@@ -42,7 +42,7 @@ func testInvoiceCollectionArchive(t *testing.T, resolution string) {
 	_, err = database.Pool().Exec(ctx, `INSERT INTO openrails.psps(merchant_id,id,rail,environment,account_id) VALUES($1,$2,'nmi','test',$3)`, mid.UUID(), psp, account)
 	require.NoError(t, err)
 	vault := "archive-original-vault"
-	_, err = database.Pool().Exec(ctx, `INSERT INTO openrails.payment_methods(merchant_id,id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES($1,$2,$3,$4,'nmi',$5,'billing-original','initial-original')`, mid.UUID(), method, payer.UUID(), psp, vault)
+	_, err = database.Pool().Exec(ctx, `INSERT INTO openrails.payment_methods(merchant_id,id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,stored_credential_unscheduled_ref) VALUES($1,$2,$3,$4,'nmi',$5,'billing-original','initial-original','approved-unscheduled')`, mid.UUID(), method, payer.UUID(), psp, vault)
 	require.NoError(t, err)
 	msvc := merchantsServiceForTest(t, database)
 	secret, err := merchants.PSPSecretName("nmi", "test", account, "security_key")
@@ -100,6 +100,11 @@ func testInvoiceCollectionArchive(t *testing.T, resolution string) {
 	require.Equal(t, original.Status, operation.Status)
 	require.JSONEq(t, string(original.Payload), string(operation.Payload))
 	require.JSONEq(t, string(original.ResultEvidence), string(operation.ResultEvidence))
+	receipt, found, err := intents.LoadCollectedReceipt(operation)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NoError(t, receipt.Validate(operation))
+
 	var settled, transfers int
 	require.NoError(t, target.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.invoice_payments WHERE invoice_id=$1 AND status='settled'`, e.invoice).Scan(&settled))
 	require.NoError(t, target.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.ledger_transfers WHERE customer_id=$1 AND transfer_type='owed_payment'`, e.payer.UUID()).Scan(&transfers))

@@ -27,6 +27,7 @@ func TestInvoiceCollectionRoundingConservesCustomerFunds(t *testing.T) {
 		failSettlement                 bool
 	}{
 		{"exact", "USD", "3.00", 3_000_000, 3_000_000, 0, false},
+		{"fractional yen", "JPY", "4.00", 30_001, 40_000, 9_999, false},
 		{"fractional dollar", "USD", "3.01", 3_000_001, 3_010_000, 9_999, false},
 		{"fractional amount with rollback", "USD", "4.01", 4_004_999, 4_010_000, 5_001, true},
 		{"rounding overflow", "USD", "", math.MaxInt64, 0, 0, false},
@@ -46,7 +47,7 @@ func TestInvoiceCollectionRoundingConservesCustomerFunds(t *testing.T) {
 			require.NoError(t, err)
 			_, err = pool.Exec(ctx, `INSERT INTO openrails.psps(merchant_id,id,rail,environment,account_id) VALUES($1,$2,'nmi','test',$3)`, mid.UUID(), psp, account)
 			require.NoError(t, err)
-			_, err = pool.Exec(ctx, `INSERT INTO openrails.payment_methods(merchant_id,id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES($1,$2,$3,$4,'nmi',$5,'billing','initial')`, mid.UUID(), method, payer.UUID(), psp, "vault_"+method.String())
+			_, err = pool.Exec(ctx, `INSERT INTO openrails.payment_methods(merchant_id,id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,stored_credential_unscheduled_ref) VALUES($1,$2,$3,$4,'nmi',$5,'billing','initial','approved-unscheduled')`, mid.UUID(), method, payer.UUID(), psp, "vault_"+method.String())
 			require.NoError(t, err)
 			secret, err := merchants.PSPSecretName("nmi", "test", account, "security_key")
 			require.NoError(t, err)
@@ -60,8 +61,8 @@ func TestInvoiceCollectionRoundingConservesCustomerFunds(t *testing.T) {
 			invoice, err := svc.FinalizeInvoice(ctx, payer, tc.currency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 			require.NoError(t, err)
 			t.Cleanup(func() {
-				// The deliberate overflow refusal must not become scheduled work for
-				// another test's fleet-wide invoice sweep in the shared database.
+				// Fleet-worker tests share this package database. The deliberate overflow
+				// refusal is not scheduled work for a later, unrelated test's worker.
 				_, err := pool.Exec(context.WithoutCancel(ctx), `UPDATE openrails.invoices SET collection_method='send_invoice' WHERE merchant_id=$1 AND id=$2`, mid.UUID(), invoice.ID)
 				require.NoError(t, err)
 			})
@@ -84,6 +85,11 @@ func TestInvoiceCollectionRoundingConservesCustomerFunds(t *testing.T) {
 				})
 			}
 			n, err := svc.ChargeOutstanding(ctx, runner, 0)
+			if tc.charged != 0 {
+				require.Equal(t, []string{tc.providerAmount}, gateway.saleAmounts)
+				require.Equal(t, []string{tc.currency}, gateway.saleCurrencies)
+			}
+
 			if tc.charged == 0 {
 				require.ErrorContains(t, err, "rounded charge is not representable")
 				require.Zero(t, n)

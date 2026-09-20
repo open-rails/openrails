@@ -4,8 +4,10 @@ package money_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -110,7 +112,7 @@ func (f *fakeCharger) Prepare(_ context.Context, req money.ChargeRequest) (money
 		if f.lostResponse {
 			return money.ChargeResult{}, &nmi.TransportAmbiguousError{Err: errors.New("timeout after send")}
 		}
-		return money.ChargeResult{TransactionID: txn}, nil
+		return money.ChargeResult{TransactionID: txn, ExternalInvoiceID: "in_" + req.IdempotencyKey}, nil
 	}), nil
 }
 
@@ -120,40 +122,8 @@ func (f *fakeCharger) chargeCount() int {
 	return len(f.charges)
 }
 
-// VerifyCollectionCharge answers the NMI-style order search from what landed.
-// Exact-read binding of the found sale is the credential plane's job
-// (MerchantCollectionAdapterBuilder), proven against the real gateway fake in
-// invoice_collection_nmi_receipt_integration_test.go.
-func (f *fakeCharger) VerifyCollectionCharge(_ context.Context, expect money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	txn, ok := f.landed[expect.OperationKey]
-	return money.CollectionVerifyResult{Supported: true, Settled: ok, TransactionID: txn}, nil
-}
-
-// ConfirmCollectionReceipt confirms any charge that landed at the fake
-// provider, deliberately NOT bound to the operation key: binding a receipt to
-// the operation's identity is the credential plane's job
-// (MerchantCollectionAdapterBuilder), proven against real gateway fakes in
-// invoice_collection_nmi_receipt_integration_test.go.
-func (f *fakeCharger) ConfirmCollectionReceipt(_ context.Context, providerReference string, _ money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, txn := range f.landed {
-		if txn == providerReference {
-			return money.CollectionVerifyResult{Supported: true, Settled: true, TransactionID: txn}, nil
-		}
-	}
-	return money.CollectionVerifyResult{}, fmt.Errorf("transaction %s does not exist", providerReference)
-}
-
-func (f *fakeCharger) ConfirmCollectionNotExecuted(_ context.Context, expect money.CollectionReceiptExpectation) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if txn, ok := f.landed[expect.OperationKey]; ok {
-		return fmt.Errorf("provider shows successful sale %s", txn)
-	}
-	return nil
+func (f *fakeCharger) ConfirmCollectionNotExecuted(_ context.Context, in gen.OpenrailsRailIntent) error {
+	return errors.New("scripted provider has no authoritative nonexecution evidence")
 }
 
 type fakeCollectionAdapter struct {
@@ -211,6 +181,9 @@ func collectionRunnerClock(dbi *db.DB, charger money.Charger, verifier money.Col
 }
 
 func collectionRunnerFull(dbi *db.DB, charger money.Charger, verifier money.CollectionVerifier, cfg *config.Config, clock clockwork.Clock) *intents.Runner {
+	if verifier == nil {
+		verifier, _ = charger.(money.CollectionVerifier)
+	}
 	return &intents.Runner{
 		Store:    intents.NewStore(dbi),
 		Registry: intents.NewRegistry(money.NewInvoiceCollectionHandler(dbi, charger, verifier, cfg, clock)),
@@ -280,11 +253,11 @@ func latestBlockExpiry(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pa
 
 // frozenInstrumentOf is what an operation freezes for a saved method: every
 // charge states the instrument it was armed against.
-func frozenInstrumentOf(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pm uuid.UUID) money.CollectionInstrument {
+func frozenInstrumentOf(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pm uuid.UUID) charge.FrozenInstrument {
 	t.Helper()
 	row, err := gen.New(pool).GetPaymentMethodByID(ctx, pm)
 	require.NoError(t, err)
-	return money.CollectionInstrumentOf(row)
+	return charge.FreezeInstrument(row)
 }
 
 func seedPaymentMethod(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail string) uuid.UUID {
@@ -341,6 +314,9 @@ func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 	}
 	_, err := gen.New(pool).CreatePaymentMethod(ctx, params)
 	require.NoError(t, err)
+	if rail == "stripe" {
+		seedRailCustomer(t, pool, ctx, payer, rail, "cus_"+payer.UUID().String())
+	}
 	if rails.IsNMI(models.Rail(rail)) {
 		dbtest.SeedNMIStoredCredentialRefs(ctx, t, pool, pm)
 	}
@@ -443,7 +419,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 		IdempotencyKey:  "instrument-moved",
 		Instrument:      moved,
 	})
-	require.ErrorIs(t, err, money.ErrCollectionInstrumentChanged)
+	require.ErrorIs(t, err, charge.ErrInstrumentChanged)
 	require.Len(t, adapter.charges, 1, "a changed instrument must not dispatch")
 
 	_, err = ch.Prepare(ctx, money.ChargeRequest{
@@ -577,28 +553,46 @@ func TestChargeOutstanding_WithNMIAdapter_SettlesInvoiceThroughGateway(t *testin
 	require.NoError(t, err)
 
 	seen := make(chan string, 1)
+	chargedOrder := ""
 	// #297: the invoice collection is a merchant-initiated stored-credential
 	// charge on classic Direct Post.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			require.Equal(t, "test-security-key", r.Header.Get("Authorization"))
+			require.Equal(t, "/payments/txn_nmi_invoice_settled", r.URL.Path)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "txn_nmi_invoice_settled", "object": "transaction", "response": "1", "amount": "0.05", "currency": "USD", "customer_vault_id": "vault_" + pm.String(), "actions": []map[string]any{{"type": "sale", "amount": "0.05", "success": true}}})
+			return
+		}
+		require.NoError(t, r.ParseForm())
+		if r.Form.Get("order_id") != "" {
+			require.Equal(t, chargedOrder, r.Form.Get("order_id"))
+			fmt.Fprintf(w, `<nm_response><transaction><transaction_id>txn_nmi_invoice_settled</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, chargedOrder)
+			return
+		}
+
 		require.NoError(t, r.ParseForm())
 		require.Equal(t, "sale", r.Form.Get("type"))
 		require.Equal(t, "vault_"+pm.String(), r.Form.Get("customer_vault_id"))
 		require.Equal(t, "0.05", r.Form.Get("amount"))
 		require.Equal(t, "merchant", r.Form.Get("initiated_by"))
 		require.Equal(t, "used", r.Form.Get("stored_credential_indicator"))
-		seen <- r.Form.Get("orderid")
+		chargedOrder = r.Form.Get("orderid")
+		seen <- chargedOrder
 		_, _ = w.Write([]byte("response=1&responsetext=SUCCESS&authcode=OK&transactionid=txn_nmi_invoice_settled&response_code=100"))
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
+	instrument := frozenInstrumentOf(t, pool, ctx, pm)
+	client, err := nmi.NewAccountClient(dbtest.TestMerchantID.UUID(), instrument.PSPID, string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
 	require.NoError(t, err)
 	client.DirectPostURL = server.URL
+	client.QueryURL = server.URL
+	client.V5BaseURL = server.URL
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
 		string(models.RailNMI): client,
 	}))
 
-	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, standaloneCollectionReader{nmi: receiptFixtureNMI{client: client, request: money.ChargeRequest{MerchantID: dbtest.TestMerchantID.UUID(), Instrument: instrument}}}), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	select {
@@ -648,9 +642,16 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "Bearer sk_test_invoice", r.Header.Get("Authorization"))
 		require.NoError(t, r.ParseForm())
-		calls = append(calls, r.URL.Path)
-		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		if r.Method != http.MethodGet {
+			calls = append(calls, r.URL.Path)
+			keys = append(keys, r.Header.Get("Idempotency-Key"))
+		}
 		switch r.URL.Path {
+		case "/v1/invoices/in_openrails_invoice":
+			_, _ = w.Write([]byte(`{"id":"in_openrails_invoice","status":"paid","amount_paid":5,"currency":"usd","customer":"cus_openrails_invoice","payment_intent":"pi_openrails_invoice","charge":"ch_openrails_invoice","metadata":{"openrails_collection_key":"` + collectionKey + `"}}`))
+		case "/v1/charges/ch_openrails_invoice":
+			_, _ = w.Write([]byte(`{"id":"ch_openrails_invoice","status":"succeeded","amount_captured":5,"currency":"usd","customer":"cus_openrails_invoice","payment_method":"pm_openrails_invoice","payment_intent":"pi_openrails_invoice","paid":true,"captured":true}`))
+
 		case "/v1/invoiceitems":
 			require.Equal(t, "cus_openrails_invoice", r.Form.Get("customer"))
 			require.Equal(t, "in_openrails_invoice", r.Form.Get("invoice"))
@@ -679,18 +680,14 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 	}))
 	t.Cleanup(server.Close)
 
-	stripeSvc := &subscriptions.StripeService{
-		Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
-		Rails: railresolve.FixedSet{
-			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_invoice"}},
-		},
-	}
+	instrument := frozenInstrumentOf(t, pool, ctx, pm)
+	stripeSvc := subscriptions.NewAccountStripeService(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, dbtest.TestMerchantID.UUID(), instrument.PSPID, "fixture", "sk_test_invoice")
 	stripeSvc.SetBaseURLForTest(server.URL)
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.RailStripe): money.NewStripeCollectionAdapter(dbi, stripeSvc),
 	})
 
-	runner := collectionRunner(dbi, ch, nil)
+	runner := collectionRunner(dbi, ch, standaloneCollectionReader{stripe: stripeSvc})
 	n, err := svc.ChargeOutstanding(ctx, runner, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
@@ -765,8 +762,12 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 		key := r.Form.Get("metadata[openrails_collection_key]")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/invoices":
-			// The refusal cleanup reads back what the operation left at Stripe.
-			_, _ = w.Write([]byte(`{"data":[{"id":"in_openrails_decline","status":"open","amount_paid":0,"currency":"usd","metadata":{"openrails_collection_key":"` + declineKey.Load().(string) + `"}}],"has_more":false}`))
+			// The refusal cleanup reads back the completed void as well as the original open invoice.
+			status := "open"
+			if voided.Load() {
+				status = "void"
+			}
+			_, _ = fmt.Fprintf(w, `{"data":[{"id":"in_openrails_decline","status":%q,"amount_paid":0,"currency":"usd","metadata":{"openrails_collection_key":%q}}],"has_more":false}`, status, declineKey.Load().(string))
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/invoiceitems":
 			_, _ = w.Write([]byte(`{"data":[],"has_more":false}`))
 		case r.URL.Path == "/v1/invoices":
@@ -851,7 +852,7 @@ func TestChargeOutstanding_WithScopedCharger_SettlesInvoiceAndRecordsRail(t *tes
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.RailNMI): adapter,
 	})
-	runner := collectionRunner(dbi, ch, nil)
+	runner := collectionRunner(dbi, ch, adapter)
 	n, err := svc.ChargeOutstanding(ctx, runner, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
@@ -906,7 +907,7 @@ func TestChargeOutstanding_WithScopedCharger_DeclineRecordsFailureMetadata(t *te
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.RailNMI): adapter,
 	})
-	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, adapter), 0)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Len(t, adapter.charges, 1)
@@ -950,7 +951,7 @@ func TestChargeOutstanding_WithScopedCharger_PrepareFailureParksWithoutProviderT
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.RailNMI): adapter,
 	})
-	runner := collectionRunner(dbi, ch, nil)
+	runner := collectionRunner(dbi, ch, adapter)
 	n, err := svc.ChargeOutstanding(ctx, runner, 0)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
@@ -1024,7 +1025,7 @@ func TestInvoiceWorker_UsesMerchantInvoiceThresholds(t *testing.T) {
 		}
 		return n
 	}
-	runner := collectionRunner(dbi, ch, nil)
+	runner := collectionRunner(dbi, ch, adapter)
 	err = riverjobs.InvoiceWorker{DB: dbi, Money: svc, Intents: runner}.Work(ctx, &river.Job[riverjobs.InvoiceArgs]{
 		Args: riverjobs.InvoiceArgs{Collect: true},
 	})

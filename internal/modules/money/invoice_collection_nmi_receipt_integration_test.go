@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,17 +31,23 @@ import (
 // uses to bind an operator receipt: Direct Post sale (always an uncertain
 // 421 here), the Query API order search, and the v5 exact payment read.
 type fakeNMIReceiptGateway struct {
-	mu sync.Mutex
+	queryStarted chan struct{}
+	queryGate    chan struct{}
+	queryCalls   int
+	mu           sync.Mutex
 	// saleForOrder is what the order-reference search returns per order id.
 	saleForOrder map[string]string
 	// payments is the v5 read per transaction id.
 	payments map[string]map[string]any
 	sends    int
 	// saleOrderIDs records the orderid of every sale sent.
-	saleOrderIDs []string
+	saleOrderIDs   []string
+	saleAmounts    []string
+	saleCurrencies []string
 	// saleVaults records the customer_vault_id every sale was sent on ("" for
 	// a custodian-proxied sale, which carries card data instead).
-	saleVaults []string
+	saleVaults     []string
+	saleBillingIDs []string
 }
 
 func newFakeNMIReceiptGateway(t *testing.T) (*fakeNMIReceiptGateway, *httptest.Server) {
@@ -63,7 +70,10 @@ func newFakeNMIReceiptGateway(t *testing.T) (*fakeNMIReceiptGateway, *httptest.S
 		if r.Form.Get("type") == "sale" {
 			f.sends++
 			f.saleOrderIDs = append(f.saleOrderIDs, r.Form.Get("orderid"))
+			f.saleAmounts = append(f.saleAmounts, r.Form.Get("amount"))
+			f.saleCurrencies = append(f.saleCurrencies, r.Form.Get("currency"))
 			f.saleVaults = append(f.saleVaults, r.Form.Get("customer_vault_id"))
+			f.saleBillingIDs = append(f.saleBillingIDs, r.Form.Get("billing_id"))
 			if r.URL.Path == "/proxy" {
 				// The custodian's detokenizing proxy forwarded the sale and the
 				// gateway's answer was lost on the way back (or#879 transport).
@@ -74,6 +84,12 @@ func newFakeNMIReceiptGateway(t *testing.T) (*fakeNMIReceiptGateway, *httptest.S
 			}
 			fmt.Fprint(w, "response=3&responsetext=Communication+error&response_code=421")
 			return
+		}
+		f.queryCalls++
+		if gate := f.queryGate; gate != nil {
+			f.queryGate = nil
+			close(f.queryStarted)
+			<-gate
 		}
 		if txn, ok := f.saleForOrder[r.Form.Get("order_id")]; ok {
 			fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, txn, r.Form.Get("order_id"))
@@ -180,9 +196,9 @@ func (e nmiReceiptEnv) methodRow(t *testing.T) gen.OpenrailsPaymentMethod {
 }
 
 // frozenInstrument is the instrument the live operation froze at enqueue.
-func (e nmiReceiptEnv) frozenInstrument(t *testing.T) money.CollectionInstrument {
+func (e nmiReceiptEnv) frozenInstrument(t *testing.T) charge.FrozenInstrument {
 	t.Helper()
-	var payload money.InvoiceCollectionPayload
+	var payload intents.InvoiceCollectionPayload
 	require.NoError(t, json.Unmarshal(latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Payload, &payload))
 	return payload.Instrument
 }
@@ -528,44 +544,58 @@ func TestInvoiceCollection_ReceiptJudgedAgainstFrozenInstrument(t *testing.T) {
 // the provider, the attempt fails without a decline, and the next collection
 // freezes the instrument as it now is.
 func TestInvoiceCollection_InstrumentChangedBeforeSubmissionIsNeverSent(t *testing.T) {
-	e := newNMIReceiptEnv(t)
-	// Freeze an operation without submitting it (the account is not armed yet).
-	_, err := e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, &fakeCharger{prepareFailures: 1}, nil), 0)
-	require.NoError(t, err)
-	op := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
-	require.Equal(t, intents.StatusPending, op.Status)
-	require.Equal(t, e.vault, e.frozenInstrument(t).RailCustomerRef)
+	for _, change := range []struct{ name, column, value string }{{"vault", "rail_customer_ref", "vault_moved"}, {"selected billing record", "rail_method_ref", "billing_moved"}, {"scoped credential", "stored_credential_unscheduled_ref", "approved_new_anchor"}} {
+		t.Run(change.name, func(t *testing.T) {
+			e := newNMIReceiptEnv(t)
+			_, err := e.pool.Exec(e.ctx, `UPDATE openrails.payment_methods SET rail_method_ref='billing_chosen' WHERE id=$1`, e.method)
+			require.NoError(t, err)
+			// Freeze an operation without submitting it (the account is not armed yet).
+			_, err = e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, &fakeCharger{prepareFailures: 1}, nil), 0)
+			require.NoError(t, err)
+			op := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+			require.Equal(t, intents.StatusPending, op.Status)
+			require.Equal(t, e.vault, e.frozenInstrument(t).RailCustomerRef)
 
-	// Even pending, the operation pins the instrument against a remap.
-	blocked := e.remapCustody(t, "tok_"+uuid.NewString()[:12])
-	require.Equal(t, custodymigration.OutcomeBlocked, blocked.Outcome)
-	require.Equal(t, custodymigration.ReasonOperationUnresolved, blocked.Reason)
+			// Even pending, the operation pins the instrument against a remap.
+			blocked := e.remapCustody(t, "tok_"+uuid.NewString()[:12])
+			require.Equal(t, custodymigration.OutcomeBlocked, blocked.Outcome)
+			require.Equal(t, custodymigration.ReasonOperationUnresolved, blocked.Reason)
 
-	// Another writer re-vaults the card anyway.
-	_, err = e.pool.Exec(e.ctx, `UPDATE openrails.payment_methods SET rail_customer_ref = 'vault_moved' WHERE id = $1`, e.method)
-	require.NoError(t, err)
+			// Another writer changes an accepted wire term anyway.
+			_, err = e.pool.Exec(e.ctx, fmt.Sprintf(`UPDATE openrails.payment_methods SET %s=$2 WHERE id=$1`, change.column), e.method, change.value)
+			require.NoError(t, err)
 
-	dueNow(t, e.pool, e.ctx, op.ID)
-	_, err = e.runner.RunExecuteOnce(e.ctx)
-	require.NoError(t, err)
-	require.Equal(t, intents.StatusFailedTerminal, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status)
-	require.Zero(t, e.gateway.sends, "nothing reached the provider")
-	require.Zero(t, e.settledPayments(t))
-	require.Zero(t, e.owedPaymentTransfers(t))
-	attempts, _, err := e.svc.ListInvoicePaymentAttempts(e.ctx, e.payer, e.invoice, 20, 0)
-	require.NoError(t, err)
-	require.Len(t, attempts, 1)
-	require.Equal(t, "failed", attempts[0].Status)
-	require.NotNil(t, attempts[0].FailureCode)
-	require.Equal(t, "instrument_changed", *attempts[0].FailureCode)
-	inv := e.invoiceRow(t)
-	require.Nil(t, inv.CollectionIntentID, "the invoice is released")
-	require.NotNil(t, inv.NextCollectionAttemptAt)
+			dueNow(t, e.pool, e.ctx, op.ID)
+			_, err = e.runner.RunExecuteOnce(e.ctx)
+			require.NoError(t, err)
+			require.Equal(t, intents.StatusFailedTerminal, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status)
+			require.Zero(t, e.gateway.sends, "nothing reached the provider")
+			require.Zero(t, e.settledPayments(t))
+			require.Zero(t, e.owedPaymentTransfers(t))
+			attempts, _, err := e.svc.ListInvoicePaymentAttempts(e.ctx, e.payer, e.invoice, 20, 0)
+			require.NoError(t, err)
+			require.Len(t, attempts, 1)
+			require.Equal(t, "failed", attempts[0].Status)
+			require.NotNil(t, attempts[0].FailureCode)
+			require.Equal(t, "instrument_changed", *attempts[0].FailureCode)
+			inv := e.invoiceRow(t)
+			require.Nil(t, inv.CollectionIntentID, "the invoice is released")
+			require.NotNil(t, inv.NextCollectionAttemptAt)
 
-	// The next collection freezes the instrument as it now is and charges it.
-	e.collectUncertain(t)
-	require.Equal(t, "vault_moved", e.frozenInstrument(t).RailCustomerRef)
-	require.Equal(t, 1, e.gateway.sends)
-	require.Equal(t, []string{"vault_moved"}, e.gateway.saleVaults)
-	require.Equal(t, []string{e.op.String()}, e.gateway.sentOrderIDs())
+			// The next collection freezes the instrument as it now is and charges it.
+			e.collectUncertain(t)
+			expectedVault, expectedBilling := e.vault, "billing_chosen"
+			if change.column == "rail_customer_ref" {
+				expectedVault = change.value
+			}
+			if change.column == "rail_method_ref" {
+				expectedBilling = change.value
+			}
+			require.Equal(t, expectedVault, e.frozenInstrument(t).RailCustomerRef)
+			require.Equal(t, 1, e.gateway.sends)
+			require.Equal(t, []string{expectedVault}, e.gateway.saleVaults)
+			require.Equal(t, []string{expectedBilling}, e.gateway.saleBillingIDs, "the actual provider request uses the accepted selected billing record")
+			require.Equal(t, []string{e.op.String()}, e.gateway.sentOrderIDs())
+		})
+	}
 }

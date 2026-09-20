@@ -31,6 +31,7 @@ var (
 // the HTTP wire. The guard fails when a listed field becomes a decimal string
 // or stops existing, so the list can only shrink.
 var pendingNumericMoney = map[string]string{
+	"internal/modules/subscriptions/stripe_invoice_collection.go:func GetCollectedInvoice.AmountCaptured amount_captured":                            "Stripe-owned inbound integer amount; the retained qualified receipt encodes charged_amount as a decimal string",
 	"internal/operator/fleet_analytics.go:FleetMerchantFunnel.ActiveRevenue active_revenue":                                                          notMoneyCount,
 	"internal/operator/fleet_analytics.go:FleetMerchantFunnel.FirstRevenue first_revenue":                                                            notMoneyCount,
 	"internal/modules/copilot/tools_draft.go:draftCatalogDiffArgs.UnitAmount unit_amount":                                                            notHTTPToolArgs,
@@ -49,7 +50,7 @@ var pendingNumericMoney = map[string]string{
 	"internal/service/spend.go:CreditAccountSnapshot.OutstandingOwedAmount outstanding_owed_amount":                                                  notHTTPInternalRow,
 	"internal/service/host_events.go:func ListHostEvents.AmountFloor amount_floor":                                                                   notHTTPStoredPayload,
 	"internal/service/host_events.go:func ListHostEvents.OverdueAmount overdue_amount":                                                               notHTTPStoredPayload,
-	"internal/modules/money/invoice_collection_intent.go:InvoiceCollectionPayload.Amount amount":                                                     notHTTPIntentPayload,
+	"internal/intents/collection_payload.go:InvoiceCollectionPayload.Amount amount":                                                                  notHTTPIntentPayload,
 	"embed/river.go:InvoiceSweepArgs.CollectionThresholdAmount collection_threshold_amount":                                                          notHTTPJobArgs,
 	"internal/db/models/billing_policy.go:BillingPolicy.AccrualRateCapPerHour accrual_rate_cap_per_hour":                                             notHTTPStorageRow,
 	"internal/db/models/billing_policy.go:BillingPolicy.CollectionThresholdAmount collection_threshold_amount":                                       notHTTPStorageRow,

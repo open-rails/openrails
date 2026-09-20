@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"net/http"
 	"net/url"
@@ -24,9 +25,12 @@ const (
 )
 
 type NMIClient struct {
-	providerName  string
-	SecurityKey   string
-	WebhookSecret string
+	accountSecurityKey string
+	accountMerchantID  uuid.UUID
+	accountPSPID       uuid.UUID
+	providerName       string
+	SecurityKey        string
+	WebhookSecret      string
 	// DirectPostURL survives #663 for the two classic-only recurring ops
 	// (add_subscription, rebill_subscription); everything else is v5 JSON.
 	DirectPostURL string
@@ -455,4 +459,24 @@ func (c *NMIClient) sendQueryRequest(ctx context.Context, data url.Values) (_ st
 
 func (c *NMIClient) GetWebhookSecret() string {
 	return c.WebhookSecret
+}
+
+// NewAccountClient binds credentials and their immutable database account in one
+// construction. An unscoped client can make ordinary reads but cannot qualify a
+// durable payment receipt for an account it does not identify.
+func NewAccountClient(merchantID, pspID uuid.UUID, provider string, cfg *config.NMIProviderSettings, testMode bool) (*NMIClient, error) {
+	if merchantID == uuid.Nil || pspID == uuid.Nil {
+		return nil, errors.New("provider account identity is required")
+	}
+	client, err := NewClient(provider, cfg, testMode)
+	if err != nil {
+		return nil, err
+	}
+	client.accountMerchantID = merchantID
+	client.accountPSPID = pspID
+	client.accountSecurityKey = cfg.SecurityKey
+	return client, nil
+}
+func (c *NMIClient) AccountIdentity() (uuid.UUID, uuid.UUID) {
+	return c.accountMerchantID, c.accountPSPID
 }

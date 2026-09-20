@@ -1441,6 +1441,7 @@
       "func (c *V5Cursor) UnmarshalJSON(raw []byte) error {\n\ttrimmed := strings.TrimSpace(string(raw))\n\tif trimmed == \"null\" || trimmed == `\"\"` {\n\t\t*c = \"\"\n\t\treturn nil\n\t}\n\tvar s string\n\tif err := json.Unmarshal(raw, \u0026s); err == nil {\n\t\t*c = V5Cursor(s)\n\t\treturn nil\n\t}\n\tvar n json.Number\n\tif err := json.Unmarshal(raw, \u0026n); err != nil {\n\t\treturn fmt.Errorf(\"unrecognized cursor %s\", trimmed)\n\t}\n\t*c = V5Cursor(n.String())\n\treturn nil\n}",
       "type CustomerPage struct {\n\tCustomers  []V5Customer `json:\"customers\"`\n\tNextCursor V5Cursor     `json:\"next_cursor\"`\n\tHasMore    bool         `json:\"has_more\"`\n}",
       "type PlanPage struct {\n\tPlans      []V5Plan `json:\"plans\"`\n\tNextCursor V5Cursor `json:\"next_cursor\"`\n\tHasMore    bool     `json:\"has_more\"`\n}",
+      "type SaleEvidence struct {\n\tTransactionID   string          `json:\"transaction_id\"`\n\tOrderReference  string          `json:\"order_reference\"`\n\tCustomerVaultID string          `json:\"customer_vault_id\"`\n\tAmount          moneyutil.Cents `json:\"amount,string\"`\n\tCurrency        string          `json:\"currency\"`\n\tApproved        bool            `json:\"approved\"`\n}",
       "type SubscriptionPage struct {\n\tSubscriptions []V5Subscription `json:\"subscriptions\"`\n\tNextCursor    V5Cursor         `json:\"next_cursor\"`\n\tHasMore       bool             `json:\"has_more\"`\n}",
       "type V5BillingCardData struct {\n\tCardNumber string `json:\"card_number\"`\n\tCardExp    string `json:\"card_exp\"`\n\tCardType   string `json:\"card_type\"`\n}",
       "type V5Customer struct {\n\tObject  string              `json:\"object\"`\n\tID      string              `json:\"id\"`\n\tCreated string              `json:\"created\"`\n\tBilling []V5CustomerBilling `json:\"billing\"`\n}",
@@ -1465,6 +1466,8 @@
       "type AccountUpdaterBatchInstrument struct {\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tToken           string    `json:\"token\"`\n\tExpirationMonth string    `json:\"expiration_month,omitempty\"`\n\tExpirationYear  string    `json:\"expiration_year,omitempty\"`\n}",
       "type AccountUpdaterBatchPayload struct {\n\tBatchID uuid.UUID `json:\"batch_id\"`\n\n\tCustodianKind      string `json:\"custodian_kind\"`\n\tCustodianAccountID string `json:\"custodian_account_id\"`\n}",
       "type CCBillCancelPayload struct {\n\tUserID             string `json:\"user_id\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id,omitempty\"`\n}",
+      "type CollectionCandidate struct {\n\tTransactionID     string `json:\"transaction_id\"`\n\tExternalInvoiceID string `json:\"external_invoice_id,omitempty\"`\n}",
+      "type InvoiceCollectionPayload struct {\n\tInvoiceID           uuid.UUID               `json:\"invoice_id\"`\n\tCustomerID          uuid.UUID               `json:\"customer_id\"`\n\tAttemptID           uuid.UUID               `json:\"attempt_id\"`\n\tPaymentMethodID     uuid.UUID               `json:\"payment_method_id\"`\n\tRail                string                  `json:\"rail\"`\n\tInstrument          charge.FrozenInstrument `json:\"instrument\"`\n\tCurrency            string                  `json:\"currency\"`\n\tAmount              int64                   `json:\"amount\"`\n\tAmountMinor         moneyutil.Cents         `json:\"amount_minor\"`\n\tProviderCustomerRef string                  `json:\"provider_customer_ref\"`\n\tDescription         string                  `json:\"description\"`\n}",
       "type ManualRebillPayload struct {\n\tSubscriptionID uuid.UUID `json:\"subscription_id\"`\n\tPeriodEnd      time.Time `json:\"period_end\"`\n\tRail           string    `json:\"rail\"`\n\n\tOrderReference string `json:\"order_reference\"`\n\tAttempt        int    `json:\"attempt\"`\n}",
       "type NMIDeletePayload struct {\n\tUserID             string `json:\"user_id\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id,omitempty\"`\n}",
       "type NMIPaymentMethodDeletePayload struct {\n\tUserID          string    `json:\"user_id\"`\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tRailCustomerRef string    `json:\"rail_customer_ref,omitempty\"`\n\tRailMethodRef   string    `json:\"rail_method_ref,omitempty\"`\n}",
@@ -1473,8 +1476,10 @@
       "type RefundPayload struct {\n\tOriginalPaymentID uuid.UUID `json:\"original_payment_id\"`\n\n\tReservationID uuid.UUID `json:\"reservation_id\"`\n\n\tAmountCents  moneyutil.Cents `json:\"amount_cents\"`\n\tReason       string          `json:\"reason,omitempty\"`\n\tRevokeAccess bool            `json:\"revoke_access\"`\n\n\tProviderTarget string `json:\"provider_target\"`\n\n\tProviderTransactionID string `json:\"provider_transaction_id,omitempty\"`\n}",
       "type SolanaSunsetPayload struct {\n\tPlanPDA string `json:\"plan_pda\"`\n\tLabel   string `json:\"label,omitempty\"`\n}",
       "type StripeArchivePayload struct {\n\tObjectID  string `json:\"object_id\"`\n\tMarkerKey string `json:\"marker_key\"`\n\tLabel     string `json:\"label,omitempty\"`\n}",
+      "type collectedReceipt struct {\n\tVersion int                                    `json:\"version\"`\n\tFamily  string                                 `json:\"family\"`\n\tBinding receiptBinding                         `json:\"binding\"`\n\tNMI     *nmi.SaleEvidence                      `json:\"nmi,omitempty\"`\n\tStripe  *subscriptions.StripeCollectionReceipt `json:\"stripe,omitempty\"`\n}",
       "type nmiCard struct {\n\tLastFour   string `json:\"last_four\"`\n\tCardType   string `json:\"card_type\"`\n\tExpiryDate string `json:\"expiry_date\"`\n}",
-      "type nmiPaymentMethodUpdateProgress struct {\n\tSubmissionStarted bool    `json:\"submission_started\"`\n\tOldCard           nmiCard `json:\"old_card\"`\n}"
+      "type nmiPaymentMethodUpdateProgress struct {\n\tSubmissionStarted bool    `json:\"submission_started\"`\n\tOldCard           nmiCard `json:\"old_card\"`\n}",
+      "type receiptBinding struct {\n\tOperationID   uuid.UUID `json:\"operation_id\"`\n\tMerchantID    uuid.UUID `json:\"merchant_id\"`\n\tPSPID         uuid.UUID `json:\"psp_id\"`\n\tKind          string    `json:\"kind\"`\n\tPayloadSHA256 string    `json:\"payload_sha256\"`\n}"
     ],
     "internal/merchantarchive": [
       "type Result struct {\n\tMerchantID string `json:\"merchant_id\"`\n\tDigest     string `json:\"digest\"`\n\tRows       int64  `json:\"rows\"`\n\tReplayed   bool   `json:\"replayed\"`\n}"
@@ -1607,13 +1612,11 @@
       "type ValidationError struct {\n\tErrors []FieldError `json:\"errors\"`\n}"
     ],
     "internal/modules/money": [
-      "type CollectionInstrument struct {\n\tPSPID           uuid.UUID  `json:\"psp_id\"`\n\tCustodian       string     `json:\"custodian\"`\n\tCustodianID     *uuid.UUID `json:\"custodian_id,omitempty\"`\n\tRailCustomerRef string     `json:\"rail_customer_ref\"`\n\tRailMethodRef   string     `json:\"rail_method_ref\"`\n}",
       "type CreditGrant struct {\n\tID                uuid.UUID  `json:\"id\"`\n\tCustomerID        uuid.UUID  `json:\"customer_id\"`\n\tCurrency          string     `json:\"currency\"`\n\tAmount            int64      `json:\"amount,string\"`\n\tSpentAmount       int64      `json:\"spent_amount,string\"`\n\tRemainingAmount   int64      `json:\"remaining_amount,string\"`\n\tRevokedAmount     int64      `json:\"revoked_amount,string\"`\n\tExpiredAmount     int64      `json:\"expired_amount,string\"`\n\tState             string     `json:\"state\"`\n\tSourceType        string     `json:\"source_type\"`\n\tSourceID          string     `json:\"source_id\"`\n\tReason            *string    `json:\"reason,omitempty\"`\n\tStartsAt          time.Time  `json:\"starts_at\"`\n\tExpiresAt         *time.Time `json:\"expires_at,omitempty\"`\n\tCreatedAt         time.Time  `json:\"created_at\"`\n\tTerminatedAt      *time.Time `json:\"terminated_at,omitempty\"`\n\tTerminationReason *string    `json:\"termination_reason,omitempty\"`\n}",
       "type CreditGrantPage struct {\n\tUnitDecimals int           `json:\"unit_decimals\"`\n\tGrants       []CreditGrant `json:\"grants\"`\n\tTotal        int64         `json:\"total\"`\n\tLimit        int           `json:\"limit\"`\n\tOffset       int           `json:\"offset\"`\n}",
       "type CreditGrantRevocation struct {\n\tGrant    CreditGrant `json:\"grant\"`\n\tReplayed bool        `json:\"replayed\"`\n}",
       "type CustomerInvoiceProfile struct {\n\tNetTermsDays     int                     `json:\"net_terms_days\"`\n\tCollectionMethod string                  `json:\"collection_method\"`\n\tPONumber         string                  `json:\"po_number,omitempty\"`\n\tTax              map[string]any          `json:\"tax,omitempty\"`\n\tBillingContacts  []models.InvoiceContact `json:\"billing_contacts,omitempty\"`\n\tMemo             string                  `json:\"memo,omitempty\"`\n}",
       "type DefaultUsageRateCard struct {\n\tID         uuid.UUID           `json:\"id\"`\n\tProductID  uuid.UUID           `json:\"product_id\"`\n\tProductKey string              `json:\"product_key\"`\n\tFilter     map[string][]string `json:\"filter\"`\n\tPrice      pricing.RatePrice   `json:\"price\"`\n\tAllowance  *pricing.Allowance  `json:\"allowance,omitempty\"`\n\tCreatedAt  time.Time           `json:\"created_at\"`\n\tUpdatedAt  time.Time           `json:\"updated_at\"`\n}",
-      "type InvoiceCollectionPayload struct {\n\tInvoiceID       uuid.UUID            `json:\"invoice_id\"`\n\tCustomerID      uuid.UUID            `json:\"customer_id\"`\n\tAttemptID       uuid.UUID            `json:\"attempt_id\"`\n\tPaymentMethodID uuid.UUID            `json:\"payment_method_id\"`\n\tRail            string               `json:\"rail\"`\n\tInstrument      CollectionInstrument `json:\"instrument\"`\n\tCurrency        string               `json:\"currency\"`\n\tAmount          int64                `json:\"amount\"`\n\tAmountMinor     moneyutil.Cents      `json:\"amount_minor\"`\n\tDescription     string               `json:\"description\"`\n}",
       "type OrphanedHold struct {\n\tID         uuid.UUID  `json:\"id\"`\n\tCustomerID uuid.UUID  `json:\"customer_id\"`\n\tAmount     int64      `json:\"authorized_amount\"`\n\tExpiresAt  *time.Time `json:\"expires_at\"`\n}",
       "type PayerRateCard struct {\n\tMeterKey  string             `json:\"meter_key\"`\n\tPrice     pricing.RatePrice  `json:\"price\"`\n\tAllowance *pricing.Allowance `json:\"allowance,omitempty\"`\n\tCreatedAt time.Time          `json:\"created_at\"`\n\tUpdatedAt time.Time          `json:\"updated_at\"`\n}",
       "type PendingCharge struct {\n\tSourceType string    `json:\"source_type\"`\n\tSource     string    `json:\"source\"`\n\tAmount     int64     `json:\"amount\"`\n\tInvoiceAt  time.Time `json:\"invoice_at\"`\n}",
@@ -1637,6 +1640,9 @@
       "type StripeCardDetails struct {\n\tBrand    string `json:\"brand\"`\n\tLast4    string `json:\"last4\"`\n\tExpMonth int    `json:\"exp_month\"`\n\tExpYear  int    `json:\"exp_year\"`\n}",
       "type stripeSubscriptionPaymentJSON struct {\n\tID                      string          `json:\"id\"`\n\tDefaultPaymentMethodRaw json.RawMessage `json:\"default_payment_method\"`\n}"
     ],
+    "internal/modules/payments/charge": [
+      "type FrozenInstrument struct {\n\tStoredCredentialRecurringRef   string     `json:\"stored_credential_recurring_ref\"`\n\tStoredCredentialUnscheduledRef string     `json:\"stored_credential_unscheduled_ref\"`\n\tPSPID                          uuid.UUID  `json:\"psp_id\"`\n\tCustodian                      string     `json:\"custodian\"`\n\tCustodianID                    *uuid.UUID `json:\"custodian_id,omitempty\"`\n\tRailCustomerRef                string     `json:\"rail_customer_ref\"`\n\tRailMethodRef                  string     `json:\"rail_method_ref\"`\n}"
+    ],
     "internal/modules/ratelimit": [
       "type Decision struct {\n\tAllowed     bool         `json:\"allowed\"`\n\tBlockedUnit string       `json:\"blocked_unit,omitempty\"`\n\tWindows     []WindowInfo `json:\"windows\"`\n}",
       "type WindowInfo struct {\n\tUnit       string        `json:\"unit\"`\n\tLimit      int64         `json:\"limit\"`\n\tRemaining  int64         `json:\"remaining\"`\n\tResetAfter time.Duration `json:\"reset_after\"`\n}"
@@ -1659,11 +1665,12 @@
       "type RepriceBatchView struct {\n\tID                     uuid.UUID          `json:\"id\"`\n\tMerchantID             uuid.UUID          `json:\"merchant_id\"`\n\tPriceKey               *string            `json:\"price_key,omitempty\"`\n\tToPriceID              openrails.PriceID  `json:\"to_price_id\"`\n\tSourcePriceID          *openrails.PriceID `json:\"source_price_id,omitempty\"`\n\tEffectiveAt            time.Time          `json:\"effective_at\"`\n\tKind                   models.RepriceKind `json:\"kind\"`\n\tFallbackPolicy         string             `json:\"fallback_policy,omitempty\"`\n\tSubscriptionsMatched   int                `json:\"subscriptions_matched\"`\n\tSubscriptionsScheduled int                `json:\"subscriptions_scheduled\"`\n\tSubscriptionsSkipped   int                `json:\"subscriptions_skipped\"`\n\tSubscriptionsBlocked   int                `json:\"subscriptions_blocked\"`\n\tCreatedAt              time.Time          `json:\"created_at\"`\n}",
       "type RepriceOutcome struct {\n\tSubscriptionID openrails.SubscriptionID `json:\"subscription_id\"`\n\tRepriceID      uuid.UUID                `json:\"reprice_id,omitempty\"`\n\tReason         string                   `json:\"reason,omitempty\"`\n\n\tAcknowledgedShortNotice bool `json:\"acknowledged_short_notice,omitempty\"`\n}",
       "type RepricePreviewResult struct {\n\tPriceKey  string            `json:\"price_key\"`\n\tToPriceID openrails.PriceID `json:\"to_price_id\"`\n\tMatched   int               `json:\"matched\"`\n}",
+      "type StripeCollectionReceipt struct {\n\tChargeInvoiceID       string `json:\"charge_invoice_id\"`\n\tChargePaymentIntentID string `json:\"charge_payment_intent_id\"`\n\tChargedAmount         int64  `json:\"charged_amount,string\"`\n\tChargeCurrency        string `json:\"charge_currency\"`\n\tChargeCustomerID      string `json:\"charge_customer_id\"`\n\tChargePaid            bool   `json:\"charge_paid\"`\n\tChargeCaptured        bool   `json:\"charge_captured\"`\n\tChargeStatus          string `json:\"charge_status\"`\n\tCustomerID            string `json:\"customer_id\"`\n\tPaymentMethodID       string `json:\"payment_method_id\"`\n\tInvoiceID             string `json:\"invoice_id\"`\n\tStatus                string `json:\"status\"`\n\tAmountPaid            int64  `json:\"amount_paid,string\"`\n\tCurrency              string `json:\"currency\"`\n\tChargeID              string `json:\"charge_id\"`\n\tPaymentIntentID       string `json:\"payment_intent_id\"`\n\n\tCollectionKey string `json:\"collection_key\"`\n}",
       "type StripeSchedulePhase struct {\n\tStartDate int64  `json:\"start_date\"`\n\tEndDate   int64  `json:\"end_date\"`\n\tPriceID   string `json:\"price_id\"`\n\tQuantity  int64  `json:\"quantity\"`\n}",
       "type StripeScheduleState struct {\n\tID             string                `json:\"id\"`\n\tSubscriptionID string                `json:\"subscription_id\"`\n\tStatus         string                `json:\"status\"`\n\tEndBehavior    string                `json:\"end_behavior,omitempty\"`\n\tTierChangeKey  string                `json:\"tier_change_key,omitempty\"`\n\tPhases         []StripeSchedulePhase `json:\"phases\"`\n}",
       "type StripeSubscriptionState struct {\n\tID              string `json:\"id\"`\n\tStatus          string `json:\"status\"`\n\tItemID          string `json:\"item_id\"`\n\tPriceID         string `json:\"price_id\"`\n\tInternalPriceID string `json:\"internal_price_id,omitempty\"`\n\tTierChangeKey   string `json:\"tier_change_key,omitempty\"`\n\tScheduleID      string `json:\"schedule_id,omitempty\"`\n\tLatestInvoiceID string `json:\"latest_invoice_id,omitempty\"`\n\tPeriodStart     int64  `json:\"period_start,omitempty\"`\n\tPeriodEnd       int64  `json:\"period_end,omitempty\"`\n}",
       "type SubscriptionRepriceView struct {\n\tID                      uuid.UUID                `json:\"id\"`\n\tMerchantID              uuid.UUID                `json:\"merchant_id\"`\n\tSubscriptionID          openrails.SubscriptionID `json:\"subscription_id\"`\n\tFromPriceID             openrails.PriceID        `json:\"from_price_id\"`\n\tToPriceID               openrails.PriceID        `json:\"to_price_id\"`\n\tEffectiveAt             time.Time                `json:\"effective_at\"`\n\tStatus                  models.RepriceStatus     `json:\"status\"`\n\tKind                    models.RepriceKind       `json:\"kind\"`\n\tBlockedReason           string                   `json:\"blocked_reason,omitempty\"`\n\tRepriceBatchID          *uuid.UUID               `json:\"reprice_batch_id,omitempty\"`\n\tAcknowledgedShortNotice bool                     `json:\"acknowledged_short_notice\"`\n\tCreatedAt               time.Time                `json:\"created_at\"`\n\tAppliedAt               *time.Time               `json:\"applied_at,omitempty\"`\n\tCanceledAt              *time.Time               `json:\"canceled_at,omitempty\"`\n}",
-      "type stripeCollectionInvoice struct {\n\tID            string `json:\"id\"`\n\tStatus        string `json:\"status\"`\n\tAmountPaid    int64  `json:\"amount_paid\"`\n\tCurrency      string `json:\"currency\"`\n\tPaymentIntent string `json:\"payment_intent\"`\n\tCharge        string `json:\"charge\"`\n\tMetadata      map[string]string\n}",
+      "type stripeCollectionInvoice struct {\n\tCustomerID      string `json:\"customer\"`\n\tPaymentMethodID string `json:\"default_payment_method\"`\n\tID              string `json:\"id\"`\n\tStatus          string `json:\"status\"`\n\tAmountPaid      int64  `json:\"amount_paid\"`\n\tCurrency        string `json:\"currency\"`\n\tPaymentIntent   string `json:\"payment_intent\"`\n\tCharge          string `json:\"charge\"`\n\tMetadata        map[string]string\n}",
       "type stripeLivenessSubscriptionEnvelope struct {\n\tID                 string            `json:\"id\"`\n\tStatus             string            `json:\"status\"`\n\tCancelAtPeriodEnd  bool              `json:\"cancel_at_period_end\"`\n\tCanceledAt         int64             `json:\"canceled_at\"`\n\tCurrentPeriodStart int64             `json:\"current_period_start\"`\n\tCurrentPeriodEnd   int64             `json:\"current_period_end\"`\n\tCustomer           string            `json:\"customer\"`\n\tMetadata           map[string]string `json:\"metadata\"`\n\tItems              struct {\n\t\tData []struct {\n\t\t\tPrice struct {\n\t\t\t\tID string `json:\"id\"`\n\t\t\t} `json:\"price\"`\n\t\t} `json:\"data\"`\n\t} `json:\"items\"`\n\tLatestInvoice struct {\n\t\tID            string `json:\"id\"`\n\t\tStatus        string `json:\"status\"`\n\t\tPaid          bool   `json:\"paid\"`\n\t\tCharge        string `json:\"charge\"`\n\t\tPaymentIntent string `json:\"payment_intent\"`\n\t\tAmountPaid    int64  `json:\"amount_paid\"`\n\t\tAmountDue     int64  `json:\"amount_due\"`\n\t\tCurrency      string `json:\"currency\"`\n\t\tCreated       int64  `json:\"created\"`\n\t\tBillingReason string `json:\"billing_reason\"`\n\t} `json:\"latest_invoice\"`\n}",
       "type stripeSubscriptionScheduleResponse struct {\n\tID     string `json:\"id\"`\n\tPhases []struct {\n\t\tStartDate int64 `json:\"start_date\"`\n\t\tEndDate   int64 `json:\"end_date\"`\n\t\tItems     []struct {\n\t\t\tPrice    string `json:\"price\"`\n\t\t\tQuantity int64  `json:\"quantity\"`\n\t\t} `json:\"items\"`\n\t} `json:\"phases\"`\n}"
     ],
@@ -2759,6 +2766,15 @@
       "sync": "sync",
       "time": "time"
     },
+    "internal/integrations/nmi/receipts.go": {
+      "big": "math/big",
+      "context": "context",
+      "errors": "errors",
+      "fmt": "fmt",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "strings": "strings",
+      "xml": "encoding/xml"
+    },
     "internal/integrations/nmi/v5.go": {
       "bytes": "bytes",
       "context": "context",
@@ -2836,6 +2852,31 @@
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/intents/collection_payload.go": {
+      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "strings": "strings",
+      "uuid": "github.com/google/uuid"
+    },
+    "internal/intents/collection_receipt.go": {
+      "bytes": "bytes",
+      "context": "context",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "hex": "encoding/hex",
+      "io": "io",
+      "json": "encoding/json",
+      "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
+      "sha256": "crypto/sha256",
+      "strings": "strings",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "uuid": "github.com/google/uuid"
     },
     "internal/intents/manual_rebill.go": {
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
@@ -3549,22 +3590,6 @@
       "strings": "strings",
       "time": "time"
     },
-    "internal/modules/money/collection.go": {
-      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
-      "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "log": "github.com/sirupsen/logrus",
-      "merchant": "github.com/open-rails/openrails/pkg/merchant",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
-      "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
-      "slices": "slices",
-      "strings": "strings",
-      "uuid": "github.com/google/uuid"
-    },
     "internal/modules/money/credit_grants.go": {
       "context": "context",
       "errors": "errors",
@@ -3615,32 +3640,6 @@
       "slices": "slices",
       "strings": "strings",
       "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
-    },
-    "internal/modules/money/invoice_collection_intent.go": {
-      "clockwork": "github.com/jonboulle/clockwork",
-      "collection": "github.com/open-rails/openrails/internal/modules/collection",
-      "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "identity": "github.com/open-rails/openrails/internal/billingidentity",
-      "intents": "github.com/open-rails/openrails/internal/intents",
-      "json": "encoding/json",
-      "ledger": "github.com/open-rails/openrails/internal/modules/money/ledger",
-      "log": "github.com/sirupsen/logrus",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
-      "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
-      "openrails": "github.com/open-rails/openrails",
-      "payments": "github.com/open-rails/openrails/internal/modules/payments",
-      "strings": "strings",
-      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
-      "time": "time",
-      "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
-      "uuid": "github.com/google/uuid",
-      "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/money/invoice_profile.go": {
@@ -3763,6 +3762,15 @@
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/modules/payments/charge/frozen.go": {
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "slices": "slices",
+      "strings": "strings",
+      "uuid": "github.com/google/uuid"
     },
     "internal/modules/payments/stripe_card.go": {
       "clockwork": "github.com/jonboulle/clockwork",
@@ -3914,17 +3922,21 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/modules/subscriptions/stripe_invoice_collection.go": {
+      "config": "github.com/open-rails/openrails/config",
       "context": "context",
       "errors": "errors",
       "fmt": "fmt",
       "http": "net/http",
       "io": "io",
       "json": "encoding/json",
+      "models": "github.com/open-rails/openrails/internal/db/models",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "railresolve": "github.com/open-rails/openrails/internal/railresolve",
       "strconv": "strconv",
       "strings": "strings",
       "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
-      "url": "net/url"
+      "url": "net/url",
+      "uuid": "github.com/google/uuid"
     },
     "internal/modules/subscriptions/stripe_liveness_source.go": {
       "context": "context",
@@ -3972,7 +3984,8 @@
       "strings": "strings",
       "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
       "time": "time",
-      "url": "net/url"
+      "url": "net/url",
+      "uuid": "github.com/google/uuid"
     },
     "internal/modules/subscriptions/stripe_tier_change.go": {
       "context": "context",

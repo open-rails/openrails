@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
-
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -41,9 +39,9 @@ func (a *StripeCollectionAdapter) Prepare(ctx context.Context, method gen.Openra
 	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
 		return nil, fmt.Errorf("stripe collection: refusing to charge without an established currency: %w", err)
 	}
-	customerID, err := a.stripeCustomerID(ctx, method.MerchantID, method.CustomerID)
-	if err != nil {
-		return nil, err
+	customerID := req.ProviderCustomerRef
+	if customerID == "" || req.Instrument.RailMethodRef != paymentMethodID {
+		return nil, errors.New("Stripe collection requires the frozen provider customer and method")
 	}
 	openRailsInvoiceID := ""
 	if req.InvoiceID != nil {
@@ -90,18 +88,6 @@ func (a *StripeCollectionAdapter) Prepare(ctx context.Context, method gen.Openra
 	}), nil
 }
 
-func (a *StripeCollectionAdapter) stripeCustomerID(ctx context.Context, merchantID, customerID uuid.UUID) (string, error) {
-	account, err := a.DB.Gen(ctx).GetRailCustomerAccountIDForMerchant(ctx, gen.GetRailCustomerAccountIDForMerchantParams{
-		MerchantID: merchantID,
-		CustomerID: customerID,
-		Rail:       string(models.RailStripe),
-	})
-	if err != nil {
-		return "", fmt.Errorf("load stripe customer mapping: %w", err)
-	}
-	return account, nil
-}
-
 // stripeDefinitiveRefusal classifies a Stripe error answer. A 4xx other than
 // an idempotency conflict or rate limit is a parsed refusal: Stripe processed
 // the request and rejected it, so no money moved by that request. Everything
@@ -119,13 +105,4 @@ func stripeDefinitiveRefusal(err error) (ChargeResult, bool) {
 	code := apiErr.FailureCode()
 	message := apiErr.Error()
 	return ChargeResult{Rail: string(models.RailStripe), Declined: true, FailureCode: &code, FailureMessage: &message}, true
-}
-
-func stripeReceiptTransactionID(r subscriptions.StripeCollectionReceipt) string {
-	for _, id := range []string{r.ChargeID, r.PaymentIntentID, r.InvoiceID} {
-		if id = strings.TrimSpace(id); id != "" {
-			return id
-		}
-	}
-	return ""
 }

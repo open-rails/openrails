@@ -2,8 +2,10 @@ package nmi
 
 import (
 	"context"
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -25,6 +27,34 @@ func exactCents(amount string) (int64, bool) {
 	}
 	cents, err := v5AmountToCents(trimmed)
 	return cents, err == nil
+}
+
+// exactMinorAmount parses a provider major-unit decimal at its declared
+// currency scale, without rounding or float conversion (JPY has no decimals).
+func exactMinorAmount(amount, currency string) (int64, bool) {
+	units, ok := moneyutil.LookupCurrency(currency)
+	if !ok {
+		return 0, false
+	}
+	amount = strings.TrimSpace(amount)
+	if amount == "" {
+		return 0, false
+	}
+	for i, ch := range amount {
+		if (ch < '0' || ch > '9') && ch != '.' && !(i == 0 && ch == '-') {
+			return 0, false
+		}
+	}
+	value, ok := new(big.Rat).SetString(amount)
+	if !ok {
+		return 0, false
+	}
+	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(units.MinorDecimals)), nil)
+	value.Mul(value, new(big.Rat).SetInt(scale))
+	if !value.IsInt() || !value.Num().IsInt64() {
+		return 0, false
+	}
+	return value.Num().Int64(), true
 }
 
 func successfulAction(txn v5Transaction, actionType string, amount moneyutil.Cents) bool {
@@ -167,4 +197,82 @@ func (c *NMIClient) ConfirmRefundNotExecuted(ctx context.Context, originalTransa
 		return receiptMismatch("original transaction %s contains a successful refund of %d cents", originalTransactionID, amount)
 	}
 	return nil
+}
+
+// SaleEvidence contains only facts read from the authenticated provider account.
+// The order search and exact transaction must identify the same successful sale.
+// No card data or arbitrary provider response is retained.
+type SaleEvidence struct {
+	TransactionID   string          `json:"transaction_id"`
+	OrderReference  string          `json:"order_reference"`
+	CustomerVaultID string          `json:"customer_vault_id"`
+	Amount          moneyutil.Cents `json:"amount,string"`
+	Currency        string          `json:"currency"`
+	Approved        bool            `json:"approved"`
+}
+
+func (c *NMIClient) ReadSaleEvidence(ctx context.Context, orderReference, reference string) (SaleEvidence, bool, error) {
+	if c.accountSecurityKey != "" {
+		scoped := *c
+		scoped.SecurityKey = c.accountSecurityKey
+		c = &scoped
+	}
+
+	if strings.TrimSpace(orderReference) == "" {
+		return SaleEvidence{}, false, errors.New("order reference is required")
+	}
+	raw, err := c.SearchTransactions(ctx, QueryFilter{OrderID: orderReference})
+	if err != nil {
+		return SaleEvidence{}, false, err
+	}
+	var query saleQueryResponse
+	if err := xml.Unmarshal([]byte(raw), &query); err != nil {
+		return SaleEvidence{}, false, err
+	}
+	if query.ErrorResponse != "" {
+		return SaleEvidence{}, false, errors.New(query.ErrorResponse)
+	}
+	id := ""
+	for _, txn := range query.Transactions {
+		for _, action := range txn.Actions {
+			if !strings.EqualFold(strings.TrimSpace(action.ActionType), "sale") || strings.TrimSpace(action.Success) != "1" {
+				continue
+			}
+			if txn.OrderID != orderReference || strings.TrimSpace(txn.TransactionID) == "" {
+				return SaleEvidence{}, false, receiptMismatch("order search returned an unbound successful sale")
+			}
+			if id != "" && id != txn.TransactionID {
+				return SaleEvidence{}, false, receiptMismatch("order has multiple successful sales")
+			}
+			id = txn.TransactionID
+		}
+	}
+	if id == "" {
+		return SaleEvidence{}, false, nil
+	}
+	if reference != "" && id != reference {
+		return SaleEvidence{}, false, receiptMismatch("named transaction does not match order's successful sale")
+	}
+	txn, err := c.approvedTransaction(ctx, id)
+	if err != nil {
+		return SaleEvidence{}, false, err
+	}
+	if txn.ID != id {
+		return SaleEvidence{}, false, receiptMismatch("exact transaction read returned a different identity")
+	}
+	var amount moneyutil.Cents
+	for _, action := range txn.Actions {
+		if !strings.EqualFold(strings.TrimSpace(action.Type), "sale") || !action.Success {
+			continue
+		}
+		cents, ok := exactMinorAmount(action.Amount, txn.Currency)
+		if !ok || cents <= 0 || amount != 0 {
+			return SaleEvidence{}, false, receiptMismatch("transaction does not have one exact positive sale")
+		}
+		amount = moneyutil.Cents(cents)
+	}
+	if amount <= 0 || strings.TrimSpace(txn.Currency) == "" {
+		return SaleEvidence{}, false, receiptMismatch("sale evidence is incomplete")
+	}
+	return SaleEvidence{TransactionID: id, OrderReference: orderReference, CustomerVaultID: strings.TrimSpace(txn.CustomerVaultID), Amount: amount, Currency: strings.ToUpper(strings.TrimSpace(txn.Currency)), Approved: true}, true, nil
 }

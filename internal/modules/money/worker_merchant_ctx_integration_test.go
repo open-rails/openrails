@@ -40,7 +40,7 @@ func TestInvoiceWorker_NoMerchantContext_CollectsSeededMerchant(t *testing.T) {
 		string(models.RailNMI): adapter,
 	})
 	// EXACTLY like River: a bare background context, no merchant pinned.
-	err = riverjobs.InvoiceWorker{DB: dbi, Money: svc, Intents: collectionRunner(dbi, ch, nil)}.Work(context.Background(), &river.Job[riverjobs.InvoiceArgs]{
+	err = riverjobs.InvoiceWorker{DB: dbi, Money: svc, Intents: collectionRunner(dbi, ch, adapter)}.Work(context.Background(), &river.Job[riverjobs.InvoiceArgs]{
 		Args: riverjobs.InvoiceArgs{Collect: true, CollectionThresholdAmount: 1},
 	})
 	require.NoError(t, err)

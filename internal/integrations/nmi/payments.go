@@ -18,7 +18,7 @@ type SaleParams struct {
 	// one-vault-per-card minting policy; set it (from the payment method's
 	// rail_method_ref) when the vault may hold multiple entries.
 	BillingID string
-	// Amount is CENTS (typed, #671) — rendered as a two-decimal wire amount.
+	// Amount is rail minor units, rendered in the explicitly supplied currency.
 	Amount           moneyutil.Cents
 	Currency         string
 	OrderDescription string
@@ -87,11 +87,15 @@ func (c *NMIClient) RunSale(ctx context.Context, params SaleParams) (*SaleRespon
 // customer_vault_id): billingID targets ONE specific billing entry; ""
 // charges the priority-1 entry. Stored-credential fields ride this lane (#297).
 func (c *NMIClient) runClassicSale(ctx context.Context, params SaleParams, currency, orderDesc, billingID string) (*SaleResponse, error) {
+	amount, err := WireAmount(params.Amount, currency)
+	if err != nil {
+		return nil, err
+	}
 	values := url.Values{
 		"type":              {"sale"},
 		"security_key":      {c.SecurityKey},
 		"customer_vault_id": {params.CustomerVaultID},
-		"amount":            {string(centsJSONAmount(params.Amount))},
+		"amount":            {amount},
 		"currency":          {currency},
 		"order_description": {orderDesc},
 	}

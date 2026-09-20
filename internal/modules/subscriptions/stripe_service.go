@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"io"
@@ -53,8 +54,12 @@ func ParseStripeAPIError(body []byte) string {
 }
 
 type StripeService struct {
-	Config *config.Config
-	Rails  railresolve.Source
+	accountMerchantID uuid.UUID
+	accountPSPID      uuid.UUID
+	accountID         string
+	accountSecret     string
+	Config            *config.Config
+	Rails             railresolve.Source
 
 	// baseURL overrides the Stripe API root. Empty means the production Stripe
 	// API (https://api.stripe.com). Tests set this to an httptest server.
@@ -586,4 +591,14 @@ func (s *StripeService) ResumeSubscription(ctx context.Context, subscriptionID s
 		return errors.New(msg)
 	}
 	return nil
+}
+
+// NewAccountStripeService binds a resolved account and its credentials together.
+// Receipt reads use the captured credentials, even if the general Rails view is
+// changed by a host after construction.
+func NewAccountStripeService(cfg *config.Config, merchantID, pspID uuid.UUID, accountID, secretKey string) *StripeService {
+	return &StripeService{Config: cfg, accountMerchantID: merchantID, accountPSPID: pspID, accountID: accountID, accountSecret: secretKey, Rails: railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: accountID, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}}
+}
+func (s *StripeService) AccountIdentity() (uuid.UUID, uuid.UUID) {
+	return s.accountMerchantID, s.accountPSPID
 }

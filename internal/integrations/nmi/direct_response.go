@@ -2,6 +2,8 @@ package nmi
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -31,12 +33,27 @@ func ParseSaleResponse(raw string) (*SaleResponse, error) {
 	}, nil
 }
 
-// WireAmount renders integer cents as the exact two-decimal wire string NMI
-// charges in (199 -> "1.99"). Money wall: never float math (#671).
-func WireAmount(cents moneyutil.Cents) string {
-	neg := ""
-	if cents < 0 {
-		neg, cents = "-", -cents
+// WireAmount renders rail minor units as NMI's major-unit decimal, at the
+// currency's scale. NMI's x.xx format is retained for zero-decimal currencies:
+// four JPY rail units become "4.00", never "0.04". No float arithmetic.
+func WireAmount(amount moneyutil.Cents, currency string) (string, error) {
+	units, ok := moneyutil.LookupCurrency(currency)
+	if !ok {
+		return "", fmt.Errorf("unknown charge currency %q", currency)
 	}
-	return fmt.Sprintf("%s%d.%02d", neg, cents/100, cents%100)
+	digits := strconv.FormatInt(int64(amount), 10)
+	sign := ""
+	if strings.HasPrefix(digits, "-") {
+		sign = "-"
+		digits = digits[1:]
+	}
+	decimals := units.MinorDecimals
+	if len(digits) <= decimals {
+		digits = strings.Repeat("0", decimals-len(digits)+1) + digits
+	}
+	whole, fraction := digits[:len(digits)-decimals], digits[len(digits)-decimals:]
+	if len(fraction) < 2 {
+		fraction += strings.Repeat("0", 2-len(fraction))
+	}
+	return sign + whole + "." + fraction, nil
 }

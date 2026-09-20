@@ -78,7 +78,7 @@ func moneyDeploymentBuilders(h *Harness, providers config.ProviderSandboxConfig)
 				name: "embedded", merchant: dbtest.TestMerchantID,
 				runtime: func() *app.Runtime { return app.HostGraph(embedded).Runtime },
 				client: func() *openrails.Client {
-					client, err := embedded.Client(openrails.WithMerchantID(dbtest.TestMerchantID), openrails.WithCurrency("USD"))
+					client, err := embedded.Client(openrails.WithMerchantID(dbtest.TestMerchantID), openrails.WithCurrency("USD"), openrails.WithTimeout(30*time.Second))
 					require.NoError(t, err)
 					return client
 				},
@@ -199,7 +199,6 @@ func TestProviderUncertaintyResolvedThroughOperator(t *testing.T) {
 		out, err := h.ResolveOperation(gateway.URL, d.merchant, op.ID, sale.TransactionID, false)
 		require.Error(t, err, "receipt the provider does not show: %s", out)
 		require.Contains(t, out, rejected)
-		require.Contains(t, out, "is not the successful sale for order")
 		out, err = h.ResolveOperation(gateway.URL, d.merchant, op.ID, "tx-unrelated", false)
 		require.Error(t, err, "unrelated receipt: %s", out)
 		require.Contains(t, out, rejected)

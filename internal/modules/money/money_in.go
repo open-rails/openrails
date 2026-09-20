@@ -2,6 +2,7 @@ package money
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 
 	"github.com/google/uuid"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -41,11 +42,12 @@ type ChargeRequest struct {
 	Currency    string
 	// IdempotencyKey is the operation's provider identity: the NMI order id and
 	// the Stripe idempotency-key root. Stable for the life of the operation.
-	IdempotencyKey string
-	Description    string
+	IdempotencyKey      string
+	ProviderCustomerRef string
+	Description         string
 	// Instrument is the method as the operation froze it; the charge is
 	// refused before submission if the method no longer matches.
-	Instrument CollectionInstrument
+	Instrument charge.FrozenInstrument
 }
 
 type ChargeResult struct {
