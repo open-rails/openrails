@@ -37,7 +37,7 @@ func (d *DB) WithMerchantConn(ctx context.Context) (context.Context, func(), err
 		return ctx, func() {}, fmt.Errorf("db: WithMerchantConn on nil DB")
 	}
 	if d.pgtx != nil {
-		return ctx, func() {}, nil
+		return transactionContext(ctx), func() {}, nil
 	}
 	if lc, err := d.merchantConn(ctx); err != nil {
 		return ctx, func() {}, err

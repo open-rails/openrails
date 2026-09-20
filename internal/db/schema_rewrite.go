@@ -216,7 +216,7 @@ func (p *Pool) MerchantTx(ctx context.Context, id merchant.ID, fn func(context.C
 		return err
 	}
 	ctx = merchant.WithID(ctx, id)
-	if err := fn(ctx, tx); err != nil {
+	if err := fn(transactionContext(ctx), tx); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
