@@ -221,7 +221,8 @@ func TestRunServerMode1BootArmsNMIPSPFromManifest(t *testing.T) {
 
 	cfg, err := config.Load(cfgPath)
 	require.NoError(t, err)
-	mintApp := &app.App{Config: cfg}
+	mintApp, err := app.Bootstrap(ctx, cfg)
+	require.NoError(t, err)
 	defer func() { _ = mintApp.Close(context.Background()) }()
 	require.NoError(t, embcp.Attach(ctx, mintApp, cfg, nil))
 	cp := embcp.Get(mintApp)
