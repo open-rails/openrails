@@ -79,6 +79,9 @@ func checkTreasuryMoney(t *testing.T, f treasuryWorkflow) {
 			_, err := f.client.Capture(ctx, req.RequestID, row.actual, &openrails.CaptureUsage{EventType: "invoke", Resource: row.name})
 			require.NoError(t, err)
 			assertLedger(t, payer, 10_000-row.actual, 0, 1)
+			probe := admission(payer, 10_000-row.actual)
+			admit(t, probe)
+			require.NoError(t, f.client.Release(ctx, probe.RequestID))
 		})
 	}
 	t.Run("insufficient_balance", func(t *testing.T) {
@@ -112,9 +115,19 @@ func checkTreasuryMoney(t *testing.T, f treasuryWorkflow) {
 		require.True(t, admit(t, req).Replayed)
 		probe := admission(payer, 7_000)
 		admit(t, probe)
-		require.NoError(t, f.client.Release(ctx, probe.RequestID))
-		_, err := f.client.Capture(ctx, req.RequestID, 3_000, nil)
+		blocked, err := f.client.AdmitBatch(ctx, []openrails.AdmitRequest{admission(payer, 1)})
 		require.NoError(t, err)
+		require.Equal(t, http.StatusPaymentRequired, blocked[0].Status)
+		require.Equal(t, "money", blocked[0].Result.BlockedBy)
+		require.NoError(t, f.client.Release(ctx, probe.RequestID))
+		first, err := f.client.Capture(ctx, req.RequestID, 3_000, nil)
+		require.NoError(t, err)
+		replay, err := f.client.Capture(ctx, req.RequestID, 3_000, nil)
+		require.NoError(t, err)
+		first.Replayed = true
+		require.Equal(t, first, replay, "amount-only retry needs no echoed admission metadata")
+		_, err = f.client.Capture(ctx, req.RequestID, 3_001, nil)
+		require.ErrorIs(t, err, openrails.ErrIdempotencyKeyReused)
 		assertLedger(t, payer, 7_000, 0, 1)
 	})
 	t.Run("payer_isolation", func(t *testing.T) {

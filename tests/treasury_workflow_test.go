@@ -28,18 +28,25 @@ import (
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/testauth"
 	"github.com/open-rails/openrails/permissions"
+	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 // One real standalone mount owns this workflow's merchant, credentials and data.
 // API keys and delegated subjects pass through the production authority chain.
 type treasuryWorkflow struct {
-	surface    *integrationharness.Surface
-	merchant   integrationharness.OwnedMerchant
-	client     *openrails.Client
-	embedded   *openrails.Client
-	issuer     *integrationharness.DelegatedIssuer
-	hostURL    string
-	hostPolicy *sync.Map
+	surface      *integrationharness.Surface
+	merchant     integrationharness.OwnedMerchant
+	client       *openrails.Client
+	embedded     *openrails.Client
+	issuer       *integrationharness.DelegatedIssuer
+	hostURL      string
+	hostPolicy   *sync.Map
+	hostInvokers *sync.Map
+}
+
+type hostInvokerBinding struct {
+	payer   openrails.CustomerID
+	invoker string
 }
 
 func newTreasuryWorkflow(t *testing.T) treasuryWorkflow {
@@ -61,6 +68,7 @@ func newTreasuryWorkflow(t *testing.T) treasuryWorkflow {
 	embeddedClient, err := host.Client(openrails.WithCurrency("USD"))
 	require.NoError(t, err)
 	policy := new(sync.Map)
+	invokers := new(sync.Map)
 	bridge, err := orauthkit.NewDelegatedAuthenticator(embcp.Get(surface.App()).AuthService().Verifier(), owned.MerchantID.String(),
 		orauthkit.WithMerchantSlug(owned.MerchantSlug),
 		orauthkit.WithPermissionResolver(func(_ context.Context, _ *http.Request, claims verify.Claims) ([]string, error) {
@@ -72,12 +80,25 @@ func newTreasuryWorkflow(t *testing.T) treasuryWorkflow {
 		}),
 	)
 	require.NoError(t, err)
-	handler, err := host.Handler(embed.MountOptions{RouteSets: []embed.RouteSet{embed.RouteSetCustomer}, DelegatedAuthenticator: bridge})
+	principalSource := billingauth.DelegatedAuthenticatorFunc(func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
+		principal, err := bridge.AuthenticateDelegated(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		// The embedding host owns organization membership and opaque invoker
+		// identities. Apply that declared relation only AFTER token verification.
+		if value, ok := invokers.Load(principal.SubjectID); ok {
+			binding := value.(hostInvokerBinding)
+			principal.SubjectID, principal.Invoker = binding.payer.String(), binding.invoker
+		}
+		return principal, nil
+	})
+	handler, err := host.Handler(embed.MountOptions{RouteSets: []embed.RouteSet{embed.RouteSetCustomer}, DelegatedAuthenticator: principalSource})
 	require.NoError(t, err)
 	hostServer := httptest.NewServer(handler)
 	t.Cleanup(hostServer.Close)
 	return treasuryWorkflow{
-		hostURL: hostServer.URL, hostPolicy: policy, embedded: embeddedClient,
+		hostURL: hostServer.URL, hostPolicy: policy, embedded: embeddedClient, hostInvokers: invokers,
 		surface: surface, merchant: owned,
 		client: surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID)),
 		issuer: surface.RegisterDelegatedIssuer("treasury-issuer-"+uuid.NewString()[:8], owned.MerchantSlug),
