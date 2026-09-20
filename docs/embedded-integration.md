@@ -61,6 +61,12 @@ that River client's schema and migration lifecycle.
 The engine validates the tracking key at boot and refuses to start if any
 OpenRails migration is missing or orphaned.
 
+OpenRails does not create or grant access to AuthKit's `profiles` schema. If
+the host enables notification email or CCBill username resolution, pass its
+identity adapter explicitly through `embed.Options.UserDirectory` and
+`embed.Options.UsernameResolver`; leaving them unset disables those optional
+lookups safely.
+
 ### 3. Config
 
 Embedded mode never runs `config.Load` — you build `*config.Config` programmatically.
