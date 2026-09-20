@@ -165,7 +165,7 @@ func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, in gen.Openra
 		}
 		lifecycle := h.lifecycle(d)
 		params := &subscriptions.RenewMembershipParams{Prepared: &p.Renewal, Rail: models.Rail(p.Rail), RailSubscriptionID: p.RailSubscriptionID, TransactionID: retained.TransactionID(), Amount: p.Renewal.Amount, AmountProvided: true, Currency: p.Renewal.Currency}
-		if _, terminal := subscriptions.TerminalCancelReason(sub); terminal {
+		if _, terminal := subscriptions.TerminalCancelReason(sub); terminal || (sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.After(p.Renewal.PeriodEnd)) {
 			err = lifecycle.RecordConfirmedChargeWithoutRenewal(ctx, params)
 		} else {
 			err = lifecycle.RenewMembership(ctx, params)

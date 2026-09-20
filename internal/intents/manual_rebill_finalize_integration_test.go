@@ -14,7 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -60,40 +62,81 @@ func TestManualRebillAdmissionReusesOneUnresolvedOperation(t *testing.T) {
 }
 
 func TestManualRebillPaidCompletionRollsBackAndReplaysOffline(t *testing.T) {
-	fx := seedPastDueSubscription(t)
-	gateway, client := newFakeNMIRebillGateway(t, fx)
-	ctx := fx.handlerCtx()
-	h := NewManualRebillHandler(fx.db, fullModeConfig(), fakeNMIResolver{client: client}, nil)
-	accepted, err := h.EnqueueScheduled(ctx, fx.subID)
-	require.NoError(t, err)
-	admin := dbtest.SharedSuperuserPGXPool(t)
-	name := "fail_rebill_paid_" + uuid.NewString()[:8]
-	_, err = admin.Exec(ctx, fmt.Sprintf(`CREATE FUNCTION openrails.%s() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RAISE EXCEPTION 'injected paid terminal failure'; END$$;
+	for _, later := range []bool{false, true} {
+		t.Run(fmt.Sprintf("later_renewal_%t", later), func(t *testing.T) {
+			fx := seedPastDueSubscription(t)
+			gateway, client := newFakeNMIRebillGateway(t, fx)
+			ctx := fx.handlerCtx()
+			h := NewManualRebillHandler(fx.db, fullModeConfig(), fakeNMIResolver{client: client}, nil)
+			accepted, err := h.EnqueueScheduled(ctx, fx.subID)
+			require.NoError(t, err)
+			admin := dbtest.SharedSuperuserPGXPool(t)
+			name := "fail_rebill_paid_" + uuid.NewString()[:8]
+			_, err = admin.Exec(ctx, fmt.Sprintf(`CREATE FUNCTION openrails.%s() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RAISE EXCEPTION 'injected paid terminal failure'; END$$;
 CREATE TRIGGER %s BEFORE UPDATE ON openrails.rail_intents FOR EACH ROW WHEN (NEW.id='%s'::uuid AND NEW.status='succeeded') EXECUTE FUNCTION openrails.%s()`, name, name, accepted.ID, name))
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, _ = admin.Exec(context.Background(), fmt.Sprintf(`DROP FUNCTION IF EXISTS openrails.%s() CASCADE`, name))
-	})
-	row, err := fx.rebillRunner(client, fullModeConfig()).ExecuteByID(ctx, accepted.ID)
-	require.NoError(t, err)
-	require.Equal(t, StatusUnknownNeedsVerify, row.Status)
-	_, found, err := LoadCollectedReceipt(row)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Zero(t, fx.paymentsFor(t, gateway.txnID))
-	require.Equal(t, "past_due", string(fx.subscription(t).Status))
-	require.True(t, fx.subscription(t).CurrentPeriodEndsAt.Equal(fx.periodEnd))
-	_, err = admin.Exec(ctx, fmt.Sprintf(`DROP FUNCTION openrails.%s() CASCADE`, name))
-	require.NoError(t, err)
-	queries := gateway.queryCalls.Load()
-	gateway.charged.Store(false)
-	for range 2 {
-		require.Equal(t, OutcomeSucceeded, h.Verify(ctx, row).Class)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_, _ = admin.Exec(context.Background(), fmt.Sprintf(`DROP FUNCTION IF EXISTS openrails.%s() CASCADE`, name))
+			})
+			row, err := fx.rebillRunner(client, fullModeConfig()).ExecuteByID(ctx, accepted.ID)
+			require.NoError(t, err)
+			require.Equal(t, StatusUnknownNeedsVerify, row.Status)
+			_, found, err := LoadCollectedReceipt(row)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Zero(t, fx.paymentsFor(t, gateway.txnID))
+			require.Equal(t, "past_due", string(fx.subscription(t).Status))
+			require.True(t, fx.subscription(t).CurrentPeriodEndsAt.Equal(fx.periodEnd))
+			_, err = admin.Exec(ctx, fmt.Sprintf(`DROP FUNCTION openrails.%s() CASCADE`, name))
+			require.NoError(t, err)
+			if later {
+				p, err := DecodeManualRebillPayload(row)
+				require.NoError(t, err)
+				laterStart, laterEnd := p.Renewal.PeriodEnd, p.Renewal.PeriodEnd.Add(30*24*time.Hour)
+				// The later renewal has different current commercial terms;
+				// old receipt completion must retain its original facts without
+				// restoring its earlier benefit snapshot over this one.
+				_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET entitlements_spec_snapshot='{"later-benefit":null}' WHERE id=$1`, fx.subID)
+				require.NoError(t, err)
+				_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.prices SET amount=12990000 WHERE id=$1`, p.Renewal.PriceID)
+				require.NoError(t, err)
+				require.NoError(t, h.lifecycle(fx.db).RenewMembership(ctx, &subscriptions.RenewMembershipParams{
+					Rail: models.RailNMI, RailSubscriptionID: p.RailSubscriptionID, TransactionID: "later-" + uuid.NewString(),
+					Amount: 12990000, AmountProvided: true, Currency: p.Renewal.Currency,
+					CurrentPeriodStartsAt: &laterStart, CurrentPeriodEndsAt: &laterEnd,
+				}))
+				require.True(t, fx.subscription(t).CurrentPeriodEndsAt.Equal(laterEnd))
+			}
+			expected := fx.subscription(t)
+			windows := fx.entitlementWindows(t)
+			queries := gateway.queryCalls.Load()
+			gateway.charged.Store(false)
+			for range 2 {
+				require.Equal(t, OutcomeSucceeded, h.Verify(ctx, row).Class)
+			}
+			require.Equal(t, 1, fx.paymentsFor(t, gateway.txnID))
+			var paidAmount int64
+			require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT amount FROM openrails.payments WHERE subscription_id=$1 AND transaction_id=$2`, fx.subID, gateway.txnID).Scan(&paidAmount))
+			require.EqualValues(t, 9990000, paidAmount)
+			if later {
+				current := fx.subscription(t)
+				require.Equal(t, expected.Status, current.Status)
+				require.True(t, current.CurrentPeriodStartsAt.Equal(*expected.CurrentPeriodStartsAt))
+				require.True(t, current.CurrentPeriodEndsAt.Equal(*expected.CurrentPeriodEndsAt))
+				require.Equal(t, expected.PriceID, current.PriceID)
+				require.Equal(t, expected.EntitlementsSpecSnapshot, current.EntitlementsSpecSnapshot)
+				require.Equal(t, windows, fx.entitlementWindows(t), "old completion cannot extend the later benefit window")
+				var metadata string
+				require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT COALESCE(metadata->>'refund_review','') FROM openrails.payments WHERE subscription_id=$1 AND transaction_id=$2`, fx.subID, gateway.txnID).Scan(&metadata))
+				require.Empty(t, metadata, "a late financial record alone is not a cancelled-subscription refund")
+			} else {
+				require.Equal(t, 1, fx.entitlementWindows(t))
+			}
+			require.Equal(t, StatusSucceeded, fx.intentByID(t, row.ID).Status)
+			require.Equal(t, queries, gateway.queryCalls.Load(), "local recovery uses retained facts")
+			require.EqualValues(t, 1, gateway.saleCalls.Load())
+		})
 	}
-	require.Equal(t, 1, fx.paymentsFor(t, gateway.txnID))
-	require.Equal(t, 1, fx.entitlementWindows(t))
-	require.Equal(t, queries, gateway.queryCalls.Load(), "local recovery uses retained facts")
-	require.EqualValues(t, 1, gateway.saleCalls.Load())
 }
 
 func TestManualRebillPreparesAcceptedPriceOnceBeforeCharging(t *testing.T) {
