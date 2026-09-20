@@ -186,9 +186,9 @@ func TestStripeRefundLostResponseReplaysProviderIdempotencyKey(t *testing.T) {
 // A lost rebill resolves only through the exact order-reference search or
 // provider-confirmed non-execution; an operator reference is refused, and
 // non-execution is refused while the order shows a successful sale.
-func TestManualRebillOperatorResolutionIsNonExecutionOnly(t *testing.T) {
+func TestManualRebillOperatorResolutionRequiresQualifiedReceipt(t *testing.T) {
 	fx := seedPastDueSubscription(t)
-	fake, client := newFakeNMIRebillGateway(t)
+	fake, client := newFakeNMIRebillGateway(t, fx)
 	fake.saleStatus.Store(http.StatusBadGateway)
 	runner := fx.rebillRunner(client, fullModeConfig())
 	row, err := runner.EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
@@ -204,9 +204,14 @@ func TestManualRebillOperatorResolutionIsNonExecutionOnly(t *testing.T) {
 	require.Equal(t, StatusUnknownNeedsVerify, fx.intentByID(t, row.ID).Status)
 
 	fake.charged.Store(false)
-	resolved, err := runner.Resolve(ctx, row.ID, Resolution{NotExecuted: true, Actor: "ops", Reason: "NMI confirmed no sale"})
+	_, err = runner.Resolve(ctx, row.ID, Resolution{NotExecuted: true, Actor: "ops", Reason: "empty search"})
+	require.ErrorIs(t, err, ErrResolutionRejected)
+	require.Equal(t, StatusUnknownNeedsVerify, fx.intentByID(t, row.ID).Status)
+	fake.charged.Store(true)
+	resolved, err := runner.Resolve(ctx, row.ID, Resolution{ProviderReference: fake.txnID, Actor: "ops", Reason: "exact receipt"})
 	require.NoError(t, err)
-	require.Equal(t, StatusFailedTerminal, resolved.Status)
-	require.Equal(t, "past_due", string(fx.subscription(t).Status), "no renewal without a charge")
+	require.Equal(t, StatusSucceeded, resolved.Status)
+	require.Equal(t, "active", string(fx.subscription(t).Status))
 	require.EqualValues(t, 1, fake.saleCalls.Load())
+
 }

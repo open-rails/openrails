@@ -14,7 +14,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 const qualifiedReceiptKey = "qualified_receipt"
@@ -39,8 +41,32 @@ type collectedReceipt struct {
 	Stripe  *subscriptions.StripeCollectionReceipt `json:"stripe,omitempty"`
 }
 
+// Each kind decodes its own accepted payload. These private expected fields
+// are never an API that a caller can supply alongside a fabricated receipt.
+type collectedTerms struct {
+	Rail                string
+	Currency            string
+	AmountMinor         moneyutil.Cents
+	Instrument          charge.FrozenInstrument
+	ProviderCustomerRef string
+	OrderReference      string
+}
+
+func decodeCollectedTerms(in gen.OpenrailsRailIntent) (collectedTerms, error) {
+	switch in.IntentType {
+	case "invoice_collection":
+		p, err := DecodeInvoiceCollectionPayload(in)
+		return collectedTerms{p.Rail, p.Currency, p.AmountMinor, p.Instrument, p.ProviderCustomerRef, in.ID.String()}, err
+	case TypeManualRebill:
+		p, err := DecodeManualRebillPayload(in)
+		return collectedTerms{p.Rail, p.Renewal.Currency, p.AmountMinor, p.Instrument, "", p.OrderReference}, err
+	default:
+		return collectedTerms{}, errors.New("operation kind has no collected-receipt contract")
+	}
+}
+
 func collectionBinding(in gen.OpenrailsRailIntent) (receiptBinding, error) {
-	if _, err := DecodeInvoiceCollectionPayload(in); err != nil {
+	if _, err := decodeCollectedTerms(in); err != nil {
 		return receiptBinding{}, err
 	}
 	d := json.NewDecoder(bytes.NewReader(in.Payload))
@@ -67,7 +93,7 @@ func ReadNMICollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, r
 	if err != nil {
 		return CollectedReceipt{}, false, err
 	}
-	p, _ := DecodeInvoiceCollectionPayload(in)
+	p, _ := decodeCollectedTerms(in)
 	if p.Rail == "stripe" {
 		return CollectedReceipt{}, false, errors.New("Stripe operation cannot accept an NMI receipt")
 	}
@@ -82,7 +108,7 @@ func ReadNMICollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, r
 	if accountMerchant != in.MerchantID || accountPSP != *in.PspID {
 		return CollectedReceipt{}, false, errors.New("NMI reader is armed for another provider account")
 	}
-	facts, found, err := client.ReadSaleEvidence(ctx, in.ID.String(), reference)
+	facts, found, err := client.ReadSaleEvidence(ctx, p.OrderReference, reference)
 	if err != nil || !found {
 		return CollectedReceipt{}, found, err
 	}
@@ -98,7 +124,7 @@ func ReadStripeCollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent
 	if err != nil {
 		return CollectedReceipt{}, false, err
 	}
-	p, _ := DecodeInvoiceCollectionPayload(in)
+	p, _ := decodeCollectedTerms(in)
 	if p.Rail != "stripe" || service == nil {
 		return CollectedReceipt{}, false, errors.New("Stripe receipt reader does not match accepted provider account")
 	}
@@ -122,7 +148,7 @@ func (r CollectedReceipt) Validate(in gen.OpenrailsRailIntent) error {
 	if r.data.Version != 1 || r.data.Family != "collected_payment" || r.data.Binding != binding {
 		return errors.New("qualified collection receipt is not bound to this accepted operation")
 	}
-	p, _ := DecodeInvoiceCollectionPayload(in)
+	p, _ := decodeCollectedTerms(in)
 	if p.Rail == "stripe" {
 		if r.data.Stripe == nil || r.data.NMI != nil {
 			return errors.New("qualified collection receipt has wrong provider family")
@@ -145,7 +171,7 @@ func (r CollectedReceipt) Validate(in gen.OpenrailsRailIntent) error {
 			return errors.New("qualified collection receipt has wrong provider family")
 		}
 		facts := r.data.NMI
-		if facts.TransactionID == "" || facts.OrderReference != in.ID.String() || !facts.Approved || facts.Amount != p.AmountMinor || !strings.EqualFold(facts.Currency, p.Currency) {
+		if facts.TransactionID == "" || facts.OrderReference != p.OrderReference || !facts.Approved || facts.Amount != p.AmountMinor || !strings.EqualFold(facts.Currency, p.Currency) {
 			return fmt.Errorf("%w: sale does not match frozen operation", nmi.ErrReceiptMismatch)
 		}
 		if !p.Instrument.CustodianHeld() && (p.Instrument.RailCustomerRef == "" || facts.CustomerVaultID != p.Instrument.RailCustomerRef) {
@@ -320,7 +346,7 @@ func LoadCollectionCandidate(in gen.OpenrailsRailIntent) (CollectionCandidate, b
 }
 
 func refuseCustodyKeys(evidence map[string]any) error {
-	for _, key := range []string{qualifiedReceiptKey, collectionCandidateKey, "account_requalifications"} {
+	for _, key := range []string{qualifiedReceiptKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, "account_requalifications"} {
 		if _, ok := evidence[key]; ok {
 			return fmt.Errorf("%s is reserved for immutable provider evidence custody", key)
 		}

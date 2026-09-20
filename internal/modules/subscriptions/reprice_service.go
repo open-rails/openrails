@@ -379,66 +379,6 @@ func (s *RepriceService) Cancel(ctx context.Context, id uuid.UUID) error {
 	return s.repo.Cancel(ctx, id)
 }
 
-// ResolveEffectivePrice is the renewal-boundary hook every renewal path calls
-// before deciding what to charge (#773's "renewal/converge jobs check for a
-// due scheduled reprice at the boundary, re-pin the subscription, then
-// charge"). v1's ONLY effective moment: the subscription's first renewal
-// on/after the reprice's effective_at. Idempotent and safe to call more than
-// once per renewal (e.g. once by the amount-deciding caller, once inside
-// RenewMembership): once applied, the scheduled row is gone, so later calls
-// just return the (already repinned) current price unchanged.
-//
-// Returns the price to charge for this renewal and whether a reprice was just
-// applied.
-func (s *RepriceService) ResolveEffectivePrice(ctx context.Context, subscriptionID uuid.UUID) (*models.Price, bool, error) {
-	sub, err := s.subscriptions.GetByID(ctx, subscriptionID)
-	if err != nil {
-		return nil, false, fmt.Errorf("resolve effective price: load subscription: %w", err)
-	}
-	scheduled, err := s.repo.GetScheduledForSubscription(ctx, subscriptionID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			price, err := s.prices.GetByID(ctx, sub.PriceID)
-			return price, false, err
-		}
-		return nil, false, fmt.Errorf("resolve effective price: load scheduled reprice: %w", err)
-	}
-	if !scheduled.IsDue(s.now()) {
-		price, err := s.prices.GetByID(ctx, sub.PriceID)
-		return price, false, err
-	}
-
-	toPrice, err := s.prices.GetByID(ctx, scheduled.ToPriceID)
-	if err != nil {
-		return nil, false, fmt.Errorf("resolve effective price: load target price: %w", err)
-	}
-	if toPrice.ProductID != sub.ProductID {
-		// #813 plan_change: cross-product cutover — move the product ref and
-		// cut entitlement/credit snapshots over with the price. The renewal
-		// grant that follows re-derives windows from the new snapshots.
-		newProduct, err := s.products(ctx, toPrice.ProductID)
-		if err != nil {
-			return nil, false, fmt.Errorf("resolve effective price: load target product: %w", err)
-		}
-		sub.ProductID = toPrice.ProductID
-		sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(newProduct.EntitlementsSpec)
-	}
-	sub.PriceID = toPrice.ID
-	if err := s.subscriptions.Update(ctx, sub); err != nil {
-		return nil, false, fmt.Errorf("resolve effective price: re-pin subscription: %w", err)
-	}
-	if err := s.repo.Apply(ctx, scheduled.ID); err != nil && !errors.Is(err, ErrRepriceNotScheduled) {
-		return nil, false, fmt.Errorf("resolve effective price: mark applied: %w", err)
-	}
-	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id": subscriptionID,
-		"reprice_id":      scheduled.ID,
-		"from_price_id":   scheduled.FromPriceID,
-		"to_price_id":     toPrice.ID,
-	}).Info("applied scheduled reprice at renewal boundary")
-	return toPrice, true, nil
-}
-
 func (s *RepriceService) emitScheduledNotification(ctx context.Context, sub *models.Subscription, from, to *models.Price, effectiveAt time.Time) {
 	if s.notifications == nil {
 		return

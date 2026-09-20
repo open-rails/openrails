@@ -43,7 +43,7 @@ type fakeNMIPlanGateway struct {
 	updateForms  []map[string]string
 }
 
-func newFakeNMIPlanGateway(t *testing.T, railSubID, initialAmount, planPayments string) (*fakeNMIPlanGateway, *nmi.NMIClient) {
+func newFakeNMIPlanGateway(t *testing.T, merchantID, pspID uuid.UUID, railSubID, initialAmount, planPayments string) (*fakeNMIPlanGateway, *nmi.NMIClient) {
 	t.Helper()
 	f := &fakeNMIPlanGateway{railSubID: railSubID, planPayments: planPayments}
 	f.amount.Store(initialAmount)
@@ -84,7 +84,7 @@ func newFakeNMIPlanGateway(t *testing.T, railSubID, initialAmount, planPayments 
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := nmi.NewClient("nmi", &config.NMIProviderSettings{
+	client, err := nmi.NewAccountClient(merchantID, pspID, "nmi", &config.NMIProviderSettings{
 		SecurityKey: "test_security_key", WebhookSecret: "test_secret",
 	}, true)
 	require.NoError(t, err)
@@ -101,20 +101,50 @@ func (f fakeNMIClientSource) ResolveNMIClient(_ context.Context, _ uuid.UUID, _ 
 	return f.client, true, nil
 }
 
-// nmiNativeFixture: the plan-migration fixture re-armed with the REAL
-// nmiPlanPusher over a fake gateway, and a pm-lookup that reports NO anchor
-// (gateway-native detection must come from the pusher, not the instrument).
+// nmiNativeFixture uses the real account-scoped NMI plan pusher over a
+// loopback gateway; the instrument does not determine schedule ownership.
 func nmiNativeFixture(t *testing.T, initialAmount, planPayments string) (*planMigrationFixture, *fakeNMIPlanGateway, uuid.UUID, string) {
 	t.Helper()
 	f := newPlanMigrationFixture(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 	subID, railSubID := f.createSubscriptionOnRail(t, ctx, f.lowPriceID, "nmi", false)
-	gateway, client := newFakeNMIPlanGateway(t, railSubID, initialAmount, planPayments)
-	f.pm = NewPlanMigrationService(f.repriceSvc, f.stripe, NewNMIPlanPusher(fakeNMIClientSource{client: client}),
-		pmLookupFunc(func(_ context.Context, id uuid.UUID) (*models.PaymentMethod, error) {
-			return &models.PaymentMethod{ID: id}, nil // no stored-credential anchor
-		}))
+	gateway, client := newFakeNMIPlanGateway(t, f.merchantID, f.nmiPSPID, railSubID, initialAmount, planPayments)
+	f.pm = NewPlanMigrationService(f.repriceSvc, f.stripe, NewNMIPlanPusher(fakeNMIClientSource{client: client}))
 	return f, gateway, subID, railSubID
+}
+
+func TestNMIPlanPreparationUsesExactAccountRecordAndCurrencyScale(t *testing.T) {
+	for _, scenario := range []string{"JPY major units", "wrong record", "wrong account", "missing installment count"} {
+		t.Run(scenario, func(t *testing.T) {
+			f, gateway, subID, railSubID := nmiNativeFixture(t, "10.00", "12")
+			ctx := dbtest.WithTestMerchant(context.Background())
+			sub, err := f.subSvc.GetByID(ctx, subID)
+			require.NoError(t, err)
+			pusher := f.pm.nmi.(*nmiPlanPusher)
+			switch scenario {
+			case "wrong record":
+				gateway.railSubID = "another-provider-subscription"
+			case "wrong account":
+				original := pusher.resolver.(fakeNMIClientSource).client
+				other, err := nmi.NewAccountClient(f.merchantID, uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "test_security_key", WebhookSecret: "test_secret"}, true)
+				require.NoError(t, err)
+				other.V5BaseURL, other.DirectPostURL = original.V5BaseURL, original.DirectPostURL
+				pusher.resolver = fakeNMIClientSource{client: other}
+			case "missing installment count":
+				gateway.planPayments = ""
+			}
+			err = pusher.PushPlanAmount(ctx, sub, "JPY", 40_000)
+			if scenario != "JPY major units" {
+				require.Error(t, err)
+				require.Zero(t, gateway.updateCalls.Load(), "contradictory or incomplete preparation cannot mutate a provider record")
+				return
+			}
+			require.NoError(t, err)
+			require.EqualValues(t, 1, gateway.updateCalls.Load())
+			require.Equal(t, map[string]string{"subscription_id": railSubID, "plan_amount": "4.00", "plan_payments": "12"}, gateway.updateForms[0])
+			require.Equal(t, "4.00", gateway.amount.Load())
+		})
+	}
 }
 
 // TestPlanMigration_NMINativeBoundaryPush: the full #815 mechanic — the push

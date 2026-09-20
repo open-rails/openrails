@@ -2,376 +2,247 @@ package intents
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/shared/opsmetric"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
-// TypeManualRebill is the rail-side dunning charge (#358 phase C),
-// folding the retired openrails.manual_rebill_attempts claim table into the
-// ledger. One intent per (subscription, period end, attempt ordinal): the
-// dunning worker enqueues + executes it synchronously and drives lifecycle
-// (decline classification, FailMembership, the #359 retry schedule) off the
-// returned status; declines are terminal PER ATTEMPT — the next scheduled
-// retry is a new intent with the next ordinal.
-//
-// system-origin: dunning charges are proactive, so the gate parks them under
-// limited/readonly and the relevance window (the #359 dunning window) expires
-// them if the mode outlasts it.
+// TypeManualRebill owns one accepted recurring recovery attempt, from
+// idempotent provider preparation through charge, receipt and local completion.
 const TypeManualRebill = "manual_rebill"
+const rebillSubmittedAt = "submitted_at"
 
-// ManualRebillPayload is the stored payload for TypeManualRebill.
-type ManualRebillPayload struct {
-	SubscriptionID uuid.UUID `json:"subscription_id"`
-	PeriodEnd      time.Time `json:"period_end"`
-	Rail           string    `json:"rail"`
-	// OrderReference is stamped as the NMI order_id/ponumber: the correlation
-	// handle the verifier queries by. Shared by every attempt for the period,
-	// so verification answers "was this PERIOD charged?" — the invariant that
-	// must never break.
-	OrderReference string `json:"order_reference"`
-	Attempt        int    `json:"attempt"`
-}
+var errRebillSuperseded = errors.New("accepted rebill is no longer applicable")
 
-// ManualRebillIdempotencyKey content-addresses one dunning charge attempt the
-// same way the retired claim row was keyed (subscription + period end +
-// rail + order reference), plus the attempt ordinal: a crash between
-// charge and lifecycle update re-derives the SAME key (the failure count only
-// moves when lifecycle moves) and gets the durable outcome back instead of
-// double-charging, while each scheduled retry is a fresh intent.
-func ManualRebillIdempotencyKey(subscriptionID uuid.UUID, periodEnd time.Time, rail, orderReference string, attempt int) string {
-	return fmt.Sprintf("%s:%s:%d:%s:%s:attempt-%d",
-		TypeManualRebill, subscriptionID, periodEnd.UTC().Unix(),
-		strings.ToLower(strings.TrimSpace(rail)), strings.TrimSpace(orderReference), attempt)
-}
-
-// ManualRebillHandler implements the money-mover semantics for dunning
-// charges: never blind-retry — a transport failure after the send parks as
-// unknown_needs_verify and the verifier resolves it by querying NMI for the
-// order reference; a clean gateway decline is terminal for the attempt with
-// the response code preserved as evidence (the dunning worker classifies it
-// hard/soft); confirmed success repairs the subscription lifecycle (renew +
-// per-renewal credits) in finalize so the async drain and the late-confirming
-// verifier need no waiting worker.
 type ManualRebillHandler struct {
-	DB     *db.DB
-	Config *config.Config
-	// Resolver arms the store-scoped NMI client per merchant AT CHARGE TIME
-	// (#730/#788: the armed rail state is the ONLY credential plane;
-	// declared-account-with-missing-secret fails closed; no caching).
-	Resolver NMIClientResolver
-	Clock    clockwork.Clock
-	Policy   BackoffPolicy
+	DB          *db.DB
+	Config      *config.Config
+	Resolver    NMIClientResolver
+	Clock       clockwork.Clock
+	Policy      BackoffPolicy
+	DeferDelete subscriptions.DeferredDeleteScheduler
 }
 
 func NewManualRebillHandler(d *db.DB, cfg *config.Config, resolver NMIClientResolver, clock clockwork.Clock) *ManualRebillHandler {
-	return &ManualRebillHandler{DB: d, Config: cfg, Resolver: resolver, Clock: clock, Policy: DefaultBackoff}
+	return &ManualRebillHandler{DB: d, Config: cfg, Resolver: resolver, Clock: timeutil.FirstClock(clock), Policy: DefaultBackoff}
+}
+func (h *ManualRebillHandler) Type() string                         { return TypeManualRebill }
+func (h *ManualRebillHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
+func (h *ManualRebillHandler) now() time.Time                       { return h.Clock.Now().UTC() }
+func (h *ManualRebillHandler) PrunePolicy() (bool, bool)            { return true, true }
+func (h *ManualRebillHandler) CommitsTerminalOutcome() bool         { return true }
+
+// Only this handler can release an accepted charge, under its domain lock and
+// retained-custody check. A stale lease or changed catalog is not nonexecution.
+func (h *ManualRebillHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (Relevance, error) {
+	return StillRelevant(), nil
 }
 
-// railClient arms the NMI client for one charge from the armed rail state
-// (scope = the intent's stamped provenance account — dunning stamps the
-// subscription's account, archived stays chargeable for existing
-// obligations). An account that cannot arm errors (fail closed).
-func (h *ManualRebillHandler) railClient(ctx context.Context, intent gen.OpenrailsRailIntent) (*nmi.NMIClient, error) {
-	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
+func (h *ManualRebillHandler) railClient(ctx context.Context, in gen.OpenrailsRailIntent) (*nmi.NMIClient, error) {
+	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, in)
 	if err != nil {
 		return nil, err
 	}
 	if !ok || client == nil {
-		return nil, fmt.Errorf("nmi rail is not armed for provider %q", intent.Rail)
+		return nil, fmt.Errorf("nmi rail is not armed for provider %q", in.Rail)
+	}
+	merchantID, pspID := client.AccountIdentity()
+	if in.PspID == nil || merchantID != in.MerchantID || pspID != *in.PspID {
+		return nil, errors.New("rebill client is armed for another provider account")
 	}
 	return client, nil
 }
 
-func (h *ManualRebillHandler) Type() string                         { return TypeManualRebill }
-func (h *ManualRebillHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
-
-func decodeManualRebillPayload(intent gen.OpenrailsRailIntent) (ManualRebillPayload, error) {
-	var p ManualRebillPayload
-	if len(intent.Payload) == 0 {
-		return p, errors.New("manual rebill intent has no payload")
-	}
-	if err := json.Unmarshal(intent.Payload, &p); err != nil {
-		return p, fmt.Errorf("decode manual rebill payload: %w", err)
-	}
-	if p.SubscriptionID == uuid.Nil || p.PeriodEnd.IsZero() || strings.TrimSpace(p.OrderReference) == "" {
-		return p, errors.New("manual rebill payload is incomplete")
-	}
-	return p, nil
-}
-
-// CheckRelevance: a dunning charge applies while the subscription is still
-// past_due ON THE SAME period. Recovery (webhook rebill, user fix), terminal
-// cancellation or a period advance all supersede; the dunning window itself
-// is the intent's expires_at, enforced by the executor's expiry sweep.
-func (h *ManualRebillHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
-	if intent.Attempts > 1 || intent.Status == StatusUnknownNeedsVerify {
-		return StillRelevant(), nil
-	}
-	p, err := decodeManualRebillPayload(intent)
+func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.OpenrailsRailIntent) Outcome {
+	ctx = pinIntentAddress(ctx, in)
+	p, err := DecodeManualRebillPayload(in)
 	if err != nil {
-		return SupersededBy("unusable manual rebill intent: " + err.Error()), nil
+		return Parked(err.Error())
 	}
-	sub, err := subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, p.SubscriptionID)
+	if outcome, done := h.completeFromEvidence(ctx, in, p); done {
+		return outcome
+	}
+	if EvidenceString(in, rebillSubmittedAt) != "" {
+		return h.Verify(ctx, in)
+	}
+	if h.Config == nil {
+		return Parked("rebill execution mode is not configured")
+	}
+	if blocked, reason := GateExecution(h.Config, Origin(in.Origin)); blocked {
+		return Parked(reason)
+	}
+	client, err := h.railClient(ctx, in)
 	if err != nil {
-		if db.IsNotFound(err) {
-			return SupersededBy("subscription row no longer exists"), nil
-		}
-		return Relevance{}, err
-	}
-	if sub.Status != models.StatusPastDue {
-		return SupersededBy(fmt.Sprintf("subscription no longer past_due (status=%s)", sub.Status)), nil
-	}
-	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.UTC().Unix() != p.PeriodEnd.UTC().Unix() {
-		return SupersededBy("billing period advanced past the dunned period"), nil
-	}
-	paid, err := h.DB.Gen(ctx).HasCompletedPaymentAtOrAfterPeriodEnd(ctx, gen.HasCompletedPaymentAtOrAfterPeriodEndParams{
-		MerchantID:     intent.MerchantID,
-		SubscriptionID: p.SubscriptionID,
-		PeriodEnd:      *sub.CurrentPeriodEndsAt,
-	})
-	if err != nil {
-		return Relevance{}, fmt.Errorf("check dunned period payment: %w", err)
-	}
-	if paid {
-		return SupersededBy("billing period already has a completed payment"), nil
-	}
-	return StillRelevant(), nil
-}
-
-func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	if intent.Attempts > 1 {
-		return h.Verify(ctx, intent)
-	}
-	client, err := h.railClient(ctx, intent)
-	if err != nil {
-		// Unarmable (unconfigured, or declared-but-secretless — fail closed):
-		// park, never charge; the executor drains it once the operator repairs.
 		return Parked(err.Error())
 	}
 	if client.ReadOnly {
-		return Parked("nmi client is read-only (mode=readonly)")
+		return Parked("nmi client is read-only")
 	}
-	p, err := decodeManualRebillPayload(intent)
+	if _, err := h.validateAndFence(ctx, in, p, false); err != nil {
+		if errors.Is(err, errRebillSuperseded) || errors.Is(err, charge.ErrInstrumentChanged) {
+			return h.finalizeNotExecuted(ctx, in, p, err.Error())
+		}
+		return Parked("validate accepted rebill: " + err.Error())
+	}
+	if err := h.prepareProvider(ctx, in, p, client); err != nil {
+		return Parked("prepare accepted rebill: " + err.Error())
+	}
+	first, err := h.validateAndFence(ctx, in, p, true)
 	if err != nil {
-		return Terminal(err.Error())
+		if errors.Is(err, errRebillSuperseded) || errors.Is(err, charge.ErrInstrumentChanged) {
+			return h.finalizeNotExecuted(ctx, in, p, err.Error())
+		}
+		return Parked("record rebill submission fence: " + err.Error())
 	}
-
-	sub, err := subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, p.SubscriptionID)
-	if err != nil {
-		return Parked("load subscription before submission: " + err.Error())
+	if !first {
+		return h.Verify(ctx, in)
 	}
-	pm := sub.PaymentMethod
-	if pm == nil || pm.RailCustomerRef == "" || pm.RailMethodRef == "" {
-		// Terminal for the attempt: nothing was sent. The worker (or the next
-		// dunning pass, off this evidence) applies the failure policy.
-		// NMI needs both the customer vault (rail_customer_ref) and the billing
-		// record (rail_method_ref) to rebill.
-		return TerminalWithEvidence("payment method unavailable for rebill", map[string]any{"declined": false})
-	}
-
-	// #297: a dunning retry is a merchant-initiated RECURRING charge — carry
-	// the credential-on-file indicators plus the approved recurring sequence
-	// anchor whenever it was captured. Historical rows without an anchor still
-	// get a best-effort merchant+used MIT so a missing migration artifact does
-	// not strand the subscription; the exception is explicit in logs/evidence.
-	priorRef := strings.TrimSpace(pm.StoredCredentialRecurringRef)
-	anchorSource := "agreement"
-	if priorRef == "" {
-		priorRef = strings.TrimSpace(pm.InitialTransactionID)
-		anchorSource = "legacy_initial_transaction_id"
-	}
-	if priorRef == "" {
-		anchorSource = "unavailable"
-		log.WithContext(ctx).WithFields(log.Fields{
-			"intent_id":         intent.ID,
-			"subscription_id":   p.SubscriptionID,
-			"payment_method_id": pm.ID,
-			"order_reference":   p.OrderReference,
-		}).Warn("manual rebill: sending best-effort MIT without the stored-credential anchor")
-		opsmetric.Emit(ctx, opsmetric.MetricNMIUnanchoredMIT, log.Fields{
-			"transport":         "direct_subscription",
-			"payment_method_id": pm.ID,
-			"agreement":         charge.AgreementRecurring,
-		})
-	} else if anchorSource == "legacy_initial_transaction_id" {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"intent_id":         intent.ID,
-			"subscription_id":   p.SubscriptionID,
-			"payment_method_id": pm.ID,
-		}).Warn("manual rebill: using legacy unscoped initial transaction ID as the stored-credential anchor")
-	}
-	anchorMissing := priorRef == ""
-	credentialContext := charge.RecurringMIT(priorRef)
-	if anchorMissing {
-		credentialContext = charge.LegacyUnanchoredRecurringMIT()
-	}
-
-	rebillResp, err := client.AttemptManualRebill(ctx, nmi.ManualRebillParams{
-		VaultID:          pm.RailCustomerRef,
-		BillingID:        pm.RailMethodRef,
-		SubscriptionID:   sub.RailSubscriptionID,
-		OrderID:          p.OrderReference,
-		PONumber:         p.OrderReference,
-		StoredCredential: nmidirect.StoredCredentialFor(credentialContext),
+	response, err := client.AttemptManualRebill(ctx, nmi.ManualRebillParams{
+		VaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef,
+		SubscriptionID: p.RailSubscriptionID, OrderID: p.OrderReference, PONumber: p.OrderReference,
+		StoredCredential: nmidirect.StoredCredentialFor(charge.RecurringMIT(p.Instrument.StoredCredentialRecurringRef)),
 	})
 	if err != nil {
-		if errors.Is(err, nmi.ErrProviderReadOnly) {
-			return Parked("nmi provider writes blocked (mode=readonly)")
-		}
-		// The charge may or may not have reached the gateway; exactly the old
-		// markManualRebillUnknown posture, now resolved by the verifier.
-		return Ambiguous("manual rebill request failed: " + err.Error())
+		return Ambiguous("rebill submission requires verification: " + err.Error())
 	}
-	if rebillResp == nil || !rebillResp.Success {
-		reason := "rebill declined"
-		responseCode := 0
-		if rebillResp != nil {
-			if rebillResp.ErrorMessage != "" {
-				reason = rebillResp.ErrorMessage
-			}
-			responseCode = rebillResp.ResponseCode
-		}
-		if nmi.UncertainResponseCode(responseCode) {
-			return Ambiguous("rebill response requires verification: " + reason)
-		}
-		return TerminalWithEvidence(reason, map[string]any{
-			"declined":                         true,
-			"response_code":                    responseCode,
-			"stored_credential_anchor_missing": anchorMissing,
-			"stored_credential_anchor_source":  anchorSource,
-		})
+	if response == nil {
+		return Ambiguous("rebill response is absent")
 	}
+	if !response.Success {
+		if !response.Declined || response.ResponseCode <= 0 || nmi.UncertainResponseCode(response.ResponseCode) {
+			return Ambiguous("rebill response requires provider verification")
+		}
+		if err := h.retainDecline(ctx, in, response.ResponseCode, response.TransactionID); err != nil {
+			return Ambiguous("retain rebill refusal: " + err.Error())
+		}
+		current, err := NewStore(h.DB).Get(ctx, in.ID)
+		if err != nil {
+			return Ambiguous(err.Error())
+		}
+		return h.finalizeDecline(ctx, current, p)
+	}
+	if strings.TrimSpace(response.TransactionID) == "" {
+		return Ambiguous("rebill approval has no transaction reference")
+	}
+	if err := NewStore(h.DB).RetainCollectionCandidate(ctx, in, CollectionCandidate{TransactionID: response.TransactionID}); err != nil {
+		return Ambiguous("retain rebill candidate: " + err.Error())
+	}
+	return h.qualifyRebill(ctx, in, p, response.TransactionID)
+}
 
-	if err := h.finalizeSuccess(ctx, intent.MerchantID, p, rebillResp.TransactionID); err != nil {
-		// The charge DID happen; route through the verifier so the lifecycle
-		// repair is retried (its read re-finds the sale by order reference).
-		return AmbiguousWithEvidence("rebill charged, but local lifecycle update failed: "+err.Error(), map[string]any{"transaction_id": rebillResp.TransactionID})
-	}
-	return Succeeded(map[string]any{
-		"transaction_id":                   rebillResp.TransactionID,
-		"stored_credential_anchor_missing": anchorMissing,
-		"stored_credential_anchor_source":  anchorSource,
+// validateAndFence holds only the local subscription/method transaction. All
+// provider traffic occurs outside it and uses the accepted references verbatim.
+func (h *ManualRebillHandler) validateAndFence(ctx context.Context, in gen.OpenrailsRailIntent, p ManualRebillPayload, fence bool) (bool, error) {
+	first := false
+	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := h.DB.NewWithPgxTx(tx)
+		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, p.Renewal.SubscriptionID)
+		if err != nil {
+			return err
+		}
+		failures := 0
+		if sub.RetryAttempts != nil {
+			failures = *sub.RetryAttempts
+		}
+		if sub.Status != models.StatusPastDue || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || string(sub.Rail) != p.Rail || sub.RailSubscriptionID != p.RailSubscriptionID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodStart) || failures != p.FailureCount {
+			return errRebillSuperseded
+		}
+		paid, err := rebillPaymentAlreadyObserved(ctx, d, in.MerchantID, p)
+		if err != nil {
+			return err
+		}
+		if paid {
+			return errRebillSuperseded
+		}
+		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, h.now())
+		if err != nil {
+			return err
+		}
+		terms.ProductName = p.Renewal.ProductName // display text cannot retarget an accepted charge
+		if !reflect.DeepEqual(terms, p.Renewal) {
+			return errRebillSuperseded
+		}
+		method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID})
+		if err != nil {
+			return err
+		}
+		if err := p.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
+			return err
+		}
+		if method.CustomerID != p.Renewal.CustomerID {
+			return errRebillSuperseded
+		}
+		if fence {
+			first, err = NewStore(d).RecordProgressIfAbsent(ctx, in.ID, rebillSubmittedAt, h.now().Format(time.RFC3339Nano))
+			return err
+		}
+		return nil
 	})
+	return first, err
 }
 
-// Verify reconciles the same submitted period from positive evidence only.
-// Empty search results retain uncertainty and never arm another charge.
-func (h *ManualRebillHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	p, err := decodeManualRebillPayload(intent)
+func (h *ManualRebillHandler) Verify(ctx context.Context, in gen.OpenrailsRailIntent) Outcome {
+	ctx = pinIntentAddress(ctx, in)
+	current, err := NewStore(h.DB).Get(ctx, in.ID)
 	if err != nil {
-		return Terminal(err.Error())
+		return Ambiguous(err.Error())
 	}
-	txnID := EvidenceString(intent, "transaction_id")
-	found := txnID != ""
+	p, err := DecodeManualRebillPayload(current)
+	if err != nil {
+		return Ambiguous(err.Error())
+	}
+	if outcome, done := h.completeFromEvidence(ctx, current, p); done {
+		return outcome
+	}
+	if EvidenceString(current, rebillSubmittedAt) == "" {
+		return h.Execute(ctx, current)
+	}
+	reference := ""
+	if candidate, found, err := LoadCollectionCandidate(current); err != nil {
+		return Ambiguous(err.Error())
+	} else if found {
+		reference = candidate.TransactionID
+	}
+	return h.qualifyRebill(ctx, current, p, reference)
+}
+
+func (h *ManualRebillHandler) qualifyRebill(ctx context.Context, in gen.OpenrailsRailIntent, p ManualRebillPayload, reference string) Outcome {
+	receipt, found, err := ReadNMICollectionReceipt(ctx, in, h.Resolver, reference)
+	if err != nil {
+		return Ambiguous("rebill receipt did not qualify: " + err.Error())
+	}
 	if !found {
-		client, cerr := h.railClient(ctx, intent)
-		if cerr != nil {
-			return Ambiguous("nmi client unavailable, cannot verify: " + cerr.Error())
-		}
-		txnID, found, err = h.findSuccessfulSale(ctx, client, p)
+		return Ambiguous("submitted rebill has no exact receipt; no automatic resend")
 	}
+	return h.finalizeSuccess(ctx, in, p, receipt)
+}
+
+func (h *ManualRebillHandler) completeFromEvidence(ctx context.Context, in gen.OpenrailsRailIntent, p ManualRebillPayload) (Outcome, bool) {
+	receipt, found, err := LoadCollectedReceipt(in)
 	if err != nil {
-		return Ambiguous("provider read failed: " + err.Error())
+		return Ambiguous("retained rebill receipt is invalid: " + err.Error()), true
 	}
-	if !found {
-		return Ambiguous("submitted rebill has no exact provider receipt; no automatic resend")
+	if found {
+		return h.finalizeSuccess(ctx, in, p, receipt), true
 	}
-	if err := h.finalizeSuccess(ctx, intent.MerchantID, p, txnID); err != nil {
-		return AmbiguousWithEvidence("charge verified at provider, but local lifecycle repair failed: "+err.Error(), map[string]any{"transaction_id": txnID})
+	if _, found, err := loadRebillDecline(in); err != nil {
+		return Ambiguous(err.Error()), true
+	} else if found {
+		return h.finalizeDecline(ctx, in, p), true
 	}
-	return Succeeded(map[string]any{"transaction_id": txnID, "verified_existing": true})
-}
-
-// findSuccessfulSale queries NMI for transactions carrying the period's order
-// reference and reports the first successful sale. Every attempt for the
-// period shares the order reference, so a hit from ANY attempt counts — that
-// is the no-double-charge invariant. The probe itself lives on the NMI client
-// (nmi.FindSuccessfulSaleByOrderID) so the #367 liveness sync shares it.
-func (h *ManualRebillHandler) findSuccessfulSale(ctx context.Context, client *nmi.NMIClient, p ManualRebillPayload) (transactionID string, found bool, err error) {
-	return client.FindSuccessfulSaleByOrderID(ctx, p.OrderReference)
-}
-
-// finalizeSuccess records a confirmed rebill charge exactly once, whatever
-// dunning did to the subscription meanwhile. The renewal (payment row, period
-// advance, access window) is deduped on the transaction id, so a retried
-// finalize is a no-op:
-//
-//	past_due / unknown (dunning parked it) / active -> RenewMembership
-//	terminally cancelled (user, merchant, chargeback) -> payment row only;
-//	                                    never reactivated, flagged for refund review
-func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, merchantID uuid.UUID, p ManualRebillPayload, transactionID string) error {
-	subRepo := subscriptions.NewSubscriptionRepo(h.DB)
-	sub, err := subRepo.GetByID(ctx, p.SubscriptionID)
-	if err != nil {
-		return fmt.Errorf("load subscription: %w", err)
-	}
-
-	priceSvc := catalog.NewPriceService(h.DB)
-	productSvc := catalog.NewProductService(h.DB)
-	lifecycle := subscriptions.NewSubscriptionLifecycleService(
-		h.DB, productSvc, priceSvc,
-		entitlements.NewEntitlementService(h.DB, h.Clock),
-		subscriptions.NewNotificationService(h.DB, nil),
-		payments.NewPaymentService(h.DB, h.Clock),
-		h.Clock,
-	)
-	lifecycle.SetConfig(h.Config)
-
-	amount := int64(0)
-	currency := subscriptions.CurrencyUSD
-	if sub.Price != nil {
-		amount = sub.Price.Amount
-		currency = sub.Price.Currency
-	} else if price, perr := priceSvc.GetByID(ctx, sub.PriceID); perr == nil {
-		amount = price.Amount
-		currency = price.Currency
-	}
-	params := &subscriptions.RenewMembershipParams{
-		Rail:               models.Rail(strings.ToLower(intentRail(p, sub))),
-		RailSubscriptionID: sub.RailSubscriptionID,
-		TransactionID:      transactionID,
-		Amount:             amount,
-		Currency:           currency,
-	}
-	if _, terminal := subscriptions.TerminalCancelReason(sub); terminal {
-		return lifecycle.RecordConfirmedChargeWithoutRenewal(ctx, params)
-	}
-	if sub.Status != models.StatusPastDue {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id": sub.ID, "status": sub.Status, "transaction_id": transactionID, "dunned_period_end": p.PeriodEnd,
-		}).Warn("manual rebill confirmed after the subscription left past_due; renewing from the confirmed charge")
-	}
-	if err := lifecycle.RenewMembership(ctx, params); err != nil {
-		return fmt.Errorf("renew membership: %w", err)
-	}
-	return nil
-}
-
-// intentRail prefers the payload's rail (what the producer charged
-// under) and falls back to the subscription row.
-func intentRail(p ManualRebillPayload, sub *models.Subscription) string {
-	if proc := strings.TrimSpace(p.Rail); proc != "" {
-		return proc
-	}
-	return string(sub.Rail)
+	return Outcome{}, false
 }

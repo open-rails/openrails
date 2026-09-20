@@ -3,38 +3,36 @@ package intents
 import (
 	"context"
 	"fmt"
-
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// Resolve accepts only provider-confirmed non-execution for a rebill. A
-// successful rebill is correlated exactly by the period's order reference,
-// which the verifier already reads; an operator-supplied transaction cannot
-// add stronger evidence without a frozen amount.
-func (h *ManualRebillHandler) Resolve(ctx context.Context, intent gen.OpenrailsRailIntent, resolution Resolution) (Outcome, error) {
-	p, err := decodeManualRebillPayload(intent)
+func (h *ManualRebillHandler) Resolve(ctx context.Context, in gen.OpenrailsRailIntent, resolution Resolution) (Outcome, error) {
+	ctx = pinIntentAddress(ctx, in)
+	p, err := DecodeManualRebillPayload(in)
 	if err != nil {
 		return Outcome{}, err
 	}
 	if resolution.Step != "" {
-		return Outcome{}, fmt.Errorf("%w: a rebill has no steps", ErrResolutionInvalid)
+		return Outcome{}, fmt.Errorf("%w: rebill resolution has no external step selector", ErrResolutionInvalid)
 	}
-	if txn := EvidenceString(intent, "transaction_id"); txn != "" {
-		return Outcome{}, RejectResolution("operation already holds receipt %s; its verifier completes renewal", txn)
+	if _, found, err := LoadCollectedReceipt(in); err != nil {
+		return Outcome{}, RejectResolution("retained receipt is invalid: %v", err)
+	} else if found {
+		return Outcome{}, RejectResolution("collected rebill must complete from retained receipt")
 	}
-	if !resolution.NotExecuted {
-		return Outcome{}, RejectResolution("rebill receipts converge through the exact order-reference search, not an operator reference")
+	if resolution.NotExecuted {
+		if EvidenceString(in, rebillSubmittedAt) != "" {
+			return Outcome{}, RejectResolution("NMI absence cannot prove a submitted rebill did not execute")
+		}
+		return h.finalizeNotExecuted(ctx, in, p, "operator released unsubmitted rebill"), nil
 	}
-	client, err := h.railClient(ctx, intent)
+	reference := resolution.ProviderReference
+	receipt, found, err := ReadNMICollectionReceipt(ctx, in, h.Resolver, reference)
 	if err != nil {
-		return Outcome{}, err
+		return Outcome{}, RejectResolution("rebill receipt did not qualify: %v", err)
 	}
-	txn, found, err := h.findSuccessfulSale(ctx, client, p)
-	if err != nil {
-		return Outcome{}, fmt.Errorf("read provider order before accepting non-execution: %w", err)
+	if !found {
+		return Outcome{}, RejectResolution("provider reference is not this accepted rebill")
 	}
-	if found {
-		return Outcome{}, RejectResolution("provider shows successful sale %s for order %s", txn, p.OrderReference)
-	}
-	return TerminalWithEvidence("provider confirmed the rebill was not executed", map[string]any{"declined": false}), nil
+	return h.finalizeSuccess(ctx, in, p, receipt), nil
 }

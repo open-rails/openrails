@@ -126,6 +126,7 @@ var allowedWriteCallers = map[string]string{
 	"internal/intents/nmi_payment_source_update.go:Execute":           "nmi_payment_source_update intent handler (both call sites route through PaymentSourceUpdateThrough)",
 	"internal/intents/nmi_payment_method_delete.go:Execute":           "nmi_vault_delete intent handler — the sanctioned executor for durable user-initiated deletes",
 	"internal/intents/nmi_payment_method_update.go:Execute":           "nmi_payment_method_update intent handler — the only stored-card replacement writer",
+	"internal/intents/manual_rebill_preparation.go:prepareProvider":   "manual_rebill intent pre-charge step; immutable provider preconditions and set/readback retry are proven by TestManualRebillPreparesAcceptedPriceOnceBeforeCharging",
 
 	// --- reactive user/admin cancels ------------------------------------
 	"internal/modules/subscriptions/admin_service.go:cancelWithNMI":         "reactive admin cancel; deferred deletes route through intents, immediate ones are user/admin-reactive",

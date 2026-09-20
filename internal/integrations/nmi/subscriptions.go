@@ -83,6 +83,8 @@ type ManualRebillParams struct {
 }
 
 type ManualRebillResponse struct {
+	// Declined is the gateway's explicit response=2, distinct from response=3 errors.
+	Declined      bool
 	Success       bool
 	TransactionID string
 	ErrorMessage  string
@@ -325,6 +327,7 @@ func (c *NMIClient) AttemptManualRebill(ctx context.Context, params ManualRebill
 	errorMessage := responseText(output, "Unknown error")
 	return &ManualRebillResponse{
 		Success:      false,
+		Declined:     strings.TrimSpace(output.Get("response")) == "2",
 		ErrorMessage: errorMessage,
 		ResponseCode: parseMobiusResponseCode(output),
 	}, nil

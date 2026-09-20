@@ -39,35 +39,35 @@ INSERT INTO openrails.rail_intents (
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN 'pending'
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN 'pending'
         ELSE openrails.rail_intents.status
     END,
     next_attempt_at = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.next_attempt_at
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.next_attempt_at
         ELSE openrails.rail_intents.next_attempt_at
     END,
     payload = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.payload
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.payload
         ELSE openrails.rail_intents.payload
     END,
     psp_id = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.psp_id
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.psp_id
         ELSE openrails.rail_intents.psp_id
     END,
     origin = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin
         ELSE openrails.rail_intents.origin
     END,
     origin_reason = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin_reason
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin_reason
         ELSE openrails.rail_intents.origin_reason
     END,
     actor = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.actor
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.actor
         ELSE openrails.rail_intents.actor
     END,
     expires_at = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.expires_at
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.expires_at
         ELSE openrails.rail_intents.expires_at
     END,
     attempts = CASE
@@ -207,7 +207,7 @@ SET status = 'succeeded',
     claimed_until = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type <> 'invoice_collection';
+  AND intent_type NOT IN ('invoice_collection', 'manual_rebill');
 
 -- name: MarkRailIntentFailedRetryable :execrows
 UPDATE openrails.rail_intents
@@ -246,7 +246,7 @@ SET status = 'failed_terminal',
     claimed_until = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type <> 'invoice_collection';
+  AND intent_type NOT IN ('invoice_collection', 'manual_rebill');
 
 -- Park: the attempt was deliberately NOT made (mode gate, kill switch,
 -- unconfigured client). The intent goes back to pending with the reason
@@ -461,7 +461,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(s
 -- invoice-before-operation order.
 SELECT * FROM openrails.rail_intents
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
-  AND intent_type = 'invoice_collection'
+  AND intent_type IN ('invoice_collection', 'manual_rebill')
 FOR UPDATE;
 
 -- name: CompleteRailIntentCollection :execrows
@@ -474,7 +474,7 @@ SET status = sqlc.arg(status)::text,
     claimed_until = NULL,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
-  AND intent_type = 'invoice_collection'
+  AND intent_type IN ('invoice_collection', 'manual_rebill')
   AND status IN ('in_flight', 'unknown_needs_verify');
 
 -- name: RetainRailIntentCollectedReceipt :execrows
@@ -507,3 +507,85 @@ WHERE id = sqlc.arg(id)::uuid
   AND status IN ('in_flight', 'unknown_needs_verify')
   AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'collection_candidate')
        OR result_evidence->'collection_candidate' = sqlc.arg(candidate)::jsonb);
+
+-- name: GetUnresolvedManualRebill :one
+-- Admission already owns the subscription lock. An unresolved charge retains
+-- ownership even when another lifecycle observer has moved its period/status.
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND subscription_id = sqlc.arg(subscription_id)::uuid
+  AND intent_type = 'manual_rebill'
+  AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+ORDER BY created_at, id
+LIMIT 1;
+
+-- name: GetLatestManualRebillForPeriod :one
+-- Accepted operation ordinals and counted financial declines are distinct: a
+-- superseded pre-send attempt must not burn a dunning failure or reuse its key.
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND subscription_id = sqlc.arg(subscription_id)::uuid
+  AND intent_type = 'manual_rebill'
+  AND (payload->'renewal'->>'period_start')::timestamptz = sqlc.arg(period_start)::timestamptz
+ORDER BY (payload->>'attempt')::integer DESC, id DESC
+LIMIT 1;
+
+-- name: RetainRailIntentRebillPreparation :execrows
+UPDATE openrails.rail_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object('rebill_preparation', sqlc.arg(preparation)::jsonb),
+    updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
+  AND psp_id = sqlc.arg(psp_id)::uuid AND intent_type = 'manual_rebill'
+  AND payload = sqlc.arg(payload)::jsonb
+  AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+  AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'rebill_preparation')
+       OR result_evidence->'rebill_preparation' = sqlc.arg(preparation)::jsonb);
+
+-- name: RetainRailIntentRebillDecline :execrows
+UPDATE openrails.rail_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb) || jsonb_build_object('rebill_decline', sqlc.arg(decline)::jsonb),
+    updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
+  AND psp_id = sqlc.arg(psp_id)::uuid AND intent_type = 'manual_rebill'
+  AND payload = sqlc.arg(payload)::jsonb
+  AND status IN ('in_flight', 'unknown_needs_verify')
+  AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')
+  AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'rebill_decline')
+       OR result_evidence->'rebill_decline' = sqlc.arg(decline)::jsonb);
+
+-- name: ListCompletedManualRebillPaymentCoverage :many
+-- Exact accepted operation provenance is decoded in Go. Do not infer an older
+-- charge's billing interval from the time its local payment row was recovered.
+SELECT sqlc.embed(i), p.id AS covered_payment_id, p.customer_id AS paid_customer_id,
+       p.psp_id AS paid_psp_id, p.subscription_id AS paid_subscription_id,
+       p.rail AS paid_rail, p.transaction_id AS paid_transaction_id, p.price_id AS paid_price_id,
+       p.amount AS paid_amount, p.currency AS paid_currency
+FROM openrails.payments p
+JOIN openrails.rail_intents i ON i.merchant_id=p.merchant_id AND i.psp_id=p.psp_id
+  AND i.subscription_id=p.subscription_id AND i.intent_type='manual_rebill'
+  AND (i.result_evidence->>'transaction_id'=p.transaction_id
+       OR i.result_evidence->'qualified_receipt'->'nmi'->>'transaction_id'=p.transaction_id)
+WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid
+  AND p.subscription_id=sqlc.arg(subscription_id)::uuid
+  AND p.psp_id=sqlc.arg(psp_id)::uuid
+  AND p.status='completed' AND p.deleted_at IS NULL;
+
+-- name: HasUnattributedPaymentAfterRebillBoundary :one
+-- Existing provider-observed payments have no immutable accepted interval.
+-- Retain their conservative timestamp refusal separately; it is not exact
+-- coverage evidence. A matched operation is validated by the query above.
+SELECT EXISTS (
+ SELECT 1 FROM openrails.payments p
+ WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid
+   AND p.subscription_id=sqlc.arg(subscription_id)::uuid
+   AND p.psp_id=sqlc.arg(psp_id)::uuid
+   AND p.status='completed' AND p.deleted_at IS NULL
+   AND p.purchased_at>=sqlc.arg(period_start)::timestamptz
+   AND NOT EXISTS (
+     SELECT 1 FROM openrails.rail_intents i
+     WHERE i.merchant_id=p.merchant_id AND i.psp_id=p.psp_id
+       AND i.subscription_id=p.subscription_id AND i.intent_type='manual_rebill'
+       AND (i.result_evidence->>'transaction_id'=p.transaction_id
+            OR i.result_evidence->'qualified_receipt'->'nmi'->>'transaction_id'=p.transaction_id)
+   )
+)::bool;

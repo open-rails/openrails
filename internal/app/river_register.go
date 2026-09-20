@@ -315,6 +315,8 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	ccbillCancel := intents.NewCCBillCancelHandler(r.DB, r.Config, r.RailConfigs, clock) // #696 (unarmed rail parks)
 	ccbillCancel.DataLinkBaseURL = r.CCBillDataLinkEndpoint
 	ccbillRefund := intents.NewCCBillRefundHandler(r.DB, clock) // retain unresolved pre-qualification refunds
+	rebill := intents.NewManualRebillHandler(r.DB, r.Config, r.CollectionResolver, clock)
+	rebill.DeferDelete = newIntentDeferredDeleteScheduler(r.DB, r.RateCeiling(), intents.OriginSystem, "terminal recurring recovery")
 	registry := intents.NewRegistry(
 		intents.NewNMIDeleteHandler(r.DB, r.Config, r.CollectionResolver, clock),
 		&intents.NMIProviderCutover{DB: r.DB, Resolver: r.CollectionResolver, Clock: clock},
@@ -323,7 +325,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewNMIRefundHandler(r.DB, r.CollectionResolver, clock),
 		intents.NewStripeRefundHandler(r.DB, r.Config, r.RailConfigs, clock),
 		ccbillRefund,
-		intents.NewManualRebillHandler(r.DB, r.Config, r.CollectionResolver, clock),
+		rebill,
 		// Invoice collection rides the ledger like every other money mover; the
 		// charger and reconciliation reads are the #725 store-armed plane.
 		money.NewInvoiceCollectionHandler(r.DB, r.MoneyCharger, r.CollectionResolver, r.Config, clock),
