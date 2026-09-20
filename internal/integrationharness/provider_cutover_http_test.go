@@ -455,14 +455,5 @@ func TestNMIProviderCutoverHTTP(t *testing.T) {
 		_, e := client.PreviewProviderCutover(ctx, openrails.SubscriptionID(p.Sub), bad)
 		require.Error(t, e)
 	})
-	t.Run("host_campaign", func(t *testing.T) {
-		p := seed(t, "lost_cancel")
-		runHostProviderCampaign(t, s.BaseURL, owner.APIKey, owner.MerchantID.UUID(), p.Source, p.Target, []hostCampaignMember{{SubscriptionID: openrails.SubscriptionID(p.Sub).String(), TargetPaymentMethodID: openrails.PaymentMethodID(p.NewMethod).String()}}, 1, nil)
-		// A real host script writes exactly one intent with the frozen request.
-		var key string
-		require.NoError(t, h.Pool().QueryRow(ctx, `SELECT idempotency_key FROM openrails.rail_intents WHERE subscription_id=$1 AND intent_type=$2`, p.Sub, intents.TypeNMIProviderCutover).Scan(&key))
-		result, e := client.GetProviderCutover(ctx, openrails.SubscriptionID(p.Sub), strings.TrimPrefix(key, intents.TypeNMIProviderCutover+":"))
-		require.NoError(t, e)
-		assertCutoverCommitted(t, h, g, p, result)
-	})
+
 }

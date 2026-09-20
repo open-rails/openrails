@@ -186,3 +186,16 @@ identity. With a one-connection pool, an active request can occupy the only slot
 a heartbeat then waits for capacity and Runner shutdown cancels that wait. This
 does not promise renewal during unavailable pool capacity. Receipt custody and
 synchronous result writes continue using the original request pin.
+
+## Qualification tests
+
+The ordinary release matrix retains the standalone HTTP, isolation,
+abandonment, qualification/revocation, and resumed-source-drift workflows. They
+use real PostgreSQL with an account-scoped local NMI fixture. This proves the
+core state machine; it does not declare a real provider account qualified.
+
+The SaaS campaign proof additionally selects the `provider_campaign` build tag
+with `integration`, runs `TestNMIProviderCutoverHostCampaign`, and requires
+`PROVIDER_MIGRATION_SCRIPT` to name the exact absolute path of SaaS's
+`scripts/provider_migration.py`. That selected proof fails if its script is
+missing. It is separate from core CI and uses the actual operator process.
