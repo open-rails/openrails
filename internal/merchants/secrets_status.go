@@ -165,7 +165,7 @@ func validateSecretValueLocal(name, value string) error {
 	if rail == "stripe" {
 		switch key {
 		case "secret_key":
-			if !strings.HasPrefix(value, "sk_") {
+			if !strings.HasPrefix(value, "sk_") && !strings.HasPrefix(value, "rk_") {
 				return apperr.Invalidf("invalid_format")
 			}
 		case "webhook_signing_secret", "webhook_signing_secret_thin", "webhook_signing_secret_previous":

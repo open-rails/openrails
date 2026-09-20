@@ -153,19 +153,37 @@ func TestServiceCredentialManagement_ValidateOnlyDoesNotSave(t *testing.T) {
 	store := NewMemorySecretStore()
 	svc := &Service{secrets: store}
 
-	called := false
-	err := svc.ValidateCredential(ctx, id, "psps/stripe/live/acct_884_test/secret_key", "sk_test_123", func(context.Context, string) error {
-		called = true
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("validate supplied credential: %v", err)
-	}
-	if !called {
-		t.Fatal("stripe tester was not called")
+	for _, value := range []string{"sk_test_123", "sk_live_123", "rk_test_123", "rk_live_123"} {
+		t.Run(value, func(t *testing.T) {
+			called := false
+			err := svc.ValidateCredential(ctx, id, "psps/stripe/live/acct_884_test/secret_key", value, func(_ context.Context, supplied string) error {
+				called = true
+				if supplied != value {
+					t.Fatalf("probed credential = %q, want %q", supplied, value)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("validate supplied credential: %v", err)
+			}
+			if !called {
+				t.Fatal("stripe tester was not called")
+			}
+		})
 	}
 	if _, err := store.Get(ctx, id, "psps/stripe/live/acct_884_test/secret_key"); !errors.Is(err, ErrSecretNotFound) {
 		t.Fatalf("validate-only saved secret: %v", err)
+	}
+}
+
+func TestServiceCredentialManagement_RestrictedStripeKeyMustPassProbe(t *testing.T) {
+	svc := &Service{secrets: NewMemorySecretStore()}
+	probeErr := errors.New("Stripe refused access")
+	err := svc.ValidateCredential(t.Context(), dbtest.TestMerchantID, "psps/stripe/test/acct_restricted/secret_key", "rk_test_123", func(context.Context, string) error {
+		return probeErr
+	})
+	if !errors.Is(err, probeErr) {
+		t.Fatalf("validation error = %v, want probe refusal", err)
 	}
 }
 
@@ -176,8 +194,10 @@ func TestServiceCredentialManagement_RejectsUnknownAndInvalidSecrets(t *testing.
 	if _, err := svc.PutCredential(ctx, dbtest.TestMerchantID, "unknown/provider_key", "secret"); err == nil {
 		t.Fatal("unknown secret should be rejected")
 	}
-	if _, err := svc.PutCredential(ctx, dbtest.TestMerchantID, "psps/stripe/live/acct_884_test/secret_key", "not-stripe"); err == nil {
-		t.Fatal("invalid Stripe secret should be rejected")
+	for _, value := range []string{"not-stripe", "pk_test_123", "pk_live_123", "whsec_123"} {
+		if _, err := svc.PutCredential(ctx, dbtest.TestMerchantID, "psps/stripe/live/acct_884_test/secret_key", value); err == nil {
+			t.Fatalf("invalid Stripe secret %q should be rejected", value)
+		}
 	}
 	// #884: the retired flat names are not a second spelling of a credential —
 	// a write to one is refused like any unknown name.
