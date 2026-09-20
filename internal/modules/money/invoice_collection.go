@@ -173,6 +173,9 @@ func (s *MoneyService) SetInvoiceCollectionPaymentMethod(ctx context.Context, pa
 		if !descriptor.SupportsChargeSavedMethod {
 			return fmt.Errorf("%w: rail %q does not support invoice collection", ErrCollectionPaymentMethodInvalid, method.Rail)
 		}
+		if rails.IsNMI(models.Rail(method.Rail)) && strings.TrimSpace(method.StoredCredentialUnscheduledRef) == "" {
+			return fmt.Errorf("%w: approved unscheduled stored-credential agreement required for automatic collection", ErrCollectionPaymentMethodInvalid)
+		}
 		if err := s.ensureSettingsRowTx(ctx, q, tid.UUID(), payer.UUID(), currency, BillingModePrepaid, now); err != nil {
 			return fmt.Errorf("ensure money account settings: %w", err)
 		}

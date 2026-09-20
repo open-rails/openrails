@@ -174,7 +174,7 @@ var jsonRules = map[string]jsonRule{
 			"version": integerValue, "family": textValue,
 			"binding": object(map[string]jsonRule{"operation_id": uuidValue, "merchant_id": uuidValue, "psp_id": uuidValue, "kind": textValue, "payload_sha256": textValue}),
 			"nmi":     object(map[string]jsonRule{"transaction_id": textValue, "order_reference": textValue, "customer_vault_id": textValue, "amount": moneyStringValue, "currency": textValue, "approved": booleanValue}),
-			"stripe":  object(map[string]jsonRule{"invoice_id": textValue, "status": textValue, "customer_id": textValue, "payment_method_id": textValue, "amount_paid": moneyStringValue, "currency": textValue, "charge_id": textValue, "payment_intent_id": textValue, "collection_key": textValue, "charged_amount": moneyStringValue, "charge_currency": textValue, "charge_customer_id": textValue, "charge_paid": booleanValue, "charge_captured": booleanValue, "charge_status": textValue}),
+			"stripe":  object(map[string]jsonRule{"invoice_id": textValue, "status": textValue, "customer_id": textValue, "payment_method_id": textValue, "amount_paid": moneyStringValue, "currency": textValue, "charge_id": textValue, "payment_intent_id": textValue, "collection_key": textValue, "charged_amount": moneyStringValue, "charge_currency": textValue, "charge_customer_id": textValue, "charge_paid": booleanValue, "charge_captured": booleanValue, "charge_status": textValue, "charge_invoice_id": textValue, "charge_payment_intent_id": textValue}),
 		}),
 
 		"transaction_id": textValue, "external_invoice_id": textValue, "rail": textValue,

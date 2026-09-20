@@ -232,15 +232,7 @@ func (f findingsNMIResolver) ResolveCollectionAdapter(context.Context, gen.Openr
 	return nil, false, nil
 }
 
-func (f findingsNMIResolver) VerifyCollectionCharge(context.Context, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
-	return money.CollectionVerifyResult{}, nil
-}
-
-func (f findingsNMIResolver) ConfirmCollectionReceipt(context.Context, string, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
-	return money.CollectionVerifyResult{}, errors.New("no collection reads in this fixture")
-}
-
-func (f findingsNMIResolver) ConfirmCollectionNotExecuted(context.Context, money.CollectionReceiptExpectation) error {
+func (f findingsNMIResolver) ConfirmCollectionNotExecuted(context.Context, gen.OpenrailsRailIntent) error {
 	return errors.New("no collection reads in this fixture")
 }
 

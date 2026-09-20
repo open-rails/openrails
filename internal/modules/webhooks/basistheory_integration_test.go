@@ -259,6 +259,7 @@ func TestBasisTheoryWebhook_AccountUpdaterFold(t *testing.T) {
 // row clears the park.
 func TestBasisTheoryWebhook_AccountUpdaterUnparksTheInstrumentItRecovered(t *testing.T) {
 	fx := newBTWebhookFixture(t)
+	dbtest.SeedNMIStoredCredentialRefs(fx.ctx, t, fx.dbi.Qx(fx.ctx), fx.methodID)
 	svc := &basisTheoryWebhookService{d: fx.dispatcher}
 
 	// 1. The card expires at the custodian: parked, never cancelled.

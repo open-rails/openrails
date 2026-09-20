@@ -42,7 +42,7 @@ func testInvoiceCollectionArchive(t *testing.T, resolution string) {
 	_, err = database.Pool().Exec(ctx, `INSERT INTO openrails.psps(merchant_id,id,rail,environment,account_id) VALUES($1,$2,'nmi','test',$3)`, mid.UUID(), psp, account)
 	require.NoError(t, err)
 	vault := "archive-original-vault"
-	_, err = database.Pool().Exec(ctx, `INSERT INTO openrails.payment_methods(merchant_id,id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES($1,$2,$3,$4,'nmi',$5,'billing-original','initial-original')`, mid.UUID(), method, payer.UUID(), psp, vault)
+	_, err = database.Pool().Exec(ctx, `INSERT INTO openrails.payment_methods(merchant_id,id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,stored_credential_unscheduled_ref) VALUES($1,$2,$3,$4,'nmi',$5,'billing-original','initial-original','approved-unscheduled')`, mid.UUID(), method, payer.UUID(), psp, vault)
 	require.NoError(t, err)
 	msvc := merchantsServiceForTest(t, database)
 	secret, err := merchants.PSPSecretName("nmi", "test", account, "security_key")

@@ -4,8 +4,10 @@ package money_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,6 +92,10 @@ func TestChargeOutstanding_StoreOnlyStripeCredentials_ChargesThroughStore(t *tes
 		case "/v1/invoices/in_store_only/pay":
 			// Stripe echoes the invoice as created: key-stamped, in its currency.
 			_, _ = w.Write([]byte(`{"id":"in_store_only","status":"paid","amount_paid":5,"currency":"usd","payment_intent":"pi_store_only","charge":"ch_store_only","metadata":{"openrails_collection_key":"` + collectionKey + `"}}`))
+		case "/v1/invoices/in_store_only":
+			fmt.Fprintf(w, `{"id":"in_store_only","status":"paid","amount_paid":5,"currency":"usd","customer":"cus_store_only_%s","payment_intent":"pi_store_only","charge":"ch_store_only","metadata":{"openrails_collection_key":"%s"}}`, sfx, collectionKey)
+		case "/v1/charges/ch_store_only":
+			fmt.Fprintf(w, `{"id":"ch_store_only","payment_intent":"pi_store_only","invoice":"in_store_only","amount_captured":5,"currency":"usd","customer":"cus_store_only_%s","payment_method":"pm_store_only_%s","paid":true,"captured":true,"status":"succeeded"}`, sfx, sfx)
 		default:
 			t.Fatalf("unexpected Stripe path %s", r.URL.Path)
 		}
@@ -97,12 +103,14 @@ func TestChargeOutstanding_StoreOnlyStripeCredentials_ChargesThroughStore(t *tes
 	t.Cleanup(server.Close)
 
 	// NO boot adapters at all: only store resolution can arm this charge.
-	ch := storeArmedCharger(dbi, msvc, nil, money.CollectionEndpoints{StripeBaseURL: server.URL})
+	plane := &money.MerchantCollectionAdapterBuilder{Config: storeCollectionTestConfig(), DB: dbi, MerchantsFn: func() *merchants.Service { return msvc }, Endpoints: money.CollectionEndpoints{StripeBaseURL: server.URL}}
+	ch := money.NewScopedCharger(dbi, nil)
+	ch.SetAdapterResolver(plane)
 
-	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, plane), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
-	require.Len(t, calls, 4)
+	require.Equal(t, []string{"/v1/invoices", "/v1/invoiceitems", "/v1/invoices/in_store_only/finalize", "/v1/invoices/in_store_only/pay", "/v1/invoices/in_store_only", "/v1/charges/ch_store_only"}, calls)
 
 	paid, err := svc.GetInvoiceByID(ctx, payer, invID)
 	require.NoError(t, err)
@@ -123,13 +131,25 @@ func TestChargeOutstanding_StoreOnlyNMICredentials_ChargesThroughStore(t *testin
 	invID := seedArrearsInvoice(t, svc, ctx, payer, pm)
 
 	seen := make(chan struct{}, 1)
+	var order string
 	// #297: store-armed collections are merchant-initiated stored-credential
 	// charges and ride classic Direct Post.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/payments/") {
+			require.Equal(t, "store-only-security-key-"+sfx, r.Header.Get("Authorization"))
+			fmt.Fprintf(w, `{"id":"txn_store_only_nmi","response":"1","currency":"USD","customer_vault_id":"vault_%s","actions":[{"type":"sale","success":true,"amount":"0.05"}]}`, pm)
+			return
+		}
 		require.NoError(t, r.ParseForm())
-		require.Equal(t, "sale", r.Form.Get("type"))
 		// The store-armed client authenticates with the STORE key.
 		require.Equal(t, "store-only-security-key-"+sfx, r.Form.Get("security_key"))
+		if r.Form.Get("type") != "sale" {
+			require.Equal(t, order, r.Form.Get("order_id"))
+			fmt.Fprintf(w, `<nm_response><transaction><transaction_id>txn_store_only_nmi</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, order)
+			return
+		}
+		require.Equal(t, "sale", r.Form.Get("type"))
+		order = r.Form.Get("orderid")
 		require.Equal(t, "vault_"+pm.String(), r.Form.Get("customer_vault_id"))
 		require.Equal(t, "0.05", r.Form.Get("amount"))
 		require.Equal(t, "merchant", r.Form.Get("initiated_by"))
@@ -140,9 +160,11 @@ func TestChargeOutstanding_StoreOnlyNMICredentials_ChargesThroughStore(t *testin
 	}))
 	t.Cleanup(server.Close)
 
-	ch := storeArmedCharger(dbi, msvc, nil, money.CollectionEndpoints{NMIDirectPostURL: server.URL})
+	plane := &money.MerchantCollectionAdapterBuilder{Config: storeCollectionTestConfig(), DB: dbi, MerchantsFn: func() *merchants.Service { return msvc }, Endpoints: money.CollectionEndpoints{NMIDirectPostURL: server.URL, NMIQueryURL: server.URL, NMIV5BaseURL: server.URL}}
+	ch := money.NewScopedCharger(dbi, nil)
+	ch.SetAdapterResolver(plane)
 
-	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, plane), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	select {

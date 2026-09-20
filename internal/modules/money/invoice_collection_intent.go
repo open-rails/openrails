@@ -242,6 +242,11 @@ func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.Openr
 	if err != nil {
 		return intents.Outcome{}, err
 	}
+	if _, found, err := intents.LoadCollectedReceipt(intent); err != nil {
+		return intents.Outcome{}, intents.RejectResolution("stored receipt is invalid; operation requires repair: %v", err)
+	} else if found {
+		return intents.Outcome{}, intents.RejectResolution("operation holds a qualified receipt; verifier must complete settlement")
+	}
 	if resolution.Step != "" {
 		return intents.Outcome{}, fmt.Errorf("%w: an invoice collection has no steps", intents.ErrResolutionInvalid)
 	}
@@ -254,12 +259,11 @@ func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.Openr
 	if h.Verifier == nil {
 		return intents.Outcome{}, errors.New("no collection verifier wired")
 	}
-	expect := receiptExpectation(intent, p)
 	if resolution.NotExecuted {
 		if contradiction := intents.EvidenceString(intent, collectionEvidenceContradiction); contradiction != "" {
 			return intents.Outcome{}, intents.RejectResolution("provider evidence contradicts this operation (%s); non-execution cannot be attested, repair from the provider record", contradiction)
 		}
-		if err := h.Verifier.ConfirmCollectionNotExecuted(ctx, expect); err != nil {
+		if err := h.Verifier.ConfirmCollectionNotExecuted(ctx, intent); err != nil {
 			return intents.Outcome{}, intents.RejectResolution("%v", err)
 		}
 		return h.finalizeProviderNotExecuted(ctx, intent, p), nil
@@ -280,16 +284,6 @@ func contradicted(err error) intents.Outcome {
 	return intents.AmbiguousWithEvidence("provider receipt contradicts the frozen operation: "+err.Error(), map[string]any{collectionEvidenceContradiction: err.Error()})
 }
 
-// receiptExpectation is the frozen operation every provider receipt must
-// match: its provider identity, the instrument, amount and currency frozen at
-// enqueue. Nothing in it is read from the method's current row.
-func receiptExpectation(intent gen.OpenrailsRailIntent, p intents.InvoiceCollectionPayload) CollectionReceiptExpectation {
-	return CollectionReceiptExpectation{
-		MerchantID: intent.MerchantID, CustomerID: p.CustomerID, OperationKey: intent.ID.String(), ProviderCustomerRef: p.ProviderCustomerRef,
-		Rail: p.Rail, Instrument: p.Instrument, Amount: p.AmountMinor, Currency: p.Currency,
-	}
-}
-
 // ResolveUnsent releases a pending operation that never reached the provider:
 // the write-ahead fence is absent, so nothing can have been charged. The
 // attempt fails without a decline and the invoice becomes due again. An
@@ -298,6 +292,9 @@ func (h *InvoiceCollectionHandler) ResolveUnsent(ctx context.Context, intent gen
 	p, err := intents.DecodeInvoiceCollectionPayload(intent)
 	if err != nil {
 		return intents.Outcome{}, err
+	}
+	if _, found, err := intents.LoadCollectedReceipt(intent); err != nil || found {
+		return intents.Outcome{}, intents.RejectResolution("operation holds receipt custody; it cannot be declared unsubmitted")
 	}
 	if !resolution.NotExecuted || resolution.Step != "" {
 		return intents.Outcome{}, fmt.Errorf("%w: a never-submitted collection accepts only --not-executed", intents.ErrResolutionInvalid)

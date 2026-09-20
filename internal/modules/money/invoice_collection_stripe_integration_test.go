@@ -5,6 +5,7 @@ package money_test
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -33,8 +34,9 @@ import (
 // idempotency keys replay the stored response of a completed request (a 5xx
 // stores nothing).
 type fakeStripe struct {
-	mu        sync.Mutex
-	responses map[string][]byte
+	chargeFacts func(map[string]any)
+	mu          sync.Mutex
+	responses   map[string][]byte
 	// statuses records a stored 4xx answer for a key (Stripe replays those).
 	statuses map[string]int
 	pending  []stripeItem
@@ -206,7 +208,11 @@ func (f *fakeStripe) handleGet(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(404)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": "ch_" + id, "invoice": id, "customer": inv["customer"], "payment_method": inv["default_payment_method"], "amount_captured": inv["amount_paid"], "currency": inv["currency"], "status": "succeeded", "paid": true, "captured": true})
+		charge := map[string]any{"id": "ch_" + id, "invoice": id, "customer": inv["customer"], "payment_method": inv["default_payment_method"], "amount_captured": inv["amount_paid"], "currency": inv["currency"], "status": "succeeded", "paid": true, "captured": true}
+		if f.chargeFacts != nil {
+			f.chargeFacts(charge)
+		}
+		_ = json.NewEncoder(w).Encode(charge)
 	case r.URL.Path == "/v1/invoices":
 		data := make([]map[string]any, 0, len(f.invoices))
 		for _, inv := range f.invoices {
@@ -643,4 +649,85 @@ func TestInvoiceCollection_StripePaidInvoiceMustMatchFrozenOperation(t *testing.
 			require.Len(t, stripe.keySequence(), 8, "the replay reused Stripe's objects under the same keys")
 		})
 	}
+}
+
+func TestInvoiceCollection_StripeReceiptBindsArmedAccountAndCapturedInstrument(t *testing.T) {
+	stripe, server := newFakeStripe(t)
+	stripe.payLostResponse = true
+	e, plane, charger := stripeCollectionEnv(t, server)
+	runner := collectionRunner(e.db, charger, plane)
+	_, err := e.svc.ChargeOutstanding(e.ctx, runner, 0)
+	require.NoError(t, err)
+	operation := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, operation.Status)
+	wrong := subscriptions.NewAccountStripeService(nil, operation.MerchantID, uuid.New(), "wrong-account", "sk_test_wrong")
+	wrong.SetBaseURLForTest(server.URL)
+	_, _, err = intents.ReadStripeCollectionReceipt(e.ctx, operation, wrong, "in_1")
+	require.ErrorContains(t, err, "another provider account", "matching invoice/charge facts from another armed account cannot be relabelled")
+	for _, bad := range []struct {
+		field string
+		value any
+	}{{"customer", "cus_wrong"}, {"payment_method", "pm_wrong"}, {"amount_captured", int64(99)}, {"captured", false}, {"status", "pending"}, {"invoice", "in_someone_else"}} {
+		t.Run(bad.field, func(t *testing.T) {
+			stripe.mu.Lock()
+			stripe.chargeFacts = func(facts map[string]any) { facts[bad.field] = bad.value }
+			stripe.mu.Unlock()
+			_, err := runner.Resolve(e.ctx, operation.ID, intents.Resolution{ProviderReference: "in_1", Actor: "operator", Reason: "provider receipt"})
+			require.ErrorIs(t, err, intents.ErrResolutionRejected)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status)
+		})
+	}
+	stripe.mu.Lock()
+	stripe.chargeFacts = nil
+	stripe.mu.Unlock()
+	complete, err := runner.Resolve(e.ctx, operation.ID, intents.Resolution{ProviderReference: "in_1", Actor: "operator", Reason: "qualified captured charge"})
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusSucceeded, complete.Status)
+	receipt, found, err := intents.LoadCollectedReceipt(complete)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "ch_in_1", receipt.TransactionID())
+	var evidence map[string]any
+	require.NoError(t, json.Unmarshal(complete.ResultEvidence, &evidence))
+	delete(evidence["qualified_receipt"].(map[string]any)["stripe"].(map[string]any), "charge_id")
+	complete.ResultEvidence, err = json.Marshal(evidence)
+	require.NoError(t, err)
+	_, _, err = intents.LoadCollectedReceipt(complete)
+	require.Error(t, err, "a persisted invoice id is never a substitute for captured charge identity")
+	require.Equal(t, []int64{frozenStripeMinor}, stripe.chargedAmounts())
+}
+
+func TestInvoiceCollection_RetainedStripeReceiptCannotBecomeNonExecution(t *testing.T) {
+	stripe, server := newFakeStripe(t)
+	stripe.payLostResponse = true
+	e, plane, charger := stripeCollectionEnv(t, server)
+	runner := collectionRunner(e.db, charger, plane)
+	_, err := e.svc.ChargeOutstanding(e.ctx, runner, 0)
+	require.NoError(t, err)
+	operation := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+	receipt, found, err := plane.ReadCollectionReceipt(e.ctx, operation, "in_1")
+	require.NoError(t, err)
+	require.True(t, found)
+	_, err = intents.NewStore(e.db).RetainCollectedReceipt(e.ctx, operation, receipt)
+	require.NoError(t, err)
+	// Model a crash before the safe result projection and later disappearance of
+	// provider objects. Cleanup now has nothing visible to void or delete.
+	operation = latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+	require.Empty(t, intents.EvidenceString(operation, "transaction_id"))
+	stripe.mu.Lock()
+	stripe.invoices = map[string]map[string]any{}
+	stripe.pending = nil
+	stripe.mu.Unlock()
+	_, resolutionErr := runner.Resolve(e.ctx, operation.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "provider objects disappeared"})
+	require.Equal(t, intents.StatusUnknownNeedsVerify, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status, "a proven charge cannot be turned into failed nonexecution")
+	invoice := e.invoiceRow(t)
+	require.NotNil(t, invoice.CollectionIntentID, "receipt custody must keep the invoice owned, preventing a new charge")
+	require.Equal(t, operation.ID, *invoice.CollectionIntentID)
+	require.ErrorIs(t, resolutionErr, intents.ErrResolutionRejected)
+	dueNow(t, e.pool, e.ctx, operation.ID)
+	_, err = runner.RunVerifyOnce(e.ctx)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusSucceeded, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status)
+	e.requireSettledOnce(t)
+	require.Equal(t, []int64{frozenStripeMinor}, stripe.chargedAmounts())
 }
