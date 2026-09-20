@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
-	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -102,6 +104,20 @@ func (s *Service) InvoiceRecovery(ctx context.Context, payer identity.CustomerID
 		out.BlockedReason = "invoice_not_payable"
 	} else {
 		out.Retryable = true
+		// Existing attempts are the invoice's authoritative collection history. Read
+		// only its newest payer-scoped attempt; a later pending/settled attempt does
+		// not inherit an older decline.
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return nil, err
+		}
+		attempts, err := s.rt.DB.Gen(ctx).ListInvoicePaymentAttemptsByPayer(ctx, gen.ListInvoicePaymentAttemptsByPayerParams{MerchantID: mid.UUID(), CustomerID: payer.UUID(), InvoiceID: id, Limit: 1})
+		if err != nil {
+			return nil, err
+		}
+		if len(attempts) > 0 && attempts[0].Status == "failed" && attempts[0].Rail != nil && attempts[0].FailureCode != nil {
+			out.LastFailureReason = payments.NormalizeFailureReason(*attempts[0].Rail, *attempts[0].FailureCode)
+		}
 	}
 	return out, nil
 }
@@ -136,6 +152,28 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 	if sub.Status != models.StatusPastDue {
 		out.BlockedReason = "subscription_not_retryable"
 		return out, nil
+	}
+	if sub.CurrentPeriodEndsAt != nil {
+		latest, err := s.rt.DB.Gen(ctx).GetLatestManualRebillForPeriod(ctx, gen.GetLatestManualRebillForPeriodParams{MerchantID: mid.UUID(), SubscriptionID: id, PeriodStart: *sub.CurrentPeriodEndsAt})
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+		if err == nil && latest.Status == intents.StatusFailedTerminal {
+			accepted, err := intents.DecodeManualRebillPayload(latest)
+			if err != nil {
+				return nil, err
+			}
+			if accepted.Renewal.CustomerID != sub.CustomerID || accepted.Renewal.PSPID != sub.PspID || accepted.Rail != string(sub.Rail) || accepted.RailSubscriptionID != sub.RailSubscriptionID || !accepted.Renewal.PeriodStart.Equal(*sub.CurrentPeriodEndsAt) {
+				return nil, errors.New("latest rebill refusal does not match this subscription period")
+			}
+			var refusal *CustomerPaymentRefusal
+			err = customerPaymentRefusal(latest)
+			if errors.As(err, &refusal) {
+				out.LastFailureReason = payments.NormalizeFailureReason(accepted.Rail, refusal.Code)
+			} else if err != nil && !errors.Is(err, intents.ErrRebillNotRetryable) {
+				return nil, err
+			}
+		}
 	}
 	if !rails.IsNMI(sub.Rail) || sub.PaymentMethodID == nil {
 		out.BlockedReason = "customer_payment_unsupported"
