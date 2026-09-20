@@ -158,6 +158,7 @@ func (e *env) seedCard(t *testing.T) uuid.UUID {
 		RailCustomerRef:      "vault_" + pm.String(),
 	})
 	require.NoError(t, err)
+	dbtest.SeedNMIStoredCredentialRefs(e.ctx, t, e.pool, pm)
 	t.Cleanup(func() { _, _ = e.pool.Exec(e.ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm) })
 	return pm
 }

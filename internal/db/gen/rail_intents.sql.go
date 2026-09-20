@@ -1054,7 +1054,7 @@ const markRailIntentFailedTerminal = `-- name: MarkRailIntentFailedTerminal :exe
 UPDATE openrails.rail_intents
 SET status = 'failed_terminal',
     last_failure_reason = $1,
-    result_evidence = COALESCE($2::jsonb, '{}'::jsonb) || CASE WHEN result_evidence ? 'qualified_receipt' THEN jsonb_build_object('qualified_receipt', result_evidence->'qualified_receipt') ELSE '{}'::jsonb END,
+    result_evidence = CASE WHEN result_evidence ? 'qualified_receipt' THEN COALESCE($2::jsonb, '{}'::jsonb) || jsonb_build_object('qualified_receipt', result_evidence->'qualified_receipt') ELSE $2::jsonb END,
     claimed_until = NULL,
     updated_at = now()
 WHERE id = $3 AND status IN ('in_flight', 'unknown_needs_verify')
@@ -1079,7 +1079,7 @@ const markRailIntentSucceeded = `-- name: MarkRailIntentSucceeded :execrows
 UPDATE openrails.rail_intents
 SET status = 'succeeded',
     executed_at = $1::timestamptz,
-    result_evidence = COALESCE($2::jsonb, '{}'::jsonb) || CASE WHEN result_evidence ? 'qualified_receipt' THEN jsonb_build_object('qualified_receipt', result_evidence->'qualified_receipt') ELSE '{}'::jsonb END,
+    result_evidence = CASE WHEN result_evidence ? 'qualified_receipt' THEN COALESCE($2::jsonb, '{}'::jsonb) || jsonb_build_object('qualified_receipt', result_evidence->'qualified_receipt') ELSE $2::jsonb END,
     last_failure_reason = NULL,
     claimed_until = NULL,
     updated_at = now()

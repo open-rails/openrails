@@ -178,7 +178,7 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx cont
 		}
 		return service.CleanupCollection(ctx, p.ProviderCustomerRef, in.ID.String())
 	}
-	_, found, err := b.ReadCollectionReceipt(ctx, in, "")
+	receipt, found, err := b.ReadCollectionReceipt(ctx, in, "")
 	if errors.Is(err, nmi.ErrReceiptMismatch) {
 		return fmt.Errorf("provider evidence contradicts the operation: %w", err)
 	}
@@ -186,7 +186,7 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx cont
 		return err
 	}
 	if found {
-		return errors.New("provider shows a successful charge; nonexecution is contradicted")
+		return fmt.Errorf("provider shows successful sale %s; nonexecution is contradicted", receipt.TransactionID())
 	}
 	return errors.New("NMI search absence cannot prove nonexecution after possible submission")
 }
