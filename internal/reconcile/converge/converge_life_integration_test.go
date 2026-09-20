@@ -32,14 +32,14 @@ func TestConverge_LifeCheckoutSessionStale(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, '{}'::jsonb, $4)`,
 			productID, "life-prod-"+suffix, "life-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 		      VALUES ($1, $2, 9990000, 'USD', 720, true, $3)`, priceID, productID, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		// A checkout session that expired an hour ago but is still 'created'.
-		exec(`INSERT INTO openrails.checkout_sessions
+		exec(`INSERT INTO billing.checkout_sessions
 		        (id, price_id, mode, rail, status, amount, currency, expires_at, merchant_id, customer_id, psp_id)
 		      VALUES ($1, $2, 'one_off', 'nmi', 'created', 9990000, 'USD', $3, $4, $5, $6)`,
 			sessionID, priceID, time.Now().Add(-1*time.Hour), merchantID, customer, pspID)
@@ -48,17 +48,17 @@ func TestConverge_LifeCheckoutSessionStale(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "checkout_session:"+sessionID.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.checkout_sessions WHERE id=$1`, sessionID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "checkout_session:"+sessionID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.checkout_sessions WHERE id=$1`, sessionID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
 
 	sessionStatus := func(ctx context.Context) string {
 		var s string
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.checkout_sessions WHERE id=$1`, sessionID).Scan(&s))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM billing.checkout_sessions WHERE id=$1`, sessionID).Scan(&s))
 		return s
 	}
 
@@ -72,7 +72,7 @@ func TestConverge_LifeCheckoutSessionStale(t *testing.T) {
 
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='life.checkout_session.stale' AND subject_key=$2`,
+			`SELECT status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND finding_type='life.checkout_session.stale' AND subject_key=$2`,
 			merchantID, "checkout_session:"+sessionID.String()).Scan(&status))
 		require.Equal(t, "auto_fixed", status)
 		return nil

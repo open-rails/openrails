@@ -129,8 +129,8 @@ func newVaultDeleteFixture(t *testing.T) *vaultDeleteFixture {
 	}
 	require.NoError(t, paymentmethods.NewPaymentMethodRepo(dbi).Create(ctx, pm))
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = $1 AND idempotency_key = $2", TypeNMIPaymentMethodDelete, NMIPaymentMethodDeleteIdempotencyKey(pm.ID))
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm.ID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE intent_type = $1 AND idempotency_key = $2", TypeNMIPaymentMethodDelete, NMIPaymentMethodDeleteIdempotencyKey(pm.ID))
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pm.ID)
 	})
 
 	gateway, client := newFakeNMIVaultGateway(t, vaultID, billingID)
@@ -157,7 +157,7 @@ func (fx *vaultDeleteFixture) localRowExists(t *testing.T) bool {
 func (fx *vaultDeleteFixture) intentStatus(t *testing.T) string {
 	t.Helper()
 	rows, err := fx.db.Pool().Query(fx.ctx,
-		"SELECT status FROM openrails.rail_intents WHERE intent_type = $1 AND idempotency_key = $2",
+		"SELECT status FROM billing.rail_intents WHERE intent_type = $1 AND idempotency_key = $2",
 		TypeNMIPaymentMethodDelete, NMIPaymentMethodDeleteIdempotencyKey(fx.pm.ID))
 	require.NoError(t, err)
 	defer rows.Close()
@@ -303,7 +303,7 @@ func TestNMIVaultDeleteIntent_SharedVaultScopesToBillingEntry(t *testing.T) {
 	}
 	require.NoError(t, paymentmethods.NewPaymentMethodRepo(fx.db).Create(fx.ctx, sibling))
 	t.Cleanup(func() {
-		_, _ = fx.db.Pool().Exec(fx.ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", sibling.ID)
+		_, _ = fx.db.Pool().Exec(fx.ctx, "DELETE FROM billing.payment_methods WHERE id = $1", sibling.ID)
 	})
 
 	out := fx.executeThrough(t)
@@ -350,11 +350,11 @@ func TestNMIVaultDeleteIntent_SupersededWhenBackInUse(t *testing.T) {
 		_, err := pool.Exec(fx.ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+	exec(`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "vdel-prod-"+sfx, dbtest.TestMerchantID.UUID())
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, dbtest.TestMerchantID.UUID())
-	exec(`INSERT INTO openrails.subscriptions
+	exec(`INSERT INTO billing.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,
 	         payment_method_id, customer_id, merchant_id, psp_id)
@@ -362,9 +362,9 @@ func TestNMIVaultDeleteIntent_SupersededWhenBackInUse(t *testing.T) {
 		subID, priceID, productID, "psid-vdel-"+sfx,
 		now.Add(-time.Hour), now.Add(720*time.Hour), fx.pm.ID, fx.pm.CustomerID, dbtest.TestMerchantID.UUID(), fx.pspID)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(fx.ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(fx.ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(fx.ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	_, err = fx.runner.RunExecuteOnce(fx.ctx)

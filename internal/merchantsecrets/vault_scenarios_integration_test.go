@@ -37,7 +37,7 @@ func registerMerchant(t *testing.T, ctx context.Context, pool *db.Pool, slugPref
 	slug := fmt.Sprintf("%s-%s", slugPrefix, uuid.New().String()[:8])
 	id := uuid.New()
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, id, slug)
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, id, slug)
 	require.NoError(t, err)
 	return merchant.ID(id), slug
 }

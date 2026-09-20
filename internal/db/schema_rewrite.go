@@ -16,15 +16,15 @@ import (
 // Schema rewriting (#471).
 //
 // OpenRails' SQL — sqlc-generated queries, hand-written queries, and migration
-// DDL — is authored schema-qualified to config.DefaultSchema ("openrails"). A
+// DDL — is authored schema-qualified to config.CanonicalSchema ("openrails"). A
 // host can relocate every OpenRails table to a different Postgres schema via
 // db.schema / DB_SCHEMA. Because OpenRails runs embedded on a pool it SHARES with
 // the host, it cannot repoint that pool's search_path (that would hijack the
 // host's own queries), so relocation is done by rewriting the schema qualifier in
 // the SQL text just before execution.
 //
-// The rewrite is a no-op whenever the configured schema equals the default, so
-// the overwhelmingly common deployment runs the SQL verbatim with zero overhead.
+// The rewrite is a no-op whenever the configured schema equals the canonical namespace, so
+// that deployment runs the SQL verbatim with zero overhead.
 // schemaRewriter is therefore safe to install unconditionally.
 
 // schemaRewriter rewrites the canonical `openrails.` qualifier to the configured
@@ -36,13 +36,16 @@ type schemaRewriter struct {
 }
 
 // newSchemaRewriter builds a rewriter for the configured schema. It is inactive
-// (identity) when the schema is empty or already the default, so the default
-// deployment pays nothing.
+// (identity) when the schema is the canonical namespace. An empty schema
+// selects the configured default.
 func newSchemaRewriter(schema string) schemaRewriter {
-	if schema == "" || schema == config.DefaultSchema {
+	if schema == "" {
+		schema = config.DefaultSchema
+	}
+	if schema == config.CanonicalSchema {
 		return schemaRewriter{}
 	}
-	return schemaRewriter{from: config.DefaultSchema + ".", to: schema + ".", active: true}
+	return schemaRewriter{from: config.CanonicalSchema + ".", to: schema + ".", active: true}
 }
 
 // apply rewrites a SQL string. Cheap and identity when inactive.
@@ -54,11 +57,11 @@ func (r schemaRewriter) apply(sql string) string {
 }
 
 // schema returns the target OpenRails schema this rewriter relocates to — the
-// configured schema when active, else config.DefaultSchema. Lets a *Pool report
+// configured schema when active, else config.CanonicalSchema. Lets a *Pool report
 // its true schema even when built straight from a rewriter (DB.DataPool).
 func (r schemaRewriter) schema() string {
 	if !r.active {
-		return config.DefaultSchema
+		return config.CanonicalSchema
 	}
 	return strings.TrimSuffix(r.to, ".")
 }
@@ -127,11 +130,11 @@ func (t schemaTx) Begin(ctx context.Context) (pgx.Tx, error) {
 	return schemaTx{Tx: inner, rw: t.rw}, nil
 }
 
-// wrapTx returns tx unchanged when the rewriter is inactive, else a schema-
-// rewriting wrapper. Callers keep committing/rolling back the wrapper (it
-// delegates those to the underlying tx).
+// wrapTx retains the configured schema even when it is canonical and needs no
+// SQL rewrite. NewWithPgxTx must distinguish that transaction from a raw host
+// transaction, whose schema defaults to billing. Commit/Rollback still delegate.
 func (r schemaRewriter) wrapTx(tx pgx.Tx) pgx.Tx {
-	if !r.active || tx == nil {
+	if tx == nil {
 		return tx
 	}
 	return schemaTx{Tx: tx, rw: r}
@@ -151,7 +154,7 @@ type Pool struct {
 }
 
 // WrapPool wraps a raw pool with schema rewriting for the configured schema. The
-// wrapper is a transparent pass-through when the schema is the default. Returns
+// wrapper is a transparent pass-through when the schema is the canonical namespace. Returns
 // nil when raw is nil so `pool == nil` guards at call sites keep working.
 func WrapPool(raw *pgxpool.Pool, schema string) *Pool {
 	if raw == nil {
@@ -227,3 +230,9 @@ func (p *Pool) Ping(ctx context.Context) error { return p.raw.Ping(ctx) }
 func (p *Pool) Stat() *pgxpool.Stat { return p.raw.Stat() }
 
 func (p *Pool) Close() { p.raw.Close() }
+
+// RewriteDBTX applies the same schema mapping as DB.Qx to a raw pool,
+// connection, or transaction. Use it when constructing sqlc queries without DB.
+func RewriteDBTX(inner gen.DBTX, schema string) gen.DBTX {
+	return newSchemaRewriter(schema).wrapDBTX(inner)
+}

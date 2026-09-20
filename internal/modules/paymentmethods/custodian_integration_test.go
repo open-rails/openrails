@@ -22,7 +22,7 @@ import (
 // impossible, not merely unusual.
 func TestCustodianIsAlwaysStated(t *testing.T) {
 	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
-	database, err := db.NewWithPGXPool(pool, "openrails")
+	database, err := db.NewWithPGXPool(pool, "billing")
 	require.NoError(t, err)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
@@ -56,7 +56,7 @@ func TestCustodianIsAlwaysStated(t *testing.T) {
 	readCustodian := func(id uuid.UUID) string {
 		var got string
 		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT custodian FROM openrails.payment_methods WHERE id = $1`, id).Scan(&got))
+			`SELECT custodian FROM billing.payment_methods WHERE id = $1`, id).Scan(&got))
 		return got
 	}
 
@@ -70,7 +70,7 @@ func TestCustodianIsAlwaysStated(t *testing.T) {
 	require.Equal(t, models.CustodianBasisTheory, readCustodian(btID))
 	var rail string
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT rail FROM openrails.payment_methods WHERE id = $1`, btID).Scan(&rail))
+		`SELECT rail FROM billing.payment_methods WHERE id = $1`, btID).Scan(&rail))
 	require.Equal(t, string(models.RailNMI), rail)
 
 	// The model's round-trip carries custody back out.
@@ -88,13 +88,13 @@ func TestCustodianIsAlwaysStated(t *testing.T) {
 			custodianID = &cid
 		}
 		_, err := pool.Exec(ctx,
-			`INSERT INTO openrails.payment_methods
+			`INSERT INTO billing.payment_methods
 			   (id, merchant_id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref, initial_transaction_id, custodian, custodian_id)
 			 VALUES ($1, $2, $3, 'nmi', $4, $5, $6, 'txn-x', $7, $8)`,
 			id, dbtest.TestMerchantID.UUID(), customerID, pspID,
 			"vault-"+uuid.NewString()[:8], "bill-"+uuid.NewString()[:8], custodian, custodianID)
 		if err == nil {
-			t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM openrails.payment_methods WHERE id = $1`, id) })
+			t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM billing.payment_methods WHERE id = $1`, id) })
 		}
 		return err
 	}

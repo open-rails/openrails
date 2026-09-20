@@ -72,14 +72,14 @@ func (e collectionEnv) attemptStatuses(t *testing.T) []string {
 func (e collectionEnv) settledPayments(t *testing.T) int {
 	t.Helper()
 	var n int
-	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM openrails.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&n))
+	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&n))
 	return n
 }
 
 func (e collectionEnv) owedPaymentTransfers(t *testing.T) int {
 	t.Helper()
 	var n int
-	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM openrails.ledger_transfers WHERE customer_id = $1 AND transfer_type = 'owed_payment'`, e.payer.UUID()).Scan(&n))
+	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.ledger_transfers WHERE customer_id = $1 AND transfer_type = 'owed_payment'`, e.payer.UUID()).Scan(&n))
 	return n
 }
 
@@ -145,7 +145,7 @@ func TestInvoiceCollection_ClientKeyReplaysDurableOutcomeWithoutRecharging(t *te
 
 	_, err = e.retry(t, collectionRunner(e.db, replayCharger, nil), "client-retry-key", e.method)
 	require.ErrorIs(t, err, money.ErrInvoiceRetryIdempotencyConflict)
-	_, err = e.pool.Exec(e.ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", bound)
+	_, err = e.pool.Exec(e.ctx, "DELETE FROM billing.payment_methods WHERE id = $1", bound)
 	require.NoError(t, err)
 	_, err = e.retry(t, collectionRunner(e.db, replayCharger, nil), "client-retry-key", e.method)
 	require.ErrorIs(t, err, money.ErrInvoiceRetryIdempotencyConflict)
@@ -184,7 +184,7 @@ func TestInvoiceCollection_ConcurrentEqualRetriesShareOneOperation(t *testing.T)
 			runner := collectionRunner(e.db, charger, charger)
 			lock, err := e.pool.Begin(e.ctx)
 			require.NoError(t, err)
-			_, err = lock.Exec(e.ctx, `SELECT id FROM openrails.invoices WHERE id = $1 FOR UPDATE`, e.invoice)
+			_, err = lock.Exec(e.ctx, `SELECT id FROM billing.invoices WHERE id = $1 FOR UPDATE`, e.invoice)
 			require.NoError(t, err)
 
 			results := make([]*money.InvoiceCollectionRetryResult, 2)
@@ -336,7 +336,7 @@ func (c *crashAfterSubmitCharger) Prepare(ctx context.Context, req money.ChargeR
 	return money.PreparedChargeFunc(func(ctx context.Context) (money.ChargeResult, error) {
 		res, err := inner.Submit(ctx)
 		c.broke.Do(func() {
-			_, _ = c.pool.Exec(ctx, `UPDATE openrails.invoice_payments SET status = 'failed' WHERE id = $1`, c.attempt)
+			_, _ = c.pool.Exec(ctx, `UPDATE billing.invoice_payments SET status = 'failed' WHERE id = $1`, c.attempt)
 		})
 		return res, err
 	}), nil
@@ -371,7 +371,7 @@ func TestInvoiceCollection_SettleFailureRetainsReceiptAndConvergesAfterRestart(t
 	require.Equal(t, op.ID, *e.invoiceRow(t).CollectionIntentID)
 
 	// Repair the local row, restart, converge from the retained receipt.
-	_, err = e.pool.Exec(e.ctx, `UPDATE openrails.invoice_payments SET status = 'attempted' WHERE id = $1`, attempts[0].ID)
+	_, err = e.pool.Exec(e.ctx, `UPDATE billing.invoice_payments SET status = 'attempted' WHERE id = $1`, attempts[0].ID)
 	require.NoError(t, err)
 	reader := &fakeCharger{}
 	dueNow(t, e.pool, e.ctx, op.ID)
@@ -392,7 +392,7 @@ func TestInvoiceCollection_CrashBetweenFenceAndSendStaysUnknown(t *testing.T) {
 	require.NoError(t, err)
 	op := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
 	// Simulate the executor dying right after the write-ahead fence.
-	_, err = e.pool.Exec(e.ctx, `UPDATE openrails.rail_intents SET status = 'in_flight', claimed_until = now() - interval '1 minute', attempts = 1, result_evidence = jsonb_build_object('submitted_at', $2::text) WHERE id = $1`, op.ID, time.Now().UTC().Format(time.RFC3339Nano))
+	_, err = e.pool.Exec(e.ctx, `UPDATE billing.rail_intents SET status = 'in_flight', claimed_until = now() - interval '1 minute', attempts = 1, result_evidence = jsonb_build_object('submitted_at', $2::text) WHERE id = $1`, op.ID, time.Now().UTC().Format(time.RFC3339Nano))
 	require.NoError(t, err)
 
 	fresh := &fakeCharger{}
@@ -425,7 +425,7 @@ func TestInvoiceCollection_OperatorResolutionFromExactReceipt(t *testing.T) {
 	e.requireSettledOnce(t)
 
 	var logged int
-	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM openrails.rail_mutation_logs WHERE rail_intent_id = $1 AND evidence->'operator_resolution'->>'actor' = 'ops@example'`, op.ID).Scan(&logged))
+	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.rail_mutation_logs WHERE rail_intent_id = $1 AND evidence->'operator_resolution'->>'actor' = 'ops@example'`, op.ID).Scan(&logged))
 	require.Equal(t, 1, logged, "the resolution is recorded with its actor")
 }
 
@@ -492,7 +492,7 @@ func TestInvoiceCollection_OperatorReleaseRefusedPastTheSubmissionFence(t *testi
 	require.Equal(t, intents.StatusPending, op.Status)
 	// An executor that died between the fence and the send leaves a pending
 	// operation that DID possibly submit.
-	_, err = e.pool.Exec(e.ctx, `UPDATE openrails.rail_intents SET result_evidence = jsonb_build_object('submitted_at', $2::text) WHERE id = $1`, op.ID, time.Now().UTC().Format(time.RFC3339Nano))
+	_, err = e.pool.Exec(e.ctx, `UPDATE billing.rail_intents SET result_evidence = jsonb_build_object('submitted_at', $2::text) WHERE id = $1`, op.ID, time.Now().UTC().Format(time.RFC3339Nano))
 	require.NoError(t, err)
 
 	_, err = runner.Resolve(e.ctx, op.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "looks unsent"})

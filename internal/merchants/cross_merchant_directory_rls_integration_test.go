@@ -12,7 +12,6 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -42,13 +41,13 @@ func TestCrossMerchantDirectoryReadsUnderEnforcingRLS(t *testing.T) {
 
 	for id, slug := range map[uuid.UUID]string{ownerID: "or824-owner-" + suffix, otherID: "or824-other-" + suffix} {
 		_, err = super.Exec(ctx,
-			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1::uuid, $2, 'active')`, id, slug)
+			`INSERT INTO billing.merchants (id, slug, status) VALUES ($1::uuid, $2, 'active')`, id, slug)
 		require.NoError(t, err)
 	}
 
 	accountID := "acct_or824_" + suffix
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
+		`INSERT INTO billing.psps (merchant_id, rail, environment, account_id, archived)
 		 VALUES ($1::uuid, 'stripe', 'live', $2, false)`, ownerID, accountID)
 	require.NoError(t, err)
 
@@ -56,7 +55,7 @@ func TestCrossMerchantDirectoryReadsUnderEnforcingRLS(t *testing.T) {
 	// portal's "which merchants do I buy from" question.
 	for _, id := range []uuid.UUID{ownerID, otherID} {
 		_, err = super.Exec(ctx,
-			`INSERT INTO openrails.customers (merchant_id, id) VALUES ($1::uuid, $2)`, id, subject)
+			`INSERT INTO billing.customers (merchant_id, id) VALUES ($1::uuid, $2)`, id, subject)
 		require.NoError(t, err)
 	}
 
@@ -81,7 +80,7 @@ func TestCrossMerchantDirectoryReadsUnderEnforcingRLS(t *testing.T) {
 	})
 
 	t.Run("global PSP ownership is asserted, not assumed", func(t *testing.T) {
-		q := gen.New(appPool)
+		q := dbtest.Queries(appPool)
 		require.NoError(t, AssertPSPUnowned(ctx, q, ownerID, "stripe", "live", accountID),
 			"the owner re-declaring its own account is not a conflict")
 
@@ -93,7 +92,7 @@ func TestCrossMerchantDirectoryReadsUnderEnforcingRLS(t *testing.T) {
 	})
 
 	t.Run("the portal's merchant directory spans merchant scopes", func(t *testing.T) {
-		rows, err := gen.New(appPool).ListMerchantsForCustomerSubject(ctx, subject)
+		rows, err := dbtest.Queries(appPool).ListMerchantsForCustomerSubject(ctx, subject)
 		require.NoError(t, err)
 		slugs := make([]string, 0, len(rows))
 		for _, r := range rows {
@@ -101,7 +100,7 @@ func TestCrossMerchantDirectoryReadsUnderEnforcingRLS(t *testing.T) {
 		}
 		require.ElementsMatch(t, []string{"or824-owner-" + suffix, "or824-other-" + suffix}, slugs)
 
-		empty, err := gen.New(appPool).ListMerchantsForCustomerSubject(ctx, uuid.New())
+		empty, err := dbtest.Queries(appPool).ListMerchantsForCustomerSubject(ctx, uuid.New())
 		require.NoError(t, err)
 		require.Empty(t, empty)
 	})

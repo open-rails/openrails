@@ -18,7 +18,7 @@ import (
 func SeedNMIStoredCredentialRefs(ctx context.Context, t testing.TB, qx gen.DBTX, paymentMethodID uuid.UUID) {
 	t.Helper()
 	_, err := qx.Exec(ctx, `
-		UPDATE openrails.payment_methods
+		UPDATE billing.payment_methods
 		SET stored_credential_recurring_ref = $2,
 		    stored_credential_unscheduled_ref = $3
 		WHERE id = $1`,

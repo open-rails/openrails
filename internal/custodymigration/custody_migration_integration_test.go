@@ -85,7 +85,7 @@ func newCustodyFixture(t *testing.T) *custodyFixture {
 	fx.custodian = custodian
 	putSecret(t, svc, custodianSecret(t, custodian), "key_private_"+sfx)
 	t.Cleanup(func() {
-		_, _ = dbi.Pool().Exec(context.Background(), `DELETE FROM openrails.custodians WHERE id = $1`, custodian.ID)
+		_, _ = dbi.Pool().Exec(context.Background(), `DELETE FROM billing.custodians WHERE id = $1`, custodian.ID)
 	})
 
 	// Two NMI gateway accounts. The old one holds its own customer vault; the
@@ -96,17 +96,17 @@ func newCustodyFixture(t *testing.T) *custodyFixture {
 	// A catalog row for the subscriptions to hang off; nothing here is under test.
 	fx.productID, fx.priceID = uuid.New(), uuid.New()
 	_, err = dbi.Pool().Exec(mctx,
-		`INSERT INTO openrails.products (id, merchant_id, key, display_name) VALUES ($1, $2, $3, 'or297 custody')`,
+		`INSERT INTO billing.products (id, merchant_id, key, display_name) VALUES ($1, $2, $3, 'or297 custody')`,
 		fx.productID, dbtest.TestMerchantID.UUID(), "or297-"+sfx)
 	require.NoError(t, err)
 	_, err = dbi.Pool().Exec(mctx,
-		`INSERT INTO openrails.prices (id, merchant_id, product_id, key, amount, currency) VALUES ($1, $2, $3, $4, 1999, 'USD')`,
+		`INSERT INTO billing.prices (id, merchant_id, product_id, key, amount, currency) VALUES ($1, $2, $3, $4, 1999, 'USD')`,
 		fx.priceID, dbtest.TestMerchantID.UUID(), fx.productID, "or297-"+sfx)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		bg := context.Background()
-		_, _ = dbi.Pool().Exec(bg, `DELETE FROM openrails.prices WHERE id = $1`, fx.priceID)
-		_, _ = dbi.Pool().Exec(bg, `DELETE FROM openrails.products WHERE id = $1`, fx.productID)
+		_, _ = dbi.Pool().Exec(bg, `DELETE FROM billing.prices WHERE id = $1`, fx.priceID)
+		_, _ = dbi.Pool().Exec(bg, `DELETE FROM billing.products WHERE id = $1`, fx.productID)
 	})
 	return fx
 }
@@ -145,7 +145,7 @@ func seedPSP(t *testing.T, dbi *db.DB, svc *merchants.Service, env, accountID st
 		return uerr
 	}))
 	t.Cleanup(func() {
-		_, _ = dbi.Pool().Exec(context.Background(), `DELETE FROM openrails.psps WHERE id = $1`, row.ID)
+		_, _ = dbi.Pool().Exec(context.Background(), `DELETE FROM billing.psps WHERE id = $1`, row.ID)
 	})
 	return row
 }
@@ -178,23 +178,23 @@ func (fx *custodyFixture) seedPSPVaultedCard(t *testing.T, vaultID string) (uuid
 	}))
 	// The anchor: an existing credential-on-file sequence that must survive.
 	_, err := fx.db.Pool().Exec(fx.ctx,
-		`UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref = $2, stored_credential_recurring_ref = $3 WHERE id = $1`,
+		`UPDATE billing.payment_methods SET stored_credential_unscheduled_ref = $2, stored_credential_recurring_ref = $3 WHERE id = $1`,
 		methodID, "anchor-unsched-"+vaultID, "anchor-recur-"+vaultID)
 	require.NoError(t, err)
 
 	subID := uuid.New()
 	_, err = fx.db.Pool().Exec(fx.ctx,
-		`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, rail, rail_subscription_id, status, payment_method_id, psp_id, created_at, updated_at)
+		`INSERT INTO billing.subscriptions (id, merchant_id, customer_id, product_id, price_id, rail, rail_subscription_id, status, payment_method_id, psp_id, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, 'nmi', $6, 'active', $7, $8, now(), now())`,
 		subID, dbtest.TestMerchantID.UUID(), customerID, fx.productID, fx.priceID, "railsub-"+vaultID, methodID, fx.oldPSP.ID)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		bg := context.Background()
-		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM openrails.rail_intents WHERE subscription_id = $1`, subID)
-		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM openrails.subscriptions WHERE id = $1`, subID)
-		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM openrails.custody_migrations WHERE payment_method_id = $1`, methodID)
-		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM openrails.payment_methods WHERE id = $1`, methodID)
+		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM billing.rail_intents WHERE subscription_id = $1`, subID)
+		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM billing.subscriptions WHERE id = $1`, subID)
+		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM billing.custody_migrations WHERE payment_method_id = $1`, methodID)
+		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM billing.payment_methods WHERE id = $1`, methodID)
 	})
 	return methodID, subID
 }
@@ -250,7 +250,7 @@ func TestCustodyMigration_PlanThenApply(t *testing.T) {
 	before := fx.method(t, methodID)
 	var subUpdatedBefore time.Time
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		`SELECT updated_at FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&subUpdatedBefore))
+		`SELECT updated_at FROM billing.subscriptions WHERE id = $1`, subID).Scan(&subUpdatedBefore))
 
 	exp := fx.export(custodymigration.ImportedToken{
 		SourceRailCustomerRef: vaultID,
@@ -295,7 +295,7 @@ func TestCustodyMigration_PlanThenApply(t *testing.T) {
 	var subMethod uuid.UUID
 	var subUpdatedAfter time.Time
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		`SELECT payment_method_id, updated_at FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&subMethod, &subUpdatedAfter))
+		`SELECT payment_method_id, updated_at FROM billing.subscriptions WHERE id = $1`, subID).Scan(&subMethod, &subUpdatedAfter))
 	require.Equal(t, methodID, subMethod)
 	require.Equal(t, subUpdatedBefore, subUpdatedAfter, "a custody flip is not a subscription event")
 
@@ -351,7 +351,7 @@ func TestCustodyMigration_RefusesMidDunningAttempt(t *testing.T) {
 
 			// The attempt resolves; the operator re-runs; the card moves.
 			_, err = fx.db.Pool().Exec(fx.ctx,
-				`UPDATE openrails.rail_intents SET status = 'succeeded', executed_at = now() WHERE id = $1`, intentID)
+				`UPDATE billing.rail_intents SET status = 'succeeded', executed_at = now() WHERE id = $1`, intentID)
 			require.NoError(t, err)
 
 			res, err = custodymigration.Migrate(fx.ctx, fx.opts(exp, true))
@@ -394,7 +394,7 @@ func TestCustodyMigration_RefusesUnresolvedFrozenOperation(t *testing.T) {
 
 			// The operation resolves; the operator re-runs; the card moves.
 			_, err = fx.db.Pool().Exec(fx.ctx,
-				`UPDATE openrails.rail_intents SET status = 'succeeded', executed_at = now() WHERE id = $1`, intentID)
+				`UPDATE billing.rail_intents SET status = 'succeeded', executed_at = now() WHERE id = $1`, intentID)
 			require.NoError(t, err)
 
 			res, err = custodymigration.Migrate(fx.ctx, fx.opts(exp, true))
@@ -438,7 +438,7 @@ func TestCustodyMigration_PerRowOutcomes(t *testing.T) {
 	otherVault := "vault-" + uuid.NewString()[:8]
 	otherMethod, _ := fx.seedPSPVaultedCard(t, otherVault)
 	_, err := fx.db.Pool().Exec(fx.ctx,
-		`UPDATE openrails.payment_methods SET custodian = 'basis_theory', custodian_id=$3, rail_method_ref = $2 WHERE id = $1`,
+		`UPDATE billing.payment_methods SET custodian = 'basis_theory', custodian_id=$3, rail_method_ref = $2 WHERE id = $1`,
 		otherMethod, "tok_already_"+uuid.NewString()[:8], fx.custodian.ID)
 	require.NoError(t, err)
 
@@ -461,8 +461,8 @@ func TestCustodyMigration_PerRowOutcomes(t *testing.T) {
 	)
 	t.Cleanup(func() {
 		bg := context.Background()
-		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM openrails.custody_migrations WHERE to_rail_method_ref = $1`, createdToken)
-		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM openrails.payment_methods WHERE rail_method_ref = $1`, createdToken)
+		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM billing.custody_migrations WHERE to_rail_method_ref = $1`, createdToken)
+		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM billing.payment_methods WHERE rail_method_ref = $1`, createdToken)
 	})
 
 	res, err := custodymigration.Migrate(fx.ctx, fx.opts(exp, true))
@@ -610,7 +610,7 @@ func seedChargeIntent(t *testing.T, fx *custodyFixture, subID uuid.UUID, status 
 	t.Helper()
 	id := uuid.New()
 	_, err := fx.db.Pool().Exec(fx.ctx,
-		`INSERT INTO openrails.rail_intents (id, merchant_id, rail, intent_type, subscription_id, idempotency_key, status, origin, origin_reason, psp_id)
+		`INSERT INTO billing.rail_intents (id, merchant_id, rail, intent_type, subscription_id, idempotency_key, status, origin, origin_reason, psp_id)
 		 VALUES ($1, $2, 'nmi', 'manual_rebill', $3, $4, $5, 'system', 'or297 test', $6)`,
 		id, dbtest.TestMerchantID.UUID(), subID, "or297-"+uuid.NewString(), status, fx.oldPSP.ID)
 	require.NoError(t, err)
@@ -624,7 +624,7 @@ func seedFrozenInstrumentIntent(t *testing.T, fx *custodyFixture, methodID uuid.
 	t.Helper()
 	id := uuid.New()
 	_, err := fx.db.Pool().Exec(fx.ctx,
-		`INSERT INTO openrails.rail_intents (id, merchant_id, rail, intent_type, idempotency_key, status, origin, origin_reason, psp_id, payload)
+		`INSERT INTO billing.rail_intents (id, merchant_id, rail, intent_type, idempotency_key, status, origin, origin_reason, psp_id, payload)
 		 VALUES ($1, $2, 'nmi', 'invoice_collection', $3, $4, 'system', 'or297 test', $5, jsonb_build_object('payment_method_id', $6::text))`,
 		id, dbtest.TestMerchantID.UUID(), "or297-frozen-"+uuid.NewString(), status, fx.oldPSP.ID, methodID)
 	require.NoError(t, err)
@@ -635,7 +635,7 @@ func requireMigrationCount(t *testing.T, fx *custodyFixture, methodID uuid.UUID,
 	t.Helper()
 	var n int
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		`SELECT count(*) FROM openrails.custody_migrations WHERE payment_method_id = $1`, methodID).Scan(&n))
+		`SELECT count(*) FROM billing.custody_migrations WHERE payment_method_id = $1`, methodID).Scan(&n))
 	require.Equal(t, want, n)
 }
 
@@ -646,7 +646,7 @@ func migrationRecord(t *testing.T, fx *custodyFixture, methodID uuid.UUID) gen.O
 		`SELECT id, merchant_id, batch_id, payment_method_id, rail, from_custodian, from_custodian_id,
 		        from_rail_customer_ref, from_rail_method_ref, from_psp_id, to_custodian, to_custodian_id,
 		        to_rail_method_ref, to_psp_id, exported_at, outcome, reason, created_at
-		   FROM openrails.custody_migrations WHERE payment_method_id = $1`, methodID).Scan(
+		   FROM billing.custody_migrations WHERE payment_method_id = $1`, methodID).Scan(
 		&rec.ID, &rec.MerchantID, &rec.BatchID, &rec.PaymentMethodID, &rec.Rail, &rec.FromCustodian, &rec.FromCustodianID,
 		&rec.FromRailCustomerRef, &rec.FromRailMethodRef, &rec.FromPspID, &rec.ToCustodian, &rec.ToCustodianID,
 		&rec.ToRailMethodRef, &rec.ToPspID, &rec.ExportedAt, &rec.Outcome, &rec.Reason, &rec.CreatedAt))

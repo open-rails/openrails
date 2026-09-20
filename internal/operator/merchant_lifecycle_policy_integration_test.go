@@ -144,20 +144,20 @@ func TestMerchantCreationPolicy(t *testing.T) {
 		require.False(t, has)
 
 		customerID := seedScoped(t, vaultMerchant.String(),
-			`INSERT INTO openrails.customers (merchant_id, issuer, id) VALUES ($1::uuid, 'test', $2) RETURNING id::text`,
+			`INSERT INTO billing.customers (merchant_id, issuer, id) VALUES ($1::uuid, 'test', $2) RETURNING id::text`,
 			vaultMerchant.String(), subject)
 		pspID := seedScoped(t, vaultMerchant.String(),
-			`INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, key) VALUES ($1::uuid, 'nmi', 'test', 'acct-`+sfx+`', 'vaultpsp') RETURNING id::text`,
+			`INSERT INTO billing.psps (merchant_id, rail, environment, account_id, key) VALUES ($1::uuid, 'nmi', 'test', 'acct-`+sfx+`', 'vaultpsp') RETURNING id::text`,
 			vaultMerchant.String())
 		pmID := seedScoped(t, vaultMerchant.String(), `
-			INSERT INTO openrails.payment_methods (rail, initial_transaction_id, merchant_id, customer_id, psp_id)
+			INSERT INTO billing.payment_methods (rail, initial_transaction_id, merchant_id, customer_id, psp_id)
 			VALUES ('nmi', 'txn-`+sfx+`', $1::uuid, $2::uuid, $3::uuid) RETURNING id::text`,
 			vaultMerchant.String(), customerID, pspID)
 		has, err = embcp.SubjectHasVaultedPaymentMethod(ctx, e.App(), vaultMerchant, subject)
 		require.NoError(t, err)
 		require.True(t, has)
 		seedScoped(t, vaultMerchant.String(),
-			`UPDATE openrails.payment_methods SET parked_at = now() WHERE id = $1::uuid`, pmID)
+			`UPDATE billing.payment_methods SET parked_at = now() WHERE id = $1::uuid`, pmID)
 		has, err = embcp.SubjectHasVaultedPaymentMethod(ctx, e.App(), vaultMerchant, subject)
 		require.NoError(t, err)
 		require.False(t, has, "a parked method is not a usable card on file")

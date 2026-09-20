@@ -88,7 +88,7 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 	require.Error(t, err, "retained former name cannot be reclaimed")
 	var projection, status string
 	var deleted *time.Time
-	require.NoError(t, admin.QueryRow(ctx, `SELECT slug,status,deleted_at FROM openrails.merchants WHERE id=$1`, first.ID.UUID()).Scan(&projection, &status, &deleted))
+	require.NoError(t, admin.QueryRow(ctx, `SELECT slug,status,deleted_at FROM billing.merchants WHERE id=$1`, first.ID.UUID()).Scan(&projection, &status, &deleted))
 	require.Equal(t, old, projection, "resolving a name must not mutate its non-authoritative projection")
 	require.Equal(t, "active", status)
 	require.Nil(t, deleted)
@@ -147,7 +147,7 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 	})
 	require.NoError(t, err)
 	var importedOwner uuid.UUID
-	require.NoError(t, admin.QueryRow(ctx, `SELECT merchant_id FROM openrails.customers WHERE id=$1`, importedCustomer).Scan(&importedOwner))
+	require.NoError(t, admin.QueryRow(ctx, `SELECT merchant_id FROM billing.customers WHERE id=$1`, importedCustomer).Scan(&importedOwner))
 	require.Equal(t, first.ID.UUID(), importedOwner)
 	resolved, canonical, err := hosttools.ResolveMerchantName(ctx, hosttools.MerchantNameOptions{PGXPool: pool, Name: old, NameAuthority: authority})
 	require.NoError(t, err)

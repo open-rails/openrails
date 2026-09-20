@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -49,10 +50,12 @@ type Hosted struct {
 	cfg      hostedConfig
 	handler  atomic.Pointer[http.Handler]
 
-	mu           sync.Mutex
-	runtime      *embed.Runtime
-	controlPlane *controlplane.ControlPlane
-	keysPath     string
+	mu            sync.Mutex
+	runtime       *embed.Runtime
+	controlPlane  *controlplane.ControlPlane
+	keysPath      string
+	workersCancel context.CancelFunc
+	workersDone   chan error
 }
 
 // HostedOption customizes the hosted deployment before it boots.
@@ -139,8 +142,9 @@ func (s *Hosted) Start() {
 	for _, mutate := range s.cfg.configMutators {
 		mutate(cfg)
 	}
-	rt, err := embed.New(h.ctx, embed.Options{Config: cfg, Redis: h.Redis, River: embed.RiverManagedByOpenRails(), RunWorkers: s.cfg.workers})
+	rt, err := embed.New(h.ctx, embed.Options{Config: cfg, Redis: h.Redis, River: embed.RiverManagedByOpenRails()})
 	require.NoError(h.t, err, "hosted embed.New")
+	s.runtime = rt // Stop owns cleanup even if attaching the control plane fails.
 	cp, err := controlplane.Attach(h.ctx, rt, controlplane.Options{
 		HostedPosture: true, PasswordlessLogin: true, PasswordlessAutoRegistration: true,
 		EmailSender: s.Sender, Frontend: authcore.FrontendConfig{BaseURL: s.BaseURL},
@@ -153,6 +157,13 @@ func (s *Hosted) Start() {
 	handler, err := cp.Handler()
 	require.NoError(h.t, err, "hosted handler")
 	s.runtime, s.controlPlane = rt, cp
+	if s.cfg.workers {
+		workersCtx, cancel := context.WithCancel(h.ctx)
+		s.workersCancel = cancel
+		done := make(chan error, 1)
+		s.workersDone = done
+		go func() { done <- rt.RunWorkers(workersCtx) }()
+	}
 	s.handler.Store(&handler)
 }
 
@@ -167,6 +178,18 @@ func (s *Hosted) Stop() {
 	s.handler.Store(nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if s.workersCancel != nil {
+		s.workersCancel()
+		select {
+		case err := <-s.workersDone:
+			if !errors.Is(err, context.Canceled) {
+				require.NoError(s.h.t, err, "hosted workers")
+			}
+		case <-ctx.Done():
+			require.NoError(s.h.t, ctx.Err(), "join hosted workers")
+		}
+		s.workersCancel, s.workersDone = nil, nil
+	}
 	require.NoError(s.h.t, s.runtime.Close(ctx), "close hosted runtime")
 	s.runtime, s.controlPlane = nil, nil
 }

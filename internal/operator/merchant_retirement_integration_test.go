@@ -42,7 +42,7 @@ func TestMerchantRetirementBoundary(t *testing.T) {
 		t.Helper()
 		res, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{Slug: slug})
 		require.NoError(t, err)
-		_, err = pool.Exec(ctx, `UPDATE openrails.merchants SET created_at=now()-make_interval(secs => $2) WHERE id=$1`,
+		_, err = pool.Exec(ctx, `UPDATE billing.merchants SET created_at=now()-make_interval(secs => $2) WHERE id=$1`,
 			res.MerchantID.UUID(), age.Seconds())
 		require.NoError(t, err)
 		return *res
@@ -54,7 +54,7 @@ func TestMerchantRetirementBoundary(t *testing.T) {
 		defer func() { _ = tx.Rollback(ctx) }()
 		_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, id.String())
 		require.NoError(t, err)
-		_, err = tx.Exec(ctx, `INSERT INTO openrails.customers (merchant_id, issuer, id) VALUES ($1, 'test', $2)`, id.UUID(), uuid.NewString())
+		_, err = tx.Exec(ctx, `INSERT INTO billing.customers (merchant_id, issuer, id) VALUES ($1, 'test', $2)`, id.UUID(), uuid.NewString())
 		require.NoError(t, err)
 		require.NoError(t, tx.Commit(ctx))
 	}
@@ -134,10 +134,10 @@ func TestMerchantRetirementBoundary(t *testing.T) {
 		var status string
 		var released bool
 		require.NoError(t, pool.QueryRow(ctx, `SELECT status, group_release_completed_at IS NOT NULL
-			FROM openrails.merchants WHERE id=$1`, unused.MerchantID.UUID()).Scan(&status, &released))
+			FROM billing.merchants WHERE id=$1`, unused.MerchantID.UUID()).Scan(&status, &released))
 		require.Equal(t, "deleted", status)
 		require.True(t, released)
-		_, err = pool.Exec(ctx, `UPDATE openrails.merchants SET deleted_at=NULL,status='active' WHERE id=$1`, unused.MerchantID.UUID())
+		_, err = pool.Exec(ctx, `UPDATE billing.merchants SET deleted_at=NULL,status='active' WHERE id=$1`, unused.MerchantID.UUID())
 		require.ErrorContains(t, err, "cannot be restored")
 
 		again, err := embcp.RetireUnusedMerchant(ctx, e.App(), unused.MerchantID, unused.GroupID)

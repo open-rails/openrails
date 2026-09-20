@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"net/http"
 	"testing"
 	"time"
@@ -14,7 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
@@ -89,7 +89,7 @@ func TestFindingsGaugesFreeloaderDetectorEndToEnd(t *testing.T) {
 	// Freeloader: a live STANDING window justified by nothing (no sub row).
 	var entID uuid.UUID
 	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
-		`INSERT INTO openrails.entitlements (merchant_id, customer_id, entitlement, start_at, end_at, source_type, source_id)
+		`INSERT INTO billing.entitlements (merchant_id, customer_id, entitlement, start_at, end_at, source_type, source_id)
 		 VALUES ($1, $2, 'premium', now() - interval '30 days', NULL, 'subscription', $3) RETURNING id`,
 		fx.merchant, fx.customer, uuid.New()).Scan(&entID))
 
@@ -111,7 +111,7 @@ func TestFindingsGaugesFreeloaderDetectorEndToEnd(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var revokedAt *time.Time
 	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
-		`SELECT revoked_at FROM openrails.entitlements WHERE id = $1`, entID).Scan(&revokedAt))
+		`SELECT revoked_at FROM billing.entitlements WHERE id = $1`, entID).Scan(&revokedAt))
 	require.NotNil(t, revokedAt, "approve executed the revoke")
 
 	// Next sweep re-measures: condition gone, finding stays fixed, gauge zero.
@@ -134,7 +134,7 @@ func TestFindingsGaugesVerificationPressure(t *testing.T) {
 
 	seedUnknown := func(productID, priceID uuid.UUID, pastBy time.Duration) uuid.UUID {
 		subID := uuid.New()
-		fx.exec(`INSERT INTO openrails.subscriptions
+		fx.exec(`INSERT INTO billing.subscriptions
 		          (id, price_id, product_id, status, rail, rail_subscription_id,
 		           current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
 		        VALUES ($1, $2, $3, 'unknown', 'nmi', $4, $5, $6, $5, $7, $8, $9)`,
@@ -153,7 +153,7 @@ func TestFindingsGaugesVerificationPressure(t *testing.T) {
 	assert.Zero(t, probe.Gauges.TotalOpen)
 
 	// Verification resolves the oldest sub (renewed) -> count and max age drop.
-	fx.exec(`UPDATE openrails.subscriptions SET status = 'active', current_period_ends_at = $2 WHERE id = $1`, oldest, now.Add(30*24*time.Hour))
+	fx.exec(`UPDATE billing.subscriptions SET status = 'active', current_period_ends_at = $2 WHERE id = $1`, oldest, now.Add(30*24*time.Hour))
 	probe = fx.gauges()
 	assert.EqualValues(t, 1, probe.Gauges.VerificationPressure.Count)
 	assert.EqualValues(t, 3600, probe.Gauges.VerificationPressure.MaxAgeSeconds)
@@ -169,7 +169,7 @@ func TestFindingsDuplicateOwnershipDetectorEndToEnd(t *testing.T) {
 	pay1, pay2 := uuid.New(), uuid.New()
 	now := time.Now().UTC()
 	seedPay := func(id uuid.UUID, txn string, at time.Time) {
-		fx.exec(`INSERT INTO openrails.payments
+		fx.exec(`INSERT INTO billing.payments
 		          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, money_movement, psp_id)
 		        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6, 'rail', $7)`,
 			id, fx.price, txn, at, fx.customer, fx.merchant, fx.pspFor("nmi"))
@@ -177,7 +177,7 @@ func TestFindingsDuplicateOwnershipDetectorEndToEnd(t *testing.T) {
 	// Two months apart: invisible to the month-scoped provider_charge check.
 	seedPay(pay1, "dup-1-"+uuid.NewString()[:8], now.Add(-65*24*time.Hour))
 	seedPay(pay2, "dup-2-"+uuid.NewString()[:8], now.Add(-24*time.Hour))
-	gl := grants.New(gen.New(fx.dbi.Pool()), fx.merchant)
+	gl := grants.New(dbtest.Queries(fx.dbi.Pool()), fx.merchant)
 	for _, p := range []uuid.UUID{pay1, pay2} {
 		pid := p
 		_, err := gl.Grant(fx.ctx, grants.GrantInput{
@@ -243,10 +243,10 @@ func (fx *findingsFixture) seedGrantableProduct(feature string, hours int) (prod
 	fx.t.Helper()
 	productID, priceID = uuid.New(), uuid.New()
 	sfx := uuid.NewString()[:8]
-	fx.exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id)
+	fx.exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id)
 	         VALUES ($1, $2, $2, jsonb_build_object($3::text, NULL), $4)`,
 		productID, "grantable-"+sfx, feature, fx.merchant)
-	fx.exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+	fx.exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	         VALUES ($1, $2, 10000000, 'USD', $3, true, $4)`, priceID, productID, hours, fx.merchant)
 	return productID, priceID
 }
@@ -270,7 +270,7 @@ func TestFindingsGaugesOrphanedMembersDetectorEndToEnd(t *testing.T) {
 
 	_, priceID := fx.seedGrantableProduct("orph-feat-"+uuid.NewString()[:8], 720)
 	payID := uuid.New()
-	fx.exec(`INSERT INTO openrails.payments
+	fx.exec(`INSERT INTO billing.payments
 	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, money_movement, psp_id)
 	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', now() - interval '3 days', $4, $5, 'rail', $6)`,
 		payID, priceID, "orphpay-"+uuid.NewString()[:8], fx.customer, fx.merchant, fx.pspFor("nmi"))
@@ -324,7 +324,7 @@ func TestFindingsFreeloaderEpisodes(t *testing.T) {
 			ca := periodEnd
 			cancelledAt, cancelType = &ca, &ct
 		}
-		fx.exec(`INSERT INTO openrails.subscriptions
+		fx.exec(`INSERT INTO billing.subscriptions
 		          (id, price_id, product_id, status, rail, rail_subscription_id,
 		           current_period_starts_at, current_period_ends_at, started_at, ended_at,
 		           next_retry_at, cancelled_at, cancel_type, customer_id, merchant_id, psp_id)
@@ -340,7 +340,7 @@ func TestFindingsFreeloaderEpisodes(t *testing.T) {
 			r := "episode test revocation"
 			reason = &r
 		}
-		fx.exec(`INSERT INTO openrails.entitlements
+		fx.exec(`INSERT INTO billing.entitlements
 		          (customer_id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, merchant_id)
 		        VALUES ($1,$2,$3,NULL,$4,'subscription',$5,$6,$7)`,
 			fx.customer, feature, now.Add(-40*24*time.Hour), subID, revokedAt, reason, fx.merchant)
@@ -371,7 +371,7 @@ func TestFindingsFreeloaderEpisodes(t *testing.T) {
 	}
 	got := map[string]episode{}
 	rows, err := fx.dbi.Pool().Query(fx.ctx,
-		`SELECT entitlement, cause, open, days FROM openrails.freeloader_episodes WHERE merchant_id=$1`, fx.merchant)
+		`SELECT entitlement, cause, open, days FROM billing.freeloader_episodes WHERE merchant_id=$1`, fx.merchant)
 	require.NoError(t, err)
 	defer rows.Close()
 	for rows.Next() {
@@ -423,7 +423,7 @@ func TestFindingsOrphanedEpisodes(t *testing.T) {
 			ct := "user"
 			cancelledAt, cancelType = endedAt, &ct
 		}
-		fx.exec(`INSERT INTO openrails.subscriptions
+		fx.exec(`INSERT INTO billing.subscriptions
 		          (id, price_id, product_id, status, rail, rail_subscription_id,
 		           current_period_starts_at, current_period_ends_at, started_at, ended_at,
 		           cancelled_at, cancel_type, customer_id, merchant_id, psp_id)
@@ -440,20 +440,20 @@ func TestFindingsOrphanedEpisodes(t *testing.T) {
 	// CLOSED span [revoked -15d, paid-through -5d).
 	pB, prB := fx.seedGrantableProduct("oe-b-"+sfx, 720)
 	subB := seedSub(pB, prB, "cancelled", now.Add(-30*24*time.Hour), now.Add(-5*24*time.Hour), ts(-5*24*time.Hour))
-	fx.exec(`INSERT INTO openrails.entitlements
+	fx.exec(`INSERT INTO billing.entitlements
 	          (customer_id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, merchant_id)
 	        VALUES ($1,$2,$3,NULL,$4,'subscription',$5,'wrongly revoked early',$6)`,
 		fx.customer, "oe-b-"+sfx, now.Add(-30*24*time.Hour), subB, now.Add(-15*24*time.Hour), fx.merchant)
 	// c: completed one-off purchase (30-day window promised), no window -> OPEN, ~3 days.
 	_, prC := fx.seedGrantableProduct("oe-c-"+sfx, 720)
-	fx.exec(`INSERT INTO openrails.payments
+	fx.exec(`INSERT INTO billing.payments
 	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, money_movement, psp_id)
 	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', now() - interval '3 days', $4, $5, 'rail', $6)`,
 		uuid.New(), prC, "oe-pay-"+uuid.NewString()[:8], fx.customer, fx.merchant, fx.pspFor("nmi"))
 	// d (negative): active sub fully covered by a standing window.
 	pD, prD := fx.seedGrantableProduct("oe-d-"+sfx, 720)
 	subD := seedSub(pD, prD, "active", now.Add(-10*24*time.Hour), now.Add(20*24*time.Hour), nil)
-	fx.exec(`INSERT INTO openrails.entitlements (customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
+	fx.exec(`INSERT INTO billing.entitlements (customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 	         VALUES ($1,$2,$3,NULL,$4,'subscription',$5)`,
 		fx.customer, "oe-d-"+sfx, now.Add(-10*24*time.Hour), subD, fx.merchant)
 	// e (negative): paying sub for a product that promises NOTHING (spec-less
@@ -467,7 +467,7 @@ func TestFindingsOrphanedEpisodes(t *testing.T) {
 	}
 	got := map[string]episode{} // keyed by source_id
 	rows, err := fx.dbi.Pool().Query(fx.ctx,
-		`SELECT source_id, source_type, open, days FROM openrails.orphaned_episodes WHERE merchant_id=$1`, fx.merchant)
+		`SELECT source_id, source_type, open, days FROM billing.orphaned_episodes WHERE merchant_id=$1`, fx.merchant)
 	require.NoError(t, err)
 	defer rows.Close()
 	for rows.Next() {

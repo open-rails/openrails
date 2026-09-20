@@ -24,10 +24,10 @@ func TestSelfInvoicesHTTP_ReflectsReceivablePaymentsAndScopesToSubject(t *testin
 	customerA := suite.ensureCustomer(ctx, subjectA)
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", customerA)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", customerA)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", customerA)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", customerA)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.invoice_payments WHERE customer_id = $1", customerA)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", customerA)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", customerA)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.money_settings WHERE customer_id = $1", customerA)
 	})
 
 	ms := suite.App.Runtime.MoneyService

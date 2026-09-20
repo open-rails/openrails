@@ -197,7 +197,7 @@ func TestHostedPosture_RegisterVerifyProvision(t *testing.T) {
 	var rowID, rowGroupID string
 	var rowDisplayName *string
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT id::text, permission_group_id, display_name FROM openrails.merchants WHERE slug = $1 AND deleted_at IS NULL`,
+		`SELECT id::text, permission_group_id, display_name FROM billing.merchants WHERE slug = $1 AND deleted_at IS NULL`,
 		slug).Scan(&rowID, &rowGroupID, &rowDisplayName))
 	require.Equal(t, res1.MerchantID.String(), rowID)
 	require.Equal(t, res1.GroupID, rowGroupID)
@@ -205,12 +205,12 @@ func TestHostedPosture_RegisterVerifyProvision(t *testing.T) {
 
 	require.NoError(t, embcp.SetMerchantDisplayName(ctx, e.App(), res1.MerchantID, "  SaaS Merchant  "))
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT display_name FROM openrails.merchants WHERE id = $1::uuid`, res1.MerchantID.String()).Scan(&rowDisplayName))
+		`SELECT display_name FROM billing.merchants WHERE id = $1::uuid`, res1.MerchantID.String()).Scan(&rowDisplayName))
 	require.NotNil(t, rowDisplayName)
 	require.Equal(t, "SaaS Merchant", *rowDisplayName)
 	require.NoError(t, embcp.SetMerchantDisplayName(ctx, e.App(), res1.MerchantID, "Repaired Merchant"))
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT display_name FROM openrails.merchants WHERE id = $1::uuid`, res1.MerchantID.String()).Scan(&rowDisplayName))
+		`SELECT display_name FROM billing.merchants WHERE id = $1::uuid`, res1.MerchantID.String()).Scan(&rowDisplayName))
 	require.NotNil(t, rowDisplayName)
 	require.Equal(t, "Repaired Merchant", *rowDisplayName)
 	require.ErrorIs(t,

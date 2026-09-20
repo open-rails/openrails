@@ -154,10 +154,10 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	)
 	err = h.Pool().QueryRow(ctx, `
 		SELECT key, display_name, description, entitlements_spec
-          FROM openrails.products
+          FROM billing.products
 		 WHERE merchant_id = $1::uuid AND key = $2
 	`, dbtest.TestMerchantID.String(), productKey).Scan(&dbProductKey, &dbDisplayName, &dbDescription, &entitlementsSpec)
-	require.NoError(t, err, "product metadata must be persisted in openrails.products")
+	require.NoError(t, err, "product metadata must be persisted in billing.products")
 	require.Equal(t, productKey, dbProductKey)
 	require.Equal(t, displayName, dbDisplayName)
 	require.Equal(t, description, dbDescription)
@@ -237,14 +237,14 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 	payerID := payer.UUID()
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, payerID.String())
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payerID)
 	})
 
 	// Granted benefit: the entitlement OpenRails grants from the catalog product.
-	ledger := grants.New(gen.New(pool), dbtest.TestMerchantID.UUID())
+	ledger := grants.New(dbtest.Queries(pool), dbtest.TestMerchantID.UUID())
 	g, err := ledger.Grant(ctx, grants.GrantInput{
 		Customer: payerID,
 		Product:  &productID,
@@ -309,13 +309,13 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 	var paymentID uuid.UUID
 	var snapshot []byte
 	err = pool.QueryRow(ctx, `
-		INSERT INTO openrails.payments
+		INSERT INTO billing.payments
 			(merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, entitlements_spec_snapshot, psp_id)
 		VALUES ($1::uuid, $2, $3, 'solana', $4, $5, $5, 'USD', 'completed', $6::jsonb, $7)
 		RETURNING id, entitlements_spec_snapshot
 	`, dbtest.TestMerchantID.String(), payerID, priceID, reference, int64(19_990_000),
 		`{"entitlements":["`+entitlement+`"]}`, solanaPSP).Scan(&paymentID, &snapshot)
-	require.NoError(t, err, "Solana payment + benefit snapshot recorded in openrails.payments")
+	require.NoError(t, err, "Solana payment + benefit snapshot recorded in billing.payments")
 	require.NotEqual(t, uuid.Nil, paymentID)
 	require.Contains(t, string(snapshot), entitlement,
 		"benefit snapshot for the Solana payment is held in OpenRails DB, keyed to the on-chain reference id")

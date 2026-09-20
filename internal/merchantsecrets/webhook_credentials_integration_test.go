@@ -33,7 +33,7 @@ func TestWebhookCredentialsRequireEncryption(t *testing.T) {
 		_, err = backend.Secrets.Put(ctx, dbtest.TestMerchantID, name, "https://hooks.example/never-persist-this")
 		require.ErrorContains(t, err, "ENCRYPTION_MASTER_KEY")
 		var count int
-		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.merchant_secrets WHERE merchant_id=$1 AND name=$2`, dbtest.TestMerchantID.UUID(), name).Scan(&count))
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.merchant_secrets WHERE merchant_id=$1 AND name=$2`, dbtest.TestMerchantID.UUID(), name).Scan(&count))
 		require.Zero(t, count)
 	}
 }

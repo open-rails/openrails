@@ -41,7 +41,7 @@ func TestCustodianStorePlaneUnderEnforcingRLS(t *testing.T) {
 	super := db.WrapPool(superRaw, config.DefaultSchema)
 	for id, slug := range map[uuid.UUID]string{ownerID: "or880-owner-" + suffix, otherID: "or880-other-" + suffix} {
 		_, err = super.Exec(ctx,
-			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1::uuid, $2, 'active')`, id, slug)
+			`INSERT INTO billing.merchants (id, slug, status) VALUES ($1::uuid, $2, 'active')`, id, slug)
 		require.NoError(t, err)
 	}
 

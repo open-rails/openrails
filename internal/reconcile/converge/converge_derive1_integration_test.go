@@ -42,12 +42,12 @@ func TestConverge_DeriveGrantMissing_Subscription(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "d1-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
+		exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "d1-"+sfx, merchantID)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "mobius")
-		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at, psp_id)
+		exec(`INSERT INTO billing.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at, psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'active','mobius',$6,$6,$7,$8)`, subActive, merchantID, custActive, prod, price, start, end, pspID)
-		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at, psp_id)
+		exec(`INSERT INTO billing.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at, psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'pending','mobius',$6,$6,$7,$8)`, subPending, merchantID, custPending, prod, price, start, end, pspID)
 		return nil
 	}))
@@ -55,13 +55,13 @@ func TestConverge_DeriveGrantMissing_Subscription(t *testing.T) {
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for _, c := range []uuid.UUID{custActive, custPending} {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key LIKE 'subscription:%'`, merchantID)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key LIKE 'subscription:%'`, merchantID)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
 			}
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=ANY($1)`, []uuid.UUID{subActive, subPending})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, prod)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=ANY($1)`, []uuid.UUID{subActive, subPending})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, price)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, prod)
 			return nil
 		})
 	})
@@ -69,14 +69,14 @@ func TestConverge_DeriveGrantMissing_Subscription(t *testing.T) {
 	liveGrants := func(ctx context.Context, c uuid.UUID) int {
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2 AND event='grant' AND source_type='subscription'`,
+			`SELECT count(*) FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2 AND event='grant' AND source_type='subscription'`,
 			merchantID, c).Scan(&n))
 		return n
 	}
 	liveEnts := func(ctx context.Context, c uuid.UUID) int {
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND revoked_at IS NULL AND deleted_at IS NULL`,
+			`SELECT count(*) FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND revoked_at IS NULL AND deleted_at IS NULL`,
 			merchantID, c).Scan(&n))
 		return n
 	}
@@ -92,7 +92,7 @@ func TestConverge_DeriveGrantMissing_Subscription(t *testing.T) {
 		var entStart, entEnd time.Time
 		var srcType string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT start_at, end_at, source_type FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
+			`SELECT start_at, end_at, source_type FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
 			merchantID, custActive).Scan(&entStart, &entEnd, &srcType))
 		require.WithinDuration(t, start, entStart, time.Second)
 		require.WithinDuration(t, end, entEnd, time.Second)
@@ -141,25 +141,25 @@ func TestConverge_DeriveSubscription_OverlapPreservesSourceWindow(t *testing.T) 
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "d1o-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
+		exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "d1o-"+sfx, merchantID)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "mobius")
-		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at, psp_id)
+		exec(`INSERT INTO billing.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, started_at, current_period_starts_at, current_period_ends_at, psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'active','mobius',$6,$6,$7,$8)`, sub, merchantID, customer, prod, price, start, end, pspID)
 		// Pre-existing live entitlement that OVERLAPS the subscription window.
-		exec(`INSERT INTO openrails.entitlements (id, merchant_id, customer_id, entitlement, start_at, end_at, source_type, source_id)
+		exec(`INSERT INTO billing.entitlements (id, merchant_id, customer_id, entitlement, start_at, end_at, source_type, source_id)
 		      VALUES ($1,$2,$3,'premium',$4,$5,'admin',$6)`, uuid.New(), merchantID, customer, start.Add(-24*time.Hour), end.Add(24*time.Hour), uuid.New())
 		return nil
 	}))
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+sub.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, sub)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, prod)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+sub.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, sub)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, price)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, prod)
 			return nil
 		})
 	})
@@ -173,17 +173,17 @@ func TestConverge_DeriveSubscription_OverlapPreservesSourceWindow(t *testing.T) 
 		var grantN int
 		var gStart, gEnd time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2 AND source_type='subscription' AND event='grant'`,
+			`SELECT count(*) FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2 AND source_type='subscription' AND event='grant'`,
 			merchantID, customer).Scan(&grantN))
 		require.Equal(t, 1, grantN, "overlapping window → grant STILL recorded (#695 provenance)")
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT starts_at, ends_at FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2 AND source_type='subscription' AND event='grant'`,
+			`SELECT starts_at, ends_at FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2 AND source_type='subscription' AND event='grant'`,
 			merchantID, customer).Scan(&gStart, &gEnd))
 		require.WithinDuration(t, start, gStart, time.Second, "grant carries the frozen subscription window")
 		require.WithinDuration(t, end, gEnd, time.Second)
 		var entN int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND grant_id IS NOT NULL`,
+			`SELECT count(*) FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND grant_id IS NOT NULL`,
 			merchantID, customer).Scan(&entN))
 		require.Equal(t, 1, entN, "the overlapping grant retains its own full source window")
 		return nil
@@ -233,37 +233,37 @@ func TestConverge_DeriveFlap_StandingWindowPlusCancelledSub(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
+		exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prod, "flap-prod-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
+		exec(`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
 		// ACTIVE auto-renew sub in a RUNNING period, with the #691 shape already
 		// projected: bounded per-period grant + ONE standing window.
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'active','ccbill',$6,$7,$8,$9,$10)`,
 			activeSub, merchantID, cust, prod, price, "flap-live-"+sfx, subStart, periodStart, periodEnd, pspID)
-		exec(`INSERT INTO openrails.grants (id,merchant_id,customer_id,kind,source_type,source_id,event,spec_snapshot,starts_at,ends_at)
+		exec(`INSERT INTO billing.grants (id,merchant_id,customer_id,kind,source_type,source_id,event,spec_snapshot,starts_at,ends_at)
 		      VALUES ($1,$2,$3,'entitlement','subscription',$4,'grant',$5,$6,$7)`,
 			activeGrant, merchantID, cust, activeSub.String(), []byte(`{"entitlements":["`+feat+`"]}`), periodStart, periodEnd)
-		exec(`INSERT INTO openrails.entitlements (id,merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type,grant_id)
+		exec(`INSERT INTO billing.entitlements (id,merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type,grant_id)
 		      VALUES ($1,$2,$3,$4,$5,NULL,$6,'subscription',$7)`, standingEnt, merchantID, cust, feat, subStart, activeSub, activeGrant)
 		// OLD cancelled sub, same product/feature, historical period, NO grant —
 		// the host-one dual-history import shape.
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at,psp_id)
+		exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$8,'user',$8,$9)`,
 			cancelledSub, merchantID, cust, prod, price, "flap-old-"+sfx, oldStart, oldEnd, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
 				merchantID, []string{"subscription:" + activeSub.String(), "subscription:" + cancelledSub.String()})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=ANY($1)`, []uuid.UUID{activeSub, cancelledSub})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, prod)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=ANY($1)`, []uuid.UUID{activeSub, cancelledSub})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, price)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, prod)
 			return nil
 		})
 	})
@@ -272,12 +272,12 @@ func TestConverge_DeriveFlap_StandingWindowPlusCancelledSub(t *testing.T) {
 		t.Helper()
 		var endAt, revokedAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT end_at, revoked_at FROM openrails.entitlements WHERE id=$1`, standingEnt).Scan(&endAt, &revokedAt))
+			`SELECT end_at, revoked_at FROM billing.entitlements WHERE id=$1`, standingEnt).Scan(&endAt, &revokedAt))
 		require.Nil(t, endAt, "standing window stays open-ended")
 		require.Nil(t, revokedAt, "standing window never revoked")
 		var entN int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust).Scan(&entN))
+			`SELECT count(*) FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust).Scan(&entN))
 		require.Equal(t, 2, entN, "the bounded source and standing source both retain their windows")
 	}
 
@@ -290,12 +290,12 @@ func TestConverge_DeriveFlap_StandingWindowPlusCancelledSub(t *testing.T) {
 		require.Equal(t, 1, res.AutoFixed)
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.subscription.missing' AND subject_key=$2`,
+			`SELECT status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.subscription.missing' AND subject_key=$2`,
 			merchantID, "subscription:"+cancelledSub.String()).Scan(&status))
 		require.Equal(t, "auto_fixed", status)
 		var gStart, gEnd time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT starts_at, ends_at FROM openrails.grants WHERE merchant_id=$1 AND source_type='subscription' AND source_id=$2 AND event='grant'`,
+			`SELECT starts_at, ends_at FROM billing.grants WHERE merchant_id=$1 AND source_type='subscription' AND source_id=$2 AND event='grant'`,
 			merchantID, cancelledSub.String()).Scan(&gStart, &gEnd))
 		require.WithinDuration(t, oldStart, gStart, time.Second, "grant freezes the historical period")
 		require.WithinDuration(t, oldEnd, gEnd, time.Second)
@@ -348,27 +348,27 @@ func TestConverge_DeriveFlap_StandingWindowPlusWalletPayment(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
+		exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			subProd, "wflap-sub-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
+		exec(`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			subPrice, subProd, merchantID)
 		ccbillPSP := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'active','ccbill',$6,$7,$8,$9,$10)`,
 			activeSub, merchantID, cust, subProd, subPrice, "wflap-live-"+sfx, subStart, periodStart, periodEnd, ccbillPSP)
-		exec(`INSERT INTO openrails.grants (id,merchant_id,customer_id,kind,source_type,source_id,event,spec_snapshot,starts_at,ends_at)
+		exec(`INSERT INTO billing.grants (id,merchant_id,customer_id,kind,source_type,source_id,event,spec_snapshot,starts_at,ends_at)
 		      VALUES ($1,$2,$3,'entitlement','subscription',$4,'grant',$5,$6,$7)`,
 			activeGrant, merchantID, cust, activeSub.String(), []byte(`{"entitlements":["`+feat+`"]}`), periodStart, periodEnd)
-		exec(`INSERT INTO openrails.entitlements (id,merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type,grant_id)
+		exec(`INSERT INTO billing.entitlements (id,merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type,grant_id)
 		      VALUES ($1,$2,$3,$4,$5,NULL,$6,'subscription',$7)`, standingEnt, merchantID, cust, feat, subStart, activeSub, activeGrant)
 		// Historical solana wallet payment for a one-off product granting the SAME
 		// feature; its stored expiration window sits inside the standing window.
-		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
+		exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			oneOffProd, "wflap-oneoff-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`,
+		exec(`INSERT INTO billing.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`,
 			oneOffPrice, oneOffProd, merchantID)
 		solanaPSP := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "solana")
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, metadata, psp_id)
+		exec(`INSERT INTO billing.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, metadata, psp_id)
 		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'USD','completed',$6,$7,$8)`,
 			pay, merchantID, cust, oneOffPrice, "wflap-"+sfx, purchased,
 			`{"expiration_rfc3339":"`+expires.Format(time.RFC3339)+`"}`, solanaPSP)
@@ -376,14 +376,14 @@ func TestConverge_DeriveFlap_StandingWindowPlusWalletPayment(t *testing.T) {
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
 				merchantID, []string{"subscription:" + activeSub.String(), "payment:" + pay.String()})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=$1`, pay)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, activeSub)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=ANY($1)`, []uuid.UUID{subPrice, oneOffPrice})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=ANY($1)`, []uuid.UUID{subProd, oneOffProd})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE id=$1`, pay)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, activeSub)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=ANY($1)`, []uuid.UUID{subPrice, oneOffPrice})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=ANY($1)`, []uuid.UUID{subProd, oneOffProd})
 			return nil
 		})
 	})
@@ -398,14 +398,14 @@ func TestConverge_DeriveFlap_StandingWindowPlusWalletPayment(t *testing.T) {
 		var gStart, gEnd time.Time
 		var paymentID uuid.UUID
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT starts_at, ends_at, payment_id FROM openrails.grants WHERE merchant_id=$1 AND source_type='purchase' AND source_id=$2 AND event='grant'`,
+			`SELECT starts_at, ends_at, payment_id FROM billing.grants WHERE merchant_id=$1 AND source_type='purchase' AND source_id=$2 AND event='grant'`,
 			merchantID, pay.String()).Scan(&gStart, &gEnd, &paymentID))
 		require.WithinDuration(t, purchased, gStart, time.Second, "grant freezes the stored wallet window")
 		require.WithinDuration(t, expires, gEnd, time.Second)
 		require.Equal(t, pay, paymentID, "payment-linked so the refund check sees it")
 		var entN int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust).Scan(&entN))
+			`SELECT count(*) FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust).Scan(&entN))
 		require.Equal(t, 2, entN, "the paid wallet window is preserved alongside standing access")
 		return nil
 	}))
@@ -418,7 +418,7 @@ func TestConverge_DeriveFlap_StandingWindowPlusWalletPayment(t *testing.T) {
 		require.Zero(t, res.Findings, "repeat sweep emits zero findings (no flap)")
 		var endAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT end_at FROM openrails.entitlements WHERE id=$1`, standingEnt).Scan(&endAt))
+			`SELECT end_at FROM billing.entitlements WHERE id=$1`, standingEnt).Scan(&endAt))
 		require.Nil(t, endAt, "standing window intact")
 		return nil
 	}))
@@ -447,24 +447,24 @@ func TestConverge_DeriveGrantMissing_CancelledSubNonOverlapped(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
+		exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prod, "nov-prod-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
+		exec(`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at,psp_id)
+		exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$8,'user',$8,$9)`,
 			sub, merchantID, cust, prod, price, "nov-"+sfx, oldStart, oldEnd, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+sub.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, sub)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, prod)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+sub.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, sub)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, price)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, prod)
 			return nil
 		})
 	})
@@ -476,7 +476,7 @@ func TestConverge_DeriveGrantMissing_CancelledSubNonOverlapped(t *testing.T) {
 		var entStart, entEnd time.Time
 		var srcType string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT start_at, end_at, source_type FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement=$3 AND revoked_at IS NULL`,
+			`SELECT start_at, end_at, source_type FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement=$3 AND revoked_at IS NULL`,
 			merchantID, cust, feat).Scan(&entStart, &entEnd, &srcType))
 		require.WithinDuration(t, oldStart, entStart, time.Second, "bounded window materialized")
 		require.WithinDuration(t, oldEnd, entEnd, time.Second)
@@ -524,42 +524,42 @@ func TestConverge_DeriveGrantMissing_UnknownSubscription(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
+		exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prodAuto, "unk-auto-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
+		exec(`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			priceAuto, prodAuto, merchantID)
-		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
+		exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prodBounded, "unk-bnd-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,false,$3)`,
+		exec(`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,false,$3)`,
 			priceBounded, prodBounded, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
 		// AUTO-RENEW sub imported as unknown with a stale (past) stored period.
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$7,$7,$8,$9)`,
 			subAuto, merchantID, custAuto, prodAuto, priceAuto, "unk-auto-"+sfx, start, pastEnd, pspID)
 		// NON-renewing unknown, same stale period.
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$7,$7,$8,$9)`,
 			subBounded, merchantID, custBounded, prodBounded, priceBounded, "unk-bnd-"+sfx, start, pastEnd, pspID)
 		// Unknown with NO window evidence: no period bounds, no ended_at.
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,psp_id)
+		exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$7,$8)`,
 			subBare, merchantID, custBare, prodAuto, priceAuto, "unk-bare-"+sfx, start, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
 				merchantID, []string{"subscription:" + subAuto.String(), "subscription:" + subBounded.String(), "subscription:" + subBare.String(),
 					"customer:" + custAuto.String(), "customer:" + custBounded.String(), "customer:" + custBare.String()})
 			for _, c := range []uuid.UUID{custAuto, custBounded, custBare} {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notifications WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.notifications WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
 			}
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=ANY($1)`, []uuid.UUID{subAuto, subBounded, subBare})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=ANY($1)`, []uuid.UUID{priceAuto, priceBounded})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=ANY($1)`, []uuid.UUID{prodAuto, prodBounded})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=ANY($1)`, []uuid.UUID{subAuto, subBounded, subBare})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=ANY($1)`, []uuid.UUID{priceAuto, priceBounded})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=ANY($1)`, []uuid.UUID{prodAuto, prodBounded})
 			return nil
 		})
 	})
@@ -567,7 +567,7 @@ func TestConverge_DeriveGrantMissing_UnknownSubscription(t *testing.T) {
 	liveNow := func(ctx context.Context, c uuid.UUID) int {
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2
+			`SELECT count(*) FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2
 			   AND revoked_at IS NULL AND deleted_at IS NULL
 			   AND start_at <= now() AND (end_at IS NULL OR end_at > now())`,
 			merchantID, c).Scan(&n))
@@ -581,14 +581,14 @@ func TestConverge_DeriveGrantMissing_UnknownSubscription(t *testing.T) {
 		require.Equal(t, 1, res.AutoFixed, "derive.subscription.missing auto-fixed for the unknown sub")
 		var gStart, gEnd time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT starts_at, ends_at FROM openrails.grants WHERE merchant_id=$1 AND source_type='subscription' AND source_id=$2 AND event='grant'`,
+			`SELECT starts_at, ends_at FROM billing.grants WHERE merchant_id=$1 AND source_type='subscription' AND source_id=$2 AND event='grant'`,
 			merchantID, subAuto.String()).Scan(&gStart, &gEnd))
 		require.WithinDuration(t, start, gStart, time.Second, "grant freezes the stored period")
 		require.WithinDuration(t, pastEnd, gEnd, time.Second)
 		var entStart time.Time
 		var endAt, revokedAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT start_at, end_at, revoked_at FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement=$3 AND deleted_at IS NULL`,
+			`SELECT start_at, end_at, revoked_at FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement=$3 AND deleted_at IS NULL`,
 			merchantID, custAuto, feat).Scan(&entStart, &endAt, &revokedAt))
 		require.Nil(t, endAt, "auto-renew unknown projects a STANDING window (fail-open)")
 		require.Nil(t, revokedAt)
@@ -606,7 +606,7 @@ func TestConverge_DeriveGrantMissing_UnknownSubscription(t *testing.T) {
 		require.Equal(t, 2, res.AutoFixed)
 		var endAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT end_at FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement=$3 AND deleted_at IS NULL`,
+			`SELECT end_at FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement=$3 AND deleted_at IS NULL`,
 			merchantID, custBounded, feat).Scan(&endAt))
 		require.NotNil(t, endAt, "non-renewing unknown gets a BOUNDED window only")
 		require.WithinDuration(t, pastEnd, *endAt, time.Second, "window ends at the stored evidence, nothing invented")
@@ -621,7 +621,7 @@ func TestConverge_DeriveGrantMissing_UnknownSubscription(t *testing.T) {
 		require.Zero(t, res.Findings, "evidence-less unknown is not flagged")
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, custBare).Scan(&n))
+			`SELECT count(*) FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, custBare).Scan(&n))
 		require.Zero(t, n, "no grant fabricated without a stored window")
 		require.Equal(t, 0, liveNow(ctx, custBare))
 		return nil
@@ -668,32 +668,32 @@ func TestConverge_DeriveGrantMissing_ChargebackNoRunway(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
+		exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prod, "cb-prod-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
+		exec(`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
 		// Charged-back sub, legacy import shape: ended_at = expiration (future).
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at,psp_id)
+		exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$9,'chargeback',$8,$10)`,
 			subCB, merchantID, custCB, prod, price, "cb-"+sfx, start, futureEnd, cancelled, pspID)
 		// User-cancelled sub with the SAME shape: paid-through runway is honored.
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at,psp_id)
+		exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$9,'user',$8,$10)`,
 			subUser, merchantID, custUser, prod, price, "cb-user-"+sfx, start, futureEnd, cancelled, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
 				merchantID, []string{"subscription:" + subCB.String(), "subscription:" + subUser.String()})
 			for _, c := range []uuid.UUID{custCB, custUser} {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
 			}
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=ANY($1)`, []uuid.UUID{subCB, subUser})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, prod)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=ANY($1)`, []uuid.UUID{subCB, subUser})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, price)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, prod)
 			return nil
 		})
 	})
@@ -705,10 +705,10 @@ func TestConverge_DeriveGrantMissing_ChargebackNoRunway(t *testing.T) {
 		require.Zero(t, res.Findings, "chargeback sub is not a derive source")
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, custCB).Scan(&n))
+			`SELECT count(*) FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, custCB).Scan(&n))
 		require.Zero(t, n, "chargeback sub materializes no grant")
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, custCB).Scan(&n))
+			`SELECT count(*) FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, custCB).Scan(&n))
 		require.Zero(t, n, "chargeback sub materializes no window — money reversed = access reversed")
 		return nil
 	}))
@@ -721,7 +721,7 @@ func TestConverge_DeriveGrantMissing_ChargebackNoRunway(t *testing.T) {
 		var endAt time.Time
 		var revokedAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT end_at, revoked_at FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement=$3 AND deleted_at IS NULL`,
+			`SELECT end_at, revoked_at FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement=$3 AND deleted_at IS NULL`,
 			merchantID, custUser, feat).Scan(&endAt, &revokedAt))
 		require.Nil(t, revokedAt)
 		require.WithinDuration(t, futureEnd, endAt, time.Second, "paid-through runway preserved for a user cancel")
@@ -753,10 +753,10 @@ func TestConverge_DeriveGrantMissing_WalletPayment(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "d1w-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
+		exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "d1w-"+sfx, merchantID)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "solana")
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, metadata, psp_id)
+		exec(`INSERT INTO billing.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, metadata, psp_id)
 		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'USD','completed',$6,$7,$8)`,
 			pay, merchantID, customer, price, "w-"+sfx, purchased,
 			`{"expiration_rfc3339":"`+expires.Format(time.RFC3339)+`"}`, pspID)
@@ -765,12 +765,12 @@ func TestConverge_DeriveGrantMissing_WalletPayment(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "payment:"+pay.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=$1`, pay)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, prod)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "payment:"+pay.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE id=$1`, pay)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, price)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, prod)
 			return nil
 		})
 	})
@@ -781,7 +781,7 @@ func TestConverge_DeriveGrantMissing_WalletPayment(t *testing.T) {
 		var entStart, entEnd time.Time
 		var srcType string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT start_at, end_at, source_type FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
+			`SELECT start_at, end_at, source_type FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
 			merchantID, customer).Scan(&entStart, &entEnd, &srcType))
 		require.WithinDuration(t, purchased, entStart, time.Second)
 		require.WithinDuration(t, expires, entEnd, time.Second)
@@ -809,8 +809,8 @@ func TestGrantAdmin_MaterializesEntitlement(t *testing.T) {
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for _, c := range []uuid.UUID{custBounded, custIndef} {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
 			}
 			return nil
 		})
@@ -829,11 +829,11 @@ func TestGrantAdmin_MaterializesEntitlement(t *testing.T) {
 		var srcType string
 		var endAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
+			`SELECT count(*) FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
 			merchantID, custBounded).Scan(&n))
 		require.Equal(t, 1, n, "admin comp → one entitlement")
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT source_type, end_at FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
+			`SELECT source_type, end_at FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
 			merchantID, custBounded).Scan(&srcType, &endAt))
 		require.Equal(t, "admin", srcType)
 		require.NotNil(t, endAt)
@@ -844,7 +844,7 @@ func TestGrantAdmin_MaterializesEntitlement(t *testing.T) {
 		require.Equal(t, 0, created)
 		require.True(t, existed, "same sourceID → skipped")
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
+			`SELECT count(*) FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
 			merchantID, custBounded).Scan(&n))
 		require.Equal(t, 1, n, "re-run is a no-op")
 
@@ -853,7 +853,7 @@ func TestGrantAdmin_MaterializesEntitlement(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, created)
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT end_at FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
+			`SELECT end_at FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
 			merchantID, custIndef).Scan(&endAt))
 		require.Nil(t, endAt, "indefinite comp → open-ended entitlement")
 
@@ -865,11 +865,11 @@ func TestGrantAdmin_MaterializesEntitlement(t *testing.T) {
 		require.Equal(t, 1, created, "overlapped comp retains its own revocable source window")
 		require.False(t, existed)
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2 AND source_type='admin' AND source_id='comp-blocked' AND event='grant'`,
+			`SELECT count(*) FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2 AND source_type='admin' AND source_id='comp-blocked' AND event='grant'`,
 			merchantID, custBounded).Scan(&n))
 		require.Equal(t, 1, n, "blocked comp still recorded on the grant ledger (#695)")
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
+			`SELECT count(*) FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
 			merchantID, custBounded).Scan(&n))
 		require.Equal(t, 2, n, "both independent source windows materialize")
 		created, existed, err = gl.GrantAdmin(ctx, custBounded, "comp-blocked", []string{"premium"}, start.Add(24*time.Hour), &insideEnd)

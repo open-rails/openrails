@@ -122,9 +122,9 @@ func TestCheckoutRefusalsAreCodedAcrossDeployments(t *testing.T) {
 
 	mid := dbtest.TestMerchantID.UUID()
 	productID, priceID := uuid.New(), uuid.New()
-	_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Refusal fixture')`, productID, mid, "refusal-"+productID.String())
+	_, err = h.Pool().Exec(ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Refusal fixture')`, productID, mid, "refusal-"+productID.String())
 	require.NoError(t, err)
-	_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,5000000,'USD',720,false)`, priceID, mid, productID, "refusal-"+priceID.String())
+	_, err = h.Pool().Exec(ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,5000000,'USD',720,false)`, priceID, mid, productID, "refusal-"+priceID.String())
 	require.NoError(t, err)
 
 	type step struct {

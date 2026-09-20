@@ -29,14 +29,14 @@ func (fx *saleIntentFixture) seedSaleInstrument(t *testing.T, unscheduledRef str
 	pspID := dbtest.EnsureTestPSP(fx.ctx, t, pool, dbtest.TestMerchantID.UUID(), "mobius")
 	pmID := uuid.New()
 	_, err := pool.Exec(fx.ctx,
-		`INSERT INTO openrails.payment_methods
+		`INSERT INTO billing.payment_methods
 		   (id, merchant_id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
 		    initial_transaction_id, stored_credential_unscheduled_ref)
 		 VALUES ($1, $2, $3, 'nmi', $4, $5, '', '', $6)`,
 		pmID, dbtest.TestMerchantID.UUID(), customerID, pspID, fx.payload.CustomerVaultID, unscheduledRef)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pmID)
+		_, _ = pool.Exec(fx.ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pmID)
 	})
 	return pmID
 }
@@ -45,7 +45,7 @@ func (fx *saleIntentFixture) unscheduledRef(t *testing.T, pmID uuid.UUID) string
 	t.Helper()
 	var ref string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT stored_credential_unscheduled_ref FROM openrails.payment_methods WHERE id = $1", pmID).Scan(&ref))
+		"SELECT stored_credential_unscheduled_ref FROM billing.payment_methods WHERE id = $1", pmID).Scan(&ref))
 	return ref
 }
 
@@ -95,14 +95,14 @@ func (fx *subIntentFixture) seedSubInstrument(t *testing.T, recurringRef string)
 	pspID := dbtest.EnsureTestPSP(fx.ctx, t, pool, dbtest.TestMerchantID.UUID(), "mobius")
 	pmID := uuid.New()
 	_, err := pool.Exec(fx.ctx,
-		`INSERT INTO openrails.payment_methods
+		`INSERT INTO billing.payment_methods
 		   (id, merchant_id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
 		    initial_transaction_id, stored_credential_recurring_ref)
 		 VALUES ($1, $2, $3, 'nmi', $4, $5, '', '', $6)`,
 		pmID, dbtest.TestMerchantID.UUID(), customerID, pspID, fx.payload.CustomerVaultID, recurringRef)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pmID)
+		_, _ = pool.Exec(fx.ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pmID)
 	})
 	return pmID
 }
@@ -125,7 +125,7 @@ func TestNMISubscriptionIntent_InitialRecurringCITAnchorsInstrument(t *testing.T
 
 	var ref string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT stored_credential_recurring_ref FROM openrails.payment_methods WHERE id = $1", pmID).Scan(&ref))
+		"SELECT stored_credential_recurring_ref FROM billing.payment_methods WHERE id = $1", pmID).Scan(&ref))
 	assert.Equal(t, fx.gateway.txnID, ref, "finalize persists the enrollment charge as the recurring anchor")
 }
 

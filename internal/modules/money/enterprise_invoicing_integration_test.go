@@ -29,18 +29,18 @@ func TestEnterpriseInvoicing_PayerRateCardOverride(t *testing.T) {
 	eventType := "storage.repo_gb." + uuid.NewString()[:8]
 	t.Cleanup(func() {
 		for _, p := range []uuid.UUID{payer.UUID(), negotiated.UUID()} {
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", p)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", p)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", p)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.metered_rating_watermarks WHERE customer_id = $1", p)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.metered_rating_watermarks WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.money_settings WHERE customer_id = $1", p)
 		}
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meter)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meter)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Storage', $3)`,
+	_, err := pool.Exec(ctx, `INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Storage', $3)`,
 		productID, "storage-"+uuid.NewString()[:8], merchantID)
 	require.NoError(t, err)
 
@@ -112,10 +112,10 @@ func TestEnterpriseInvoicing_NetTermsDocumentSnapshotAndDunning(t *testing.T) {
 func testNetTermsDocumentAndDunning(t *testing.T, initialStatus string) {
 	svc, dbi, pool, payer, cur, ctx := moneyInEnvWithDB(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.customer_invoice_profiles WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_payments WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.customer_invoice_profiles WHERE customer_id = $1", payer.UUID())
 	})
 
 	// Terms account: net-30 manual remittance with full document fields.
@@ -189,7 +189,7 @@ func testNetTermsDocumentAndDunning(t *testing.T, initialStatus string) {
 
 	// A collection failure may already mark the receivable past_due. The debt
 	// pass still sends the ordinary overdue notice when its due date passes.
-	_, err = pool.Exec(ctx, "UPDATE openrails.invoices SET status = $2, due_at = now() - interval '1 day' WHERE id = $1", inv.ID, initialStatus)
+	_, err = pool.Exec(ctx, "UPDATE billing.invoices SET status = $2, due_at = now() - interval '1 day' WHERE id = $1", inv.ID, initialStatus)
 	require.NoError(t, err)
 	type dueResult struct {
 		count int
@@ -236,7 +236,7 @@ func testNetTermsDocumentAndDunning(t *testing.T, initialStatus string) {
 func TestEnterpriseInvoicing_EnsureCustomerInvoiceProfileDoesNotOverwrite(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.customer_invoice_profiles WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.customer_invoice_profiles WHERE customer_id = $1", payer.UUID())
 	})
 
 	created, err := svc.EnsureCustomerInvoiceProfile(ctx, payer, money.CustomerInvoiceProfile{
@@ -263,7 +263,7 @@ func TestEnterpriseInvoicing_EnsureCustomerInvoiceProfileDoesNotOverwrite(t *tes
 	require.Equal(t, money.CollectionSendInvoice, got.CollectionMethod)
 	require.Equal(t, "operator terms", got.Memo)
 
-	_, err = pool.Exec(ctx, "DELETE FROM openrails.customer_invoice_profiles WHERE customer_id = $1", payer.UUID())
+	_, err = pool.Exec(ctx, "DELETE FROM billing.customer_invoice_profiles WHERE customer_id = $1", payer.UUID())
 	require.NoError(t, err)
 
 	start := make(chan struct{})
@@ -293,7 +293,7 @@ func TestEnterpriseInvoicing_EnsureCustomerInvoiceProfileDoesNotOverwrite(t *tes
 	require.Equal(t, money.CollectionSendInvoice, got.CollectionMethod)
 	require.Equal(t, "concurrent operator terms", got.Memo)
 
-	_, err = pool.Exec(ctx, "DELETE FROM openrails.customer_invoice_profiles WHERE customer_id = $1", payer.UUID())
+	_, err = pool.Exec(ctx, "DELETE FROM billing.customer_invoice_profiles WHERE customer_id = $1", payer.UUID())
 	require.NoError(t, err)
 	type ensureResult struct {
 		created bool
@@ -330,17 +330,17 @@ func TestEnterpriseInvoicing_CustomerInvoiceProfileScopesSharedPayer(t *testing.
 	// this merchant's invoice profile must create a separate local relationship.
 	pool := dbtest.SharedSuperuserPGXPool(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.customers WHERE id = $1", foreignPayer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.merchants WHERE id = $1", foreignMerchantID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.customers WHERE id = $1", foreignPayer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.merchants WHERE id = $1", foreignMerchantID)
 	})
 
 	_, err := pool.Exec(ctx,
-		"INSERT INTO openrails.merchants (id, slug) VALUES ($1, $2)",
+		"INSERT INTO billing.merchants (id, slug) VALUES ($1, $2)",
 		foreignMerchantID, "foreign-profile-"+uuid.NewString()[:8],
 	)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`,
 		foreignPayer.UUID(), foreignMerchantID,
 	)
 	require.NoError(t, err)
@@ -351,7 +351,7 @@ func TestEnterpriseInvoicing_CustomerInvoiceProfileScopesSharedPayer(t *testing.
 	require.True(t, created)
 	require.NoError(t, svc.SetCustomerInvoiceProfile(ctx, foreignPayer, profile))
 	var otherProfiles int
-	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM openrails.customer_invoice_profiles WHERE merchant_id=$1 AND customer_id=$2", foreignMerchantID, foreignPayer.UUID()).Scan(&otherProfiles))
+	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM billing.customer_invoice_profiles WHERE merchant_id=$1 AND customer_id=$2", foreignMerchantID, foreignPayer.UUID()).Scan(&otherProfiles))
 	require.Zero(t, otherProfiles)
 }
 
@@ -366,15 +366,15 @@ func TestEnterpriseInvoicing_PastWindowFinalizeAttachesAccruals(t *testing.T) {
 	meter := "past-gb-" + uuid.NewString()[:8]
 	eventType := "storage.past_gb." + uuid.NewString()[:8]
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.metered_rating_watermarks WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meter)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.metered_rating_watermarks WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meter)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Past', $3)`,
+	_, err := pool.Exec(ctx, `INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Past', $3)`,
 		productID, "past-"+uuid.NewString()[:8], merchantID)
 	require.NoError(t, err)
 	require.NoError(t, svc.EnsureUsageMeter(ctx, money.UsageMeterSpec{
@@ -415,15 +415,15 @@ func TestEnterpriseInvoicing_SweepUsageFeedsPendingChargesAndExposure(t *testing
 	meter := "media-gb-" + uuid.NewString()[:8]
 	eventType := "storage.user_media_gb." + uuid.NewString()[:8]
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.metered_rating_watermarks WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meter)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.metered_rating_watermarks WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meter)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Media', $3)`,
+	_, err := pool.Exec(ctx, `INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Media', $3)`,
 		productID, "media-"+uuid.NewString()[:8], merchantID)
 	require.NoError(t, err)
 	require.NoError(t, svc.EnsureUsageMeter(ctx, money.UsageMeterSpec{

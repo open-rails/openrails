@@ -43,13 +43,13 @@ func TestConverge_DeadSubRunwayGuard(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`, productID, "rw-prod-"+suffix, "rw-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		// User cancelled mid-period: cancelled now, ended_at = period end (the runway).
-		exec(`INSERT INTO openrails.subscriptions
+		exec(`INSERT INTO billing.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
 		         entitlements_spec_snapshot, customer_id, merchant_id, cancelled_at, cancel_type, ended_at, psp_id)
@@ -57,7 +57,7 @@ func TestConverge_DeadSubRunwayGuard(t *testing.T) {
 			subID, priceID, productID, "rw-sub-"+suffix,
 			now.Add(-20*24*time.Hour), periodEnd, customer, merchantID, now.Add(-time.Hour), periodEnd, pspID)
 		// The proper #691 closure: window bounded exactly at period end.
-		exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
+		exec(`INSERT INTO billing.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 		      VALUES ($1,$2,$3,$4,$5,$6,'subscription',$7)`,
 			entID, customer, "rw-feat-"+suffix, now.Add(-20*24*time.Hour), periodEnd, subID, merchantID)
 		return nil
@@ -65,11 +65,11 @@ func TestConverge_DeadSubRunwayGuard(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE id=$1`, entID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE id=$1`, entID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, subID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -80,7 +80,7 @@ func TestConverge_DeadSubRunwayGuard(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, res.Findings, "a user-cancelled sub's paid runway must not be flagged before period end")
 		var endAt *time.Time
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT end_at FROM openrails.entitlements WHERE id=$1`, entID).Scan(&endAt))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT end_at FROM billing.entitlements WHERE id=$1`, entID).Scan(&endAt))
 		require.NotNil(t, endAt)
 		require.WithinDuration(t, periodEnd, *endAt, time.Second, "runway window untouched")
 		return nil
@@ -89,14 +89,14 @@ func TestConverge_DeadSubRunwayGuard(t *testing.T) {
 	// Extend the window past the entitled bound (simulated drift): the sweep
 	// bounds it BACK to period end — the runway survives, the overrun is gone.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		_, err := appDB.Qx(ctx).Exec(ctx, `UPDATE openrails.entitlements SET end_at=$1 WHERE id=$2`, now.Add(40*24*time.Hour), entID)
+		_, err := appDB.Qx(ctx).Exec(ctx, `UPDATE billing.entitlements SET end_at=$1 WHERE id=$2`, now.Add(40*24*time.Hour), entID)
 		require.NoError(t, err)
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
 		require.Equal(t, 1, res.Findings)
 		require.Equal(t, 1, res.AutoFixed)
 		var endAt, revokedAt *time.Time
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT end_at, revoked_at FROM openrails.entitlements WHERE id=$1`, entID).Scan(&endAt, &revokedAt))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT end_at, revoked_at FROM billing.entitlements WHERE id=$1`, entID).Scan(&endAt, &revokedAt))
 		require.NotNil(t, endAt)
 		require.WithinDuration(t, periodEnd, *endAt, 2*time.Second, "overrun bounded back to the entitled bound, not revoked-as-of-now")
 		require.Nil(t, revokedAt, "the runway is preserved: closure, not revocation")
@@ -155,14 +155,14 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id)
+		exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id)
 		      VALUES ($1,$2,$2,'{}'::jsonb,$3)`, productID, "orph-prod-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 
 		seedSub := func(id uuid.UUID, status string, periodEnd, endedAt *time.Time, nextRetry *time.Time) {
-			exec(`INSERT INTO openrails.subscriptions
+			exec(`INSERT INTO billing.subscriptions
 			        (id, price_id, product_id, status, rail, rail_subscription_id,
 			         current_period_starts_at, current_period_ends_at, started_at, next_retry_at,
 			         entitlements_spec_snapshot, customer_id, merchant_id, cancelled_at, cancel_type, ended_at, psp_id)
@@ -179,15 +179,15 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 		seedSub(subUnknown, "unknown", &bound, nil, nil)
 		seedSub(subPastDue, "past_due", &futurePeriod, nil, &futureRetry)
 
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		exec(`INSERT INTO billing.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
 		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','refunded',$6,$7)`,
 			payRefunded, merchantID, customer, priceID, "orph-txn-r-"+suffix, now.Add(-5*24*time.Hour), pspID)
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		exec(`INSERT INTO billing.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
 		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','completed',$6,$7)`,
 			payCompleted, merchantID, customer, priceID, "orph-txn-c-"+suffix, now.Add(-4*24*time.Hour), pspID)
 
 		seedEnt := func(id uuid.UUID, feature, sourceType string, sourceID uuid.UUID, endAt *time.Time) {
-			exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
+			exec(`INSERT INTO billing.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 			      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
 				id, customer, feature, now.Add(-40*24*time.Hour), endAt, sourceID, sourceType, merchantID)
 		}
@@ -214,13 +214,13 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=ANY($2)`, merchantID, subjects)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE customer_id=$1`, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE customer_id=$1`, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=ANY($1)`, []uuid.UUID{payRefunded, payCompleted})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=ANY($1)`, []uuid.UUID{subTerminal, subRunway, subUnknown, subPastDue})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=ANY($2)`, merchantID, subjects)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE customer_id=$1`, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE customer_id=$1`, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE id=ANY($1)`, []uuid.UUID{payRefunded, payCompleted})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=ANY($1)`, []uuid.UUID{subTerminal, subRunway, subUnknown, subPastDue})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -231,7 +231,7 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 		var prose *string
 		var evidence []byte
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, severity, recommended_action, evidence FROM openrails.reconciliation_findings
+			`SELECT status, severity, recommended_action, evidence FROM billing.reconciliation_findings
 			 WHERE merchant_id=$1 AND finding_type='derive.entitlement.unjustified' AND subject_key=$2`,
 			merchantID, "entitlement:"+entID.String()).Scan(&status, &severity, &prose, &evidence))
 		require.Equal(t, "requires_review", status, "freeloaders are ADMIN surface-only")
@@ -253,7 +253,7 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 		t.Helper()
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.reconciliation_findings
+			`SELECT count(*) FROM billing.reconciliation_findings
 			 WHERE merchant_id=$1 AND finding_type='derive.entitlement.unjustified' AND subject_key=$2`,
 			merchantID, "entitlement:"+entID.String()).Scan(&n))
 		require.Zero(t, n, label)
@@ -276,14 +276,14 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 		// while standing terminal windows belong only to the AUTO mismatch check.
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.reconciliation_findings
+			`SELECT count(*) FROM billing.reconciliation_findings
 			 WHERE merchant_id=$1 AND finding_type='consistency.reference.source_reference' AND subject_key=$2`,
 			merchantID, "entitlement:"+entMissingSub.String()).Scan(&n))
 		require.Zero(t, n, "partition: live dangling window is unjustified-only")
 		for _, subID := range []uuid.UUID{subTerminal, subRunway} {
 			var status string
 			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-				`SELECT status FROM openrails.reconciliation_findings
+				`SELECT status FROM billing.reconciliation_findings
 				 WHERE merchant_id=$1 AND finding_type='derive.grant_effect.mismatch' AND subject_key=$2`,
 				merchantID, "subscription:"+subID.String()).Scan(&status))
 			require.Equal(t, "auto_fixed", status, "terminal standing access must use the exact AUTO mismatch finding")
@@ -292,12 +292,12 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 		// Policy-ambiguous windows remain surface-only and untouched.
 		for _, id := range []uuid.UUID{entMissingSub, entRefunded} {
 			var revokedAt, endAt *time.Time
-			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT revoked_at, end_at FROM openrails.entitlements WHERE id=$1`, id).Scan(&revokedAt, &endAt))
+			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT revoked_at, end_at FROM billing.entitlements WHERE id=$1`, id).Scan(&revokedAt, &endAt))
 			require.Nil(t, revokedAt, "never auto-revoked (policy #690)")
 		}
 		for id, wantEnd := range map[uuid.UUID]time.Time{entTerminal: bound, entRunway: runwayEnd} {
 			var revokedAt, endAt *time.Time
-			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT revoked_at, end_at FROM openrails.entitlements WHERE id=$1`, id).Scan(&revokedAt, &endAt))
+			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT revoked_at, end_at FROM billing.entitlements WHERE id=$1`, id).Scan(&revokedAt, &endAt))
 			require.Nil(t, revokedAt, "terminal access is bounded, not revoked")
 			require.NotNil(t, endAt)
 			require.WithinDuration(t, wantEnd, *endAt, 2*time.Second)
@@ -311,7 +311,7 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 		require.NoError(t, err)
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.reconciliation_findings
+			`SELECT count(*) FROM billing.reconciliation_findings
 			 WHERE merchant_id=$1 AND finding_type='derive.entitlement.unjustified' AND subject_key=ANY($2)`,
 			merchantID, subjects).Scan(&n))
 		require.Equal(t, 2, n, "two freeloader shapes, one finding each, no duplicates")
@@ -345,14 +345,14 @@ func TestConverge_ConDuplicateOwnership(t *testing.T) {
 			require.NoError(t, err)
 		}
 		for i, pid := range []uuid.UUID{prodDup, prodSingle, prodSeq, prodSubShaped} {
-			exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id)
+			exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id)
 			      VALUES ($1,$2,$2,'{}'::jsonb,$3)`, pid, "dupown-"+suffix+"-"+string(rune('a'+i)), merchantID)
 		}
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id)
 		      VALUES ($1,$2,9990000,'USD',$3)`, priceID, prodDup, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		seedPay := func(id uuid.UUID, txn string, at time.Time) {
-			exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+			exec(`INSERT INTO billing.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
 			      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','completed',$6,$7)`,
 				id, merchantID, customer, priceID, txn, at, pspID)
 		}
@@ -401,11 +401,11 @@ func TestConverge_ConDuplicateOwnership(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=ANY($2)`, merchantID, subjects)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE customer_id=$1`, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=ANY($1)`, []uuid.UUID{pay1, pay2, pay3, pay4, pay5, pay6})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=ANY($1)`, []uuid.UUID{prodDup, prodSingle, prodSeq, prodSubShaped})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=ANY($2)`, merchantID, subjects)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE customer_id=$1`, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE id=ANY($1)`, []uuid.UUID{pay1, pay2, pay3, pay4, pay5, pay6})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=ANY($1)`, []uuid.UUID{prodDup, prodSingle, prodSeq, prodSubShaped})
 			return nil
 		})
 	})
@@ -419,7 +419,7 @@ func TestConverge_ConDuplicateOwnership(t *testing.T) {
 			var prose *string
 			var evidence []byte
 			err := appDB.Qx(ctx).QueryRow(ctx,
-				`SELECT status, severity, recommended_action, evidence FROM openrails.reconciliation_findings
+				`SELECT status, severity, recommended_action, evidence FROM billing.reconciliation_findings
 				 WHERE merchant_id=$1 AND finding_type='consistency.duplicate.ownership' AND subject_key=$2`,
 				merchantID, "ownership:"+customer.String()+":"+product.String()).Scan(&status, &severity, &prose, &evidence)
 			if err != nil {
@@ -462,7 +462,7 @@ func TestConverge_ConDuplicateOwnership(t *testing.T) {
 		// Surface-only: no grant terminated, no payment touched.
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.grants WHERE customer_id=$1 AND event IN ('revoke','expire','supersede')`, customer).Scan(&n))
+			`SELECT count(*) FROM billing.grants WHERE customer_id=$1 AND event IN ('revoke','expire','supersede')`, customer).Scan(&n))
 		require.Equal(t, 1, n, "only the test's own seeded termination exists")
 		return nil
 	}))
@@ -473,7 +473,7 @@ func TestConverge_ConDuplicateOwnership(t *testing.T) {
 		require.NoError(t, err)
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.reconciliation_findings
+			`SELECT count(*) FROM billing.reconciliation_findings
 			 WHERE merchant_id=$1 AND finding_type='consistency.duplicate.ownership' AND subject_key=ANY($2)`,
 			merchantID, subjects).Scan(&n))
 		require.Equal(t, 2, n)

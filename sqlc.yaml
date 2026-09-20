@@ -4,7 +4,7 @@ sql:
     queries: "internal/db/queries"
     schema:
       - "migrations/bootstrap"
-      - "migrations/postgres"
+      - "internal/migrate/postgres"
       - "internal/db/schema"
     database:
       uri: "${SQLC_DATABASE_URL}"

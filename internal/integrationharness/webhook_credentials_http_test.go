@@ -62,7 +62,7 @@ func webhookCredentialHTTPWorkflow(t *testing.T, source string) {
 		require.Equal(t, http.StatusNotFound, status, "deferred alert route must be absent")
 	}
 	var removedTables int
-	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema='openrails' AND table_name IN ('alert_rules','finding_digest_state')`).Scan(&removedTables))
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema='billing' AND table_name IN ('alert_rules','finding_digest_state')`).Scan(&removedTables))
 	require.Zero(t, removedTables)
 
 	status, raw := requestJSON(t, http.MethodPost, base+"/webhooks", surface.Token, map[string]any{"name": "synthetic sink", "url": rawURL, "format": "slack"})
@@ -75,7 +75,7 @@ func webhookCredentialHTTPWorkflow(t *testing.T, source string) {
 	require.NotEqual(t, uuid.Nil, hook.ID)
 	name := merchants.AlertWebhookURLSecretName(hook.ID)
 	var stored string
-	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT value FROM openrails.merchant_secrets WHERE merchant_id=$1 AND name=$2`, dbtest.TestMerchantID.UUID(), name).Scan(&stored))
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT value FROM billing.merchant_secrets WHERE merchant_id=$1 AND name=$2`, dbtest.TestMerchantID.UUID(), name).Scan(&stored))
 	require.NotContains(t, stored, "path-secret")
 	require.NotContains(t, stored, "query-secret")
 	require.NotContains(t, stored, sink.URL)
@@ -142,6 +142,6 @@ func webhookCredentialHTTPWorkflow(t *testing.T, source string) {
 	require.ErrorIs(t, err, merchants.ErrSecretNotFound)
 	// Owned metadata does not contain any hidden URL column.
 	var count int
-	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema='openrails' AND table_name='merchant_webhooks' AND column_name='url'`).Scan(&count))
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema='billing' AND table_name='merchant_webhooks' AND column_name='url'`).Scan(&count))
 	require.Zero(t, count)
 }

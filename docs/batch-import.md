@@ -117,9 +117,10 @@ derives the windows. `Client.ImportBilling` posts the same book over
 The ordered phases, from a production host that migrated many years of legacy
 billing data over this seam:
 
-1. **Apply migrations.** OpenRails' baseline schema (via migratekit from
-   `migrations/postgres`), River's tables, and your app schemas. Validate the
-   target shape before writing anything.
+1. **Apply migrations.** Call `embed.ApplyMigrations` with a privileged pool;
+   OpenRails owns and applies its billing baseline and managed River tables.
+   Apply your application schemas separately, then validate the target shape
+   before writing anything.
 2. **Declare the merchant, PSPs, and catalog.** Upsert the merchant + its
    operator-declared PSP rows through `embed.Runtime.UpsertMerchantConfig`
    (or manifest boot), then push the catalog — including *retired* historical

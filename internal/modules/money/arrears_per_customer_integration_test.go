@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
@@ -41,7 +41,7 @@ func TestOr897_ArrearsIsPerCustomerAndOutstandingIsTheAccountBalance(t *testing.
 	require.Equal(t, int64(250_000), owedB, "one payer's debt must not leak into another's exposure")
 
 	// Two DISTINCT arrears accounts, and no merchant-wide one survives (hard cut).
-	l := ledger.New(gen.New(pool), merchantID)
+	l := ledger.New(dbtest.Queries(pool), merchantID)
 	accA, foundA, err := l.CustomerArrearsAccountID(ctx, payerA.UUID(), cur)
 	require.NoError(t, err)
 	require.True(t, foundA)
@@ -52,7 +52,7 @@ func TestOr897_ArrearsIsPerCustomerAndOutstandingIsTheAccountBalance(t *testing.
 
 	var systemArrears int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.ledger_accounts
+		SELECT count(*) FROM billing.ledger_accounts
 		 WHERE merchant_id = $1 AND account_type = 'arrears_liability' AND customer_id IS NULL
 	`, merchantID).Scan(&systemArrears))
 	require.Zero(t, systemArrears,
@@ -77,7 +77,7 @@ func TestOr897_PerCustomerArrearsPreservesLedgerIntegrity(t *testing.T) {
 	_, err = svc.AccrueOwed(ctx, payer, cur, "usage", "or897-integrity-2", 100_000)
 	require.NoError(t, err)
 
-	rep, err := ledger.CheckIntegrity(ctx, pool, merchantID)
+	rep, err := ledger.CheckIntegrity(ctx, db.WrapPool(pool, ""), merchantID)
 	require.NoError(t, err)
 	// Conservation is ledger-wide and must hold outright — that is the property
 	// the re-homing had to preserve.
@@ -107,7 +107,7 @@ func TestOr897_ExposureReadNeverCreatesAnAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, owed, "no arrears account = a clean zero, not an error")
 
-	l := ledger.New(gen.New(pool), merchantID)
+	l := ledger.New(dbtest.Queries(pool), merchantID)
 	_, found, err := l.CustomerArrearsAccountID(ctx, fresh.UUID(), cur)
 	require.NoError(t, err)
 	require.False(t, found, "a read must not have materialized an account")

@@ -97,7 +97,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 	directoryRow := func(slug string) (id, groupID string, found bool) {
 		t.Helper()
 		err := pool.QueryRow(ctx,
-			`SELECT id::text, COALESCE(permission_group_id,'') FROM openrails.merchants WHERE slug = $1 AND deleted_at IS NULL`,
+			`SELECT id::text, COALESCE(permission_group_id,'') FROM billing.merchants WHERE slug = $1 AND deleted_at IS NULL`,
 			slug).Scan(&id, &groupID)
 		if err != nil {
 			return "", "", false
@@ -113,7 +113,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		groupID, _ := body["group_id"].(string)
 		require.NotEmpty(t, groupID, "ak#269: group_id on the create response")
 		rowID, rowGroup, found := directoryRow(slug)
-		require.True(t, found, "or#914: the wrap attaches the openrails.merchants row")
+		require.True(t, found, "or#914: the wrap attaches the billing.merchants row")
 		require.Equal(t, groupID, rowGroup)
 		require.NotEmpty(t, rowID)
 
@@ -124,7 +124,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		require.Equal(t, groupID, body["group_id"])
 		var n int
 		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT count(*) FROM openrails.merchants WHERE slug = $1`, slug).Scan(&n))
+			`SELECT count(*) FROM billing.merchants WHERE slug = $1`, slug).Scan(&n))
 		require.Equal(t, 1, n)
 	})
 
@@ -186,7 +186,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		require.Equal(t, newSlug, canonical)
 		var rowSlug string
 		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT slug FROM openrails.merchants WHERE id = $1::uuid`, res.MerchantID.String()).Scan(&rowSlug))
+			`SELECT slug FROM billing.merchants WHERE id = $1::uuid`, res.MerchantID.String()).Scan(&rowSlug))
 		require.Equal(t, oldSlug, rowSlug, "name resolution does not mutate the billing projection")
 
 		// An active former-name alias resolves directly to the group; canonical name wins.
@@ -196,7 +196,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		require.Equal(t, newSlug, canonical)
 
 		// Webhook-route resolution (published URLs carry the old slug).
-		dir, err := merchants.NewDirectoryService(db.WrapPool(pool, "openrails"))
+		dir, err := merchants.NewDirectoryService(db.WrapPool(pool, "billing"))
 		require.NoError(t, err)
 		dir.WithGroupSlugResolver(cp.MerchantGroupSlugResolver()).WithGroupIDResolver(cp.MerchantGroupIDResolver())
 		route, err := dir.ResolveBySlug(ctx, oldSlug)
@@ -232,7 +232,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		require.NoError(t, err)
 		_, _, err = cp.ResolveAuthorizedMerchant(ctx, name, stranger.ID, "merchant:catalog:read")
 		require.ErrorIs(t, err, policy.ErrMerchantUnresolved)
-		dir, err := merchants.NewDirectoryService(db.WrapPool(pool, "openrails"))
+		dir, err := merchants.NewDirectoryService(db.WrapPool(pool, "billing"))
 		require.NoError(t, err)
 		fresh, made, err := dir.Provision(ctx, merchants.ProvisionRequest{Slug: name, PermissionGroupID: replacement})
 		require.NoError(t, err)
@@ -258,7 +258,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		name := "retire-" + sfx
 		original, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{Slug: name, OwnerUserID: user.ID})
 		require.NoError(t, err)
-		dir, err := merchants.NewDirectoryService(db.WrapPool(pool, "openrails"))
+		dir, err := merchants.NewDirectoryService(db.WrapPool(pool, "billing"))
 		require.NoError(t, err)
 		failed := true
 		release := func(ctx context.Context, groupID string) error {
@@ -273,13 +273,13 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		require.ErrorIs(t, err, merchants.ErrGroupReleasePending)
 		require.ErrorContains(t, err, "crash after group commit")
 		require.True(t, outcome.Retired, "the tombstone commits before external release")
-		_, err = pool.Exec(ctx, `UPDATE openrails.merchants SET deleted_at=NULL,status='active' WHERE id=$1`, original.MerchantID.UUID())
+		_, err = pool.Exec(ctx, `UPDATE billing.merchants SET deleted_at=NULL,status='active' WHERE id=$1`, original.MerchantID.UUID())
 		require.ErrorContains(t, err, "cannot be restored")
 		fresh, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{Slug: name, OwnerUserID: user.ID})
 		require.NoError(t, err)
 		require.NotEqual(t, original.GroupID, fresh.GroupID)
 		failed = false
-		restarted, err := merchants.NewDirectoryService(db.WrapPool(pool, "openrails"))
+		restarted, err := merchants.NewDirectoryService(db.WrapPool(pool, "billing"))
 		require.NoError(t, err)
 		completed, err := restarted.CompletePendingGroupReleases(ctx, 500, release)
 		require.NoError(t, err)
@@ -303,7 +303,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		// Host-side delete: soft-delete the directory row, release the name in
 		// authkit (the never-used-merchant dormancy shape; plain deletes
 		// tombstone by default).
-		_, err = pool.Exec(ctx, `UPDATE openrails.merchants
+		_, err = pool.Exec(ctx, `UPDATE billing.merchants
 			SET status='deleted', deleted_at=now(), updated_at=now() WHERE id=$1::uuid`,
 			res.MerchantID.String())
 		require.NoError(t, err)

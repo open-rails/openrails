@@ -71,7 +71,7 @@ func TestStripeRefundReceiptSurvivesCanceledRequest(t *testing.T) {
 			_, _, metadata := fx.reservation(t)
 			require.Equal(t, "re_exact", metadata["provider_refund_id"], "the receipt write lands before the cancelled finalize")
 
-			_, err = fx.db.Pool().Exec(base, "UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+			_, err = fx.db.Pool().Exec(base, "UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 			require.NoError(t, err)
 			require.NoError(t, inScope(func(ctx context.Context) error {
 				_, err := runner.RunVerifyOnce(ctx)

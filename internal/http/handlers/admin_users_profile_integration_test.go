@@ -42,7 +42,7 @@ func seedSubscriptionWithStatus(fx *findingsFixture, productID, priceID uuid.UUI
 		cancelType = &ct
 		cancelledAt = &now
 	}
-	fx.exec(`INSERT INTO openrails.subscriptions
+	fx.exec(`INSERT INTO billing.subscriptions
 	          (id, price_id, product_id, status, rail, rail_subscription_id,
 	           current_period_starts_at, current_period_ends_at, started_at,
 	           cancel_type, cancelled_at, customer_id, merchant_id, psp_id)
@@ -79,7 +79,7 @@ func TestAdminUserBillingProfile_DegradesWhenCollectionDefaultsFail(t *testing.T
 	original := loadCollectionPaymentMethodDefaults
 	t.Cleanup(func() { loadCollectionPaymentMethodDefaults = original })
 	loadCollectionPaymentMethodDefaults = func(*httprequest.Request, identity.CustomerID) (map[uuid.UUID][]string, error) {
-		return nil, errors.New("relation openrails.money_settings does not exist")
+		return nil, errors.New("relation billing.money_settings does not exist")
 	}
 
 	dedicated := serveAdminUser(fx, GetAdminUserPaymentMethods)
@@ -109,7 +109,7 @@ func TestAdminUserBillingProfile_ListsSubscriptionsOfEveryStatus(t *testing.T) {
 	pending := seedSubscriptionWithStatus(fx, product3, price3, "pending")
 	product4, price4 := fx.seedSecondProduct()
 	deleted := seedSubscriptionWithStatus(fx, product4, price4, "cancelled")
-	fx.exec(`UPDATE openrails.subscriptions SET deleted_at = now() WHERE id = $1`, deleted)
+	fx.exec(`UPDATE billing.subscriptions SET deleted_at = now() WHERE id = $1`, deleted)
 
 	rec := serveAdminUser(fx, GetAdminUserBillingProfile)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())

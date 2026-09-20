@@ -157,7 +157,7 @@ func newFindingsFixture(t *testing.T) *findingsFixture {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, mid, "findings-"+sfx)
+	exec(`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, mid, "findings-"+sfx)
 	// SEC-18: pin the request's merchant-scoped connection, exactly as
 	// MerchantDBConnMW does for /v1/merchant/findings/*. The by-id findings
 	// queries now carry `merchant_id = openrails.current_merchant_id()`, so a
@@ -168,31 +168,31 @@ func newFindingsFixture(t *testing.T) *findingsFixture {
 	t.Cleanup(release)
 	ctx = pinned
 	fx.ctx = ctx
-	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+	exec(`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		fx.product, "findings-prod-"+sfx, mid)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 10000000, 'USD', 720, true, $3)`, fx.price, fx.product, mid)
-	customer, err := gen.New(pool).EnsureCustomer(ctx, gen.EnsureCustomerParams{ID: uuid.New(), MerchantID: mid})
+	customer, err := dbtest.Queries(pool).EnsureCustomer(ctx, gen.EnsureCustomerParams{ID: uuid.New(), MerchantID: mid})
 	require.NoError(t, err)
 	fx.customer = customer.ID
 
 	t.Cleanup(func() {
 		bg := context.Background()
 		for _, stmt := range []string{
-			`DELETE FROM openrails.rail_mutation_logs WHERE merchant_id = $1`,
-			`DELETE FROM openrails.rail_intents WHERE merchant_id = $1`,
-			`DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1`,
-			`DELETE FROM openrails.maintenance_runs WHERE merchant_id = $1`,
-			`DELETE FROM openrails.notifications WHERE merchant_id = $1`,
+			`DELETE FROM billing.rail_mutation_logs WHERE merchant_id = $1`,
+			`DELETE FROM billing.rail_intents WHERE merchant_id = $1`,
+			`DELETE FROM billing.reconciliation_findings WHERE merchant_id = $1`,
+			`DELETE FROM billing.maintenance_runs WHERE merchant_id = $1`,
+			`DELETE FROM billing.notifications WHERE merchant_id = $1`,
 			`DELETE FROM openrails.product_access_grants WHERE merchant_id = $1`,
-			`DELETE FROM openrails.entitlements WHERE merchant_id = $1`,
-			`DELETE FROM openrails.grants WHERE merchant_id = $1`,
-			`DELETE FROM openrails.payments WHERE merchant_id = $1`,
-			`DELETE FROM openrails.subscriptions WHERE merchant_id = $1`,
-			`DELETE FROM openrails.prices WHERE merchant_id = $1`,
-			`DELETE FROM openrails.products WHERE merchant_id = $1`,
-			`DELETE FROM openrails.customers WHERE merchant_id = $1`,
-			`DELETE FROM openrails.merchants WHERE id = $1`,
+			`DELETE FROM billing.entitlements WHERE merchant_id = $1`,
+			`DELETE FROM billing.grants WHERE merchant_id = $1`,
+			`DELETE FROM billing.payments WHERE merchant_id = $1`,
+			`DELETE FROM billing.subscriptions WHERE merchant_id = $1`,
+			`DELETE FROM billing.prices WHERE merchant_id = $1`,
+			`DELETE FROM billing.products WHERE merchant_id = $1`,
+			`DELETE FROM billing.customers WHERE merchant_id = $1`,
+			`DELETE FROM billing.merchants WHERE id = $1`,
 		} {
 			_, _ = pool.Exec(bg, stmt, mid)
 		}
@@ -250,7 +250,7 @@ func (fx *findingsFixture) seedActiveSubscriptionFor(productID, priceID uuid.UUI
 	fx.t.Helper()
 	subID := uuid.New()
 	now := time.Now().UTC()
-	fx.exec(`INSERT INTO openrails.subscriptions
+	fx.exec(`INSERT INTO billing.subscriptions
 	          (id, price_id, product_id, status, rail, rail_subscription_id,
 	           current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
 	        VALUES ($1, $2, $3, 'active', 'nmi', $4, $5, $6, $5, $7, $8, $9)`,
@@ -264,9 +264,9 @@ func (fx *findingsFixture) seedSecondProduct() (productID, priceID uuid.UUID) {
 	fx.t.Helper()
 	productID, priceID = uuid.New(), uuid.New()
 	sfx := uuid.NewString()[:8]
-	fx.exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+	fx.exec(`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "findings-prod2-"+sfx, fx.merchant)
-	fx.exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+	fx.exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	         VALUES ($1, $2, 10000000, 'USD', 8760, true, $3)`, priceID, productID, fx.merchant)
 	return productID, priceID
 }
@@ -274,7 +274,7 @@ func (fx *findingsFixture) seedSecondProduct() (productID, priceID uuid.UUID) {
 func (fx *findingsFixture) seedCompletedPayment(txn string, subID *uuid.UUID) uuid.UUID {
 	fx.t.Helper()
 	payID := uuid.New()
-	fx.exec(`INSERT INTO openrails.payments
+	fx.exec(`INSERT INTO billing.payments
 	          (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, customer_id, merchant_id, money_movement, psp_id)
 	        VALUES ($1, $2, 'nmi', $3, 10000000, 10000000, 'USD', 'completed', $4, $5, $6, 'rail', $7)`,
 		payID, fx.price, txn, subID, fx.customer, fx.merchant, fx.pspFor("nmi"))
@@ -293,7 +293,7 @@ func (fx *findingsFixture) seedFinding(ftype, subject, severity, prose string, r
 	if prose != "" {
 		prosePtr = &prose
 	}
-	row, err := gen.New(fx.dbi.Pool()).UpsertReconciliationFinding(fx.ctx, gen.UpsertReconciliationFindingParams{
+	row, err := dbtest.Queries(fx.dbi.Pool()).UpsertReconciliationFinding(fx.ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        fx.merchant,
 		FindingType:       ftype,
 		SubjectKey:        subject,
@@ -456,7 +456,7 @@ func TestFindingsQueueApproveCancelAndRefundEndToEnd(t *testing.T) {
 	var subStatus string
 	var marker *time.Time
 	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
-		`SELECT status, deletion_scheduled_at FROM openrails.subscriptions WHERE id = $1`, subID).
+		`SELECT status, deletion_scheduled_at FROM billing.subscriptions WHERE id = $1`, subID).
 		Scan(&subStatus, &marker))
 	assert.Equal(t, "cancelled", subStatus)
 	require.NotNil(t, marker, "deferred-delete marker persists until the intent executes")
@@ -464,7 +464,7 @@ func TestFindingsQueueApproveCancelAndRefundEndToEnd(t *testing.T) {
 	var deleteIntentID uuid.UUID
 	var deleteIntentStatus string
 	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
-		`SELECT id, status FROM openrails.rail_intents WHERE merchant_id = $1 AND intent_type = $2 AND subscription_id = $3`,
+		`SELECT id, status FROM billing.rail_intents WHERE merchant_id = $1 AND intent_type = $2 AND subscription_id = $3`,
 		fx.merchant, intents.TypeNMIDeleteSubscription, subID).Scan(&deleteIntentID, &deleteIntentStatus))
 	assert.Equal(t, intents.StatusPending, deleteIntentStatus, "delete rides the ledger (queue-always #679)")
 
@@ -473,13 +473,13 @@ func TestFindingsQueueApproveCancelAndRefundEndToEnd(t *testing.T) {
 	assert.EqualValues(t, 1, fx.fake.refundCalls.Load())
 	var refundIntentStatus string
 	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
-		`SELECT status FROM openrails.rail_intents WHERE merchant_id = $1 AND intent_type = $2 AND payment_id = $3`,
+		`SELECT status FROM billing.rail_intents WHERE merchant_id = $1 AND intent_type = $2 AND payment_id = $3`,
 		fx.merchant, intents.TypeNMIRefund, payID).Scan(&refundIntentStatus))
 	assert.Equal(t, intents.StatusSucceeded, refundIntentStatus)
 	var refundAmount int64
 	var refundStatus, refundTxn string
 	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
-		`SELECT amount, status, transaction_id FROM openrails.payments WHERE refunded_payment_id = $1`, payID).
+		`SELECT amount, status, transaction_id FROM billing.payments WHERE refunded_payment_id = $1`, payID).
 		Scan(&refundAmount, &refundStatus, &refundTxn))
 	assert.EqualValues(t, -10000000, refundAmount)
 	assert.Equal(t, "completed", refundStatus)
@@ -502,7 +502,7 @@ func TestFindingsQueueApproveCancelAndRefundEndToEnd(t *testing.T) {
 	_, err := fx.deleteRunner().RunExecuteOnce(fx.ctx)
 	require.NoError(t, err)
 	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
-		`SELECT status FROM openrails.rail_intents WHERE id = $1`, deleteIntentID).Scan(&deleteIntentStatus))
+		`SELECT status FROM billing.rail_intents WHERE id = $1`, deleteIntentID).Scan(&deleteIntentStatus))
 	assert.Equal(t, intents.StatusSucceeded, deleteIntentStatus)
 	assert.EqualValues(t, 1, fx.fake.deleteCalls.Load())
 
@@ -550,11 +550,11 @@ func TestFindingsQueueApprovePartialFailureLeavesOpen(t *testing.T) {
 	// The cancel side is NOT silently lost: sub cancelled + delete intent queued.
 	var subStatus string
 	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
-		`SELECT status FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&subStatus))
+		`SELECT status FROM billing.subscriptions WHERE id = $1`, subID).Scan(&subStatus))
 	assert.Equal(t, "cancelled", subStatus)
 	var n int
 	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
-		`SELECT count(*) FROM openrails.rail_intents WHERE merchant_id = $1 AND intent_type = $2 AND subscription_id = $3`,
+		`SELECT count(*) FROM billing.rail_intents WHERE merchant_id = $1 AND intent_type = $2 AND subscription_id = $3`,
 		fx.merchant, intents.TypeNMIDeleteSubscription, subID).Scan(&n))
 	assert.Equal(t, 1, n)
 }
@@ -624,8 +624,8 @@ func TestFindingsQueueOverrideParamsSwapSubscription(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
 	var statusA, statusB string
-	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx, `SELECT status FROM openrails.subscriptions WHERE id = $1`, subA).Scan(&statusA))
-	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx, `SELECT status FROM openrails.subscriptions WHERE id = $1`, subB).Scan(&statusB))
+	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx, `SELECT status FROM billing.subscriptions WHERE id = $1`, subA).Scan(&statusA))
+	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx, `SELECT status FROM billing.subscriptions WHERE id = $1`, subB).Scan(&statusB))
 	assert.Equal(t, "active", statusA, "override spared the default target")
 	assert.Equal(t, "cancelled", statusB, "override swapped which subscription is cancelled")
 }
@@ -638,7 +638,7 @@ func TestFindingsQueueRevokeEntitlementAndAdminGrant(t *testing.T) {
 
 	var entID uuid.UUID
 	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
-		`INSERT INTO openrails.entitlements (merchant_id, customer_id, entitlement, start_at, end_at, source_type, source_id)
+		`INSERT INTO billing.entitlements (merchant_id, customer_id, entitlement, start_at, end_at, source_type, source_id)
 		 VALUES ($1, $2, 'premium', now() - interval '1 day', NULL, 'admin', $3) RETURNING id`,
 		fx.merchant, fx.customer, uuid.New()).Scan(&entID))
 
@@ -660,7 +660,7 @@ func TestFindingsQueueRevokeEntitlementAndAdminGrant(t *testing.T) {
 	var revokedAt *time.Time
 	var revokeReason *string
 	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
-		`SELECT revoked_at, revoke_reason FROM openrails.entitlements WHERE id = $1`, entID).Scan(&revokedAt, &revokeReason))
+		`SELECT revoked_at, revoke_reason FROM billing.entitlements WHERE id = $1`, entID).Scan(&revokedAt, &revokeReason))
 	require.NotNil(t, revokedAt, "entitlement revoked")
 	require.NotNil(t, revokeReason)
 	assert.Equal(t, "admin", *revokeReason)
@@ -682,7 +682,7 @@ func TestFindingsQueueRevokeEntitlementAndAdminGrant(t *testing.T) {
 	// Ownership lives in the #514 grant ledger (kind=ownership).
 	var sourceID string
 	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
-		`SELECT source_id FROM openrails.grants
+		`SELECT source_id FROM billing.grants
 		 WHERE merchant_id = $1 AND customer_id = $2 AND product_id = $3
 		   AND kind = 'ownership' AND source_type = 'admin' AND event = 'grant'`,
 		fx.merchant, fx.customer, fx.product).Scan(&sourceID))
@@ -714,13 +714,13 @@ func TestFindingsHeldBulkAckResumeEndToEnd(t *testing.T) {
 			OriginReason:   "findings queue held_bulk test (budget consumption)",
 		})
 		require.NoError(t, err)
-		fx.exec(`UPDATE openrails.rail_intents SET status = 'succeeded', executed_at = now() WHERE id = $1`, row.ID)
+		fx.exec(`UPDATE billing.rail_intents SET status = 'succeeded', executed_at = now() WHERE id = $1`, row.ID)
 	}
 
 	// One more destructive delete for a REAL cancelled sub: over budget → held.
 	psid := "psid-held-" + uuid.NewString()[:8]
 	subID := fx.seedActiveSubscription(psid)
-	fx.exec(`UPDATE openrails.subscriptions
+	fx.exec(`UPDATE billing.subscriptions
 	         SET status = 'cancelled', cancelled_at = now(), cancel_type = 'merchant', deletion_scheduled_at = now()
 	         WHERE id = $1`, subID)
 	held, err := store.Enqueue(fx.ctx, intents.EnqueueParams{
@@ -741,7 +741,7 @@ func TestFindingsHeldBulkAckResumeEndToEnd(t *testing.T) {
 	_, err = runner.RunExecuteOnce(fx.ctx)
 	require.NoError(t, err)
 	var heldStatus string
-	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx, `SELECT status FROM openrails.rail_intents WHERE id = $1`, held.ID).Scan(&heldStatus))
+	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx, `SELECT status FROM billing.rail_intents WHERE id = $1`, held.ID).Scan(&heldStatus))
 	require.Equal(t, intents.StatusPending, heldStatus, "over-budget destructive intent held")
 	assert.Zero(t, fx.fake.deleteCalls.Load())
 
@@ -764,10 +764,10 @@ func TestFindingsHeldBulkAckResumeEndToEnd(t *testing.T) {
 	assert.Equal(t, fx.adminID, *row.ResolvedBy)
 
 	// Destructive execution RESUMES: the held delete drains on the next pass.
-	fx.exec(`UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1`, held.ID)
+	fx.exec(`UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1`, held.ID)
 	_, err = runner.RunExecuteOnce(fx.ctx)
 	require.NoError(t, err)
-	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx, `SELECT status FROM openrails.rail_intents WHERE id = $1`, held.ID).Scan(&heldStatus))
+	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx, `SELECT status FROM billing.rail_intents WHERE id = $1`, held.ID).Scan(&heldStatus))
 	assert.Equal(t, intents.StatusSucceeded, heldStatus, "operator approve resumed destructive execution")
 	assert.EqualValues(t, 1, fx.fake.deleteCalls.Load())
 }

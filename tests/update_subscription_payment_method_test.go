@@ -32,9 +32,9 @@ func TestUpdateSubscriptionPaymentMethodCustodianHeldTarget(t *testing.T) {
 	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{UserID: user, PriceID: suite.SeedProducts()[0].Prices[0].ID, Status: models.StatusActive, Rail: models.RailNMI, RailSubID: "provider-sub-" + uuid.NewString(), PaymentMethodID: &oldPM.ID})
 	custodian := uuid.New()
 	ctx := t.Context()
-	_, err := suite.MerchantPool().Exec(ctx, `INSERT INTO openrails.custodians(id,merchant_id,key,kind,account_id) VALUES($1,$2,$3,'basis_theory',$3)`, custodian, dbtest.TestMerchantID.UUID(), "source-update-"+custodian.String())
+	_, err := suite.MerchantPool().Exec(ctx, `INSERT INTO billing.custodians(id,merchant_id,key,kind,account_id) VALUES($1,$2,$3,'basis_theory',$3)`, custodian, dbtest.TestMerchantID.UUID(), "source-update-"+custodian.String())
 	require.NoError(t, err)
-	_, err = suite.MerchantPool().Exec(ctx, `UPDATE openrails.payment_methods SET custodian='basis_theory',custodian_id=$2,rail_method_ref='custodian-token' WHERE id=$1`, newPM.ID, custodian)
+	_, err = suite.MerchantPool().Exec(ctx, `UPDATE billing.payment_methods SET custodian='basis_theory',custodian_id=$2,rail_method_ref='custodian-token' WHERE id=$1`, newPM.ID, custodian)
 	require.NoError(t, err)
 	mock.Reset()
 	body, err := json.Marshal(openrails.UpdateSubscriptionPaymentMethodRequest{PaymentMethodID: openrails.PaymentMethodID(newPM.ID)})
@@ -561,17 +561,17 @@ func TestUpdateSubscriptionPaymentMethodCrossPSP(t *testing.T) {
 
 	ctx := context.Background()
 	var homePSP uuid.UUID
-	require.NoError(t, suite.MerchantPool().QueryRow(ctx, `SELECT psp_id FROM openrails.payment_methods WHERE id = $1`, oldPM.ID).Scan(&homePSP))
+	require.NoError(t, suite.MerchantPool().QueryRow(ctx, `SELECT psp_id FROM billing.payment_methods WHERE id = $1`, oldPM.ID).Scan(&homePSP))
 	otherPSP := uuid.New()
 	_, err := suite.MerchantPool().Exec(ctx,
-		`INSERT INTO openrails.psps (id, merchant_id, rail, environment, account_id, archived) VALUES ($1, $2, 'nmi', 'test', $3, true)`,
+		`INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id, archived) VALUES ($1, $2, 'nmi', 'test', $3, true)`,
 		otherPSP, dbtest.TestMerchantID.UUID(), "other-"+uuid.NewString()[:8])
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = suite.MerchantPool().Exec(ctx, `UPDATE openrails.payment_methods SET psp_id = $1 WHERE id = $2`, homePSP, newPM.ID)
-		_, _ = suite.MerchantPool().Exec(ctx, `DELETE FROM openrails.psps WHERE id = $1`, otherPSP)
+		_, _ = suite.MerchantPool().Exec(ctx, `UPDATE billing.payment_methods SET psp_id = $1 WHERE id = $2`, homePSP, newPM.ID)
+		_, _ = suite.MerchantPool().Exec(ctx, `DELETE FROM billing.psps WHERE id = $1`, otherPSP)
 	})
-	_, err = suite.MerchantPool().Exec(ctx, `UPDATE openrails.payment_methods SET psp_id = $1 WHERE id = $2`, otherPSP, newPM.ID)
+	_, err = suite.MerchantPool().Exec(ctx, `UPDATE billing.payment_methods SET psp_id = $1 WHERE id = $2`, otherPSP, newPM.ID)
 	require.NoError(t, err)
 
 	t.Run("self-service HTTP answers the coded 409", func(t *testing.T) {
@@ -595,7 +595,7 @@ func TestUpdateSubscriptionPaymentMethodCrossPSP(t *testing.T) {
 
 	t.Run("a re-attribution committed while the request is in flight is refused", func(t *testing.T) {
 		mock.Reset()
-		_, err := suite.MerchantPool().Exec(ctx, `UPDATE openrails.payment_methods SET psp_id = $1 WHERE id = $2`, homePSP, newPM.ID)
+		_, err := suite.MerchantPool().Exec(ctx, `UPDATE billing.payment_methods SET psp_id = $1 WHERE id = $2`, homePSP, newPM.ID)
 		require.NoError(t, err)
 
 		// The HTTP pre-check sees a same-PSP method; the durable seam's FOR
@@ -604,7 +604,7 @@ func TestUpdateSubscriptionPaymentMethodCrossPSP(t *testing.T) {
 		flip, err := suite.MerchantPool().Begin(ctx)
 		require.NoError(t, err)
 		defer func() { _ = flip.Rollback(context.Background()) }()
-		_, err = flip.Exec(ctx, `SELECT 1 FROM openrails.payment_methods WHERE id = $1 FOR UPDATE`, newPM.ID)
+		_, err = flip.Exec(ctx, `SELECT 1 FROM billing.payment_methods WHERE id = $1 FOR UPDATE`, newPM.ID)
 		require.NoError(t, err)
 
 		jsonBody, _ := json.Marshal(map[string]string{"payment_method_id": openrails.PaymentMethodID(newPM.ID).String()})
@@ -623,7 +623,7 @@ func TestUpdateSubscriptionPaymentMethodCrossPSP(t *testing.T) {
 				`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%FOR SHARE%')`).Scan(&waiting))
 			return waiting
 		}, 10*time.Second, 20*time.Millisecond, "the durable seam must wait on the instrument's row lock")
-		_, err = flip.Exec(ctx, `UPDATE openrails.payment_methods SET psp_id = $1 WHERE id = $2`, otherPSP, newPM.ID)
+		_, err = flip.Exec(ctx, `UPDATE billing.payment_methods SET psp_id = $1 WHERE id = $2`, otherPSP, newPM.ID)
 		require.NoError(t, err)
 		require.NoError(t, flip.Commit(ctx))
 		<-served

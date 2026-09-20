@@ -249,7 +249,7 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 	t.Run("batch progress comes from persisted subscription reprices", func(t *testing.T) {
 		ids := append(oldSubscriptions, seedRepriceSubscription(t, ctx, h, v1.ProductID, v1.ID))
 		batch := uuid.New()
-		_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.reprice_batches(id,merchant_id,price_key,to_price_id,effective_at,subscriptions_matched) VALUES($1,$2,$3,$4,now(),3)`, batch, dbtest.TestMerchantID.UUID(), priceKey, v2.ID.UUID())
+		_, err := h.Pool().Exec(ctx, `INSERT INTO billing.reprice_batches(id,merchant_id,price_key,to_price_id,effective_at,subscriptions_matched) VALUES($1,$2,$3,$4,now(),3)`, batch, dbtest.TestMerchantID.UUID(), priceKey, v2.ID.UUID())
 		require.NoError(t, err)
 		for i, id := range ids {
 			status := "scheduled"
@@ -259,7 +259,7 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 				now := time.Now()
 				applied = &now
 			}
-			_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.subscription_reprices(merchant_id,subscription_id,from_price_id,to_price_id,effective_at,status,reprice_batch_id,applied_at) VALUES($1,$2,$3,$4,now(),$5,$6,$7)`, dbtest.TestMerchantID.UUID(), id, v1.ID.UUID(), v2.ID.UUID(), status, batch, applied)
+			_, err = h.Pool().Exec(ctx, `INSERT INTO billing.subscription_reprices(merchant_id,subscription_id,from_price_id,to_price_id,effective_at,status,reprice_batch_id,applied_at) VALUES($1,$2,$3,$4,now(),$5,$6,$7)`, dbtest.TestMerchantID.UUID(), id, v1.ID.UUID(), v2.ID.UUID(), status, batch, applied)
 			require.NoError(t, err)
 		}
 		svc.SetLLM(&copilotScriptLLM{script: oneToolThenAnswer("list_reprice_batches", fmt.Sprintf(`{"price_key":%q}`, priceKey), "progress")})
@@ -421,15 +421,15 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 		future := time.Now().UTC().AddDate(0, 0, 40).Format("2006-01-02")
 		stripe := uuid.New()
 		stripeKey := "copilot-stripe-" + stripe.String()
-		_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id,key,created_at,first_seen_at) VALUES($1,$2,'stripe','test',$3,$3,'epoch','epoch')`, stripe, dbtest.TestMerchantID.UUID(), stripeKey)
+		_, err := h.Pool().Exec(ctx, `INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,key,created_at,first_seen_at) VALUES($1,$2,'stripe','test',$3,$3,'epoch','epoch')`, stripe, dbtest.TestMerchantID.UUID(), stripeKey)
 		require.NoError(t, err)
 		t.Cleanup(func() {
-			_, err := h.Pool().Exec(ctx, `DELETE FROM openrails.price_psp_bindings WHERE psp_id=$1`, stripe)
+			_, err := h.Pool().Exec(ctx, `DELETE FROM billing.price_psp_bindings WHERE psp_id=$1`, stripe)
 			require.NoError(t, err)
-			_, err = h.Pool().Exec(ctx, `DELETE FROM openrails.psps WHERE id=$1`, stripe)
+			_, err = h.Pool().Exec(ctx, `DELETE FROM billing.psps WHERE id=$1`, stripe)
 			require.NoError(t, err)
 		})
-		_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,price_ref) VALUES($1,$2,$3,'price-copilot')`, dbtest.TestMerchantID.UUID(), v2.ID.UUID(), stripe)
+		_, err = h.Pool().Exec(ctx, `INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,price_ref) VALUES($1,$2,$3,'price-copilot')`, dbtest.TestMerchantID.UUID(), v2.ID.UUID(), stripe)
 		require.NoError(t, err)
 		cases := []struct {
 			name, tool, args string

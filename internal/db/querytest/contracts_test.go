@@ -19,7 +19,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedSuperuserPGXPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	merchantID := dbtest.TestMerchantID.UUID()
@@ -217,7 +217,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.ledger_accounts (
+		INSERT INTO billing.ledger_accounts (
 			id, merchant_id, customer_id, account_type, currency,
 			debits_must_not_exceed_credits, credits_posted, debits_posted
 		) VALUES ($1, $2, $3, 'customer_balance', 'USD', true, 5000, 1250)
@@ -354,11 +354,11 @@ func TestPSPIdentityIsGlobal(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedSuperuserPGXPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 
 	otherMerchantID := uuid.New()
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status)
+		`INSERT INTO billing.merchants (id, slug, status)
 		 VALUES ($1, $2, 'active')`,
 		otherMerchantID, "other-"+otherMerchantID.String()[:8])
 	require.NoError(t, err)
@@ -404,7 +404,7 @@ func TestUpsertPSPOnlyRecordsExplicitValidation(t *testing.T) {
 	// so it seeds through the owner like its sibling above (or#782).
 	pool := dbtest.SharedSuperuserPGXPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	accountID := "validation-" + uuid.NewString()
 	params := gen.UpsertPSPParams{
 		MerchantID:  dbtest.TestMerchantID.UUID(),

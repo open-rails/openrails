@@ -26,7 +26,7 @@ func TestCatalogPushDumpRoundTrip(t *testing.T) {
 	merchantID := uuid.New()
 	merchantSlug := "catalog-roundtrip-" + strings.ReplaceAll(merchantID.String()[:8], "-", "")
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		merchantID, merchantSlug)
 	require.NoError(t, err)
 

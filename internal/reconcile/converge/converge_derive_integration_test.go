@@ -46,10 +46,10 @@ func TestConverge_DeriveGrantEffectMissing(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "grant_effect:"+grantID.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "grant_effect:"+grantID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.ledger_transfers WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
 			return nil
 		})
 	})
@@ -67,7 +67,7 @@ func TestConverge_DeriveGrantEffectMissing(t *testing.T) {
 
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.grant_effect.missing' AND subject_key=$2`,
+			`SELECT status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.grant_effect.missing' AND subject_key=$2`,
 			merchantID, "grant_effect:"+grantID.String()).Scan(&status))
 		require.Equal(t, "auto_fixed", status)
 		return nil
@@ -116,7 +116,7 @@ func TestConverge_DeriveGrantEffectExcess_TerminatedNotRetracted(t *testing.T) {
 		var live bool
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `
 			SELECT EXISTS (
-				SELECT 1 FROM openrails.entitlements
+				SELECT 1 FROM billing.entitlements
 				WHERE merchant_id=$1 AND grant_id=$2
 				  AND revoked_at IS NULL AND deleted_at IS NULL
 			)
@@ -127,12 +127,12 @@ func TestConverge_DeriveGrantEffectExcess_TerminatedNotRetracted(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
 				merchantID, []string{"grant_effect:" + grantID.String(), "customer:" + customer.String()})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notifications WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2 AND event<>'grant'`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.notifications WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2 AND event<>'grant'`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
 			return nil
 		})
 	})
@@ -149,7 +149,7 @@ func TestConverge_DeriveGrantEffectExcess_TerminatedNotRetracted(t *testing.T) {
 		var live bool
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `
 			SELECT EXISTS (
-				SELECT 1 FROM openrails.entitlements
+				SELECT 1 FROM billing.entitlements
 				WHERE merchant_id=$1 AND grant_id=$2
 				  AND revoked_at IS NULL AND deleted_at IS NULL
 			)
@@ -158,7 +158,7 @@ func TestConverge_DeriveGrantEffectExcess_TerminatedNotRetracted(t *testing.T) {
 
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.grant_effect.excess' AND subject_key=$2`,
+			`SELECT status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.grant_effect.excess' AND subject_key=$2`,
 			merchantID, "grant_effect:"+grantID.String()).Scan(&status))
 		require.Equal(t, "auto_fixed", status)
 		return nil
@@ -191,13 +191,13 @@ func TestConverge_DeriveGrantExcess_RefundedPayment(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id)
+		exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id)
 		      VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, productID, "ge-prod-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id)
 		      VALUES ($1,$2,9990000,'USD',$3)`, priceID, productID, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "mobius")
 		// A REFUNDED payment backing a still-live ownership grant.
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		exec(`INSERT INTO billing.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
 		      VALUES ($1,$2,$3,$4,'mobius',$5,9990000,9990000,'USD','refunded',now(),$6)`,
 			paymentID, merchantID, customer, priceID, "txn_"+suffix, pspID)
 		gl := grants.New(appDB.Gen(ctx), merchantID)
@@ -212,11 +212,11 @@ func TestConverge_DeriveGrantExcess_RefundedPayment(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "grant:"+grantID.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=$1`, paymentID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "grant:"+grantID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE id=$1`, paymentID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -228,7 +228,7 @@ func TestConverge_DeriveGrantExcess_RefundedPayment(t *testing.T) {
 
 		var status, sev string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, severity FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.grant.excess' AND subject_key=$2`,
+			`SELECT status, severity FROM billing.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.grant.excess' AND subject_key=$2`,
 			merchantID, "grant:"+grantID.String()).Scan(&status, &sev))
 		require.Equal(t, "requires_review", status, "refunded-payment grant surfaced for operator triage")
 
@@ -269,13 +269,13 @@ func TestConverge_DeriveGrantMissing_GrantablePayment(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prodGrant, "gm-g-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prodEmpty, "gm-e-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, priceGrant, prodGrant, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, priceEmpty, prodEmpty, merchantID)
+		exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prodGrant, "gm-g-"+sfx, merchantID)
+		exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prodEmpty, "gm-e-"+sfx, merchantID)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, priceGrant, prodGrant, merchantID)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, priceEmpty, prodEmpty, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "mobius")
 		ins := func(id, price uuid.UUID, txn string) {
-			exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+			exec(`INSERT INTO billing.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
 			      VALUES ($1,$2,$3,$4,'mobius',$5,5000000,5000000,'USD','completed',now(),$6)`, id, merchantID, customer, price, txn, pspID)
 		}
 		ins(payMissing, priceGrant, "txn-m-"+sfx) // grantable product, NO grant → flagged
@@ -289,12 +289,12 @@ func TestConverge_DeriveGrantMissing_GrantablePayment(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key LIKE 'payment:%'`, merchantID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=ANY($1)`, []uuid.UUID{payMissing, payEmpty, payOK})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=ANY($1)`, []uuid.UUID{priceGrant, priceEmpty})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=ANY($1)`, []uuid.UUID{prodGrant, prodEmpty})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key LIKE 'payment:%'`, merchantID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE id=ANY($1)`, []uuid.UUID{payMissing, payEmpty, payOK})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=ANY($1)`, []uuid.UUID{priceGrant, priceEmpty})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=ANY($1)`, []uuid.UUID{prodGrant, prodEmpty})
 			return nil
 		})
 	})
@@ -305,7 +305,7 @@ func TestConverge_DeriveGrantMissing_GrantablePayment(t *testing.T) {
 		count := func(pid uuid.UUID) int {
 			var n int
 			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-				`SELECT count(*) FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.grant.missing' AND subject_key=$2`,
+				`SELECT count(*) FROM billing.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.grant.missing' AND subject_key=$2`,
 				merchantID, "payment:"+pid.String()).Scan(&n))
 			return n
 		}
@@ -314,7 +314,7 @@ func TestConverge_DeriveGrantMissing_GrantablePayment(t *testing.T) {
 		require.Equal(t, 0, count(payOK), "payment with a grant → not flagged")
 		var severity, status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT severity, status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.grant.missing' AND subject_key=$2`,
+			`SELECT severity, status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.grant.missing' AND subject_key=$2`,
 			merchantID, "payment:"+payMissing.String()).Scan(&severity, &status))
 		require.Equal(t, "critical", severity, "#690: orphaned category (paying, no access) outranks freeloader")
 		require.Equal(t, "requires_review", status, "ADMIN surface-only")
@@ -363,11 +363,11 @@ func TestConverge_DeriveSweepRemediatesAllCustomers(t *testing.T) {
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for i := range customers {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "grant_effect:"+grantIDs[i].String())
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customers[i])
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customers[i])
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "grant_effect:"+grantIDs[i].String())
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.ledger_transfers WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customers[i])
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customers[i])
 			}
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 			return nil
 		})
 	})

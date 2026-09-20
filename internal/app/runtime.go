@@ -225,10 +225,11 @@ type Runtime struct {
 	// configured (safe no-op).
 	CardAbuseGuard *abuse.CardAbuseGuard
 
+	riverConfigurers      []func(context.Context, *river.Config) error
 	riverStarted          bool
 	workerConsumerRunning atomic.Bool
 	externalRiverClient   bool
-	riverSchema           string // true if River client was provided externally
+	riverSchema           string // managed override or actual host-client schema
 
 	// progressLifecycle owns the #895 out-of-River progress detector: a plain
 	// goroutine that answers "is the periodic fleet progressing?" without
@@ -312,6 +313,11 @@ func (r *Runtime) Close(ctx context.Context) error {
 		r.workerConsumerRunning.Store(false)
 		log.Info("Stopping River background workers...")
 		if err := r.RiverClient.Stop(ctx); err != nil {
+			// Stop may return before workers finish when ctx is canceled.
+			// Join cancellation before closing worker pools or attached services.
+			if stopErr := r.RiverClient.StopAndCancel(context.Background()); stopErr != nil {
+				errs = append(errs, fmt.Errorf("cancel River workers: %w", stopErr))
+			}
 			// During shutdown, Stop can surface context cancellation if the passed ctx is cancelled.
 			// Treat this as an expected shutdown condition.
 			if !errors.Is(err, context.Canceled) {
@@ -350,6 +356,24 @@ func (r *Runtime) Close(ctx context.Context) error {
 	return fmt.Errorf("failed to close some resources: %v", errs)
 }
 
+// AddRiverConfigurer composes an optional component's workers and schedules into
+// the managed fleet before river.NewClient fixes the worker registry. Call only
+// during startup, before InitRiver. External fleets must compose their own full
+// registry before returning their client from the host binder.
+func (r *Runtime) AddRiverConfigurer(configure func(context.Context, *river.Config) error) error {
+	if r == nil {
+		return fmt.Errorf("runtime is nil")
+	}
+	if configure == nil {
+		return fmt.Errorf("River configurer is required")
+	}
+	if r.RiverClient != nil || r.externalRiverClient {
+		return fmt.Errorf("River is already initialized: attach optional components before InitRiver; host-owned fleets must compose their workers before binding")
+	}
+	r.riverConfigurers = append(r.riverConfigurers, configure)
+	return nil
+}
+
 // InitRiver initialises the River client for background workers.
 // If an external client was provided via SetExternalRiverClient, this is a no-op.
 func (r *Runtime) InitRiver(ctx context.Context) error {
@@ -366,7 +390,7 @@ func (r *Runtime) InitRiver(ctx context.Context) error {
 	}
 	// #895: health bookkeeping rides on each worker (addTrackedWorker), not on
 	// the client, so it cannot be omitted by whoever builds the client.
-	client, pool, err := buildRiverClient(ctx, r.Config, workers, nil)
+	client, pool, err := buildRiverClient(ctx, r.Config, r.riverSchemaOrDefault(), workers, nil, r.riverConfigurers)
 	if err != nil {
 		return err
 	}

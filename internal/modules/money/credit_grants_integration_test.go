@@ -14,7 +14,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/grants"
@@ -76,7 +75,7 @@ func TestCreditGrantSupportLifecycle(t *testing.T) {
 	require.Zero(t, empty.Total)
 	// Original facts and the existing clawback remain the only authorities.
 	var spent, revoked int64
-	require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT COALESCE(sum(amount) FILTER(WHERE transfer_type='credit_spend'),0),COALESCE(sum(amount) FILTER(WHERE transfer_type='credit_revoke'),0) FROM openrails.ledger_transfers WHERE grant_id=$1`, grant.ID).Scan(&spent, &revoked))
+	require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT COALESCE(sum(amount) FILTER(WHERE transfer_type='credit_spend'),0),COALESCE(sum(amount) FILTER(WHERE transfer_type='credit_revoke'),0) FROM billing.ledger_transfers WHERE grant_id=$1`, grant.ID).Scan(&spent, &revoked))
 	require.EqualValues(t, 100, spent+revoked)
 }
 
@@ -112,7 +111,7 @@ func TestCreditGrantSupportExpiryAndDurableHolds(t *testing.T) {
 	_, err = svc.RevokeCreditGrant(ctx, payer, expired.ID, "expired")
 	require.ErrorIs(t, err, money.ErrCreditGrantUnavailable)
 	require.NoError(t, dbi.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := grants.New(gen.New(tx), dbtest.TestMerchantID.UUID()).ExpireLapsed(ctx, payer.UUID(), cur)
+		_, err := grants.New(dbtest.Queries(tx), dbtest.TestMerchantID.UUID()).ExpireLapsed(ctx, payer.UUID(), cur)
 		return err
 	}))
 	page, err := svc.ListCreditGrants(ctx, payer, cur, 10, 0)
@@ -158,7 +157,7 @@ func TestCreditGrantSupportConcurrentSpendAndRevoke(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, bal.Balance)
 		var total int64
-		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT COALESCE(sum(amount),0) FROM openrails.ledger_transfers WHERE grant_id=$1 AND transfer_type IN ('credit_spend','credit_revoke')`, grant.ID).Scan(&total))
+		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT COALESCE(sum(amount),0) FROM billing.ledger_transfers WHERE grant_id=$1 AND transfer_type IN ('credit_spend','credit_revoke')`, grant.ID).Scan(&total))
 		require.EqualValues(t, 100, total)
 	}
 }

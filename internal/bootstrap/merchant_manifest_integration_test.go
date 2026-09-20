@@ -40,7 +40,7 @@ func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {
 	var tenantID, permissionGroupID string
 	require.NoError(t, pool.QueryRow(ctx, `
 			SELECT id::text, permission_group_id
-		  FROM openrails.merchants
+		  FROM billing.merchants
 		 WHERE slug = 'host-three'
 	`).Scan(&tenantID, &permissionGroupID))
 
@@ -53,7 +53,7 @@ func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {
 
 	require.NoError(t, pool.QueryRow(ctx, `
 			SELECT permission_group_id
-		  FROM openrails.merchants
+		  FROM billing.merchants
 		 WHERE slug = 'host-three'
 	`).Scan(&permissionGroupID))
 	require.Equal(t, groupID, permissionGroupID)
@@ -86,7 +86,7 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantID string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM billing.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
 
 	var displayName, logoURL, fromEmail, supportURL string
 	require.NoError(t, pool.QueryRow(ctx, `
@@ -95,7 +95,7 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 			config #>> '{profile,logo_url}',
 			config #>> '{profile,from_email}',
 			config #>> '{profile,support_url}'
-		FROM openrails.merchant_configurations
+		FROM billing.merchant_configurations
 		WHERE merchant_id = $1::uuid
 	`, merchantID).Scan(&displayName, &logoURL, &fromEmail, &supportURL))
 	require.Equal(t, "Host Three Billing", displayName)
@@ -108,7 +108,7 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT value
-		FROM openrails.merchant_secrets
+		FROM billing.merchant_secrets
 		WHERE merchant_id = $1::uuid AND name = $2
 	`, merchantID, secretName).Scan(&secretValue))
 	require.Equal(t, "sk_test_bootstrap", secretValue)
@@ -117,7 +117,7 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	var archived bool
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT rail, environment, account_id, archived
-		FROM openrails.psps
+		FROM billing.psps
 		WHERE merchant_id = $1::uuid
 	`, merchantID).Scan(&rail, &environment, &accountID, &archived))
 	require.Equal(t, "stripe", rail)
@@ -149,11 +149,11 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantID string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM billing.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
 	var accountID string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT account_id
-		FROM openrails.psps
+		FROM billing.psps
 		WHERE merchant_id = $1::uuid AND rail = 'ccbill'
 	`, merchantID).Scan(&accountID))
 	require.Equal(t, "900000-0000", accountID)
@@ -168,7 +168,7 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 		var secretValue string
 		require.NoError(t, pool.QueryRow(ctx, `
 			SELECT value
-			FROM openrails.merchant_secrets
+			FROM billing.merchant_secrets
 			WHERE merchant_id = $1::uuid AND name = $2
 		`, merchantID, secretName).Scan(&secretValue))
 		require.Equal(t, want, secretValue)
@@ -211,12 +211,12 @@ func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantID string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM billing.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
 
 	var evidenceBytes []byte
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT evidence
-		FROM openrails.psps
+		FROM billing.psps
 		WHERE merchant_id = $1::uuid AND rail = 'solana' AND environment = 'live' AND account_id = $2
 	`, merchantID, accountID).Scan(&evidenceBytes))
 	var evidence map[string]any
@@ -306,7 +306,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 
 	// merchant_configurations carries the invoice policy.
 	var merchantID string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM billing.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
 	parsedMerchantID, err := merchant.ParseID(merchantID)
 	require.NoError(t, err)
 	var boundary string
@@ -315,7 +315,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 		SELECT config #>> '{billing_period_boundary}',
 		       (config #>> '{collection_threshold}')::bigint,
 		       (config #>> '{monthly_floor}')::bigint
-		FROM openrails.merchant_configurations WHERE merchant_id = $1::uuid
+		FROM billing.merchant_configurations WHERE merchant_id = $1::uuid
 	`, merchantID).Scan(&boundary, &gotThreshold, &gotFloor))
 	require.Equal(t, "calendar_month", boundary)
 	require.Equal(t, threshold, gotThreshold)
@@ -324,7 +324,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	// #882: every PSP lands in the environment derived from test_mode.
 	derivedEnv := config.ExpectedProviderEnvironment(cfg.IsTestMode())
 	var envs []string
-	rows, err := pool.Query(ctx, `SELECT environment FROM openrails.psps WHERE merchant_id = $1::uuid`, merchantID)
+	rows, err := pool.Query(ctx, `SELECT environment FROM billing.psps WHERE merchant_id = $1::uuid`, merchantID)
 	require.NoError(t, err)
 	for rows.Next() {
 		var e string
@@ -341,7 +341,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	// The manifest PSP map key persists as the PSP key.
 	var liveKey string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT key FROM openrails.psps
+		SELECT key FROM billing.psps
 		WHERE merchant_id = $1::uuid AND rail = 'nmi' AND account_id = '100001'
 	`, merchantID).Scan(&liveKey))
 	require.Equal(t, "mobius", liveKey)
@@ -445,7 +445,7 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantIDText string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantIDText))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM billing.merchants WHERE slug = 'host-three'`).Scan(&merchantIDText))
 	secretName, err := merchants.PSPSecretName("stripe", "test", "acct_vault_123", "secret_key")
 	require.NoError(t, err)
 	vaultPath := "secret/openrails/merchants/" + merchantIDText + "/" + secretName
@@ -454,7 +454,7 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 	var dbSecretCount int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*)
-		FROM openrails.merchant_secrets
+		FROM billing.merchant_secrets
 		WHERE merchant_id = $1::uuid AND name = $2
 	`, merchantIDText, secretName).Scan(&dbSecretCount))
 	require.Equal(t, 0, dbSecretCount, "Vault-enabled bootstrap must not import provider secrets into DB merchant_secrets")
@@ -497,14 +497,14 @@ func TestReconcileMerchantManifestUsesEncryptedDBSecretBackend(t *testing.T) {
 	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantIDText string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantIDText))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM billing.merchants WHERE slug = 'host-three'`).Scan(&merchantIDText))
 	secretName, err := merchants.PSPSecretName("stripe", "test", "acct_db_123", "secret_key")
 	require.NoError(t, err)
 
 	var storedValue string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT value
-		FROM openrails.merchant_secrets
+		FROM billing.merchant_secrets
 		WHERE merchant_id = $1::uuid AND name = $2
 	`, merchantIDText, secretName).Scan(&storedValue))
 	require.NotEqual(t, "sk_test_db_bootstrap", storedValue, "DB-backed bootstrap must store encrypted ciphertext when encryption is configured")
@@ -631,6 +631,7 @@ func newMerchantManifestTestPool(t *testing.T) *pgxpool.Pool {
 	pool, err := pgxpool.New(ctx, targetDSN)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
+	dbtest.ApplyAuthKitMigrations(t, ctx, pool, "profiles")
 	return pool
 }
 

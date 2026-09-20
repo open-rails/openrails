@@ -10,11 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMain(m *testing.M) { dbtest.RunMain(m) }
@@ -41,17 +39,17 @@ func testLedger(t *testing.T) (*ledger.Ledger, *pgxpool.Pool, context.Context, u
 	merchantID := dbtest.TestMerchantID.UUID()
 	customer := uuid.New()
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+		`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
 		customer, merchantID)
 	require.NoError(t, err)
 
 	currency := "TC" + strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", "")[:10])
 	t.Cleanup(func() {
 		owner := ledgerOwnerPool(t)
-		_, _ = owner.Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE merchant_id = $1 AND currency = $2`, merchantID, currency)
-		_, _ = owner.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id = $1 AND currency = $2`, merchantID, currency)
+		_, _ = owner.Exec(ctx, `DELETE FROM billing.ledger_transfers WHERE merchant_id = $1 AND currency = $2`, merchantID, currency)
+		_, _ = owner.Exec(ctx, `DELETE FROM billing.ledger_accounts WHERE merchant_id = $1 AND currency = $2`, merchantID, currency)
 	})
-	return ledger.New(gen.New(pool), merchantID), pool, ctx, customer, merchantID, currency
+	return ledger.New(dbtest.Queries(pool), merchantID), pool, ctx, customer, merchantID, currency
 }
 
 // Deposit -> spend -> expire transfers: balances move correctly and the ledger
@@ -130,7 +128,7 @@ func TestLedger_CurrencyGuard(t *testing.T) {
 	l, pool, ctx, customer, merchantID, curA := testLedger(t)
 	curB := "TC" + strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", "")[:10])
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id = $1 AND currency = $2`, merchantID, curB)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.ledger_accounts WHERE merchant_id = $1 AND currency = $2`, merchantID, curB)
 	})
 
 	custA, err := l.EnsureCustomerBalance(ctx, customer, curA)
@@ -163,15 +161,15 @@ func TestLedger_AppendOnly(t *testing.T) {
 
 	// Visible (SELECT granted, same merchant under RLS)...
 	var seen int
-	require.NoError(t, conn.QueryRow(ctx, `SELECT count(*) FROM openrails.ledger_transfers WHERE id = $1`, tr.ID).Scan(&seen))
+	require.NoError(t, conn.QueryRow(ctx, `SELECT count(*) FROM billing.ledger_transfers WHERE id = $1`, tr.ID).Scan(&seen))
 	require.Equal(t, 1, seen)
 
 	// ...but not mutable.
-	_, err = conn.Exec(ctx, `UPDATE openrails.ledger_transfers SET amount = amount + 1 WHERE id = $1`, tr.ID)
+	_, err = conn.Exec(ctx, `UPDATE billing.ledger_transfers SET amount = amount + 1 WHERE id = $1`, tr.ID)
 	require.Error(t, err)
 	require.Contains(t, strings.ToLower(err.Error()), "permission denied")
 
-	_, err = conn.Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE id = $1`, tr.ID)
+	_, err = conn.Exec(ctx, `DELETE FROM billing.ledger_transfers WHERE id = $1`, tr.ID)
 	require.Error(t, err)
 	require.Contains(t, strings.ToLower(err.Error()), "permission denied")
 }
@@ -182,7 +180,7 @@ func requireLedgerNetZero(t *testing.T, ctx context.Context, pool *pgxpool.Pool,
 	t.Helper()
 	var net int64
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT COALESCE(SUM(credits_posted - debits_posted), 0)::bigint FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`,
+		`SELECT COALESCE(SUM(credits_posted - debits_posted), 0)::bigint FROM billing.ledger_accounts WHERE merchant_id=$1 AND currency=$2`,
 		merchantID, cur).Scan(&net))
 	require.Equal(t, int64(0), net, "every (merchant,currency) ledger must net to zero")
 }
@@ -202,15 +200,15 @@ WITH actual AS (
         a.id,
         COALESCE(SUM(t.amount) FILTER (WHERE t.credit_account_id = a.id), 0)::bigint AS credits_posted,
         COALESCE(SUM(t.amount) FILTER (WHERE t.debit_account_id = a.id), 0)::bigint AS debits_posted
-    FROM openrails.ledger_accounts a
-    LEFT JOIN openrails.ledger_transfers t
+    FROM billing.ledger_accounts a
+    LEFT JOIN billing.ledger_transfers t
       ON t.merchant_id = a.merchant_id
      AND (t.debit_account_id = a.id OR t.credit_account_id = a.id)
     WHERE a.merchant_id = $1 AND a.currency = $2
     GROUP BY a.id
 )
 SELECT a.id
-FROM openrails.ledger_accounts a
+FROM billing.ledger_accounts a
 JOIN actual ON actual.id = a.id
 WHERE a.merchant_id = $1
   AND a.currency = $2

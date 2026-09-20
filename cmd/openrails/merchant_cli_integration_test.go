@@ -60,7 +60,7 @@ func TestCLIMerchantNameAndExplicitIdentityAreDistinct(t *testing.T) {
 	require.Equal(t, a.ID, selected)
 	_, err = resolveCLIMerchant(ctx, database, "id:"+uuid.NewString())
 	require.Error(t, err, "an absent explicit UUID cannot produce empty successful work")
-	_, err = admin.Exec(ctx, `UPDATE openrails.merchants SET deleted_at=now() WHERE id=$1`, a.ID.UUID())
+	_, err = admin.Exec(ctx, `UPDATE billing.merchants SET deleted_at=now() WHERE id=$1`, a.ID.UUID())
 	require.NoError(t, err)
 	_, err = resolveCLIMerchant(ctx, database, "id:"+a.ID.String())
 	require.Error(t, err, "a deleted explicit UUID is unavailable")
