@@ -3,49 +3,84 @@ package openrails
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
-	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
-// TestWithTimeoutEnforcedWithCustomClient guards the per-call deadline: even
-// when the host injects its own *http.Client that has NO Timeout set,
-// WithTimeout must still bound the call (it is applied as a per-request context
-// deadline in doRaw). A slow upstream therefore fails fast with ErrUnreachable
-// instead of stalling the hot path.
-func TestWithTimeoutEnforcedWithCustomClient(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(500 * time.Millisecond)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
+type deadlineTransport func(*http.Request) (*http.Response, error)
 
-	c, cErr := NewRemote(srv.URL,
-		// Custom client with NO Timeout — the pre-fix code would block until the
-		// server responded (500ms) instead of honoring WithTimeout.
-		WithHTTPClient(&http.Client{}),
-		WithTimeout(50*time.Millisecond),
-		WithTokenProvider(func(context.Context) (string, error) { return "tok", nil }),
-	)
-	if cErr != nil {
-		t.Fatal(cErr)
-	}
+func (f deadlineTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-	start := time.Now()
-	_, err := c.Balance(context.Background(), CustomerID(uuid.MustParse("11111111-1111-1111-1111-111111111111")))
-	elapsed := time.Since(start)
-
-	if err == nil {
-		t.Fatalf("expected timeout error, got nil")
-	}
-	if !errors.Is(err, ErrUnreachable) {
-		t.Fatalf("expected ErrUnreachable, got %v", err)
-	}
-	if elapsed > 300*time.Millisecond {
-		t.Fatalf("call was not bounded by WithTimeout: took %s", elapsed)
+func TestClientDeadlineOwnership(t *testing.T) {
+	for _, mode := range []string{"default unbounded", "caller deadline", "caller cancellation", "explicit timeout"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			cancel := func() {}
+			deadline := time.Now().Add(time.Minute)
+			if mode == "caller cancellation" {
+				ctx, cancel = context.WithCancel(ctx)
+			} else if mode != "default unbounded" {
+				ctx, cancel = context.WithDeadline(ctx, deadline)
+			}
+			defer cancel()
+			called := false
+			transport := deadlineTransport(func(request *http.Request) (*http.Response, error) {
+				called = true
+				observed, hasDeadline := request.Context().Deadline()
+				switch mode {
+				case "default unbounded":
+					if hasDeadline {
+						t.Errorf("default introduced a deadline: %v", observed)
+					}
+				case "caller deadline":
+					if !hasDeadline || !observed.Equal(deadline) {
+						t.Errorf("caller deadline changed: got %v, want %v", observed, deadline)
+					}
+				case "caller cancellation":
+					cancel()
+					<-request.Context().Done()
+					return nil, request.Context().Err()
+				case "explicit timeout":
+					if !hasDeadline || !observed.Before(deadline) {
+						t.Errorf("explicit timeout did not shorten caller budget: %v", observed)
+					}
+					<-request.Context().Done()
+					return nil, request.Context().Err()
+				}
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("{}")), Header: http.Header{}}, nil
+			})
+			opts := []ClientOption{WithAPIKey("test-key"), WithHTTPClient(&http.Client{Transport: transport})}
+			if mode == "explicit timeout" {
+				opts = append(opts, WithTimeout(20*time.Millisecond))
+			}
+			client, err := NewRemote("https://openrails.test", opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = client.Verify(ctx)
+			switch mode {
+			case "caller cancellation":
+				if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrUnreachable) {
+					t.Fatalf("cancellation not preserved: %v", err)
+				}
+			case "explicit timeout":
+				if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrUnreachable) {
+					t.Fatalf("explicit deadline not enforced: %v", err)
+				}
+				if ctx.Err() != nil {
+					t.Fatal("child timeout canceled caller context")
+				}
+			default:
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !called {
+				t.Fatal("test did not exercise the HTTP boundary")
+			}
+		})
 	}
 }
