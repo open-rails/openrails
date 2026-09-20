@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,7 +20,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/open-rails/openrails/config"
@@ -28,126 +27,9 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
-	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
+	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
-
-const merchantManifestSchemaDDL = `
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE SCHEMA IF NOT EXISTS openrails;
-
-CREATE TABLE IF NOT EXISTS openrails.merchants (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    slug                TEXT NOT NULL,
-    display_name        TEXT,
-    status              TEXT NOT NULL DEFAULT 'active',
-    permission_group_id     TEXT,
-    api_host            TEXT,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    deleted_at          TIMESTAMPTZ
-);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_unbound_slug ON openrails.merchants(slug) WHERE deleted_at IS NULL AND permission_group_id IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_permission_group_id ON openrails.merchants(permission_group_id) WHERE permission_group_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_api_host ON openrails.merchants (api_host) WHERE api_host IS NOT NULL AND deleted_at IS NULL;
-
-CREATE TABLE IF NOT EXISTS openrails.merchant_secrets (
-    merchant_id uuid NOT NULL,
-    name text NOT NULL,
-    value text NOT NULL,
-    version integer DEFAULT 1 NOT NULL,
-    created_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT pk_merchant_secrets PRIMARY KEY (merchant_id, name)
-);
-ALTER TABLE ONLY openrails.merchant_secrets FORCE ROW LEVEL SECURITY;
-ALTER TABLE openrails.merchant_secrets ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS merchant_isolation ON openrails.merchant_secrets;
-CREATE POLICY merchant_isolation ON openrails.merchant_secrets
-    USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
-    WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
-
-CREATE TABLE IF NOT EXISTS openrails.psps (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    merchant_id uuid NOT NULL,
-    rail text NOT NULL,
-    environment text DEFAULT 'live' NOT NULL,
-    account_id text NOT NULL,
-    key text,
-    custodian_id uuid,
-    archived boolean DEFAULT false NOT NULL,
-    evidence jsonb,
-    first_seen_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    last_verified_at timestamptz,
-    replaced_at timestamptz,
-    created_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT psps_pkey PRIMARY KEY (id),
-    CONSTRAINT psps_nonempty CHECK (btrim(rail) <> '' AND btrim(environment) <> '' AND btrim(account_id) <> ''),
-    CONSTRAINT psps_environment_check CHECK (environment = ANY (ARRAY['live','test'])),
-    CONSTRAINT psps_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE
-);
-ALTER TABLE ONLY openrails.psps FORCE ROW LEVEL SECURITY;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_psps_merchant_identity ON openrails.psps (merchant_id, rail, environment, account_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_psps_identity ON openrails.psps (rail, environment, account_id);
-CREATE INDEX IF NOT EXISTS idx_psps_new_work ON openrails.psps (merchant_id, rail, environment, created_at DESC, id DESC) WHERE archived = false;
-ALTER TABLE openrails.psps ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS merchant_isolation ON openrails.psps;
-CREATE POLICY merchant_isolation ON openrails.psps
-    USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
-    WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
-
--- #824: the subject-first directory function targets customers; this harness
--- replays that function from the baseline, so the table must exist.
-CREATE TABLE IF NOT EXISTS openrails.customers (
-    id uuid NOT NULL,
-    merchant_id uuid NOT NULL,
-    PRIMARY KEY (merchant_id, id)
-);
-
--- or#897: the billing-policy registry the manifest loader now installs.
-CREATE TABLE IF NOT EXISTS openrails.billing_policies (
-    id uuid DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
-    merchant_id uuid NOT NULL,
-    name text NOT NULL,
-    policy jsonb DEFAULT '{}'::jsonb NOT NULL,
-    created_at timestamptz DEFAULT now() NOT NULL,
-    updated_at timestamptz DEFAULT now() NOT NULL,
-    CONSTRAINT billing_policies_name_key UNIQUE (merchant_id, name),
-    CONSTRAINT billing_policies_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT
-);
-ALTER TABLE ONLY openrails.billing_policies FORCE ROW LEVEL SECURITY;
-ALTER TABLE openrails.billing_policies ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS merchant_isolation ON openrails.billing_policies;
-CREATE POLICY merchant_isolation ON openrails.billing_policies
-    USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
-    WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
-
-CREATE TABLE IF NOT EXISTS openrails.billing_policy_bindings (
-    id uuid DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
-    merchant_id uuid NOT NULL,
-    customer_id uuid,
-    tier text,
-    policy_name text NOT NULL,
-    created_at timestamptz DEFAULT now() NOT NULL,
-    updated_at timestamptz DEFAULT now() NOT NULL,
-    CONSTRAINT billing_policy_bindings_rung_ck CHECK ((customer_id IS NULL) OR (tier IS NULL)),
-    CONSTRAINT billing_policy_bindings_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT,
-    CONSTRAINT billing_policy_bindings_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id),
-    CONSTRAINT billing_policy_bindings_policy_fk FOREIGN KEY (merchant_id, policy_name) REFERENCES openrails.billing_policies(merchant_id, name) ON DELETE RESTRICT
-);
-CREATE INDEX IF NOT EXISTS idx_billing_policy_bindings_merchant_id ON openrails.billing_policy_bindings (merchant_id);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_billing_policy_bindings_default ON openrails.billing_policy_bindings (merchant_id) WHERE ((customer_id IS NULL) AND (tier IS NULL));
-CREATE UNIQUE INDEX IF NOT EXISTS uq_billing_policy_bindings_tier ON openrails.billing_policy_bindings (merchant_id, tier) WHERE ((customer_id IS NULL) AND (tier IS NOT NULL));
-CREATE UNIQUE INDEX IF NOT EXISTS uq_billing_policy_bindings_customer ON openrails.billing_policy_bindings (merchant_id, customer_id) WHERE (customer_id IS NOT NULL);
-ALTER TABLE ONLY openrails.billing_policy_bindings FORCE ROW LEVEL SECURITY;
-ALTER TABLE openrails.billing_policy_bindings ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS merchant_isolation ON openrails.billing_policy_bindings;
-CREATE POLICY merchant_isolation ON openrails.billing_policy_bindings
-    USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
-    WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
-
-`
 
 func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {
 	ctx := context.Background()
@@ -720,101 +602,71 @@ func readVaultKV2Value(t *testing.T, vault merchantManifestVault, fullPath strin
 	return payload.Data.Data["value"]
 }
 
+// Keep a fresh database per test: these manifests deliberately reuse merchant
+// names and provider identities. Reuse dbtest's owned server and apply exactly
+// the production schema instead of reconstructing a subset of its tables.
 func newMerchantManifestTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()
-	if dsn := strings.TrimSpace(os.Getenv("OPENRAILS_TEST_DB_DSN")); dsn != "" {
-		pool := newExternalMerchantManifestTestPool(t, ctx, dsn)
-		applyMerchantManifestTestSchema(t, ctx, pool)
-		return pool
-	}
-
-	container, err := postgres.Run(ctx,
-		"postgres:18-alpine",
-		postgres.WithDatabase("openrails"),
-		postgres.WithUsername("test"),
-		postgres.WithPassword("test"),
-		dbtest.WithPostgresLimits(),
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).WithStartupTimeout(60*time.Second)),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = container.Terminate(context.Background()) })
-
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-	pool, err := pgxpool.New(ctx, dsn)
-	require.NoError(t, err)
-	t.Cleanup(pool.Close)
-
-	applyMerchantManifestTestSchema(t, ctx, pool)
-	return pool
-}
-
-func newExternalMerchantManifestTestPool(t *testing.T, ctx context.Context, adminDSN string) *pgxpool.Pool {
-	t.Helper()
+	adminDSN := dbtest.SharedSuperuserDSN(t)
 	adminCfg, err := pgxpool.ParseConfig(adminDSN)
 	require.NoError(t, err)
 	adminCfg.ConnConfig.Config.Database = "postgres"
 	adminPool, err := pgxpool.NewWithConfig(ctx, adminCfg)
 	require.NoError(t, err)
+	t.Cleanup(adminPool.Close)
 
 	dbName := fmt.Sprintf("openrails_tenant_manifest_%d", time.Now().UnixNano())
 	_, err = adminPool.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{dbName}.Sanitize())
 	require.NoError(t, err)
-
-	testCfg, err := pgxpool.ParseConfig(adminDSN)
-	require.NoError(t, err)
-	testCfg.ConnConfig.Config.Database = dbName
-	pool, err := pgxpool.NewWithConfig(ctx, testCfg)
-	require.NoError(t, err)
-
 	t.Cleanup(func() {
-		pool.Close()
-		_, _ = adminPool.Exec(context.Background(), "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", dbName)
-		_, _ = adminPool.Exec(context.Background(), "DROP DATABASE IF EXISTS "+pgx.Identifier{dbName}.Sanitize())
-		adminPool.Close()
+		_, err := adminPool.Exec(context.Background(), "DROP DATABASE "+pgx.Identifier{dbName}.Sanitize()+" WITH (FORCE)")
+		require.NoError(t, err, "clean up this test's database only")
 	})
+
+	targetDSN := merchantManifestDatabaseDSN(t, adminDSN, dbName)
+	require.NoError(t, migrate.RunPostgres(ctx, &config.Config{
+		Env: "development", DB: &config.DBConfig{URL: targetDSN},
+	}))
+	pool, err := pgxpool.New(ctx, targetDSN)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
 	return pool
 }
 
-func applyMerchantManifestTestSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+// ConnString preserves the original DSN when pgx.Config.Database changes.
+// Rewrite both URL paths and overriding query parameters before migration.
+func merchantManifestDatabaseDSN(t *testing.T, adminDSN, dbName string) string {
 	t.Helper()
-	dbtest.ApplyAuthKitMigrations(t, ctx, pool, "profiles")
-	_, err := pool.Exec(ctx, merchantManifestSchemaDDL)
+	targetDSN := adminDSN + " dbname=" + dbName
+	if strings.HasPrefix(adminDSN, "postgres://") || strings.HasPrefix(adminDSN, "postgresql://") {
+		targetURL, err := url.Parse(adminDSN)
+		require.NoError(t, err)
+		targetURL.Path = "/" + dbName
+		query := targetURL.Query()
+		query.Del("dbname")
+		targetURL.RawQuery = query.Encode()
+		targetDSN = targetURL.String()
+	}
+	parsed, err := pgxpool.ParseConfig(targetDSN)
 	require.NoError(t, err)
+	require.Equal(t, dbName, parsed.ConnConfig.Database, "migrations must target only this test's database")
+	return targetDSN
+}
 
-	// Replay the baseline objects whose exact shape matters to this harness:
-	// directory functions, merchant configuration and DEK storage, and the
-	// custodian registry. Hand-copying them here previously let removed version
-	// columns survive in tests after the production schema moved forward.
-	_, err = pool.Exec(ctx, `DO $$ BEGIN
-		IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
-			CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS;
-		END IF;
-	END $$;`)
-	require.NoError(t, err)
-	baselineDDL, err := postgresmigrations.BaselineObjects(
-		"current_merchant_id",
-		"assert_cross_merchant_reader",
-		"psp_owner_by_identity",
-		"customer_merchant_ids_for_subject",
-		"merchant_configurations",
-		"merchant_deks",
-		"custodians",
-		"custodian_owner_by_identity",
-	)
-	require.NoError(t, err)
-	_, err = pool.Exec(ctx, baselineDDL)
-	require.NoError(t, err)
-
-	// The custody reference onto psps, which this harness's own psps table
-	// declares without it (custodians is created above, after psps).
-	_, err = pool.Exec(ctx, `ALTER TABLE openrails.psps
-		ADD CONSTRAINT psps_custodian_fk FOREIGN KEY (custodian_id, merchant_id)
-		REFERENCES openrails.custodians(id, merchant_id) ON DELETE RESTRICT`)
-	require.NoError(t, err)
+func TestMerchantManifestDatabaseDSNIsOwned(t *testing.T) {
+	for name, original := range map[string]string{
+		"url":                "postgres://test:secret@localhost/original?sslmode=disable",
+		"url query override": "postgresql://test:secret@localhost/original?sslmode=disable&dbname=foreign&dbname=another",
+		"keyword":            "host=localhost user=test password='test secret' dbname=original sslmode=disable",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dsn := merchantManifestDatabaseDSN(t, original, "owned_fixture")
+			parsed, err := pgxpool.ParseConfig(dsn)
+			require.NoError(t, err)
+			require.Equal(t, "owned_fixture", parsed.ConnConfig.Database)
+		})
+	}
 }
 
 // apiModeReconcileConfig pins these store-semantics tests to MODE 2 (#723
