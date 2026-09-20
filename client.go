@@ -284,16 +284,18 @@ type BillingPolicyInput struct {
 	PolicyCurrency  string              `json:"policy_currency,omitempty"`
 }
 
-// BillingPolicyBindingInput points one rung at a declared policy name (or#897).
-// Set CustomerID for the per-customer rung, Tier for the per-tier rung, neither
-// for the merchant default — never both. Most specific wins.
-//
-// GetMerchantSettings returns only the DECLARATIVE rungs (default + tier):
-// per-customer bindings are runtime segmentation state and are not enumerated.
+// BillingPolicyBindingInput declares a merchant-default or per-tier policy.
+// Customer assignments are runtime state managed by SetCustomerBillingPolicy.
 type BillingPolicyBindingInput struct {
-	PolicyName string     `json:"policy"`
-	CustomerID CustomerID `json:"customer_id,omitzero"`
-	Tier       string     `json:"tier,omitempty"`
+	PolicyName string `json:"policy"`
+	Tier       string `json:"tier,omitempty"`
+}
+
+// CustomerBillingPolicyAssignment names only the customer's explicit policy.
+// A nil PolicyName means the customer inherits the ordinary tier/default policy.
+type CustomerBillingPolicyAssignment struct {
+	CustomerID CustomerID `json:"customer_id"`
+	PolicyName *string    `json:"policy_name"`
 }
 
 // WastedSpendReport is one host-reported failed attempt that cost money.

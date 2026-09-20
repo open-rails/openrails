@@ -96,8 +96,7 @@ API (mode 2), `PUT /v1/merchant/settings`:
   ],
   "billing_policy_bindings": [
     { "policy": "api_line" },
-    { "policy": "cloud_monthly", "tier": "cloud" },
-    { "policy": "cloud_monthly", "customer_id": "…" }
+    { "policy": "cloud_monthly", "tier": "cloud" }
   ]
 }
 ```
@@ -107,11 +106,36 @@ policy the API would have refused. Each kind accepts only its own limit: putting
 `spend_windows` on an `outstanding_cap` policy is an error, not a silently
 ignored field.
 
-Per-customer binding is API-only. In manifest mode the YAML *is* the
-configuration and changing it means a restart, which is the wrong shape for
-per-customer segmentation — and it would put customer identifiers into a
-committed file. `GET /v1/merchant/settings` likewise returns only the
-declarative rungs.
+Customer assignments use a separate runtime resource in both manifest and API
+mode. They are excluded from `GET /v1/merchant/settings`; replacing that
+merchant document preserves them. Removing a policy that is still assigned to a
+customer is refused. `customer_id` is not accepted in a declaration binding.
+
+### Assigning a customer
+
+The same Go Client operations work embedded and remotely:
+
+```go
+name := "cloud_monthly"
+assignment, err := client.SetCustomerBillingPolicy(ctx, customerID, &name)
+assignment, err = client.GetCustomerBillingPolicy(ctx, customerID)
+assignment, err = client.SetCustomerBillingPolicy(ctx, customerID, nil) // inherit again
+```
+
+HTTP uses `GET` and `PUT` on
+`/v1/merchant/customers/{customer_id}/billing-policy`. PUT requires
+`{"policy_name":"cloud_monthly"}` to assign, or `{"policy_name":null}` to clear.
+Both operations return `{"customer_id":"…","policy_name":"cloud_monthly"}`;
+an unassigned customer returns an explicit `null` policy name. This reads the
+explicit assignment, not the effective tier or default policy.
+
+GET requires `merchant:customer-settings:read`; PUT requires
+`merchant:customer-settings:update`. Customer self-service permissions cannot
+change this resource. The customer and policy must already exist under the
+request's merchant: missing/foreign customers return `404 customer_not_found`,
+and missing/foreign policies return `404 billing_policy_not_found`. No customer
+is implicitly created. Missing, blank, non-string policy names and unknown
+fields return `400 invalid_param`; only an explicit JSON `null` clears.
 
 ## Resolution
 
@@ -124,9 +148,8 @@ per-customer binding  →  per-tier binding  →  merchant default  →  (none)
 With no binding at all, admission falls back to the payer's own arrears credit
 limit under `outstanding_cap` semantics — the reading that can still refuse.
 
-Resolutions are cached per process and invalidated on every policy or binding
-write, so a tightened cap bites on the next admission rather than at the end of
-a TTL.
+Policy resolution reads PostgreSQL directly. A committed assignment changes the
+next admission in every runtime, without waiting for a process-local cache TTL.
 
 ## Other policy fields
 

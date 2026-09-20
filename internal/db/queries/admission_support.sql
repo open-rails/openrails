@@ -49,6 +49,23 @@ ON CONFLICT (merchant_id, customer_id) WHERE (customer_id IS NOT NULL) DO UPDATE
     policy_name = EXCLUDED.policy_name,
     updated_at = EXCLUDED.updated_at;
 
+-- name: GetCustomerBillingPolicyAssignment :one
+-- The left join distinguishes an existing unassigned customer from a missing one.
+SELECT c.id AS customer_id, b.policy_name
+FROM openrails.customers c
+LEFT JOIN openrails.billing_policy_bindings b
+  ON b.merchant_id = c.merchant_id AND b.customer_id = c.id
+WHERE c.merchant_id = sqlc.arg(merchant_id) AND c.id = sqlc.arg(customer_id);
+
+-- name: LockBillingPolicyName :one
+SELECT name FROM openrails.billing_policies
+WHERE merchant_id = sqlc.arg(merchant_id) AND name = sqlc.arg(name)
+FOR KEY SHARE;
+
+-- name: DeleteCustomerBillingPolicyBinding :exec
+DELETE FROM openrails.billing_policy_bindings
+WHERE merchant_id = sqlc.arg(merchant_id) AND customer_id = sqlc.arg(customer_id);
+
 -- name: ListDeclarativeBillingPolicyBindings :many
 -- The DECLARATIVE rungs (merchant default + per-tier) for the config-sync
 -- document. Per-customer bindings are deliberately excluded: they are runtime

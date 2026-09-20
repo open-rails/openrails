@@ -18,7 +18,11 @@ policy resolution reads PostgreSQL directly so another runtime does not retain
 an old process-local cached cap.
 
 Per-customer policy bindings are runtime segmentation, outside
-this declaration. PUT rejects customer bindings and preserves existing runtime
+this declaration. Use `Client.GetCustomerBillingPolicy` and
+`Client.SetCustomerBillingPolicy` (GET/PUT on
+`/v1/merchant/customers/{customer_id}/billing-policy`) to read, assign or clear
+one customer's explicit policy. A required nullable `policy_name` distinguishes
+clearing from an incomplete request. PUT rejects customer bindings and preserves existing runtime
 rows. Removing a named policy still referenced by a customer is refused, preserving
 the entire previous document. This contract contains no global consumer or wallet
 state; those remain OpenRails-SaaS responsibilities.

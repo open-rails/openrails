@@ -15,14 +15,13 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func TestPolicyDelegationAndAdmissionWorkflow(t *testing.T) {
 	f := newTreasuryWorkflow(t)
 	t.Run("delegation_document", func(t *testing.T) { checkPolicyDelegationDocument(t, f) })
 	t.Run("settings_and_precedence", func(t *testing.T) { checkPolicyPrecedence(t, f) })
+	t.Run("customer_assignment_boundary", func(t *testing.T) { checkCustomerPolicyBoundary(t, f) })
 	t.Run("budget_effects", func(t *testing.T) { checkPolicyBudgetEffects(t, f) })
 	t.Run("waste_and_profiles", func(t *testing.T) { checkPolicyWasteAndProfiles(t, f) })
 	t.Run("invoker_windows", func(t *testing.T) { checkPolicyInvokerWindows(t, f) })
@@ -161,16 +160,37 @@ func checkPolicyPrecedence(t *testing.T, f treasuryWorkflow) {
 	require.NoError(t, f.client.SetMerchantSettings(ctx, doc))
 	require.True(t, allows(2_000_000))
 	require.False(t, allows(100_000_000))
-	doc.BillingPolicyBindings = append(doc.BillingPolicyBindings, openrails.BillingPolicyBindingInput{PolicyName: "large", CustomerID: payer})
-	require.ErrorIs(t, f.client.SetMerchantSettings(ctx, doc), openrails.ErrInvalid, "customer bindings are not accepted in a merchant settings document")
+	status, raw := requestWorkflowJSON(t, http.MethodPut, settingsURL, f.merchant.APIKey, map[string]any{
+		"billing_policies":        doc.BillingPolicies,
+		"billing_policy_bindings": []any{map[string]any{"policy": "large", "customer_id": payer}},
+	})
+	require.Equal(t, http.StatusBadRequest, status, string(raw), "customer assignments are not declarations")
+	require.Contains(t, string(raw), "customer_id", "refusal must identify the removed field, not another malformed declaration key")
 	require.False(t, allows(100_000_000), "the refused document cannot change the current binding")
-	// Customer binding currently has no public Client/HTTP operation. Keep its
-	// precedence proof explicit at the existing private fixture boundary.
-	svc, err := service.New(f.surface.App().Runtime)
-	require.NoError(t, err)
-	mctx := merchant.WithID(ctx, f.merchant.MerchantID)
-	require.NoError(t, svc.BindBillingPolicy(mctx, openrails.BillingPolicyBindingInput{PolicyName: "large", CustomerID: payer}))
-	require.True(t, allows(100_000_000))
-	require.NoError(t, svc.BindBillingPolicy(mctx, openrails.BillingPolicyBindingInput{PolicyName: "tiny", CustomerID: payer}))
-	require.False(t, allows(2_000_000), "rebinding changes the next decision, not a future cache expiry")
+	for _, client := range []*openrails.Client{f.client, f.embedded} {
+		assignment, err := client.GetCustomerBillingPolicy(ctx, payer)
+		require.NoError(t, err)
+		require.Equal(t, &openrails.CustomerBillingPolicyAssignment{CustomerID: payer}, assignment)
+		large, tiny := "large", "tiny"
+		assignment, err = client.SetCustomerBillingPolicy(ctx, payer, &large)
+		require.NoError(t, err)
+		require.Equal(t, &openrails.CustomerBillingPolicyAssignment{CustomerID: payer, PolicyName: &large}, assignment)
+		require.True(t, allows(100_000_000))
+		require.NoError(t, client.SetMerchantSettings(ctx, doc))
+		require.True(t, allows(100_000_000), "declaration replacement preserves customer assignments")
+		removed := doc
+		removed.BillingPolicies = doc.BillingPolicies[:2]
+		require.ErrorIs(t, client.SetMerchantSettings(ctx, removed), openrails.ErrInvalid, "cannot remove a referenced policy")
+		assignment, err = client.GetCustomerBillingPolicy(ctx, payer)
+		require.NoError(t, err)
+		require.Equal(t, &large, assignment.PolicyName)
+		_, err = client.SetCustomerBillingPolicy(ctx, payer, &tiny)
+		require.NoError(t, err)
+		require.False(t, allows(2_000_000), "rebinding changes the next decision, not a future cache expiry")
+		assignment, err = client.SetCustomerBillingPolicy(ctx, payer, nil)
+		require.NoError(t, err)
+		require.Nil(t, assignment.PolicyName)
+		require.True(t, allows(2_000_000), "clearing restores the tier policy")
+		require.False(t, allows(100_000_000))
+	}
 }

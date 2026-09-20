@@ -224,6 +224,8 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	customers := group.Group("/customers/:customer_id")
 	// Materialize a customer before its first purchase (idempotent touch).
 	customers.Handle(http.MethodPut, "", h(httphandlers.ServiceEnsureCustomer), writeMW...)
+	customers.Handle(http.MethodGet, "/billing-policy", h(httphandlers.ServiceGetCustomerBillingPolicy), readMW...)
+	customers.Handle(http.MethodPut, "/billing-policy", h(httphandlers.ServiceSetCustomerBillingPolicy), writeMW...)
 	paymentReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentsRead)}, dbMW...)
 	customers.Handle(http.MethodGet, "/payment-settlement-status", h(httphandlers.ServicePaymentSettlementStatus), paymentReadMW...)
 	customers.Handle(http.MethodGet, "/entitlements",

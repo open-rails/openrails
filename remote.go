@@ -480,6 +480,36 @@ func (c *Client) SetMerchantSettings(ctx context.Context, settings MerchantSetti
 	return c.do(ctx, http.MethodPut, "/v1/merchant/settings", settings, nil)
 }
 
+// GetCustomerBillingPolicy reads the explicit assignment, not the resolved tier/default policy.
+func (c *Client) GetCustomerBillingPolicy(ctx context.Context, customerID CustomerID) (*CustomerBillingPolicyAssignment, error) {
+	path, err := customerPath(customerID)
+	if err != nil {
+		return nil, err
+	}
+	var out CustomerBillingPolicyAssignment
+	if err := c.do(ctx, http.MethodGet, path+"/billing-policy", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SetCustomerBillingPolicy assigns a declared policy; nil explicitly clears the
+// assignment and restores tier/default inheritance. It never creates a customer.
+func (c *Client) SetCustomerBillingPolicy(ctx context.Context, customerID CustomerID, policyName *string) (*CustomerBillingPolicyAssignment, error) {
+	path, err := customerPath(customerID)
+	if err != nil {
+		return nil, err
+	}
+	body := struct {
+		PolicyName *string `json:"policy_name"`
+	}{PolicyName: policyName}
+	var out CustomerBillingPolicyAssignment
+	if err := c.do(ctx, http.MethodPut, path+"/billing-policy", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // SetCustomerSpendDelegations replaces the customer's complete delegation
 // document over the machine-authenticated merchant surface.
 func (c *Client) SetCustomerSpendDelegations(ctx context.Context, customerID CustomerID, delegations []SpendDelegationInput) error {
