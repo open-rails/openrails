@@ -155,7 +155,7 @@ func (h *NMIProviderCutover) requalifyAccount(ctx context.Context, in gen.Openra
 			return err
 		}
 		current, err := providerqualification.Current(row)
-		if err != nil || current == nil || current.CredentialFingerprint != fingerprint || current.PSPID != previous.Qualification.PSPID || current.Environment != previous.Qualification.Environment || current.Contract != previous.Qualification.Contract || current.EvidenceRef != r.RequalifyAccount || (current.CredentialFingerprint == previous.Fingerprint && *current.CredentialVersion == previous.Version) {
+		if err != nil || current == nil || current.CredentialFingerprint != fingerprint || current.PSPID != previous.Qualification.PSPID || current.Environment != previous.Qualification.Environment || current.Contract != previous.Qualification.Contract || current.EvidenceRef != r.RequalifyAccount || *current.CredentialVersion < previous.Version || (current.CredentialFingerprint == previous.Fingerprint && *current.CredentialVersion == previous.Version) {
 			return RejectResolution("current qualification does not bind this credential and account")
 		}
 		canonical, err := NewStore(h.DB).Get(ctx, in.ID)
