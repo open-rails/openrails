@@ -22,10 +22,7 @@ import (
 // and lifecycle effects; there is no second dunning lease to infer ownership.
 func (h *ManualRebillHandler) EnqueueScheduled(ctx context.Context, subscriptionID uuid.UUID) (gen.OpenrailsRailIntent, error) {
 	var accepted gen.OpenrailsRailIntent
-	now := time.Now().UTC()
-	if h.Clock != nil {
-		now = h.Clock.Now().UTC()
-	}
+	now := h.now()
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return accepted, err
