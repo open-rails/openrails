@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
@@ -21,14 +20,15 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
+	owned := surface.ProvisionOwnedMerchant("provider-config-" + uuid.NewString()[:8])
 
 	adminToken := surface.MintAPIKey(
-		dbtest.TestMerchantSlug,
+		owned.MerchantSlug,
 		"provider-admin-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantPaymentProvidersRead, controlplane.PermMerchantPaymentProvidersUpdate},
 	)
 	readToken := surface.MintAPIKey(
-		dbtest.TestMerchantSlug,
+		owned.MerchantSlug,
 		"provider-reader-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantPaymentProvidersRead},
 	)
@@ -38,7 +38,7 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 	// no role holding catalog:read in isolation; catalog:read would widen to
 	// viewer, which does carry payment-providers:read).
 	deniedToken := surface.MintAPIKey(
-		dbtest.TestMerchantSlug,
+		owned.MerchantSlug,
 		"provider-denied-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCustomerSettingsRead},
 	)

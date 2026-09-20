@@ -36,7 +36,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"io/fs"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -63,8 +62,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
-	"github.com/open-rails/openrails/internal/http/middleware"
-	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/testauth"
@@ -328,10 +325,13 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 
 // StartEmbeddedMerchant starts an independent embedded runtime for an existing
 // merchant. Construction fixes its authority before any client is created.
-func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug string) *Surface {
+func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug string, configure ...func(*config.Config)) *Surface {
 	h.t.Helper()
 
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: h.DSN}}
+	for _, apply := range configure {
+		apply(cfg)
+	}
 	rt, err := embed.New(h.ctx, embed.Options{
 		Config: cfg, Redis: h.Redis, River: embed.RiverManagedByOpenRails(),
 	})
@@ -342,27 +342,14 @@ func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug st
 	// transport (#685) pins this merchant per request.
 	app.HostGraph(rt).Runtime.SetConfiguredMerchant(id)
 
-	mux := http.NewServeMux()
-	runtime := app.HostGraph(rt).Runtime
-	routeOptions := httproutes.Options{
+	handler, err := rt.Handler(embed.MountOptions{
+		RouteSets: []embed.RouteSet{embed.RouteSetMerchantAPI, embed.RouteSetCatalog, embed.RouteSetMerchantAdmin},
 		Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
-			merchantID:   id,
-			merchantSlug: slug,
+			merchantID: id, merchantSlug: slug,
 		}}),
-	}
-	httproutes.RegisterServiceRoutes(
-		router.NewMux(mux, "/v1/merchant", runtime),
-		runtime,
-		routeOptions,
-	)
-	httproutes.RegisterCatalogRoutes(router.NewMux(mux, "/v1/merchant/catalog", runtime), runtime, routeOptions)
-	httproutes.RegisterMerchantActionRoutes(router.NewMux(mux, "/v1/merchant", runtime), runtime, routeOptions)
-	// The production mounts (internal/http/embedhttp, server.go) cap request
-	// bodies before any route; the fixture host must refuse the same way.
-	srv := httptest.NewServer(middleware.ChainHTTP(mux,
-		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		middleware.ResolveMerchantHTTP(runtime.ConfiguredMerchant),
-	))
+	})
+	require.NoError(h.t, err, "mount production embedded merchant surface")
+	srv := httptest.NewServer(handler)
 	h.cleanup(srv.Close)
 
 	return &Surface{

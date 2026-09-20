@@ -190,3 +190,20 @@ change: `202` with the operation id while unresolved, the stored result under
 the same key, `409 tier_change_in_flight` under another key, and a coded
 `tier_change_refused` (a card decline keeps its code) once terminal. See
 [upgrade recovery](architecture/upgrade-recovery.md).
+
+### NMI refund currency and non-execution
+
+Refund operations retain the original payment's currency with their accepted
+minor-unit amount. The NMI adapter renders that amount in major units using the
+currency's scale; the local refund reservation remains in native currency units.
+For example, 100 JPY is 100 provider minor units and is sent as `100.00`, not `1.00`.
+Missing or unknown currency is refused rather than treated as USD.
+
+A possibly submitted NMI refund cannot be resolved with `--not-executed` from an
+empty action list, an unmatched amount, or an operator's claim about a dashboard.
+The reservation remains held, and the verifier does not send another refund.
+Known response receipts retain their existing recovery path; operator receipt
+reads additionally require the named identities, currency and exact refund
+amount. This is an engine/wire correction tested with loopback provider fixtures;
+it does not qualify a particular NMI account or establish missing provider
+operation-correlation guarantees.

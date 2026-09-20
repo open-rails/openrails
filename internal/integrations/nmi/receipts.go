@@ -19,16 +19,6 @@ func receiptMismatch(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrReceiptMismatch, fmt.Sprintf(format, args...))
 }
 
-// exactCents parses a v5 decimal amount, refusing sub-cent precision.
-func exactCents(amount string) (int64, bool) {
-	trimmed := strings.TrimSpace(amount)
-	if _, frac, ok := strings.Cut(trimmed, "."); ok && len(frac) > 2 {
-		return 0, false
-	}
-	cents, err := v5AmountToCents(trimmed)
-	return cents, err == nil
-}
-
 // exactMinorAmount parses a provider major-unit decimal at its declared
 // currency scale, without rounding or float conversion (JPY has no decimals).
 func exactMinorAmount(amount, currency string) (int64, bool) {
@@ -59,7 +49,7 @@ func exactMinorAmount(amount, currency string) (int64, bool) {
 
 func successfulAction(txn v5Transaction, actionType string, amount moneyutil.Cents) bool {
 	for _, action := range txn.Actions {
-		cents, ok := exactCents(action.Amount)
+		cents, ok := exactMinorAmount(action.Amount, txn.Currency)
 		if cents < 0 {
 			cents = -cents
 		}
@@ -140,18 +130,21 @@ func (c *NMIClient) ConfirmLiveSubscription(ctx context.Context, subscriptionID,
 }
 
 // ConfirmRefund reads the refund transaction by its exact id and requires an
-// approved refund of exactly amount on the original transaction's vault. A
+// approved refund of exactly amount and currency on the original transaction's vault. A
 // zero amount means a full refund of the original sale.
-func (c *NMIClient) ConfirmRefund(ctx context.Context, originalTransactionID, refundTransactionID string, amount moneyutil.Cents) error {
+func (c *NMIClient) ConfirmRefund(ctx context.Context, originalTransactionID, refundTransactionID string, amount moneyutil.Cents, currency string) error {
 	original, found, err := c.GetPayment(ctx, originalTransactionID)
 	if err != nil {
 		return err
 	}
-	if !found {
+	if !found || original.ID != originalTransactionID {
 		return receiptMismatch("original transaction %s does not exist", originalTransactionID)
 	}
+	if _, ok := moneyutil.LookupCurrency(currency); !ok || currency == "" || !strings.EqualFold(strings.TrimSpace(original.Currency), currency) {
+		return receiptMismatch("original transaction %s is not in %s", originalTransactionID, currency)
+	}
 	if amount == 0 {
-		cents, ok := exactCents(original.Amount)
+		cents, ok := exactMinorAmount(original.Amount, currency)
 		if !ok || cents <= 0 {
 			return receiptMismatch("original transaction %s has no exact amount", originalTransactionID)
 		}
@@ -162,39 +155,16 @@ func (c *NMIClient) ConfirmRefund(ctx context.Context, originalTransactionID, re
 		return err
 	}
 	switch {
-	case !found:
+	case !found || refund.ID != refundTransactionID:
 		return receiptMismatch("refund %s does not exist", refundTransactionID)
+	case !strings.EqualFold(strings.TrimSpace(refund.Currency), currency):
+		return receiptMismatch("refund %s is not in %s", refundTransactionID, currency)
 	case !refund.approved():
 		return receiptMismatch("refund %s is not approved", refundTransactionID)
 	case strings.TrimSpace(original.CustomerVaultID) == "" || strings.TrimSpace(refund.CustomerVaultID) != strings.TrimSpace(original.CustomerVaultID):
 		return receiptMismatch("refund %s is not on the original transaction's customer vault", refundTransactionID)
 	case !successfulAction(refund, "refund", amount):
-		return receiptMismatch("refund %s has no successful refund of %d cents", refundTransactionID, amount)
-	}
-	return nil
-}
-
-// ConfirmRefundNotExecuted reads the original transaction before accepting an
-// operator's non-execution attestation. A successful refund action for the
-// requested amount is contradictory evidence and must keep the operation
-// unresolved; callers must resolve it from that exact receipt instead.
-func (c *NMIClient) ConfirmRefundNotExecuted(ctx context.Context, originalTransactionID string, amount moneyutil.Cents) error {
-	txn, found, err := c.GetPayment(ctx, originalTransactionID)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return receiptMismatch("original transaction %s does not exist", originalTransactionID)
-	}
-	if amount == 0 {
-		cents, ok := exactCents(txn.Amount)
-		if !ok || cents <= 0 {
-			return receiptMismatch("original transaction %s has no exact amount", originalTransactionID)
-		}
-		amount = moneyutil.Cents(cents)
-	}
-	if successfulAction(txn, "refund", amount) {
-		return receiptMismatch("original transaction %s contains a successful refund of %d cents", originalTransactionID, amount)
+		return receiptMismatch("refund %s has no successful refund of %d minor units", refundTransactionID, amount)
 	}
 	return nil
 }
