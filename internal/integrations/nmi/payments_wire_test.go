@@ -50,7 +50,7 @@ func TestRefund_WirePinsCentsAmount(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(t, server.URL)
-	_, err := client.Refund(context.Background(), RefundParams{TransactionID: "t1", Amount: moneyutil.Cents(500)})
+	_, err := client.Refund(context.Background(), RefundParams{TransactionID: "t1", Currency: "USD", Amount: moneyutil.Cents(500)})
 	require.NoError(t, err)
 
 	var req map[string]json.RawMessage
@@ -58,7 +58,7 @@ func TestRefund_WirePinsCentsAmount(t *testing.T) {
 	assert.Equal(t, "5.00", string(req["amount"]), "refund wire amount must be the exact two-decimal cents rendering")
 
 	// Amount 0 = full refund: no amount key on the wire.
-	_, err = client.Refund(context.Background(), RefundParams{TransactionID: "t1"})
+	_, err = client.Refund(context.Background(), RefundParams{TransactionID: "t1", Currency: "USD"})
 	require.NoError(t, err)
 	fullBody := map[string]json.RawMessage{}
 	require.NoError(t, json.Unmarshal(body, &fullBody))

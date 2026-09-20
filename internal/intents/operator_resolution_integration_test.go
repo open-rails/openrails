@@ -85,35 +85,28 @@ func TestNMIRefundUnknownResolvesOnlyFromExactReceipt(t *testing.T) {
 	require.EqualValues(t, 1, fake.refundCalls.Load())
 }
 
-// Provider-confirmed non-execution releases the reservation exactly once.
-func TestNMIRefundUnknownNonExecutionReleasesReservation(t *testing.T) {
-	fx := seedRefundablePayment(t, 500)
-	fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
-	fake.refundStatus.Store(http.StatusBadGateway)
-	runner := fx.refundRunner(client, fullModeConfig())
-	row, err := runner.EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
-	require.NoError(t, err)
-	resolved, err := runner.Resolve(dbtest.WithTestMerchant(context.Background()), row.ID, Resolution{NotExecuted: true, Actor: "ops", Reason: "NMI confirmed no refund"})
-	require.NoError(t, err)
-	require.Equal(t, StatusFailedTerminal, resolved.Status)
-	status, _, _ := fx.reservation(t)
-	require.Equal(t, "failed", status)
-	require.EqualValues(t, 1, fake.refundCalls.Load())
-}
-
-func TestNMIRefundUnknownNonExecutionRejectsSuccessfulRefund(t *testing.T) {
-	fx := seedRefundablePayment(t, 500)
-	fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
-	fake.refundStatus.Store(http.StatusBadGateway)
-	runner := fx.refundRunner(client, fullModeConfig())
-	row, err := runner.EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
-	require.NoError(t, err)
-	fake.refunded.Store(true)
-	_, err = runner.Resolve(dbtest.WithTestMerchant(context.Background()), row.ID, Resolution{NotExecuted: true, Actor: "ops", Reason: "incorrect dashboard reading"})
-	require.ErrorIs(t, err, ErrResolutionRejected)
-	require.Equal(t, StatusUnknownNeedsVerify, fx.intentByID(t, row.ID).Status)
-	status, _, _ := fx.reservation(t)
-	require.Equal(t, "pending", status)
+// Neither a missing refund in the provider read nor another matching refund
+// proves that this possibly submitted operation never ran.
+func TestNMIRefundUnknownNonExecutionPreservesReservation(t *testing.T) {
+	for _, visible := range []bool{false, true} {
+		t.Run(fmt.Sprint(visible), func(t *testing.T) {
+			fx := seedRefundablePayment(t, 500)
+			fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
+			fake.refundStatus.Store(http.StatusBadGateway)
+			runner := fx.refundRunner(client, fullModeConfig())
+			row, err := runner.EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
+			require.NoError(t, err)
+			fake.refunded.Store(visible)
+			_, err = runner.Resolve(dbtest.WithTestMerchant(context.Background()), row.ID, Resolution{NotExecuted: true, Actor: "ops", Reason: "provider search"})
+			require.ErrorIs(t, err, ErrResolutionRejected)
+			require.Equal(t, StatusUnknownNeedsVerify, fx.intentByID(t, row.ID).Status)
+			status, _, _ := fx.reservation(t)
+			require.Equal(t, "pending", status)
+			_, err = runner.RunExecuteOnce(context.Background())
+			require.NoError(t, err)
+			require.EqualValues(t, 1, fake.refundCalls.Load(), "nonexecution cannot release funds for another refund")
+		})
+	}
 }
 
 // A successful refund whose local receipt write fails keeps the exact provider

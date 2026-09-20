@@ -49,8 +49,9 @@ type RefundPayload struct {
 	// completes (provider id recorded) or releases (terminal refusal).
 	ReservationID uuid.UUID `json:"reservation_id"`
 	// AmountCents is provider minor units (typed CENTS, #671) — converted
-	// exactly from the request's micros at the admin boundary.
+	// exactly from the payment-currency native amount at the admin boundary.
 	AmountCents  moneyutil.Cents `json:"amount_cents"`
+	Currency     string          `json:"currency"`
 	Reason       string          `json:"reason,omitempty"`
 	RevokeAccess bool            `json:"revoke_access"`
 	// ProviderTarget is what the provider refunds against: the Stripe charge /
@@ -79,7 +80,8 @@ func (r refundReservations) payments() *payments.PaymentService {
 	return payments.NewPaymentService(r.DB, r.Clock)
 }
 
-func decodeRefundPayload(intent gen.OpenrailsRailIntent) (RefundPayload, error) {
+// DecodeRefundPayload validates the accepted amount/currency and target for execution and portable replay.
+func DecodeRefundPayload(intent gen.OpenrailsRailIntent) (RefundPayload, error) {
 	var p RefundPayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("refund intent has no payload")
@@ -90,6 +92,9 @@ func decodeRefundPayload(intent gen.OpenrailsRailIntent) (RefundPayload, error) 
 	if p.OriginalPaymentID == uuid.Nil || p.ReservationID == uuid.Nil || strings.TrimSpace(p.ProviderTarget) == "" || p.AmountCents <= 0 {
 		return p, errors.New("refund payload is incomplete (original payment, reservation, provider target and amount are required)")
 	}
+	if _, ok := moneyutil.LookupCurrency(p.Currency); !ok || p.Currency == "" || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) {
+		return p, errors.New("refund payload requires its canonical payment currency")
+	}
 	return p, nil
 }
 
@@ -97,7 +102,7 @@ func decodeRefundPayload(intent gen.OpenrailsRailIntent) (RefundPayload, error) 
 // still open (pending). A completed reservation means the refund already
 // finalized; a released/failed or deleted one means it was abandoned.
 func (r refundReservations) checkRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
-	p, err := decodeRefundPayload(intent)
+	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		// Malformed payloads can never become executable; superseding surfaces
 		// them in reconcile instead of re-parking forever.
@@ -190,7 +195,7 @@ func (r refundReservations) recoverReceipt(ctx context.Context, intent gen.Openr
 		return Ambiguous("load refund receipt: " + err.Error())
 	}
 	if ref == "" {
-		return Ambiguous("refund response has no exact operation receipt; operator must resolve it with the exact provider refund or provider-confirmed non-execution")
+		return Ambiguous("refund response has no exact operation receipt; operator must review provider records, and unavailable evidence keeps the refund unresolved")
 	}
 	return r.settle(ctx, p, ref, map[string]any{"recovered_receipt": true})
 }
@@ -282,7 +287,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 	if client.ReadOnly {
 		return Parked("nmi client is read-only (mode=readonly)")
 	}
-	p, err := decodeRefundPayload(intent)
+	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
 	}
@@ -291,7 +296,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 		return h.recoverReceipt(ctx, intent, p)
 	}
 
-	result, err := client.Refund(ctx, nmi.RefundParams{TransactionID: p.ProviderTarget, Amount: p.AmountCents})
+	result, err := client.Refund(ctx, nmi.RefundParams{TransactionID: p.ProviderTarget, Amount: p.AmountCents, Currency: p.Currency})
 	if err != nil {
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
 			return Parked("nmi provider writes blocked (mode=readonly)")
@@ -320,7 +325,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 // operation key on refund actions: matching an amount can select an earlier
 // partial refund, and absence in a read cannot prove a lost request never landed.
 func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	p, err := decodeRefundPayload(intent)
+	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
 	}
@@ -328,11 +333,11 @@ func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailI
 }
 
 // Resolve accepts an exact refund transaction the provider confirms is an
-// approved refund of the reserved amount on the original sale's vault, or
-// provider-confirmed non-execution, which releases the reservation. It never
-// re-sends the refund.
+// approved refund of the reserved amount and currency on the original sale's
+// vault. NMI read absence cannot establish nonexecution of a submitted refund,
+// so that resolution is refused. It never re-sends the refund.
 func (h *NMIRefundHandler) Resolve(ctx context.Context, intent gen.OpenrailsRailIntent, resolution Resolution) (Outcome, error) {
-	p, err := decodeRefundPayload(intent)
+	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -347,20 +352,13 @@ func (h *NMIRefundHandler) Resolve(ctx context.Context, intent gen.OpenrailsRail
 		return Outcome{}, RejectResolution("operation already holds refund receipt %s; its verifier completes it", ref)
 	}
 	if resolution.NotExecuted {
-		client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
-		if err != nil || !ok || client == nil {
-			return Outcome{}, fmt.Errorf("nmi rail is not armed for provider %q: %v", intent.Rail, err)
-		}
-		if err := client.ConfirmRefundNotExecuted(ctx, p.ProviderTarget, p.AmountCents); err != nil {
-			return Outcome{}, RejectResolution("provider evidence contradicts non-execution: %v", err)
-		}
-		return h.terminally(ctx, p, "provider confirmed the refund was not executed", nil), nil
+		return Outcome{}, RejectResolution("NMI does not provide definitive nonexecution proof for a possibly submitted refund; the reservation must remain held")
 	}
 	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
 	if err != nil || !ok || client == nil {
 		return Outcome{}, fmt.Errorf("nmi rail is not armed for provider %q: %v", intent.Rail, err)
 	}
-	if err := client.ConfirmRefund(ctx, p.ProviderTarget, resolution.ProviderReference, p.AmountCents); err != nil {
+	if err := client.ConfirmRefund(ctx, p.ProviderTarget, resolution.ProviderReference, p.AmountCents, p.Currency); err != nil {
 		return Outcome{}, RejectResolution("%v", err)
 	}
 	if err := h.finalize(ctx, p, resolution.ProviderReference); err != nil {
@@ -415,7 +413,7 @@ func (h *StripeRefundHandler) CheckRelevance(ctx context.Context, intent gen.Ope
 }
 
 func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	p, err := decodeRefundPayload(intent)
+	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
 	}
@@ -467,7 +465,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 }
 
 func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	p, err := decodeRefundPayload(intent)
+	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
 	}
