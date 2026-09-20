@@ -619,3 +619,30 @@ func derefUUID(id *uuid.UUID) uuid.UUID {
 	}
 	return *id
 }
+
+// VerifyByID reconciles one submitted operation on an explicit request replay.
+// It claims the same lease as the scheduled verifier and performs no provider
+// writes. A retryable result may subsequently enter ExecuteByID's write gates.
+func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent, error) {
+	now := r.now()
+	in, ok, err := r.Store.ClaimUnknownByID(ctx, id, now, now.Add(r.lease()))
+	if err != nil {
+		return gen.OpenrailsRailIntent{}, err
+	}
+	if !ok {
+		return r.Store.Get(ctx, id)
+	}
+	ctx = merchant.WithID(ctx, merchant.ID(in.MerchantID))
+	ctx = pinIntentAddress(ctx, in)
+	h := r.Registry.Lookup(in.IntentType)
+	out := Ambiguous("no verifier registered")
+	logger := log.WithContext(ctx).WithField("intent_id", in.ID)
+	stop := r.renewClaimWhile(ctx, logger, in.ID)
+	if h != nil {
+		out = h.Verify(ctx, in)
+	}
+	stop()
+	var stats Stats
+	r.apply(ctx, logger, &stats, h, in, out, true)
+	return r.Store.Get(ctx, id)
+}

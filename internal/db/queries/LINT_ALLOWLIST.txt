@@ -56,3 +56,4 @@ DEBT internal/river/jobs_provider_refresh.go
 DEBT internal/river/jobs_stripe_webhooks.go
 DEBT internal/service/catalog_sidecars.go
 DEBT internal/operator/admission.go
+DEBT internal/intents/nmi_provider_cutover.go # frozen cross-account admission and finalization; all queries use merchant-scoped Qx

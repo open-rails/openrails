@@ -108,6 +108,7 @@ type Runtime struct {
 	// durable nmi_payment_source_update intent (#674 write-through). Set by the
 	// composition root alongside the other write-through producers.
 	PaymentSourceUpdateIntents *intents.PaymentSourceUpdateThrough
+	ProviderCutovers           *intents.NMIProviderCutover
 
 	UserSubscriptionService   *subscriptions.UserSubscriptionService
 	PublicSubscriptionService *catalog.PublicSubscriptionService

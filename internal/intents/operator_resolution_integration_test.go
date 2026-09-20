@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -56,6 +57,8 @@ func TestNMIRefundUnknownResolvesOnlyFromExactReceipt(t *testing.T) {
 	fake.refunded.Store(true)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
+	_, err = runner.Resolve(ctx, row.ID, Resolution{Step: "anchor", BillingAnchor: time.Now().Add(time.Hour), Actor: "ops", Reason: "cutover-only decision"})
+	require.ErrorIs(t, err, ErrResolutionUnsupported, "billing-anchor authorization must not reach other handlers")
 	_, err = runner.Resolve(ctx, row.ID, Resolution{ProviderReference: "txn_refund_1", Reason: "provider dashboard"})
 	require.ErrorIs(t, err, ErrResolutionInvalid)
 	_, err = runner.Resolve(ctx, row.ID, Resolution{ProviderReference: "txn_refund_1", NotExecuted: true, Actor: "ops", Reason: "both"})

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -62,13 +63,14 @@ func newIntentsCmd() *cobra.Command {
 // provider-confirmed non-execution. Neither resends the unresolved mutation.
 func newIntentsResolveCmd() *cobra.Command {
 	var (
-		merchantSlug string
-		intentID     string
-		step         string
-		reference    string
-		notExecuted  bool
-		actor        string
-		reason       string
+		merchantSlug  string
+		intentID      string
+		step          string
+		reference     string
+		billingAnchor string
+		notExecuted   bool
+		actor         string
+		reason        string
 	)
 	cmd := &cobra.Command{
 		Use:   "resolve",
@@ -80,14 +82,21 @@ func newIntentsResolveCmd() *cobra.Command {
 				return fmt.Errorf("--intent must be a UUID: %w", err)
 			}
 			resolution := intents.Resolution{Step: step, ProviderReference: reference, NotExecuted: notExecuted, Actor: actor, Reason: reason}
+			if billingAnchor != "" {
+				resolution.BillingAnchor, err = time.Parse(time.RFC3339, billingAnchor)
+				if err != nil {
+					return fmt.Errorf("--billing-anchor must be an RFC3339 instant: %w", err)
+				}
+			}
 			cfg, _ := c.Context().Value(config.ConfigContextKey).(*config.Config)
 			return runIntentsResolve(c.Context(), cfg, merchantSlug, id, resolution)
 		},
 	}
 	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")
 	cmd.Flags().StringVar(&intentID, "intent", "", "Unknown operation id (required)")
-	cmd.Flags().StringVar(&step, "step", "", "Provider step of a multi-step operation (nmi_upgrade: successor or proration; stripe_tier_change: update, schedule or phases)")
+	cmd.Flags().StringVar(&step, "step", "", "Provider step of a multi-step operation (nmi_upgrade: successor or proration; stripe_tier_change: update, schedule or phases; nmi_provider_cutover: target or anchor)")
 	cmd.Flags().StringVar(&reference, "receipt", "", "Exact provider object id: transaction, subscription, schedule or refund id")
+	cmd.Flags().StringVar(&billingAnchor, "billing-anchor", "", "Future first charge instant, RFC3339 whole seconds (NMI provider cutover --step anchor only)")
 	cmd.Flags().BoolVar(&notExecuted, "not-executed", false, "Record provider-confirmed non-execution")
 	cmd.Flags().StringVar(&actor, "actor", cliActor(), "Operator recorded with the resolution")
 	cmd.Flags().StringVar(&reason, "reason", "", "Evidence source, e.g. provider ticket or dashboard record (required)")

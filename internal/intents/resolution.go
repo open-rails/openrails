@@ -15,17 +15,21 @@ import (
 )
 
 // Resolution is operator evidence for an operation the engine could not
-// resolve from provider reads. Exactly one of ProviderReference or NotExecuted
-// is set. A reference is accepted only after the handler reads that exact
+// resolve from provider reads. Exactly one of ProviderReference, NotExecuted
+// or BillingAnchor is set. BillingAnchor is accepted only by the NMI cutover
+// anchor step and authorizes a later first charge on its verified paused target.
+// A reference is accepted only after the handler reads that exact
 // provider object and matches it to the frozen operation; NotExecuted records
-// provider-confirmed non-execution. Neither ever authorizes another send of
-// the unresolved mutation.
+// provider-confirmed non-execution. Those evidence forms never authorize another
+// send of the unresolved mutation. Anchor authorization does not perform a send;
+// the executor applies the new first-charge date under its normal write gates.
 type Resolution struct {
 	// Step names the provider step of a multi-step operation (e.g. an
 	// upgrade's "successor" or "proration"); empty for single-step types.
 	Step              string
 	ProviderReference string
 	NotExecuted       bool
+	BillingAnchor     time.Time
 	Actor             string
 	Reason            string
 }
@@ -59,13 +63,24 @@ func (r Resolution) normalized() (Resolution, error) {
 	r.ProviderReference = strings.TrimSpace(r.ProviderReference)
 	r.Actor = strings.TrimSpace(r.Actor)
 	r.Reason = strings.TrimSpace(r.Reason)
+	choices := 0
+	if r.ProviderReference != "" {
+		choices++
+	}
+	if r.NotExecuted {
+		choices++
+	}
+	if !r.BillingAnchor.IsZero() {
+		choices++
+		r.BillingAnchor = r.BillingAnchor.UTC()
+	}
 	switch {
 	case r.Actor == "":
 		return r, fmt.Errorf("%w: actor is required", ErrResolutionInvalid)
 	case r.Reason == "":
 		return r, fmt.Errorf("%w: reason is required", ErrResolutionInvalid)
-	case (r.ProviderReference == "") == !r.NotExecuted:
-		return r, fmt.Errorf("%w: supply exactly one of a provider reference or not-executed", ErrResolutionInvalid)
+	case choices != 1:
+		return r, fmt.Errorf("%w: supply exactly one of a provider reference, not-executed or billing anchor", ErrResolutionInvalid)
 	}
 	return r, nil
 }
@@ -76,7 +91,9 @@ func (r Resolution) Record(at time.Time) map[string]any {
 	if r.Step != "" {
 		out["step"] = r.Step
 	}
-	if r.NotExecuted {
+	if !r.BillingAnchor.IsZero() {
+		out["billing_anchor"] = r.BillingAnchor.Format(time.RFC3339)
+	} else if r.NotExecuted {
 		out["not_executed"] = true
 	} else {
 		out["provider_reference"] = r.ProviderReference
@@ -107,6 +124,14 @@ func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolutio
 	}
 	if row.MerchantID != mid.UUID() {
 		return gen.OpenrailsRailIntent{}, fmt.Errorf("%w: operation belongs to another merchant", ErrResolutionInvalid)
+	}
+	if !resolution.BillingAnchor.IsZero() {
+		if row.IntentType != TypeNMIProviderCutover || resolution.Step != "anchor" {
+			return row, ErrResolutionUnsupported
+		}
+		if cutoverAnchorResolutionMatches(row, resolution) {
+			return row, nil
+		}
 	}
 	if row.Status == StatusPending || row.Status == StatusFailedRetryable {
 		return r.resolveUnsent(ctx, row, resolution)

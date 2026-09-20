@@ -41,6 +41,9 @@ var converters = []string{
 // pinnedBoundaries: file -> the wire-pinning test that covers it (known micros
 // in ⇒ exact integer on the wire).
 var pinnedBoundaries = map[string]string{
+	// Cutover sends a plan ID, never a sale amount; the real HTTP fixture pins
+	// its 10_000_000 micros price against the provider's exact "10.00" plan.
+	"internal/intents/nmi_provider_cutover.go":        "internal/integrationharness/provider_cutover_http_test.go",
 	"internal/modules/checkout/nmi_upgrade_intent.go": "internal/modules/checkout/upgrade_receipts_integration_test.go",
 	"internal/integrations/nmi/payments.go":           "internal/integrations/nmi/payments_wire_test.go",
 	"internal/integrations/nmi/v5.go":                 "internal/integrations/nmi/payments_wire_test.go",

@@ -69,7 +69,7 @@ func ValidateValues(p Profile, values []*string) error {
 		case "jsonb":
 			field := p.Name + "." + c.Name
 			if p.Name == "rail_intents" && (c.Name == "payload" || c.Name == "result_evidence") {
-				if typ := value(p, values, "intent_type"); typ != nil && (*typ == "nmi_sale" || *typ == "nmi_subscription_create" || *typ == "invoice_collection") {
+				if typ := value(p, values, "intent_type"); typ != nil && (*typ == "nmi_sale" || *typ == "nmi_subscription_create" || *typ == "nmi_provider_cutover" || *typ == "invoice_collection") {
 					field = p.Name + "." + *typ + "." + c.Name
 				}
 			}
@@ -119,7 +119,7 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "rail_intents" {
 		typ := value(p, values, "intent_type")
 		payload := value(p, values, "payload")
-		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection")) {
+		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "nmi_provider_cutover" && *typ != "invoice_collection")) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
 	}
