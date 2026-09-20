@@ -125,6 +125,14 @@ func ValidateValues(p Profile, values []*string) error {
 		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "nmi_provider_cutover" && *typ != "invoice_collection")) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
+		if typ != nil && (*typ == "nmi_refund" || *typ == "stripe_refund" || *typ == "ccbill_refund") {
+			if payload == nil {
+				return fmt.Errorf("refund operation has no accepted payload")
+			}
+			if _, err := intents.DecodeRefundPayload(gen.OpenrailsRailIntent{Payload: []byte(*payload)}); err != nil {
+				return fmt.Errorf("invalid accepted refund payload: %w", err)
+			}
+		}
 		if typ != nil && *typ == "invoice_collection" {
 			field := func(name string) string {
 				if v := value(p, values, name); v != nil {

@@ -123,7 +123,7 @@ func TestLiveSandboxClientSurface(t *testing.T) {
 	// (observed live); a production-posture gateway would refuse (settled-only,
 	// same as classic). Accept either — what matters is the route + body shape
 	// + error mapping are the live dialect, never a route/shape rejection.
-	refundResp, refundErr := client.Refund(context.Background(), RefundParams{TransactionID: sale.TransactionID, Amount: amountCents})
+	refundResp, refundErr := client.Refund(context.Background(), RefundParams{TransactionID: sale.TransactionID, Amount: amountCents, Currency: "USD"})
 	if refundErr != nil {
 		assert.NotContains(t, refundErr.Error(), "Route not found", "refund route must exist")
 		assert.NotContains(t, refundErr.Error(), "extraParameters", "refund body shape must be accepted")

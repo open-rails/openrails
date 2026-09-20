@@ -5,6 +5,7 @@ package merchantarchive
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -68,7 +70,9 @@ func seedBook(t *testing.T, d *db.DB, id merchant.ID) {
 		exec(`INSERT INTO openrails.invoices(merchant_id,id,customer_id,currency,period_from,period_to,status,total_amount,amount_due) VALUES($1,$2,$3,'USD','2026-01-01','2026-02-01','open',500000,500000)`, id.UUID(), invoice, customer)
 		exec(`INSERT INTO openrails.metered_rating_watermarks(merchant_id,customer_id,currency,source,period_from,rated_through,accrued_amount) VALUES($1,$2,'USD','metered:tokens','2026-01-01','2026-01-15',500000)`, id.UUID(), customer)
 		exec(`INSERT INTO openrails.webhook_events(merchant_id,op,event_id) VALUES($1,'nmi','event-1')`, id.UUID())
-		exec(`INSERT INTO openrails.rail_intents(merchant_id,rail,intent_type,idempotency_key,status,origin,psp_id,payment_id,executed_at,result_evidence) VALUES($1,'nmi','nmi_refund','refund-key','succeeded','admin',$2,$3,now(),'{"transaction_id":"refund-1"}')`, id.UUID(), psp, refund)
+		refundPayload, err := json.Marshal(intents.RefundPayload{OriginalPaymentID: payment, ReservationID: refund, AmountCents: 10, Currency: "USD", ProviderTarget: "charge-1"})
+		require.NoError(t, err)
+		exec(`INSERT INTO openrails.rail_intents(merchant_id,rail,intent_type,idempotency_key,status,origin,psp_id,payment_id,payload,executed_at,result_evidence) VALUES($1,'nmi','nmi_refund','refund-key','succeeded','admin',$2,$3,$4,now(),'{"transaction_id":"refund-1"}')`, id.UUID(), psp, payment, refundPayload)
 		custodian, rootGrant, run, batch, nextPrice := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 		exec(`INSERT INTO openrails.custodians(merchant_id,id,key,kind,account_id,settings,credential_versions) VALUES($1,$2,'vault','basis_theory',$3,'{"public_api_key":"public-token","network_tokens":true,"account_updater":true,"account_updater_lookahead_days":30}','{"api_key":9}')`, id.UUID(), custodian, uuid.NewString())
 		exec(`INSERT INTO openrails.merchant_configurations(merchant_id,config) VALUES($1,'{"profile":{"display_name":"Merchant"},"collection_threshold":1000000,"checkout_routing":[{"prefer":["primary"]}]}')`, id.UUID())
@@ -209,12 +213,31 @@ func TestArchiveSchemaCoverageAndBusyRefusal(t *testing.T) {
 	provision(t, d, id)
 	seedBook(t, d, id)
 	ctx := merchant.WithID(t.Context(), id)
+	var accepted []byte
+	require.NoError(t, d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, "SELECT payload FROM openrails.rail_intents WHERE merchant_id=$1 AND intent_type='nmi_refund'", id.UUID()).Scan(&accepted); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, "UPDATE openrails.rail_intents SET payload=payload-'currency' WHERE merchant_id=$1 AND intent_type='nmi_refund'", id.UUID())
+		return err
+	}))
+	var incomplete bytes.Buffer
+	err := Export(t.Context(), d, id, &incomplete)
+	var invalid *Error
+	require.ErrorAs(t, err, &invalid)
+	require.Equal(t, "rail_intents", invalid.Table)
+	_, err = archivewire.Read(bytes.NewReader(incomplete.Bytes()), nil, nil)
+	require.Error(t, err, "a failed streaming export must not produce a valid archive")
+	require.NoError(t, d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "UPDATE openrails.rail_intents SET payload=$2 WHERE merchant_id=$1 AND intent_type='nmi_refund'", id.UUID(), accepted)
+		return err
+	}))
 	require.NoError(t, d.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, "UPDATE openrails.payments SET status='pending' WHERE merchant_id=$1 AND transaction_id='refund-1'", id.UUID())
 		return err
 	}))
 	var b bytes.Buffer
-	err := Export(t.Context(), d, id, &b)
+	err = Export(t.Context(), d, id, &b)
 	var ae *Error
 	require.ErrorAs(t, err, &ae)
 	require.Equal(t, "payments", ae.Table)

@@ -2,6 +2,7 @@ package nmi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -38,8 +39,9 @@ type SaleResponse struct {
 
 type RefundParams struct {
 	TransactionID string
-	// Amount is CENTS (typed, #671); 0 = full refund.
-	Amount moneyutil.Cents
+	// Amount is rail minor units in Currency; 0 requests a full refund.
+	Amount   moneyutil.Cents
+	Currency string
 }
 
 type RefundResponse struct {
@@ -135,10 +137,20 @@ func (c *NMIClient) Refund(ctx context.Context, params RefundParams) (*RefundRes
 	if txnID == "" {
 		return nil, errors.New("transaction ID is required")
 	}
+	if params.Amount < 0 {
+		return nil, errors.New("refund amount cannot be negative")
+	}
+	if strings.TrimSpace(params.Currency) == "" {
+		return nil, errors.New("refund currency is required")
+	}
+	amount, err := WireAmount(params.Amount, params.Currency)
+	if err != nil {
+		return nil, err
+	}
 
 	body := map[string]any{}
 	if params.Amount > 0 {
-		body["amount"] = centsJSONAmount(params.Amount)
+		body["amount"] = json.RawMessage(amount)
 	}
 
 	var txn v5Transaction
