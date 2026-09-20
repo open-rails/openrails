@@ -472,12 +472,16 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 	}
 	if !g.SourceCanceled {
 		old, found, e := source.GetCutoverSubscription(ctx, p.SourceSubscriptionID)
-		if e != nil || (old.ID != "" && (old.ID != p.SourceSubscriptionID || old.CustomerVaultID != p.SourceVaultID)) {
+		// A bare 404 has no cancellation receipt. Even after a submitted DELETE,
+		// it cannot distinguish cancellation from a stale or wrong-scope lookup.
+		if e != nil || old.ID != p.SourceSubscriptionID || old.CustomerVaultID != p.SourceVaultID {
 			return uncertain("source cancellation readback unavailable or wrong identity")
 		}
 		if found {
-			if old.CustomerVaultID != p.SourceVaultID {
-				return uncertain("source vault changed before cancellation")
+			// A paused target can survive an outage while the source renews or
+			// changes terms. Recheck the complete frozen obligation before DELETE.
+			if !cutoverSourceMatches(old, p) {
+				return uncertain("source commercial terms changed before cancellation")
 			}
 			if !send {
 				return Retryable("source is still active; cancellation requires executor")
@@ -493,7 +497,7 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 				return uncertain("source cancellation unresolved: " + e.Error())
 			}
 			old, found, e = source.GetCutoverSubscription(ctx, p.SourceSubscriptionID)
-			if e != nil || found || (old.ID != "" && (old.ID != p.SourceSubscriptionID || old.CustomerVaultID != p.SourceVaultID)) {
+			if e != nil || found || old.ID != p.SourceSubscriptionID || old.CustomerVaultID != p.SourceVaultID {
 				return uncertain("source cancellation is not verified")
 			}
 		}
@@ -719,7 +723,7 @@ func (h *NMIProviderCutover) resolveAnchor(ctx context.Context, in gen.Openrails
 		return Outcome{}, ErrResolutionRejected
 	}
 	old, active, e := source.GetCutoverSubscription(ctx, p.SourceSubscriptionID)
-	if e != nil || active || (old.ID != "" && (old.ID != p.SourceSubscriptionID || old.CustomerVaultID != p.SourceVaultID)) {
+	if e != nil || active || old.ID != p.SourceSubscriptionID || old.CustomerVaultID != p.SourceVaultID {
 		return Outcome{}, ErrResolutionRejected
 	}
 	g.SourceCanceled = true

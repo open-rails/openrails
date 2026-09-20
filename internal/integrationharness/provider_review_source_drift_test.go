@@ -3,6 +3,7 @@
 package integrationharness
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -10,11 +11,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,9 +47,13 @@ func TestProviderCutoverRefusesSourceDriftAfterPausedTarget(t *testing.T) {
 	s.App().Runtime.CollectionResolver.(*money.MerchantCollectionAdapterBuilder).Endpoints.NMIV5BaseURL = g.Server.URL
 	owner := s.ProvisionOwnedMerchant("cutover-drift-review-" + uuid.NewString())
 	client := s.Client(openrails.WithAPIKey(owner.APIKey), openrails.WithMerchantID(owner.MerchantID))
-	for _, drift := range []string{"amount", "date", "cadence", "unproven_absence"} {
+	for _, drift := range []string{"amount", "date", "cadence", "unproven_absence", "after_cancel_absence"} {
 		t.Run(drift, func(t *testing.T) {
-			p := seedCutoverHTTP(t, h, s, g, "source_dark", owner.MerchantID)
+			mode := "source_dark"
+			if drift == "after_cancel_absence" {
+				mode = "lost_cancel"
+			}
+			p := seedCutoverHTTP(t, h, s, g, mode, owner.MerchantID)
 			key := uuid.NewString()
 			first, err := client.CutoverProvider(ctx, api.FormatSubscriptionID(p.Sub), key, p.Req)
 			require.NoError(t, err)
@@ -53,6 +61,7 @@ func TestProviderCutoverRefusesSourceDriftAfterPausedTarget(t *testing.T) {
 			g.mu.Lock()
 			source := g.Accounts[p.SourceKey]
 			source.Mode = ""
+			initialDeletes := source.Deletes
 			original := make(map[string]nmi.V5Subscription, len(source.Subs))
 			for id, sub := range source.Subs {
 				original[id] = sub
@@ -65,7 +74,7 @@ func TestProviderCutoverRefusesSourceDriftAfterPausedTarget(t *testing.T) {
 					sub.NextBillingDate = p.Anchor.Add(time.Hour).Format(time.RFC3339)
 				case "cadence":
 					plan.DayFrequency = "31"
-				case "unproven_absence":
+				case "unproven_absence", "after_cancel_absence":
 					delete(source.Subs, id)
 					continue
 				}
@@ -82,9 +91,23 @@ func TestProviderCutoverRefusesSourceDriftAfterPausedTarget(t *testing.T) {
 			var actual uuid.UUID
 			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT psp_id FROM openrails.subscriptions WHERE id=$1`, p.Sub).Scan(&actual))
 			t.Logf("drift=%s status=%s source_deletes=%d target_activations=%d repointed=%v", drift, resumed.Status, deletes, activations, actual == p.Target)
-			require.Zero(t, deletes, "source with drifted commercial terms must not be cancelled")
+			require.Equal(t, initialDeletes, deletes, "source with drifted or unproven terms must not be cancelled")
 			require.Zero(t, activations, "target must remain paused after source drift")
 			require.Equal(t, p.Source, actual, "local subscription must remain on original account")
+			if drift == "after_cancel_absence" {
+				rt := s.App().Runtime
+				previousClock := rt.ProviderCutovers.Clock
+				rt.ProviderCutovers.Clock = clockwork.NewFakeClockAt(p.Anchor.Add(time.Hour))
+				err = rt.DB.RunInMerchantConn(merchant.WithID(ctx, owner.MerchantID), func(cctx context.Context) error {
+					_, e := rt.IntentRunner().Resolve(cctx, resumed.ID, intents.Resolution{
+						Step: "anchor", BillingAnchor: p.Anchor.Add(24 * time.Hour),
+						Actor: "fixture-operator", Reason: "test later anchor after unknown cancellation",
+					})
+					return e
+				})
+				rt.ProviderCutovers.Clock = previousClock
+				require.ErrorIs(t, err, intents.ErrResolutionRejected, "a new billing anchor needs an exact source cancellation receipt")
+			}
 			g.mu.Lock()
 			source.Subs = original
 			g.mu.Unlock()
