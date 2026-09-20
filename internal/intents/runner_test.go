@@ -18,17 +18,18 @@ import (
 // fakeLedger is an in-memory ledger recording the transition the Runner
 // applied to each intent.
 type fakeLedger struct {
-	due            []gen.OpenrailsRailIntent
-	dueVerify      []gen.OpenrailsRailIntent
-	accounts       map[uuid.UUID]gen.OpenrailsPsp
-	transition     map[uuid.UUID]string // id -> applied transition
-	reasons        map[uuid.UUID]string
-	nextAt         map[uuid.UUID]time.Time
-	evidence       map[uuid.UUID]map[string]any
-	pruned         []uuid.UUID // ids the Runner pruned post-success (#607)
-	prunedTerminal []uuid.UUID
-	logs           []MutationLogParams
-	logErr         error
+	markSucceededErr error
+	due              []gen.OpenrailsRailIntent
+	dueVerify        []gen.OpenrailsRailIntent
+	accounts         map[uuid.UUID]gen.OpenrailsPsp
+	transition       map[uuid.UUID]string // id -> applied transition
+	reasons          map[uuid.UUID]string
+	nextAt           map[uuid.UUID]time.Time
+	evidence         map[uuid.UUID]map[string]any
+	pruned           []uuid.UUID // ids the Runner pruned post-success (#607)
+	prunedTerminal   []uuid.UUID
+	logs             []MutationLogParams
+	logErr           error
 
 	// Synchronous-path state: Enqueue returns enqueued (scripted conflict
 	// row); ClaimByID claims it unless claimByIDRefused.
@@ -108,6 +109,9 @@ func (f *fakeLedger) LogExternalMutation(_ context.Context, p MutationLogParams)
 	return nil
 }
 func (f *fakeLedger) MarkSucceeded(_ context.Context, id uuid.UUID, _ time.Time, ev map[string]any) error {
+	if f.markSucceededErr != nil {
+		return f.markSucceededErr
+	}
 	f.transition[id] = StatusSucceeded
 	f.evidence[id] = ev
 	return nil
@@ -473,4 +477,16 @@ func TestRunnerDestructiveKillSwitch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunnerDoesNotReportUncommittedSuccess(t *testing.T) {
+	store := newFakeLedger()
+	store.markSucceededErr = assert.AnError
+	intent := testIntent("test", OriginUser, 1)
+	store.due = []gen.OpenrailsRailIntent{intent}
+	handler := &fakeHandler{typ: "test", relevance: StillRelevant(), execute: Succeeded(nil)}
+	stats := runOnce(t, store, handler, modeFull())
+	require.Zero(t, stats.Succeeded)
+	require.Empty(t, store.pruned)
+	require.Empty(t, store.transition)
 }

@@ -419,64 +419,90 @@ func (r *Runner) newTicker(d time.Duration) clockwork.Ticker {
 // caller's cancellation (LedgerWriteContext). verifying selects the verifier's
 // interpretation of OutcomeAmbiguous (still inconclusive -> backoff the next
 // verify) vs the executor's (fresh ambiguity -> first verify soon).
+// terminalCommitter is internal to the runner contract. Only converted handlers
+// opt in; the marker never bypasses durable-state readback.
+type terminalCommitter interface{ CommitsTerminalOutcome() bool }
+
 func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.OpenrailsRailIntent, outcome Outcome, verifying bool) {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
 	now := r.now()
+	terminalOwned := false
+	if owner, ok := handler.(terminalCommitter); ok && owner.CommitsTerminalOutcome() && (outcome.Class == OutcomeSucceeded || outcome.Class == OutcomeTerminal) {
+		expected := StatusSucceeded
+		if outcome.Class == OutcomeTerminal {
+			expected = StatusFailedTerminal
+		}
+		current, err := r.Store.Get(ctx, intent.ID)
+		if err != nil {
+			logEntry.WithError(err).Error("intent ledger: cannot verify transactionally completed outcome")
+			return
+		}
+		if current.Status != expected {
+			logEntry.WithFields(log.Fields{"expected": expected, "actual": current.Status}).Error("intent ledger: handler did not commit its terminal outcome")
+			return
+		}
+		terminalOwned = true
+	}
 	var err error
+	applied := outcome.Class
 	switch outcome.Class {
 	case OutcomeSucceeded:
-		err = r.Store.MarkSucceeded(ctx, intent.ID, now, outcome.Evidence)
-		stats.Succeeded++
-		logEntry.WithField("evidence", outcome.Evidence).Info("intent succeeded")
-		if err == nil {
-			// Prune the now-succeeded row to a slim dedupe tombstone (#607):
-			// drop the heavy payload and slim the forensic evidence, retaining
-			// only what post-success readers need (per the handler's
-			// PrunePolicy). The row survives — it is the effectively-once guard.
-			// A prune failure is non-fatal (the full row stands; dedupe intact).
-			keepPayload, keepEvidence := prunePolicyFor(handler)
-			if perr := r.Store.PruneSucceeded(ctx, intent.ID, outcome.Evidence, keepPayload, keepEvidence); perr != nil {
-				logEntry.WithError(perr).Warn("intent ledger: prune of succeeded intent failed; tombstone retains full payload (dedupe intact)")
-			}
+		if !terminalOwned {
+			err = r.Store.MarkSucceeded(ctx, intent.ID, now, outcome.Evidence)
 		}
 	case OutcomeRetryable:
 		err = r.Store.MarkFailedRetryable(ctx, intent.ID, now.Add(handler.Backoff(intent.Attempts)), outcome.Reason)
-		stats.Retryable++
-		logEntry.WithField("reason", outcome.Reason).Warn("intent attempt failed; will retry")
 	case OutcomeAmbiguous:
 		delay := VerifyDelay
 		if verifying {
 			delay = handler.Backoff(intent.Attempts)
 		}
 		err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(delay), outcome.Reason, outcome.Evidence)
-		stats.Unknown++
-		logEntry.WithField("reason", outcome.Reason).Warn("intent outcome ambiguous; verifier will resolve via provider reads")
 	case OutcomeTerminal:
-		err = r.Store.MarkFailedTerminal(ctx, intent.ID, outcome.Reason, outcome.Evidence)
-		stats.Terminal++
-		logEntry.WithField("reason", outcome.Reason).Error("intent failed terminally")
-		if err == nil && pruneTerminalPayloadFor(handler) {
-			if perr := r.Store.PruneTerminalPayload(ctx, intent.ID); perr != nil {
-				logEntry.WithError(perr).Warn("intent ledger: terminal payload prune failed")
-			}
+		if !terminalOwned {
+			err = r.Store.MarkFailedTerminal(ctx, intent.ID, outcome.Reason, outcome.Evidence)
 		}
 	case OutcomeParked:
 		if verifying {
-			// A verifier cannot park (reads are never blocked); treat as
-			// still-unknown so the intent is not lost.
 			err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), outcome.Reason, outcome.Evidence)
-			stats.Unknown++
+			applied = OutcomeAmbiguous
 		} else {
 			r.park(ctx, logEntry, stats, intent.ID, now, outcome.Reason)
 			return
 		}
 	default:
 		err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), "unrecognized outcome class", nil)
-		stats.Unknown++
+		applied = OutcomeAmbiguous
 	}
 	if err != nil {
 		logEntry.WithError(err).Error("intent ledger: outcome transition failed; lease expiry will re-surface the intent")
+		return
+	}
+	// Reporting follows a confirmed write/read. A failed transition is never a
+	// successful payment or terminal refusal in worker statistics.
+	switch applied {
+	case OutcomeSucceeded:
+		stats.Succeeded++
+		logEntry.WithField("evidence", outcome.Evidence).Info("intent succeeded")
+		keepPayload, keepEvidence := prunePolicyFor(handler)
+		if err := r.Store.PruneSucceeded(ctx, intent.ID, outcome.Evidence, keepPayload, keepEvidence); err != nil {
+			logEntry.WithError(err).Warn("intent ledger: prune failed; full durable result retained")
+		}
+	case OutcomeRetryable:
+		stats.Retryable++
+		logEntry.WithField("reason", outcome.Reason).Warn("intent attempt failed; will retry")
+	case OutcomeAmbiguous:
+		stats.Unknown++
+		logEntry.WithField("reason", outcome.Reason).Warn("intent outcome ambiguous; verifier will resolve via provider reads")
+	case OutcomeTerminal:
+		stats.Terminal++
+		logEntry.WithField("reason", outcome.Reason).Error("intent failed terminally")
+		if pruneTerminalPayloadFor(handler) {
+			if err := r.Store.PruneTerminalPayload(ctx, intent.ID); err != nil {
+				logEntry.WithError(err).Warn("intent ledger: terminal payload prune failed")
+			}
+		}
 	}
 }
 

@@ -285,6 +285,44 @@ func (q *Queries) ClaimUnknownRailIntentByID(ctx context.Context, arg ClaimUnkno
 	return i, err
 }
 
+const completeRailIntentCollection = `-- name: CompleteRailIntentCollection :execrows
+UPDATE openrails.rail_intents
+SET status = $1::text,
+    result_evidence = $2::jsonb,
+    last_failure_reason = NULLIF($3::text, ''),
+    executed_at = CASE WHEN $1::text = 'succeeded' THEN $4::timestamptz ELSE executed_at END,
+    claimed_until = NULL,
+    updated_at = $4::timestamptz
+WHERE id = $5::uuid AND merchant_id = $6::uuid
+  AND intent_type = 'invoice_collection'
+  AND status IN ('in_flight', 'unknown_needs_verify')
+`
+
+type CompleteRailIntentCollectionParams struct {
+	Status     string
+	Evidence   []byte
+	Reason     string
+	Now        time.Time
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+// The caller owns the row lock and commits this transition with local effects.
+func (q *Queries) CompleteRailIntentCollection(ctx context.Context, arg CompleteRailIntentCollectionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeRailIntentCollection,
+		arg.Status,
+		arg.Evidence,
+		arg.Reason,
+		arg.Now,
+		arg.ID,
+		arg.MerchantID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countActiveSubscriptionsByMerchant = `-- name: CountActiveSubscriptionsByMerchant :one
 SELECT count(*) FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid AND status = 'active'
@@ -1026,6 +1064,54 @@ func (q *Queries) ListStuckRailIntents(ctx context.Context, arg ListStuckRailInt
 	return items, nil
 }
 
+const lockRailIntentForCollectionCompletion = `-- name: LockRailIntentForCollectionCompletion :one
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE id = $1::uuid AND merchant_id = $2::uuid
+  AND intent_type = 'invoice_collection'
+FOR UPDATE
+`
+
+type LockRailIntentForCollectionCompletionParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+// Call after acquiring the domain's payer/invoice locks, matching admission's
+// invoice-before-operation order.
+func (q *Queries) LockRailIntentForCollectionCompletion(ctx context.Context, arg LockRailIntentForCollectionCompletionParams) (OpenrailsRailIntent, error) {
+	row := q.db.QueryRow(ctx, lockRailIntentForCollectionCompletion, arg.ID, arg.MerchantID)
+	var i OpenrailsRailIntent
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.IntentType,
+		&i.SubscriptionID,
+		&i.PaymentID,
+		&i.PriceID,
+		&i.Payload,
+		&i.IdempotencyKey,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ClaimedUntil,
+		&i.Origin,
+		&i.OriginReason,
+		&i.Actor,
+		&i.LastFailureReason,
+		&i.ExpiresAt,
+		&i.ResultEvidence,
+		&i.CreatedAt,
+		&i.ExecutedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.CustodianID,
+	)
+	return i, err
+}
+
 const markRailIntentFailedRetryable = `-- name: MarkRailIntentFailedRetryable :execrows
 UPDATE openrails.rail_intents
 SET status = 'failed_retryable',
@@ -1058,6 +1144,7 @@ SET status = 'failed_terminal',
     claimed_until = NULL,
     updated_at = now()
 WHERE id = $3 AND status IN ('in_flight', 'unknown_needs_verify')
+  AND intent_type <> 'invoice_collection'
 `
 
 type MarkRailIntentFailedTerminalParams struct {
@@ -1084,6 +1171,7 @@ SET status = 'succeeded',
     claimed_until = NULL,
     updated_at = now()
 WHERE id = $3 AND status IN ('in_flight', 'unknown_needs_verify')
+  AND intent_type <> 'invoice_collection'
 `
 
 type MarkRailIntentSucceededParams struct {
