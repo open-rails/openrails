@@ -128,7 +128,7 @@ var rateJSON = object(map[string]jsonRule{
 
 // Exact nested shapes keep raw metadata/provider bodies out of the archive.
 // An unsupported shape is a refusal, never a lossy rewrite of a replay body.
-var cutoverQualificationJSON = object(map[string]jsonRule{"psp_id": uuidValue, "environment": textValue, "contract": textValue, "evidence_ref": textValue})
+var cutoverQualificationJSON = object(map[string]jsonRule{"psp_id": uuidValue, "environment": textValue, "contract": textValue, "evidence_ref": textValue, "credential_fingerprint": sha256Value, "credential_version": integerValue})
 
 var cutoverInstrumentJSON = object(map[string]jsonRule{
 	"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue,
@@ -153,8 +153,9 @@ var jsonRules = map[string]jsonRule{
 		"customer_id": uuidValue, "subscription_id": uuidValue, "source_subscription_id": textValue, "source_payment_method_id": uuidValue, "price_id": uuidValue, "plan_id": textValue, "currency": textValue, "amount": integerValue, "cycle_hours": integerValue, "period_start": textValue, "period_end": textValue, "anchor": textValue,
 	}),
 	"rail_intents.nmi_provider_cutover.result_evidence": object(map[string]jsonRule{
-		"decision":                object(map[string]jsonRule{"action": textValue, "authorization": object(map[string]jsonRule{"actor": textValue, "reason": textValue, "resolved_at": textValue, "step": textValue, "abandon": booleanValue})}),
-		"target_cancel_submitted": booleanValue, "target_cancel_receipt": nullable(cutoverSubscriptionJSON), "abandoned": booleanValue,
+		"account_requalifications": array(object(map[string]jsonRule{"role": textValue, "qualification": cutoverQualificationJSON, "original_fingerprint": sha256Value, "previous_fingerprint": sha256Value, "credential_fingerprint": sha256Value, "credential_version": integerValue, "actor": textValue, "reason": textValue, "recorded_at": textValue})),
+		"decision":                 object(map[string]jsonRule{"action": textValue, "authorization": object(map[string]jsonRule{"actor": textValue, "reason": textValue, "resolved_at": textValue, "step": textValue, "abandon": booleanValue})}),
+		"target_cancel_submitted":  booleanValue, "target_cancel_receipt": nullable(cutoverSubscriptionJSON), "abandoned": booleanValue,
 		"create_submitted": booleanValue, "target": nullable(cutoverSubscriptionJSON), "source_receipt": nullable(cutoverSubscriptionJSON), "source_absent_at": textValue, "activated_target": nullable(cutoverSubscriptionJSON), "source_cancel_submitted": booleanValue, "source_canceled": booleanValue, "activation_submitted": booleanValue, "target_active": booleanValue,
 		"activation_anchor": textValue, "billing_anchor": textValue, "paused_anchor": textValue,
 		"not_executed": booleanValue, "not_executed_code": textValue,

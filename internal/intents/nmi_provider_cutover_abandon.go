@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/providerqualification"
 )
 
 // A direction is written once, before either account's cancellation can be
@@ -34,12 +33,16 @@ func (h *NMIProviderCutover) claimCutoverDecision(ctx context.Context, id uuid.U
 }
 
 func (h *NMIProviderCutover) abandonClients(ctx context.Context, in gen.OpenrailsRailIntent, p nmiCutoverPayload) (*nmi.NMIClient, *nmi.NMIClient, error) {
+	bindings, _, err := cutoverAccountBindings(in, p)
+	if err != nil {
+		return nil, nil, err
+	}
 	source, ok, err := h.Resolver.ResolveNMIClient(ctx, in.MerchantID, &p.Request.ExpectedSourcePSPID)
-	if err != nil || !ok || source == nil || !cutoverAccountMatches(source, in.MerchantID, p.Request.ExpectedSourcePSPID) || cutoverCredentialFingerprint(source) != p.SourceCredentialFingerprint {
+	if err != nil || !ok || source == nil || !h.boundCutoverClient(ctx, source, in.MerchantID, bindings["source"]) {
 		return nil, nil, ErrResolutionRejected
 	}
 	target, ok, err := h.Resolver.ResolveNMIClient(ctx, in.MerchantID, &p.Request.ExpectedTargetPSPID)
-	if err != nil || !ok || target == nil || !cutoverAccountMatches(target, in.MerchantID, p.Request.ExpectedTargetPSPID) || cutoverCredentialFingerprint(target) != p.TargetCredentialFingerprint {
+	if err != nil || !ok || target == nil || !h.boundCutoverClient(ctx, target, in.MerchantID, bindings["target"]) {
 		return nil, nil, ErrResolutionRejected
 	}
 	return source, target, nil
@@ -115,7 +118,7 @@ func (h *NMIProviderCutover) advanceAbandon(ctx context.Context, in gen.Openrail
 			}
 			g.TargetCancelSubmitted = true
 		}
-		entered, writeErr := providerqualification.WithWrite(ctx, h.DB, p.Request.ExpectedTargetPSPID, func() error {
+		entered, writeErr := h.writeCutover(ctx, in, p, "target", target, func() error {
 			return target.DeleteRecurringSubscription(ctx, g.Target.ID)
 		})
 		if !entered {

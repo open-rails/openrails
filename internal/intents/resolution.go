@@ -28,6 +28,7 @@ type Resolution struct {
 	// upgrade's "successor" or "proration"); empty for single-step types.
 	Step              string
 	ProviderReference string
+	RequalifyAccount  string
 	NotExecuted       bool
 	Abandon           bool
 	BillingAnchor     time.Time
@@ -62,6 +63,7 @@ type UnsentResolver interface {
 func (r Resolution) normalized() (Resolution, error) {
 	r.Step = strings.TrimSpace(r.Step)
 	r.ProviderReference = strings.TrimSpace(r.ProviderReference)
+	r.RequalifyAccount = strings.TrimSpace(r.RequalifyAccount)
 	r.Actor = strings.TrimSpace(r.Actor)
 	r.Reason = strings.TrimSpace(r.Reason)
 	choices := 0
@@ -69,6 +71,9 @@ func (r Resolution) normalized() (Resolution, error) {
 		choices++
 	}
 	if r.NotExecuted {
+		choices++
+	}
+	if r.RequalifyAccount != "" {
 		choices++
 	}
 	if r.Abandon {
@@ -84,7 +89,7 @@ func (r Resolution) normalized() (Resolution, error) {
 	case r.Reason == "":
 		return r, fmt.Errorf("%w: reason is required", ErrResolutionInvalid)
 	case choices != 1:
-		return r, fmt.Errorf("%w: supply exactly one of a provider reference, not-executed billing anchor or abandon", ErrResolutionInvalid)
+		return r, fmt.Errorf("%w: supply exactly one of a provider reference, not-executed, billing anchor, abandon or account requalification", ErrResolutionInvalid)
 	}
 	return r, nil
 }
@@ -95,7 +100,9 @@ func (r Resolution) Record(at time.Time) map[string]any {
 	if r.Step != "" {
 		out["step"] = r.Step
 	}
-	if r.Abandon {
+	if r.RequalifyAccount != "" {
+		out["requalify_account"] = r.RequalifyAccount
+	} else if r.Abandon {
 		out["abandon"] = true
 	} else if !r.BillingAnchor.IsZero() {
 		out["billing_anchor"] = r.BillingAnchor.Format(time.RFC3339)
@@ -133,6 +140,12 @@ func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolutio
 	if row.MerchantID != mid.UUID() {
 		return gen.OpenrailsRailIntent{}, fmt.Errorf("%w: operation belongs to another merchant", ErrResolutionInvalid)
 	}
+	if resolution.RequalifyAccount != "" && (row.IntentType != TypeNMIProviderCutover || (resolution.Step != "source" && resolution.Step != "target")) {
+		return row, ErrResolutionUnsupported
+	}
+	if resolution.RequalifyAccount != "" && cutoverAccountRequalificationMatches(row, resolution) {
+		return row, nil
+	}
 	if !resolution.BillingAnchor.IsZero() {
 		if row.IntentType != TypeNMIProviderCutover || resolution.Step != "anchor" {
 			return row, ErrResolutionUnsupported
@@ -154,10 +167,10 @@ func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolutio
 		}
 	}
 	pending := row.Status == StatusPending || row.Status == StatusFailedRetryable
-	if pending && !resolution.Abandon {
+	if pending && !resolution.Abandon && resolution.RequalifyAccount == "" {
 		return r.resolveUnsent(ctx, row, resolution)
 	}
-	if row.Status != StatusUnknownNeedsVerify && !(pending && resolution.Abandon) {
+	if row.Status != StatusUnknownNeedsVerify && !(pending && (resolution.Abandon || resolution.RequalifyAccount != "")) {
 		return row, fmt.Errorf("%w (status=%s)", ErrResolutionNotUnknown, row.Status)
 	}
 	resolver, ok := r.Registry.Lookup(row.IntentType).(OperatorResolver)
@@ -187,7 +200,7 @@ func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolutio
 		releaseCtx, cancel := LedgerWriteContext(ctx)
 		defer cancel()
 		if pending {
-			if err := r.Store.Park(releaseCtx, claimed.ID, now.Add(ParkRetryInterval), "operator abandonment rejected"); err != nil {
+			if err := r.Store.Park(releaseCtx, claimed.ID, now.Add(ParkRetryInterval), "operator cutover recovery rejected"); err != nil {
 				logEntry.WithError(err).Error("operator resolution: release failed")
 			}
 		} else if _, err := r.Store.ReleaseUnknownClaim(releaseCtx, claimed.ID); err != nil {

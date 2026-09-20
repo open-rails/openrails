@@ -2,7 +2,6 @@ package intents
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,25 +41,25 @@ func normalizeCutoverRequest(body openrails.ProviderCutoverRequest) (nmiCutoverR
 }
 
 type nmiCutoverPayload struct {
-	SourceQualification         providerqualification.Record `json:"source_qualification"`
-	TargetQualification         providerqualification.Record `json:"target_qualification"`
-	Request                     nmiCutoverRequest            `json:"request"`
-	CustomerID                  uuid.UUID                    `json:"customer_id"`
-	SubscriptionID              uuid.UUID                    `json:"subscription_id"`
-	SourceSubscriptionID        string                       `json:"source_subscription_id"`
-	SourcePaymentMethodID       uuid.UUID                    `json:"source_payment_method_id"`
-	SourceInstrument            charge.FrozenInstrument      `json:"source_instrument"`
-	PriceID                     uuid.UUID                    `json:"price_id"`
-	PlanID                      string                       `json:"plan_id"`
-	TargetInstrument            charge.FrozenInstrument      `json:"target_instrument"`
-	Currency                    string                       `json:"currency"`
-	Amount                      int64                        `json:"amount"`
-	CycleHours                  int32                        `json:"cycle_hours"`
-	PeriodStart                 time.Time                    `json:"period_start"`
-	PeriodEnd                   time.Time                    `json:"period_end"`
-	Anchor                      time.Time                    `json:"anchor"`
-	SourceCredentialFingerprint string                       `json:"source_credential_fingerprint"`
-	TargetCredentialFingerprint string                       `json:"target_credential_fingerprint"`
+	SourceQualification         providerqualification.BoundRecord `json:"source_qualification"`
+	TargetQualification         providerqualification.BoundRecord `json:"target_qualification"`
+	Request                     nmiCutoverRequest                 `json:"request"`
+	CustomerID                  uuid.UUID                         `json:"customer_id"`
+	SubscriptionID              uuid.UUID                         `json:"subscription_id"`
+	SourceSubscriptionID        string                            `json:"source_subscription_id"`
+	SourcePaymentMethodID       uuid.UUID                         `json:"source_payment_method_id"`
+	SourceInstrument            charge.FrozenInstrument           `json:"source_instrument"`
+	PriceID                     uuid.UUID                         `json:"price_id"`
+	PlanID                      string                            `json:"plan_id"`
+	TargetInstrument            charge.FrozenInstrument           `json:"target_instrument"`
+	Currency                    string                            `json:"currency"`
+	Amount                      int64                             `json:"amount"`
+	CycleHours                  int32                             `json:"cycle_hours"`
+	PeriodStart                 time.Time                         `json:"period_start"`
+	PeriodEnd                   time.Time                         `json:"period_end"`
+	Anchor                      time.Time                         `json:"anchor"`
+	SourceCredentialFingerprint string                            `json:"source_credential_fingerprint"`
+	TargetCredentialFingerprint string                            `json:"target_credential_fingerprint"`
 }
 
 type nmiCutoverDecision struct {
@@ -195,6 +194,7 @@ func sameCutoverLocal(live, frozen nmiCutoverPayload) bool {
 	// Qualification is authority for admission and each write, not mutable
 	// commercial data. Current authority is checked separately under a row lock.
 	live.SourceQualification, live.TargetQualification = frozen.SourceQualification, frozen.TargetQualification
+	live.SourceCredentialFingerprint, live.TargetCredentialFingerprint = frozen.SourceCredentialFingerprint, frozen.TargetCredentialFingerprint
 	return reflect.DeepEqual(live, frozen)
 }
 
@@ -207,12 +207,15 @@ func (h *NMIProviderCutover) qualifyAdmission(ctx context.Context, database *db.
 	if err != nil {
 		return err
 	}
+	if source.CredentialFingerprint != p.SourceCredentialFingerprint || target.CredentialFingerprint != p.TargetCredentialFingerprint {
+		return providerqualification.ErrUnqualified
+	}
 	p.SourceQualification, p.TargetQualification = *source, *target
 	return nil
 }
 
 func cutoverCredentialFingerprint(client *nmi.NMIClient) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(client.SecurityKey)))
+	return providerqualification.Fingerprint(client.SecurityKey)
 }
 
 func (h *NMIProviderCutover) Preview(ctx context.Context, id uuid.UUID, body openrails.ProviderCutoverRequest) (*openrails.ProviderCutover, error) {
@@ -442,7 +445,7 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 		return uncertain("frozen intent address mismatch")
 	}
 	if g.Decision != nil && g.Decision.Action == "abandon" {
-		return h.advanceAbandon(ctx, in, p, g, send)
+		return h.advanceAbandon(ctx, current, p, g, send)
 	}
 	if !g.CreateSubmitted && !p.Anchor.After(h.now()) {
 		g.NotExecuted, g.NotExecutedCode = true, "anchor_expired"
@@ -477,7 +480,8 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 	if err != nil || !ok || source == nil {
 		return uncertain("source credentials unavailable; cancellation is unproven")
 	}
-	if !cutoverAccountMatches(source, in.MerchantID, p.Request.ExpectedSourcePSPID) || !cutoverAccountMatches(target, in.MerchantID, p.Request.ExpectedTargetPSPID) || cutoverCredentialFingerprint(source) != p.SourceCredentialFingerprint || cutoverCredentialFingerprint(target) != p.TargetCredentialFingerprint {
+	bindings, _, bindingErr := cutoverAccountBindings(current, p)
+	if bindingErr != nil || !h.boundCutoverClient(ctx, source, in.MerchantID, bindings["source"]) || !h.boundCutoverClient(ctx, target, in.MerchantID, bindings["target"]) {
 		return uncertain("provider credential changed; account identity must be requalified")
 	}
 	if e := target.ConfirmCutoverVault(ctx, p.TargetInstrument.RailCustomerRef, p.TargetInstrument.RailMethodRef); e != nil {
@@ -507,7 +511,7 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 			return uncertain("target enrollment already submitted")
 		}
 		g.CreateSubmitted = true
-		entered, writeErr := providerqualification.WithWrite(ctx, h.DB, p.Request.ExpectedTargetPSPID, func() error {
+		entered, writeErr := h.writeCutover(ctx, current, p, "target", target, func() error {
 			var err error
 			g.Target, err = target.CreatePausedSubscription(ctx, p.PlanID, p.TargetInstrument.RailCustomerRef, p.TargetInstrument.RailMethodRef, p.Anchor)
 			return err
@@ -581,7 +585,7 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 				}
 				g.SourceCancelSubmitted = true
 			}
-			entered, writeErr := providerqualification.WithWrite(ctx, h.DB, p.Request.ExpectedSourcePSPID, func() error {
+			entered, writeErr := h.writeCutover(ctx, current, p, "source", source, func() error {
 				return source.DeleteRecurringSubscription(ctx, p.SourceSubscriptionID)
 			})
 			if !entered {
@@ -629,7 +633,7 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 				return uncertain("persist target activation anchor: " + e.Error())
 			}
 		}
-		entered, writeErr := providerqualification.WithWrite(ctx, h.DB, p.Request.ExpectedTargetPSPID, func() error {
+		entered, writeErr := h.writeCutover(ctx, current, p, "target", target, func() error {
 			return target.ActivateSubscription(ctx, g.Target.ID, terms.Anchor)
 		})
 		if !entered {
@@ -754,6 +758,9 @@ func (h *NMIProviderCutover) Resolve(ctx context.Context, in gen.OpenrailsRailIn
 	if e != nil {
 		return Outcome{}, e
 	}
+	if r.RequalifyAccount != "" {
+		return h.requalifyAccount(ctx, in, p, r)
+	}
 	if r.Abandon {
 		return h.requestAbandon(ctx, in, p, g, r)
 	}
@@ -767,7 +774,8 @@ func (h *NMIProviderCutover) Resolve(ctx context.Context, in gen.OpenrailsRailIn
 	if e != nil || !ok || client == nil {
 		return Outcome{}, ErrResolutionRejected
 	}
-	if !cutoverAccountMatches(client, in.MerchantID, p.Request.ExpectedTargetPSPID) || cutoverCredentialFingerprint(client) != p.TargetCredentialFingerprint {
+	bindings, _, bindingErr := cutoverAccountBindings(in, p)
+	if bindingErr != nil || !h.boundCutoverClient(ctx, client, in.MerchantID, bindings["target"]) {
 		return Outcome{}, ErrResolutionRejected
 	}
 	target, found, e := client.GetCutoverSubscription(ctx, r.ProviderReference)
@@ -817,7 +825,8 @@ func (h *NMIProviderCutover) resolveAnchor(ctx context.Context, in gen.Openrails
 	if e != nil || !ok || target == nil {
 		return Outcome{}, ErrResolutionRejected
 	}
-	if !cutoverAccountMatches(target, in.MerchantID, p.Request.ExpectedTargetPSPID) || cutoverCredentialFingerprint(target) != p.TargetCredentialFingerprint {
+	bindings, _, bindingErr := cutoverAccountBindings(in, p)
+	if bindingErr != nil || !h.boundCutoverClient(ctx, target, in.MerchantID, bindings["target"]) {
 		return Outcome{}, ErrResolutionRejected
 	}
 	if e = target.ConfirmCutoverVault(ctx, p.TargetInstrument.RailCustomerRef, p.TargetInstrument.RailMethodRef); e != nil {
@@ -836,7 +845,7 @@ func (h *NMIProviderCutover) resolveAnchor(ctx context.Context, in gen.Openrails
 	if e != nil || !ok || source == nil {
 		return Outcome{}, ErrResolutionRejected
 	}
-	if !cutoverAccountMatches(source, in.MerchantID, p.Request.ExpectedSourcePSPID) || cutoverCredentialFingerprint(source) != p.SourceCredentialFingerprint {
+	if !h.boundCutoverClient(ctx, source, in.MerchantID, bindings["source"]) {
 		return Outcome{}, ErrResolutionRejected
 	}
 	old, active, e := source.GetCutoverSubscription(ctx, p.SourceSubscriptionID)

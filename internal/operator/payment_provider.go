@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/providerqualification"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -103,6 +104,34 @@ func SetProviderCutoverQualification(ctx context.Context, a *app.App, id merchan
 		return providerqualification.ErrInvalid
 	}
 	return a.Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-		return providerqualification.Set(ctx, a.Runtime.DB, pspID, record)
+		if record == nil {
+			return providerqualification.Set(ctx, a.Runtime.DB, pspID, nil, "", 0)
+		}
+		row, err := a.Runtime.DB.Gen(ctx).GetPSP(ctx, pspID)
+		if db.IsNotFound(err) || (err == nil && row.MerchantID != id.UUID()) {
+			return providerqualification.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if a.Runtime.ProviderCutovers == nil || a.Runtime.ProviderCutovers.Resolver == nil {
+			return providerqualification.ErrUnqualified
+		}
+		client, ok, err := a.Runtime.ProviderCutovers.Resolver.ResolveNMIClient(ctx, id.UUID(), &pspID)
+		if err != nil {
+			return err
+		}
+		if !ok || client == nil {
+			return providerqualification.ErrUnqualified
+		}
+		boundMerchant, boundPSP := client.AccountIdentity()
+		if boundMerchant != id.UUID() || boundPSP != pspID {
+			return providerqualification.ErrInvalid
+		}
+		version, err := providerqualification.CredentialVersion(row)
+		if err != nil {
+			return err
+		}
+		return providerqualification.Set(ctx, a.Runtime.DB, pspID, record, providerqualification.Fingerprint(client.SecurityKey), version)
 	})
 }

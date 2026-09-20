@@ -3,11 +3,14 @@ package providerqualification
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"regexp"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -36,13 +39,117 @@ type Record struct {
 	EvidenceRef string    `json:"evidence_ref"`
 }
 
+// BoundRecord is private storage. Callers supply only Record; the server binds
+// its selected credential before persisting qualification.
+type BoundRecord struct {
+	Record
+	CredentialFingerprint string `json:"credential_fingerprint"`
+	CredentialVersion     *int   `json:"credential_version"`
+}
+
+func Fingerprint(credential string) string {
+	if strings.TrimSpace(credential) == "" {
+		return ""
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.TrimSpace(credential))))
+}
+
+// CredentialVersion reads the existing cross-node security-key watermark.
+func CredentialVersion(row gen.OpenrailsPsp) (int, error) {
+	var document struct {
+		Versions map[string]int `json:"credential_versions"`
+	}
+	if len(row.Evidence) > 0 {
+		if err := json.Unmarshal(row.Evidence, &document); err != nil {
+			return 0, ErrInvalid
+		}
+	}
+	version := document.Versions["security_key"]
+	if version < 0 {
+		return 0, ErrInvalid
+	}
+	return version, nil
+}
+
+func ValidFingerprint(value string) bool {
+	if len(value) != 64 || value != strings.ToLower(value) {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func ValidEvidenceReference(value string) bool {
+	return evidenceReference.MatchString(value) && !cardguard.ContainsPAN(value)
+}
+
+// BindManifest accepts the public qualification shape only. In particular, a
+// supplied fingerprint is rejected; the secret reader owns that value.
+func BindManifest(row gen.OpenrailsPsp, input []byte, credential func(int) (string, error)) ([]byte, error) {
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(input, &document); err != nil {
+		return nil, ErrInvalid
+	}
+	var settings map[string]json.RawMessage
+	if raw := document["settings"]; len(raw) > 0 {
+		if err := json.Unmarshal(raw, &settings); err != nil {
+			return nil, ErrInvalid
+		}
+	}
+	raw := settings[setting]
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return input, nil
+	}
+	var record Record
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&record); err != nil {
+		return nil, ErrInvalid
+	}
+	if err := validate(&record, row); err != nil {
+		return nil, err
+	}
+	version, err := CredentialVersion(row)
+	if err != nil {
+		return nil, err
+	}
+	key, err := credential(version)
+	if err != nil {
+		return nil, err
+	}
+	bound := BoundRecord{Record: record, CredentialFingerprint: Fingerprint(key), CredentialVersion: &version}
+	if !ValidFingerprint(bound.CredentialFingerprint) {
+		return nil, ErrInvalid
+	}
+	var previous map[string]json.RawMessage
+	if len(row.Evidence) > 0 {
+		if err := json.Unmarshal(row.Evidence, &previous); err != nil {
+			return nil, ErrInvalid
+		}
+	}
+	if raw := previous["credential_versions"]; len(raw) > 0 {
+		document["credential_versions"] = raw
+	} else {
+		delete(document, "credential_versions")
+	}
+	settings[setting], err = json.Marshal(bound)
+	if err != nil {
+		return nil, err
+	}
+	document["settings"], err = json.Marshal(settings)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(document)
+}
+
 func validate(record *Record, row gen.OpenrailsPsp) error {
 	if record == nil {
 		return nil
 	}
 	if row.Rail != "nmi" || record.PSPID == uuid.Nil || record.PSPID != row.ID ||
 		record.Environment != row.Environment || record.Contract != NMIContract ||
-		!evidenceReference.MatchString(record.EvidenceRef) || cardguard.ContainsPAN(record.EvidenceRef) {
+		!ValidEvidenceReference(record.EvidenceRef) {
 		return ErrInvalid
 	}
 	return nil
@@ -50,7 +157,7 @@ func validate(record *Record, row gen.OpenrailsPsp) error {
 
 // Current validates the same stored shape used by manifest ingestion and the
 // control-plane setter. Absence means unqualified; malformed records refuse.
-func Current(row gen.OpenrailsPsp) (*Record, error) {
+func Current(row gen.OpenrailsPsp) (*BoundRecord, error) {
 	var doc struct {
 		Settings map[string]json.RawMessage `json:"settings"`
 	}
@@ -64,7 +171,7 @@ func Current(row gen.OpenrailsPsp) (*Record, error) {
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		return nil, nil
 	}
-	var record Record
+	var record BoundRecord
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&record); err != nil {
@@ -73,13 +180,23 @@ func Current(row gen.OpenrailsPsp) (*Record, error) {
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return nil, ErrInvalid
 	}
-	if err := validate(&record, row); err != nil {
+	if err := validate(&record.Record, row); err != nil {
 		return nil, err
+	}
+	if !ValidFingerprint(record.CredentialFingerprint) || record.CredentialVersion == nil {
+		return nil, ErrInvalid
+	}
+	version, err := CredentialVersion(row)
+	if err != nil {
+		return nil, err
+	}
+	if *record.CredentialVersion != version {
+		return nil, ErrUnqualified
 	}
 	return &record, nil
 }
 
-func Read(ctx context.Context, database *db.DB, pspID uuid.UUID) (*Record, error) {
+func Read(ctx context.Context, database *db.DB, pspID uuid.UUID) (*BoundRecord, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -103,7 +220,7 @@ func Read(ctx context.Context, database *db.DB, pspID uuid.UUID) (*Record, error
 
 // Set changes only this private settings record. The row update serializes with
 // WithWrite's share lock; nil revokes without touching credentials or history.
-func Set(ctx context.Context, database *db.DB, pspID uuid.UUID, record *Record) error {
+func Set(ctx context.Context, database *db.DB, pspID uuid.UUID, record *Record, fingerprint string, observedVersion int) error {
 	if pspID == uuid.Nil {
 		return ErrInvalid
 	}
@@ -125,7 +242,14 @@ func Set(ctx context.Context, database *db.DB, pspID uuid.UUID, record *Record) 
 		}
 		var raw []byte
 		if record != nil {
-			raw, err = json.Marshal(record)
+			version, err := CredentialVersion(row)
+			if err != nil {
+				return err
+			}
+			if !ValidFingerprint(fingerprint) || version != observedVersion {
+				return ErrInvalid
+			}
+			raw, err = json.Marshal(BoundRecord{Record: *record, CredentialFingerprint: fingerprint, CredentialVersion: &version})
 			if err != nil {
 				return err
 			}
@@ -139,7 +263,7 @@ func Set(ctx context.Context, database *db.DB, pspID uuid.UUID, record *Record) 
 // returned. It reuses the current merchant pin, so a one-connection host pool
 // works. Submission markers must commit before entering; results persist after.
 // entered is false only when this invocation never called the HTTP callback.
-func WithWrite(ctx context.Context, database *db.DB, pspID uuid.UUID, send func() error) (entered bool, err error) {
+func WithWrite(ctx context.Context, database *db.DB, pspID uuid.UUID, fingerprint string, send func() error) (entered bool, err error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
@@ -156,7 +280,7 @@ func WithWrite(ctx context.Context, database *db.DB, pspID uuid.UUID, send func(
 		if err != nil {
 			return err
 		}
-		if record == nil {
+		if record == nil || !ValidFingerprint(fingerprint) || record.CredentialFingerprint != fingerprint {
 			return ErrUnqualified
 		}
 		entered = true

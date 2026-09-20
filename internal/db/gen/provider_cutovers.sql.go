@@ -12,6 +12,40 @@ import (
 	"github.com/google/uuid"
 )
 
+const appendProviderCutoverAccountRequalification = `-- name: AppendProviderCutoverAccountRequalification :execrows
+UPDATE openrails.rail_intents
+SET result_evidence = jsonb_set(COALESCE(result_evidence, '{}'::jsonb), '{account_requalifications}',
+    COALESCE(NULLIF(result_evidence->'account_requalifications', 'null'::jsonb), '[]'::jsonb)
+    || jsonb_build_array($1::jsonb))
+WHERE id = $2::uuid AND merchant_id = $3::uuid
+  AND intent_type = 'nmi_provider_cutover' AND rail = 'nmi'
+  AND payload = $4::jsonb
+  AND status IN ('in_flight','unknown_needs_verify') AND claimed_until IS NOT NULL
+  AND COALESCE(NULLIF(result_evidence->'account_requalifications', 'null'::jsonb), '[]'::jsonb) = $5::jsonb
+`
+
+type AppendProviderCutoverAccountRequalificationParams struct {
+	Record          []byte
+	ID              uuid.UUID
+	MerchantID      uuid.UUID
+	AcceptedPayload []byte
+	Previous        []byte
+}
+
+func (q *Queries) AppendProviderCutoverAccountRequalification(ctx context.Context, arg AppendProviderCutoverAccountRequalificationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, appendProviderCutoverAccountRequalification,
+		arg.Record,
+		arg.ID,
+		arg.MerchantID,
+		arg.AcceptedPayload,
+		arg.Previous,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getNMIProviderCutoverSnapshot = `-- name: GetNMIProviderCutoverSnapshot :one
 
 SELECT s.customer_id, s.rail_subscription_id, s.payment_method_id,
@@ -169,7 +203,7 @@ SELECT id FROM openrails.payment_methods
 WHERE merchant_id = $1::uuid
   AND (id = $2::uuid OR id = (
     SELECT payment_method_id FROM openrails.subscriptions
-    WHERE id = $3::uuid AND merchant_id = $1::uuid
+    WHERE id = $3::uuid AND merchant_id = $1::uuid AND deleted_at IS NULL
   ))
 ORDER BY id FOR UPDATE
 `
@@ -200,7 +234,7 @@ SET psp_id = $1::uuid,
     rail_subscription_id = $2::text,
     payment_method_id = $3::uuid,
     updated_at = $4::timestamptz
-WHERE id = $5::uuid AND merchant_id = $6::uuid
+WHERE id = $5::uuid AND merchant_id = $6::uuid AND deleted_at IS NULL
 `
 
 type RepointProviderCutoverSubscriptionParams struct {

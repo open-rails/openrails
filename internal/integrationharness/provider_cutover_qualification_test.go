@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/providerqualification"
@@ -84,6 +86,312 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 	seed := func(t *testing.T, mode string) cutoverHTTPFixture {
 		return seedCutoverHTTP(t, h, s, g, mode, owner.MerchantID)
 	}
+
+	t.Run("credential_rotation", func(t *testing.T) {
+		// Only this loopback server receives the ordinary configuration API's
+		// credential-query and simulated-auth probes.
+		probe := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := r.Header.Get("Authorization")
+			if r.URL.Path == "/" {
+				require.NoError(t, r.ParseForm())
+				key = r.Form.Get("security_key")
+			}
+			g.mu.Lock()
+			known := g.Accounts[key] != nil
+			g.mu.Unlock()
+			if !known {
+				http.Error(w, "unknown fixture credential", 401)
+				return
+			}
+			switch r.URL.Path {
+			case "/":
+				_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))
+			case "/payments/auth", "/payments/probe-txn/void":
+				_, _ = w.Write([]byte(`{"object":"transaction","id":"probe-txn","response":"1","response_text":"SIMULATED","response_code":"100"}`))
+			default:
+				http.Error(w, "unexpected probe", 400)
+			}
+		}))
+		t.Cleanup(probe.Close)
+		rt.Merchants.SetCredentialProbeEndpointsForIntegration(probe.URL, "")
+		rt.Merchants.SetNMIProbeV5EndpointForIntegration(probe.URL)
+		mctx := merchant.WithID(ctx, owner.MerchantID)
+		rotate := func(t *testing.T, p cutoverHTTPFixture, role, key string) {
+			account := p.SourceKey
+			enabled := false
+			if role == "target" {
+				account = p.TargetKey
+				enabled = true
+			}
+			g.mu.Lock()
+			g.Accounts[key] = g.Accounts[account]
+			g.mu.Unlock()
+			err := rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+				_, err := rt.Merchants.UpsertPaymentProviderConfig(cctx, owner.MerchantID, "nmi", merchants.UpsertPaymentProviderConfigRequest{AccountID: account, Enabled: &enabled, Credentials: map[string]string{"security_key": key}})
+				return err
+			})
+			require.NoError(t, err)
+		}
+		resolve := func(id uuid.UUID, resolution intents.Resolution) error {
+			return rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+				_, err := rt.IntentRunner().Resolve(cctx, id, resolution)
+				return err
+			})
+		}
+		qualify := func(t *testing.T, p cutoverHTTPFixture, role string) string {
+			id := p.Source
+			if role == "target" {
+				id = p.Target
+			}
+			q := record(id)
+			q.EvidenceRef = "rotation-proof-" + uuid.NewString()
+			require.NoError(t, set(id, q))
+			return q.EvidenceRef
+		}
+		for _, mode := range []string{"complete_source", "complete_target", "abandon_source", "abandon_target"} {
+			t.Run(mode, func(t *testing.T) {
+				p := seed(t, "source_dark")
+				key := uuid.NewString()
+				operation, err := client.CutoverProvider(ctx, openrails.SubscriptionID(p.Sub), key, p.Req)
+				require.NoError(t, err)
+				require.Equal(t, "unknown_needs_verify", operation.Status)
+				var payload []byte
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&payload))
+				var oldSource, oldTarget *nmi.NMIClient
+				require.NoError(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+					var ok bool
+					var err error
+					oldSource, ok, err = rt.ProviderCutovers.Resolver.ResolveNMIClient(cctx, owner.MerchantID.UUID(), &p.Source)
+					if err != nil {
+						return err
+					}
+					require.True(t, ok)
+					oldTarget, ok, err = rt.ProviderCutovers.Resolver.ResolveNMIClient(cctx, owner.MerchantID.UUID(), &p.Target)
+					require.True(t, ok)
+					return err
+				}))
+				g.mu.Lock()
+				g.Accounts[p.SourceKey].Mode = ""
+				g.mu.Unlock()
+				role := "source"
+				if strings.HasSuffix(mode, "target") {
+					role = "target"
+				}
+				rotate(t, p, role, "rotated-"+uuid.NewString())
+				_, err = client.PreviewProviderCutover(ctx, openrails.SubscriptionID(p.Sub), p.Req)
+				require.Error(t, err, "an old qualification cannot arm fresh credentials")
+				stale := *rt.ProviderCutovers
+				stale.Resolver = cutoverScopedClients{p.Source: oldSource, p.Target: oldTarget}
+				err = rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error { _, err := stale.Preview(cctx, p.Sub, p.Req); return err })
+				require.ErrorIs(t, err, providerqualification.ErrUnqualified, "an already armed client must see the shared version floor")
+				proof := qualify(t, p, role)
+				operation, err = client.CutoverProvider(ctx, openrails.SubscriptionID(p.Sub), key, p.Req)
+				require.NoError(t, err)
+				require.Equal(t, "unknown_needs_verify", operation.Status, "account qualification alone cannot rewrite accepted credential identity")
+				approval := intents.Resolution{Step: role, RequalifyAccount: proof, Actor: "fixture-operator", Reason: "provider account continuity independently verified"}
+				require.NoError(t, resolve(operation.ID, approval))
+				require.NoError(t, resolve(operation.ID, approval), "same resolution replays")
+				if strings.HasPrefix(mode, "abandon") {
+					require.NoError(t, resolve(operation.ID, intents.Resolution{Step: "target", Abandon: true, Actor: "fixture-operator", Reason: "cancel only the exact paused target"}))
+				}
+				operation, err = client.CutoverProvider(ctx, openrails.SubscriptionID(p.Sub), key, p.Req)
+				require.NoError(t, err)
+				if strings.HasPrefix(mode, "complete") {
+					assertCutoverCommitted(t, h, g, p, operation)
+				} else {
+					require.Equal(t, "failed_terminal", operation.Status)
+					require.Equal(t, "abandoned", operation.Stage)
+				}
+				var after []byte
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&after))
+				require.JSONEq(t, string(payload), string(after))
+			})
+		}
+		t.Run("requalified_rotation_keeps_read_only_recovery_after_revocation", func(t *testing.T) {
+			p := seed(t, "lost_activation")
+			key := uuid.NewString()
+			operation, err := client.CutoverProvider(ctx, openrails.SubscriptionID(p.Sub), key, p.Req)
+			require.NoError(t, err)
+			require.Equal(t, "unknown_needs_verify", operation.Status)
+			rotate(t, p, "target", "rotated-"+uuid.NewString())
+			proof := qualify(t, p, "target")
+			require.NoError(t, resolve(operation.ID, intents.Resolution{Step: "target", RequalifyAccount: proof, Actor: "fixture-operator", Reason: "provider account continuity independently verified"}))
+			require.NoError(t, set(p.Source, nil))
+			require.NoError(t, set(p.Target, nil))
+			operation, err = client.CutoverProvider(ctx, openrails.SubscriptionID(p.Sub), key, p.Req)
+			require.NoError(t, err)
+			assertCutoverCommitted(t, h, g, p, operation)
+		})
+		t.Run("requalification_cannot_turn_another_account_404_into_evidence", func(t *testing.T) {
+			p := seed(t, "source_dark")
+			key := uuid.NewString()
+			operation, err := client.CutoverProvider(ctx, openrails.SubscriptionID(p.Sub), key, p.Req)
+			require.NoError(t, err)
+			wrongKey := "different-account-" + uuid.NewString()
+			g.mu.Lock()
+			g.Accounts[wrongKey] = &cutoverAccount{Source: true, Subs: map[string]nmi.V5Subscription{}}
+			g.mu.Unlock()
+			disabled := false
+			require.NoError(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+				_, err := rt.Merchants.UpsertPaymentProviderConfig(cctx, owner.MerchantID, "nmi", merchants.UpsertPaymentProviderConfigRequest{AccountID: p.SourceKey, Enabled: &disabled, Credentials: map[string]string{"security_key": wrongKey}})
+				return err
+			}))
+			proof := qualify(t, p, "source")
+			require.ErrorIs(t, resolve(operation.ID, intents.Resolution{Step: "source", RequalifyAccount: proof, Actor: "fixture-operator", Reason: "inadequate account continuity evidence"}), intents.ErrResolutionRejected)
+			var records int
+			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT jsonb_array_length(COALESCE(result_evidence->'account_requalifications','[]')) FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&records))
+			require.Zero(t, records)
+			g.mu.Lock()
+			deletes, activations := g.Accounts[wrongKey].Deletes, g.Accounts[p.TargetKey].Activations
+			g.mu.Unlock()
+			require.Zero(t, deletes)
+			require.Zero(t, activations)
+		})
+
+		t.Run("ordinary_rotation_commits_its_floor_after_the_inflight_write", func(t *testing.T) {
+			p := seed(t, "success")
+			entered, release := make(chan int32, 1), make(chan struct{})
+			var once sync.Once
+			unblock := func() { once.Do(func() { close(release) }) }
+			finished := make(chan error, 1)
+			go func() {
+				defer close(finished)
+				finished <- rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+					_, err := providerqualification.WithWrite(cctx, rt.DB, p.Target, providerqualification.Fingerprint(p.TargetKey), func() error {
+						var backend int32
+						if err := rt.DB.Qx(cctx).QueryRow(cctx, "SELECT pg_backend_pid()").Scan(&backend); err != nil {
+							return err
+						}
+						entered <- backend
+						<-release
+						return nil
+					})
+					return err
+				})
+			}()
+			t.Cleanup(func() { unblock(); <-finished })
+			var writerBackend int32
+			select {
+			case writerBackend = <-entered:
+			case err := <-finished:
+				t.Fatalf("write did not reach its callback: %v", err)
+			}
+			replacement := "rotated-" + uuid.NewString()
+			g.mu.Lock()
+			g.Accounts[replacement] = g.Accounts[p.TargetKey]
+			g.mu.Unlock()
+			rotated := make(chan error, 1)
+			go func() {
+				defer close(rotated)
+				rotated <- rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+					_, err := rt.Merchants.UpsertPaymentProviderConfig(cctx, owner.MerchantID, "nmi", merchants.UpsertPaymentProviderConfigRequest{AccountID: p.TargetKey, Credentials: map[string]string{"security_key": replacement}})
+					return err
+				})
+			}()
+			t.Cleanup(func() { unblock(); <-rotated })
+			require.Eventually(t, func() bool {
+				var blocked bool
+				err := h.Pool().QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)))`, writerBackend).Scan(&blocked)
+				return err == nil && blocked
+			}, 5*time.Second, 5*time.Millisecond)
+			select {
+			case err := <-rotated:
+				t.Fatalf("rotation completed before provider callback returned: %v", err)
+			default:
+			}
+			unblock()
+			require.NoError(t, <-finished)
+			require.NoError(t, <-rotated)
+			calls := 0
+			require.ErrorIs(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+				_, err := providerqualification.WithWrite(cctx, rt.DB, p.Target, providerqualification.Fingerprint(p.TargetKey), func() error { calls++; return nil })
+				return err
+			}), providerqualification.ErrUnqualified)
+			require.Zero(t, calls, "a previously armed key cannot dispatch after completed rotation")
+		})
+
+		for _, abandon := range []bool{false, true} {
+			name := "stale_executor_after_credential_ABA"
+			if abandon {
+				name = "stale_abandon_after_credential_ABA"
+			}
+			t.Run(name, func(t *testing.T) {
+				p := seed(t, "source_dark")
+				key := uuid.NewString()
+				operation, err := client.CutoverProvider(ctx, openrails.SubscriptionID(p.Sub), key, p.Req)
+				require.NoError(t, err)
+				g.mu.Lock()
+				g.Accounts[p.SourceKey].Mode = ""
+				g.mu.Unlock()
+				if abandon {
+					require.NoError(t, resolve(operation.ID, intents.Resolution{Step: "target", Abandon: true, Actor: "fixture-operator", Reason: "compensate paused target"}))
+				}
+				var snapshot gen.OpenrailsRailIntent
+				require.NoError(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+					var err error
+					snapshot, err = intents.NewStore(rt.DB).Get(cctx, operation.ID)
+					return err
+				}))
+				entered, release := make(chan struct{}), make(chan struct{})
+				var releaseOnce sync.Once
+				releaseGate := func() { releaseOnce.Do(func() { close(release) }) }
+				var caught atomic.Bool
+				g.mu.Lock()
+				g.AfterSubscriptionRead = func(source bool, _ nmi.V5Subscription) {
+					if source != abandon && caught.CompareAndSwap(false, true) {
+						close(entered)
+						<-release
+					}
+				}
+				g.mu.Unlock()
+				done := make(chan intents.Outcome, 1)
+				t.Cleanup(func() { releaseGate(); <-done; g.mu.Lock(); g.AfterSubscriptionRead = nil; g.mu.Unlock() })
+				go func() {
+					defer close(done)
+					_ = rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error { done <- rt.ProviderCutovers.Execute(cctx, snapshot); return nil })
+				}()
+				select {
+				case <-entered:
+				case outcome := <-done:
+					t.Fatalf("executor returned before the fixture read gate: %+v", outcome)
+				}
+				role, original := "source", p.SourceKey
+				if abandon {
+					role, original = "target", p.TargetKey
+				}
+				for _, replacement := range []string{"rotated-" + uuid.NewString(), original} {
+					rotate(t, p, role, replacement)
+					proof := qualify(t, p, role)
+					require.NoError(t, resolve(operation.ID, intents.Resolution{Step: role, RequalifyAccount: proof, Actor: "fixture-operator", Reason: "verified same account after credential rotation"}))
+				}
+				releaseGate()
+				<-done
+				g.mu.Lock()
+				g.AfterSubscriptionRead = nil
+				g.mu.Unlock()
+				g.mu.Lock()
+				sourceDeletes, targetDeletes, targetActivations := g.Accounts[p.SourceKey].Deletes, g.Accounts[p.TargetKey].Deletes, g.Accounts[p.TargetKey].Activations
+				g.mu.Unlock()
+				require.Zero(t, sourceDeletes)
+				require.Zero(t, targetDeletes)
+				require.Zero(t, targetActivations)
+				var evidence struct {
+					Records []json.RawMessage `json:"account_requalifications"`
+				}
+				var raw []byte
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT result_evidence FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&raw))
+				require.NoError(t, json.Unmarshal(raw, &evidence))
+				require.Len(t, evidence.Records, 2, "stale progress cannot overwrite qualified history")
+				operation, err = client.CutoverProvider(ctx, openrails.SubscriptionID(p.Sub), key, p.Req)
+				require.NoError(t, err)
+				if abandon {
+					require.Equal(t, "abandoned", operation.Stage)
+				} else {
+					assertCutoverCommitted(t, h, g, p, operation)
+				}
+			})
+		}
+	})
 
 	t.Run("admission_and_record_binding", func(t *testing.T) {
 		p := seed(t, "success")
@@ -255,7 +563,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 		done := make(chan error, 1)
 		go func() {
 			done <- writer.RunInMerchantConn(mctx, func(cctx context.Context) error {
-				entered, err := providerqualification.WithWrite(cctx, writer, p.Target, func() error {
+				entered, err := providerqualification.WithWrite(cctx, writer, p.Target, providerqualification.Fingerprint(p.TargetKey), func() error {
 					req, err := http.NewRequestWithContext(cctx, http.MethodPost, gateway.URL, nil)
 					if err != nil {
 						return err
@@ -286,7 +594,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 					return err
 				}
 				pid <- backend
-				return providerqualification.Set(cctx, revoker, p.Target, nil)
+				return providerqualification.Set(cctx, revoker, p.Target, nil, "", 0)
 			})
 		}()
 		var backend int32
@@ -304,7 +612,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 		require.NoError(t, <-done)
 		require.NoError(t, <-revoked)
 		require.NoError(t, writer.RunInMerchantConn(mctx, func(cctx context.Context) error {
-			entered, err := providerqualification.WithWrite(cctx, writer, p.Target, func() error { calls.Add(1); return nil })
+			entered, err := providerqualification.WithWrite(cctx, writer, p.Target, providerqualification.Fingerprint(p.TargetKey), func() error { calls.Add(1); return nil })
 			require.False(t, entered)
 			require.ErrorIs(t, err, providerqualification.ErrUnqualified)
 			return nil

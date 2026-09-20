@@ -1491,9 +1491,10 @@
       "type SolanaSunsetPayload struct {\n\tPlanPDA string `json:\"plan_pda\"`\n\tLabel   string `json:\"label,omitempty\"`\n}",
       "type StripeArchivePayload struct {\n\tObjectID  string `json:\"object_id\"`\n\tMarkerKey string `json:\"marker_key\"`\n\tLabel     string `json:\"label,omitempty\"`\n}",
       "type collectedReceipt struct {\n\tVersion int                                    `json:\"version\"`\n\tFamily  string                                 `json:\"family\"`\n\tBinding receiptBinding                         `json:\"binding\"`\n\tNMI     *nmi.SaleEvidence                      `json:\"nmi,omitempty\"`\n\tStripe  *subscriptions.StripeCollectionReceipt `json:\"stripe,omitempty\"`\n}",
+      "type cutoverAccountRequalification struct {\n\tRole                  string                       `json:\"role\"`\n\tQualification         providerqualification.Record `json:\"qualification\"`\n\tOriginalFingerprint   string                       `json:\"original_fingerprint\"`\n\tPreviousFingerprint   string                       `json:\"previous_fingerprint\"`\n\tCredentialFingerprint string                       `json:\"credential_fingerprint\"`\n\tCredentialVersion     int                          `json:\"credential_version\"`\n\tActor                 string                       `json:\"actor\"`\n\tReason                string                       `json:\"reason\"`\n\tRecordedAt            time.Time                    `json:\"recorded_at\"`\n}",
       "type nmiCard struct {\n\tLastFour   string `json:\"last_four\"`\n\tCardType   string `json:\"card_type\"`\n\tExpiryDate string `json:\"expiry_date\"`\n}",
       "type nmiCutoverDecision struct {\n\tAction        string         `json:\"action\"`\n\tAuthorization map[string]any `json:\"authorization,omitempty\"`\n}",
-      "type nmiCutoverPayload struct {\n\tSourceQualification         providerqualification.Record `json:\"source_qualification\"`\n\tTargetQualification         providerqualification.Record `json:\"target_qualification\"`\n\tRequest                     nmiCutoverRequest            `json:\"request\"`\n\tCustomerID                  uuid.UUID                    `json:\"customer_id\"`\n\tSubscriptionID              uuid.UUID                    `json:\"subscription_id\"`\n\tSourceSubscriptionID        string                       `json:\"source_subscription_id\"`\n\tSourcePaymentMethodID       uuid.UUID                    `json:\"source_payment_method_id\"`\n\tSourceInstrument            charge.FrozenInstrument      `json:\"source_instrument\"`\n\tPriceID                     uuid.UUID                    `json:\"price_id\"`\n\tPlanID                      string                       `json:\"plan_id\"`\n\tTargetInstrument            charge.FrozenInstrument      `json:\"target_instrument\"`\n\tCurrency                    string                       `json:\"currency\"`\n\tAmount                      int64                        `json:\"amount\"`\n\tCycleHours                  int32                        `json:\"cycle_hours\"`\n\tPeriodStart                 time.Time                    `json:\"period_start\"`\n\tPeriodEnd                   time.Time                    `json:\"period_end\"`\n\tAnchor                      time.Time                    `json:\"anchor\"`\n\tSourceCredentialFingerprint string                       `json:\"source_credential_fingerprint\"`\n\tTargetCredentialFingerprint string                       `json:\"target_credential_fingerprint\"`\n}",
+      "type nmiCutoverPayload struct {\n\tSourceQualification         providerqualification.BoundRecord `json:\"source_qualification\"`\n\tTargetQualification         providerqualification.BoundRecord `json:\"target_qualification\"`\n\tRequest                     nmiCutoverRequest                 `json:\"request\"`\n\tCustomerID                  uuid.UUID                         `json:\"customer_id\"`\n\tSubscriptionID              uuid.UUID                         `json:\"subscription_id\"`\n\tSourceSubscriptionID        string                            `json:\"source_subscription_id\"`\n\tSourcePaymentMethodID       uuid.UUID                         `json:\"source_payment_method_id\"`\n\tSourceInstrument            charge.FrozenInstrument           `json:\"source_instrument\"`\n\tPriceID                     uuid.UUID                         `json:\"price_id\"`\n\tPlanID                      string                            `json:\"plan_id\"`\n\tTargetInstrument            charge.FrozenInstrument           `json:\"target_instrument\"`\n\tCurrency                    string                            `json:\"currency\"`\n\tAmount                      int64                             `json:\"amount\"`\n\tCycleHours                  int32                             `json:\"cycle_hours\"`\n\tPeriodStart                 time.Time                         `json:\"period_start\"`\n\tPeriodEnd                   time.Time                         `json:\"period_end\"`\n\tAnchor                      time.Time                         `json:\"anchor\"`\n\tSourceCredentialFingerprint string                            `json:\"source_credential_fingerprint\"`\n\tTargetCredentialFingerprint string                            `json:\"target_credential_fingerprint\"`\n}",
       "type nmiCutoverProgress struct {\n\tDecision              *nmiCutoverDecision `json:\"decision,omitempty\"`\n\tTargetCancelSubmitted bool                `json:\"target_cancel_submitted,omitempty\"`\n\tTargetCancelReceipt   *nmi.V5Subscription `json:\"target_cancel_receipt,omitempty\"`\n\tAbandoned             bool                `json:\"abandoned,omitempty\"`\n\tCreateSubmitted       bool                `json:\"create_submitted,omitempty\"`\n\tTarget                *nmi.V5Subscription `json:\"target,omitempty\"`\n\tSourceCancelSubmitted bool                `json:\"source_cancel_submitted,omitempty\"`\n\tSourceReceipt         *nmi.V5Subscription `json:\"source_receipt,omitempty\"`\n\tSourceAbsentAt        time.Time           `json:\"source_absent_at,omitzero\"`\n\tActivatedTarget       *nmi.V5Subscription `json:\"activated_target,omitempty\"`\n\tSourceCanceled        bool                `json:\"source_canceled,omitempty\"`\n\tActivationSubmitted   bool                `json:\"activation_submitted,omitempty\"`\n\tActivationAnchor      time.Time           `json:\"activation_anchor,omitzero\"`\n\tTargetActive          bool                `json:\"target_active,omitempty\"`\n\tResolution            map[string]any      `json:\"resolution,omitempty\"`\n\tBillingAnchor         time.Time           `json:\"billing_anchor,omitzero\"`\n\tPausedAnchor          time.Time           `json:\"paused_anchor,omitzero\"`\n\tAnchorResolutions     []map[string]any    `json:\"anchor_resolutions,omitempty\"`\n\tNotExecuted           bool                `json:\"not_executed,omitempty\"`\n\tNotExecutedCode       string              `json:\"not_executed_code,omitempty\"`\n}",
       "type nmiCutoverRequest struct {\n\tTargetPaymentMethodID uuid.UUID `json:\"target_payment_method_id\"`\n\tExpectedSourcePSPID   uuid.UUID `json:\"expected_source_psp_id\"`\n\tExpectedTargetPSPID   uuid.UUID `json:\"expected_target_psp_id\"`\n}",
       "type nmiPaymentMethodUpdateProgress struct {\n\tSubmissionStarted bool    `json:\"submission_started\"`\n\tOldCard           nmiCard `json:\"old_card\"`\n}",
@@ -1752,6 +1753,7 @@
       "type ProviderAccountCutoverReport struct {\n\tSubscriptionID openrails.SubscriptionID   `json:\"subscription_id\"`\n\tSourcePSPID    uuid.UUID                  `json:\"source_psp_id\"`\n\tTargetPSPID    uuid.UUID                  `json:\"target_psp_id\"`\n\tPlan           ProviderAccountCutoverPlan `json:\"plan\"`\n}"
     ],
     "internal/providerqualification": [
+      "type BoundRecord struct {\n\tRecord\n\tCredentialFingerprint string `json:\"credential_fingerprint\"`\n\tCredentialVersion     *int   `json:\"credential_version\"`\n}",
       "type Record struct {\n\tPSPID       uuid.UUID `json:\"psp_id\"`\n\tEnvironment string    `json:\"environment\"`\n\tContract    string    `json:\"contract\"`\n\tEvidenceRef string    `json:\"evidence_ref\"`\n}"
     ],
     "internal/reconcile": [
@@ -3014,7 +3016,20 @@
       "openrails": "github.com/open-rails/openrails",
       "providerqualification": "github.com/open-rails/openrails/internal/providerqualification",
       "reflect": "reflect",
-      "sha256": "crypto/sha256",
+      "strings": "strings",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/intents/nmi_provider_cutover_requalification.go": {
+      "bytes": "bytes",
+      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
+      "context": "context",
+      "errors": "errors",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
+      "providerqualification": "github.com/open-rails/openrails/internal/providerqualification",
       "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid",
@@ -4185,6 +4200,7 @@
     "internal/operator/payment_provider.go": {
       "app": "github.com/open-rails/openrails/internal/app",
       "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
@@ -4246,10 +4262,13 @@
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "hex": "encoding/hex",
       "io": "io",
       "json": "encoding/json",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "regexp": "regexp",
+      "sha256": "crypto/sha256",
+      "strings": "strings",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },

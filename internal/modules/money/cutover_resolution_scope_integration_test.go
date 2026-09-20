@@ -16,6 +16,8 @@ func TestCutoverAbandonCannotResolveInvoiceCollection(t *testing.T) {
 		Step: "target", Abandon: true, Actor: "operator", Reason: "cutover-only action",
 	})
 	require.ErrorIs(t, err, intents.ErrResolutionUnsupported)
+	_, err = e.runner.Resolve(e.ctx, before.ID, intents.Resolution{Step: "source", RequalifyAccount: "account-proof", Actor: "operator", Reason: "cutover-only requalification"})
+	require.ErrorIs(t, err, intents.ErrResolutionUnsupported)
 	after := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
 	require.Equal(t, before.Status, after.Status)
 	require.Equal(t, before.ClaimedUntil, after.ClaimedUntil)

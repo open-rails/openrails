@@ -26,7 +26,7 @@ SELECT id FROM openrails.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (id = sqlc.arg(target_payment_method_id)::uuid OR id = (
     SELECT payment_method_id FROM openrails.subscriptions
-    WHERE id = sqlc.arg(subscription_id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
+    WHERE id = sqlc.arg(subscription_id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND deleted_at IS NULL
   ))
 ORDER BY id FOR UPDATE;
 
@@ -66,4 +66,15 @@ SET psp_id = sqlc.arg(target_psp_id)::uuid,
     rail_subscription_id = sqlc.arg(target_subscription_id)::text,
     payment_method_id = sqlc.arg(target_payment_method_id)::uuid,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE id = sqlc.arg(subscription_id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid;
+WHERE id = sqlc.arg(subscription_id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid AND deleted_at IS NULL;
+
+-- name: AppendProviderCutoverAccountRequalification :execrows
+UPDATE openrails.rail_intents
+SET result_evidence = jsonb_set(COALESCE(result_evidence, '{}'::jsonb), '{account_requalifications}',
+    COALESCE(NULLIF(result_evidence->'account_requalifications', 'null'::jsonb), '[]'::jsonb)
+    || jsonb_build_array(sqlc.arg(record)::jsonb))
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
+  AND intent_type = 'nmi_provider_cutover' AND rail = 'nmi'
+  AND payload = sqlc.arg(accepted_payload)::jsonb
+  AND status IN ('in_flight','unknown_needs_verify') AND claimed_until IS NOT NULL
+  AND COALESCE(NULLIF(result_evidence->'account_requalifications', 'null'::jsonb), '[]'::jsonb) = sqlc.arg(previous)::jsonb;

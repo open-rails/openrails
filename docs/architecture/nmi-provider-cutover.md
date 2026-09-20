@@ -199,3 +199,44 @@ with `integration`, runs `TestNMIProviderCutoverHostCampaign`, and requires
 `PROVIDER_MIGRATION_SCRIPT` to name the exact absolute path of SaaS's
 `scripts/provider_migration.py`. That selected proof fails if its script is
 missing. It is separate from core CI and uses the actual operator process.
+
+## Credential rotation and explicit account continuity
+
+The persisted qualification includes a credential fingerprint and the existing
+`security_key` version watermark, both derived by the server. They are not
+accepted in the public qualification record or manifest input. Missing bindings
+refuse; there is no pre-v1 fallback. Changing the security key invalidates old
+qualification for new admission and provider writes. Rotating only a webhook
+secret does not invalidate payment-account authority.
+
+Refresh the account qualification with a new evidence reference after verifying
+that the new credential still identifies the intended provider account. An
+already accepted operation also needs explicit continuity authorization:
+
+```sh
+openrails intents resolve --merchant <merchant> --intent <operation-id> \
+  --step source --requalify-account <new-evidence-reference> \
+  --actor <operator> --reason <account-continuity-evidence>
+```
+
+Use `--step target` for the target account. The reference must match the current
+private account qualification. The resolver reads the exact frozen provider
+addresses, but matching object IDs alone is not proof of account continuity:
+the operator attests that continuity using the referenced external evidence.
+Missing objects and bare 404 responses refuse. This command performs no provider
+mutation and never changes the accepted financial or instrument payload.
+
+A typed history records each role, original/effective fingerprint, credential
+version, qualification reference, operator, reason and time. One conditional
+append under the account update lock prevents concurrent authorizations from
+replacing one another. Ordinary progress writes do not serialize this history.
+Each provider write reloads its canonical role binding while holding that
+account's share lock, so an executor started before requalification cannot reuse
+stale authority, including a key changing A -> B -> A. Reads and local completion
+remain available after qualification is subsequently revoked; provider writes
+still require current qualification.
+
+The version fence covers the ordinary provider-configuration rotation API,
+whose PSP-row update serializes with provider writes. Direct writes to a secret
+backend bypass that rotation protocol and must not be used to promise atomic
+cutover. Requalification cannot cancel a request already sent to the provider.

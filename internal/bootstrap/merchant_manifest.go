@@ -1813,7 +1813,21 @@ func reconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 		// #662: derive the id from the global natural key and store the SAME
 		// normalized (rail, environment, account_id) it is hashed from.
 		railAcctID, nRail, nEnv, nAccount := merchants.PSPNaturalKey(rail, environment, accountID)
-		if _, err := providerqualification.Current(gen.OpenrailsPsp{ID: railAcctID, Rail: nRail, Environment: nEnv, Evidence: evidenceJSON}); err != nil {
+		qualifiedRow, readErr := database.Gen(ctx).GetPSP(ctx, railAcctID)
+		if errors.Is(readErr, pgx.ErrNoRows) {
+			qualifiedRow = gen.OpenrailsPsp{ID: railAcctID, Rail: nRail, Environment: nEnv}
+		} else if readErr != nil {
+			return readErr
+		}
+		evidenceJSON, err = providerqualification.BindManifest(qualifiedRow, evidenceJSON, func(version int) (string, error) {
+			name, err := merchants.PSPSecretName(nRail, nEnv, nAccount, "security_key")
+			if err != nil {
+				return "", err
+			}
+			secret, err := merchants.ReadSecretRef(ctx, secretStore, merchantID, merchants.SecretRef{Name: name, MinVersion: version})
+			return secret.Value, err
+		})
+		if err != nil {
 			return fmt.Errorf("PSP cutover qualification: %w", err)
 		}
 		_, err := database.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{
