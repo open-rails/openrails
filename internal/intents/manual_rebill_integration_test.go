@@ -210,7 +210,7 @@ func seedPastDueSubscriptionAt(t *testing.T, merchantID uuid.UUID, now time.Time
 		if err != nil {
 			return err
 		}
-		fx.payload = ManualRebillPayload{Renewal: terms, PaymentMethodID: paymentMethodID, Instrument: charge.FreezeInstrument(method), Rail: "nmi", RailSubscriptionID: sub.RailSubscriptionID, Attempt: 1, FailureCount: 1, OrderReference: fx.orderRef, AmountMinor: minor}
+		fx.payload = ManualRebillPayload{Initiator: charge.InitiatorMerchant, Renewal: terms, PaymentMethodID: paymentMethodID, Instrument: charge.FreezeInstrument(method), Rail: "nmi", RailSubscriptionID: sub.RailSubscriptionID, Attempt: 1, FailureCount: 1, OrderReference: fx.orderRef, AmountMinor: minor}
 		return nil
 	}))
 

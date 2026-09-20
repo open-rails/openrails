@@ -5,6 +5,7 @@ package custodymigration_test
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -574,7 +575,7 @@ func TestRemappedInstrumentChargesThroughTheSurvivorGateway(t *testing.T) {
 	require.IsType(t, &money.CustodianProxyCollectionAdapter{}, adapter,
 		"the INSTRUMENT decides the transport (or#879) — nothing else changed")
 
-	prepared, err := adapter.Prepare(fx.ctx, remapped, money.ChargeRequest{
+	prepared, err := adapter.Prepare(fx.ctx, remapped, money.ChargeRequest{Initiator: charge.InitiatorMerchant,
 		MerchantID:      dbtest.TestMerchantID.UUID(),
 		PaymentMethodID: methodID,
 		AmountCents:     1999,

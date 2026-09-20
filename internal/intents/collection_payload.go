@@ -19,6 +19,7 @@ import (
 // payment_method_id also pins the method against custody remap while the
 // operation is unresolved (or#297).
 type InvoiceCollectionPayload struct {
+	Initiator           charge.Initiator        `json:"initiator"`
 	InvoiceID           uuid.UUID               `json:"invoice_id"`
 	CustomerID          uuid.UUID               `json:"customer_id"`
 	AttemptID           uuid.UUID               `json:"attempt_id"`
@@ -42,6 +43,12 @@ func DecodeInvoiceCollectionPayload(intent gen.OpenrailsRailIntent) (InvoiceColl
 	}
 	if p.InvoiceID == uuid.Nil || p.CustomerID == uuid.Nil || p.AttemptID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Rail == "" || p.Amount <= 0 || p.AmountMinor <= 0 || p.Currency == "" {
 		return p, errors.New("invoice collection payload is incomplete")
+	}
+	if p.Initiator != charge.InitiatorMerchant && p.Initiator != charge.InitiatorCustomer {
+		return p, errors.New("collection initiation is not established")
+	}
+	if p.Initiator == charge.InitiatorCustomer && (intent.Origin != string(OriginUser) || intent.Actor == nil || *intent.Actor != p.CustomerID.String() || p.Rail != "nmi" || p.Instrument.CustodianHeld() || !customerPaymentKeyValid("invoice_collection", p.CustomerID, intent.IdempotencyKey)) {
+		return p, errors.New("customer collection has an unsupported authority or rail")
 	}
 	if err := p.Instrument.Validate(); err != nil {
 		return p, fmt.Errorf("invoice collection payload: %w", err)

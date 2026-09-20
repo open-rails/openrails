@@ -2,6 +2,7 @@ package money
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"strings"
 	"testing"
 
@@ -24,7 +25,7 @@ import (
 // third outcome, so the assertion cannot pass for the wrong reason.
 
 func chargeRequestWithCurrency(currency string) ChargeRequest {
-	return ChargeRequest{
+	return ChargeRequest{Initiator: charge.InitiatorMerchant,
 		MerchantID:      uuid.New(),
 		Payer:           identity.CustomerID(uuid.New()),
 		PaymentMethodID: uuid.New(),

@@ -44,14 +44,14 @@ func TestLiveSandboxClientSurface(t *testing.T) {
 
 	// --- plans: v5 create -> v5 get -> classic edit -> v5 get -> cleanup ---
 	planID := "openrails-live-surface-" + runID[:10]
-	require.NoError(t, client.AddRecurringPlan(context.Background(), planID, "Live Surface Probe", 123, 30, 0))
-	detail, err := client.GetRecurringPlanDetailByID(context.Background(), planID)
+	require.NoError(t, client.AddRecurringPlan(context.Background(), planID, "Live Surface Probe", 123, "USD", 30, 0))
+	detail, err := client.GetRecurringPlanDetailByID(context.Background(), planID, "USD")
 	require.NoError(t, err)
 	require.True(t, detail.Found)
 	assert.Equal(t, int64(123), detail.AmountCents)
 	assert.Equal(t, 30, detail.DayFrequency)
-	require.NoError(t, client.EditRecurringPlan(context.Background(), planID, "Live Surface Probe v2", 321))
-	detail, err = client.GetRecurringPlanDetailByID(context.Background(), planID)
+	require.NoError(t, client.EditRecurringPlan(context.Background(), planID, "Live Surface Probe v2", 321, "USD"))
+	detail, err = client.GetRecurringPlanDetailByID(context.Background(), planID, "USD")
 	require.NoError(t, err)
 	require.True(t, detail.Found)
 	assert.Equal(t, int64(321), detail.AmountCents, "classic edit_plan must be visible through the v5 read")

@@ -15,20 +15,25 @@ import (
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestManualRebillArchivePreservesAcceptedTermsAndTerminalCustody(t *testing.T) {
-	for _, outcome := range []string{"paid", "refused"} {
+	for _, outcome := range []string{"paid", "refused", "customer_paid", "customer_refused"} {
 		t.Run(outcome, func(t *testing.T) {
-			source, mid, original, calls := intents.TerminalRebillArchiveFixture(t, outcome == "refused")
+			fixture := intents.TerminalRebillArchiveFixture
+			if strings.HasPrefix(outcome, "customer_") {
+				fixture = intents.CustomerTerminalRebillArchiveFixture
+			}
+			source, mid, original, calls := fixture(t, strings.HasSuffix(outcome, "refused"))
 			var archive bytes.Buffer
 			sourceCtx, sourceRelease, err := source.WithMerchantConn(merchant.WithID(t.Context(), mid))
 			require.NoError(t, err)
 			events, err := source.Gen(sourceCtx).ListHostEvents(sourceCtx, gen.ListHostEventsParams{MerchantID: mid.UUID(), RowLimit: 100})
 			require.NoError(t, err)
-			if outcome == "paid" {
+			if strings.HasSuffix(outcome, "paid") {
 				require.Len(t, events, 1)
 				require.Error(t, merchantarchive.Export(t.Context(), source, mid, &archive), "a pending host reaction is not silently discarded")
 				require.Empty(t, archive.Bytes())

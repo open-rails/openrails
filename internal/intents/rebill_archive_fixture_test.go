@@ -15,6 +15,14 @@ import (
 // admission/HTTP/receipt/lifecycle workflow without importing archive into the
 // intents package (the contract depends on the canonical intent decoder).
 func TerminalRebillArchiveFixture(t *testing.T, refused bool) (*db.DB, merchant.ID, gen.OpenrailsRailIntent, func() int64) {
+	return terminalRebillArchiveFixture(t, refused, false)
+}
+
+func CustomerTerminalRebillArchiveFixture(t *testing.T, refused bool) (*db.DB, merchant.ID, gen.OpenrailsRailIntent, func() int64) {
+	return terminalRebillArchiveFixture(t, refused, true)
+}
+
+func terminalRebillArchiveFixture(t *testing.T, refused, customer bool) (*db.DB, merchant.ID, gen.OpenrailsRailIntent, func() int64) {
 	t.Helper()
 	fx := seedPastDueSubscriptionForMerchant(t, uuid.New())
 	gateway, client := newFakeNMIRebillGateway(t, fx)
@@ -22,7 +30,13 @@ func TerminalRebillArchiveFixture(t *testing.T, refused bool) (*db.DB, merchant.
 		gateway.saleBody.Store("response=2&response_code=202&responsetext=Insufficient+funds")
 	}
 	handler := NewManualRebillHandler(fx.db, fullModeConfig(), fakeNMIResolver{client: client}, nil)
-	accepted, err := handler.EnqueueScheduled(fx.handlerCtx(), fx.subID)
+	var accepted gen.OpenrailsRailIntent
+	var err error
+	if customer {
+		accepted, _, err = handler.EnqueueCustomer(fx.handlerCtx(), fx.subID, fx.payload.Renewal.CustomerID, uuid.NewString(), nil)
+	} else {
+		accepted, err = handler.EnqueueScheduled(fx.handlerCtx(), fx.subID)
+	}
 	require.NoError(t, err)
 	result, err := fx.rebillRunner(client, fullModeConfig()).ExecuteByID(fx.handlerCtx(), accepted.ID)
 	require.NoError(t, err)

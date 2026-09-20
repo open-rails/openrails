@@ -83,12 +83,16 @@ func (a *nmiAdapter) Attach(ctx context.Context, link map[string]string, in auto
 	// When no NMI rail is configured there is no API to verify/create
 	// against, so the link is stored as-is (operator-owned).
 	if ok && client != nil {
-		detail, err := client.GetRecurringPlanDetailByID(ctx, planID)
+		detail, err := client.GetRecurringPlanDetailByID(ctx, planID, in.Currency)
 		if err != nil {
 			return nil, fmt.Errorf("verify NMI recurring plan %q: %w", planID, err)
 		}
 		if detail.Found {
-			if in.UnitAmount > 0 && int64(moneyutil.CentsToMicros(moneyutil.Cents(detail.AmountCents))) != in.UnitAmount {
+			remoteAmount, err := moneyutil.RailMinorToNative(in.Currency, moneyutil.Cents(detail.AmountCents))
+			if err != nil {
+				return nil, err
+			}
+			if in.UnitAmount > 0 && remoteAmount != in.UnitAmount {
 				return nil, fmt.Errorf("NMI recurring plan %q amount (%d cents) does not match catalog price (%d micros)", planID, detail.AmountCents, in.UnitAmount)
 			}
 			// day_frequency is only reported for day-based plans; validate it only
@@ -136,7 +140,7 @@ func (a *nmiAdapter) createPlan(ctx context.Context, client *nmi.NMIClient, plan
 		planName = planID
 	}
 	// plan_payments=0 means bill forever; OpenRails models open-ended subscriptions.
-	return client.AddRecurringPlan(ctx, planID, planName, moneyutil.Cents(amountCents), *in.BillingCycleDays, 0)
+	return client.AddRecurringPlan(ctx, planID, planName, moneyutil.Cents(amountCents), in.Currency, *in.BillingCycleDays, 0)
 }
 
 // nmiDeterministicPlanID is the stable NMI plan_id OpenRails uses for a price.
@@ -205,7 +209,7 @@ func (a *nmiAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[
 	planID := nmiDeterministicPlanID(in.ProductKey, in.Currency, in.UnitAmount, in.BillingCycleDays)
 
 	// Find-or-create: prefer an existing plan with this deterministic id.
-	found, _, _, err := client.GetRecurringPlanByID(ctx, planID)
+	found, _, _, err := client.GetRecurringPlanByID(ctx, planID, in.Currency)
 	if err != nil {
 		return nil, fmt.Errorf("lookup recurring plan: %w", err)
 	}
@@ -233,7 +237,10 @@ func (a *nmiAdapter) Verify(ctx context.Context, ids map[string]string, local *p
 	if planID == "" {
 		return nil, false, fmt.Errorf("nmi plan_id missing on local rails map")
 	}
-	found, _, remoteAmountCents, err := client.GetRecurringPlanByID(ctx, planID)
+	if local == nil || strings.TrimSpace(local.Currency) == "" {
+		return nil, false, fmt.Errorf("NMI plan verification requires the established catalog currency")
+	}
+	found, _, remoteAmountCents, err := client.GetRecurringPlanByID(ctx, planID, local.Currency)
 	if err != nil {
 		return nil, false, err
 	}
@@ -242,7 +249,10 @@ func (a *nmiAdapter) Verify(ctx context.Context, ids map[string]string, local *p
 	}
 	drift := []DriftField{}
 	if local != nil {
-		remoteAmountMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(remoteAmountCents)))
+		remoteAmountMicros, err := moneyutil.RailMinorToNative(local.Currency, moneyutil.Cents(remoteAmountCents))
+		if err != nil {
+			return nil, false, err
+		}
 		if local.UnitAmount != remoteAmountMicros {
 			drift = append(drift, DriftField{
 				Field:          "unit_amount",

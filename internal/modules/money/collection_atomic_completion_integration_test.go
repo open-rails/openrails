@@ -17,12 +17,18 @@ import (
 )
 
 func TestCollectionSettlementAndTerminalCommitTogether(t *testing.T) {
-	e := nmiReceiptScenario(t)
+	e := newNMIReceiptEnv(t)
+	_, err := e.pool.Exec(e.ctx, `UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref='' WHERE id=$1`, e.method)
+	require.NoError(t, err)
+	accepted, err := e.svc.PayInvoiceNow(e.ctx, e.runner, e.payer, money.InvoiceCollectionRetryRequest{InvoiceID: e.invoice, PaymentMethodID: e.method, IdempotencyKey: uuid.NewString()})
+	require.NoError(t, err)
+	e.op = accepted.Operation.ID
+	require.Equal(t, intents.StatusUnknownNeedsVerify, accepted.Operation.Status)
 	e.gateway.orderSale(e.op.String(), "atomic-charge")
 	e.gateway.payment("atomic-charge", e.vault, "0.05", e.currency)
 	admin := dbtest.SharedSuperuserPGXPool(t)
 	trigger := "atomic_terminal_" + uuid.NewString()[:8]
-	_, err := admin.Exec(e.ctx, fmt.Sprintf(`CREATE FUNCTION openrails.%s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+	_, err = admin.Exec(e.ctx, fmt.Sprintf(`CREATE FUNCTION openrails.%s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
  IF NEW.id='%s'::uuid AND NEW.status='succeeded' THEN RAISE EXCEPTION 'injected terminal commit failure'; END IF;
  RETURN NEW; END $$; CREATE TRIGGER %s BEFORE UPDATE ON openrails.rail_intents FOR EACH ROW EXECUTE FUNCTION openrails.%s()`, trigger, e.op, trigger, trigger))
 	require.NoError(t, err)
@@ -36,6 +42,7 @@ func TestCollectionSettlementAndTerminalCommitTogether(t *testing.T) {
 	require.Equal(t, intents.StatusUnknownNeedsVerify, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status)
 	require.Equal(t, []string{"attempted"}, e.attemptStatuses(t))
 	require.Zero(t, e.owedPaymentTransfers(t))
+	require.Empty(t, e.methodRow(t).StoredCredentialUnscheduledRef, "the customer agreement rolls back with settlement")
 	invoice := e.invoiceRow(t)
 	require.EqualValues(t, 50000, invoice.AmountDue)
 	require.NotNil(t, invoice.CollectionIntentID)
@@ -55,6 +62,7 @@ func TestCollectionSettlementAndTerminalCommitTogether(t *testing.T) {
 	require.Equal(t, 1, stats.Succeeded)
 	require.Equal(t, intents.StatusSucceeded, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status)
 	e.requireSettledOnce(t)
+	require.Equal(t, "atomic-charge", e.methodRow(t).StoredCredentialUnscheduledRef, "qualified offline recovery establishes the agreement atomically")
 	require.Len(t, e.gateway.sentOrderIDs(), 1)
 	// Generic terminal mutation is not an alternate completion door.
 	require.Error(t, intents.NewStore(e.db).MarkFailedTerminal(e.ctx, e.op, "late refusal", nil))

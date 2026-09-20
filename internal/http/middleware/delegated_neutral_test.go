@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -188,4 +189,30 @@ func TestDelegatedSelfRequired_NilResolverFailsClosed(t *testing.T) {
 	r := newDelegatedTestRouter(nil, "")
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestDelegatedSelfHonoursClientAndConfiguredMerchantBindings(t *testing.T) {
+	actual := dbtest.TestMerchantID
+	resolver := fakeDelegatedResolver{resolved: &controlplane.ResolvedDelegated{MerchantID: actual, DelegatedSubject: "payer"}}
+	handler := newDelegatedTestRouter(resolver, "")
+	for _, tc := range []struct {
+		name, header    string
+		contextMerchant merchant.ID
+		want            int
+	}{
+		{"matching", actual.String(), actual, 200},
+		{"wrong client", uuid.NewString(), actual, 409},
+		{"wrong runtime", actual.String(), merchant.ID(uuid.New()), 409},
+		{"invalid header", "invalid", actual, 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/self", nil)
+			r.Header.Set("Authorization", "Bearer delegated")
+			r.Header.Set(merchant.BindingHeader, tc.header)
+			r = r.WithContext(merchant.WithID(r.Context(), tc.contextMerchant))
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			require.Equal(t, tc.want, w.Code, w.Body.String())
+		})
+	}
 }
