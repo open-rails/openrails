@@ -80,7 +80,8 @@ func (r refundReservations) payments() *payments.PaymentService {
 	return payments.NewPaymentService(r.DB, r.Clock)
 }
 
-func decodeRefundPayload(intent gen.OpenrailsRailIntent) (RefundPayload, error) {
+// DecodeRefundPayload validates the accepted amount/currency and target for execution and portable replay.
+func DecodeRefundPayload(intent gen.OpenrailsRailIntent) (RefundPayload, error) {
 	var p RefundPayload
 	if len(intent.Payload) == 0 {
 		return p, errors.New("refund intent has no payload")
@@ -101,7 +102,7 @@ func decodeRefundPayload(intent gen.OpenrailsRailIntent) (RefundPayload, error) 
 // still open (pending). A completed reservation means the refund already
 // finalized; a released/failed or deleted one means it was abandoned.
 func (r refundReservations) checkRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
-	p, err := decodeRefundPayload(intent)
+	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		// Malformed payloads can never become executable; superseding surfaces
 		// them in reconcile instead of re-parking forever.
@@ -194,7 +195,7 @@ func (r refundReservations) recoverReceipt(ctx context.Context, intent gen.Openr
 		return Ambiguous("load refund receipt: " + err.Error())
 	}
 	if ref == "" {
-		return Ambiguous("refund response has no exact operation receipt; operator must resolve it with the exact provider refund or provider-confirmed non-execution")
+		return Ambiguous("refund response has no exact operation receipt; operator must review provider records, and unavailable evidence keeps the refund unresolved")
 	}
 	return r.settle(ctx, p, ref, map[string]any{"recovered_receipt": true})
 }
@@ -286,7 +287,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 	if client.ReadOnly {
 		return Parked("nmi client is read-only (mode=readonly)")
 	}
-	p, err := decodeRefundPayload(intent)
+	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
 	}
@@ -324,7 +325,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 // operation key on refund actions: matching an amount can select an earlier
 // partial refund, and absence in a read cannot prove a lost request never landed.
 func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	p, err := decodeRefundPayload(intent)
+	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
 	}
@@ -336,7 +337,7 @@ func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailI
 // vault. NMI read absence cannot establish nonexecution of a submitted refund,
 // so that resolution is refused. It never re-sends the refund.
 func (h *NMIRefundHandler) Resolve(ctx context.Context, intent gen.OpenrailsRailIntent, resolution Resolution) (Outcome, error) {
-	p, err := decodeRefundPayload(intent)
+	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -412,7 +413,7 @@ func (h *StripeRefundHandler) CheckRelevance(ctx context.Context, intent gen.Ope
 }
 
 func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	p, err := decodeRefundPayload(intent)
+	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
 	}
@@ -464,7 +465,7 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 }
 
 func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	p, err := decodeRefundPayload(intent)
+	p, err := DecodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
 	}

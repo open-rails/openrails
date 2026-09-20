@@ -19,16 +19,6 @@ func receiptMismatch(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrReceiptMismatch, fmt.Sprintf(format, args...))
 }
 
-// exactCents parses a v5 decimal amount, refusing sub-cent precision.
-func exactCents(amount string) (int64, bool) {
-	trimmed := strings.TrimSpace(amount)
-	if _, frac, ok := strings.Cut(trimmed, "."); ok && len(frac) > 2 {
-		return 0, false
-	}
-	cents, err := v5AmountToCents(trimmed)
-	return cents, err == nil
-}
-
 // exactMinorAmount parses a provider major-unit decimal at its declared
 // currency scale, without rounding or float conversion (JPY has no decimals).
 func exactMinorAmount(amount, currency string) (int64, bool) {
@@ -59,7 +49,7 @@ func exactMinorAmount(amount, currency string) (int64, bool) {
 
 func successfulAction(txn v5Transaction, actionType string, amount moneyutil.Cents) bool {
 	for _, action := range txn.Actions {
-		cents, ok := exactCents(action.Amount)
+		cents, ok := exactMinorAmount(action.Amount, txn.Currency)
 		if cents < 0 {
 			cents = -cents
 		}
