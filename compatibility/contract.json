@@ -5288,7 +5288,7 @@
     "internal/http/routes_public.go": "ed42f6005a68866be2a4a68214287c308388bb618918430319d76496d69d3013",
     "internal/http/routes_self.go": "f87be5d91c28b31e405b2244f20cf14b03866f2834de36b35b0f519e6ea6b73a",
     "internal/http/routesurface/provider_routes.go": "6a49245b179c577ea3d0d997234eb7314c19827b152931efd581625d54aab909",
-    "internal/http/server.go": "bd486c02567fa35590ee4b117b8d12c1674e4930edc30f1c822c3589a90aa2bd",
+    "internal/http/server.go": "8c37de35c4cf2d8091ff0d7eb7b8eab18ebf4688ec9c48e795bac783e3cdaef7",
     "internal/intents/rate_ceiling.go": "2f14ccb694839b19af499b5346cb052d3296a9346590d15f7f1ed5e4271da962",
     "internal/operator/profile.go": "084d6f735001ff56c70898a2abc5d967b438b24b99c7e5afe8a7d7fef70ea369",
     "internal/requestauth/cache.go": "275b8a83d62c567041a6a3ed307dc4fce74c54f5c061b0cd96a91d08e401bd83",
