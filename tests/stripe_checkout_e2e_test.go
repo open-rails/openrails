@@ -33,7 +33,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 )
 
@@ -196,6 +198,18 @@ func seedStripeSubscriptionPrice(t *testing.T, suite *TestContainerSuite, stripe
 func TestCheckoutSessionStripeRedirect(t *testing.T) {
 	fake := newFakeStripeAPI(t)
 	suite := setupTestSuite(t, WithSuiteStripeRail("sk_test_e2e"))
+	// The fresh runtime shares the package merchant database. Retire only the
+	// Stripe account this checkout fixture armed; linked rows retain their PSP.
+	env := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
+	fixturePool := suite.MerchantPool()
+	t.Cleanup(func() {
+		archived, err := fixturePool.Exec(context.Background(),
+			`UPDATE openrails.psps SET archived = true
+			 WHERE merchant_id = $1 AND rail = 'stripe' AND environment = $2 AND account_id = $3 AND archived = false`,
+			dbtest.TestMerchantID.UUID(), env, "acct_openrails_test")
+		require.NoError(t, err)
+		require.EqualValues(t, 1, archived.RowsAffected(), "archive exactly the account this fixture armed")
+	})
 	priceID := seedStripeSubscriptionPrice(t, suite, "price_e2e_stripe")
 
 	userID := uuid.New().String()
