@@ -417,6 +417,10 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		if err != nil {
 			return fmt.Errorf("invoice %s amount is not representable on rail %s: %w", invoice.ID, method.Rail, err)
 		}
+		chargedAmount, err := moneyutil.RailMinorToNative(invoice.Currency, amountMinor)
+		if err != nil {
+			return fmt.Errorf("invoice %s rounded charge is not representable: %w", invoice.ID, err)
+		}
 		attempts, err := q.CountInvoicePaymentAttemptsByPayer(ctx, gen.CountInvoicePaymentAttemptsByPayerParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID})
 		if err != nil {
 			return fmt.Errorf("count invoice collection attempts: %w", err)
@@ -441,7 +445,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		}
 		if err := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
 			ID: attemptID, MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID,
-			Currency: invoice.Currency, Amount: invoice.AmountDue, Status: "attempted",
+			Currency: invoice.Currency, Amount: chargedAmount, Status: "attempted",
 			AttemptedAt: now, CreatedAt: now, UpdatedAt: now,
 			PaymentMethodID: &method.ID, IdempotencyKey: &key, PspID: &method.PspID,
 		}); err != nil {

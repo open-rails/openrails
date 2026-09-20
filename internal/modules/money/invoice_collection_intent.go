@@ -392,6 +392,15 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 	now := h.now()
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		chargedAmount, err := moneyutil.RailMinorToNative(p.Currency, p.AmountMinor)
+		if err != nil || chargedAmount < p.Amount {
+			return fmt.Errorf("collection charge does not cover the frozen invoice amount")
+		}
+		// Take the payer's money lock before invoice/ledger writes. Rounding
+		// credits use the same spendable-lot path and lock order as deposits.
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: intent.MerchantID, ID: p.CustomerID}); err != nil {
+			return err
+		}
 		attempt, err := q.GetInvoicePaymentAttempt(ctx, gen.GetInvoicePaymentAttemptParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID})
 		if err != nil {
 			return fmt.Errorf("load attempt: %w", err)
@@ -431,6 +440,18 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 		}
 		if err != nil {
 			return err
+		}
+		if excess := chargedAmount - p.Amount; excess > 0 {
+			payer := identity.CustomerIDFromString(p.CustomerID.String())
+			key := "invoice-rounding:" + intent.ID.String()
+			reason := "Rounding credit from invoice " + p.InvoiceID.String()
+			_, err = NewMoneyService(h.DB, h.Clock).depositTx(ctx, q, DepositParams{
+				CustomerID: &payer, Currency: currency, Amount: excess,
+				Source: "invoice_rounding_purchase", SourceID: &key, Description: &reason,
+			})
+			if err != nil {
+				return fmt.Errorf("credit invoice rounding surplus: %w", err)
+			}
 		}
 		settled, err := q.SettleClaimedInvoicePaymentAttempt(ctx, gen.SettleClaimedInvoicePaymentAttemptParams{
 			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID,
