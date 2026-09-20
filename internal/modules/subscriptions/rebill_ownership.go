@@ -25,8 +25,20 @@ func RefuseOwnedRebillTerms(ctx context.Context, d *db.DB, sub *models.Subscript
 		return err
 	}
 	for _, row := range rows {
-		if _, err := DecodeManualRebillPayload(row); err != nil {
+		accepted, err := DecodeManualRebillPayload(row)
+		if err != nil {
 			return fmt.Errorf("%w: accepted rebill terms are invalid: %v", ErrRebillTermsCommitted, err)
+		}
+		switch row.Status {
+		case "pending", "in_flight", "unknown_needs_verify", "failed_retryable":
+			return ErrRebillTermsCommitted
+		}
+		// scheduled_price_id is a reusable target, not a quote identity. A terminal
+		// historical A->B operation does not own another A->B in a later period.
+		// Unique reprice rows instead remain owned while that exact row is pending.
+		if accepted.Renewal.ScheduledPriceID != nil && (sub.CurrentPeriodEndsAt == nil ||
+			!sub.CurrentPeriodEndsAt.Equal(accepted.Renewal.PeriodStart) || sub.PriceID != accepted.Renewal.FromPriceID || sub.ProductID != accepted.Renewal.FromProductID) {
+			continue
 		}
 		// Only the canonical handler's terminal pre-preparation release proves that
 		// no provider terms changed. A decline, lease expiry or absent progress on

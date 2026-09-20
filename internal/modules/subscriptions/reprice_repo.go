@@ -347,6 +347,9 @@ func (r *RepriceRepo) Cancel(ctx context.Context, id uuid.UUID) error {
 // The reprice is reloaded after locking; its pre-lock status grants no authority.
 func (r *RepriceRepo) mutatePending(ctx context.Context, id uuid.UUID, mutate func(context.Context, *db.DB) error) error {
 	change, err := r.GetByID(ctx, id)
+	if db.IsNotFound(err) {
+		return ErrRepriceNotScheduled
+	}
 	if err != nil {
 		return err
 	}
@@ -374,6 +377,9 @@ func (r *RepriceRepo) mutatePending(ctx context.Context, id uuid.UUID, mutate fu
 // boundary pickup is safe to retry.
 func (r *RepriceRepo) Apply(ctx context.Context, id uuid.UUID) error {
 	change, err := r.GetByID(ctx, id)
+	if db.IsNotFound(err) {
+		return ErrRepriceNotScheduled
+	}
 	if err != nil {
 		return err
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/assert"
@@ -165,4 +166,55 @@ func TestRepriceCancelAndRebillAdmissionSerializeBothOrders(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHistoricalScheduledTargetDoesNotOwnANewerQuote(t *testing.T) {
+	clock := clockwork.NewFakeClockAt(time.Now().Add(-90 * 24 * time.Hour).UTC().Truncate(time.Second))
+	fx := seedPastDueSubscriptionAt(t, uuid.New(), clock.Now())
+	ctx := fx.handlerCtx()
+	target := uuid.New()
+	_, err := fx.db.Pool().Exec(ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew,key) VALUES($1,$2,$3,8000000,'USD',720,true,$4)`, target, fx.merchantID, fx.payload.Renewal.ProductID, "reused-"+target.String())
+	require.NoError(t, err)
+	repo := subscriptions.NewSubscriptionRepo(fx.db)
+	_, err = repo.SchedulePriceChange(ctx, fx.subID, fx.payload.Renewal.PriceID, target)
+	require.NoError(t, err)
+	gateway, client := newFakeNMIRebillGateway(t, fx)
+	h := NewManualRebillHandler(fx.db, fullModeConfig(), fakeNMIResolver{client: client}, clock)
+	accepted, err := h.EnqueueScheduled(ctx, fx.subID)
+	require.NoError(t, err)
+	runner := &Runner{Store: fx.store, Config: fullModeConfig(), Registry: NewRegistry(h), Clock: clock}
+	done, err := runner.ExecuteByID(ctx, accepted.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusSucceeded, done.Status)
+	current, err := repo.GetByID(ctx, fx.subID)
+	require.NoError(t, err)
+	require.Nil(t, current.ScheduledPriceID)
+	// A later observed renewal applies an explicit reprice back to A. The old
+	// A->B receipt remains valid history, but its accepted period has ended.
+	clock.Advance(current.CurrentPeriodEndsAt.Add(time.Minute).Sub(clock.Now()))
+	_, err = subscriptions.NewRepriceRepo(fx.db).CreateSubscriptionReprice(ctx, fx.subID, target, fx.payload.Renewal.PriceID, clock.Now().Add(-time.Minute), nil, false)
+	require.NoError(t, err)
+	start, end := *current.CurrentPeriodEndsAt, current.CurrentPeriodEndsAt.Add(30*24*time.Hour)
+	require.NoError(t, h.lifecycle(fx.db).RenewMembership(ctx, &subscriptions.RenewMembershipParams{Rail: "nmi", RailSubscriptionID: fx.payload.RailSubscriptionID, TransactionID: "return-to-A-" + uuid.NewString(), Amount: fx.payload.Renewal.Amount, AmountProvided: true, Currency: "USD", CurrentPeriodStartsAt: &start, CurrentPeriodEndsAt: &end}))
+	_, err = repo.SchedulePriceChange(ctx, fx.subID, fx.payload.Renewal.PriceID, target)
+	require.NoError(t, err)
+
+	// The actual tier-change admission path must likewise ignore the old
+	// completed quote. This tests admission only; it sends no second upgrade.
+	_, err = fx.store.Enqueue(ctx, EnqueueParams{MerchantID: fx.merchantID, Provider: "nmi", PspID: fx.pspID, IntentType: "nmi_upgrade", SubscriptionID: &fx.subID, PriceID: &target, IdempotencyKey: "later-upgrade-" + uuid.NewString(), NextAttemptAt: clock.Now(), Origin: OriginUser})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, gateway.saleCalls.Load())
+}
+
+func TestRebillAdmissionRefusesAnAcceptedNMIUpgrade(t *testing.T) {
+	fx := seedPastDueSubscription(t)
+	ctx := fx.handlerCtx()
+	_, client := newFakeNMIRebillGateway(t, fx)
+	_, err := fx.store.Enqueue(ctx, EnqueueParams{MerchantID: fx.merchantID, Provider: "nmi", PspID: fx.pspID, IntentType: "nmi_upgrade", SubscriptionID: &fx.subID, PriceID: &fx.payload.Renewal.PriceID, IdempotencyKey: "first-upgrade-" + uuid.NewString(), NextAttemptAt: time.Now(), Origin: OriginUser})
+	require.NoError(t, err)
+	_, err = NewManualRebillHandler(fx.db, fullModeConfig(), fakeNMIResolver{client: client}, nil).EnqueueScheduled(ctx, fx.subID)
+	require.ErrorIs(t, err, subscriptions.ErrRebillTermsCommitted)
+	var count int
+	require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1 AND intent_type='manual_rebill'`, fx.subID).Scan(&count))
+	require.Zero(t, count)
 }
