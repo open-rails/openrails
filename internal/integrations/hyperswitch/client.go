@@ -238,3 +238,35 @@ func (c *Client) GetMethod(ctx context.Context, token, customer string) (Method,
 	}
 	return out, err
 }
+
+// CheckProxyContract refuses stock/missing/disabled proxy deployments before
+// any charge dispatch. The operator-controlled HTTPS origin is the trust root;
+// a generic health response is not a proxy qualification.
+func (c *Client) CheckProxyContract(ctx context.Context, destination string) error {
+	var contract struct {
+		Contract         string `json:"contract"`
+		Strict           bool   `json:"strict"`
+		MaxResponseBytes int    `json:"max_response_bytes"`
+		Routes           []struct {
+			Destination string `json:"destination_url"`
+			Method      string `json:"method"`
+			Profile     string `json:"response_profile"`
+		} `json:"routes"`
+	}
+	if err := c.call(ctx, http.MethodGet, "/v2/proxy", nil, &contract); err != nil {
+		return ErrUnavailable
+	}
+	if contract.Contract != "openrails-nmi-form-v1" || !contract.Strict || contract.MaxResponseBytes != 65536 {
+		return ErrUnavailable
+	}
+	target, err := url.Parse(destination)
+	if err != nil || target.Host == "" || target.User != nil || target.RawQuery != "" || target.Fragment != "" {
+		return ErrBinding
+	}
+	for _, route := range contract.Routes {
+		if route.Destination == target.String() && route.Method == http.MethodPost && route.Profile == "nmi_classic" {
+			return nil
+		}
+	}
+	return ErrUnavailable
+}

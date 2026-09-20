@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -95,4 +96,46 @@ func TestCaptureClientBindsTokenOnlyWorkflow(t *testing.T) {
 	_, err = client.GetMethod(t.Context(), "session-token-A", customer.ID)
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "must-not-consume")
+}
+
+func TestProxyPreflightRefusesUnsupportedDeploymentWithoutDispatch(t *testing.T) {
+	const destination = "https://secure.nmi.com/api/transact.php"
+	good := `{"contract":"openrails-nmi-form-v1","strict":true,"max_response_bytes":65536,"routes":[{"destination_url":"https://secure.nmi.com/api/transact.php","method":"POST","response_profile":"nmi_classic"}]}`
+	cases := []struct {
+		name, body string
+		status     int
+		ok         bool
+	}{
+		{"qualified", good, 200, true},
+		{"stock health", "health is good", 200, false},
+		{"missing endpoint", "", 404, false},
+		{"wrong contract", strings.Replace(good, "openrails-nmi-form-v1", "unqualified", 1), 200, false},
+		{"disabled policy", strings.Replace(good, `"strict":true`, `"strict":false`, 1), 200, false},
+		{"unbounded", strings.Replace(good, "65536", "0", 1), 200, false},
+		{"different destination", strings.Replace(good, "secure.nmi.com", "other.example", 1), 200, false},
+		{"wrong profile", strings.Replace(good, "nmi_classic", "arbitrary_json", 1), 200, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var writes atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					writes.Add(1)
+				}
+				require.Equal(t, "/v2/proxy", r.URL.Path)
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			client, err := New(Config{BaseURL: server.URL, MerchantID: "merchant-A", ProfileID: "profile-A", APIKey: "fixture-key"})
+			require.NoError(t, err)
+			err = client.CheckProxyContract(t.Context(), destination)
+			if tc.ok {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			require.Zero(t, writes.Load())
+		})
+	}
 }
