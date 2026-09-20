@@ -1723,6 +1723,31 @@ func (q *Queries) RetainRailIntentRebillPreparation(ctx context.Context, arg Ret
 	return result.RowsAffected(), nil
 }
 
+const supersedePendingNMIDelete = `-- name: SupersedePendingNMIDelete :execrows
+UPDATE openrails.rail_intents
+SET status='superseded', last_failure_reason=$1, updated_at=now()
+WHERE merchant_id=$2::uuid
+  AND idempotency_key=$3::text
+  AND intent_type='nmi_delete_subscription'
+  AND (status='failed_retryable' OR (status='pending' AND attempts=0))
+`
+
+type SupersedePendingNMIDeleteParams struct {
+	Reason         *string
+	MerchantID     uuid.UUID
+	IdempotencyKey string
+}
+
+// Resume undoes only the current provider target's unsent cancellation. A
+// previous binding may retain an independent historical deletion obligation.
+func (q *Queries) SupersedePendingNMIDelete(ctx context.Context, arg SupersedePendingNMIDeleteParams) (int64, error) {
+	result, err := q.db.Exec(ctx, supersedePendingNMIDelete, arg.Reason, arg.MerchantID, arg.IdempotencyKey)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const supersedeRailIntentsBySubject = `-- name: SupersedeRailIntentsBySubject :execrows
 
 UPDATE openrails.rail_intents

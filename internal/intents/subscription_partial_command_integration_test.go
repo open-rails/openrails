@@ -11,9 +11,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -46,6 +48,8 @@ func TestPartialSubscriptionCommandsPreserveNewlyAcceptedBillingTerms(t *testing
 			require.NoError(t, err)
 			var pid int
 			require.NoError(t, tx.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid))
+			deletePayload, err := json.Marshal(NMIDeletePayload{UserID: fx.payload.Renewal.CustomerID.String(), RailSubscriptionID: fx.payload.RailSubscriptionID})
+			require.NoError(t, err)
 			result := make(chan error, 1)
 			go func() {
 				switch command {
@@ -58,7 +62,7 @@ func TestPartialSubscriptionCommandsPreserveNewlyAcceptedBillingTerms(t *testing
 				case "cancel":
 					result <- admin.CancelSubscription(ctx, fx.subID, "requested", false)
 				case "delete_completed":
-					result <- NewNMIDeleteHandler(fx.db, fullModeConfig(), nil, nil).finalize(ctx, gen.OpenrailsRailIntent{MerchantID: fx.merchantID, SubscriptionID: &fx.subID})
+					result <- NewNMIDeleteHandler(fx.db, fullModeConfig(), nil, nil).finalize(ctx, gen.OpenrailsRailIntent{MerchantID: fx.merchantID, SubscriptionID: &fx.subID, PspID: &fx.pspID, Payload: deletePayload})
 				}
 			}()
 			require.Eventually(t, func() bool {
@@ -151,4 +155,110 @@ func TestAdminExtensionAndCancellationKeepFreshBillingFields(t *testing.T) {
 	var deletes int
 	require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1 AND intent_type='nmi_delete_subscription' AND origin='admin'`, fx.subID).Scan(&deletes))
 	require.Equal(t, 1, deletes)
+}
+
+func TestDeleteCompletionOnlyClearsItsAcceptedProviderTarget(t *testing.T) {
+	fx := seedPastDueSubscriptionForMerchant(t, uuid.New())
+	ctx := fx.handlerCtx()
+	payload, err := json.Marshal(NMIDeletePayload{UserID: fx.payload.Renewal.CustomerID.String(), RailSubscriptionID: fx.payload.RailSubscriptionID})
+	require.NoError(t, err)
+	completed := gen.OpenrailsRailIntent{MerchantID: fx.merchantID, SubscriptionID: &fx.subID, PspID: &fx.pspID, Payload: payload}
+	other := dbtest.EnsureTestPSP(ctx, t, fx.db.Pool(), fx.merchantID, "other-nmi-"+uuid.NewString())
+	h := NewNMIDeleteHandler(fx.db, fullModeConfig(), nil, nil)
+	for _, target := range []struct {
+		name      string
+		psp       uuid.UUID
+		reference string
+		clear     bool
+	}{
+		{"different account same reference", other, fx.payload.RailSubscriptionID, false},
+		{"same account different reference", fx.pspID, "replacement-reference", false},
+		{"same accepted target", fx.pspID, fx.payload.RailSubscriptionID, true},
+	} {
+		t.Run(target.name, func(t *testing.T) {
+			_, err := fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET psp_id=$2,rail_subscription_id=$3,deletion_scheduled_at=now() WHERE id=$1`, fx.subID, target.psp, target.reference)
+			require.NoError(t, err)
+			for range 2 {
+				require.NoError(t, h.finalize(ctx, completed))
+			}
+			current, err := subscriptions.NewSubscriptionRepo(fx.db).GetByID(ctx, fx.subID)
+			require.NoError(t, err)
+			if target.clear {
+				require.Nil(t, current.DeletionScheduledAt)
+			} else {
+				require.NotNil(t, current.DeletionScheduledAt)
+			}
+		})
+	}
+	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET deletion_scheduled_at=now() WHERE id=$1`, fx.subID)
+	require.NoError(t, err)
+	completed.Payload = []byte(`{}`)
+	require.Error(t, h.finalize(ctx, completed))
+	current, err := subscriptions.NewSubscriptionRepo(fx.db).GetByID(ctx, fx.subID)
+	require.NoError(t, err)
+	require.NotNil(t, current.DeletionScheduledAt)
+}
+
+func TestDeleteProducerSeparatesCompletedProviderTargets(t *testing.T) {
+	fx := seedCancelledNMISubscription(t, time.Now().Add(-time.Minute))
+	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	scheduler := NewNMIDeleteScheduler(fx.db, nil, OriginAdmin, "cancel exact target")
+	require.NoError(t, scheduler.ScheduleNMIDelete(ctx, fx.userID.String(), fx.subID, time.Now()))
+	first, err := fx.store.GetByIdempotencyKey(ctx, NMIDeleteIdempotencyKey(fx.subID, fx.pspID, fx.psid))
+	require.NoError(t, err)
+	a, clientA := newFakeNMI(t, fx.psid, true)
+	done, err := fx.runner(clientA, fullModeConfig()).ExecuteByID(ctx, first.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusSucceeded, done.Status)
+	require.EqualValues(t, 1, a.deleteCalls.Load())
+	other := dbtest.EnsureTestPSP(ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "replacement-mobius-"+uuid.NewString())
+	reference := "replacement-" + uuid.NewString()
+	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET psp_id=$2,rail_subscription_id=$3,deletion_scheduled_at=now() WHERE id=$1`, fx.subID, other, reference)
+	require.NoError(t, err)
+	require.NoError(t, scheduler.ScheduleNMIDelete(ctx, fx.userID.String(), fx.subID, time.Now()))
+	second, err := fx.store.GetByIdempotencyKey(ctx, NMIDeleteIdempotencyKey(fx.subID, other, reference))
+	require.NoError(t, err)
+	require.NotEqual(t, first.ID, second.ID)
+	b, clientB := newFakeNMI(t, reference, true)
+	done, err = fx.runner(clientB, fullModeConfig()).ExecuteByID(ctx, second.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusSucceeded, done.Status)
+	require.NoError(t, scheduler.ScheduleNMIDelete(ctx, fx.userID.String(), fx.subID, time.Now()))
+	replay, err := fx.store.GetByIdempotencyKey(ctx, NMIDeleteIdempotencyKey(fx.subID, other, reference))
+	require.NoError(t, err)
+	require.Equal(t, second.ID, replay.ID)
+	require.Equal(t, StatusSucceeded, replay.Status)
+	_, err = fx.runner(clientB, fullModeConfig()).ExecuteByID(ctx, replay.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, a.deleteCalls.Load())
+	require.EqualValues(t, 1, b.deleteCalls.Load())
+}
+
+func TestOldDeleteCannotTargetOrUndoAReplacementBinding(t *testing.T) {
+	fx := seedCancelledNMISubscription(t, time.Now().Add(-time.Minute))
+	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	scheduler := NewNMIDeleteScheduler(fx.db, nil, OriginAdmin, "cancel exact target")
+	require.NoError(t, scheduler.ScheduleNMIDelete(ctx, fx.userID.String(), fx.subID, time.Now()))
+	first, err := fx.store.GetByIdempotencyKey(ctx, NMIDeleteIdempotencyKey(fx.subID, fx.pspID, fx.psid))
+	require.NoError(t, err)
+	reference := "replacement-" + uuid.NewString()
+	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET rail_subscription_id=$2 WHERE id=$1`, fx.subID, reference)
+	require.NoError(t, err)
+	gateway, client := newFakeNMI(t, reference, true)
+	h := NewNMIDeleteHandler(fx.db, fullModeConfig(), fakeNMIResolver{client: client}, nil)
+	executed, verified := h.Execute(ctx, first), h.Verify(ctx, first)
+	require.Zero(t, gateway.deleteCalls.Load(), "old A must never delete current B")
+	require.Zero(t, gateway.queryCalls.Load())
+	require.Equal(t, OutcomeParked, executed.Class)
+	require.Equal(t, OutcomeAmbiguous, verified.Class)
+	require.NoError(t, scheduler.ScheduleNMIDelete(ctx, fx.userID.String(), fx.subID, time.Now()))
+	second, err := fx.store.GetByIdempotencyKey(ctx, NMIDeleteIdempotencyKey(fx.subID, fx.pspID, reference))
+	require.NoError(t, err)
+	require.NoError(t, scheduler.CancelNMIDelete(ctx, fx.userID.String(), fx.subID))
+	current, err := fx.store.Get(ctx, second.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusSuperseded, current.Status)
+	historical, err := fx.store.Get(ctx, first.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusPending, historical.Status, "undo of B must preserve unresolved historical A")
 }

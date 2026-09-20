@@ -77,7 +77,7 @@ func seedBreakerMerchant(t *testing.T, n int) breakerMerchant {
 			IntentType:     TypeNMIDeleteSubscription,
 			SubscriptionID: &subID,
 			Payload:        NMIDeletePayload{UserID: custID.String(), RailSubscriptionID: psid},
-			IdempotencyKey: NMIDeleteIdempotencyKey(subID),
+			IdempotencyKey: NMIDeleteIdempotencyKey(subID, pspID, psid),
 			NextAttemptAt:  now.Add(-time.Minute),
 			Origin:         OriginSystem,
 			OriginReason:   "breaker integration test",

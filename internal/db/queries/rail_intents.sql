@@ -589,3 +589,13 @@ SELECT EXISTS (
             OR i.result_evidence->'qualified_receipt'->'nmi'->>'transaction_id'=p.transaction_id)
    )
 )::bool;
+
+-- Resume undoes only the current provider target's unsent cancellation. A
+-- previous binding may retain an independent historical deletion obligation.
+-- name: SupersedePendingNMIDelete :execrows
+UPDATE openrails.rail_intents
+SET status='superseded', last_failure_reason=sqlc.arg(reason), updated_at=now()
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid
+  AND idempotency_key=sqlc.arg(idempotency_key)::text
+  AND intent_type='nmi_delete_subscription'
+  AND (status='failed_retryable' OR (status='pending' AND attempts=0));

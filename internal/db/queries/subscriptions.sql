@@ -345,4 +345,6 @@ ORDER BY sub.created_at;
 UPDATE openrails.subscriptions
 SET deletion_scheduled_at=NULL, updated_at=sqlc.arg(now)::timestamptz
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
+  AND psp_id=sqlc.arg(psp_id)::uuid
+  AND rail_subscription_id=sqlc.arg(rail_subscription_id)::text
   AND deletion_scheduled_at IS NOT NULL;
