@@ -22,14 +22,14 @@ import (
 // payment method?" assertion below is answered by the production mechanism (the
 // payment_methods table and the nmi_vault_delete intent ledger), never a mock.
 //
-// The standing rule these tests exist to defend: OpenRails NEVER deletes a
-// stored payment method. Not on expiry, not on a stolen card, not on
-// cancellation, not ever.
+// Automated decline and dunning paths never delete a stored payment method.
+// Expiry, a stolen card, and cancellation do not authorize that destruction;
+// explicit authenticated customer deletion remains valid.
 
 // storedPaymentMethodDestruction counts everything that could have destroyed a
 // customer's saved instrument: the local row disappearing, and any
-// nmi_vault_delete intent on the ledger (the ONLY durable path that deletes a
-// vault at the rail).
+// nmi_vault_delete intent for that instrument (the ONLY durable path that
+// deletes its vault at the rail).
 func storedPaymentMethodDestruction(t *testing.T, suite *TestContainerSuite, pmID uuid.UUID) (rowPresent bool, vaultDeleteIntents int) {
 	t.Helper()
 	ctx := suite.MerchantCtx()
@@ -37,8 +37,8 @@ func storedPaymentMethodDestruction(t *testing.T, suite *TestContainerSuite, pmI
 		SELECT EXISTS (SELECT 1 FROM openrails.payment_methods WHERE id = $1)`,
 		pmID).Scan(&rowPresent))
 	require.NoError(t, suite.Pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM openrails.rail_intents WHERE intent_type = $1`,
-		intents.TypeNMIPaymentMethodDelete).Scan(&vaultDeleteIntents))
+		SELECT COUNT(*) FROM openrails.rail_intents WHERE intent_type = $1 AND idempotency_key = $2`,
+		intents.TypeNMIPaymentMethodDelete, intents.NMIPaymentMethodDeleteIdempotencyKey(pmID)).Scan(&vaultDeleteIntents))
 	return rowPresent, vaultDeleteIntents
 }
 
@@ -294,6 +294,10 @@ func TestOr870UnknownCodeIsBucket1(t *testing.T) {
 // producer of TypeNMIPaymentMethodDelete is the authenticated user route.
 func TestOr870NoAutomatedPathEverDeletesAStoredPaymentMethod(t *testing.T) {
 	suite := getSharedTestSuite(t)
+	var beforeDeletes int
+	require.NoError(t, suite.Pool.QueryRow(suite.MerchantCtx(), `
+		SELECT COUNT(*) FROM openrails.rail_intents WHERE intent_type = $1`,
+		intents.TypeNMIPaymentMethodDelete).Scan(&beforeDeletes))
 
 	for _, code := range []string{"202", "223", "252", "261", "999"} {
 		_, sub, _ := declineFixture(t, suite, 0)
@@ -307,6 +311,6 @@ func TestOr870NoAutomatedPathEverDeletesAStoredPaymentMethod(t *testing.T) {
 	require.NoError(t, suite.Pool.QueryRow(suite.MerchantCtx(), `
 		SELECT COUNT(*) FROM openrails.rail_intents WHERE intent_type = $1`,
 		intents.TypeNMIPaymentMethodDelete).Scan(&vaultDeletes))
-	assert.Zero(t, vaultDeletes,
+	assert.Equal(t, beforeDeletes, vaultDeletes,
 		"no decline outcome, and no dunning exhaustion, may ever queue a stored-payment-method delete")
 }
