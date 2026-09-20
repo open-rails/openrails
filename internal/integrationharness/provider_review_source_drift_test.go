@@ -41,9 +41,14 @@ func TestProviderCutoverRefusesSourceDriftAfterPausedTarget(t *testing.T) {
 	h := New(t, ctx)
 	g := newCutoverGateway(t)
 	s := h.StartStandalone("USD", WithConfig(func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeFull }))
+	var previousEnabled bool
+	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT enabled FROM openrails.destructive_action_switch`).Scan(&previousEnabled))
+	t.Cleanup(func() {
+		_, err := h.Pool().Exec(context.WithoutCancel(ctx), `UPDATE openrails.destructive_action_switch SET enabled=$1`, previousEnabled)
+		require.NoError(t, err)
+	})
 	_, err := h.Pool().Exec(ctx, `UPDATE openrails.destructive_action_switch SET enabled=true`)
 	require.NoError(t, err)
-	t.Cleanup(func() { _, _ = h.Pool().Exec(ctx, `UPDATE openrails.destructive_action_switch SET enabled=false`) })
 	s.App().Runtime.CollectionResolver.(*money.MerchantCollectionAdapterBuilder).Endpoints.NMIV5BaseURL = g.Server.URL
 	owner := s.ProvisionOwnedMerchant("cutover-drift-review-" + uuid.NewString())
 	client := s.Client(openrails.WithAPIKey(owner.APIKey), openrails.WithMerchantID(owner.MerchantID))
@@ -97,6 +102,7 @@ func TestProviderCutoverRefusesSourceDriftAfterPausedTarget(t *testing.T) {
 			if drift == "after_cancel_absence" {
 				rt := s.App().Runtime
 				previousClock := rt.ProviderCutovers.Clock
+				t.Cleanup(func() { rt.ProviderCutovers.Clock = previousClock })
 				rt.ProviderCutovers.Clock = clockwork.NewFakeClockAt(p.Anchor.Add(time.Hour))
 				err = rt.DB.RunInMerchantConn(merchant.WithID(ctx, owner.MerchantID), func(cctx context.Context) error {
 					_, e := rt.IntentRunner().Resolve(cctx, resumed.ID, intents.Resolution{
