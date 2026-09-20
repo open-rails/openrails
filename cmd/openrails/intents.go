@@ -69,6 +69,7 @@ func newIntentsResolveCmd() *cobra.Command {
 		reference     string
 		billingAnchor string
 		notExecuted   bool
+		abandon       bool
 		actor         string
 		reason        string
 	)
@@ -81,7 +82,7 @@ func newIntentsResolveCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("--intent must be a UUID: %w", err)
 			}
-			resolution := intents.Resolution{Step: step, ProviderReference: reference, NotExecuted: notExecuted, Actor: actor, Reason: reason}
+			resolution := intents.Resolution{Step: step, ProviderReference: reference, NotExecuted: notExecuted, Abandon: abandon, Actor: actor, Reason: reason}
 			if billingAnchor != "" {
 				resolution.BillingAnchor, err = time.Parse(time.RFC3339, billingAnchor)
 				if err != nil {
@@ -97,6 +98,7 @@ func newIntentsResolveCmd() *cobra.Command {
 	cmd.Flags().StringVar(&step, "step", "", "Provider step of a multi-step operation (nmi_upgrade: successor or proration; stripe_tier_change: update, schedule or phases; nmi_provider_cutover: target or anchor)")
 	cmd.Flags().StringVar(&reference, "receipt", "", "Exact provider object id: transaction, subscription, schedule or refund id")
 	cmd.Flags().StringVar(&billingAnchor, "billing-anchor", "", "Future first charge instant, RFC3339 whole seconds (NMI provider cutover --step anchor only)")
+	cmd.Flags().BoolVar(&abandon, "abandon", false, "Authorize cancellation of the exact paused NMI cutover target; source remains unchanged (--step target)")
 	cmd.Flags().BoolVar(&notExecuted, "not-executed", false, "Record provider-confirmed non-execution")
 	cmd.Flags().StringVar(&actor, "actor", cliActor(), "Operator recorded with the resolution")
 	cmd.Flags().StringVar(&reason, "reason", "", "Evidence source, e.g. provider ticket or dashboard record (required)")

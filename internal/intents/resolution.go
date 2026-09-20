@@ -16,7 +16,7 @@ import (
 
 // Resolution is operator evidence for an operation the engine could not
 // resolve from provider reads. Exactly one of ProviderReference, NotExecuted
-// or BillingAnchor is set. BillingAnchor is accepted only by the NMI cutover
+// BillingAnchor or Abandon is set. BillingAnchor is accepted only by the NMI cutover
 // anchor step and authorizes a later first charge on its verified paused target.
 // A reference is accepted only after the handler reads that exact
 // provider object and matches it to the frozen operation; NotExecuted records
@@ -29,6 +29,7 @@ type Resolution struct {
 	Step              string
 	ProviderReference string
 	NotExecuted       bool
+	Abandon           bool
 	BillingAnchor     time.Time
 	Actor             string
 	Reason            string
@@ -70,6 +71,9 @@ func (r Resolution) normalized() (Resolution, error) {
 	if r.NotExecuted {
 		choices++
 	}
+	if r.Abandon {
+		choices++
+	}
 	if !r.BillingAnchor.IsZero() {
 		choices++
 		r.BillingAnchor = r.BillingAnchor.UTC()
@@ -80,7 +84,7 @@ func (r Resolution) normalized() (Resolution, error) {
 	case r.Reason == "":
 		return r, fmt.Errorf("%w: reason is required", ErrResolutionInvalid)
 	case choices != 1:
-		return r, fmt.Errorf("%w: supply exactly one of a provider reference, not-executed or billing anchor", ErrResolutionInvalid)
+		return r, fmt.Errorf("%w: supply exactly one of a provider reference, not-executed billing anchor or abandon", ErrResolutionInvalid)
 	}
 	return r, nil
 }
@@ -91,7 +95,9 @@ func (r Resolution) Record(at time.Time) map[string]any {
 	if r.Step != "" {
 		out["step"] = r.Step
 	}
-	if !r.BillingAnchor.IsZero() {
+	if r.Abandon {
+		out["abandon"] = true
+	} else if !r.BillingAnchor.IsZero() {
 		out["billing_anchor"] = r.BillingAnchor.Format(time.RFC3339)
 	} else if r.NotExecuted {
 		out["not_executed"] = true
@@ -133,10 +139,23 @@ func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolutio
 			return row, nil
 		}
 	}
-	if row.Status == StatusPending || row.Status == StatusFailedRetryable {
+	if resolution.Abandon {
+		if row.IntentType != TypeNMIProviderCutover || resolution.Step != "target" {
+			return row, ErrResolutionUnsupported
+		}
+		_, progress, err := decodeCutover(row)
+		if err != nil {
+			return row, err
+		}
+		if progress.Decision != nil && progress.Decision.Action == "abandon" {
+			return row, nil // The original approval is immutable and already recorded.
+		}
+	}
+	pending := row.Status == StatusPending || row.Status == StatusFailedRetryable
+	if pending && !resolution.Abandon {
 		return r.resolveUnsent(ctx, row, resolution)
 	}
-	if row.Status != StatusUnknownNeedsVerify {
+	if row.Status != StatusUnknownNeedsVerify && !(pending && resolution.Abandon) {
 		return row, fmt.Errorf("%w (status=%s)", ErrResolutionNotUnknown, row.Status)
 	}
 	resolver, ok := r.Registry.Lookup(row.IntentType).(OperatorResolver)
@@ -144,7 +163,12 @@ func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolutio
 		return row, fmt.Errorf("%w: %s", ErrResolutionUnsupported, row.IntentType)
 	}
 	now := r.now()
-	claimed, ok, err := r.Store.ClaimUnknownByID(ctx, id, now, now.Add(r.lease()))
+	var claimed gen.OpenrailsRailIntent
+	if pending {
+		claimed, ok, err = r.Store.ClaimByID(ctx, id, now, now.Add(r.lease()))
+	} else {
+		claimed, ok, err = r.Store.ClaimUnknownByID(ctx, id, now, now.Add(r.lease()))
+	}
 	if err != nil {
 		return row, err
 	}
@@ -159,7 +183,11 @@ func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolutio
 	if rerr != nil {
 		releaseCtx, cancel := LedgerWriteContext(ctx)
 		defer cancel()
-		if _, err := r.Store.ReleaseUnknownClaim(releaseCtx, claimed.ID); err != nil {
+		if pending {
+			if err := r.Store.Park(releaseCtx, claimed.ID, now.Add(ParkRetryInterval), "operator abandonment rejected"); err != nil {
+				logEntry.WithError(err).Error("operator resolution: release failed")
+			}
+		} else if _, err := r.Store.ReleaseUnknownClaim(releaseCtx, claimed.ID); err != nil {
 			logEntry.WithError(err).Error("operator resolution: lease release failed; lease expiry will re-surface the operation")
 		}
 		return claimed, rerr

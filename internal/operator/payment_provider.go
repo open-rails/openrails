@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/providerqualification"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -90,4 +91,18 @@ func paymentProviderService(a *app.App) (*merchants.Service, error) {
 		return nil, errors.New("merchant secrets unavailable")
 	}
 	return a.Runtime.Merchants, nil
+}
+
+// SetProviderCutoverQualification installs or revokes only the private operator
+// qualification record for an existing merchant-owned account. No provider call.
+func SetProviderCutoverQualification(ctx context.Context, a *app.App, id merchant.ID, pspID uuid.UUID, record *providerqualification.Record) error {
+	if Get(a) == nil || a.Runtime == nil || a.Runtime.DB == nil {
+		return errors.New("control plane runtime is unavailable")
+	}
+	if id.IsZero() {
+		return providerqualification.ErrInvalid
+	}
+	return a.Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
+		return providerqualification.Set(ctx, a.Runtime.DB, pspID, record)
+	})
 }

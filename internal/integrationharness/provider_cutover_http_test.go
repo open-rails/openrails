@@ -23,6 +23,8 @@ import (
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/internal/providerqualification"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
@@ -39,9 +41,11 @@ type cutoverAccount struct {
 	Source                        bool
 }
 type cutoverGateway struct {
-	mu       sync.Mutex
-	Accounts map[string]*cutoverAccount
-	Server   *httptest.Server
+	mu                    sync.Mutex
+	Accounts              map[string]*cutoverAccount
+	Server                *httptest.Server
+	AfterSubscriptionRead func(source bool, sub nmi.V5Subscription)
+	AfterCreate           func()
 }
 
 func newCutoverGateway(t *testing.T) *cutoverGateway {
@@ -96,6 +100,11 @@ func newCutoverGateway(t *testing.T) *cutoverGateway {
 			id := fmt.Sprint(8000 + acct.Creates)
 			sub := nmi.V5Subscription{Object: "subscription", ID: id, StartDate: start.Format(time.RFC3339), NextBillingDate: start.Format(time.RFC3339), Amount: acct.Plan.PlanAmount, CustomerVaultID: req.Vault.ID, DelayedCondition: "active", PausedSubscription: 1, Plan: &acct.Plan}
 			acct.Subs[id] = sub
+			if hook := g.AfterCreate; hook != nil {
+				g.mu.Unlock()
+				hook()
+				g.mu.Lock()
+			}
 			if acct.Mode == "source_dark" {
 				g.Accounts[strings.Replace(r.Header.Get("Authorization"), "target-", "source-", 1)].Mode = "dark"
 			}
@@ -130,16 +139,24 @@ func newCutoverGateway(t *testing.T) *cutoverGateway {
 				if acct.Mode == "wrong_tombstone_vault" && sub.DelayedCondition == "inactive" {
 					sub.CustomerVaultID = "different-vault"
 				}
+				if hook := g.AfterSubscriptionRead; hook != nil {
+					g.mu.Unlock()
+					hook(acct.Source, sub)
+					g.mu.Lock()
+				}
 				_ = json.NewEncoder(w).Encode(sub)
 			case http.MethodDelete:
-				if !acct.Source {
-					http.Error(w, "unexpected target cancellation", 400)
+				if !acct.Source && sub.PausedSubscription != 1 && sub.PausedSubscription != true {
+					http.Error(w, "active target cancellation is forbidden", 400)
 					return
 				}
 				acct.Deletes++
 				sub.DelayedCondition = "inactive"
 				acct.Subs[id] = sub
-				if acct.Mode == "lost_cancel" {
+				if acct.Mode == "target_cancel_bare404" {
+					delete(acct.Subs, id)
+				}
+				if acct.Mode == "lost_cancel" || acct.Mode == "lost_target_cancel" {
 					acct.Mode = ""
 					w.WriteHeader(502)
 					return
@@ -209,6 +226,11 @@ func seedCutoverHTTP(t *testing.T, h *Harness, s *Surface, g *cutoverGateway, mo
 	SeedPSPs(ctx, t, rt, merchantID, set)
 	source, _, _, _ := merchants.PSPNaturalKey("nmi", "test", sourceKey)
 	target, _, _, _ := merchants.PSPNaturalKey("nmi", "test", targetKey)
+	for _, pspID := range []uuid.UUID{source, target} {
+		require.NoError(t, operator.SetProviderCutoverQualification(ctx, s.App(), merchantID, pspID, &providerqualification.Record{
+			PSPID: pspID, Environment: "test", Contract: providerqualification.NMIContract, EvidenceRef: "loopback-fixture-only",
+		}))
+	}
 	p := cutoverHTTPFixture{Sub: uuid.New(), Source: source, Target: target, Customer: uuid.New(), OldMethod: uuid.New(), NewMethod: uuid.New(), Price: uuid.New(), Start: time.Now().UTC().Truncate(time.Second).Add(-time.Hour), Anchor: time.Now().UTC().Truncate(time.Second).Add(7 * 24 * time.Hour), SourceKey: sourceKey, TargetKey: targetKey}
 	p.SourceDeletes = 1
 	if mode == "source_external_cancel" {

@@ -110,3 +110,79 @@ request terms or ineligible state return 409 `provider_cutover_conflict`, and
 unresolved accepted operations return 202. GET is read-only; repeating POST with
 the original key verifies uncertain work, then resumes permissible writes under
 the normal mode, kill-switch and destructive-operation budgets.
+
+## Abandon a paused target safely
+
+An operator can choose `openrails intents resolve --merchant id:<uuid>
+--intent <uuid> --step target --abandon --actor <operator> --reason <record>`
+when the target is identified and paused but the source still exists and is
+active. Changed source price/date/cadence is allowed for this compensation: it
+never updates the source. A missing target receipt, source cancellation already
+submitted, source already canceled, or target already activated refuses this
+action. No generic HTTP abort endpoint is introduced.
+
+The operation chooses its direction once by atomic compare-and-swap, before
+either cancellation can be submitted. A stale executor cannot turn an approved
+abandonment into forward cancellation, and an operator cannot abandon after
+forward execution claimed the decision. Approval persists the original actor
+and reason; repeating it does not replace that record.
+
+The ordinary executor reads the exact target and frozen commercial terms,
+records its cancellation marker, deletes only that paused target, and requires
+an identity/terms-matching inactive tombstone. Missing reads, a lost response,
+changed terms or an active target remain unresolved. Verification performs only
+reads. Once target cancellation and the source's still-active identity are both
+proven, the operation ends `failed_terminal` with stage `abandoned`, retaining
+receipts and releasing the existing local mutation fences. No source billing
+reference or paid-through period is changed.
+
+NMI does not document a conditional DELETE that locks out provider-console
+changes. Core serializes its own forward/abandon decision; it cannot lock a
+concurrent provider-console activation. Qualification and campaign quiescence
+must include that external-writer boundary.
+
+## Account qualification and revocation
+
+Cutover is unqualified by default. Both accounts must have a private
+`settings.nmi_cutover_qualification` record before preview or admission can
+succeed; absent or invalid records return `409 provider_cutover_unqualified`.
+This is an operator attestation backed by external evidence, not a capability
+inferred from credential access or the test-mode flag. The record is:
+
+```yaml
+settings:
+  nmi_cutover_qualification:
+    psp_id: <the immutable PSP UUID>
+    environment: test # exactly the PSP environment; live for a live PSP
+    contract: nmi-paused-fixed-day-usd-v1
+    evidence_ref: <nonsecret approved qualification reference>
+```
+
+Manifest reconciliation validates this shape against that exact account. Hosted
+and embedded operators use
+`ControlPlane.SetProviderCutoverQualification(ctx, merchantID, pspID, record)`;
+a nil record revokes. It changes only this private record and needs no provider
+call or writable secret backend. The operation retains its admission records
+for audit; those frozen records never authorize later writes.
+
+Every provider mutation rereads the written account's qualification under a PSP
+row share lock held through the HTTP response. Metadata revocation serializes
+with that lock and waits for the local HTTP call to return. A sent request can
+still finish at the provider after a timeout; revocation cannot undo it. Later
+dispatches cannot use the revoked record. The existing merchant connection
+is reused, including a host pool limited to one connection. Submission markers
+commit before the lock transaction; results persist after it.
+
+Only the executor that inserted a new target-create marker and never entered its
+HTTP callback may record terminal non-execution after a qualification refusal.
+An already-present create marker remains uncertain. Later-stage refusal parks
+the existing direction; it never reverses an admitted cancellation. Verification
+and local completion remain available after revocation. Target compensation
+checks only the target's qualification because it never writes the source.
+
+Lease heartbeats use an independent merchant-scoped lazy connection on the same
+database. They never join the provider-lock transaction or lose their RLS
+identity. With a one-connection pool, an active request can occupy the only slot;
+a heartbeat then waits for capacity and Runner shutdown cancels that wait. This
+does not promise renewal during unavailable pool capacity. Receipt custody and
+synchronous result writes continue using the original request pin.

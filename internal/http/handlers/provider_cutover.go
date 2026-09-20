@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/providerqualification"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -92,12 +93,14 @@ func providerCutover(r *httprequest.Request, owned, preview bool) {
 		switch {
 		case errors.Is(err, openrails.ErrInvalid):
 			cutoverRefusal(r, 400, "invalid_param", "invalid cutover request", "")
+		case errors.Is(err, providerqualification.ErrUnqualified), errors.Is(err, providerqualification.ErrInvalid):
+			cutoverRefusal(r, http.StatusConflict, "provider_cutover_unqualified", "both provider accounts require explicit cutover qualification", "")
 		case errors.Is(err, intents.ErrProviderCutoverConflict):
 			cutoverRefusal(r, http.StatusConflict, "provider_cutover_conflict", err.Error(), "")
 		case errors.Is(err, intents.ErrRateCeilingTripped):
 			r.APIError(api.NewAPIError(http.StatusTooManyRequests, api.ErrorTypeRateLimit, api.CodeRateLimitExceeded,
 				"Destructive operation rate limit reached; try again later or contact support"))
-		case db.IsNotFound(err):
+		case db.IsNotFound(err), errors.Is(err, providerqualification.ErrNotFound):
 			cutoverRefusal(r, http.StatusNotFound, "resource_missing", "cutover or subscription not found", "")
 		default:
 			cutoverRefusal(r, http.StatusInternalServerError, "provider_cutover_unavailable", "provider cutover failed", "")
