@@ -196,6 +196,7 @@ func TestLiveIncidentReplay(t *testing.T) {
 		"0001_schema.up.sql",
 		"0004_grants_credit_deposit_once.up.sql",
 	)
+	base := origin.git("rev-parse", "HEAD")
 	lane := clone(t, origin)
 
 	lane.migration("0005_spend_delegation_provenance.up.sql")
@@ -220,6 +221,12 @@ func TestLiveIncidentReplay(t *testing.T) {
 		"migrations/postgres/0005_customer_business_profiles.up.sql",
 		"git rebase origin/master",
 	)
+	if lane.git("rev-parse", "--is-shallow-repository") != "false" {
+		t.Fatal("checking migration prefixes must not truncate the shared repository's history")
+	}
+	if got := lane.git("merge-base", "HEAD", "origin/master"); got != base {
+		t.Fatalf("the fetch lost the lane's common ancestor: got %s, want %s", got, base)
+	}
 }
 
 // TestFreeNumberPasses: the ordinary case. A lane that drafted the next free
