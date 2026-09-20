@@ -255,6 +255,9 @@ func replaceDSNDatabase(dsn, dbName string) (string, error) {
 			return "", fmt.Errorf("parse external postgres url: %w", err)
 		}
 		u.Path = "/" + dbName
+		query := u.Query()
+		query.Del("dbname")
+		u.RawQuery = query.Encode()
 		return u.String(), nil
 	}
 	// key=value form: drop any existing dbname and append the new one.
