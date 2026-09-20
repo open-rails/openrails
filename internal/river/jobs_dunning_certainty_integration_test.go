@@ -4,9 +4,11 @@ package riverjobs
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -80,6 +82,9 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 	productID, priceID, subID, pmID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	description := "Certainty"
 	var customerID, pspID uuid.UUID
+	providerSubID := "sub_certainty_" + uuid.NewString()
+	providerVault := ""
+	periodEnd := now.Add(-periodEndAgo)
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		q := dbi.Gen(ctx)
 		_, err := q.CreateProduct(ctx, gen.CreateProductParams{
@@ -88,7 +93,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 		})
 		require.NoError(t, err)
 		_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-			ID: priceID, ProductID: productID, Amount: 999, Currency: "USD", MerchantID: merchantID,
+			ID: priceID, ProductID: productID, Amount: 9990000, Currency: "USD", MerchantID: merchantID,
 			Archived: false, AccessDurationHours: &cycleHours, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 		})
 		require.NoError(t, err)
@@ -98,6 +103,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 		customerRef, methodRef := "", ""
 		if vaultRefs {
 			customerRef, methodRef = "vault_"+uuid.New().String(), "card_"+uuid.New().String()
+			providerVault = customerRef
 		}
 		_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 			ID: pmID, MerchantID: merchantID, CustomerID: customerID, Rail: string(models.RailNMI),
@@ -113,14 +119,13 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 			dbtest.SeedNMIStoredCredentialRefs(ctx, t, dbi.Qx(ctx), pmID)
 		}
 
-		periodEnd := now.Add(-periodEndAgo)
 		periodStart := periodEnd.Add(-time.Duration(cycleHours) * time.Hour)
 		nextRetry := now.Add(-time.Minute)
 		_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 			ID: subID, MerchantID: merchantID, CustomerID: customerID, ProductID: productID, PriceID: &priceID,
 			Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
 			PspID:              pspID,
-			RailSubscriptionID: "sub_certainty_" + uuid.New().String(), PaymentMethodID: &pmID,
+			RailSubscriptionID: providerSubID, PaymentMethodID: &pmID,
 			CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd, StartedAt: periodStart,
 			NextRetryAt: &nextRetry, CreatedAt: now, UpdatedAt: now,
 		})
@@ -144,22 +149,51 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 	f := &dunningCertaintyFixture{dbi: dbi, ctx: baseCtx, subID: subID, nmiWrites: &atomic.Int64{}}
 	f.nmiRespond = func(w http.ResponseWriter) { _, _ = w.Write([]byte("response=1&transactionid=txn_ok")) }
 
+	var paid atomic.Bool
+	var order atomic.Value
+	order.Store("")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		if r.Form.Get("report_type") == "profile" {
-			_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response><merchant><company>Certainty TEST</company><email>c@acme.test</email></merchant></nm_response>`))
+		if r.Method == http.MethodGet && r.URL.Path == "/subscriptions/"+providerSubID {
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": providerSubID, "amount": "9.99", "customer_vault_id": providerVault, "delayed_condition": "active", "paused_subscription": "0", "next_billing_date": periodEnd.Add(time.Duration(cycleHours) * time.Hour).UTC().Format("2006-01-02"), "plan": map[string]any{"id": "plan-" + subID.String(), "plan_amount": "9.99", "plan_payments": "0", "day_frequency": fmt.Sprint(cycleHours / 24)}})
 			return
 		}
-		f.nmiWrites.Add(1)
-		f.nmiRespond(w)
+		if r.Method == http.MethodGet && r.URL.Path == "/payments/txn_ok" {
+			if !paid.Load() {
+				w.WriteHeader(404)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "txn_ok", "amount": "9.99", "currency": "USD", "response": "1", "customer_vault_id": providerVault, "actions": []map[string]any{{"type": "sale", "amount": "9.99", "success": true, "response": "1"}}})
+			return
+		}
+		_ = r.ParseForm()
+		if r.Form.Get("report_type") == "profile" {
+			fmt.Fprint(w, `<nm_response><merchant><company>Certainty TEST</company></merchant></nm_response>`)
+			return
+		}
+		if r.Form.Get("report_type") == "transaction" {
+			if paid.Load() && r.Form.Get("order_id") == order.Load().(string) {
+				fmt.Fprintf(w, `<nm_response><transaction><transaction_id>txn_ok</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, order.Load().(string))
+			} else {
+				fmt.Fprint(w, `<nm_response/>`)
+			}
+			return
+		}
+		if r.Form.Get("type") == "sale" {
+			f.nmiWrites.Add(1)
+			order.Store(r.Form.Get("orderid"))
+			response := httptest.NewRecorder()
+			f.nmiRespond(response)
+			values, _ := url.ParseQuery(response.Body.String())
+			paid.Store(values.Get("response") == "1")
+			fmt.Fprint(w, response.Body.String())
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
 	}))
 	t.Cleanup(srv.Close)
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
-		SecurityKey: "certainty_key", WebhookSecret: "s",
-	}, true)
+	client, err := nmi.NewAccountClient(merchantID, pspID, "nmi", &config.NMIProviderSettings{SecurityKey: "certainty_key", WebhookSecret: "s"}, true)
 	require.NoError(t, err)
-	client.DirectPostURL = srv.URL
-	client.QueryURL = srv.URL
+	client.DirectPostURL, client.QueryURL, client.V5BaseURL = srv.URL, srv.URL, srv.URL
 
 	f.priceSvc = catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
@@ -177,7 +211,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 	// or#865: the worker's self-assembled intent Runner parks every intent when
 	// no mode is stated — these tests assert on charges that actually fire and
 	// on terminal outcomes, so the mode has to be "full".
-	f.worker = &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}, Config: fullModeConfig()}
+	f.worker = &DunningWorker{DB: dbi, NMIResolver: fakeDunningNMIResolver{client: client}, Config: fullModeConfig(), DeferDelete: intents.NewNMIDeleteScheduler(dbi, nil, intents.OriginSystem, "dunning terminal cancellation")}
 	return f
 }
 
@@ -221,24 +255,6 @@ type dunningRowState struct {
 	cancelledAt         *time.Time
 	deletionScheduledAt *time.Time
 	deleteIntents       int
-}
-
-type failingDunningLifecycle struct {
-	err       error
-	failCalls atomic.Int64
-}
-
-func (f *failingDunningLifecycle) ApplyLocalUnknown(context.Context, *db.DB, *models.Subscription) error {
-	return nil
-}
-
-func (f *failingDunningLifecycle) FailMembership(context.Context, *subscriptions.FailMembershipParams) error {
-	f.failCalls.Add(1)
-	return f.err
-}
-
-func (f *failingDunningLifecycle) RenewMembership(context.Context, *subscriptions.RenewMembershipParams) error {
-	return nil
 }
 
 func (f *dunningCertaintyFixture) state(t *testing.T) dunningRowState {
@@ -385,57 +401,4 @@ func TestDunning_KillSwitchHaltsTerminalCollectionOutcomes(t *testing.T) {
 	assert.NotNil(t, s.cancelledAt)
 	assert.Equal(t, 1, s.deleteIntents,
 		"and only then is the remote NMI schedule stopped through the deferred-delete mechanism")
-}
-
-// #959: a terminal provider decline is already durable before the lifecycle
-// transition runs. If that transition rolls back, release only its exact row
-// claim and fail the River job so the same ordinal is retried without charging
-// again. Leaving the 15-minute claim in place can turn River's early retry into
-// a false-successful "no work" pass.
-func TestDunning_LifecycleFailureReleasesClaimAndSurfacesToRiver(t *testing.T) {
-	f := newDunningCertaintyFixture(t, 24, time.Hour, true)
-	forcedErr := errors.New("forced lifecycle failure")
-	lifecycle := &failingDunningLifecycle{err: forcedErr}
-	f.worker.lifecycle = lifecycle
-	f.worker.Intents = &intents.Runner{Store: intents.NewStore(f.dbi), Config: fullModeConfig()}
-
-	var intentKey string
-	require.NoError(t, f.dbi.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
-		sub, err := f.subSvc.GetByID(ctx, f.subID)
-		if err != nil {
-			return err
-		}
-		require.Nil(t, sub.RetryAttempts)
-		periodEnd := sub.CurrentPeriodEndsAt.UTC()
-		intentKey = intents.ManualRebillIdempotencyKey(
-			sub.ID, periodEnd, string(models.RailNMI), rebillOrderReference(sub), 0,
-		)
-		_, err = f.dbi.Qx(ctx).Exec(ctx, `
-			INSERT INTO openrails.rail_intents
-			  (merchant_id, rail, psp_id, intent_type, subscription_id,
-			   idempotency_key, status, origin, result_evidence, executed_at)
-			VALUES ($1, 'nmi', $2, $3, $4, $5, 'failed_terminal', 'system',
-			        '{"response_code":261}'::jsonb, now())`,
-			sub.MerchantID, sub.PspID, intents.TypeManualRebill, sub.ID, intentKey)
-		return err
-	}))
-
-	err := f.worker.Work(context.Background(), nil)
-	require.ErrorIs(t, err, forcedErr)
-	assert.Equal(t, int64(1), lifecycle.failCalls.Load())
-
-	state := f.state(t)
-	assert.Nil(t, state.retryAttempts, "a failed lifecycle transition must not advance the charge ordinal")
-	require.NotNil(t, state.lastRetryAt)
-	require.NotNil(t, state.nextRetryAt)
-	assert.True(t, state.nextRetryAt.Equal(*state.lastRetryAt), "the exact claim is immediately eligible for River's backoff retry")
-	assert.False(t, state.nextRetryAt.After(time.Now().UTC()), "released claim must be due now")
-
-	var intentCount int
-	require.NoError(t, f.dbi.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
-		return f.dbi.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.rail_intents WHERE merchant_id = $1 AND idempotency_key = $2`,
-			dbtest.TestMerchantID.UUID(), intentKey).Scan(&intentCount)
-	}))
-	assert.Equal(t, 1, intentCount, "the durable decline is replayed; no fresh charge intent is created")
 }

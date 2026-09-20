@@ -15,6 +15,20 @@ import (
 // after its payer/invoice/attempt locks. It is deliberately collection-specific:
 // a successful state requires retained, validated provider receipt custody.
 func (s *Store) CompleteInvoiceCollection(ctx context.Context, in gen.OpenrailsRailIntent, outcome Outcome, now time.Time) error {
+	if in.IntentType != "invoice_collection" {
+		return errors.New("invoice completion received another operation kind")
+	}
+	return s.completeCollectedPayment(ctx, in, outcome, now)
+}
+
+func (s *Store) CompleteManualRebill(ctx context.Context, in gen.OpenrailsRailIntent, outcome Outcome, now time.Time) error {
+	if in.IntentType != TypeManualRebill {
+		return errors.New("rebill completion received another operation kind")
+	}
+	return s.completeCollectedPayment(ctx, in, outcome, now)
+}
+
+func (s *Store) completeCollectedPayment(ctx context.Context, in gen.OpenrailsRailIntent, outcome Outcome, now time.Time) error {
 	if s == nil || s.db == nil || s.db.Pool() != nil {
 		return errors.New("collection completion requires a transaction-bound database")
 	}
@@ -73,6 +87,26 @@ func (s *Store) CompleteInvoiceCollection(ctx context.Context, in gen.OpenrailsR
 	if len(current.ResultEvidence) > 0 {
 		if err := json.Unmarshal(current.ResultEvidence, &existing); err != nil {
 			return err
+		}
+	}
+	if current.IntentType == TypeManualRebill {
+		for _, key := range []string{rebillPreparationKey, rebillDeclineKey} {
+			if value, ok := existing[key]; ok {
+				evidence[key] = value
+			}
+		}
+		if outcome.Class == OutcomeTerminal {
+			refusal, found, err := loadRebillDecline(current)
+			if err != nil {
+				return err
+			}
+			if found {
+				if outcome.Evidence["declined"] != true || outcome.Evidence["response_code"] != refusal.ResponseCode {
+					return errors.New("rebill terminal result contradicts retained refusal")
+				}
+			} else if EvidenceString(current, rebillSubmittedAt) != "" || outcome.Evidence["not_executed"] != true {
+				return errors.New("submitted rebill cannot be released without a definitive refusal")
+			}
 		}
 	}
 	if record, ok := existing["operator_resolution"]; ok {

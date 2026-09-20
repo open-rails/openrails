@@ -116,6 +116,15 @@ var rateJSON = object(map[string]jsonRule{
 	"package": object(map[string]jsonRule{"amount": moneyStringValue, "package_size": integerValue, "free_units": integerValue}),
 })
 
+var collectedReceiptJSON = object(map[string]jsonRule{
+	"version": integerValue, "family": textValue,
+	"binding": object(map[string]jsonRule{"operation_id": uuidValue, "merchant_id": uuidValue, "psp_id": uuidValue, "kind": textValue, "payload_sha256": textValue}),
+	"nmi":     object(map[string]jsonRule{"transaction_id": textValue, "order_reference": textValue, "customer_vault_id": textValue, "amount": moneyStringValue, "currency": textValue, "approved": booleanValue}),
+	"stripe":  object(map[string]jsonRule{"invoice_id": textValue, "status": textValue, "customer_id": textValue, "payment_method_id": textValue, "amount_paid": moneyStringValue, "currency": textValue, "charge_id": textValue, "payment_intent_id": textValue, "collection_key": textValue, "charged_amount": moneyStringValue, "charge_currency": textValue, "charge_customer_id": textValue, "charge_paid": booleanValue, "charge_captured": booleanValue, "charge_status": textValue, "charge_invoice_id": textValue, "charge_payment_intent_id": textValue}),
+})
+
+var receiptBindingJSON = object(map[string]jsonRule{"operation_id": uuidValue, "merchant_id": uuidValue, "psp_id": uuidValue, "kind": textValue, "payload_sha256": textValue})
+
 // Exact nested shapes keep raw metadata/provider bodies out of the archive.
 // An unsupported shape is a refusal, never a lossy rewrite of a replay body.
 var jsonRules = map[string]jsonRule{
@@ -127,21 +136,40 @@ var jsonRules = map[string]jsonRule{
 		"instrument": object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue}),
 	}),
 	"rail_intents.invoice_collection.result_evidence": nullable(object(map[string]jsonRule{
-		"qualified_receipt": object(map[string]jsonRule{
-			"version": integerValue, "family": textValue,
-			"binding": object(map[string]jsonRule{"operation_id": uuidValue, "merchant_id": uuidValue, "psp_id": uuidValue, "kind": textValue, "payload_sha256": textValue}),
-			"nmi":     object(map[string]jsonRule{"transaction_id": textValue, "order_reference": textValue, "customer_vault_id": textValue, "amount": moneyStringValue, "currency": textValue, "approved": booleanValue}),
-			"stripe":  object(map[string]jsonRule{"invoice_id": textValue, "status": textValue, "customer_id": textValue, "payment_method_id": textValue, "amount_paid": moneyStringValue, "currency": textValue, "charge_id": textValue, "payment_intent_id": textValue, "collection_key": textValue, "charged_amount": moneyStringValue, "charge_currency": textValue, "charge_customer_id": textValue, "charge_paid": booleanValue, "charge_captured": booleanValue, "charge_status": textValue, "charge_invoice_id": textValue, "charge_payment_intent_id": textValue}),
-		}),
+		"qualified_receipt": collectedReceiptJSON,
 
 		"transaction_id": textValue, "external_invoice_id": textValue, "rail": textValue,
 		"declined": booleanValue, "failure_code": textValue, "failure_message": textValue, "not_executed": booleanValue,
 		"not_executed_code": textValue, "submitted_at": textValue, "provider_contradiction": textValue, "verified_existing": booleanValue,
 		"operator_resolution": operatorResolutionJSON,
 	})),
+	"rail_intents.manual_rebill.payload": object(map[string]jsonRule{
+		"renewal": object(map[string]jsonRule{
+			"psp_id": uuidValue, "subscription_id": uuidValue, "customer_id": uuidValue,
+			"from_price_id": uuidValue, "from_product_id": uuidValue, "price_id": uuidValue, "product_id": uuidValue,
+			"product_name": textValue, "amount": moneyStringValue, "currency": textValue,
+			"period_start": textValue, "period_end": textValue,
+			"entitlements": nullable(dictionary(nullable(integerValue))), "previous_entitlements": nullable(dictionary(nullable(integerValue))),
+			"reprice_id": uuidValue, "scheduled_price_id": uuidValue,
+		}),
+		"payment_method_id": uuidValue, "rail": textValue, "rail_subscription_id": textValue, "order_reference": uuidValue,
+		"attempt": integerValue, "failure_count": integerValue, "amount_minor": moneyStringValue,
+		"instrument": object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue}),
+	}),
+	"rail_intents.manual_rebill.result_evidence": nullable(object(map[string]jsonRule{
+		"qualified_receipt": collectedReceiptJSON, "transaction_id": textValue, "rail": textValue, "verified_existing": booleanValue,
+		"declined": booleanValue, "response_code": integerValue, "not_executed": booleanValue, "submitted_at": textValue,
+		"operator_resolution": operatorResolutionJSON,
+		"rebill_preparation": object(map[string]jsonRule{
+			"binding": receiptBindingJSON, "subscription_id": textValue, "customer_vault_id": textValue, "amount": textValue, "next_billing_date": textValue,
+			"plan": object(map[string]jsonRule{"object": textValue, "id": textValue, "plan_name": textValue, "plan_amount": textValue, "plan_payments": textValue, "day_frequency": textValue, "month_frequency": textValue, "day_of_month": textValue}),
+		}),
+		"rebill_decline": object(map[string]jsonRule{"binding": receiptBindingJSON, "response_code": integerValue, "provider_reference": textValue}),
+	})),
 	// Engine-authored payment correlation, not an arbitrary provider body.
 	"payments.metadata": nullable(object(map[string]jsonRule{
 		"order_id": textValue, "provider_transaction_id": textValue, "e2e_run_id": textValue, "stripe_invoice_id": textValue,
+		"refund_review": func(v any) bool { return v == "confirmed charge on a cancelled subscription" },
 	})),
 	"invoice_items.metadata": nullable(object(map[string]jsonRule{
 		"operation": textValue, "source": textValue,

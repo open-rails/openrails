@@ -4,14 +4,21 @@ package intents
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -34,14 +41,28 @@ type fakeNMIRebillGateway struct {
 	saleAuthKey atomic.Value // security_key the last sale authenticated with (#730)
 	saleForm    atomic.Value // url.Values: full form of the last sale (#297 wire assertions)
 	txnID       string
+	orderID     atomic.Value
 }
 
-func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClient) {
+func newFakeNMIRebillGateway(t *testing.T, fx rebillFixture) (*fakeNMIRebillGateway, *nmi.NMIClient) {
 	t.Helper()
 	f := &fakeNMIRebillGateway{txnID: "txn-rebill-" + uuid.NewString()[:8]}
 	f.saleBody.Store("response=1&transactionid=" + f.txnID)
+	f.orderID.Store(fx.orderRef)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/subscriptions/") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": fx.payload.RailSubscriptionID, "amount": "9.99", "customer_vault_id": fx.payload.Instrument.RailCustomerRef, "delayed_condition": "active", "paused_subscription": "0", "next_billing_date": fx.payload.Renewal.PeriodEnd.UTC().Format("2006-01-02"), "plan": map[string]any{"id": "plan-" + fx.subID.String(), "plan_amount": "9.99", "plan_payments": "0", "day_frequency": "30"}})
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/payments/"+f.txnID {
+			if !f.charged.Load() {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": f.txnID, "amount": "9.99", "currency": "USD", "response": "1", "customer_vault_id": fx.payload.Instrument.RailCustomerRef, "actions": []map[string]any{{"type": "sale", "amount": "9.99", "success": true, "response": "1"}}})
+			return
+		}
 		_ = r.ParseForm()
 		if r.Form.Get("report_type") == "transaction" || r.URL.Query().Get("report_type") == "transaction" {
 			f.queryCalls.Add(1)
@@ -49,7 +70,7 @@ func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClien
 			if orderID == "" {
 				orderID = r.URL.Query().Get("order_id")
 			}
-			if f.charged.Load() {
+			if f.charged.Load() && orderID == f.orderID.Load().(string) {
 				fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, f.txnID, orderID)
 			} else {
 				fmt.Fprint(w, `<nm_response></nm_response>`)
@@ -60,9 +81,13 @@ func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClien
 			f.saleCalls.Add(1)
 			f.saleAuthKey.Store(r.Form.Get("security_key"))
 			f.saleForm.Store(r.Form)
+			f.orderID.Store(r.Form.Get("orderid"))
 			if st := f.saleStatus.Load(); st != 0 {
 				w.WriteHeader(int(st))
 				return
+			}
+			if strings.HasPrefix(f.saleBody.Load().(string), "response=1") {
+				f.charged.Store(true)
 			}
 			_, _ = w.Write([]byte(f.saleBody.Load().(string)))
 			return
@@ -71,40 +96,52 @@ func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClien
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
+	client, err := nmi.NewAccountClient(fx.merchantID, fx.pspID, "mobius", &config.NMIProviderSettings{
 		SecurityKey:   "test_security_key",
 		WebhookSecret: "test_secret",
 	}, true)
 	require.NoError(t, err)
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
+	client.V5BaseURL = srv.URL
 	return f, client
 }
 
 type rebillFixture struct {
-	db        *db.DB
-	store     *Store
-	subID     uuid.UUID
-	periodEnd time.Time
-	orderRef  string
-	pspID     uuid.UUID
+	merchantID uuid.UUID
+	db         *db.DB
+	store      *Store
+	subID      uuid.UUID
+	periodEnd  time.Time
+	orderRef   string
+	pspID      uuid.UUID
+	payload    ManualRebillPayload
 }
 
 // seedPastDueSubscription inserts product/price/payment-method/subscription
 // in the dunning posture: past_due, missed period end in the recent past.
 func seedPastDueSubscription(t *testing.T) rebillFixture {
 	t.Helper()
-	ctx := context.Background()
-	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	return seedPastDueSubscriptionForMerchant(t, dbtest.TestMerchantID.UUID())
+}
+
+func seedPastDueSubscriptionForMerchant(t *testing.T, merchantID uuid.UUID) rebillFixture {
+	t.Helper()
+	ctx := merchant.WithID(context.Background(), merchant.ID(merchantID))
+	dbi := dbtest.OpenMerchantDB(t, merchantID)
 	pool := dbi.Pool()
 
-	fx := rebillFixture{db: dbi, store: NewStore(dbi)}
+	fx := rebillFixture{db: dbi, store: NewStore(dbi), merchantID: merchantID}
+	_, err := pool.Exec(ctx, `INSERT INTO openrails.merchants(id,slug) VALUES($1,$2) ON CONFLICT(id) DO NOTHING`, merchantID, "rebill-"+merchantID.String())
+	require.NoError(t, err)
 	fx.subID = uuid.New()
 	now := time.Now().UTC().Truncate(time.Second)
 	fx.periodEnd = now.Add(-time.Minute)
-	fx.orderRef = fmt.Sprintf("rebill-%s-%d", fx.subID, fx.periodEnd.Unix())
+	fx.orderRef = rebillOrderReference(ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, "mobius", 1))
 
-	userID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, uuid.NewString())
+	userID := uuid.New()
+	_, err = pool.Exec(ctx, `INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, merchantID, userID)
+	require.NoError(t, err)
 	productID := uuid.New()
 	priceID := uuid.New()
 	paymentMethodID := uuid.New()
@@ -115,12 +152,12 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	tenantID := dbtest.TestMerchantID.UUID()
+	tenantID := merchantID
 	fx.pspID = dbtest.EnsureTestPSP(ctx, t, pool, tenantID, "mobius")
-	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id, entitlements_spec) VALUES ($1, $2, $2, $3, '{"premium":null}')`,
 		productID, "rebill-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, tenantID)
+	      VALUES ($1, $2, 9990000, 'USD', 720, true, $3)`, priceID, productID, tenantID)
 	exec(`INSERT INTO openrails.payment_methods
 	        (id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
 	         initial_transaction_id, stored_credential_recurring_ref, merchant_id)
@@ -129,10 +166,33 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 		"txn-init-"+suffix, "txn-recurring-init-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id, payment_method_id,
-	         current_period_starts_at, current_period_ends_at, started_at, next_retry_at, retry_attempts, customer_id, merchant_id, psp_id)
-	      VALUES ($1, $2, $3, 'past_due', 'mobius', $4, $5, $6, $7, $6, $8, 1, $9, $10, $11)`,
+	         current_period_starts_at, current_period_ends_at, started_at, next_retry_at, retry_attempts, customer_id, merchant_id, psp_id, entitlements_spec_snapshot)
+	      VALUES ($1, $2, $3, 'past_due', 'mobius', $4, $5, $6, $7, $6, $8, 1, $9, $10, $11, '{"premium":null}')`,
 		fx.subID, priceID, productID, "psid-"+suffix, paymentMethodID,
 		fx.periodEnd.Add(-30*24*time.Hour), fx.periodEnd, now.Add(-30*time.Second), userID, tenantID, fx.pspID)
+
+	ctx = merchant.WithID(ctx, merchant.ID(merchantID))
+	require.NoError(t, dbi.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := dbi.NewWithPgxTx(tx)
+		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, fx.subID)
+		if err != nil {
+			return err
+		}
+		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, now)
+		if err != nil {
+			return err
+		}
+		method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: tenantID, ID: paymentMethodID})
+		if err != nil {
+			return err
+		}
+		minor, err := moneyutil.NativeToRailMinorExact(terms.Currency, terms.Amount)
+		if err != nil {
+			return err
+		}
+		fx.payload = ManualRebillPayload{Renewal: terms, PaymentMethodID: paymentMethodID, Instrument: charge.FreezeInstrument(method), Rail: "mobius", RailSubscriptionID: sub.RailSubscriptionID, Attempt: 1, FailureCount: 1, OrderReference: fx.orderRef, AmountMinor: minor}
+		return nil
+	}))
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", fx.subID)
@@ -151,19 +211,19 @@ func (fx rebillFixture) enqueueParams(attempt int) EnqueueParams {
 	subID := fx.subID
 	windowEnd := fx.periodEnd.Add(14 * 24 * time.Hour)
 	return EnqueueParams{
-		MerchantID:     dbtest.TestMerchantID.UUID(),
-		Provider:       "mobius",
+		MerchantID:     fx.merchantID,
+		Provider:       fx.payload.Rail,
 		PspID:          fx.pspID,
 		IntentType:     TypeManualRebill,
 		SubscriptionID: &subID,
-		Payload: ManualRebillPayload{
-			SubscriptionID: fx.subID,
-			PeriodEnd:      fx.periodEnd,
-			Rail:           "mobius",
-			OrderReference: fx.orderRef,
-			Attempt:        attempt,
-		},
-		IdempotencyKey: ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, "mobius", fx.orderRef, attempt),
+		PriceID:        &fx.payload.Renewal.PriceID,
+		Payload: func() ManualRebillPayload {
+			p := fx.payload
+			p.Attempt = attempt
+			p.OrderReference = rebillOrderReference(ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, fx.payload.Rail, attempt))
+			return p
+		}(),
+		IdempotencyKey: ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, fx.payload.Rail, attempt),
 		NextAttemptAt:  time.Now().UTC(),
 		Origin:         OriginSystem,
 		OriginReason:   "integration test",
@@ -198,7 +258,7 @@ func (fx rebillFixture) intentByID(t *testing.T, id uuid.UUID) gen.OpenrailsRail
 // membership (period advances, payment row recorded).
 func TestManualRebillSynchronousSuccessRenewsLifecycle(t *testing.T) {
 	fx := seedPastDueSubscription(t)
-	fake, client := newFakeNMIRebillGateway(t)
+	fake, client := newFakeNMIRebillGateway(t, fx)
 
 	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
 	require.NoError(t, err)
@@ -223,7 +283,7 @@ func TestManualRebillSynchronousSuccessRenewsLifecycle(t *testing.T) {
 // when full mode returns the scheduled executor charges and renews.
 func TestManualRebillSystemOriginParksUnderLimitedThenDrains(t *testing.T) {
 	fx := seedPastDueSubscription(t)
-	fake, client := newFakeNMIRebillGateway(t)
+	fake, client := newFakeNMIRebillGateway(t, fx)
 
 	row, err := fx.rebillRunner(client, limitedModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
 	require.NoError(t, err)
@@ -250,7 +310,7 @@ func TestManualRebillSystemOriginParksUnderLimitedThenDrains(t *testing.T) {
 // worker involved, and no second charge ever sent.
 func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 	fx := seedPastDueSubscription(t)
-	fake, client := newFakeNMIRebillGateway(t)
+	fake, client := newFakeNMIRebillGateway(t, fx)
 	fake.saleStatus.Store(http.StatusBadGateway) // outcome lost mid-flight
 
 	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
@@ -281,11 +341,9 @@ func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 
 	got := fx.intentByID(t, row.ID)
 	assert.Equal(t, StatusSucceeded, got.Status)
-	// #607: the tombstone is slimmed to the dunning pointer keys — the
-	// transaction_id the repair path reads survives; the verified_existing
-	// forensic marker is dropped (retained in the mutation log).
+	// Terminal replay retains the qualified provider facts and accepted terms.
 	assert.Contains(t, string(got.ResultEvidence), fake.txnID, "transaction_id pointer retained for the dunning repair path")
-	assert.NotContains(t, string(got.ResultEvidence), "verified_existing", "forensic evidence pruned")
+	assert.Contains(t, string(got.ResultEvidence), "qualified_receipt", "qualified custody survives terminal replay")
 	assert.EqualValues(t, 1, fake.saleCalls.Load(), "exactly one charge attempt ever reached the gateway")
 
 	sub := fx.subscription(t)
@@ -296,18 +354,19 @@ func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 
 // TestManualRebillDeclineIsTerminalWithEvidence: a clean decline terminates
 // the ATTEMPT, preserving the response code as evidence for the worker's
-// hard/soft classification; the lifecycle is the worker's call, not the
-// handler's.
+// hard/soft classification; lifecycle and terminal state commit together.
 func TestManualRebillDeclineIsTerminalWithEvidence(t *testing.T) {
 	fx := seedPastDueSubscription(t)
-	fake, client := newFakeNMIRebillGateway(t)
-	fake.saleBody.Store("response=2&responsetext=Stolen card&response_code=252")
+	fake, client := newFakeNMIRebillGateway(t, fx)
+	fake.saleBody.Store("response=2&responsetext=Insufficient funds&response_code=202")
 
 	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
 	require.NoError(t, err)
 	assert.Equal(t, StatusFailedTerminal, row.Status)
-	assert.Contains(t, string(row.ResultEvidence), `"response_code": 252`)
-	assert.Equal(t, "past_due", string(fx.subscription(t).Status), "decline lifecycle handling belongs to the dunning worker")
+	assert.Contains(t, string(row.ResultEvidence), `"response_code": 202`)
+	assert.Equal(t, "past_due", string(fx.subscription(t).Status), "retryable refusal retains the subscription")
+	assert.EqualValues(t, 2, *fx.subscription(t).RetryAttempts, "decline policy committed with the terminal result")
+	assert.NotNil(t, fx.subscription(t).NextRetryAt)
 }
 
 // TestManualRebillRecoveredSubscriptionSupersedes: a parked charge for a
@@ -315,7 +374,7 @@ func TestManualRebillDeclineIsTerminalWithEvidence(t *testing.T) {
 // relevance check instead of firing a stale charge.
 func TestManualRebillRecoveredSubscriptionSupersedes(t *testing.T) {
 	fx := seedPastDueSubscription(t)
-	fake, client := newFakeNMIRebillGateway(t)
+	fake, client := newFakeNMIRebillGateway(t, fx)
 
 	row, err := fx.rebillRunner(client, limitedModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
 	require.NoError(t, err)
@@ -333,7 +392,8 @@ func TestManualRebillRecoveredSubscriptionSupersedes(t *testing.T) {
 	require.NoError(t, err)
 
 	got := fx.intentByID(t, row.ID)
-	assert.Equal(t, StatusSuperseded, got.Status)
+	assert.Equal(t, StatusFailedTerminal, got.Status)
+	assert.Contains(t, string(got.ResultEvidence), `"not_executed": true`)
 	assert.Zero(t, fake.saleCalls.Load(), "a recovered subscription must never be re-charged")
 }
 
@@ -342,7 +402,7 @@ func TestManualRebillRecoveredSubscriptionSupersedes(t *testing.T) {
 // stale dunning charge even while the subscription still reads past_due.
 func TestManualRebillPaidPeriodSupersedes(t *testing.T) {
 	fx := seedPastDueSubscription(t)
-	fake, client := newFakeNMIRebillGateway(t)
+	fake, client := newFakeNMIRebillGateway(t, fx)
 
 	_, err := fx.db.Pool().Exec(context.Background(), `
 		INSERT INTO openrails.payments
@@ -356,7 +416,8 @@ func TestManualRebillPaidPeriodSupersedes(t *testing.T) {
 
 	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
 	require.NoError(t, err)
-	assert.Equal(t, StatusSuperseded, row.Status)
+	assert.Equal(t, StatusFailedTerminal, row.Status)
+	assert.Contains(t, string(row.ResultEvidence), `"not_executed": true`)
 	assert.Zero(t, fake.saleCalls.Load(), "a paid billing period must never be re-charged")
 	assert.Zero(t, fake.queryCalls.Load(), "local payment evidence supersedes without a provider call")
 }
@@ -366,7 +427,7 @@ func TestManualRebillPaidPeriodSupersedes(t *testing.T) {
 // stale period.
 func TestManualRebillWindowExpiryNeverFires(t *testing.T) {
 	fx := seedPastDueSubscription(t)
-	fake, client := newFakeNMIRebillGateway(t)
+	fake, client := newFakeNMIRebillGateway(t, fx)
 
 	params := fx.enqueueParams(1)
 	expired := time.Now().Add(-time.Hour).UTC()

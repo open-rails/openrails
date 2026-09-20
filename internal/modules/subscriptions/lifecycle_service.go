@@ -632,30 +632,46 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 	if params == nil || strings.TrimSpace(params.TransactionID) == "" {
 		return errors.New("confirmed charge requires a transaction id")
 	}
+	if params.Prepared != nil {
+		ctx = db.WithPSPID(ctx, params.Prepared.PSPID)
+	}
 	return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		db := db.NewWithPgxTx(tx)
 		subscription, err := NewSubscriptionRepo(db).GetByPSPSubscriptionIDForUpdate(ctx, string(params.Rail), params.RailSubscriptionID)
 		if err != nil {
 			return fmt.Errorf("subscription not found: %w", err)
 		}
-		price, err := catalog.NewPriceService(db).GetByID(ctx, subscription.PriceID)
-		if err != nil {
-			return fmt.Errorf("failed to get price: %w", err)
-		}
+		priceID := subscription.PriceID
+		snapshot := models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot)
 		amount, currency := params.Amount, strings.TrimSpace(params.Currency)
-		if amount <= 0 {
-			amount = price.Amount
+		if terms := params.Prepared; terms != nil {
+			if err := terms.Validate(); err != nil {
+				return err
+			}
+			if subscription.ID != terms.SubscriptionID || subscription.CustomerID != terms.CustomerID || subscription.PspID != terms.PSPID || !params.AmountProvided || amount != terms.Amount || currency != terms.Currency {
+				return errors.New("confirmed charge does not match the accepted cancelled subscription")
+			}
+			priceID, snapshot = terms.PriceID, models.CloneEntitlementsSpec(terms.Entitlements)
+		} else {
+			price, err := catalog.NewPriceService(db).GetByID(ctx, subscription.PriceID)
+			if err != nil {
+				return fmt.Errorf("failed to get price: %w", err)
+			}
+			if amount <= 0 {
+				amount = price.Amount
+			}
+			if currency == "" {
+				currency = price.Currency
+			}
 		}
-		if currency == "" {
-			currency = price.Currency
-		}
+
 		now := s.now().UTC()
 		payment := &models.Payment{
-			ID: uuidutil.NewV7(), CustomerID: subscription.CustomerID, PriceID: price.ID, SubscriptionID: &subscription.ID,
+			ID: uuidutil.NewV7(), CustomerID: subscription.CustomerID, PriceID: priceID, SubscriptionID: &subscription.ID,
 			Rail: params.Rail, PspID: pspIDOf(subscription), TransactionID: params.TransactionID,
 			Amount: amount, ListAmount: amount, Currency: currency, Status: payments.PaymentStatusCompletedValue,
 			Metadata:                 map[string]any{"refund_review": "confirmed charge on a cancelled subscription"},
-			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
+			EntitlementsSpecSnapshot: snapshot,
 			AttemptKind:              func() *string { k := payments.AttemptRenewal; return &k }(),
 			MoneyMovement:            models.MoneyMovementRail, PurchasedAt: now, CreatedAt: now,
 		}
@@ -665,6 +681,16 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 		created, err := payments.NewPaymentService(db, s.Clock()).CreateIfNotExists(ctx, payment)
 		if err != nil {
 			return fmt.Errorf("failed to persist confirmed charge: %w", err)
+		}
+		if !created {
+			existing, err := payments.NewPaymentService(db, s.Clock()).GetByPSPTransactionID(ctx, params.Rail, params.TransactionID)
+			if err != nil {
+				return err
+			}
+			if existing.SubscriptionID == nil || *existing.SubscriptionID != subscription.ID || existing.CustomerID != subscription.CustomerID || existing.PriceID != priceID {
+				return errors.New("confirmed charge replay belongs to different accepted terms")
+			}
+			return validateCompletedPayment(existing, amount, currency)
 		}
 		if created {
 			log.WithContext(ctx).WithFields(log.Fields{
@@ -680,6 +706,9 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 // If a scheduled downgrade exists (ScheduledPriceID), it will be applied on renewal.
 func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, params *RenewMembershipParams) error {
 	notifications := make([]*models.NotificationQueue, 0, 1)
+	if params.Prepared != nil {
+		ctx = db.WithPSPID(ctx, params.Prepared.PSPID)
+	}
 	renewalApplied := false
 
 	log.WithContext(ctx).WithFields(log.Fields{
@@ -695,9 +724,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		notificationRepo := NewNotificationQueueRepo(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
-		entitlementService := s.newLifecycleEntitlementService(db)
 		paymentService := payments.NewPaymentService(db, s.Clock())
 
 		// Lock before checking terminal state or preparing a full-row update.
@@ -716,11 +743,15 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 		var price *models.Price
 		var oldProduct, newProduct *models.Product
-		oldEntitlementsSpec := models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot)
 		applyingDowngrade, planChangeApplied := false, false
+		preserveLifecycle := false
+		var acceptedPayment *models.Payment
 		if terms := params.Prepared; terms != nil {
 			if err := terms.Validate(); err != nil {
 				return err
+			}
+			if subscription.ID != terms.SubscriptionID || subscription.CustomerID != terms.CustomerID || subscription.PspID != terms.PSPID {
+				return errors.New("renewal scope does not match the accepted subscription")
 			}
 			if !params.AmountProvided || params.Amount != terms.Amount || params.Currency != terms.Currency || params.TransactionID == "" {
 				return errors.New("confirmed charge does not match the accepted renewal terms")
@@ -732,17 +763,19 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				if existing.SubscriptionID == nil || *existing.SubscriptionID != terms.SubscriptionID || existing.CustomerID != terms.CustomerID || existing.PriceID != terms.PriceID {
 					return errors.New("renewal transaction already belongs to different accepted terms")
 				}
-				return validateCompletedPayment(existing, terms.Amount, terms.Currency)
+				if err := validateCompletedPayment(existing, terms.Amount, terms.Currency); err != nil {
+					return err
+				}
+				acceptedPayment = existing
 			}
-			if !errors.Is(err, pgx.ErrNoRows) {
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("load accepted renewal payment: %w", err)
 			}
-			if err := applyRenewalTerms(ctx, db, subscription, *terms); err != nil {
+			preserveLifecycle, err = applyRenewalTerms(ctx, db, subscription, *terms)
+			if err != nil {
 				return err
 			}
 			price = &models.Price{ID: terms.PriceID, ProductID: terms.ProductID, Amount: terms.Amount, Currency: terms.Currency}
-			oldEntitlementsSpec = models.CloneEntitlementsSpec(terms.PreviousEntitlements)
-			oldProduct = &models.Product{ID: terms.FromProductID, EntitlementsSpec: oldEntitlementsSpec}
 			newProduct = &models.Product{ID: terms.ProductID, DisplayName: terms.ProductName, EntitlementsSpec: models.CloneEntitlementsSpec(terms.Entitlements)}
 			applyingDowngrade = terms.ScheduledPriceID != nil
 			planChangeApplied = terms.FromProductID != terms.ProductID
@@ -865,7 +898,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			currency = price.Currency
 		}
 
-		if params.TransactionID != "" {
+		if params.TransactionID != "" && acceptedPayment == nil {
 			now := s.now().UTC()
 			if !params.AmountProvided && params.Amount <= 0 {
 				// #651: recording a renewal payment with no charged amount supplied;
@@ -929,8 +962,10 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 					"transaction_id":  params.TransactionID,
 					"subscription_id": subscription.ID,
 					"rail":            params.Rail,
-				}).Info("Renewal already processed; skipping duplicate lifecycle mutation")
-				return nil
+				}).Info("Renewal payment already recorded")
+				if params.Prepared == nil {
+					return nil
+				}
 			}
 		}
 
@@ -972,161 +1007,23 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 		}
 
-		// Update subscription
-		subscription.Status = models.StatusActive
-		// Transaction IDs now stored in Purchase table
-		subscription.CurrentPeriodStartsAt = &periodStartsAt
-		subscription.CurrentPeriodEndsAt = &periodEndsAt
-		subscription.CancelledAt = nil
-		subscription.CancelType = nil
-		subscription.CancelFeedback = nil
-		subscription.EndedAt = nil
-		// Clear any dunning/grace fields on successful renewal.
-		subscription.ClearRetrySchedule()
-
-		if err := subService.Update(ctx, subscription); err != nil {
-			return fmt.Errorf("failed to update subscription: %w", err)
+		// Both observed and accepted inputs share one local effect writer.
+		// A payment row alone does not finish an accepted renewal.
+		productName := ""
+		if newProduct != nil {
+			productName = newProduct.DisplayName
+		}
+		notification, err := s.applyRenewalEffects(ctx, db, subscription, renewalEffects{
+			PeriodStart: periodStartsAt, PeriodEnd: periodEndsAt,
+			RevokeRemoved: params.Prepared != nil || applyingDowngrade || planChangeApplied,
+			Downgrade:     applyingDowngrade, ProductName: productName,
+			PreserveLifecycle: preserveLifecycle,
+		})
+		if err != nil {
+			return err
 		}
 		renewalApplied = true
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id":      subscription.ID,
-			"user_id":              subscription.CustomerID.String(),
-			"price_id":             price.ID,
-			"rail":                 subscription.Rail,
-			"rail_subscription_id": subscription.RailSubscriptionID,
-			"period_start":         periodStartsAt,
-			"period_end":           periodEndsAt,
-			"downgrade_applied":    applyingDowngrade,
-		}).Info("Updated subscription for renewal")
-
-		// Append the next paid entitlement window for the subscription's entitlements.
-		// Entitlement windows are immutable: renewals create new windows instead of extending existing ones.
-		entitlementsSpec := subscription.EntitlementsSpecSnapshot
-		if len(entitlementsSpec) == 0 && params.Prepared == nil {
-			effectiveProduct := newProduct
-			if effectiveProduct == nil {
-				effectiveProduct, err = productService.GetByID(ctx, price.ProductID)
-				if err != nil {
-					return fmt.Errorf("failed to get product for renewal: %w", err)
-				}
-			}
-			entitlementsSpec = effectiveProduct.EntitlementsSpec
-		}
-		if entitlementsSpec != nil {
-			notBefore := periodStartsAt.UTC()
-			endAt := periodEndsAt.UTC()
-			// A renewal whose period is ALREADY entirely elapsed (a months-
-			// stale backfill repair, e.g. the #367 liveness sync walking
-			// charged-but-silent periods forward) grants no access window —
-			// the period is over. Skipping the push (instead of letting
-			// PushNewEntitlement error on the uncoverable past window) keeps
-			// the payment backfill + period advance committing.
-			grantWindows := endAt.After(s.now().UTC())
-			if !grantWindows {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id": subscription.ID,
-					"period_end":      endAt,
-				}).Warn("Renewal period already elapsed; advancing lifecycle without granting entitlement windows")
-			}
-			for entName := range entitlementsSpec {
-				// If the subscription had rail-driven grace windows (e.g. CCBill dunning),
-				// remove them before pushing the next paid window. Otherwise, the grace tail can
-				// cause the paid push to be scheduled after grace or become a no-op.
-				grace := models.EntitlementSourceGrace
-				sid := subscription.ID
-				if err := entitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-					UserID:      subscription.CustomerID.String(),
-					Entitlement: entName,
-					SourceType:  &grace,
-					SourceID:    &sid,
-					Reason:      models.EntitlementRevokeSuperseded,
-				}); err != nil {
-					return fmt.Errorf("failed to clear grace entitlement %s on renewal: %w", entName, err)
-				}
-
-				if !grantWindows {
-					continue
-				}
-				if _, err := entitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
-					UserID:      subscription.CustomerID.String(),
-					Entitlement: entName,
-					NotBefore:   &notBefore,
-					EndAt:       &endAt,
-					SourceType:  models.EntitlementSourceSubscription,
-					SourceID:    subscription.ID,
-				}); err != nil {
-					return fmt.Errorf("failed to grant renewal entitlement %s: %w", entName, err)
-				}
-			}
-
-		}
-
-		// Handle entitlements for downgrade (and #813 cross-product plan
-		// changes — same diff: revoke what the old product had and the new
-		// one doesn't).
-		if (applyingDowngrade || planChangeApplied) && oldProduct != nil && newProduct != nil {
-			// Determine which entitlements to revoke (in old but not in new)
-			oldEnts := make(map[string]bool)
-			if len(oldEntitlementsSpec) == 0 {
-				oldEntitlementsSpec = oldProduct.EntitlementsSpec
-			}
-			for name := range oldEntitlementsSpec {
-				oldEnts[name] = true
-			}
-
-			newEnts := make(map[string]bool)
-			for name := range newProduct.EntitlementsSpec {
-				newEnts[name] = true
-			}
-
-			// Revoke entitlements that are in old product but not in new product
-			for entName := range oldEnts {
-				if !newEnts[entName] {
-					reason := models.EntitlementRevokeDowngrade
-					st := models.EntitlementSourceSubscription
-					sid := subscription.ID
-					if err := entitlementService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-						UserID:      subscription.CustomerID.String(),
-						Entitlement: entName,
-						SourceType:  &st,
-						SourceID:    &sid,
-						Reason:      reason,
-					}); err != nil {
-						log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-							"subscription_id": subscription.ID,
-							"entitlement":     entName,
-						}).Warn("Failed to revoke entitlement during downgrade")
-						return fmt.Errorf("failed to revoke entitlement %s during downgrade: %w", entName, err)
-					} else {
-						log.WithContext(ctx).WithFields(log.Fields{
-							"subscription_id": subscription.ID,
-							"entitlement":     entName,
-						}).Info("Revoked entitlement due to downgrade")
-					}
-				}
-			}
-
-			// Any new entitlements introduced by the downgrade target product are granted by the renewal push above.
-		}
-
-		// Notify user
-		eventType := models.NotificationPremiumRenewed
-		var notifData openrails.NotificationData
-		if applyingDowngrade && newProduct != nil {
-			notifData = openrails.NotificationData{DowngradeApplied: true, NewProduct: newProduct.DisplayName}
-		}
-
-		notification := &models.NotificationQueue{
-			ID:         uuidutil.NewV7(),
-			CustomerID: subscription.CustomerID,
-			EventType:  eventType,
-			Data:       notifData,
-		}
-		if err := notificationRepo.Create(ctx, notification); err != nil {
-			return fmt.Errorf("create membership renewed notification: %w", err)
-		} else {
-			notifications = append(notifications, notification)
-		}
+		notifications = append(notifications, notification)
 
 		return nil
 	})
@@ -2327,7 +2224,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			Data:       data,
 		}
 		if err := notificationRepo.Create(ctx, notification); err != nil {
-			log.WithContext(ctx).WithError(err).Error("failed to create payment failed notification")
+			return fmt.Errorf("create payment failed notification: %w", err)
 		} else {
 			notifications = append(notifications, notification)
 		}
