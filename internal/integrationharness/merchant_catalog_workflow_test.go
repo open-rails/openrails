@@ -160,11 +160,12 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 	t.Run("authority_and_refusals", func(t *testing.T) {
 		path := f.surface.BaseURL + "/v1/merchant/catalog/products"
 		reader := f.surface.MintAPIKey(f.merchant.MerchantSlug, "catalog-reader", []string{controlplane.PermMerchantCatalogRead})
+		unscoped := f.surface.MintAPIKey(f.merchant.MerchantSlug, "customer-settings-only", []string{controlplane.PermMerchantCustomerSettingsRead})
 		for _, row := range []struct {
 			method, token string
 			want          int
 		}{
-			{http.MethodGet, "", http.StatusUnauthorized}, {http.MethodPost, reader, http.StatusForbidden},
+			{http.MethodGet, "", http.StatusUnauthorized}, {http.MethodGet, unscoped, http.StatusForbidden}, {http.MethodPost, reader, http.StatusForbidden},
 		} {
 			status, raw := requestJSON(t, row.method, path, row.token, map[string]any{"key": "denied", "display_name": "Denied"})
 			require.Equal(t, row.want, status, string(raw))
