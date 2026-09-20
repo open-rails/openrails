@@ -80,6 +80,6 @@ done
 psql_file "$VET_URL" internal/db/schema/profiles_shim.sql 1>&2
 # Use the same runner as application startup so migratekit owns its tracker DDL.
 go run github.com/open-rails/migratekit/cmd/migratekit apply \
-    -dsn "$VET_URL" -app openrails -schema openrails -dir migrations/postgres 1>&2
+    -dsn "$VET_URL" -app openrails -schema openrails -dir internal/migrate/postgres 1>&2
 
 printf '%s\n' "$VET_URL"

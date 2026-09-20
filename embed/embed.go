@@ -59,6 +59,12 @@ type Options struct {
 	// driving rail pushes against a fake Stripe. Refused with a live posture.
 	// Process-wide: this does not independently route concurrent runtimes.
 	StripeTransport http.RoundTripper
+	// UserDirectory and UsernameResolver are optional host identity adapters.
+	// OpenRails does not assume ownership of AuthKit's profiles schema; hosts
+	// opt in explicitly when they need notification email or CCBill username
+	// resolution.
+	UserDirectory    openrails.UserDirectory
+	UsernameResolver openrails.UsernameResolver
 }
 
 // Runtime is the in-process engine: Client() for the shared client, Handler()
@@ -108,9 +114,11 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		return nil, fmt.Errorf("openrails embed: Options.StripeTransport is a test seam and is refused with config.TestMode=live")
 	}
 	application, err := app.BootstrapWithOptions(ctx, opts.Config, &app.BootstrapOptions{
-		PGXPool: opts.PGXPool,
-		Redis:   opts.Redis,
-		Cache:   opts.Cache,
+		PGXPool:          opts.PGXPool,
+		Redis:            opts.Redis,
+		Cache:            opts.Cache,
+		UserDirectory:    opts.UserDirectory,
+		UsernameResolver: opts.UsernameResolver,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)

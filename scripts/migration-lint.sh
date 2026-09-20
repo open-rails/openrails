@@ -33,7 +33,7 @@ fi
 all_migrations=()
 while IFS= read -r migration; do
     [ -n "$migration" ] && all_migrations+=("$migration")
-done < <(ls migrations/postgres/*.up.sql 2>/dev/null || true)
+done < <(ls internal/migrate/postgres/*.up.sql 2>/dev/null || true)
 if [ "${#all_migrations[@]}" -eq 0 ]; then
     echo "migration-lint: no migrations found at all — the layout moved. Fix that before trusting this gate." 1>&2
     exit 1
@@ -61,7 +61,7 @@ fi
 # into "0 issues" and a green gate. A gate that cannot go red is worth less than
 # no gate, because it is believed.
 set +e
-report="$("$BIN" 'migrations/postgres/*.up.sql' 2>&1)"
+report="$("$BIN" 'internal/migrate/postgres/*.up.sql' 2>&1)"
 status=$?
 set -e
 

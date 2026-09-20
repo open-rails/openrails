@@ -3,72 +3,77 @@ package migrate
 import (
 	"context"
 	"database/sql"
-
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 
-	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 
-	authpostgres "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
-	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
+	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
 	log "github.com/sirupsen/logrus"
 )
 
-// RunPostgres applies all Postgres migrations:
-// 0. bootstrap schema/extensions, 1. AuthKit (`profiles` schema), 2. River
-// (`public`, #545), 3. OpenRails (billing schema).
+// RunPostgres applies OpenRails' own Postgres migrations and its River schema.
+// AuthKit is a separate dependency and owns its own schema migrations.
 func RunPostgres(ctx context.Context, cfg *config.Config) error {
 	if cfg == nil || cfg.DB == nil {
 		return fmt.Errorf("missing database config")
 	}
 
-	// migratekit drives a database/sql handle; open one over the pgx stdlib
-	// driver for the duration of the migration run.
-	sqlDB, err := sql.Open("pgx", cfg.DB.GetConnectionString())
+	pool, err := db.NewPGXPoolWithRetry(ctx, cfg.DB.GetConnectionString())
 	if err != nil {
 		return fmt.Errorf("open db: %w", err)
 	}
+	defer pool.Close()
+	return ApplyPostgresMigrations(ctx, pool, cfg.DB.SchemaName())
+}
+
+// ApplyPostgresMigrations applies OpenRails' embedded billing migrations and
+// the River migrations it owns. The pool must use a role permitted to create
+// the configured schema, extensions, roles, and RLS policy objects. AuthKit's
+// profiles schema is deliberately outside this package: callers initialize it
+// through AuthKit's own embedded migration API.
+func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, schema string) error {
+	if pool == nil {
+		return fmt.Errorf("missing postgres pool")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	sqlDB := stdlib.OpenDBFromPool(pool)
 	defer func() { _ = sqlDB.Close() }()
 
 	// Effective OpenRails schema (defaults to `openrails`). Validated as a safe
 	// identifier during config load (#165).
-	schema := cfg.DB.SchemaName()
+	if schema == "" {
+		schema = config.DefaultSchema
+	}
 
 	// ---------- 0. Bootstrap schema/extensions ----------
 	if err := ensurePostgresBootstrap(ctx, sqlDB, schema); err != nil {
 		return fmt.Errorf("postgres bootstrap failed: %w", err)
 	}
 
-	// ---------- 1. AuthKit Migrations (profiles schema) ----------
-	log.Info("Running AuthKit migrations (profiles schema)...")
-	authMigrations, err := migratekit.LoadFromFS(authpostgres.FS)
-	if err != nil {
-		return fmt.Errorf("authkit: load migrations: %w", err)
-	}
-	if err := migratekit.NewPostgres(sqlDB, "authkit").WithSchema("profiles").ApplyMigrations(ctx, authMigrations); err != nil {
-		return fmt.Errorf("authkit: apply migrations: %w", err)
-	}
-	log.Info("✓ AuthKit migrations completed successfully")
-
-	// ---------- 2. River Migrations (always `public`, #545) ----------
+	// ---------- 1. River Migrations (always `public`, #545) ----------
 	// River job-queue tables live in `public` (config.RiverSchema), NOT the
 	// OpenRails billing schema, so the billing schema stays 100% portable for the
 	// embedded↔standalone data move (#544). Must match the runtime client schema
 	// (app.standaloneRiverSchema).
 	log.Infof("Running River migrations (schema %q)...", config.RiverSchema)
-	if err := runRiverMigrations(ctx, cfg, config.RiverSchema); err != nil {
+	if err := runRiverMigrationsPool(ctx, pool, config.RiverSchema); err != nil {
 		return fmt.Errorf("river migrations failed: %w", err)
 	}
 
-	// ---------- 3. OpenRails Migrations (OpenRails schema) ----------
+	// ---------- 2. OpenRails Migrations (OpenRails schema) ----------
 	log.Infof("Running OpenRails migrations (schema %q)...", schema)
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	if err != nil {
@@ -247,14 +252,13 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
-// runRiverMigrations executes River's built-in schema migrations
-func runRiverMigrations(ctx context.Context, cfg *config.Config, schema string) error {
-	pgxPool, err := db.NewPGXPoolWithRetry(ctx, cfg.DB.GetConnectionString())
-	if err != nil {
-		return fmt.Errorf("create pgx pool: %w", err)
+// runRiverMigrationsPool executes River's built-in schema migrations over the
+// caller's pool. Keeping this in the OpenRails migration package means the
+// consumer never needs to import rivermigrate either.
+func runRiverMigrationsPool(ctx context.Context, pgxPool *pgxpool.Pool, schema string) error {
+	if pgxPool == nil {
+		return fmt.Errorf("missing postgres pool")
 	}
-	defer pgxPool.Close()
-
 	riverCfg := &rivermigrate.Config{}
 	if schema != "" && schema != "public" {
 		riverCfg.Schema = schema

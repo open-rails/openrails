@@ -41,31 +41,25 @@ flowchart LR
 go get github.com/open-rails/openrails
 ```
 
-Migrations ship in the module as an embedded FS. Apply them from your own migration
-step with [migratekit](https://github.com/open-rails/migratekit):
+OpenRails owns its migration source and applies it through one explicit
+initialization call. Your application supplies the privileged pool used for
+schema initialization; it does not import migratekit or OpenRails' migration
+files:
 
 ```go
-import (
-    "github.com/open-rails/openrails/config"
-    postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
-)
-
-migratekit.MigrationSource{
-    App:    config.MigratekitApp, // tracking key "openrails"
-    FS:     postgresmigrations.FS,
-    Schema: "openrails",
+if err := embed.ApplyMigrations(ctx, migrationPool, "openrails"); err != nil {
+    return fmt.Errorf("initialize OpenRails database: %w", err)
 }
 ```
 
-Apply sibling migration chains in this order: **AuthKit (`profiles`), River
-(`public`), then OpenRails (`openrails`)**. The OpenRails baseline tolerates an
-absent sibling schema so isolated schema tests can apply it, but skipped grants
-are not retroactive: an embedded runtime needs AuthKit's schema to exist before
-OpenRails grants `openrails_app` access to it. Run every chain with the same
-owner/migration role so the default privileges also cover later sibling tables.
+Initialize AuthKit separately through AuthKit's own embedded migration API.
+`embed.ApplyMigrations` applies OpenRails' billing chain and the River chain
+used by `RiverManagedByOpenRails`, in the order OpenRails requires. A
+`RiverFromHost` integration is the explicit low-level exception: the host owns
+that River client's schema and migration lifecycle.
 
-The engine never runs migrations itself — it validates the tracking key at boot and
-refuses to start if any migration is missing.
+The engine validates the tracking key at boot and refuses to start if any
+OpenRails migration is missing or orphaned.
 
 ### 3. Config
 

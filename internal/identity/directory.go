@@ -19,6 +19,12 @@ import (
 	"github.com/google/uuid"
 )
 
+// UsernameResolver is the optional host identity lookup used by the CCBill
+// username bridge. OpenRails does not construct one implicitly.
+type UsernameResolver interface {
+	GetUserIDByUsername(ctx context.Context, username string) (string, error)
+}
+
 // UserDirectory is the host-injectable view of the user store that billing
 // depends on. It is deliberately tiny: only the facts billing actually reads.
 // All methods are read-only.

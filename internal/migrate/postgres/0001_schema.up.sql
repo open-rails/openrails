@@ -36,16 +36,11 @@ CREATE SCHEMA IF NOT EXISTS openrails;
 GRANT USAGE ON SCHEMA openrails TO openrails_app;
 
 -- ---------------------------------------------------------------------------
--- Cross-schema grants (#764): openrails_app also drives River's job-queue
--- tables (`public`, config.RiverSchema) and AuthKit's `profiles` schema — both
--- sibling-owned, independently-versioned schemas. This runs as step 3 of
--- internal/migrate.RunPostgres, AFTER step 1 (AuthKit migrations, creates
--- `profiles`) and step 2 (River migrations, creates the tables below), so
--- every object granted here already exists on a real boot. A from-scratch or
--- test-only harness that applies OpenRails' own migrations without also
--- running River's/AuthKit's separate migrators must not fail here — the
--- guarded DO block below and the prospective ALTER DEFAULT PRIVILEGES still
--- cover those tables the moment they get created by this same role.
+-- Cross-schema grants (#764): openrails_app drives River's job-queue tables
+-- (`public`, config.RiverSchema), which are OpenRails-managed runtime state.
+-- AuthKit's profiles schema is sibling-owned and independently versioned; this
+-- migration never creates it or grants access to it. AuthKit's initialization
+-- API is responsible for its own schema and access policy.
 -- ---------------------------------------------------------------------------
 
 -- River (public schema). Least-privilege: name the actual tables the runtime
@@ -83,24 +78,6 @@ GRANT SELECT ON TABLE public.migrations TO openrails_app;
 -- (scoped to that role, implicitly) covers them without a follow-up migration.
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openrails_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO openrails_app;
-
--- AuthKit (profiles schema) — a sibling-owned, independently-versioned schema
--- (github.com/open-rails/authkit's own migrations). Unlike River, granted at
--- the SCHEMA boundary rather than by table name: this repo does not own or
--- want to track AuthKit's internal table shape, exactly as openrails.* is
--- granted at the openrails schema boundary above. Embedded hosts must migrate
--- AuthKit first so these grants land; the guard lets an isolated OpenRails
--- schema harness apply without inventing a sibling-owned profiles schema.
-DO $$
-BEGIN
-  IF to_regnamespace('profiles') IS NOT NULL THEN
-    GRANT USAGE ON SCHEMA profiles TO openrails_app;
-    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA profiles TO openrails_app;
-    GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA profiles TO openrails_app;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA profiles GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openrails_app;
-    ALTER DEFAULT PRIVILEGES IN SCHEMA profiles GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO openrails_app;
-  END IF;
-END $$;
 
 -- ---------------------------------------------------------------------------
 -- Types

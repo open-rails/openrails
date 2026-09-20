@@ -21,7 +21,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
-	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
+	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

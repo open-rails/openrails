@@ -6,7 +6,7 @@ import (
 	"context"
 	"testing"
 
-	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
+	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -444,7 +444,7 @@ func TestGAP10_UniqueIndexesAreMerchantScoped(t *testing.T) {
 		require.NoError(t, rows.Scan(&tbl, &idx, &def))
 		seen++
 		// ONE exemption list, shared with the migration-text guard
-		// (migrations/postgres/unique_scope_exemptions.go). A surrogate-id
+		// (internal/migrate/postgres/unique_scope_exemptions.go). A surrogate-id
 		// primary key is not a tenancy statement; every other exception is
 		// named there with a reason.
 		if postgresmigrations.UniqueScopeExemptDef(idx, def) {

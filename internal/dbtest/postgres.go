@@ -32,6 +32,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
+	authkitembedded "github.com/open-rails/authkit/embedded"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -280,18 +281,23 @@ func bootstrapAndMigrate(ctx context.Context, dsn string) error {
 		return fmt.Errorf("wait for postgres: %w", err)
 	}
 
-	// migrate.RunPostgres owns the full schema: ensurePostgresBootstrap creates
-	// the configured OpenRails schema (default openrails) + pgcrypto, then the authkit migrations create the
-	// profiles schema and all of its tables (users, *_roles, the role_id()
-	// function, etc.). We deliberately do NOT pre-create any profiles tables —
-	// doing so shadows authkit's own migration-managed definitions and breaks
-	// later authkit migrations (e.g. missing users.phone_number).
+	// Each library owns its own migration source. AuthKit initializes profiles;
+	// OpenRails initializes billing and its managed River tables. The harness
+	// intentionally does not import either package's embedded migration FS.
 	cfg := &config.Config{
 		Env: "dev",
 		DB:  &config.DBConfig{URL: dsn},
 	}
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("open postgres pool for AuthKit migrations: %w", err)
+	}
+	defer pool.Close()
+	if err := authkitembedded.ApplyMigrations(ctx, pool, "profiles"); err != nil {
+		return fmt.Errorf("apply AuthKit migrations: %w", err)
+	}
 	if err := migrate.RunPostgres(ctx, cfg); err != nil {
-		return fmt.Errorf("run migrations: %w", err)
+		return fmt.Errorf("apply OpenRails migrations: %w", err)
 	}
 
 	// Seed the canonical test merchant once per provisioned DB so every test has a

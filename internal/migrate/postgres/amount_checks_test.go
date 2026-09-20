@@ -14,7 +14,7 @@ import (
 // comments and payments schema).
 //
 // This is a static test: it validates the migration file content, not a live
-// database. Run `bash scripts/test_integration.sh ./migrations/postgres` to
+// database. Run `bash scripts/test_integration.sh ./internal/migrate/postgres` to
 // also verify apply-time correctness.
 func TestAmountValueChecks(t *testing.T) {
 	files, err := fs.Glob(FS, "0001_*.sql")

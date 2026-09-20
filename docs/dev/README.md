@@ -70,7 +70,7 @@ rule PREPAREs every query) need a live Postgres whose schema matches
   `127.0.0.1:5434`; override via `SQLC_ADMIN_DATABASE_URL`,
   `SQLC_POSTGRES_HOST`, `POSTGRES_HOST_PORT`, `SQLC_VET_DB`) and applies
   `migrations/bootstrap/`, the `profiles` shim (`internal/db/schema/profiles_shim.sql`,
-  standing in for AuthKit's schema), then `migrations/postgres/*.up.sql` in order.
+  standing in for AuthKit's schema), then `internal/migrate/postgres/*.up.sql` in order.
 
 So the usual loop: `task docker-up`, edit queries or migrations, `task sqlc`,
 commit the regenerated `internal/db/gen`. CI runs `task sqlc-check` and fails
@@ -78,7 +78,7 @@ if generated code is stale.
 
 ## Migrations
 
-`migrations/postgres/0001_schema.up.sql` is a single squashed baseline
+`internal/migrate/postgres/0001_schema.up.sql` is a single squashed baseline
 (greenfield — no numbered history before it); new migrations continue from
 `0002_*`. `migrations/bootstrap/` holds instance-level init that runs before
 the app migrations. Schema-shape invariants are enforced by Go tests that live

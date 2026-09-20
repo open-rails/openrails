@@ -13,10 +13,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for the migration bootstrap
-	authpgmigrations "github.com/open-rails/authkit/migrations/postgres"
+	authkitembedded "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/config"
-	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
+	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -61,9 +61,10 @@ func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Contex
 	`)
 	require.NoError(t, err)
 
-	authMigrations, err := migratekit.LoadFromFS(authpgmigrations.FS)
+	profilesPool, err := pgxpool.New(ctx, superDSN)
 	require.NoError(t, err)
-	require.NoError(t, migratekit.NewPostgres(sqlDB, "authkit").WithSchema("profiles").ApplyMigrations(ctx, authMigrations))
+	t.Cleanup(profilesPool.Close)
+	require.NoError(t, authkitembedded.ApplyMigrations(ctx, profilesPool, "profiles"))
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	require.NoError(t, err)
 	m := migratekit.NewPostgres(sqlDB, config.MigratekitApp).WithSchema(config.DefaultSchema)

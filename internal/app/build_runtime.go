@@ -20,16 +20,17 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/migratekit"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/integrations/pyth"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/migrate"
+	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -54,7 +55,6 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 )
 
 const (
@@ -80,9 +80,11 @@ func standaloneRiverSchema(_ *config.Config) string {
 }
 
 type runtimeOverrides struct {
-	DB    *db.DB
-	Redis *redis.Client
-	Clock clockwork.Clock
+	DB               *db.DB
+	Redis            *redis.Client
+	Clock            clockwork.Clock
+	UserDirectory    openrails.UserDirectory
+	UsernameResolver openrails.UsernameResolver
 }
 
 // effectiveSolanaNetwork derives the Solana network purely from the test_mode
@@ -229,7 +231,13 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		MerchantsFn: merchantsFn,
 	}
 
-	serviceInstances, err := createServices(database, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider)
+	var userDirectory openrails.UserDirectory
+	var usernameResolver openrails.UsernameResolver
+	if overrides != nil {
+		userDirectory = overrides.UserDirectory
+		usernameResolver = overrides.UsernameResolver
+	}
+	serviceInstances, err := createServices(database, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider, usernameResolver)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +253,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 				serviceInstances.SubscriptionService,
 				serviceInstances.ProductService,
 				serviceInstances.PriceService,
-				identity.NewProfilesDirectory(identity.NewProfileRepo(database)),
+				// OpenRails does not own the host identity schema. A host that
+				// wants subscription emails must wire its UserDirectory through
+				// its own integration boundary; leaving this nil makes email
+				// lookup fail closed instead of silently depending on AuthKit's
+				// profiles tables or grants.
+				userDirectory,
 			)
 		}
 	}
@@ -666,7 +679,7 @@ func alertingDashboardBaseURL(cfg *config.Config) string {
 	return base
 }
 
-func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) (*servicesInstances, error) {
+func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver openrails.UsernameResolver) (*servicesInstances, error) {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
@@ -707,8 +720,6 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		Clock:      clock,
 	})
 	railCustomerService := payments.NewRailCustomerService(database)
-	profileRepo := identity.NewProfileRepo(database)
-
 	// Create FX provider for Solana token quoting and policy-currency admission.
 	// Runtime enforcement reads fresh cross-currency rates from Redis; same-currency
 	// paths do not require FX.
@@ -840,7 +851,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		SubscriptionService:          subscriptionService,
 		PaymentService:               purchaseService,
 		SubscriptionLifecycleService: subscriptionLifecycleService,
-		ProfileRepo:                  profileRepo,
+		ProfileRepo:                  usernameResolver,
 		DeduplicationService:         deduplicationService,
 		RailCustomerService:          railCustomerService,
 		RailConfigs:                  railConfigs,
