@@ -31,6 +31,7 @@ import (
 // uses to bind an operator receipt: Direct Post sale (always an uncertain
 // 421 here), the Query API order search, and the v5 exact payment read.
 type fakeNMIReceiptGateway struct {
+	saleResponse string
 	queryStarted chan struct{}
 	queryGate    chan struct{}
 	queryCalls   int
@@ -80,6 +81,10 @@ func newFakeNMIReceiptGateway(t *testing.T) (*fakeNMIReceiptGateway, *httptest.S
 				conn, _, herr := w.(http.Hijacker).Hijack()
 				require.NoError(t, herr)
 				_ = conn.Close()
+				return
+			}
+			if f.saleResponse != "" {
+				fmt.Fprint(w, f.saleResponse)
 				return
 			}
 			fmt.Fprint(w, "response=3&responsetext=Communication+error&response_code=421")

@@ -84,6 +84,8 @@ func (r Resolution) Record(at time.Time) map[string]any {
 	return out
 }
 
+type operatorResolutionContextKey struct{}
+
 // RejectResolution wraps a handler's reason for refusing operator evidence.
 func RejectResolution(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrResolutionRejected, fmt.Sprintf(format, args...))
@@ -127,6 +129,7 @@ func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolutio
 		return row, ErrResolutionBusy
 	}
 	ctx = pinIntentAddress(ctx, claimed)
+	ctx = context.WithValue(ctx, operatorResolutionContextKey{}, resolution.Record(now))
 	logEntry := r.resolutionLog(ctx, claimed, resolution)
 	stopBeat := r.renewClaimWhile(ctx, logEntry, claimed.ID)
 	outcome, rerr := resolver.Resolve(ctx, claimed, resolution)
@@ -159,6 +162,7 @@ func (r *Runner) resolveUnsent(ctx context.Context, row gen.OpenrailsRailIntent,
 		return row, ErrResolutionBusy
 	}
 	ctx = pinIntentAddress(ctx, claimed)
+	ctx = context.WithValue(ctx, operatorResolutionContextKey{}, resolution.Record(now))
 	logEntry := r.resolutionLog(ctx, claimed, resolution)
 	stopBeat := r.renewClaimWhile(ctx, logEntry, claimed.ID)
 	outcome, rerr := resolver.ResolveUnsent(ctx, claimed, resolution)
