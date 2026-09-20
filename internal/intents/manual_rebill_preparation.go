@@ -35,8 +35,10 @@ func snapshotRebillPreparation(in gen.OpenrailsRailIntent, p ManualRebillPayload
 	if strings.TrimSpace(remote.DelayedCondition) != "active" {
 		return out, errors.New("provider subscription is not active")
 	}
-	switch remote.PausedSubscription {
-	case false, "0", float64(0):
+	// This provider boolean arrives as false, "0", or numeric 0. Its text
+	// form avoids routing any monetary value through floating-point arithmetic.
+	switch fmt.Sprint(remote.PausedSubscription) {
+	case "false", "0":
 	default:
 		return out, errors.New("provider subscription is paused or has no qualified pause state")
 	}

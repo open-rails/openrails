@@ -33,15 +33,19 @@ import (
 // API answers recurring=rebill_subscription sales, the Query API answers the
 // order_id transaction search.
 type fakeNMIRebillGateway struct {
-	saleBody    atomic.Value // string Direct Post response
-	saleStatus  atomic.Int64 // optional HTTP status (0 = 200)
-	charged     atomic.Bool  // query reports a successful sale for the order id
-	saleCalls   atomic.Int64
-	queryCalls  atomic.Int64
-	saleAuthKey atomic.Value // security_key the last sale authenticated with (#730)
-	saleForm    atomic.Value // url.Values: full form of the last sale (#297 wire assertions)
-	txnID       string
-	orderID     atomic.Value
+	saleBody           atomic.Value // string Direct Post response
+	saleStatus         atomic.Int64 // optional HTTP status (0 = 200)
+	charged            atomic.Bool  // query reports a successful sale for the order id
+	saleCalls          atomic.Int64
+	queryCalls         atomic.Int64
+	saleAuthKey        atomic.Value // security_key the last sale authenticated with (#730)
+	saleForm           atomic.Value // url.Values: full form of the last sale (#297 wire assertions)
+	txnID              string
+	orderID            atomic.Value
+	amount             atomic.Value
+	updateCalls        atomic.Int64
+	updateForm         atomic.Value
+	loseUpdateResponse atomic.Bool
 }
 
 func newFakeNMIRebillGateway(t *testing.T, fx rebillFixture) (*fakeNMIRebillGateway, *nmi.NMIClient) {
@@ -49,10 +53,11 @@ func newFakeNMIRebillGateway(t *testing.T, fx rebillFixture) (*fakeNMIRebillGate
 	f := &fakeNMIRebillGateway{txnID: "txn-rebill-" + uuid.NewString()[:8]}
 	f.saleBody.Store("response=1&transactionid=" + f.txnID)
 	f.orderID.Store(fx.orderRef)
+	f.amount.Store("9.99")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/subscriptions/") {
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": fx.payload.RailSubscriptionID, "amount": "9.99", "customer_vault_id": fx.payload.Instrument.RailCustomerRef, "delayed_condition": "active", "paused_subscription": "0", "next_billing_date": fx.payload.Renewal.PeriodEnd.UTC().Format("2006-01-02"), "plan": map[string]any{"id": "plan-" + fx.subID.String(), "plan_amount": "9.99", "plan_payments": "0", "day_frequency": "30"}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": fx.payload.RailSubscriptionID, "amount": f.amount.Load().(string), "customer_vault_id": fx.payload.Instrument.RailCustomerRef, "delayed_condition": "active", "paused_subscription": "0", "next_billing_date": fx.payload.Renewal.PeriodEnd.UTC().Format("2006-01-02"), "plan": map[string]any{"id": "plan-" + fx.subID.String(), "plan_amount": f.amount.Load().(string), "plan_payments": "0", "day_frequency": "30"}})
 			return
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/payments/"+f.txnID {
@@ -60,7 +65,7 @@ func newFakeNMIRebillGateway(t *testing.T, fx rebillFixture) (*fakeNMIRebillGate
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": f.txnID, "amount": "9.99", "currency": "USD", "response": "1", "customer_vault_id": fx.payload.Instrument.RailCustomerRef, "actions": []map[string]any{{"type": "sale", "amount": "9.99", "success": true, "response": "1"}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": f.txnID, "amount": f.amount.Load().(string), "currency": "USD", "response": "1", "customer_vault_id": fx.payload.Instrument.RailCustomerRef, "actions": []map[string]any{{"type": "sale", "amount": f.amount.Load().(string), "success": true, "response": "1"}}})
 			return
 		}
 		_ = r.ParseForm()
@@ -75,6 +80,17 @@ func newFakeNMIRebillGateway(t *testing.T, fx rebillFixture) (*fakeNMIRebillGate
 			} else {
 				fmt.Fprint(w, `<nm_response></nm_response>`)
 			}
+			return
+		}
+		if r.Form.Get("recurring") == "update_subscription" {
+			f.updateCalls.Add(1)
+			f.updateForm.Store(r.Form)
+			f.amount.Store(r.Form.Get("plan_amount"))
+			if f.loseUpdateResponse.Swap(false) {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			fmt.Fprint(w, "response=1")
 			return
 		}
 		if r.Form.Get("type") == "sale" {

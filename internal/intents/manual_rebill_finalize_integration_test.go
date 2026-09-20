@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"net/http"
+	"net/url"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -22,6 +24,119 @@ import (
 // handlerCtx pins what the runner pins before a handler call.
 func (fx rebillFixture) handlerCtx() context.Context {
 	return db.WithPSPID(merchant.WithID(context.Background(), merchant.ID(fx.merchantID)), fx.pspID)
+}
+
+func TestManualRebillAdmissionReusesOneUnresolvedOperation(t *testing.T) {
+	fx := seedPastDueSubscription(t)
+	gateway, client := newFakeNMIRebillGateway(t, fx)
+	gateway.saleStatus.Store(http.StatusBadGateway)
+	ctx := fx.handlerCtx()
+	h := NewManualRebillHandler(fx.db, fullModeConfig(), fakeNMIResolver{client: client}, nil)
+	start := make(chan struct{})
+	type result struct {
+		id  uuid.UUID
+		err error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() { <-start; row, err := h.EnqueueScheduled(ctx, fx.subID); results <- result{row.ID, err} }()
+	}
+	close(start)
+	first, second := <-results, <-results
+	require.NoError(t, first.err)
+	require.NoError(t, second.err)
+	require.Equal(t, first.id, second.id)
+	row, err := fx.rebillRunner(client, fullModeConfig()).ExecuteByID(ctx, first.id)
+	require.NoError(t, err)
+	require.Equal(t, StatusUnknownNeedsVerify, row.Status)
+	replayed, err := h.EnqueueScheduled(ctx, fx.subID)
+	require.NoError(t, err)
+	require.Equal(t, row.ID, replayed.ID)
+	require.JSONEq(t, string(row.Payload), string(replayed.Payload))
+	require.EqualValues(t, 1, gateway.saleCalls.Load())
+	gateway.charged.Store(true)
+	require.Equal(t, OutcomeSucceeded, h.Verify(ctx, row).Class)
+	require.EqualValues(t, 1, gateway.saleCalls.Load())
+}
+
+func TestManualRebillPaidCompletionRollsBackAndReplaysOffline(t *testing.T) {
+	fx := seedPastDueSubscription(t)
+	gateway, client := newFakeNMIRebillGateway(t, fx)
+	ctx := fx.handlerCtx()
+	h := NewManualRebillHandler(fx.db, fullModeConfig(), fakeNMIResolver{client: client}, nil)
+	accepted, err := h.EnqueueScheduled(ctx, fx.subID)
+	require.NoError(t, err)
+	admin := dbtest.SharedSuperuserPGXPool(t)
+	name := "fail_rebill_paid_" + uuid.NewString()[:8]
+	_, err = admin.Exec(ctx, fmt.Sprintf(`CREATE FUNCTION openrails.%s() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RAISE EXCEPTION 'injected paid terminal failure'; END$$;
+CREATE TRIGGER %s BEFORE UPDATE ON openrails.rail_intents FOR EACH ROW WHEN (NEW.id='%s'::uuid AND NEW.status='succeeded') EXECUTE FUNCTION openrails.%s()`, name, name, accepted.ID, name))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), fmt.Sprintf(`DROP FUNCTION IF EXISTS openrails.%s() CASCADE`, name))
+	})
+	row, err := fx.rebillRunner(client, fullModeConfig()).ExecuteByID(ctx, accepted.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusUnknownNeedsVerify, row.Status)
+	_, found, err := LoadCollectedReceipt(row)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Zero(t, fx.paymentsFor(t, gateway.txnID))
+	require.Equal(t, "past_due", string(fx.subscription(t).Status))
+	require.True(t, fx.subscription(t).CurrentPeriodEndsAt.Equal(fx.periodEnd))
+	_, err = admin.Exec(ctx, fmt.Sprintf(`DROP FUNCTION openrails.%s() CASCADE`, name))
+	require.NoError(t, err)
+	queries := gateway.queryCalls.Load()
+	gateway.charged.Store(false)
+	for range 2 {
+		require.Equal(t, OutcomeSucceeded, h.Verify(ctx, row).Class)
+	}
+	require.Equal(t, 1, fx.paymentsFor(t, gateway.txnID))
+	require.Equal(t, 1, fx.entitlementWindows(t))
+	require.Equal(t, queries, gateway.queryCalls.Load(), "local recovery uses retained facts")
+	require.EqualValues(t, 1, gateway.saleCalls.Load())
+}
+
+func TestManualRebillPreparesAcceptedPriceOnceBeforeCharging(t *testing.T) {
+	fx := seedPastDueSubscription(t)
+	ctx := fx.handlerCtx()
+	target := uuid.New()
+	_, err := fx.db.Pool().Exec(ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew,key) VALUES($1,$2,$3,8000000,'USD',720,true,$4)`, target, fx.merchantID, fx.payload.Renewal.ProductID, "target-"+target.String())
+	require.NoError(t, err)
+	_, err = fx.db.Pool().Exec(ctx, `INSERT INTO openrails.subscription_reprices(id,merchant_id,subscription_id,from_price_id,to_price_id,effective_at,status,kind) VALUES($1,$2,$3,$4,$5,$6,'scheduled','reprice')`, uuid.New(), fx.merchantID, fx.subID, fx.payload.Renewal.PriceID, target, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	gateway, client := newFakeNMIRebillGateway(t, fx)
+	gateway.loseUpdateResponse.Store(true)
+	h := NewManualRebillHandler(fx.db, fullModeConfig(), fakeNMIResolver{client: client}, nil)
+	accepted, err := h.EnqueueScheduled(ctx, fx.subID)
+	require.NoError(t, err)
+	runner := fx.rebillRunner(client, fullModeConfig())
+	row, err := runner.ExecuteByID(ctx, accepted.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusPending, row.Status, "an uncertain idempotent setup write has not submitted money")
+	require.Zero(t, gateway.saleCalls.Load())
+	require.EqualValues(t, 1, gateway.updateCalls.Load())
+	preparation, found, err := loadRebillPreparation(row)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "9.99", preparation.Amount, "preconditions remain the first observed provider state")
+	form := gateway.updateForm.Load().(url.Values)
+	require.Equal(t, "8.00", form.Get("plan_amount"))
+	require.Equal(t, fx.payload.RailSubscriptionID, form.Get("subscription_id"))
+	require.Empty(t, form.Get("plan_id"), "preparation must not mutate a shared plan")
+	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.rail_intents SET next_attempt_at=now() WHERE id=$1`, accepted.ID)
+	require.NoError(t, err)
+	row, err = runner.ExecuteByID(ctx, accepted.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusSucceeded, row.Status)
+	require.EqualValues(t, 1, gateway.updateCalls.Load(), "readback confirms the first setup write; retry does not replace its preconditions")
+	require.EqualValues(t, 1, gateway.saleCalls.Load())
+	retained, found, err := LoadCollectedReceipt(row)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.EqualValues(t, 800, retained.data.NMI.Amount)
+	var amount int64
+	require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT amount FROM openrails.payments WHERE transaction_id=$1 AND psp_id=$2`, gateway.txnID, fx.pspID).Scan(&amount))
+	require.EqualValues(t, 8_000_000, amount)
 }
 
 func TestManualRebillRefusalCommitsLifecycleOutboxAndTerminalTogether(t *testing.T) {
