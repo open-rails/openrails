@@ -225,6 +225,22 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.Equal(t, "Overwrite applies", premium.DisplayName)
 	})
 
+	t.Run("additive_plan_and_financial_matching", func(t *testing.T) {
+		m := manifest(12_000_000)
+		m.Products[0].Prices[0].PSPs = []string{"stripe", "nmi"}
+		require.NoError(t, m.Validate())
+		// Provider attachment is not price identity. No provider write is made
+		// here: the real API supplies current rows to the production planner.
+		plan, err := catalog.PlanWithOptions(ctx, catalogClientApplier{f.client}, &m, catalog.PlanOptions{})
+		require.NoError(t, err)
+		require.Equal(t, 1, countPriceActions(plan, catalog.PriceUnchanged))
+		require.Zero(t, countPriceActions(plan, catalog.PriceCreate))
+		require.Zero(t, countPriceActions(plan, catalog.PriceArchive))
+		for _, group := range plan.Groups {
+			require.Empty(t, group.RemovedProducts, "additive plans retain omitted products")
+		}
+	})
+
 	t.Run("keys_and_trials", func(t *testing.T) {
 		t.Run("collision", func(t *testing.T) {
 			collision := catalog.Manifest{Version: catalog.SupportedVersion, Products: []catalog.Product{{Key: "ambiguous", DisplayName: "Ambiguous", Prices: []catalog.Price{
@@ -235,6 +251,13 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 			require.Equal(t, http.StatusBadRequest, status, string(raw))
 			require.Contains(t, string(raw), "ambiguous-monthly")
 			require.Contains(t, string(raw), "disambiguate")
+			var response struct {
+				Error openrails.ErrorDetails `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &response))
+			require.Equal(t, "invalid_param", response.Error.Code)
+			require.NotNil(t, response.Error.Param)
+			require.Equal(t, "key", *response.Error.Param)
 			_, err := f.client.GetProductByKey(ctx, "ambiguous")
 			require.ErrorIs(t, err, openrails.ErrNotFound, "colliding keys refuse before product creation")
 		})
@@ -278,7 +301,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.False(t, f.publish(t, m, catalog.ApplyOptions{}).Plan.HasChanges())
 	})
 	t.Run("archived_declarations", func(t *testing.T) {
-		m := catalog.Manifest{Version: catalog.SupportedVersion, Products: []catalog.Product{{Key: "historical", DisplayName: "Historical", Archived: true, Prices: []catalog.Price{{Currency: "USD", UnitAmount: 1_000_000, Duration: "30d", AutoRenew: true, Archived: true}}}}}
+		m := catalog.Manifest{Version: catalog.SupportedVersion, Products: []catalog.Product{{Key: "historical", DisplayName: "Historical", TierGroup: "history", Archived: true, Prices: []catalog.Price{{Currency: "USD", UnitAmount: 1_000_000, Duration: "30d", AutoRenew: true, Archived: true}}}}}
 		f.publish(t, m, catalog.ApplyOptions{Insert: true})
 		product, err := f.client.GetProductByKey(ctx, "historical")
 		require.NoError(t, err)
