@@ -19,7 +19,7 @@ import (
 // in internal/modules/money/invoice_verify_integration_test.go.
 func TestManualRebillCrashRerunConvergesWithoutDoubleCharge(t *testing.T) {
 	fx := seedPastDueSubscription(t)
-	fake, client := newFakeNMIRebillGateway(t)
+	fake, client := newFakeNMIRebillGateway(t, fx)
 	fake.saleStatus.Store(http.StatusBadGateway) // outcome lost mid-flight (crash window)
 
 	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))

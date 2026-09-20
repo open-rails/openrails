@@ -109,12 +109,6 @@ type (
 	RailCounts           = openrails.PlanMigrationRailCounts
 )
 
-// PaymentMethodLookup resolves a subscription's payment method — the
-// engine-driven-rail detector (#297 stored-credential recurring anchor).
-type PaymentMethodLookup interface {
-	GetByID(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error)
-}
-
 // StripePusher is the observed-rail push seam (satisfied by
 // *StripeService). Extracted as an interface so migration tests can run
 // against a fake without a live Stripe.
@@ -127,14 +121,13 @@ type StripePusher interface {
 // PlanMigrationService drives #813 bulk plan migrations over the #773
 // reprice engine.
 type PlanMigrationService struct {
-	reprice        *RepriceService
-	stripe         StripePusher
-	nmi            NMIPusher
-	paymentMethods PaymentMethodLookup
+	reprice *RepriceService
+	stripe  StripePusher
+	nmi     NMIPusher
 }
 
-func NewPlanMigrationService(reprice *RepriceService, stripe StripePusher, nmi NMIPusher, paymentMethods PaymentMethodLookup) *PlanMigrationService {
-	return &PlanMigrationService{reprice: reprice, stripe: stripe, nmi: nmi, paymentMethods: paymentMethods}
+func NewPlanMigrationService(reprice *RepriceService, stripe StripePusher, nmi NMIPusher) *PlanMigrationService {
+	return &PlanMigrationService{reprice: reprice, stripe: stripe, nmi: nmi}
 }
 
 // migrationCapability classifies one subscription's rail for forced
@@ -142,10 +135,9 @@ func NewPlanMigrationService(reprice *RepriceService, stripe StripePusher, nmi N
 type migrationCapability int
 
 const (
-	capabilityAutoInternal migrationCapability = iota // engine-driven: reprice row alone suffices
-	capabilityAutoStripe                              // push to Stripe, converge applies
-	capabilityAutoNMI                                 // #815: push plan_amount to NMI, cutover accompanies the push
-	capabilityUserAction                              // rail cannot be mutated server-side
+	capabilityAutoStripe migrationCapability = iota // push to Stripe, converge applies
+	capabilityAutoNMI                               // #815: push plan_amount to NMI, cutover accompanies the push
+	capabilityUserAction                            // rail cannot be mutated server-side
 )
 
 func (s *PlanMigrationService) classifyMigrationCapability(ctx context.Context, sub *models.Subscription) migrationCapability {
@@ -155,16 +147,9 @@ func (s *PlanMigrationService) classifyMigrationCapability(ctx context.Context, 
 	case sub.Rail == models.RailCCBill, sub.Rail == models.RailSolana:
 		return capabilityUserAction
 	default:
-		// Non-stripe card rails split by who INITIATES the recurring charge:
-		// a payment method carrying the #297 stored-credential recurring
-		// anchor means OpenRails' own engine charges (RenewalCharger) — the
-		// renewal-boundary pickup is then the whole mechanism.
-		if s.paymentMethods != nil && sub.PaymentMethodID != nil {
-			pm, err := s.paymentMethods.GetByID(ctx, *sub.PaymentMethodID)
-			if err == nil && pm != nil && strings.TrimSpace(pm.StoredCredentialRecurringRef) != "" {
-				return capabilityAutoInternal
-			}
-		}
+		// A stored-credential anchor proves authorization, not ownership of the
+		// recurring schedule. The NMI rebill transport charges the gateway
+		// subscription, so its amount must be pushed even when a card is saved.
 		// #815: a gateway-native NMI recurring record CAN be mutated
 		// server-side (classic update_subscription). CanPush is the
 		// resolver-driven NMI-family detector, so custom-named NMI PSPs
@@ -418,10 +403,6 @@ func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationReq
 				continue
 			}
 			switch s.classifyMigrationCapability(ctx, sub) {
-			case capabilityAutoInternal:
-				if req.Immediate {
-					o.Disposition = "applied_immediately"
-				}
 			case capabilityAutoNMI:
 				// #815: the NMI push carries the internal cutover with it
 				// (provider truth flips at push) — the row is already applied.
@@ -468,11 +449,6 @@ func (s *PlanMigrationService) executeScheduled(ctx context.Context, req *PlanMi
 		return s.pushStripe(ctx, req, sub, source, target, row)
 	case capabilityAutoNMI:
 		return s.pushNMI(ctx, req, sub, target, targetProduct, row)
-	case capabilityAutoInternal:
-		if req.Immediate {
-			return s.applyImmediately(ctx, sub, target, targetProduct, row)
-		}
-		return nil // the renewal-boundary pickup is the whole mechanism
 	default:
 		return fmt.Errorf("unexpected capability for scheduled row")
 	}

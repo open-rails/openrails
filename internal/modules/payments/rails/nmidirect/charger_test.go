@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"testing"
 
-	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -16,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/internal/shared/opsmetric"
 )
 
 func TestStoredCredentialFor_ContextMapping(t *testing.T) {
@@ -60,24 +58,16 @@ func TestStoredCredentialFor_ContextMapping(t *testing.T) {
 			charge.UnscheduledMIT(""),
 			nmi.StoredCredential{InitiatedBy: "merchant", Indicator: "used"},
 		},
-		{
-			"explicit legacy MIT enables best effort",
-			charge.LegacyUnanchoredUnscheduledMIT(),
-			nmi.StoredCredential{InitiatedBy: "merchant", Indicator: "used", AllowUnanchoredMIT: true},
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := StoredCredentialFor(tc.ctx)
 			require.NotNil(t, got)
 			assert.Equal(t, tc.want, *got)
-			if tc.ctx.Initiator == charge.InitiatorMerchant && tc.ctx.PriorRef == "" && !tc.ctx.UnanchoredBestEffort {
+			if tc.ctx.Initiator == charge.InitiatorMerchant && tc.ctx.PriorRef == "" {
 				require.ErrorContains(t, got.Validate(), "requires initial_transaction_id")
 			}
-			if tc.ctx.UnanchoredBestEffort {
-				require.NoError(t, got.Validate())
-				assert.True(t, got.IsUnanchoredMIT())
-			}
+
 		})
 	}
 }
@@ -138,31 +128,6 @@ func TestCharger_ReferenceLessMITFailsBeforeNetwork(t *testing.T) {
 	_, err := c.Charge(context.Background(), baseRequest(charge.UnscheduledMIT("")))
 	require.ErrorContains(t, err, "requires initial_transaction_id")
 	assert.Zero(t, requests)
-}
-
-func TestCharger_ExplicitUnanchoredMITReachesNMIWithIndicators(t *testing.T) {
-	hook := logtest.NewGlobal()
-	t.Cleanup(hook.Reset)
-	var form url.Values
-	c := newChargerAgainst(t, func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, r.ParseForm())
-		form = r.Form
-		fmt.Fprint(w, "response=1&transactionid=txn-best-effort&authcode=OK&response_code=100")
-	})
-
-	_, err := c.Charge(context.Background(), baseRequest(charge.LegacyUnanchoredUnscheduledMIT()))
-	require.NoError(t, err)
-	assert.Equal(t, "merchant", form.Get("initiated_by"))
-	assert.Equal(t, "used", form.Get("stored_credential_indicator"))
-	assert.NotContains(t, form, "initial_transaction_id")
-	metricSeen := false
-	for _, entry := range hook.AllEntries() {
-		if entry.Data["metric"] == opsmetric.MetricNMIUnanchoredMIT {
-			metricSeen = true
-			assert.Equal(t, "direct", entry.Data["transport"])
-		}
-	}
-	assert.True(t, metricSeen, "best-effort MIT must emit the stable operational metric")
 }
 
 func TestCharger_HardDeclineIsResultNotError(t *testing.T) {

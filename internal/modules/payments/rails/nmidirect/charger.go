@@ -11,11 +11,8 @@ import (
 	"fmt"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
-	"github.com/open-rails/openrails/internal/shared/opsmetric"
 )
 
 // StoredCredentialFor maps the rail-agnostic CIT/MIT context onto NMI's
@@ -25,8 +22,7 @@ import (
 // dunning) that charge NMI schedule objects instead of (instrument, amount).
 func StoredCredentialFor(c charge.Context) *nmi.StoredCredential {
 	sc := &nmi.StoredCredential{
-		Recurring:          c.Agreement == charge.AgreementRecurring,
-		AllowUnanchoredMIT: c.UnanchoredBestEffort,
+		Recurring: c.Agreement == charge.AgreementRecurring,
 	}
 	switch c.Initiator {
 	case charge.InitiatorMerchant:
@@ -74,19 +70,6 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 		return charge.Result{}, errors.New("charge amount must be positive")
 	}
 	storedCredential := StoredCredentialFor(req.Context)
-	if storedCredential.IsUnanchoredMIT() {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"payment_method_id": req.Instrument.PaymentMethodID,
-			"rail":              req.Instrument.Rail,
-			"agreement":         req.Context.Agreement,
-			"order_ref":         req.OrderRef,
-		}).Warn("nmi: sending best-effort MIT without the stored-credential anchor")
-		opsmetric.Emit(ctx, opsmetric.MetricNMIUnanchoredMIT, log.Fields{
-			"transport":         "direct",
-			"payment_method_id": req.Instrument.PaymentMethodID,
-			"agreement":         req.Context.Agreement,
-		})
-	}
 
 	sale, err := c.Client.RunSale(ctx, nmi.SaleParams{
 		CustomerVaultID:  railCustomerRef,

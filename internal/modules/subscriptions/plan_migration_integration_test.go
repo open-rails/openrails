@@ -77,12 +77,6 @@ func (f *fakeStripePusher) ScheduleSubscriptionPriceChange(_ context.Context, su
 	return "sub_sched_fake", nil
 }
 
-type pmLookupFunc func(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error)
-
-func (f pmLookupFunc) GetByID(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error) {
-	return f(ctx, id)
-}
-
 // fakeNMIPusher (#815) records gateway-native NMI pushes at the seam level
 // (the real Direct Post wire shape is covered by the fake-gateway suite in
 // plan_migration_nmi_integration_test.go).
@@ -166,12 +160,7 @@ func newPlanMigrationFixture(t *testing.T) *planMigrationFixture {
 
 	stripe := &fakeStripePusher{}
 	nmiPusher := &fakeNMIPusher{canPush: true}
-	// Payment-method lookup: any PM id resolves to an engine-anchored
-	// instrument (per-test overrides construct their own service).
-	pmLookup := pmLookupFunc(func(_ context.Context, id uuid.UUID) (*models.PaymentMethod, error) {
-		return &models.PaymentMethod{ID: id, StoredCredentialRecurringRef: "anchor-" + id.String()}, nil
-	})
-	svc := NewPlanMigrationService(base.repriceSvc, stripe, nmiPusher, pmLookup)
+	svc := NewPlanMigrationService(base.repriceSvc, stripe, nmiPusher)
 
 	f := &planMigrationFixture{
 		repriceFixture:      base,
@@ -230,80 +219,9 @@ func (f *planMigrationFixture) subscriptionRow(t *testing.T, ctx context.Context
 	return priceID, productID
 }
 
-// TestPlanMigration_BoundaryCutoverOnEngineRail: the core mechanic — a
-// migration scheduled "now" flips price AND product AND entitlement snapshots
-// at the subscription's next renewal, never mid-cycle.
-func TestPlanMigration_BoundaryCutoverOnEngineRail(t *testing.T) {
-	f := newPlanMigrationFixture(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
-	subID, railSubID := f.createSubscriptionOnRail(t, ctx, f.lowPriceID, "nmi", true)
-
-	res, err := f.pm.Migrate(ctx, PlanMigrationRequest{SourcePriceID: f.lowPriceID, TargetPriceID: f.targetPriceID})
-	require.NoError(t, err)
-	require.NotNil(t, res.BatchID)
-	require.Equal(t, 1, res.Matched)
-	require.Equal(t, 1, res.Scheduled)
-	require.Equal(t, 0, res.Blocked)
-	require.True(t, res.SourceArchived)
-
-	// Source price archived, target untouched.
-	src, err := f.priceSvc.GetByID(ctx, f.lowPriceID)
-	require.NoError(t, err)
-	require.True(t, src.Archived, "source price must be archived by the migration")
-
-	// Nothing flips mid-cycle.
-	priceID, productID := f.subscriptionRow(t, ctx, subID)
-	require.Equal(t, f.lowPriceID, priceID)
-	require.Equal(t, f.productID, productID)
-
-	// The renewal applies the full cross-product cutover and charges the
-	// TARGET amount.
-	f.clock.Advance(time.Hour)
-	amount := f.renewalAmount(t, ctx, models.RailNMI, railSubID)
-	require.EqualValues(t, 9000000, amount, "renewal must charge the target plan's amount")
-	priceID, productID = f.subscriptionRow(t, ctx, subID)
-	require.Equal(t, f.targetPriceID, priceID)
-	require.Equal(t, f.targetProductID, productID)
-
-	var specs string
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT entitlements_spec_snapshot::text FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&specs))
-	require.Contains(t, specs, "plan_b_access", "entitlement snapshot must cut over to the target product")
-	require.NotContains(t, specs, "plan_a_access")
-
-	// The reprice row is applied.
-	rows, err := f.repriceRepo.List(ctx, SubscriptionRepriceFilter{RepriceBatchID: res.BatchID}, 10, 0)
-	require.NoError(t, err)
-	require.Len(t, rows, 1)
-	require.Equal(t, models.RepriceStatusApplied, rows[0].Status)
-	require.Equal(t, models.RepriceKindPlanChange, rows[0].Kind)
-}
-
-// TestPlanMigration_FutureEffectiveDateDoesNotFlipEarly: a renewal BEFORE the
-// effective date charges the old plan; the first renewal on/after flips.
-func TestPlanMigration_FutureEffectiveDateDoesNotFlipEarly(t *testing.T) {
-	f := newPlanMigrationFixture(t)
-	ctx := dbtest.WithTestMerchant(context.Background())
-	_, railSubID := f.createSubscriptionOnRail(t, ctx, f.lowPriceID, "nmi", true)
-
-	res, err := f.pm.Migrate(ctx, PlanMigrationRequest{
-		SourcePriceID: f.lowPriceID, TargetPriceID: f.targetPriceID,
-		EffectiveAt: f.clock.Now().Add(48 * time.Hour),
-	})
-	require.NoError(t, err)
-	require.Equal(t, 1, res.Scheduled)
-
-	f.clock.Advance(24 * time.Hour)
-	amount := f.renewalAmount(t, ctx, models.RailNMI, railSubID)
-	require.EqualValues(t, 10000000, amount, "renewal before effective_at keeps the old plan")
-
-	f.clock.Advance(30 * time.Hour)
-	amount = f.renewalAmount(t, ctx, models.RailNMI, railSubID)
-	require.EqualValues(t, 9000000, amount, "first renewal on/after effective_at flips")
-}
-
-// TestPlanMigration_ImmediateOnEngineRail: Immediate cuts price/product/
+// TestPlanMigration_ImmediateOnNMIRecord: Immediate cuts price/product/
 // entitlement snapshots over NOW (no charge) and marks the row applied.
-func TestPlanMigration_ImmediateOnEngineRail(t *testing.T) {
+func TestPlanMigration_ImmediateOnNMIRecord(t *testing.T) {
 	f := newPlanMigrationFixture(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
 	subID, _ := f.createSubscriptionOnRail(t, ctx, f.lowPriceID, "nmi", true)
@@ -426,18 +344,10 @@ func TestPlanMigration_CapabilityClassification(t *testing.T) {
 	// NMI WITHOUT a payment method (gateway-native recurring): AUTO via the
 	// #815 pusher.
 	f.createSubscriptionOnRail(t, ctx, f.lowPriceID, "nmi", false)
-	// Engine-anchored NMI: auto via the renewal-boundary pickup.
+	// Saved-card NMI: still a gateway-owned recurring record.
 	f.createSubscriptionOnRail(t, ctx, f.lowPriceID, "nmi", true)
 
-	// Real PM lookup for this test: resolve from the DB so the anchored/
-	// unanchored split is driven by actual rows.
-	svc := NewPlanMigrationService(f.repriceSvc, f.stripe, f.nmi, pmLookupFunc(func(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error) {
-		var anchor string
-		if err := f.pool.QueryRow(ctx, `SELECT stored_credential_recurring_ref FROM openrails.payment_methods WHERE id = $1`, id).Scan(&anchor); err != nil {
-			return nil, err
-		}
-		return &models.PaymentMethod{ID: id, StoredCredentialRecurringRef: anchor}, nil
-	}))
+	svc := NewPlanMigrationService(f.repriceSvc, f.stripe, f.nmi)
 
 	preview, err := svc.Preview(ctx, PlanMigrationRequest{SourcePriceID: f.lowPriceID, TargetPriceID: f.targetPriceID})
 	require.NoError(t, err)
@@ -463,7 +373,7 @@ func TestPlanMigration_CapabilityClassification(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 2, res.Blocked)
 	require.Equal(t, preview.Scheduled, res.Scheduled, "preview counts must match execute classification")
-	require.Len(t, f.nmi.pushes, 1, "exactly the gateway-native NMI sub is pushed")
+	require.Len(t, f.nmi.pushes, 2, "both recurring records must be updated; authorization does not change the transport")
 	require.EqualValues(t, 9000000, f.nmi.pushes[0]["amount_micros"])
 	rows, err := f.repriceRepo.List(ctx, SubscriptionRepriceFilter{RepriceBatchID: res.BatchID}, 10, 0)
 	require.NoError(t, err)
@@ -548,7 +458,8 @@ func TestPlanMigration_IdempotentRerun(t *testing.T) {
 	res2, err := f.pm.Migrate(ctx, PlanMigrationRequest{SourcePriceID: f.lowPriceID, TargetPriceID: f.targetPriceID})
 	require.NoError(t, err)
 	require.Equal(t, 0, res2.Scheduled)
-	require.Equal(t, 1, res2.Skipped, "second run skips via the one-scheduled conflict")
+	require.Zero(t, res2.Matched, "provider-converged subscription has already left the source cohort")
+	require.Len(t, f.nmi.pushes, 1, "replay does not repeat the provider update")
 
 	// After an Immediate run on a second sub, a further re-run skips it as
 	// already on target.
@@ -563,32 +474,24 @@ func TestPlanMigration_IdempotentRerun(t *testing.T) {
 	require.Zero(t, res4.Scheduled)
 }
 
-// TestPlanMigration_CancelBatch: cancel-before-effective cancels every
-// still-scheduled row; the next renewal charges the OLD plan.
-func TestPlanMigration_CancelBatch(t *testing.T) {
+// TestPlanMigration_CancelAppliedNMIHasNoEffect: the update already changed
+// this gateway subscription; canceling local scheduling cannot undo that fact.
+func TestPlanMigration_CancelAppliedNMIHasNoEffect(t *testing.T) {
 	f := newPlanMigrationFixture(t)
 	ctx := dbtest.WithTestMerchant(context.Background())
-	_, railSubID := f.createSubscriptionOnRail(t, ctx, f.lowPriceID, "nmi", true)
-
-	res, err := f.pm.Migrate(ctx, PlanMigrationRequest{SourcePriceID: f.lowPriceID, TargetPriceID: f.targetPriceID, EffectiveAt: f.clock.Now().Add(24 * time.Hour)})
+	subID, _ := f.createSubscriptionOnRail(t, ctx, f.lowPriceID, "nmi", true)
+	res, err := f.pm.Migrate(ctx, PlanMigrationRequest{SourcePriceID: f.lowPriceID, TargetPriceID: f.targetPriceID})
 	require.NoError(t, err)
-	require.Equal(t, 1, res.Scheduled)
-
 	cres, err := f.pm.CancelBatch(ctx, *res.BatchID)
 	require.NoError(t, err)
-	require.Equal(t, 1, cres.Canceled)
-	require.Empty(t, cres.RailReleaseRequired, "engine-rail cancel is complete on both sides")
-	require.Empty(t, cres.Warning)
-
-	f.clock.Advance(48 * time.Hour)
-	amount := f.renewalAmount(t, ctx, models.RailNMI, railSubID)
-	require.EqualValues(t, 10000000, amount, "canceled migration must not flip")
-
-	batch, rows, err := f.pm.GetBatch(ctx, *res.BatchID, 10, 0)
+	require.Zero(t, cres.Canceled)
+	require.Len(t, f.nmi.pushes, 1)
+	priceID, _ := f.subscriptionRow(t, ctx, subID)
+	require.Equal(t, f.targetPriceID, priceID)
+	_, rows, err := f.pm.GetBatch(ctx, *res.BatchID, 10, 0)
 	require.NoError(t, err)
-	require.Equal(t, models.RepriceKindPlanChange, batch.Kind)
 	require.Len(t, rows, 1)
-	require.Equal(t, models.RepriceStatusCanceled, rows[0].Status)
+	require.Equal(t, models.RepriceStatusApplied, rows[0].Status)
 }
 
 // TestPlanMigration_CancelAfterStripePushWarnsLoudly: cancelling a batch

@@ -52,7 +52,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID: priceID, ProductID: productID, Amount: 999, Currency: "USD",
+		ID: priceID, ProductID: productID, Amount: 9990000, Currency: "USD",
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Archived:   false, AccessDurationHours: &billingDays32, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 	})
@@ -213,7 +213,7 @@ func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID: priceID, ProductID: productID, Amount: 999, Currency: "USD",
+		ID: priceID, ProductID: productID, Amount: 9990000, Currency: "USD",
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Archived:   false, AccessDurationHours: &billingDays32, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 	})
