@@ -31,6 +31,11 @@ func seedDefaultMethod(t *testing.T, fx *findingsFixture, customer uuid.UUID) *m
 	t.Helper()
 	pm := &models.PaymentMethod{ID: uuid.New(), CustomerID: customer, Rail: models.RailNMI, PspID: fx.pspFor("nmi"), RailCustomerRef: "default-" + uuid.NewString(), RebillDriver: models.RebillDriverProvider, CreatedAt: fx.rt.Clock.Now(), UpdatedAt: fx.rt.Clock.Now()}
 	require.NoError(t, paymentmethods.NewPaymentMethodRepo(fx.dbi).Create(fx.ctx, pm))
+	// This boundary fixture represents a prior approved customer-present charge;
+	// vault creation alone does not establish an off-session agreement.
+	n, err := fx.dbi.Gen(fx.ctx).CaptureStoredCredentialRef(fx.ctx, gen.CaptureStoredCredentialRefParams{Agreement: "unscheduled", Ref: "approved-unscheduled", MerchantID: fx.merchant, ID: pm.ID})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n)
 	return pm
 }
 func readDefaultMethods(t *testing.T, fx *findingsFixture, customer uuid.UUID, handler func(*httprequest.Request)) map[string][]string {
@@ -83,6 +88,11 @@ func TestSavedMethodCollectionDefaultsAreCurrencyAndCustomerScoped(t *testing.T)
 	}
 	subID := fx.seedActiveSubscription("provider-default-" + uuid.NewString())
 	fx.exec(`UPDATE openrails.subscriptions SET payment_method_id=$1 WHERE id=$2`, subscriptionMethod.ID, subID)
+	fx.exec(`UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref='' WHERE id=$1`, usd.ID)
+	code, _ := setDefaultMethodHTTP(t, fx, fx.customer, "USD", openrails.PaymentMethodID(usd.ID).String())
+	require.Equal(t, http.StatusBadRequest, code, "a saved card without an approved agreement cannot be designated")
+	require.Empty(t, readDefaultMethods(t, fx, fx.customer, ListPaymentMethods)[openrails.PaymentMethodID(usd.ID).String()])
+	fx.exec(`UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref='approved-unscheduled' WHERE id=$1`, usd.ID)
 	code, body := setDefaultMethodHTTP(t, fx, fx.customer, "usd", openrails.PaymentMethodID(usd.ID).String())
 	require.Equal(t, http.StatusOK, code, body)
 	require.Equal(t, map[string]string{"currency": "USD", "payment_method_id": openrails.PaymentMethodID(usd.ID).String()}, body)

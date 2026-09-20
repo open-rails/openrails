@@ -6,14 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/config"
 
 	"github.com/google/uuid"
 	authkit "github.com/open-rails/authkit"
@@ -21,33 +20,13 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	billingservice "github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
-
-type invoiceAdminCharger struct {
-	mu        sync.Mutex
-	calls     []money.ChargeRequest
-	ambiguous bool
-}
-
-func (c *invoiceAdminCharger) Prepare(_ context.Context, request money.ChargeRequest) (money.PreparedCharge, error) {
-	return money.PreparedChargeFunc(func(context.Context) (money.ChargeResult, error) {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		c.calls = append(c.calls, request)
-		if c.ambiguous {
-			return money.ChargeResult{}, &nmi.TransportAmbiguousError{Err: errors.New("lost response")}
-		}
-		return money.ChargeResult{Rail: "nmi", TransactionID: "invoice-test-" + request.IdempotencyKey}, nil
-	}), nil
-}
 
 func invoiceRequest(t *testing.T, method, url, token, key string, body any) (int, []byte) {
 	t.Helper()
@@ -72,7 +51,10 @@ func invoiceRequest(t *testing.T, method, url, token, key string, body any) (int
 
 func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 	h := New(t, context.Background())
-	surface := h.StartStandalone("usd")
+	gateway := NewFakeNMIGateway(t)
+	surface := h.StartStandalone("usd", WithConfig(func(cfg *config.Config) {
+		cfg.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: gateway.URL}
+	}))
 	rt := surface.App().Runtime
 	owner := surface.Token
 	cp := embcp.Get(surface.App())
@@ -211,13 +193,12 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 	require.Equal(t, 200, status, string(body))
 	require.NoError(t, json.Unmarshal(body, &read))
 	require.EqualValues(t, 100000, read.AmountDue)
-	psp := dbtest.EnsureTestPSP(ctx, t, h.MerchantPool(dbtest.TestMerchantID.UUID()), dbtest.TestMerchantID.UUID(), "nmi")
+	psp := h.ArmLoopbackNMI(rt, dbtest.TestMerchantID)
 	method := uuid.New()
 	require.NoError(t, paymentmethods.NewPaymentMethodRepo(h.MerchantDB(dbtest.TestMerchantID.UUID())).Create(ctx, &models.PaymentMethod{ID: method, CustomerID: yenCustomer.UUID(), PspID: psp, Rail: models.RailNMI, RailCustomerRef: "vault-" + method.String(), RailMethodRef: "method-" + method.String(), InitialTransactionID: "initial-" + method.String()}))
+	dbtest.SeedNMIStoredCredentialRefs(ctx, t, h.MerchantDB(dbtest.TestMerchantID.UUID()).Qx(ctx), method)
 	_, err = rt.MoneyService.MarkInvoicesPastDue(ctx, time.Now().Add(time.Minute))
 	require.NoError(t, err)
-	charger := &invoiceAdminCharger{}
-	rt.MoneyCharger = charger
 	status, body = invoiceRequest(t, http.MethodPost, yenPath+"/retry-collection", reader, "jpy-retry", map[string]any{"payment_method_id": openrails.PaymentMethodID(method)})
 	require.Equal(t, 403, status, string(body))
 	var attemptID uuid.UUID
@@ -234,9 +215,9 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 		require.Equal(t, "paid", result.Invoice.Status)
 		require.EqualValues(t, 120000, result.Invoice.AmountPaid)
 	}
-	require.Len(t, charger.calls, 1)
-	require.Equal(t, "JPY", charger.calls[0].Currency)
-	require.Equal(t, moneyutil.Cents(10), charger.calls[0].AmountCents)
+	require.Equal(t, 1, gateway.SaleCount())
+	require.Equal(t, "JPY", gateway.Sales()[0].Currency)
+	require.Equal(t, "10.00", gateway.Sales()[0].Amount, "actual NMI major-unit wire amount for ten yen")
 	status, body = invoiceRequest(t, http.MethodGet, yenPath+"/payments?limit=1&offset=1", reader, "", nil)
 	require.Equal(t, 200, status, string(body))
 	require.Contains(t, string(body), `"total":2`)
@@ -247,10 +228,12 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 	blocked := issue(dbtest.TestMerchantID, blockedCustomer, "USD", 2000000)
 	blockedMethod := uuid.New()
 	require.NoError(t, paymentmethods.NewPaymentMethodRepo(h.MerchantDB(dbtest.TestMerchantID.UUID())).Create(ctx, &models.PaymentMethod{ID: blockedMethod, CustomerID: blockedCustomer.UUID(), PspID: psp, Rail: models.RailNMI, RailCustomerRef: "vault-" + blockedMethod.String(), RailMethodRef: "method-" + blockedMethod.String(), InitialTransactionID: "initial-" + blockedMethod.String()}))
+	dbtest.SeedNMIStoredCredentialRefs(ctx, t, h.MerchantDB(dbtest.TestMerchantID.UUID()).Qx(ctx), blockedMethod)
 	_, err = rt.MoneyService.MarkInvoicesPastDue(ctx, time.Now().Add(time.Minute))
 	require.NoError(t, err)
-	ambiguous := &invoiceAdminCharger{ambiguous: true}
-	rt.MoneyCharger = ambiguous
+	gateway.SetMode(NMISaleUncertain)
+	gateway.SetVisible(false)
+	priorSales := gateway.SaleCount()
 	blockedPath := surface.BaseURL + "/v1/merchant/invoices/" + blocked.ID.String()
 	// A lost response answers 202 with the live attempt; the same key replays
 	// that durable state without another charge.
@@ -262,7 +245,7 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 		require.Equal(t, "attempted", pending.Attempt.Status)
 		require.NotNil(t, pending.Invoice.CollectionIntentID)
 	}
-	require.Len(t, ambiguous.calls, 1)
+	require.Equal(t, priorSales+1, gateway.SaleCount())
 	status, body = invoiceRequest(t, http.MethodGet, blockedPath, owner, "", nil)
 	require.Equal(t, 200, status, string(body))
 	require.NoError(t, json.Unmarshal(body, &read))
@@ -276,7 +259,7 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 	require.Equal(t, 409, status, string(body))
 	status, body = invoiceRequest(t, http.MethodPost, blockedPath+"/retry-collection", owner, "new-key", map[string]any{"payment_method_id": openrails.PaymentMethodID(blockedMethod)})
 	require.Equal(t, 409, status, string(body))
-	require.Len(t, ambiguous.calls, 1)
+	require.Equal(t, priorSales+1, gateway.SaleCount())
 	uncollectibleCustomer := makeCustomer(dbtest.TestMerchantID, "USD")
 	uncollectible := issue(dbtest.TestMerchantID, uncollectibleCustomer, "USD", 3000000)
 	for range 2 {

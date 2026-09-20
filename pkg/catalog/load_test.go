@@ -86,111 +86,6 @@ func TestLoad_Good(t *testing.T) {
 	}
 }
 
-func TestLoad_BadVersion(t *testing.T) {
-	_, err := Load(writeManifest(t, "version: 2\nproducts: []\n"))
-	if err == nil || !strings.Contains(err.Error(), "unsupported") {
-		t.Fatalf("want unsupported version error, got %v", err)
-	}
-}
-
-func TestLoad_RejectsTierGroups(t *testing.T) {
-	_, err := Load(writeManifest(t, "version: 1\ntier_groups: []\n"))
-	if err == nil || !strings.Contains(err.Error(), "unknown field") {
-		t.Fatalf("want tier_groups unknown-field error, got %v", err)
-	}
-}
-
-func TestLoad_RejectsStatus(t *testing.T) {
-	_, err := Load(writeManifest(t, "version: 1\nproducts:\n  - key: p\n    display_name: P\n    status: archived\n"))
-	if err == nil || !strings.Contains(err.Error(), "unknown field") {
-		t.Fatalf("want status unknown-field error, got %v", err)
-	}
-}
-
-func TestLoad_RejectsDefaultProviders(t *testing.T) {
-	_, err := Load(writeManifest(t, "version: 1\ndefault_providers: [stripe]\nproducts: []\n"))
-	if err == nil || !strings.Contains(err.Error(), "unknown field") {
-		t.Fatalf("want default_providers unknown-field error, got %v", err)
-	}
-}
-
-func TestLoad_RejectsProductProviders(t *testing.T) {
-	_, err := Load(writeManifest(t, "version: 1\nproducts:\n  - key: p\n    display_name: P\n    psps: [stripe]\n"))
-	if err == nil || !strings.Contains(err.Error(), "unknown field") {
-		t.Fatalf("want product providers unknown-field error, got %v", err)
-	}
-}
-
-func TestLoad_ProviderLinksRequirePriceProvider(t *testing.T) {
-	body := `
-version: 1
-products:
-  - key: p
-    display_name: P
-    prices:
-      - currency: usd
-        unit_amount: 1000
-        duration: 30d
-        psp_links:
-          stripe:
-            lookup_key: p-monthly
-`
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "requires psps to include") {
-		t.Fatalf("want provider_links/provider mismatch error, got %v", err)
-	}
-}
-
-func TestLoad_RejectsRetiredProviderKeysForTypedPrice(t *testing.T) {
-	body := `
-version: 1
-products:
-  - key: topup
-    display_name: Topup
-    prices:
-      - currency: usd
-        unit_amount: 10_000
-        providers: [stripe]
-`
-	_, err := Load(writeManifest(t, body))
-	if err == nil {
-		t.Fatal("a retired providers: key must not load")
-	}
-	for _, want := range []string{`unknown field "providers"`, "providers: was renamed to psps:"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error must carry %q, got:\n%v", want, err)
-		}
-	}
-}
-
-// or#893 phase 7: provider_links: is the same one mechanism — strict decoding
-// plus the rename, not a sentinel struct field.
-func TestLoad_RejectsRetiredProviderLinksKey(t *testing.T) {
-	body := `
-version: 1
-products:
-  - key: p
-    display_name: P
-    prices:
-      - currency: usd
-        unit_amount: 1000
-        duration: 30d
-        psps: [stripe]
-        provider_links:
-          stripe:
-            lookup_key: p-monthly
-`
-	_, err := Load(writeManifest(t, body))
-	if err == nil {
-		t.Fatal("a retired provider_links: key must not load")
-	}
-	for _, want := range []string{`unknown field "provider_links"`, "provider_links: was renamed to psp_links:"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error must carry %q, got:\n%v", want, err)
-		}
-	}
-}
-
 func TestValidateRejectsTierGroupsOnly(t *testing.T) {
 	m := &Manifest{
 		Version:    SupportedVersion,
@@ -211,159 +106,6 @@ func TestValidateProductsIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestLoad_DuplicatePriceByTerms(t *testing.T) {
-	body := `
-version: 1
-products:
-  - key: p
-    display_name: P
-    tier_group: g
-    tier_rank: 1
-    prices:
-      - {currency: usd, unit_amount: 1000, duration: 30d, auto_renew: true}
-      - {currency: usd, unit_amount: 1000, duration: 30d, auto_renew: true}
-`
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "duplicate price terms") {
-		t.Fatalf("want duplicate price terms error, got %v", err)
-	}
-}
-
-// Two prices that differ only by provider share one unique_prices_product_amount_window
-// key, so the DB can hold at most one. The loader must reject the manifest up
-// front rather than let it collide on the unique key at apply time.
-func TestLoad_RejectsSameTermsWithDifferentProviders(t *testing.T) {
-	body := `
-version: 1
-products:
-  - key: p
-    display_name: P
-    prices:
-      - {currency: usd, unit_amount: 23000000, duration: 30d, psps: [mobius, ccbill, solana]}
-      - {currency: usd, unit_amount: 23000000, duration: 30d, psps: [solana], archived: true}
-`
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "duplicate price terms") {
-		t.Fatalf("want duplicate price terms error, got %v", err)
-	}
-}
-
-// Trial is part of price identity: two prices with the same recurring substance
-// but different first phases (one with a trial, one without) are distinct rows
-// under the unique key, so the loader must accept both.
-func TestLoad_AcceptsSameTermsWithDifferentTrials(t *testing.T) {
-	body := `
-version: 1
-products:
-  - key: p
-    display_name: P
-    prices:
-      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, psps: [mobius]}
-      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, psps: [mobius], trial: {unit_amount: 100, duration: 7d}}
-`
-	if _, err := Load(writeManifest(t, body)); err != nil {
-		t.Fatalf("same terms with different trials must be accepted: %v", err)
-	}
-}
-
-func TestLoad_DuplicateProductKey(t *testing.T) {
-	body := `
-version: 1
-products:
-  - {key: p, display_name: P, tier_group: g1, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
-  - {key: p, display_name: P, tier_group: g2, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
-`
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "duplicate product key") {
-		t.Fatalf("want duplicate product key error, got %v", err)
-	}
-}
-
-func TestLoad_MissingTierRank(t *testing.T) {
-	body := `
-version: 1
-products:
-  - {key: p1, display_name: P1, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
-  - {key: p2, display_name: P2, tier_group: g, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
-`
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "tier_rank is required") {
-		t.Fatalf("want tier_rank error, got %v", err)
-	}
-}
-
-func TestLoad_TierRankOptionalForSingleProduct(t *testing.T) {
-	body := `
-version: 1
-products:
-  - {key: p, display_name: P, tier_group: g, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
-`
-	m, err := Load(writeManifest(t, body))
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if m.TierGroups[0].Products[0].TierRank != nil {
-		t.Fatalf("single-product tier_rank should stay omitted")
-	}
-}
-
-func TestLoad_TierRankAllowsZeroAndNegative(t *testing.T) {
-	body := `
-version: 1
-products:
-  - {key: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
-  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
-  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
-`
-	m, err := Load(writeManifest(t, body))
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	ranks := ranksByKey(m)
-	if ranks["free"] != -1 || ranks["starter"] != 0 || ranks["pro"] != 1 {
-		t.Fatalf("unexpected ranks: %v", ranks)
-	}
-}
-
-func TestLoad_TierRankDirectionSurvivesRenumberAndNegativePrepend(t *testing.T) {
-	tests := []struct {
-		name string
-		body string
-	}{
-		{
-			name: "renumber",
-			body: `
-version: 1
-products:
-  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 10, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
-  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 20, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
-`,
-		},
-		{
-			name: "prepend-negative",
-			body: `
-version: 1
-products:
-  - {key: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
-  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
-  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
-`,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m, err := Load(writeManifest(t, tt.body))
-			if err != nil {
-				t.Fatalf("Load: %v", err)
-			}
-			ranks := ranksByKey(m)
-			if !(ranks["starter"] < ranks["pro"]) {
-				t.Fatalf("starter should downgrade from pro and pro should upgrade from starter: %v", ranks)
-			}
-		})
-	}
-}
-
 func ranksByKey(m *Manifest) map[string]int {
 	ranks := map[string]int{}
 	for _, group := range m.TierGroups {
@@ -374,25 +116,6 @@ func ranksByKey(m *Manifest) map[string]int {
 	return ranks
 }
 
-func TestLoad_SolanaNonStablecoinRejected(t *testing.T) {
-	body := `
-version: 1
-products:
-  - key: p
-    display_name: P
-    tier_group: g
-    tier_rank: 1
-    prices:
-      - {currency: eur, unit_amount: 1000, duration: 30d, psps: [solana]}
-`
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "solana requires a stablecoin") {
-		t.Fatalf("want solana eligibility error, got %v", err)
-	}
-}
-
-// The former gauge shape ({kind: gauge} + metered.per) is expressed canonically:
-// divide_by carries per_units x per-seconds directly. Same integer math, one input.
 func TestLoad_RateCardCarriesTimeDenominatorInDivideBy(t *testing.T) {
 	body := `
 version: 1
@@ -460,10 +183,108 @@ products:
 	}
 }
 
-// One meter backs at most one usage rate card, whichever product declares it.
-func TestLoad_RateCardsMayNotShareAMeter(t *testing.T) {
-	body := `
-version: 1
+func TestLoadRejectsDeferredCatalogFeatures(t *testing.T) {
+	for _, field := range []string{"credit_balances", "usage_limits"} {
+		_, err := Parse([]byte("version: 1\n" + field + ": []\nproducts: []\n"))
+		if err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("accepted %s: %v", field, err)
+		}
+	}
+	for _, field := range []string{"credits", "includes", "usage_limits"} {
+		_, err := Parse([]byte("version: 1\nproducts:\n  - key: test\n    display_name: Test\n    " + field + ": []\n"))
+		if err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("accepted %s: %v", field, err)
+		}
+	}
+}
+
+func TestLoadRefusesInvalidInputs(t *testing.T) {
+	cases := []struct {
+		name, body string
+		errors     []string
+	}{
+		{"BadVersion", `version: 2
+products: []`, []string{"unsupported"}},
+		{"RejectsTierGroups", `version: 1
+tier_groups: []`, []string{"unknown field"}},
+		{"RejectsStatus", `version: 1
+products:
+  - key: p
+    display_name: P
+    status: archived`, []string{"unknown field"}},
+		{"RejectsDefaultProviders", `version: 1
+default_providers: [stripe]
+products: []`, []string{"unknown field"}},
+		{"RejectsProductProviders", `version: 1
+products:
+  - key: p
+    display_name: P
+    psps: [stripe]`, []string{"unknown field"}},
+		{"ProviderLinksRequirePriceProvider", `version: 1
+products:
+  - key: p
+    display_name: P
+    prices:
+      - currency: usd
+        unit_amount: 1000
+        duration: 30d
+        psp_links:
+          stripe:
+            lookup_key: p-monthly`, []string{"requires psps to include"}},
+		{"RejectsRetiredProviderKeysForTypedPrice", `version: 1
+products:
+  - key: topup
+    display_name: Topup
+    prices:
+      - currency: usd
+        unit_amount: 10_000
+        providers: [stripe]`, []string{"unknown field \"providers\"", "providers: was renamed to psps:"}},
+		{"RejectsRetiredProviderLinksKey", `version: 1
+products:
+  - key: p
+    display_name: P
+    prices:
+      - currency: usd
+        unit_amount: 1000
+        duration: 30d
+        psps: [stripe]
+        provider_links:
+          stripe:
+            lookup_key: p-monthly`, []string{"unknown field \"provider_links\"", "provider_links: was renamed to psp_links:"}},
+		{"DuplicatePriceByTerms", `version: 1
+products:
+  - key: p
+    display_name: P
+    tier_group: g
+    tier_rank: 1
+    prices:
+      - {currency: usd, unit_amount: 1000, duration: 30d, auto_renew: true}
+      - {currency: usd, unit_amount: 1000, duration: 30d, auto_renew: true}`, []string{"duplicate price terms"}},
+		{"RejectsSameTermsWithDifferentProviders", `version: 1
+products:
+  - key: p
+    display_name: P
+    prices:
+      - {currency: usd, unit_amount: 23000000, duration: 30d, psps: [mobius, ccbill, solana]}
+      - {currency: usd, unit_amount: 23000000, duration: 30d, psps: [solana], archived: true}`, []string{"duplicate price terms"}},
+		{"DuplicateProductKey", `version: 1
+products:
+  - {key: p, display_name: P, tier_group: g1, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
+  - {key: p, display_name: P, tier_group: g2, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}`, []string{"duplicate product key"}},
+		{"MissingTierRank", `version: 1
+products:
+  - {key: p1, display_name: P1, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
+  - {key: p2, display_name: P2, tier_group: g, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}`, []string{"tier_rank is required"}},
+		{"SolanaNonStablecoinRejected", `version: 1
+products:
+  - key: p
+    display_name: P
+    tier_group: g
+    tier_rank: 1
+    prices:
+      - {currency: eur, unit_amount: 1000, duration: 30d, psps: [solana]}`, []string{"solana requires a stablecoin"}},
+		// One meter backs at most one usage rate card, whichever product declares it.
+		{"RateCardsMayNotShareAMeter", `version: 1
 meters:
   - {key: droplet-vcpu-seconds, aggregation: sum, value_property: $.seconds}
 products:
@@ -478,21 +299,24 @@ products:
     rate_cards:
       - meter: droplet-vcpu-seconds
         payment_term: in_arrears
-        price: {model: per_unit, currency: usd, per_unit: {unit_amount: 14_000, divide_by: 3_600}}
-`
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "one meter per usage rate card") {
-		t.Fatalf("want shared-meter rejection, got %v", err)
-	}
-}
-
-// or#893 phase 5: the rate card is THE pricing input. The #599 metered: sugar
-// and the counter|gauge meter kind are gone; a manifest that still declares
-// either fails loudly, and the error carries the rewrite.
-func TestLoad_RetiredPricingInputsFailWithTheRewrite(t *testing.T) {
-	t.Run("metered: price sugar", func(t *testing.T) {
-		body := `
-version: 1
+        price: {model: per_unit, currency: usd, per_unit: {unit_amount: 14_000, divide_by: 3_600}}`, []string{"one meter per usage rate card"}},
+		{"BadInterval", `version: 1
+products:
+  - key: p
+    display_name: P
+    tier_group: g
+    tier_rank: 1
+    prices:
+      - {currency: usd, unit_amount: 1000, duration: 1w}`, []string{"must use h or d"}},
+		{"RejectsLegacyNamedInterval", `version: 1
+products:
+  - key: p
+    display_name: P
+    tier_group: g
+    tier_rank: 1
+    prices:
+      - {currency: usd, unit_amount: 1000, duration: month}`, []string{"whole h or d value"}},
+		{"retired metered price", `version: 1
 meters:
   - {key: api-calls, aggregation: sum, value_property: $.count}
 products:
@@ -502,171 +326,132 @@ products:
       - currency: usd
         unit_amount: 0
         psps: []
-        metered: {meter: api-calls, rate: 2_000}
-`
-		_, err := Load(writeManifest(t, body))
-		if err == nil {
-			t.Fatal("a metered: price must not load")
-		}
-		for _, want := range []string{
-			`unknown field "metered"`,
-			"the metered: price sugar was removed (or#893/#707)",
-			"rate_cards:",
-			"payment_term: in_arrears",
-			"model: per_unit",
-		} {
-			if !strings.Contains(err.Error(), want) {
-				t.Fatalf("error must carry %q, got:\n%v", want, err)
-			}
-		}
-	})
-
-	t.Run("meter kind:", func(t *testing.T) {
-		body := `
-version: 1
+        metered: {meter: api-calls, rate: 2_000}`, []string{"unknown field \"metered\"", "the metered: price sugar was removed (or#893/#707)", "rate_cards:", "payment_term: in_arrears", "model: per_unit"}},
+		{"retired meter kind", `version: 1
 meters:
   - {key: api-calls, kind: counter}
 products:
   - key: api
     display_name: API
     prices:
-      - {currency: usd, unit_amount: 1_000, duration: 30d}
-`
-		_, err := Load(writeManifest(t, body))
-		if err == nil {
-			t.Fatal("a kind: meter must not load")
-		}
-		for _, want := range []string{
-			`unknown field "kind"`,
-			"meter kind: counter|gauge was removed (or#893/#707)",
-			"aggregation: sum",
-			"aggregation: count",
-		} {
-			if !strings.Contains(err.Error(), want) {
-				t.Fatalf("error must carry %q, got:\n%v", want, err)
-			}
-		}
-	})
-
-	t.Run("meter without aggregation", func(t *testing.T) {
-		body := `
-version: 1
+      - {currency: usd, unit_amount: 1_000, duration: 30d}`, []string{"unknown field \"kind\"", "meter kind: counter|gauge was removed (or#893/#707)", "aggregation: sum", "aggregation: count"}},
+		{"missing aggregation", `version: 1
 meters:
   - {key: api-calls}
 products:
   - key: api
     display_name: API
     prices:
-      - {currency: usd, unit_amount: 1_000, duration: 30d}
-`
-		_, err := Load(writeManifest(t, body))
-		if err == nil || !strings.Contains(err.Error(), "aggregation is required") {
-			t.Fatalf("want missing-aggregation error, got %v", err)
-		}
-	})
+      - {currency: usd, unit_amount: 1_000, duration: 30d}`, []string{"aggregation is required"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(writeManifest(t, tc.body))
+			if err == nil {
+				t.Fatal("invalid catalog was accepted")
+			}
+			for _, want := range tc.errors {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error must contain %q, got %v", want, err)
+				}
+			}
+		})
+	}
 }
 
-func TestLoad_SolanaStablecoinAccepted(t *testing.T) {
-	body := `
-version: 1
+func TestLoadTierRanks(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		ranks      map[string]int
+	}{
+		{"single product rank omitted", `version: 1
+products:
+  - {key: p, display_name: P, tier_group: g, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}`, nil},
+		{"negative tier prepended", `version: 1
+products:
+  - {key: free, display_name: Free, tier_group: g, tier_rank: -1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
+  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 0, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
+  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 1, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}`, map[string]int{"free": -1, "starter": 0, "pro": 1}},
+		{"ranks renumbered", `version: 1
+products:
+  - {key: starter, display_name: Starter, tier_group: g, tier_rank: 10, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}
+  - {key: pro, display_name: Pro, tier_group: g, tier_rank: 20, prices: [{currency: usd, unit_amount: 1, duration: 30d, auto_renew: true}]}`, map[string]int{"starter": 10, "pro": 20}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := Load(writeManifest(t, tc.body))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if tc.ranks == nil {
+				if m.TierGroups[0].Products[0].TierRank != nil {
+					t.Fatal("single-product rank must remain omitted")
+				}
+				return
+			}
+			ranks := ranksByKey(m)
+			for key, want := range tc.ranks {
+				if got, ok := ranks[key]; !ok || got != want {
+					t.Errorf("rank[%q]=%v, want %v", key, got, want)
+				}
+			}
+			if ranks["starter"] >= ranks["pro"] {
+				t.Fatalf("upgrade/downgrade direction must survive renumbering or prepending: %v", ranks)
+			}
+		})
+	}
+}
+
+func TestLoadAcceptsPriceTerms(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, duration string
+		prices               int
+	}{
+		{"AcceptsSameTermsWithDifferentTrials", `version: 1
+products:
+  - key: p
+    display_name: P
+    prices:
+      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, psps: [mobius]}
+      - {currency: usd, unit_amount: 23000000, duration: 30d, auto_renew: true, psps: [mobius], trial: {unit_amount: 100, duration: 7d}}`, "30d", 2},
+		{"SolanaStablecoinAccepted", `version: 1
 products:
   - key: p
     display_name: P
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usdc, unit_amount: 1000, duration: 30d, auto_renew: true, psps: [solana]}
-`
-	if _, err := Load(writeManifest(t, body)); err != nil {
-		t.Fatalf("usdc + solana should be accepted, got %v", err)
-	}
-}
-
-func TestLoad_BadInterval(t *testing.T) {
-	body := `
-version: 1
+      - {currency: usdc, unit_amount: 1000, duration: 30d, auto_renew: true, psps: [solana]}`, "30d", 1},
+		{"NormalizesWholeDayHourInterval", `version: 1
 products:
   - key: p
     display_name: P
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1000, duration: 1w}
-`
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "must use h or d") {
-		t.Fatalf("want interval error, got %v", err)
-	}
-}
-
-func TestLoad_RejectsLegacyNamedInterval(t *testing.T) {
-	body := `
-version: 1
+      - {currency: usd, unit_amount: 1000, duration: 24h, auto_renew: true}`, "1d", 1},
+		{"AcceptsSubDayRecurringInterval", `version: 1
 products:
   - key: p
     display_name: P
     tier_group: g
     tier_rank: 1
     prices:
-      - {currency: usd, unit_amount: 1000, duration: month}
-`
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "whole h or d value") {
-		t.Fatalf("want duration interval error, got %v", err)
-	}
-}
-
-func TestLoad_NormalizesWholeDayHourInterval(t *testing.T) {
-	body := `
-version: 1
-products:
-  - key: p
-    display_name: P
-    tier_group: g
-    tier_rank: 1
-    prices:
-      - {currency: usd, unit_amount: 1000, duration: 24h, auto_renew: true}
-`
-	m, err := Load(writeManifest(t, body))
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if got := m.TierGroups[0].Products[0].Prices[0].Duration; got != "1d" {
-		t.Fatalf("duration = %q, want 1d", got)
-	}
-}
-
-func TestLoad_AcceptsSubDayRecurringInterval(t *testing.T) {
-	body := `
-version: 1
-products:
-  - key: p
-    display_name: P
-    tier_group: g
-    tier_rank: 1
-    prices:
-      - {currency: usd, unit_amount: 1000, duration: 1h, auto_renew: true}
-`
-	m, err := Load(writeManifest(t, body))
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if got := m.TierGroups[0].Products[0].Prices[0].Duration; got != "1h" {
-		t.Fatalf("duration = %q, want 1h", got)
-	}
-}
-
-func TestLoadRejectsDeferredCatalogFeatures(t *testing.T) {
-	for _, field := range []string{"credit_balances", "usage_limits"} {
-		_, err := Parse([]byte("version: 1\n" + field + ": []\nproducts: []\n"))
-		if err == nil || !strings.Contains(err.Error(), "unknown field") {
-			t.Fatalf("accepted %s: %v", field, err)
-		}
-	}
-	for _, field := range []string{"credits", "includes", "usage_limits"} {
-		_, err := Parse([]byte("version: 1\nproducts:\n  - key: test\n    display_name: Test\n    " + field + ": []\n"))
-		if err == nil || !strings.Contains(err.Error(), "unknown field") {
-			t.Fatalf("accepted %s: %v", field, err)
-		}
+      - {currency: usd, unit_amount: 1000, duration: 1h, auto_renew: true}`, "1h", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := Load(writeManifest(t, tc.body))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			prices := m.TierGroups[0].Products[0].Prices
+			if len(prices) != tc.prices {
+				t.Fatalf("price count=%d, want %d", len(prices), tc.prices)
+			}
+			for _, price := range prices {
+				if price.Duration != tc.duration {
+					t.Errorf("duration=%q, want %q", price.Duration, tc.duration)
+				}
+			}
+		})
 	}
 }

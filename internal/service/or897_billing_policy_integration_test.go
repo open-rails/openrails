@@ -379,6 +379,7 @@ func or897SeedPaymentMethod(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		PspID:                pspID,
 	})
 	require.NoError(t, err)
+	dbtest.SeedNMIStoredCredentialRefs(ctx, t, pool, pm)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.payment_methods WHERE id = $1", pm)
 	})

@@ -383,13 +383,13 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 	if keepPayload {
 		_, err := qx.Exec(ctx,
 			`UPDATE openrails.rail_intents
-			    SET result_evidence = coalesce($2::jsonb,'{}'::jsonb) || CASE WHEN result_evidence ? 'qualified_receipt' THEN jsonb_build_object('qualified_receipt',result_evidence->'qualified_receipt') ELSE '{}'::jsonb END, updated_at = now()
+			    SET result_evidence = CASE WHEN result_evidence ? 'qualified_receipt' THEN coalesce($2::jsonb,'{}'::jsonb) || jsonb_build_object('qualified_receipt',result_evidence->'qualified_receipt') ELSE $2::jsonb END, updated_at = now()
 			  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded'`, id, ev, mid.UUID())
 		return err
 	}
 	_, err = qx.Exec(ctx,
 		`UPDATE openrails.rail_intents
-		    SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, result_evidence = coalesce($2::jsonb,'{}'::jsonb) || CASE WHEN result_evidence ? 'qualified_receipt' THEN jsonb_build_object('qualified_receipt',result_evidence->'qualified_receipt') ELSE '{}'::jsonb END, updated_at = now()
+		    SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, result_evidence = CASE WHEN result_evidence ? 'qualified_receipt' THEN coalesce($2::jsonb,'{}'::jsonb) || jsonb_build_object('qualified_receipt',result_evidence->'qualified_receipt') ELSE $2::jsonb END, updated_at = now()
 		  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded'`, id, ev, mid.UUID())
 	return err
 }

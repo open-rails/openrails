@@ -31,6 +31,7 @@ var (
 // the HTTP wire. The guard fails when a listed field becomes a decimal string
 // or stops existing, so the list can only shrink.
 var pendingNumericMoney = map[string]string{
+	"internal/modules/subscriptions/stripe_invoice_collection.go:func GetCollectedInvoice.AmountCaptured amount_captured":                            "Stripe-owned inbound integer amount; the retained qualified receipt encodes charged_amount as a decimal string",
 	"internal/operator/fleet_analytics.go:FleetMerchantFunnel.ActiveRevenue active_revenue":                                                          notMoneyCount,
 	"internal/operator/fleet_analytics.go:FleetMerchantFunnel.FirstRevenue first_revenue":                                                            notMoneyCount,
 	"internal/modules/copilot/tools_draft.go:draftCatalogDiffArgs.UnitAmount unit_amount":                                                            notHTTPToolArgs,

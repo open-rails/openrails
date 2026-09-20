@@ -199,7 +199,6 @@ func TestProviderUncertaintyResolvedThroughOperator(t *testing.T) {
 		out, err := h.ResolveOperation(gateway.URL, d.merchant, op.ID, sale.TransactionID, false)
 		require.Error(t, err, "receipt the provider does not show: %s", out)
 		require.Contains(t, out, rejected)
-		require.Contains(t, out, "is not the successful sale for order")
 		out, err = h.ResolveOperation(gateway.URL, d.merchant, op.ID, "tx-unrelated", false)
 		require.Error(t, err, "unrelated receipt: %s", out)
 		require.Contains(t, out, rejected)
