@@ -129,13 +129,17 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 				return c
 			}
 			request := openrails.PayInvoiceNowRequest{InvoiceID: f.Invoice, PaymentMethodID: openrails.PaymentMethodID(f.Method), IdempotencyKey: uuid.NewString()}
-			for _, bad := range []string{"", "invalid", standalone.Token, machine.Token} {
+			for _, bad := range []string{"", "invalid", "in-process-host", standalone.Token, machine.Token} {
 				_, err := newClient(bad).PayInvoiceNow(ctx, request)
 				require.Error(t, err, "absent, invalid and merchant credentials cannot become a customer action")
 			}
 			if mode == "embedded" {
+				_, err := newClient("in-process-host").CreateProduct(ctx, openrails.CreateProductRequest{Key: "forged-" + uuid.NewString(), DisplayName: "must not write"})
+				require.Error(t, err, "forwarded well-known string cannot become merchant owner")
 				owner, err := rt.Client()
 				require.NoError(t, err)
+				_, err = owner.CreateProduct(ctx, openrails.CreateProductRequest{Key: "owner-" + uuid.NewString(), DisplayName: "Default host authority"})
+				require.NoError(t, err, "default host client retains ordinary merchant authority")
 				_, err = owner.PayInvoiceNow(billingauth.SetUserContext(ctx, billingauth.UserContext{UserID: user.ID}), request)
 				require.Error(t, err, "ambient host user cannot turn the default owner into CIT")
 			}

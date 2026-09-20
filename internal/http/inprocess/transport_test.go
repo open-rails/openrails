@@ -53,8 +53,8 @@ func TestExplicitCredentialsNeverInheritHostAuthority(t *testing.T) {
 	mid := merchant.ID(uuid.New())
 	ctx := merchant.WithID(requestauth.WithHostPrincipal(t.Context(), &requestauth.HostPrincipal{MerchantID: mid, Permissions: hostPermissions()}), mid)
 	ctx = billingauth.SetUserContext(ctx, billingauth.UserContext{UserID: uuid.NewString()})
-	for _, token := range []string{"", "customer-credential", "invalid-credential", "merchant-key"} {
-		transport := NewTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	for _, token := range []string{"", "customer-credential", "invalid-credential", "merchant-key", "Bearer in-process-host"} {
+		transport, _ := NewTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, host := requestauth.HostPrincipalFromContext(r.Context())
 			require.False(t, host)
 			_, user := billingauth.FromContext(r.Context())
@@ -91,7 +91,7 @@ func TestTransportMerchantAuthorityAndIsolation(t *testing.T) {
 		require.Equal(t, bound, mid)
 		_, _ = w.Write([]byte("ok"))
 	})
-	transport := NewTransport(handler, func() merchant.ID { return bound })
+	transport, hostCapability := NewTransport(handler, func() merchant.ID { return bound })
 	host := context.WithValue(t.Context(), privateKey{}, "host-private")
 	host = requestauth.WithHostPrincipal(host, &requestauth.HostPrincipal{MerchantID: merchant.ID(uuid.New()), Permissions: []string{"platform:*"}})
 	host = billingauth.SetUserContext(host, billingauth.UserContext{UserID: uuid.NewString()})
@@ -99,7 +99,7 @@ func TestTransportMerchantAuthorityAndIsolation(t *testing.T) {
 	host = merchant.WithID(host, original)
 	for _, path := range []string{"/v1/merchant/ordinary", "/v1/merchant/billing-archive"} {
 		req, _ := http.NewRequestWithContext(host, http.MethodGet, "http://openrails.invalid"+path, nil)
-		req.Header.Set("Authorization", "Bearer "+HostCredential)
+		req.Header.Set("Authorization", "Bearer "+hostCapability)
 		resp, err := transport.RoundTrip(req)
 		require.NoError(t, err)
 		body, err := io.ReadAll(resp.Body)
@@ -136,7 +136,7 @@ func TestTransportImportCancellationClosesRequestBody(t *testing.T) {
 	defer writer.Close()
 	started := make(chan struct{})
 	finished := make(chan error, 1)
-	transport := NewTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	transport, _ := NewTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(started)
 		_, err := io.Copy(io.Discard, r.Body)
 		finished <- err

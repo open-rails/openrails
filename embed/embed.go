@@ -178,9 +178,10 @@ func applyEmbeddedDefaults(cfg *config.Config) error {
 func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, error) {
 	rt := r.app.Runtime
 	r.handlerOnce.Do(func() { r.handler = newServiceHandler(rt, r.delegatedAuthenticator) })
+	transport, hostCapability := inprocess.NewTransport(r.handler, rt.ConfiguredMerchant)
 	defaults := []openrails.ClientOption{
-		openrails.WithHTTPClient(&http.Client{Transport: inprocess.NewTransport(r.handler, rt.ConfiguredMerchant)}),
-		openrails.WithTokenProvider(func(context.Context) (string, error) { return inprocess.HostCredential, nil }),
+		openrails.WithHTTPClient(&http.Client{Transport: transport}),
+		openrails.WithTokenProvider(func(context.Context) (string, error) { return hostCapability, nil }),
 	}
 	if id := rt.ConfiguredMerchant(); !id.IsZero() {
 		defaults = append(defaults, openrails.WithMerchantID(id))

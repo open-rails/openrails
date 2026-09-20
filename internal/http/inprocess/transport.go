@@ -3,6 +3,7 @@ package inprocess
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,10 +17,6 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// HostCredential identifies the runtime's default, locally constructed host
-// client. Network routes never treat this string as a valid credential.
-const HostCredential = "in-process-host"
-
 // hostPermissions is the embedded host's authority over its own merchant: the
 // full merchant owner grant, identical to what a merchant-owner API key
 // resolves to on the standalone wire path.
@@ -30,8 +27,11 @@ func hostPermissions() []string {
 // NewTransport uses the same host authority and context isolation for embedded
 // clients and database-only operator commands. configuredMerchant is read on
 // each call so a runtime may be bound after constructing its client.
-func NewTransport(handler http.Handler, configuredMerchant func() merchant.ID) http.RoundTripper {
-	return &inprocessTransport{handler: handler, configuredMerchant: configuredMerchant}
+func NewTransport(handler http.Handler, configuredMerchant func() merchant.ID) (http.RoundTripper, string) {
+	// Only the constructor's private default token provider receives this
+	// per-client capability. A forwarded caller credential cannot name a mode.
+	capability := rand.Text()
+	return &inprocessTransport{handler: handler, configuredMerchant: configuredMerchant, hostCredential: capability}, capability
 }
 
 // inprocessTransport dispatches SDK requests directly into the in-process
@@ -42,6 +42,7 @@ func NewTransport(handler http.Handler, configuredMerchant func() merchant.ID) h
 type inprocessTransport struct {
 	handler            http.Handler
 	configuredMerchant func() merchant.ID
+	hostCredential     string
 }
 
 func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -76,7 +77,7 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// Only the caller's cancellation and deadline reach the engine; every host
 	// context value is dropped (engineContext).
 	ctx = engineContext(ctx)
-	if req.Header.Get("Authorization") == "Bearer "+HostCredential {
+	if req.Header.Get("Authorization") == "Bearer "+t.hostCredential {
 		ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: mid, Permissions: hostPermissions()})
 	}
 

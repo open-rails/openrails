@@ -25,6 +25,7 @@ import (
 // on their OWN billing: the acting user (the token's `delegated_sub`) and the
 // resolved OpenRails merchant the user belongs to.
 type ResolvedDelegated struct {
+	CredentialClass billingauth.CredentialClass
 	// Merchant is the resolved merchant's slug, sourced from the issuer registry
 	// (openrails.merchants via the validated `iss`). Delegated tokens carry NO
 	// merchant claims (authkit v0.23.0 issuer-only profile); the slug is
@@ -124,6 +125,7 @@ func ResolvedDelegatedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*Res
 		}
 	}
 	return &ResolvedDelegated{
+		CredentialClass:  p.CredentialClass,
 		Merchant:         strings.TrimSpace(p.MerchantSlug),
 		MerchantID:       merchantID,
 		MerchantSlug:     strings.TrimSpace(p.MerchantSlug),
@@ -280,6 +282,12 @@ func (c *ControlPlane) ResolveDelegated(r *http.Request) (*ResolvedDelegated, er
 		return nil, err
 	}
 
+	class := billingauth.CredentialClassUnknown
+	if raw, present := principal.Attributes[billingauth.DelegatedCredentialClassAttribute]; present {
+		if err := json.Unmarshal(raw, &class); err != nil || (class != billingauth.CredentialClassUserSession && class != billingauth.CredentialClassAutomation) {
+			return nil, ErrDelegatedInvalid
+		}
+	}
 	customerID, err := c.TouchCustomer(ctx, tid, issuer, subject)
 	if err != nil {
 		return nil, err
@@ -289,6 +297,7 @@ func (c *ControlPlane) ResolveDelegated(r *http.Request) (*ResolvedDelegated, er
 	// remote-app's stored authority (#564): an over-claim rejects the token before
 	// we get here, so what survives is a subset the signer is entitled to grant.
 	return &ResolvedDelegated{
+		CredentialClass:      class,
 		Merchant:             tslug,
 		MerchantID:           tid,
 		MerchantSlug:         tslug,

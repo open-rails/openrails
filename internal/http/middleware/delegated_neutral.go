@@ -153,7 +153,7 @@ func DelegatedSelfRequired(resolver DelegatedResolver) router.Middleware {
 				}
 				return
 			}
-			if !bindDelegated(r, resolved, CredentialDelegatedUser, billingauth.CredentialClassUserSession) {
+			if !bindDelegated(r, resolved, CredentialDelegatedUser, resolved.CredentialClass) {
 				return
 			}
 			next(r)

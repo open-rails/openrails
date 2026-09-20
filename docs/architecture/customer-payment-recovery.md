@@ -35,6 +35,37 @@ context remains isolated. The default runtime Client is the merchant-owner
 client and is not a customer credential. An explicit per-mount verifier override
 is possible, but is a deliberate host policy decision.
 
+
+The built-in delegated-token receiver reads the reserved signed attribute
+`attributes.openrails_credential_class`. Missing means unknown; only
+`user_session` and `automation` are valid explicit values. A delegated subject
+alone is not evidence of customer interaction. For AuthKit's HTTP mint route,
+the host authorizer can read the original verified claims from its context:
+
+```go
+DelegatedAuthorization: func(ctx context.Context, request authkit.DelegationRequest) (authkit.DelegationGrant, error) {
+    claims, ok := verify.ClaimsFromContext(ctx)
+    if !ok || claims.UserID == "" || claims.UserID != request.UserID {
+        return authkit.DelegationGrant{}, authkit.ErrDelegationRefused
+    }
+    class := billingauth.CredentialClassUserSession
+    if claims.DeviceKeyID != "" || claims.TokenType != "" {
+        class = billingauth.CredentialClassAutomation
+    }
+    return authkit.DelegationGrant{Attributes: map[string]any{
+        billingauth.DelegatedCredentialClassAttribute: class,
+    }}, nil
+}
+```
+
+That callback constructs its grant from verified context; it never copies the
+requested grant's class. A programmatic issuer without original credential
+provenance leaves the attribute absent or marks automation. The device-key
+login → HTTP delegation → OpenRails workflow qualifies this distinction with
+real signing keys and sender proofs. Altering the signed class invalidates the
+token. Host bridges supplying `DelegatedPrincipal` directly obey the same rule.
+
+
 For NMI invoice pay, a customer action freezes initial or subsequent unscheduled
 stored-credential posture. An initial approved reference is captured only from
 the qualified provider receipt, atomically with invoice settlement and operation
