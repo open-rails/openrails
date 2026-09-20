@@ -3,12 +3,14 @@ package intents
 import (
 	"context"
 	"fmt"
+
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 func (h *ManualRebillHandler) Resolve(ctx context.Context, in gen.OpenrailsRailIntent, resolution Resolution) (Outcome, error) {
 	ctx = pinIntentAddress(ctx, in)
-	p, err := DecodeManualRebillPayload(in)
+	p, err := subscriptions.DecodeManualRebillPayload(in)
 	if err != nil {
 		return Outcome{}, err
 	}

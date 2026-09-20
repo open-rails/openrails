@@ -155,7 +155,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 		Scan(&status, &origin, &intentType, &gotPSPID, &expiresAt))
 	assert.Equal(t, intents.StatusPending, status)
 	assert.Equal(t, string(intents.OriginSystem), origin)
-	assert.Equal(t, intents.TypeManualRebill, intentType)
+	assert.Equal(t, subscriptions.TypeManualRebill, intentType)
 	assert.Equal(t, pspID, gotPSPID, "or#893: the materialized intent carries the subscription's PSP")
 	require.NotNil(t, expiresAt, "parked charge must be bounded by the dunning window")
 

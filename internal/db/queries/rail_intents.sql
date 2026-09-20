@@ -589,3 +589,24 @@ SELECT EXISTS (
             OR i.result_evidence->'qualified_receipt'->'nmi'->>'transaction_id'=p.transaction_id)
    )
 )::bool;
+
+-- A pending quote remains owned after a charge decline: provider preparation
+-- may already have changed its recurring amount. Applied/canceled historical
+-- quotes do not lock future price changes. Call under the subscription lock.
+-- name: ListRebillTermOwners :many
+SELECT i.*
+FROM openrails.rail_intents i
+JOIN openrails.subscriptions s ON s.id=i.subscription_id AND s.merchant_id=i.merchant_id
+WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid
+  AND i.subscription_id=sqlc.arg(subscription_id)::uuid
+  AND i.intent_type='manual_rebill'
+  AND (
+    i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
+    OR EXISTS (
+      SELECT 1 FROM openrails.subscription_reprices r
+      WHERE r.merchant_id=i.merchant_id AND r.subscription_id=i.subscription_id
+        AND r.status IN ('scheduled','blocked')
+        AND r.id::text=i.payload->'renewal'->>'reprice_id'
+    )
+    OR s.scheduled_price_id::text=i.payload->'renewal'->>'scheduled_price_id'
+  );

@@ -43,7 +43,7 @@ func TestLateRebillCompletionDoesNotPayANewerMissedPeriod(t *testing.T) {
 			require.True(t, found)
 			_, err = admin.Exec(ctx, "DROP FUNCTION openrails."+trigger+"() CASCADE")
 			require.NoError(t, err)
-			p, err := DecodeManualRebillPayload(row)
+			p, err := subscriptions.DecodeManualRebillPayload(row)
 			require.NoError(t, err)
 			laterStart, laterEnd := p.Renewal.PeriodEnd, p.Renewal.PeriodEnd.Add(30*24*time.Hour)
 			clock.Advance(laterStart.Add(time.Minute).Sub(clock.Now()))
@@ -63,7 +63,7 @@ func TestLateRebillCompletionDoesNotPayANewerMissedPeriod(t *testing.T) {
 			next, err := h.EnqueueScheduled(ctx, fx.subID)
 			require.NoError(t, err)
 			require.NotEqual(t, row.ID, next.ID)
-			nextTerms, err := DecodeManualRebillPayload(next)
+			nextTerms, err := subscriptions.DecodeManualRebillPayload(next)
 			require.NoError(t, err)
 			require.True(t, nextTerms.Renewal.PeriodStart.Equal(laterEnd))
 			nextFixture := fx
@@ -107,7 +107,7 @@ func TestQualifiedRebillCoverageUsesHalfOpenIntervalsAndExactPayment(t *testing.
 	rows, err := fx.db.Gen(ctx).ListCompletedManualRebillPaymentCoverage(ctx, gen.ListCompletedManualRebillPaymentCoverageParams{MerchantID: fx.merchantID, SubscriptionID: fx.subID, PspID: fx.pspID})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	p, err := DecodeManualRebillPayload(done)
+	p, err := subscriptions.DecodeManualRebillPayload(done)
 	require.NoError(t, err)
 	for _, tc := range []struct {
 		name       string

@@ -57,8 +57,8 @@ func decodeCollectedTerms(in gen.OpenrailsRailIntent) (collectedTerms, error) {
 	case "invoice_collection":
 		p, err := DecodeInvoiceCollectionPayload(in)
 		return collectedTerms{p.Rail, p.Currency, p.AmountMinor, p.Instrument, p.ProviderCustomerRef, in.ID.String()}, err
-	case TypeManualRebill:
-		p, err := DecodeManualRebillPayload(in)
+	case subscriptions.TypeManualRebill:
+		p, err := subscriptions.DecodeManualRebillPayload(in)
 		return collectedTerms{p.Rail, p.Renewal.Currency, p.AmountMinor, p.Instrument, "", p.OrderReference}, err
 	default:
 		return collectedTerms{}, errors.New("operation kind has no collected-receipt contract")

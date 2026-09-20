@@ -6,6 +6,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -198,6 +200,6 @@ func (fx *rebillFixture) bindProvider(t *testing.T, pspID uuid.UUID, rail string
 	require.NoError(t, err)
 	fx.pspID, fx.payload.Instrument.PSPID, fx.payload.Renewal.PSPID = pspID, pspID, pspID
 	fx.payload.Rail = rail
-	fx.orderRef = rebillOrderReference(ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, rail, 1))
+	fx.orderRef = subscriptions.RebillOrderReference(subscriptions.ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, rail, 1))
 	fx.payload.OrderReference = fx.orderRef
 }

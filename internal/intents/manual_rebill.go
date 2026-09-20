@@ -21,9 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
-// TypeManualRebill owns one accepted recurring recovery attempt, from
-// idempotent provider preparation through charge, receipt and local completion.
-const TypeManualRebill = "manual_rebill"
 const rebillSubmittedAt = "submitted_at"
 
 var errRebillSuperseded = errors.New("accepted rebill is no longer applicable")
@@ -40,7 +37,7 @@ type ManualRebillHandler struct {
 func NewManualRebillHandler(d *db.DB, cfg *config.Config, resolver NMIClientResolver, clock clockwork.Clock) *ManualRebillHandler {
 	return &ManualRebillHandler{DB: d, Config: cfg, Resolver: resolver, Clock: timeutil.FirstClock(clock), Policy: DefaultBackoff}
 }
-func (h *ManualRebillHandler) Type() string                         { return TypeManualRebill }
+func (h *ManualRebillHandler) Type() string                         { return subscriptions.TypeManualRebill }
 func (h *ManualRebillHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
 func (h *ManualRebillHandler) now() time.Time                       { return h.Clock.Now().UTC() }
 func (h *ManualRebillHandler) PrunePolicy() (bool, bool)            { return true, true }
@@ -69,7 +66,7 @@ func (h *ManualRebillHandler) railClient(ctx context.Context, in gen.OpenrailsRa
 
 func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.OpenrailsRailIntent) Outcome {
 	ctx = pinIntentAddress(ctx, in)
-	p, err := DecodeManualRebillPayload(in)
+	p, err := subscriptions.DecodeManualRebillPayload(in)
 	if err != nil {
 		return Parked(err.Error())
 	}
@@ -146,7 +143,7 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.OpenrailsRailI
 
 // validateAndFence holds only the local subscription/method transaction. All
 // provider traffic occurs outside it and uses the accepted references verbatim.
-func (h *ManualRebillHandler) validateAndFence(ctx context.Context, in gen.OpenrailsRailIntent, p ManualRebillPayload, fence bool) (bool, error) {
+func (h *ManualRebillHandler) validateAndFence(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload, fence bool) (bool, error) {
 	first := false
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := h.DB.NewWithPgxTx(tx)
@@ -201,7 +198,7 @@ func (h *ManualRebillHandler) Verify(ctx context.Context, in gen.OpenrailsRailIn
 	if err != nil {
 		return Ambiguous(err.Error())
 	}
-	p, err := DecodeManualRebillPayload(current)
+	p, err := subscriptions.DecodeManualRebillPayload(current)
 	if err != nil {
 		return Ambiguous(err.Error())
 	}
@@ -220,7 +217,7 @@ func (h *ManualRebillHandler) Verify(ctx context.Context, in gen.OpenrailsRailIn
 	return h.qualifyRebill(ctx, current, p, reference)
 }
 
-func (h *ManualRebillHandler) qualifyRebill(ctx context.Context, in gen.OpenrailsRailIntent, p ManualRebillPayload, reference string) Outcome {
+func (h *ManualRebillHandler) qualifyRebill(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload, reference string) Outcome {
 	receipt, found, err := ReadNMICollectionReceipt(ctx, in, h.Resolver, reference)
 	if err != nil {
 		return Ambiguous("rebill receipt did not qualify: " + err.Error())
@@ -231,7 +228,7 @@ func (h *ManualRebillHandler) qualifyRebill(ctx context.Context, in gen.Openrail
 	return h.finalizeSuccess(ctx, in, p, receipt)
 }
 
-func (h *ManualRebillHandler) completeFromEvidence(ctx context.Context, in gen.OpenrailsRailIntent, p ManualRebillPayload) (Outcome, bool) {
+func (h *ManualRebillHandler) completeFromEvidence(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload) (Outcome, bool) {
 	receipt, found, err := LoadCollectedReceipt(in)
 	if err != nil {
 		return Ambiguous("retained rebill receipt is invalid: " + err.Error()), true

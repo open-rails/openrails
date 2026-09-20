@@ -1,4 +1,4 @@
-package intents
+package subscriptions
 
 import (
 	"encoding/json"
@@ -10,23 +10,26 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
+
+// TypeManualRebill owns accepted recurring recovery through provider
+// preparation, charge, receipt and local completion.
+const TypeManualRebill = "manual_rebill"
 
 // ManualRebillPayload freezes one attempt, including the local effects the
 // confirmed charge buys. OrderReference identifies this attempt, not every
 // attempt in a period; a different attempt's receipt cannot settle this one.
 type ManualRebillPayload struct {
-	Renewal            subscriptions.RenewalTerms `json:"renewal"`
-	PaymentMethodID    uuid.UUID                  `json:"payment_method_id"`
-	Instrument         charge.FrozenInstrument    `json:"instrument"`
-	Rail               string                     `json:"rail"`
-	RailSubscriptionID string                     `json:"rail_subscription_id"`
-	OrderReference     string                     `json:"order_reference"`
-	Attempt            int                        `json:"attempt"`
-	FailureCount       int                        `json:"failure_count"`
-	AmountMinor        moneyutil.Cents            `json:"amount_minor,string"`
+	Renewal            RenewalTerms            `json:"renewal"`
+	PaymentMethodID    uuid.UUID               `json:"payment_method_id"`
+	Instrument         charge.FrozenInstrument `json:"instrument"`
+	Rail               string                  `json:"rail"`
+	RailSubscriptionID string                  `json:"rail_subscription_id"`
+	OrderReference     string                  `json:"order_reference"`
+	Attempt            int                     `json:"attempt"`
+	FailureCount       int                     `json:"failure_count"`
+	AmountMinor        moneyutil.Cents         `json:"amount_minor,string"`
 }
 
 func ManualRebillIdempotencyKey(subscriptionID uuid.UUID, periodEnd time.Time, rail string, attempt int) string {
@@ -34,7 +37,7 @@ func ManualRebillIdempotencyKey(subscriptionID uuid.UUID, periodEnd time.Time, r
 		periodEnd.UTC().Format(time.RFC3339Nano), strings.ToLower(strings.TrimSpace(rail)), attempt)
 }
 
-func rebillOrderReference(key string) string {
+func RebillOrderReference(key string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(key)).String()
 }
 
@@ -56,7 +59,7 @@ func DecodeManualRebillPayload(in gen.OpenrailsRailIntent) (ManualRebillPayload,
 		return p, errors.New("rebill instrument or recurring agreement is incomplete")
 	}
 	key := ManualRebillIdempotencyKey(p.Renewal.SubscriptionID, p.Renewal.PeriodStart, p.Rail, p.Attempt)
-	if in.IdempotencyKey != key || p.OrderReference != rebillOrderReference(key) {
+	if in.IdempotencyKey != key || p.OrderReference != RebillOrderReference(key) {
 		return p, errors.New("rebill identity does not name the accepted period and attempt")
 	}
 	minor, err := moneyutil.NativeToRailMinorExact(p.Renewal.Currency, p.Renewal.Amount)

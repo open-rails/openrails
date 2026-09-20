@@ -4,9 +4,11 @@ package intents
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"net/url"
 	"testing"
+
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/stretchr/testify/require"
 )
 
 func (fx rebillFixture) recurringRef(t *testing.T) string {
@@ -75,7 +77,7 @@ func TestManualRebill_ChangedAnchorRefusesBeforeSubmission(t *testing.T) {
 	next, err := handler.EnqueueScheduled(fx.handlerCtx(), fx.subID)
 	require.NoError(t, err)
 	require.NotEqual(t, accepted.ID, next.ID)
-	current, err := DecodeManualRebillPayload(next)
+	current, err := subscriptions.DecodeManualRebillPayload(next)
 	require.NoError(t, err)
 	require.Equal(t, 1, current.Attempt)
 	require.Equal(t, 1, current.FailureCount)

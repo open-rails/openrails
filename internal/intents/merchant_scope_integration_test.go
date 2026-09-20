@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
@@ -102,7 +104,7 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 			"scope-claim-"+suffix, "scope-schedule-"+suffix, now.Add(-24*time.Hour), dueAt)
 		require.NoError(t, err)
 
-		accepted, err := NewStore(dbi).Enqueue(ownerCtx, EnqueueParams{MerchantID: ownerID, Provider: "nmi", IntentType: TypeManualRebill, SubscriptionID: &claimSubID, PspID: pspID, Payload: map[string]any{}, IdempotencyKey: "scope-" + suffix, NextAttemptAt: now, Origin: OriginSystem})
+		accepted, err := NewStore(dbi).Enqueue(ownerCtx, EnqueueParams{MerchantID: ownerID, Provider: "nmi", IntentType: subscriptions.TypeManualRebill, SubscriptionID: &claimSubID, PspID: pspID, Payload: map[string]any{}, IdempotencyKey: "scope-" + suffix, NextAttemptAt: now, Origin: OriginSystem})
 		require.NoError(t, err)
 		_, err = queries.GetUnresolvedManualRebill(ctx, gen.GetUnresolvedManualRebillParams{MerchantID: otherID, SubscriptionID: claimSubID})
 		require.ErrorIs(t, err, pgx.ErrNoRows)

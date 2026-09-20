@@ -45,6 +45,7 @@ type fakeNMIRebillGateway struct {
 	amount             atomic.Value
 	updateCalls        atomic.Int64
 	updateForm         atomic.Value
+	beforeUpdate       func()
 	loseUpdateResponse atomic.Bool
 }
 
@@ -83,6 +84,9 @@ func newFakeNMIRebillGateway(t *testing.T, fx rebillFixture) (*fakeNMIRebillGate
 			return
 		}
 		if r.Form.Get("recurring") == "update_subscription" {
+			if f.beforeUpdate != nil {
+				f.beforeUpdate()
+			}
 			f.updateCalls.Add(1)
 			f.updateForm.Store(r.Form)
 			f.amount.Store(r.Form.Get("plan_amount"))
@@ -131,7 +135,7 @@ type rebillFixture struct {
 	periodEnd  time.Time
 	orderRef   string
 	pspID      uuid.UUID
-	payload    ManualRebillPayload
+	payload    subscriptions.ManualRebillPayload
 }
 
 // seedPastDueSubscription inserts product/price/payment-method/subscription
@@ -157,7 +161,7 @@ func seedPastDueSubscriptionAt(t *testing.T, merchantID uuid.UUID, now time.Time
 	fx.subID = uuid.New()
 	now = now.UTC().Truncate(time.Second)
 	fx.periodEnd = now.Add(-time.Minute)
-	fx.orderRef = rebillOrderReference(ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, "nmi", 1))
+	fx.orderRef = subscriptions.RebillOrderReference(subscriptions.ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, "nmi", 1))
 
 	userID := uuid.New()
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, merchantID, userID)
@@ -210,7 +214,7 @@ func seedPastDueSubscriptionAt(t *testing.T, merchantID uuid.UUID, now time.Time
 		if err != nil {
 			return err
 		}
-		fx.payload = ManualRebillPayload{Renewal: terms, PaymentMethodID: paymentMethodID, Instrument: charge.FreezeInstrument(method), Rail: "nmi", RailSubscriptionID: sub.RailSubscriptionID, Attempt: 1, FailureCount: 1, OrderReference: fx.orderRef, AmountMinor: minor}
+		fx.payload = subscriptions.ManualRebillPayload{Renewal: terms, PaymentMethodID: paymentMethodID, Instrument: charge.FreezeInstrument(method), Rail: "nmi", RailSubscriptionID: sub.RailSubscriptionID, Attempt: 1, FailureCount: 1, OrderReference: fx.orderRef, AmountMinor: minor}
 		return nil
 	}))
 
@@ -234,16 +238,16 @@ func (fx rebillFixture) enqueueParams(attempt int) EnqueueParams {
 		MerchantID:     fx.merchantID,
 		Provider:       fx.payload.Rail,
 		PspID:          fx.pspID,
-		IntentType:     TypeManualRebill,
+		IntentType:     subscriptions.TypeManualRebill,
 		SubscriptionID: &subID,
 		PriceID:        &fx.payload.Renewal.PriceID,
-		Payload: func() ManualRebillPayload {
+		Payload: func() subscriptions.ManualRebillPayload {
 			p := fx.payload
 			p.Attempt = attempt
-			p.OrderReference = rebillOrderReference(ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, fx.payload.Rail, attempt))
+			p.OrderReference = subscriptions.RebillOrderReference(subscriptions.ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, fx.payload.Rail, attempt))
 			return p
 		}(),
-		IdempotencyKey: ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, fx.payload.Rail, attempt),
+		IdempotencyKey: subscriptions.ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, fx.payload.Rail, attempt),
 		NextAttemptAt:  time.Now().UTC(),
 		Origin:         OriginSystem,
 		OriginReason:   "integration test",
@@ -347,7 +351,7 @@ func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 	require.Equal(t, StatusUnknownNeedsVerify, fx.intentByID(t, row.ID).Status)
 	resumed := row
 	resumed.Attempts = 2
-	outcome := fx.rebillRunner(client, fullModeConfig()).Registry.Lookup(TypeManualRebill).Execute(context.Background(), resumed)
+	outcome := fx.rebillRunner(client, fullModeConfig()).Registry.Lookup(subscriptions.TypeManualRebill).Execute(context.Background(), resumed)
 	require.Equal(t, OutcomeAmbiguous, outcome.Class)
 	require.EqualValues(t, 1, fake.saleCalls.Load())
 

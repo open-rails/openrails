@@ -49,7 +49,7 @@ func (h *ManualRebillHandler) EnqueueScheduled(ctx context.Context, subscription
 		ordinal := 0
 		previous, err := d.Gen(ctx).GetLatestManualRebillForPeriod(ctx, gen.GetLatestManualRebillForPeriodParams{MerchantID: mid.UUID(), SubscriptionID: subscriptionID, PeriodStart: sub.CurrentPeriodEndsAt.UTC()})
 		if err == nil {
-			prior, err := DecodeManualRebillPayload(previous)
+			prior, err := subscriptions.DecodeManualRebillPayload(previous)
 			if err != nil {
 				return err
 			}
@@ -61,7 +61,7 @@ func (h *ManualRebillHandler) EnqueueScheduled(ctx context.Context, subscription
 		if sub.RetryAttempts != nil {
 			failures = *sub.RetryAttempts
 		}
-		key := ManualRebillIdempotencyKey(sub.ID, *sub.CurrentPeriodEndsAt, string(sub.Rail), ordinal)
+		key := subscriptions.ManualRebillIdempotencyKey(sub.ID, *sub.CurrentPeriodEndsAt, string(sub.Rail), ordinal)
 		store := NewStore(d)
 		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, now)
 		if err != nil {
@@ -85,16 +85,16 @@ func (h *ManualRebillHandler) EnqueueScheduled(ctx context.Context, subscription
 		if err != nil {
 			return err
 		}
-		p := ManualRebillPayload{Renewal: terms, PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(methodRow), Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, OrderReference: rebillOrderReference(key), Attempt: ordinal, FailureCount: failures, AmountMinor: minor}
+		p := subscriptions.ManualRebillPayload{Renewal: terms, PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(methodRow), Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, OrderReference: subscriptions.RebillOrderReference(key), Attempt: ordinal, FailureCount: failures, AmountMinor: minor}
 		windowEnd := terms.PeriodStart.Add(collection.Window(int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour)))
 		if !windowEnd.After(now) {
 			return errors.New("rebill is outside its collection window")
 		}
-		accepted, err = store.Enqueue(ctx, EnqueueParams{MerchantID: mid.UUID(), Provider: p.Rail, IntentType: TypeManualRebill, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: sub.PspID, Payload: p, IdempotencyKey: key, NextAttemptAt: now, Origin: OriginSystem, OriginReason: "scheduled recurring recovery", ExpiresAt: &windowEnd})
+		accepted, err = store.Enqueue(ctx, EnqueueParams{MerchantID: mid.UUID(), Provider: p.Rail, IntentType: subscriptions.TypeManualRebill, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: sub.PspID, Payload: p, IdempotencyKey: key, NextAttemptAt: now, Origin: OriginSystem, OriginReason: "scheduled recurring recovery", ExpiresAt: &windowEnd})
 		if err != nil {
 			return err
 		}
-		canonical, err := DecodeManualRebillPayload(accepted)
+		canonical, err := subscriptions.DecodeManualRebillPayload(accepted)
 		if err != nil {
 			return err
 		}
