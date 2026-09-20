@@ -419,8 +419,17 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 
 	t.Run("draft defaults explicit date new tier and key correction", func(t *testing.T) {
 		future := time.Now().UTC().AddDate(0, 0, 40).Format("2006-01-02")
-		stripe := dbtest.EnsureTestPSP(ctx, t, h.Pool(), dbtest.TestMerchantID.UUID(), "stripe")
-		_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,price_ref) VALUES($1,$2,$3,'price-copilot')`, dbtest.TestMerchantID.UUID(), v2.ID.UUID(), stripe)
+		stripe := uuid.New()
+		stripeKey := "copilot-stripe-" + stripe.String()
+		_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id,key,created_at,first_seen_at) VALUES($1,$2,'stripe','test',$3,$3,'epoch','epoch')`, stripe, dbtest.TestMerchantID.UUID(), stripeKey)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, err := h.Pool().Exec(ctx, `DELETE FROM openrails.price_psp_bindings WHERE psp_id=$1`, stripe)
+			require.NoError(t, err)
+			_, err = h.Pool().Exec(ctx, `DELETE FROM openrails.psps WHERE id=$1`, stripe)
+			require.NoError(t, err)
+		})
+		_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,price_ref) VALUES($1,$2,$3,'price-copilot')`, dbtest.TestMerchantID.UUID(), v2.ID.UUID(), stripe)
 		require.NoError(t, err)
 		cases := []struct {
 			name, tool, args string
@@ -469,7 +478,7 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 					require.NotEmpty(t, d.PriceChange.DraftID)
 					require.Equal(t, v2.ProductID.UUID().String(), d.PriceChange.CreatePrice.ProductID)
 					require.Equal(t, priceKey, d.PriceChange.CreatePrice.Key)
-					require.Contains(t, d.PriceChange.CreatePrice.Providers, "stripe")
+					require.Contains(t, d.PriceChange.CreatePrice.Providers, stripeKey)
 					if tc.name == "increase" {
 						require.Equal(t, "increase", d.PriceChange.Direction)
 						require.Nil(t, d.PriceChange.Reprice)
