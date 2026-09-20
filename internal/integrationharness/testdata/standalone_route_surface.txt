@@ -50,6 +50,7 @@ GET /v1/me/spend-limits
 GET /v1/me/status
 GET /v1/me/subscriptions
 GET /v1/me/subscriptions/{id}
+GET /v1/me/subscriptions/{id}/provider-cutover
 GET /v1/me/tier
 GET /v1/me/transactions
 GET /v1/me/usage
@@ -113,6 +114,7 @@ GET /v1/merchant/reprices/{id}
 GET /v1/merchant/settings
 GET /v1/merchant/subscriptions
 GET /v1/merchant/subscriptions/{id}
+GET /v1/merchant/subscriptions/{id}/provider-cutover
 GET /v1/merchant/team
 GET /v1/merchant/team/invites
 GET /v1/merchant/trust-level
@@ -146,6 +148,8 @@ POST /v1/me/payment-methods
 POST /v1/me/subscriptions/{id}/cancel
 POST /v1/me/subscriptions/{id}/change-tier
 POST /v1/me/subscriptions/{id}/change-tier/preview
+POST /v1/me/subscriptions/{id}/provider-cutover
+POST /v1/me/subscriptions/{id}/provider-cutover/preview
 POST /v1/me/subscriptions/{id}/resume
 POST /v1/me/subscriptions/{id}/solana-cancel
 POST /v1/me/subscriptions/{id}/solana-cancel-tx
@@ -200,6 +204,8 @@ POST /v1/merchant/reprices/{id}/cancel
 POST /v1/merchant/subscriptions/{id}/cancel
 POST /v1/merchant/subscriptions/{id}/change-tier
 POST /v1/merchant/subscriptions/{id}/change-tier/preview
+POST /v1/merchant/subscriptions/{id}/provider-cutover
+POST /v1/merchant/subscriptions/{id}/provider-cutover/preview
 POST /v1/merchant/subscriptions/{id}/reprice
 POST /v1/merchant/subscriptions/{id}/resume
 POST /v1/merchant/team/invites
