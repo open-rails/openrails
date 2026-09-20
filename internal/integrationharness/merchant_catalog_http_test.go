@@ -943,7 +943,7 @@ type httpCatalogApplier struct {
 func (a httpCatalogApplier) GetProductByKey(_ context.Context, key string) (*billingservice.CatalogProduct, error) {
 	status, body := requestJSON(a.t, http.MethodGet, a.baseURL+"/v1/merchant/catalog/products/by-key/"+url.PathEscape(key), a.token, nil)
 	if status == http.StatusNotFound {
-		return nil, fmt.Errorf("product not found: %s", key)
+		return nil, openrails.ErrNotFound
 	}
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("get product by key: status %d: %s", status, string(body))

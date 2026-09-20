@@ -2,7 +2,7 @@ package catalog
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -70,7 +70,7 @@ func (f *fakeApplier) GetProductByKey(_ context.Context, key string) (*billingse
 	if p, ok := f.products[key]; ok {
 		return p, nil
 	}
-	return nil, fmt.Errorf("product not found: %s", key)
+	return nil, openrails.ErrNotFound
 }
 
 func (f *fakeApplier) ListProducts(_ context.Context, opts billingservice.ListProductsOptions) (billingservice.CatalogPage[billingservice.CatalogProduct], error) {
@@ -562,4 +562,29 @@ products:
 			t.Fatalf("converged plan must have no changes:\n%s", plan)
 		}
 	})
+}
+
+// A planner may create only after a genuine absent-product result; storage or
+// provider lookup failure must not be presented as a successful create plan.
+type productLookupFailure struct {
+	*fakeApplier
+	err error
+}
+
+func (a productLookupFailure) GetProductByKey(context.Context, string) (*billingservice.CatalogProduct, error) {
+	return nil, a.err
+}
+func TestPlanPropagatesOperationalProductLookupFailure(t *testing.T) {
+	for _, cause := range []error{nil, errors.New("database unavailable"), errors.New("provider lookup failed")} {
+		plan, err := Plan(context.Background(), productLookupFailure{newFakeApplier(), cause}, loadFrom(t, planManifest))
+		if err == nil || plan != nil {
+			t.Fatalf("incomplete read became successful create plan: %v", plan)
+		}
+		if cause != nil && !errors.Is(err, cause) {
+			t.Fatalf("operational lookup failure became a create plan: %v", err)
+		}
+		if errors.Is(err, openrails.ErrInvalid) || errors.Is(err, openrails.ErrNotFound) {
+			t.Fatalf("operational failure was classified as caller input: %v", err)
+		}
+	}
 }

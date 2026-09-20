@@ -5109,8 +5109,10 @@
       "time": "time"
     },
     "pkg/catalog/plan.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "billingservice": "github.com/open-rails/openrails/internal/service",
       "context": "context",
+      "errors": "errors",
       "fmt": "fmt",
       "io": "io",
       "maps": "maps",
