@@ -70,7 +70,7 @@ func TestMobiusAdapter_AutoCreateRejectsNilFrequency(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	_, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: uuid.New(), UnitAmount: 9_990_000, BillingCycleDays: nil,
+		PriceID: uuid.New(), Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: nil,
 	})
 	if err == nil {
 		t.Fatal("expected error when recurring day cadence is nil")
@@ -322,7 +322,7 @@ func TestMobiusAdapter_AttachMissingPlanRequiresCycleToCreate(t *testing.T) {
 
 	_, err := a.Attach(context.Background(),
 		map[string]string{models.RailKeyPlanID: "premium"},
-		autoCreateContext{UnitAmount: 9_990_000, BillingCycleDays: nil})
+		autoCreateContext{Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: nil})
 	if err == nil || !strings.Contains(err.Error(), "recurring day cadence") {
 		t.Fatalf("expected a loud recurring day cadence error, got %v", err)
 	}
@@ -339,7 +339,7 @@ func TestMobiusAdapter_AttachRejectsAmountMismatch(t *testing.T) {
 
 	_, err := a.Attach(context.Background(),
 		map[string]string{models.RailKeyPlanID: planID},
-		autoCreateContext{UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
+		autoCreateContext{Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err == nil || !strings.Contains(err.Error(), "amount") {
 		t.Fatalf("expected an amount-mismatch error, got %v", err)
 	}
@@ -356,7 +356,7 @@ func TestMobiusAdapter_AttachRejectsCycleMismatch(t *testing.T) {
 
 	_, err := a.Attach(context.Background(),
 		map[string]string{models.RailKeyPlanID: planID},
-		autoCreateContext{UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
+		autoCreateContext{Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err == nil || !strings.Contains(err.Error(), "billing cycle") {
 		t.Fatalf("expected a billing-cycle-mismatch error, got %v", err)
 	}
@@ -384,7 +384,7 @@ func TestMobiusAdapter_VerifyDetectsDrift(t *testing.T) {
 
 	ids := map[string]string{models.RailKeyPlanID: "p", models.RailKeyProvider: "mobius"}
 	drift, missing, err := a.Verify(context.Background(), ids, &priceVerifyContext{
-		UnitAmount: 9_990_000,
+		UnitAmount: 9_990_000, Currency: "USD",
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -410,7 +410,7 @@ func TestMobiusAdapter_VerifyMissingPlan(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	ids := map[string]string{models.RailKeyPlanID: "p", models.RailKeyProvider: "mobius"}
-	_, missing, err := a.Verify(context.Background(), ids, &priceVerifyContext{})
+	_, missing, err := a.Verify(context.Background(), ids, &priceVerifyContext{Currency: "USD"})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestMobiusAdapter_VerifyUnconfiguredIsSyncDisabled(t *testing.T) {
 	a := &nmiAdapter{svc: &Service{rt: &app.Runtime{}}}
 	// VerifyPriceSync maps errProviderNotArmed to sync_disabled. A nil error
 	// would be read as in sync and could close drift nothing verified.
-	drift, missing, err := a.Verify(context.Background(), map[string]string{models.RailKeyPlanID: "p"}, &priceVerifyContext{})
+	drift, missing, err := a.Verify(context.Background(), map[string]string{models.RailKeyPlanID: "p"}, &priceVerifyContext{Currency: "USD"})
 	if !errors.Is(err, errProviderNotArmed) || missing || drift != nil {
 		t.Fatalf("expected a not-armed error, got drift=%v missing=%v err=%v", drift, missing, err)
 	}

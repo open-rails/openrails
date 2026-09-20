@@ -81,6 +81,11 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 }
 
 func (s *Service) InvoiceRecovery(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*openrails.PaymentRecovery, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	invoice, err := s.moneyService().GetInvoiceByID(ctx, payer, id)
 	if err != nil {
 		return nil, err
@@ -102,6 +107,11 @@ func (s *Service) InvoiceRecovery(ctx context.Context, payer identity.CustomerID
 }
 
 func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*openrails.PaymentRecovery, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	sub, err := subscriptions.NewSubscriptionRepo(s.rt.DB).GetByID(ctx, id)
 	if err != nil {
 		return nil, err
