@@ -49,8 +49,8 @@ func (q *Queries) AcceptPaymentMethodSetupSession(ctx context.Context, arg Accep
 
 const attachCapturedPaymentMethod = `-- name: AttachCapturedPaymentMethod :one
 INSERT INTO openrails.payment_methods
-(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,last_four,card_type,expiry_date,charge_via,created_at,updated_at)
-VALUES($1,$2,$3,$4,'nmi','hyperswitch',$5,$6,$7,$8,$9,$10,'pan_proxy',$11,$11)
+(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,last_four,card_type,expiry_date,charge_via,initial_transaction_id,created_at,updated_at)
+VALUES($1,$2,$3,$4,'nmi','hyperswitch',$5,$6,$7,$8,$9,$10,'pan_proxy','',$11,$11)
 ON CONFLICT (merchant_id,psp_id,custodian_id,rail_customer_ref,rail_method_ref)
 DO UPDATE SET id=openrails.payment_methods.id
 WHERE openrails.payment_methods.customer_id=EXCLUDED.customer_id
@@ -185,6 +185,25 @@ func (q *Queries) CompletePaymentMethodSetupSession(ctx context.Context, arg Com
 	return result.RowsAffected(), nil
 }
 
+const countInvalidCheckoutCaptureReferences = `-- name: CountInvalidCheckoutCaptureReferences :one
+SELECT count(*) FROM openrails.checkout_sessions cs
+WHERE cs.merchant_id=$1::uuid AND cs.mode='payment_method'
+AND (
+ NOT EXISTS(SELECT 1 FROM openrails.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
+ OR (cs.status='succeeded' AND NOT EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id=cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
+)
+`
+
+// Terminal replay retains the original capture authority even after a later
+// legitimate instrument remap. The attached local method must still be owned
+// by this payer; it need not still use the historical custodian/PSP.
+func (q *Queries) CountInvalidCheckoutCaptureReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countInvalidCheckoutCaptureReferences, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createCheckoutSession = `-- name: CreateCheckoutSession :execrows
 
 INSERT INTO openrails.checkout_sessions (
@@ -261,8 +280,8 @@ func (q *Queries) CreateCheckoutSession(ctx context.Context, arg CreateCheckoutS
 
 const createPaymentMethodSetupSession = `-- name: CreatePaymentMethodSetupSession :execrows
 INSERT INTO openrails.checkout_sessions
-(id,merchant_id,customer_id,psp_id,mode,rail,status,expires_at,rail_state,created_at,updated_at)
-VALUES($1,$2,$3,$4,'payment_method','nmi','created',$5,$6,$7,$7)
+(id,merchant_id,customer_id,psp_id,mode,rail,status,expires_at,rail_state,metadata,created_at,updated_at)
+VALUES($1,$2,$3,$4,'payment_method','nmi','created',$5,$6,$7,$8,$8)
 ON CONFLICT (id) DO NOTHING
 `
 
@@ -273,6 +292,7 @@ type CreatePaymentMethodSetupSessionParams struct {
 	PspID      uuid.UUID
 	ExpiresAt  *time.Time
 	RailState  []byte
+	Metadata   []byte
 	Now        time.Time
 }
 
@@ -286,6 +306,7 @@ func (q *Queries) CreatePaymentMethodSetupSession(ctx context.Context, arg Creat
 		arg.PspID,
 		arg.ExpiresAt,
 		arg.RailState,
+		arg.Metadata,
 		arg.Now,
 	)
 	if err != nil {

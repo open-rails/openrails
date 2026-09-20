@@ -144,6 +144,9 @@ func (s *CheckoutSessionService) createPaymentMethodSetup(ctx context.Context, r
 	if payment != (CheckoutSessionPaymentRequest{}) || req.PriceID != "" || req.SubscriptionID != "" || req.NewPriceID != "" || req.SuccessURL != "" || req.CancelURL != "" || (req.Payment.Rail != "" && req.Payment.Rail != "nmi") {
 		return nil, fmt.Errorf("%w: setup accepts no purchase, token or redirect fields", ErrCheckoutSessionValidation)
 	}
+	if user.Email == nil || strings.TrimSpace(*user.Email) == "" || strings.TrimSpace(user.Username) == "" {
+		return nil, fmt.Errorf("%w: capture requires verified customer email and name", ErrCheckoutSessionValidation)
+	}
 	customer, err := customerIDFromUser(user.ID)
 	if err != nil {
 		return nil, err
@@ -154,7 +157,10 @@ func (s *CheckoutSessionService) createPaymentMethodSetup(ctx context.Context, r
 	}
 	canonical := *req
 	canonical.Payment.Rail = "nmi"
-	fingerprint := checkoutSessionRequestFingerprintForRail(&canonical, user, "nmi")
+	baseFingerprint := checkoutSessionRequestFingerprintForRail(&canonical, user, "nmi")
+	body, _ := json.Marshal([]any{baseFingerprint, user.Username, user.Email})
+	bodyDigest := sha256.Sum256(body)
+	fingerprint := hex.EncodeToString(bodyDigest[:])
 	id := captureSessionID(owner, customer, req.IdempotencyKey)
 	session, err := s.repo.GetByID(ctx, id)
 	if err == nil {
@@ -180,10 +186,11 @@ func (s *CheckoutSessionService) createPaymentMethodSetup(ctx context.Context, r
 		pending.ExpiresAt = now.Add(defaultCheckoutSessionTTL)
 		state := map[string]any{checkoutSessionFingerprintKey: fingerprint, "capture": pending}
 		raw, _ := json.Marshal(state)
+		metadata, _ := json.Marshal(normalizeMetadata(req.Metadata))
 		if err = db.EnsureCustomerRow(ctx, s.db.Qx(ctx), uuid.Nil, customer); err != nil {
 			return nil, err
 		}
-		_, err = s.db.Gen(ctx).CreatePaymentMethodSetupSession(ctx, gen.CreatePaymentMethodSetupSessionParams{ID: id, MerchantID: owner.UUID(), CustomerID: customer, PspID: req.Payment.PSPID, ExpiresAt: new(pending.ExpiresAt), RailState: raw, Now: now})
+		_, err = s.db.Gen(ctx).CreatePaymentMethodSetupSession(ctx, gen.CreatePaymentMethodSetupSessionParams{ID: id, MerchantID: owner.UUID(), CustomerID: customer, PspID: req.Payment.PSPID, ExpiresAt: new(pending.ExpiresAt), RailState: raw, Metadata: metadata, Now: now})
 		if err != nil {
 			return nil, err
 		}
@@ -207,9 +214,6 @@ func (s *CheckoutSessionService) createPaymentMethodSetup(ctx context.Context, r
 	}
 	if !s.now().Before(accepted.ExpiresAt) {
 		return s.renderPaymentMethodSetup(ctx, session)
-	}
-	if user.Email == nil || strings.TrimSpace(*user.Email) == "" || strings.TrimSpace(user.Username) == "" {
-		return nil, fmt.Errorf("%w: capture requires verified customer email and name", ErrCheckoutSessionValidation)
 	}
 	vendorCustomer, err := client.EnsureCustomer(ctx, customer.String(), user.Username, *user.Email)
 	if err != nil {

@@ -114,8 +114,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 -- UUID. The first writer owns its immutable request fingerprint and binding.
 -- name: CreatePaymentMethodSetupSession :execrows
 INSERT INTO openrails.checkout_sessions
-(id,merchant_id,customer_id,psp_id,mode,rail,status,expires_at,rail_state,created_at,updated_at)
-VALUES(sqlc.arg(id),sqlc.arg(merchant_id),sqlc.arg(customer_id),sqlc.arg(psp_id),'payment_method','nmi','created',sqlc.arg(expires_at),sqlc.arg(rail_state),sqlc.arg(now),sqlc.arg(now))
+(id,merchant_id,customer_id,psp_id,mode,rail,status,expires_at,rail_state,metadata,created_at,updated_at)
+VALUES(sqlc.arg(id),sqlc.arg(merchant_id),sqlc.arg(customer_id),sqlc.arg(psp_id),'payment_method','nmi','created',sqlc.arg(expires_at),sqlc.arg(rail_state),sqlc.arg(metadata),sqlc.arg(now),sqlc.arg(now))
 ON CONFLICT (id) DO NOTHING;
 
 -- Only one prepared vendor session is accepted and exposed to the browser.
@@ -146,10 +146,21 @@ WHERE id=sqlc.arg(id) AND merchant_id=sqlc.arg(merchant_id)
 -- Capture attachment never reparents an existing instrument to another payer.
 -- name: AttachCapturedPaymentMethod :one
 INSERT INTO openrails.payment_methods
-(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,last_four,card_type,expiry_date,charge_via,created_at,updated_at)
-VALUES(sqlc.arg(id),sqlc.arg(merchant_id),sqlc.arg(customer_id),sqlc.arg(psp_id),'nmi','hyperswitch',sqlc.arg(custodian_id),sqlc.arg(vendor_customer_id),sqlc.arg(vendor_method_id),sqlc.arg(last_four),sqlc.arg(card_type),sqlc.arg(expiry_date),'pan_proxy',sqlc.arg(now),sqlc.arg(now))
+(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,last_four,card_type,expiry_date,charge_via,initial_transaction_id,created_at,updated_at)
+VALUES(sqlc.arg(id),sqlc.arg(merchant_id),sqlc.arg(customer_id),sqlc.arg(psp_id),'nmi','hyperswitch',sqlc.arg(custodian_id),sqlc.arg(vendor_customer_id),sqlc.arg(vendor_method_id),sqlc.arg(last_four),sqlc.arg(card_type),sqlc.arg(expiry_date),'pan_proxy','',sqlc.arg(now),sqlc.arg(now))
 ON CONFLICT (merchant_id,psp_id,custodian_id,rail_customer_ref,rail_method_ref)
 DO UPDATE SET id=openrails.payment_methods.id
 WHERE openrails.payment_methods.customer_id=EXCLUDED.customer_id
   AND openrails.payment_methods.custodian='hyperswitch'
 RETURNING *;
+
+-- name: CountInvalidCheckoutCaptureReferences :one
+-- Terminal replay retains the original capture authority even after a later
+-- legitimate instrument remap. The attached local method must still be owned
+-- by this payer; it need not still use the historical custodian/PSP.
+SELECT count(*) FROM openrails.checkout_sessions cs
+WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.mode='payment_method'
+AND (
+ NOT EXISTS(SELECT 1 FROM openrails.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
+ OR (cs.status='succeeded' AND NOT EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id=cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
+);
