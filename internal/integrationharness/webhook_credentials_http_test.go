@@ -27,9 +27,16 @@ import (
 )
 
 func TestWebhookCredentialHTTPWorkflow(t *testing.T) {
+	for _, source := range []string{config.MerchantSourceAPI, config.MerchantSourceManifest} {
+		t.Run(source, func(t *testing.T) { webhookCredentialHTTPWorkflow(t, source) })
+	}
+}
+
+func webhookCredentialHTTPWorkflow(t *testing.T, source string) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd", WithConfig(func(cfg *config.Config) {
+		cfg.MerchantSource = source
 		cfg.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 	}))
 	rt := surface.App().Runtime
