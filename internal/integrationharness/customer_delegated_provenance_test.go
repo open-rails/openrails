@@ -26,7 +26,6 @@ import (
 	"github.com/open-rails/authkit/verify"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/testauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/stretchr/testify/require"
@@ -40,7 +39,8 @@ func TestCustomerDelegationRetainsIssuerVerifiedInteraction(t *testing.T) {
 	h := New(t, ctx)
 	gateway := NewFakeNMIGateway(t)
 	receiver := h.StartStandalone("USD", WithConfig(func(c *config.Config) { c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: gateway.URL} }))
-	di := receiver.RegisterDelegatedIssuer("interaction-"+uuid.NewString()[:8], dbtest.TestMerchantSlug)
+	owned := receiver.ProvisionOwnedMerchant("interaction-" + uuid.NewString()[:8])
+	di := receiver.RegisterDelegatedIssuer("interaction-"+uuid.NewString()[:8], owned.MerchantSlug)
 	signer := di.issuer.Signer()
 	pub := signer.(jwtkit.PublicKeySigner).PublicKey()
 	var sawDevice atomic.Bool
@@ -87,7 +87,7 @@ func TestCustomerDelegationRetainsIssuerVerifiedInteraction(t *testing.T) {
 	require.NoError(t, err)
 	session, _, err := issuerCore.MintAccessToken(ctx, user.ID, nil)
 	require.NoError(t, err)
-	fixture := h.SeedPastDueInvoiceForCustomer(receiver.App().Runtime, dbtest.TestMerchantID, uuid.MustParse(user.ID), "USD", 50_000)
+	fixture := h.SeedPastDueInvoiceForCustomer(receiver.App().Runtime, owned.MerchantID, uuid.MustParse(user.ID), "USD", 50_000)
 	sender, err := testauth.NewSender()
 	require.NoError(t, err)
 	exchange := func(parent string) string {

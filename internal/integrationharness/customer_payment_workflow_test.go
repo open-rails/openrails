@@ -24,7 +24,6 @@ import (
 	orauthkit "github.com/open-rails/openrails/embed/authkit"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/dbtest"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/stretchr/testify/require"
@@ -85,9 +84,10 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 	}))
 	t.Cleanup(wire.Close)
 	standalone := h.StartStandalone("USD", WithConfig(func(c *config.Config) { c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: wire.URL} }))
-	machine := standalone.RegisterRemoteApplication("payment-machine-"+uuid.NewString()[:8], dbtest.TestMerchantSlug, controlplane.MerchantRoleOwner)
+	owned := standalone.ProvisionOwnedMerchant("customer-recovery-" + uuid.NewString()[:8])
+	machine := standalone.RegisterRemoteApplication("payment-machine-"+uuid.NewString()[:8], owned.MerchantSlug, controlplane.MerchantRoleOwner)
 	cp := embcp.Get(standalone.App())
-	authn, err := orauthkit.NewDelegatedAuthenticator(cp.AuthService().Verifier(), dbtest.TestMerchantID.String())
+	authn, err := orauthkit.NewDelegatedAuthenticator(cp.AuthService().Verifier(), owned.MerchantID.String())
 	require.NoError(t, err)
 	rt, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}, ProviderSandbox: &config.ProviderSandboxConfig{NMIGatewayURL: wire.URL}},
@@ -95,7 +95,7 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
-	app.HostGraph(rt).Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
+	app.HostGraph(rt).Runtime.SetConfiguredMerchant(owned.MerchantID)
 	handler, err := rt.Handler(embed.MountOptions{RouteSets: []embed.RouteSet{embed.RouteSetCustomer}})
 	require.NoError(t, err, "mount inherits the runtime's verifier")
 	mounted := httptest.NewServer(handler)
@@ -111,7 +111,7 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			if mode == "http" {
 				currency, amount, providerAmount = "JPY", 30_001, "4.00"
 			}
-			f := h.SeedPastDueInvoiceForCustomer(app.HostGraph(rt).Runtime, dbtest.TestMerchantID, customer, currency, amount)
+			f := h.SeedPastDueInvoiceForCustomer(app.HostGraph(rt).Runtime, owned.MerchantID, customer, currency, amount)
 			// This method was saved without an approved unscheduled agreement. A
 			// customer-present payment must establish one before future MIT.
 			_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref='' WHERE id=$1`, f.Method)
