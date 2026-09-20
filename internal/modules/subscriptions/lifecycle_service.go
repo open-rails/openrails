@@ -747,7 +747,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		}
 
 		var price *models.Price
-		var oldProduct, newProduct *models.Product
+		var newProduct *models.Product
 		applyingDowngrade, planChangeApplied := false, false
 		preserveLifecycle := false
 		var acceptedPayment *models.Payment
@@ -814,10 +814,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 						// #813 plan_change: cross-product cutover — move the
 						// product ref and cut entitlement/credit snapshots over at
 						// the same boundary the price moves.
-						oldProduct, err = productService.GetByID(ctx, subscription.ProductID)
-						if err != nil {
-							return fmt.Errorf("failed to get current product for plan change: %w", err)
-						}
+
 						newProduct, err = productService.GetByID(ctx, repricedTo.ProductID)
 						if err != nil {
 							return fmt.Errorf("failed to get target product for plan change: %w", err)
@@ -840,16 +837,6 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			applyingDowngrade = subscription.ScheduledPriceID != nil
 
 			if applyingDowngrade {
-				// Get old product for entitlement comparison
-				oldPrice, err := priceService.GetByID(ctx, subscription.PriceID)
-				if err != nil {
-					return fmt.Errorf("failed to get current price: %w", err)
-				}
-				oldProduct, err = productService.GetByID(ctx, oldPrice.ProductID)
-				if err != nil {
-					return fmt.Errorf("failed to get current product: %w", err)
-				}
-
 				// Apply the scheduled downgrade - switch to the new price
 				price, err = priceService.GetByID(ctx, *subscription.ScheduledPriceID)
 				if err != nil {
@@ -866,7 +853,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 					"user_id":         subscription.CustomerID.String(),
 					"old_price_id":    subscription.PriceID,
 					"new_price_id":    price.ID,
-					"old_product":     oldProduct.DisplayName,
+					"old_product_id":  subscription.ProductID,
 					"new_product":     newProduct.DisplayName,
 				}).Info("Applying scheduled downgrade on renewal")
 
