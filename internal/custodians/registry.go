@@ -85,6 +85,7 @@ type Descriptor struct {
 // custody was smuggled into a PSP's settings map (or#879).
 const (
 	SettingPublicAPIKey  = "public_api_key"
+	SettingProfileID     = "profile_id"
 	SettingNetworkTokens = "network_tokens"
 	// SettingAccountUpdater arms the batch account-updater cycle (or#795). It
 	// is a CONTRACT flag, not a preference: the add-on is priced separately and
@@ -108,6 +109,17 @@ const (
 const DefaultAccountUpdaterLookaheadDays = 14
 
 var registry = map[string]Descriptor{
+	models.CustodianHyperSwitch: {
+		Kind:        models.CustodianHyperSwitch,
+		DisplayName: "HyperSwitch",
+		ProxyRails:  []models.Rail{models.RailNMI},
+		Secrets:     []SecretKey{{Name: SecretAPIKey, Required: true, MerchantWritable: true}},
+		Settings: []SettingKey{
+			{Name: SettingPublicAPIKey, Kind: ValueString, Required: true, Public: true, PublicField: "public_api_key"},
+			{Name: SettingProfileID, Kind: ValueString, Required: true},
+		},
+		BrowserFlow: FlowTokenize,
+	},
 	models.CustodianBasisTheory: {
 		Kind:        models.CustodianBasisTheory,
 		DisplayName: "Basis Theory",

@@ -113,6 +113,9 @@ func (s *CheckoutCustodianSaleService) resolveConfig(ctx context.Context) (*cust
 }
 
 func (s *CheckoutCustodianSaleService) btClient(cfg *custodialPSP) (*basistheory.Client, error) {
+	if cfg == nil || cfg.Custody == nil || cfg.Custody.Custodian != models.CustodianBasisTheory {
+		return nil, errors.New("this custodian does not support the Basis Theory sale transport")
+	}
 	baseURL := s.BTBaseURLOverride
 	if baseURL == "" {
 		baseURL = cfg.Custody.APIBaseURL
