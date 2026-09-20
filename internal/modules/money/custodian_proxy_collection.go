@@ -31,6 +31,10 @@ func (a *CustodianProxyCollectionAdapter) Prepare(_ context.Context, method gen.
 	if strings.TrimSpace(method.RailMethodRef) == "" {
 		return nil, fmt.Errorf("custodian-held payment method missing its custodian token reference")
 	}
+	anchor := strings.TrimSpace(method.StoredCredentialUnscheduledRef)
+	if anchor == "" {
+		return nil, fmt.Errorf("custodian-held payment method missing approved unscheduled credential reference")
+	}
 	// Parked instrument (#795 B6): the custody-side credential is gone.
 	if strings.TrimSpace(method.ParkReason) != "" {
 		return nil, fmt.Errorf("custodian-held instrument %s is parked (%s): custodian token unusable; re-collect the card", method.ID, method.ParkReason)
@@ -61,7 +65,7 @@ func (a *CustodianProxyCollectionAdapter) Prepare(_ context.Context, method gen.
 		Currency:    currency,
 		Description: description,
 		OrderRef:    strings.TrimSpace(req.IdempotencyKey),
-		Context:     unscheduledMITContext(method),
+		Context:     charge.UnscheduledMIT(anchor),
 	}
 	return PreparedChargeFunc(func(ctx context.Context) (ChargeResult, error) {
 		res, err := charger.Charge(ctx, request)

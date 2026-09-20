@@ -40,6 +40,10 @@ func (a *NMICollectionAdapter) Prepare(_ context.Context, method gen.OpenrailsPa
 	if strings.TrimSpace(method.RailCustomerRef) == "" {
 		return nil, fmt.Errorf("nmi payment method missing customer vault id")
 	}
+	anchor := strings.TrimSpace(method.StoredCredentialUnscheduledRef)
+	if anchor == "" {
+		return nil, fmt.Errorf("nmi payment method missing approved unscheduled credential reference")
+	}
 	if req.AmountCents <= 0 {
 		return nil, fmt.Errorf("amount_cents must be positive")
 	}
@@ -59,7 +63,7 @@ func (a *NMICollectionAdapter) Prepare(_ context.Context, method gen.OpenrailsPa
 		Currency:    currency,
 		Description: description,
 		OrderRef:    strings.TrimSpace(req.IdempotencyKey),
-		Context:     unscheduledMITContext(method),
+		Context:     charge.UnscheduledMIT(anchor),
 	}
 	return PreparedChargeFunc(func(ctx context.Context) (ChargeResult, error) {
 		res, err := a.Charger.Charge(ctx, request)
@@ -75,18 +79,4 @@ func (a *NMICollectionAdapter) Prepare(_ context.Context, method gen.OpenrailsPa
 			CapturedStoredCredentialRef: res.CapturedRef,
 		}, nil
 	}), nil
-}
-
-// unscheduledMITContext replays the approved initial transaction NMI requires
-// on every subsequent CIT/MIT; historical rows without one use the charger's
-// observable best-effort merchant+used fallback.
-func unscheduledMITContext(method gen.OpenrailsPaymentMethod) charge.Context {
-	priorRef := strings.TrimSpace(method.StoredCredentialUnscheduledRef)
-	if priorRef == "" {
-		priorRef = strings.TrimSpace(method.InitialTransactionID)
-	}
-	if priorRef == "" {
-		return charge.LegacyUnanchoredUnscheduledMIT()
-	}
-	return charge.UnscheduledMIT(priorRef)
 }

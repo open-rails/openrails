@@ -303,6 +303,10 @@ func (s *Store) ExpireOverdue(ctx context.Context, now time.Time) (int64, error)
 }
 
 func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, evidence map[string]any) error {
+	if err := refuseCustodyKeys(evidence); err != nil {
+		return err
+	}
+
 	var ev []byte
 	if len(evidence) > 0 {
 		b, err := json.Marshal(evidence)
@@ -359,7 +363,7 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 		// post-success readers.
 		_, err := qx.Exec(ctx,
 			`UPDATE openrails.rail_intents
-			    SET payload = NULL, updated_at = now()
+			    SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, updated_at = now()
 			  WHERE id = $1 AND merchant_id = $2 AND status = 'succeeded'`, id, mid.UUID())
 		return err
 	}
@@ -374,13 +378,13 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 	if keepPayload {
 		_, err := qx.Exec(ctx,
 			`UPDATE openrails.rail_intents
-			    SET result_evidence = $2, updated_at = now()
+			    SET result_evidence = coalesce($2::jsonb,'{}'::jsonb) || CASE WHEN result_evidence ? 'qualified_receipt' THEN jsonb_build_object('qualified_receipt',result_evidence->'qualified_receipt') ELSE '{}'::jsonb END, updated_at = now()
 			  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded'`, id, ev, mid.UUID())
 		return err
 	}
 	_, err = qx.Exec(ctx,
 		`UPDATE openrails.rail_intents
-		    SET payload = NULL, result_evidence = $2, updated_at = now()
+		    SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, result_evidence = coalesce($2::jsonb,'{}'::jsonb) || CASE WHEN result_evidence ? 'qualified_receipt' THEN jsonb_build_object('qualified_receipt',result_evidence->'qualified_receipt') ELSE '{}'::jsonb END, updated_at = now()
 		  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded'`, id, ev, mid.UUID())
 	return err
 }
@@ -394,7 +398,7 @@ func (s *Store) PruneTerminalPayload(ctx context.Context, id uuid.UUID) error {
 	}
 	_, err = s.db.Qx(ctx).Exec(ctx,
 		`UPDATE openrails.rail_intents
-		    SET payload = NULL, updated_at = now()
+		    SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, updated_at = now()
 		  WHERE id = $1 AND merchant_id = $2 AND status = 'failed_terminal'`, id, mid.UUID())
 	return err
 }
@@ -426,6 +430,10 @@ func slimEvidence(evidence map[string]any) map[string]any {
 // RAW pgx (no sqlc): runs on Qx(ctx) so the schema rewriter (#471) and RLS
 // apply exactly as for the generated queries.
 func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[string]any) error {
+	if err := refuseCustodyKeys(keys); err != nil {
+		return err
+	}
+
 	if len(keys) == 0 {
 		return nil
 	}
@@ -455,6 +463,9 @@ func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[strin
 // sending another provider request).
 func (s *Store) RecordProgressIfAbsent(ctx context.Context, id uuid.UUID, key string, value any) (bool, error) {
 	key = strings.TrimSpace(key)
+	if err := refuseCustodyKeys(map[string]any{key: value}); err != nil {
+		return false, err
+	}
 	if key == "" {
 		return false, fmt.Errorf("intents: progress key is required")
 	}
@@ -487,6 +498,10 @@ func (s *Store) MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttem
 }
 
 func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, evidence map[string]any) error {
+	if err := refuseCustodyKeys(evidence); err != nil {
+		return err
+	}
+
 	var raw []byte
 	if len(evidence) > 0 {
 		var err error
@@ -504,6 +519,10 @@ func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt tim
 // carries structured forensics — e.g. the gateway decline response code that
 // the dunning worker's decline classification reads back off the ledger.
 func (s *Store) MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string, evidence map[string]any) error {
+	if err := refuseCustodyKeys(evidence); err != nil {
+		return err
+	}
+
 	var ev []byte
 	if len(evidence) > 0 {
 		b, err := json.Marshal(evidence)

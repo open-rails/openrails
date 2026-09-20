@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"io"
 	"net/http"
 	"net/url"
@@ -256,29 +260,41 @@ func parseStripeAPIError(statusCode int, body []byte) error {
 }
 
 type stripeCollectionInvoice struct {
-	ID            string `json:"id"`
-	Status        string `json:"status"`
-	AmountPaid    int64  `json:"amount_paid"`
-	Currency      string `json:"currency"`
-	PaymentIntent string `json:"payment_intent"`
-	Charge        string `json:"charge"`
-	Metadata      map[string]string
+	CustomerID      string `json:"customer"`
+	PaymentMethodID string `json:"default_payment_method"`
+	ID              string `json:"id"`
+	Status          string `json:"status"`
+	AmountPaid      int64  `json:"amount_paid"`
+	Currency        string `json:"currency"`
+	PaymentIntent   string `json:"payment_intent"`
+	Charge          string `json:"charge"`
+	Metadata        map[string]string
 }
 
 // StripeCollectionReceipt is one Stripe invoice read back for reconciliation.
 type StripeCollectionReceipt struct {
-	InvoiceID       string
-	Status          string
-	AmountPaid      int64
-	Currency        string
-	ChargeID        string
-	PaymentIntentID string
+	ChargeInvoiceID       string `json:"charge_invoice_id"`
+	ChargePaymentIntentID string `json:"charge_payment_intent_id"`
+	ChargedAmount         int64  `json:"charged_amount,string"`
+	ChargeCurrency        string `json:"charge_currency"`
+	ChargeCustomerID      string `json:"charge_customer_id"`
+	ChargePaid            bool   `json:"charge_paid"`
+	ChargeCaptured        bool   `json:"charge_captured"`
+	ChargeStatus          string `json:"charge_status"`
+	CustomerID            string `json:"customer_id"`
+	PaymentMethodID       string `json:"payment_method_id"`
+	InvoiceID             string `json:"invoice_id"`
+	Status                string `json:"status"`
+	AmountPaid            int64  `json:"amount_paid,string"`
+	Currency              string `json:"currency"`
+	ChargeID              string `json:"charge_id"`
+	PaymentIntentID       string `json:"payment_intent_id"`
 	// CollectionKey is the operation identity stamped at creation.
-	CollectionKey string
+	CollectionKey string `json:"collection_key"`
 }
 
 func (i stripeCollectionInvoice) receipt() StripeCollectionReceipt {
-	r := StripeCollectionReceipt{InvoiceID: i.ID, Status: i.Status, AmountPaid: i.AmountPaid, Currency: i.Currency,
+	r := StripeCollectionReceipt{CustomerID: i.CustomerID, PaymentMethodID: i.PaymentMethodID, InvoiceID: i.ID, Status: i.Status, AmountPaid: i.AmountPaid, Currency: i.Currency,
 		ChargeID: strings.TrimSpace(i.Charge), PaymentIntentID: strings.TrimSpace(i.PaymentIntent)}
 	r.CollectionKey = strings.TrimSpace(i.Metadata[StripeCollectionKeyMetadata])
 	return r
@@ -329,6 +345,85 @@ func (s *StripeService) GetCollectionInvoice(ctx context.Context, invoiceID stri
 		return StripeCollectionReceipt{}, false, err
 	}
 	return inv.receipt(), true, nil
+}
+
+// GetCollectedInvoice reads the actual captured charge as well as its invoice.
+// A paid invoice or default payment method alone cannot prove which card paid it.
+func (s *StripeService) GetCollectedInvoice(ctx context.Context, invoiceID string) (StripeCollectionReceipt, bool, error) {
+	if s.accountMerchantID == uuid.Nil || s.accountPSPID == uuid.Nil || s.accountSecret == "" {
+		return StripeCollectionReceipt{}, false, errors.New("Stripe receipt reader has no resolved account")
+	}
+	scoped := *s
+	scoped.Rails = railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
+	s = &scoped
+
+	receipt, found, err := s.GetCollectionInvoice(ctx, invoiceID)
+	if err != nil || !found {
+		return receipt, found, err
+	}
+	if receipt.InvoiceID != invoiceID {
+		return receipt, true, fmt.Errorf("%w: invoice identity mismatch", ErrStripeReceiptMismatch)
+	}
+	chargeID := receipt.ChargeID
+	if chargeID == "" && receipt.PaymentIntentID != "" {
+		body, status, err := s.stripeGet(ctx, "/v1/payment_intents/"+url.PathEscape(receipt.PaymentIntentID), nil)
+		if err != nil {
+			return receipt, true, err
+		}
+		if status >= 400 {
+			return receipt, true, parseStripeAPIError(status, body)
+		}
+		var intent struct {
+			ID           string          `json:"id"`
+			LatestCharge json.RawMessage `json:"latest_charge"`
+		}
+		if err := json.Unmarshal(body, &intent); err != nil {
+			return receipt, true, err
+		}
+		if intent.ID != receipt.PaymentIntentID {
+			return receipt, true, fmt.Errorf("%w: payment intent identity mismatch", ErrStripeReceiptMismatch)
+		}
+		chargeID = rawID(intent.LatestCharge)
+	}
+	if chargeID == "" {
+		return receipt, true, fmt.Errorf("%w: invoice has no captured-charge reference", ErrStripeReceiptMismatch)
+	}
+	body, status, err := s.stripeGet(ctx, "/v1/charges/"+url.PathEscape(chargeID), nil)
+	if err != nil {
+		return receipt, true, err
+	}
+	if status >= 400 {
+		return receipt, true, parseStripeAPIError(status, body)
+	}
+	var charge struct {
+		ID             string          `json:"id"`
+		AmountCaptured int64           `json:"amount_captured"`
+		Currency       string          `json:"currency"`
+		Customer       json.RawMessage `json:"customer"`
+		PaymentMethod  string          `json:"payment_method"`
+		PaymentIntent  json.RawMessage `json:"payment_intent"`
+		Invoice        json.RawMessage `json:"invoice"`
+		Paid           bool            `json:"paid"`
+		Captured       bool            `json:"captured"`
+		Status         string          `json:"status"`
+	}
+	if err := json.Unmarshal(body, &charge); err != nil {
+		return receipt, true, err
+	}
+	if charge.ID != chargeID || (receipt.PaymentIntentID != "" && rawID(charge.PaymentIntent) != receipt.PaymentIntentID) || (rawID(charge.Invoice) != "" && rawID(charge.Invoice) != receipt.InvoiceID) || (receipt.PaymentIntentID == "" && rawID(charge.Invoice) == "") {
+		return receipt, true, fmt.Errorf("%w: charge does not belong to invoice payment", ErrStripeReceiptMismatch)
+	}
+	receipt.ChargeID = chargeID
+	receipt.ChargeInvoiceID = rawID(charge.Invoice)
+	receipt.ChargePaymentIntentID = rawID(charge.PaymentIntent)
+	receipt.ChargedAmount = charge.AmountCaptured
+	receipt.ChargeCurrency = strings.ToUpper(charge.Currency)
+	receipt.ChargeCustomerID = rawID(charge.Customer)
+	receipt.PaymentMethodID = charge.PaymentMethod
+	receipt.ChargePaid = charge.Paid
+	receipt.ChargeCaptured = charge.Captured
+	receipt.ChargeStatus = charge.Status
+	return receipt, true, nil
 }
 
 // StripeCollectionObjects is everything Stripe still holds for one operation
@@ -412,6 +507,19 @@ func (s *StripeService) CleanupCollection(ctx context.Context, customerID, key s
 			}
 		}
 	}
+	remaining, err := s.ListCollectionObjects(ctx, customerID, key)
+	if err != nil {
+		return err
+	}
+	if len(remaining.PendingItems) != 0 {
+		return errors.New("Stripe pending invoice items remain chargeable after cleanup")
+	}
+	for _, invoice := range remaining.Invoices {
+		if invoice.Status != "void" {
+			return fmt.Errorf("Stripe invoice %s remains %s after cleanup", invoice.InvoiceID, invoice.Status)
+		}
+	}
+
 	return nil
 }
 
@@ -518,6 +626,8 @@ func parseStripeCollectionInvoice(body []byte) (stripeCollectionInvoice, error) 
 	}
 	out := stripeCollectionInvoice{}
 	out.ID = rawString(raw["id"])
+	out.CustomerID = rawID(raw["customer"])
+	out.PaymentMethodID = rawID(raw["default_payment_method"])
 	out.Status = rawString(raw["status"])
 	out.AmountPaid = rawInt64(raw["amount_paid"])
 	out.Currency = strings.ToUpper(rawString(raw["currency"]))

@@ -232,15 +232,7 @@ func (f findingsNMIResolver) ResolveCollectionAdapter(context.Context, gen.Openr
 	return nil, false, nil
 }
 
-func (f findingsNMIResolver) VerifyCollectionCharge(context.Context, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
-	return money.CollectionVerifyResult{}, nil
-}
-
-func (f findingsNMIResolver) ConfirmCollectionReceipt(context.Context, string, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
-	return money.CollectionVerifyResult{}, errors.New("no collection reads in this fixture")
-}
-
-func (f findingsNMIResolver) ConfirmCollectionNotExecuted(context.Context, money.CollectionReceiptExpectation) error {
+func (f findingsNMIResolver) ConfirmCollectionNotExecuted(context.Context, gen.OpenrailsRailIntent) error {
 	return errors.New("no collection reads in this fixture")
 }
 
@@ -778,4 +770,8 @@ func TestFindingsHeldBulkAckResumeEndToEnd(t *testing.T) {
 	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx, `SELECT status FROM openrails.rail_intents WHERE id = $1`, held.ID).Scan(&heldStatus))
 	assert.Equal(t, intents.StatusSucceeded, heldStatus, "operator approve resumed destructive execution")
 	assert.EqualValues(t, 1, fx.fake.deleteCalls.Load())
+}
+
+func (f findingsNMIResolver) ReadCollectionReceipt(context.Context, gen.OpenrailsRailIntent, string) (intents.CollectedReceipt, bool, error) {
+	return intents.CollectedReceipt{}, false, errors.New("no collection reads in this fixture")
 }
