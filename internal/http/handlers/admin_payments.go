@@ -239,7 +239,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 		MerchantID: mid.UUID(), Provider: provider, IntentType: intentType,
 		SubscriptionID: payment.SubscriptionID, PaymentID: &payment.ID, PspID: *payment.PspID,
 		Payload: intents.RefundPayload{OriginalPaymentID: payment.ID, ReservationID: reservation.ID,
-			AmountCents: amountCents, Reason: strings.TrimSpace(req.Reason), RevokeAccess: req.RevokeAccess,
+			AmountCents: amountCents, Currency: payment.Currency, Reason: strings.TrimSpace(req.Reason), RevokeAccess: req.RevokeAccess,
 			ProviderTarget: providerTarget},
 		IdempotencyKey: intentKey, NextAttemptAt: r.Clock.Now().UTC(),
 		Origin: intents.OriginAdmin, OriginReason: "admin refund request",

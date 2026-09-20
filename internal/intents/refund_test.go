@@ -38,6 +38,7 @@ func refundIntent(t *testing.T, intentType string, payload RefundPayload) gen.Op
 
 func testRefundPayload() RefundPayload {
 	return RefundPayload{
+		Currency:          "USD",
 		OriginalPaymentID: uuid.New(),
 		ReservationID:     uuid.New(),
 		AmountCents:       500,

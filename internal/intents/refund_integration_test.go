@@ -55,16 +55,16 @@ func newFakeNMIRefundGateway(t *testing.T, originalTxn string) (*fakeNMIRefundGa
 				fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"not found"}`)
 				return
 			}
-			fmt.Fprint(w, `{"object":"transaction","id":"txn_refund_1","response":"1","amount":"5.00","customer_vault_id":"vault-refund","actions":[{"id":"txn_refund_1","type":"refund","success":true,"amount":"5.00"}]}`)
+			fmt.Fprint(w, `{"object":"transaction","id":"txn_refund_1","response":"1","currency":"USD","amount":"5.00","customer_vault_id":"vault-refund","actions":[{"id":"txn_refund_1","type":"refund","success":true,"amount":"5.00"}]}`)
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/payments/"+f.psid):
 			f.queryCalls.Add(1)
 			if f.refunded.Load() {
-				fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","amount":"10.00","customer_vault_id":"vault-refund","actions":[
+				fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","currency":"USD","amount":"10.00","customer_vault_id":"vault-refund","actions":[
 					{"id":"%s","type":"sale","success":true,"amount":"10.00"},
 					{"id":"txn_refund_1","type":"refund","success":true,"amount":"5.00"}
 				]}`, f.psid, f.psid)
 			} else {
-				fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","amount":"10.00","customer_vault_id":"vault-refund","actions":[{"id":"%s","type":"sale","success":true,"amount":"10.00"}]}`, f.psid, f.psid)
+				fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","currency":"USD","amount":"10.00","customer_vault_id":"vault-refund","actions":[{"id":"%s","type":"sale","success":true,"amount":"10.00"}]}`, f.psid, f.psid)
 			}
 		case r.Method == http.MethodGet:
 			f.queryCalls.Add(1)
@@ -133,14 +133,16 @@ func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 	ctx = db.WithPSPID(ctx, fx.pspID)
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "refund-prod-"+suffix, tenantID)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 1000, 'USD', $3)`,
+	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 10000000, 'USD', $3)`,
 		priceID, productID, tenantID)
 	exec(`INSERT INTO openrails.payments (id, price_id, rail, psp_id, transaction_id, amount, list_amount, currency, status, customer_id, merchant_id, money_movement)
-	      VALUES ($1, $2, 'nmi', $3, $4, 1000, 1000, 'USD', 'completed', $5, $6, 'rail')`,
+	      VALUES ($1, $2, 'nmi', $3, $4, 10000000, 10000000, 'USD', 'completed', $5, $6, 'rail')`,
 		fx.paymentID, priceID, fx.pspID, fx.originalTxn, userID, tenantID)
 
+	amountNative, err := moneyutil.RailMinorToNative("USD", moneyutil.Cents(amountCents))
+	require.NoError(t, err)
 	reservation, err := payments.NewPaymentService(dbi).ReserveRefund(ctx, fx.paymentID,
-		"admin_refund_reservation:"+fx.paymentID.String(), amountCents,
+		"admin_refund_reservation:"+fx.paymentID.String(), amountNative,
 		map[string]any{"admin_refund_idempotency_key": "it-key", "admin_refund_status": "pending"})
 	require.NoError(t, err)
 	fx.reservationID = reservation.ID
@@ -156,6 +158,7 @@ func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 
 func (fx refundFixture) payload(amountCents int64) RefundPayload {
 	return RefundPayload{
+		Currency:          "USD",
 		OriginalPaymentID: fx.paymentID,
 		ReservationID:     fx.reservationID,
 		AmountCents:       moneyutil.Cents(amountCents),
@@ -218,6 +221,9 @@ func TestNMIRefundSynchronousSuccess(t *testing.T) {
 	assert.NotEmpty(t, row.Payload, "refund payload retained on the succeeded tombstone")
 	assert.NotContains(t, string(row.ResultEvidence), "txn_refund_1", "forensic evidence slimmed off the tombstone")
 	assert.EqualValues(t, 1, fake.refundCalls.Load())
+	var amount int64
+	require.NoError(t, fx.db.Pool().QueryRow(context.Background(), "SELECT amount FROM openrails.payments WHERE id=$1", fx.reservationID).Scan(&amount))
+	require.EqualValues(t, -5_000_000, amount, "the local USD refund is the same five dollars sent to NMI")
 
 	status, txn, metadata := fx.reservation(t)
 	assert.Equal(t, "completed", status)
