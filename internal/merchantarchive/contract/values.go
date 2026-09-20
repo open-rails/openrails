@@ -2,6 +2,9 @@ package contract
 
 import (
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/intents"
 	"strconv"
 	"strings"
 	"time"
@@ -122,6 +125,29 @@ func ValidateValues(p Profile, values []*string) error {
 		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "nmi_provider_cutover" && *typ != "invoice_collection")) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
+		if typ != nil && *typ == "invoice_collection" {
+			field := func(name string) string {
+				if v := value(p, values, name); v != nil {
+					return *v
+				}
+				return ""
+			}
+			id, _ := uuid.Parse(field("id"))
+			merchant, _ := uuid.Parse(field("merchant_id"))
+			psp, _ := uuid.Parse(field("psp_id"))
+			row := gen.OpenrailsRailIntent{ID: id, MerchantID: merchant, PspID: &psp, Rail: field("rail"), IntentType: *typ, Payload: []byte(field("payload")), ResultEvidence: []byte(field("result_evidence")), Status: field("status")}
+			if _, err := intents.DecodeInvoiceCollectionPayload(row); err != nil {
+				return fmt.Errorf("invalid accepted collection payload: %w", err)
+			}
+			_, found, err := intents.LoadCollectedReceipt(row)
+			if err != nil {
+				return fmt.Errorf("invalid qualified collection receipt: %w", err)
+			}
+			if (row.Status == intents.StatusSucceeded) != found {
+				return fmt.Errorf("collection terminal state and qualified receipt disagree")
+			}
+		}
+
 	}
 	return nil
 }

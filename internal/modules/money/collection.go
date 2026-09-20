@@ -2,9 +2,7 @@ package money
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -24,55 +22,6 @@ import (
 // Submit is the provider submission.
 type CollectionAdapter interface {
 	Prepare(ctx context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (PreparedCharge, error)
-}
-
-// CollectionInstrument is the saved method as its collection operation froze
-// it at enqueue: the account the charge settles through and how the card is
-// addressed there. A charge is submitted only while the method still matches
-// it, and every receipt is judged against it, never the method's current row.
-type CollectionInstrument struct {
-	PSPID           uuid.UUID  `json:"psp_id"`
-	Custodian       string     `json:"custodian"`
-	CustodianID     *uuid.UUID `json:"custodian_id,omitempty"`
-	RailCustomerRef string     `json:"rail_customer_ref"`
-	RailMethodRef   string     `json:"rail_method_ref"`
-}
-
-// ErrCollectionInstrumentChanged: the payment method no longer matches the
-// instrument its operation froze. Raised before any provider traffic.
-var ErrCollectionInstrumentChanged = errors.New("payment method no longer matches the operation's frozen instrument")
-
-// CollectionInstrumentOf freezes a saved method's instrument.
-func CollectionInstrumentOf(method gen.OpenrailsPaymentMethod) CollectionInstrument {
-	return CollectionInstrument{
-		PSPID: method.PspID, Custodian: method.Custodian, CustodianID: method.CustodianID,
-		RailCustomerRef: strings.TrimSpace(method.RailCustomerRef), RailMethodRef: strings.TrimSpace(method.RailMethodRef),
-	}
-}
-
-func (i CollectionInstrument) validate() error {
-	if i.PSPID == uuid.Nil {
-		return errors.New("frozen instrument names no provider account")
-	}
-	if !slices.Contains(models.Custodians(), i.Custodian) || (i.Custodian == models.CustodianPSP) != (i.CustodianID == nil) {
-		return fmt.Errorf("frozen instrument custody %q is incomplete", i.Custodian)
-	}
-	return nil
-}
-
-// custodianHeld: the frozen charge addressed the card through a custodian
-// proxy (or#879), so the gateway holds no vault for it.
-func (i CollectionInstrument) custodianHeld() bool { return i.Custodian != models.CustodianPSP }
-
-func (i CollectionInstrument) matches(method gen.OpenrailsPaymentMethod) error {
-	cur := CollectionInstrumentOf(method)
-	sameCustodian := (cur.CustodianID == nil && i.CustodianID == nil) ||
-		(cur.CustodianID != nil && i.CustodianID != nil && *cur.CustodianID == *i.CustodianID)
-	if cur.PSPID != i.PSPID || cur.Custodian != i.Custodian || !sameCustodian ||
-		cur.RailCustomerRef != i.RailCustomerRef || cur.RailMethodRef != i.RailMethodRef {
-		return fmt.Errorf("%w: payment method %s", ErrCollectionInstrumentChanged, method.ID)
-	}
-	return nil
 }
 
 // ScopedCharger validates merchant/customer/payment-method scope and resolves
@@ -145,10 +94,10 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	if method.CustomerID != req.Payer.UUID() {
 		return nil, fmt.Errorf("payment method belongs to another customer")
 	}
-	if err := req.Instrument.validate(); err != nil {
+	if err := req.Instrument.Validate(); err != nil {
 		return nil, err
 	}
-	if err := req.Instrument.matches(method); err != nil {
+	if err := req.Instrument.Matches(method); err != nil {
 		return nil, err
 	}
 

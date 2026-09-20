@@ -153,10 +153,17 @@ var jsonRules = map[string]jsonRule{
 	// accepted terms for replay; none of these fields contains card data.
 	"rail_intents.invoice_collection.payload": object(map[string]jsonRule{
 		"invoice_id": uuidValue, "customer_id": uuidValue, "attempt_id": uuidValue, "payment_method_id": uuidValue,
-		"rail": textValue, "currency": textValue, "amount": integerValue, "amount_minor": integerValue, "description": textValue,
+		"rail": textValue, "currency": textValue, "amount": integerValue, "amount_minor": integerValue, "description": textValue, "provider_customer_ref": textValue,
 		"instrument": object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue}),
 	}),
 	"rail_intents.invoice_collection.result_evidence": nullable(object(map[string]jsonRule{
+		"qualified_receipt": object(map[string]jsonRule{
+			"version": integerValue, "family": textValue,
+			"binding": object(map[string]jsonRule{"operation_id": uuidValue, "merchant_id": uuidValue, "psp_id": uuidValue, "kind": textValue, "payload_sha256": textValue}),
+			"nmi":     object(map[string]jsonRule{"transaction_id": textValue, "order_reference": textValue, "customer_vault_id": textValue, "amount": moneyStringValue, "currency": textValue, "approved": booleanValue}),
+			"stripe":  object(map[string]jsonRule{"invoice_id": textValue, "status": textValue, "customer_id": textValue, "payment_method_id": textValue, "amount_paid": moneyStringValue, "currency": textValue, "charge_id": textValue, "payment_intent_id": textValue, "collection_key": textValue, "charged_amount": moneyStringValue, "charge_currency": textValue, "charge_customer_id": textValue, "charge_paid": booleanValue, "charge_captured": booleanValue, "charge_status": textValue}),
+		}),
+
 		"transaction_id": textValue, "external_invoice_id": textValue, "rail": textValue,
 		"declined": booleanValue, "failure_code": textValue, "failure_message": textValue, "not_executed": booleanValue,
 		"not_executed_code": textValue, "submitted_at": textValue, "provider_contradiction": textValue, "verified_existing": booleanValue,

@@ -779,3 +779,7 @@ func TestFindingsHeldBulkAckResumeEndToEnd(t *testing.T) {
 	assert.Equal(t, intents.StatusSucceeded, heldStatus, "operator approve resumed destructive execution")
 	assert.EqualValues(t, 1, fx.fake.deleteCalls.Load())
 }
+
+func (f findingsNMIResolver) ReadCollectionReceipt(context.Context, gen.OpenrailsRailIntent, string) (intents.CollectedReceipt, bool, error) {
+	return intents.CollectedReceipt{}, false, errors.New("no collection reads in this fixture")
+}

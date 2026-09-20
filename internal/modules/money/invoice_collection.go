@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"strings"
 	"time"
 
@@ -379,7 +380,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 			prior, err := q.GetRailIntentByIdempotencyKey(ctx, gen.GetRailIntentByIdempotencyKeyParams{MerchantID: tid.UUID(), IdempotencyKey: opts.operationKey})
 			switch {
 			case err == nil:
-				frozen, err := decodeInvoiceCollectionPayload(prior)
+				frozen, err := intents.DecodeInvoiceCollectionPayload(prior)
 				if err != nil {
 					return err
 				}
@@ -417,6 +418,20 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		if err != nil {
 			return fmt.Errorf("invoice %s amount is not representable on rail %s: %w", invoice.ID, method.Rail, err)
 		}
+		providerCustomerRef := ""
+		if normalizeRail(method.Rail) == "stripe" {
+			providerCustomerRef, err = q.GetRailCustomerAccountIDForPSP(ctx, gen.GetRailCustomerAccountIDForPSPParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), Rail: "stripe", PspID: method.PspID})
+			if err != nil {
+				return fmt.Errorf("freeze Stripe customer on accepted account: %w", err)
+			}
+			if strings.TrimSpace(providerCustomerRef) == "" {
+				return errors.New("Stripe collection customer mapping is empty")
+			}
+		}
+		chargedAmount, err := moneyutil.RailMinorToNative(invoice.Currency, amountMinor)
+		if err != nil {
+			return fmt.Errorf("invoice %s rounded charge is not representable: %w", invoice.ID, err)
+		}
 		attempts, err := q.CountInvoicePaymentAttemptsByPayer(ctx, gen.CountInvoicePaymentAttemptsByPayerParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID})
 		if err != nil {
 			return fmt.Errorf("count invoice collection attempts: %w", err)
@@ -428,11 +443,12 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		attemptID := uuidutil.NewV7()
 		intent, err := intents.NewStore(s.db.NewWithPgxTx(tx)).Enqueue(ctx, intents.EnqueueParams{
 			MerchantID: tid.UUID(), Provider: normalizeRail(method.Rail), PspID: method.PspID, IntentType: TypeInvoiceCollection,
-			Payload: InvoiceCollectionPayload{
+			Payload: intents.InvoiceCollectionPayload{
 				InvoiceID: invoiceID, CustomerID: payer.UUID(), AttemptID: attemptID, PaymentMethodID: method.ID,
-				Rail: normalizeRail(method.Rail), Instrument: CollectionInstrumentOf(*method),
+				Rail: normalizeRail(method.Rail), Instrument: charge.FreezeInstrument(*method),
 				Currency: invoice.Currency, Amount: invoice.AmountDue, AmountMinor: amountMinor,
-				Description: fmt.Sprintf("invoice %s", invoiceID),
+				ProviderCustomerRef: providerCustomerRef,
+				Description:         fmt.Sprintf("invoice %s", invoiceID),
 			},
 			IdempotencyKey: key, NextAttemptAt: now, Origin: opts.origin, OriginReason: opts.originReason,
 		})
@@ -441,7 +457,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		}
 		if err := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
 			ID: attemptID, MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID,
-			Currency: invoice.Currency, Amount: invoice.AmountDue, Status: "attempted",
+			Currency: invoice.Currency, Amount: chargedAmount, Status: "attempted",
 			AttemptedAt: now, CreatedAt: now, UpdatedAt: now,
 			PaymentMethodID: &method.ID, IdempotencyKey: &key, PspID: &method.PspID,
 		}); err != nil {
