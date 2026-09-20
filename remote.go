@@ -55,11 +55,9 @@ func WithMerchantID(id MerchantID) ClientOption {
 // remote client relies on its credential's merchant.
 func (c *Client) MerchantID() MerchantID { return c.merchantID }
 
-// WithHTTPClient injects a transport (tests, custom TLS/conn pooling). When
-// unset a client bounded by the configured timeout is created. The per-call
-// timeout (WithTimeout) is enforced via a per-request context deadline
-// REGARDLESS of the injected client, so a custom client that omits
-// http.Client.Timeout still cannot stall the hot path.
+// WithHTTPClient injects a transport (custom TLS or connection pooling). When
+// unset, the client uses Go's default HTTP transport. An explicit WithTimeout
+// still bounds each request independently of this client's Timeout setting.
 func WithHTTPClient(hc *http.Client) ClientOption {
 	return func(r *Client) { r.client = hc }
 }
@@ -92,12 +90,10 @@ func WithAPIKey(key string) ClientOption {
 	}
 }
 
-// WithTimeout bounds EVERY hot-path call via a per-request context deadline
-// (independent of the http.Client, so WithHTTPClient cannot silently drop it).
-// A short value is the point — a slow OpenRails must not stall the request hot
-// path; on timeout the fail-policy decides (ErrUnreachable). A non-positive
-// value disables the per-call deadline (rely on ctx / the client transport).
-// Defaults to 2s.
+// WithTimeout adds a per-request budget without extending a caller's earlier
+// deadline. It applies in both embedded and remote modes, including when a
+// custom HTTP client is supplied. By default the caller context and transport
+// own deadlines; a non-positive value leaves that behavior unchanged.
 func WithTimeout(d time.Duration) ClientOption {
 	return func(r *Client) { r.timeout = d }
 }
@@ -107,7 +103,6 @@ func WithTimeout(d time.Duration) ClientOption {
 func NewRemote(baseURL string, opts ...ClientOption) (*Client, error) {
 	r := &Client{
 		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-		timeout: 2 * time.Second,
 	}
 	if err := validateBaseURL(r.baseURL); err != nil {
 		return nil, err
