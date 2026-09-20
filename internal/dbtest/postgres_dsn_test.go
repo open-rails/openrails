@@ -5,15 +5,15 @@ package dbtest
 import (
 	"context"
 	"fmt"
-	"github.com/jackc/pgx/v5"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 func TestMerchantPinnedDSNEncodesStartupOptionSpace(t *testing.T) {
@@ -22,6 +22,25 @@ func TestMerchantPinnedDSNEncodesStartupOptionSpace(t *testing.T) {
 	cfg, err := pgconn.ParseConfig(got)
 	require.NoError(t, err)
 	require.Equal(t, "-c app.merchant_id="+id.String(), cfg.RuntimeParams["options"])
+}
+
+func TestReplaceDSNDatabaseTargetsOwnedDatabase(t *testing.T) {
+	for name, tc := range map[string]struct{ dsn, password string }{
+		"URL":              {"postgres://test:secret@localhost/original?sslmode=disable", "secret"},
+		"URL overrides":    {"postgresql://test:secret@localhost/original?sslmode=disable&dbname=foreign&dbname=another", "secret"},
+		"keyword":          {"host=localhost user=test password='test secret' dbname=original sslmode=disable", "test secret"},
+		"quoted database":  {"host=localhost user=test password='test secret' dbname='original database' sslmode=disable", "test secret"},
+		"password content": {"host=localhost user=test password='test  dbname=foreign secret' dbname=original sslmode=disable", "test  dbname=foreign secret"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rewritten, err := replaceDSNDatabase(tc.dsn, "owned_fixture")
+			require.NoError(t, err)
+			cfg, err := pgx.ParseConfig(rewritten)
+			require.NoError(t, err)
+			require.Equal(t, "owned_fixture", cfg.Database)
+			require.Equal(t, tc.password, cfg.Password)
+		})
+	}
 }
 
 func TestMain(m *testing.M) { RunMain(m) }
@@ -63,7 +82,7 @@ func TestExternalDatabaseLifecyclePreservesOtherRuns(t *testing.T) {
 	}
 	previousDSN, previousName := sharedExternalAdminDSN, sharedExternalDBName
 	defer func() { sharedExternalAdminDSN, sharedExternalDBName = previousDSN, previousName }()
-	created, err := createExternalTestDatabase(ctx, dsn)
+	created, err := createExternalTestDatabase(ctx, dsn+"&dbname="+peers[0].Config().Database)
 	require.NoError(t, err)
 	cfg, err := pgx.ParseConfig(created)
 	require.NoError(t, err)
