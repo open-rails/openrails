@@ -75,8 +75,12 @@ func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 	if err != nil {
 		return fmt.Errorf("nmi push: resolve client: %w", err)
 	}
-	if !ok {
+	if !ok || client == nil {
 		return fmt.Errorf("nmi push: merchant declares no armable nmi account")
+	}
+	accountMerchant, accountPSP := client.AccountIdentity()
+	if accountMerchant != sub.MerchantID || accountPSP != sub.PspID {
+		return fmt.Errorf("nmi push: reader is armed for another provider account")
 	}
 	railID := strings.TrimSpace(sub.RailSubscriptionID)
 	if railID == "" {
@@ -97,25 +101,24 @@ func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 	if err != nil {
 		return fmt.Errorf("nmi push: read %s: %w", railID, err)
 	}
-	if !found {
-		return fmt.Errorf("nmi push: subscription %s not found at nmi", railID)
+	if !found || remote.ID != railID {
+		return fmt.Errorf("nmi push: exact subscription %s not found at nmi", railID)
 	}
-	// plan_payments is the TOTAL payment count (0 = until cancelled; see
-	// AddRecurringPlan) and update_subscription always sends it. Absent/empty
-	// reads as NMI's own 0 default; a NON-empty value we cannot parse must
-	// block rather than silently rewrite a finite schedule to bill-forever.
-	planPayments := 0
-	if remote.Plan != nil {
-		if raw := strings.TrimSpace(remote.Plan.PlanPayments); raw != "" {
-			n, perr := strconv.Atoi(raw)
-			if perr != nil || n < 0 {
-				return fmt.Errorf("nmi push: %s carries unparseable plan_payments %q — refusing to guess the schedule", railID, raw)
-			}
-			planPayments = n
-		}
+	// update_subscription always writes the total installment count. Freeze an
+	// explicit provider value; missing facts cannot silently become bill forever.
+	if remote.Plan == nil || strings.TrimSpace(remote.Plan.PlanPayments) == "" {
+		return fmt.Errorf("nmi push: %s has no qualified plan_payments", railID)
+	}
+	planPayments, err := strconv.Atoi(strings.TrimSpace(remote.Plan.PlanPayments))
+	if err != nil || planPayments < 0 {
+		return fmt.Errorf("nmi push: %s has unparseable plan_payments", railID)
 	}
 
-	if _, err := client.UpdateRecurringSubscription(ctx, railID, moneyutil.FormatCentsDecimal(cents), planPayments); err != nil {
+	wireAmount, err := nmi.WireAmount(cents, currency)
+	if err != nil {
+		return err
+	}
+	if _, err := client.UpdateRecurringSubscription(ctx, railID, wireAmount, planPayments); err != nil {
 		return fmt.Errorf("nmi push: update %s: %w", railID, err)
 	}
 
@@ -127,31 +130,15 @@ func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 	if err != nil {
 		return fmt.Errorf("nmi push: verify %s: %w", railID, err)
 	}
-	if !found {
-		return fmt.Errorf("nmi push: subscription %s vanished during update", railID)
+	if !found || after.ID != railID {
+		return fmt.Errorf("nmi push: exact subscription %s vanished during update", railID)
 	}
-	gotCents, err := nmiRemoteAmountCents(after)
+	gotCents, err := nmi.SubscriptionAmountMinor(after, currency)
 	if err != nil {
 		return fmt.Errorf("nmi push: verify %s: %w", railID, err)
 	}
 	if gotCents != cents {
-		return fmt.Errorf("nmi push: update did not converge: remote amount %s, want %s",
-			moneyutil.FormatCentsDecimal(gotCents), moneyutil.FormatCentsDecimal(cents))
+		return fmt.Errorf("nmi push: update did not converge: remote amount %d rail units, want %d %s", gotCents, cents, currency)
 	}
 	return nil
-}
-
-// nmiRemoteAmountCents parses the fetched record's amount with the same
-// precedence as the bulk NMI fetcher: subscription amount first, then the
-// embedded plan's plan_amount.
-func nmiRemoteAmountCents(sub nmi.V5Subscription) (moneyutil.Cents, error) {
-	if cents, err := moneyutil.ParseDecimalToCents(strings.TrimSpace(sub.Amount)); err == nil && cents > 0 {
-		return cents, nil
-	}
-	if sub.Plan != nil {
-		if cents, err := moneyutil.ParseDecimalToCents(strings.TrimSpace(sub.Plan.PlanAmount)); err == nil {
-			return cents, nil
-		}
-	}
-	return 0, fmt.Errorf("no parseable amount on the remote record")
 }

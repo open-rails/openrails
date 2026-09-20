@@ -74,7 +74,7 @@ func TestPlanMigrationFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 		ProductService:       products,
 		PriceService:         prices,
 		SubscriptionService:  subs,
-		PlanMigrationService: subscriptions.NewPlanMigrationService(reprice, nil, nil, nil),
+		PlanMigrationService: subscriptions.NewPlanMigrationService(reprice, nil, nil),
 		Clock:                clock,
 	}
 	svc, err := billingservice.New(rt)

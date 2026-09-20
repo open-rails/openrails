@@ -41,16 +41,18 @@ var converters = []string{
 // pinnedBoundaries: file -> the wire-pinning test that covers it (known micros
 // in ⇒ exact integer on the wire).
 var pinnedBoundaries = map[string]string{
-	"internal/intents/collection_payload.go":          "internal/modules/money/invoice_rounding_integration_test.go",
-	"internal/modules/money/invoice_collection.go":    "internal/modules/money/invoice_rounding_integration_test.go",
-	"internal/modules/checkout/nmi_upgrade_intent.go": "internal/modules/checkout/upgrade_receipts_integration_test.go",
-	"internal/integrations/nmi/payments.go":           "internal/integrations/nmi/payments_wire_test.go",
-	"internal/integrations/nmi/v5.go":                 "internal/integrations/nmi/payments_wire_test.go",
-	"internal/integrations/nmi/subscriptions.go":      "internal/integrations/nmi/recurring_plan_test.go",
-	"internal/modules/webhooks/nmi.go":                "internal/modules/webhooks/nmi_test.go",
-	"internal/modules/webhooks/ccbill.go":             "internal/modules/webhooks/ccbill_wire_pinning_test.go",
-	"internal/service/catalog_provider_stripe.go":     "internal/modules/subscriptions/stripe_wire_pinning_test.go",
-	"internal/service/catalog_provider_nmi.go":        "internal/integrations/nmi/recurring_plan_test.go",
+	"internal/modules/subscriptions/renewal_terms.go":      "internal/modules/subscriptions/renewal_terms_integration_test.go",
+	"internal/modules/subscriptions/plan_migration_nmi.go": "internal/modules/subscriptions/plan_migration_nmi_integration_test.go",
+	"internal/intents/collection_payload.go":               "internal/modules/money/invoice_rounding_integration_test.go",
+	"internal/modules/money/invoice_collection.go":         "internal/modules/money/invoice_rounding_integration_test.go",
+	"internal/modules/checkout/nmi_upgrade_intent.go":      "internal/modules/checkout/upgrade_receipts_integration_test.go",
+	"internal/integrations/nmi/payments.go":                "internal/integrations/nmi/payments_wire_test.go",
+	"internal/integrations/nmi/v5.go":                      "internal/integrations/nmi/payments_wire_test.go",
+	"internal/integrations/nmi/subscriptions.go":           "internal/integrations/nmi/recurring_plan_test.go",
+	"internal/modules/webhooks/nmi.go":                     "internal/modules/webhooks/nmi_test.go",
+	"internal/modules/webhooks/ccbill.go":                  "internal/modules/webhooks/ccbill_wire_pinning_test.go",
+	"internal/service/catalog_provider_stripe.go":          "internal/modules/subscriptions/stripe_wire_pinning_test.go",
+	"internal/service/catalog_provider_nmi.go":             "internal/integrations/nmi/recurring_plan_test.go",
 }
 
 // deferredBoundaries: file -> why it has no wire-pinning test yet. Recorded so
@@ -63,7 +65,6 @@ var deferredBoundaries = map[string]string{
 	"internal/modules/checkout/nmi_subscription_intent.go": "same",
 	"internal/modules/checkout/custodian_sale.go":          "same",
 	"internal/modules/subscriptions/plan_migration.go":     "or#815 plan migration: successor amount reaches NMI through the pinned client",
-	"internal/modules/subscriptions/plan_migration_nmi.go": "same",
 	"internal/http/handlers/admin_payments.go":             "admin-initiated refund amount; reaches the wire through the pinned nmi/stripe clients",
 	"internal/service/service_definition_catalog_admin.go": "catalog definition admin; pushes through the pinned provider adapters",
 }
