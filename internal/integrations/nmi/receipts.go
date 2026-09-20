@@ -59,7 +59,7 @@ func exactMinorAmount(amount, currency string) (int64, bool) {
 
 func successfulAction(txn v5Transaction, actionType string, amount moneyutil.Cents) bool {
 	for _, action := range txn.Actions {
-		cents, ok := exactMinorAmount(action.Amount, txn.Currency)
+		cents, ok := exactCents(action.Amount)
 		if cents < 0 {
 			cents = -cents
 		}
