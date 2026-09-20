@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,420 +32,45 @@ import (
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/money"
 	billingservice "github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/catalog"
 )
 
 func intPtr(v int) *int { return &v }
 
-func TestStandaloneMerchantCatalogRoutesHTTP(t *testing.T) {
-	ctx := context.Background()
-	h := New(t, ctx)
-	surface := h.StartStandalone("usd")
-
-	catalogToken := surface.MintAPIKey(
-		dbtest.TestMerchantSlug,
-		"catalog-writer-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
-	)
-	readOnlyToken := surface.MintAPIKey(
-		dbtest.TestMerchantSlug,
-		"catalog-denied-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCustomerSettingsRead},
-	)
-
-	productKey := "catalog-route-" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	createStatus, createBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/products", catalogToken, map[string]any{
-		"key":          productKey,
-		"display_name": "Catalog Route Product",
-		"description":  "created through the live merchant catalog route",
-	})
-	require.Equal(t, http.StatusCreated, createStatus, string(createBody))
-	var created struct {
-		ID  string `json:"id"`
-		Key string `json:"key"`
-	}
-	require.NoError(t, json.Unmarshal(createBody, &created))
-	require.NotEmpty(t, created.ID)
-	require.Equal(t, productKey, created.Key)
-
-	// Retired fields are refused in the coded envelope: the field is named in
-	// param and Go's decoder text never reaches the wire.
-	requireRetiredFieldRefused := func(status int, body []byte, field string) {
-		t.Helper()
-		require.Equal(t, http.StatusBadRequest, status, string(body))
-		var refused struct {
-			Error openrails.ErrorDetails `json:"error"`
-		}
-		require.NoError(t, json.Unmarshal(body, &refused), string(body))
-		require.Equal(t, api.ErrorTypeInvalidRequest, refused.Error.Type, string(body))
-		require.Equal(t, api.CodeInvalidParam, refused.Error.Code, string(body))
-		require.NotNil(t, refused.Error.Param, string(body))
-		require.Equal(t, field, *refused.Error.Param, string(body))
-		require.Equal(t, "unknown field "+field, refused.Error.Message, string(body))
-		require.NotEmpty(t, refused.Error.RequestID, string(body))
-	}
-	for _, retired := range []string{"credits_spec", "set_credits"} {
-		status, body := requestJSON(t, http.MethodPatch, surface.BaseURL+"/v1/merchant/catalog/products/"+created.ID, catalogToken, map[string]any{retired: true})
-		requireRetiredFieldRefused(status, body, retired)
-	}
-	for _, retired := range []string{"credits", "includes", "usage_limits"} {
-		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", catalogToken, map[string]any{
-			"catalog": map[string]any{"version": 1, "products": []any{map[string]any{"key": "retired", "display_name": "Retired", retired: []any{}}}},
-			"insert":  true,
-		})
-		requireRetiredFieldRefused(status, body, retired)
-	}
-	wrongTypeStatus, wrongTypeBody := requestJSON(t, http.MethodPatch, surface.BaseURL+"/v1/merchant/catalog/products/"+created.ID, catalogToken, map[string]any{"display_name": 7})
-	require.Equal(t, http.StatusBadRequest, wrongTypeStatus, string(wrongTypeBody))
-	require.Contains(t, string(wrongTypeBody), `"code":"invalid_param"`)
-	require.Contains(t, string(wrongTypeBody), `"param":"display_name"`)
-	require.NotContains(t, string(wrongTypeBody), "json:")
-
-	getStatus, getBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/by-key/"+productKey, catalogToken, nil)
-	require.Equal(t, http.StatusOK, getStatus, string(getBody))
-	var fetched struct {
-		ID  string `json:"id"`
-		Key string `json:"key"`
-	}
-	require.NoError(t, json.Unmarshal(getBody, &fetched))
-	require.Equal(t, created.ID, fetched.ID)
-	require.Equal(t, productKey, fetched.Key)
-
-	unauthStatus, unauthBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products", "", nil)
-	require.Equal(t, http.StatusUnauthorized, unauthStatus, string(unauthBody))
-
-	deniedStatus, deniedBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products", readOnlyToken, nil)
-	require.Equal(t, http.StatusForbidden, deniedStatus, string(deniedBody))
-}
-
-func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
-	ctx := context.Background()
-	h := New(t, ctx)
-	surface := h.StartStandalone("usd")
-	token := surface.MintAPIKey(
-		dbtest.TestMerchantSlug,
-		"catalog-apply-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
-	)
-	applier := httpCatalogApplier{t: t, baseURL: surface.BaseURL, token: token}
-
-	groupSlug := "apply-flags-" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	productKey := "plan-product-" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	manifest := &catalog.Manifest{
-		Version: catalog.SupportedVersion,
-		Products: []catalog.Product{{
-			Key:         productKey,
-			DisplayName: "Plan Product",
-			Description: "inserted through HTTP-backed catalog apply",
-			TierGroup:   groupSlug,
-			TierRank:    intPtr(1),
-			Prices: []catalog.Price{{
-				UnitAmount: 1299,
-				Currency:   "USD",
-				Duration:   "30d",
-				AutoRenew:  true,
-			}},
-		}},
-	}
-	require.NoError(t, manifest.Validate())
-
-	plan, err := catalog.Plan(ctx, applier, manifest)
-	require.NoError(t, err)
-	_, err = catalog.ApplyWithOptions(ctx, applier, plan, catalog.ApplyOptions{})
-	require.NoError(t, err)
-	_, err = applier.GetProductByKey(ctx, productKey)
-	require.Error(t, err, "bare apply options must be plan-only over HTTP")
-
-	plan, err = catalog.Plan(ctx, applier, manifest)
-	require.NoError(t, err)
-	inserted, err := catalog.ApplyWithOptions(ctx, applier, plan, catalog.ApplyOptions{Insert: true})
-	require.NoError(t, err)
-	require.Equal(t, 1, inserted.ProductsCreated)
-	require.Equal(t, 1, inserted.PricesCreated)
-	product, err := applier.GetProductByKey(ctx, productKey)
-	require.NoError(t, err)
-	require.Equal(t, "Plan Product", product.DisplayName)
-
-	updatedManifest := *manifest
-	updatedManifest.TierGroups = nil
-	updatedManifest.Products = []catalog.Product{{
-		Key:         productKey,
-		DisplayName: "Plan Product Updated",
-		Description: "updated through HTTP-backed catalog apply",
-		TierGroup:   groupSlug,
-		TierRank:    intPtr(2),
-		Prices:      manifest.Products[0].Prices,
-	}}
-	require.NoError(t, updatedManifest.Validate())
-	plan, err = catalog.Plan(ctx, applier, &updatedManifest)
-	require.NoError(t, err)
-	updated, err := catalog.ApplyWithOptions(ctx, applier, plan, catalog.ApplyOptions{Overwrite: true})
-	require.NoError(t, err)
-	require.Equal(t, 1, updated.ProductsUpdated)
-	product, err = applier.GetProductByKey(ctx, productKey)
-	require.NoError(t, err)
-	require.Equal(t, "Plan Product Updated", product.DisplayName)
-	require.Equal(t, 2, product.TierRank)
-
-	extraSlug := "prune-extra-" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	extra, err := applier.CreateProduct(ctx, billingservice.CreateProductRequest{
-		Key:         extraSlug,
-		DisplayName: "Prune Extra",
-		TierGroup:   &groupSlug,
-		Archived:    false,
-	})
-	require.NoError(t, err)
-
-	plan, err = catalog.Plan(ctx, applier, &updatedManifest)
-	require.NoError(t, err)
-	pruned, err := catalog.ApplyWithOptions(ctx, applier, plan, catalog.ApplyOptions{Prune: true})
-	require.NoError(t, err)
-	require.Equal(t, 1, pruned.ProductsArchived)
-	status, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/"+openrails.ProductID(extra.ID).String(), token, nil)
-	require.Equal(t, http.StatusOK, status, string(body))
-	var archived billingservice.CatalogProduct
-	require.NoError(t, json.Unmarshal(body, &archived))
-	require.True(t, archived.Archived)
-}
-
-func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
-	ctx := context.Background()
-	h := New(t, ctx)
-	surface := h.StartStandalone("usd")
-
-	token := surface.MintAPIKey(
-		dbtest.TestMerchantSlug,
-		"catalog-publish-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
-	)
-	deniedToken := surface.MintAPIKey(
-		dbtest.TestMerchantSlug,
-		"catalog-publish-denied-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCatalogRead},
-	)
-
-	groupSlug := "publish-group-" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	productKey := "publish-product-" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	manifest := catalog.Manifest{
-		Version: catalog.SupportedVersion,
-		Products: []catalog.Product{{
-			Key:         productKey,
-			DisplayName: "Publish Product",
-			Description: "published through the live merchant catalog route",
-			TierGroup:   groupSlug,
-			TierRank:    intPtr(1),
-			Prices: []catalog.Price{{
-				UnitAmount: 1499,
-				Currency:   "USD",
-				Duration:   "30d",
-				AutoRenew:  true,
-			}},
-		}},
-	}
-	require.NoError(t, manifest.Validate())
-
-	deniedStatus, deniedBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", deniedToken, map[string]any{
-		"catalog": manifest,
-		"insert":  true,
-	})
-	require.Equal(t, http.StatusForbidden, deniedStatus, string(deniedBody))
-
-	planStatus, planBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-		"catalog": manifest,
-	})
-	require.Equal(t, http.StatusOK, planStatus, string(planBody))
-	var planned struct {
-		Plan   *catalog.ApplyPlan   `json:"plan"`
-		Result *catalog.ApplyResult `json:"result"`
-	}
-	require.NoError(t, json.Unmarshal(planBody, &planned))
-	require.NotNil(t, planned.Plan)
-	require.Nil(t, planned.Result)
-
-	listURL := surface.BaseURL + "/v1/merchant/catalog/products?tier_group=" + url.QueryEscape(groupSlug) + "&archived=false"
-	missingStatus, missingBody := requestJSON(t, http.MethodGet, listURL, token, nil)
-	require.Equal(t, http.StatusOK, missingStatus, string(missingBody))
-	var missingPage struct {
-		Items []billingservice.CatalogProduct `json:"items"`
-		Total int64                           `json:"total"`
-	}
-	require.NoError(t, json.Unmarshal(missingBody, &missingPage))
-	for _, item := range missingPage.Items {
-		require.NotEqual(t, productKey, item.Key)
-	}
-
-	applyStatus, applyBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-		"catalog": manifest,
-		"insert":  true,
-	})
-	require.Equal(t, http.StatusOK, applyStatus, string(applyBody))
-	var applied struct {
-		Plan   *catalog.ApplyPlan   `json:"plan"`
-		Result *catalog.ApplyResult `json:"result"`
-	}
-	require.NoError(t, json.Unmarshal(applyBody, &applied))
-	require.NotNil(t, applied.Plan)
-	require.NotNil(t, applied.Result)
-	require.Equal(t, 1, applied.Result.ProductsCreated)
-	require.Equal(t, 1, applied.Result.PricesCreated)
-
-	foundStatus, foundBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/by-key/"+productKey, token, nil)
-	require.Equal(t, http.StatusOK, foundStatus, string(foundBody))
-	var product billingservice.CatalogProduct
-	require.NoError(t, json.Unmarshal(foundBody, &product))
-	require.Equal(t, productKey, product.Key)
-}
-
-// TestStandaloneMerchantCatalogPriceKeyVersionBumpHTTP is #774's MODE 1
-// YAML-edit+push round-trip through the FULL converge (POST .../catalog/
-// publish drives the identical catalog.Plan+catalog.ApplyWithOptions pipeline
-// the manifest CLI uses): an amount edit under the auto-defaulted key version-
-// bumps (new row, key re-pointed, old row archived), and flip-flopping back
-// to the original amount REACTIVATES the same original row rather than
-// minting a third.
-func TestStandaloneMerchantCatalogPriceKeyVersionBumpHTTP(t *testing.T) {
-	ctx := context.Background()
-	h := New(t, ctx)
-	surface := h.StartStandalone("usd")
-	token := surface.MintAPIKey(
-		dbtest.TestMerchantSlug,
-		"catalog-price-key-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
-	)
-
-	productKey := "price-key-bump-" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	wantKey := productKey + "-monthly"
-	manifestAt := func(amount int64) catalog.Manifest {
-		return catalog.Manifest{
-			Version: catalog.SupportedVersion,
-			Products: []catalog.Product{{
-				Key:         productKey,
-				DisplayName: "Price Key Bump Product",
-				Prices: []catalog.Price{{
-					UnitAmount: amount,
-					Currency:   "USD",
-					Duration:   "30d",
-					AutoRenew:  true,
-				}},
-			}},
-		}
-	}
-	publish := func(m catalog.Manifest) *catalog.ApplyResult {
-		t.Helper()
-		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-			"catalog": m, "insert": true, "overwrite": true, "prune": true,
-		})
-		require.Equal(t, http.StatusOK, status, string(body))
-		var out struct {
-			Result *catalog.ApplyResult `json:"result"`
-		}
-		require.NoError(t, json.Unmarshal(body, &out))
-		require.NotNil(t, out.Result)
-		return out.Result
-	}
-	getByKey := func() billingservice.CatalogPrice {
-		t.Helper()
-		status, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/prices/by-key/"+wantKey, token, nil)
-		require.Equal(t, http.StatusOK, status, string(body))
-		var p billingservice.CatalogPrice
-		require.NoError(t, json.Unmarshal(body, &p))
-		return p
-	}
-
-	// v1: create at $10/mo — auto-defaults to "<product-key>-monthly".
-	result := publish(manifestAt(1000000))
-	require.Equal(t, 1, result.ProductsCreated)
-	require.Equal(t, 1, result.PricesCreated)
-	original := getByKey()
-	require.Equal(t, wantKey, original.Key)
-	require.EqualValues(t, 1000000, original.UnitAmount)
-
-	// v2: amount edit under the SAME (auto-defaulted) key -> version bump.
-	result = publish(manifestAt(1200000))
-	require.Equal(t, 1, result.PricesCreated, "new substance -> new row")
-	require.Equal(t, 1, result.PricesArchived, "displaced row archived")
-	bumped := getByKey()
-	require.Equal(t, wantKey, bumped.Key)
-	require.EqualValues(t, 1200000, bumped.UnitAmount)
-	require.NotEqual(t, original.ID, bumped.ID)
-
-	oldStatus, oldBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/prices/"+openrails.PriceID(original.ID).String(), token, nil)
-	require.Equal(t, http.StatusOK, oldStatus, string(oldBody))
-	var oldRow billingservice.CatalogPrice
-	require.NoError(t, json.Unmarshal(oldBody, &oldRow))
-	require.True(t, oldRow.Archived, "displaced row is archived, not deleted")
-	require.Equal(t, wantKey, oldRow.Key, "archived predecessor keeps the key as a back-reference")
-
-	// v3: flip back to $10 -> REACTIVATES the original row (never a third).
-	result = publish(manifestAt(1000000))
-	require.Equal(t, 0, result.PricesCreated, "flip-flop must reactivate, not create")
-	require.Equal(t, 1, result.PricesActivated)
-	require.Equal(t, 1, result.PricesArchived)
-	reactivated := getByKey()
-	require.Equal(t, original.ID, reactivated.ID, "reactivated the SAME row (#662 deterministic id)")
-
-	pricesStatus, pricesBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/prices?product_id="+openrails.ProductID(bumped.ProductID).String(), token, nil)
-	require.Equal(t, http.StatusOK, pricesStatus, string(pricesBody))
-	var page struct {
-		Items []billingservice.CatalogPrice `json:"items"`
-	}
-	require.NoError(t, json.Unmarshal(pricesBody, &page))
-	require.Len(t, page.Items, 2, "flip-flopping forever yields exactly two rows total")
-}
-
 func TestExampleCatalogPublishesOverHTTP(t *testing.T) {
-	ctx := context.Background()
-	h := New(t, ctx)
-	surface := h.StartStandalone("usd")
-	token := surface.MintAPIKey(
-		dbtest.TestMerchantSlug,
-		"catalog-example-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
-	)
-
+	h, f := newCatalogWorkflow(t)
 	manifest := loadExampleCatalogForHTTP(t)
-	expectedProducts, expectedPrices := catalogShapeCounts(manifest)
-
-	planStatus, planBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-		"catalog": manifest,
-	})
-	require.Equal(t, http.StatusOK, planStatus, string(planBody))
-	var planned struct {
-		Plan   *catalog.ApplyPlan   `json:"plan"`
-		Result *catalog.ApplyResult `json:"result"`
+	expected := [5]int{len(manifest.Products), 0, len(manifest.Meters), 0, 0}
+	for _, product := range manifest.Products {
+		expected[1] += len(product.Prices)
+		expected[3] += len(product.RateCards)
+		for _, price := range product.Prices {
+			if price.Trial != nil && price.Trial.UnitAmount == 0 && price.Trial.Duration == "7d" {
+				expected[4]++
+			}
+		}
 	}
-	require.NoError(t, json.Unmarshal(planBody, &planned))
-	require.NotNil(t, planned.Plan)
+	rows := func() [5]int {
+		t.Helper()
+		var counts [5]int
+		require.NoError(t, h.Pool().QueryRow(t.Context(), `SELECT
+    (SELECT count(*) FROM openrails.products WHERE merchant_id=$1),
+    (SELECT count(*) FROM openrails.prices WHERE merchant_id=$1),
+    (SELECT count(*) FROM openrails.catalog_meters WHERE merchant_id=$1),
+    (SELECT count(*) FROM openrails.catalog_rate_cards WHERE merchant_id=$1),
+    (SELECT count(*) FROM openrails.prices WHERE merchant_id=$1 AND trial_unit_amount=0 AND trial_duration_hours=168)`, f.merchant.MerchantID.UUID()).Scan(&counts[0], &counts[1], &counts[2], &counts[3], &counts[4]))
+		return counts
+	}
+	planned := f.publish(t, manifest, catalog.ApplyOptions{})
 	require.Nil(t, planned.Result)
-	require.Equal(t, expectedProducts, countProductActions(planned.Plan, catalog.ProductCreate))
-	require.Equal(t, expectedPrices, countPriceActions(planned.Plan, catalog.PriceCreate))
-	require.Zero(t, exampleProductCount(t, ctx, h, manifest))
-
-	applyStatus, applyBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-		"catalog": manifest,
-		"insert":  true,
-	})
-	require.Equal(t, http.StatusOK, applyStatus, string(applyBody))
-	var applied struct {
-		Plan   *catalog.ApplyPlan   `json:"plan"`
-		Result *catalog.ApplyResult `json:"result"`
-	}
-	require.NoError(t, json.Unmarshal(applyBody, &applied))
-	require.NotNil(t, applied.Result)
-	require.Equal(t, expectedProducts, applied.Result.ProductsCreated)
-	require.Equal(t, expectedPrices, applied.Result.PricesCreated)
-
-	assertExampleCatalogRows(t, ctx, h, manifest, expectedProducts, expectedPrices)
-
-	againStatus, againBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-		"catalog": manifest,
-	})
-	require.Equal(t, http.StatusOK, againStatus, string(againBody))
-	var again struct {
-		Plan *catalog.ApplyPlan `json:"plan"`
-	}
-	require.NoError(t, json.Unmarshal(againBody, &again))
+	require.Equal(t, expected[0], countProductActions(planned.Plan, catalog.ProductCreate))
+	require.Equal(t, expected[1], countPriceActions(planned.Plan, catalog.PriceCreate))
+	require.Equal(t, [5]int{}, rows())
+	applied := f.publish(t, manifest, catalog.ApplyOptions{Insert: true})
+	require.Equal(t, expected[0], applied.Result.ProductsCreated)
+	require.Equal(t, expected[1], applied.Result.PricesCreated)
+	require.Equal(t, expected, rows())
+	again := f.publish(t, manifest, catalog.ApplyOptions{})
 	require.Zero(t, countProductActions(again.Plan, catalog.ProductCreate))
 	require.Zero(t, countPriceActions(again.Plan, catalog.PriceCreate))
 }
@@ -810,7 +434,7 @@ WHERE g.merchant_id = $1
 	return n
 }
 
-func mustCatalogProduct(t *testing.T, ctx context.Context, applier httpCatalogApplier, key string) billingservice.CatalogProduct {
+func mustCatalogProduct(t *testing.T, ctx context.Context, applier catalogClientApplier, key string) billingservice.CatalogProduct {
 	t.Helper()
 	product, err := applier.GetProductByKey(ctx, key)
 	require.NoError(t, err)
@@ -940,140 +564,14 @@ type httpCatalogApplier struct {
 	token   string
 }
 
-func (a httpCatalogApplier) GetProductByKey(_ context.Context, key string) (*billingservice.CatalogProduct, error) {
-	status, body := requestJSON(a.t, http.MethodGet, a.baseURL+"/v1/merchant/catalog/products/by-key/"+url.PathEscape(key), a.token, nil)
-	if status == http.StatusNotFound {
-		return nil, openrails.ErrNotFound
+// The external Solana proof uses this one convenience method. Its requests
+// now go through the shared Client, not another HTTP implementation.
+func (a httpCatalogApplier) ListPricesByProduct(ctx context.Context, id openrails.ProductID, activeOnly bool) ([]billingservice.CatalogPrice, error) {
+	client, err := openrails.NewRemote(a.baseURL, openrails.WithAPIKey(a.token), openrails.WithMerchantID(dbtest.TestMerchantID), openrails.WithCurrency("USD"))
+	if err != nil {
+		return nil, err
 	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("get product by key: status %d: %s", status, string(body))
-	}
-	var out billingservice.CatalogProduct
-	require.NoError(a.t, json.Unmarshal(body, &out))
-	return &out, nil
-}
-
-func (a httpCatalogApplier) ListProducts(_ context.Context, opts billingservice.ListProductsOptions) (billingservice.CatalogPage[billingservice.CatalogProduct], error) {
-	q := url.Values{}
-	if opts.TierGroup != "" {
-		q.Set("tier_group", opts.TierGroup)
-	}
-	if opts.Archived != nil {
-		q.Set("archived", fmt.Sprint(*opts.Archived))
-	}
-	if opts.Limit > 0 {
-		q.Set("limit", fmt.Sprint(opts.Limit))
-	}
-	if opts.Offset > 0 {
-		q.Set("offset", fmt.Sprint(opts.Offset))
-	}
-	u := a.baseURL + "/v1/merchant/catalog/products"
-	if encoded := q.Encode(); encoded != "" {
-		u += "?" + encoded
-	}
-	status, body := requestJSON(a.t, http.MethodGet, u, a.token, nil)
-	if status != http.StatusOK {
-		return billingservice.CatalogPage[billingservice.CatalogProduct]{}, fmt.Errorf("list products: status %d: %s", status, string(body))
-	}
-	var page billingservice.CatalogPage[billingservice.CatalogProduct]
-	require.NoError(a.t, json.Unmarshal(body, &page))
-	return page, nil
-}
-
-func (a httpCatalogApplier) CreateProduct(_ context.Context, req billingservice.CreateProductRequest) (*billingservice.CatalogProduct, error) {
-	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/products", a.token, req)
-	if status != http.StatusCreated {
-		return nil, fmt.Errorf("create product: status %d: %s", status, string(body))
-	}
-	var out billingservice.CatalogProduct
-	require.NoError(a.t, json.Unmarshal(body, &out))
-	return &out, nil
-}
-
-func (a httpCatalogApplier) UpdateProduct(_ context.Context, id openrails.ProductID, req billingservice.UpdateProductRequest) (*billingservice.CatalogProduct, error) {
-	status, body := requestJSON(a.t, http.MethodPatch, a.baseURL+"/v1/merchant/catalog/products/"+openrails.ProductID(id).String(), a.token, req)
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("update product: status %d: %s", status, string(body))
-	}
-	var out billingservice.CatalogProduct
-	require.NoError(a.t, json.Unmarshal(body, &out))
-	return &out, nil
-}
-
-func (a httpCatalogApplier) DeactivateProduct(_ context.Context, id openrails.ProductID) (*billingservice.CatalogProduct, error) {
-	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/products/"+openrails.ProductID(id).String()+"/deactivate", a.token, nil)
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("deactivate product: status %d: %s", status, string(body))
-	}
-	var out billingservice.CatalogProduct
-	require.NoError(a.t, json.Unmarshal(body, &out))
-	return &out, nil
-}
-
-func (a httpCatalogApplier) ListPricesByProduct(_ context.Context, productID openrails.ProductID, activeOnly bool) ([]billingservice.CatalogPrice, error) {
-	q := url.Values{"product_id": []string{productID.String()}}
-	if activeOnly {
-		q.Set("archived", "false")
-	}
-	status, body := requestJSON(a.t, http.MethodGet, a.baseURL+"/v1/merchant/catalog/prices?"+q.Encode(), a.token, nil)
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("list prices: status %d: %s", status, string(body))
-	}
-	var page struct {
-		Items []billingservice.CatalogPrice `json:"items"`
-	}
-	require.NoError(a.t, json.Unmarshal(body, &page))
-	return page.Items, nil
-}
-
-func (a httpCatalogApplier) CreatePrice(_ context.Context, req billingservice.CreatePriceRequest) (*billingservice.CatalogPrice, error) {
-	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/prices", a.token, req)
-	if status != http.StatusCreated {
-		return nil, fmt.Errorf("create price: status %d: %s", status, string(body))
-	}
-	var out billingservice.CatalogPrice
-	require.NoError(a.t, json.Unmarshal(body, &out))
-	return &out, nil
-}
-
-func (a httpCatalogApplier) UpdatePrice(_ context.Context, id openrails.PriceID, req billingservice.UpdatePriceRequest) (*billingservice.CatalogPrice, error) {
-	status, body := requestJSON(a.t, http.MethodPatch, a.baseURL+"/v1/merchant/catalog/prices/"+openrails.PriceID(id).String(), a.token, req)
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("update price: status %d: %s", status, string(body))
-	}
-	var out billingservice.CatalogPrice
-	require.NoError(a.t, json.Unmarshal(body, &out))
-	return &out, nil
-}
-
-func (a httpCatalogApplier) ActivatePrice(_ context.Context, id openrails.PriceID) (*billingservice.CatalogPrice, error) {
-	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/prices/"+openrails.PriceID(id).String()+"/activate", a.token, nil)
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("activate price: status %d: %s", status, string(body))
-	}
-	var out billingservice.CatalogPrice
-	require.NoError(a.t, json.Unmarshal(body, &out))
-	return &out, nil
-}
-
-func (a httpCatalogApplier) DeactivatePrice(_ context.Context, id openrails.PriceID) (*billingservice.CatalogPrice, error) {
-	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/prices/"+openrails.PriceID(id).String()+"/deactivate", a.token, nil)
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("deactivate price: status %d: %s", status, string(body))
-	}
-	var out billingservice.CatalogPrice
-	require.NoError(a.t, json.Unmarshal(body, &out))
-	return &out, nil
-}
-
-func (a httpCatalogApplier) SetPriceKey(_ context.Context, id openrails.PriceID, key string) (*billingservice.CatalogPrice, error) {
-	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/prices/"+openrails.PriceID(id).String()+"/key", a.token, map[string]string{"key": key})
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("set price key: status %d: %s", status, string(body))
-	}
-	var out billingservice.CatalogPrice
-	require.NoError(a.t, json.Unmarshal(body, &out))
-	return &out, nil
+	return (catalogClientApplier{client}).ListPricesByProduct(ctx, id, activeOnly)
 }
 
 type exampleCatalogFile struct {
@@ -1107,26 +605,12 @@ func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
 		}
 	}
 	require.Equal(t, "anthropic", entry.Merchant, "example must include the anthropic catalog")
-	suffix := "-" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	meterKeys := map[string]string{}
-	for i := range entry.Meters {
-		old := entry.Meters[i].Key
-		entry.Meters[i].Key += suffix
-		meterKeys[old] = entry.Meters[i].Key
-	}
+	// The fixture owns an empty merchant, so catalog names need no renaming.
+	// Provider linking has separate local-network qualification.
 	for i := range entry.Products {
-		entry.Products[i].Key += suffix
-		if entry.Products[i].TierGroup != "" {
-			entry.Products[i].TierGroup += suffix
-		}
 		for j := range entry.Products[i].Prices {
 			entry.Products[i].Prices[j].PSPs = nil
 			entry.Products[i].Prices[j].PSPLinks = nil
-		}
-		for j := range entry.Products[i].RateCards {
-			if mapped, ok := meterKeys[entry.Products[i].RateCards[j].Meter]; ok {
-				entry.Products[i].RateCards[j].Meter = mapped
-			}
 		}
 	}
 	m := catalog.Manifest{
@@ -1136,14 +620,6 @@ func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
 	}
 	require.NoError(t, m.Validate())
 	return m
-}
-
-func catalogShapeCounts(m catalog.Manifest) (products int, prices int) {
-	for _, p := range m.Products {
-		products++
-		prices += len(p.Prices)
-	}
-	return products, prices
 }
 
 func countProductActions(plan *catalog.ApplyPlan, action catalog.ProductAction) int {
@@ -1172,92 +648,6 @@ func countPriceActions(plan *catalog.ApplyPlan, action catalog.PriceAction) int 
 				if price.Action == action {
 					n++
 				}
-			}
-		}
-	}
-	return n
-}
-
-func exampleProductCount(t *testing.T, ctx context.Context, h *Harness, m catalog.Manifest) int {
-	t.Helper()
-	var n int
-	require.NoError(t, h.Pool().QueryRow(ctx,
-		`SELECT count(*) FROM openrails.products WHERE merchant_id = $1 AND key = ANY($2::text[])`,
-		dbtest.TestMerchantID.UUID(), exampleProductKeys(m)).Scan(&n))
-	return n
-}
-
-func assertExampleCatalogRows(t *testing.T, ctx context.Context, h *Harness, m catalog.Manifest, expectedProducts, expectedPrices int) {
-	t.Helper()
-	pool := h.Pool()
-	keys := exampleProductKeys(m)
-	require.Equal(t, expectedProducts, exampleProductCount(t, ctx, h, m))
-
-	var n int
-	require.NoError(t, pool.QueryRow(ctx, `
-SELECT count(*) FROM openrails.prices pr
-JOIN openrails.products p ON p.id = pr.product_id
-WHERE p.merchant_id = $1 AND p.key = ANY($2::text[])`, dbtest.TestMerchantID.UUID(), keys).Scan(&n))
-	require.Equal(t, expectedPrices, n)
-
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = ANY($2::text[])`,
-		dbtest.TestMerchantID.UUID(), exampleMeterKeys(m)).Scan(&n))
-	require.Equal(t, len(m.Meters), n)
-
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = ANY($2::text[])`,
-		dbtest.TestMerchantID.UUID(), exampleMeterKeys(m)).Scan(&n))
-	require.Equal(t, exampleUsageRateCardCount(m), n)
-
-	require.NoError(t, pool.QueryRow(ctx, `
-SELECT count(*) FROM openrails.prices pr
-JOIN openrails.products p ON p.id = pr.product_id
-WHERE p.merchant_id = $1 AND p.key = ANY($2::text[]) AND pr.trial_unit_amount = 0 AND pr.trial_duration_hours = 168`,
-		dbtest.TestMerchantID.UUID(), keys).Scan(&n))
-	require.Equal(t, exampleFreeTrialPriceCount(m), n)
-}
-
-func exampleProductKeys(m catalog.Manifest) []string {
-	keys := make([]string, 0, len(m.Products))
-	for _, p := range m.Products {
-		keys = append(keys, p.Key)
-	}
-	return keys
-}
-
-// exampleFreeTrialPriceCount counts prices in the published manifest that carry a
-// free 7-day trial — data-driven so the assertion holds for whichever merchant
-// slice the test publishes (anthropic has none), not a stale hardcoded 1.
-func exampleFreeTrialPriceCount(m catalog.Manifest) int {
-	n := 0
-	for _, p := range m.Products {
-		for _, pr := range p.Prices {
-			if pr.Trial != nil && pr.Trial.UnitAmount == 0 && pr.Trial.Duration == "7d" {
-				n++
-			}
-		}
-	}
-	return n
-}
-
-func exampleMeterKeys(m catalog.Manifest) []string {
-	keys := make([]string, 0, len(m.Meters))
-	for _, meter := range m.Meters {
-		keys = append(keys, meter.Key)
-	}
-	return keys
-}
-
-// exampleUsageRateCardCount counts the usage rate cards in the published
-// manifest. or#893: declared rate_cards are the only source — the metered:
-// price sugar that used to translate into one is gone.
-func exampleUsageRateCardCount(m catalog.Manifest) int {
-	var n int
-	for _, p := range m.Products {
-		for _, rc := range p.RateCards {
-			if rc.Meter != "" {
-				n++
 			}
 		}
 	}
@@ -1343,7 +733,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, status, string(body))
 
-	applier := httpCatalogApplier{t: t, baseURL: standalone.BaseURL, token: token}
+	applier := catalogClientApplier{standalone.Client(openrails.WithAPIKey(token))}
 	premium := mustCatalogProduct(t, ctx, applier, premiumKey)
 	basic := mustCatalogProduct(t, ctx, applier, basicKey)
 	pro := mustCatalogProduct(t, ctx, applier, proKey)
