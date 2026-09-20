@@ -37,21 +37,21 @@ func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) 
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "ps-prod-"+suffix, "ps-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, started_at, created_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
+		exec(`INSERT INTO billing.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, started_at, created_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
 		      VALUES ($1,$2,$3,'pending','nmi',$4,$5,$5,'{}'::jsonb,$6,$7,$8)`,
 			subID, priceID, productID, "ps-sub-"+suffix, old, customer, merchantID, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_state WHERE merchant_id=$1 AND source_domain='subscriptions'`, merchantID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_state WHERE merchant_id=$1 AND source_domain='subscriptions'`, merchantID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, subID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -67,11 +67,11 @@ func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) 
 		require.Equal(t, 0, res.AutoFixed, "ungated retraction: the gate must hold it")
 		require.Equal(t, 1, res.ReconcileRequired)
 		var status string
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&status))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM billing.subscriptions WHERE id=$1`, subID).Scan(&status))
 		require.Equal(t, "pending", status, "the subscription must survive an unproven absence")
 		var findingType, findingStatus string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT finding_type, status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`,
+			`SELECT finding_type, status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`,
 			merchantID, "subscription:"+subID.String()).Scan(&findingType, &findingStatus))
 		require.Equal(t, "life.subscription.pending_stale", findingType)
 		require.Equal(t, "reconcile_required", findingStatus)
@@ -82,7 +82,7 @@ func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) 
 	// repair proceeds.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, err := appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.reconciliation_state (merchant_id, source_domain, fully_reconciled)
+			`INSERT INTO billing.reconciliation_state (merchant_id, source_domain, fully_reconciled)
 			 VALUES ($1,'subscriptions',true)
 			 ON CONFLICT (merchant_id, source_domain) DO UPDATE SET fully_reconciled = true`, merchantID)
 		return err
@@ -95,7 +95,7 @@ func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) 
 		var status string
 		var cancelledAt, endedAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status::text, cancelled_at, ended_at FROM openrails.subscriptions WHERE id=$1`, subID).
+			`SELECT status::text, cancelled_at, ended_at FROM billing.subscriptions WHERE id=$1`, subID).
 			Scan(&status, &cancelledAt, &endedAt))
 		require.Equal(t, "cancelled", status)
 		require.NotNil(t, cancelledAt)
@@ -130,23 +130,23 @@ func TestConverge_LifeProviderIntentAbandoned(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "pi-prod-"+suffix, "pi-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, started_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
+		exec(`INSERT INTO billing.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, started_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
 		      VALUES ($1,$2,$3,'active','nmi',$4,now(),'{}'::jsonb,$5,$6,$7)`, subID, priceID, productID, "pi-sub-"+suffix, customer, merchantID, pspID)
 		// a provider action that failed terminally and won't auto-retry
-		exec(`INSERT INTO openrails.rail_intents (id, merchant_id, rail, intent_type, idempotency_key, status, origin, subscription_id, psp_id)
+		exec(`INSERT INTO billing.rail_intents (id, merchant_id, rail, intent_type, idempotency_key, status, origin, subscription_id, psp_id)
 		      VALUES ($1,$2,'nmi','cancel_subscription',$3,'failed_terminal','system',$4,$5)`, intentID, merchantID, "pi-key-"+suffix, subID, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "provider_intent:"+intentID.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.rail_intents WHERE id=$1`, intentID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "provider_intent:"+intentID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.rail_intents WHERE id=$1`, intentID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, subID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -160,13 +160,13 @@ func TestConverge_LifeProviderIntentAbandoned(t *testing.T) {
 
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='life.provider_intent.abandoned' AND subject_key=$2`,
+			`SELECT status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND finding_type='life.provider_intent.abandoned' AND subject_key=$2`,
 			merchantID, "provider_intent:"+intentID.String()).Scan(&status))
 		require.Equal(t, "requires_review", status)
 
 		// surface-only: the intent itself is untouched
 		var istatus string
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.rail_intents WHERE id=$1`, intentID).Scan(&istatus))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM billing.rail_intents WHERE id=$1`, intentID).Scan(&istatus))
 		require.Equal(t, "failed_terminal", istatus)
 		return nil
 	}))
@@ -192,28 +192,28 @@ func TestConverge_LifeSubscriptionPeriodOverdue(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "po-prod-"+suffix, "po-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		// #664: period_overdue needs vault + ownership evidence — seed a payment
 		// method and a completed payment that opened the current period.
 		pmID := uuid.New()
-		exec(`INSERT INTO openrails.payment_methods (id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref, initial_transaction_id, psp_id) VALUES ($1,$2,$3,'nmi','po-cust','po-vault','po-tx',$4)`, pmID, merchantID, customer, pspID)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		exec(`INSERT INTO billing.payment_methods (id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref, initial_transaction_id, psp_id) VALUES ($1,$2,$3,'nmi','po-cust','po-vault','po-tx',$4)`, pmID, merchantID, customer, pspID)
+		exec(`INSERT INTO billing.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
 		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9,$10)`,
 			subID, priceID, productID, "po-sub-"+suffix, pmID, periodEnd.Add(-30*24*time.Hour), periodEnd, customer, merchantID, pspID)
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, subscription_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		exec(`INSERT INTO billing.payments (id, merchant_id, customer_id, price_id, subscription_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'nmi',$6,9990000,9990000,'USD','completed',$7,$8)`,
 			uuid.New(), merchantID, customer, priceID, subID, "po-pay-"+suffix, periodEnd.Add(-30*24*time.Hour), pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE subscription_id=$1`, subID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE subscription_id=$1`, subID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, subID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -225,7 +225,7 @@ func TestConverge_LifeSubscriptionPeriodOverdue(t *testing.T) {
 		require.Equal(t, 1, res.AutoFixed)
 		var status string
 		var graceEnds *time.Time
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text, grace_ends_at FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&status, &graceEnds))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text, grace_ends_at FROM billing.subscriptions WHERE id=$1`, subID).Scan(&status, &graceEnds))
 		require.Equal(t, "past_due", status)
 		require.NotNil(t, graceEnds)
 		require.WithinDuration(t, periodEnd.Add(reconcile.PeriodGrace), *graceEnds, time.Second, "grace dated to period end + cap")
@@ -239,7 +239,7 @@ func TestConverge_LifeSubscriptionPeriodOverdue(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, res.Findings, "period_overdue → past_due composes into dunning_overdue")
 		var retry *time.Time
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT next_retry_at FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&retry))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT next_retry_at FROM billing.subscriptions WHERE id=$1`, subID).Scan(&retry))
 		require.NotNil(t, retry, "dunning_overdue scheduled the retry")
 		return nil
 	}))
@@ -275,21 +275,21 @@ func TestConverge_LifeSubscriptionDunningOverdue(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "do-prod-"+suffix, "do-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		// past_due, grace still open, but next_retry_at NULL: schedule stalled.
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, grace_ends_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		exec(`INSERT INTO billing.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, grace_ends_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
 		      VALUES ($1,$2,$3,'past_due','nmi',$4,$5,$6,$5,$7,'{}'::jsonb,$8,$9,$10)`,
 			subID, priceID, productID, "do-sub-"+suffix, periodEnd.Add(-30*24*time.Hour), periodEnd, graceEnd, customer, merchantID, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, subID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -301,18 +301,18 @@ func TestConverge_LifeSubscriptionDunningOverdue(t *testing.T) {
 		require.Equal(t, 1, res.AutoFixed)
 
 		var retry *time.Time
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT next_retry_at FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&retry))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT next_retry_at FROM billing.subscriptions WHERE id=$1`, subID).Scan(&retry))
 		require.NotNil(t, retry, "retry schedule re-established")
 		require.WithinDuration(t, time.Now().UTC(), *retry, 5*time.Second, "scheduled the NEXT retry (now), not a replayed past attempt")
 
 		// the sub stays past_due (we resumed dunning, we did not cancel)
 		var status string
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&status))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM billing.subscriptions WHERE id=$1`, subID).Scan(&status))
 		require.Equal(t, "past_due", status)
 
 		var fstatus string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='life.subscription.dunning_overdue' AND subject_key=$2`,
+			`SELECT status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND finding_type='life.subscription.dunning_overdue' AND subject_key=$2`,
 			merchantID, "subscription:"+subID.String()).Scan(&fstatus))
 		require.Equal(t, "auto_fixed", fstatus)
 		return nil

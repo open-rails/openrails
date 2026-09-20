@@ -27,13 +27,13 @@ func TestStandaloneMerchantCustomerLookupClientHTTP(t *testing.T) {
 	subjectID := uuid.New()
 	subject := subjectID.String()
 	_, err := pool.Exec(ctx, `
-		INSERT INTO openrails.customers (id, merchant_id, issuer, created_at, last_seen_at)
+		INSERT INTO billing.customers (id, merchant_id, issuer, created_at, last_seen_at)
 		VALUES ($1, $2, 'lookup-test', now(), now())`,
 		subjectID, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.entitlements (
+		INSERT INTO billing.entitlements (
 			id, merchant_id, customer_id, entitlement, start_at, source_id, source_type, created_at, updated_at
 		) VALUES ($1, $2, $3, 'premium', now() - interval '1 hour', $4, 'admin', now(), now())`,
 		uuid.New(), dbtest.TestMerchantID.UUID(), subjectID, uuid.New())
@@ -41,7 +41,7 @@ func TestStandaloneMerchantCustomerLookupClientHTTP(t *testing.T) {
 
 	productID := uuid.New()
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.products (id, merchant_id, key, display_name)
+		INSERT INTO billing.products (id, merchant_id, key, display_name)
 		VALUES ($1, $2, $3, 'Lookup Test Product')`,
 		productID, dbtest.TestMerchantID.UUID(), "lookup-product-"+productID.String())
 	require.NoError(t, err)

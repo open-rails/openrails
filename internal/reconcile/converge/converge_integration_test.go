@@ -57,8 +57,8 @@ func TestConverge_ConfirmedAbsenceGate(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key IN ($2,$3)`, merchantID, missingKey, excessKey)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_state WHERE merchant_id=$1`, merchantID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key IN ($2,$3)`, merchantID, missingKey, excessKey)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_state WHERE merchant_id=$1`, merchantID)
 			return nil
 		})
 	})
@@ -80,7 +80,7 @@ func TestConverge_ConfirmedAbsenceGate(t *testing.T) {
 	status := func(ctx context.Context, key string) string {
 		var s string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`,
+			`SELECT status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`,
 			merchantID, key).Scan(&s))
 		return s
 	}

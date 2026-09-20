@@ -62,7 +62,7 @@ func TestTEN1_AllTablesUnderRLSExceptDocumentedExemptions(t *testing.T) {
 	rows, err := app.Query(ctx, `
 		SELECT c.relname FROM pg_class c
 		  JOIN pg_namespace n ON n.oid = c.relnamespace
-		 WHERE n.nspname = 'openrails' AND c.relkind = 'r' AND NOT c.relrowsecurity
+		 WHERE n.nspname = 'billing' AND c.relkind = 'r' AND NOT c.relrowsecurity
 		 ORDER BY 1`)
 	require.NoError(t, err)
 	defer rows.Close()
@@ -78,7 +78,7 @@ func TestTEN1_AllTablesUnderRLSExceptDocumentedExemptions(t *testing.T) {
 	for _, name := range unpoliced {
 		_, ok := exemptTables[name]
 		require.Truef(t, ok,
-			"table openrails.%s has NO row level security and is not a documented TEN-3 exemption. "+
+			"table billing.%s has NO row level security and is not a documented TEN-3 exemption. "+
 				"Either add ENABLE+FORCE RLS with a merchant_isolation policy, or document the exemption "+
 				"in docs/invariants.md TEN-3 and add it to exemptTables here.", name)
 	}
@@ -100,7 +100,7 @@ func TestTEN1_PoliciedTablesForceRLSAndCheckWrites(t *testing.T) {
 		         WHERE p.polrelid = c.oid AND p.polname = 'merchant_isolation'
 		           AND p.polqual IS NOT NULL AND p.polwithcheck IS NOT NULL) AS both_clauses
 		  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-		 WHERE n.nspname = 'openrails' AND c.relkind = 'r' AND c.relrowsecurity
+		 WHERE n.nspname = 'billing' AND c.relkind = 'r' AND c.relrowsecurity
 		 ORDER BY 1`)
 	require.NoError(t, err)
 	defer rows.Close()
@@ -137,16 +137,16 @@ func TestTEN2_UnsetGUCYieldsZeroRowsAndNoError(t *testing.T) {
 	merchantID := uuid.New()
 	slug := "inv-ten2-" + uuid.NewString()[:8]
 	_, err := super.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, merchantID, slug)
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, merchantID, slug)
 	require.NoError(t, err)
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.customers (merchant_id, id) VALUES ($1, $2)`, merchantID, uuid.NewString())
+		`INSERT INTO billing.customers (merchant_id, id) VALUES ($1, $2)`, merchantID, uuid.NewString())
 	require.NoError(t, err)
 
 	// No GUC on this connection.
 	var n int64
 	require.NoError(t, app.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.customers WHERE merchant_id = $1`, merchantID).Scan(&n),
+		`SELECT count(*) FROM billing.customers WHERE merchant_id = $1`, merchantID).Scan(&n),
 		"a GUC-less read must NOT error — it silently returns nothing, which is the whole hazard")
 	require.EqualValues(t, 0, n,
 		"TEN-2: unset app.merchant_id must yield zero rows")
@@ -154,7 +154,7 @@ func TestTEN2_UnsetGUCYieldsZeroRowsAndNoError(t *testing.T) {
 	// Superuser sees the row that the app role cannot: proves the seed is real
 	// and the emptiness above is RLS, not a missing fixture.
 	require.NoError(t, super.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.customers WHERE merchant_id = $1`, merchantID).Scan(&n))
+		`SELECT count(*) FROM billing.customers WHERE merchant_id = $1`, merchantID).Scan(&n))
 	require.EqualValues(t, 1, n)
 
 	// With the GUC set transaction-locally, the same read answers.
@@ -164,7 +164,7 @@ func TestTEN2_UnsetGUCYieldsZeroRowsAndNoError(t *testing.T) {
 	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1::text, true)`, merchantID.String())
 	require.NoError(t, err)
 	require.NoError(t, tx.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.customers WHERE merchant_id = $1`, merchantID).Scan(&n))
+		`SELECT count(*) FROM billing.customers WHERE merchant_id = $1`, merchantID).Scan(&n))
 	require.EqualValues(t, 1, n, "GUC-scoped read must see the merchant's own row")
 }
 
@@ -176,11 +176,11 @@ func TestTEN2_CrossMerchantReadAndWriteBlocked(t *testing.T) {
 	a, b := uuid.New(), uuid.New()
 	for id, slug := range map[uuid.UUID]string{a: "inv-a-" + uuid.NewString()[:8], b: "inv-b-" + uuid.NewString()[:8]} {
 		_, err := super.Exec(ctx,
-			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, id, slug)
+			`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, id, slug)
 		require.NoError(t, err)
 	}
 	_, err := super.Exec(ctx,
-		`INSERT INTO openrails.customers (merchant_id, id) VALUES ($1, $2)`, b, uuid.NewString())
+		`INSERT INTO billing.customers (merchant_id, id) VALUES ($1, $2)`, b, uuid.NewString())
 	require.NoError(t, err)
 
 	tx, err := app.Begin(ctx)
@@ -191,11 +191,11 @@ func TestTEN2_CrossMerchantReadAndWriteBlocked(t *testing.T) {
 
 	var n int64
 	require.NoError(t, tx.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.customers WHERE merchant_id = $1`, b).Scan(&n))
+		`SELECT count(*) FROM billing.customers WHERE merchant_id = $1`, b).Scan(&n))
 	require.EqualValues(t, 0, n, "merchant A read merchant B's customers")
 
 	_, err = tx.Exec(ctx,
-		`INSERT INTO openrails.customers (merchant_id, id) VALUES ($1, $2)`, b, uuid.NewString())
+		`INSERT INTO billing.customers (merchant_id, id) VALUES ($1, $2)`, b, uuid.NewString())
 	require.Error(t, err, "WITH CHECK must reject writing a row into another merchant's scope")
 }
 
@@ -220,7 +220,7 @@ func TestLED5_LedgerIsAppendOnlyByPrivilege(t *testing.T) {
 	for _, table := range []string{"ledger_transfers", "ledger_accounts"} {
 		rows, err := app.Query(ctx, `
 			SELECT privilege_type FROM information_schema.table_privileges
-			 WHERE grantee = 'openrails_app' AND table_schema = 'openrails' AND table_name = $1
+			 WHERE grantee = 'openrails_app' AND table_schema = 'billing' AND table_name = $1
 			 ORDER BY 1`, table)
 		require.NoError(t, err)
 		var privs []string
@@ -243,15 +243,15 @@ func ledgerFixture(t *testing.T, ctx context.Context, super, app *pgxpool.Pool, 
 	t.Helper()
 	merchantID = uuid.New()
 	_, err := super.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		merchantID, "inv-led-"+uuid.NewString()[:8])
 	require.NoError(t, err)
 
 	require.NoError(t, super.QueryRow(ctx,
-		`INSERT INTO openrails.ledger_accounts (merchant_id, account_type, currency, debits_must_not_exceed_credits)
+		`INSERT INTO billing.ledger_accounts (merchant_id, account_type, currency, debits_must_not_exceed_credits)
 		 VALUES ($1,'customer_balance',$2,$3) RETURNING id`, merchantID, currency, floorOnDebit).Scan(&debit))
 	require.NoError(t, super.QueryRow(ctx,
-		`INSERT INTO openrails.ledger_accounts (merchant_id, account_type, currency)
+		`INSERT INTO billing.ledger_accounts (merchant_id, account_type, currency)
 		 VALUES ($1,'platform_revenue',$2) RETURNING id`, merchantID, currency).Scan(&credit))
 
 	pgtx, err := app.Begin(ctx)
@@ -290,7 +290,7 @@ func TestMONEY8_TransferAmountAndFloorChecks(t *testing.T) {
 
 	insert := func(amount int64, d, c uuid.UUID, floor int64) error {
 		return attemptInTx(ctx, tx,
-			`INSERT INTO openrails.ledger_transfers
+			`INSERT INTO billing.ledger_transfers
 			   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to,
 			    operation, source, source_id)
 			 VALUES ($1,$2,$3,$4,'USD','credit_spend',$5,'spend','audit',gen_random_uuid()::text)`, merchantID, d, c, amount, floor)
@@ -310,7 +310,7 @@ func TestCUR3_CrossCurrencyTransferRaises(t *testing.T) {
 
 	var eurCredit uuid.UUID
 	require.NoError(t, super.QueryRow(ctx,
-		`INSERT INTO openrails.ledger_accounts (merchant_id, account_type, currency)
+		`INSERT INTO billing.ledger_accounts (merchant_id, account_type, currency)
 		 VALUES ($1,'processor_clearing','EUR') RETURNING id`, merchantID).Scan(&eurCredit))
 
 	// transfer_type is 'credit_spend' (a real GAP-7 vocabulary value) rather
@@ -320,7 +320,7 @@ func TestCUR3_CrossCurrencyTransferRaises(t *testing.T) {
 	// fires ahead of CHECK constraints. Relying on that ordering to keep a
 	// guard pointed at the right failure is luck, not design.
 	err := attemptInTx(ctx, tx,
-		`INSERT INTO openrails.ledger_transfers
+		`INSERT INTO billing.ledger_transfers
 		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
 		    operation, source, source_id)
 		 VALUES ($1,$2,$3,100,'USD','credit_spend','spend','audit',gen_random_uuid()::text)`, merchantID, debit, eurCredit)
@@ -336,7 +336,7 @@ func TestLED2_MissingAccountRaises(t *testing.T) {
 	tx, debit, _, merchantID := ledgerFixture(t, ctx, super, app, "USD", false)
 
 	_, err := tx.Exec(ctx,
-		`INSERT INTO openrails.ledger_transfers
+		`INSERT INTO billing.ledger_transfers
 		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
 		    operation, source, source_id)
 		 VALUES ($1,$2,$3,100,'USD','credit_spend','spend','audit',gen_random_uuid()::text)`, merchantID, debit, uuid.New())
@@ -349,7 +349,7 @@ func TestLED3_InsufficientFundsFloorRaises(t *testing.T) {
 	tx, debit, credit, merchantID := ledgerFixture(t, ctx, super, app, "USD", true)
 
 	err := attemptInTx(ctx, tx,
-		`INSERT INTO openrails.ledger_transfers
+		`INSERT INTO billing.ledger_transfers
 		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to,
 		    operation, source, source_id)
 		 VALUES ($1,$2,$3,500,'USD','credit_spend',0,'spend','audit',gen_random_uuid()::text)`, merchantID, debit, credit)
@@ -359,7 +359,7 @@ func TestLED3_InsufficientFundsFloorRaises(t *testing.T) {
 	// …and the arrears allowance is honoured, so the floor is a real threshold
 	// rather than a blanket refusal.
 	err = attemptInTx(ctx, tx,
-		`INSERT INTO openrails.ledger_transfers
+		`INSERT INTO billing.ledger_transfers
 		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to,
 		    operation, source, source_id)
 		 VALUES ($1,$2,$3,500,'USD','owed_accrual',500,'arrears_accrual','audit',gen_random_uuid()::text)`, merchantID, debit, credit)
@@ -374,7 +374,7 @@ func TestLED7_CreditLotTerminatesOnce(t *testing.T) {
 
 	dep := func() error {
 		_, err := tx.Exec(ctx,
-			`INSERT INTO openrails.ledger_transfers
+			`INSERT INTO billing.ledger_transfers
 			   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, grant_id,
 			    operation, source, source_id)
 			 VALUES ($1,$2,$3,100,'USD','deposit',$4,'deposit','audit',gen_random_uuid()::text)`, merchantID, debit, credit, lot)
@@ -391,7 +391,7 @@ func TestGAP7_TransferTypeIsConstrained(t *testing.T) {
 	tx, debit, credit, merchantID := ledgerFixture(t, ctx, super, app, "USD", false)
 
 	_, err := tx.Exec(ctx,
-		`INSERT INTO openrails.ledger_transfers
+		`INSERT INTO billing.ledger_transfers
 		   (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
 		    operation, source, source_id)
 		 VALUES ($1,$2,$3,100,'USD','depsoit','deposit','audit',gen_random_uuid()::text)`, merchantID, debit, credit)
@@ -403,7 +403,7 @@ func TestCUR1_CurrencyColumnsAreNotNull(t *testing.T) {
 	ctx, _, app := pools(t)
 	rows, err := app.Query(ctx, `
 		SELECT table_name FROM information_schema.columns
-		 WHERE column_name = 'currency' AND table_schema = 'openrails' AND is_nullable = 'YES'
+		 WHERE column_name = 'currency' AND table_schema = 'billing' AND is_nullable = 'YES'
 		 ORDER BY 1`)
 	require.NoError(t, err)
 	defer rows.Close()
@@ -428,11 +428,11 @@ func TestGAP10_UniqueIndexesAreMerchantScoped(t *testing.T) {
 	rows, err := app.Query(ctx, `
 		SELECT i.tablename, i.indexname, i.indexdef
 		  FROM pg_indexes i
-		 WHERE i.schemaname = 'openrails'
+		 WHERE i.schemaname = 'billing'
 		   AND i.indexdef LIKE '%UNIQUE%'
 		   AND i.indexdef NOT LIKE '%merchant_id%'
 		   AND EXISTS (SELECT 1 FROM information_schema.columns c
-		                WHERE c.table_schema='openrails' AND c.table_name=i.tablename
+		                WHERE c.table_schema='billing' AND c.table_name=i.tablename
 		                  AND c.column_name='merchant_id')
 		 ORDER BY 1,2`)
 	require.NoError(t, err)
@@ -479,7 +479,7 @@ func TestID11_BeforeImagesIdentityUniqueIsMerchantLed(t *testing.T) {
 	var def string
 	require.NoError(t, app.QueryRow(ctx, `
 		SELECT indexdef FROM pg_indexes
-		 WHERE schemaname = 'openrails'
+		 WHERE schemaname = 'billing'
 		   AND tablename  = 'destructive_run_before_images'
 		   AND indexname  = 'uq_destructive_run_before_images_identity'`).Scan(&def),
 		"the or#859 undo-evidence identity index is missing entirely")
@@ -490,12 +490,12 @@ func TestID11_BeforeImagesIdentityUniqueIsMerchantLed(t *testing.T) {
 	require.NoError(t, super.QueryRow(ctx, `
 		SELECT pg_get_constraintdef(oid)
 		  FROM pg_constraint
-		 WHERE connamespace = 'openrails'::regnamespace
-		   AND conrelid = 'openrails.destructive_run_before_images'::regclass
+		 WHERE connamespace = 'billing'::regnamespace
+		   AND conrelid = 'billing.destructive_run_before_images'::regclass
 		   AND conname = 'destructive_run_before_images_run_fk'`).Scan(&fkDef),
 		"the before-image-to-run foreign key is missing entirely")
 	require.Contains(t, fkDef,
-		"FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES openrails.maintenance_runs(merchant_id, id, run_class)",
+		"FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class)",
 		"ID-11: the run foreign key must carry merchant identity, got: %s", fkDef)
 
 	a, b := uuid.New(), uuid.New()
@@ -504,13 +504,13 @@ func TestID11_BeforeImagesIdentityUniqueIsMerchantLed(t *testing.T) {
 		b: "inv-bi-b-" + uuid.NewString()[:8],
 	} {
 		_, err := super.Exec(ctx,
-			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, id, slug)
+			`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, id, slug)
 		require.NoError(t, err)
 	}
 
 	runID := uuid.New()
 	_, err := super.Exec(ctx,
-		`INSERT INTO openrails.maintenance_runs (id, merchant_id, kind, actor)
+		`INSERT INTO billing.maintenance_runs (id, merchant_id, kind, actor)
 		 VALUES ($1, $2, 'converge_enforce', 'or902-invariant-audit')`, runID, a)
 	require.NoError(t, err)
 
@@ -520,7 +520,7 @@ func TestID11_BeforeImagesIdentityUniqueIsMerchantLed(t *testing.T) {
 	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1::text, true)`, b.String())
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `
-		INSERT INTO openrails.destructive_run_before_images
+		INSERT INTO billing.destructive_run_before_images
 		    (merchant_id, destructive_run_id, table_name, row_id, before)
 		VALUES ($1, $2, 'subscriptions', $3, '{}'::jsonb)`, b, runID, uuid.New())
 	require.Error(t, err,
@@ -534,7 +534,7 @@ func TestGAP9_PermissionGroupIsUniquePerMerchant(t *testing.T) {
 	var dupes int64
 	require.NoError(t, app.QueryRow(ctx, `
 		SELECT count(*) FROM (
-		  SELECT permission_group_id FROM openrails.merchants
+		  SELECT permission_group_id FROM billing.merchants
 		   WHERE permission_group_id IS NOT NULL
 		   GROUP BY 1 HAVING count(*) > 1) d`).Scan(&dupes))
 	require.EqualValues(t, 0, dupes, "GAP-9: two merchants share one permission group")
@@ -546,15 +546,15 @@ func TestGAP9_PermissionGroupIsUniquePerMerchant(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
 	owner, group := uuid.New(), uuid.NewString()
-	_, err = tx.Exec(ctx, `INSERT INTO openrails.merchants(id,slug,permission_group_id) VALUES($1,$2,$3)`, owner, "group-owner-"+owner.String(), group)
+	_, err = tx.Exec(ctx, `INSERT INTO billing.merchants(id,slug,permission_group_id) VALUES($1,$2,$3)`, owner, "group-owner-"+owner.String(), group)
 	require.NoError(t, err)
 	for _, deleted := range []bool{false, true} {
 		if deleted {
-			_, err = tx.Exec(ctx, `UPDATE openrails.merchants SET status='deleted',deleted_at=now() WHERE id=$1`, owner)
+			_, err = tx.Exec(ctx, `UPDATE billing.merchants SET status='deleted',deleted_at=now() WHERE id=$1`, owner)
 			require.NoError(t, err)
 		}
 		next := uuid.New()
-		err = attemptInTx(ctx, tx, `INSERT INTO openrails.merchants(id,slug,permission_group_id) VALUES($1,$2,$3)`, next, "group-duplicate-"+next.String(), group)
+		err = attemptInTx(ctx, tx, `INSERT INTO billing.merchants(id,slug,permission_group_id) VALUES($1,$2,$3)`, next, "group-duplicate-"+next.String(), group)
 		var violation *pgconn.PgError
 		require.ErrorAs(t, err, &violation, "GAP-9: a group cannot acquire another billing identity (old owner deleted=%v)", deleted)
 		require.Equal(t, "23505", violation.Code, "group ownership must remain unique after deletion")

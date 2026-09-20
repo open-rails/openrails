@@ -57,6 +57,7 @@ func applyDirectoryFunctionMigration(t *testing.T, ctx context.Context, pool *pg
 		"customer_merchant_ids_for_subject",
 	)
 	require.NoError(t, err)
+	sql = postgresmigrations.RewriteSchema(sql, "billing")
 	_, err = pool.Exec(ctx, sql)
 	require.NoError(t, err)
 }
@@ -66,9 +67,9 @@ func applyDirectoryFunctionMigration(t *testing.T, ctx context.Context, pool *pg
 // (entitlements) so export/delete have rows to purge, and the #225 control-plane
 // tables. The columns under test mirror the baseline's shapes.
 const schemaDDL = `
-CREATE SCHEMA IF NOT EXISTS openrails;
+CREATE SCHEMA IF NOT EXISTS billing;
 
-CREATE TABLE IF NOT EXISTS openrails.merchants (
+CREATE TABLE IF NOT EXISTS billing.merchants (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug             TEXT NOT NULL,
     status           TEXT NOT NULL DEFAULT 'active',
@@ -79,23 +80,23 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
     deleted_at       TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_unbound_slug ON openrails.merchants(slug) WHERE deleted_at IS NULL AND permission_group_id IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_permission_group_id ON openrails.merchants(permission_group_id) WHERE permission_group_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_unbound_slug ON billing.merchants(slug) WHERE deleted_at IS NULL AND permission_group_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_permission_group_id ON billing.merchants(permission_group_id) WHERE permission_group_id IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS openrails.entitlements (
+CREATE TABLE IF NOT EXISTS billing.entitlements (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id      UUID,
     customer_id UUID
 );
 
-CREATE TABLE IF NOT EXISTS openrails.customers (
+CREATE TABLE IF NOT EXISTS billing.customers (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id UUID NOT NULL,
     -- #824: the subject-first directory lookup is replayed from the baseline.
     subject     TEXT
 );
 
-CREATE TABLE IF NOT EXISTS openrails.merchant_secrets (
+CREATE TABLE IF NOT EXISTS billing.merchant_secrets (
     merchant_id UUID NOT NULL,
     name       TEXT NOT NULL,
     value      TEXT NOT NULL,
@@ -106,7 +107,7 @@ CREATE TABLE IF NOT EXISTS openrails.merchant_secrets (
 );
 
 
-CREATE TABLE IF NOT EXISTS openrails.custodians (
+CREATE TABLE IF NOT EXISTS billing.custodians (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     merchant_id uuid NOT NULL,
     key text NOT NULL,
@@ -123,10 +124,10 @@ CREATE TABLE IF NOT EXISTS openrails.custodians (
     UNIQUE (kind, environment, account_id)
 );
 
-CREATE TABLE IF NOT EXISTS openrails.psps (
+CREATE TABLE IF NOT EXISTS billing.psps (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     merchant_id uuid NOT NULL,
-    custodian_id uuid REFERENCES openrails.custodians(id),
+    custodian_id uuid REFERENCES billing.custodians(id),
     rail text NOT NULL,
     environment text DEFAULT 'live' NOT NULL,
     account_id text NOT NULL,
@@ -143,7 +144,7 @@ CREATE TABLE IF NOT EXISTS openrails.psps (
 );
 
 
-CREATE TABLE IF NOT EXISTS openrails.subscriptions (
+CREATE TABLE IF NOT EXISTS billing.subscriptions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id uuid NOT NULL,
     rail text NOT NULL,
@@ -151,7 +152,7 @@ CREATE TABLE IF NOT EXISTS openrails.subscriptions (
     status text NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS openrails.payments (
+CREATE TABLE IF NOT EXISTS billing.payments (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id uuid NOT NULL,
     rail text NOT NULL,
@@ -160,7 +161,7 @@ CREATE TABLE IF NOT EXISTS openrails.payments (
     CONSTRAINT payments_psp_required_on_rail CHECK (((psp_id IS NOT NULL) OR (rail = ANY (ARRAY['manual'::text, 'admin'::text]))))
 );
 
-CREATE TABLE IF NOT EXISTS openrails.rail_intents (
+CREATE TABLE IF NOT EXISTS billing.rail_intents (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id uuid NOT NULL,
     rail text NOT NULL,
@@ -170,7 +171,7 @@ CREATE TABLE IF NOT EXISTS openrails.rail_intents (
     CONSTRAINT rail_intents_addressed CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL)))
 );
 
-CREATE TABLE IF NOT EXISTS openrails.maintenance_runs (
+CREATE TABLE IF NOT EXISTS billing.maintenance_runs (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     merchant_id uuid NOT NULL,
     kind text NOT NULL,
@@ -223,7 +224,7 @@ func compactLifecycleSQL(sql string) string {
 }
 
 func lifecycleFixtureObjectDDL(name string) string {
-	marker := "CREATE TABLE IF NOT EXISTS openrails." + name + " ("
+	marker := "CREATE TABLE IF NOT EXISTS billing." + name + " ("
 	start := strings.Index(schemaDDL, marker)
 	if start < 0 {
 		return ""
@@ -266,24 +267,24 @@ func TestLifecycleFixtureEnforcesProviderProvenance(t *testing.T) {
 	merchantID := uuid.New()
 
 	_, err := pool.Exec(ctx, `
-		INSERT INTO openrails.subscriptions (merchant_id, rail, status)
+		INSERT INTO billing.subscriptions (merchant_id, rail, status)
 		VALUES ($1, 'nmi', 'active')
 	`, merchantID)
 	require.Error(t, err, "provider-bound subscriptions require a PSP")
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.payments (merchant_id, rail, status)
+		INSERT INTO billing.payments (merchant_id, rail, status)
 		VALUES ($1, 'nmi', 'completed')
 	`, merchantID)
 	require.Error(t, err, "on-rail payments require a PSP")
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.payments (merchant_id, rail, status)
+		INSERT INTO billing.payments (merchant_id, rail, status)
 		VALUES ($1, 'manual', 'completed')
 	`, merchantID)
 	require.NoError(t, err, "off-rail manual payments have no PSP")
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.rail_intents (merchant_id, rail, status)
+		INSERT INTO billing.rail_intents (merchant_id, rail, status)
 		VALUES ($1, 'nmi', 'pending')
 	`, merchantID)
 	require.Error(t, err, "outbound intents must address a PSP or custodian")
@@ -362,7 +363,7 @@ func newSvc(t *testing.T) *Service {
 func seedPSP(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
 	t.Helper()
 	_, err := svc.pool.Exec(context.Background(), `
-		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO billing.psps (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, lower($2), $3, $4, false)
 		ON CONFLICT (rail, environment, account_id) DO NOTHING
 	`, merchantID.String(), rail, environment, accountID)
@@ -372,7 +373,7 @@ func seedPSP(t *testing.T, svc *Service, merchantID merchant.ID, rail, environme
 func seedArchivedPSP(t *testing.T, svc *Service, merchantID merchant.ID, rail, environment, accountID string) {
 	t.Helper()
 	_, err := svc.pool.Exec(context.Background(), `
-		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO billing.psps (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, lower($2), $3, $4, true)
 		ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = true
 	`, merchantID.String(), rail, environment, accountID)
@@ -419,7 +420,7 @@ func TestArchivedPSPDrainState(t *testing.T) {
 	require.Equal(t, int64(0), items[0].OpenObligations)
 
 	_, err = svc.pool.Exec(ctx, `
-		INSERT INTO openrails.subscriptions (merchant_id, rail, psp_id, status)
+		INSERT INTO billing.subscriptions (merchant_id, rail, psp_id, status)
 		VALUES ($1::uuid, 'nmi', $2::uuid, 'active')
 	`, tn.ID.String(), items[0].ID)
 	require.NoError(t, err)
@@ -451,7 +452,7 @@ func TestProvision_Idempotent(t *testing.T) {
 	require.Equal(t, first.ID, second.ID)
 
 	var count int
-	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.merchants WHERE slug='acme'`).Scan(&count))
+	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM billing.merchants WHERE slug='acme'`).Scan(&count))
 	require.Equal(t, 1, count, "provision must not create a duplicate merchant row")
 
 	_, _, err = svc.Provision(ctx, ProvisionRequest{Slug: "noown"})
@@ -467,24 +468,24 @@ func TestSetDisplayName(t *testing.T) {
 	require.NoError(t, svc.SetDisplayName(ctx, tn.ID, "  Named Merchant  "))
 	var displayName *string
 	require.NoError(t, svc.pool.QueryRow(ctx,
-		`SELECT display_name FROM openrails.merchants WHERE id = $1::uuid`, tn.ID.String()).Scan(&displayName))
+		`SELECT display_name FROM billing.merchants WHERE id = $1::uuid`, tn.ID.String()).Scan(&displayName))
 	require.NotNil(t, displayName)
 	require.Equal(t, "Named Merchant", *displayName)
 
 	require.NoError(t, svc.SetDisplayName(ctx, tn.ID, "Repaired Name"))
 	require.NoError(t, svc.SetDisplayName(ctx, tn.ID, "  "))
 	require.NoError(t, svc.pool.QueryRow(ctx,
-		`SELECT display_name FROM openrails.merchants WHERE id = $1::uuid`, tn.ID.String()).Scan(&displayName))
+		`SELECT display_name FROM billing.merchants WHERE id = $1::uuid`, tn.ID.String()).Scan(&displayName))
 	require.NotNil(t, displayName)
 	require.Equal(t, "Repaired Name", *displayName)
 
 	require.ErrorIs(t, svc.SetDisplayName(ctx, merchant.ID(uuid.New()), "Missing"), ErrMerchantNotFound)
 	_, err = svc.pool.Exec(ctx,
-		`UPDATE openrails.merchants SET status = 'deleted' WHERE id = $1::uuid`, tn.ID.String())
+		`UPDATE billing.merchants SET status = 'deleted' WHERE id = $1::uuid`, tn.ID.String())
 	require.NoError(t, err)
 	require.ErrorIs(t, svc.SetDisplayName(ctx, tn.ID, "Deleted"), ErrMerchantNotFound)
 	_, err = svc.pool.Exec(ctx,
-		`UPDATE openrails.merchants SET status = 'active', deleted_at = current_timestamp WHERE id = $1::uuid`, tn.ID.String())
+		`UPDATE billing.merchants SET status = 'active', deleted_at = current_timestamp WHERE id = $1::uuid`, tn.ID.String())
 	require.NoError(t, err)
 	require.ErrorIs(t, svc.SetDisplayName(ctx, tn.ID, "Soft Deleted"), ErrMerchantNotFound)
 }
@@ -527,7 +528,7 @@ func TestListDirectoryRefs(t *testing.T) {
 	require.Error(t, err, "an oversized slug list must error rather than silently truncate")
 
 	_, err = svc.pool.Exec(ctx,
-		`UPDATE openrails.merchants SET deleted_at = current_timestamp WHERE id = $1::uuid`, named.ID.String())
+		`UPDATE billing.merchants SET deleted_at = current_timestamp WHERE id = $1::uuid`, named.ID.String())
 	require.NoError(t, err)
 	refs, err = svc.ListDirectoryRefs(ctx, []string{"refs-named", "refs-unnamed"})
 	require.NoError(t, err)
@@ -543,11 +544,11 @@ func TestDelete_RequiresExport(t *testing.T) {
 	// Seed a merchant-owned row + a secret so the purge has something to remove.
 	_, err = svc.pool.Exec(ctx, `
 		WITH subject AS (
-			INSERT INTO openrails.customers (merchant_id)
+			INSERT INTO billing.customers (merchant_id)
 			VALUES ($1::uuid)
 			RETURNING id
 		)
-		INSERT INTO openrails.entitlements (merchant_id, customer_id)
+		INSERT INTO billing.entitlements (merchant_id, customer_id)
 		SELECT $1::uuid, id FROM subject
 	`, tn.ID.String())
 	require.NoError(t, err)
@@ -582,7 +583,7 @@ func TestDelete_RequiresExport(t *testing.T) {
 	require.NoError(t, svc.Delete(ctx, tn.ID, confirmed))
 
 	var entCount int
-	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1::uuid`, tn.ID.String()).Scan(&entCount))
+	require.NoError(t, svc.pool.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements WHERE merchant_id=$1::uuid`, tn.ID.String()).Scan(&entCount))
 	require.Equal(t, 0, entCount, "delete must purge merchant-owned rows")
 
 	// The directory row is tombstoned (no longer resolvable as active).

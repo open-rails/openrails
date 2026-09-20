@@ -14,33 +14,35 @@ import (
 
 var migrationSchemaName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
-// ApplyMigrations initializes the database objects owned by OpenRails.
-//
-// OpenRails loads and applies its embedded billing migrations and the River
-// migrations used by RiverManagedByOpenRails. The caller supplies a privileged
-// pool because initialization creates the configured billing schema, shared
-// extensions, RLS roles/policies, and River's tables. The caller does not need
-// migratekit, rivermigrate, or an OpenRails migration package.
-//
-// AuthKit owns its profiles schema independently; initialize it through
-// authkit/embedded.ApplyMigrations before constructing the AuthKit client. A
-// blank schema selects OpenRails' default schema, "openrails".
-//
-// RiverFromHost is the explicit low-level exception: when the host supplies
-// River, the host owns that River client's schema and its migrations.
-func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, schema string) error {
+// MigrationOptions selects the billing namespace and River ownership. Use the
+// same Schema and River values in the runtime configuration and Options.River.
+// The zero value creates billing tables in billing and manages River in public.
+type MigrationOptions struct {
+	Schema string
+	River  RiverOwnership
+}
+
+// ApplyMigrations initializes OpenRails-owned database objects using a privileged
+// pool. Hosts never import migration files or construct a River migrator. With
+// RiverFromHost, River migration and access policy remain entirely host-owned.
+// AuthKit is initialized separately through its own embedded migration API.
+func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, opts MigrationOptions) error {
 	if pool == nil {
 		return fmt.Errorf("openrails embed: postgres pool is required")
 	}
-	var err error
-	if schema, err = validateMigrationSchema(schema); err != nil {
+	schema, err := validateMigrationSchema(opts.Schema)
+	if err != nil {
 		return err
 	}
-	return migrate.ApplyPostgresMigrations(ctx, pool, schema)
+	riverSchema, err := opts.River.managedSchema(schema)
+	if err != nil {
+		return err
+	}
+	return migrate.ApplyPostgresMigrations(ctx, pool, migrate.Options{Schema: schema, RiverSchema: riverSchema, HostRiver: opts.River.host})
 }
 
 func validateMigrationSchema(schema string) (string, error) {
-	schema = strings.TrimSpace(schema)
+	schema = strings.ToLower(strings.TrimSpace(schema))
 	if schema == "" {
 		schema = config.DefaultSchema
 	}

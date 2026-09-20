@@ -44,13 +44,13 @@ func TestOR860_DestructiveRateCeilingCountsAcrossMerchantsUnderRLS(t *testing.T)
 		id := uuid.New()
 		merchants = append(merchants, id)
 		_, err := super.Exec(ctx,
-			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+			`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 			id, "or860-"+suffix+"-"+uuid.NewString()[:6])
 		require.NoError(t, err)
 		pspID := dbtest.EnsureTestPSP(ctx, t, super, id, "nmi")
 		for j := 0; j < 3; j++ {
 			_, err = super.Exec(ctx, `
-				INSERT INTO openrails.rail_intents
+				INSERT INTO billing.rail_intents
 				  (merchant_id, rail, psp_id, intent_type, idempotency_key, origin, actor, status, next_attempt_at)
 				VALUES ($1,'nmi',$2,$3,$4,'user',$5,'pending', now())`,
 				id, pspID, intentType, "or860-"+suffix+"-"+uuid.NewString(), actor)
@@ -63,7 +63,7 @@ func TestOR860_DestructiveRateCeilingCountsAcrossMerchantsUnderRLS(t *testing.T)
 	// The retired shape: a GUC-less count on the app role. Zero, no error.
 	var basePool int64
 	require.NoError(t, app.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.rail_intents
+		SELECT count(*) FROM billing.rail_intents
 		 WHERE origin IN ('user','admin') AND intent_type = ANY($1::text[])
 		   AND actor = $2 AND created_at >= now() - interval '1 hour'`,
 		types, actor).Scan(&basePool))
@@ -76,7 +76,7 @@ func TestOR860_DestructiveRateCeilingCountsAcrossMerchantsUnderRLS(t *testing.T)
 	for _, mid := range merchants {
 		var perMerchant int64
 		require.NoError(t, app.QueryRow(ctx,
-			`SELECT openrails.count_destructive_intents_for_merchant_since($1, $2::text[], $3::text[], now() - interval '1 hour')`,
+			`SELECT billing.count_destructive_intents_for_merchant_since($1, $2::text[], $3::text[], now() - interval '1 hour')`,
 			mid, origins, types).Scan(&perMerchant))
 		require.EqualValues(t, 3, perMerchant,
 			"or#887: the ceiling's per-merchant count must see the merchant's own destructive intents, or the wall never trips")
@@ -87,7 +87,7 @@ func TestOR860_DestructiveRateCeilingCountsAcrossMerchantsUnderRLS(t *testing.T)
 	// six invisible ones.
 	var byActor int64
 	require.NoError(t, app.QueryRow(ctx,
-		`SELECT openrails.count_destructive_intents_by_actor_since($1, $2::text[], now() - interval '1 hour')`,
+		`SELECT billing.count_destructive_intents_by_actor_since($1, $2::text[], now() - interval '1 hour')`,
 		actor, types).Scan(&byActor))
 	require.EqualValues(t, 6, byActor,
 		"or#860: one actor operating across two merchants must be visible as one actor")
@@ -99,7 +99,7 @@ func TestOR860_DestructiveRateCeilingCountsAcrossMerchantsUnderRLS(t *testing.T)
 func TestCrossMerchantReadersRefuseAWeakDefiner(t *testing.T) {
 	ctx, super, app := pools(t)
 
-	const fn = `openrails.count_destructive_intents_for_merchant_since(uuid, text[], text[], timestamptz)`
+	const fn = `billing.count_destructive_intents_for_merchant_since(uuid, text[], text[], timestamptz)`
 
 	role := "or860_weak_" + uuid.NewString()[:8]
 	_, err := super.Exec(ctx, `CREATE ROLE `+role+` NOLOGIN`)
@@ -109,14 +109,14 @@ func TestCrossMerchantReadersRefuseAWeakDefiner(t *testing.T) {
 		_, _ = super.Exec(bg, `ALTER FUNCTION `+fn+` OWNER TO CURRENT_USER`)
 		_, _ = super.Exec(bg, `DROP ROLE IF EXISTS `+role)
 	})
-	_, err = super.Exec(ctx, `GRANT USAGE ON SCHEMA openrails TO `+role)
+	_, err = super.Exec(ctx, `GRANT USAGE ON SCHEMA billing TO `+role)
 	require.NoError(t, err)
 	_, err = super.Exec(ctx, `ALTER FUNCTION `+fn+` OWNER TO `+role)
 	require.NoError(t, err)
 
 	var n int64
 	err = app.QueryRow(ctx,
-		`SELECT openrails.count_destructive_intents_for_merchant_since($1, ARRAY['user','admin']::text[], ARRAY['nmi_delete_subscription']::text[], now() - interval '1 hour')`,
+		`SELECT billing.count_destructive_intents_for_merchant_since($1, ARRAY['user','admin']::text[], ARRAY['nmi_delete_subscription']::text[], now() - interval '1 hour')`,
 		uuid.New()).
 		Scan(&n)
 	require.Error(t, err,

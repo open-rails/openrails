@@ -109,11 +109,11 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	}
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", suite.ensureCustomer(ctx, userID))
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", sub.ID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm.ID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", suite.ensureCustomer(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", sub.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pm.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	// Move time to paid end and mark a failure (puts subscription into past_due and schedules next_retry_at).
@@ -153,7 +153,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		require.True(t, ok, "access never lapses mid-dunning (%s)", entName)
 	}
 	graceRows := suite.Count(ctx, `
-		SELECT COUNT(*) FROM openrails.entitlements
+		SELECT COUNT(*) FROM billing.entitlements
 		WHERE source_type = $1 AND source_id = $2 AND deleted_at IS NULL`,
 		string(models.EntitlementSourceGrace), sub.ID)
 	require.Zero(t, graceRows, "#691: no grace windows are ever appended during NMI dunning")
@@ -224,9 +224,9 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", suite.ensureCustomer(ctx, userID))
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", sub.ID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", suite.ensureCustomer(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", sub.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pm.ID)
 	})
 
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
@@ -248,9 +248,9 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 	dbtest.ArmDestructiveActions(ctx, t, dbtest.TestMerchantID.UUID())
 	t.Cleanup(func() {
 		_, _ = suite.MerchantPool().Exec(context.Background(),
-			`UPDATE openrails.destructive_action_switch SET enabled = false`)
+			`UPDATE billing.destructive_action_switch SET enabled = false`)
 		_, _ = suite.MerchantPool().Exec(context.Background(),
-			`DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id = $1`,
+			`DELETE FROM billing.merchant_destructive_policy WHERE merchant_id = $1`,
 			dbtest.TestMerchantID.UUID())
 	})
 

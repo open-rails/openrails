@@ -28,7 +28,7 @@ var (
 func EnsureTestMerchant(ctx context.Context, t testing.TB, qx gen.DBTX) {
 	t.Helper()
 	_, err := qx.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status)
+		`INSERT INTO billing.merchants (id, slug, status)
 		 VALUES ($1, $2, 'active')
 		 ON CONFLICT (id) DO NOTHING`,
 		TestMerchantID.UUID(), TestMerchantSlug)

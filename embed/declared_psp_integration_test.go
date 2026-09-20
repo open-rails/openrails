@@ -45,7 +45,7 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEqual(t, uuid.Nil, pspID)
 	t.Cleanup(func() {
-		_, _ = h.Pool().Exec(context.Background(), `DELETE FROM openrails.psps WHERE id = $1`, pspID)
+		_, _ = h.Pool().Exec(context.Background(), `DELETE FROM billing.psps WHERE id = $1`, pspID)
 	})
 	armed, err := app.HostGraph(runtime).Runtime.RailConfigs.Armed(merchant.WithID(ctx, mid), "stripe")
 	require.NoError(t, err)

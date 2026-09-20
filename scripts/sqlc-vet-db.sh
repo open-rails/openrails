@@ -73,12 +73,9 @@ VET_URL="$(printf '%s' "$ADMIN_URL" | sed -E "s|(postgres(ql)?://[^/]+/)[^?]+|\1
 for f in migrations/bootstrap/*.sql; do
     psql_file "$VET_URL" "$f" 1>&2
 done
-# profiles_shim stands in for AuthKit's own migrations, which create the
-# `profiles` schema FIRST in a real deploy. It must load BEFORE the openrails
-# migrations, because 0007+ GRANT on schema profiles — loading it afterwards
-# fails the whole build at 0007 with "schema profiles does not exist".
-psql_file "$VET_URL" internal/db/schema/profiles_shim.sql 1>&2
-# Use the same runner as application startup so migratekit owns its tracker DDL.
+# SQLC prepares authored SQL before runtime schema rewriting. Explicitly use
+# canonical openrails here, independently of the runtime default billing schema.
+# migratekit owns its tracker DDL.
 go run github.com/open-rails/migratekit/cmd/migratekit apply \
     -dsn "$VET_URL" -app openrails -schema openrails -dir internal/migrate/postgres 1>&2
 

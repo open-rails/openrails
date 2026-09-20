@@ -66,14 +66,14 @@ func TestReconcileMerchantManifestDeclaresOneCustodianForTwoPSPs(t *testing.T) {
 	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true, NMIProbeV5BaseURL: server.URL}))
 
 	var merchantID string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM billing.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
 
 	// ONE custodian row, carrying the identity and the declared settings.
 	var custodianID, key, kind, environment, accountID string
 	var settings []byte
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT id::text, key, kind, environment, account_id, settings
-		FROM openrails.custodians WHERE merchant_id = $1::uuid
+		FROM billing.custodians WHERE merchant_id = $1::uuid
 	`, merchantID).Scan(&custodianID, &key, &kind, &environment, &accountID, &settings))
 	require.Equal(t, "bt", key)
 	require.Equal(t, models.CustodianBasisTheory, kind)
@@ -84,7 +84,7 @@ func TestReconcileMerchantManifestDeclaresOneCustodianForTwoPSPs(t *testing.T) {
 	// BOTH PSPs reference that one row.
 	rows, err := pool.Query(ctx, `
 		SELECT account_id, custodian_id::text
-		FROM openrails.psps WHERE merchant_id = $1::uuid ORDER BY account_id
+		FROM billing.psps WHERE merchant_id = $1::uuid ORDER BY account_id
 	`, merchantID)
 	require.NoError(t, err)
 	defer rows.Close()
@@ -104,13 +104,13 @@ func TestReconcileMerchantManifestDeclaresOneCustodianForTwoPSPs(t *testing.T) {
 	require.Equal(t, "custodians/basis_theory/test/tnt_manifest_880/api_key", custodianSecret)
 	var stored string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT value FROM openrails.merchant_secrets WHERE merchant_id = $1::uuid AND name = $2
+		SELECT value FROM billing.merchant_secrets WHERE merchant_id = $1::uuid AND name = $2
 	`, merchantID, custodianSecret).Scan(&stored))
 	require.Equal(t, "key_private_880", stored)
 
 	var custodialSecretCount int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.merchant_secrets
+		SELECT count(*) FROM billing.merchant_secrets
 		WHERE merchant_id = $1::uuid AND name LIKE 'custodians/%'
 	`, merchantID).Scan(&custodialSecretCount))
 	require.Equal(t, 1, custodialSecretCount, "one custodian means one copy of its private key")
@@ -122,7 +122,7 @@ func TestReconcileMerchantManifestDeclaresOneCustodianForTwoPSPs(t *testing.T) {
 		require.NoError(t, err)
 		var value string
 		require.NoError(t, pool.QueryRow(ctx, `
-			SELECT value FROM openrails.merchant_secrets WHERE merchant_id = $1::uuid AND name = $2
+			SELECT value FROM billing.merchant_secrets WHERE merchant_id = $1::uuid AND name = $2
 		`, merchantID, name).Scan(&value))
 		require.Equal(t, want, value)
 	}
@@ -130,7 +130,7 @@ func TestReconcileMerchantManifestDeclaresOneCustodianForTwoPSPs(t *testing.T) {
 	// Re-applying is idempotent: still one custodian, still both references.
 	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true, Overwrite: true, NMIProbeV5BaseURL: server.URL}))
 	var count int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.custodians WHERE merchant_id = $1::uuid`, merchantID).Scan(&count))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.custodians WHERE merchant_id = $1::uuid`, merchantID).Scan(&count))
 	require.Equal(t, 1, count)
 }
 

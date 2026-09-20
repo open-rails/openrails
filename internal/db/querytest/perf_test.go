@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
@@ -204,7 +205,7 @@ type explainRoot struct {
 // shared seed (mirrors the authkit harness).
 func explainCase(ctx context.Context, t *testing.T, pool *pgxpool.Pool, scale int, c perfCase) perfResult {
 	t.Helper()
-	tx, err := pool.Begin(ctx)
+	tx, err := db.WrapPool(pool, "").Begin(ctx)
 	require.NoError(t, err, "begin %s", c.Name)
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -263,7 +264,7 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 
 	// Clean slate. CASCADE from customers+products wipes every customer-scoped
 	// child (subscriptions, payments, grants, entitlements, ledger/usage, ...).
-	_, err := pool.Exec(ctx, "TRUNCATE openrails.customers, openrails.products RESTART IDENTITY CASCADE")
+	_, err := pool.Exec(ctx, "TRUNCATE billing.customers, billing.products RESTART IDENTITY CASCADE")
 	require.NoError(t, err)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "ccbill")
@@ -271,7 +272,7 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 	// One base product/price (all scale subs+payments use it) + perfFatProducts
 	// distinct products for the fat customer's active-sub fan-out. tier_group NULL
 	// keeps the per-customer active-tier unique constraint out of the way.
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	productIDs := make([]uuid.UUID, perfFatProducts+1)
 	priceIDs := make([]uuid.UUID, perfFatProducts+1)
 	for k := range productIDs {
@@ -403,7 +404,7 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 		"customers", "entitlements", "subscriptions", "payments", "grants",
 		"ledger_accounts", "money_settings", "usage_events", "payment_methods",
 	} {
-		_, err = pool.Exec(ctx, "ANALYZE openrails."+tbl)
+		_, err = pool.Exec(ctx, "ANALYZE billing."+tbl)
 		require.NoError(t, err)
 	}
 
@@ -414,7 +415,7 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 func copyRows(ctx context.Context, t *testing.T, pool *pgxpool.Pool, table string, cols []string, n int, row func(i int) []any) {
 	t.Helper()
 	src := pgx.CopyFromSlice(n, func(i int) ([]any, error) { return row(i), nil })
-	count, err := pool.CopyFrom(ctx, pgx.Identifier{"openrails", table}, cols, src)
+	count, err := pool.CopyFrom(ctx, pgx.Identifier{"billing", table}, cols, src)
 	require.NoError(t, err, "copy %s", table)
 	require.EqualValues(t, n, count, "copy %s row count", table)
 }

@@ -105,11 +105,11 @@ func seedCCBillSubscription(t *testing.T) ccbillFixture {
 		require.NoError(t, err)
 	}
 	fx.pspID = dbtest.EnsureTestPSP(ctx, t, pool, tenantID, "ccbill")
-	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+	exec(`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "ccbill-prod-"+suffix, tenantID)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, tenantID)
-	exec(`INSERT INTO openrails.subscriptions
+	exec(`INSERT INTO billing.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
 	      VALUES ($1, $2, $3, 'active', 'ccbill', $4, $5, $6, $5, $7, $8, $9)`,
@@ -117,14 +117,14 @@ func seedCCBillSubscription(t *testing.T) ccbillFixture {
 		now.Add(-10*24*time.Hour), now.Add(20*24*time.Hour), fx.userID, tenantID, fx.pspID)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.rail_mutation_logs
-			WHERE rail_intent_id IN (SELECT id FROM openrails.rail_intents WHERE subscription_id = $1)`, fx.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", fx.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", fx.userID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", fx.userID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", fx.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.rail_mutation_logs
+			WHERE rail_intent_id IN (SELECT id FROM billing.rail_intents WHERE subscription_id = $1)`, fx.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE subscription_id = $1", fx.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.notifications WHERE customer_id = $1", fx.userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", fx.userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", fx.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 	return fx
 }
@@ -169,7 +169,7 @@ func (fx ccbillFixture) runner(client *ccbill.DataLinkClient, cfg *config.Config
 func (fx ccbillFixture) intentRow(t *testing.T) (id uuid.UUID, status, origin string, lastFailure *string) {
 	t.Helper()
 	require.NoError(t, fx.db.Pool().QueryRow(context.Background(),
-		`SELECT id, status, origin, last_failure_reason FROM openrails.rail_intents
+		`SELECT id, status, origin, last_failure_reason FROM billing.rail_intents
 		 WHERE subscription_id = $1 AND intent_type = $2`, fx.subID, TypeCCBillCancelSubscription).
 		Scan(&id, &status, &origin, &lastFailure))
 	return id, status, origin, lastFailure
@@ -178,7 +178,7 @@ func (fx ccbillFixture) intentRow(t *testing.T) (id uuid.UUID, status, origin st
 func (fx ccbillFixture) forceDue(t *testing.T, id uuid.UUID) {
 	t.Helper()
 	_, err := fx.db.Pool().Exec(context.Background(),
-		`UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1`, id)
+		`UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1`, id)
 	require.NoError(t, err)
 }
 
@@ -199,7 +199,7 @@ func TestCCBillUserCancelQueuesAndExecutes(t *testing.T) {
 	var marker *time.Time
 	require.NoError(t, fx.db.Pool().QueryRow(ctx,
 		`SELECT status, cancel_type, current_period_ends_at, deletion_scheduled_at
-		   FROM openrails.subscriptions WHERE id = $1`, fx.subID).
+		   FROM billing.subscriptions WHERE id = $1`, fx.subID).
 		Scan(&subStatus, &cancelType, &periodEnd, &marker))
 	assert.Equal(t, "cancelled", subStatus)
 	assert.Equal(t, "user", cancelType)
@@ -325,7 +325,7 @@ func TestCCBillCancelMinusSevenRequiresVerification(t *testing.T) {
 			fake.cancelBody.Store(`<results>-7</results>`)
 			require.NoError(t, fx.userService().CancelUserSubscription(ctx, fx.userID.String(), "test feedback"))
 			intentID, _, _, _ := fx.intentRow(t)
-			_, err := fx.db.Pool().Exec(ctx, `UPDATE openrails.rail_intents SET attempts=3 WHERE id=$1`, intentID)
+			_, err := fx.db.Pool().Exec(ctx, `UPDATE billing.rail_intents SET attempts=3 WHERE id=$1`, intentID)
 			require.NoError(t, err)
 			_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(ctx)
 			require.NoError(t, err)
@@ -357,7 +357,7 @@ func TestCCBillCancelExplicitAccessRefusalHasBoundedRetries(t *testing.T) {
 			fake.cancelHTTP.Store(http.StatusForbidden)
 			require.NoError(t, fx.userService().CancelUserSubscription(ctx, fx.userID.String(), "test feedback"))
 			intentID, _, _, _ := fx.intentRow(t)
-			_, err := fx.db.Pool().Exec(ctx, `UPDATE openrails.rail_intents SET attempts=$2 WHERE id=$1`, intentID, attempts)
+			_, err := fx.db.Pool().Exec(ctx, `UPDATE billing.rail_intents SET attempts=$2 WHERE id=$1`, intentID, attempts)
 			require.NoError(t, err)
 			_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(ctx)
 			require.NoError(t, err)
@@ -407,7 +407,7 @@ func TestCCBillCancelSupersededByReactivation(t *testing.T) {
 
 	require.NoError(t, fx.userService().CancelUserSubscription(ctx, fx.userID.String(), "test feedback"))
 	_, err := fx.db.Pool().Exec(ctx,
-		`UPDATE openrails.subscriptions SET status = 'active', cancelled_at = NULL, cancel_type = NULL WHERE id = $1`, fx.subID)
+		`UPDATE billing.subscriptions SET status = 'active', cancelled_at = NULL, cancel_type = NULL WHERE id = $1`, fx.subID)
 	require.NoError(t, err)
 
 	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(ctx)
@@ -434,21 +434,21 @@ func TestBreakerCountsCCBillCancelsTowardDestructiveBudget(t *testing.T) {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, mid, "ccbreaker-"+sfx)
+	exec(`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, mid, "ccbreaker-"+sfx)
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, mid, "ccbill")
 	productID, priceID := uuid.New(), uuid.New()
-	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+	exec(`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "ccbreaker-prod-"+sfx, mid)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, mid)
 	now := time.Now().UTC()
 	for i := 0; i < DestructiveBudgetFloor+over; i++ {
 		subID := uuid.New()
 		var custID uuid.UUID
 		require.NoError(t, pool.QueryRow(ctx,
-			`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2) RETURNING id`, uuid.New(), mid).Scan(&custID))
+			`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2) RETURNING id`, uuid.New(), mid).Scan(&custID))
 		psid := fmt.Sprintf("cc-%s-%d", sfx, i)
-		exec(`INSERT INTO openrails.subscriptions
+		exec(`INSERT INTO billing.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
 		         cancelled_at, cancel_type, customer_id, merchant_id, psp_id)
@@ -470,14 +470,14 @@ func TestBreakerCountsCCBillCancelsTowardDestructiveBudget(t *testing.T) {
 		require.NoError(t, err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.rail_mutation_logs WHERE merchant_id = $1`, mid)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.rail_intents WHERE merchant_id = $1`, mid)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1`, mid)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.subscriptions WHERE merchant_id = $1`, mid)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.prices WHERE merchant_id = $1`, mid)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.products WHERE merchant_id = $1`, mid)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.customers WHERE merchant_id = $1`, mid)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.merchants WHERE id = $1`, mid)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.rail_mutation_logs WHERE merchant_id = $1`, mid)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.rail_intents WHERE merchant_id = $1`, mid)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id = $1`, mid)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.subscriptions WHERE merchant_id = $1`, mid)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.prices WHERE merchant_id = $1`, mid)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.products WHERE merchant_id = $1`, mid)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.customers WHERE merchant_id = $1`, mid)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.merchants WHERE id = $1`, mid)
 	})
 
 	fake, client := newFakeSMS(t, "2")
@@ -491,7 +491,7 @@ func TestBreakerCountsCCBillCancelsTowardDestructiveBudget(t *testing.T) {
 	require.NoError(t, err)
 
 	counts := map[string]int{}
-	rows, err := pool.Query(ctx, `SELECT status, count(*) FROM openrails.rail_intents WHERE merchant_id = $1 GROUP BY status`, mid)
+	rows, err := pool.Query(ctx, `SELECT status, count(*) FROM billing.rail_intents WHERE merchant_id = $1 GROUP BY status`, mid)
 	require.NoError(t, err)
 	for rows.Next() {
 		var s string
@@ -508,7 +508,7 @@ func TestBreakerCountsCCBillCancelsTowardDestructiveBudget(t *testing.T) {
 
 	var findingCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.reconciliation_findings
+		`SELECT count(*) FROM billing.reconciliation_findings
 		 WHERE merchant_id = $1 AND finding_type = $2 AND status = 'requires_review'`, mid, HeldBulkFindingType).Scan(&findingCount))
 	assert.Equal(t, 1, findingCount, "one held_bulk finding raised for the ccbill cohort")
 }

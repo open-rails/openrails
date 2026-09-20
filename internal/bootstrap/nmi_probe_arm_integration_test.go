@@ -84,7 +84,7 @@ func TestReconcileMerchantManifestRefusesLiveNMIUnderTestMode(t *testing.T) {
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '100002'
+		SELECT count(*) FROM billing.psps WHERE rail = 'nmi' AND account_id = '100002'
 	`).Scan(&count))
 	require.Zero(t, count, "a refused arm must never persist the PSP row")
 }
@@ -109,7 +109,7 @@ func TestReconcileMerchantManifestArmsSimulatedNMIUnderTestMode(t *testing.T) {
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '100002'
+		SELECT count(*) FROM billing.psps WHERE rail = 'nmi' AND account_id = '100002'
 	`).Scan(&count))
 	require.Equal(t, 1, count, "a simulated (sandbox) account arms normally")
 }
@@ -132,7 +132,7 @@ func TestReconcileMerchantManifestNMIProbeIndeterminateRefuses(t *testing.T) {
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '100002'
+		SELECT count(*) FROM billing.psps WHERE rail = 'nmi' AND account_id = '100002'
 	`).Scan(&count))
 	require.Zero(t, count)
 }
@@ -198,7 +198,7 @@ func TestReconcileMerchantManifestNMIProbeSkippedOutsideTestMode(t *testing.T) {
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '100002'
+		SELECT count(*) FROM billing.psps WHERE rail = 'nmi' AND account_id = '100002'
 	`).Scan(&count))
 	require.Equal(t, 1, count)
 }

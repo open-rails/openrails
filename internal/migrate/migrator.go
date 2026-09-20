@@ -7,7 +7,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
 
@@ -33,7 +35,15 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("open db: %w", err)
 	}
 	defer pool.Close()
-	return ApplyPostgresMigrations(ctx, pool, cfg.DB.SchemaName())
+	return ApplyPostgresMigrations(ctx, pool, Options{Schema: cfg.DB.SchemaName()})
+}
+
+// Options selects the billing namespace and managed River namespace.
+// HostRiver leaves all River migrations and privileges to the host.
+type Options struct {
+	Schema      string
+	RiverSchema string
+	HostRiver   bool
 }
 
 // ApplyPostgresMigrations applies OpenRails' embedded billing migrations and
@@ -41,7 +51,7 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 // the configured schema, extensions, roles, and RLS policy objects. AuthKit's
 // profiles schema is deliberately outside this package: callers initialize it
 // through AuthKit's own embedded migration API.
-func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, schema string) error {
+func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, opts Options) error {
 	if pool == nil {
 		return fmt.Errorf("missing postgres pool")
 	}
@@ -52,10 +62,19 @@ func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, schema str
 	sqlDB := stdlib.OpenDBFromPool(pool)
 	defer func() { _ = sqlDB.Close() }()
 
-	// Effective OpenRails schema (defaults to `openrails`). Validated as a safe
+	schema := opts.Schema
+	// Effective OpenRails schema (defaults to `billing`). Validated as a safe
 	// identifier during config load (#165).
 	if schema == "" {
 		schema = config.DefaultSchema
+	}
+
+	riverSchema := opts.RiverSchema
+	if riverSchema == "" {
+		riverSchema = config.RiverSchema
+	}
+	if !opts.HostRiver && riverSchema == schema {
+		return fmt.Errorf("River schema must differ from billing schema")
 	}
 
 	// ---------- 0. Bootstrap schema/extensions ----------
@@ -63,17 +82,7 @@ func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, schema str
 		return fmt.Errorf("postgres bootstrap failed: %w", err)
 	}
 
-	// ---------- 1. River Migrations (always `public`, #545) ----------
-	// River job-queue tables live in `public` (config.RiverSchema), NOT the
-	// OpenRails billing schema, so the billing schema stays 100% portable for the
-	// embedded↔standalone data move (#544). Must match the runtime client schema
-	// (app.standaloneRiverSchema).
-	log.Infof("Running River migrations (schema %q)...", config.RiverSchema)
-	if err := runRiverMigrationsPool(ctx, pool, config.RiverSchema); err != nil {
-		return fmt.Errorf("river migrations failed: %w", err)
-	}
-
-	// ---------- 2. OpenRails Migrations (OpenRails schema) ----------
+	// ---------- 1. OpenRails Migrations (billing schema) ----------
 	log.Infof("Running OpenRails migrations (schema %q)...", schema)
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	if err != nil {
@@ -81,7 +90,7 @@ func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, schema str
 	}
 
 	// The migration DDL is authored schema-qualified to the default schema
-	// (config.DefaultSchema, "openrails"). When a host configures a different
+	// (config.CanonicalSchema, "openrails"). When a host configures a different
 	// schema, relocate every qualifier before applying — search_path alone can't
 	// move hard-qualified DDL (#471).
 	migrations, err = rewriteMigrationsSchema(migrations, schema)
@@ -95,12 +104,28 @@ func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, schema str
 	m := migratekit.NewPostgres(sqlDB, config.MigratekitApp).WithSchema(schema)
 	// or#901: refuse a database that has run migrations this build no longer
 	// carries, BEFORE applying anything. See assertNoOrphanedMigrations.
-	if err := assertNoOrphanedMigrations(ctx, m, schema, migrations); err != nil {
-		return err
+	// A fresh database has no ledger yet. Applied only reads it; migratekit's
+	// ApplyMigrations owns creating it under its bootstrap lock.
+	var ledgerExists bool
+	if err := sqlDB.QueryRowContext(ctx, "SELECT to_regclass('public.migrations') IS NOT NULL").Scan(&ledgerExists); err != nil {
+		return fmt.Errorf("inspect migration ledger: %w", err)
+	}
+	if ledgerExists {
+		if err := assertNoOrphanedMigrations(ctx, m, schema, migrations); err != nil {
+			return err
+		}
 	}
 	// ApplyMigrations initializes the migration tracker automatically.
 	if err := m.ApplyMigrations(ctx, migrations); err != nil {
 		return fmt.Errorf("openrails: apply migrations: %w", err)
+	}
+	if !opts.HostRiver {
+		if err := runRiverMigrationsPool(ctx, pool, riverSchema); err != nil {
+			return fmt.Errorf("river migrations failed: %w", err)
+		}
+		if err := grantRiverPrivileges(ctx, pool, riverSchema); err != nil {
+			return fmt.Errorf("river runtime privileges: %w", err)
+		}
 	}
 	log.Info("✓ OpenRails migrations completed successfully")
 	return nil
@@ -221,8 +246,7 @@ func sortMigrationNames(names []string) {
 }
 
 // ensurePostgresBootstrap creates the OpenRails schema (configurable via
-// db.schema, default `openrails` — #165/#471) and shared extensions. migratekit
-// owns its ledger and creates it before applying AuthKit migrations.
+// db.schema, default `billing`) and shared extensions. migratekit owns its ledger.
 // schema is a pre-validated SQL identifier
 // (config.validateSchema), so it is safe to interpolate. CREATE SCHEMA IF NOT
 // EXISTS is a no-op when the host already owns the schema.
@@ -240,7 +264,7 @@ func ensurePostgresBootstrap(ctx context.Context, db *sql.DB, schema string) err
 	return err
 }
 
-// Run applies all migrations (Postgres: River → Billing).
+// Run applies all OpenRails-owned migrations (billing and managed River).
 func Run(ctx context.Context, cfg *config.Config) error {
 	if cfg == nil || cfg.DB == nil {
 		return fmt.Errorf("missing database config")
@@ -259,10 +283,29 @@ func runRiverMigrationsPool(ctx context.Context, pgxPool *pgxpool.Pool, schema s
 	if pgxPool == nil {
 		return fmt.Errorf("missing postgres pool")
 	}
-	riverCfg := &rivermigrate.Config{}
-	if schema != "" && schema != "public" {
-		riverCfg.Schema = schema
+	if schema == "" {
+		schema = config.RiverSchema
 	}
+	// Shared protocol with AuthKit: serialize schema creation and River's own
+	// version migrations without pinning the caller pool's only connection.
+	lockConn, err := pgx.ConnectConfig(ctx, pgxPool.Config().ConnConfig.Copy())
+	if err != nil {
+		return fmt.Errorf("connect River migration lock: %w", err)
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = lockConn.Close(cleanupCtx)
+	}()
+	if _, err := lockConn.Exec(ctx, "SELECT pg_advisory_lock(hashtext(current_database()), hashtext($1))", "river-migrations:"+schema); err != nil {
+		return fmt.Errorf("lock River migrations: %w", err)
+	}
+	if _, err := pgxPool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+pgx.Identifier{schema}.Sanitize()); err != nil {
+		return err
+	}
+	// Always target the declared namespace, including public; caller search_path
+	// must not redirect River migrations away from the namespace we locked.
+	riverCfg := &rivermigrate.Config{Schema: schema}
 
 	migrator, err := rivermigrate.New(riverpgxv5.New(pgxPool), riverCfg)
 	if err != nil {
@@ -280,5 +323,25 @@ func runRiverMigrationsPool(ctx context.Context, pgxPool *pgxpool.Pool, schema s
 		log.Infof("Applied %d River migration(s)", len(res.Versions))
 	}
 
+	return nil
+}
+
+// grantRiverPrivileges names only runtime objects created by the pinned River
+// migrations. Do not grant by prefix or install default privileges: unrelated
+// host tables, including future public tables, must remain inaccessible.
+func grantRiverPrivileges(ctx context.Context, pool *pgxpool.Pool, schema string) error {
+	if _, err := pool.Exec(ctx, "GRANT USAGE ON SCHEMA "+pgx.Identifier{schema}.Sanitize()+" TO openrails_app"); err != nil {
+		return err
+	}
+	for _, table := range []string{"river_job", "river_queue", "river_leader", "river_notification"} {
+		if _, err := pool.Exec(ctx, "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "+pgx.Identifier{schema, table}.Sanitize()+" TO openrails_app"); err != nil {
+			return err
+		}
+	}
+	for _, sequence := range []string{"river_job_id_seq", "river_notification_id_seq"} {
+		if _, err := pool.Exec(ctx, "GRANT USAGE, SELECT, UPDATE ON SEQUENCE "+pgx.Identifier{schema, sequence}.Sanitize()+" TO openrails_app"); err != nil {
+			return err
+		}
+	}
 	return nil
 }

@@ -48,7 +48,7 @@ func TestSandboxPostureResolvesTestScopedCredentials(t *testing.T) {
 
 	// NMI: test-env account (with tokenization settings) + webhook secret row.
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence)
+		INSERT INTO billing.psps (merchant_id, rail, environment, account_id, archived, evidence)
 		VALUES ($1::uuid, 'nmi', 'test', $2, false, $3::jsonb)
 	`, tn.ID.String(), "100002", `{"settings":{"tokenization_key":"tok_sandbox_681"}}`)
 	require.NoError(t, err)

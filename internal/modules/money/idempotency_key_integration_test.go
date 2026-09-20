@@ -274,7 +274,7 @@ func TestOr891_OwedLegAccruesOneInvoiceItemPerKey(t *testing.T) {
 
 	var items int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.invoice_items WHERE merchant_id = $1 AND customer_id = $2`,
+		`SELECT count(*) FROM billing.invoice_items WHERE merchant_id = $1 AND customer_id = $2`,
 		dbtest.TestMerchantID.UUID(), payer.UUID()).Scan(&items))
 	require.Equal(t, 1, items, "one pending invoice item per key, not one per replay")
 }
@@ -303,7 +303,7 @@ func TestOr891_KeylessSpendCannotReachTheOwedLeg(t *testing.T) {
 	}
 	var items int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.invoice_items WHERE merchant_id = $1 AND customer_id = $2`,
+		`SELECT count(*) FROM billing.invoice_items WHERE merchant_id = $1 AND customer_id = $2`,
 		dbtest.TestMerchantID.UUID(), payer.UUID()).Scan(&items))
 	require.Equal(t, 0, items, "no minted-key invoice items")
 }

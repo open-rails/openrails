@@ -27,16 +27,16 @@ func TestPolicyStateIntegrity(t *testing.T) {
 		require.NoError(t, f.client.SetCustomerSpendDelegation(t.Context(), payer, original))
 		name := "policy_fail_" + uuid.NewString()[:8]
 		failingKey := "failure-" + uuid.NewString()
-		_, err := pool.Exec(t.Context(), fmt.Sprintf(`CREATE SEQUENCE openrails.%s;
-GRANT USAGE,SELECT ON SEQUENCE openrails.%s TO openrails_app;
-CREATE FUNCTION openrails.%s() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN PERFORM nextval('openrails.%s'); RAISE EXCEPTION 'injected policy replacement failure'; END $$;
-CREATE TRIGGER %s BEFORE INSERT OR UPDATE ON openrails.invoker_spend_limits
+		_, err := pool.Exec(t.Context(), fmt.Sprintf(`CREATE SEQUENCE billing.%s;
+GRANT USAGE,SELECT ON SEQUENCE billing.%s TO openrails_app;
+CREATE FUNCTION billing.%s() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN PERFORM nextval('billing.%s'); RAISE EXCEPTION 'injected policy replacement failure'; END $$;
+CREATE TRIGGER %s BEFORE INSERT OR UPDATE ON billing.invoker_spend_limits
 FOR EACH ROW WHEN (NEW.merchant_id = '%s'::uuid AND NEW.customer_id = '%s'::uuid AND NEW.scope_key = '%s')
-EXECUTE FUNCTION openrails.%s()`, name, name, name, name, name, f.merchant.MerchantID, payer, failingKey, name))
+EXECUTE FUNCTION billing.%s()`, name, name, name, name, name, f.merchant.MerchantID, payer, failingKey, name))
 		require.NoError(t, err)
 		t.Cleanup(func() {
-			_, err := pool.Exec(context.Background(), fmt.Sprintf("DROP TRIGGER %s ON openrails.invoker_spend_limits; DROP FUNCTION openrails.%s(); DROP SEQUENCE openrails.%s", name, name, name))
+			_, err := pool.Exec(context.Background(), fmt.Sprintf("DROP TRIGGER %s ON billing.invoker_spend_limits; DROP FUNCTION billing.%s(); DROP SEQUENCE billing.%s", name, name, name))
 			require.NoError(t, err)
 		})
 		failed := original
@@ -49,7 +49,7 @@ EXECUTE FUNCTION openrails.%s()`, name, name, name, name, name, f.merchant.Merch
 		// Sequence advancement survives rollback and proves the injected write
 		// fault ran; an auth/validation rejection cannot satisfy this witness.
 		var reached bool
-		require.NoError(t, pool.QueryRow(t.Context(), "SELECT is_called FROM openrails."+name).Scan(&reached))
+		require.NoError(t, pool.QueryRow(t.Context(), "SELECT is_called FROM billing."+name).Scan(&reached))
 		require.True(t, reached, "the write reached the injected rollback point")
 		status, raw := requestWorkflowJSON(t, http.MethodGet, f.hostURL+"/v1/customers/"+payer.String()+"/spend-delegations", token, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
@@ -107,12 +107,12 @@ AND wait_event_type='Lock' AND query LIKE '%pg_advisory_xact_lock(hashtextextend
 	t.Run("invalid_persisted_configuration", func(t *testing.T) {
 		require.NoError(t, f.client.SetMerchantSettings(t.Context(), openrails.MerchantSettings{Profile: &openrails.MerchantProfileInput{DisplayName: "before corruption"}}))
 		var original []byte
-		require.NoError(t, pool.QueryRow(t.Context(), `SELECT config FROM openrails.merchant_configurations WHERE merchant_id=$1`, f.merchant.MerchantID.UUID()).Scan(&original))
+		require.NoError(t, pool.QueryRow(t.Context(), `SELECT config FROM billing.merchant_configurations WHERE merchant_id=$1`, f.merchant.MerchantID.UUID()).Scan(&original))
 		t.Cleanup(func() {
-			_, err := pool.Exec(context.Background(), `UPDATE openrails.merchant_configurations SET config=$1::jsonb WHERE merchant_id=$2`, original, f.merchant.MerchantID.UUID())
+			_, err := pool.Exec(context.Background(), `UPDATE billing.merchant_configurations SET config=$1::jsonb WHERE merchant_id=$2`, original, f.merchant.MerchantID.UUID())
 			require.NoError(t, err)
 		})
-		changed, err := pool.Exec(t.Context(), `UPDATE openrails.merchant_configurations SET config='{"delegated_invoker_wasted_spend_windows":[{"key":"bad","window_seconds":"oops","limit":1}]}'::jsonb WHERE merchant_id=$1`, f.merchant.MerchantID.UUID())
+		changed, err := pool.Exec(t.Context(), `UPDATE billing.merchant_configurations SET config='{"delegated_invoker_wasted_spend_windows":[{"key":"bad","window_seconds":"oops","limit":1}]}'::jsonb WHERE merchant_id=$1`, f.merchant.MerchantID.UUID())
 		require.NoError(t, err)
 		require.EqualValues(t, 1, changed.RowsAffected())
 		payer, _ := f.actor(t, nil)

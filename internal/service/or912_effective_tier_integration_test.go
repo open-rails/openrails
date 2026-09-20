@@ -49,11 +49,11 @@ func TestOr912_ServiceResolveEffectiveTier(t *testing.T) {
 		require.NoError(t, err)
 		id := uuid.New()
 		_, err = pool.Exec(ctx, `
-			INSERT INTO openrails.products (id, merchant_id, key, display_name, entitlements_spec, tier_group, tier_rank)
+			INSERT INTO billing.products (id, merchant_id, key, display_name, entitlements_spec, tier_group, tier_rank)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 			id, dbtest.TestMerchantID.UUID(), key, name, spec, group, rank)
 		require.NoError(t, err)
-		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM openrails.products WHERE id = $1`, id) })
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM billing.products WHERE id = $1`, id) })
 		return id
 	}
 	seed("svc_basic_"+suffix, "Basic", 1, entLow)

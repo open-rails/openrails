@@ -352,9 +352,9 @@ func newStripeTierFixture(t *testing.T) *stripeTierFixture {
 		product := &models.Product{ID: uuid.New(), Key: key + "-" + sfx, DisplayName: name, TierGroup: &group, TierRank: rank, CreatedAt: now, UpdatedAt: now}
 		price := &models.Price{ID: uuid.New(), ProductID: product.ID, Amount: amount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours, CreatedAt: now, UpdatedAt: now}
 		insertProductAndPrice(ctx, t, pool, product, price)
-		_, err := pool.Exec(ctx, `UPDATE openrails.products SET tier_group=$2, tier_rank=$3 WHERE id=$1`, product.ID, group, rank)
+		_, err := pool.Exec(ctx, `UPDATE billing.products SET tier_group=$2, tier_rank=$3 WHERE id=$1`, product.ID, group, rank)
 		require.NoError(t, err)
-		_, err = pool.Exec(ctx, `INSERT INTO openrails.price_psp_bindings(merchant_id, price_id, psp_id, price_ref) VALUES ($1,$2,$3,$4)`, dbtest.TestMerchantID.UUID(), price.ID, pspID, ref)
+		_, err = pool.Exec(ctx, `INSERT INTO billing.price_psp_bindings(merchant_id, price_id, psp_id, price_ref) VALUES ($1,$2,$3,$4)`, dbtest.TestMerchantID.UUID(), price.ID, pspID, ref)
 		require.NoError(t, err)
 		return product, price
 	}
@@ -370,7 +370,7 @@ func newStripeTierFixture(t *testing.T) *stripeTierFixture {
 	pm := &models.PaymentMethod{ID: uuid.New(), CustomerID: customerID, Rail: models.RailStripe, PspID: pspID, RailCustomerRef: "cus_" + sfx, RailMethodRef: "pm_" + sfx, RebillDriver: models.RebillDriverProvider, CreatedAt: now, UpdatedAt: now}
 	require.NoError(t, paymentmethods.NewPaymentMethodRepo(dbi).Create(ctx, pm))
 	subID := uuid.New()
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.subscriptions
+	_, err := pool.Exec(ctx, `INSERT INTO billing.subscriptions
 	        (id, price_id, product_id, status, rail, psp_id, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,
 	         payment_method_id, customer_id, merchant_id)
@@ -378,12 +378,12 @@ func newStripeTierFixture(t *testing.T) *stripeTierFixture {
 		subID, basic.ID, basic.ProductID, pspID, railSub, periodStart, periodEnd, pm.ID, customerID, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm.ID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.price_psp_bindings WHERE price_id = ANY($1)", []uuid.UUID{basic.ID, pro.ID})
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = ANY($1)", []uuid.UUID{basic.ID, pro.ID})
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = ANY($1)", []uuid.UUID{basic.ProductID, pro.ProductID})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pm.ID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.price_psp_bindings WHERE price_id = ANY($1)", []uuid.UUID{basic.ID, pro.ID})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = ANY($1)", []uuid.UUID{basic.ID, pro.ID})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = ANY($1)", []uuid.UUID{basic.ProductID, pro.ProductID})
 	})
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -413,15 +413,15 @@ func (fx *stripeTierFixture) seedCustomer(t *testing.T) (*models.Subscription, *
 	start, end := *fx.sub.CurrentPeriodStartsAt, *fx.sub.CurrentPeriodEndsAt
 	fx.stripe.declare(railSub, "si_"+sfx, fx.basicRef, start.Unix(), end.Unix())
 	id := uuid.New()
-	_, err := pool.Exec(fx.ctx, `INSERT INTO openrails.subscriptions
+	_, err := pool.Exec(fx.ctx, `INSERT INTO billing.subscriptions
 	        (id, price_id, product_id, status, rail, psp_id, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id)
 	      VALUES ($1, $2, $3, 'active', 'stripe', $4, $5, $6, $7, $6, $8, $9)`,
 		id, fx.basic.ID, fx.basic.ProductID, fx.sub.PspID, railSub, start, end, customerID, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", id)
-		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", id)
+		_, _ = pool.Exec(fx.ctx, "DELETE FROM billing.rail_intents WHERE subscription_id = $1", id)
+		_, _ = pool.Exec(fx.ctx, "DELETE FROM billing.subscriptions WHERE id = $1", id)
 	})
 	sub, err := fx.svc.SubscriptionService.GetByID(fx.ctx, id)
 	require.NoError(t, err)
@@ -451,7 +451,7 @@ func (fx *stripeTierFixture) operation(key string) gen.OpenrailsRailIntent {
 func (fx *stripeTierFixture) verifyOnce(t *testing.T, key string) gen.OpenrailsRailIntent {
 	t.Helper()
 	in := fx.operation(key)
-	_, err := fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE openrails.rail_intents SET next_attempt_at='epoch', claimed_until=NULL WHERE id=$1`, in.ID)
+	_, err := fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE billing.rail_intents SET next_attempt_at='epoch', claimed_until=NULL WHERE id=$1`, in.ID)
 	require.NoError(t, err)
 	_, err = fx.restart().RunVerifyOnce(fx.ctx)
 	require.NoError(t, err)
@@ -468,7 +468,7 @@ func (fx *stripeTierFixture) local(t *testing.T) *models.Subscription {
 func (fx *stripeTierFixture) operations(t *testing.T) int {
 	t.Helper()
 	var count int
-	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1`, fx.sub.ID).Scan(&count))
+	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1`, fx.sub.ID).Scan(&count))
 	return count
 }
 
@@ -511,7 +511,7 @@ func TestStripeTierChangeUpgradeReplaysStoredReceipt(t *testing.T) {
 	require.Equal(t, payload.AmountDueNow, first.AmountDueNow)
 
 	// The catalog moves on; the replay is the stored receipt, byte for byte.
-	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.prices SET amount = 99_000_000 WHERE id = $1`, fx.pro.ID)
+	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.prices SET amount = 99_000_000 WHERE id = $1`, fx.pro.ID)
 	require.NoError(t, err)
 	again, err := fx.change(key, fx.pro)
 	require.NoError(t, err)
@@ -759,7 +759,7 @@ func TestStripeTierChangeConcurrentSameKeyRunsOnce(t *testing.T) {
 func TestStripeTierChangeDowngradeSchedulesOnce(t *testing.T) {
 	fx := newStripeTierFixture(t)
 	// Start on Pro so Basic is a downgrade.
-	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.subscriptions SET price_id=$2, product_id=$3 WHERE id=$1`, fx.sub.ID, fx.pro.ID, fx.pro.ProductID)
+	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.subscriptions SET price_id=$2, product_id=$3 WHERE id=$1`, fx.sub.ID, fx.pro.ID, fx.pro.ProductID)
 	require.NoError(t, err)
 	fx.stripe.declare(fx.sub.RailSubscriptionID, "si_pro", fx.proRef, fx.sub.CurrentPeriodStartsAt.Unix(), fx.sub.CurrentPeriodEndsAt.Unix())
 	key := "down-" + uuid.NewString()[:8]
@@ -803,7 +803,7 @@ func TestStripeTierChangeDowngradeSchedulesOnce(t *testing.T) {
 
 func TestStripeTierChangeDowngradeLostCreateReplaysKey(t *testing.T) {
 	fx := newStripeTierFixture(t)
-	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.subscriptions SET price_id=$2, product_id=$3 WHERE id=$1`, fx.sub.ID, fx.pro.ID, fx.pro.ProductID)
+	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.subscriptions SET price_id=$2, product_id=$3 WHERE id=$1`, fx.sub.ID, fx.pro.ID, fx.pro.ProductID)
 	require.NoError(t, err)
 	fx.stripe.declare(fx.sub.RailSubscriptionID, "si_pro", fx.proRef, fx.sub.CurrentPeriodStartsAt.Unix(), fx.sub.CurrentPeriodEndsAt.Unix())
 	fx.stripe.setMode("lostAfterLanding")

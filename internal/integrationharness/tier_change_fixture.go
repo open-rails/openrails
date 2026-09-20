@@ -28,7 +28,7 @@ func (h *Harness) ArmLoopbackStripe(rt *app.Runtime, mid merchant.ID) uuid.UUID 
 	account := "acct_" + strings.ReplaceAll(mid.String(), "-", "")[:12]
 	SeedPSPs(h.ctx, h.t, rt, mid, config.PSPSet{"stripe": {Rail: models.RailStripe, AccountID: account, Stripe: &config.StripeRailConfig{SecretKey: LoopbackStripeSecretKey}}})
 	var id uuid.UUID
-	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT id FROM openrails.psps WHERE merchant_id=$1 AND rail='stripe' AND account_id=$2`, mid.UUID(), account).Scan(&id))
+	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT id FROM billing.psps WHERE merchant_id=$1 AND rail='stripe' AND account_id=$2`, mid.UUID(), account).Scan(&id))
 	return id
 }
 
@@ -61,11 +61,11 @@ func (h *Harness) SeedStripeTierSubscription(rt *app.Runtime, mid merchant.ID, g
 	group := "tier-" + sfx
 	seed := func(key, name string, rank int, amount int64, ref string) uuid.UUID {
 		product, price := uuid.New(), uuid.New()
-		_, err := pool.Exec(h.ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name,tier_group,tier_rank) VALUES($1,$2,$3,$4,$5,$6)`, product, mid.UUID(), key+"-"+sfx, name, group, rank)
+		_, err := pool.Exec(h.ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name,tier_group,tier_rank) VALUES($1,$2,$3,$4,$5,$6)`, product, mid.UUID(), key+"-"+sfx, name, group, rank)
 		require.NoError(h.t, err)
-		_, err = pool.Exec(h.ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,$5,'USD',720,true)`, price, mid.UUID(), product, key+"-"+sfx+"-monthly", amount)
+		_, err = pool.Exec(h.ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,$5,'USD',720,true)`, price, mid.UUID(), product, key+"-"+sfx+"-monthly", amount)
 		require.NoError(h.t, err)
-		_, err = pool.Exec(h.ctx, `INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,price_ref) VALUES($1,$2,$3,$4)`, mid.UUID(), price, psp, ref)
+		_, err = pool.Exec(h.ctx, `INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,price_ref) VALUES($1,$2,$3,$4)`, mid.UUID(), price, psp, ref)
 		require.NoError(h.t, err)
 		return price
 	}
@@ -73,19 +73,19 @@ func (h *Harness) SeedStripeTierSubscription(rt *app.Runtime, mid merchant.ID, g
 	basic := seed("basic", "Basic", 1, 10_000_000, basicStripe)
 	pro := seed("pro", "Pro", 2, 30_000_000, proStripe)
 	var basicProduct uuid.UUID
-	require.NoError(h.t, pool.QueryRow(h.ctx, `SELECT product_id FROM openrails.prices WHERE id=$1`, basic).Scan(&basicProduct))
+	require.NoError(h.t, pool.QueryRow(h.ctx, `SELECT product_id FROM billing.prices WHERE id=$1`, basic).Scan(&basicProduct))
 
 	customer, method, subscription := uuid.New(), uuid.New(), uuid.New()
-	_, err := pool.Exec(h.ctx, `INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), customer)
+	_, err := pool.Exec(h.ctx, `INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), customer)
 	require.NoError(h.t, err)
-	_, err = gen.New(pool).CreatePaymentMethod(h.ctx, gen.CreatePaymentMethodParams{
+	_, err = dbtest.Queries(pool).CreatePaymentMethod(h.ctx, gen.CreatePaymentMethodParams{
 		ID: method, MerchantID: mid.UUID(), CustomerID: customer, Rail: string(models.RailStripe), PspID: psp,
 		InitialTransactionID: "init-" + method.String(), RailCustomerRef: "cus_" + sfx, RailMethodRef: "pm_" + sfx,
 	})
 	require.NoError(h.t, err)
 	stripeSub := "sub_" + sfx
 	periodStart, periodEnd := now.Add(-5*24*time.Hour), now.Add(25*24*time.Hour)
-	_, err = pool.Exec(h.ctx, `INSERT INTO openrails.subscriptions
+	_, err = pool.Exec(h.ctx, `INSERT INTO billing.subscriptions
 	        (id, merchant_id, customer_id, price_id, product_id, status, rail, psp_id, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at, payment_method_id)
 	      VALUES ($1, $2, $3, $4, $5, 'active', 'stripe', $6, $7, $8, $9, $8, $10)`,
@@ -121,11 +121,11 @@ func (h *Harness) SeedNMITierSubscription(rt *app.Runtime, mid merchant.ID) NMIT
 	group := "tier-" + sfx
 	seed := func(key, name string, rank int, amount int64, plan string) uuid.UUID {
 		product, price := uuid.New(), uuid.New()
-		_, err := pool.Exec(h.ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name,tier_group,tier_rank) VALUES($1,$2,$3,$4,$5,$6)`, product, mid.UUID(), key+"-"+sfx, name, group, rank)
+		_, err := pool.Exec(h.ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name,tier_group,tier_rank) VALUES($1,$2,$3,$4,$5,$6)`, product, mid.UUID(), key+"-"+sfx, name, group, rank)
 		require.NoError(h.t, err)
-		_, err = pool.Exec(h.ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,$5,'USD',720,true)`, price, mid.UUID(), product, key+"-"+sfx+"-monthly", amount)
+		_, err = pool.Exec(h.ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,$5,'USD',720,true)`, price, mid.UUID(), product, key+"-"+sfx+"-monthly", amount)
 		require.NoError(h.t, err)
-		_, err = pool.Exec(h.ctx, `INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,plan_id) VALUES($1,$2,$3,$4)`, mid.UUID(), price, psp, plan)
+		_, err = pool.Exec(h.ctx, `INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,plan_id) VALUES($1,$2,$3,$4)`, mid.UUID(), price, psp, plan)
 		require.NoError(h.t, err)
 		return price
 	}
@@ -133,20 +133,20 @@ func (h *Harness) SeedNMITierSubscription(rt *app.Runtime, mid merchant.ID) NMIT
 	basic := seed("basic", "Basic", 1, 10_000_000, "plan-basic-"+sfx)
 	pro := seed("pro", "Pro", 2, 30_000_000, proPlan)
 	var basicProduct uuid.UUID
-	require.NoError(h.t, pool.QueryRow(h.ctx, `SELECT product_id FROM openrails.prices WHERE id=$1`, basic).Scan(&basicProduct))
+	require.NoError(h.t, pool.QueryRow(h.ctx, `SELECT product_id FROM billing.prices WHERE id=$1`, basic).Scan(&basicProduct))
 
 	customer, method, subscription := uuid.New(), uuid.New(), uuid.New()
 	vault := "vault-" + sfx
-	_, err := pool.Exec(h.ctx, `INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), customer)
+	_, err := pool.Exec(h.ctx, `INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), customer)
 	require.NoError(h.t, err)
-	_, err = gen.New(pool).CreatePaymentMethod(h.ctx, gen.CreatePaymentMethodParams{
+	_, err = dbtest.Queries(pool).CreatePaymentMethod(h.ctx, gen.CreatePaymentMethodParams{
 		ID: method, MerchantID: mid.UUID(), CustomerID: customer, Rail: string(models.RailNMI), PspID: psp,
 		InitialTransactionID: "init-" + method.String(), RailCustomerRef: vault,
 	})
 	require.NoError(h.t, err)
 	dbtest.SeedNMIStoredCredentialRefs(h.ctx, h.t, pool, method)
 	periodStart, periodEnd := now.Add(-5*24*time.Hour), now.Add(25*24*time.Hour)
-	_, err = pool.Exec(h.ctx, `INSERT INTO openrails.subscriptions
+	_, err = pool.Exec(h.ctx, `INSERT INTO billing.subscriptions
 	        (id, merchant_id, customer_id, price_id, product_id, status, rail, psp_id, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at, payment_method_id)
 	      VALUES ($1, $2, $3, $4, $5, 'active', 'nmi', $6, $7, $8, $9, $8, $10)`,
@@ -168,7 +168,7 @@ type TierChangeOperation struct {
 func (h *Harness) LatestTierChangeOperation(subscription uuid.UUID) TierChangeOperation {
 	h.t.Helper()
 	var op TierChangeOperation
-	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT id, status FROM openrails.rail_intents WHERE intent_type IN ('nmi_upgrade','stripe_tier_change') AND subscription_id=$1 ORDER BY created_at DESC LIMIT 1`, subscription).Scan(&op.ID, &op.Status))
+	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT id, status FROM billing.rail_intents WHERE intent_type IN ('nmi_upgrade','stripe_tier_change') AND subscription_id=$1 ORDER BY created_at DESC LIMIT 1`, subscription).Scan(&op.ID, &op.Status))
 	return op
 }
 
@@ -176,7 +176,7 @@ func (h *Harness) LatestTierChangeOperation(subscription uuid.UUID) TierChangeOp
 func (h *Harness) TierChangeOperations(subscription uuid.UUID) int {
 	h.t.Helper()
 	var n int
-	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT count(*) FROM openrails.rail_intents WHERE intent_type IN ('nmi_upgrade','stripe_tier_change') AND subscription_id=$1`, subscription).Scan(&n))
+	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT count(*) FROM billing.rail_intents WHERE intent_type IN ('nmi_upgrade','stripe_tier_change') AND subscription_id=$1`, subscription).Scan(&n))
 	return n
 }
 
@@ -184,7 +184,7 @@ func (h *Harness) TierChangeOperations(subscription uuid.UUID) int {
 func (h *Harness) LocalSubscriptionStatus(subscription uuid.UUID) string {
 	h.t.Helper()
 	var status string
-	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT status FROM openrails.subscriptions WHERE id=$1`, subscription).Scan(&status))
+	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT status FROM billing.subscriptions WHERE id=$1`, subscription).Scan(&status))
 	return status
 }
 
@@ -192,6 +192,6 @@ func (h *Harness) LocalSubscriptionStatus(subscription uuid.UUID) string {
 func (h *Harness) LocalSubscriptionPrice(subscription uuid.UUID) openrails.PriceID {
 	h.t.Helper()
 	var price uuid.UUID
-	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT price_id FROM openrails.subscriptions WHERE id=$1`, subscription).Scan(&price))
+	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT price_id FROM billing.subscriptions WHERE id=$1`, subscription).Scan(&price))
 	return openrails.PriceID(price)
 }

@@ -35,35 +35,9 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 CREATE SCHEMA IF NOT EXISTS openrails;
 GRANT USAGE ON SCHEMA openrails TO openrails_app;
 
--- ---------------------------------------------------------------------------
--- Cross-schema grants (#764): openrails_app drives River's job-queue tables
--- (`public`, config.RiverSchema), which are OpenRails-managed runtime state.
--- AuthKit's profiles schema is sibling-owned and independently versioned; this
--- migration never creates it or grants access to it. AuthKit's initialization
--- API is responsible for its own schema and access policy.
--- ---------------------------------------------------------------------------
-
--- River (public schema). Least-privilege: name the actual tables the runtime
--- client touches (per riverpgxv5's dbsqlc query set) rather than blanket ALL
--- TABLES IN SCHEMA public. river_migration is deliberately excluded — only
--- River's own migrator (running as the admin/migrate role) ever reads or
--- writes it; the runtime client never touches it.
+-- River migration and targeted runtime grants are handled by the migration
+-- entrypoint only when OpenRails owns River. AuthKit grants remain AuthKit-owned.
 GRANT USAGE ON SCHEMA public TO openrails_app;
-DO $$
-BEGIN
-  IF to_regclass('public.river_job') IS NOT NULL THEN
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.river_job TO openrails_app;
-  END IF;
-  IF to_regclass('public.river_job_id_seq') IS NOT NULL THEN
-    GRANT USAGE, SELECT, UPDATE ON SEQUENCE public.river_job_id_seq TO openrails_app;
-  END IF;
-  IF to_regclass('public.river_queue') IS NOT NULL THEN
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.river_queue TO openrails_app;
-  END IF;
-  IF to_regclass('public.river_leader') IS NOT NULL THEN
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.river_leader TO openrails_app;
-  END IF;
-END $$;
 
 -- The migratekit ledger table (public.migrations) predates this migration on
 -- every deployment (created at the bootstrap step, before AuthKit/River/
@@ -71,13 +45,6 @@ END $$;
 -- migrations are applied (internal/app/build_runtime.go validateDatabase) —
 -- read-only, no write path needs it.
 GRANT SELECT ON TABLE public.migrations TO openrails_app;
-
--- A later River version bump's NEW tables must inherit the same grant
--- automatically — both migrators (River's and OpenRails') run as the SAME
--- admin/migrate role that applies this migration, so ALTER DEFAULT PRIVILEGES
--- (scoped to that role, implicitly) covers them without a follow-up migration.
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openrails_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO openrails_app;
 
 -- ---------------------------------------------------------------------------
 -- Types

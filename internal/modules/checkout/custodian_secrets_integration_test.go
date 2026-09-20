@@ -40,22 +40,22 @@ func TestCustodianHeldCardResolvesFromStoreBothModes(t *testing.T) {
 	// Layer B rows (identical in both modes — mode 1 converges the same rows).
 	var custodianID uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx, `
-		INSERT INTO openrails.custodians (merchant_id, key, kind, environment, account_id, settings)
+		INSERT INTO billing.custodians (merchant_id, key, kind, environment, account_id, settings)
 		VALUES ($1::uuid, 'bt', 'basis_theory', 'test', $2, '{"public_api_key":"key_pub_c12","network_tokens":true}'::jsonb)
 		ON CONFLICT (kind, environment, account_id) DO UPDATE SET settings = EXCLUDED.settings
 		RETURNING id
 	`, dbtest.TestMerchantID.String(), tenantID).Scan(&custodianID))
 	for _, gateway := range []string{primaryGateway, backupGateway} {
 		_, err := pool.Exec(ctx, `
-			INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence, custodian_id)
+			INSERT INTO billing.psps (merchant_id, rail, environment, account_id, archived, evidence, custodian_id)
 			VALUES ($1::uuid, 'nmi', 'test', $2, false, '{"source":"test_795"}'::jsonb, $3::uuid)
 			ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = false, custodian_id = EXCLUDED.custodian_id
 		`, dbtest.TestMerchantID.String(), gateway, custodianID)
 		require.NoError(t, err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.psps WHERE account_id = ANY($1)", []string{primaryGateway, backupGateway})
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.custodians WHERE id = $1", custodianID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.psps WHERE account_id = ANY($1)", []string{primaryGateway, backupGateway})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.custodians WHERE id = $1", custodianID)
 	})
 
 	dbp := db.WrapPool(pool, "")
@@ -147,7 +147,7 @@ func TestCustodianHeldCardResolvesFromStoreBothModes(t *testing.T) {
 	t.Run("cross_merchant_reference_is_refused_by_the_database", func(t *testing.T) {
 		other := uuid.New()
 		_, err := pool.Exec(ctx, `
-			INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, evidence, custodian_id)
+			INSERT INTO billing.psps (merchant_id, rail, environment, account_id, evidence, custodian_id)
 			VALUES ($1::uuid, 'nmi', 'test', 'foreign-gateway-c12', '{}'::jsonb, $2::uuid)
 		`, other.String(), custodianID)
 		require.Error(t, err, "a PSP owned by another merchant must not reference this custodian")

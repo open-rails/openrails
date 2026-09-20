@@ -100,12 +100,12 @@ func TestPlatformMerchantDirectoryListHTTP(t *testing.T) {
 	c := surface.ProvisionOwnedMerchant(slugC)
 	t.Cleanup(func() {
 		for _, m := range []OwnedMerchant{a, b, c} {
-			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.psps WHERE merchant_id = $1", m.MerchantID.UUID())
-			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.payments WHERE merchant_id = $1", m.MerchantID.UUID())
-			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE merchant_id = $1", m.MerchantID.UUID())
-			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE merchant_id = $1", m.MerchantID.UUID())
-			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.customers WHERE merchant_id = $1", m.MerchantID.UUID())
-			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.merchants WHERE id = $1", m.MerchantID.UUID())
+			_, _ = h.Pool().Exec(ctx, "DELETE FROM billing.psps WHERE merchant_id = $1", m.MerchantID.UUID())
+			_, _ = h.Pool().Exec(ctx, "DELETE FROM billing.payments WHERE merchant_id = $1", m.MerchantID.UUID())
+			_, _ = h.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE merchant_id = $1", m.MerchantID.UUID())
+			_, _ = h.Pool().Exec(ctx, "DELETE FROM billing.products WHERE merchant_id = $1", m.MerchantID.UUID())
+			_, _ = h.Pool().Exec(ctx, "DELETE FROM billing.customers WHERE merchant_id = $1", m.MerchantID.UUID())
+			_, _ = h.Pool().Exec(ctx, "DELETE FROM billing.merchants WHERE id = $1", m.MerchantID.UUID())
 		}
 	})
 
@@ -117,12 +117,12 @@ func TestPlatformMerchantDirectoryListHTTP(t *testing.T) {
 		{"stripe", "acct_" + suffix},
 	} {
 		_, err := h.Pool().Exec(ctx, `
-			INSERT INTO openrails.psps (merchant_id, rail, environment, account_id)
+			INSERT INTO billing.psps (merchant_id, rail, environment, account_id)
 			VALUES ($1, $2, 'test', $3)`, b.MerchantID.UUID(), row.rail, row.account)
 		require.NoError(t, err)
 	}
 	_, err := h.Pool().Exec(ctx, `
-		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO billing.psps (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1, 'solana', 'test', $2, true)`, b.MerchantID.UUID(), "wallet-"+suffix)
 	require.NoError(t, err)
 
@@ -130,19 +130,19 @@ func TestPlatformMerchantDirectoryListHTTP(t *testing.T) {
 	productID, priceID, customerID := uuid.New(), uuid.New(), uuid.New()
 	paidAt := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Microsecond)
 	_, err = h.Pool().Exec(ctx, `
-		INSERT INTO openrails.products (id, merchant_id, key, display_name)
+		INSERT INTO billing.products (id, merchant_id, key, display_name)
 		VALUES ($1, $2, $3, 'Plat Directory Product')`, productID, a.MerchantID.UUID(), "plat-prod-"+suffix)
 	require.NoError(t, err)
 	_, err = h.Pool().Exec(ctx, `
-		INSERT INTO openrails.prices (id, merchant_id, product_id, amount, currency)
+		INSERT INTO billing.prices (id, merchant_id, product_id, amount, currency)
 		VALUES ($1, $2, $3, 1000000, 'USD')`, priceID, a.MerchantID.UUID(), productID)
 	require.NoError(t, err)
 	_, err = h.Pool().Exec(ctx, `
-		INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`, customerID, a.MerchantID.UUID())
+		INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`, customerID, a.MerchantID.UUID())
 	require.NoError(t, err)
 	aPSP := dbtest.EnsureTestPSP(ctx, t, h.Pool(), a.MerchantID.UUID(), "nmi")
 	_, err = h.Pool().Exec(ctx, `
-		INSERT INTO openrails.payments (merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, created_at, psp_id)
+		INSERT INTO billing.payments (merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, created_at, psp_id)
 		VALUES ($1, $2, $3, 'nmi', $4, 1000000, 1000000, 'USD', $5, $6)`,
 		a.MerchantID.UUID(), customerID, priceID, "txn-"+suffix, paidAt, aPSP)
 	require.NoError(t, err)
@@ -225,7 +225,7 @@ func TestPlatformMerchantSoftDeleteRestoreHTTP(t *testing.T) {
 	slug := "plat-del-" + suffix
 	m := surface.ProvisionOwnedMerchant(slug)
 	t.Cleanup(func() {
-		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.merchants WHERE id = $1", m.MerchantID.UUID())
+		_, _ = h.Pool().Exec(ctx, "DELETE FROM billing.merchants WHERE id = $1", m.MerchantID.UUID())
 	})
 	merchantURL := surface.BaseURL + "/v1/platform/merchants/" + m.MerchantID.String()
 	catalogURL := surface.BaseURL + "/v1/merchant/catalog/products"
@@ -309,7 +309,7 @@ func TestPlatformMerchantPermissionsHTTP(t *testing.T) {
 	slug := "plat-perm-" + suffix
 	m := surface.ProvisionOwnedMerchant(slug)
 	t.Cleanup(func() {
-		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.merchants WHERE id = $1", m.MerchantID.UUID())
+		_, _ = h.Pool().Exec(ctx, "DELETE FROM billing.merchants WHERE id = $1", m.MerchantID.UUID())
 	})
 	merchantURL := surface.BaseURL + "/v1/platform/merchants/" + m.MerchantID.String()
 

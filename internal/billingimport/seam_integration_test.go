@@ -57,11 +57,11 @@ func TestDeclaredAdminGrantThenConverge(t *testing.T) {
 		}
 		mobiusPSP := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "mobius")
 		solanaPSP := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "solana")
-		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "e2e-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`, prod, "e2e-"+sfx, merchantID)
+		exec(`INSERT INTO billing.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
+		exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,started_at,current_period_starts_at,current_period_ends_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'active','mobius',$6,$6,$7,$8)`, sub, merchantID, custSub, prod, price, start, end, mobiusPSP)
-		exec(`INSERT INTO openrails.payments (id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,purchased_at,metadata,psp_id)
+		exec(`INSERT INTO billing.payments (id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,purchased_at,metadata,psp_id)
 		      VALUES ($1,$2,$3,$4,'solana',$5,5000000,5000000,'USD','completed',$6,$7,$8)`,
 			pay, merchantID, custWallet, price, "e2e-w-"+sfx, purchased,
 			`{"expiration_rfc3339":"`+expires.Format(time.RFC3339)+`"}`, solanaPSP)
@@ -71,13 +71,13 @@ func TestDeclaredAdminGrantThenConverge(t *testing.T) {
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for _, c := range []uuid.UUID{custSub, custWallet, custAdmin} {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
 			}
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, sub)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=$1`, pay)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, prod)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, sub)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE id=$1`, pay)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, price)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, prod)
 			return nil
 		})
 	})
@@ -106,7 +106,7 @@ func TestDeclaredAdminGrantThenConverge(t *testing.T) {
 			var n int
 			var src string
 			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-				`SELECT count(*), COALESCE(max(source_type),'') FROM openrails.entitlements
+				`SELECT count(*), COALESCE(max(source_type),'') FROM billing.entitlements
 				 WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL AND deleted_at IS NULL`,
 				merchantID, c).Scan(&n, &src))
 			return n, src
@@ -114,7 +114,7 @@ func TestDeclaredAdminGrantThenConverge(t *testing.T) {
 		grantCount := func(c uuid.UUID) int {
 			var n int
 			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-				`SELECT count(*) FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2 AND event='grant'`,
+				`SELECT count(*) FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2 AND event='grant'`,
 				merchantID, c).Scan(&n))
 			return n
 		}

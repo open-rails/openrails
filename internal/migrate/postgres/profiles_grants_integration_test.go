@@ -55,7 +55,7 @@ func TestBaselineAppliesWithoutProfilesSchema(t *testing.T) {
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	require.NoError(t, err)
 	err = migratekit.NewPostgres(targetDB, config.MigratekitApp).
-		WithSchema(config.DefaultSchema).
+		WithSchema(config.CanonicalSchema).
 		ApplyMigrations(ctx, migrations)
 	require.NoError(t, err)
 }

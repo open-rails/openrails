@@ -76,7 +76,7 @@ func TestBootstrap_ConcurrentColdBoot(t *testing.T) {
 	// merchant directory row.
 	var recorded string
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT permission_group_id FROM openrails.merchants WHERE slug = $1`,
+		`SELECT permission_group_id FROM billing.merchants WHERE slug = $1`,
 		dbtest.TestMerchantSlug).Scan(&recorded))
 	require.NotEmpty(t, recorded)
 	for i := range results {

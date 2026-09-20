@@ -45,10 +45,10 @@ func TestConverge_DeriveGrantEffectExcess_CreditClawback(t *testing.T) {
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "grant_effect:"+grantID.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "grant_effect:"+grantID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.ledger_transfers WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
 			return nil
 		})
 	})
@@ -99,10 +99,10 @@ func TestConverge_OverlappingRuns_SingleClawback(t *testing.T) {
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "grant_effect:"+grantID.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "grant_effect:"+grantID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.ledger_transfers WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
 			return nil
 		})
 	})
@@ -122,7 +122,7 @@ func TestConverge_OverlappingRuns_SingleClawback(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.ledger_transfers WHERE merchant_id=$1 AND grant_id=$2 AND transfer_type='credit_revoke'`,
+			`SELECT count(*) FROM billing.ledger_transfers WHERE merchant_id=$1 AND grant_id=$2 AND transfer_type='credit_revoke'`,
 			merchantID, grantID).Scan(&n))
 		require.Equal(t, 1, n, "exactly one clawback across overlapping runs")
 		ml := ledger.New(appDB.Gen(ctx), merchantID)

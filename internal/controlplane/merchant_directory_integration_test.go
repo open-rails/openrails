@@ -30,7 +30,7 @@ func TestListActiveMerchantIDs(t *testing.T) {
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
 	activeA, activeB, deleted := uuid.New(), uuid.New(), uuid.New()
 	_, err = super.Exec(ctx, `
-		INSERT INTO openrails.merchants (id, slug, status, deleted_at)
+		INSERT INTO billing.merchants (id, slug, status, deleted_at)
 		VALUES ($1, $2, 'active', NULL), ($3, $4, 'active', NULL), ($5, $6, 'deleted', now())`,
 		activeA, "host-page-a-"+suffix,
 		activeB, "host-page-b-"+suffix,

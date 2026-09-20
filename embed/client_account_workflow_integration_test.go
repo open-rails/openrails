@@ -155,7 +155,7 @@ func checkClientMetering(t *testing.T, ctx context.Context, h *integrationharnes
 	mctx := merchant.WithID(ctx, mid)
 	product, payer := uuid.New(), uuid.New()
 	key := "meter-client-" + uuid.NewString()
-	_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Usage product')`, product, mid.UUID(), key)
+	_, err := h.Pool().Exec(ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Usage product')`, product, mid.UUID(), key)
 	require.NoError(t, err)
 	spec := openrails.UsageMeterSpec{Key: key, EventType: key, Aggregation: "sum", ValueProperty: "units", Unit: "requests"}
 	require.NoError(t, client.EnsureUsageMeter(ctx, spec))
@@ -272,12 +272,12 @@ func checkClientGaugeUsage(t *testing.T, ctx context.Context, h *integrationharn
 	payerID := uuid.New()
 	payer := identity.CustomerID(payerID)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE key = $1", meterKey)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE key = $1", meterKey)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	// Arrears so rated usage becomes an open receivable.
@@ -326,12 +326,12 @@ func checkClientGaugeUsage(t *testing.T, ctx context.Context, h *integrationharn
 	var totalUnits int64
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*), COALESCE(SUM((dimensions ->> $2)::bigint), 0)
-		FROM openrails.usage_events
+		FROM billing.usage_events
 		WHERE customer_id = $1 AND event_type = $2`, payerID, meterKey).Scan(&eventCount, &totalUnits))
 	require.Equal(t, 3, eventCount, "replay must not create a fourth event")
 	require.Equal(t, int64(1800+5400+3600), totalUnits)
 	var occurredAt []time.Time
-	rows, err := pool.Query(ctx, `SELECT DISTINCT occurred_at FROM openrails.usage_events WHERE customer_id = $1 AND event_type = $2`, payerID, meterKey)
+	rows, err := pool.Query(ctx, `SELECT DISTINCT occurred_at FROM billing.usage_events WHERE customer_id = $1 AND event_type = $2`, payerID, meterKey)
 	require.NoError(t, err)
 	for rows.Next() {
 		var at time.Time
@@ -349,14 +349,14 @@ func checkClientGaugeUsage(t *testing.T, ctx context.Context, h *integrationharn
 
 	// Gauge rate card: 500_000 micros per 3600 unit-seconds.
 	rateMicros, divideBy := int64(500_000), int64(3600)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4)`,
+	_, err = pool.Exec(ctx, `INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4)`,
 		productID, "usage-report-"+uuid.NewString(), "Usage Report Product", merchantID)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'sum')`,
+	_, err = pool.Exec(ctx, `INSERT INTO billing.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'sum')`,
 		merchantID, meterKey)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
+INSERT INTO billing.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
     'model', 'per_unit',
     'currency', 'USD',
@@ -405,11 +405,11 @@ func checkClientSettings(t *testing.T, ctx context.Context, h *integrationharnes
 	}
 
 	// A database failure after the config/schedule writes must roll everything back.
-	_, err := h.Pool().Exec(ctx, `CREATE FUNCTION openrails.client_workflow_fail_binding() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.tier = 'issue999-fail' THEN RAISE EXCEPTION 'injected issue999 binding failure'; END IF; RETURN NEW; END $$;
-CREATE TRIGGER client_workflow_fail_binding BEFORE INSERT ON openrails.billing_policy_bindings FOR EACH ROW EXECUTE FUNCTION openrails.client_workflow_fail_binding();`)
+	_, err := h.Pool().Exec(ctx, `CREATE FUNCTION billing.client_workflow_fail_binding() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.tier = 'issue999-fail' THEN RAISE EXCEPTION 'injected issue999 binding failure'; END IF; RETURN NEW; END $$;
+CREATE TRIGGER client_workflow_fail_binding BEFORE INSERT ON billing.billing_policy_bindings FOR EACH ROW EXECUTE FUNCTION billing.client_workflow_fail_binding();`)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, err := h.Pool().Exec(context.Background(), `DROP TRIGGER IF EXISTS client_workflow_fail_binding ON openrails.billing_policy_bindings; DROP FUNCTION IF EXISTS openrails.client_workflow_fail_binding();`)
+		_, err := h.Pool().Exec(context.Background(), `DROP TRIGGER IF EXISTS client_workflow_fail_binding ON billing.billing_policy_bindings; DROP FUNCTION IF EXISTS billing.client_workflow_fail_binding();`)
 		require.NoError(t, err)
 	})
 	for i, client := range clients {
@@ -420,7 +420,7 @@ CREATE TRIGGER client_workflow_fail_binding BEFORE INSERT ON openrails.billing_p
 			require.Equal(t, document.CheckoutRouting, got.CheckoutRouting)
 			require.Equal(t, document.Profile, got.Profile)
 			var raw []byte
-			require.NoError(t, h.MerchantPool(d.mid.UUID()).QueryRow(ctx, `SELECT config FROM openrails.merchant_configurations WHERE merchant_id=$1`, d.mid.UUID()).Scan(&raw))
+			require.NoError(t, h.MerchantPool(d.mid.UUID()).QueryRow(ctx, `SELECT config FROM billing.merchant_configurations WHERE merchant_id=$1`, d.mid.UUID()).Scan(&raw))
 			var persisted models.MerchantConfiguration
 			require.NoError(t, json.Unmarshal(raw, &persisted))
 			require.Equal(t, document.Profile.DisplayName, persisted.Profile.DisplayName)
@@ -471,7 +471,7 @@ CREATE TRIGGER client_workflow_fail_binding BEFORE INSERT ON openrails.billing_p
 
 	// Runtime customer bindings survive document roundtrips and prevent removal
 	// of a policy they still reference, even when its FK is configured to cascade.
-	_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.billing_policy_bindings(id,merchant_id,customer_id,policy_name,created_at,updated_at) VALUES($1,$2,$3,'gold',now(),now())`, uuid.New(), d.mid.UUID(), payer.UUID())
+	_, err = h.Pool().Exec(ctx, `INSERT INTO billing.billing_policy_bindings(id,merchant_id,customer_id,policy_name,created_at,updated_at) VALUES($1,$2,$3,'gold',now(),now())`, uuid.New(), d.mid.UUID(), payer.UUID())
 	require.NoError(t, err)
 	got, before := read(remote)
 	require.NoError(t, remote.SetMerchantSettings(ctx, got))
@@ -552,7 +552,7 @@ func checkClientAdmissionFields(t *testing.T, ctx context.Context, h *integratio
 		BillingPolicyBindings: []openrails.BillingPolicyBindingInput{{PolicyName: "client_rate"}},
 	}))
 	payer := uuid.New()
-	_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.customers
+	_, err := h.Pool().Exec(ctx, `INSERT INTO billing.customers
 		(id, merchant_id, issuer, created_at, last_seen_at)
 		VALUES ($1, $2, 'client-fields', now(), now())`, payer, d.mid.UUID())
 	require.NoError(t, err)
@@ -594,7 +594,7 @@ func checkClientAdmissionFields(t *testing.T, ctx context.Context, h *integratio
 	readProvenance := func() string {
 		t.Helper()
 		var value string
-		require.NoError(t, h.Pool().QueryRow(ctx, `SELECT provenance FROM openrails.invoker_spend_limits
+		require.NoError(t, h.Pool().QueryRow(ctx, `SELECT provenance FROM billing.invoker_spend_limits
 			WHERE merchant_id=$1 AND customer_id=$2 AND scope=$3 AND scope_key=$4`,
 			d.mid.UUID(), payer, grant.Scope, grant.ScopeKey).Scan(&value))
 		return value
@@ -612,16 +612,16 @@ func checkClientPaymentReads(t *testing.T, ctx context.Context, h *integrationha
 	pool := h.MerchantPool(d.mid.UUID())
 	payer, other, product, price, payment, refund := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	exec := func(sql string, args ...any) { _, err := pool.Exec(ctx, sql, args...); require.NoError(t, err) }
-	exec(`INSERT INTO openrails.customers (id,merchant_id) VALUES ($1,$2),($3,$2)`, payer, d.mid.UUID(), other)
-	exec(`INSERT INTO openrails.products (id,merchant_id,key,display_name) VALUES ($1,$2,$3,'Payment reads')`, product, d.mid.UUID(), uuid.NewString())
-	exec(`INSERT INTO openrails.prices (id,merchant_id,product_id,amount,currency) VALUES ($1,$2,$3,$4,'USD')`, price, d.mid.UUID(), product, int64(math.MaxInt64))
+	exec(`INSERT INTO billing.customers (id,merchant_id) VALUES ($1,$2),($3,$2)`, payer, d.mid.UUID(), other)
+	exec(`INSERT INTO billing.products (id,merchant_id,key,display_name) VALUES ($1,$2,$3,'Payment reads')`, product, d.mid.UUID(), uuid.NewString())
+	exec(`INSERT INTO billing.prices (id,merchant_id,product_id,amount,currency) VALUES ($1,$2,$3,$4,'USD')`, price, d.mid.UUID(), product, int64(math.MaxInt64))
 	psp := dbtest.EnsureTestPSP(ctx, t, pool, d.mid.UUID(), "nmi")
 	purchased := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	exec(`INSERT INTO openrails.payments (id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,money_movement,psp_id,purchased_at)
+	exec(`INSERT INTO billing.payments (id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,money_movement,psp_id,purchased_at)
 		VALUES ($1,$2,$3,$4,'nmi',$5,$6,$6,'USD','completed','rail',$7,$8)`, payment, d.mid.UUID(), payer, price, uuid.NewString(), int64(math.MaxInt64), psp, purchased)
-	exec(`INSERT INTO openrails.payments (id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,money_movement,psp_id,refunded_payment_id,purchased_at)
+	exec(`INSERT INTO billing.payments (id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,money_movement,psp_id,refunded_payment_id,purchased_at)
 		VALUES ($1,$2,$3,$4,'nmi',$5,-1,-1,'USD','completed','rail',$6,$7,$8)`, refund, d.mid.UUID(), payer, price, uuid.NewString(), psp, payment, purchased.Add(time.Minute))
-	exec(`INSERT INTO openrails.payments (id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,money_movement,psp_id,purchased_at)
+	exec(`INSERT INTO billing.payments (id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,money_movement,psp_id,purchased_at)
 		VALUES ($1,$2,$3,$4,'nmi',$5,500,500,'USD','completed','rail',$6,$7)`, uuid.New(), d.mid.UUID(), other, price, uuid.NewString(), psp, purchased)
 
 	got, err := client.GetPayment(ctx, openrails.PaymentID(payment))

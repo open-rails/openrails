@@ -238,7 +238,7 @@ func (fx rebillFixture) paymentsFor(t *testing.T, txn string) int {
 	t.Helper()
 	var n int
 	require.NoError(t, fx.db.Pool().QueryRow(context.Background(),
-		"SELECT count(*) FROM openrails.payments WHERE subscription_id = $1 AND transaction_id = $2 AND status = 'completed'",
+		"SELECT count(*) FROM billing.payments WHERE subscription_id = $1 AND transaction_id = $2 AND status = 'completed'",
 		fx.subID, txn).Scan(&n))
 	return n
 }
@@ -247,7 +247,7 @@ func (fx rebillFixture) entitlementWindows(t *testing.T) int {
 	t.Helper()
 	var n int
 	require.NoError(t, fx.db.Pool().QueryRow(context.Background(),
-		"SELECT count(*) FROM openrails.entitlements WHERE source_id = $1 AND source_type = 'subscription' AND revoked_at IS NULL AND (end_at IS NULL OR end_at > now())",
+		"SELECT count(*) FROM billing.entitlements WHERE source_id = $1 AND source_type = 'subscription' AND revoked_at IS NULL AND (end_at IS NULL OR end_at > now())",
 		fx.subID).Scan(&n))
 	return n
 }
@@ -268,11 +268,11 @@ func TestManualRebillConfirmedAfterDunningParkedUnknownRenewsOnce(t *testing.T) 
 	require.Equal(t, StatusUnknownNeedsVerify, row.Status)
 
 	// Dunning's staleness rule parks the row out of the queue (#839).
-	_, err = fx.db.Pool().Exec(ctx, "UPDATE openrails.subscriptions SET status = 'unknown', grace_ends_at = NULL, next_retry_at = NULL, entitlements_spec_snapshot = '{\"premium\": null}'::jsonb WHERE id = $1", fx.subID)
+	_, err = fx.db.Pool().Exec(ctx, "UPDATE billing.subscriptions SET status = 'unknown', grace_ends_at = NULL, next_retry_at = NULL, entitlements_spec_snapshot = '{\"premium\": null}'::jsonb WHERE id = $1", fx.subID)
 	require.NoError(t, err)
 
 	fake.charged.Store(true)
-	_, err = fx.db.Pool().Exec(ctx, "UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+	_, err = fx.db.Pool().Exec(ctx, "UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.rebillRunner(client, fullModeConfig()).RunVerifyOnce(ctx)
 	require.NoError(t, err)
@@ -312,11 +312,11 @@ func TestManualRebillConfirmedOnCancelledSubscriptionRecordsPaymentOnly(t *testi
 	require.NoError(t, err)
 	require.Equal(t, StatusUnknownNeedsVerify, row.Status)
 
-	_, err = fx.db.Pool().Exec(ctx, "UPDATE openrails.subscriptions SET status = 'cancelled', cancel_type = 'user', cancelled_at = now(), ended_at = now(), next_retry_at = NULL, grace_ends_at = NULL WHERE id = $1", fx.subID)
+	_, err = fx.db.Pool().Exec(ctx, "UPDATE billing.subscriptions SET status = 'cancelled', cancel_type = 'user', cancelled_at = now(), ended_at = now(), next_retry_at = NULL, grace_ends_at = NULL WHERE id = $1", fx.subID)
 	require.NoError(t, err)
 
 	fake.charged.Store(true)
-	_, err = fx.db.Pool().Exec(ctx, "UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+	_, err = fx.db.Pool().Exec(ctx, "UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.rebillRunner(client, fullModeConfig()).RunVerifyOnce(ctx)
 	require.NoError(t, err)
@@ -330,7 +330,7 @@ func TestManualRebillConfirmedOnCancelledSubscriptionRecordsPaymentOnly(t *testi
 	require.Zero(t, fx.entitlementWindows(t))
 
 	var review string
-	require.NoError(t, fx.db.Pool().QueryRow(ctx, "SELECT metadata->>'refund_review' FROM openrails.payments WHERE subscription_id = $1 AND transaction_id = $2", fx.subID, fake.txnID).Scan(&review))
+	require.NoError(t, fx.db.Pool().QueryRow(ctx, "SELECT metadata->>'refund_review' FROM billing.payments WHERE subscription_id = $1 AND transaction_id = $2", fx.subID, fake.txnID).Scan(&review))
 	require.NotEmpty(t, review)
 
 	outcome := fx.rebillRunner(client, fullModeConfig()).Registry.Lookup(TypeManualRebill).Verify(fx.handlerCtx(), row)

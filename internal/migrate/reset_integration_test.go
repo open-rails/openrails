@@ -58,10 +58,10 @@ func TestEmbeddedResetIsTransactionalAndLedgerScoped(t *testing.T) {
 	require.True(t, status.Exact, status.Report())
 	_, err = target.Exec(ctx, `
 		INSERT INTO public.migrations (app, database, schema, sequence) VALUES
-			('openrails', 'postgres', 'openrails', 10),
-			('openrails', 'postgres', 'openrails', 2),
+			('openrails', 'postgres', 'billing', 10),
+			('openrails', 'postgres', 'billing', 2),
 			('openrails', 'postgres', 'another_schema', 1),
-			('another_app', 'postgres', 'openrails', 1);
+			('another_app', 'postgres', 'billing', 1);
 	`)
 	require.NoError(t, err)
 
@@ -75,7 +75,7 @@ func TestEmbeddedResetIsTransactionalAndLedgerScoped(t *testing.T) {
 		migrate.EmbeddedResetConfirmation(plan.Target))
 	require.ErrorContains(t, err, "not allow-listed")
 	var schemaExists bool
-	require.NoError(t, target.QueryRow(ctx, `SELECT to_regnamespace('openrails') IS NOT NULL`).Scan(&schemaExists))
+	require.NoError(t, target.QueryRow(ctx, `SELECT to_regnamespace('billing') IS NOT NULL`).Scan(&schemaExists))
 	require.True(t, schemaExists, "a refused reset must not mutate the target")
 
 	_, err = target.Exec(ctx, `ALTER TABLE public.migrations RENAME COLUMN schema TO migration_schema`)
@@ -83,7 +83,7 @@ func TestEmbeddedResetIsTransactionalAndLedgerScoped(t *testing.T) {
 	_, err = migrate.ApplyEmbeddedReset(ctx, targetDSN, plan.Target,
 		migrate.EmbeddedResetConfirmation(plan.Target))
 	require.ErrorContains(t, err, "delete openrails migration ledger")
-	require.NoError(t, target.QueryRow(ctx, `SELECT to_regnamespace('openrails') IS NOT NULL`).Scan(&schemaExists))
+	require.NoError(t, target.QueryRow(ctx, `SELECT to_regnamespace('billing') IS NOT NULL`).Scan(&schemaExists))
 	require.True(t, schemaExists, "a ledger failure must roll back the schema drop")
 	_, err = target.Exec(ctx, `ALTER TABLE public.migrations RENAME COLUMN migration_schema TO schema`)
 	require.NoError(t, err)
@@ -92,13 +92,12 @@ func TestEmbeddedResetIsTransactionalAndLedgerScoped(t *testing.T) {
 		migrate.EmbeddedResetConfirmation(plan.Target))
 	require.NoError(t, err)
 	require.Equal(t, int64(3), result.DeletedLedgerRows)
-	require.NoError(t, target.QueryRow(ctx, `SELECT to_regnamespace('openrails') IS NOT NULL`).Scan(&schemaExists))
+	require.NoError(t, target.QueryRow(ctx, `SELECT to_regnamespace('billing') IS NOT NULL`).Scan(&schemaExists))
 	require.False(t, schemaExists)
 	var retained int
 	require.NoError(t, target.QueryRow(ctx, `SELECT count(*) FROM public.migrations`).Scan(&retained))
-	require.Equal(t, 3, retained, "reset must preserve AuthKit and the other app/schema rows")
-	// Resetting billing leaves its sibling identity schema intact and allows
-	// the standalone startup path to rebuild only OpenRails.
+	require.Equal(t, 2, retained, "reset must preserve the other app/schema rows")
+	// The standalone billing initializer rebuilds only the reset schema.
 	require.NoError(t, migrate.RunPostgres(ctx, cfg))
 	status, err = migrate.InspectPostgres(ctx, cfg)
 	require.NoError(t, err)

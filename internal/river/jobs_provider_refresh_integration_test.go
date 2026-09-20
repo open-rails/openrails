@@ -88,18 +88,18 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 			_, err := dbi.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, '{}'::jsonb, $4)`,
 			productID, "refresh-prod-"+uuid.NewString(), "refresh-tier-"+uuid.NewString(), merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 		      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.subscriptions
+		exec(`INSERT INTO billing.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
 		         entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
 		      VALUES ($1, $2, $3, 'active', 'stripe', $4, $5, $6, $5, '{}'::jsonb, $7, $8, $9)`,
 			subID, priceID, productID, psid, now.Add(-35*24*time.Hour), now.Add(-5*24*time.Hour), customerID, merchantID, pspID)
-		exec(`INSERT INTO openrails.payments
+		exec(`INSERT INTO billing.payments
 		        (id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, purchased_at, merchant_id, customer_id, psp_id)
 		      VALUES ($1, $2, 'stripe', 'ch_original', 999, 999, 'USD', 'completed', $3, $4, $5, $6, $7)`,
 			originalPaymentID, priceID, subID, now.Add(-20*24*time.Hour), merchantID, customerID, pspID)
@@ -145,12 +145,12 @@ func TestProviderRefreshBackfillsEventsAndTerminalState(t *testing.T) {
 
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var status string
-		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&status))
+		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT status FROM billing.subscriptions WHERE id = $1`, subID).Scan(&status))
 		require.Equal(t, "cancelled", status)
 
 		var missingCharge, missingRefund int
-		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE transaction_id = 'ch_missing'`).Scan(&missingCharge))
-		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE transaction_id = 're_missing' AND refunded_payment_id = $1`, originalPaymentID).Scan(&missingRefund))
+		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE transaction_id = 'ch_missing'`).Scan(&missingCharge))
+		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE transaction_id = 're_missing' AND refunded_payment_id = $1`, originalPaymentID).Scan(&missingRefund))
 		require.Equal(t, 1, missingCharge)
 		require.Equal(t, 1, missingRefund)
 		return nil
@@ -218,7 +218,7 @@ func loadProviderRefreshWatermarkForTest(t *testing.T, ctx context.Context, dbi 
 	var watermark time.Time
 	err := dbi.Qx(ctx).QueryRow(ctx, `
 SELECT watermark_at
-  FROM openrails.rail_refresh_watermarks
+  FROM billing.rail_refresh_watermarks
  WHERE merchant_id = $1::uuid
    AND rail = 'stripe'
    AND event_domain = 'events'
@@ -293,7 +293,7 @@ func TestProviderRefreshWatermarksAreScopedPerPSP(t *testing.T) {
 
 		var rows int
 		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.rail_refresh_watermarks
+			`SELECT count(*) FROM billing.rail_refresh_watermarks
 			  WHERE merchant_id = $1 AND rail = 'stripe' AND psp_id IN ($2, $3)`,
 			merchantID, pspA, pspB).Scan(&rows))
 		require.Equal(t, 2, rows, "each PSP owns its own watermark row")
@@ -312,7 +312,7 @@ func TestProviderRefreshWatermarkRejectsAnUnattributedRow(t *testing.T) {
 
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, err := dbi.Qx(ctx).Exec(ctx, `
-INSERT INTO openrails.rail_refresh_watermarks (merchant_id, rail, psp_id, event_domain, watermark_at)
+INSERT INTO billing.rail_refresh_watermarks (merchant_id, rail, psp_id, event_domain, watermark_at)
 VALUES ($1, 'stripe', NULL, 'events', now())`, merchantID)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "psp_id")

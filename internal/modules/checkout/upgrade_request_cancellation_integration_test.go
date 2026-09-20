@@ -104,7 +104,7 @@ func TestUpgradeReceiptsSurviveCanceledRequestOnPinnedConnection(t *testing.T) {
 				require.Zero(t, fx.gateway.saleCalls.Load(), "a cancelled request never submits the next step")
 			}
 
-			_, err = fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE openrails.rail_intents SET next_attempt_at = 'epoch' WHERE id = $1`, row.ID)
+			_, err = fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE billing.rail_intents SET next_attempt_at = 'epoch' WHERE id = $1`, row.ID)
 			require.NoError(t, err)
 			require.NoError(t, app.RunInMerchantConn(fx.ctx, func(ctx context.Context) error {
 				_, err := svc.Intents.(*intents.Runner).RunVerifyOnce(ctx)

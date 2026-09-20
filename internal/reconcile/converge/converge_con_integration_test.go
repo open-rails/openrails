@@ -38,7 +38,7 @@ func TestConverge_ConReferenceSourceReference(t *testing.T) {
 		// freeloader case (derive.entitlement.unjustified); this reference check
 		// keeps the non-live rest — history rows with broken provenance.
 		_, err := appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
+			`INSERT INTO billing.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 			 VALUES ($1,$2,$3,$4,$5,$6,'subscription',$7)`,
 			entID, customer, feature, time.Now().Add(-24*time.Hour), time.Now().Add(-time.Hour), danglingSubID, merchantID)
 		require.NoError(t, err)
@@ -47,10 +47,10 @@ func TestConverge_ConReferenceSourceReference(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
 				merchantID, []string{"entitlement:" + entID.String(), "customer:" + customer.String()})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notifications WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE id=$1`, entID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.notifications WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE id=$1`, entID)
 			return nil
 		})
 	})
@@ -66,13 +66,13 @@ func TestConverge_ConReferenceSourceReference(t *testing.T) {
 
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='consistency.reference.source_reference' AND subject_key=$2`,
+			`SELECT status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND finding_type='consistency.reference.source_reference' AND subject_key=$2`,
 			merchantID, "entitlement:"+entID.String()).Scan(&status))
 		require.Equal(t, "requires_review", status)
 
 		// surface-only: the entitlement itself is untouched.
 		var revokedAt *time.Time
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT revoked_at FROM openrails.entitlements WHERE id=$1`, entID).Scan(&revokedAt))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT revoked_at FROM billing.entitlements WHERE id=$1`, entID).Scan(&revokedAt))
 		require.Nil(t, revokedAt, "CON reference finding does not mutate the entitlement")
 		return nil
 	}))
@@ -86,7 +86,7 @@ func TestConverge_ConReferenceSourceReference(t *testing.T) {
 
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`,
+			`SELECT count(*) FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`,
 			merchantID, "entitlement:"+entID.String()).Scan(&n))
 		require.Equal(t, 1, n, "finding upserted, not duplicated")
 		return nil
@@ -115,12 +115,12 @@ func TestConverge_ConDuplicateProviderCharge(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "dup-prod-"+suffix, "dup-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		ins := func(id uuid.UUID, txn string) {
-			exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, merchant_id, customer_id, psp_id)
+			exec(`INSERT INTO billing.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, merchant_id, customer_id, psp_id)
 			      VALUES ($1,$2,'nmi',$3,9990000,9990000,'USD','completed',$4,$5,$6,$7)`, id, priceID, txn, when, merchantID, customer, pspID)
 		}
 		ins(pay1, "dup-txn-1-"+suffix)
@@ -130,10 +130,10 @@ func TestConverge_ConDuplicateProviderCharge(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='consistency.duplicate.provider_charge' AND evidence->'local'->>'customer_id'=$2`, merchantID, customer.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=ANY($1)`, []uuid.UUID{pay1, pay2})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND finding_type='consistency.duplicate.provider_charge' AND evidence->'local'->>'customer_id'=$2`, merchantID, customer.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE id=ANY($1)`, []uuid.UUID{pay1, pay2})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -148,7 +148,7 @@ func TestConverge_ConDuplicateProviderCharge(t *testing.T) {
 		var status string
 		var ev map[string]any
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, evidence->'local' FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='consistency.duplicate.provider_charge' AND evidence->'local'->>'customer_id'=$2`,
+			`SELECT status, evidence->'local' FROM billing.reconciliation_findings WHERE merchant_id=$1 AND finding_type='consistency.duplicate.provider_charge' AND evidence->'local'->>'customer_id'=$2`,
 			merchantID, customer.String()).Scan(&status, &ev))
 		require.Equal(t, "requires_review", status)
 		require.EqualValues(t, 2, ev["charge_count"], "two charges in the duplicate group")
@@ -156,7 +156,7 @@ func TestConverge_ConDuplicateProviderCharge(t *testing.T) {
 
 		// surface-only: the payments are untouched.
 		var n int
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE id=ANY($1) AND refunded_payment_id IS NULL`, []uuid.UUID{pay1, pay2}).Scan(&n))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE id=ANY($1) AND refunded_payment_id IS NULL`, []uuid.UUID{pay1, pay2}).Scan(&n))
 		require.Equal(t, 2, n, "no payment auto-refunded")
 		return nil
 	}))

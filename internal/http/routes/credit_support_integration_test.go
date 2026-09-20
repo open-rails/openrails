@@ -51,7 +51,7 @@ func TestCreditSupportHTTPGrantListRevokeIsolation(t *testing.T) {
 	database := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
 	admin := dbtest.SharedSuperuserPGXPool(t)
 	otherMerchant := uuid.New()
-	_, err := admin.Exec(ctx, `INSERT INTO openrails.merchants(id,slug,status) VALUES($1,$2,'active')`, otherMerchant, "credit-"+otherMerchant.String())
+	_, err := admin.Exec(ctx, `INSERT INTO billing.merchants(id,slug,status) VALUES($1,$2,'active')`, otherMerchant, "credit-"+otherMerchant.String())
 	require.NoError(t, err)
 	redis := dbtest.NewSharedRedisClient(t)
 	t.Cleanup(func() { _ = redis.Close() })

@@ -63,16 +63,16 @@ func newRepriceFixture(t *testing.T) *repriceFixture {
 	productID := uuid.New()
 	otherProductID := uuid.New()
 	suffix := uuid.NewString()[:8]
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.products (id, merchant_id, key, display_name) VALUES ($1,$2,$3,$3)`,
+	_, err := pool.Exec(ctx, `INSERT INTO billing.products (id, merchant_id, key, display_name) VALUES ($1,$2,$3,$3)`,
 		productID, merchantID, "reprice-product-"+suffix)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, merchant_id, key, display_name) VALUES ($1,$2,$3,$3)`,
+	_, err = pool.Exec(ctx, `INSERT INTO billing.products (id, merchant_id, key, display_name) VALUES ($1,$2,$3,$3)`,
 		otherProductID, merchantID, "reprice-other-product-"+suffix)
 	require.NoError(t, err)
 
 	insertPrice := func(id, productID uuid.UUID, amount int64, currency string, archived bool, key string) {
 		_, e := pool.Exec(ctx, `
-			INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
+			INSERT INTO billing.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
 			VALUES ($1,$2,$3,$4,$5,720,true,$6,$7,$8,$8)`,
 			id, productID, merchantID, amount, currency, archived, key, now)
 		require.NoError(t, e)
@@ -116,13 +116,13 @@ func newRepriceFixture(t *testing.T) *repriceFixture {
 		nmiPSPID:        dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "nmi"),
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.subscription_reprices WHERE merchant_id = $1", merchantID)
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.reprice_batches WHERE merchant_id = $1", merchantID)
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.payments WHERE price_id = ANY($1)",
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.subscription_reprices WHERE merchant_id = $1", merchantID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.reprice_batches WHERE merchant_id = $1", merchantID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.payments WHERE price_id = ANY($1)",
 			[]uuid.UUID{lowPriceID, highPriceID, otherProductPriceID, otherCurrencyPriceID, inactivePriceID})
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.subscriptions WHERE product_id IN ($1,$2)", productID, otherProductID)
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.prices WHERE product_id IN ($1,$2)", productID, otherProductID)
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.products WHERE id IN ($1,$2)", productID, otherProductID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.subscriptions WHERE product_id IN ($1,$2)", productID, otherProductID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.prices WHERE product_id IN ($1,$2)", productID, otherProductID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.products WHERE id IN ($1,$2)", productID, otherProductID)
 	})
 	return f
 }
@@ -142,19 +142,19 @@ func (f *repriceFixture) setNoticeWindowDays(t *testing.T, ctx context.Context, 
 func (f *repriceFixture) createSubscription(t *testing.T, ctx context.Context, priceID uuid.UUID) (subID uuid.UUID, railSubID string) {
 	t.Helper()
 	var productID uuid.UUID
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT product_id FROM openrails.prices WHERE id = $1`, priceID).Scan(&productID))
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT product_id FROM billing.prices WHERE id = $1`, priceID).Scan(&productID))
 
 	subject := uuid.NewString()
 	var customerID uuid.UUID
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`INSERT INTO openrails.customers (merchant_id, id) VALUES ($1,$2) RETURNING id`,
+		`INSERT INTO billing.customers (merchant_id, id) VALUES ($1,$2) RETURNING id`,
 		f.merchantID, subject).Scan(&customerID))
 
 	railSubID = "reprice-rail-sub-" + uuid.NewString()
 	now := f.clock.Now()
 	periodEnd := now.Add(30 * 24 * time.Hour)
 	require.NoError(t, f.pool.QueryRow(ctx, `
-		INSERT INTO openrails.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, psp_id, rail_subscription_id, current_period_starts_at, current_period_ends_at)
+		INSERT INTO billing.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, psp_id, rail_subscription_id, current_period_starts_at, current_period_ends_at)
 		VALUES ($1,$2,$3,$4,'active','nmi',$5,$6,$7,$8) RETURNING id`,
 		f.merchantID, customerID, productID, priceID, f.nmiPSPID, railSubID, now, periodEnd).Scan(&subID))
 	return subID, railSubID
@@ -169,8 +169,8 @@ func (f *repriceFixture) renewalAmount(t *testing.T, ctx context.Context, rail m
 	}))
 	var amount int64
 	require.NoError(t, f.pool.QueryRow(ctx, `
-		SELECT p.amount FROM openrails.payments p
-		JOIN openrails.subscriptions s ON s.id = p.subscription_id
+		SELECT p.amount FROM billing.payments p
+		JOIN billing.subscriptions s ON s.id = p.subscription_id
 		WHERE s.rail_subscription_id = $1
 		ORDER BY p.created_at DESC LIMIT 1`, railSubID).Scan(&amount))
 	return amount

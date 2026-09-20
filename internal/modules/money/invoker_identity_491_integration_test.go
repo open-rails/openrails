@@ -21,7 +21,7 @@ func TestInvokerIdentityAndPayerNaturalKey(t *testing.T) {
 	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	merchantID := dbtest.TestMerchantID.UUID()
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 
 	t.Run("subject_natural_key_is_idempotent_across_issuers", func(t *testing.T) {
 		issuerA := "https://host-one.example"
@@ -40,7 +40,7 @@ func TestInvokerIdentityAndPayerNaturalKey(t *testing.T) {
 		require.NotEqual(t, a1.ID, b1.ID, "distinct subjects -> distinct customers")
 
 		var issuer string
-		require.NoError(t, pool.QueryRow(ctx, "SELECT issuer FROM openrails.customers WHERE merchant_id=$1 AND id=$2", merchantID, subjAID).Scan(&issuer))
+		require.NoError(t, pool.QueryRow(ctx, "SELECT issuer FROM billing.customers WHERE merchant_id=$1 AND id=$2", merchantID, subjAID).Scan(&issuer))
 		require.Equal(t, issuerB, issuer)
 	})
 }

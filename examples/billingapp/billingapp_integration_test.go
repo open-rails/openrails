@@ -120,17 +120,17 @@ func seedMerchantFacts(ctx context.Context, t *testing.T, h *integrationharness.
 	run := uuid.NewString()
 	product, price := uuid.New(), uuid.New()
 	priceKey := "billingapp-" + price.String()
-	exec(`INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Membership')`, product, mid.UUID(), "billingapp-"+product.String())
-	exec(`INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,10000000,'USD',720,true)`, price, mid.UUID(), product, priceKey)
+	exec(`INSERT INTO billing.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Membership')`, product, mid.UUID(), "billingapp-"+product.String())
+	exec(`INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,10000000,'USD',720,true)`, price, mid.UUID(), product, priceKey)
 	ccbillPSP := dbtest.EnsureTestPSP(ctx, t, pool, mid.UUID(), "ccbill")
-	exec(`INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,flex_id,configuration) VALUES($1,$2,$3,$4,'{"form_name":"billingapp-form"}')`, mid.UUID(), price, ccbillPSP, uuid.NewString())
+	exec(`INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,flex_id,configuration) VALUES($1,$2,$3,$4,'{"form_name":"billingapp-form"}')`, mid.UUID(), price, ccbillPSP, uuid.NewString())
 
 	subscriber, method, subscription, nmiPSP := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	start := time.Now().UTC()
-	exec(`INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), subscriber)
-	exec(`INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id,key) VALUES($1,$2,'nmi','test',$3,$3)`, nmiPSP, mid.UUID(), nmiPSP.String())
-	exec(`INSERT INTO openrails.payment_methods(id,merchant_id,customer_id,psp_id,rail,initial_transaction_id,last_four,card_type) VALUES($1,$2,$3,$4,'nmi','billingapp-anchor','4242','visa')`, method, mid.UUID(), subscriber, nmiPSP)
-	exec(`INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,'nmi','active',$7,$8,$9,$10)`,
+	exec(`INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), subscriber)
+	exec(`INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,key) VALUES($1,$2,'nmi','test',$3,$3)`, nmiPSP, mid.UUID(), nmiPSP.String())
+	exec(`INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,initial_transaction_id,last_four,card_type) VALUES($1,$2,$3,$4,'nmi','billingapp-anchor','4242','visa')`, method, mid.UUID(), subscriber, nmiPSP)
+	exec(`INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,'nmi','active',$7,$8,$9,$10)`,
 		subscription, mid.UUID(), subscriber, product, price, nmiPSP, subscription.String(), method, start, start.Add(48*time.Hour))
 
 	debtor := identity.CustomerID(uuid.New())
@@ -162,10 +162,10 @@ func assertDurableFacts(ctx context.Context, t *testing.T, h *integrationharness
 	var intents, sessions int
 	var status string
 	subscription := in.SubscriptionID.UUID()
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.rail_intents WHERE merchant_id=$1 AND subscription_id=$2`, mid.UUID(), subscription).Scan(&intents))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.rail_intents WHERE merchant_id=$1 AND subscription_id=$2`, mid.UUID(), subscription).Scan(&intents))
 	require.Positive(t, intents, "cancellation is a durable provider intent")
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.checkout_sessions WHERE merchant_id=$1 AND price_id=$2`, mid.UUID(), price).Scan(&sessions))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.checkout_sessions WHERE merchant_id=$1 AND price_id=$2`, mid.UUID(), price).Scan(&sessions))
 	require.Equal(t, 1, sessions, "checkout replay creates one session")
-	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM openrails.invoices WHERE merchant_id=$1 AND id=$2`, mid.UUID(), in.InvoiceID).Scan(&status))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM billing.invoices WHERE merchant_id=$1 AND id=$2`, mid.UUID(), in.InvoiceID).Scan(&status))
 	require.Equal(t, "voided", status)
 }

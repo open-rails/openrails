@@ -29,7 +29,7 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
@@ -111,10 +111,10 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -152,7 +152,7 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 	// NO grace entitlement windows are appended (#691 deleted them).
 	var graceCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.entitlements
+		`SELECT count(*) FROM billing.entitlements
 		 WHERE customer_id = $1 AND source_type = $2 AND source_id = $3`,
 		tenantSubjectID, string(models.EntitlementSourceGrace), subID,
 	).Scan(&graceCount))
@@ -163,7 +163,7 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 	var status string
 	var graceEndsAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status, grace_ends_at FROM openrails.subscriptions WHERE id = $1`, subID,
+		`SELECT status, grace_ends_at FROM billing.subscriptions WHERE id = $1`, subID,
 	).Scan(&status, &graceEndsAt))
 	require.Equal(t, "past_due", status)
 	require.NotNil(t, graceEndsAt)
@@ -179,7 +179,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
@@ -291,10 +291,10 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -331,7 +331,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 
 	var gotRevokedAt, gotDeletedAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT revoked_at, deleted_at FROM openrails.entitlements WHERE id = $1",
+		"SELECT revoked_at, deleted_at FROM billing.entitlements WHERE id = $1",
 		graceActiveID).Scan(&gotRevokedAt, &gotDeletedAt))
 	require.NotNil(t, gotRevokedAt)
 	require.Nil(t, gotDeletedAt)
@@ -340,7 +340,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	// soft-deleted rows without any opt-in.
 	var gotFutureDeletedAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT deleted_at FROM openrails.entitlements WHERE id = $1",
+		"SELECT deleted_at FROM billing.entitlements WHERE id = $1",
 		graceFutureID).Scan(&gotFutureDeletedAt))
 	require.NotNil(t, gotFutureDeletedAt)
 }

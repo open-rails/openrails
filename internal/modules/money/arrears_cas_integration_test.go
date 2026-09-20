@@ -55,7 +55,7 @@ func TestChargeOutstanding_MutatedInvoiceUnderLiveOperationFailsClosed(t *testin
 
 	ch := &hookCharger{hook: func() {
 		_, err := pool.Exec(ctx,
-			`UPDATE openrails.invoices SET status = 'voided', amount_due = 0, voided_at = now() WHERE id = $1`, inv.ID)
+			`UPDATE billing.invoices SET status = 'voided', amount_due = 0, voided_at = now() WHERE id = $1`, inv.ID)
 		require.NoError(t, err)
 	}}
 	runner := collectionRunner(dbi, ch, nil)
@@ -71,13 +71,13 @@ func TestChargeOutstanding_MutatedInvoiceUnderLiveOperationFailsClosed(t *testin
 	require.Contains(t, *op.LastFailureReason, "needs repair")
 
 	var settled int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, inv.ID).Scan(&settled))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, inv.ID).Scan(&settled))
 	require.Zero(t, settled, "nothing is recorded against an invoice that no longer matches the frozen snapshot")
 	var transfers int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.ledger_transfers WHERE customer_id = $1 AND transfer_type = 'owed_payment'`, payer.UUID()).Scan(&transfers))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.ledger_transfers WHERE customer_id = $1 AND transfer_type = 'owed_payment'`, payer.UUID()).Scan(&transfers))
 	require.Zero(t, transfers)
 	var pointer *uuid.UUID
-	require.NoError(t, pool.QueryRow(ctx, `SELECT collection_intent_id FROM openrails.invoices WHERE id = $1`, inv.ID).Scan(&pointer))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT collection_intent_id FROM billing.invoices WHERE id = $1`, inv.ID).Scan(&pointer))
 	require.NotNil(t, pointer, "the invoice stays claimed until an operator repairs it")
 	require.Equal(t, op.ID, *pointer)
 

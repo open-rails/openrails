@@ -26,12 +26,12 @@ func TestNMIProviderCutoverAbandon(t *testing.T) {
 	g := newCutoverGateway(t)
 	s := h.StartStandalone("USD", WithConfig(func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeFull }))
 	var prior bool
-	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT enabled FROM openrails.destructive_action_switch`).Scan(&prior))
+	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT enabled FROM billing.destructive_action_switch`).Scan(&prior))
 	t.Cleanup(func() {
-		_, err := h.Pool().Exec(context.WithoutCancel(ctx), `UPDATE openrails.destructive_action_switch SET enabled=$1`, prior)
+		_, err := h.Pool().Exec(context.WithoutCancel(ctx), `UPDATE billing.destructive_action_switch SET enabled=$1`, prior)
 		require.NoError(t, err)
 	})
-	_, err := h.Pool().Exec(ctx, `UPDATE openrails.destructive_action_switch SET enabled=true`)
+	_, err := h.Pool().Exec(ctx, `UPDATE billing.destructive_action_switch SET enabled=true`)
 	require.NoError(t, err)
 	rt := s.App().Runtime
 	rt.CollectionResolver.(*money.MerchantCollectionAdapterBuilder).Endpoints.NMIV5BaseURL = g.Server.URL
@@ -123,7 +123,7 @@ func TestNMIProviderCutoverAbandon(t *testing.T) {
 			require.NoError(t, err)
 			if mode == "lost_target_cancel" || mode == "target_cancel_bare404" || mode == "target_changed" {
 				require.Equal(t, "unknown_needs_verify", result.Status)
-				_, err := h.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET updated_at=now() WHERE id=$1`, p.Sub)
+				_, err := h.Pool().Exec(ctx, `UPDATE billing.subscriptions SET updated_at=now() WHERE id=$1`, p.Sub)
 				require.Error(t, err, "uncertain target cancellation must keep the local fence")
 				g.mu.Lock()
 				if mode == "target_cancel_bare404" {
@@ -140,7 +140,7 @@ func TestNMIProviderCutoverAbandon(t *testing.T) {
 			require.Equal(t, "failed_terminal", result.Status)
 			require.Equal(t, "abandoned", result.Stage)
 			var payload, evidence string
-			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload::text,result_evidence::text FROM openrails.rail_intents WHERE id=$1`, result.ID).Scan(&payload, &evidence))
+			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload::text,result_evidence::text FROM billing.rail_intents WHERE id=$1`, result.ID).Scan(&payload, &evidence))
 			profile := contract.Profile{Name: "rail_intents", Columns: []contract.Column{{Name: "intent_type", Type: "text"}, {Name: "status", Type: "text"}, {Name: "payload", Type: "jsonb"}, {Name: "result_evidence", Type: "jsonb"}}}
 			typ := intents.TypeNMIProviderCutover
 			require.NoError(t, contract.ValidateValues(profile, []*string{&typ, &result.Status, &payload, &evidence}))
@@ -151,9 +151,9 @@ func TestNMIProviderCutoverAbandon(t *testing.T) {
 			require.Zero(t, sourceDeletes)
 			require.Zero(t, activations)
 			var psp uuid.UUID
-			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT psp_id FROM openrails.subscriptions WHERE id=$1`, p.Sub).Scan(&psp))
+			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT psp_id FROM billing.subscriptions WHERE id=$1`, p.Sub).Scan(&psp))
 			require.Equal(t, p.Source, psp)
-			_, err = h.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET updated_at=now() WHERE id=$1`, p.Sub)
+			_, err = h.Pool().Exec(ctx, `UPDATE billing.subscriptions SET updated_at=now() WHERE id=$1`, p.Sub)
 			require.NoError(t, err, "proven abandonment releases the existing mutation fence")
 		})
 	}

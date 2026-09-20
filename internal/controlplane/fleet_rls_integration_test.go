@@ -49,7 +49,7 @@ func TestFleetAggregatesUnderTheEnforcingRole(t *testing.T) {
 	t.Run("failing_before: the same aggregate on the base pool sees nothing", func(t *testing.T) {
 		var payments int64
 		require.NoError(t, appPool.QueryRow(ctx, `
-SELECT count(*) FROM openrails.payments
+SELECT count(*) FROM billing.payments
  WHERE status = 'completed' AND reversal_kind IS NULL AND merchant_id = $1`, mid).Scan(&payments))
 		require.Zero(t, payments,
 			"a GUC-less read of payments returns zero rows and no error — the silence this whole class is made of")
@@ -119,14 +119,14 @@ func seedFleetMerchantWithRevenue(t *testing.T, mid uuid.UUID, sfx string) {
 		require.NoError(t, err, sql)
 	}
 	custID, prodID, priceID, payID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
-	exec(`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, mid, "fleet-"+sfx)
-	exec(`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`, custID, mid)
-	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Fleet', $3)`,
+	exec(`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, mid, "fleet-"+sfx)
+	exec(`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`, custID, mid)
+	exec(`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Fleet', $3)`,
 		prodID, "fleet-prod-"+sfx, mid)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, auto_renew, access_duration_hours)
+	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id, auto_renew, access_duration_hours)
 	      VALUES ($1, $2, 7000000, 'USD', $3, true, 720)`, priceID, prodID, mid)
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, mid, "nmi")
-	exec(`INSERT INTO openrails.payments
+	exec(`INSERT INTO billing.payments
 	        (id, merchant_id, customer_id, price_id, transaction_id, amount, list_amount, currency, status, rail, purchased_at, psp_id)
 	      VALUES ($1, $2, $3, $4, $5, 7000000, 7000000, 'USD', 'completed', 'nmi', $6, $7)`,
 		payID, mid, custID, priceID, "fleet-txn-"+sfx, time.Now().UTC().Add(-time.Hour), pspID)

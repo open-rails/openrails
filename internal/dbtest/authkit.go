@@ -16,5 +16,5 @@ import (
 // migratekit.
 func ApplyAuthKitMigrations(t *testing.T, ctx context.Context, pool *pgxpool.Pool, schema string) {
 	t.Helper()
-	require.NoError(t, authkitembedded.ApplyMigrations(ctx, pool, schema))
+	require.NoError(t, authkitembedded.ApplyMigrations(ctx, pool, schema, authkitembedded.MigrationOptions{River: authkitembedded.RiverFromHost()}))
 }

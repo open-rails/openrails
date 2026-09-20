@@ -34,7 +34,7 @@ import (
 //
 // RunPostgres must refuse such a database instead of reporting success.
 
-const orphanedSchema = "openrails" // the production default; the stacks' schema
+const orphanedSchema = config.DefaultSchema
 
 func seedAppliedMigration(t *testing.T, sqlDB *sql.DB, name string) {
 	t.Helper()

@@ -39,7 +39,7 @@ func countDEKs(t *testing.T, ctx context.Context, pool *db.Pool, m merchant.ID) 
 	var n int
 	require.NoError(t, pool.MerchantTx(ctx, m, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
-			`SELECT count(*) FROM openrails.merchant_deks WHERE merchant_id=$1::uuid`, m.String()).Scan(&n)
+			`SELECT count(*) FROM billing.merchant_deks WHERE merchant_id=$1::uuid`, m.String()).Scan(&n)
 	}))
 	return n
 }
@@ -49,7 +49,7 @@ func seedMerchant(t *testing.T, ctx context.Context, pool *db.Pool) merchant.ID 
 	t.Helper()
 	id := uuid.New()
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		id, "crypto-"+id.String())
 	require.NoError(t, err)
 	return merchant.ID(id)
