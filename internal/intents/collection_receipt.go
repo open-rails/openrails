@@ -57,6 +57,13 @@ func decodeCollectedTerms(in gen.OpenrailsRailIntent) (collectedTerms, error) {
 	case "invoice_collection":
 		p, err := DecodeInvoiceCollectionPayload(in)
 		return collectedTerms{p.Rail, p.Currency, p.AmountMinor, p.Instrument, p.ProviderCustomerRef, in.ID.String()}, err
+	case subscriptions.TypeNMIUpgrade:
+		p, err := subscriptions.DecodeNMIUpgradePayload(in)
+		if err != nil {
+			return collectedTerms{}, err
+		}
+		minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.ProrationAmount)
+		return collectedTerms{"nmi", p.Currency, minor, p.Instrument, "", in.ID.String()}, err
 	case TypeManualRebill:
 		p, err := DecodeManualRebillPayload(in)
 		return collectedTerms{p.Rail, p.Renewal.Currency, p.AmountMinor, p.Instrument, "", p.OrderReference}, err

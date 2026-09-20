@@ -1592,11 +1592,18 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 	if method == nil {
 		return nil, errors.New("upgrade requires a stored payment method")
 	}
+	methodRow, err := s.SubscriptionService.Database().Gen(ctx).GetPaymentMethodByID(ctx, method.ID)
+	if err != nil {
+		return nil, err
+	}
+	if methodRow.CustomerID != customerID || methodRow.PspID != existingSub.PspID || methodRow.Custodian != models.CustodianPSP || methodRow.RailCustomerRef != vault || methodRow.RailMethodRef != billing {
+		return nil, errors.New("upgrade instrument does not match accepted customer and provider account")
+	}
 	end := now.Add(time.Duration(hours) * time.Hour)
 	startDate, _ := buildNMIFutureStartDate(end, now)
-	payload := NMIUpgradePayload{RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: req.Email, OldSubscriptionID: existingSub.ID, OldPriceID: existingSub.PriceID, OldProviderSubscriptionID: existingSub.RailSubscriptionID, NewSubscriptionID: uuidutil.NewV7(), NewPaymentID: uuidutil.NewV7(), PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, PlanID: plan, VaultID: vault, BillingID: billing, PaymentMethodID: method.ID, RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: end, StartDate: startDate, RecurringAnchor: method.StoredCredentialRecurringRef, UnscheduledAnchor: method.StoredCredentialUnscheduledRef, Entitlements: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec), Card: nmi.CardUserData{FirstName: ResolveCheckoutFirstName(req, user), LastName: ResolveCheckoutLastName(req), Address1: DefaultIfEmpty(req.Address1, "N/A"), City: DefaultIfEmpty(req.City, "N/A"), State: DefaultIfEmpty(req.State, "N/A"), Zip: DefaultIfEmpty(req.Zip, "00000"), Country: DefaultIfEmpty(req.Country, "US")}}
+	payload := subscriptions.NMIUpgradePayload{RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: req.Email, OldSubscriptionID: existingSub.ID, OldPriceID: existingSub.PriceID, OldProviderSubscriptionID: existingSub.RailSubscriptionID, NewSubscriptionID: uuidutil.NewV7(), NewPaymentID: uuidutil.NewV7(), PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, PlanID: plan, Instrument: charge.FreezeInstrument(methodRow), PaymentMethodID: method.ID, RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: end, StartDate: startDate, Entitlements: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec), Card: nmi.CardUserData{FirstName: ResolveCheckoutFirstName(req, user), LastName: ResolveCheckoutLastName(req), Address1: DefaultIfEmpty(req.Address1, "N/A"), City: DefaultIfEmpty(req.City, "N/A"), State: DefaultIfEmpty(req.State, "N/A"), Zip: DefaultIfEmpty(req.Zip, "00000"), Country: DefaultIfEmpty(req.Country, "US")}}
 	intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, intents.EnqueueParams{MerchantID: existingSub.MerchantID, Provider: target.Rail, PspID: existingSub.PspID, IntentType: TypeNMIUpgrade, SubscriptionID: &existingSub.ID, PriceID: &newPrice.ID, Payload: payload, IdempotencyKey: key, NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "customer tier upgrade"},
-		func(row gen.OpenrailsRailIntent) error { return tierChangeOwnedBy(row, payload.subject()) })
+		func(row gen.OpenrailsRailIntent) error { return tierChangeOwnedBy(row, nmiUpgradeSubject(payload)) })
 	var conflict *pgconn.PgError
 	if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == tierChangeSubjectConstraint {
 		// Another unresolved tier change owns this predecessor's provider steps.
