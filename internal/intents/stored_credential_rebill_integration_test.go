@@ -12,12 +12,12 @@ import (
 func (fx rebillFixture) recurringRef(t *testing.T) string {
 	t.Helper()
 	var ref string
-	require.NoError(t, fx.db.Pool().QueryRow(context.Background(), `SELECT stored_credential_recurring_ref FROM openrails.payment_methods WHERE id=$1`, fx.payload.PaymentMethodID).Scan(&ref))
+	require.NoError(t, fx.db.Pool().QueryRow(context.Background(), `SELECT stored_credential_recurring_ref FROM billing.payment_methods WHERE id=$1`, fx.payload.PaymentMethodID).Scan(&ref))
 	return ref
 }
 func (fx rebillFixture) setRecurringRef(t *testing.T, ref string) {
 	t.Helper()
-	_, err := fx.db.Pool().Exec(context.Background(), `UPDATE openrails.payment_methods SET stored_credential_recurring_ref=$2 WHERE id=$1`, fx.payload.PaymentMethodID, ref)
+	_, err := fx.db.Pool().Exec(context.Background(), `UPDATE billing.payment_methods SET stored_credential_recurring_ref=$2 WHERE id=$1`, fx.payload.PaymentMethodID, ref)
 	require.NoError(t, err)
 }
 
@@ -46,7 +46,7 @@ func TestManualRebill_MissingScopedAnchorRefusesAdmission(t *testing.T) {
 		t.Run(unscoped, func(t *testing.T) {
 			fx := seedPastDueSubscription(t)
 			fx.setRecurringRef(t, "")
-			_, err := fx.db.Pool().Exec(context.Background(), `UPDATE openrails.payment_methods SET initial_transaction_id=$2 WHERE id=$1`, fx.payload.PaymentMethodID, unscoped)
+			_, err := fx.db.Pool().Exec(context.Background(), `UPDATE billing.payment_methods SET initial_transaction_id=$2 WHERE id=$1`, fx.payload.PaymentMethodID, unscoped)
 			require.NoError(t, err)
 			gateway, client := newFakeNMIRebillGateway(t, fx)
 			handler := NewManualRebillHandler(fx.db, fullModeConfig(), fakeNMIResolver{client: client}, nil)
@@ -54,7 +54,7 @@ func TestManualRebill_MissingScopedAnchorRefusesAdmission(t *testing.T) {
 			require.Error(t, err)
 			require.Zero(t, gateway.saleCalls.Load())
 			var operations int
-			require.NoError(t, fx.db.Pool().QueryRow(context.Background(), `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1`, fx.subID).Scan(&operations))
+			require.NoError(t, fx.db.Pool().QueryRow(context.Background(), `SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1`, fx.subID).Scan(&operations))
 			require.Zero(t, operations, "an incomplete agreement is not accepted and later refreshed")
 		})
 	}

@@ -57,7 +57,8 @@ func applyDirectoryFunctionMigration(t *testing.T, ctx context.Context, pool *pg
 		"customer_merchant_ids_for_subject",
 	)
 	require.NoError(t, err)
-	sql = postgresmigrations.RewriteSchema(sql, "billing")
+	sql, err = postgresmigrations.RewriteSchema(sql, "billing")
+	require.NoError(t, err)
 	_, err = pool.Exec(ctx, sql)
 	require.NoError(t, err)
 }

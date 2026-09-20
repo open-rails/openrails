@@ -31,7 +31,7 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 	suffix := uuid.NewString()
 
 	_, err = qx.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status)
+		`INSERT INTO billing.merchants (id, slug, status)
 		 VALUES ($1, $2, 'active'), ($3, $4, 'active')`,
 		ownerID, "scope-owner-"+suffix, otherID, "scope-other-"+suffix)
 	require.NoError(t, err)
@@ -39,26 +39,26 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 	customerA, customerB := uuid.New(), uuid.New()
 	productID, priceID, pspID := uuid.New(), uuid.New(), uuid.New()
 	_, err = qx.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id)
+		`INSERT INTO billing.customers (id, merchant_id)
 		 VALUES ($1, $3), ($2, $3)`, customerA, customerB, ownerID)
 	require.NoError(t, err)
 	_, err = qx.Exec(ctx,
-		`INSERT INTO openrails.products (id, key, display_name, merchant_id)
+		`INSERT INTO billing.products (id, key, display_name, merchant_id)
 		 VALUES ($1, $2, 'Scope predicate product', $3)`, productID, "scope-product-"+suffix, ownerID)
 	require.NoError(t, err)
 	_, err = qx.Exec(ctx,
-		`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, key)
+		`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id, key)
 		 VALUES ($1, $2, 1000000, 'USD', $3, $4)`, priceID, productID, ownerID, "scope-price-"+suffix)
 	require.NoError(t, err)
 	_, err = qx.Exec(ctx,
-		`INSERT INTO openrails.psps (id, merchant_id, rail, account_id)
+		`INSERT INTO billing.psps (id, merchant_id, rail, account_id)
 		 VALUES ($1, $2, 'nmi', $3)`, pspID, ownerID, "scope-account-"+suffix)
 	require.NoError(t, err)
 
 	t.Run("generated mutations", func(t *testing.T) {
 		paymentMethodID := uuid.New()
 		_, err := qx.Exec(ctx,
-			`INSERT INTO openrails.payment_methods
+			`INSERT INTO billing.payment_methods
 			   (id, merchant_id, customer_id, psp_id, rail, initial_transaction_id, last_four, expiry_date)
 			 VALUES ($1, $2, $3, $4, 'nmi', $5, '1111', '01/29')`,
 			paymentMethodID, ownerID, customerA, pspID, "scope-txn-"+suffix)
@@ -73,7 +73,7 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 		require.Zero(t, n)
 		var lastFour, expiry string
 		require.NoError(t, qx.QueryRow(ctx,
-			`SELECT last_four, expiry_date FROM openrails.payment_methods WHERE id = $1`, paymentMethodID,
+			`SELECT last_four, expiry_date FROM billing.payment_methods WHERE id = $1`, paymentMethodID,
 		).Scan(&lastFour, &expiry))
 		require.Equal(t, "1111", lastFour)
 		require.Equal(t, "01/29", expiry)
@@ -83,7 +83,7 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, 1, n)
 		require.NoError(t, qx.QueryRow(ctx,
-			`SELECT last_four, expiry_date FROM openrails.payment_methods WHERE id = $1`, paymentMethodID,
+			`SELECT last_four, expiry_date FROM billing.payment_methods WHERE id = $1`, paymentMethodID,
 		).Scan(&lastFour, &expiry))
 		require.Equal(t, "4242", lastFour)
 		require.Equal(t, "12/30", expiry)
@@ -92,7 +92,7 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 		dueAt := now.Add(-time.Hour)
 		claimSubID, scheduleSubID := uuid.New(), uuid.New()
 		_, err = qx.Exec(ctx,
-			`INSERT INTO openrails.subscriptions
+			`INSERT INTO billing.subscriptions
 			   (id, merchant_id, customer_id, product_id, price_id, status, rail, psp_id,
 			    rail_subscription_id, current_period_ends_at, next_retry_at)
 			 VALUES
@@ -111,7 +111,7 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 		require.Equal(t, accepted.ID, owned.ID)
 		var nextRetry time.Time
 		var lastRetry *time.Time
-		require.NoError(t, qx.QueryRow(ctx, `SELECT next_retry_at, last_retry_at FROM openrails.subscriptions WHERE id = $1`, claimSubID).Scan(&nextRetry, &lastRetry))
+		require.NoError(t, qx.QueryRow(ctx, `SELECT next_retry_at, last_retry_at FROM billing.subscriptions WHERE id = $1`, claimSubID).Scan(&nextRetry, &lastRetry))
 		require.True(t, dueAt.Equal(nextRetry), "operation ownership never writes a second dunning lease")
 		require.Nil(t, lastRetry)
 
@@ -124,7 +124,7 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 		require.Zero(t, n)
 		var scheduled *time.Time
 		require.NoError(t, qx.QueryRow(ctx,
-			`SELECT next_retry_at FROM openrails.subscriptions WHERE id = $1`, scheduleSubID,
+			`SELECT next_retry_at FROM billing.subscriptions WHERE id = $1`, scheduleSubID,
 		).Scan(&scheduled))
 		require.Nil(t, scheduled)
 
@@ -133,7 +133,7 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, 1, n)
 		require.NoError(t, qx.QueryRow(ctx,
-			`SELECT next_retry_at FROM openrails.subscriptions WHERE id = $1`, scheduleSubID,
+			`SELECT next_retry_at FROM billing.subscriptions WHERE id = $1`, scheduleSubID,
 		).Scan(&scheduled))
 		require.NotNil(t, scheduled)
 		require.True(t, scheduleAt.Equal(*scheduled))
@@ -147,7 +147,7 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 		statuses := []string{StatusSucceeded, StatusSucceeded, StatusSucceeded, StatusFailedTerminal, StatusPending}
 		for i, id := range ids {
 			_, err := qx.Exec(ctx,
-				`INSERT INTO openrails.rail_intents
+				`INSERT INTO billing.rail_intents
 				   (id, merchant_id, rail, psp_id, intent_type, idempotency_key, status, origin,
 				    payload, result_evidence, executed_at)
 				 VALUES ($1, $2, 'nmi', $3, 'scope_test', $4, $5, 'system', $6, $7,
@@ -160,7 +160,7 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 			t.Helper()
 			var gotPayload, gotEvidence []byte
 			require.NoError(t, qx.QueryRow(ctx,
-				`SELECT payload, result_evidence FROM openrails.rail_intents WHERE id = $1`, id,
+				`SELECT payload, result_evidence FROM billing.rail_intents WHERE id = $1`, id,
 			).Scan(&gotPayload, &gotEvidence))
 			if wantPayload == "" {
 				require.Nil(t, gotPayload)

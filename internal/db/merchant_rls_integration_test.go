@@ -68,7 +68,8 @@ func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Contex
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	require.NoError(t, err)
 	for i := range migrations {
-		migrations[i].Content = postgresmigrations.RewriteSchema(migrations[i].Content, config.DefaultSchema)
+		migrations[i].Content, err = postgresmigrations.RewriteSchema(migrations[i].Content, config.DefaultSchema)
+		require.NoError(t, err)
 	}
 	m := migratekit.NewPostgres(sqlDB, config.MigratekitApp).WithSchema(config.DefaultSchema)
 	require.NoError(t, m.ApplyMigrations(ctx, migrations))
