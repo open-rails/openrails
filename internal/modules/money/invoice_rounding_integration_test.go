@@ -59,6 +59,12 @@ func TestInvoiceCollectionRoundingConservesCustomerFunds(t *testing.T) {
 			require.NoError(t, err)
 			invoice, err := svc.FinalizeInvoice(ctx, payer, tc.currency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 			require.NoError(t, err)
+			t.Cleanup(func() {
+				// The deliberate overflow refusal must not become scheduled work for
+				// another test's fleet-wide invoice sweep in the shared database.
+				_, err := pool.Exec(context.WithoutCancel(ctx), `UPDATE openrails.invoices SET collection_method='send_invoice' WHERE merchant_id=$1 AND id=$2`, mid.UUID(), invoice.ID)
+				require.NoError(t, err)
+			})
 			gateway, server := newFakeNMIReceiptGateway(t)
 			plane := &money.MerchantCollectionAdapterBuilder{Config: storeCollectionTestConfig(), DB: database, MerchantsFn: func() *merchants.Service { return msvc },
 				Endpoints: money.CollectionEndpoints{NMIDirectPostURL: server.URL, NMIQueryURL: server.URL, NMIV5BaseURL: server.URL}}
