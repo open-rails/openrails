@@ -134,6 +134,9 @@ func (r CollectedReceipt) Validate(in gen.OpenrailsRailIntent) error {
 		if facts.ChargeID == "" || !facts.ChargePaid || !facts.ChargeCaptured || facts.ChargeStatus != "succeeded" || facts.ChargedAmount != int64(p.AmountMinor) || facts.ChargeCurrency != p.Currency || facts.ChargeCustomerID != p.ProviderCustomerRef {
 			return errors.New("Stripe captured charge does not match frozen collection")
 		}
+		if (facts.PaymentIntentID != "" && facts.ChargePaymentIntentID != facts.PaymentIntentID) || (facts.ChargeInvoiceID != "" && facts.ChargeInvoiceID != facts.InvoiceID) || (facts.PaymentIntentID == "" && facts.ChargeInvoiceID == "") {
+			return errors.New("captured Stripe charge is not linked to this invoice payment")
+		}
 		if facts.InvoiceID == "" || facts.CustomerID != p.ProviderCustomerRef || facts.PaymentMethodID != p.Instrument.RailMethodRef {
 			return errors.New("Stripe receipt does not match frozen customer and payment method")
 		}

@@ -85,6 +85,24 @@ func TestQualifiedCollectionReceiptCustody(t *testing.T) {
 	retained, err := store.RetainCollectedReceipt(e.ctx, operation, receipt)
 	require.NoError(t, err)
 	require.Equal(t, candidate.TransactionID, retained.TransactionID())
+	custodyOnly, err := store.Get(e.ctx, e.op)
+	require.NoError(t, err)
+	require.Empty(t, intents.EvidenceString(custodyOnly, "transaction_id"))
+	e.gateway.mu.Lock()
+	beforeReads := e.gateway.queryCalls
+	delete(e.gateway.saleForOrder, e.op.String())
+	e.gateway.mu.Unlock()
+	_, err = e.pool.Exec(e.ctx, `UPDATE openrails.rail_intents SET claimed_until=NULL WHERE id=$1`, e.op)
+	require.NoError(t, err)
+	_, err = e.runner.Resolve(e.ctx, e.op, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "provider search later disappeared"})
+	require.ErrorIs(t, err, intents.ErrResolutionRejected)
+	require.Contains(t, err.Error(), "qualified receipt")
+	e.gateway.mu.Lock()
+	afterReads := e.gateway.queryCalls
+	e.gateway.mu.Unlock()
+	require.Equal(t, beforeReads, afterReads, "receipt custody must reject nonexecution before any new provider read")
+	e.gateway.orderSale(e.op.String(), candidate.TransactionID)
+
 	for _, write := range []func() error{
 		func() error {
 			return store.RecordProgress(e.ctx, e.op, map[string]any{"qualified_receipt": map[string]any{"transaction_id": "forged"}})

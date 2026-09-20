@@ -40,9 +40,10 @@ func TestNMICollectionRefusesUnestablishedCurrency(t *testing.T) {
 	// An unconfigured adapter: the currency gate must answer before it does.
 	adapter := &NMICollectionAdapter{Charger: nmidirect.New((*nmi.NMIClient)(nil))}
 	method := gen.OpenrailsPaymentMethod{
-		ID:              uuid.New(),
-		Rail:            "nmi",
-		RailCustomerRef: "vault-123",
+		ID:                             uuid.New(),
+		Rail:                           "nmi",
+		RailCustomerRef:                "vault-123",
+		StoredCredentialUnscheduledRef: "approved-unscheduled",
 	}
 
 	for _, currency := range []string{"", "   ", "XXX", "usdd"} {
@@ -68,9 +69,10 @@ func TestCustodianProxyCollectionRefusesUnestablishedCurrency(t *testing.T) {
 
 	adapter := &CustodianProxyCollectionAdapter{Charger: nmiproxy.New(nil, nmiproxy.GatewayConfig{})}
 	method := gen.OpenrailsPaymentMethod{
-		ID:            uuid.New(),
-		Rail:          nmiproxy.Rail,
-		RailMethodRef: "bt-token-123",
+		ID:                             uuid.New(),
+		Rail:                           nmiproxy.Rail,
+		RailMethodRef:                  "bt-token-123",
+		StoredCredentialUnscheduledRef: "approved-unscheduled",
 	}
 
 	for _, currency := range []string{"", "   ", "XXX"} {

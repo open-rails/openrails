@@ -429,42 +429,23 @@ func TestInvoiceCollection_OperatorResolutionFromExactReceipt(t *testing.T) {
 	require.Equal(t, 1, logged, "the resolution is recorded with its actor")
 }
 
-func TestInvoiceCollection_OperatorNonExecutionMakesInvoiceDueAgain(t *testing.T) {
-	e := newCollectionEnv(t, string(models.RailNMI))
-	// The request never reached the gateway: an error after a submit that
-	// recorded nothing at the "provider".
-	vanished := &fakeCharger{submitErrors: 1}
-	_, err := e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, vanished, nil), 0)
-	require.NoError(t, err)
-	op := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
-	require.Equal(t, intents.StatusUnknownNeedsVerify, op.Status)
-	delete(vanished.landed, op.ID.String())
-
-	// Non-execution is refused while the provider shows the sale...
-	contradicted := &fakeCharger{landed: map[string]string{op.ID.String(): "tx_seen"}}
-	_, err = collectionRunner(e.db, contradicted, contradicted).Resolve(e.ctx, op.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "not in portal"})
+func TestInvoiceCollection_EmptyNMISearchCannotReleasePossibleCharge(t *testing.T) {
+	e := nmiReceiptScenario(t)
+	// An authenticated empty order search still cannot exclude a charge that
+	// has not reached the provider's query view. An operator reason is not proof.
+	_, err := e.runner.Resolve(e.ctx, e.op, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "gateway search is empty"})
 	require.ErrorIs(t, err, intents.ErrResolutionRejected)
-
-	// ...and accepted when it does not: the attempt fails without a decline
-	// and the invoice is due again now under a fresh operation.
-	empty := &fakeCharger{}
-	resolved, err := collectionRunner(e.db, empty, empty).Resolve(e.ctx, op.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "gateway log shows no request"})
+	require.Contains(t, err.Error(), "cannot prove nonexecution")
+	operation := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, operation.Status)
+	invoice := e.invoiceRow(t)
+	require.NotNil(t, invoice.CollectionIntentID)
+	require.Equal(t, e.op, *invoice.CollectionIntentID)
+	require.Equal(t, []string{"attempted"}, e.attemptStatuses(t))
+	count, err := e.svc.ChargeOutstanding(e.ctx, e.runner, 0)
 	require.NoError(t, err)
-	require.Equal(t, intents.StatusFailedTerminal, resolved.Status)
-	inv := e.invoiceRow(t)
-	require.Nil(t, inv.CollectionIntentID)
-	require.Equal(t, int32(0), inv.CollectionFailureCount, "non-execution is not a decline")
-	require.NotNil(t, inv.NextCollectionAttemptAt)
-	require.Equal(t, []string{"failed"}, e.attemptStatuses(t))
-
-	again := &fakeCharger{}
-	n, err := e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, again, again), 0)
-	require.NoError(t, err)
-	require.Equal(t, 1, n)
-	second := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
-	require.NotEqual(t, op.ID, second.ID)
-	require.Equal(t, second.ID.String(), again.charges[0].IdempotencyKey, "the resend is a new operation with a new identity")
-	e.requireSettledOnce(t)
+	require.Zero(t, count)
+	require.Len(t, e.gateway.sentOrderIDs(), 1, "absence never authorizes a second provider submission")
 }
 
 // TestInvoiceCollection_OperatorReleasesNeverSubmittedOperation: an operation

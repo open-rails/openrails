@@ -104,13 +104,8 @@ func (h *hookCharger) ReadCollectionReceipt(ctx context.Context, in gen.Openrail
 	}
 	return intents.CollectedReceipt{}, false, nil
 }
-func (h *hookCharger) VerifyCollectionCharge(context.Context, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
-	return money.CollectionVerifyResult{}, nil
-}
-func (h *hookCharger) ConfirmCollectionReceipt(context.Context, string, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
-	return money.CollectionVerifyResult{}, fmt.Errorf("use qualified read")
-}
-func (h *hookCharger) ConfirmCollectionNotExecuted(context.Context, money.CollectionReceiptExpectation) error {
+
+func (h *hookCharger) ConfirmCollectionNotExecuted(context.Context, gen.OpenrailsRailIntent) error {
 	return fmt.Errorf("fixture does not attest nonexecution")
 }
 
@@ -125,13 +120,8 @@ func (f *fakeCollectionAdapter) ReadCollectionReceipt(ctx context.Context, in ge
 	}
 	return intents.CollectedReceipt{}, false, nil
 }
-func (f *fakeCollectionAdapter) VerifyCollectionCharge(context.Context, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
-	return money.CollectionVerifyResult{}, fmt.Errorf("use qualified read")
-}
-func (f *fakeCollectionAdapter) ConfirmCollectionReceipt(context.Context, string, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
-	return money.CollectionVerifyResult{}, fmt.Errorf("use qualified read")
-}
-func (f *fakeCollectionAdapter) ConfirmCollectionNotExecuted(context.Context, money.CollectionReceiptExpectation) error {
+
+func (f *fakeCollectionAdapter) ConfirmCollectionNotExecuted(context.Context, gen.OpenrailsRailIntent) error {
 	return fmt.Errorf("fixture does not attest nonexecution")
 }
 
@@ -148,12 +138,7 @@ func (r standaloneCollectionReader) ReadCollectionReceipt(ctx context.Context, i
 	}
 	return intents.ReadNMICollectionReceipt(ctx, in, r.nmi, reference)
 }
-func (r standaloneCollectionReader) VerifyCollectionCharge(context.Context, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
-	return money.CollectionVerifyResult{}, fmt.Errorf("use qualified read")
-}
-func (r standaloneCollectionReader) ConfirmCollectionReceipt(context.Context, string, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
-	return money.CollectionVerifyResult{}, fmt.Errorf("use qualified read")
-}
-func (r standaloneCollectionReader) ConfirmCollectionNotExecuted(context.Context, money.CollectionReceiptExpectation) error {
+
+func (r standaloneCollectionReader) ConfirmCollectionNotExecuted(context.Context, gen.OpenrailsRailIntent) error {
 	return fmt.Errorf("fixture does not attest nonexecution")
 }

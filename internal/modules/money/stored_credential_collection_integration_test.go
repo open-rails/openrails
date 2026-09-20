@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"sync"
 	"testing"
 
@@ -88,22 +87,20 @@ func TestChargeOutstanding_StoredCredentialMITRequiresScopedAnchor(t *testing.T)
 				}
 				_, err := pool.Exec(ctx, `UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref=$2,initial_transaction_id=$3 WHERE id=$1`, pm, anchor, initial)
 				require.NoError(t, err)
-				invoice := seedArrearsInvoice(t, svc, ctx, payer, pm)
+				if !scoped {
+					err := svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm)
+					require.ErrorIs(t, err, money.ErrCollectionPaymentMethodInvalid)
+					require.ErrorContains(t, err, "approved unscheduled stored-credential agreement")
+					require.Empty(t, fake.forms, "designation never creates a charge to fabricate an agreement")
+					return
+				}
+				seedArrearsInvoice(t, svc, ctx, payer, pm)
 				plane := &money.MerchantCollectionAdapterBuilder{Config: storeCollectionTestConfig(), DB: dbi, MerchantsFn: func() *merchants.Service { return msvc }, Endpoints: money.CollectionEndpoints{NMIDirectPostURL: server.URL, NMIQueryURL: server.URL, NMIV5BaseURL: server.URL}}
 				charger := money.NewScopedCharger(dbi, nil)
 				charger.SetAdapterResolver(plane)
 				n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, charger, plane), 0)
 				require.NoError(t, err)
-				if !scoped {
-					require.Zero(t, n)
-					fake.mu.Lock()
-					require.Empty(t, fake.forms, "no provider sale without an approved agreement reference")
-					fake.mu.Unlock()
-					op := latestCollectionIntent(t, pool, ctx, invoice)
-					require.NotNil(t, op.LastFailureReason)
-					require.True(t, strings.Contains(*op.LastFailureReason, "unscheduled credential reference"))
-					return
-				}
+
 				require.Equal(t, 1, n)
 				form := fake.form(t, 0)
 				require.Equal(t, "merchant", form.Get("initiated_by"))

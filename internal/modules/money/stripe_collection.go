@@ -106,12 +106,3 @@ func stripeDefinitiveRefusal(err error) (ChargeResult, bool) {
 	message := apiErr.Error()
 	return ChargeResult{Rail: string(models.RailStripe), Declined: true, FailureCode: &code, FailureMessage: &message}, true
 }
-
-func stripeReceiptTransactionID(r subscriptions.StripeCollectionReceipt) string {
-	for _, id := range []string{r.ChargeID, r.PaymentIntentID, r.InvoiceID} {
-		if id = strings.TrimSpace(id); id != "" {
-			return id
-		}
-	}
-	return ""
-}

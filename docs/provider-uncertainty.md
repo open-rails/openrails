@@ -38,9 +38,8 @@ operator with `openrails intents resolve`, never by resending. A
 operation (sale: approved sale of the amount on the vault; enrollment: live
 subscription on the vault and plan, unowned locally; refund: approved refund of
 the reserved amount on the original sale's vault) before local effects commit
-through the normal receipt path. `--not-executed` records provider-confirmed
-non-execution and takes the type's definitive-refusal path; it is refused while
-the operation's exact order reference shows a successful sale. Rebills and
+through the normal receipt path. `--not-executed` requires the operation type's supported non-execution proof; it is not an override of provider uncertainty.
+For invoice collection, an empty NMI search after possible submission is insufficient. Rebills and
 custodian sales accept only non-execution because their receipts correlate
 exactly by order reference. Every resolution records actor and reason on the
 operation and in the mutation log. NMI subscription enrollment follows the
@@ -61,6 +60,13 @@ matches them, and every receipt read (verifier, `--receipt`, `--not-executed`)
 uses the frozen account and the frozen custody's rule, never the method's
 current row. An unresolved operation therefore blocks an or#297 custody remap
 of the instrument it names (`operation_unresolved`) until it resolves.
+Automatic NMI collection requires an approved unscheduled stored-credential
+reference. Creating a vault record alone does not establish that agreement:
+designating an unanchored card as the collection method is refused. A prior
+customer-present charge can establish the scoped reference; an unscoped initial
+transaction id is not a fallback. Customer-present invoice onboarding and its
+subsequent off-session workflow are a separate #809 acceptance item.
+
 A pre-submission failure (unarmed account, missing secret, parked instrument)
 parks the operation without consuming an attempt. After the write-ahead fence every adapter error is a possible
 submission: NMI-family operations converge only from an exact receipt —
@@ -75,22 +81,42 @@ so nothing it creates can be swept into another invoice; a parsed refusal
 becomes definitive only after every draft/open invoice and pending item
 stamped with the operation key has been deleted or voided (a failed cleanup
 keeps the outcome unknown). A confirmed charge whose local settlement fails
-keeps its transaction id on the operation and settles from it after restart;
+first commits its qualified receipt on the operation and settles from that receipt after restart;
 an invoice that no longer accepts the frozen snapshot fails closed (nothing
 written, pointer kept) until an operator repairs it.
 The autonomous verifier and `intents resolve --receipt` share that one
 exact-receipt path (`--receipt` additionally requires the named transaction
-to be the order reference's sale); for Stripe the paid invoice — returned by
-the sequence or named by the operator — must carry the operation key and be
-paid in the frozen currency for exactly the frozen amount. A provider object
+to be the order reference's sale). Stripe also reads the invoice's actual captured
+charge and checks its customer, payment method, amount and currency. A paid
+invoice or its default payment method alone is not proof of which card paid it.
+Both readers are bound to the credential plane's immutable merchant/account;
+callers cannot label a reader for account B as account A.
+
+The NMI receipt independently proves account, order, vault, approved sale,
+amount and currency. NMI does not expose a documented historical billing-id
+link in this receipt. Shared-vault billing-id is frozen and sent exactly, and
+local drift before submission refuses the charge, but the receipt does not
+independently prove that billing record. Current vault contents or an unqualified
+card hash are not substituted for missing historical evidence.
+
+Qualified receipt custody is insert-once against the canonical accepted payload.
+A bare transaction id remains only a candidate; it cannot finalize a payment.
+Generic progress writes cannot replace the receipt, and pruning and portable
+archives retain and revalidate its binding. Receipt custody categorically
+precludes non-execution, including a crash before the safe result projection
+was written. Computed invoice dues round up to provider minor units; the exact
+due is settled and the remainder becomes spendable purchased credit in the same
+local transaction. A provider object
 under the operation's identity that contradicts the frozen facts settles
 nothing: it is retained as `provider_contradiction` evidence, the operation
 stays unknown and `--not-executed` is refused until an operator repairs from
 the provider record.
-`--not-executed` refuses while the provider shows the operation's charge (for
-Stripe it first deletes/voids the operation's unpaid objects and refuses on a
-paid one), then fails the attempt without a decline and makes the invoice due
-again. A submission refused because the instrument no longer matches the
+For a submitted NMI invoice collection, `--not-executed` refuses even when the
+order search is empty: query visibility is not authoritative non-execution.
+The invoice remains owned by its unresolved operation, so no new charge is
+admitted. Stripe can close after deleting/voiding the scoped operation's unpaid
+objects and reading back that none remains chargeable; a paid object or a
+retained receipt always refuses. A submission refused because the instrument no longer matches the
 frozen one is provable non-execution (`instrument_changed`): the attempt fails
 without a decline and the invoice is due again, so the next collection freezes
 the instrument as it now is. A `pending` operation that never crossed its

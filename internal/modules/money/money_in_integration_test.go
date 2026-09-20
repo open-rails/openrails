@@ -122,40 +122,8 @@ func (f *fakeCharger) chargeCount() int {
 	return len(f.charges)
 }
 
-// VerifyCollectionCharge answers the NMI-style order search from what landed.
-// Exact-read binding of the found sale is the credential plane's job
-// (MerchantCollectionAdapterBuilder), proven against the real gateway fake in
-// invoice_collection_nmi_receipt_integration_test.go.
-func (f *fakeCharger) VerifyCollectionCharge(_ context.Context, expect money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	txn, ok := f.landed[expect.OperationKey]
-	return money.CollectionVerifyResult{Supported: true, Settled: ok, TransactionID: txn}, nil
-}
-
-// ConfirmCollectionReceipt confirms any charge that landed at the fake
-// provider, deliberately NOT bound to the operation key: binding a receipt to
-// the operation's identity is the credential plane's job
-// (MerchantCollectionAdapterBuilder), proven against real gateway fakes in
-// invoice_collection_nmi_receipt_integration_test.go.
-func (f *fakeCharger) ConfirmCollectionReceipt(_ context.Context, providerReference string, _ money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, txn := range f.landed {
-		if txn == providerReference {
-			return money.CollectionVerifyResult{Supported: true, Settled: true, TransactionID: txn}, nil
-		}
-	}
-	return money.CollectionVerifyResult{}, fmt.Errorf("transaction %s does not exist", providerReference)
-}
-
-func (f *fakeCharger) ConfirmCollectionNotExecuted(_ context.Context, expect money.CollectionReceiptExpectation) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if txn, ok := f.landed[expect.OperationKey]; ok {
-		return fmt.Errorf("provider shows successful sale %s", txn)
-	}
-	return nil
+func (f *fakeCharger) ConfirmCollectionNotExecuted(_ context.Context, in gen.OpenrailsRailIntent) error {
+	return errors.New("scripted provider has no authoritative nonexecution evidence")
 }
 
 type fakeCollectionAdapter struct {
