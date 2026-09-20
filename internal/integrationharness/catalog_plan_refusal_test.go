@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/pkg/catalog"
 )
 
-func TestCatalogPublishRefusesAmbiguousPriceKeys(t *testing.T) {
+func TestCatalogPublishPriceKeyPlanningOverHTTP(t *testing.T) {
 	h := New(t, t.Context())
 	surface := h.StartStandalone("USD")
 	owned := surface.ProvisionOwnedMerchant("catalog-collision-" + uuid.NewString()[:8])
@@ -39,4 +39,32 @@ func TestCatalogPublishRefusesAmbiguousPriceKeys(t *testing.T) {
 	products, err := client.ListProducts(t.Context(), openrails.ProductFilter{})
 	require.NoError(t, err)
 	require.Empty(t, products.Items, "bad input cannot install a partial catalog")
+	// Disambiguate, publish, then rename a key without changing any price
+	// substance. The planner must report what apply would actually mutate.
+	m.Products[0].Prices[0].Key = "standard"
+	m.Products[0].Prices[1].Key = "launch"
+	publish := func(body map[string]any) *catalog.ApplyPlan {
+		t.Helper()
+		status, raw := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, body)
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var out struct {
+			Plan catalog.ApplyPlan `json:"plan"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &out))
+		return &out.Plan
+	}
+	publish(map[string]any{"catalog": m, "insert": true})
+	original, err := client.GetPriceByKey(t.Context(), "standard")
+	require.NoError(t, err)
+	m.Products[0].Prices[0].Key = "renamed"
+	planned := publish(map[string]any{"catalog": m})
+	require.True(t, planned.HasChanges(), "key-only relabel is a real mutation")
+	publish(map[string]any{"catalog": m, "overwrite": true})
+	renamed, err := client.GetPriceByKey(t.Context(), "renamed")
+	require.NoError(t, err)
+	require.Equal(t, original.ID, renamed.ID)
+	_, err = client.GetPriceByKey(t.Context(), "standard")
+	require.ErrorIs(t, err, openrails.ErrNotFound)
+	require.False(t, publish(map[string]any{"catalog": m}).HasChanges())
+
 }
