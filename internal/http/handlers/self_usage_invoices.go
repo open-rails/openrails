@@ -75,6 +75,11 @@ func GetMyInvoice(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, err.Error())
 		return
 	}
+	inv.Recovery, err = svc.InvoiceRecovery(r.Request.Context(), payer, id)
+	if err != nil {
+		r.InternalError("invoice recovery unavailable", err)
+		return
+	}
 	r.SuccessJSON(inv)
 }
 

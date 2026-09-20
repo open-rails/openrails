@@ -14,7 +14,7 @@ import (
 
 func TestCollectionReceiptBindingPreservesLargeAcceptedIntegers(t *testing.T) {
 	psp := uuid.New()
-	payload := InvoiceCollectionPayload{InvoiceID: uuid.New(), CustomerID: uuid.New(), AttemptID: uuid.New(), PaymentMethodID: uuid.New(), Rail: "nmi", Currency: "USD", Amount: 9_007_199_254_740_992, Instrument: charge.FrozenInstrument{PSPID: psp, Custodian: "psp", RailCustomerRef: "vault"}}
+	payload := InvoiceCollectionPayload{Initiator: charge.InitiatorMerchant, InvoiceID: uuid.New(), CustomerID: uuid.New(), AttemptID: uuid.New(), PaymentMethodID: uuid.New(), Rail: "nmi", Currency: "USD", Amount: 9_007_199_254_740_992, Instrument: charge.FrozenInstrument{PSPID: psp, Custodian: "psp", RailCustomerRef: "vault"}}
 	minor, err := moneyutil.NativeToRailMinor(payload.Currency, payload.Amount)
 	require.NoError(t, err)
 	payload.AmountMinor = minor

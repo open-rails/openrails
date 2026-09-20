@@ -57,12 +57,18 @@ type CollectionFixture struct {
 // SeedPastDueInvoice arms a loopback NMI account, vaults an instrument for a
 // fresh arrears customer, issues an invoice for amount and marks it past due.
 func (h *Harness) SeedPastDueInvoice(rt *app.Runtime, mid merchant.ID, currency string, amount int64) CollectionFixture {
+	return h.SeedPastDueInvoiceForCustomer(rt, mid, uuid.New(), currency, amount)
+}
+
+// SeedPastDueInvoiceForCustomer binds the workflow to an independently verified
+// identity, so customer-authenticated Client tests need no invented principal.
+func (h *Harness) SeedPastDueInvoiceForCustomer(rt *app.Runtime, mid merchant.ID, customer uuid.UUID, currency string, amount int64) CollectionFixture {
 	h.t.Helper()
 	psp := h.ArmLoopbackNMI(rt, mid)
-	customer, method := uuid.New(), uuid.New()
+	method := uuid.New()
 	vault := "vault-" + method.String()[:8]
 	pool := h.sharedPool()
-	_, err := pool.Exec(h.ctx, `INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), customer)
+	_, err := pool.Exec(h.ctx, `INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2) ON CONFLICT DO NOTHING`, mid.UUID(), customer)
 	require.NoError(h.t, err)
 	_, err = gen.New(pool).CreatePaymentMethod(h.ctx, gen.CreatePaymentMethodParams{
 		ID: method, MerchantID: mid.UUID(), CustomerID: customer, Rail: string(models.RailNMI), PspID: psp,

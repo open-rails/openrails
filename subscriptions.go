@@ -28,11 +28,12 @@ type SubscriptionFilter struct {
 // this one shape; the self routes additionally fill ScheduledPrice,
 // ScheduledProduct, CancelPortalURL and Access.
 type Subscription struct {
-	LastRetryAt         *time.Time `json:"last_retry_at"`
-	RetryAttempts       *int       `json:"retry_attempts"`
-	NextRetryAt         *time.Time `json:"next_retry_at"`
-	GraceEndsAt         *time.Time `json:"grace_ends_at"`
-	DeletionScheduledAt *time.Time `json:"deletion_scheduled_at,omitempty"`
+	Recovery            *PaymentRecovery `json:"recovery,omitempty"`
+	LastRetryAt         *time.Time       `json:"last_retry_at"`
+	RetryAttempts       *int             `json:"retry_attempts"`
+	NextRetryAt         *time.Time       `json:"next_retry_at"`
+	GraceEndsAt         *time.Time       `json:"grace_ends_at"`
+	DeletionScheduledAt *time.Time       `json:"deletion_scheduled_at,omitempty"`
 	// Payments is the subscription's recovery history: the same Payment shape
 	// GET /v1/merchant/payments serves.
 	Payments              []Payment            `json:"payments,omitempty"`

@@ -98,16 +98,14 @@ func RecurringReuse(priorRef string) Context {
 }
 
 // RecurringMIT: merchant-initiated recurring charge (renewal, dunning retry).
-// priorRef must identify the approved initial recurring CIT. Use the explicitly
-// named legacy constructor when no reference can be recovered.
+// priorRef must identify the approved initial recurring CIT. Refuse the charge when no scoped reference exists.
 func RecurringMIT(priorRef string) Context {
 	return Context{Initiator: InitiatorMerchant, Agreement: AgreementRecurring, PriorRef: priorRef}
 }
 
 // UnscheduledMIT is a merchant-initiated invoice collection charge.
 // priorRef must identify the approved initial
-// unscheduled CIT. Use the explicitly named legacy constructor when no
-// reference can be recovered.
+// unscheduled CIT. Refuse the charge when no scoped reference exists.
 func UnscheduledMIT(priorRef string) Context {
 	return Context{Initiator: InitiatorMerchant, Agreement: AgreementUnscheduled, PriorRef: priorRef}
 }

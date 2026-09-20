@@ -2,6 +2,7 @@ package nmi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -114,9 +115,14 @@ func (c *NMIClient) AddRecurringSubscription(ctx context.Context, data Recurring
 		return nil, err
 	}
 
+	amount, err := WireAmount(data.Amount, data.Currency)
+	if err != nil {
+		return nil, err
+	}
+
 	values := url.Values{
 		"type":              {"sale"},
-		"amount":            {centsToDollarString(data.Amount)},
+		"amount":            {amount},
 		"email":             {data.Email},
 		"plan_id":           {data.PlanID},
 		"billing_method":    {"recurring"},
@@ -338,7 +344,7 @@ func (c *NMIClient) AttemptManualRebill(ctx context.Context, params ManualRebill
 // wire boundary. dayFrequency is the billing interval in days; planPayments is
 // the total number of payments (0 = bill forever). Frequency and payments are
 // immutable once a plan is created.
-func (c *NMIClient) AddRecurringPlan(ctx context.Context, planID, planName string, planAmountCents moneyutil.Cents, dayFrequency, planPayments int) error {
+func (c *NMIClient) AddRecurringPlan(ctx context.Context, planID, planName string, planAmountCents moneyutil.Cents, currency string, dayFrequency, planPayments int) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
@@ -352,10 +358,15 @@ func (c *NMIClient) AddRecurringPlan(ctx context.Context, planID, planName strin
 		return errors.New("dayFrequency must be greater than zero")
 	}
 
+	amount, err := WireAmount(planAmountCents, currency)
+	if err != nil {
+		return err
+	}
+
 	body := v5PlanCreateRequest{
 		PlanID:       planID,
 		PlanName:     planName,
-		PlanAmount:   centsJSONAmount(planAmountCents),
+		PlanAmount:   json.RawMessage(amount),
 		PlanPayments: planPayments,
 		DayFrequency: dayFrequency,
 	}
@@ -370,12 +381,17 @@ func (c *NMIClient) AddRecurringPlan(ctx context.Context, planID, planName strin
 // gateway (verified 2026-07-01). NMI only permits the plan name and amount to
 // change; frequency and payment count are immutable once a plan exists.
 // planAmountCents is converted from cents to a dollar string for NMI.
-func (c *NMIClient) EditRecurringPlan(ctx context.Context, planID, planName string, planAmountCents moneyutil.Cents) error {
+func (c *NMIClient) EditRecurringPlan(ctx context.Context, planID, planName string, planAmountCents moneyutil.Cents, currency string) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(planID) == "" {
 		return errors.New("planID is required")
+	}
+
+	amount, err := WireAmount(planAmountCents, currency)
+	if err != nil {
+		return err
 	}
 
 	// current_plan_id identifies the plan being edited (live-verified
@@ -386,7 +402,7 @@ func (c *NMIClient) EditRecurringPlan(ctx context.Context, planID, planName stri
 		"recurring":       {"edit_plan"},
 		"security_key":    {c.SecurityKey},
 		"current_plan_id": {planID},
-		"plan_amount":     {centsToDollarString(planAmountCents)},
+		"plan_amount":     {amount},
 	}
 	if name := strings.TrimSpace(planName); name != "" {
 		values.Set("plan_name", name)
@@ -427,8 +443,8 @@ type RecurringPlanDetail struct {
 
 // GetRecurringPlanByID performs a strongly-consistent lookup of a single
 // recurring plan by its operator-chosen plan_id.
-func (c *NMIClient) GetRecurringPlanByID(ctx context.Context, planID string) (found bool, name string, amountCents int64, err error) {
-	detail, err := c.GetRecurringPlanDetailByID(ctx, planID)
+func (c *NMIClient) GetRecurringPlanByID(ctx context.Context, planID, currency string) (found bool, name string, amountCents int64, err error) {
+	detail, err := c.GetRecurringPlanDetailByID(ctx, planID, currency)
 	if err != nil {
 		return false, "", 0, err
 	}
@@ -438,7 +454,7 @@ func (c *NMIClient) GetRecurringPlanByID(ctx context.Context, planID string) (fo
 // GetRecurringPlanDetailByID fetches one plan via GET /v5/plans/{id} so
 // callers validating an operator-supplied link can confirm the linked plan
 // matches the OpenRails price's money terms, not just that it exists.
-func (c *NMIClient) GetRecurringPlanDetailByID(ctx context.Context, planID string) (RecurringPlanDetail, error) {
+func (c *NMIClient) GetRecurringPlanDetailByID(ctx context.Context, planID, currency string) (RecurringPlanDetail, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return RecurringPlanDetail{}, err
 	}
@@ -456,13 +472,13 @@ func (c *NMIClient) GetRecurringPlanDetailByID(ctx context.Context, planID strin
 		return RecurringPlanDetail{}, err
 	}
 
-	cents, convErr := v5AmountToCents(plan.PlanAmount)
-	if convErr != nil {
-		return RecurringPlanDetail{Found: true, Name: plan.PlanName}, fmt.Errorf("failed to parse plan amount %q: %w", plan.PlanAmount, convErr)
+	minor, valid := exactMinorAmount(plan.PlanAmount, currency)
+	if !valid {
+		return RecurringPlanDetail{Found: true, Name: plan.PlanName}, fmt.Errorf("plan amount is not exactly representable in %s minor units", currency)
 	}
 	// day_frequency is "0"/empty for month-based plans; DayFrequency stays 0.
 	dayFreq, _ := strconv.Atoi(strings.TrimSpace(plan.DayFrequency))
-	return RecurringPlanDetail{Found: true, Name: plan.PlanName, AmountCents: cents, DayFrequency: dayFreq}, nil
+	return RecurringPlanDetail{Found: true, Name: plan.PlanName, AmountCents: minor, DayFrequency: dayFreq}, nil
 }
 
 // SearchTransactions stays on the classic Query API (query.php) DELIBERATELY

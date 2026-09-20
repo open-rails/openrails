@@ -49,6 +49,29 @@ func TestEngineContextKeepsOnlyCancellation(t *testing.T) {
 	require.ErrorIs(t, ctx.Err(), context.Canceled)
 }
 
+func TestExplicitCredentialsNeverInheritHostAuthority(t *testing.T) {
+	mid := merchant.ID(uuid.New())
+	ctx := merchant.WithID(requestauth.WithHostPrincipal(t.Context(), &requestauth.HostPrincipal{MerchantID: mid, Permissions: hostPermissions()}), mid)
+	ctx = billingauth.SetUserContext(ctx, billingauth.UserContext{UserID: uuid.NewString()})
+	for _, token := range []string{"", "customer-credential", "invalid-credential", "merchant-key"} {
+		transport := NewTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, host := requestauth.HostPrincipalFromContext(r.Context())
+			require.False(t, host)
+			_, user := billingauth.FromContext(r.Context())
+			require.False(t, user)
+			require.Equal(t, token, r.Header.Get("Authorization"))
+			w.WriteHeader(http.StatusUnauthorized) // the real verifier owns authentication
+		}), func() merchant.ID { return mid })
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://openrails.invalid/v1/me/status", nil)
+		require.NoError(t, err)
+		req.Header.Set("Authorization", token)
+		res, err := transport.RoundTrip(req)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusUnauthorized, res.StatusCode)
+		require.NoError(t, res.Body.Close())
+	}
+}
+
 func TestTransportMerchantAuthorityAndIsolation(t *testing.T) {
 	type privateKey struct{}
 	bound := merchant.ID(uuid.New())
@@ -76,6 +99,7 @@ func TestTransportMerchantAuthorityAndIsolation(t *testing.T) {
 	host = merchant.WithID(host, original)
 	for _, path := range []string{"/v1/merchant/ordinary", "/v1/merchant/billing-archive"} {
 		req, _ := http.NewRequestWithContext(host, http.MethodGet, "http://openrails.invalid"+path, nil)
+		req.Header.Set("Authorization", "Bearer "+HostCredential)
 		resp, err := transport.RoundTrip(req)
 		require.NoError(t, err)
 		body, err := io.ReadAll(resp.Body)

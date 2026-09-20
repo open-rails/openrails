@@ -122,3 +122,27 @@ func TestSubCentMicrosNeverReachTheRecurringWire(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "19.99", centsToDollarString(moneyutil.Cents(cents)))
 }
+
+func TestInitialRecurringChargeUsesItsCurrencyScale(t *testing.T) {
+	for _, currency := range []string{"USD", "JPY"} {
+		t.Run(currency, func(t *testing.T) {
+			var form url.Values
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				require.NoError(t, r.ParseForm())
+				form = r.Form
+				fmt.Fprint(w, "response=1&subscription_id=sub1&transactionid=initial-authorized")
+			}))
+			defer server.Close()
+			_, err := newTestClient(t, server.URL).AddRecurringSubscription(context.Background(), RecurringPaymentData{PlanID: "plan1", CustomerVaultID: "vault1", BillingID: "billing1", Amount: 4, Currency: currency, StoredCredential: testInitialRecurringCredential()})
+			require.NoError(t, err)
+			want := "0.04"
+			if currency == "JPY" {
+				want = "4.00"
+			}
+			require.Equal(t, want, form.Get("amount"))
+			require.Equal(t, currency, form.Get("currency"))
+			require.Equal(t, "customer", form.Get("initiated_by"))
+			require.Equal(t, "stored", form.Get("stored_credential_indicator"))
+		})
+	}
+}

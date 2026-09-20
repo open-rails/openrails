@@ -16,6 +16,10 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
+// HostCredential identifies the runtime's default, locally constructed host
+// client. Network routes never treat this string as a valid credential.
+const HostCredential = "in-process-host"
+
 // hostPermissions is the embedded host's authority over its own merchant: the
 // full merchant owner grant, identical to what a merchant-owner API key
 // resolves to on the standalone wire path.
@@ -33,8 +37,8 @@ func NewTransport(handler http.Handler, configuredMerchant func() merchant.ID) h
 // inprocessTransport dispatches SDK requests directly into the in-process
 // neutral handler — no socket, no serialization loss, one JSON round-trip. It
 // attaches the host principal as a CONTEXT VALUE (requestauth.WithHostPrincipal);
-// headers are never the trust carrier, so nothing a network peer sends can
-// impersonate the host.
+// only for the internal default host credential. Explicit customer credentials
+// use normal verification. Network mounts never use this transport.
 type inprocessTransport struct {
 	handler            http.Handler
 	configuredMerchant func() merchant.ID
@@ -72,10 +76,10 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// Only the caller's cancellation and deadline reach the engine; every host
 	// context value is dropped (engineContext).
 	ctx = engineContext(ctx)
-	ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{
-		MerchantID:  mid,
-		Permissions: hostPermissions(),
-	})
+	if req.Header.Get("Authorization") == "Bearer "+HostCredential {
+		ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: mid, Permissions: hostPermissions()})
+	}
+
 	// The in-process analogue of middleware.ResolveMerchantHTTP: pin the
 	// bound merchant before any merchant-owned DB access.
 	ctx = merchant.WithID(ctx, mid)

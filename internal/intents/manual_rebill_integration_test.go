@@ -112,7 +112,7 @@ func newFakeNMIRebillGateway(t *testing.T, fx rebillFixture) (*fakeNMIRebillGate
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := nmi.NewAccountClient(fx.merchantID, fx.pspID, "mobius", &config.NMIProviderSettings{
+	client, err := nmi.NewAccountClient(fx.merchantID, fx.pspID, "nmi", &config.NMIProviderSettings{
 		SecurityKey:   "test_security_key",
 		WebhookSecret: "test_secret",
 	}, true)
@@ -153,7 +153,7 @@ func seedPastDueSubscriptionForMerchant(t *testing.T, merchantID uuid.UUID) rebi
 	fx.subID = uuid.New()
 	now := time.Now().UTC().Truncate(time.Second)
 	fx.periodEnd = now.Add(-time.Minute)
-	fx.orderRef = rebillOrderReference(ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, "mobius", 1))
+	fx.orderRef = rebillOrderReference(ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, "nmi", 1))
 
 	userID := uuid.New()
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, merchantID, userID)
@@ -169,21 +169,21 @@ func seedPastDueSubscriptionForMerchant(t *testing.T, merchantID uuid.UUID) rebi
 		require.NoError(t, err)
 	}
 	tenantID := merchantID
-	fx.pspID = dbtest.EnsureTestPSP(ctx, t, pool, tenantID, "mobius")
+	fx.pspID = dbtest.EnsureTestPSP(ctx, t, pool, tenantID, "nmi")
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id, entitlements_spec) VALUES ($1, $2, $2, $3, '{"premium":null}')`,
 		productID, "rebill-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 9990000, 'USD', 720, true, $3)`, priceID, productID, tenantID)
 	exec(`INSERT INTO openrails.payment_methods
 	        (id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
-	         initial_transaction_id, stored_credential_recurring_ref, merchant_id)
-	      VALUES ($1, $2, 'mobius', $3, $4, $5, $6, $7, $8)`,
+	         initial_transaction_id, stored_credential_recurring_ref, merchant_id, rebill_driver)
+	      VALUES ($1, $2, 'nmi', $3, $4, $5, $6, $7, $8, 'openrails')`,
 		paymentMethodID, userID, fx.pspID, "vault-"+suffix, "bill-"+suffix,
 		"txn-init-"+suffix, "txn-recurring-init-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id, payment_method_id,
 	         current_period_starts_at, current_period_ends_at, started_at, next_retry_at, retry_attempts, customer_id, merchant_id, psp_id, entitlements_spec_snapshot)
-	      VALUES ($1, $2, $3, 'past_due', 'mobius', $4, $5, $6, $7, $6, $8, 1, $9, $10, $11, '{"premium":null}')`,
+	      VALUES ($1, $2, $3, 'past_due', 'nmi', $4, $5, $6, $7, $6, $8, 1, $9, $10, $11, '{"premium":null}')`,
 		fx.subID, priceID, productID, "psid-"+suffix, paymentMethodID,
 		fx.periodEnd.Add(-30*24*time.Hour), fx.periodEnd, now.Add(-30*time.Second), userID, tenantID, fx.pspID)
 
@@ -206,7 +206,7 @@ func seedPastDueSubscriptionForMerchant(t *testing.T, merchantID uuid.UUID) rebi
 		if err != nil {
 			return err
 		}
-		fx.payload = ManualRebillPayload{Renewal: terms, PaymentMethodID: paymentMethodID, Instrument: charge.FreezeInstrument(method), Rail: "mobius", RailSubscriptionID: sub.RailSubscriptionID, Attempt: 1, FailureCount: 1, OrderReference: fx.orderRef, AmountMinor: minor}
+		fx.payload = ManualRebillPayload{Initiator: charge.InitiatorMerchant, Renewal: terms, PaymentMethodID: paymentMethodID, Instrument: charge.FreezeInstrument(method), Rail: "nmi", RailSubscriptionID: sub.RailSubscriptionID, Attempt: 1, FailureCount: 1, OrderReference: fx.orderRef, AmountMinor: minor}
 		return nil
 	}))
 

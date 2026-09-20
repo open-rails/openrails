@@ -131,6 +131,7 @@ var jsonRules = map[string]jsonRule{
 	// The completed collection operation retains its frozen instrument and
 	// accepted terms for replay; none of these fields contains card data.
 	"rail_intents.invoice_collection.payload": object(map[string]jsonRule{
+		"initiator":  textValue,
 		"invoice_id": uuidValue, "customer_id": uuidValue, "attempt_id": uuidValue, "payment_method_id": uuidValue,
 		"rail": textValue, "currency": textValue, "amount": integerValue, "amount_minor": integerValue, "description": textValue, "provider_customer_ref": textValue,
 		"instrument": object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue}),
@@ -144,6 +145,7 @@ var jsonRules = map[string]jsonRule{
 		"operator_resolution": operatorResolutionJSON,
 	})),
 	"rail_intents.manual_rebill.payload": object(map[string]jsonRule{
+		"initiator": textValue, "requested_payment_method_id": uuidValue,
 		"renewal": object(map[string]jsonRule{
 			"psp_id": uuidValue, "subscription_id": uuidValue, "customer_id": uuidValue,
 			"from_price_id": uuidValue, "from_product_id": uuidValue, "price_id": uuidValue, "product_id": uuidValue,

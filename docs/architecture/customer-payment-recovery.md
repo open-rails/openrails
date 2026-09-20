@@ -1,0 +1,69 @@
+# Customer payment recovery
+
+A customer can pay an unpaid invoice or retry a past-due subscription from the
+existing self-service billing surface. These commands accept no payer identifier:
+the verified customer principal owns the addressed resource. `Idempotency-Key`
+is required, payer-scoped and bound to the accepted request. Same-key replay
+returns the existing result after settlement; a different key cannot displace
+unresolved work. The existing invoice/subscription read exposes `recovery` and
+any unresolved operation, without a second operation API.
+
+The shared Go Client runs identically over HTTP or in process. Embedded hosts
+configure `embed.Options.DelegatedAuthenticator` once (the ordinary Handler
+inherits it) and construct a customer Client with explicit credentials:
+
+```go
+customer, err := runtime.Client(openrails.WithTokenProvider(func(ctx context.Context) (string, error) {
+    return verifiedCustomerToken, nil
+}))
+result, err := customer.PayInvoiceNow(ctx, openrails.PayInvoiceNowRequest{
+    InvoiceID: invoiceID,
+    PaymentMethodID: paymentMethodID,
+    IdempotencyKey: stableKeyForThisCustomerAction,
+})
+```
+
+The authenticator must verify a customer's credential before mapping it to the
+payer. The `embed/authkit` bridge performs the existing host verification and
+supports a live admission veto. A merchant API key or service credential cannot
+become customer-present by supplying a payment method. Ambient host request
+context remains isolated. The default runtime Client is the merchant-owner
+client and is not a customer credential. An explicit per-mount verifier override
+is possible, but is a deliberate host policy decision.
+
+For NMI invoice pay, a customer action freezes initial or subsequent unscheduled
+stored-credential posture. An initial approved reference is captured only from
+the qualified provider receipt, atomically with invoice settlement and operation
+completion. Local rollback retains custody and recovery commits it without
+charging again. Future off-session invoice collection requires that approved
+reference. Rounded provider collection settles the exact invoice liability and
+credits the excess through the existing spendable credit ledger.
+
+Subscription retry uses the same immutable admission and completion as the
+scheduled worker. It freezes customer-initiated recurring reuse of the existing
+approved agreement, the subscription's current method, price/benefits and paid
+period. The NMI request remains `recurring=rebill_subscription`; preparation
+checks the supported fixed-day calendar against the actual provider record.
+The client command does not invent new calendar semantics or reset a lapsed
+period to the click time. Unsupported cadence or preparation stays refused or
+unresolved before a money write. Live NMI scheduling effects remain a separate
+provider qualification requirement.
+
+Current customer-pay support is NMI with PSP-held cards. Unsupported rails or
+custody paths return `customer_payment_unsupported`. Stripe's customer-action/
+3DS continuation remains an explicit #809 follow-up; its existing administrative
+and scheduled off-session collection is unchanged. Invoice payment does not
+reactivate an unrelated subscription.
+
+HTTP commands:
+
+- `POST /v1/me/invoices/{id}/pay-now` with `payment_method_id`.
+- `POST /v1/me/subscriptions/{id}/retry-now` with optional `payment_method_id`
+  (when supplied, it must be the subscription's current method).
+
+A terminal result is 200; unresolved execution is 202 with the operation's
+identity and state. Definitive provider declines are terminal results whose
+attempt/operation carries the refusal; they are not transport failures.
+`payment_in_progress` and `payment_idempotency_conflict` are 409 refusals.
+A caller should retain its key through network uncertainty and read the existing
+resource before starting a different action.
