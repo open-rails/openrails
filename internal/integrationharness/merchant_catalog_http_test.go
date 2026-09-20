@@ -535,12 +535,16 @@ func TestCatalogPublishRefusesTrialOnRailsWithoutFirstPhase(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
+	owned := surface.ProvisionOwnedMerchant("trial-capability-" + uuid.NewString()[:8])
 	token := surface.MintAPIKey(
-		dbtest.TestMerchantSlug,
+		owned.MerchantSlug,
 		"catalog-trials-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
 	)
-	mid := dbtest.TestMerchantID.UUID()
+	mid := owned.MerchantID.UUID()
+	for _, rail := range []string{"nmi", "solana", "stripe", "ccbill"} {
+		dbtest.EnsureTestPSP(ctx, t, h.MerchantPool(mid), mid, rail)
+	}
 
 	publish := func(t *testing.T, psp string) (int, []byte, string) {
 		t.Helper()
