@@ -41,7 +41,11 @@ func providerCutover(r *httprequest.Request, owned, preview bool) {
 		}
 		sub, e := r.State.SubscriptionService.GetByID(ctx, id)
 		if e != nil {
-			cutoverRefusal(r, http.StatusNotFound, "resource_missing", "subscription not found", "subscription_id")
+			if db.IsNotFound(e) {
+				cutoverRefusal(r, http.StatusNotFound, "resource_missing", "subscription not found", "subscription_id")
+			} else {
+				r.InternalError("could not load subscription", e)
+			}
 			return
 		}
 		if sub.CustomerID.String() != user.ID {
@@ -115,12 +119,9 @@ func providerCutover(r *httprequest.Request, owned, preview bool) {
 }
 
 func cutoverRefusal(r *httprequest.Request, status int, code, message, param string) {
-	detail := openrails.ErrorDetails{Type: "invalid_request_error", Code: code, Message: message, RequestID: r.RequestID()}
-	if status >= 500 {
-		detail.Type = "api_error"
-	}
+	refusal := api.NewAPIError(status, api.ErrorTypeForStatus(status), code, message)
 	if param != "" {
-		detail.Param = &param
+		refusal.WithParam(param)
 	}
-	r.JSON(status, map[string]any{"error": detail})
+	r.APIError(refusal)
 }

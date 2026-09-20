@@ -18,6 +18,8 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/http/handlers"
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
@@ -25,6 +27,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/providerqualification"
+	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
@@ -425,6 +429,27 @@ func TestNMIProviderCutoverHTTP(t *testing.T) {
 		other := issuer.Mint(uuid.NewString(), "other@example.com", "other", nil)
 		status, body = requestJSON(t, http.MethodPost, path, other, p.Req)
 		require.Equal(t, http.StatusNotFound, status, string(body))
+		missingPath := strings.Replace(path, openrails.SubscriptionID(p.Sub).String(), openrails.SubscriptionID(uuid.New()).String(), 1)
+		status, body = requestJSON(t, http.MethodPost, missingPath, token, p.Req)
+		require.Equal(t, http.StatusNotFound, status, string(body))
+
+		// A database request failure is not evidence that the subscription is
+		// absent. Drive the same handler/service with a canceled query context;
+		// a canceled socket cannot expose the chosen envelope over real HTTP.
+		cctx, cancel := context.WithCancel(merchant.WithID(ctx, owner.MerchantID))
+		cancel()
+		_, lookupErr := s.App().Runtime.SubscriptionService.GetByID(cctx, p.Sub)
+		require.ErrorIs(t, lookupErr, context.Canceled)
+		request := httptest.NewRequest(http.MethodPost, path, nil).WithContext(billingauth.SetUserContext(cctx, billingauth.UserContext{UserID: p.Customer.String()}))
+		request.SetPathValue("id", openrails.SubscriptionID(p.Sub).String())
+		response := httptest.NewRecorder()
+		handlers.PreviewMyProviderCutover(httprequest.NewHTTP(response, request, s.App().Runtime))
+		require.Equal(t, http.StatusInternalServerError, response.Code, response.Body.String())
+		var refusal api.ErrorResponse
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &refusal))
+		require.Equal(t, api.ErrorTypeAPI, refusal.Error.Type)
+		require.Equal(t, api.CodeInternalError, refusal.Error.Code)
+		require.NotEmpty(t, refusal.Error.RequestID)
 		bad := p.Req
 		bad.ExpectedTargetPSPID = uuid.Nil
 		_, e := client.PreviewProviderCutover(ctx, openrails.SubscriptionID(p.Sub), bad)
