@@ -101,9 +101,13 @@ func TestClientRefusesEmptyIdentifiersBeforeIO(t *testing.T) {
 	}
 	// Typed identifiers: the zero id names nothing and is refused before I/O.
 	typedCalls := map[string]func() error{
-		"GetSubscription":    func() error { _, err := c.GetSubscription(ctx, SubscriptionID{}); return err },
-		"CancelSubscription": func() error { return c.CancelSubscription(ctx, SubscriptionID{}, CancelSubscriptionRequest{}) },
-		"ResumeSubscription": func() error { return c.ResumeSubscription(ctx, SubscriptionID{}) },
+		"PayInvoiceNow":        func() error { _, err := c.PayInvoiceNow(ctx, PayInvoiceNowRequest{}); return err },
+		"RetrySubscriptionNow": func() error { _, err := c.RetrySubscriptionNow(ctx, RetrySubscriptionNowRequest{}); return err },
+		"GetMyInvoice":         func() error { _, err := c.GetMyInvoice(ctx, uuid.Nil); return err },
+		"GetMySubscription":    func() error { _, err := c.GetMySubscription(ctx, SubscriptionID{}); return err },
+		"GetSubscription":      func() error { _, err := c.GetSubscription(ctx, SubscriptionID{}); return err },
+		"CancelSubscription":   func() error { return c.CancelSubscription(ctx, SubscriptionID{}, CancelSubscriptionRequest{}) },
+		"ResumeSubscription":   func() error { return c.ResumeSubscription(ctx, SubscriptionID{}) },
 		"UpdateSubscriptionPaymentMethod subscription": func() error {
 			return c.UpdateSubscriptionPaymentMethod(ctx, SubscriptionID{}, UpdateSubscriptionPaymentMethodRequest{PaymentMethodID: method})
 		},

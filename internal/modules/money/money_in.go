@@ -48,6 +48,8 @@ type ChargeRequest struct {
 	// Instrument is the method as the operation froze it; the charge is
 	// refused before submission if the method no longer matches.
 	Instrument charge.FrozenInstrument
+	// Initiator is frozen by the verified command admission, never decoded from a public request.
+	Initiator charge.Initiator
 }
 
 type ChargeResult struct {
@@ -60,9 +62,4 @@ type ChargeResult struct {
 	Declined       bool
 	FailureCode    *string
 	FailureMessage *string
-	// CapturedStoredCredentialRef is the rail-scoped stored-credential replay
-	// reference this charge established for the instrument's UNSCHEDULED
-	// agreement sequence (#297) — set when the instrument had none (first use
-	// or legacy). ScopedCharger persists it write-once; "" = nothing captured.
-	CapturedStoredCredentialRef string
 }

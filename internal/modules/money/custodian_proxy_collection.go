@@ -32,8 +32,19 @@ func (a *CustodianProxyCollectionAdapter) Prepare(_ context.Context, method gen.
 		return nil, fmt.Errorf("custodian-held payment method missing its custodian token reference")
 	}
 	anchor := strings.TrimSpace(method.StoredCredentialUnscheduledRef)
-	if anchor == "" {
-		return nil, fmt.Errorf("custodian-held payment method missing approved unscheduled credential reference")
+	posture := charge.UnscheduledMIT(anchor)
+	switch req.Initiator {
+	case charge.InitiatorCustomer:
+		posture = charge.OneTimeReuse(anchor)
+		if anchor == "" {
+			posture = charge.InitialOneTime()
+		}
+	case charge.InitiatorMerchant:
+		if anchor == "" {
+			return nil, fmt.Errorf("custodian-held payment method missing approved unscheduled credential reference")
+		}
+	default:
+		return nil, fmt.Errorf("collection initiation is not established")
 	}
 	// Parked instrument (#795 B6): the custody-side credential is gone.
 	if strings.TrimSpace(method.ParkReason) != "" {
@@ -65,7 +76,7 @@ func (a *CustodianProxyCollectionAdapter) Prepare(_ context.Context, method gen.
 		Currency:    currency,
 		Description: description,
 		OrderRef:    strings.TrimSpace(req.IdempotencyKey),
-		Context:     charge.UnscheduledMIT(anchor),
+		Context:     posture,
 	}
 	return PreparedChargeFunc(func(ctx context.Context) (ChargeResult, error) {
 		res, err := charger.Charge(ctx, request)
@@ -73,12 +84,11 @@ func (a *CustodianProxyCollectionAdapter) Prepare(_ context.Context, method gen.
 			return ChargeResult{}, err
 		}
 		return ChargeResult{
-			Rail:                        nmiproxy.Rail,
-			TransactionID:               res.TransactionID,
-			Declined:                    res.Declined,
-			FailureCode:                 res.FailureCode,
-			FailureMessage:              res.FailureMessage,
-			CapturedStoredCredentialRef: res.CapturedRef,
+			Rail:           nmiproxy.Rail,
+			TransactionID:  res.TransactionID,
+			Declined:       res.Declined,
+			FailureCode:    res.FailureCode,
+			FailureMessage: res.FailureMessage,
 		}, nil
 	}), nil
 }

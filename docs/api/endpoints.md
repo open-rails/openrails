@@ -118,7 +118,8 @@ scoped to the token's subject — no `:user_id` appears in any path.
 | GET | `/v1/me/usage` | Usage breakdown for the token's subject |
 | GET | `/v1/me/spend-limits` | The spend windows the AUTHENTICATED INVOKER is enforced against at admission, with live metering: `{ currency, invoker, windows: [{ scope, key, window_seconds, limit, currency, used, reserved, remaining, resets_at }] }`. Query: `currency` (required). Windows are estimate-based, so `used` already includes in-flight reservations and `reserved` names that part (what a release hands back); `resets_at` is the window's real staggered boundary. Self-scoped by construction — both the payer account and the invoker come from the credential, and naming another subject (`invoker`, `customer_id`, `scope_key`, `subject`) is refused `400 spend_scope_not_addressable`. The payer's admin view of every delegation it granted stays on `GET /v1/customers/{id}/spend-delegations` |
 | GET | `/v1/me/invoices` | List the subject's invoices |
-| GET | `/v1/me/invoices/{id}` | One invoice |
+| GET | `/v1/me/invoices/{id}` | One invoice, including payer-scoped recovery state |
+| POST | `/v1/me/invoices/{id}/pay-now` | Verified customer payment on an NMI saved method. Requires Idempotency-Key and payment_method_id; 200 complete, 202 unresolved, coded 402 card refusal. |
 | GET | `/v1/me/payments` | One-off payment history. Query: `type` (rail filter), `limit`, `offset` |
 | GET | `/v1/me/entitlements/active` | The subject's currently-active entitlements |
 | GET | `/v1/me/tier` | THE effective tier in one tier group (or#912): highest tier_rank among products whose entitlements intersect the subject's active windows; `tier: null` when none. Query: `group` (required), `at` (RFC3339, optional). Tier carries the immutable `entitlement` identifier + mutable `display_name` + `tier_rank` + product ref |
@@ -139,6 +140,7 @@ scoped to the token's subject — no `:user_id` appears in any path.
 | POST | `/v1/me/subscriptions/{id}/provider-cutover` | Durable account cutover; Idempotency-Key plus target_payment_method_id and expected source/target PSP IDs |
 | GET | `/v1/me/subscriptions/{id}/provider-cutover` | Read one cutover using idempotency_key; 404 for another customer's subscription |
 | POST | `/v1/me/subscriptions/{id}/cancel` | Cancel. Body `{ "feedback": "..." }` (4-500 chars, required). Returns `202 { "status": "queued" }` on EVERY rail — the cancel is recorded locally and the remote cancel executes as a durable intent (CCBill included; the old portal-only 422 is retired) |
+| POST | `/v1/me/subscriptions/{id}/retry-now` | Verified customer retry of a past-due NMI subscription through the shared durable operation. Requires Idempotency-Key; optional payment_method_id must match its current method. 200 complete, 202 unresolved, coded 402 card refusal. |
 | POST | `/v1/me/subscriptions/{id}/resume` | Resume a cancelled subscription on a reversible rail before period end. `202 { "status": "queued" }`; 400 with a specific reason otherwise |
 | POST | `/v1/me/subscriptions/{id}/change-tier` | Unified upgrade/downgrade. Body `{ "price_id": "..." }` (same tier group). See below |
 | POST | `/v1/me/subscriptions/{id}/change-tier/preview` | Dry-run of the tier change (proration/effect preview), no mutation |

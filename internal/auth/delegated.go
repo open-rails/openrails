@@ -92,14 +92,19 @@ func (p *DelegatedAuthenticator) AuthenticateDelegated(ctx context.Context, r *h
 	if issuer == "" {
 		issuer = cl.Issuer
 	}
+	class := billingauth.CredentialClassUserSession
+	if strings.TrimSpace(cl.DeviceKeyID) != "" || strings.TrimSpace(cl.TokenType) != "" {
+		class = billingauth.CredentialClassAutomation
+	}
 	return &billingauth.DelegatedPrincipal{
-		MerchantID:    p.cfg.MerchantID,
-		MerchantSlug:  p.cfg.MerchantSlug,
-		SubjectID:     cl.UserID,
-		Issuer:        issuer,
-		Permissions:   perms,
-		Email:         cl.Email,
-		EmailVerified: cl.EmailVerified,
-		Username:      cl.Username,
+		CredentialClass: class,
+		MerchantID:      p.cfg.MerchantID,
+		MerchantSlug:    p.cfg.MerchantSlug,
+		SubjectID:       cl.UserID,
+		Issuer:          issuer,
+		Permissions:     perms,
+		Email:           cl.Email,
+		EmailVerified:   cl.EmailVerified,
+		Username:        cl.Username,
 	}, nil
 }

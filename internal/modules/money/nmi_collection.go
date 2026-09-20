@@ -41,8 +41,19 @@ func (a *NMICollectionAdapter) Prepare(_ context.Context, method gen.OpenrailsPa
 		return nil, fmt.Errorf("nmi payment method missing customer vault id")
 	}
 	anchor := strings.TrimSpace(method.StoredCredentialUnscheduledRef)
-	if anchor == "" {
-		return nil, fmt.Errorf("nmi payment method missing approved unscheduled credential reference")
+	posture := charge.UnscheduledMIT(anchor)
+	switch req.Initiator {
+	case charge.InitiatorCustomer:
+		posture = charge.OneTimeReuse(anchor)
+		if anchor == "" {
+			posture = charge.InitialOneTime()
+		}
+	case charge.InitiatorMerchant:
+		if anchor == "" {
+			return nil, fmt.Errorf("nmi payment method missing approved unscheduled credential reference")
+		}
+	default:
+		return nil, fmt.Errorf("collection initiation is not established")
 	}
 	if req.AmountCents <= 0 {
 		return nil, fmt.Errorf("amount_cents must be positive")
@@ -63,7 +74,7 @@ func (a *NMICollectionAdapter) Prepare(_ context.Context, method gen.OpenrailsPa
 		Currency:    currency,
 		Description: description,
 		OrderRef:    strings.TrimSpace(req.IdempotencyKey),
-		Context:     charge.UnscheduledMIT(anchor),
+		Context:     posture,
 	}
 	return PreparedChargeFunc(func(ctx context.Context) (ChargeResult, error) {
 		res, err := a.Charger.Charge(ctx, request)
@@ -71,12 +82,11 @@ func (a *NMICollectionAdapter) Prepare(_ context.Context, method gen.OpenrailsPa
 			return ChargeResult{}, err
 		}
 		return ChargeResult{
-			Rail:                        rail,
-			TransactionID:               res.TransactionID,
-			Declined:                    res.Declined,
-			FailureCode:                 res.FailureCode,
-			FailureMessage:              res.FailureMessage,
-			CapturedStoredCredentialRef: res.CapturedRef,
+			Rail:           rail,
+			TransactionID:  res.TransactionID,
+			Declined:       res.Declined,
+			FailureCode:    res.FailureCode,
+			FailureMessage: res.FailureMessage,
 		}, nil
 	}), nil
 }

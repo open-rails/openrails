@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
-	log "github.com/sirupsen/logrus"
 )
 
 // CollectionAdapter arms a rail-specific saved-method charge. Prepare performs
@@ -138,20 +137,6 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 		}
 		if strings.TrimSpace(res.Rail) == "" {
 			res.Rail = rail
-		}
-		// #297: a successful charge on an instrument with no stored-credential
-		// replay reference anchors its unscheduled sequence, write-once.
-		// Best-effort: the charge itself succeeded and must never fail on this.
-		if ref := strings.TrimSpace(res.CapturedStoredCredentialRef); ref != "" && !res.Declined {
-			if _, cerr := c.db.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
-				MerchantID: merchantID,
-				ID:         method.ID,
-				Agreement:  string(charge.AgreementUnscheduled),
-				Ref:        ref,
-			}); cerr != nil {
-				log.WithContext(ctx).WithError(cerr).WithField("payment_method_id", method.ID).
-					Warn("failed to persist captured stored-credential reference (#297); next charge re-captures")
-			}
 		}
 		return res, nil
 	}), nil

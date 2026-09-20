@@ -8,6 +8,7 @@ import (
 	"github.com/open-rails/openrails"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/query"
 )
 
@@ -91,5 +92,20 @@ func GetSubscription(r *httprequest.Request) {
 		return
 	}
 
-	r.SuccessJSON(subscription.View())
+	out := subscription.View()
+	payer, ok := selfAccountPayer(r)
+	if !ok {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.InternalError("billing service unavailable", err)
+		return
+	}
+	out.Recovery, err = svc.SubscriptionRecovery(r.Request.Context(), payer, subscriptionID)
+	if err != nil {
+		r.InternalError("subscription recovery unavailable", err)
+		return
+	}
+	r.SuccessJSON(out)
 }
