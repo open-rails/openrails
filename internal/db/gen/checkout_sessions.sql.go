@@ -69,13 +69,13 @@ INSERT INTO openrails.checkout_sessions (
 type CreateCheckoutSessionParams struct {
 	ID             uuid.UUID
 	CustomerID     uuid.UUID
-	PriceID        uuid.UUID
+	PriceID        *uuid.UUID
 	Mode           string
 	Rail           string
 	Status         string
-	Amount         int64
+	Amount         *int64
 	MerchantID     uuid.UUID
-	Currency       string
+	Currency       *string
 	ExpiresAt      *time.Time
 	Reference      *string
 	TransactionID  *string
@@ -266,7 +266,7 @@ LIMIT 1
 
 type GetLatestOpenCheckoutSessionParams struct {
 	CustomerID uuid.UUID
-	PriceID    uuid.UUID
+	PriceID    *uuid.UUID
 	Rail       string
 	Now        time.Time
 }
@@ -372,12 +372,12 @@ WHERE id = $1
 type UpdateCheckoutSessionParams struct {
 	ID             uuid.UUID
 	CustomerID     uuid.UUID
-	PriceID        uuid.UUID
+	PriceID        *uuid.UUID
 	Mode           string
 	Rail           string
 	Status         string
-	Amount         int64
-	Currency       string
+	Amount         *int64
+	Currency       *string
 	ExpiresAt      *time.Time
 	Reference      *string
 	TransactionID  *string

@@ -37,9 +37,13 @@ func checkoutSessionJSONB(s *models.CheckoutSession) (meta, fields, state []byte
 }
 
 func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.CheckoutSession) error {
-	currency := strings.TrimSpace(session.Currency)
-	if currency == "" {
-		return fmt.Errorf("checkout session currency required")
+	if err := session.ValidateTerms(); err != nil {
+		return err
+	}
+	var currency *string
+	if session.Currency != nil {
+		value := strings.TrimSpace(*session.Currency)
+		currency = &value
 	}
 	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, session.CustomerID); err != nil {
 		return err
@@ -193,7 +197,7 @@ func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceRail(ctx context.Context, 
 	}
 	row, err := r.db.Gen(ctx).GetLatestOpenCheckoutSession(ctx, gen.GetLatestOpenCheckoutSessionParams{
 		CustomerID: tsid,
-		PriceID:    priceID,
+		PriceID:    &priceID,
 		Rail:       string(rail),
 		Now:        now,
 	})

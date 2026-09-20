@@ -615,12 +615,12 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	session := &models.CheckoutSession{
 		ID:         sessionID,
 		CustomerID: identity.CustomerIDFromString(user.ID).UUID(),
-		PriceID:    price.ID,
+		PriceID:    new(price.ID),
 		Mode:       mode,
 		Rail:       models.Rail(rail),
 		Status:     models.CheckoutSessionStatusCreated,
-		Amount:     price.Amount,
-		Currency:   price.Currency,
+		Amount:     new(price.Amount),
+		Currency:   new(price.Currency),
 		ExpiresAt:  timePtr(now.Add(ttl)),
 		Metadata:   normalizeMetadata(req.Metadata),
 		RailFields: railFields,
@@ -1030,7 +1030,7 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		if s.solanaPayService == nil {
 			return fmt.Errorf("%w: solana pay service unavailable", ErrCheckoutSessionValidation)
 		}
-		result, err := s.solanaPayService.GeneratePayment(ctx, session.CustomerID.String(), session.PriceID, tokenSymbol, &session.ID)
+		result, err := s.solanaPayService.GeneratePayment(ctx, session.CustomerID.String(), *session.PriceID, tokenSymbol, &session.ID)
 		if err != nil {
 			return err
 		}
@@ -1068,7 +1068,7 @@ func (s *CheckoutSessionService) initializeSolanaSession(ctx context.Context, se
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
 		}
-		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(session.Amount), session.Currency, s.fxProvider, s.priceProvider)
+		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(*session.Amount), *session.Currency, s.fxProvider, s.priceProvider)
 		if err != nil {
 			return fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrCheckoutSessionValidation, err)
 		}
@@ -1192,7 +1192,7 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 	if wallet == "" {
 		return s.initializeSolanaSubscriptionPayRequest(ctx, session)
 	}
-	price, err := s.priceService.GetByID(ctx, session.PriceID)
+	price, err := s.priceService.GetByID(ctx, *session.PriceID)
 	if err != nil || price == nil {
 		return fmt.Errorf("%w: price not found", ErrCheckoutSessionValidation)
 	}
@@ -1269,7 +1269,7 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 // mode override. The duplicate-billing guard still runs up front so we never
 // hand out a QR that would double-bill.
 func (s *CheckoutSessionService) initializeSolanaSubscriptionPayRequest(ctx context.Context, session *models.CheckoutSession) error {
-	price, err := s.priceService.GetByID(ctx, session.PriceID)
+	price, err := s.priceService.GetByID(ctx, *session.PriceID)
 	if err != nil || price == nil {
 		return fmt.Errorf("%w: price not found", ErrCheckoutSessionValidation)
 	}
@@ -1352,15 +1352,15 @@ func (s *CheckoutSessionService) confirmSolanaSubscriptionSession(ctx context.Co
 		MerchantID:       tenantID,
 		UserID:           session.CustomerID.String(),
 		UserEmail:        email,
-		PriceID:          session.PriceID,
+		PriceID:          *session.PriceID,
 		SubscriberWallet: wallet,
 		PlanID:           terms.planID,
 		MintSymbol:       terms.mintSymbol,
 		AmountBaseUnits:  terms.amount,
 		PeriodHours:      terms.period,
 		PlanCreatedAt:    terms.createdAt,
-		FiatAmount:       session.Amount,
-		Currency:         session.Currency,
+		FiatAmount:       *session.Amount,
+		Currency:         *session.Currency,
 		// The first pull happened inside the atomic subscribe tx the wallet just
 		// submitted; record its signature on the membership/row (#286).
 		Signature: sig,
@@ -1505,12 +1505,12 @@ func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Contex
 	session := &models.CheckoutSession{
 		ID:         uuidutil.NewV7(),
 		CustomerID: identity.CustomerIDFromString(user.ID).UUID(),
-		PriceID:    sessionPriceID,
+		PriceID:    &sessionPriceID,
 		Mode:       mode,
 		Rail:       models.RailSolana,
 		Status:     models.CheckoutSessionStatusRequiresAction,
-		Amount:     sessionAmount,
-		Currency:   sessionCurrency,
+		Amount:     &sessionAmount,
+		Currency:   &sessionCurrency,
 		ExpiresAt:  &expiresAt,
 		Metadata:   normalizeMetadata(req.Metadata),
 		RailFields: map[string]any{"rail": string(models.RailSolana)},
@@ -1660,7 +1660,7 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 		railSelector = strings.TrimSpace(psp)
 	}
 	req := &CheckoutRequest{
-		PriceID:           openrails.PriceID(session.PriceID).String(),
+		PriceID:           openrails.PriceID(*session.PriceID).String(),
 		PaymentMethodID:   payment.PaymentMethodID,
 		PaymentToken:      payment.PaymentToken,
 		Rail:              railSelector,
@@ -1787,7 +1787,6 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 		ID:       openrails.CheckoutSessionID(session.ID),
 		Status:   string(session.Status),
 		Mode:     string(session.Mode),
-		PriceID:  openrails.PriceID(session.PriceID),
 		Amount:   session.Amount,
 		Currency: session.Currency,
 		Payment: CheckoutSessionPaymentResponse{
@@ -1795,6 +1794,10 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 		},
 		ExpiresAt: session.ExpiresAt,
 		CreatedAt: session.CreatedAt,
+	}
+	if session.PriceID != nil {
+		id := openrails.PriceID(*session.PriceID)
+		resp.PriceID = &id
 	}
 	if len(session.Metadata) > 0 {
 		resp.Metadata = session.Metadata
@@ -2092,11 +2095,11 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 
 	result, err := s.checkoutService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
 		UserID:        session.CustomerID.String(),
-		PriceID:       session.PriceID,
+		PriceID:       *session.PriceID,
 		Rail:          "solana",
 		TransactionID: signature,
-		Amount:        session.Amount,
-		Currency:      session.Currency,
+		Amount:        *session.Amount,
+		Currency:      *session.Currency,
 		Metadata: map[string]any{
 			"solana_reference":    referenceValue,
 			"checkout_session_id": session.ID.String(),
@@ -2144,7 +2147,7 @@ func validateSolanaPaymentMatchesSession(payment *models.Payment, session *model
 	if payment == nil || session == nil {
 		return fmt.Errorf("%w: solana payment does not match checkout session", ErrCheckoutSessionConflict)
 	}
-	if payment.CustomerID.String() != session.CustomerID.String() || payment.PriceID != session.PriceID || payment.Amount != session.Amount || !strings.EqualFold(payment.Currency, session.Currency) {
+	if payment.CustomerID.String() != session.CustomerID.String() || payment.PriceID != *session.PriceID || payment.Amount != *session.Amount || !strings.EqualFold(payment.Currency, *session.Currency) {
 		return fmt.Errorf("%w: solana payment does not match checkout session", ErrCheckoutSessionConflict)
 	}
 	if strings.TrimSpace(fmt.Sprint(payment.Metadata["solana_reference"])) != strings.TrimSpace(reference) {
@@ -2333,7 +2336,7 @@ func (s *CheckoutSessionService) FindOpenCCBillReservation(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	if session.CustomerID.String() != userID || session.PriceID != priceID || session.Rail != models.RailCCBill {
+	if session.CustomerID.String() != userID || *session.PriceID != priceID || session.Rail != models.RailCCBill {
 		return nil, ErrCheckoutSessionConflict
 	}
 	if s.isTerminal(session.Status) || s.isExpired(session) {
@@ -2521,7 +2524,7 @@ func (s *CheckoutSessionService) GetSessionForSolanaPay(ctx context.Context, ses
 	// Get product name for label (via price)
 	var productName string
 	if s.priceService != nil {
-		price, err := s.priceService.GetByID(ctx, session.PriceID)
+		price, err := s.priceService.GetByID(ctx, *session.PriceID)
 		if err == nil && s.productService != nil {
 			product, err := s.productService.GetByID(ctx, price.ProductID)
 			if err == nil {
@@ -2701,15 +2704,15 @@ func solanaBuildRequestFromSession(session *models.CheckoutSession, account, tok
 
 	return &solanamodule.PaymentTransactionBuildRequest{
 		UserID:      session.CustomerID.String(),
-		PriceID:     session.PriceID,
+		PriceID:     *session.PriceID,
 		TokenSymbol: tokenSymbol,
 		UserWallet:  account,
 		Reference:   session.Reference,
 		TokenAmount: tokenAmount,
 		TokenMint:   tokenMint,
 		Recipient:   recipient,
-		Amount:      session.Amount,
-		Currency:    session.Currency,
+		Amount:      *session.Amount,
+		Currency:    *session.Currency,
 		SessionID:   session.ID, // #713 memo local-id
 	}, nil
 }
@@ -3042,15 +3045,15 @@ func (s *CheckoutSessionService) ConfirmSolanaSubscribeSession(ctx context.Conte
 	sub, err := s.solanaEnroll.ConfirmEnrollment(ctx, recurring.EnrollInput{
 		MerchantID:       tenantID,
 		UserID:           session.CustomerID.String(),
-		PriceID:          session.PriceID,
+		PriceID:          *session.PriceID,
 		SubscriberWallet: wallet,
 		PlanID:           terms.planID,
 		MintSymbol:       terms.mintSymbol,
 		AmountBaseUnits:  terms.amount,
 		PeriodHours:      terms.period,
 		PlanCreatedAt:    terms.createdAt,
-		FiatAmount:       session.Amount,
-		Currency:         session.Currency,
+		FiatAmount:       *session.Amount,
+		Currency:         *session.Currency,
 		Signature:        signature,
 	})
 	if err != nil {
@@ -3113,8 +3116,8 @@ func (s *CheckoutSessionService) tierChangeConfirmInput(ctx context.Context, ses
 		NewAmountBaseUnits:   prepIn.NewAmountBaseUnits,
 		NewPeriodHours:       prepIn.NewPeriodHours,
 		NewPlanCreatedAt:     prepIn.NewPlanCreatedAt,
-		NewFiatAmount:        session.Amount,
-		NewCurrency:          session.Currency,
+		NewFiatAmount:        *session.Amount,
+		NewCurrency:          *session.Currency,
 		IsUpgrade:            prepIn.IsUpgrade,
 		FirstChargeBaseUnits: prepIn.FirstChargeBaseUnits,
 		OldPeriodEndsAt:      oldPeriodEnds,

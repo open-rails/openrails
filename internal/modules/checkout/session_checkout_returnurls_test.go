@@ -52,7 +52,7 @@ func TestInitializeCheckoutSession_ThreadsStripeReturnURLs(t *testing.T) {
 
 	session := &models.CheckoutSession{
 		ID:        uuid.New(),
-		PriceID:   uuid.New(),
+		PriceID:   new(uuid.New()),
 		Rail:      models.RailStripe,
 		CreatedAt: startedAt,
 	}

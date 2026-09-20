@@ -226,12 +226,12 @@ type OpenrailsCatalogRateCard struct {
 
 type OpenrailsCheckoutSession struct {
 	ID             uuid.UUID
-	PriceID        uuid.UUID
+	PriceID        *uuid.UUID
 	Mode           string
 	Rail           string
 	Status         string
-	Amount         int64
-	Currency       string
+	Amount         *int64
+	Currency       *string
 	ExpiresAt      *time.Time
 	Reference      *string
 	TransactionID  *string

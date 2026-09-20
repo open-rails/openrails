@@ -3758,12 +3758,12 @@ ALTER TABLE ONLY openrails.host_outbox
 
 CREATE TABLE openrails.checkout_sessions (
     id uuid DEFAULT uuidv7() NOT NULL,
-    price_id uuid NOT NULL,
+    price_id uuid,
     mode text NOT NULL,
     rail text NOT NULL,
     status text NOT NULL,
-    amount bigint NOT NULL,
-    currency text NOT NULL,
+    amount bigint,
+    currency text,
     expires_at timestamp with time zone,
     reference text,
     transaction_id text,
@@ -3782,7 +3782,11 @@ CREATE TABLE openrails.checkout_sessions (
     destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
     routing_reason jsonb,
     CONSTRAINT checkout_sessions_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
-    CONSTRAINT checkout_sessions_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text, 'solana_cancel'::text, 'solana_tier_change'::text])))
+    CONSTRAINT checkout_sessions_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text, 'solana_cancel'::text, 'solana_tier_change'::text, 'payment_method'::text]))),
+    CONSTRAINT checkout_sessions_monetary_terms CHECK (
+      (mode = 'payment_method' AND price_id IS NULL AND amount IS NULL AND currency IS NULL AND payment_id IS NULL AND subscription_id IS NULL)
+      OR (mode <> 'payment_method' AND price_id IS NOT NULL AND amount IS NOT NULL AND currency IS NOT NULL)
+    )
 );
 
 ALTER TABLE ONLY openrails.checkout_sessions FORCE ROW LEVEL SECURITY;
