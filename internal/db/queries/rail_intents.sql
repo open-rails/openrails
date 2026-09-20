@@ -599,6 +599,7 @@ FROM openrails.rail_intents i
 JOIN openrails.subscriptions s ON s.id=i.subscription_id AND s.merchant_id=i.merchant_id
 WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid
   AND i.subscription_id=sqlc.arg(subscription_id)::uuid
+  AND s.deleted_at IS NULL
   AND i.intent_type='manual_rebill'
   AND (
     i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
