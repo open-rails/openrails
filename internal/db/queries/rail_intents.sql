@@ -194,7 +194,15 @@ WHERE id = sqlc.arg(id)
 UPDATE openrails.rail_intents
 SET status = 'succeeded',
     executed_at = sqlc.arg(now)::timestamptz,
-    result_evidence = CASE WHEN result_evidence ? 'qualified_receipt' THEN COALESCE(sqlc.narg(result_evidence)::jsonb, '{}'::jsonb) || jsonb_build_object('qualified_receipt', result_evidence->'qualified_receipt') ELSE sqlc.narg(result_evidence)::jsonb END,
+    result_evidence = CASE
+        WHEN result_evidence ?| ARRAY['qualified_receipt', 'account_requalifications']
+        THEN COALESCE(sqlc.narg(result_evidence)::jsonb, '{}'::jsonb)
+          || CASE WHEN result_evidence ? 'qualified_receipt'
+                  THEN jsonb_build_object('qualified_receipt', result_evidence->'qualified_receipt') ELSE '{}'::jsonb END
+          || CASE WHEN result_evidence ? 'account_requalifications'
+                  THEN jsonb_build_object('account_requalifications', result_evidence->'account_requalifications') ELSE '{}'::jsonb END
+        ELSE sqlc.narg(result_evidence)::jsonb
+    END,
     last_failure_reason = NULL,
     claimed_until = NULL,
     updated_at = now()
@@ -226,7 +234,15 @@ WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
 UPDATE openrails.rail_intents
 SET status = 'failed_terminal',
     last_failure_reason = sqlc.arg(reason),
-    result_evidence = CASE WHEN result_evidence ? 'qualified_receipt' THEN COALESCE(sqlc.narg(result_evidence)::jsonb, '{}'::jsonb) || jsonb_build_object('qualified_receipt', result_evidence->'qualified_receipt') ELSE sqlc.narg(result_evidence)::jsonb END,
+    result_evidence = CASE
+        WHEN result_evidence ?| ARRAY['qualified_receipt', 'account_requalifications']
+        THEN COALESCE(sqlc.narg(result_evidence)::jsonb, '{}'::jsonb)
+          || CASE WHEN result_evidence ? 'qualified_receipt'
+                  THEN jsonb_build_object('qualified_receipt', result_evidence->'qualified_receipt') ELSE '{}'::jsonb END
+          || CASE WHEN result_evidence ? 'account_requalifications'
+                  THEN jsonb_build_object('account_requalifications', result_evidence->'account_requalifications') ELSE '{}'::jsonb END
+        ELSE sqlc.narg(result_evidence)::jsonb
+    END,
     claimed_until = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')

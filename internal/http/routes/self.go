@@ -81,6 +81,9 @@ func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	subs.Handle(http.MethodPost, "/:id/change-tier", h(httphandlers.ChangeTier))
 	subs.Handle(http.MethodPost, "/:id/change-tier/preview", h(httphandlers.ChangeTierPreview))
 	subs.Handle(http.MethodPut, "/:id/payment-method", h(httphandlers.UpdateSubscriptionPaymentMethod))
+	subs.Handle(http.MethodPost, "/:id/provider-cutover", h(httphandlers.MyProviderCutover))
+	subs.Handle(http.MethodGet, "/:id/provider-cutover", h(httphandlers.MyProviderCutover))
+	subs.Handle(http.MethodPost, "/:id/provider-cutover/preview", h(httphandlers.PreviewMyProviderCutover))
 	if providerRoutes.SolanaSigning {
 		// App-driven on-chain cancel (#266/#271) and tier change (#272): the
 		// prepare -> sign -> confirm -> mirror loops. Need an OpenRails signer (#661).

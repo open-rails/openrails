@@ -130,3 +130,23 @@ ORDER BY account_id;
 -- (ResolveCustodianOwnerByIdentity). Custody identity is the CUSTODIAN's, not
 -- a PSP's — and one custodian may back several PSPs, so "the" PSP was never a
 -- well-defined answer.
+
+-- name: GetPSPForCutoverWrite :one
+SELECT * FROM openrails.psps
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
+FOR SHARE;
+
+-- name: GetPSPForQualificationUpdate :one
+SELECT * FROM openrails.psps
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
+FOR NO KEY UPDATE;
+
+-- name: SetPSPCutoverQualification :execrows
+UPDATE openrails.psps
+SET evidence = CASE WHEN sqlc.narg(qualification)::jsonb IS NULL
+    THEN COALESCE(evidence, '{}'::jsonb) #- '{settings,nmi_cutover_qualification}'
+    ELSE jsonb_set(COALESCE(evidence, '{}'::jsonb), '{settings}',
+        COALESCE(NULLIF(evidence->'settings', 'null'::jsonb), '{}'::jsonb)
+        || jsonb_build_object('nmi_cutover_qualification', sqlc.narg(qualification)::jsonb)) END,
+    updated_at = now()
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid;

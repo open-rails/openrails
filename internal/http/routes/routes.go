@@ -224,6 +224,8 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	customers := group.Group("/customers/:customer_id")
 	// Materialize a customer before its first purchase (idempotent touch).
 	customers.Handle(http.MethodPut, "", h(httphandlers.ServiceEnsureCustomer), writeMW...)
+	customers.Handle(http.MethodGet, "/billing-policy", h(httphandlers.ServiceGetCustomerBillingPolicy), readMW...)
+	customers.Handle(http.MethodPut, "/billing-policy", h(httphandlers.ServiceSetCustomerBillingPolicy), writeMW...)
 	paymentReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentsRead)}, dbMW...)
 	customers.Handle(http.MethodGet, "/payment-settlement-status", h(httphandlers.ServicePaymentSettlementStatus), paymentReadMW...)
 	customers.Handle(http.MethodGet, "/entitlements",
@@ -793,6 +795,9 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	subs.Handle(http.MethodPost, "/:id/change-tier", h(httphandlers.AdminChangeTier), tierChangeWrite...)
 	subs.Handle(http.MethodPost, "/:id/change-tier/preview", h(httphandlers.AdminChangeTierPreview), subWrite...)
 	subs.Handle(http.MethodPut, "/:id/payment-method", h(httphandlers.AdminUpdateSubscriptionPaymentMethod), subWrite...)
+	subs.Handle(http.MethodPost, "/:id/provider-cutover", h(httphandlers.ProviderCutover), subWrite...)
+	subs.Handle(http.MethodGet, "/:id/provider-cutover", h(httphandlers.ProviderCutover), subRead...)
+	subs.Handle(http.MethodPost, "/:id/provider-cutover/preview", h(httphandlers.PreviewProviderCutover), subRead...)
 	// #773 reprice: schedule a single subscription's price move at its next
 	// renewal on/after effective_at.
 	subs.Handle(http.MethodPost, "/:id/reprice", h(httphandlers.CreateSubscriptionReprice), subWrite...)

@@ -33,6 +33,21 @@ func (q *Queries) DeleteAllInvokerSpendLimits(ctx context.Context, arg DeleteAll
 	return result.RowsAffected(), nil
 }
 
+const deleteCustomerBillingPolicyBinding = `-- name: DeleteCustomerBillingPolicyBinding :exec
+DELETE FROM openrails.billing_policy_bindings
+WHERE merchant_id = $1 AND customer_id = $2
+`
+
+type DeleteCustomerBillingPolicyBindingParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+}
+
+func (q *Queries) DeleteCustomerBillingPolicyBinding(ctx context.Context, arg DeleteCustomerBillingPolicyBindingParams) error {
+	_, err := q.db.Exec(ctx, deleteCustomerBillingPolicyBinding, arg.MerchantID, arg.CustomerID)
+	return err
+}
+
 const deleteInvokerSpendLimit = `-- name: DeleteInvokerSpendLimit :execrows
 DELETE FROM openrails.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2 AND scope = $3 AND scope_key = $4
@@ -59,6 +74,32 @@ func (q *Queries) DeleteInvokerSpendLimit(ctx context.Context, arg DeleteInvoker
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const getCustomerBillingPolicyAssignment = `-- name: GetCustomerBillingPolicyAssignment :one
+SELECT c.id AS customer_id, b.policy_name
+FROM openrails.customers c
+LEFT JOIN openrails.billing_policy_bindings b
+  ON b.merchant_id = c.merchant_id AND b.customer_id = c.id
+WHERE c.merchant_id = $1 AND c.id = $2
+`
+
+type GetCustomerBillingPolicyAssignmentParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+type GetCustomerBillingPolicyAssignmentRow struct {
+	CustomerID uuid.UUID
+	PolicyName *string
+}
+
+// The left join distinguishes an existing unassigned customer from a missing one.
+func (q *Queries) GetCustomerBillingPolicyAssignment(ctx context.Context, arg GetCustomerBillingPolicyAssignmentParams) (GetCustomerBillingPolicyAssignmentRow, error) {
+	row := q.db.QueryRow(ctx, getCustomerBillingPolicyAssignment, arg.MerchantID, arg.CustomerID)
+	var i GetCustomerBillingPolicyAssignmentRow
+	err := row.Scan(&i.CustomerID, &i.PolicyName)
+	return i, err
 }
 
 const listBillingPolicies = `-- name: ListBillingPolicies :many
@@ -174,6 +215,24 @@ func (q *Queries) ListInvokerSpendLimits(ctx context.Context, arg ListInvokerSpe
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockBillingPolicyName = `-- name: LockBillingPolicyName :one
+SELECT name FROM openrails.billing_policies
+WHERE merchant_id = $1 AND name = $2
+FOR KEY SHARE
+`
+
+type LockBillingPolicyNameParams struct {
+	MerchantID uuid.UUID
+	Name       string
+}
+
+func (q *Queries) LockBillingPolicyName(ctx context.Context, arg LockBillingPolicyNameParams) (string, error) {
+	row := q.db.QueryRow(ctx, lockBillingPolicyName, arg.MerchantID, arg.Name)
+	var name string
+	err := row.Scan(&name)
+	return name, err
 }
 
 const resolveBillingPolicy = `-- name: ResolveBillingPolicy :one
