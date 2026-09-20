@@ -23,7 +23,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -53,12 +52,6 @@ var (
 	sharedExternalAdminDSN string
 	sharedExternalDBName   string
 )
-
-// testDBStaleAfter bounds how long an orphaned per-run test database (left by a
-// crashed/killed process whose teardown never ran) may live before the next run
-// reaps it. Generously above the per-package test timeout so a database in
-// active use by a concurrent run is never mistaken for an orphan.
-const testDBStaleAfter = 30 * time.Minute
 
 // RunMain is the TestMain entry point for any package that uses
 // SharedPostgresDSN. It runs the package's tests and then ALWAYS terminates the
@@ -115,48 +108,6 @@ func dropExternalTestDatabase(adminDSN, dbName string) {
 	}
 	defer pool.Close()
 	_, _ = pool.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{dbName}.Sanitize()+" WITH (FORCE)")
-}
-
-// reapStaleTestDatabases drops orphaned per-run test databases left by
-// crashed/killed prior runs whose teardown never ran — both `openrails_it_*`
-// (SharedPostgresDSN) and `openrails_bootstrap_*` (newExternalPostgresTestPool).
-// Only databases older than testDBStaleAfter are reaped, so a database in active
-// use by a concurrent run is never dropped. Best-effort: errors (incl. races
-// with another reaper) are ignored.
-func reapStaleTestDatabases(ctx context.Context, adminPool *pgxpool.Pool) {
-	rows, err := adminPool.Query(ctx, `SELECT datname FROM pg_database WHERE datname LIKE 'openrails\_it\_%' OR datname LIKE 'openrails\_bootstrap\_%'`)
-	if err != nil {
-		return
-	}
-	var stale []string
-	for rows.Next() {
-		var name string
-		if rows.Scan(&name) != nil {
-			continue
-		}
-		if testDBIsStale(name) {
-			stale = append(stale, name)
-		}
-	}
-	rows.Close()
-	for _, name := range stale {
-		_, _ = adminPool.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{name}.Sanitize()+" WITH (FORCE)")
-	}
-}
-
-// testDBIsStale parses the trailing `_<unixnano>` from a per-run test database
-// name and reports whether it is older than testDBStaleAfter. Unparseable names
-// are treated as not stale (never reaped).
-func testDBIsStale(name string) bool {
-	i := strings.LastIndex(name, "_")
-	if i < 0 || i+1 >= len(name) {
-		return false
-	}
-	nano, err := strconv.ParseInt(name[i+1:], 10, 64)
-	if err != nil || nano <= 0 {
-		return false
-	}
-	return time.Since(time.Unix(0, nano)) > testDBStaleAfter
 }
 
 // SharedPostgresDSN returns the DEFAULT DSN to a migrated Postgres shared across
@@ -276,10 +227,8 @@ func createExternalTestDatabase(ctx context.Context, adminDSN string) (string, e
 	}
 	defer adminPool.Close()
 
-	// Reap orphaned per-run databases from crashed/killed prior runs before
-	// adding another, so the shared server's data dir cannot grow without bound.
-	reapStaleTestDatabases(ctx, adminPool)
-
+	// Never inspect or reap other runs' databases. Age cannot prove ownership;
+	// RunMain drops only the exact database this process records below.
 	dbName := fmt.Sprintf("openrails_it_%d_%d", os.Getpid(), time.Now().UnixNano())
 	if _, err := adminPool.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{dbName}.Sanitize()); err != nil {
 		return "", fmt.Errorf("create external test database %s: %w", dbName, err)
