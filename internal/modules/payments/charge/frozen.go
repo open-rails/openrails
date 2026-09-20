@@ -15,11 +15,13 @@ import (
 // addressed there. A charge is submitted only while the method still matches
 // it, and every receipt is judged against it, never the method's current row.
 type FrozenInstrument struct {
-	PSPID           uuid.UUID  `json:"psp_id"`
-	Custodian       string     `json:"custodian"`
-	CustodianID     *uuid.UUID `json:"custodian_id,omitempty"`
-	RailCustomerRef string     `json:"rail_customer_ref"`
-	RailMethodRef   string     `json:"rail_method_ref"`
+	StoredCredentialRecurringRef   string     `json:"stored_credential_recurring_ref"`
+	StoredCredentialUnscheduledRef string     `json:"stored_credential_unscheduled_ref"`
+	PSPID                          uuid.UUID  `json:"psp_id"`
+	Custodian                      string     `json:"custodian"`
+	CustodianID                    *uuid.UUID `json:"custodian_id,omitempty"`
+	RailCustomerRef                string     `json:"rail_customer_ref"`
+	RailMethodRef                  string     `json:"rail_method_ref"`
 }
 
 // ErrInstrumentChanged: the payment method no longer matches the
@@ -30,6 +32,7 @@ var ErrInstrumentChanged = errors.New("payment method no longer matches the oper
 func FreezeInstrument(method gen.OpenrailsPaymentMethod) FrozenInstrument {
 	return FrozenInstrument{
 		PSPID: method.PspID, Custodian: method.Custodian, CustodianID: method.CustodianID,
+		StoredCredentialRecurringRef: strings.TrimSpace(method.StoredCredentialRecurringRef), StoredCredentialUnscheduledRef: strings.TrimSpace(method.StoredCredentialUnscheduledRef),
 		RailCustomerRef: strings.TrimSpace(method.RailCustomerRef), RailMethodRef: strings.TrimSpace(method.RailMethodRef),
 	}
 }
@@ -48,8 +51,20 @@ func (i FrozenInstrument) Validate() error {
 // proxy (or#879), so the gateway holds no vault for it.
 func (i FrozenInstrument) CustodianHeld() bool { return i.Custodian != models.CustodianPSP }
 
-func (i FrozenInstrument) Matches(method gen.OpenrailsPaymentMethod) error {
+func (i FrozenInstrument) Matches(method gen.OpenrailsPaymentMethod, agreement Agreement) error {
 	cur := FreezeInstrument(method)
+	switch agreement {
+	case AgreementRecurring:
+		if i.StoredCredentialRecurringRef != cur.StoredCredentialRecurringRef {
+			return fmt.Errorf("%w: recurring credential changed", ErrInstrumentChanged)
+		}
+	case AgreementUnscheduled:
+		if i.StoredCredentialUnscheduledRef != cur.StoredCredentialUnscheduledRef {
+			return fmt.Errorf("%w: unscheduled credential changed", ErrInstrumentChanged)
+		}
+	default:
+		return fmt.Errorf("frozen instrument requires a scoped credential agreement")
+	}
 	sameCustodian := (cur.CustodianID == nil && i.CustodianID == nil) ||
 		(cur.CustodianID != nil && i.CustodianID != nil && *cur.CustodianID == *i.CustodianID)
 	if cur.PSPID != i.PSPID || cur.Custodian != i.Custodian || !sameCustodian ||

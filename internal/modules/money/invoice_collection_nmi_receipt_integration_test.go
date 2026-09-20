@@ -40,7 +40,9 @@ type fakeNMIReceiptGateway struct {
 	payments map[string]map[string]any
 	sends    int
 	// saleOrderIDs records the orderid of every sale sent.
-	saleOrderIDs []string
+	saleOrderIDs   []string
+	saleAmounts    []string
+	saleCurrencies []string
 	// saleVaults records the customer_vault_id every sale was sent on ("" for
 	// a custodian-proxied sale, which carries card data instead).
 	saleVaults []string
@@ -66,6 +68,8 @@ func newFakeNMIReceiptGateway(t *testing.T) (*fakeNMIReceiptGateway, *httptest.S
 		if r.Form.Get("type") == "sale" {
 			f.sends++
 			f.saleOrderIDs = append(f.saleOrderIDs, r.Form.Get("orderid"))
+			f.saleAmounts = append(f.saleAmounts, r.Form.Get("amount"))
+			f.saleCurrencies = append(f.saleCurrencies, r.Form.Get("currency"))
 			f.saleVaults = append(f.saleVaults, r.Form.Get("customer_vault_id"))
 			if r.URL.Path == "/proxy" {
 				// The custodian's detokenizing proxy forwarded the sale and the

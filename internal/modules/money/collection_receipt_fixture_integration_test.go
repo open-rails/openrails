@@ -113,3 +113,47 @@ func (h *hookCharger) ConfirmCollectionReceipt(context.Context, string, money.Co
 func (h *hookCharger) ConfirmCollectionNotExecuted(context.Context, money.CollectionReceiptExpectation) error {
 	return fmt.Errorf("fixture does not attest nonexecution")
 }
+
+func (f *fakeCollectionAdapter) ReadCollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, reference string) (intents.CollectedReceipt, bool, error) {
+	if f.decline {
+		return intents.CollectedReceipt{}, false, nil
+	}
+	for _, request := range f.charges {
+		if request.IdempotencyKey == in.ID.String() {
+			return readChargedRequest(ctx, in, request, "tx_"+request.IdempotencyKey, reference)
+		}
+	}
+	return intents.CollectedReceipt{}, false, nil
+}
+func (f *fakeCollectionAdapter) VerifyCollectionCharge(context.Context, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
+	return money.CollectionVerifyResult{}, fmt.Errorf("use qualified read")
+}
+func (f *fakeCollectionAdapter) ConfirmCollectionReceipt(context.Context, string, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
+	return money.CollectionVerifyResult{}, fmt.Errorf("use qualified read")
+}
+func (f *fakeCollectionAdapter) ConfirmCollectionNotExecuted(context.Context, money.CollectionReceiptExpectation) error {
+	return fmt.Errorf("fixture does not attest nonexecution")
+}
+
+// standaloneCollectionReader exercises a test's actual loopback provider with
+// the same account-scoped clients its isolated adapter uses.
+type standaloneCollectionReader struct {
+	nmi    intents.NMIClientResolver
+	stripe *subscriptions.StripeService
+}
+
+func (r standaloneCollectionReader) ReadCollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, reference string) (intents.CollectedReceipt, bool, error) {
+	if r.stripe != nil {
+		return intents.ReadStripeCollectionReceipt(ctx, in, r.stripe, reference)
+	}
+	return intents.ReadNMICollectionReceipt(ctx, in, r.nmi, reference)
+}
+func (r standaloneCollectionReader) VerifyCollectionCharge(context.Context, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
+	return money.CollectionVerifyResult{}, fmt.Errorf("use qualified read")
+}
+func (r standaloneCollectionReader) ConfirmCollectionReceipt(context.Context, string, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
+	return money.CollectionVerifyResult{}, fmt.Errorf("use qualified read")
+}
+func (r standaloneCollectionReader) ConfirmCollectionNotExecuted(context.Context, money.CollectionReceiptExpectation) error {
+	return fmt.Errorf("fixture does not attest nonexecution")
+}
