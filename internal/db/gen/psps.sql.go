@@ -199,6 +199,77 @@ func (q *Queries) GetPSPByRailIdentity(ctx context.Context, arg GetPSPByRailIden
 	return i, err
 }
 
+const getPSPForCutoverWrite = `-- name: GetPSPForCutoverWrite :one
+
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
+WHERE id = $1::uuid AND merchant_id = $2::uuid
+FOR SHARE
+`
+
+type GetPSPForCutoverWriteParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+// or#880: the custody sibling moved to internal/db/queries/custodians.sql
+// (ResolveCustodianOwnerByIdentity). Custody identity is the CUSTODIAN's, not
+// a PSP's — and one custodian may back several PSPs, so "the" PSP was never a
+// well-defined answer.
+func (q *Queries) GetPSPForCutoverWrite(ctx context.Context, arg GetPSPForCutoverWriteParams) (OpenrailsPsp, error) {
+	row := q.db.QueryRow(ctx, getPSPForCutoverWrite, arg.ID, arg.MerchantID)
+	var i OpenrailsPsp
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.Environment,
+		&i.AccountID,
+		&i.Key,
+		&i.Evidence,
+		&i.FirstSeenAt,
+		&i.LastVerifiedAt,
+		&i.ReplacedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Archived,
+		&i.CustodianID,
+	)
+	return i, err
+}
+
+const getPSPForQualificationUpdate = `-- name: GetPSPForQualificationUpdate :one
+SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
+WHERE id = $1::uuid AND merchant_id = $2::uuid
+FOR NO KEY UPDATE
+`
+
+type GetPSPForQualificationUpdateParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) GetPSPForQualificationUpdate(ctx context.Context, arg GetPSPForQualificationUpdateParams) (OpenrailsPsp, error) {
+	row := q.db.QueryRow(ctx, getPSPForQualificationUpdate, arg.ID, arg.MerchantID)
+	var i OpenrailsPsp
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.Environment,
+		&i.AccountID,
+		&i.Key,
+		&i.Evidence,
+		&i.FirstSeenAt,
+		&i.LastVerifiedAt,
+		&i.ReplacedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Archived,
+		&i.CustodianID,
+	)
+	return i, err
+}
+
 const listLivePSPsForRail = `-- name: ListLivePSPsForRail :many
 SELECT id, merchant_id, rail, environment, account_id, key
 FROM openrails.psps
@@ -378,6 +449,31 @@ func (q *Queries) ResolvePSPOwnerByRailIdentity(ctx context.Context, arg Resolve
 		&i.AccountID,
 	)
 	return i, err
+}
+
+const setPSPCutoverQualification = `-- name: SetPSPCutoverQualification :execrows
+UPDATE openrails.psps
+SET evidence = CASE WHEN $1::jsonb IS NULL
+    THEN COALESCE(evidence, '{}'::jsonb) #- '{settings,nmi_cutover_qualification}'
+    ELSE jsonb_set(COALESCE(evidence, '{}'::jsonb), '{settings}',
+        COALESCE(NULLIF(evidence->'settings', 'null'::jsonb), '{}'::jsonb)
+        || jsonb_build_object('nmi_cutover_qualification', $1::jsonb)) END,
+    updated_at = now()
+WHERE id = $2::uuid AND merchant_id = $3::uuid
+`
+
+type SetPSPCutoverQualificationParams struct {
+	Qualification []byte
+	ID            uuid.UUID
+	MerchantID    uuid.UUID
+}
+
+func (q *Queries) SetPSPCutoverQualification(ctx context.Context, arg SetPSPCutoverQualificationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setPSPCutoverQualification, arg.Qualification, arg.ID, arg.MerchantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertPSP = `-- name: UpsertPSP :one

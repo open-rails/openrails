@@ -32,6 +32,7 @@
       "func (c *Client) CreatePlanMigration(ctx context.Context, request PlanMigrationRequest) (*PlanMigrationResult, error)",
       "func (c *Client) CreatePrice(ctx context.Context, request CreatePriceRequest) (*CatalogPrice, error)",
       "func (c *Client) CreateProduct(ctx context.Context, request CreateProductRequest) (*CatalogProduct, error)",
+      "func (c *Client) CutoverProvider(ctx context.Context, subscriptionID SubscriptionID, key string, req ProviderCutoverRequest) (*ProviderCutover, error)",
       "func (c *Client) DeleteCustomerSpendDelegation(ctx context.Context, customerID CustomerID, scope, scopeKey string) error",
       "func (c *Client) DeleteDefaultUsageRateCard(ctx context.Context, key string) error",
       "func (c *Client) DeletePaymentMethod(ctx context.Context, customerID CustomerID, methodID PaymentMethodID) (*PaymentMethodDeletion, error)",
@@ -58,6 +59,7 @@
       "func (c *Client) GetProduct(ctx context.Context, id ProductID) (*CatalogProduct, error)",
       "func (c *Client) GetProductByKey(ctx context.Context, key string) (*CatalogProduct, error)",
       "func (c *Client) GetProviderBillingQualification(ctx context.Context, operationID string) (*ProviderBillingQualification, error)",
+      "func (c *Client) GetProviderCutover(ctx context.Context, subscriptionID SubscriptionID, key string) (*ProviderCutover, error)",
       "func (c *Client) GetSubscription(ctx context.Context, id SubscriptionID) (*Subscription, error)",
       "func (c *Client) GetTrustLevel(ctx context.Context, customerID CustomerID, currency string) (string, error)",
       "func (c *Client) GetUsageMeter(ctx context.Context, key string) (*UsageMeterDTO, error)",
@@ -85,6 +87,7 @@
       "func (c *Client) MerchantID() MerchantID",
       "func (c *Client) OpenOperationAuthorization(ctx context.Context, req OperationAuthorizationRequest) (*OperationAuthorization, error)",
       "func (c *Client) PreviewPlanMigration(ctx context.Context, request PlanMigrationRequest) (*PlanMigrationResult, error)",
+      "func (c *Client) PreviewProviderCutover(ctx context.Context, subscriptionID SubscriptionID, req ProviderCutoverRequest) (*ProviderCutover, error)",
       "func (c *Client) PreviewTierChange(ctx context.Context, id SubscriptionID, request ChangeTierRequest) (*TierChangePreviewResponse, error)",
       "func (c *Client) RecordInvoicePayment(ctx context.Context, id uuid.UUID, request RecordInvoicePaymentRequest) (*MerchantInvoiceDTO, error)",
       "func (c *Client) RecordProviderBillingObservation(ctx context.Context, req ProviderBillingObservationRequest) (*ProviderBillingQualification, error)",
@@ -314,6 +317,8 @@
       "type ProviderBillingQualificationReason string",
       "type ProviderBillingQualificationState string",
       "type ProviderBillingRecord struct {\n\tProviderResourceID string    `json:\"provider_resource_id\"`\n\tBucketStart        time.Time `json:\"bucket_start\"`\n\tAmountUSDMicros    int64     `json:\"amount_usd_micros,string\"`\n\tTimeBilledMS       int64     `json:\"time_billed_ms,string\"`\n}",
+      "type ProviderCutover struct {\n\tID                    uuid.UUID       `json:\"id\"`\n\tMerchantID            uuid.UUID       `json:\"merchant_id\"`\n\tSubscriptionID        SubscriptionID  `json:\"subscription_id\"`\n\tSourcePSPID           uuid.UUID       `json:\"source_psp_id\"`\n\tTargetPSPID           uuid.UUID       `json:\"target_psp_id\"`\n\tTargetPaymentMethodID PaymentMethodID `json:\"target_payment_method_id\"`\n\tTargetSubscriptionID  string          `json:\"target_subscription_id\"`\n\tAnchor                time.Time       `json:\"anchor\"`\n\tStatus                string          `json:\"status\"`\n\tStage                 string          `json:\"stage\"`\n\tReason                string          `json:\"reason\"`\n}",
+      "type ProviderCutoverRequest struct {\n\tTargetPaymentMethodID PaymentMethodID `json:\"target_payment_method_id\"`\n\tExpectedSourcePSPID   uuid.UUID       `json:\"expected_source_psp_id\"`\n\tExpectedTargetPSPID   uuid.UUID       `json:\"expected_target_psp_id\"`\n}",
       "type ProviderState struct {\n\tStatus     ProviderStatus    `json:\"status\"`\n\tIDs        map[string]string `json:\"ids,omitempty\"`\n\tLookupKey  string            `json:\"lookup_key,omitempty\"`\n\tSyncStatus SyncStatus        `json:\"sync_status,omitempty\"`\n\tDrift      []DriftField      `json:\"drift,omitempty\"`\n\tMessage    string            `json:\"message,omitempty\"`\n}",
       "type ProviderStatus string",
       "type PublicPrice struct {\n\tID PriceID `json:\"id\"`\n\n\tKey        string            `json:\"key,omitempty\"`\n\tObject     string            `json:\"object\"`\n\tUnitAmount int64             `json:\"unit_amount,string\"`\n\tCurrency   string            `json:\"currency\"`\n\tType       string            `json:\"type,omitempty\"`\n\tRecurring  *PriceRecurrence  `json:\"recurring,omitempty\"`\n\tProduct    ProductID         `json:\"product\"`\n\tActive     bool              `json:\"active\"`\n\tProviders  []string          `json:\"providers,omitempty\"`\n\tMetadata   map[string]string `json:\"metadata,omitempty\"`\n\tCreatedAt  time.Time         `json:\"created_at\"`\n}",
@@ -580,6 +585,7 @@
     ],
     "embed/controlplane": [
       "const (\n\tMerchantType = operator.MerchantType\n\tCustomerType = operator.CustomerType\n\n\tMerchantRetirementRefusedNotLive       = operator.MerchantRetirementRefusedNotLive\n\tMerchantRetirementRefusedGroupMismatch = operator.MerchantRetirementRefusedGroupMismatch\n\tMerchantRetirementRefusedReserved      = operator.MerchantRetirementRefusedReserved\n\tMerchantRetirementRefusedActive        = operator.MerchantRetirementRefusedActive\n\n\tProviderAccountCutoverSameAccount     = operator.ProviderAccountCutoverSameAccount\n\tProviderAccountCutoverRequiresReentry = operator.ProviderAccountCutoverRequiresReentry\n\tProviderAccountCutoverBlocked         = operator.ProviderAccountCutoverBlocked\n\n\tProviderAccountCutoverReady                     = operator.ProviderAccountCutoverReady\n\tProviderAccountCutoverIdentityMissing           = operator.ProviderAccountCutoverIdentityMissing\n\tProviderAccountCutoverRailUnsupported           = operator.ProviderAccountCutoverRailUnsupported\n\tProviderAccountCutoverTargetRailMismatch        = operator.ProviderAccountCutoverTargetRailMismatch\n\tProviderAccountCutoverSubscriptionNotRebilling  = operator.ProviderAccountCutoverSubscriptionNotRebilling\n\tProviderAccountCutoverSubscriptionNotAtProvider = operator.ProviderAccountCutoverSubscriptionNotAtProvider\n\tProviderAccountCutoverTargetArchived            = operator.ProviderAccountCutoverTargetArchived\n\tProviderAccountCutoverSourceNotArchived         = operator.ProviderAccountCutoverSourceNotArchived\n\tProviderAccountCutoverReplacementCardRequired   = operator.ProviderAccountCutoverReplacementCardRequired\n\tProviderAccountCutoverReplacementCardNotFound   = operator.ProviderAccountCutoverReplacementCardNotFound\n\tProviderAccountCutoverReplacementCardNotOwned   = operator.ProviderAccountCutoverReplacementCardNotOwned\n\tProviderAccountCutoverReplacementCardUnusable   = operator.ProviderAccountCutoverReplacementCardUnusable\n\tProviderAccountCutoverReplacementCardPSP        = operator.ProviderAccountCutoverReplacementCardPSP\n\tProviderAccountCutoverCrossAccountNotQualified  = operator.ProviderAccountCutoverCrossAccountNotQualified\n)",
+      "const NMIProviderCutoverContract = providerqualification.NMIContract",
       "func (c *ControlPlane) ArchivePaymentProviderAccount(ctx context.Context, id merchant.ID, rail string, pspID uuid.UUID, req ArchivePaymentProviderAccountRequest) (PaymentProviderConfig, error)",
       "func (c *ControlPlane) CompletePendingMerchantRetirements(ctx context.Context, limit int) (int, error)",
       "func (c *ControlPlane) Core() *authcore.Client",
@@ -605,6 +611,7 @@
       "func (c *ControlPlane) RunBootstrap(ctx context.Context, opts BootstrapOptions) (*BootstrapResult, error)",
       "func (c *ControlPlane) SetMerchantAPIHost(ctx context.Context, id merchant.ID, apiHost string) error",
       "func (c *ControlPlane) SetMerchantDisplayName(ctx context.Context, id merchant.ID, displayName string) error",
+      "func (c *ControlPlane) SetProviderCutoverQualification(ctx context.Context, merchantID merchant.ID, pspID uuid.UUID, qualification *ProviderCutoverQualification) error",
       "func (c *ControlPlane) UpsertPaymentProviderConfig(ctx context.Context, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error)",
       "func (c *ControlPlane) UserAuthenticator() billingauth.Authenticator",
       "func Attach(ctx context.Context, rt *embed.Runtime, opts Options) (*ControlPlane, error)",
@@ -641,6 +648,7 @@
       "type ProviderAccountCutoverPlan = operator.ProviderAccountCutoverPlan",
       "type ProviderAccountCutoverQuery = operator.ProviderAccountCutoverQuery",
       "type ProviderAccountCutoverReport = operator.ProviderAccountCutoverReport",
+      "type ProviderCutoverQualification = providerqualification.Record",
       "type ProvisionMerchantForRestoreRequest = operator.ProvisionMerchantForRestoreRequest",
       "type ProvisionMerchantRequest = operator.ProvisionMerchantRequest",
       "type ProvisionMerchantResult = operator.ProvisionMerchantResult",
@@ -657,6 +665,8 @@
       "var ErrPaymentProviderNotFound = merchants.ErrPaymentProviderNotFound",
       "var ErrPermissionRequired = operator.ErrPermissionRequired",
       "var ErrProviderAccountCutoverNotQualified = operator.ErrProviderAccountCutoverNotQualified",
+      "var ErrProviderCutoverAccountNotFound = providerqualification.ErrNotFound",
+      "var ErrProviderCutoverQualificationInvalid = providerqualification.ErrInvalid",
       "var ErrSlugReserved = operator.ErrSlugReserved",
       "var ErrVaultedPaymentMethodRequired = operator.ErrVaultedPaymentMethodRequired"
     ],
@@ -809,6 +819,9 @@
       "type ProvisionMerchantResult struct {\n\tMerchantID merchant.ID\n\n\tGroupID string\n\n\tCreated bool\n}",
       "type RetireUnusedMerchantResult = merchants.RetireResult",
       "type UpsertPaymentProviderConfigRequest = merchants.UpsertPaymentProviderConfigRequest"
+    ],
+    "internal/providerqualification": [
+      "type Record struct {\n\tPSPID       uuid.UUID `json:\"psp_id\"`\n\tEnvironment string    `json:\"environment\"`\n\tContract    string    `json:\"contract\"`\n\tEvidenceRef string    `json:\"evidence_ref\"`\n}"
     ],
     "internal/reconcile": [
       "type ProviderEndpoints struct {\n\tNMIQueryURL           string\n\tNMIV5BaseURL          string\n\tCCBillDataLinkBaseURL string\n\tStripeBaseURL         string\n}"
@@ -1455,6 +1468,7 @@
       "type V5CustomerBilling struct {\n\tID             string            `json:\"id\"`\n\tFirstName      string            `json:\"first_name\"`\n\tLastName       string            `json:\"last_name\"`\n\tEmail          string            `json:\"email\"`\n\tPriority       *int              `json:\"priority\"`\n\tPaymentDetails V5BillingCardData `json:\"payment_details\"`\n}",
       "type V5Plan struct {\n\tObject         string `json:\"object\"`\n\tID             string `json:\"id\"`\n\tPlanName       string `json:\"plan_name\"`\n\tPlanAmount     string `json:\"plan_amount\"`\n\tPlanPayments   string `json:\"plan_payments\"`\n\tDayFrequency   string `json:\"day_frequency\"`\n\tMonthFrequency string `json:\"month_frequency\"`\n\tDayOfMonth     string `json:\"day_of_month\"`\n}",
       "type V5Subscription struct {\n\tObject          string `json:\"object\"`\n\tID              string `json:\"id\"`\n\tStartDate       string `json:\"start_date\"`\n\tNextBillingDate string `json:\"next_billing_date\"`\n\tAmount          string `json:\"amount\"`\n\tCustomerVaultID string `json:\"customer_vault_id\"`\n\n\tDelayedCondition   string  `json:\"delayed_condition\"`\n\tPausedSubscription any     `json:\"paused_subscription\"`\n\tPlan               *V5Plan `json:\"plan\"`\n}",
+      "type cutoverVaultRef struct {\n\tID        string `json:\"id\"`\n\tBillingID string `json:\"billing_id,omitempty\"`\n}",
       "type v5CustomerBillingRequest struct {\n\tID             string            `json:\"id,omitempty\"`\n\tCurrency       string            `json:\"currency,omitempty\"`\n\tPaymentDetails *v5PaymentDetails `json:\"payment_details,omitempty\"`\n\tFirstName      string            `json:\"first_name,omitempty\"`\n\tLastName       string            `json:\"last_name,omitempty\"`\n\tCompany        string            `json:\"company,omitempty\"`\n\tAddress1       string            `json:\"address1,omitempty\"`\n\tAddress2       string            `json:\"address2,omitempty\"`\n\tCity           string            `json:\"city,omitempty\"`\n\tState          string            `json:\"state,omitempty\"`\n\tZip            string            `json:\"zip,omitempty\"`\n\tCountry        string            `json:\"country,omitempty\"`\n\tPhone          string            `json:\"phone,omitempty\"`\n\tEmail          string            `json:\"email,omitempty\"`\n}",
       "type v5CustomerVaultRef struct {\n\tID string `json:\"id\"`\n}",
       "type v5Error struct {\n\tType      string `json:\"type\"`\n\tErrorCode string `json:\"error_code\"`\n\tMessage   string `json:\"message\"`\n\tRefID     string `json:\"ref_id\"`\n}",
@@ -1484,7 +1498,12 @@
       "type SolanaSunsetPayload struct {\n\tPlanPDA string `json:\"plan_pda\"`\n\tLabel   string `json:\"label,omitempty\"`\n}",
       "type StripeArchivePayload struct {\n\tObjectID  string `json:\"object_id\"`\n\tMarkerKey string `json:\"marker_key\"`\n\tLabel     string `json:\"label,omitempty\"`\n}",
       "type collectedReceipt struct {\n\tVersion int                                    `json:\"version\"`\n\tFamily  string                                 `json:\"family\"`\n\tBinding receiptBinding                         `json:\"binding\"`\n\tNMI     *nmi.SaleEvidence                      `json:\"nmi,omitempty\"`\n\tStripe  *subscriptions.StripeCollectionReceipt `json:\"stripe,omitempty\"`\n}",
+      "type cutoverAccountRequalification struct {\n\tRole                  string                       `json:\"role\"`\n\tQualification         providerqualification.Record `json:\"qualification\"`\n\tOriginalFingerprint   string                       `json:\"original_fingerprint\"`\n\tPreviousFingerprint   string                       `json:\"previous_fingerprint\"`\n\tCredentialFingerprint string                       `json:\"credential_fingerprint\"`\n\tCredentialVersion     int                          `json:\"credential_version\"`\n\tActor                 string                       `json:\"actor\"`\n\tReason                string                       `json:\"reason\"`\n\tRecordedAt            time.Time                    `json:\"recorded_at\"`\n}",
       "type nmiCard struct {\n\tLastFour   string `json:\"last_four\"`\n\tCardType   string `json:\"card_type\"`\n\tExpiryDate string `json:\"expiry_date\"`\n}",
+      "type nmiCutoverDecision struct {\n\tAction        string         `json:\"action\"`\n\tAuthorization map[string]any `json:\"authorization,omitempty\"`\n}",
+      "type nmiCutoverPayload struct {\n\tSourceQualification         providerqualification.BoundRecord `json:\"source_qualification\"`\n\tTargetQualification         providerqualification.BoundRecord `json:\"target_qualification\"`\n\tRequest                     nmiCutoverRequest                 `json:\"request\"`\n\tCustomerID                  uuid.UUID                         `json:\"customer_id\"`\n\tSubscriptionID              uuid.UUID                         `json:\"subscription_id\"`\n\tSourceSubscriptionID        string                            `json:\"source_subscription_id\"`\n\tSourcePaymentMethodID       uuid.UUID                         `json:\"source_payment_method_id\"`\n\tSourceInstrument            charge.FrozenInstrument           `json:\"source_instrument\"`\n\tPriceID                     uuid.UUID                         `json:\"price_id\"`\n\tPlanID                      string                            `json:\"plan_id\"`\n\tTargetInstrument            charge.FrozenInstrument           `json:\"target_instrument\"`\n\tCurrency                    string                            `json:\"currency\"`\n\tAmount                      int64                             `json:\"amount\"`\n\tCycleHours                  int32                             `json:\"cycle_hours\"`\n\tPeriodStart                 time.Time                         `json:\"period_start\"`\n\tPeriodEnd                   time.Time                         `json:\"period_end\"`\n\tAnchor                      time.Time                         `json:\"anchor\"`\n\tSourceCredentialFingerprint string                            `json:\"source_credential_fingerprint\"`\n\tTargetCredentialFingerprint string                            `json:\"target_credential_fingerprint\"`\n}",
+      "type nmiCutoverProgress struct {\n\tDecision              *nmiCutoverDecision `json:\"decision,omitempty\"`\n\tTargetCancelSubmitted bool                `json:\"target_cancel_submitted,omitempty\"`\n\tTargetCancelReceipt   *nmi.V5Subscription `json:\"target_cancel_receipt,omitempty\"`\n\tAbandoned             bool                `json:\"abandoned,omitempty\"`\n\tCreateSubmitted       bool                `json:\"create_submitted,omitempty\"`\n\tTarget                *nmi.V5Subscription `json:\"target,omitempty\"`\n\tSourceCancelSubmitted bool                `json:\"source_cancel_submitted,omitempty\"`\n\tSourceReceipt         *nmi.V5Subscription `json:\"source_receipt,omitempty\"`\n\tSourceAbsentAt        time.Time           `json:\"source_absent_at,omitzero\"`\n\tActivatedTarget       *nmi.V5Subscription `json:\"activated_target,omitempty\"`\n\tSourceCanceled        bool                `json:\"source_canceled,omitempty\"`\n\tActivationSubmitted   bool                `json:\"activation_submitted,omitempty\"`\n\tActivationAnchor      time.Time           `json:\"activation_anchor,omitzero\"`\n\tTargetActive          bool                `json:\"target_active,omitempty\"`\n\tResolution            map[string]any      `json:\"resolution,omitempty\"`\n\tBillingAnchor         time.Time           `json:\"billing_anchor,omitzero\"`\n\tPausedAnchor          time.Time           `json:\"paused_anchor,omitzero\"`\n\tAnchorResolutions     []map[string]any    `json:\"anchor_resolutions,omitempty\"`\n\tNotExecuted           bool                `json:\"not_executed,omitempty\"`\n\tNotExecutedCode       string              `json:\"not_executed_code,omitempty\"`\n}",
+      "type nmiCutoverRequest struct {\n\tTargetPaymentMethodID uuid.UUID `json:\"target_payment_method_id\"`\n\tExpectedSourcePSPID   uuid.UUID `json:\"expected_source_psp_id\"`\n\tExpectedTargetPSPID   uuid.UUID `json:\"expected_target_psp_id\"`\n}",
       "type nmiPaymentMethodUpdateProgress struct {\n\tSubmissionStarted bool    `json:\"submission_started\"`\n\tOldCard           nmiCard `json:\"old_card\"`\n}",
       "type receiptBinding struct {\n\tOperationID   uuid.UUID `json:\"operation_id\"`\n\tMerchantID    uuid.UUID `json:\"merchant_id\"`\n\tPSPID         uuid.UUID `json:\"psp_id\"`\n\tKind          string    `json:\"kind\"`\n\tPayloadSHA256 string    `json:\"payload_sha256\"`\n}"
     ],
@@ -1740,6 +1759,10 @@
       "type MerchantRef struct {\n\tID          merchant.ID `json:\"id\"`\n\tSlug        string      `json:\"slug\"`\n\tDisplayName string      `json:\"display_name,omitempty\"`\n}",
       "type ProviderAccountCutoverReport struct {\n\tSubscriptionID openrails.SubscriptionID   `json:\"subscription_id\"`\n\tSourcePSPID    uuid.UUID                  `json:\"source_psp_id\"`\n\tTargetPSPID    uuid.UUID                  `json:\"target_psp_id\"`\n\tPlan           ProviderAccountCutoverPlan `json:\"plan\"`\n}"
     ],
+    "internal/providerqualification": [
+      "type BoundRecord struct {\n\tRecord\n\tCredentialFingerprint string `json:\"credential_fingerprint\"`\n\tCredentialVersion     *int   `json:\"credential_version\"`\n}",
+      "type Record struct {\n\tPSPID       uuid.UUID `json:\"psp_id\"`\n\tEnvironment string    `json:\"environment\"`\n\tContract    string    `json:\"contract\"`\n\tEvidenceRef string    `json:\"evidence_ref\"`\n}"
+    ],
     "internal/reconcile": [
       "type Capabilities struct {\n\tSubscriptions bool `json:\"subscriptions\"`\n\tTransactions  bool `json:\"transactions\"`\n\tRefunds       bool `json:\"refunds\"`\n\tChargebacks   bool `json:\"chargebacks\"`\n\tVault         bool `json:\"vault\"`\n}",
       "type ConvergeRollbackResult struct {\n\tRunID uuid.UUID `json:\"run_id\"`\n\n\tSubscriptionsRestored int64 `json:\"subscriptions_restored\"`\n\n\tEntitlementsCaptured int64 `json:\"entitlements_captured\"`\n\n\tEntitlementsInvalidated int64 `json:\"entitlements_invalidated\"`\n\n\tIntentsSuperseded int `json:\"intents_superseded\"`\n\n\tIntentsIrreversible []IntentDivergence `json:\"intents_irreversible,omitempty\"`\n\n\tIntentsAmbiguous []IntentDivergence `json:\"intents_ambiguous,omitempty\"`\n\n\tProvenDomainsReset int64 `json:\"proven_domains_reset\"`\n\n\tEnforcementDisarmed bool `json:\"enforcement_disarmed\"`\n\n\tRecomputed bool `json:\"recomputed\"`\n}",
@@ -1949,6 +1972,7 @@
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants",
       "operator": "github.com/open-rails/openrails/internal/operator",
+      "providerqualification": "github.com/open-rails/openrails/internal/providerqualification",
       "uuid": "github.com/google/uuid"
     },
     "embed/controlplane/restore_identity.go": {
@@ -2108,6 +2132,7 @@
       "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
       "os": "os",
       "pem": "encoding/pem",
+      "providerqualification": "github.com/open-rails/openrails/internal/providerqualification",
       "rawbytes": "github.com/knadh/koanf/providers/rawbytes",
       "solana": "github.com/open-rails/openrails/internal/integrations/solana",
       "solanago": "github.com/gagliardetto/solana-go",
@@ -2782,6 +2807,13 @@
       "sync": "sync",
       "time": "time"
     },
+    "internal/integrations/nmi/cutover.go": {
+      "context": "context",
+      "errors": "errors",
+      "http": "net/http",
+      "time": "time",
+      "url": "net/url"
+    },
     "internal/integrations/nmi/receipts.go": {
       "big": "math/big",
       "context": "context",
@@ -2981,6 +3013,40 @@
       "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/intents/nmi_provider_cutover.go": {
+      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
+      "clockwork": "github.com/jonboulle/clockwork",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/pkg/merchant",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
+      "openrails": "github.com/open-rails/openrails",
+      "providerqualification": "github.com/open-rails/openrails/internal/providerqualification",
+      "reflect": "reflect",
+      "strings": "strings",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/intents/nmi_provider_cutover_requalification.go": {
+      "bytes": "bytes",
+      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
+      "context": "context",
+      "errors": "errors",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
+      "providerqualification": "github.com/open-rails/openrails/internal/providerqualification",
+      "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
@@ -4150,10 +4216,12 @@
     "internal/operator/payment_provider.go": {
       "app": "github.com/open-rails/openrails/internal/app",
       "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants",
+      "providerqualification": "github.com/open-rails/openrails/internal/providerqualification",
       "strings": "strings",
       "uuid": "github.com/google/uuid"
     },
@@ -4201,6 +4269,24 @@
       "errors": "errors",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants"
+    },
+    "internal/providerqualification/cutover.go": {
+      "bytes": "bytes",
+      "cardguard": "github.com/open-rails/openrails/internal/cardguard",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "hex": "encoding/hex",
+      "io": "io",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/pkg/merchant",
+      "regexp": "regexp",
+      "sha256": "crypto/sha256",
+      "strings": "strings",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/reconcile/converge/converge_passes.go": {
       "context": "context",
@@ -4989,6 +5075,13 @@
       "time": "time",
       "uuid": "github.com/google/uuid"
     },
+    "provider_cutovers.go": {
+      "context": "context",
+      "http": "net/http",
+      "time": "time",
+      "url": "net/url",
+      "uuid": "github.com/google/uuid"
+    },
     "provider_obligation_errors.go": {
       "fmt": "fmt"
     },
@@ -5067,7 +5160,7 @@
   },
   "boundary_sources_sha256": {
     "embed/authkit/authkit.go": "05aeab359a5540dc96f204a0c72cc993023817c2a66af6dd0b362bb002026944",
-    "embed/controlplane/controlplane.go": "f82c40527c8bbd4480faf66ace75e76daae67e7078ee9f28f4649763c568e350",
+    "embed/controlplane/controlplane.go": "b553cff0f76cf85074ac3ef5cbb3314877e99b21a4f3fe64f0e70a74ea1b215c",
     "embed/mount.go": "29f5b5b630d51b748508c0c05da518bd8f00978171f2ed14c7227e72f8428e40",
     "errors.go": "bea224812329fcb558d6b087b3a524107ce5d939d16b303b99354d35a6397d55",
     "examples/embedded/main.go": "0d5564988f72131da7d58c0f74a9455aff56054257d12dd65fd858e07437ea0b",
@@ -5147,6 +5240,7 @@
     "internal/http/handlers/platform_merchants.go": "67e49f7eb7272dccd479c4cec4937c9a48351cfcf572c64b201c2bac57e3d85c",
     "internal/http/handlers/portal.go": "a08623bb9092c9dd138bb1748e0a9e8a0c3a409e296eecf653f56a1bff13021c",
     "internal/http/handlers/product_access.go": "18d8b64895a421e0da32b4d4ac086a8fc85e2142e776bc2d5a64bc69cd38ada1",
+    "internal/http/handlers/provider_cutover.go": "a42523617cb25b41489d545147009f8aa3bf414721e74ecbfac70324ca05f7bd",
     "internal/http/handlers/provider_operations.go": "e8fbc2586a4db93614c7f52b475a6fd6a120d12628a9f12e8bcff06fd7e0148c",
     "internal/http/handlers/refusal.go": "dc38ffbd46e2bcada71a02d6079c3c3dc1719b11297a53faae076bb2d7fd9842",
     "internal/http/handlers/self_account.go": "8999564f9ad961ab69c23616259fda1ae1b75b1459b0855b054cf3b450d8a5b3",
@@ -5185,8 +5279,8 @@
     "internal/http/router/mux.go": "d2ebb1886749d56fc464d5c61dd1c999fbbecc3c998cf299c2d78b1b79f75a74",
     "internal/http/router/router.go": "30ddebbb8d3b25bfcaf1c33d9fc62537599e50f965bd063e7f577a3fadf225b9",
     "internal/http/routes/platform.go": "91ee70c261cd3c5a0685f996a7c225e771263405ede2267fed07dc08bab263f3",
-    "internal/http/routes/routes.go": "2de643213011574776f6cfef347b5e6ffd3069770932df0fd75032523af05fe7",
-    "internal/http/routes/self.go": "537150e58931a4e4c2c82cf9964662912b319dfb490af00bb910f5ff07c4da88",
+    "internal/http/routes/routes.go": "7ef307d1050393dc90814cc7e575f1d0994b306715905f663ab89d2d5e1baed6",
+    "internal/http/routes/self.go": "5b20b3878488b5c47cfcab1783ddf718df0e96f4375a1e7ce999fd0c62c0e43c",
     "internal/http/routes_admin.go": "2a4f430108673678e70adaefc77391cda012c6467fca5864e4bf0ef6a7b4ff28",
     "internal/http/routes_admin_console.go": "7a75f06fe018140696a6af193b8b7a51d564ef271535aa4ad82d0cc141068c27",
     "internal/http/routes_controlplane.go": "583c19b391f087f291cc5a09b6f33d587cf8f92e683fadd5f9498a49459a021a",
@@ -5199,7 +5293,7 @@
     "internal/operator/profile.go": "084d6f735001ff56c70898a2abc5d967b438b24b99c7e5afe8a7d7fef70ea369",
     "internal/requestauth/cache.go": "275b8a83d62c567041a6a3ed307dc4fce74c54f5c061b0cd96a91d08e401bd83",
     "internal/requestauth/hostprincipal.go": "3bcc329a9b5ed5cce301a8a99f92846c35011f596f70a2bd37fe164d6a3ed46f",
-    "migrations/postgres/0001_schema.up.sql": "4d56f2a91e0e023d591050e6d10edf047a9bcedfa40acd1ea63a37d60feb91c5",
+    "migrations/postgres/0001_schema.up.sql": "506a3d374017ce7e787a046420969df71fc41f3399f8d8b24edbff4f56b3c2c0",
     "migrations/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "migrations/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
     "migrations/postgres/unique_scope_exemptions.go": "50f144594711a439c71aa95954b102a9ea0b423488a3e850dd6853fccf91ccd8",

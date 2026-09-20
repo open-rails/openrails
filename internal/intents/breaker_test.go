@@ -36,7 +36,7 @@ func TestIsDestructiveIntentType(t *testing.T) {
 		t.Fatal("manual_rebill must not be destructive (charges are not breaker-gated)")
 	}
 	types := DestructiveIntentTypes()
-	if len(types) != 3 || types[0] != TypeCCBillCancelSubscription || types[1] != TypeNMIDeleteSubscription || types[2] != TypeNMIPaymentMethodDelete {
+	if len(types) != 4 || types[0] != TypeCCBillCancelSubscription || types[1] != TypeNMIDeleteSubscription || types[2] != TypeNMIProviderCutover || types[3] != TypeNMIPaymentMethodDelete {
 		t.Fatalf("DestructiveIntentTypes() = %v", types)
 	}
 }

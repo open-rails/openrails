@@ -20,6 +20,7 @@ import (
 // The volume breaker (#679) gates ONLY these; add future destructive types here.
 var destructiveIntentTypes = map[string]struct{}{
 	TypeNMIDeleteSubscription:    {},
+	TypeNMIProviderCutover:       {},
 	TypeCCBillCancelSubscription: {}, // #696: stops rebilling irreversibly (no resume API)
 	// #674 tail: deleting a vaulted card destroys the stored instrument
 	// irreversibly (only the cardholder can re-enter it) — mass vault deletion
