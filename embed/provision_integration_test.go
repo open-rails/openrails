@@ -48,6 +48,7 @@ func TestUpsertMerchantConfig_SeedsPSPs(t *testing.T) {
 	id, err := rt.UpsertMerchantConfig(ctx, slug, m)
 	require.NoError(t, err)
 	require.False(t, id.IsZero())
+	cleanupCCBillWebhookMerchant(t, id)
 
 	// psps is RLS-scoped: read it on a connection pinned to the
 	// merchant so the policy admits its rows.

@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/money"
 	billingservice "github.com/open-rails/openrails/internal/service"
@@ -531,16 +532,30 @@ SELECT aggregation FROM openrails.catalog_meters WHERE merchant_id = $1 AND key 
 // (NMI, Solana) is REFUSED at publish, naming the limitation — it used to be
 // accepted, dropped, and the subscriber charged the full amount immediately.
 // The rails that can execute one (Stripe, CCBill) still publish.
+type trialCapabilityNoNetwork struct{}
+
+func (trialCapabilityNoNetwork) RoundTrip(r *http.Request) (*http.Response, error) {
+	return nil, fmt.Errorf("trial capability fixture forbids outbound Stripe calls to %s", r.URL.Host)
+}
+
 func TestCatalogPublishRefusesTrialOnRailsWithoutFirstPhase(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
+	// This checks local capability rules with unarmed declarations. Any provider
+	// request is a fixture bug; refuse it under the real Stripe choke point.
+	release := stripeapi.InstallBaseTransport(trialCapabilityNoNetwork{})
+	t.Cleanup(release)
+	owned := surface.ProvisionOwnedMerchant("trial-capability-" + uuid.NewString()[:8])
 	token := surface.MintAPIKey(
-		dbtest.TestMerchantSlug,
+		owned.MerchantSlug,
 		"catalog-trials-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
 	)
-	mid := dbtest.TestMerchantID.UUID()
+	mid := owned.MerchantID.UUID()
+	for _, rail := range []string{"nmi", "solana", "stripe", "ccbill"} {
+		dbtest.EnsureTestPSP(ctx, t, h.MerchantPool(mid), mid, rail)
+	}
 
 	publish := func(t *testing.T, psp string) (int, []byte, string) {
 		t.Helper()
