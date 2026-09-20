@@ -16,11 +16,12 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 func customerActionPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 	p, ok := middleware.PrincipalFromRequest(r)
-	if !ok || p.InvokerScoped() || (p.CredentialType != middleware.CredentialDelegatedUser && p.CredentialType != middleware.CredentialHostDelegatedUser && p.CredentialType != middleware.CredentialUserSession) {
+	if !ok || p.InvokerScoped() || p.CredentialClass != billingauth.CredentialClassUserSession {
 		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "customer_action_required", "verified customer action required"))
 		return identity.CustomerID{}, false
 	}

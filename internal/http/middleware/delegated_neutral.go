@@ -51,11 +51,12 @@ const (
 
 // Principal is the common bearer-auth result used by route permission gates.
 type Principal struct {
-	MerchantID     merchant.ID
-	MerchantSlug   string
-	MerchantSource string
-	CredentialType CredentialType
-	Subject        string
+	CredentialClass billingauth.CredentialClass
+	MerchantID      merchant.ID
+	MerchantSlug    string
+	MerchantSource  string
+	CredentialType  CredentialType
+	Subject         string
 	// Invoker is the host-owned spend principal this credential acts as under
 	// Subject's account (or#930). Non-empty = INVOKER-SCOPED: it spends the
 	// payer's money without being the payer.
@@ -152,7 +153,9 @@ func DelegatedSelfRequired(resolver DelegatedResolver) router.Middleware {
 				}
 				return
 			}
-			bindDelegated(r, resolved, CredentialDelegatedUser)
+			if !bindDelegated(r, resolved, CredentialDelegatedUser, billingauth.CredentialClassUserSession) {
+				return
+			}
 			next(r)
 		}
 	}
@@ -180,7 +183,9 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) router
 				r.AbortJSON(http.StatusUnauthorized, "delegated_principal_invalid")
 				return
 			}
-			bindDelegated(r, resolved, CredentialHostDelegatedUser)
+			if !bindDelegated(r, resolved, CredentialHostDelegatedUser, principal.CredentialClass) {
+				return
+			}
 			next(r)
 		}
 	}
@@ -188,7 +193,10 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) router
 
 // bindDelegated pins the resolved merchant (#223), binds the acting user, and
 // records the delegated state + principal for the permission gates.
-func bindDelegated(r *request.Request, resolved *controlplane.ResolvedDelegated, typ CredentialType) {
+func bindDelegated(r *request.Request, resolved *controlplane.ResolvedDelegated, typ CredentialType, class billingauth.CredentialClass) bool {
+	if !EnforceMerchantBinding(r, resolved.MerchantID) {
+		return false
+	}
 	ctx := merchant.WithID(r.Request.Context(), resolved.MerchantID)
 	r.Request = r.Request.WithContext(ctx)
 	r.SetUserContext(billingauth.UserContext{
@@ -200,20 +208,22 @@ func bindDelegated(r *request.Request, resolved *controlplane.ResolvedDelegated,
 	})
 	r.Set("openrails.merchant_id", resolved.MerchantID)
 	r.Set(DelegatedContextKey, resolved)
-	r.Set(PrincipalContextKey, principalFromDelegated(resolved, typ))
+	r.Set(PrincipalContextKey, principalFromDelegated(resolved, typ, class))
+	return true
 }
 
-func principalFromDelegated(resolved *controlplane.ResolvedDelegated, typ CredentialType) *Principal {
+func principalFromDelegated(resolved *controlplane.ResolvedDelegated, typ CredentialType, class billingauth.CredentialClass) *Principal {
 	if resolved == nil {
 		return nil
 	}
 	return &Principal{
-		MerchantID:     resolved.MerchantID,
-		MerchantSlug:   resolved.MerchantSlug,
-		MerchantSource: "delegated_issuer",
-		CredentialType: typ,
-		Subject:        strings.TrimSpace(resolved.DelegatedSubject),
-		Invoker:        strings.TrimSpace(resolved.Invoker),
+		MerchantID:      resolved.MerchantID,
+		MerchantSlug:    resolved.MerchantSlug,
+		MerchantSource:  "delegated_issuer",
+		CredentialType:  typ,
+		CredentialClass: class,
+		Subject:         strings.TrimSpace(resolved.DelegatedSubject),
+		Invoker:         strings.TrimSpace(resolved.Invoker),
 		can: func(_ context.Context, perm string) bool {
 			// #564: resolved.Permissions is already claim ∩ signer authority.
 			return resolved.HasPermission(perm)

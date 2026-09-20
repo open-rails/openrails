@@ -144,6 +144,7 @@ POST /v1/import/billing
 POST /v1/me/billing-portal
 POST /v1/me/checkout
 POST /v1/me/checkout/{id}/confirm
+POST /v1/me/invoices/{id}/pay-now
 POST /v1/me/notifications/{id}/read
 POST /v1/me/payment-methods
 POST /v1/me/subscriptions/{id}/cancel
@@ -152,6 +153,7 @@ POST /v1/me/subscriptions/{id}/change-tier/preview
 POST /v1/me/subscriptions/{id}/provider-cutover
 POST /v1/me/subscriptions/{id}/provider-cutover/preview
 POST /v1/me/subscriptions/{id}/resume
+POST /v1/me/subscriptions/{id}/retry-now
 POST /v1/me/subscriptions/{id}/solana-cancel
 POST /v1/me/subscriptions/{id}/solana-cancel-tx
 POST /v1/me/subscriptions/{id}/solana-tier-change

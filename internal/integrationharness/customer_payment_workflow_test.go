@@ -4,6 +4,8 @@ package integrationharness
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"io"
@@ -21,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/embed"
 	orauthkit "github.com/open-rails/openrails/embed/authkit"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -36,7 +39,19 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 	gateway := NewFakeNMIGateway(t)
 	var mu sync.Mutex
 	var forms []url.Values
+	type recurringObligation struct{ vault, billing, amount, currency, next string }
+	obligations := map[string]recurringObligation{}
 	wire := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/subscriptions/") {
+			id := r.URL.Path[strings.LastIndex(r.URL.Path, "/subscriptions/")+len("/subscriptions/"):]
+			mu.Lock()
+			obligation, found := obligations[id]
+			mu.Unlock()
+			if found {
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "amount": obligation.amount, "customer_vault_id": obligation.vault, "delayed_condition": "active", "paused_subscription": "0", "next_billing_date": obligation.next, "plan": map[string]any{"id": "fixed-days", "plan_amount": obligation.amount, "plan_payments": "0", "day_frequency": "30"}})
+				return
+			}
+		}
 		if r.Method == http.MethodPost {
 			raw, err := io.ReadAll(r.Body)
 			require.NoError(t, err)
@@ -44,16 +59,33 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			r.Body = io.NopCloser(strings.NewReader(string(raw)))
 			form, err := url.ParseQuery(string(raw))
 			require.NoError(t, err)
-			if form.Get("type") == "sale" {
+			if form.Get("type") == "sale" || form.Get("recurring") == "rebill_subscription" {
 				mu.Lock()
 				forms = append(forms, form)
 				mu.Unlock()
+			}
+			if form.Get("recurring") == "rebill_subscription" {
+				mu.Lock()
+				obligation, found := obligations[form.Get("subscription_id")]
+				mu.Unlock()
+				if !found {
+					http.Error(w, "unknown recurring obligation", http.StatusNotFound)
+					return
+				}
+				require.Equal(t, obligation.vault, form.Get("customer_vault_id"))
+				require.Equal(t, obligation.billing, form.Get("billing_id"))
+				// NMI's recurring engine supplies its stored amount/currency;
+				// the actual request above is retained before this fake dispatch.
+				dispatch := url.Values{"type": {"sale"}, "orderid": form["orderid"], "customer_vault_id": {obligation.vault}, "amount": {obligation.amount}, "currency": {obligation.currency}}
+				r.Body = io.NopCloser(strings.NewReader(dispatch.Encode()))
+				r.Form, r.PostForm = nil, nil
 			}
 		}
 		gateway.serve(w, r)
 	}))
 	t.Cleanup(wire.Close)
 	standalone := h.StartStandalone("USD", WithConfig(func(c *config.Config) { c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: wire.URL} }))
+	machine := standalone.RegisterRemoteApplication("payment-machine-"+uuid.NewString()[:8], dbtest.TestMerchantSlug, controlplane.MerchantRoleOwner)
 	cp := embcp.Get(standalone.App())
 	authn, err := orauthkit.NewDelegatedAuthenticator(cp.AuthService().Verifier(), dbtest.TestMerchantID.String())
 	require.NoError(t, err)
@@ -97,7 +129,7 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 				return c
 			}
 			request := openrails.PayInvoiceNowRequest{InvoiceID: f.Invoice, PaymentMethodID: openrails.PaymentMethodID(f.Method), IdempotencyKey: uuid.NewString()}
-			for _, bad := range []string{"", "invalid", standalone.Token} {
+			for _, bad := range []string{"", "invalid", standalone.Token, machine.Token} {
 				_, err := newClient(bad).PayInvoiceNow(ctx, request)
 				require.Error(t, err, "absent, invalid and merchant credentials cannot become a customer action")
 			}
@@ -108,6 +140,39 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 				require.Error(t, err, "ambient host user cannot turn the default owner into CIT")
 			}
 			client := newClient(token)
+			// The same actual embedded mount and socket mount must reject
+			// conflicting Client/runtime constraints before reading this payer.
+			for _, binding := range []struct {
+				name, header string
+				configured   merchant.ID
+				status       int
+			}{
+				{"wrong client", uuid.NewString(), f.Merchant, 409},
+				{"wrong runtime", f.Merchant.String(), merchant.ID(uuid.New()), 409},
+				{"invalid header", "invalid", f.Merchant, 400},
+			} {
+				func() {
+					runtime := app.HostGraph(rt).Runtime
+					runtime.SetConfiguredMerchant(binding.configured)
+					defer runtime.SetConfiguredMerchant(f.Merchant)
+					wire, err := http.NewRequestWithContext(ctx, http.MethodGet, mounted.URL+"/v1/me/invoices/"+f.Invoice.String(), nil)
+					require.NoError(t, err)
+					wire.Header.Set("Authorization", "Bearer "+token)
+					wire.Header.Set(merchant.BindingHeader, binding.header)
+					if mode == "embedded" {
+						response := httptest.NewRecorder()
+						handler.ServeHTTP(response, wire)
+						require.Equal(t, binding.status, response.Code, binding.name+response.Body.String())
+					} else {
+						response, err := http.DefaultClient.Do(wire)
+						require.NoError(t, err)
+						body, err := io.ReadAll(response.Body)
+						require.NoError(t, err)
+						require.NoError(t, response.Body.Close())
+						require.Equal(t, binding.status, response.StatusCode, binding.name+string(body))
+					}
+				}()
+			}
 			before := gateway.SaleAttempts()
 			if mode == "http" {
 				gateway.SetMode(NMISaleUncertain)
@@ -199,6 +264,43 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			_, err = client.PayInvoiceNow(ctx, changed)
 			require.ErrorIs(t, err, openrails.ErrConflict)
 			require.Equal(t, before+2, gateway.SaleAttempts())
+			// The same verified-customer Client now recovers a subscription;
+			// no merchant service credential or HTTP wrapper participates.
+			product, price, subscription := uuid.New(), uuid.New(), uuid.New()
+			periodEnd := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
+			psp := h.ArmLoopbackNMI(runtime, f.Merchant)
+			billing, railSub := "billing-"+f.Method.String(), "subscription-"+subscription.String()
+			_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.payment_methods SET rail_method_ref=$2,rebill_driver='openrails',stored_credential_recurring_ref='approved-recurring' WHERE id=$1`, f.Method, billing)
+			require.NoError(t, err)
+			_, err = h.sharedPool().Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name,entitlements_spec) VALUES($1,$2,$3,'Recovery','{"paid":null}')`, product, f.Merchant.UUID(), product.String())
+			require.NoError(t, err)
+			_, err = h.sharedPool().Exec(ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,9990000,'USD',720,true)`, price, f.Merchant.UUID(), product, price.String())
+			require.NoError(t, err)
+			_, err = h.sharedPool().Exec(ctx, `INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,rail_subscription_id,payment_method_id,status,started_at,current_period_starts_at,current_period_ends_at,next_retry_at,retry_attempts,entitlements_spec_snapshot) VALUES($1,$2,$3,$4,$5,$6,'nmi',$7,$8,'past_due',$9,$9,$10,$11,1,'{"paid":null}')`, subscription, f.Merchant.UUID(), customer, product, price, psp, railSub, f.Method, periodEnd.Add(-30*24*time.Hour), periodEnd, time.Now().Add(48*time.Hour))
+			require.NoError(t, err)
+			mu.Lock()
+			obligations[railSub] = recurringObligation{f.Vault, billing, "9.99", "USD", periodEnd.Add(30 * 24 * time.Hour).Format("2006-01-02")}
+			mu.Unlock()
+			retry := openrails.RetrySubscriptionNowRequest{SubscriptionID: openrails.SubscriptionID(subscription), IdempotencyKey: uuid.NewString()}
+			due, err := client.GetMySubscription(ctx, retry.SubscriptionID)
+			require.NoError(t, err)
+			require.True(t, due.Recovery.Retryable)
+			recovered, err := client.RetrySubscriptionNow(ctx, retry)
+			require.NoError(t, err)
+			require.Equal(t, "succeeded", recovered.Operation.Status)
+			require.Equal(t, "active", recovered.Subscription.Status)
+			require.True(t, recovered.Subscription.CurrentPeriodEndsAt.Equal(periodEnd.Add(30*24*time.Hour)))
+			mu.Lock()
+			rebill := forms[len(forms)-1]
+			mu.Unlock()
+			require.Equal(t, "rebill_subscription", rebill.Get("recurring"))
+			require.Equal(t, "customer", rebill.Get("initiated_by"))
+			require.Equal(t, "approved-recurring", rebill.Get("initial_transaction_id"))
+			same, err := client.RetrySubscriptionNow(ctx, retry)
+			require.NoError(t, err)
+			require.True(t, same.Replayed)
+			require.Equal(t, recovered.Operation, same.Operation)
+			require.Equal(t, before+3, gateway.SaleAttempts(), fmt.Sprintf("%s invoice/CIT/MIT/rebill workflow", mode))
 		})
 	}
 }
