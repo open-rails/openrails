@@ -27,20 +27,30 @@ func TestPolicyStateIntegrity(t *testing.T) {
 		require.NoError(t, f.client.SetCustomerSpendDelegation(t.Context(), payer, original))
 		name := "policy_fail_" + uuid.NewString()[:8]
 		failingKey := "failure-" + uuid.NewString()
-		_, err := pool.Exec(t.Context(), fmt.Sprintf(`CREATE FUNCTION openrails.%s() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN RAISE EXCEPTION 'injected policy replacement failure'; END $$;
+		_, err := pool.Exec(t.Context(), fmt.Sprintf(`CREATE SEQUENCE openrails.%s;
+GRANT USAGE,SELECT ON SEQUENCE openrails.%s TO openrails_app;
+CREATE FUNCTION openrails.%s() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN PERFORM nextval('openrails.%s'); RAISE EXCEPTION 'injected policy replacement failure'; END $$;
 CREATE TRIGGER %s BEFORE INSERT OR UPDATE ON openrails.invoker_spend_limits
 FOR EACH ROW WHEN (NEW.merchant_id = '%s'::uuid AND NEW.customer_id = '%s'::uuid AND NEW.scope_key = '%s')
-EXECUTE FUNCTION openrails.%s()`, name, name, f.merchant.MerchantID, payer, failingKey, name))
+EXECUTE FUNCTION openrails.%s()`, name, name, name, name, name, f.merchant.MerchantID, payer, failingKey, name))
 		require.NoError(t, err)
 		t.Cleanup(func() {
-			_, err := pool.Exec(context.Background(), fmt.Sprintf("DROP TRIGGER %s ON openrails.invoker_spend_limits; DROP FUNCTION openrails.%s()", name, name))
+			_, err := pool.Exec(context.Background(), fmt.Sprintf("DROP TRIGGER %s ON openrails.invoker_spend_limits; DROP FUNCTION openrails.%s(); DROP SEQUENCE openrails.%s", name, name, name))
 			require.NoError(t, err)
 		})
 		failed := original
 		failed.ScopeKey = failingKey
 		failed.Windows = []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 999, Currency: "USD"}}
-		require.Error(t, f.client.SetCustomerSpendDelegations(t.Context(), payer, []openrails.SpendDelegationInput{failed}))
+		failure := f.client.SetCustomerSpendDelegations(t.Context(), payer, []openrails.SpendDelegationInput{failed})
+		var serverError *openrails.StatusError
+		require.ErrorAs(t, failure, &serverError)
+		require.Equal(t, http.StatusInternalServerError, serverError.Status)
+		// Sequence advancement survives rollback and proves the injected write
+		// fault ran; an auth/validation rejection cannot satisfy this witness.
+		var reached bool
+		require.NoError(t, pool.QueryRow(t.Context(), "SELECT is_called FROM openrails."+name).Scan(&reached))
+		require.True(t, reached, "the write reached the injected rollback point")
 		status, raw := requestWorkflowJSON(t, http.MethodGet, f.hostURL+"/v1/customers/"+payer.String()+"/spend-delegations", token, nil)
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var doc struct {

@@ -99,7 +99,7 @@ func checkPolicyWasteAndProfiles(t *testing.T, f treasuryWorkflow) {
 	own, err = f.client.GetMerchantSettings(ctx)
 	require.NoError(t, err)
 	own.BillingPolicies = append(own.BillingPolicies, openrails.BillingPolicyInput{Name: "direct_grace", Kind: "outstanding_cap",
-		BadSpendWindows: []openrails.BudgetWindowInput{{Key: "burst", WindowSeconds: 900, Limit: 1_000_000, Currency: "USD"}}})
+		BadSpendWindows: []openrails.BudgetWindowInput{{Key: "burst", WindowSeconds: 900, Limit: 1_000_000}}})
 	own.BillingPolicyBindings = append(own.BillingPolicyBindings, openrails.BillingPolicyBindingInput{PolicyName: "direct_grace", Tier: "free"})
 	require.NoError(t, f.client.SetMerchantSettings(ctx, *own))
 	direct := fund(f.client)
@@ -131,6 +131,13 @@ func checkPolicyWasteAndProfiles(t *testing.T, f treasuryWorkflow) {
 WHERE customer_id=$1 AND event_type='wasted_spend' AND source='waste' AND source_id=$2`, direct.UUID(), row.sourceID).Scan(&amount))
 		require.Equal(t, row.amount, amount, "usage records the chargeable portion of each waste report")
 	}
+	otherCurrency := over
+	otherCurrency.Currency, otherCurrency.Amount = "EUR", 1
+	result, err = f.client.ReportWastedSpend(ctx, otherCurrency)
+	require.NoError(t, err)
+	require.False(t, result.Duplicate, "the same source ID in another currency is a distinct report")
+	require.Equal(t, "EUR", result.Currency)
+	require.EqualValues(t, 1, result.ForgivenAmount)
 	grant(f.client, direct, direct.String())
 	require.True(t, admit(f.client, direct, direct.String()).Allowed, "direct-payer waste must not contaminate delegated cutoff counters")
 }

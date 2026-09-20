@@ -55,8 +55,16 @@ func checkPolicyDelegationDocument(t *testing.T, f treasuryWorkflow) {
 	invoker.Windows[0].Limit = 321
 	require.NoError(t, machine.SetCustomerSpendDelegation(ctx, payer, invoker))
 	require.ElementsMatch(t, []openrails.SpendDelegationInput{invoker, role, tier}, read(), "singular upsert preserves sibling role and tier grants")
+	invoker.Windows[0].Limit = 322
+	status, raw = requestWorkflowJSON(t, http.MethodPut, path+":upsert", token, invoker)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	require.ElementsMatch(t, []openrails.SpendDelegationInput{invoker, role, tier}, read(), "customer upsert also preserves sibling grants")
 	role.Provenance = "sha256:" + strings.Repeat("ab", 32)
 	role.Windows = []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 500, Currency: "USD"}}
+	status, raw = requestWorkflowJSON(t, http.MethodPut, path, token, map[string]any{"delegations": []openrails.SpendDelegationInput{role}})
+	require.Equal(t, http.StatusOK, status, string(raw))
+	require.Equal(t, []openrails.SpendDelegationInput{role}, read(), "customer replacement removes omitted invoker and tier grants")
+	require.NoError(t, machine.SetCustomerSpendDelegation(ctx, payer, invoker))
 	require.NoError(t, machine.SetCustomerSpendDelegations(ctx, payer, []openrails.SpendDelegationInput{role}))
 	require.Equal(t, []openrails.SpendDelegationInput{role}, read())
 	duplicate := role

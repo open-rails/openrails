@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -159,7 +160,13 @@ func TestTreasuryAuthorityAndMoneyWorkflow(t *testing.T) {
 	path := f.hostURL + "/v1/customers/" + payer.String() + "/balance?currency=USD"
 	status, raw = requestWorkflowJSON(t, http.MethodGet, path, hostToken, nil)
 	require.Equal(t, http.StatusOK, status, string(raw))
-	for _, invalid := range []string{"", "not-a-token"} {
+	parts := strings.Split(hostToken, ".")
+	if parts[2][0] == 'A' {
+		parts[2] = "B" + parts[2][1:]
+	} else {
+		parts[2] = "A" + parts[2][1:]
+	}
+	for _, invalid := range []string{"", "not-a-token", strings.Join(parts, ".")} {
 		status, raw = requestWorkflowJSON(t, http.MethodGet, path, invalid, nil)
 		require.Equal(t, http.StatusUnauthorized, status, string(raw))
 	}

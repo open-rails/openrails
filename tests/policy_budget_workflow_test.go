@@ -64,6 +64,7 @@ func checkPolicyBudgetEffects(t *testing.T, f treasuryWorkflow) {
 	quota.BillingPolicyBindings = append(quota.BillingPolicyBindings, openrails.BillingPolicyBindingInput{PolicyName: "budget_rate_large", Tier: "large"})
 	require.NoError(t, f.client.SetMerchantSettings(ctx, quota))
 	require.True(t, check(busy, 1000, 2_000_000, "large").Allowed)
+	require.Equal(t, admission.DenyAccrualRateCap, check(busy, 1000, 200_000_000, "large").DenyCode, "the larger tier still has a finite ceiling")
 	require.False(t, check(busy, 1000, 2_000_000, "").Allowed, "tier override must not lift unrelated requests")
 
 	debtPayer := payer()
