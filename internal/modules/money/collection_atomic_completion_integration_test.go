@@ -121,9 +121,11 @@ func TestConcurrentCollectionCompletionReplaysOneTerminalResult(t *testing.T) {
 	operation = latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
 	handler := money.NewInvoiceCollectionHandler(e.db, nil, e.plane, fullModeConfig(), nil)
 	results := make(chan intents.Outcome, 2)
+	start := make(chan struct{})
 	for range 2 {
-		go func() { results <- handler.Verify(e.ctx, operation) }()
+		go func() { <-start; results <- handler.Verify(e.ctx, operation) }()
 	}
+	close(start)
 	for range 2 {
 		outcome := <-results
 		require.Equal(t, intents.OutcomeSucceeded, outcome.Class, outcome.Reason)

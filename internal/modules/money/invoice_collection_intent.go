@@ -278,7 +278,7 @@ func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.Openr
 	if !found {
 		return intents.Outcome{}, intents.RejectResolution("provider object is not this operation's settled charge")
 	}
-	return h.finalizeSettle(ctx, intent, receipt, true), nil
+	return h.finalizeSettle(ctx, intent, receipt), nil
 }
 
 // contradicted keeps an operation unknown when the provider holds an object
@@ -318,7 +318,7 @@ func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, int
 	if receipt, found, err := intents.LoadCollectedReceipt(intent); err != nil {
 		return intents.Ambiguous("stored receipt rejected: " + err.Error()), true
 	} else if found {
-		return h.finalizeSettle(ctx, intent, receipt, true), true
+		return h.finalizeSettle(ctx, intent, receipt), true
 	}
 	if candidate, found, err := intents.LoadCollectionCandidate(intent); err != nil {
 		return intents.Ambiguous(err.Error()), true
@@ -344,7 +344,7 @@ func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, int
 // key), attempt settled, invoice released — all or nothing. A local failure
 // retains the receipt on the operation for the verifier and keeps the
 // invoice pointed at it.
-func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent gen.OpenrailsRailIntent, receipt intents.CollectedReceipt, verified bool) intents.Outcome {
+func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent gen.OpenrailsRailIntent, receipt intents.CollectedReceipt) intents.Outcome {
 	p, err := intents.DecodeInvoiceCollectionPayload(intent)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -354,7 +354,7 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 		return intents.Ambiguous("retain qualified receipt before local settlement: " + err.Error())
 	}
 	transactionID, externalInvoiceID, rail := retained.TransactionID(), retained.ExternalInvoiceID(), p.Rail
-	evidence := map[string]any{collectionEvidenceTransactionID: transactionID, collectionEvidenceRail: rail}
+	evidence := map[string]any{collectionEvidenceTransactionID: transactionID, collectionEvidenceRail: rail, "verified_existing": true}
 	if ext := strings.TrimSpace(externalInvoiceID); ext != "" {
 		evidence[collectionEvidenceExternalID] = ext
 	}
@@ -446,9 +446,6 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 	})
 	if err != nil {
 		return intents.AmbiguousWithEvidence("collection charged, but local settlement failed: "+err.Error(), evidence)
-	}
-	if verified {
-		evidence["verified_existing"] = true
 	}
 	return intents.Succeeded(evidence)
 }
@@ -655,5 +652,5 @@ func (h *InvoiceCollectionHandler) qualifyAndSettle(ctx context.Context, in gen.
 	if !found {
 		return intents.Ambiguous("no exact provider receipt; no automatic resend")
 	}
-	return h.finalizeSettle(ctx, in, receipt, true)
+	return h.finalizeSettle(ctx, in, receipt)
 }

@@ -553,9 +553,6 @@ func (s *Store) MarkSuperseded(ctx context.Context, id uuid.UUID, reason string)
 	}))
 }
 
-// one normalizes :execrows transitions: 0 rows means the row raced into a
-// state the transition no longer applies to — not an error, the next sweep
-// re-evaluates.
 // Terminal transitions must actually commit one row; a stale or prohibited
 // update is not a successful operation and must not trigger result pruning.
 func oneTerminal(rows int64, err error) error {
@@ -568,6 +565,9 @@ func oneTerminal(rows int64, err error) error {
 	return nil
 }
 
+// one normalizes :execrows transitions: 0 rows means the row raced into a
+// state the transition no longer applies to — not an error, the next sweep
+// re-evaluates.
 func one(rows int64, err error) error {
 	if err != nil {
 		return err
