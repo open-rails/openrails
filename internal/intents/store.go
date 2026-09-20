@@ -246,6 +246,11 @@ func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch i
 // false means the lease had already lapsed — another executor may own the row
 // now, and this one must not write over it without its per-type verify.
 func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (bool, error) {
+	ctx, release, err := s.db.WithIndependentMerchantConn(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer release()
 	n, err := s.db.Gen(ctx).RenewRailIntentClaim(ctx, gen.RenewRailIntentClaimParams{
 		ID: id, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
 	})

@@ -58,6 +58,26 @@ func (d *DB) WithMerchantConn(ctx context.Context) (context.Context, func(), err
 	return newCtx, lazy.release, nil
 }
 
+// WithIndependentMerchantConn gives a lease heartbeat its own lazy pin on this
+// database. It preserves cancellation and context values, but cannot join the
+// request's open transaction. Acquisition may wait for pool capacity; canceling
+// the heartbeat cancels that wait without closing the request's connection.
+func (d *DB) WithIndependentMerchantConn(ctx context.Context) (context.Context, func(), error) {
+	if d == nil || d.pool == nil || d.pgtx != nil {
+		return ctx, func() {}, fmt.Errorf("db: independent merchant connection requires a pool-backed DB")
+	}
+	id, err := merchant.Require(ctx)
+	if err != nil {
+		return ctx, func() {}, err
+	}
+	if inherited, ok := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn); ok &&
+		(inherited.pool != d.pool || inherited.tenantID != id.String() || inherited.schema != d.rw.schema()) {
+		return ctx, func() {}, fmt.Errorf("db: inherited merchant connection does not match database, schema or merchant")
+	}
+	lazy := &lazyMerchantPgxConn{pool: d.pool, tenantID: id.String(), schema: d.rw.schema()}
+	return context.WithValue(ctx, merchantPgxConnKey{}, lazy), lazy.release, nil
+}
+
 // detachedWriteKey marks a context built by DetachedWriteContext.
 type detachedWriteKey struct{}
 
