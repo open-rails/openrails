@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	billingservice "github.com/open-rails/openrails/internal/service"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -170,10 +172,15 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 	pp := &ProductPlan{Key: product.Key}
 
 	existing, err := applier.GetProductByKey(ctx, product.Key)
-	if err != nil || existing == nil {
-		// Not found -> create. (The facade returns an error for "not found"; we
-		// treat any lookup failure as create-intent — apply will surface a real
-		// create error if the slug actually exists.)
+	if err != nil && !errors.Is(err, openrails.ErrNotFound) {
+		return nil, fmt.Errorf("look up catalog product %q: %w", product.Key, err)
+	}
+	if err == nil && existing == nil {
+		return nil, fmt.Errorf("look up catalog product %q returned no result", product.Key)
+	}
+	if err != nil {
+		// Only an absent product authorizes a create plan. A failed read does
+		// not establish absence and must not produce a successful plan.
 		pp.Action = ProductCreate
 		pp.CreateReq = billingservice.CreateProductRequest{
 			Key:              product.Key,
@@ -286,7 +293,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 	for i, price := range product.Prices {
 		accessDurationHours, err := normalizeDuration(price.Duration)
 		if err != nil {
-			return fmt.Errorf("price %s duration: %w", PriceLabel(product.Key, price), err)
+			return apperr.Invalidf("price %s duration: %v", PriceLabel(product.Key, price), err).WithParam("duration")
 		}
 		key := strings.TrimSpace(price.Key)
 		if key == "" {
@@ -297,14 +304,14 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 	}
 	for key, labels := range byResolvedKey {
 		if len(labels) > 1 {
-			return fmt.Errorf("product %q: prices [%s] all resolve to price key %q — set an explicit `key:` on each price to disambiguate (#774)", product.Key, strings.Join(labels, ", "), key)
+			return apperr.Invalidf("product %q: prices [%s] all resolve to price key %q — set an explicit `key:` on each price to disambiguate", product.Key, strings.Join(labels, ", "), key).WithParam("key")
 		}
 	}
 
 	for i, price := range product.Prices {
 		accessDurationHours, err := normalizeDuration(price.Duration)
 		if err != nil {
-			return fmt.Errorf("price %s duration: %w", PriceLabel(product.Key, price), err)
+			return apperr.Invalidf("price %s duration: %v", PriceLabel(product.Key, price), err).WithParam("duration")
 		}
 		label := PriceLabel(product.Key, price)
 		key := resolvedKeys[i]
@@ -317,7 +324,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 			amt := price.Trial.UnitAmount
 			hours, err := normalizeDuration(price.Trial.Duration)
 			if err != nil {
-				return fmt.Errorf("price %s trial.duration: %w", label, err)
+				return apperr.Invalidf("price %s trial.duration: %v", label, err).WithParam("trial.duration")
 			}
 			trialAmount = &amt
 			trialHours = hours
