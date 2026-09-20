@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/query"
@@ -165,42 +166,58 @@ func (s *AdminSubscriptionService) GetSubscriptionByID(ctx context.Context, subs
 
 // UpdateSubscription updates a subscription (admin)
 func (s *AdminSubscriptionService) UpdateSubscription(ctx context.Context, subscriptionID uuid.UUID, updates map[string]any) error {
-	subscription, err := s.requireSubscription(ctx, subscriptionID)
-	if err != nil {
-		return err
-	}
-
-	// Apply allowed updates
-	for field, value := range updates {
-		switch field {
-		case "status":
-			if status, ok := value.(models.SubscriptionStatus); ok {
-				subscription.Status = status
-			}
-		case "notes":
-			if notes, ok := value.(string); ok {
-				// Store notes in Metadata JSONB field which is designed for additional metadata
-				var responseData map[string]any
-				if subscription.Metadata != nil {
-					if err := json.Unmarshal(subscription.Metadata, &responseData); err != nil {
+	database := s.SubscriptionService.Database()
+	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := database.NewWithPgxTx(tx)
+		subscription, err := s.requireLockedSubscription(ctx, d, subscriptionID)
+		if err != nil {
+			return err
+		}
+		// Apply allowed updates
+		for field, value := range updates {
+			switch field {
+			case "status":
+				if status, ok := value.(models.SubscriptionStatus); ok {
+					subscription.Status = status
+				}
+			case "notes":
+				if notes, ok := value.(string); ok {
+					// Store notes in Metadata JSONB field which is designed for additional metadata
+					var responseData map[string]any
+					if subscription.Metadata != nil {
+						if err := json.Unmarshal(subscription.Metadata, &responseData); err != nil {
+							responseData = make(map[string]any)
+						}
+					} else {
 						responseData = make(map[string]any)
 					}
-				} else {
-					responseData = make(map[string]any)
-				}
-				responseData["admin_notes"] = notes
-				if newData, err := json.Marshal(responseData); err == nil {
-					subscription.Metadata = newData
+					responseData["admin_notes"] = notes
+					if newData, err := json.Marshal(responseData); err == nil {
+						subscription.Metadata = newData
+					}
 				}
 			}
 		}
-	}
 
-	if err := s.SubscriptionService.Update(ctx, subscription); err != nil {
-		return fmt.Errorf("failed to update subscription: %w", err)
-	}
+		if err := NewSubscriptionRepo(d).UpdateAt(ctx, subscription, s.now()); err != nil {
+			return fmt.Errorf("failed to update subscription: %w", err)
+		}
+		return nil
+	})
+}
 
-	return nil
+// Partial admin commands must read their input image after taking the same
+// subscription lock as payment admission/completion. A metadata/status change
+// cannot replay an older price, card, period or pending quote from preflight.
+func (s *AdminSubscriptionService) requireLockedSubscription(ctx context.Context, d *db.DB, id uuid.UUID) (*models.Subscription, error) {
+	sub, err := NewSubscriptionRepo(d).GetByIDForUpdate(ctx, id)
+	if db.IsNotFound(err) {
+		return nil, ErrSubscriptionNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load subscription %s: %w", id, err)
+	}
+	return sub, nil
 }
 
 // CancelSubscription cancels a subscription (admin/merchant-initiated).
@@ -241,7 +258,6 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 			// Marker + intent commit together: the cancellation is not
 			// destructive (and not terminal rail-side) until the intent
 			// confirms NMI dropped the schedule.
-			subscription.DeletionScheduledAt = &now
 			enqueueRemoteIntent = func(ctx context.Context, tx pgx.Tx) error {
 				return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, subscription.CustomerID.String(), subscription.ID, now)
 			}
@@ -272,21 +288,37 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		return fmt.Errorf("%w: %s", ErrCancelUnsupportedOnRail, subscription.Rail)
 	}
 
-	cancelType := models.CancelTypeMerchant
-	subscription.Status = models.StatusCancelled
-	subscription.CancelledAt = &now
-	subscription.CancelType = &cancelType
-	subscription.ClearRetrySchedule()
-	if reason != "" {
-		subscription.CancelFeedback = &reason
-	}
+	observedPSP, observedRail, observedReference := subscription.PspID, subscription.Rail, subscription.RailSubscriptionID
 
 	if err := s.SubscriptionService.Database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := db.NewWithPgxTx(tx)
-		txSubSvc := NewSubscriptionService(txdb, catalog.NewPriceService(txdb), catalog.NewProductService(txdb), nil, s.clock)
-		if err := txSubSvc.Update(ctx, subscription); err != nil {
+		txdb := s.SubscriptionService.Database().NewWithPgxTx(tx)
+		var err error
+		subscription, err = s.requireLockedSubscription(ctx, txdb, subscriptionID)
+		if err != nil {
+			return err
+		}
+		if subscription.Status != models.StatusActive {
+			return ErrSubscriptionNotActive
+		}
+		if subscription.PspID != observedPSP || subscription.Rail != observedRail || subscription.RailSubscriptionID != observedReference {
+			return apperr.Conflictf("subscription provider binding changed before cancellation")
+		}
+		cancelType := models.CancelTypeMerchant
+		subscription.Status = models.StatusCancelled
+		subscription.CancelledAt = &now
+		subscription.CancelType = &cancelType
+		subscription.ClearRetrySchedule()
+		if reason != "" {
+			subscription.CancelFeedback = &reason
+		}
+
+		if rails.IsNMI(subscription.Rail) && enqueueRemoteIntent != nil {
+			subscription.DeletionScheduledAt = &now
+		}
+		if err := NewSubscriptionRepo(txdb).UpdateAt(ctx, subscription, now); err != nil {
 			return fmt.Errorf("failed to update subscription: %w", err)
 		}
+
 		if enqueueRemoteIntent != nil {
 			return enqueueRemoteIntent(ctx, tx)
 		}
@@ -334,37 +366,34 @@ func (s *AdminSubscriptionService) ExtendSubscription(ctx context.Context, subsc
 
 // ExtendSubscriptionByDuration extends a subscription period by a duration (admin)
 func (s *AdminSubscriptionService) ExtendSubscriptionByDuration(ctx context.Context, subscriptionID uuid.UUID, duration time.Duration) error {
-	subscription, err := s.requireSubscription(ctx, subscriptionID)
-	if err != nil {
-		return err
-	}
-
-	if subscription.Status != models.StatusActive {
-		return ErrSubscriptionNotActive
-	}
-
-	if subscription.CurrentPeriodEndsAt != nil {
-		newEndTime := subscription.CurrentPeriodEndsAt.Add(duration)
-		subscription.CurrentPeriodEndsAt = &newEndTime
-	} else {
-		now := s.now()
-		newEndTime := now.Add(duration)
-		subscription.CurrentPeriodEndsAt = &newEndTime
-		subscription.CurrentPeriodStartsAt = &now
-	}
-
-	if err := s.SubscriptionService.Update(ctx, subscription); err != nil {
-		return fmt.Errorf("failed to update subscription: %w", err)
-	}
-	if s.EntitlementService != nil && subscription.CurrentPeriodEndsAt != nil {
-		if err := s.EntitlementService.ExtendActiveBySubscription(ctx, subscription.ID, *subscription.CurrentPeriodEndsAt); err != nil {
-			return fmt.Errorf("failed to extend subscription entitlements: %w", err)
+	database := s.SubscriptionService.Database()
+	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := database.NewWithPgxTx(tx)
+		subscription, err := s.requireLockedSubscription(ctx, d, subscriptionID)
+		if err != nil {
+			return err
 		}
-	}
-
-	// Admin actions don't generate user notifications - this is purely for admin operations
-
-	return nil
+		if subscription.Status != models.StatusActive {
+			return ErrSubscriptionNotActive
+		}
+		now := s.now()
+		end := now.Add(duration)
+		if subscription.CurrentPeriodEndsAt != nil {
+			end = subscription.CurrentPeriodEndsAt.Add(duration)
+		} else {
+			subscription.CurrentPeriodStartsAt = &now
+		}
+		subscription.CurrentPeriodEndsAt = &end
+		if err := NewSubscriptionRepo(d).UpdateAt(ctx, subscription, now); err != nil {
+			return fmt.Errorf("failed to update subscription: %w", err)
+		}
+		if s.EntitlementService != nil {
+			if err := entitlements.NewEntitlementService(d, s.clock).ExtendActiveBySubscription(ctx, subscription.ID, end); err != nil {
+				return fmt.Errorf("failed to extend subscription entitlements: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 // GetAllPurchases retrieves all purchases with filtering (admin)

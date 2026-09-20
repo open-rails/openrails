@@ -193,18 +193,14 @@ func (h *NMIDeleteHandler) loadSubscription(ctx context.Context, intent gen.Open
 // destructive (no longer resumable). Idempotent — a cleared marker is left
 // alone.
 func (h *NMIDeleteHandler) finalize(ctx context.Context, intent gen.OpenrailsRailIntent) error {
-	sub, err := h.loadSubscription(ctx, intent)
-	if err != nil {
-		if db.IsNotFound(err) {
-			return nil
-		}
-		return err
+	if intent.SubscriptionID == nil {
+		return fmt.Errorf("intent has no subscription_id")
 	}
-	if sub.DeletionScheduledAt == nil {
-		return nil
-	}
-	sub.DeletionScheduledAt = nil
-	return subscriptions.NewSubscriptionRepo(h.DB).UpdateAt(ctx, sub, h.now())
+	// UPDATE acquires the row lock and clears only the completed deletion marker.
+	// It must not replay a subscription image read before a concurrent renewal,
+	// card change, resume or newly accepted quote.
+	_, err := h.DB.Gen(ctx).ClearSubscriptionDeletionMarker(ctx, gen.ClearSubscriptionDeletionMarkerParams{MerchantID: intent.MerchantID, ID: *intent.SubscriptionID, Now: h.now()})
+	return err
 }
 
 // subscriptionPresent reads GET /v5/subscriptions/{id}. NMI drops deleted/
