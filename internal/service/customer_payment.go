@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -33,6 +36,9 @@ func (s *Service) PayInvoiceNow(ctx context.Context, payer identity.CustomerID, 
 		if err != nil {
 			return err
 		}
+		if err := customerPaymentRefusal(result.Operation); err != nil {
+			return err
+		}
 		out = &openrails.InvoicePayNowResult{Invoice: invoiceToDTO(result.Invoice), Attempt: invoicePaymentAttemptToDTO(result.Attempt), Operation: openrails.PaymentOperation{ID: result.Operation.ID, Status: result.Operation.Status}, Replayed: result.Replayed}
 		return nil
 	})
@@ -59,6 +65,9 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 		}
 		result, err := rt.IntentRunner().ExecuteByID(ctx, accepted.ID)
 		if err != nil {
+			return err
+		}
+		if err := customerPaymentRefusal(result); err != nil {
 			return err
 		}
 		sub, err := rt.UserSubscriptionService.GetUserSubscriptionByID(ctx, payer.UUID().String(), request.SubscriptionID.UUID())
@@ -145,4 +154,51 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 	}
 	out.Retryable = true
 	return out, nil
+}
+
+// CustomerPaymentRefusal is a definitive accepted operation result, rendered
+// through the standard card-error envelope. It is never inferred from current
+// subscription/invoice state, so an old key keeps its original refusal.
+type CustomerPaymentRefusal struct {
+	OperationID uuid.UUID
+	Code        string
+}
+
+func (r *CustomerPaymentRefusal) Error() string { return "customer payment was refused" }
+
+func customerPaymentRefusal(row gen.OpenrailsRailIntent) error {
+	if row.Status != intents.StatusFailedTerminal {
+		return nil
+	}
+	var evidence struct {
+		Declined     bool   `json:"declined"`
+		FailureCode  string `json:"failure_code"`
+		ResponseCode int    `json:"response_code"`
+	}
+	if err := json.Unmarshal(row.ResultEvidence, &evidence); err != nil {
+		return err
+	}
+	switch row.IntentType {
+	case intents.TypeManualRebill:
+		if err := intents.ValidateManualRebillTerminal(row); err != nil {
+			return err
+		}
+		if !evidence.Declined {
+			return intents.ErrRebillNotRetryable
+		}
+		evidence.FailureCode = strconv.Itoa(evidence.ResponseCode)
+	case money.TypeInvoiceCollection:
+		if _, err := intents.DecodeInvoiceCollectionPayload(row); err != nil {
+			return err
+		}
+		if !evidence.Declined {
+			return money.ErrInvoiceNotRetryable
+		}
+	default:
+		return fmt.Errorf("unexpected customer payment operation %q", row.IntentType)
+	}
+	if evidence.FailureCode == "" {
+		return errors.New("payment refusal has no code")
+	}
+	return &CustomerPaymentRefusal{OperationID: row.ID, Code: evidence.FailureCode}
 }

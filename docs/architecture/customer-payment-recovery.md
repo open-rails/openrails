@@ -65,9 +65,11 @@ HTTP commands:
 - `POST /v1/me/subscriptions/{id}/retry-now` with optional `payment_method_id`
   (when supplied, it must be the subscription's current method).
 
-A terminal result is 200; unresolved execution is 202 with the operation's
-identity and state. Definitive provider declines are terminal results whose
-attempt/operation carries the refusal; they are not transport failures.
+A completed result is 200; unresolved execution is 202 with the operation's
+identity and state. A definitive card refusal uses the existing coded 402 error
+envelope (processor failures retain the standard processor error mapping).
+Error metadata includes the operation ID. Replaying the same key returns that
+original refusal even if a later attempt has recovered the account.
 `payment_in_progress` and `payment_idempotency_conflict` are 409 refusals.
 A caller should retain its key through network uncertainty and read the existing
 resource before starting a different action.

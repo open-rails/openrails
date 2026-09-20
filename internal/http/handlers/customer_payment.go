@@ -118,6 +118,16 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 	r.JSON(status, result)
 }
 func customerPaymentError(r *httprequest.Request, err error) {
+	var refusal *billingservice.CustomerPaymentRefusal
+	if errors.As(err, &refusal) {
+		apiError := paymentRefusalError(refusal.Code)
+		if apiError.Metadata == nil {
+			apiError.Metadata = map[string]any{}
+		}
+		apiError.Metadata["operation_id"] = refusal.OperationID.String()
+		r.APIError(apiError)
+		return
+	}
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, api.CodeResourceNotFound, "billing resource not found"))

@@ -64,7 +64,7 @@ func DecodeManualRebillPayload(in gen.OpenrailsRailIntent) (ManualRebillPayload,
 			return p, errors.New("scheduled rebill identity contradicts accepted terms")
 		}
 	case charge.InitiatorCustomer:
-		if in.Origin != string(OriginUser) || !customerPaymentKeyValid(TypeManualRebill, p.Renewal.CustomerID, in.IdempotencyKey) || (p.RequestedPaymentMethodID != nil && *p.RequestedPaymentMethodID != p.PaymentMethodID) {
+		if in.Origin != string(OriginUser) || in.Actor == nil || *in.Actor != p.Renewal.CustomerID.String() || !customerPaymentKeyValid(TypeManualRebill, p.Renewal.CustomerID, in.IdempotencyKey) || (p.RequestedPaymentMethodID != nil && *p.RequestedPaymentMethodID != p.PaymentMethodID) {
 			return p, errors.New("customer rebill identity contradicts accepted terms")
 		}
 	default:

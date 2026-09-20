@@ -173,6 +173,16 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 					}
 				}()
 			}
+			declinedRequest := request
+			gateway.SetMode(NMISaleDecline)
+			_, declinedError := client.PayInvoiceNow(ctx, declinedRequest)
+			var invoiceRefusal *openrails.StatusError
+			require.ErrorAs(t, declinedError, &invoiceRefusal)
+			require.Equal(t, 402, invoiceRefusal.Status)
+			require.Equal(t, openrails.CodeCardDeclined, invoiceRefusal.Code)
+			require.NotEmpty(t, invoiceRefusal.Metadata["operation_id"])
+			gateway.SetMode(NMISaleApprove)
+			request.IdempotencyKey = uuid.NewString()
 			before := gateway.SaleAttempts()
 			if mode == "http" {
 				gateway.SetMode(NMISaleUncertain)
@@ -222,6 +232,13 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			require.True(t, replay.Replayed)
 			require.Equal(t, paid.Operation, replay.Operation)
 			require.Equal(t, before+1, gateway.SaleAttempts())
+			_, err = client.PayInvoiceNow(ctx, declinedRequest)
+			var oldInvoiceRefusal *openrails.StatusError
+			require.ErrorAs(t, err, &oldInvoiceRefusal)
+			require.Equal(t, 402, oldInvoiceRefusal.Status)
+			require.Equal(t, invoiceRefusal.Code, oldInvoiceRefusal.Code)
+			require.Equal(t, invoiceRefusal.Metadata, oldInvoiceRefusal.Metadata)
+			require.Equal(t, before+1, gateway.SaleAttempts(), "old refusal cannot charge or disturb paid invoice")
 			read, err := client.GetMyInvoice(ctx, f.Invoice)
 			require.NoError(t, err)
 			require.Equal(t, "paid", read.Status)
@@ -285,6 +302,15 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			due, err := client.GetMySubscription(ctx, retry.SubscriptionID)
 			require.NoError(t, err)
 			require.True(t, due.Recovery.Retryable)
+			refusedRetry := retry
+			gateway.SetMode(NMISaleDecline)
+			_, err = client.RetrySubscriptionNow(ctx, refusedRetry)
+			var subscriptionRefusal *openrails.StatusError
+			require.ErrorAs(t, err, &subscriptionRefusal)
+			require.Equal(t, 402, subscriptionRefusal.Status)
+			require.Equal(t, openrails.CodeCardDeclined, subscriptionRefusal.Code)
+			gateway.SetMode(NMISaleApprove)
+			retry.IdempotencyKey = uuid.NewString()
 			recovered, err := client.RetrySubscriptionNow(ctx, retry)
 			require.NoError(t, err)
 			require.Equal(t, "succeeded", recovered.Operation.Status)
@@ -300,7 +326,17 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, same.Replayed)
 			require.Equal(t, recovered.Operation, same.Operation)
-			require.Equal(t, before+3, gateway.SaleAttempts(), fmt.Sprintf("%s invoice/CIT/MIT/rebill workflow", mode))
+			_, err = client.RetrySubscriptionNow(ctx, refusedRetry)
+			var oldSubscriptionRefusal *openrails.StatusError
+			require.ErrorAs(t, err, &oldSubscriptionRefusal)
+			require.Equal(t, 402, oldSubscriptionRefusal.Status)
+			require.Equal(t, subscriptionRefusal.Code, oldSubscriptionRefusal.Code)
+			require.Equal(t, subscriptionRefusal.Metadata, oldSubscriptionRefusal.Metadata)
+			after, err := client.GetMySubscription(ctx, retry.SubscriptionID)
+			require.NoError(t, err)
+			require.Equal(t, "active", after.Status)
+			require.True(t, after.CurrentPeriodEndsAt.Equal(*recovered.Subscription.CurrentPeriodEndsAt))
+			require.Equal(t, before+4, gateway.SaleAttempts(), fmt.Sprintf("%s invoice/CIT/MIT/rebill workflow", mode))
 		})
 	}
 }
