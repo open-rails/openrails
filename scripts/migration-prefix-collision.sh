@@ -34,7 +34,7 @@
 # The one question here is the one nothing else answers: what does master hold
 # RIGHT NOW.
 #
-# NO DATABASE, NO CONTAINERS, NO GO BUILD. One shallow fetch and two listings,
+# NO DATABASE, NO CONTAINERS, NO GO BUILD. One fetch and two listings,
 # so it costs a couple of seconds and can be re-run freely.
 #
 # SOFT ON INFRASTRUCTURE, HARD ON COLLISIONS. If master cannot be resolved the
@@ -116,14 +116,12 @@ if [ "${MIGRATION_PREFIX_NO_FETCH:-0}" = "1" ]; then
     || unverified "MIGRATION_PREFIX_NO_FETCH=1 but $REF is not present locally."
 else
   fetch_log="$(mktemp)"
-  # --depth=1: only the tip tree is ever read, so there is no reason to pay for
-  # history. On an already-complete clone git ignores the shallow hint.
-  if ! git fetch --no-tags --quiet --depth=1 "$REMOTE" "+refs/heads/$BRANCH:$REF" 2>"$fetch_log"; then
-    if ! git fetch --no-tags --quiet "$REMOTE" "+refs/heads/$BRANCH:$REF" 2>>"$fetch_log"; then
-      err="$(tr '\n' ' ' <"$fetch_log" 2>/dev/null || true)"
-      rm -f "$fetch_log"
-      unverified "could not fetch $REMOTE/$BRANCH: ${err:-unknown fetch failure}"
-    fi
+  # Shallow boundaries are shared by every worktree. Fetch the tip without
+  # truncating history that another lane needs for its merge base or rebase.
+  if ! git fetch --no-tags --quiet "$REMOTE" "+refs/heads/$BRANCH:$REF" 2>"$fetch_log"; then
+    err="$(tr '\n' ' ' <"$fetch_log" 2>/dev/null || true)"
+    rm -f "$fetch_log"
+    unverified "could not fetch $REMOTE/$BRANCH: ${err:-unknown fetch failure}"
   fi
   rm -f "$fetch_log"
 fi
