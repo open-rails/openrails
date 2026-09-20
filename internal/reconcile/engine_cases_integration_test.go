@@ -114,6 +114,10 @@ func (f *reconcileCase) finding(result *RunResult, kind FindingType) FindingReco
 		return err
 	}))
 	require.Equal(f.t, matches[0].Status, stored.Status, "returned and persisted finding disagree")
+	require.Equal(f.t, matches[0].SubjectKey, stored.SubjectKey)
+	require.Equal(f.t, matches[0].Severity, stored.Severity)
+	require.Equal(f.t, matches[0].RequiresAdmin, stored.RequiresAdmin)
+	require.Equal(f.t, matches[0].RecommendedAction, stored.RecommendedAction)
 	return stored
 }
 
@@ -167,12 +171,15 @@ func TestReconcileTaxonomyWorkflow(t *testing.T) {
 		require.NoError(t, f.db.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
 			local, err := (&PGLocalStateLoader{DB: f.db}).Load(ctx, ProviderNMI, f.psp.ID)
 			require.NoError(t, err)
+			var ids []uuid.UUID
 			for _, sub := range local.Subscriptions {
+				ids = append(ids, sub.ID)
 				if sub.ID == dead.ID {
 					require.Equal(t, "cancelled", sub.Status)
 					require.Equal(t, "expired", sub.CancelType)
 				}
 			}
+			require.ElementsMatch(t, []uuid.UUID{dead.ID, alive.ID}, ids)
 			return nil
 		}))
 	})
@@ -216,6 +223,7 @@ func TestReconcileTaxonomyWorkflow(t *testing.T) {
 			local, err := (&PGLocalStateLoader{DB: f.db}).Load(ctx, ProviderStripe, f.psp.ID)
 			require.NoError(t, err)
 			require.Len(t, local.Subscriptions, 1)
+			require.Equal(t, s.ID, local.Subscriptions[0].ID)
 			require.Equal(t, "active", local.Subscriptions[0].Status)
 			require.NotNil(t, local.Subscriptions[0].CurrentPeriodEndsAt)
 			require.True(t, end.Equal(*local.Subscriptions[0].CurrentPeriodEndsAt))
@@ -252,9 +260,9 @@ func TestReconcileTaxonomyWorkflow(t *testing.T) {
 			require.Len(t, payments, 1)
 			require.Equal(t, s.CustomerID, payments[0].CustomerID)
 			require.EqualValues(t, 999, payments[0].AmountCents)
-			var entitlement string
-			require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT entitlement FROM openrails.entitlements WHERE customer_id=$1`, s.CustomerID).Scan(&entitlement))
-			require.Equal(t, "premium", entitlement)
+			var entitlements []string
+			require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT array_agg(entitlement ORDER BY entitlement) FROM openrails.entitlements WHERE customer_id=$1`, s.CustomerID).Scan(&entitlements))
+			require.Equal(t, []string{"premium"}, entitlements)
 			return nil
 		}))
 	})
@@ -324,8 +332,9 @@ func TestReconcileTaxonomyWorkflow(t *testing.T) {
 		require.True(t, finding.RequiresAdmin)
 		// The mismatch may repair the second row's status, but neither row may be cancelled.
 		require.NoError(t, f.db.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
-			var cancelled int
-			require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.subscriptions WHERE status='cancelled'`).Scan(&cancelled))
+			var remaining, cancelled int
+			require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE status='cancelled') FROM openrails.subscriptions`).Scan(&remaining, &cancelled))
+			require.Equal(t, 2, remaining)
 			require.Zero(t, cancelled)
 			return nil
 		}))
@@ -499,8 +508,9 @@ func TestReconcileCancellationBudget(t *testing.T) {
 				require.False(t, result.Summary.Providers["nmi"].Aborted)
 				require.Equal(t, 3, result.Summary.Providers["nmi"].AutoFixed)
 				require.NoError(t, f.db.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
-					var cancelled int
-					require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.subscriptions WHERE status='cancelled'`).Scan(&cancelled))
+					var remaining, cancelled int
+					require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE status='cancelled') FROM openrails.subscriptions`).Scan(&remaining, &cancelled))
+					require.Equal(t, 200, remaining)
 					require.Equal(t, 3, cancelled)
 					return nil
 				}))
