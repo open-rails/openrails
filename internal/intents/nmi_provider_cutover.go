@@ -129,30 +129,24 @@ func (h *NMIProviderCutover) freeze(ctx context.Context, d *db.DB, id uuid.UUID,
 	if err != nil {
 		return p, err
 	}
-	err = d.Qx(ctx).QueryRow(ctx, `SELECT s.customer_id, s.rail_subscription_id, s.payment_method_id,
- s.price_id,b.plan_id,pr.currency,pr.amount,pr.access_duration_hours,s.current_period_starts_at,s.current_period_ends_at
- FROM openrails.subscriptions s
- JOIN openrails.payment_methods old ON old.id=s.payment_method_id AND old.merchant_id=s.merchant_id AND old.customer_id=s.customer_id
- JOIN openrails.payment_methods pm ON pm.id=$3 AND pm.merchant_id=s.merchant_id AND pm.customer_id=s.customer_id
- JOIN openrails.psps source ON source.id=s.psp_id AND source.merchant_id=s.merchant_id
- JOIN openrails.psps target ON target.id=pm.psp_id AND target.merchant_id=s.merchant_id
- JOIN openrails.prices pr ON pr.id=s.price_id AND pr.merchant_id=s.merchant_id
- JOIN openrails.price_psp_bindings b ON b.price_id=s.price_id AND b.psp_id=target.id AND b.merchant_id=s.merchant_id
- WHERE s.id=$1 AND s.merchant_id=$2 AND s.deleted_at IS NULL
- AND s.psp_id=$4 AND pm.psp_id=$5 AND s.rail='nmi' AND pm.rail='nmi' AND old.psp_id=source.id
- AND source.rail='nmi' AND target.rail='nmi' AND source.environment=target.environment
- AND source.archived AND NOT target.archived AND source.custodian_id IS NULL AND target.custodian_id IS NULL
- AND s.status='active' AND s.scheduled_price_id IS NULL AND s.deletion_scheduled_at IS NULL
- AND pm.custodian='psp' AND COALESCE(pm.park_reason,'')='' AND pm.rebill_driver='provider'
- AND old.custodian='psp' AND old.rebill_driver='provider' AND pr.auto_renew AND NOT pr.archived AND lower(pr.currency)='usd'`,
-		id, mid.UUID(), req.TargetPaymentMethodID, req.ExpectedSourcePSPID, req.ExpectedTargetPSPID).Scan(
-		&p.CustomerID, &p.SourceSubscriptionID, &p.SourcePaymentMethodID, &p.PriceID, &p.PlanID, &p.Currency, &p.Amount, &p.CycleHours, &p.PeriodStart, &p.PeriodEnd)
+	snapshot, err := d.Gen(ctx).GetNMIProviderCutoverSnapshot(ctx, gen.GetNMIProviderCutoverSnapshotParams{
+		SubscriptionID: id, MerchantID: mid.UUID(), TargetPaymentMethodID: req.TargetPaymentMethodID,
+		SourcePspID: req.ExpectedSourcePSPID, TargetPspID: req.ExpectedTargetPSPID,
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, cutoverConflict("subscription, accounts, target card or target price binding is not eligible")
 	}
 	if err != nil {
 		return p, err
 	}
+	if snapshot.PaymentMethodID == nil || snapshot.PriceID == nil || snapshot.PlanID == nil ||
+		snapshot.AccessDurationHours == nil || snapshot.CurrentPeriodStartsAt == nil || snapshot.CurrentPeriodEndsAt == nil {
+		return p, errors.New("cutover snapshot is missing required commercial terms")
+	}
+	p.CustomerID, p.SourceSubscriptionID = snapshot.CustomerID, snapshot.RailSubscriptionID
+	p.SourcePaymentMethodID, p.PriceID, p.PlanID = *snapshot.PaymentMethodID, *snapshot.PriceID, *snapshot.PlanID
+	p.Currency, p.Amount, p.CycleHours = snapshot.Currency, snapshot.Amount, *snapshot.AccessDurationHours
+	p.PeriodStart, p.PeriodEnd = *snapshot.CurrentPeriodStartsAt, *snapshot.CurrentPeriodEndsAt
 	sourceMethod, err := d.Gen(ctx).GetPaymentMethodByID(ctx, p.SourcePaymentMethodID)
 	if err != nil {
 		return p, err
@@ -277,7 +271,7 @@ func (h *NMIProviderCutover) Submit(ctx context.Context, runner *Runner, id uuid
 		}
 		// Serialize request identity first, then subject. Replay never runs mutable
 		// eligibility checks: a completed cutover already points at its target.
-		if _, e := d.Qx(ctx).Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, k); e != nil {
+		if e := d.Gen(ctx).LockProviderCutoverRequest(ctx, k); e != nil {
 			return e
 		}
 		old, e := store.GetByIdempotencyKey(ctx, k)
@@ -298,7 +292,9 @@ func (h *NMIProviderCutover) Submit(ctx context.Context, runner *Runner, id uuid
 		if _, e = d.Gen(ctx).GetSubscriptionByIDForUpdate(ctx, id); e != nil {
 			return e
 		}
-		if _, e = d.Qx(ctx).Exec(ctx, `SELECT id FROM openrails.payment_methods WHERE merchant_id=$1 AND (id=$2 OR id=(SELECT payment_method_id FROM openrails.subscriptions WHERE id=$3 AND merchant_id=$1)) ORDER BY id FOR UPDATE`, pMerchant(ctx), req.TargetPaymentMethodID, id); e != nil {
+		if e = d.Gen(ctx).LockProviderCutoverPaymentMethods(ctx, gen.LockProviderCutoverPaymentMethodsParams{
+			MerchantID: pMerchant(ctx), TargetPaymentMethodID: req.TargetPaymentMethodID, SubscriptionID: id,
+		}); e != nil {
 			return e
 		}
 		p, e := h.freeze(ctx, d, id, req)
@@ -311,15 +307,18 @@ func (h *NMIProviderCutover) Submit(ctx context.Context, runner *Runner, id uuid
 		if !p.Anchor.After(h.now()) {
 			return cutoverConflict("paid-through anchor must be in the future")
 		}
-		var busy bool
-		e = d.Qx(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM openrails.rail_intents WHERE merchant_id=$1 AND subscription_id=$2 AND status NOT IN ('succeeded','failed_terminal','superseded','expired'))`, pMerchant(ctx), id).Scan(&busy)
+		busy, e := d.Gen(ctx).HasOpenProviderCutoverSubscriptionIntent(ctx, gen.HasOpenProviderCutoverSubscriptionIntentParams{
+			MerchantID: pMerchant(ctx), SubscriptionID: id,
+		})
 		if e != nil {
 			return e
 		}
 		if busy {
 			return cutoverConflict("subscription has an unresolved provider operation")
 		}
-		e = d.Qx(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM openrails.rail_intents WHERE merchant_id=$1 AND intent_type IN ('nmi_vault_delete','nmi_payment_method_update') AND payload->>'payment_method_id'=ANY($2::text[]) AND status NOT IN ('succeeded','failed_terminal','superseded','expired'))`, pMerchant(ctx), []string{p.SourcePaymentMethodID.String(), req.TargetPaymentMethodID.String()}).Scan(&busy)
+		busy, e = d.Gen(ctx).HasOpenProviderCutoverPaymentMethodIntent(ctx, gen.HasOpenProviderCutoverPaymentMethodIntentParams{
+			MerchantID: pMerchant(ctx), PaymentMethodIds: []string{p.SourcePaymentMethodID.String(), req.TargetPaymentMethodID.String()},
+		})
 		if e != nil {
 			return e
 		}
@@ -710,9 +709,11 @@ func (h *NMIProviderCutover) isRepointed(ctx context.Context, p nmiCutoverPayloa
 	if target == nil {
 		return false, nil
 	}
-	var done bool
-	e := h.DB.Qx(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM openrails.subscriptions WHERE id=$1 AND merchant_id=$2 AND psp_id=$3 AND rail_subscription_id=$4 AND payment_method_id=$5 AND customer_id=$6 AND price_id=$7 AND current_period_starts_at=$8 AND current_period_ends_at=$9 AND deleted_at IS NULL)`, p.SubscriptionID, pMerchant(ctx), p.Request.ExpectedTargetPSPID, target.ID, p.Request.TargetPaymentMethodID, p.CustomerID, p.PriceID, p.PeriodStart, p.PeriodEnd).Scan(&done)
-	return done, e
+	return h.DB.Gen(ctx).IsProviderCutoverRepointed(ctx, gen.IsProviderCutoverRepointedParams{
+		SubscriptionID: p.SubscriptionID, MerchantID: pMerchant(ctx), TargetPspID: p.Request.ExpectedTargetPSPID,
+		TargetSubscriptionID: target.ID, TargetPaymentMethodID: p.Request.TargetPaymentMethodID,
+		CustomerID: p.CustomerID, PriceID: p.PriceID, PeriodStart: p.PeriodStart, PeriodEnd: p.PeriodEnd,
+	})
 }
 func (h *NMIProviderCutover) repoint(ctx context.Context, p nmiCutoverPayload, target *nmi.V5Subscription) error {
 	wctx, cancel := LedgerWriteContext(ctx)
@@ -729,11 +730,14 @@ func (h *NMIProviderCutover) repoint(ctx context.Context, p nmiCutoverPayload, t
 		if !sameCutoverLocal(live, p) {
 			return cutoverConflict("local terms changed")
 		}
-		tag, e := d.Qx(ctx).Exec(ctx, `UPDATE openrails.subscriptions SET psp_id=$3,rail_subscription_id=$4,payment_method_id=$5,updated_at=$6 WHERE id=$1 AND merchant_id=$2`, p.SubscriptionID, pMerchant(ctx), p.Request.ExpectedTargetPSPID, target.ID, p.Request.TargetPaymentMethodID, h.now())
+		updated, e := d.Gen(ctx).RepointProviderCutoverSubscription(ctx, gen.RepointProviderCutoverSubscriptionParams{
+			SubscriptionID: p.SubscriptionID, MerchantID: pMerchant(ctx), TargetPspID: p.Request.ExpectedTargetPSPID,
+			TargetSubscriptionID: target.ID, TargetPaymentMethodID: p.Request.TargetPaymentMethodID, Now: h.now(),
+		})
 		if e != nil {
 			return e
 		}
-		if tag.RowsAffected() != 1 {
+		if updated != 1 {
 			return errors.New("subscription disappeared")
 		}
 		return nil

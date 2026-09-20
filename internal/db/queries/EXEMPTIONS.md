@@ -237,8 +237,3 @@ friends against tables three statements old.
 A new migration that genuinely needs one of these must add the constraint
 `NOT VALID` and `VALIDATE CONSTRAINT` it in a *later* file — one transaction
 each. That is the only shape that actually reduces lock time here.
-
-`internal/intents/nmi_provider_cutover.go` retains the cutover admission snapshot,
-subject/card locks, replay lookup and atomic repoint in the same implementation
-as the durable provider steps. These static queries are sqlc conversion debt;
-all use Qx with explicit merchant predicates and transaction-local RLS.
