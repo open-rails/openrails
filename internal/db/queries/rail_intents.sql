@@ -552,3 +552,40 @@ WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')
   AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'rebill_decline')
        OR result_evidence->'rebill_decline' = sqlc.arg(decline)::jsonb);
+
+-- name: ListCompletedManualRebillPaymentCoverage :many
+-- Exact accepted operation provenance is decoded in Go. Do not infer an older
+-- charge's billing interval from the time its local payment row was recovered.
+SELECT sqlc.embed(i), p.id AS covered_payment_id, p.customer_id AS paid_customer_id,
+       p.psp_id AS paid_psp_id, p.subscription_id AS paid_subscription_id,
+       p.rail AS paid_rail, p.transaction_id AS paid_transaction_id, p.price_id AS paid_price_id,
+       p.amount AS paid_amount, p.currency AS paid_currency
+FROM openrails.payments p
+JOIN openrails.rail_intents i ON i.merchant_id=p.merchant_id AND i.psp_id=p.psp_id
+  AND i.subscription_id=p.subscription_id AND i.intent_type='manual_rebill'
+  AND (i.result_evidence->>'transaction_id'=p.transaction_id
+       OR i.result_evidence->'qualified_receipt'->'nmi'->>'transaction_id'=p.transaction_id)
+WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid
+  AND p.subscription_id=sqlc.arg(subscription_id)::uuid
+  AND p.psp_id=sqlc.arg(psp_id)::uuid
+  AND p.status='completed' AND p.deleted_at IS NULL;
+
+-- name: HasUnattributedPaymentAfterRebillBoundary :one
+-- Existing provider-observed payments have no immutable accepted interval.
+-- Retain their conservative timestamp refusal separately; it is not exact
+-- coverage evidence. A matched operation is validated by the query above.
+SELECT EXISTS (
+ SELECT 1 FROM openrails.payments p
+ WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid
+   AND p.subscription_id=sqlc.arg(subscription_id)::uuid
+   AND p.psp_id=sqlc.arg(psp_id)::uuid
+   AND p.status='completed' AND p.deleted_at IS NULL
+   AND p.purchased_at>=sqlc.arg(period_start)::timestamptz
+   AND NOT EXISTS (
+     SELECT 1 FROM openrails.rail_intents i
+     WHERE i.merchant_id=p.merchant_id AND i.psp_id=p.psp_id
+       AND i.subscription_id=p.subscription_id AND i.intent_type='manual_rebill'
+       AND (i.result_evidence->>'transaction_id'=p.transaction_id
+            OR i.result_evidence->'qualified_receipt'->'nmi'->>'transaction_id'=p.transaction_id)
+   )
+)::bool;

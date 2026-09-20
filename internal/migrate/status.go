@@ -71,7 +71,10 @@ func InspectPostgres(ctx context.Context, cfg *config.Config) (report PostgresSt
 		return report, fmt.Errorf("load openrails migrations: %w", err)
 	}
 	schema := cfg.DB.SchemaName()
-	migrations = rewriteMigrationsSchema(migrations, schema)
+	migrations, err = rewriteMigrationsSchema(migrations, schema)
+	if err != nil {
+		return report, err
+	}
 
 	sqlDB, err := sql.Open("pgx", cfg.DB.GetConnectionString())
 	if err != nil {

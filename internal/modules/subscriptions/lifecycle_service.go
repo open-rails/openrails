@@ -624,10 +624,10 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 }
 
 // RecordConfirmedChargeWithoutRenewal records a provider-confirmed renewal
-// charge on a subscription that must NOT be reactivated (terminally
-// cancelled meanwhile). The money moved, so the completed payment row is
-// written exactly once (deduped on rail + transaction id); access and period
-// stay as they are and the charge is flagged for refund review.
+// charge whose lifecycle must be preserved: a later period is already applied
+// or the subscription was terminally cancelled meanwhile. The completed payment
+// uses its accepted terms; current price, benefits, access and period stay intact.
+// A terminal cancellation alone flags the charge for refund review.
 func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx context.Context, params *RenewMembershipParams) error {
 	if params == nil || strings.TrimSpace(params.TransactionID) == "" {
 		return errors.New("confirmed charge requires a transaction id")
@@ -649,7 +649,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 				return err
 			}
 			if subscription.ID != terms.SubscriptionID || subscription.CustomerID != terms.CustomerID || subscription.PspID != terms.PSPID || !params.AmountProvided || amount != terms.Amount || currency != terms.Currency {
-				return errors.New("confirmed charge does not match the accepted cancelled subscription")
+				return errors.New("confirmed charge does not match the accepted subscription")
 			}
 			priceID, snapshot = terms.PriceID, models.CloneEntitlementsSpec(terms.Entitlements)
 		} else {
@@ -665,12 +665,17 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 			}
 		}
 
+		var metadata map[string]any
+		_, terminal := TerminalCancelReason(subscription)
+		if terminal {
+			metadata = map[string]any{"refund_review": "confirmed charge on a cancelled subscription"}
+		}
 		now := s.now().UTC()
 		payment := &models.Payment{
 			ID: uuidutil.NewV7(), CustomerID: subscription.CustomerID, PriceID: priceID, SubscriptionID: &subscription.ID,
 			Rail: params.Rail, PspID: pspIDOf(subscription), TransactionID: params.TransactionID,
 			Amount: amount, ListAmount: amount, Currency: currency, Status: payments.PaymentStatusCompletedValue,
-			Metadata:                 map[string]any{"refund_review": "confirmed charge on a cancelled subscription"},
+			Metadata:                 metadata,
 			EntitlementsSpecSnapshot: snapshot,
 			AttemptKind:              func() *string { k := payments.AttemptRenewal; return &k }(),
 			MoneyMovement:            models.MoneyMovementRail, PurchasedAt: now, CreatedAt: now,
@@ -692,7 +697,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 			}
 			return validateCompletedPayment(existing, amount, currency)
 		}
-		if created {
+		if created && terminal {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID, "transaction_id": params.TransactionID, "status": subscription.Status,
 			}).Error("confirmed rebill charge on a cancelled subscription; payment recorded without reactivation — refund review required")

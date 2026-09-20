@@ -142,6 +142,10 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 }
 
 func seedPastDueSubscriptionForMerchant(t *testing.T, merchantID uuid.UUID) rebillFixture {
+	return seedPastDueSubscriptionAt(t, merchantID, time.Now().UTC())
+}
+
+func seedPastDueSubscriptionAt(t *testing.T, merchantID uuid.UUID, now time.Time) rebillFixture {
 	t.Helper()
 	ctx := merchant.WithID(context.Background(), merchant.ID(merchantID))
 	dbi := dbtest.OpenMerchantDB(t, merchantID)
@@ -151,7 +155,7 @@ func seedPastDueSubscriptionForMerchant(t *testing.T, merchantID uuid.UUID) rebi
 	_, err := pool.Exec(ctx, `INSERT INTO openrails.merchants(id,slug) VALUES($1,$2) ON CONFLICT(id) DO NOTHING`, merchantID, "rebill-"+merchantID.String())
 	require.NoError(t, err)
 	fx.subID = uuid.New()
-	now := time.Now().UTC().Truncate(time.Second)
+	now = now.UTC().Truncate(time.Second)
 	fx.periodEnd = now.Add(-time.Minute)
 	fx.orderRef = rebillOrderReference(ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, "nmi", 1))
 

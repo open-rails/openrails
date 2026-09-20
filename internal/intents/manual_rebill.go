@@ -165,7 +165,7 @@ func (h *ManualRebillHandler) validateAndFence(ctx context.Context, in gen.Openr
 		if sub.Status != models.StatusPastDue || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || string(sub.Rail) != p.Rail || sub.RailSubscriptionID != p.RailSubscriptionID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodStart) || failures != p.FailureCount {
 			return errRebillSuperseded
 		}
-		paid, err := d.Gen(ctx).HasCompletedPaymentAtOrAfterPeriodEnd(ctx, gen.HasCompletedPaymentAtOrAfterPeriodEndParams{MerchantID: in.MerchantID, SubscriptionID: sub.ID, PeriodEnd: p.Renewal.PeriodStart})
+		paid, err := rebillPaymentAlreadyObserved(ctx, d, in.MerchantID, p)
 		if err != nil {
 			return err
 		}
