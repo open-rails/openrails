@@ -25,6 +25,7 @@ type InvoiceLineItemDTO struct {
 }
 
 type InvoiceDTO struct {
+	Recovery                  *PaymentRecovery     `json:"recovery,omitempty"`
 	ID                        uuid.UUID            `json:"id"`
 	Currency                  string               `json:"currency"`
 	InvoiceNumber             *string              `json:"invoice_number,omitempty"`

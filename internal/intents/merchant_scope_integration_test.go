@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -88,7 +89,7 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 		require.Equal(t, "12/30", expiry)
 
 		now := time.Now().UTC().Truncate(time.Microsecond)
-		dueAt, leaseUntil := now.Add(-time.Hour), now.Add(time.Hour)
+		dueAt := now.Add(-time.Hour)
 		claimSubID, scheduleSubID := uuid.New(), uuid.New()
 		_, err = qx.Exec(ctx,
 			`INSERT INTO openrails.subscriptions
@@ -101,30 +102,18 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 			"scope-claim-"+suffix, "scope-schedule-"+suffix, now.Add(-24*time.Hour), dueAt)
 		require.NoError(t, err)
 
-		claim := gen.ClaimDunningAttemptParams{
-			ID: claimSubID, MerchantID: otherID, LeaseUntil: leaseUntil, ClaimedAt: now,
-		}
-		n, err = queries.ClaimDunningAttempt(ctx, claim)
+		accepted, err := NewStore(dbi).Enqueue(ownerCtx, EnqueueParams{MerchantID: ownerID, Provider: "nmi", IntentType: TypeManualRebill, SubscriptionID: &claimSubID, PspID: pspID, Payload: map[string]any{}, IdempotencyKey: "scope-" + suffix, NextAttemptAt: now, Origin: OriginSystem})
 		require.NoError(t, err)
-		require.Zero(t, n)
+		_, err = queries.GetUnresolvedManualRebill(ctx, gen.GetUnresolvedManualRebillParams{MerchantID: otherID, SubscriptionID: claimSubID})
+		require.ErrorIs(t, err, pgx.ErrNoRows)
+		owned, err := queries.GetUnresolvedManualRebill(ctx, gen.GetUnresolvedManualRebillParams{MerchantID: ownerID, SubscriptionID: claimSubID})
+		require.NoError(t, err)
+		require.Equal(t, accepted.ID, owned.ID)
 		var nextRetry time.Time
 		var lastRetry *time.Time
-		require.NoError(t, qx.QueryRow(ctx,
-			`SELECT next_retry_at, last_retry_at FROM openrails.subscriptions WHERE id = $1`, claimSubID,
-		).Scan(&nextRetry, &lastRetry))
-		require.True(t, dueAt.Equal(nextRetry))
+		require.NoError(t, qx.QueryRow(ctx, `SELECT next_retry_at, last_retry_at FROM openrails.subscriptions WHERE id = $1`, claimSubID).Scan(&nextRetry, &lastRetry))
+		require.True(t, dueAt.Equal(nextRetry), "operation ownership never writes a second dunning lease")
 		require.Nil(t, lastRetry)
-
-		claim.MerchantID = ownerID
-		n, err = queries.ClaimDunningAttempt(ctx, claim)
-		require.NoError(t, err)
-		require.EqualValues(t, 1, n)
-		require.NoError(t, qx.QueryRow(ctx,
-			`SELECT next_retry_at, last_retry_at FROM openrails.subscriptions WHERE id = $1`, claimSubID,
-		).Scan(&nextRetry, &lastRetry))
-		require.True(t, leaseUntil.Equal(nextRetry))
-		require.NotNil(t, lastRetry)
-		require.True(t, now.Equal(*lastRetry))
 
 		scheduleAt := now.Add(30 * time.Minute)
 		schedule := gen.SetSubscriptionNextRetryParams{

@@ -204,9 +204,10 @@ func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts bill
 	httproutes.RegisterMerchantArchiveRoutes(router.NewMux(mux, "/v1/merchant", rt), rt,
 		httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{})})
 	handler := middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes)(mux)
+	transport, hostCapability := inprocess.NewTransport(handler, rt.ConfiguredMerchant)
 	clientOpts = append(clientOpts,
-		openrails.WithHTTPClient(&http.Client{Transport: inprocess.NewTransport(handler, rt.ConfiguredMerchant)}),
-		openrails.WithTokenProvider(func(context.Context) (string, error) { return "in-process-host", nil }))
+		openrails.WithHTTPClient(&http.Client{Transport: transport}),
+		openrails.WithTokenProvider(func(context.Context) (string, error) { return hostCapability, nil }))
 	client, err := openrails.NewRemote("http://openrails.invalid", clientOpts...)
 	if err != nil {
 		close()

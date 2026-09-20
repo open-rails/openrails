@@ -4,6 +4,7 @@ package tests
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -29,7 +30,9 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	ctx := suite.MerchantCtx()
 
 	baseNow := time.Now().UTC().Truncate(time.Second)
-	t0 := baseNow.Add(-120 * 24 * time.Hour)
+	// Keep the recovered period current for the production inline convergence
+	// pass, which observes wall time after the worker commits.
+	t0 := baseNow.Add(-35 * 24 * time.Hour)
 	clock := suite.SetMockClock(t0)
 	require.IsType(t, &clockwork.FakeClock{}, clock)
 
@@ -56,8 +59,8 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		ID:                  priceID,
 		ProductID:           productID,
 		Archived:            false,
-		Amount:              999,
-		Currency:            "usd",
+		Amount:              9990000,
+		Currency:            "USD",
 		AccessDurationHours: &billingDays, AutoRenew: true,
 		PSPLinks: map[string]map[string]string{
 			string(models.RailNMI): {
@@ -85,6 +88,10 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		PaymentMethodID:     &pm.ID,
 		RailSubID:           "sub_" + uuid.New().String()[:8],
 	})
+
+	sub.EntitlementsSpecSnapshot = map[string]*int{"premium": nil, "extra": nil}
+	require.NoError(t, subscriptions.NewSubscriptionRepo(rt.DB).Update(ctx, sub))
+	seedDunningProviderObligation(mock, sub, pm, paidEnd, 9990000)
 
 	// Initial paid windows for both entitlements.
 	for _, entName := range []string{"premium", "extra"} {
@@ -134,6 +141,7 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 		Clock:              clock,
 		NMIResolver:        rt.CollectionResolver,
 		IdempotencyService: rt.IdempotencyService,
+		DeferDelete:        rt.DeferredDeletes,
 	}
 	require.NoError(t, worker.Work(suite.WorkerCtx(), &river.Job[riverjobs.DunningArgs]{}))
 
@@ -153,9 +161,14 @@ func TestEntitlementsDunningStateMachine_NMI_SucceedsAfterRetries(t *testing.T) 
 	// Second retry attempt: succeed via mock — recovery records the renewal;
 	// the standing window needs no extension.
 	mock.ShouldFail = false
-	clock.Advance(collection.NextRetryIn(30*24, 2))
+	next := suite.GetSubscription(sub.ID).NextRetryAt
+	require.NotNil(t, next)
+	clock.Advance(next.Sub(clock.Now().UTC()) + time.Second)
 	require.NoError(t, worker.Work(suite.WorkerCtx(), &river.Job[riverjobs.DunningArgs]{}))
 
+	refreshed := suite.GetSubscription(sub.ID)
+	require.Equal(t, models.StatusActive, refreshed.Status)
+	require.True(t, refreshed.CurrentPeriodEndsAt.After(paidEnd), "confirmed retry advances this paid period")
 	for _, entName := range []string{"premium", "extra"} {
 		ok, err := rt.EntitlementService.IsEntitled(ctx, userID, entName, clock.Now().UTC().Add(time.Second))
 		require.NoError(t, err)
@@ -194,6 +207,8 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 		PaymentMethodID:     &pm.ID,
 		RailSubID:           "sub_" + uuid.New().String()[:8],
 	})
+
+	seedDunningProviderObligation(mock, sub, pm, paidEnd, products[0].Prices[0].Amount)
 
 	// Minimal entitlement for this subscription.
 	notBefore := periodStart.UTC()
@@ -252,6 +267,7 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 		Clock:              clock,
 		NMIResolver:        rt.CollectionResolver,
 		IdempotencyService: rt.IdempotencyService,
+		DeferDelete:        rt.DeferredDeletes,
 	}
 
 	// Drive retries until the subscription is cancelled (monthly schedule,
@@ -271,4 +287,14 @@ func TestEntitlementsDunningStateMachine_NMI_TerminalFailure(t *testing.T) {
 	ok, err := rt.EntitlementService.IsEntitled(ctx, userID, "premium", clock.Now().UTC().Add(time.Second))
 	require.NoError(t, err)
 	require.False(t, ok)
+}
+
+func seedDunningProviderObligation(mock *MockNMIServer, sub *models.Subscription, pm *models.PaymentMethod, paidEnd time.Time, amount int64) {
+	mock.rebillMu.Lock()
+	defer mock.rebillMu.Unlock()
+	if mock.rebillObligations == nil {
+		mock.rebillObligations = map[string]map[string]any{}
+	}
+	decimal := fmt.Sprintf("%d.%02d", amount/1000000, (amount%1000000)/10000)
+	mock.rebillObligations[sub.RailSubscriptionID] = map[string]any{"id": sub.RailSubscriptionID, "amount": decimal, "customer_vault_id": pm.RailCustomerRef, "delayed_condition": "active", "paused_subscription": "0", "next_billing_date": paidEnd.Add(30 * 24 * time.Hour).UTC().Format("2006-01-02"), "plan": map[string]any{"id": "plan-dunning", "plan_amount": decimal, "plan_payments": "0", "day_frequency": "30"}}
 }

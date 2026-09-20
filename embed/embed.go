@@ -24,11 +24,16 @@ import (
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/service"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
 )
 
 // Options configures the embedded runtime.
 type Options struct {
+	// DelegatedAuthenticator verifies explicit customer credentials for Client
+	// self-service calls and is the default verifier for customer HTTP mounts.
+	// Use the existing embed/authkit bridge; ambient host sessions confer no authority.
+	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	// Config is built programmatically by the host; embedded construction never
 	// runs config.Load, so Env and TestMode (sandbox or live) must be set
 	// explicitly. Rate-limit and captcha defaults are seeded when left nil
@@ -59,8 +64,9 @@ type Options struct {
 // Runtime is the in-process engine: Client() for the shared client, Handler()
 // to mount the billing HTTP surface, RunWorkers/Close for lifecycle.
 type Runtime struct {
-	app *app.App
-	svc *service.Service
+	delegatedAuthenticator billingauth.DelegatedAuthenticator
+	app                    *app.App
+	svc                    *service.Service
 
 	activeRouteSets        []RouteSet
 	releaseStripeTransport func()
@@ -117,7 +123,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	}
 	application.ConsoleAssets = opts.ConsoleAssets
 
-	r := &Runtime{app: application}
+	r := &Runtime{app: application, delegatedAuthenticator: opts.DelegatedAuthenticator}
 	if opts.StripeTransport != nil {
 		r.releaseStripeTransport = stripeapi.InstallBaseTransport(opts.StripeTransport)
 	}
@@ -171,10 +177,11 @@ func applyEmbeddedDefaults(cfg *config.Config) error {
 // WithMerchantID on a multi-merchant runtime; an unbound client is refused.
 func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, error) {
 	rt := r.app.Runtime
-	r.handlerOnce.Do(func() { r.handler = newServiceHandler(rt) })
+	r.handlerOnce.Do(func() { r.handler = newServiceHandler(rt, r.delegatedAuthenticator) })
+	transport, hostCapability := inprocess.NewTransport(r.handler, rt.ConfiguredMerchant)
 	defaults := []openrails.ClientOption{
-		openrails.WithHTTPClient(&http.Client{Transport: inprocess.NewTransport(r.handler, rt.ConfiguredMerchant)}),
-		openrails.WithTokenProvider(func(context.Context) (string, error) { return "in-process-host", nil }),
+		openrails.WithHTTPClient(&http.Client{Transport: transport}),
+		openrails.WithTokenProvider(func(context.Context) (string, error) { return hostCapability, nil }),
 	}
 	if id := rt.ConfiguredMerchant(); !id.IsZero() {
 		defaults = append(defaults, openrails.WithMerchantID(id))

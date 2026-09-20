@@ -3,9 +3,11 @@
 package tests
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,12 +20,16 @@ import (
 
 // MockNMIServer simulates the NMI Direct Post API for testing
 type MockNMIServer struct {
-	Server           *httptest.Server
-	RequestCount     int32
-	LastRequest      map[string][]string
-	ResponseOverride string
-	ShouldFail       bool
-	FailReason       string
+	rebillMu          sync.Mutex
+	rebillObligations map[string]map[string]any
+	rebillReceipts    map[string]map[string]any
+	rebillOrders      map[string]string
+	Server            *httptest.Server
+	RequestCount      int32
+	LastRequest       map[string][]string
+	ResponseOverride  string
+	ShouldFail        bool
+	FailReason        string
 	// FailCode is the NMI response_code the decline carries. It decides the
 	// or#870 bucket: the default 300 is a RETRYABLE decline (bucket 1, never
 	// terminal); 261 "Stop All Recurring Payments" is the hard mandate
@@ -73,6 +79,20 @@ func (m *MockNMIServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m.LastRequest = r.Form
+	if r.Form.Get("report_type") == "transaction" {
+		m.rebillMu.Lock()
+		defer m.rebillMu.Unlock()
+		if m.rebillOrders != nil {
+			fmt.Fprint(w, "<nm_response>")
+			for id, order := range m.rebillOrders {
+				if order == r.Form.Get("order_id") {
+					fmt.Fprintf(w, `<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction>`, id, order)
+				}
+			}
+			fmt.Fprint(w, "</nm_response>")
+			return
+		}
+	}
 
 	// Determine what type of request this is
 	customerVault := r.Form.Get("customer_vault")
@@ -124,6 +144,22 @@ func (m *MockNMIServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		response = fmt.Sprintf("response=1&responsetext=SUCCESS&transactionid=%s&authcode=123456&type=sale", txnID)
 	}
 
+	if recurring == "rebill_subscription" {
+		values, _ := url.ParseQuery(response)
+		if values.Get("response") == "1" {
+			m.rebillMu.Lock()
+			if obligation, ok := m.rebillObligations[r.Form.Get("subscription_id")]; ok {
+				id := values.Get("transactionid")
+				if m.rebillReceipts == nil {
+					m.rebillReceipts = map[string]map[string]any{}
+					m.rebillOrders = map[string]string{}
+				}
+				m.rebillOrders[id] = r.Form.Get("orderid")
+				m.rebillReceipts[id] = map[string]any{"id": id, "amount": obligation["amount"], "currency": "USD", "response": "1", "customer_vault_id": obligation["customer_vault_id"], "actions": []map[string]any{{"type": "sale", "amount": obligation["amount"], "success": true, "response": "1"}}}
+			}
+			m.rebillMu.Unlock()
+		}
+	}
 	w.Header().Set("Content-Type", "application/x-www-form-urlencoded")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(response))
@@ -170,9 +206,25 @@ func (m *MockNMIServer) handleV5(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(txnJSON(parts[1])))
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/payments/"):
 		id := strings.TrimPrefix(r.URL.Path, "/payments/")
+		m.rebillMu.Lock()
+		receipt, found := m.rebillReceipts[id]
+		m.rebillMu.Unlock()
+		if found {
+			_ = json.NewEncoder(w).Encode(receipt)
+			return
+		}
+
 		fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","actions":[{"id":"%s","type":"sale","success":true,"amount":"1.00"}]}`, id, id)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/subscriptions/"):
 		id := strings.TrimPrefix(r.URL.Path, "/subscriptions/")
+		m.rebillMu.Lock()
+		obligation, found := m.rebillObligations[id]
+		m.rebillMu.Unlock()
+		if found {
+			_ = json.NewEncoder(w).Encode(obligation)
+			return
+		}
+
 		if m.deletedSub(id) {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"type":"notFound","error_code":"E_NOT_FOUND","message":"subscription not found"}`))

@@ -39,7 +39,7 @@ func TestInProcessTransportAuthTraversal(t *testing.T) {
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	rt.app.Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
-	handler := newServiceHandler(rt.app.Runtime)
+	handler := newServiceHandler(rt.app.Runtime, nil)
 
 	// 1) Network-shaped request: NO context principal. The real gate rejects it
 	// 401 even with a bearer and a spoofed header — nothing wire-supplied can

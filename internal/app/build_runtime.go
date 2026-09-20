@@ -823,7 +823,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	// reprice engine. Observed rails with a server-side push: Stripe, and
 	// (#815) gateway-native NMI recurring via the per-merchant client
 	// resolver.
-	planMigrationService := subscriptions.NewPlanMigrationService(repriceService, &subscriptions.StripeService{Config: cfg, Rails: railConfigs}, subscriptions.NewNMIPlanPusher(collectionResolver), paymentMethodService)
+	planMigrationService := subscriptions.NewPlanMigrationService(repriceService, &subscriptions.StripeService{Config: cfg, Rails: railConfigs}, subscriptions.NewNMIPlanPusher(collectionResolver))
 
 	// #678: Postgres (webhook_events) is the dedup truth; Redis is cache + lease coordination.
 	deduplicationService, err := webhooks.NewDeduplicationService(webhookIdempotencyService, database, clock)

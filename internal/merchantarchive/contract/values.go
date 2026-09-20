@@ -74,7 +74,7 @@ func ValidateValues(p Profile, values []*string) error {
 		case "jsonb":
 			field := p.Name + "." + c.Name
 			if p.Name == "rail_intents" && (c.Name == "payload" || c.Name == "result_evidence") {
-				if typ := value(p, values, "intent_type"); typ != nil && (*typ == "nmi_sale" || *typ == "nmi_subscription_create" || *typ == "nmi_provider_cutover" || *typ == "invoice_collection") {
+				if typ := value(p, values, "intent_type"); typ != nil && (*typ == "nmi_sale" || *typ == "nmi_subscription_create" || *typ == "invoice_collection" || *typ == "manual_rebill" || *typ == "nmi_provider_cutover") {
 					field = p.Name + "." + *typ + "." + c.Name
 				}
 			}
@@ -161,7 +161,7 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "rail_intents" {
 		typ := value(p, values, "intent_type")
 		payload := value(p, values, "payload")
-		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "nmi_provider_cutover" && *typ != "invoice_collection")) {
+		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection" && *typ != "manual_rebill" && *typ != "nmi_provider_cutover")) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
 		if typ != nil && (*typ == "nmi_refund" || *typ == "stripe_refund" || *typ == "ccbill_refund") {
@@ -172,7 +172,7 @@ func ValidateValues(p Profile, values []*string) error {
 				return fmt.Errorf("invalid accepted refund payload: %w", err)
 			}
 		}
-		if typ != nil && *typ == "invoice_collection" {
+		if typ != nil && (*typ == "invoice_collection" || *typ == "manual_rebill") {
 			field := func(name string) string {
 				if v := value(p, values, name); v != nil {
 					return *v
@@ -182,7 +182,22 @@ func ValidateValues(p Profile, values []*string) error {
 			id, _ := uuid.Parse(field("id"))
 			merchant, _ := uuid.Parse(field("merchant_id"))
 			psp, _ := uuid.Parse(field("psp_id"))
-			row := gen.OpenrailsRailIntent{ID: id, MerchantID: merchant, PspID: &psp, Rail: field("rail"), IntentType: *typ, Payload: []byte(field("payload")), ResultEvidence: []byte(field("result_evidence")), Status: field("status")}
+			row := gen.OpenrailsRailIntent{ID: id, MerchantID: merchant, PspID: &psp, Rail: field("rail"), IntentType: *typ, Payload: []byte(field("payload")), ResultEvidence: []byte(field("result_evidence")), Status: field("status"), Origin: field("origin"), IdempotencyKey: field("idempotency_key")}
+			if actor := field("actor"); actor != "" {
+				row.Actor = &actor
+			}
+			if id, err := uuid.Parse(field("subscription_id")); err == nil {
+				row.SubscriptionID = &id
+			}
+			if id, err := uuid.Parse(field("price_id")); err == nil {
+				row.PriceID = &id
+			}
+			if *typ == "manual_rebill" {
+				if err := intents.ValidateManualRebillTerminal(row); err != nil {
+					return fmt.Errorf("invalid accepted rebill archive: %w", err)
+				}
+				return nil
+			}
 			if _, err := intents.DecodeInvoiceCollectionPayload(row); err != nil {
 				return fmt.Errorf("invalid accepted collection payload: %w", err)
 			}

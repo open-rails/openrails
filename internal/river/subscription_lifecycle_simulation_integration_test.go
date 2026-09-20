@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -110,9 +112,11 @@ const (
 
 // simSub is one seeded subscription plus the identifiers a scenario asserts against.
 type simSub struct {
-	subID      uuid.UUID
-	customerID uuid.UUID
-	entName    string
+	pspID               uuid.UUID
+	providerID, vaultID string
+	subID               uuid.UUID
+	customerID          uuid.UUID
+	entName             string
 }
 
 // seedSimSubscription creates an entitlement-bearing product, a monthly price,
@@ -152,7 +156,7 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 
 	cycleHours32 := int32(simCycleHours)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID: priceID, ProductID: productID, Amount: 999, Currency: "USD", MerchantID: dbtest.TestMerchantID.UUID(),
+		ID: priceID, ProductID: productID, Amount: 9990000, Currency: "USD", MerchantID: dbtest.TestMerchantID.UUID(),
 		Archived: false, AccessDurationHours: &cycleHours32, AutoRenew: true,
 		CreatedAt: now, UpdatedAt: now,
 	})
@@ -161,10 +165,11 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 	tenantSubjectID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
 	billingID := "bill_" + uuid.New().String()
+	vaultID, providerID := "vault_"+uuid.NewString(), "sub_sim_"+uuid.NewString()
 	_, err = q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: "nmi",
 		PspID:           pspID,
-		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
+		RailCustomerRef: vaultID, RailMethodRef: billingID,
 		RebillDriver:         "openrails",
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
 		CreatedAt:            now, UpdatedAt: now,
@@ -177,10 +182,10 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusActive), Rail: "nmi",
 		PspID:                 pspID,
-		RailSubscriptionID:    "sub_sim_" + uuid.New().String(),
+		RailSubscriptionID:    providerID,
 		PaymentMethodID:       &paymentMethodID,
 		CurrentPeriodStartsAt: &periodStart, CurrentPeriodEndsAt: &periodEnd,
-		StartedAt: periodStart, CreatedAt: now, UpdatedAt: now,
+		StartedAt: periodStart, CreatedAt: now, UpdatedAt: now, EntitlementsSpecSnapshot: entitlementsSpecJSON,
 	})
 	require.NoError(t, err)
 
@@ -197,8 +202,8 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 			// moved; the signup payment is a real rail settlement.
 			MoneyMovement: models.MoneyMovementRail,
 			TransactionID: "txn_signup_" + uuid.New().String(),
-			Amount:        999,
-			ListAmount:    999,
+			Amount:        9990000,
+			ListAmount:    9990000,
 			Currency:      "USD",
 			Status:        payments.PaymentStatusCompletedValue,
 			PurchasedAt:   periodStart,
@@ -218,7 +223,7 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 		_, _ = pool.Exec(bg, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
-	return simSub{subID: subID, customerID: tenantSubjectID, entName: entName}
+	return simSub{subID: subID, customerID: tenantSubjectID, entName: entName, pspID: pspID, providerID: providerID, vaultID: vaultID}
 }
 
 // nmiStub is an httptest server speaking NMI's classic Direct Post wire
@@ -233,28 +238,72 @@ type nmiStub struct {
 	requests   int
 	violations []string
 	server     *httptest.Server
+	sub        simSub
+	nextDate   string
+	payments   map[string]string
 }
 
 func newNMIStub(t *testing.T) *nmiStub {
 	t.Helper()
-	s := &nmiStub{}
+	s := &nmiStub{payments: map[string]string{}}
 	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		s.mu.Lock()
+		defer s.mu.Unlock()
+		if r.Method == http.MethodGet && r.URL.Path == "/subscriptions/"+s.sub.providerID {
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": s.sub.providerID, "customer_vault_id": s.sub.vaultID, "amount": "9.99", "delayed_condition": "active", "paused_subscription": "0", "next_billing_date": s.nextDate, "plan": map[string]any{"id": "plan-sim", "plan_amount": "9.99", "plan_payments": "0", "day_frequency": "30"}})
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/payments/") {
+			id := strings.TrimPrefix(r.URL.Path, "/payments/")
+			if _, ok := s.payments[id]; !ok {
+				w.WriteHeader(404)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "amount": "9.99", "currency": "USD", "customer_vault_id": s.sub.vaultID, "response": "1", "actions": []map[string]any{{"type": "sale", "amount": "9.99", "success": true, "response": "1"}}})
+			return
+		}
+		if r.Form.Get("report_type") == "transaction" {
+			fmt.Fprint(w, "<nm_response>")
+			for id, order := range s.payments {
+				if order == r.Form.Get("order_id") {
+					fmt.Fprintf(w, `<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction>`, id, order)
+				}
+			}
+			fmt.Fprint(w, "</nm_response>")
+			return
+		}
+		if r.Form.Get("type") != "sale" || r.Form.Get("recurring") != "rebill_subscription" {
+			s.violations = append(s.violations, "unsupported request: "+r.URL.Path)
+			w.WriteHeader(400)
+			return
+		}
 		s.requests++
 		var resp string
 		if len(s.responses) == 0 {
-			s.violations = append(s.violations, fmt.Sprintf("unscripted NMI request #%d: %s", s.requests, r.Form.Encode()))
+			s.violations = append(s.violations, fmt.Sprintf("unscripted NMI charge #%d", s.requests))
 			resp = "response=3&responsetext=unscripted request"
 		} else {
 			resp = s.responses[0]
 			s.responses = s.responses[1:]
 		}
-		s.mu.Unlock()
-		_, _ = w.Write([]byte(resp))
+		parsed, _ := url.ParseQuery(resp)
+		if parsed.Get("response") == "1" {
+			s.payments[parsed.Get("transactionid")] = r.Form.Get("orderid")
+		}
+		fmt.Fprint(w, resp)
+
 	}))
 	t.Cleanup(s.server.Close)
 	return s
+}
+
+// The simulation explicitly supplies each gateway period; it does not claim
+// that Classic rebill_subscription advances the provider schedule this way.
+func (s *nmiStub) prepareRenewal(periodEnd time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nextDate = periodEnd.Add(simCycleHours * time.Hour).UTC().Format("2006-01-02")
 }
 
 // enqueue schedules the next scripted response(s), FIFO.
@@ -330,12 +379,13 @@ func newSimRigWithStep(t *testing.T, dbi *db.DB, start time.Time, stub *nmiStub,
 	t.Helper()
 	clock := clockwork.NewFakeClockAt(start)
 
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
+	client, err := nmi.NewAccountClient(dbtest.TestMerchantID.UUID(), stub.sub.pspID, "nmi", &config.NMIProviderSettings{
 		SecurityKey: "test_security_key", WebhookSecret: "test_secret",
 	}, true)
 	require.NoError(t, err)
 	client.DirectPostURL = stub.server.URL
 	client.QueryURL = stub.server.URL
+	client.V5BaseURL = stub.server.URL
 
 	priceSvc := catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
@@ -466,6 +516,8 @@ func testHappyRenewals(t *testing.T, ctx context.Context, dbi *db.DB) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	stub := newNMIStub(t)
 	sim := seedSimSubscription(t, ctx, dbi, start, true)
+	stub.sub = sim
+	stub.prepareRenewal(start.Add(simCycleHours * time.Hour))
 	rig := newSimRig(t, dbi, start, stub)
 	scope := converge.Scope{Merchant: dbtest.TestMerchantID, Customer: &sim.customerID}
 
@@ -479,6 +531,7 @@ func testHappyRenewals(t *testing.T, ctx context.Context, dbi *db.DB) {
 
 	periodEnd := start.Add(simCycleHours * time.Hour)
 	for cycle := 1; cycle <= 3; cycle++ {
+		stub.prepareRenewal(periodEnd)
 		stub.enqueue(approvedResponse())
 		wantEnd := periodEnd.Add(simCycleHours * time.Hour)
 
@@ -513,6 +566,8 @@ func testDunningRecovery(t *testing.T, ctx context.Context, dbi *db.DB) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	stub := newNMIStub(t)
 	sim := seedSimSubscription(t, ctx, dbi, start, true)
+	stub.sub = sim
+	stub.prepareRenewal(start.Add(simCycleHours * time.Hour))
 	rig := newSimRig(t, dbi, start, stub)
 	scope := converge.Scope{Merchant: dbtest.TestMerchantID, Customer: &sim.customerID}
 	convergeToFixpoint(t, ctx, rig.engine, scope)
@@ -531,6 +586,7 @@ func testDunningRecovery(t *testing.T, ctx context.Context, dbi *db.DB) {
 
 	// Prove the cadence is fully restored: the next cycle renews normally too.
 	secondPeriodEnd := *sub.CurrentPeriodEndsAt
+	stub.prepareRenewal(secondPeriodEnd)
 	stub.enqueue(approvedResponse())
 	sub = rig.waitFor(t, ctx, scope, sim, 40, true, func(s *models.Subscription) bool {
 		return s.Status == models.StatusActive && s.CurrentPeriodEndsAt != nil && s.CurrentPeriodEndsAt.After(secondPeriodEnd)
@@ -551,6 +607,8 @@ func testExhaustedDunning(t *testing.T, ctx context.Context, dbi *db.DB) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	stub := newNMIStub(t)
 	sim := seedSimSubscription(t, ctx, dbi, start, true)
+	stub.sub = sim
+	stub.prepareRenewal(start.Add(simCycleHours * time.Hour))
 	// A 6h step (not the default 24h): this scenario walks the retry schedule
 	// all the way to its last offset (13d), where the manufactured detection
 	// lag at 24h ticks would land the 5th attempt exactly ON the 14d dunning
@@ -618,6 +676,7 @@ func testNoEvidenceParking(t *testing.T, ctx context.Context, dbi *db.DB) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	stub := newNMIStub(t) // never scripted: zero requests expected, ever.
 	sim := seedSimSubscription(t, ctx, dbi, start, false /* no ownership evidence */)
+	stub.sub = sim
 	rig := newSimRig(t, dbi, start, stub)
 	scope := converge.Scope{Merchant: dbtest.TestMerchantID, Customer: &sim.customerID}
 	convergeToFixpoint(t, ctx, rig.engine, scope)

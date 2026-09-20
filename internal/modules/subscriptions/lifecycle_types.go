@@ -29,6 +29,9 @@ type CreateMembershipParams struct {
 }
 
 type RenewMembershipParams struct {
+	// Prepared is supplied only by an accepted durable recurring-charge operation.
+	// Observed provider renewals use the ordinary catalog-convergence path.
+	Prepared              *RenewalTerms
 	Rail                  models.Rail
 	RailSubscriptionID    string
 	CurrentPeriodStartsAt *time.Time

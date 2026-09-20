@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -271,7 +272,7 @@ func TestBasisTheoryWebhook_AccountUpdaterUnparksTheInstrumentItRecovered(t *tes
 	// The PRODUCTION collection guard refuses it — this is the state that,
 	// left alone, outlives the network's own repair.
 	collect := money.NewCustodianProxyCollectionAdapter(&nmiproxy.Charger{})
-	_, err := collect.Prepare(fx.ctx, parked, money.ChargeRequest{AmountCents: 500, Currency: "USD"})
+	_, err := collect.Prepare(fx.ctx, parked, money.ChargeRequest{Initiator: charge.InitiatorMerchant, AmountCents: 500, Currency: "USD"})
 	require.ErrorContains(t, err, "is parked")
 
 	// 2. The network reissues the card; the AU job reports the new expiry
@@ -293,7 +294,7 @@ func TestBasisTheoryWebhook_AccountUpdaterUnparksTheInstrumentItRecovered(t *tes
 
 	// And the production guard no longer refuses it: the recovered card can
 	// bill again, so this customer never reaches or#870 bucket 2.
-	_, err = collect.Prepare(fx.ctx, row, money.ChargeRequest{AmountCents: 500, Currency: "USD"})
+	_, err = collect.Prepare(fx.ctx, row, money.ChargeRequest{Initiator: charge.InitiatorMerchant, AmountCents: 500, Currency: "USD"})
 	require.NoError(t, err, "an updater-recovered instrument is billable again")
 }
 

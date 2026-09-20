@@ -12,6 +12,8 @@ import (
 // fake in tests, by an in-process *service.Service adapter, or by a remote HTTP
 // client — all decoupled from *service.Service.
 type Applier interface {
+	// GetProductByKey returns openrails.ErrNotFound (or a wrapping typed refusal)
+	// only when the product is absent. Other failures stop planning.
 	GetProductByKey(ctx context.Context, key string) (*billingservice.CatalogProduct, error)
 	ListProducts(ctx context.Context, opts billingservice.ListProductsOptions) (billingservice.CatalogPage[billingservice.CatalogProduct], error)
 	CreateProduct(ctx context.Context, req billingservice.CreateProductRequest) (*billingservice.CatalogProduct, error)

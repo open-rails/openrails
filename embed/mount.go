@@ -69,7 +69,8 @@ type MountOptions struct {
 	Authenticator billingauth.Authenticator
 	// Gate protects merchant routes.
 	Gate billingauth.Gate
-	// DelegatedAuthenticator protects /v1/me and /v1/customers routes.
+	// DelegatedAuthenticator overrides the runtime default for this mount.
+	// It protects /v1/me and /v1/customers routes.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	// MountPrefix is the host path the whole surface is mounted under (e.g.
 	// "/billing"); incoming paths are MountPrefix + "/v1/...". Empty means
@@ -159,6 +160,9 @@ func (r *Runtime) SelfHandler(authn billingauth.DelegatedAuthenticator) (http.Ha
 }
 
 func (r *Runtime) selfHandler(authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes) (http.Handler, error) {
+	if authn == nil && r != nil {
+		authn = r.delegatedAuthenticator
+	}
 	// #913: checked first (static misconfiguration beats runtime state), and
 	// the error names the standard bridge so the self-service surface cannot be
 	// wired incorrectly or omitted.

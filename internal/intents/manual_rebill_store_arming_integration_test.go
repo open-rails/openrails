@@ -81,7 +81,7 @@ func storeRebillBuilder(dbi *db.DB, svc *merchants.Service, cfg *config.Config, 
 		Config:      cfg,
 		DB:          dbi,
 		MerchantsFn: func() *merchants.Service { return svc },
-		Endpoints:   railresolve.NMIEndpoints{DirectPostURL: gatewayURL, QueryURL: gatewayURL},
+		Endpoints:   railresolve.NMIEndpoints{DirectPostURL: gatewayURL, QueryURL: gatewayURL, V5BaseURL: gatewayURL},
 	}
 }
 
@@ -96,7 +96,7 @@ func storeArmedRebillRunner(fx rebillFixture, resolver NMIClientResolver, cfg *c
 // handler's finalize renews the membership.
 func TestManualRebillStoreOnlyNMICredentials_ChargesThroughStore(t *testing.T) {
 	fx := seedPastDueSubscription(t)
-	fake, bootClient := newFakeNMIRebillGateway(t)
+	fake, bootClient := newFakeNMIRebillGateway(t, fx)
 	gatewayURL := bootClient.DirectPostURL
 
 	msvc := rebillMerchantsService(t, fx.db)
@@ -109,7 +109,8 @@ func TestManualRebillStoreOnlyNMICredentials_ChargesThroughStore(t *testing.T) {
 	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, cfg, gatewayURL), cfg)
 
 	params := fx.enqueueParams(1)
-	params.PspID = accountRowID // #704 provenance stamp (what dunning enqueues)
+	fx.bindProvider(t, accountRowID, "nmi")
+	params = fx.enqueueParams(1)
 	_, err := fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()), `UPDATE openrails.subscriptions SET psp_id=$2 WHERE id=$1`, *params.SubscriptionID, accountRowID)
 	require.NoError(t, err)
 
@@ -126,7 +127,7 @@ func TestManualRebillStoreOnlyNMICredentials_ChargesThroughStore(t *testing.T) {
 // falls back to the (working) boot client and never charges.
 func TestManualRebillDeclaredAccountMissingSecret_FailsClosed(t *testing.T) {
 	fx := seedPastDueSubscription(t)
-	fake, bootClient := newFakeNMIRebillGateway(t)
+	fake, bootClient := newFakeNMIRebillGateway(t, fx)
 
 	msvc := rebillMerchantsService(t, fx.db)
 	sfx := uuid.NewString()[:8]
@@ -136,7 +137,8 @@ func TestManualRebillDeclaredAccountMissingSecret_FailsClosed(t *testing.T) {
 	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, cfg, bootClient.DirectPostURL), cfg)
 
 	params := fx.enqueueParams(1)
-	params.PspID = accountRowID
+	fx.bindProvider(t, accountRowID, "nmi")
+	params = fx.enqueueParams(1)
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)
@@ -160,7 +162,7 @@ func TestManualRebillDeclaredAccountMissingSecret_FailsClosed(t *testing.T) {
 // layer, from TestManualRebillDeclaredAccountMissingSecret_FailsClosed above.
 func TestManualRebillNoStoreRow_ParksFailClosed(t *testing.T) {
 	fx := seedPastDueSubscription(t)
-	fake, bootClient := newFakeNMIRebillGateway(t)
+	fake, bootClient := newFakeNMIRebillGateway(t, fx)
 
 	msvc := rebillMerchantsService(t, fx.db)
 	// The builder resolves in the LIVE environment posture: integration tests
@@ -173,7 +175,8 @@ func TestManualRebillNoStoreRow_ParksFailClosed(t *testing.T) {
 	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, liveCfg, bootClient.DirectPostURL), cfg)
 
 	params := fx.enqueueParams(1)
-	params.PspID = dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "nmi")
+	fx.bindProvider(t, dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "nmi"), "nmi")
+	params = fx.enqueueParams(1)
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)
@@ -182,4 +185,19 @@ func TestManualRebillNoStoreRow_ParksFailClosed(t *testing.T) {
 	assert.Contains(t, *row.LastFailureReason, "missing")
 	assert.Zero(t, fake.saleCalls.Load(), "fail-closed must never charge through another plane")
 	assert.Equal(t, "past_due", string(fx.subscription(t).Status))
+}
+
+// bindProvider sets up a complete existing obligation on the fixture account;
+// stamping just the operation would contradict the frozen method/subscription.
+func (fx *rebillFixture) bindProvider(t *testing.T, pspID uuid.UUID, rail string) {
+	t.Helper()
+	ctx := fx.handlerCtx()
+	_, err := fx.db.Pool().Exec(ctx, `UPDATE openrails.payment_methods SET psp_id=$2, rail=$3 WHERE id=$1`, fx.payload.PaymentMethodID, pspID, rail)
+	require.NoError(t, err)
+	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET psp_id=$2, rail=$3 WHERE id=$1`, fx.subID, pspID, rail)
+	require.NoError(t, err)
+	fx.pspID, fx.payload.Instrument.PSPID, fx.payload.Renewal.PSPID = pspID, pspID, pspID
+	fx.payload.Rail = rail
+	fx.orderRef = rebillOrderReference(ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, rail, 1))
+	fx.payload.OrderReference = fx.orderRef
 }

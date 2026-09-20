@@ -150,3 +150,23 @@ func TestAuthenticator_AdmissionAndTokenRoles(t *testing.T) {
 	_, err = vetoed.Authenticate(t.Context(), req("/billing/v1/checkout"))
 	require.ErrorIs(t, err, billingauth.ErrUnauthenticated)
 }
+
+func TestDelegatedAuthenticatorRetainsVerifiedCredentialClass(t *testing.T) {
+	for _, tc := range []struct {
+		name, device string
+		class        billingauth.CredentialClass
+	}{
+		{"interactive user", "", billingauth.CredentialClassUserSession},
+		{"device automation", "device-key", billingauth.CredentialClassAutomation},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, err := NewDelegatedAuthenticator(&hostVerifier{claims: verify.Claims{UserID: "8b0f9f0e-9a4b-4a5f-9f3a-2f8f0a1b2c3d", DeviceKeyID: tc.device}}, boundMerchant)
+			require.NoError(t, err)
+			r := req("/v1/me/invoices/id/pay-now")
+			r.Header.Set("Credential-Class", "user_session")
+			principal, err := a.AuthenticateDelegated(t.Context(), r)
+			require.NoError(t, err, "automation retains ordinary self authentication")
+			require.Equal(t, tc.class, principal.CredentialClass, "request header cannot assert user interaction")
+		})
+	}
+}

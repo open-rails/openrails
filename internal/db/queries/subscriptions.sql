@@ -319,34 +319,6 @@ WHERE sub.rail = ANY(sqlc.arg(rails)::text[])
 ORDER BY sub.next_retry_at, sub.id
 LIMIT sqlc.arg(row_limit)::int;
 
--- name: ClaimDunningAttempt :execrows
--- Lease-style claim: pushes next_retry_at out so concurrent dunning runs
--- cannot double-charge; only claims a still-due past_due row.
-UPDATE openrails.subscriptions
-SET next_retry_at = sqlc.arg(lease_until)::timestamptz,
-    last_retry_at = sqlc.arg(claimed_at)::timestamptz,
-    updated_at = sqlc.arg(claimed_at)::timestamptz
-WHERE id = $1
-  AND merchant_id = sqlc.arg(merchant_id)
-  AND status = 'past_due'
-  AND next_retry_at IS NOT NULL AND next_retry_at <= sqlc.arg(claimed_at)::timestamptz
-  AND deleted_at IS NULL;
-
--- name: ReleaseDunningAttempt :execrows
--- A provider decline is already durable before its lifecycle transition runs.
--- If that transition rolls back, make this exact claim immediately eligible
--- for River's retry without advancing the attempt ordinal (and therefore
--- without deriving a fresh charge intent).
-UPDATE openrails.subscriptions
-SET next_retry_at = sqlc.arg(claimed_at)::timestamptz,
-    updated_at = sqlc.arg(claimed_at)::timestamptz
-WHERE id = sqlc.arg(id)
-  AND merchant_id = sqlc.arg(merchant_id)
-  AND status = 'past_due'
-  AND last_retry_at = sqlc.arg(claimed_at)::timestamptz
-  AND next_retry_at = sqlc.arg(lease_until)::timestamptz
-  AND deleted_at IS NULL;
-
 -- name: GetLatestResumableCancelledSubscription :one
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
