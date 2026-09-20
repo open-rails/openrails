@@ -3,6 +3,7 @@
 package integrationharness
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -23,7 +24,9 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/providerqualification"
@@ -148,6 +151,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 			require.NoError(t, set(id, q))
 			return q.EvidenceRef
 		}
+		terminal := map[uuid.UUID]intents.Resolution{}
 		for _, mode := range []string{"complete_source", "complete_target", "abandon_source", "abandon_target"} {
 			t.Run(mode, func(t *testing.T) {
 				p := seed(t, "source_dark")
@@ -191,6 +195,23 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 				approval := intents.Resolution{Step: role, RequalifyAccount: proof, Actor: "fixture-operator", Reason: "provider account continuity independently verified"}
 				require.NoError(t, resolve(operation.ID, approval))
 				require.NoError(t, resolve(operation.ID, approval), "same resolution replays")
+				var history []byte
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT result_evidence->'account_requalifications' FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&history))
+				require.NotEmpty(t, history)
+				require.NoError(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+					store := intents.NewStore(rt.DB)
+					for _, value := range []any{nil, []any{}, "forged"} {
+						forged := map[string]any{"account_requalifications": value}
+						require.Error(t, store.RecordProgress(cctx, operation.ID, forged))
+						_, err := store.RecordProgressIfAbsent(cctx, operation.ID, "account_requalifications", value)
+						require.Error(t, err)
+						require.Error(t, store.MarkUnknown(cctx, operation.ID, time.Now(), "forged", forged))
+						require.Error(t, store.MarkSucceeded(cctx, operation.ID, time.Now(), forged))
+						require.Error(t, store.MarkFailedTerminal(cctx, operation.ID, "forged", forged))
+						require.Error(t, store.PruneSucceeded(cctx, operation.ID, forged, false, false))
+					}
+					return nil
+				}))
 				if strings.HasPrefix(mode, "abandon") {
 					require.NoError(t, resolve(operation.ID, intents.Resolution{Step: "target", Abandon: true, Actor: "fixture-operator", Reason: "cancel only the exact paused target"}))
 				}
@@ -205,6 +226,73 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 				var after []byte
 				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&after))
 				require.JSONEq(t, string(payload), string(after))
+				var retained []byte
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT result_evidence->'account_requalifications' FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&retained))
+				require.JSONEq(t, string(history), string(retained), "terminal outcome must retain the exact account-continuity record")
+				require.NoError(t, resolve(operation.ID, approval), "the CLI resolution replays after terminal completion")
+				terminal[operation.ID] = approval
+				var evidence []byte
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT result_evidence FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&evidence))
+				require.NoError(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+					store := intents.NewStore(rt.DB)
+					for _, keep := range [][2]bool{{false, false}, {true, false}, {false, true}} {
+						require.NoError(t, store.PruneSucceeded(cctx, operation.ID, nil, keep[0], keep[1]))
+					}
+					require.NoError(t, store.PruneTerminalPayload(cctx, operation.ID))
+					return nil
+				}))
+				var prunedPayload, prunedEvidence []byte
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload,result_evidence FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&prunedPayload, &prunedEvidence))
+				require.JSONEq(t, string(payload), string(prunedPayload))
+				require.JSONEq(t, string(evidence), string(prunedEvidence), "generic pruning must preserve cutover replay and account custody")
+			})
+		}
+		if len(terminal) == 4 {
+			t.Run("terminal_rotation_history_archive_restore", func(t *testing.T) {
+				// Only terminal operations are exportable. Deliver source host events
+				// through the ordinary production queries before taking the archive.
+				require.NoError(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+					events, err := rt.DB.Gen(cctx).ListHostEvents(cctx, gen.ListHostEventsParams{MerchantID: owner.MerchantID.UUID(), RowLimit: 100})
+					if err != nil {
+						return err
+					}
+					for _, event := range events {
+						_, err = rt.DB.Gen(cctx).AcknowledgeHostEvent(cctx, gen.AcknowledgeHostEventParams{MerchantID: owner.MerchantID.UUID(), ID: event.ID, Now: time.Now().UTC()})
+						if err != nil {
+							return err
+						}
+					}
+					return nil
+				}))
+				var artifact bytes.Buffer
+				require.NoError(t, merchantarchive.Export(ctx, rt.DB, owner.MerchantID, &artifact))
+				schema := "cutover_archive_" + uuid.NewString()[:8]
+				require.NoError(t, migrate.RunPostgres(ctx, &config.Config{DB: &config.DBConfig{URL: h.SuperDSN, Schema: schema}}))
+				target, err := db.NewDB(ctx, &config.DBConfig{URL: h.DSN, Schema: schema})
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, target.Close()) })
+				_, err = target.Qx(ctx).Exec(ctx, `INSERT INTO openrails.merchants(id,slug) VALUES($1,$2)`, owner.MerchantID.UUID(), "restored-rotation")
+				require.NoError(t, err)
+				_, err = merchantarchive.Restore(ctx, target, owner.MerchantID, bytes.NewReader(artifact.Bytes()))
+				require.NoError(t, err)
+				runner := *rt.IntentRunner()
+				runner.Store = intents.NewStore(target)
+				for id, approval := range terminal {
+					var before, after gen.OpenrailsRailIntent
+					require.NoError(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+						var err error
+						before, err = intents.NewStore(rt.DB).Get(cctx, id)
+						return err
+					}))
+					require.NoError(t, target.RunInMerchantConn(mctx, func(cctx context.Context) error {
+						var err error
+						after, err = runner.Resolve(cctx, id, approval)
+						return err
+					}), "the CLI resolution must replay from the restored terminal history without provider credentials")
+					require.Equal(t, before.Status, after.Status)
+					require.JSONEq(t, string(before.Payload), string(after.Payload))
+					require.JSONEq(t, string(before.ResultEvidence), string(after.ResultEvidence))
+				}
 			})
 		}
 		t.Run("requalified_rotation_keeps_read_only_recovery_after_revocation", func(t *testing.T) {
