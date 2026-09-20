@@ -7,13 +7,13 @@ import (
 	"strings"
 )
 
-// CredentialClass is provenance supplied by a trusted verifier. An automation
-// credential can authorize ordinary self reads but does not itself establish
-// customer interaction for customer-present payment commands.
 // DelegatedCredentialClassAttribute is the reserved signed delegated-token
 // attribute carrying issuer-verified interaction provenance.
 const DelegatedCredentialClassAttribute = "openrails_credential_class"
 
+// CredentialClass is provenance supplied by a trusted verifier. An automation
+// credential can authorize ordinary self reads but does not itself establish
+// customer interaction for customer-present payment commands.
 type CredentialClass string
 
 const (
