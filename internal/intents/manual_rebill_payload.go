@@ -52,7 +52,7 @@ func DecodeManualRebillPayload(in gen.OpenrailsRailIntent) (ManualRebillPayload,
 	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeManualRebill || in.PriceID == nil || *in.PriceID != p.Renewal.PriceID || in.SubscriptionID == nil || *in.SubscriptionID != p.Renewal.SubscriptionID || in.PspID == nil || *in.PspID != p.Instrument.PSPID || p.Renewal.PSPID != p.Instrument.PSPID || in.CustodianID != nil {
 		return p, errors.New("rebill operation identity contradicts accepted terms")
 	}
-	if p.Rail == "" || p.Rail != in.Rail || p.Rail == "stripe" || p.RailSubscriptionID == "" || p.PaymentMethodID == uuid.Nil || p.Attempt < 0 || p.FailureCount < 0 || p.Instrument.CustodianHeld() || p.Instrument.RailCustomerRef == "" || p.Instrument.RailMethodRef == "" || strings.TrimSpace(p.Instrument.StoredCredentialRecurringRef) == "" {
+	if p.Rail != "nmi" || p.Rail != in.Rail || p.RailSubscriptionID == "" || p.PaymentMethodID == uuid.Nil || p.Attempt < 0 || p.FailureCount < 0 || p.Instrument.CustodianHeld() || p.Instrument.RailCustomerRef == "" || p.Instrument.RailMethodRef == "" || strings.TrimSpace(p.Instrument.StoredCredentialRecurringRef) == "" {
 		return p, errors.New("rebill instrument or recurring agreement is incomplete")
 	}
 	key := ManualRebillIdempotencyKey(p.Renewal.SubscriptionID, p.Renewal.PeriodStart, p.Rail, p.Attempt)

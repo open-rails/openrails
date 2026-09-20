@@ -5,6 +5,7 @@ package intents_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -48,7 +49,7 @@ func TestManualRebillArchivePreservesAcceptedTermsAndTerminalCustody(t *testing.
 			_, err = target.Qx(t.Context()).Exec(t.Context(), `INSERT INTO openrails.merchants(id,slug) VALUES($1,$2)`, mid.UUID(), schema)
 			require.NoError(t, err)
 			_, err = merchantarchive.Restore(t.Context(), target, mid, bytes.NewReader(archive.Bytes()))
-			require.NoError(t, err)
+			require.NoError(t, err, "%v", errors.Unwrap(err))
 			ctx, release, err := target.WithMerchantConn(merchant.WithID(context.Background(), mid))
 			require.NoError(t, err)
 			defer release()
