@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/crypto"
 	"github.com/open-rails/openrails/internal/custodians"
@@ -58,21 +59,42 @@ func (s *CheckoutSessionService) captureEncryptor() (*crypto.Encryptor, error) {
 func captureAAD(owner merchant.ID, id uuid.UUID, state models.CheckoutCapture) crypto.AAD {
 	// Bind both the physical row and accepted authority; copying or editing
 	// customer/custodian/session/expiry metadata cannot relocate a credential.
-	parts, _ := json.Marshal([]string{id.String(), state.CustomerID.String(), state.PSPID.String(), state.CustodianID.String(), state.AccountID, state.ProfileID, state.PublicAPIKey, state.APIBaseURL, state.SDKURL, state.VendorCustomerID, state.VendorSessionID, state.ExpiresAt.UTC().Format(time.RFC3339Nano)})
+	parts, _ := json.Marshal([]string{id.String(), state.CustomerID.String(), state.PSPID.String(), state.CustodianID.String(), state.AccountID, state.Environment, state.ProfileID, state.PublicAPIKey, state.APIBaseURL, state.SDKURL, state.VendorCustomerID, state.VendorSessionID, state.ExpiresAt.UTC().Format(time.RFC3339Nano)})
 	return crypto.SecretAAD(owner, "checkout_capture/v1/"+string(parts))
 }
 func captureTokenHash(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
-func captureSessionID(owner merchant.ID, customer uuid.UUID, key string) uuid.UUID {
-	input := []byte("openrails/payment-method-setup/v1\x00")
+func captureScopedID(domain string, owner merchant.ID, customer uuid.UUID, key string) uuid.UUID {
+	input := []byte(domain + "\x00")
 	merchantID := owner.UUID()
 	for _, part := range [][]byte{merchantID[:], customer[:], []byte(key)} {
 		input = binary.BigEndian.AppendUint64(input, uint64(len(part)))
 		input = append(input, part...)
 	}
 	return uuid.NewHash(sha256.New(), uuid.NameSpaceURL, input, 8)
+}
+func captureSessionID(owner merchant.ID, customer uuid.UUID, key string) uuid.UUID {
+	return captureScopedID("openrails/payment-method-setup/v1", owner, customer, key)
+}
+func captureCustomerReference(owner merchant.ID, customer uuid.UUID) string {
+	return captureScopedID("openrails/custody-customer/v1", owner, customer, "").String()
+}
+func (s *CheckoutSessionService) captureBinding(owner merchant.ID, psp gen.OpenrailsPsp, custodian gen.OpenrailsCustodian) (models.CheckoutCapture, error) {
+	var empty models.CheckoutCapture
+	if s.config == nil || s.config.HyperSwitch == nil || psp.MerchantID != owner.UUID() || psp.Archived || psp.Rail != "nmi" || psp.CustodianID == nil || *psp.CustodianID != custodian.ID || custodian.MerchantID != owner.UUID() || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != psp.Environment || psp.Environment != config.ExpectedProviderEnvironment(s.config.IsTestMode()) {
+		return empty, ErrCheckoutCaptureUnavailable
+	}
+	var settings map[string]any
+	if json.Unmarshal(custodian.Settings, &settings) != nil {
+		return empty, ErrCheckoutCaptureUnavailable
+	}
+	parsed, err := custodians.ParseSettings(custodian.Kind, settings)
+	if err != nil {
+		return empty, ErrCheckoutCaptureUnavailable
+	}
+	return models.CheckoutCapture{MerchantID: owner.UUID(), PSPID: psp.ID, CustodianID: custodian.ID, AccountID: custodian.AccountID, Environment: custodian.Environment, ProfileID: parsed.ProfileID, PublicAPIKey: parsed.PublicAPIKey, APIBaseURL: strings.TrimRight(s.config.HyperSwitch.APIBaseURL, "/"), SDKURL: s.config.HyperSwitch.SDKURL}, nil
 }
 func (s *CheckoutSessionService) captureFromSession(ctx context.Context, session *models.CheckoutSession) (models.CheckoutCapture, []byte, error) {
 	owner, err := merchant.Require(ctx)
@@ -106,13 +128,12 @@ func (s *CheckoutSessionService) resolveCapture(ctx context.Context, pspID uuid.
 	if err != nil || custodian.MerchantID != owner.UUID() || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != psp.Environment {
 		return state, nil, ErrCheckoutCaptureUnavailable
 	}
-	var settings map[string]any
-	var versions map[string]int
-	if json.Unmarshal(custodian.Settings, &settings) != nil || json.Unmarshal(custodian.CredentialVersions, &versions) != nil {
-		return state, nil, ErrCheckoutCaptureUnavailable
+	state, err = s.captureBinding(owner, psp, custodian)
+	if err != nil {
+		return state, nil, err
 	}
-	parsed, err := custodians.ParseSettings(custodian.Kind, settings)
-	if err != nil || versions[custodians.SecretAPIKey] < 0 {
+	var versions map[string]int
+	if json.Unmarshal(custodian.CredentialVersions, &versions) != nil || versions[custodians.SecretAPIKey] < 0 {
 		return state, nil, ErrCheckoutCaptureUnavailable
 	}
 	name, err := merchants.CustodianSecretName(custodian.Kind, custodian.Environment, custodian.AccountID, custodians.SecretAPIKey)
@@ -123,12 +144,11 @@ func (s *CheckoutSessionService) resolveCapture(ctx context.Context, pspID uuid.
 	if err != nil {
 		return state, nil, ErrCheckoutCaptureUnavailable
 	}
-	state = models.CheckoutCapture{MerchantID: owner.UUID(), PSPID: pspID, CustodianID: custodian.ID, AccountID: custodian.AccountID, ProfileID: parsed.ProfileID, PublicAPIKey: parsed.PublicAPIKey, APIBaseURL: strings.TrimRight(s.config.HyperSwitch.APIBaseURL, "/"), SDKURL: s.config.HyperSwitch.SDKURL}
 	client, err := hyperswitch.New(hyperswitch.Config{BaseURL: state.APIBaseURL, MerchantID: state.AccountID, ProfileID: state.ProfileID, APIKey: hyperswitch.Secret(secret.Value), ReadOnly: s.config.IsProviderReadOnly()})
 	return state, client, err
 }
 func sameCaptureAccount(a, b models.CheckoutCapture) bool {
-	return a.MerchantID == b.MerchantID && a.PSPID == b.PSPID && a.CustodianID == b.CustodianID && a.AccountID == b.AccountID && a.ProfileID == b.ProfileID && a.PublicAPIKey == b.PublicAPIKey && a.APIBaseURL == b.APIBaseURL && a.SDKURL == b.SDKURL
+	return a.MerchantID == b.MerchantID && a.PSPID == b.PSPID && a.CustodianID == b.CustodianID && a.AccountID == b.AccountID && a.Environment == b.Environment && a.ProfileID == b.ProfileID && a.PublicAPIKey == b.PublicAPIKey && a.APIBaseURL == b.APIBaseURL && a.SDKURL == b.SDKURL
 }
 
 func (s *CheckoutSessionService) createPaymentMethodSetup(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
@@ -180,6 +200,9 @@ func (s *CheckoutSessionService) createPaymentMethodSetup(ctx context.Context, r
 	if err != nil {
 		return nil, err
 	}
+	if err = client.CheckCaptureContract(ctx); err != nil {
+		return nil, ErrCheckoutCaptureUnavailable
+	}
 	if session == nil {
 		now := s.now().UTC().Truncate(time.Microsecond)
 		pending.CustomerID = customer
@@ -215,7 +238,7 @@ func (s *CheckoutSessionService) createPaymentMethodSetup(ctx context.Context, r
 	if !s.now().Before(accepted.ExpiresAt) {
 		return s.renderPaymentMethodSetup(ctx, session)
 	}
-	vendorCustomer, err := client.EnsureCustomer(ctx, customer.String(), user.Username, *user.Email)
+	vendorCustomer, err := client.EnsureCustomer(ctx, captureCustomerReference(owner, customer), user.Username, *user.Email)
 	if err != nil {
 		return nil, ErrCheckoutCaptureUnavailable
 	}
@@ -276,6 +299,13 @@ func (s *CheckoutSessionService) renderPaymentMethodSetup(ctx context.Context, s
 		return response, nil
 	}
 	if s.config == nil || s.config.HyperSwitch == nil || state.APIBaseURL != strings.TrimRight(s.config.HyperSwitch.APIBaseURL, "/") || state.SDKURL != s.config.HyperSwitch.SDKURL {
+		return nil, ErrCheckoutCaptureUnavailable
+	}
+	current, client, err := s.resolveCapture(ctx, session.PspID)
+	if err != nil || !sameCaptureAccount(state, current) {
+		return nil, ErrCheckoutCaptureUnavailable
+	}
+	if err = client.CheckCaptureContract(ctx); err != nil {
 		return nil, ErrCheckoutCaptureUnavailable
 	}
 	cipher, err := s.captureEncryptor()
@@ -359,6 +389,17 @@ func (s *CheckoutSessionService) confirmPaymentMethodSetup(ctx context.Context, 
 		}
 		if locked.Status != models.CheckoutSessionStatusRequiresAction || !s.now().Before(canonical.ExpiresAt) {
 			return ErrCheckoutSessionExpired
+		}
+		accounts, err := queries.GetCheckoutCaptureAccountsForShare(c, gen.GetCheckoutCaptureAccountsForShareParams{MerchantID: owner.UUID(), PspID: locked.PspID})
+		if err != nil {
+			if db.IsNotFound(err) {
+				return ErrCheckoutSessionConflict
+			}
+			return err
+		}
+		current, err := s.captureBinding(owner, accounts.OpenrailsPsp, accounts.OpenrailsCustodian)
+		if err != nil || !sameCaptureAccount(canonical, current) {
+			return ErrCheckoutSessionConflict
 		}
 		expiry := method.MaskedExpiry()
 		attached, err := queries.AttachCapturedPaymentMethod(c, gen.AttachCapturedPaymentMethodParams{ID: uuid.New(), MerchantID: owner.UUID(), CustomerID: locked.CustomerID, PspID: locked.PspID, CustodianID: new(canonical.CustodianID), VendorCustomerID: canonical.VendorCustomerID, VendorMethodID: method.ID, LastFour: new(method.Data.Card.Last4), CardType: new(method.Data.Card.Brand), ExpiryDate: new(expiry), Now: s.now().UTC()})

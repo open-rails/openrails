@@ -372,6 +372,58 @@ func (q *Queries) ExpireCheckoutSessions(ctx context.Context, arg ExpireCheckout
 	return result.RowsAffected(), nil
 }
 
+const getCheckoutCaptureAccountsForShare = `-- name: GetCheckoutCaptureAccountsForShare :one
+SELECT p.id, p.merchant_id, p.rail, p.environment, p.account_id, p.key, p.evidence, p.first_seen_at, p.last_verified_at, p.replaced_at, p.created_at, p.updated_at, p.archived, p.custodian_id,c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at FROM openrails.psps p
+JOIN openrails.custodians c ON c.id=p.custodian_id AND c.merchant_id=p.merchant_id
+WHERE p.merchant_id=$1::uuid AND p.id=$2::uuid
+FOR SHARE OF p,c
+`
+
+type GetCheckoutCaptureAccountsForShareParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+type GetCheckoutCaptureAccountsForShareRow struct {
+	OpenrailsPsp       OpenrailsPsp
+	OpenrailsCustodian OpenrailsCustodian
+}
+
+// Recheck current authority after vendor metadata readback, inside only the
+// short local attachment transaction. Archive/reconfiguration serializes here.
+func (q *Queries) GetCheckoutCaptureAccountsForShare(ctx context.Context, arg GetCheckoutCaptureAccountsForShareParams) (GetCheckoutCaptureAccountsForShareRow, error) {
+	row := q.db.QueryRow(ctx, getCheckoutCaptureAccountsForShare, arg.MerchantID, arg.PspID)
+	var i GetCheckoutCaptureAccountsForShareRow
+	err := row.Scan(
+		&i.OpenrailsPsp.ID,
+		&i.OpenrailsPsp.MerchantID,
+		&i.OpenrailsPsp.Rail,
+		&i.OpenrailsPsp.Environment,
+		&i.OpenrailsPsp.AccountID,
+		&i.OpenrailsPsp.Key,
+		&i.OpenrailsPsp.Evidence,
+		&i.OpenrailsPsp.FirstSeenAt,
+		&i.OpenrailsPsp.LastVerifiedAt,
+		&i.OpenrailsPsp.ReplacedAt,
+		&i.OpenrailsPsp.CreatedAt,
+		&i.OpenrailsPsp.UpdatedAt,
+		&i.OpenrailsPsp.Archived,
+		&i.OpenrailsPsp.CustodianID,
+		&i.OpenrailsCustodian.ID,
+		&i.OpenrailsCustodian.MerchantID,
+		&i.OpenrailsCustodian.Key,
+		&i.OpenrailsCustodian.Kind,
+		&i.OpenrailsCustodian.Environment,
+		&i.OpenrailsCustodian.AccountID,
+		&i.OpenrailsCustodian.Settings,
+		&i.OpenrailsCustodian.CredentialVersions,
+		&i.OpenrailsCustodian.Archived,
+		&i.OpenrailsCustodian.CreatedAt,
+		&i.OpenrailsCustodian.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCheckoutSessionByID = `-- name: GetCheckoutSessionByID :one
 SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM openrails.checkout_sessions WHERE id = $1
   AND deleted_at IS NULL

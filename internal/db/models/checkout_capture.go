@@ -23,6 +23,7 @@ type CheckoutCapture struct {
 	CustomerID        uuid.UUID `json:"customer_id"`
 	PSPID             uuid.UUID `json:"psp_id"`
 	CustodianID       uuid.UUID `json:"custodian_id"`
+	Environment       string    `json:"environment"`
 	AccountID         string    `json:"account_id"`
 	ProfileID         string    `json:"profile_id"`
 	PublicAPIKey      string    `json:"public_api_key"`
@@ -51,6 +52,9 @@ func DecodeCheckoutCapture(raw []byte, merchantID, sessionCustomerID, pspID uuid
 		if strings.TrimSpace(v) == "" {
 			return capture, ErrCheckoutCaptureBinding
 		}
+	}
+	if capture.Environment != "test" && capture.Environment != "live" {
+		return capture, ErrCheckoutCaptureBinding
 	}
 	if (capture.VendorSessionID == "") != (capture.VendorCustomerID == "") {
 		return capture, ErrCheckoutCaptureBinding

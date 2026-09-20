@@ -37,13 +37,15 @@ type captureFixtureSession struct {
 	Ready                       bool
 }
 type captureFixture struct {
-	mu       sync.Mutex
-	server   *httptest.Server
-	account  string
-	users    map[string]string
-	sessions map[string]*captureFixtureSession
-	barrier  chan struct{}
-	arrived  int
+	mu              sync.Mutex
+	server          *httptest.Server
+	account         string
+	users           map[string]string
+	sessions        map[string]*captureFixtureSession
+	barrier         chan struct{}
+	arrived         int
+	preflight       string
+	afterMethodRead func()
 }
 
 func newCaptureFixture(t *testing.T) *captureFixture {
@@ -56,6 +58,15 @@ func newCaptureFixture(t *testing.T) *captureFixture {
 		g.mu.Lock()
 		defer g.mu.Unlock()
 		switch {
+		case r.Method == "GET" && r.URL.Path == "/v2/proxy":
+			switch g.preflight {
+			case "missing":
+				w.WriteHeader(404)
+			case "stock":
+				write(map[string]any{"status": "ok"})
+			default:
+				write(map[string]any{"contract": "openrails-nmi-form-v1", "strict": g.preflight != "disabled", "max_response_bytes": 65536, "routes": []any{map[string]string{"destination_url": "https://secure.nmi.com/api/transact.php", "method": "POST", "response_profile": "nmi_classic"}}})
+			}
 		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v2/customers/reference/"):
 			ref := strings.TrimPrefix(r.URL.Path, "/v2/customers/reference/")
 			id := g.users[ref]
@@ -113,6 +124,11 @@ func newCaptureFixture(t *testing.T) *captureFixture {
 			token := strings.TrimPrefix(r.URL.Path, "/v2/payment-methods/")
 			for _, s := range g.sessions {
 				if s.Token == token && s.Ready {
+					if hook := g.afterMethodRead; hook != nil {
+						g.mu.Unlock()
+						hook()
+						g.mu.Lock()
+					}
 					write(map[string]any{"id": "method-" + s.ID, "merchant_id": g.account, "customer_id": s.Customer, "storage_type": "persistent", "payment_method_data": map[string]any{"card": map[string]string{"last4_digits": "4242", "expiry_month": "12", "expiry_year": "2030", "card_network": "Visa"}}})
 					return
 				}
@@ -296,6 +312,108 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		got, err := fresh.GetCheckoutSession(ctx, req.Customer.ID, a.session.ID)
 		require.NoError(t, err)
 		require.Equal(t, a.session.Capture, got.Capture)
+	})
+
+	t.Run("unpatched deployment cannot issue browser authority", func(t *testing.T) {
+		for _, mode := range []string{"stock", "missing", "disabled"} {
+			g.mu.Lock()
+			g.preflight = mode
+			users := len(g.users)
+			g.mu.Unlock()
+			before := g.count()
+			got, err := remote.CreateCheckoutSession(ctx, request())
+			require.Error(t, err)
+			require.Nil(t, got)
+			require.Equal(t, before, g.count())
+			g.mu.Lock()
+			require.Len(t, g.users, users)
+			g.preflight = ""
+			g.mu.Unlock()
+		}
+	})
+	t.Run("account change during metadata read refuses attachment", func(t *testing.T) {
+		for _, change := range []string{"psp archive", "custodian archive", "retarget", "profile"} {
+			t.Run(change, func(t *testing.T) {
+				req := request()
+				session, err := remote.CreateCheckoutSession(ctx, req)
+				require.NoError(t, err)
+				token := g.complete(session.Capture.SessionID)
+				entered, release := make(chan struct{}), make(chan struct{})
+				var once sync.Once
+				unblock := func() { once.Do(func() { close(release) }) }
+				t.Cleanup(unblock)
+				g.mu.Lock()
+				g.afterMethodRead = func() { close(entered); <-release }
+				g.mu.Unlock()
+				t.Cleanup(func() { g.mu.Lock(); g.afterMethodRead = nil; g.mu.Unlock() })
+				finished := make(chan error, 1)
+				go func() {
+					_, err := remote.ConfirmCheckoutSession(ctx, session.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: req.Customer.ID, Payment: openrails.ConfirmPayment{Capture: &openrails.CustodianCaptureReference{CustodianID: custodian, SessionID: session.Capture.SessionID, Token: token}}})
+					finished <- err
+				}()
+				select {
+				case <-entered:
+				case err := <-finished:
+					t.Fatalf("confirm did not reach metadata: %v", err)
+				}
+				t.Cleanup(func() {
+					_, err := h.sharedPool().Exec(context.WithoutCancel(ctx), `UPDATE openrails.psps SET archived=false,custodian_id=$1 WHERE merchant_id=$2 AND id=$3`, custodian, mid.UUID(), psp)
+					require.NoError(t, err)
+					_, err = h.sharedPool().Exec(context.WithoutCancel(ctx), `UPDATE openrails.custodians SET archived=false,settings=jsonb_set(settings,'{profile_id}','"capture-profile"') WHERE merchant_id=$1 AND id=$2`, mid.UUID(), custodian)
+					require.NoError(t, err)
+				})
+				switch change {
+				case "psp archive":
+					_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.psps SET archived=true WHERE merchant_id=$1 AND id=$2`, mid.UUID(), psp)
+				case "custodian archive":
+					_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.custodians SET archived=true WHERE merchant_id=$1 AND id=$2`, mid.UUID(), custodian)
+				case "retarget":
+					_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.psps SET custodian_id=NULL WHERE merchant_id=$1 AND id=$2`, mid.UUID(), psp)
+				case "profile":
+					_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.custodians SET settings=jsonb_set(settings,'{profile_id}','"different-profile"') WHERE merchant_id=$1 AND id=$2`, mid.UUID(), custodian)
+				}
+				require.NoError(t, err)
+				unblock()
+				require.Error(t, <-finished)
+				var methods int
+				require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM openrails.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID.UUID()).Scan(&methods))
+				require.Zero(t, methods)
+			})
+		}
+	})
+	t.Run("two deployments sharing vendor account keep payer identities separate", func(t *testing.T) {
+		req := request()
+		first, err := remote.CreateCheckoutSession(ctx, req)
+		require.NoError(t, err)
+		schema := "capture_owner_" + uuid.NewString()[:8]
+		require.NoError(t, migrate.RunPostgres(ctx, &config.Config{DB: &config.DBConfig{URL: h.SuperDSN, Schema: schema}}))
+		rt, _ := newEmbedded(schema)
+		runtime := app.HostGraph(rt).Runtime
+		other := merchant.ID(uuid.New())
+		otherCustodian, otherPSP := uuid.New(), uuid.New()
+		_, err = runtime.DB.Qx(ctx).Exec(ctx, `INSERT INTO openrails.merchants(id,slug) VALUES($1,$2)`, other.UUID(), "capture-other")
+		require.NoError(t, err)
+		require.NoError(t, runtime.DB.RunInMerchantConn(merchant.WithID(ctx, other), func(scoped context.Context) error {
+			_, err := runtime.DB.Qx(scoped).Exec(scoped, `INSERT INTO openrails.custodians(id,merchant_id,key,kind,environment,account_id,settings,credential_versions) VALUES($1,$2,'capture','hyperswitch','test',$3,'{"public_api_key":"capture-public","profile_id":"capture-profile"}','{"api_key":1}')`, otherCustodian, other.UUID(), g.account)
+			if err != nil {
+				return err
+			}
+			_, err = runtime.DB.Qx(scoped).Exec(scoped, `INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id,key,custodian_id) VALUES($1,$2,'nmi','test',$3,'capture',$4)`, otherPSP, other.UUID(), "other-psp", otherCustodian)
+			return err
+		}))
+		_, err = runtime.Merchants.Secrets().Put(ctx, other, name, "capture-fixture-key")
+		require.NoError(t, err)
+		client, err := rt.Client(openrails.WithMerchantID(other))
+		require.NoError(t, err)
+		otherReq := req
+		otherReq.Payment.PSPID = otherPSP
+		second, err := client.CreateCheckoutSession(ctx, otherReq)
+		require.NoError(t, err)
+		require.NotEqual(t, first.Capture.CustomerID, second.Capture.CustomerID)
+		require.NotEqual(t, first.ID, second.ID)
+		token := g.complete(first.Capture.SessionID)
+		_, err = client.ConfirmCheckoutSession(ctx, second.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: req.Customer.ID, Payment: openrails.ConfirmPayment{Capture: &openrails.CustodianCaptureReference{CustodianID: otherCustodian, SessionID: second.Capture.SessionID, Token: token}}})
+		require.Error(t, err)
 	})
 	t.Run("copied or corrupt ciphertext never reissues a session", func(t *testing.T) {
 		one, two := request(), request()

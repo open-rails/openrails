@@ -158,7 +158,7 @@ var cutoverSubscriptionJSON = object(map[string]jsonRule{
 // uses the same decoder as the checkout service.
 var captureJSON = object(map[string]jsonRule{
 	"merchant_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "custodian_id": uuidValue,
-	"account_id": textValue, "profile_id": textValue, "public_api_key": textValue, "api_base_url": textValue, "sdk_url": textValue,
+	"account_id": textValue, "environment": textValue, "profile_id": textValue, "public_api_key": textValue, "api_base_url": textValue, "sdk_url": textValue,
 	"vendor_customer_id": textValue, "vendor_session_id": textValue, "expires_at": textValue, "payment_method_id": uuidValue, "vendor_method_id": textValue, "accepted_token_hash": sha256Value,
 })
 

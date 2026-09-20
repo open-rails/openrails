@@ -282,32 +282,52 @@ func (m Method) MaskedExpiry() string {
 	return fmt.Sprintf("%02d/%s", month, m.Data.Card.Year[2:])
 }
 
-// CheckProxyContract refuses stock/missing/disabled proxy deployments before
-// any charge dispatch. The operator-controlled HTTPS origin is the trust root;
-// a generic health response is not a proxy qualification.
-func (c *Client) CheckProxyContract(ctx context.Context, destination string) error {
-	var contract struct {
-		Contract         string `json:"contract"`
-		Strict           bool   `json:"strict"`
-		MaxResponseBytes int    `json:"max_response_bytes"`
-		Routes           []struct {
-			Destination string `json:"destination_url"`
-			Method      string `json:"method"`
-			Profile     string `json:"response_profile"`
-		} `json:"routes"`
-	}
+// The single patched deployment contract covers the SDK resource binding and
+// proxy boundaries. Capture must not issue authority against stock v2 either.
+type proxyContract struct {
+	Contract         string `json:"contract"`
+	Strict           bool   `json:"strict"`
+	MaxResponseBytes int    `json:"max_response_bytes"`
+	Routes           []struct {
+		Destination string `json:"destination_url"`
+		Method      string `json:"method"`
+		Profile     string `json:"response_profile"`
+	} `json:"routes"`
+}
+
+func (c *Client) readProxyContract(ctx context.Context) (proxyContract, error) {
+	var contract proxyContract
 	if err := c.call(ctx, http.MethodGet, "/v2/proxy", nil, &contract); err != nil {
-		return ErrUnavailable
+		return contract, ErrUnavailable
 	}
-	if contract.Contract != "openrails-nmi-form-v1" || !contract.Strict || contract.MaxResponseBytes != 65536 {
-		return ErrUnavailable
+	if contract.Contract != "openrails-nmi-form-v1" || !contract.Strict || contract.MaxResponseBytes != 65536 || len(contract.Routes) == 0 {
+		return contract, ErrUnavailable
+	}
+	for _, route := range contract.Routes {
+		target, err := url.Parse(route.Destination)
+		if err != nil || target.Host == "" || target.User != nil || target.RawQuery != "" || target.Fragment != "" || (target.Scheme != "https" && target.Scheme != "http") || route.Method != http.MethodPost || route.Profile != "nmi_classic" {
+			return contract, ErrUnavailable
+		}
+	}
+	return contract, nil
+}
+func (c *Client) CheckCaptureContract(ctx context.Context) error {
+	_, err := c.readProxyContract(ctx)
+	return err
+}
+
+// CheckProxyContract additionally binds the later payment to the exact route.
+func (c *Client) CheckProxyContract(ctx context.Context, destination string) error {
+	contract, err := c.readProxyContract(ctx)
+	if err != nil {
+		return err
 	}
 	target, err := url.Parse(destination)
 	if err != nil || target.Host == "" || target.User != nil || target.RawQuery != "" || target.Fragment != "" {
 		return ErrBinding
 	}
 	for _, route := range contract.Routes {
-		if route.Destination == target.String() && route.Method == http.MethodPost && route.Profile == "nmi_classic" {
+		if route.Destination == target.String() {
 			return nil
 		}
 	}

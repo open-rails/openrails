@@ -164,3 +164,11 @@ AND (
  NOT EXISTS(SELECT 1 FROM openrails.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
  OR (cs.status='succeeded' AND NOT EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id=cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
 );
+
+-- name: GetCheckoutCaptureAccountsForShare :one
+-- Recheck current authority after vendor metadata readback, inside only the
+-- short local attachment transaction. Archive/reconfiguration serializes here.
+SELECT sqlc.embed(p),sqlc.embed(c) FROM openrails.psps p
+JOIN openrails.custodians c ON c.id=p.custodian_id AND c.merchant_id=p.merchant_id
+WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(psp_id)::uuid
+FOR SHARE OF p,c;
