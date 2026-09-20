@@ -47,7 +47,7 @@ func DecodeInvoiceCollectionPayload(intent gen.OpenrailsRailIntent) (InvoiceColl
 	if p.Initiator != charge.InitiatorMerchant && p.Initiator != charge.InitiatorCustomer {
 		return p, errors.New("collection initiation is not established")
 	}
-	if p.Initiator == charge.InitiatorCustomer && (intent.Origin != string(OriginUser) || p.Rail == "stripe" || p.Instrument.CustodianHeld()) {
+	if p.Initiator == charge.InitiatorCustomer && (intent.Origin != string(OriginUser) || p.Rail != "nmi" || p.Instrument.CustodianHeld() || !customerPaymentKeyValid("invoice_collection", p.CustomerID, intent.IdempotencyKey)) {
 		return p, errors.New("customer collection has an unsupported authority or rail")
 	}
 	if err := p.Instrument.Validate(); err != nil {

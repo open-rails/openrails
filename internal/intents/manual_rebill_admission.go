@@ -123,6 +123,9 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if err != nil {
 			return err
 		}
+		if customer && terms.PeriodEnd.Sub(terms.PeriodStart)%(24*time.Hour) != 0 {
+			return ErrRebillUnsupported
+		}
 		if requestedMethod != nil && (sub.PaymentMethodID == nil || *requestedMethod != *sub.PaymentMethodID) {
 			return ErrRebillUnsupported
 		}
@@ -150,7 +153,7 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		p := ManualRebillPayload{Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Renewal: terms, PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(methodRow), Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, OrderReference: rebillOrderReference(key), Attempt: ordinal, FailureCount: failures, AmountMinor: minor}
 		windowEnd := terms.PeriodStart.Add(collection.Window(int(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour)))
 		if !windowEnd.After(now) {
-			return errors.New("rebill is outside its collection window")
+			return ErrRebillNotRetryable
 		}
 		accepted, err = store.Enqueue(ctx, EnqueueParams{MerchantID: mid.UUID(), Provider: p.Rail, IntentType: TypeManualRebill, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: sub.PspID, Payload: p, IdempotencyKey: key, NextAttemptAt: now, Origin: origin, OriginReason: reason, Actor: actor, ExpiresAt: &windowEnd})
 		if err != nil {

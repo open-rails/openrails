@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/collection"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -126,6 +129,19 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 	}
 	if method.RebillDriver != models.RebillDriverOpenRails || method.Custodian != models.CustodianPSP || method.StoredCredentialRecurringRef == "" {
 		out.BlockedReason = "customer_payment_unsupported"
+		return out, nil
+	}
+	price, err := catalog.NewPriceService(s.rt.DB).GetByID(ctx, sub.PriceID)
+	if err != nil {
+		return nil, err
+	}
+	cycle := price.RecurringCycleHours()
+	if cycle == nil || *cycle <= 0 || *cycle%24 != 0 || sub.CurrentPeriodEndsAt == nil {
+		out.BlockedReason = "customer_payment_unsupported"
+		return out, nil
+	}
+	if !sub.CurrentPeriodEndsAt.Add(collection.Window(*cycle)).After(s.now().UTC()) {
+		out.BlockedReason = "subscription_not_retryable"
 		return out, nil
 	}
 	out.Retryable = true

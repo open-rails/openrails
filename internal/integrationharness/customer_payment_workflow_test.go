@@ -109,8 +109,35 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			}
 			client := newClient(token)
 			before := gateway.SaleAttempts()
+			if mode == "http" {
+				gateway.SetMode(NMISaleUncertain)
+				gateway.SetVisible(false)
+			}
 			paid, err := client.PayInvoiceNow(ctx, request)
 			require.NoError(t, err)
+			if mode == "http" {
+				require.True(t, paid.Operation.Unresolved())
+				pending, err := client.GetMyInvoice(ctx, f.Invoice)
+				require.NoError(t, err)
+				require.Equal(t, paid.Operation, *pending.Recovery.Operation)
+				require.False(t, pending.Recovery.Retryable)
+				replay, err := client.PayInvoiceNow(ctx, request)
+				require.NoError(t, err)
+				require.True(t, replay.Replayed)
+				require.Equal(t, paid.Operation, replay.Operation)
+				competing := request
+				competing.IdempotencyKey = uuid.NewString()
+				_, err = client.PayInvoiceNow(ctx, competing)
+				require.ErrorIs(t, err, openrails.ErrConflict)
+				require.Equal(t, before+1, gateway.SaleAttempts())
+				gateway.SetVisible(true)
+				gateway.SetMode(NMISaleApprove)
+				h.MakeOperationDue(paid.Operation.ID)
+				runtime := app.HostGraph(rt).Runtime
+				require.NoError(t, runtime.DB.RunInMerchantConn(merchant.WithID(ctx, f.Merchant), func(c context.Context) error { _, err := runtime.IntentRunner().RunVerifyOnce(c); return err }))
+				paid, err = client.PayInvoiceNow(ctx, request)
+				require.NoError(t, err)
+			}
 			require.Equal(t, "succeeded", paid.Operation.Status)
 			require.Equal(t, "paid", paid.Invoice.Status)
 			require.Equal(t, before+1, gateway.SaleAttempts())
