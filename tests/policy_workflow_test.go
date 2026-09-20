@@ -162,9 +162,10 @@ func checkPolicyPrecedence(t *testing.T, f treasuryWorkflow) {
 	require.False(t, allows(100_000_000))
 	status, raw := requestWorkflowJSON(t, http.MethodPut, settingsURL, f.merchant.APIKey, map[string]any{
 		"billing_policies":        doc.BillingPolicies,
-		"billing_policy_bindings": []any{map[string]any{"policy_name": "large", "customer_id": payer}},
+		"billing_policy_bindings": []any{map[string]any{"policy": "large", "customer_id": payer}},
 	})
 	require.Equal(t, http.StatusBadRequest, status, string(raw), "customer assignments are not declarations")
+	require.Contains(t, string(raw), "customer_id", "refusal must identify the removed field, not another malformed declaration key")
 	require.False(t, allows(100_000_000), "the refused document cannot change the current binding")
 	for _, client := range []*openrails.Client{f.client, f.embedded} {
 		assignment, err := client.GetCustomerBillingPolicy(ctx, payer)

@@ -128,7 +128,6 @@ func checkCustomerPolicyBoundary(t *testing.T, f treasuryWorkflow) {
 		_, err = f.client.SetCustomerBillingPolicy(ctx, payer, nil)
 		require.NoError(t, err)
 	}
-
 }
 
 func requirePolicyNotFound(t *testing.T, err error, code string) {

@@ -95,8 +95,8 @@ API (mode 2), `PUT /v1/merchant/settings`:
       "spend_windows": [{ "key": "monthly", "window_seconds": 2592000, "limit": "2000000000" }] }
   ],
   "billing_policy_bindings": [
-    { "policy_name": "api_line" },
-    { "policy_name": "cloud_monthly", "tier": "cloud" }
+    { "policy": "api_line" },
+    { "policy": "cloud_monthly", "tier": "cloud" }
   ]
 }
 ```
