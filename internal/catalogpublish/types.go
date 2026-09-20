@@ -2,10 +2,11 @@ package catalogpublish
 
 import (
 	"fmt"
-	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/pkg/catalog"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/pkg/catalog"
 )
 
 type (

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/open-rails/openrails/pkg/pricing"
 	"reflect"
 	"slices"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/open-rails/openrails/pkg/pricing"
 )
 
 type CatalogMeterSpec struct {

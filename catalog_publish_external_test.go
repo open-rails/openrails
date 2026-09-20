@@ -2,6 +2,7 @@ package openrails_test
 
 import (
 	"context"
+
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/pkg/catalog"
 )

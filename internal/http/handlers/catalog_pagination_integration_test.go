@@ -3,6 +3,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -81,12 +82,16 @@ func TestCatalogProductFilteringAndEffectivePagination(t *testing.T) {
 	// Manifest pruning is another full-list consumer: a request cap is not the
 	// end of a tier group, and the plan must see its thousand-and-first product.
 	fx.exec(`UPDATE openrails.products SET archived=false WHERE tier_group='target'`)
-	svc, err := billingservice.New(fx.rt)
+	body, err := json.Marshal(openrails.CatalogPublishRequest{Catalog: manifest.Manifest{Version: manifest.SupportedVersion, Products: []manifest.Product{{Key: "declared", DisplayName: "Declared", TierGroup: "target", Prices: []manifest.Price{{Currency: "USD", UnitAmount: 1, Duration: "30d", AutoRenew: true}}}}}})
 	require.NoError(t, err)
-	plan, err := manifest.PlanWithOptions(fx.ctx, svc, &manifest.Manifest{TierGroups: []manifest.TierGroup{{Key: "target"}}}, manifest.PlanOptions{ArchiveMissingProducts: true})
-	require.NoError(t, err)
-	require.Len(t, plan.Groups, 1)
-	require.Len(t, plan.Groups[0].RemovedProducts, 1005)
+	rec := httptest.NewRecorder()
+	MerchantPublishCatalog(httprequest.NewHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/merchant/catalog/publish", bytes.NewReader(body)).WithContext(fx.ctx), fx.rt))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var response openrails.CatalogPublishResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Nil(t, response.Result, "read-only publication must not archive rows")
+	require.Len(t, response.Plan.Groups, 1)
+	require.Len(t, response.Plan.Groups[0].RemovedProducts, 1005)
 }
 
 func TestCatalogPricesPageAcross1000AndProductFilter(t *testing.T) {
