@@ -316,6 +316,7 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			retry := openrails.RetrySubscriptionNowRequest{SubscriptionID: openrails.SubscriptionID(subscription), IdempotencyKey: uuid.NewString()}
 			due, err := client.GetMySubscription(ctx, retry.SubscriptionID)
 			require.NoError(t, err)
+			require.Equal(t, "provider_dunning", due.CollectionPolicy)
 			require.True(t, due.Recovery.Retryable)
 			refusedRetry := retry
 			gateway.SetMode(NMISaleDecline)

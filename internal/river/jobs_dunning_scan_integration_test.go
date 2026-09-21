@@ -288,7 +288,7 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	autoBilledSubID := uuid.New()
 	autoBilledCustomer := dbtest.EnsureCustomerIDPgx(ctx, t, pool, uuid.New().String())
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		CollectionPolicy: string(models.CollectionPolicyProviderDunning),
+		CollectionPolicy: string(models.CollectionPolicyProvider),
 		ID:               autoBilledSubID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: autoBilledCustomer, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
 		PspID:                 pspID,

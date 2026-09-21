@@ -1,6 +1,7 @@
 {
   "has_active_subscription": true,
   "subscription": {
+    "collection_policy": "provider",
     "last_retry_at": null,
     "retry_attempts": null,
     "next_retry_at": null,
