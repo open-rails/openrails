@@ -4,7 +4,6 @@ GRANT USAGE ON SCHEMA public TO :"runtime_user";
 GRANT SELECT ON TABLE public.migrations TO :"runtime_user";
 GRANT ALL ON FUNCTION openrails.account_updater_open_batch_merchant_ids(p_limit integer) TO :"runtime_user";
 GRANT ALL ON FUNCTION openrails.account_updater_work_merchant_ids(p_custodian text, p_environment text, p_now timestamp with time zone, p_default_lookahead_days integer, p_after uuid, p_limit integer) TO :"runtime_user";
-GRANT ALL ON FUNCTION openrails.assert_cross_merchant_reader() TO :"runtime_user";
 GRANT ALL ON FUNCTION openrails.count_destructive_intents_by_actor_since(p_actor text, p_intent_types text[], p_since timestamp with time zone) TO :"runtime_user";
 GRANT ALL ON FUNCTION openrails.count_destructive_intents_for_merchant_since(p_merchant uuid, p_origins text[], p_intent_types text[], p_since timestamp with time zone) TO :"runtime_user";
 GRANT ALL ON FUNCTION openrails.current_merchant_id() TO :"runtime_user";

@@ -220,7 +220,11 @@ func TestPruneSoftDeletesAndRollbackRestores(t *testing.T) {
 	// Gone from every live read path...
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		q := appDB.Gen(ctx)
-		_, err := q.GetSubscriptionByID(ctx, f.subID)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return scopeErr
+		}
+		_, err := q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: f.subID})
 		require.Error(t, err, "GetSubscriptionByID must not see a pruned row")
 
 		_, err = q.GetSubscriptionByPSPSubID(ctx, gen.GetSubscriptionByPSPSubIDParams{MerchantID: dbtest.TestMerchantID.UUID(), PspID: db.PSPIDFromContext(ctx), Rail: "nmi", RailSubscriptionID: f.railSub})
@@ -234,11 +238,11 @@ func TestPruneSoftDeletesAndRollbackRestores(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, standing, "a pruned subscription projects no standing access")
 
-		ents, err := q.ListEntitlementsByCustomer(ctx, f.customer)
+		ents, err := q.ListEntitlementsByCustomer(ctx, gen.ListEntitlementsByCustomerParams{MerchantID: scopeMerchantID.UUID(), CustomerID: f.customer})
 		require.NoError(t, err)
 		require.Empty(t, ents, "the pruned subscription's entitlement is gone with it")
 
-		_, err = q.GetCheckoutSessionByID(ctx, f.sessID)
+		_, err = q.GetCheckoutSessionByID(ctx, gen.GetCheckoutSessionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: f.sessID})
 		require.Error(t, err, "the subscription's checkout session went with it")
 		return nil
 	}))
@@ -269,14 +273,18 @@ func TestPruneSoftDeletesAndRollbackRestores(t *testing.T) {
 		require.EqualValues(t, 1, rb.Entitlements)
 
 		q := appDB.Gen(ctx)
-		sub, err := q.GetSubscriptionByID(ctx, f.subID)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return scopeErr
+		}
+		sub, err := q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: f.subID})
 		require.NoError(t, err)
 		require.Nil(t, sub.DeletedAt)
 		require.Nil(t, sub.DestructiveRunID, "the stamp is cleared, so a second rollback cannot double-restore")
 
-		_, err = q.GetCheckoutSessionByID(ctx, f.sessID)
+		_, err = q.GetCheckoutSessionByID(ctx, gen.GetCheckoutSessionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: f.sessID})
 		require.NoError(t, err)
-		ents, err := q.ListEntitlementsByCustomer(ctx, f.customer)
+		ents, err := q.ListEntitlementsByCustomer(ctx, gen.ListEntitlementsByCustomerParams{MerchantID: scopeMerchantID.UUID(), CustomerID: f.customer})
 		require.NoError(t, err)
 		require.Len(t, ents, 1, "access comes back with the subscription")
 

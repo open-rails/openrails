@@ -20,16 +20,17 @@ SET status = 'fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = $2 AND status IN ('reconcile_required', 'requires_review', 'auto_fixed')
+WHERE reconciliation_findings.merchant_id = $2::uuid AND id = $3 AND status IN ('reconcile_required', 'requires_review', 'auto_fixed')
 `
 
 type AckReconciliationFindingParams struct {
 	OperatorNotes *string
+	MerchantID    uuid.UUID
 	ID            uuid.UUID
 }
 
 func (q *Queries) AckReconciliationFinding(ctx context.Context, arg AckReconciliationFindingParams) (int64, error) {
-	result, err := q.db.Exec(ctx, ackReconciliationFinding, arg.OperatorNotes, arg.ID)
+	result, err := q.db.Exec(ctx, ackReconciliationFinding, arg.OperatorNotes, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -317,7 +318,7 @@ const claimReconciliationFindingNotification = `-- name: ClaimReconciliationFind
 UPDATE openrails.reconciliation_findings
 SET notified_at = $1::timestamptz,
     notified_severity = $2::text
-WHERE id = $3::uuid
+WHERE reconciliation_findings.merchant_id = $3::uuid AND id = $4::uuid
   AND status = 'requires_review'
   AND severity = $2::text
   AND (notified_at IS NULL OR
@@ -328,12 +329,18 @@ WHERE id = $3::uuid
 type ClaimReconciliationFindingNotificationParams struct {
 	NotifiedAt time.Time
 	Severity   string
+	MerchantID uuid.UUID
 	ID         uuid.UUID
 }
 
 // Claim one open episode/escalation in the same transaction as its notification.
 func (q *Queries) ClaimReconciliationFindingNotification(ctx context.Context, arg ClaimReconciliationFindingNotificationParams) (int64, error) {
-	result, err := q.db.Exec(ctx, claimReconciliationFindingNotification, arg.NotifiedAt, arg.Severity, arg.ID)
+	result, err := q.db.Exec(ctx, claimReconciliationFindingNotification,
+		arg.NotifiedAt,
+		arg.Severity,
+		arg.MerchantID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -535,16 +542,17 @@ SET status = 'ignored',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = $2 AND status IN ('reconcile_required', 'requires_review', 'auto_fixed', 'fixed')
+WHERE reconciliation_findings.merchant_id = $2::uuid AND id = $3 AND status IN ('reconcile_required', 'requires_review', 'auto_fixed', 'fixed')
 `
 
 type DismissReconciliationFindingParams struct {
 	OperatorNotes *string
+	MerchantID    uuid.UUID
 	ID            uuid.UUID
 }
 
 func (q *Queries) DismissReconciliationFinding(ctx context.Context, arg DismissReconciliationFindingParams) (int64, error) {
-	result, err := q.db.Exec(ctx, dismissReconciliationFinding, arg.OperatorNotes, arg.ID)
+	result, err := q.db.Exec(ctx, dismissReconciliationFinding, arg.OperatorNotes, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -781,12 +789,17 @@ func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAban
 
 const listActionableReconciliationFindingsByProvider = `-- name: ListActionableReconciliationFindingsByProvider :many
 SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM openrails.reconciliation_findings
-WHERE evidence->>'provider' = $1 AND status IN ('reconcile_required', 'requires_review')
+WHERE reconciliation_findings.merchant_id = $2::uuid AND evidence->>'provider' = $1 AND status IN ('reconcile_required', 'requires_review')
 ORDER BY finding_type, subject_key
 `
 
-func (q *Queries) ListActionableReconciliationFindingsByProvider(ctx context.Context, evidence *string) ([]OpenrailsReconciliationFinding, error) {
-	rows, err := q.db.Query(ctx, listActionableReconciliationFindingsByProvider, evidence)
+type ListActionableReconciliationFindingsByProviderParams struct {
+	Evidence   *string
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) ListActionableReconciliationFindingsByProvider(ctx context.Context, arg ListActionableReconciliationFindingsByProviderParams) ([]OpenrailsReconciliationFinding, error) {
+	rows, err := q.db.Query(ctx, listActionableReconciliationFindingsByProvider, arg.Evidence, arg.MerchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -1431,15 +1444,16 @@ func (q *Queries) ListRecentlyClosedLastEntitlementWindows(ctx context.Context, 
 
 const listReconciliationFindings = `-- name: ListReconciliationFindings :many
 SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM openrails.reconciliation_findings
-WHERE ($1::text IS NULL OR status = $1::text)
-  AND ($2::text IS NULL OR COALESCE(NULLIF(rail,''),evidence->>'provider') = $2::text)
-  AND ($3::text IS NULL OR finding_type = $3::text)
-  AND (NOT $4::boolean OR status = 'requires_review')
+WHERE reconciliation_findings.merchant_id = $1::uuid AND ($2::text IS NULL OR status = $2::text)
+  AND ($3::text IS NULL OR COALESCE(NULLIF(rail,''),evidence->>'provider') = $3::text)
+  AND ($4::text IS NULL OR finding_type = $4::text)
+  AND (NOT $5::boolean OR status = 'requires_review')
 ORDER BY last_seen_at DESC, id
-LIMIT $6 OFFSET $5
+LIMIT $7 OFFSET $6
 `
 
 type ListReconciliationFindingsParams struct {
+	MerchantID      uuid.UUID
 	Status          *string
 	Provider        *string
 	FindingType     *string
@@ -1450,6 +1464,7 @@ type ListReconciliationFindingsParams struct {
 
 func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconciliationFindingsParams) ([]OpenrailsReconciliationFinding, error) {
 	rows, err := q.db.Query(ctx, listReconciliationFindings,
+		arg.MerchantID,
 		arg.Status,
 		arg.Provider,
 		arg.FindingType,
@@ -1820,16 +1835,17 @@ SET status = 'auto_fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = $2 AND status IN ('reconcile_required', 'requires_review')
+WHERE reconciliation_findings.merchant_id = $2::uuid AND id = $3 AND status IN ('reconcile_required', 'requires_review')
 `
 
 type MarkReconciliationFindingAutoFixedParams struct {
 	ResolutionEvidence []byte
+	MerchantID         uuid.UUID
 	ID                 uuid.UUID
 }
 
 func (q *Queries) MarkReconciliationFindingAutoFixed(ctx context.Context, arg MarkReconciliationFindingAutoFixedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markReconciliationFindingAutoFixed, arg.ResolutionEvidence, arg.ID)
+	result, err := q.db.Exec(ctx, markReconciliationFindingAutoFixed, arg.ResolutionEvidence, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -1840,12 +1856,13 @@ const markReconciliationFindingNotified = `-- name: MarkReconciliationFindingNot
 UPDATE openrails.reconciliation_findings
 SET notified_at = $1::timestamptz,
     notified_severity = $2::text
-WHERE id = $3
+WHERE reconciliation_findings.merchant_id = $3::uuid AND id = $4
 `
 
 type MarkReconciliationFindingNotifiedParams struct {
 	NotifiedAt time.Time
 	Severity   string
+	MerchantID uuid.UUID
 	ID         uuid.UUID
 }
 
@@ -1853,7 +1870,12 @@ type MarkReconciliationFindingNotifiedParams struct {
 // pushes an operator notification, cleared by every resolution statement below
 // so a reopened finding notifies again.
 func (q *Queries) MarkReconciliationFindingNotified(ctx context.Context, arg MarkReconciliationFindingNotifiedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markReconciliationFindingNotified, arg.NotifiedAt, arg.Severity, arg.ID)
+	result, err := q.db.Exec(ctx, markReconciliationFindingNotified,
+		arg.NotifiedAt,
+		arg.Severity,
+		arg.MerchantID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -1867,11 +1889,16 @@ SET status = 'fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = $1 AND status IN ('reconcile_required', 'requires_review')
+WHERE reconciliation_findings.merchant_id = $1::uuid AND id = $2 AND status IN ('reconcile_required', 'requires_review')
 `
 
-func (q *Queries) MarkReconciliationFindingVanished(ctx context.Context, id uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, markReconciliationFindingVanished, id)
+type MarkReconciliationFindingVanishedParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) MarkReconciliationFindingVanished(ctx context.Context, arg MarkReconciliationFindingVanishedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markReconciliationFindingVanished, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -1977,7 +2004,7 @@ SELECT $1, $2, $3,
        $6, 'subscription'
 WHERE NOT EXISTS (
     SELECT 1 FROM openrails.entitlements ent
-    WHERE ent.customer_id = $2
+    WHERE ent.merchant_id = $1::uuid AND ent.customer_id = $2
       AND ent.entitlement = $3
       AND ent.source_type = 'subscription'
       AND ent.source_id = $6
@@ -2030,13 +2057,14 @@ const reconcileListPaymentMethodsByRails = `-- name: ReconcileListPaymentMethods
 SELECT id, customer_id, rail, rail_customer_ref, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
-WHERE rail = ANY ($1::text[])
-  AND psp_id = $2::uuid
+WHERE payment_methods.merchant_id = $1::uuid AND rail = ANY ($2::text[])
+  AND psp_id = $3::uuid
 `
 
 type ReconcileListPaymentMethodsByRailsParams struct {
-	Rails []string
-	PspID uuid.UUID
+	MerchantID uuid.UUID
+	Rails      []string
+	PspID      uuid.UUID
 }
 
 type ReconcileListPaymentMethodsByRailsRow struct {
@@ -2053,7 +2081,7 @@ type ReconcileListPaymentMethodsByRailsRow struct {
 // the customer_vault_id). or#871: no `AS vault_id` alias — `vault` is reserved
 // for HashiCorp Vault, and the column already carries the right name.
 func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg ReconcileListPaymentMethodsByRailsParams) ([]ReconcileListPaymentMethodsByRailsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListPaymentMethodsByRails, arg.Rails, arg.PspID)
+	rows, err := q.db.Query(ctx, reconcileListPaymentMethodsByRails, arg.MerchantID, arg.Rails, arg.PspID)
 	if err != nil {
 		return nil, err
 	}
@@ -2084,13 +2112,14 @@ const reconcileListPaymentsByTransactionIDs = `-- name: ReconcileListPaymentsByT
 SELECT id, customer_id, rail, transaction_id, amount, status,
        subscription_id, refunded_payment_id, purchased_at
 FROM openrails.payments
-WHERE rail::text = ANY ($1::text[])
+WHERE payments.merchant_id = $1::uuid AND rail::text = ANY ($2::text[])
   AND deleted_at IS NULL
-  AND transaction_id = ANY ($2::text[])
-  AND psp_id = $3::uuid
+  AND transaction_id = ANY ($3::text[])
+  AND psp_id = $4::uuid
 `
 
 type ReconcileListPaymentsByTransactionIDsParams struct {
+	MerchantID     uuid.UUID
 	Rails          []string
 	TransactionIds []string
 	PspID          uuid.UUID
@@ -2109,7 +2138,12 @@ type ReconcileListPaymentsByTransactionIDsRow struct {
 }
 
 func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg ReconcileListPaymentsByTransactionIDsParams) ([]ReconcileListPaymentsByTransactionIDsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListPaymentsByTransactionIDs, arg.Rails, arg.TransactionIds, arg.PspID)
+	rows, err := q.db.Query(ctx, reconcileListPaymentsByTransactionIDs,
+		arg.MerchantID,
+		arg.Rails,
+		arg.TransactionIds,
+		arg.PspID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -2141,8 +2175,13 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 const reconcileListPricesWithPSPLinks = `-- name: ReconcileListPricesWithPSPLinks :many
 SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived
 FROM openrails.prices
-WHERE EXISTS (SELECT 1 FROM openrails.price_psp_bindings b WHERE b.price_id = openrails.prices.id AND b.merchant_id = openrails.prices.merchant_id AND b.psp_id = $1::uuid)
+WHERE prices.merchant_id = $1::uuid AND EXISTS (SELECT 1 FROM openrails.price_psp_bindings b WHERE b.merchant_id = $1::uuid AND b.price_id = openrails.prices.id AND b.merchant_id = openrails.prices.merchant_id AND b.psp_id = $2::uuid)
 `
+
+type ReconcileListPricesWithPSPLinksParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
 
 type ReconcileListPricesWithPSPLinksRow struct {
 	ID                  uuid.UUID
@@ -2158,8 +2197,8 @@ type ReconcileListPricesWithPSPLinksRow struct {
 // materializer maps a remote plan id onto the local price whose psp_links
 // jsonb carries that id under the provider's key. Archived prices stay
 // (grandfathered subscriptions bill them).
-func (q *Queries) ReconcileListPricesWithPSPLinks(ctx context.Context, pspID uuid.UUID) ([]ReconcileListPricesWithPSPLinksRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListPricesWithPSPLinks, pspID)
+func (q *Queries) ReconcileListPricesWithPSPLinks(ctx context.Context, arg ReconcileListPricesWithPSPLinksParams) ([]ReconcileListPricesWithPSPLinksRow, error) {
+	rows, err := q.db.Query(ctx, reconcileListPricesWithPSPLinks, arg.MerchantID, arg.PspID)
 	if err != nil {
 		return nil, err
 	}
@@ -2189,6 +2228,7 @@ func (q *Queries) ReconcileListPricesWithPSPLinks(ctx context.Context, pspID uui
 const reconcileListSolanaSubscriptionRefs = `-- name: ReconcileListSolanaSubscriptionRefs :many
 SELECT subscription_pda, plan_pda, subscriber_wallet
 FROM openrails.solana_subscriptions
+WHERE solana_subscriptions.merchant_id = $1::uuid
 `
 
 type ReconcileListSolanaSubscriptionRefsRow struct {
@@ -2197,8 +2237,8 @@ type ReconcileListSolanaSubscriptionRefsRow struct {
 	SubscriberWallet string
 }
 
-func (q *Queries) ReconcileListSolanaSubscriptionRefs(ctx context.Context) ([]ReconcileListSolanaSubscriptionRefsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListSolanaSubscriptionRefs)
+func (q *Queries) ReconcileListSolanaSubscriptionRefs(ctx context.Context, merchantID uuid.UUID) ([]ReconcileListSolanaSubscriptionRefsRow, error) {
+	rows, err := q.db.Query(ctx, reconcileListSolanaSubscriptionRefs, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -2226,14 +2266,15 @@ SELECT id, customer_id, price_id, product_id, status, rail,
        last_retry_at, retry_attempts, next_retry_at,
        entitlements_spec_snapshot
 FROM openrails.subscriptions
-WHERE rail = ANY ($1::text[])
+WHERE subscriptions.merchant_id = $1::uuid AND rail = ANY ($2::text[])
   AND deleted_at IS NULL
-  AND psp_id = $2::uuid
+  AND psp_id = $3::uuid
 `
 
 type ReconcileListSubscriptionsByRailsParams struct {
-	Rails []string
-	PspID uuid.UUID
+	MerchantID uuid.UUID
+	Rails      []string
+	PspID      uuid.UUID
 }
 
 type ReconcileListSubscriptionsByRailsRow struct {
@@ -2264,7 +2305,7 @@ type ReconcileListSubscriptionsByRailsRow struct {
 // Local-state reads for the diff engine
 // ============================================================================
 func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg ReconcileListSubscriptionsByRailsParams) ([]ReconcileListSubscriptionsByRailsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListSubscriptionsByRails, arg.Rails, arg.PspID)
+	rows, err := q.db.Query(ctx, reconcileListSubscriptionsByRails, arg.MerchantID, arg.Rails, arg.PspID)
 	if err != nil {
 		return nil, err
 	}
@@ -2308,11 +2349,16 @@ func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg Rec
 const reconcileMarkPaymentRefunded = `-- name: ReconcileMarkPaymentRefunded :execrows
 UPDATE openrails.payments
 SET status = 'refunded'
-WHERE id = $1 AND status <> 'refunded' AND deleted_at IS NULL
+WHERE payments.merchant_id = $1::uuid AND id = $2 AND status <> 'refunded' AND deleted_at IS NULL
 `
 
-func (q *Queries) ReconcileMarkPaymentRefunded(ctx context.Context, id uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, reconcileMarkPaymentRefunded, id)
+type ReconcileMarkPaymentRefundedParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) ReconcileMarkPaymentRefunded(ctx context.Context, arg ReconcileMarkPaymentRefundedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reconcileMarkPaymentRefunded, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -2334,10 +2380,10 @@ SELECT $1::uuid, pr.id, pr.product_id, $2::openrails.subscription_status,
        p.entitlements_spec, $9, $10::uuid
 FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
-WHERE pr.id = $11
+WHERE pr.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND pr.id = $11
   AND NOT EXISTS (
       SELECT 1 FROM openrails.subscriptions s
-      WHERE s.rail_subscription_id = $4
+      WHERE s.merchant_id = $1::uuid AND s.rail_subscription_id = $4
         AND s.deleted_at IS NULL
         AND s.rail = ANY ($12::text[])
         -- or#893: every writer resolves a PSP now, including the declared

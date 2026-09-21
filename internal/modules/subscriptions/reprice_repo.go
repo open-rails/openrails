@@ -134,7 +134,11 @@ func (r *RepriceRepo) CreateBlockedReprice(ctx context.Context, subscriptionID, 
 // push failed after creation). Idempotent via the status predicate.
 func (r *RepriceRepo) BlockScheduledReprice(ctx context.Context, id uuid.UUID, reason string) error {
 	return r.mutatePending(ctx, id, func(ctx context.Context, d *db.DB) error {
-		_, err := d.Gen(ctx).BlockSubscriptionReprice(ctx, gen.BlockSubscriptionRepriceParams{ID: id, BlockedReason: reason})
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return scopeErr
+		}
+		_, err := d.Gen(ctx).BlockSubscriptionReprice(ctx, gen.BlockSubscriptionRepriceParams{MerchantID: scopeMerchantID.UUID(), ID: id, BlockedReason: reason})
 		return err
 	})
 }
@@ -172,7 +176,12 @@ func (r *RepriceRepo) CreatePlanMigrationBatch(ctx context.Context, sourcePriceI
 func (r *RepriceRepo) UpdatePlanMigrationBatchCounts(ctx context.Context, id uuid.UUID, scheduled, blocked int) error {
 	scheduled32, _ := safecast.Convert[int32](scheduled)
 	blocked32, _ := safecast.Convert[int32](blocked)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
 	_, err := r.db.Gen(ctx).UpdatePlanMigrationBatchCounts(ctx, gen.UpdatePlanMigrationBatchCountsParams{
+		MerchantID:             scopeMerchantID.UUID(),
 		ID:                     id,
 		SubscriptionsScheduled: scheduled32,
 		SubscriptionsBlocked:   blocked32,
@@ -183,7 +192,11 @@ func (r *RepriceRepo) UpdatePlanMigrationBatchCounts(ctx context.Context, id uui
 // ListMigratableSubscriptionsByPriceID (#813) returns the plan-migration
 // cohort: every subscription still billing (or being dunned) on the price.
 func (r *RepriceRepo) ListMigratableSubscriptionsByPriceID(ctx context.Context, priceID uuid.UUID) ([]*models.Subscription, error) {
-	rows, err := r.db.Gen(ctx).ListMigratableSubscriptionsByPriceID(ctx, priceID)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	rows, err := r.db.Gen(ctx).ListMigratableSubscriptionsByPriceID(ctx, gen.ListMigratableSubscriptionsByPriceIDParams{MerchantID: scopeMerchantID.UUID(), PriceID: priceID})
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +242,11 @@ func (r *RepriceRepo) ListRedrivableMerchants(ctx context.Context, limit int) ([
 // rows come from the merchant's own scope, where RLS supplies the predicate.
 func (r *RepriceRepo) ListRedrivableBlockedPlanChanges(ctx context.Context, batchSize int) ([]*models.SubscriptionReprice, error) {
 	batch32, _ := safecast.Convert[int32](batchSize)
-	rows, err := r.db.Gen(ctx).ListRedrivableBlockedPlanChangeReprices(ctx, batch32)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	rows, err := r.db.Gen(ctx).ListRedrivableBlockedPlanChangeReprices(ctx, gen.ListRedrivableBlockedPlanChangeRepricesParams{MerchantID: scopeMerchantID.UUID(), BatchSize: batch32})
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +262,11 @@ func (r *RepriceRepo) ListRedrivableBlockedPlanChanges(ctx context.Context, batc
 // treat as a skip.
 func (r *RepriceRepo) Unblock(ctx context.Context, id uuid.UUID) error {
 	return r.mutatePending(ctx, id, func(ctx context.Context, d *db.DB) error {
-		rows, err := d.Gen(ctx).UnblockSubscriptionReprice(ctx, id)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return scopeErr
+		}
+		rows, err := d.Gen(ctx).UnblockSubscriptionReprice(ctx, gen.UnblockSubscriptionRepriceParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 		if err != nil {
 			return err
 		}
@@ -260,7 +281,11 @@ func (r *RepriceRepo) Unblock(ctx context.Context, id uuid.UUID) error {
 // scheduled/blocked counts from its actual rows — the re-sync source of
 // truth after re-drives move rows between the classes.
 func (r *RepriceRepo) CountBatchRows(ctx context.Context, batchID uuid.UUID) (scheduled, blocked int, err error) {
-	row, err := r.db.Gen(ctx).CountPlanMigrationBatchRows(ctx, batchID)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return 0, 0, scopeErr
+	}
+	row, err := r.db.Gen(ctx).CountPlanMigrationBatchRows(ctx, gen.CountPlanMigrationBatchRowsParams{MerchantID: scopeMerchantID.UUID(), BatchID: batchID})
 	if err != nil {
 		return 0, 0, err
 	}
@@ -283,7 +308,11 @@ func (r *RepriceRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Subscr
 // reprice, or pgx.ErrNoRows if none exists. At most one can exist at a time
 // (uq_subscription_reprices_one_scheduled).
 func (r *RepriceRepo) GetScheduledForSubscription(ctx context.Context, subscriptionID uuid.UUID) (*models.SubscriptionReprice, error) {
-	row, err := r.db.Gen(ctx).GetScheduledRepriceForSubscription(ctx, subscriptionID)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	row, err := r.db.Gen(ctx).GetScheduledRepriceForSubscription(ctx, gen.GetScheduledRepriceForSubscriptionParams{MerchantID: scopeMerchantID.UUID(), SubscriptionID: subscriptionID})
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +419,11 @@ func (r *RepriceRepo) Apply(ctx context.Context, id uuid.UUID) error {
 		}
 		// Applying the accepted quote is completion, not revocation; it deliberately
 		// does not reject the operation that owns these exact pending terms.
-		rows, err := d.Gen(ctx).ApplySubscriptionReprice(ctx, id)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return scopeErr
+		}
+		rows, err := d.Gen(ctx).ApplySubscriptionReprice(ctx, gen.ApplySubscriptionRepriceParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 		if err != nil {
 			return err
 		}
@@ -430,7 +463,11 @@ func (r *RepriceRepo) ListBatchesByPriceKey(ctx context.Context, priceKey string
 // ListActiveSubscriptionsByPriceIDs returns every ACTIVE subscription pinned
 // to one of the given price rows — reprice_all_prior_versions' match set.
 func (r *RepriceRepo) ListActiveSubscriptionsByPriceIDs(ctx context.Context, priceIDs []uuid.UUID) ([]*models.Subscription, error) {
-	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByPriceIDs(ctx, priceIDs)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByPriceIDs(ctx, gen.ListActiveSubscriptionsByPriceIDsParams{MerchantID: scopeMerchantID.UUID(), PriceIds: priceIDs})
 	if err != nil {
 		return nil, err
 	}

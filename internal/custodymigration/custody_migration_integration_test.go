@@ -205,7 +205,7 @@ func (fx *custodyFixture) method(t *testing.T, id uuid.UUID) gen.OpenrailsPaymen
 	t.Helper()
 	var row gen.OpenrailsPaymentMethod
 	require.NoError(t, fx.db.RunInMerchantConn(fx.ctx, func(ctx context.Context) error {
-		r, err := fx.db.Gen(ctx).GetPaymentMethodByID(ctx, id)
+		r, err := fx.db.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{ID: id, MerchantID: dbtest.TestMerchantID.UUID()})
 		row = r
 		return err
 	}))

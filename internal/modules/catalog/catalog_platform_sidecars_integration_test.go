@@ -8,10 +8,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -97,11 +99,10 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 	}))
 
 	require.NoError(t, appDB.MerchantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
-		var meterCount, rateCardCount int
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.catalog_meters WHERE key = $1`, meterKey).Scan(&meterCount))
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.catalog_rate_cards WHERE meter_key = $1`, meterKey).Scan(&rateCardCount))
-		require.Equal(t, 1, meterCount)
-		require.Equal(t, 1, rateCardCount)
+		meter, err := dbtest.Queries(tx).GetUsageMeterWithCatalog(ctx, gen.GetUsageMeterWithCatalogParams{MerchantID: tA.UUID(), MeterKey: meterKey})
+		require.NoError(t, err)
+		require.NotNil(t, meter.ProductID)
+		require.Equal(t, productA, *meter.ProductID)
 		return nil
 	}))
 
@@ -113,20 +114,21 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		var meterCount, rateCardCount int
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.catalog_meters WHERE key = $1`, meterKey).Scan(&meterCount))
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.catalog_rate_cards WHERE meter_key = $1`, meterKey).Scan(&rateCardCount))
-		require.Equal(t, 0, meterCount)
-		require.Equal(t, 0, rateCardCount)
+		_, err = dbtest.Queries(tx).GetUsageMeterWithCatalog(ctx, gen.GetUsageMeterWithCatalogParams{MerchantID: tB.UUID(), MeterKey: meterKey})
+		require.ErrorIs(t, err, pgx.ErrNoRows, "B's scoped meter query must not expose A's meter or rate card")
 		return nil
 	}))
 
 	err := appDB.MerchantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx,
-			`INSERT INTO billing.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'count')`,
-			tA.UUID(), "cross-tenant-"+suffix,
+			`INSERT INTO billing.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
+			 SELECT $1, product_id, 2, meter_key, payment_term, price FROM billing.catalog_rate_cards
+			 WHERE merchant_id=$2 AND product_id=$3`,
+			tB.UUID(), tA.UUID(), productA,
 		)
 		return err
 	})
-	require.Error(t, err, "app role must not write catalog sidecars for another merchant")
+	var pgErr *pgconn.PgError
+	require.ErrorAs(t, err, &pgErr)
+	require.Equal(t, "23503", pgErr.Code, "a B rate card must not reference A's product/meter even without RLS")
 }

@@ -1,6 +1,8 @@
 package intents
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"encoding/json"
 	"errors"
@@ -55,7 +57,11 @@ func (h *NMIProviderCutover) sourceRemainsActive(ctx context.Context, source *nm
 		return false
 	}
 	// Commercial drift is allowed here: compensation never writes the source.
-	local, err := h.DB.Gen(ctx).GetSubscriptionByID(ctx, p.SubscriptionID)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return false
+	}
+	local, err := h.DB.Gen(ctx).GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: p.SubscriptionID})
 	return err == nil && local.MerchantID == pMerchant(ctx) && local.CustomerID == p.CustomerID &&
 		local.PspID == p.Request.ExpectedSourcePSPID && local.PaymentMethodID != nil &&
 		*local.PaymentMethodID == p.SourcePaymentMethodID && local.RailSubscriptionID == p.SourceSubscriptionID

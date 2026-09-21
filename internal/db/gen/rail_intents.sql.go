@@ -16,13 +16,13 @@ const claimDueRailIntents = `-- name: ClaimDueRailIntents :many
 
 WITH due AS (
     SELECT id FROM openrails.rail_intents
-    WHERE (
-            (status IN ('pending', 'failed_retryable') AND next_attempt_at <= $2::timestamptz)
-            OR (status = 'in_flight' AND claimed_until IS NOT NULL AND claimed_until <= $2::timestamptz)
+    WHERE rail_intents.merchant_id = $2::uuid AND (
+            (status IN ('pending', 'failed_retryable') AND next_attempt_at <= $3::timestamptz)
+            OR (status = 'in_flight' AND claimed_until IS NOT NULL AND claimed_until <= $3::timestamptz)
           )
-      AND (status = 'in_flight' OR (status = 'pending' AND attempts > 0) OR expires_at IS NULL OR expires_at > $2::timestamptz)
+      AND (status = 'in_flight' OR (status = 'pending' AND attempts > 0) OR expires_at IS NULL OR expires_at > $3::timestamptz)
     ORDER BY next_attempt_at
-    LIMIT $3
+    LIMIT $4
     FOR UPDATE SKIP LOCKED
 )
 UPDATE openrails.rail_intents pi
@@ -31,12 +31,13 @@ SET status = 'in_flight',
     attempts = pi.attempts + 1,
     updated_at = now()
 FROM due
-WHERE pi.id = due.id
+WHERE pi.merchant_id = $2::uuid AND pi.id = due.id
 RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id, pi.destructive_run_class, pi.custodian_id
 `
 
 type ClaimDueRailIntentsParams struct {
 	LeaseUntil time.Time
+	MerchantID uuid.UUID
 	Now        time.Time
 	BatchSize  int64
 }
@@ -51,7 +52,12 @@ type ClaimDueRailIntentsParams struct {
 // ExpireOverdueRailIntents. Abandoned in-flight attempts are still claimed
 // after their deadline so possible submissions can be reconciled.
 func (q *Queries) ClaimDueRailIntents(ctx context.Context, arg ClaimDueRailIntentsParams) ([]OpenrailsRailIntent, error) {
-	rows, err := q.db.Query(ctx, claimDueRailIntents, arg.LeaseUntil, arg.Now, arg.BatchSize)
+	rows, err := q.db.Query(ctx, claimDueRailIntents,
+		arg.LeaseUntil,
+		arg.MerchantID,
+		arg.Now,
+		arg.BatchSize,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -100,23 +106,24 @@ func (q *Queries) ClaimDueRailIntents(ctx context.Context, arg ClaimDueRailInten
 const claimDueVerifyRailIntents = `-- name: ClaimDueVerifyRailIntents :many
 WITH due AS (
     SELECT id FROM openrails.rail_intents
-    WHERE status = 'unknown_needs_verify'
-      AND next_attempt_at <= $2::timestamptz
-      AND (claimed_until IS NULL OR claimed_until <= $2::timestamptz)
+    WHERE rail_intents.merchant_id = $2::uuid AND status = 'unknown_needs_verify'
+      AND next_attempt_at <= $3::timestamptz
+      AND (claimed_until IS NULL OR claimed_until <= $3::timestamptz)
     ORDER BY next_attempt_at
-    LIMIT $3
+    LIMIT $4
     FOR UPDATE SKIP LOCKED
 )
 UPDATE openrails.rail_intents pi
 SET claimed_until = $1::timestamptz,
     updated_at = now()
 FROM due
-WHERE pi.id = due.id
+WHERE pi.merchant_id = $2::uuid AND pi.id = due.id
 RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id, pi.destructive_run_class, pi.custodian_id
 `
 
 type ClaimDueVerifyRailIntentsParams struct {
 	LeaseUntil time.Time
+	MerchantID uuid.UUID
 	Now        time.Time
 	BatchSize  int64
 }
@@ -125,7 +132,12 @@ type ClaimDueVerifyRailIntentsParams struct {
 // unknown_needs_verify (verification is a read, not an attempt — attempts is
 // not bumped); the lease alone prevents double-verification.
 func (q *Queries) ClaimDueVerifyRailIntents(ctx context.Context, arg ClaimDueVerifyRailIntentsParams) ([]OpenrailsRailIntent, error) {
-	rows, err := q.db.Query(ctx, claimDueVerifyRailIntents, arg.LeaseUntil, arg.Now, arg.BatchSize)
+	rows, err := q.db.Query(ctx, claimDueVerifyRailIntents,
+		arg.LeaseUntil,
+		arg.MerchantID,
+		arg.Now,
+		arg.BatchSize,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -177,17 +189,18 @@ SET status = 'in_flight',
     claimed_until = $1::timestamptz,
     attempts = pi.attempts + 1,
     updated_at = now()
-WHERE pi.id = $2
+WHERE pi.merchant_id = $2::uuid AND pi.id = $3
   AND (
         pi.status IN ('pending', 'failed_retryable')
-        OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= $3::timestamptz)
+        OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= $4::timestamptz)
       )
-  AND (pi.status = 'in_flight' OR (pi.status = 'pending' AND pi.attempts > 0) OR pi.expires_at IS NULL OR pi.expires_at > $3::timestamptz)
+  AND (pi.status = 'in_flight' OR (pi.status = 'pending' AND pi.attempts > 0) OR pi.expires_at IS NULL OR pi.expires_at > $4::timestamptz)
 RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id, pi.destructive_run_class, pi.custodian_id
 `
 
 type ClaimRailIntentByIDParams struct {
 	LeaseUntil time.Time
+	MerchantID uuid.UUID
 	ID         uuid.UUID
 	Now        time.Time
 }
@@ -199,7 +212,12 @@ type ClaimRailIntentByIDParams struct {
 // honors the relevance window and existing leases; anything not claimable here
 // is drained by the scheduled executor instead.
 func (q *Queries) ClaimRailIntentByID(ctx context.Context, arg ClaimRailIntentByIDParams) (OpenrailsRailIntent, error) {
-	row := q.db.QueryRow(ctx, claimRailIntentByID, arg.LeaseUntil, arg.ID, arg.Now)
+	row := q.db.QueryRow(ctx, claimRailIntentByID,
+		arg.LeaseUntil,
+		arg.MerchantID,
+		arg.ID,
+		arg.Now,
+	)
 	var i OpenrailsRailIntent
 	err := row.Scan(
 		&i.ID,
@@ -236,14 +254,15 @@ const claimUnknownRailIntentByID = `-- name: ClaimUnknownRailIntentByID :one
 UPDATE openrails.rail_intents
 SET claimed_until = $1::timestamptz,
     updated_at = now()
-WHERE id = $2
+WHERE rail_intents.merchant_id = $2::uuid AND id = $3
   AND status = 'unknown_needs_verify'
-  AND (claimed_until IS NULL OR claimed_until <= $3::timestamptz)
+  AND (claimed_until IS NULL OR claimed_until <= $4::timestamptz)
 RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id
 `
 
 type ClaimUnknownRailIntentByIDParams struct {
 	LeaseUntil time.Time
+	MerchantID uuid.UUID
 	ID         uuid.UUID
 	Now        time.Time
 }
@@ -252,7 +271,12 @@ type ClaimUnknownRailIntentByIDParams struct {
 // claim, status and attempts are unchanged; the lease excludes a concurrent
 // verifier or resolver.
 func (q *Queries) ClaimUnknownRailIntentByID(ctx context.Context, arg ClaimUnknownRailIntentByIDParams) (OpenrailsRailIntent, error) {
-	row := q.db.QueryRow(ctx, claimUnknownRailIntentByID, arg.LeaseUntil, arg.ID, arg.Now)
+	row := q.db.QueryRow(ctx, claimUnknownRailIntentByID,
+		arg.LeaseUntil,
+		arg.MerchantID,
+		arg.ID,
+		arg.Now,
+	)
 	var i OpenrailsRailIntent
 	err := row.Scan(
 		&i.ID,
@@ -516,13 +540,14 @@ func (q *Queries) CountDestructiveRailIntentsExecutedSince(ctx context.Context, 
 
 const countRailIntents = `-- name: CountRailIntents :one
 SELECT count(*) FROM openrails.rail_intents
-WHERE ($1::text IS NULL OR status = $1::text)
-  AND ($2::text IS NULL OR rail = $2::text)
-  AND ($3::text IS NULL OR intent_type = $3::text)
-  AND ($4::uuid IS NULL OR subscription_id = $4::uuid)
+WHERE rail_intents.merchant_id = $1::uuid AND ($2::text IS NULL OR status = $2::text)
+  AND ($3::text IS NULL OR rail = $3::text)
+  AND ($4::text IS NULL OR intent_type = $4::text)
+  AND ($5::uuid IS NULL OR subscription_id = $5::uuid)
 `
 
 type CountRailIntentsParams struct {
+	MerchantID     uuid.UUID
 	Status         *string
 	Rail           *string
 	IntentType     *string
@@ -531,6 +556,7 @@ type CountRailIntentsParams struct {
 
 func (q *Queries) CountRailIntents(ctx context.Context, arg CountRailIntentsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countRailIntents,
+		arg.MerchantID,
 		arg.Status,
 		arg.Rail,
 		arg.IntentType,
@@ -701,14 +727,14 @@ SET status = 'expired',
     last_failure_reason = 'relevance window elapsed before execution',
     claimed_until = NULL,
     updated_at = now()
-WHERE (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
+WHERE pi.merchant_id = $1::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
   AND pi.expires_at IS NOT NULL
-  AND pi.expires_at <= $1::timestamptz
+  AND pi.expires_at <= $2::timestamptz
   AND NOT (
-        pi.intent_type = ANY ($2::text[])
+        pi.intent_type = ANY ($3::text[])
         AND EXISTS (
             SELECT 1 FROM openrails.reconciliation_findings f
-            WHERE f.merchant_id = pi.merchant_id
+            WHERE f.merchant_id = $1::uuid AND f.merchant_id = pi.merchant_id
               AND f.finding_type = 'life.provider_intent.held_bulk'
               AND f.status IN ('reconcile_required', 'requires_review')
         )
@@ -716,6 +742,7 @@ WHERE (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts 
 `
 
 type ExpireOverdueRailIntentsParams struct {
+	MerchantID       uuid.UUID
 	Now              time.Time
 	BreakerHeldTypes []string
 }
@@ -724,7 +751,7 @@ type ExpireOverdueRailIntentsParams struct {
 // life.provider_intent.held_bulk finding for their merchant) never expire out
 // of the ledger while held — the operator's resolution decides their fate.
 func (q *Queries) ExpireOverdueRailIntents(ctx context.Context, arg ExpireOverdueRailIntentsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, expireOverdueRailIntents, arg.Now, arg.BreakerHeldTypes)
+	result, err := q.db.Exec(ctx, expireOverdueRailIntents, arg.MerchantID, arg.Now, arg.BreakerHeldTypes)
 	if err != nil {
 		return 0, err
 	}
@@ -833,14 +860,19 @@ func (q *Queries) GetLiveTierChangeRailIntent(ctx context.Context, arg GetLiveTi
 
 const getRailIntent = `-- name: GetRailIntent :one
 
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents WHERE id = $1
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents WHERE rail_intents.merchant_id = $2::uuid AND id = $1
 `
+
+type GetRailIntentParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
 
 // =====================================================================
 // Reads
 // =====================================================================
-func (q *Queries) GetRailIntent(ctx context.Context, id uuid.UUID) (OpenrailsRailIntent, error) {
-	row := q.db.QueryRow(ctx, getRailIntent, id)
+func (q *Queries) GetRailIntent(ctx context.Context, arg GetRailIntentParams) (OpenrailsRailIntent, error) {
+	row := q.db.QueryRow(ctx, getRailIntent, arg.ID, arg.MerchantID)
 	var i OpenrailsRailIntent
 	err := row.Scan(
 		&i.ID,
@@ -1278,15 +1310,16 @@ func (q *Queries) ListDueVerifyRailIntentMerchants(ctx context.Context, arg List
 
 const listRailIntents = `-- name: ListRailIntents :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
-WHERE ($1::text IS NULL OR status = $1::text)
-  AND ($2::text IS NULL OR rail = $2::text)
-  AND ($3::text IS NULL OR intent_type = $3::text)
-  AND ($4::uuid IS NULL OR subscription_id = $4::uuid)
+WHERE rail_intents.merchant_id = $1::uuid AND ($2::text IS NULL OR status = $2::text)
+  AND ($3::text IS NULL OR rail = $3::text)
+  AND ($4::text IS NULL OR intent_type = $4::text)
+  AND ($5::uuid IS NULL OR subscription_id = $5::uuid)
 ORDER BY created_at DESC, id
-LIMIT $6 OFFSET $5
+LIMIT $7 OFFSET $6
 `
 
 type ListRailIntentsParams struct {
+	MerchantID     uuid.UUID
 	Status         *string
 	Rail           *string
 	IntentType     *string
@@ -1297,6 +1330,7 @@ type ListRailIntentsParams struct {
 
 func (q *Queries) ListRailIntents(ctx context.Context, arg ListRailIntentsParams) ([]OpenrailsRailIntent, error) {
 	rows, err := q.db.Query(ctx, listRailIntents,
+		arg.MerchantID,
 		arg.Status,
 		arg.Rail,
 		arg.IntentType,
@@ -1362,6 +1396,7 @@ WHERE i.merchant_id=$1::uuid
     OR EXISTS (
       SELECT 1 FROM openrails.subscription_reprices r
       WHERE r.merchant_id=i.merchant_id AND r.subscription_id=i.subscription_id
+        AND r.merchant_id=$1::uuid
         AND r.status IN ('scheduled','blocked')
         AND r.id::text=i.payload->'renewal'->>'reprice_id'
     )
@@ -1487,12 +1522,13 @@ func (q *Queries) ListRetainedSalesForArchive(ctx context.Context, arg ListRetai
 const listStuckRailIntents = `-- name: ListStuckRailIntents :many
 
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
-WHERE (status IN ('pending', 'failed_retryable') AND created_at <= $1::timestamptz)
-   OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $2::timestamptz)
-ORDER BY created_at, id
+WHERE rail_intents.merchant_id = $1::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= $2::timestamptz)
+   OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $3::timestamptz)
+) ORDER BY created_at, id
 `
 
 type ListStuckRailIntentsParams struct {
+	MerchantID   uuid.UUID
 	ActionCutoff time.Time
 	VerifyCutoff time.Time
 }
@@ -1507,7 +1543,7 @@ type ListStuckRailIntentsParams struct {
 // lease outliving hours means a dead executor). Read-only; runs tenant-scoped
 // on the engine's tenant-pinned connection.
 func (q *Queries) ListStuckRailIntents(ctx context.Context, arg ListStuckRailIntentsParams) ([]OpenrailsRailIntent, error) {
-	rows, err := q.db.Query(ctx, listStuckRailIntents, arg.ActionCutoff, arg.VerifyCutoff)
+	rows, err := q.db.Query(ctx, listStuckRailIntents, arg.MerchantID, arg.ActionCutoff, arg.VerifyCutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -1700,17 +1736,23 @@ SET status = 'failed_retryable',
     last_failure_reason = $2,
     claimed_until = NULL,
     updated_at = now()
-WHERE id = $3 AND status IN ('in_flight', 'unknown_needs_verify')
+WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
 `
 
 type MarkRailIntentFailedRetryableParams struct {
 	NextAttemptAt time.Time
 	Reason        *string
+	MerchantID    uuid.UUID
 	ID            uuid.UUID
 }
 
 func (q *Queries) MarkRailIntentFailedRetryable(ctx context.Context, arg MarkRailIntentFailedRetryableParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markRailIntentFailedRetryable, arg.NextAttemptAt, arg.Reason, arg.ID)
+	result, err := q.db.Exec(ctx, markRailIntentFailedRetryable,
+		arg.NextAttemptAt,
+		arg.Reason,
+		arg.MerchantID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -1734,18 +1776,24 @@ SET status = 'failed_terminal',
     END,
     claimed_until = NULL,
     updated_at = now()
-WHERE id = $3 AND status IN ('in_flight', 'unknown_needs_verify')
+WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
   AND intent_type NOT IN ('invoice_collection', 'manual_rebill', 'nmi_upgrade', 'stripe_tier_change', 'nmi_sale')
 `
 
 type MarkRailIntentFailedTerminalParams struct {
 	Reason         *string
 	ResultEvidence []byte
+	MerchantID     uuid.UUID
 	ID             uuid.UUID
 }
 
 func (q *Queries) MarkRailIntentFailedTerminal(ctx context.Context, arg MarkRailIntentFailedTerminalParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markRailIntentFailedTerminal, arg.Reason, arg.ResultEvidence, arg.ID)
+	result, err := q.db.Exec(ctx, markRailIntentFailedTerminal,
+		arg.Reason,
+		arg.ResultEvidence,
+		arg.MerchantID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -1771,13 +1819,14 @@ SET status = 'succeeded',
     last_failure_reason = NULL,
     claimed_until = NULL,
     updated_at = now()
-WHERE id = $3 AND status IN ('in_flight', 'unknown_needs_verify')
+WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
   AND intent_type NOT IN ('invoice_collection', 'manual_rebill', 'nmi_upgrade', 'stripe_tier_change', 'nmi_sale')
 `
 
 type MarkRailIntentSucceededParams struct {
 	Now            time.Time
 	ResultEvidence []byte
+	MerchantID     uuid.UUID
 	ID             uuid.UUID
 }
 
@@ -1785,7 +1834,12 @@ type MarkRailIntentSucceededParams struct {
 // Outcome transitions (always release the lease)
 // =====================================================================
 func (q *Queries) MarkRailIntentSucceeded(ctx context.Context, arg MarkRailIntentSucceededParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markRailIntentSucceeded, arg.Now, arg.ResultEvidence, arg.ID)
+	result, err := q.db.Exec(ctx, markRailIntentSucceeded,
+		arg.Now,
+		arg.ResultEvidence,
+		arg.MerchantID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -1798,16 +1852,17 @@ SET status = 'superseded',
     last_failure_reason = $1,
     claimed_until = NULL,
     updated_at = now()
-WHERE id = $2 AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+WHERE rail_intents.merchant_id = $2::uuid AND id = $3 AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
 `
 
 type MarkRailIntentSupersededParams struct {
-	Reason *string
-	ID     uuid.UUID
+	Reason     *string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
 }
 
 func (q *Queries) MarkRailIntentSuperseded(ctx context.Context, arg MarkRailIntentSupersededParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markRailIntentSuperseded, arg.Reason, arg.ID)
+	result, err := q.db.Exec(ctx, markRailIntentSuperseded, arg.Reason, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -1822,13 +1877,14 @@ SET status = 'unknown_needs_verify',
     last_failure_reason = $3,
     claimed_until = NULL,
     updated_at = now()
-WHERE id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
+WHERE rail_intents.merchant_id = $4::uuid AND id = $5 AND status IN ('in_flight', 'unknown_needs_verify')
 `
 
 type MarkRailIntentUnknownParams struct {
 	ResultEvidence []byte
 	NextAttemptAt  time.Time
 	Reason         *string
+	MerchantID     uuid.UUID
 	ID             uuid.UUID
 }
 
@@ -1839,6 +1895,7 @@ func (q *Queries) MarkRailIntentUnknown(ctx context.Context, arg MarkRailIntentU
 		arg.ResultEvidence,
 		arg.NextAttemptAt,
 		arg.Reason,
+		arg.MerchantID,
 		arg.ID,
 	)
 	if err != nil {
@@ -1855,7 +1912,7 @@ SET status = 'pending',
     last_failure_reason = $2,
     claimed_until = NULL,
     updated_at = now()
-WHERE id = $3 AND status = 'in_flight'
+WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status = 'in_flight'
   -- A stale no-send result must not undo another executor's payment fence.
   AND (intent_type <> 'nmi_sale' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'sale_submitted'))
 `
@@ -1863,6 +1920,7 @@ WHERE id = $3 AND status = 'in_flight'
 type ParkRailIntentParams struct {
 	NextAttemptAt time.Time
 	Reason        *string
+	MerchantID    uuid.UUID
 	ID            uuid.UUID
 }
 
@@ -1871,7 +1929,12 @@ type ParkRailIntentParams struct {
 // recorded and the claim's attempts bump undone — a park is not a failure and
 // must not escalate backoff.
 func (q *Queries) ParkRailIntent(ctx context.Context, arg ParkRailIntentParams) (int64, error) {
-	result, err := q.db.Exec(ctx, parkRailIntent, arg.NextAttemptAt, arg.Reason, arg.ID)
+	result, err := q.db.Exec(ctx, parkRailIntent,
+		arg.NextAttemptAt,
+		arg.Reason,
+		arg.MerchantID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -1882,13 +1945,18 @@ const releaseUnknownRailIntentClaim = `-- name: ReleaseUnknownRailIntentClaim :e
 UPDATE openrails.rail_intents
 SET claimed_until = NULL,
     updated_at = now()
-WHERE id = $1 AND status = 'unknown_needs_verify'
+WHERE rail_intents.merchant_id = $1::uuid AND id = $2 AND status = 'unknown_needs_verify'
 `
+
+type ReleaseUnknownRailIntentClaimParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
 
 // Releases a resolver lease after rejected evidence, leaving the operation
 // exactly as it was.
-func (q *Queries) ReleaseUnknownRailIntentClaim(ctx context.Context, id uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, releaseUnknownRailIntentClaim, id)
+func (q *Queries) ReleaseUnknownRailIntentClaim(ctx context.Context, arg ReleaseUnknownRailIntentClaimParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseUnknownRailIntentClaim, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -1899,14 +1967,15 @@ const renewRailIntentClaim = `-- name: RenewRailIntentClaim :execrows
 UPDATE openrails.rail_intents
 SET claimed_until = $1::timestamptz,
     updated_at = now()
-WHERE id = $2
+WHERE rail_intents.merchant_id = $2::uuid AND id = $3
   AND status IN ('in_flight', 'unknown_needs_verify')
   AND claimed_until IS NOT NULL
-  AND claimed_until > $3::timestamptz
+  AND claimed_until > $4::timestamptz
 `
 
 type RenewRailIntentClaimParams struct {
 	LeaseUntil time.Time
+	MerchantID uuid.UUID
 	ID         uuid.UUID
 	Now        time.Time
 }
@@ -1917,7 +1986,12 @@ type RenewRailIntentClaimParams struct {
 // once the lease has lapsed — by then another executor may hold the row, and a
 // late beat must not steal it back. Returns rows affected (0 = lost).
 func (q *Queries) RenewRailIntentClaim(ctx context.Context, arg RenewRailIntentClaimParams) (int64, error) {
-	result, err := q.db.Exec(ctx, renewRailIntentClaim, arg.LeaseUntil, arg.ID, arg.Now)
+	result, err := q.db.Exec(ctx, renewRailIntentClaim,
+		arg.LeaseUntil,
+		arg.MerchantID,
+		arg.ID,
+		arg.Now,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -2109,13 +2183,14 @@ UPDATE openrails.rail_intents
 SET status = 'superseded',
     last_failure_reason = $1,
     updated_at = now()
-WHERE intent_type = $2
-  AND subscription_id = $3
+WHERE rail_intents.merchant_id = $2::uuid AND intent_type = $3
+  AND subscription_id = $4
   AND (status = 'failed_retryable' OR (status = 'pending' AND attempts = 0))
 `
 
 type SupersedeRailIntentsBySubjectParams struct {
 	Reason         *string
+	MerchantID     uuid.UUID
 	IntentType     string
 	SubscriptionID *uuid.UUID
 }
@@ -2128,7 +2203,12 @@ type SupersedeRailIntentsBySubjectParams struct {
 // their executor: its per-type relevance check re-verifies before acting, so
 // a racing supersede is advisory there.
 func (q *Queries) SupersedeRailIntentsBySubject(ctx context.Context, arg SupersedeRailIntentsBySubjectParams) (int64, error) {
-	result, err := q.db.Exec(ctx, supersedeRailIntentsBySubject, arg.Reason, arg.IntentType, arg.SubscriptionID)
+	result, err := q.db.Exec(ctx, supersedeRailIntentsBySubject,
+		arg.Reason,
+		arg.MerchantID,
+		arg.IntentType,
+		arg.SubscriptionID,
+	)
 	if err != nil {
 		return 0, err
 	}

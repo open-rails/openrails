@@ -242,6 +242,10 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 	}
 
 	return withIntentsListDB(cmd, merchantSlug, func(ctx context.Context, database *db.DB) error {
+		merchantID, err := merchant.Require(ctx)
+		if err != nil {
+			return err
+		}
 		q := database.Gen(ctx)
 		// Union over statusFilters: one count+list per status predicate (the
 		// generated query takes a single optional status), then merge, sort by
@@ -251,14 +255,16 @@ func runIntentsList(cmd *cobra.Command, status, provider, intentType, format, me
 		var rows []gen.OpenrailsRailIntent
 		for _, statusFilter := range statusFilters {
 			n, err := q.CountRailIntents(ctx, gen.CountRailIntentsParams{
-				Status: statusFilter, Rail: providerFilter, IntentType: typeFilter,
+				MerchantID: merchantID.UUID(),
+				Status:     statusFilter, Rail: providerFilter, IntentType: typeFilter,
 			})
 			if err != nil {
 				return fmt.Errorf("count provider intents: %w", err)
 			}
 			total += n
 			part, err := q.ListRailIntents(ctx, gen.ListRailIntentsParams{
-				Status: statusFilter, Rail: providerFilter, IntentType: typeFilter,
+				MerchantID: merchantID.UUID(),
+				Status:     statusFilter, Rail: providerFilter, IntentType: typeFilter,
 				PageLimit: int64(limit), PageOffset: 0,
 			})
 			if err != nil {

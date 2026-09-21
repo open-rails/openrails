@@ -1,6 +1,8 @@
 package riverjobs
 
 import (
+	"github.com/open-rails/openrails/internal/db/gen"
+
 	"context"
 	"fmt"
 	"time"
@@ -89,7 +91,11 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 		progress.Mark(ctx, "solana reconcile subscription "+row.ID.String())
 		sig := *row.LastSignature
 		err := w.DB.RunInMerchantScope(ctx, merchant.ID(row.MerchantID), "solana reconcile pull", func(mctx context.Context) error {
-			parent, err := w.DB.Gen(mctx).GetSubscriptionByID(mctx, row.SubscriptionID)
+			scopeMerchantID, scopeErr := merchant.Require(mctx)
+			if scopeErr != nil {
+				return scopeErr
+			}
+			parent, err := w.DB.Gen(mctx).GetSubscriptionByID(mctx, gen.GetSubscriptionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: row.SubscriptionID})
 			if err != nil {
 				return err
 			}

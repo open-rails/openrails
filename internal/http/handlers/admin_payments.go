@@ -166,6 +166,10 @@ func refundAmountCents(currency string, amountNative int64) (moneyutil.Cents, er
 }
 
 func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB, paymentService *payments.PaymentService, paymentID uuid.UUID, req refundRequest, idempotencyKey string) (*adminRefundPrepared, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	payment, err := paymentService.GetByID(ctx, paymentID)
 	if err != nil {
 		return nil, adminRefundHTTPError(http.StatusNotFound, "payment not found")
@@ -175,7 +179,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 			return nil, adminRefundHTTPError(http.StatusConflict, "idempotency key was already used for a different refund request")
 		}
 		var intentID uuid.UUID
-		if err := txDB.Qx(ctx).QueryRow(ctx, `SELECT id FROM openrails.rail_intents WHERE payment_id=$1 AND idempotency_key=$2`, paymentID, intents.RefundIdempotencyKey(paymentID, idempotencyKey)).Scan(&intentID); err != nil {
+		if err := txDB.Qx(ctx).QueryRow(ctx, `SELECT id FROM openrails.rail_intents WHERE merchant_id=$3 AND payment_id=$1 AND idempotency_key=$2`, paymentID, intents.RefundIdempotencyKey(paymentID, idempotencyKey), mid.UUID()).Scan(&intentID); err != nil {
 			return nil, fmt.Errorf("load refund intent: %w", err)
 		}
 		return &adminRefundPrepared{reservationID: existing.ID, intentID: intentID}, nil
@@ -228,10 +232,6 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 		providerTarget = stripeRefundTargetID
 	}
 	intentType, provider, intentKey, err := intents.RefundIntentFor(payment, idempotencyKey)
-	if err != nil {
-		return nil, err
-	}
-	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}

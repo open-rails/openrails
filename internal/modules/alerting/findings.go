@@ -2,6 +2,8 @@
 package alerting
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"fmt"
 
@@ -36,6 +38,11 @@ var _ reconcile.FindingNotifier = (*Service)(nil)
 // lower severity is silent. Every resolution path clears the linkage (see
 // reconciliation.sql), so a finding that reopens later notifies again.
 func (s *Service) NotifyFinding(ctx context.Context, rec reconcile.FindingRecord) error {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return queryScopeErr
+	}
+
 	if rec.Status != reconcile.FindingStatusRequiresReview {
 		return nil
 	}
@@ -69,7 +76,7 @@ func (s *Service) NotifyFinding(ctx context.Context, rec reconcile.FindingRecord
 	claimed := false
 	if err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		st := newStore(s.db.NewWithPgxTx(tx))
-		n, err := st.db.Gen(ctx).ClaimReconciliationFindingNotification(ctx, gen.ClaimReconciliationFindingNotificationParams{
+		n, err := st.db.Gen(ctx).ClaimReconciliationFindingNotification(ctx, gen.ClaimReconciliationFindingNotificationParams{MerchantID: queryMerchant.UUID(),
 			ID: rec.ID, NotifiedAt: alert.FiredAt, Severity: string(rec.Severity),
 		})
 		if err != nil || n == 0 {

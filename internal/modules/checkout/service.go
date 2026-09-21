@@ -1532,6 +1532,11 @@ func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.Re
 // charge for the remaining period, answered on the tier change contract
 // (tier_change_operation.go).
 func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutRequest, user *UserIdentity, newPrice *models.Price, newProduct *models.Product, existingSub *models.Subscription, target railTarget) (*TierChangeResponse, error) {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
 	newPrice = priceForCheckoutTarget(newPrice, target)
 	if !rails.IsNMI(models.Rail(target.Rail)) {
 		return nil, fmt.Errorf("unsupported rail for upgrades: %s", target.Rail)
@@ -1592,7 +1597,7 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 	if method == nil {
 		return nil, errors.New("upgrade requires a stored payment method")
 	}
-	methodRow, err := s.SubscriptionService.Database().Gen(ctx).GetPaymentMethodByID(ctx, method.ID)
+	methodRow, err := s.SubscriptionService.Database().Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: queryMerchant.UUID(), ID: method.ID})
 	if err != nil {
 		return nil, err
 	}

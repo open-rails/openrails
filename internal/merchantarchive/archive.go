@@ -213,13 +213,7 @@ func scope(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 	if _, err := tx.Exec(ctx, "SET LOCAL TIME ZONE 'UTC'; SET LOCAL DateStyle TO 'ISO, YMD'; SET LOCAL IntervalStyle TO 'iso_8601'; SET LOCAL extra_float_digits TO 3"); err != nil {
 		return err
 	}
-	var active, bypasses bool
-	if err := tx.QueryRow(ctx, "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user").Scan(&bypasses); err != nil {
-		return err
-	}
-	if bypasses {
-		return &Error{Code: "unsupported_state", Err: fmt.Errorf("archive requires an RLS enforcing application role")}
-	}
+	var active bool
 	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM openrails.merchants WHERE id=$1 AND status='active' AND deleted_at IS NULL)", id.UUID()).Scan(&active); err != nil {
 		return err
 	}

@@ -183,7 +183,7 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 		out.BlockedReason = "customer_payment_unsupported"
 		return out, nil
 	}
-	method, err := s.rt.DB.Gen(ctx).GetPaymentMethodByID(ctx, *sub.PaymentMethodID)
+	method, err := s.rt.DB.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{ID: *sub.PaymentMethodID, MerchantID: mid.UUID()})
 	if err != nil {
 		return nil, err
 	}

@@ -179,37 +179,17 @@ func assertCCBillSubscriptionActive(t *testing.T, ctx context.Context, mid merch
 	require.Equal(t, "active", status)
 }
 
-// Cleanup uses the fixture-only administrator because immutable grants deny
-// app-role DELETE. Every statement still selects this test's exact merchant;
-// the runtime and all behavioral assertions continue using the RLS app role.
+// Deactivate this test's unique merchant without deleting financial history.
+// Immutable subscription transitions and grants survive until dbtest drops
+// this process's owned scratch database after all tests finish.
 func cleanupCCBillWebhookMerchant(t *testing.T, mid merchant.ID) {
 	t.Helper()
 	appDB := dbtest.OpenAppDB(t, dbtest.SharedSuperuserDSN(t))
 	t.Cleanup(func() {
-		pool := appDB.Pool()
-		for _, stmt := range []string{
-			`DELETE FROM billing.webhook_events WHERE merchant_id = $1`,
-			`DELETE FROM billing.entitlements WHERE merchant_id = $1`,
-			`DELETE FROM billing.checkout_sessions WHERE merchant_id = $1`,
-			`DELETE FROM billing.payments WHERE merchant_id = $1`,
-			`DELETE FROM billing.subscriptions WHERE merchant_id = $1`,
-			`DELETE FROM billing.notifications WHERE merchant_id = $1`,
-			`DELETE FROM billing.grants WHERE merchant_id = $1`,
-			`DELETE FROM billing.customers WHERE merchant_id = $1`,
-			`DELETE FROM billing.price_key_movements WHERE merchant_id = $1`,
-			`DELETE FROM billing.price_psp_bindings WHERE merchant_id = $1`,
-			`DELETE FROM billing.prices WHERE merchant_id = $1`,
-			`DELETE FROM billing.products WHERE merchant_id = $1`,
-			`DELETE FROM billing.merchant_secrets WHERE merchant_id = $1`,
-			`DELETE FROM billing.psps WHERE merchant_id = $1`,
-			`DELETE FROM billing.merchants WHERE id = $1`,
-		} {
-			deleted, err := pool.Exec(context.Background(), stmt, mid.UUID())
-			require.NoError(t, err, "clean owned merchant fixture: %s", stmt)
-			if stmt == `DELETE FROM billing.merchants WHERE id = $1` {
-				require.EqualValues(t, 1, deleted.RowsAffected(), "owned merchant was actually removed")
-			}
-		}
+		updated, err := appDB.Pool().Exec(context.Background(),
+			`UPDATE billing.merchants SET status='deleted', deleted_at=now(), updated_at=now() WHERE id=$1`, mid.UUID())
+		require.NoError(t, err, "deactivate owned merchant fixture")
+		require.EqualValues(t, 1, updated.RowsAffected())
 	})
 }
 

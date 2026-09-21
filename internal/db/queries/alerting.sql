@@ -12,18 +12,20 @@ UPDATE openrails.merchant_webhooks
    SET destination_host = sqlc.arg(destination_host),
        secret_version = sqlc.arg(secret_version)::integer,
        updated_at = current_timestamp
- WHERE id = sqlc.arg(id)::uuid
+ WHERE merchant_webhooks.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
    AND secret_version <= sqlc.arg(secret_version)::integer
 RETURNING *;
 
 -- name: GetMerchantWebhook :one
-SELECT * FROM openrails.merchant_webhooks WHERE id = $1;
+SELECT * FROM openrails.merchant_webhooks WHERE merchant_webhooks.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: ListMerchantWebhooks :many
-SELECT * FROM openrails.merchant_webhooks ORDER BY created_at DESC, id;
+SELECT * FROM openrails.merchant_webhooks
+WHERE merchant_webhooks.merchant_id = sqlc.arg(merchant_id)::uuid
+ORDER BY created_at DESC, id;
 
 -- name: DeleteMerchantWebhook :execrows
-DELETE FROM openrails.merchant_webhooks WHERE id = $1;
+DELETE FROM openrails.merchant_webhooks WHERE merchant_webhooks.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- ============================================================================
 -- notifications  (in_app bell)

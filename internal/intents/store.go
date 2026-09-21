@@ -85,6 +85,13 @@ type EnqueueParams struct {
 // Enqueue records the intent (idempotent) and returns the canonical row for
 // its idempotency key.
 func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
+	scope, err := merchant.Require(ctx)
+	if err != nil {
+		return gen.OpenrailsRailIntent{}, err
+	}
+	if scope.UUID() != p.MerchantID {
+		return gen.OpenrailsRailIntent{}, errors.New("intent merchant does not match context")
+	}
 	if p.IntentType == "nmi_sale" {
 		return s.enqueueSale(ctx, p)
 	}
@@ -94,12 +101,8 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	if p.SubscriptionID == nil {
 		return gen.OpenrailsRailIntent{}, errors.New("recurring operation requires a subscription")
 	}
-	if scope, ok := merchant.FromContext(ctx); ok && scope.UUID() != p.MerchantID {
-		return gen.OpenrailsRailIntent{}, errors.New("recurring operation merchant does not match context")
-	}
-	ctx = merchant.WithID(ctx, merchant.ID(p.MerchantID))
 	var row gen.OpenrailsRailIntent
-	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.db.NewWithPgxTx(tx)
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, *p.SubscriptionID)
 		if err != nil {
@@ -250,7 +253,12 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 // in_flight rows are left to their executor, whose relevance re-check is the
 // authoritative guard.
 func (s *Store) SupersedeBySubject(ctx context.Context, intentType string, subscriptionID uuid.UUID, reason string) (int64, error) {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return 0, scopeErr
+	}
 	return s.db.Gen(ctx).SupersedeRailIntentsBySubject(ctx, gen.SupersedeRailIntentsBySubjectParams{
+		MerchantID:     scopeMerchantID.UUID(),
 		IntentType:     intentType,
 		SubscriptionID: &subscriptionID,
 		Reason:         &reason,
@@ -261,7 +269,12 @@ func (s *Store) SupersedeBySubject(ctx context.Context, intentType string, subsc
 // ok=false means the row is not claimable (terminal, expired, or leased by a
 // live executor) — the caller inspects the canonical row instead.
 func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsRailIntent, bool, error) {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return gen.OpenrailsRailIntent{}, false, scopeErr
+	}
 	row, err := s.db.Gen(ctx).ClaimRailIntentByID(ctx, gen.ClaimRailIntentByIDParams{
+		MerchantID: scopeMerchantID.UUID(),
 		ID:         id,
 		Now:        now.UTC(),
 		LeaseUntil: leaseUntil.UTC(),
@@ -277,7 +290,11 @@ func (s *Store) ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil tim
 
 // Get returns the intent row by id.
 func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent, error) {
-	return s.db.Gen(ctx).GetRailIntent(ctx, id)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return gen.OpenrailsRailIntent{}, scopeErr
+	}
+	return s.db.Gen(ctx).GetRailIntent(ctx, gen.GetRailIntentParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 }
 
 // DueExecuteMerchants lists the merchants with executor work (claimable or
@@ -319,10 +336,15 @@ func derefIDs(rows []*uuid.UUID) []uuid.UUID {
 // intents — silently, with no error — which is how the entire outbound
 // provider-mutation plane came to be inert while its tests passed.
 func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error) {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	if err := s.db.AssertMerchantScope(ctx, "intent executor claim"); err != nil {
 		return nil, err
 	}
 	return s.db.Gen(ctx).ClaimDueRailIntents(ctx, gen.ClaimDueRailIntentsParams{
+		MerchantID: scopeMerchantID.UUID(),
 		Now:        now.UTC(),
 		LeaseUntil: leaseUntil.UTC(),
 		BatchSize:  batch,
@@ -338,8 +360,13 @@ func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, now, leaseUntil ti
 		return false, err
 	}
 	defer release()
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return false, scopeErr
+	}
 	n, err := s.db.Gen(ctx).RenewRailIntentClaim(ctx, gen.RenewRailIntentClaimParams{
-		ID: id, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
+		MerchantID: scopeMerchantID.UUID(),
+		ID:         id, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
 	})
 	if err != nil {
 		return false, err
@@ -350,10 +377,15 @@ func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, now, leaseUntil ti
 // ClaimDueVerify leases up to batch due unknown_needs_verify intents. Same
 // merchant-pin requirement as ClaimDue (or#862).
 func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error) {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	if err := s.db.AssertMerchantScope(ctx, "intent verifier claim"); err != nil {
 		return nil, err
 	}
 	return s.db.Gen(ctx).ClaimDueVerifyRailIntents(ctx, gen.ClaimDueVerifyRailIntentsParams{
+		MerchantID: scopeMerchantID.UUID(),
 		Now:        now.UTC(),
 		LeaseUntil: leaseUntil.UTC(),
 		BatchSize:  batch,
@@ -363,8 +395,13 @@ func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, b
 // ClaimUnknownByID leases one unknown operation for operator resolution.
 // ok=false means it is not unknown or another worker holds its lease.
 func (s *Store) ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsRailIntent, bool, error) {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return gen.OpenrailsRailIntent{}, false, scopeErr
+	}
 	row, err := s.db.Gen(ctx).ClaimUnknownRailIntentByID(ctx, gen.ClaimUnknownRailIntentByIDParams{
-		ID: id, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
+		MerchantID: scopeMerchantID.UUID(),
+		ID:         id, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return gen.OpenrailsRailIntent{}, false, nil
@@ -377,7 +414,11 @@ func (s *Store) ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUn
 
 // ReleaseUnknownClaim drops a resolver lease without changing the operation.
 func (s *Store) ReleaseUnknownClaim(ctx context.Context, id uuid.UUID) (bool, error) {
-	n, err := s.db.Gen(ctx).ReleaseUnknownRailIntentClaim(ctx, id)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return false, scopeErr
+	}
+	n, err := s.db.Gen(ctx).ReleaseUnknownRailIntentClaim(ctx, gen.ReleaseUnknownRailIntentClaimParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 	return n == 1, err
 }
 
@@ -388,7 +429,12 @@ func (s *Store) ExpireOverdue(ctx context.Context, now time.Time) (int64, error)
 	if err := s.db.AssertMerchantScope(ctx, "intent expiry sweep"); err != nil {
 		return 0, err
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return 0, scopeErr
+	}
 	return s.db.Gen(ctx).ExpireOverdueRailIntents(ctx, gen.ExpireOverdueRailIntentsParams{
+		MerchantID:       scopeMerchantID.UUID(),
 		Now:              now.UTC(),
 		BreakerHeldTypes: DestructiveIntentTypes(),
 	})
@@ -407,8 +453,13 @@ func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, 
 		}
 		ev = b
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
 	return oneTerminal(s.db.Gen(ctx).MarkRailIntentSucceeded(ctx, gen.MarkRailIntentSucceededParams{
-		ID: id, Now: now.UTC(), ResultEvidence: ev,
+		MerchantID: scopeMerchantID.UUID(),
+		ID:         id, Now: now.UTC(), ResultEvidence: ev,
 	}))
 }
 
@@ -590,8 +641,13 @@ func (s *Store) RecordProgressIfAbsent(ctx context.Context, id uuid.UUID, key st
 }
 
 func (s *Store) MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
 	return one(s.db.Gen(ctx).MarkRailIntentFailedRetryable(ctx, gen.MarkRailIntentFailedRetryableParams{
-		ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
+		MerchantID: scopeMerchantID.UUID(),
+		ID:         id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 	}))
 }
 
@@ -608,8 +664,13 @@ func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt tim
 			return fmt.Errorf("marshal provider receipt: %w", err)
 		}
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
 	return one(s.db.Gen(ctx).MarkRailIntentUnknown(ctx, gen.MarkRailIntentUnknownParams{
-		ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason, ResultEvidence: raw,
+		MerchantID: scopeMerchantID.UUID(),
+		ID:         id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason, ResultEvidence: raw,
 	}))
 }
 
@@ -629,20 +690,35 @@ func (s *Store) MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason str
 		}
 		ev = b
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
 	return oneTerminal(s.db.Gen(ctx).MarkRailIntentFailedTerminal(ctx, gen.MarkRailIntentFailedTerminalParams{
-		ID: id, Reason: &reason, ResultEvidence: ev,
+		MerchantID: scopeMerchantID.UUID(),
+		ID:         id, Reason: &reason, ResultEvidence: ev,
 	}))
 }
 
 func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
 	return one(s.db.Gen(ctx).ParkRailIntent(ctx, gen.ParkRailIntentParams{
-		ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
+		MerchantID: scopeMerchantID.UUID(),
+		ID:         id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 	}))
 }
 
 func (s *Store) MarkSuperseded(ctx context.Context, id uuid.UUID, reason string) error {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
 	return one(s.db.Gen(ctx).MarkRailIntentSuperseded(ctx, gen.MarkRailIntentSupersededParams{
-		ID: id, Reason: &reason,
+		MerchantID: scopeMerchantID.UUID(),
+		ID:         id, Reason: &reason,
 	}))
 }
 

@@ -2,6 +2,7 @@ package productaccess
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -116,13 +117,14 @@ func (r *ProductAccessGrantRepo) ownershipGrants(ctx context.Context, merchantID
 // Insert creates an ownership grant in the ledger. The grant row IS the ownership
 // record (no projection); the caller's model is stamped with the new grant id.
 func (r *ProductAccessGrantRepo) Insert(ctx context.Context, grant *models.ProductAccessGrant) error {
-	if (grant.MerchantID == uuid.UUID{}) {
-		tid, err := merchant.Require(ctx)
-		if err != nil {
-			return err
-		}
-		grant.MerchantID = tid.UUID()
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
 	}
+	if grant.MerchantID != uuid.Nil && grant.MerchantID != mid.UUID() {
+		return errors.New("product access grant merchant does not match the authorized merchant")
+	}
+	grant.MerchantID = mid.UUID()
 	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), grant.MerchantID, grant.CustomerID); err != nil {
 		return err
 	}

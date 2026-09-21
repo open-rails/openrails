@@ -17,45 +17,47 @@ INSERT INTO openrails.prices (
 );
 
 -- name: GetPriceByID :one
-SELECT * FROM openrails.prices WHERE id = $1;
+SELECT * FROM openrails.prices WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: ListPricesByIDs :many
-SELECT * FROM openrails.prices WHERE id = ANY(sqlc.arg(ids)::uuid[]);
+SELECT * FROM openrails.prices WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
 
 -- name: ListPricesWithProductByIDs :many
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
-WHERE price.id = ANY(sqlc.arg(ids)::uuid[]);
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND price.id = ANY(sqlc.arg(ids)::uuid[]);
 
 -- All prices for a product, archived included — the catalog converge needs
 -- archived rows to reconcile legacy_import prices instead of re-creating them
 -- (would violate unique_prices_product_amount_cycle).
 -- name: ListPricesByProduct :many
 SELECT * FROM openrails.prices price
-WHERE price.product_id = $1;
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND price.product_id = $1;
 
 -- name: ListActivePricesByProductOrdered :many
 SELECT * FROM openrails.prices price
-WHERE price.product_id = $1 AND NOT price.archived
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND price.product_id = $1 AND NOT price.archived
 ORDER BY price.amount ASC;
 
 -- name: ListAllActivePricesWithProduct :many
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
-WHERE NOT price.archived
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND NOT price.archived
 ORDER BY price.amount ASC;
 
 -- name: ListAllPricesWithProduct :many
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
+
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY price.amount ASC;
 
 -- name: CountPricesFiltered :one
 SELECT count(*) FROM openrails.prices price
-WHERE (sqlc.narg(archived)::boolean IS NULL OR price.archived = sqlc.narg(archived)::boolean)
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(archived)::boolean IS NULL OR price.archived = sqlc.narg(archived)::boolean)
   AND (sqlc.narg(currency)::text IS NULL OR LOWER(price.currency) = LOWER(sqlc.narg(currency)::text))
   AND (sqlc.narg(product_id)::uuid IS NULL OR price.product_id = sqlc.narg(product_id)::uuid)
   AND (NOT sqlc.arg(only_recurring)::boolean OR price.auto_renew)
@@ -65,7 +67,7 @@ WHERE (sqlc.narg(archived)::boolean IS NULL OR price.archived = sqlc.narg(archiv
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
-WHERE (sqlc.narg(archived)::boolean IS NULL OR price.archived = sqlc.narg(archived)::boolean)
+WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(archived)::boolean IS NULL OR price.archived = sqlc.narg(archived)::boolean)
   AND (sqlc.narg(currency)::text IS NULL OR LOWER(price.currency) = LOWER(sqlc.narg(currency)::text))
   AND (sqlc.narg(product_id)::uuid IS NULL OR price.product_id = sqlc.narg(product_id)::uuid)
   AND (NOT sqlc.arg(only_recurring)::boolean OR price.auto_renew)
@@ -110,7 +112,7 @@ WHERE binding.merchant_id = sqlc.arg(merchant_id)::uuid AND binding.psp_id = sql
 UPDATE openrails.prices SET
     archived = sqlc.arg(archived)::boolean,
     updated_at = now()
-WHERE id = sqlc.arg(id);
+WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id);
 
 -- #774: key is a mutable LABEL (the movable pointer), not financial substance —
 -- its own narrow query, same pattern as psp_links/archived above.
@@ -118,7 +120,7 @@ WHERE id = sqlc.arg(id);
 UPDATE openrails.prices SET
     key = sqlc.arg(key)::text,
     updated_at = now()
-WHERE id = sqlc.arg(id);
+WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id);
 
 -- name: GetCurrentPriceByKey :one
 SELECT * FROM openrails.prices

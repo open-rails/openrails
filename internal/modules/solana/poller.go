@@ -1,6 +1,8 @@
 package solana
 
 import (
+	"github.com/open-rails/openrails/internal/db/gen"
+
 	"context"
 	"errors"
 	"fmt"
@@ -372,7 +374,11 @@ func (p *SolanaPayPoller) attachCheckoutExpiry(ctx context.Context, reference st
 	if err != nil {
 		return fmt.Errorf("invalid checkout session id %q: %w", pending.SessionID, err)
 	}
-	row, err := p.db.Gen(ctx).GetCheckoutSessionByID(ctx, sessionID)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
+	row, err := p.db.Gen(ctx).GetCheckoutSessionByID(ctx, gen.GetCheckoutSessionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: sessionID})
 	if err != nil {
 		return err
 	}
@@ -397,7 +403,11 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 		return nil, nil
 	}
 	ref := strings.TrimSpace(reference)
-	row, err := p.db.Gen(ctx).GetCheckoutSessionByReference(ctx, &ref)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	row, err := p.db.Gen(ctx).GetCheckoutSessionByReference(ctx, gen.GetCheckoutSessionByReferenceParams{MerchantID: scopeMerchantID.UUID(), Reference: &ref})
 	if err != nil {
 		if db.IsNotFound(err) {
 			return nil, nil
@@ -709,7 +719,11 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, txSvc *So
 		if err != nil {
 			return fmt.Errorf("confirmed Solana payment requires checkout session identity: %w", err)
 		}
-		session, err := p.db.Gen(ctx).GetCheckoutSessionByID(ctx, sessionID)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return scopeErr
+		}
+		session, err := p.db.Gen(ctx).GetCheckoutSessionByID(ctx, gen.GetCheckoutSessionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: sessionID})
 		if err != nil {
 			return err
 		}

@@ -24,7 +24,7 @@ INSERT INTO openrails.payment_methods (
 );
 
 -- name: GetPaymentMethodByID :one
-SELECT * FROM openrails.payment_methods WHERE id = $1;
+SELECT * FROM openrails.payment_methods WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: GetPaymentMethodForShare :one
 -- An operation freezing the instrument reads it under a shared lock, which
@@ -37,10 +37,10 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 FOR SHARE;
 
 -- name: ListPaymentMethodsByIDs :many
-SELECT * FROM openrails.payment_methods WHERE id = ANY(sqlc.arg(ids)::uuid[]);
+SELECT * FROM openrails.payment_methods WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
 
 -- name: DeletePaymentMethod :execrows
-DELETE FROM openrails.payment_methods WHERE id = $1;
+DELETE FROM openrails.payment_methods WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: ListPaymentMethodsByCustomer :many
 SELECT * FROM openrails.payment_methods pm
@@ -89,26 +89,26 @@ UPDATE openrails.payment_methods SET
     expiry_date = sqlc.narg(expiry_date),
     metadata = sqlc.narg(metadata),
     updated_at = sqlc.arg(updated_at)
-WHERE id = $1;
+WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: ListPaymentMethodsByRails :many
 SELECT * FROM openrails.payment_methods pm
-WHERE pm.rail = ANY(sqlc.arg(rails)::text[])
+WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.rail = ANY(sqlc.arg(rails)::text[])
 ORDER BY pm.created_at DESC;
 
 -- name: ListPaymentMethodsByCustomerRails :many
 SELECT * FROM openrails.payment_methods pm
-WHERE pm.customer_id = $1
+WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.customer_id = $1
   AND pm.rail = ANY(sqlc.arg(rails)::text[])
 ORDER BY pm.created_at DESC;
 
 -- name: CountPaymentMethodForUser :one
 SELECT count(*) FROM openrails.payment_methods pm
-WHERE pm.id = $1 AND pm.customer_id = $2;
+WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.id = $1 AND pm.customer_id = $2;
 
 -- name: ListPaymentMethodsByRail :many
 SELECT * FROM openrails.payment_methods pm
-WHERE pm.rail = $1
+WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.rail = $1
 ORDER BY pm.created_at DESC;
 
 -- name: ListLatestChargeByPaymentMethodIDs :many
@@ -122,7 +122,7 @@ SELECT DISTINCT ON (s.payment_method_id)
     p.status            AS status
 FROM openrails.subscriptions s
 JOIN openrails.payments p ON p.subscription_id = s.id AND p.deleted_at IS NULL
-WHERE s.payment_method_id = ANY(sqlc.arg(ids)::uuid[])
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND s.payment_method_id = ANY(sqlc.arg(ids)::uuid[])
   AND s.deleted_at IS NULL
 ORDER BY s.payment_method_id, p.purchased_at DESC;
 
@@ -252,7 +252,7 @@ UPDATE openrails.payment_methods SET
     park_reason = sqlc.arg(park_reason),
     parked_at = COALESCE(parked_at, now()),
     updated_at = now()
-WHERE rail = 'stripe'
+WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = 'stripe'
   AND psp_id = sqlc.arg(psp_id)::uuid
   AND rail_method_ref = sqlc.arg(rail_method_ref)
   AND park_reason = '';

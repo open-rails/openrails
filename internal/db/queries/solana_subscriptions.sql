@@ -18,13 +18,14 @@ ON CONFLICT (subscription_pda) DO UPDATE SET
     next_pull_at = EXCLUDED.next_pull_at,
     status = EXCLUDED.status,
     plan_created_at_fingerprint = EXCLUDED.plan_created_at_fingerprint,
-    updated_at = EXCLUDED.updated_at;
+    updated_at = EXCLUDED.updated_at
+WHERE openrails.solana_subscriptions.merchant_id = EXCLUDED.merchant_id;
 
 -- name: GetSolanaSubscriptionByPDA :one
-SELECT * FROM openrails.solana_subscriptions WHERE subscription_pda = $1;
+SELECT * FROM openrails.solana_subscriptions WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_pda = $1;
 
 -- name: GetSolanaSubscriptionBySubscriptionID :one
-SELECT * FROM openrails.solana_subscriptions WHERE subscription_id = $1;
+SELECT * FROM openrails.solana_subscriptions WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = $1;
 
 -- name: ListDueSolanaSubscriptions :many
 -- or#893: the crank's recurring-pull intent must name the PSP it executes
@@ -35,7 +36,7 @@ JOIN openrails.subscriptions sub ON sub.id = s.subscription_id
 -- A subscription a prune tombstoned is not due for anything: the join is a
 -- LIVE read, so it carries the or#858 predicate. The parent terminal guard is
 -- defence in depth if a failed/legacy cascade ever leaves its mirror active.
-WHERE s.status = 'active' AND s.next_pull_at <= sqlc.arg(now)::timestamptz
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.merchant_id = sqlc.arg(merchant_id)::uuid AND s.status = 'active' AND s.next_pull_at <= sqlc.arg(now)::timestamptz
   AND sub.deleted_at IS NULL
   AND sub.status <> 'cancelled'
 ORDER BY s.merchant_id ASC, s.next_pull_at ASC
@@ -47,22 +48,22 @@ UPDATE openrails.solana_subscriptions SET
     last_signature = $3,
     next_pull_at = $4,
     updated_at = $5
-WHERE id = $1;
+WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: SetSolanaSubscriptionNextPullAt :exec
 UPDATE openrails.solana_subscriptions SET
     next_pull_at = $2,
     updated_at = $3
-WHERE id = $1;
+WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: ListActiveSolanaMerchantWallets :many
 SELECT DISTINCT merchant_id, merchant_address
 FROM openrails.solana_subscriptions
-WHERE status = 'active';
+WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'active';
 
 -- name: ListActiveSolanaSubscriptionsWithSignature :many
 SELECT * FROM openrails.solana_subscriptions
-WHERE status = 'active'
+WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'active'
   AND last_signature IS NOT NULL
   AND last_signature <> ''
 ORDER BY updated_at ASC
@@ -72,4 +73,4 @@ LIMIT NULLIF(sqlc.arg(page_limit)::int, 0);
 UPDATE openrails.solana_subscriptions SET
     status = $2,
     updated_at = $3
-WHERE id = $1;
+WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;

@@ -1,6 +1,8 @@
 package intents
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"fmt"
 	"strings"
@@ -68,7 +70,11 @@ func (s *NMIDeleteScheduler) ScheduleNMIDelete(ctx context.Context, userID strin
 	// the intent must execute against. The delete is addressed to the SAME
 	// gateway account that holds the schedule; anything else would fire against
 	// a sibling account's book.
-	sub, err := s.db.Gen(ctx).GetSubscriptionByID(ctx, subscriptionID)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
+	sub, err := s.db.Gen(ctx).GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: subscriptionID})
 	if err != nil {
 		return fmt.Errorf("load subscription for deferred delete intent: %w", err)
 	}

@@ -3,6 +3,8 @@
 package webhooks
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"encoding/json"
 	"testing"
@@ -194,7 +196,9 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	require.True(t, entitled(clock.Now().UTC()), "access intact mid-dunning")
 
 	// The standing window is untouched.
-	gotPaid, err := q.GetEntitlementByID(ctx, paidEntID)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	require.NoError(t, scopeErr)
+	gotPaid, err := q.GetEntitlementByID(ctx, gen.GetEntitlementByIDParams{MerchantID: scopeMerchantID.UUID(), ID: paidEntID})
 	require.NoError(t, err)
 	require.Nil(t, gotPaid.EndAt)
 	require.Nil(t, gotPaid.RevokedAt)

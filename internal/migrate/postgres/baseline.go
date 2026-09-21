@@ -22,7 +22,7 @@ func Baseline() (string, error) {
 // BaselineObjects returns the baseline DDL for the named objects, in baseline
 // order. A function yields its CREATE, its COMMENT and its REVOKE/GRANT; a
 // table yields its CREATE and everything grouped with it (comments,
-// constraints, indexes, triggers, RLS, policy, grants).
+// constraints, indexes, triggers and comments).
 //
 // It lets a harness with a partial schema replay the real definitions it
 // depends on even when its deliberately minimal tables cannot take the full

@@ -42,12 +42,12 @@ go get github.com/open-rails/openrails
 ```
 
 OpenRails owns its migration source and applies it through one explicit
-initialization call. Your application supplies the privileged pool used for
-schema initialization; it does not import migratekit or OpenRails' migration
+initialization call. Your application supplies a pool that can create its schema
+and objects; it does not import migratekit or OpenRails' migration
 files:
 
 ```go
-if err := embed.ApplyMigrations(ctx, migrationPool, embed.MigrationOptions{RuntimePool: appPool}); err != nil {
+if err := embed.ApplyMigrations(ctx, appPool, embed.MigrationOptions{}); err != nil {
     return fmt.Errorf("initialize OpenRails database: %w", err)
 }
 ```
@@ -79,58 +79,36 @@ to boot unless you declare posture explicitly (#745):
 
 | Field | Required | Meaning |
 |---|---|---|
-| `Env` | yes | `"development"` / `"staging"` / `"production"`. Empty errors — an empty Env reads as dev and would silently disable hard gates (RLS, secret encryption). |
+| `Env` | yes | `"development"` / `"staging"` / `"production"`. Empty errors; development-only secret-storage relaxations must be explicit. |
 | `TestMode` | yes | `config.CredentialPostureSandbox` or `config.CredentialPostureLive`. The zero value is UNSET and rejected — it can never silently mean "live". |
 | `ProviderWriteMode` | recommended | `config.ProviderWriteModeFull` etc.; unset fail-closes to readonly. |
 | `MerchantSource` | defaults to `config.MerchantSourceManifest` | Mode 1 (manifest-is-truth, secrets in memory, reboot to change) vs `MerchantSourceAPI` (mode 2: provision via HTTP APIs + persistent secret store). |
 | `CatalogSource` | empty follows `MerchantSource` | `CatalogSourceManifest` uses `PushCatalog`; `CatalogSourceAPI` permits authorized product, price and metering APIs independently of provider credentials. |
-| `DB` | yes | Schema defaults to `billing`. The **pool you inject must connect as a non-superuser, `NOBYPASSRLS` role** — see below. |
+| `DB` | yes | Schema defaults to `billing`. The injected pool can be the same owning connection used for initialization. |
 
-#### The database role you connect as (required)
+#### Database ownership and optional separate runtime credentials
 
-**The pool you hand OpenRails must connect as a role that is neither a superuser
-nor `BYPASSRLS` — in every environment, local development included** (or#782,
-or#885). There is no config knob, no dev exemption, and no warn-and-continue.
+The simple setup uses one application login and pool. That login creates and
+owns the library's objects during `ApplyMigrations`, then uses them at runtime.
+Ownership already supplies access; no self-grants or library-specific roles are
+required. AuthKit and a host-owned River client may share that same pool.
 
-Why it is a hard gate: OpenRails' merchant isolation is `FORCE ROW LEVEL
-SECURITY` keyed on the `app.merchant_id` GUC. A privileged role skips every
-policy, so isolation degrades to whatever `WHERE merchant_id = …` predicate each
-query happens to carry — and, worse, a query that forgets its merchant scope
-returns *rows* instead of the empty result the policy would give it. That is the
-"the worker ran and did nothing" class: scheduled work that silently matches
-nothing in production while looking healthy on a privileged connection.
+If your deployment separates migration and runtime credentials, pass the
+existing runtime pool as `MigrationOptions{RuntimePool: appPool}` when initializing
+through the migration pool. OpenRails grants its exact runtime table, column,
+function and migration-ledger privileges to that pool's user. Managed River
+objects are included; host-owned River access remains the host's responsibility.
+The CLI exposes this optional provisioning as `--runtime-database-url`.
 
-Where it is checked: `embed.New`, plus every operator entry point that takes a
-pool (`rt.PushCatalog`, `rt.Converge`, `rt.PullProvider`, the standalone CLI's
-dump/prune/undo commands, the declared-facts import). Each refuses with the
-role name in the error.
+Merchant isolation uses verified application scope, explicit SQL predicates and
+composite relationships. PostgreSQL RLS and username flags are not part of the
+authorization boundary. Financial triggers protect ordinary DML invariants even
+for an owner; a database owner can deliberately change or drop those guards.
 
-What to do:
-
-1. Provision an admin/migration connection and one regular host application
-   login (`LOGIN NOSUPERUSER NOBYPASSRLS`). The host owns its credentials.
-2. Pass the admin pool and `MigrationOptions{RuntimePool: appPool}` to
-   `embed.ApplyMigrations`. OpenRails creates its schema and grants its exact
-   table, column, function and migration-ledger privileges directly to that
-   login. Managed River runtime objects are included; `RiverFromHost()` leaves
-   River ownership and access with the host. No library role or manual billing
-   grants are required. Without `RuntimePool`, initialization performs DDL only.
-3. Pass the same normal `appPool` to AuthKit, OpenRails, and the host River client.
-   AuthKit's initializer accepts its own `MigrationOptions.RuntimePool` and
-   provisions identity access independently. The host owns access to its own
-   application tables. Keep privileged migration connections out of the runtime.
-
-For the standalone CLI, supply `--runtime-database-url` to `migrate up` or
-`migrate pg`; its ordinary DB configuration identifies the migration owner.
-Verify the runtime login with:
-
-```sql
-SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user;
-```
-
-If a query starts failing under the unprivileged role, it is missing its
-merchant scope (or a grant) — that is the gate working, not a reason to hand
-back the owner role.
+Renaming an existing PostgreSQL role preserves its identity and ownership; update
+the connection configuration as needed. Replacing it with a different role needs
+the normal PostgreSQL ownership transfer or grants performed by your operator.
+The libraries do not manage database accounts or ownership transfers.
 
 Under `TestMode = sandbox` every rail routes to its test environment and live
 credentials refuse to boot — no real money can move. NMI accounts get an arm-time

@@ -40,16 +40,10 @@ func TestProviderIntentExecutorFansOutPerMerchant(t *testing.T) {
 	// package inherits whatever this test left behind.
 	restoreDestructiveSwitch(t, worker)
 
-	t.Run("failing_before: the bare-context claim leases nothing", func(t *testing.T) {
-		// The exact shape the worker used to run: sqlc on the base pool, no
-		// app.merchant_id. It returns zero rows AND no error — the silence that
-		// let this ship.
+	t.Run("a claim requires an explicit merchant scope", func(t *testing.T) {
 		now := time.Now().UTC()
-		claimed, err := worker.Gen(ctx).ClaimDueRailIntents(ctx, gen.ClaimDueRailIntentsParams{
-			Now: now, LeaseUntil: now.Add(time.Minute), BatchSize: 50,
-		})
-		require.NoError(t, err, "the old posture never errored — that is the whole problem")
-		require.Empty(t, claimed, "a GUC-less claim can only ever lease zero intents")
+		_, err := intents.NewStore(worker).ClaimDue(ctx, now, now.Add(time.Minute), 50)
+		require.ErrorIs(t, err, merchant.ErrNoMerchant)
 
 		// And the merchant IS there to be found, through the sanctioned path.
 		ids, err := intents.NewStore(worker).DueExecuteMerchants(ctx, now, 500)
@@ -103,11 +97,8 @@ func TestProviderIntentVerifierFansOutPerMerchant(t *testing.T) {
 	m.exec(t, `UPDATE billing.rail_intents SET status = 'unknown_needs_verify' WHERE id = $1`, id)
 
 	now := time.Now().UTC()
-	claimed, err := worker.Gen(ctx).ClaimDueVerifyRailIntents(ctx, gen.ClaimDueVerifyRailIntentsParams{
-		Now: now, LeaseUntil: now.Add(time.Minute), BatchSize: 50,
-	})
-	require.NoError(t, err)
-	require.Empty(t, claimed, "failing-before: the GUC-less verify claim leases nothing, silently")
+	_, err := intents.NewStore(worker).ClaimDueVerify(ctx, now, now.Add(time.Minute), 50)
+	require.ErrorIs(t, err, merchant.ErrNoMerchant)
 
 	h := &recordingIntentHandler{intentType: intents.TypeNMIDeleteSubscription}
 	require.NoError(t, ProviderIntentVerifyWorker{DB: worker, Registry: intents.NewRegistry(h)}.Work(ctx, nil))
@@ -127,7 +118,7 @@ func TestVolumeBreakerRefusesToReadZeros(t *testing.T) {
 	m := seedIntentMerchant(t)
 	id := seedDueIntent(t, m, intents.TypeNMIDeleteSubscription)
 
-	row, err := dbtest.Queries(m.pool).GetRailIntent(ctx, id)
+	row, err := dbtest.Queries(m.pool).GetRailIntent(ctx, gen.GetRailIntentParams{MerchantID: m.id, ID: id})
 	require.NoError(t, err)
 
 	// The runner pins the intent's merchant as a context VALUE before calling
