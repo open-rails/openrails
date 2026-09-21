@@ -74,6 +74,7 @@ func (s *Store) ConfirmCollectedPaymentNotExecuted(ctx context.Context, in gen.O
 	return CollectionNonexecutionProof{binding: binding, submittedAt: EvidenceString(current, "submitted_at")}, nil
 }
 
+// Keep the existing persisted key while both collected-payment kinds share its sealed proof.
 const qualifiedCollectionNonexecutionKey = "qualified_invoice_nonexecution"
 
 type collectionNonexecution struct {

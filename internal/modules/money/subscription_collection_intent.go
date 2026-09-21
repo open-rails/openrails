@@ -123,6 +123,9 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 // then operation. No provider request runs while these locks are held.
 func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, fence bool) (gen.OpenrailsPaymentMethod, intents.CollectionNonexecutionProof, bool, error) {
 	var method gen.OpenrailsPaymentMethod
+	if h.now().Before(p.AcceptedAt) {
+		return method, intents.CollectionNonexecutionProof{}, false, errors.New("engine admission time has not arrived")
+	}
 	var proof intents.CollectionNonexecutionProof
 	var first bool
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -130,13 +133,6 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		q := d.Gen(ctx)
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: p.Renewal.CustomerID}); err != nil {
 			return err
-		}
-		handle := paymentmethods.CustodianHandle{Custodian: *p.Instrument.CustodianID, Method: p.Instrument.RailMethodRef}
-		if err := paymentmethods.LockCustodianHandles(ctx, q, in.MerchantID, handle); err != nil {
-			return err
-		}
-		if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, in.MerchantID, handle); err != nil {
-			return errors.Join(charge.ErrInstrumentChanged, err)
 		}
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, p.Renewal.SubscriptionID)
 		if err != nil {
@@ -148,6 +144,13 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		}
 		if sub.CollectionPolicy != models.CollectionPolicyEngine || sub.Rail != models.RailNMI || sub.RailSubscriptionID != "" || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) || sub.PriceID != p.Renewal.FromPriceID || sub.ProductID != p.Renewal.FromProductID || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) || sub.CancelledAt != nil || failures != p.FailureCount {
 			return errEngineObligationChanged
+		}
+		handle := paymentmethods.CustodianHandle{Custodian: *p.Instrument.CustodianID, Method: p.Instrument.RailMethodRef}
+		if err := paymentmethods.LockCustodianHandles(ctx, q, in.MerchantID, handle); err != nil {
+			return err
+		}
+		if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, in.MerchantID, handle); err != nil {
+			return errors.Join(charge.ErrInstrumentChanged, err)
 		}
 		method, err = q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID})
 		if err != nil {

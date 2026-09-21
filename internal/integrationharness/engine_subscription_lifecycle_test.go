@@ -93,11 +93,23 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 	}))
 	defer gateway.Close()
 	h := New(t, t.Context())
+	// These are explicit merchant-admin deletion requests against a disposable
+	// fixture; enable its ordinary maintenance gate and restore it afterward.
+	var previousSwitch bool
+	require.NoError(t, h.Pool().QueryRow(t.Context(), `SELECT enabled FROM billing.destructive_action_switch`).Scan(&previousSwitch))
+	_, switchErr := h.Pool().Exec(t.Context(), `UPDATE billing.destructive_action_switch SET enabled=true`)
+	require.NoError(t, switchErr)
+	t.Cleanup(func() {
+		_, err := h.Pool().Exec(context.Background(), `UPDATE billing.destructive_action_switch SET enabled=$1`, previousSwitch)
+		require.NoError(t, err)
+	})
+
 	var host billingauth.DelegatedAuthenticator
 	surface := h.StartStandalone("USD", WithClock(clockwork.NewFakeClockAt(now)), WithConfig(func(c *config.Config) {
 		c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: gateway.URL}
 		c.ProviderWriteMode = config.ProviderWriteModeFull
-		c.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: hs.URL}
+		c.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: hs.URL, SDKURL: hs.URL + "/sdk.js"}
+		c.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 	}), func(c *standaloneConfig) {
 		c.delegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
 			return host.AuthenticateDelegated(ctx, r)
@@ -127,6 +139,8 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 	t.Cleanup(func() {
 		cleanup := context.Background()
 		_, err := pool.Exec(cleanup, `DELETE FROM public.river_job WHERE args->>'merchant_id'=$1`, owned.MerchantID.String())
+		require.NoError(t, err)
+		_, err = pool.Exec(cleanup, `DELETE FROM billing.rail_mutation_logs WHERE merchant_id=$1`, owned.MerchantID.UUID())
 		require.NoError(t, err)
 		_, err = pool.Exec(cleanup, `DELETE FROM billing.rail_intents WHERE merchant_id=$1`, owned.MerchantID.UUID())
 		require.NoError(t, err)
@@ -272,7 +286,10 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 					t.Cleanup(releaseDelete)
 					done := make(chan error, 1)
 					go func() {
-						_, err := owner.DeletePaymentMethod(t.Context(), openrails.CustomerID(user), openrails.PaymentMethodID(method))
+						result, err := owner.DeletePaymentMethod(t.Context(), openrails.CustomerID(user), openrails.PaymentMethodID(method))
+						if err == nil && result.Pending {
+							err = fmt.Errorf("deletion remains pending")
+						}
 						done <- err
 					}()
 					select {
@@ -294,8 +311,9 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 					releaseDelete()
 					require.NoError(t, <-done)
 				} else {
-					_, err := owner.DeletePaymentMethod(t.Context(), openrails.CustomerID(user), openrails.PaymentMethodID(method))
+					result, err := owner.DeletePaymentMethod(t.Context(), openrails.CustomerID(user), openrails.PaymentMethodID(method))
 					require.NoError(t, err)
+					require.False(t, result.Pending)
 				}
 				var methodID *uuid.UUID
 				require.NoError(t, pool.QueryRow(ctx, `SELECT payment_method_id FROM billing.subscriptions WHERE id=$1`, id).Scan(&methodID))

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 
@@ -110,9 +112,22 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	if p.SubscriptionID == nil {
 		return gen.OpenrailsRailIntent{}, errors.New("recurring operation requires a subscription")
 	}
+	var engineCustomer uuid.UUID
+	if p.IntentType == subscriptions.TypeSubscriptionCollection {
+		observed, err := subscriptions.NewSubscriptionRepo(s.db).GetByID(ctx, *p.SubscriptionID)
+		if err != nil {
+			return gen.OpenrailsRailIntent{}, err
+		}
+		engineCustomer = observed.CustomerID
+	}
 	var row gen.OpenrailsRailIntent
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.db.NewWithPgxTx(tx)
+		if engineCustomer != uuid.Nil {
+			if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: p.MerchantID, ID: engineCustomer}); err != nil {
+				return err
+			}
+		}
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, *p.SubscriptionID)
 		if err != nil {
 			return err
@@ -132,7 +147,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 			return err
 		}
 		if p.IntentType == subscriptions.TypeSubscriptionCollection {
-			if sub.CollectionPolicy != "engine" {
+			if sub.CollectionPolicy != "engine" || sub.CustomerID != engineCustomer {
 				return errors.New("engine operation requires engine scheduling ownership")
 			}
 			owner, err := d.Gen(ctx).GetUnresolvedSubscriptionCollection(ctx, gen.GetUnresolvedSubscriptionCollectionParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
@@ -141,6 +156,68 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 			}
 			if !errors.Is(err, pgx.ErrNoRows) {
 				return err
+			}
+			payload, ok := p.Payload.(subscriptions.SubscriptionCollectionPayload)
+			if !ok || p.Origin != OriginSystem || p.PspID == uuid.Nil || p.CustodianID == uuid.Nil {
+				return errors.New("engine admission requires typed system-owned terms")
+			}
+			handle := paymentmethods.CustodianHandle{Custodian: p.CustodianID, Method: payload.Instrument.RailMethodRef}
+			if err := paymentmethods.LockCustodianHandles(ctx, d.Gen(ctx), p.MerchantID, handle); err != nil {
+				return err
+			}
+			if err := paymentmethods.RequireCustodianHandleAvailable(ctx, d.Gen(ctx), p.MerchantID, handle); err != nil {
+				return err
+			}
+			method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: p.MerchantID, ID: payload.PaymentMethodID})
+			if err != nil {
+				return err
+			}
+			if sub.PaymentMethodID == nil || method.ID != *sub.PaymentMethodID || method.CustomerID != engineCustomer || method.ParkReason != "" {
+				return errors.New("engine admission payment method changed")
+			}
+			if err := payload.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
+				return err
+			}
+			if sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(payload.PreviousPeriodEnd) || (sub.Status != "active" && sub.Status != "past_due") || (sub.Status == "past_due" && (sub.NextRetryAt == nil || sub.NextRetryAt.After(payload.AcceptedAt))) {
+				return errors.New("engine admission is not a due obligation")
+			}
+			failures := 0
+			if sub.RetryAttempts != nil {
+				failures = *sub.RetryAttempts
+			}
+			if payload.FailureCount != failures {
+				return errors.New("engine admission changed the accepted failure count")
+			}
+			terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, payload.AcceptedAt)
+			if err != nil {
+				return err
+			}
+			terms, err = subscriptions.SelectEngineRenewalPeriod(terms, payload.AcceptedAt)
+			if err != nil {
+				return err
+			}
+			if !reflect.DeepEqual(terms, payload.Renewal) {
+				return errors.New("engine admission differs from current accepted catalog terms")
+			}
+			latest, err := d.Gen(ctx).GetLatestSubscriptionCollectionForPeriod(ctx, gen.GetLatestSubscriptionCollectionForPeriodParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID, PreviousPeriodEnd: payload.PreviousPeriodEnd})
+			ordinal := 0
+			if err == nil {
+				if latest.Status != StatusFailedTerminal {
+					return errors.New("previous engine obligation has not been released")
+				}
+				if err := ValidateSubscriptionCollectionTerminal(latest); err != nil {
+					return err
+				}
+				previous, err := subscriptions.DecodeSubscriptionCollectionPayload(latest)
+				if err != nil {
+					return err
+				}
+				ordinal = previous.Attempt + 1
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if payload.Attempt != ordinal {
+				return errors.New("engine admission changed its accepted attempt ordinal")
 			}
 		}
 		if p.IntentType == "nmi_upgrade" {

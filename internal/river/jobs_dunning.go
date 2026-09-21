@@ -116,7 +116,7 @@ func (w *DunningWorker) intentRunner() *intents.Runner {
 // armable: a declared-but-unarmable account must reach the ledger and park
 // with its loud fail-closed reason, not vanish in a silent skip.
 func (w *DunningWorker) storeArmsNMI(ctx context.Context, sub *models.Subscription) bool {
-	if w.NMIResolver == nil && w.EngineCollections == nil {
+	if w.NMIResolver == nil {
 		return false
 	}
 	_, ok, err := w.NMIResolver.ResolveNMIClient(ctx, sub.MerchantID, &sub.PspID)
@@ -157,7 +157,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		}
 	}
 
-	if w.NMIResolver == nil {
+	if w.NMIResolver == nil && w.EngineCollections == nil {
 		log.WithContext(ctx).Warn("NMI client resolver not configured; skipping dunning run")
 		return nil
 	}

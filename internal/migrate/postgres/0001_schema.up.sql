@@ -253,6 +253,9 @@ BEGIN
        AND ((s.collection_policy <> 'engine' AND s.status='past_due' AND s.next_retry_at IS NOT NULL AND s.next_retry_at <= p_now)
             OR (p_include_engine AND s.collection_policy='engine' AND s.current_period_ends_at <= p_now
                 AND (s.status='active' OR (s.status='past_due' AND s.next_retry_at <= p_now))
+                AND EXISTS (SELECT 1 FROM openrails.payment_methods pm JOIN openrails.psps p ON p.id=pm.psp_id AND p.merchant_id=pm.merchant_id JOIN openrails.custodians c ON c.id=pm.custodian_id AND c.merchant_id=pm.merchant_id
+                            WHERE pm.id=s.payment_method_id AND pm.merchant_id=s.merchant_id AND pm.customer_id=s.customer_id AND pm.psp_id=s.psp_id
+                              AND pm.custodian='hyperswitch' AND pm.park_reason='' AND pm.stored_credential_recurring_ref<>'' AND NOT p.archived AND NOT c.archived AND p.environment=c.environment)
                 AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=s.merchant_id AND i.subscription_id=s.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
        AND s.deleted_at IS NULL
      GROUP BY s.merchant_id
@@ -2781,6 +2784,7 @@ CREATE INDEX idx_subscriptions_customer_active_created ON openrails.subscription
 CREATE INDEX idx_subscriptions_destructive_run ON openrails.subscriptions USING btree (destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
 
 CREATE INDEX idx_subscriptions_engine_due ON openrails.subscriptions (merchant_id, current_period_ends_at, next_retry_at) WHERE collection_policy = 'engine' AND status IN ('active', 'past_due') AND deleted_at IS NULL;
+CREATE INDEX idx_subscriptions_engine_due_global ON openrails.subscriptions (current_period_ends_at, merchant_id) WHERE collection_policy = 'engine' AND status IN ('active', 'past_due') AND deleted_at IS NULL;
 
 CREATE INDEX idx_subscriptions_due_dunning ON openrails.subscriptions USING btree (next_retry_at, rail) WHERE ((status = 'past_due'::openrails.subscription_status) AND (next_retry_at IS NOT NULL));
 
