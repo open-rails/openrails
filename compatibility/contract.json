@@ -3000,8 +3000,10 @@
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
+      "sha256": "crypto/sha256",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
@@ -3981,6 +3983,7 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/subscriptions/admin_service.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",

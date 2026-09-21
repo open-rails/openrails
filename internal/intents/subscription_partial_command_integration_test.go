@@ -212,7 +212,7 @@ func TestDeleteProducerSeparatesCompletedProviderTargets(t *testing.T) {
 	require.Equal(t, StatusSucceeded, done.Status)
 	require.EqualValues(t, 1, a.deleteCalls.Load())
 	other := dbtest.EnsureTestPSP(ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "replacement-mobius-"+uuid.NewString())
-	reference := "replacement-" + uuid.NewString()
+	reference := fx.psid // Independent accounts may reuse the identical provider id.
 	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET psp_id=$2,rail_subscription_id=$3,deletion_scheduled_at=now() WHERE id=$1`, fx.subID, other, reference)
 	require.NoError(t, err)
 	require.NoError(t, scheduler.ScheduleNMIDelete(ctx, fx.userID.String(), fx.subID, time.Now()))
@@ -254,6 +254,7 @@ func TestOldDeleteCannotTargetOrUndoAReplacementBinding(t *testing.T) {
 	require.NoError(t, scheduler.ScheduleNMIDelete(ctx, fx.userID.String(), fx.subID, time.Now()))
 	second, err := fx.store.GetByIdempotencyKey(ctx, NMIDeleteIdempotencyKey(fx.subID, fx.pspID, reference))
 	require.NoError(t, err)
+	require.NotEqual(t, first.ID, second.ID, "a replacement reference on the same account has its own command")
 	require.NoError(t, scheduler.CancelNMIDelete(ctx, fx.userID.String(), fx.subID))
 	current, err := fx.store.Get(ctx, second.ID)
 	require.NoError(t, err)
