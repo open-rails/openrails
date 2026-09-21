@@ -144,7 +144,6 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	require.NoError(t, err)
 	_, err = surface.App().Runtime.Merchants.Secrets().Put(ctx, owned.MerchantID, name, vendor.APIKey)
 	require.NoError(t, err)
-	var invoiceID uuid.UUID
 	rt := surface.App().Runtime
 	ownerCtx := merchant.WithID(ctx, owned.MerchantID)
 	payer := identity.CustomerID(uuid.MustParse(user.ID))
@@ -165,6 +164,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	sdkOrigin := sdkURL.Scheme + "://" + sdkURL.Host
 	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/invoice-fixture" {
+			var invoiceID uuid.UUID
 			// Called by the test driver only after Save card completed.
 			// Saving either volatile or persistent capture creates no money rows.
 			var financial int
@@ -242,6 +242,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 		t.Logf("Explicit storage consent=%t; vendor readback storage_type=%s", store, method.StorageType)
 		if store {
 			require.NotNil(t, proof.InvoicePay)
+			invoiceID := proof.InvoicePay.Invoice.ID
 			require.Equal(t, "succeeded", proof.InvoicePay.Operation.Status)
 			require.Equal(t, "paid", proof.InvoicePay.Invoice.Status)
 			client, err := openrails.NewRemote(surface.BaseURL, openrails.WithMerchantID(owned.MerchantID), openrails.WithTokenProvider(func(context.Context) (string, error) { return token, nil }))
