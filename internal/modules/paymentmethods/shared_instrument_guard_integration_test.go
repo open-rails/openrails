@@ -40,7 +40,7 @@ func (noSubsReader) GetPaginatedByUserID(context.Context, string, int, int) ([]m
 // package cannot import intents: import cycle via subscriptions).
 func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
-	database, err := db.NewWithPGXPool(pool, "openrails")
+	database, err := db.NewWithPGXPool(pool, "billing")
 	require.NoError(t, err)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
@@ -55,7 +55,7 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 	// vaultStaticProviderSecretResolver, once a payment method carries a psp_id.
 	var pspID uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx, `
-		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, key)
+		INSERT INTO billing.psps (merchant_id, rail, environment, account_id, key)
 		VALUES ($1, 'nmi', 'live', 'mobius-account', 'mobius-account')
 		ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = false
 		RETURNING id`, dbtest.TestMerchantID.UUID()).Scan(&pspID))

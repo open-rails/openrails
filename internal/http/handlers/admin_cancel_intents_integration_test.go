@@ -64,7 +64,7 @@ func (fx *findingsFixture) railIntent(t *testing.T, intentType string, subID uui
 	t.Helper()
 	var row railIntentRow
 	require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx,
-		`SELECT id, status, origin FROM openrails.rail_intents
+		`SELECT id, status, origin FROM billing.rail_intents
 		 WHERE merchant_id = $1 AND intent_type = $2 AND subscription_id = $3`,
 		fx.merchant, intentType, subID).Scan(&row.ID, &row.Status, &row.Origin))
 	return row
@@ -127,7 +127,7 @@ func TestMerchantCancelNMIAmbiguousOutcomeParksForVerification(t *testing.T) {
 	fx.fake.deleteFails.Store(false)
 	fx.fake.subDeleted.Store(true)
 	_, err = fx.dbi.Pool().Exec(fx.ctx,
-		`UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1`, intent.ID)
+		`UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1`, intent.ID)
 	require.NoError(t, err)
 	_, err = fx.deleteRunner().RunVerifyOnce(fx.ctx)
 	require.NoError(t, err)
@@ -178,7 +178,7 @@ func TestMerchantCancelSolanaNamesTheWalletEndpoints(t *testing.T) {
 	productID, priceID := fx.seedSecondProduct()
 	subID := uuid.New()
 	now := time.Now().UTC()
-	fx.exec(`INSERT INTO openrails.subscriptions
+	fx.exec(`INSERT INTO billing.subscriptions
 	          (id, price_id, product_id, status, rail, rail_subscription_id,
 	           current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
 	        VALUES ($1, $2, $3, 'active', 'solana', 'pda-merchant-cancel', $4, $5, $4, $6, $7, $8)`,

@@ -29,7 +29,7 @@ func TestSearchCustomersScopedToMerchant(t *testing.T) {
 	otherMerchantID := uuid.New()
 	otherSlug := fmt.Sprintf("othr%x", time.Now().UnixNano())
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		otherMerchantID, otherSlug)
 	require.NoError(t, err)
 
@@ -43,16 +43,16 @@ func TestSearchCustomersScopedToMerchant(t *testing.T) {
 		{theirs, otherMerchantID},
 	} {
 		_, err := pool.Exec(ctx,
-			`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+			`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`,
 			row.id, row.merchant)
 		require.NoError(t, err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.customers WHERE id IN ($1, $2)`, mine, theirs)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.merchants WHERE id = $1`, otherMerchantID)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.customers WHERE id IN ($1, $2)`, mine, theirs)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.merchants WHERE id = $1`, otherMerchantID)
 	})
 
-	queries := gen.New(pool)
+	queries := dbtest.Queries(pool)
 
 	// Unfiltered list: only the scoped merchant's customer comes back.
 	rows, err := queries.SearchCustomers(ctx, gen.SearchCustomersParams{

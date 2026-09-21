@@ -37,14 +37,14 @@ func seedSweepMerchants(t *testing.T, count int) (*db.DB, []uuid.UUID) {
 	for i := range ids {
 		ids[i] = uuid.MustParse(fmt.Sprintf("%s-0000-4000-8000-%012x", prefix, i+1))
 	}
-	_, err := admin.Exec(ctx, `INSERT INTO openrails.merchants(id,slug,status) SELECT id,'sweep-'||id::text,'active' FROM unnest($1::uuid[]) AS id`, ids)
+	_, err := admin.Exec(ctx, `INSERT INTO billing.merchants(id,slug,status) SELECT id,'sweep-'||id::text,'active' FROM unnest($1::uuid[]) AS id`, ids)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = admin.Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=ANY($1::uuid[])`, ids)
-		_, _ = admin.Exec(ctx, `DELETE FROM openrails.psps WHERE merchant_id=ANY($1::uuid[])`, ids)
-		_, _ = admin.Exec(ctx, `DELETE FROM openrails.merchants WHERE id=ANY($1::uuid[])`, ids)
+		_, _ = admin.Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=ANY($1::uuid[])`, ids)
+		_, _ = admin.Exec(ctx, `DELETE FROM billing.psps WHERE merchant_id=ANY($1::uuid[])`, ids)
+		_, _ = admin.Exec(ctx, `DELETE FROM billing.merchants WHERE id=ANY($1::uuid[])`, ids)
 	})
-	_, err = admin.Exec(ctx, `INSERT INTO openrails.psps(merchant_id,rail,environment,account_id) SELECT id,'stripe','test','acct_'||id::text FROM unnest($1::uuid[]) AS id`, ids)
+	_, err = admin.Exec(ctx, `INSERT INTO billing.psps(merchant_id,rail,environment,account_id) SELECT id,'stripe','test','acct_'||id::text FROM unnest($1::uuid[]) AS id`, ids)
 	require.NoError(t, err)
 	return database, ids
 }
@@ -76,13 +76,13 @@ func TestCatalogSweepCoverageAndFailureHealth(t *testing.T) {
 	database, ids := seedSweepMerchants(t, 1001)
 	ctx := context.Background()
 	admin := dbtest.SharedSuperuserPGXPool(t)
-	_, err := admin.Exec(ctx, `INSERT INTO openrails.reconciliation_findings(merchant_id,finding_type,subject_key,severity,status,rail,psp_id,openrails_resource_type,openrails_resource_id,external_resource_id)
+	_, err := admin.Exec(ctx, `INSERT INTO billing.reconciliation_findings(merchant_id,finding_type,subject_key,severity,status,rail,psp_id,openrails_resource_type,openrails_resource_id,external_resource_id)
  SELECT p.merchant_id,'catalog.orphan_in_stripe',jsonb_build_array(p.id::text,'product',p.merchant_id::text,'product_'||p.merchant_id::text,'')::text,'low','reconcile_required','stripe',p.id,'product',p.merchant_id::text,'product_'||p.merchant_id::text
-   FROM openrails.psps p WHERE p.merchant_id=ANY($1::uuid[])`, ids)
+   FROM billing.psps p WHERE p.merchant_id=ANY($1::uuid[])`, ids)
 	require.NoError(t, err)
 	source := &sweepRails{database: database, seen: map[uuid.UUID]int{}, failures: map[uuid.UUID]string{
 		ids[0]: "SELECT 1/0", // Earlier nonstructural PG error must not mask later drift.
-		ids[1]: "SELECT missing_sweep_column FROM openrails.products",
+		ids[1]: "SELECT missing_sweep_column FROM billing.products",
 	}}
 	worker := CatalogReconciliationPullWorker{DB: database, Config: &config.Config{}, Rails: source}
 	job := &rivertype.JobRow{Kind: KindCatalogReconciliationPull}
@@ -97,15 +97,15 @@ func TestCatalogSweepCoverageAndFailureHealth(t *testing.T) {
 		require.Equal(t, 1, source.seen[id], "merchant %s must be visited once", id)
 	}
 	var resolved int
-	require.NoError(t, admin.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_drift_events WHERE merchant_id=ANY($1::uuid[]) AND resolved_at IS NOT NULL`, ids).Scan(&resolved))
+	require.NoError(t, admin.QueryRow(ctx, `SELECT count(*) FROM billing.catalog_drift_events WHERE merchant_id=ANY($1::uuid[]) AND resolved_at IS NOT NULL`, ids).Scan(&resolved))
 	require.Zero(t, resolved, "an unarmed or failed account read is never absence proof")
 	var lastSuccess *time.Time
 	var failures int
-	require.NoError(t, admin.QueryRow(ctx, `SELECT last_success_at,consecutive_failures FROM openrails.worker_state WHERE worker_kind=$1`, KindCatalogReconciliationPull).Scan(&lastSuccess, &failures))
+	require.NoError(t, admin.QueryRow(ctx, `SELECT last_success_at,consecutive_failures FROM billing.worker_state WHERE worker_kind=$1`, KindCatalogReconciliationPull).Scan(&lastSuccess, &failures))
 	require.Nil(t, lastSuccess)
 	require.Equal(t, 1, failures)
 	t.Cleanup(func() {
-		_, _ = admin.Exec(ctx, `DELETE FROM openrails.worker_state WHERE worker_kind=$1`, KindCatalogReconciliationPull)
+		_, _ = admin.Exec(ctx, `DELETE FROM billing.worker_state WHERE worker_kind=$1`, KindCatalogReconciliationPull)
 	})
 }
 
@@ -134,11 +134,11 @@ func TestStripeWebhookSweepCoverageAndFailure(t *testing.T) {
 	admin := dbtest.SharedSuperuserPGXPool(t)
 	var lastSuccess *time.Time
 	var failures int
-	require.NoError(t, admin.QueryRow(ctx, `SELECT last_success_at,consecutive_failures FROM openrails.worker_state WHERE worker_kind=$1`, KindStripeWebhookReconcile).Scan(&lastSuccess, &failures))
+	require.NoError(t, admin.QueryRow(ctx, `SELECT last_success_at,consecutive_failures FROM billing.worker_state WHERE worker_kind=$1`, KindStripeWebhookReconcile).Scan(&lastSuccess, &failures))
 	require.Nil(t, lastSuccess)
 	require.Equal(t, 1, failures)
 	t.Cleanup(func() {
-		_, _ = admin.Exec(ctx, `DELETE FROM openrails.worker_state WHERE worker_kind=$1`, KindStripeWebhookReconcile)
+		_, _ = admin.Exec(ctx, `DELETE FROM billing.worker_state WHERE worker_kind=$1`, KindStripeWebhookReconcile)
 	})
 	for _, id := range ids {
 		require.True(t, secrets.seen[merchant.ID(id)], "merchant %s must be reached beyond the first page", id)
@@ -176,22 +176,22 @@ func TestNotificationSweepPoisonPageDoesNotStarveReceipt(t *testing.T) {
 	}
 	require.NoError(t, database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		customer = dbtest.EnsureCustomerIDPgxFor(ctx, t, database.Qx(ctx), mid, uuid.NewString())
-		_, err := database.Qx(ctx).Exec(ctx, `INSERT INTO openrails.notifications(id,merchant_id,customer_id,event_type,data,created_at)
+		_, err := database.Qx(ctx).Exec(ctx, `INSERT INTO billing.notifications(id,merchant_id,customer_id,event_type,data,created_at)
  SELECT id,$2,$3,'one_off_purchase_completed',jsonb_build_object('user_email','buyer@example.test','amount',CASE WHEN id=$4 THEN '1000000' ELSE 'invalid' END,'currency','USD'),$5
  FROM unnest($1::uuid[]) AS id`, ids, mid, customer, ids[200], time.Now().Add(-time.Hour))
 		return err
 	}))
 	t.Cleanup(func() {
 		_ = database.RunInMerchantConn(mctx, func(ctx context.Context) error {
-			_, err := database.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notifications WHERE id=ANY($1::uuid[])`, ids)
+			_, err := database.Qx(ctx).Exec(ctx, `DELETE FROM billing.notifications WHERE id=ANY($1::uuid[])`, ids)
 			if err != nil {
 				return err
 			}
-			_, err = database.Qx(ctx).Exec(ctx, `DELETE FROM openrails.customers WHERE id=$1`, customer)
+			_, err = database.Qx(ctx).Exec(ctx, `DELETE FROM billing.customers WHERE id=$1`, customer)
 			if err != nil {
 				return err
 			}
-			_, err = database.Qx(ctx).Exec(ctx, `DELETE FROM openrails.merchant_configurations WHERE merchant_id=$1`, mid)
+			_, err = database.Qx(ctx).Exec(ctx, `DELETE FROM billing.merchant_configurations WHERE merchant_id=$1`, mid)
 			return err
 		})
 	})
@@ -202,7 +202,7 @@ func TestNotificationSweepPoisonPageDoesNotStarveReceipt(t *testing.T) {
 	}
 	require.NoError(t, database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		var delivered, pending int
-		err := database.Qx(ctx).QueryRow(ctx, `SELECT count(*) FILTER(WHERE emailed_at IS NOT NULL),count(*) FILTER(WHERE emailed_at IS NULL) FROM openrails.notifications WHERE id=ANY($1::uuid[])`, ids).Scan(&delivered, &pending)
+		err := database.Qx(ctx).QueryRow(ctx, `SELECT count(*) FILTER(WHERE emailed_at IS NOT NULL),count(*) FILTER(WHERE emailed_at IS NULL) FROM billing.notifications WHERE id=ANY($1::uuid[])`, ids).Scan(&delivered, &pending)
 		require.NoError(t, err)
 		require.Equal(t, 1, delivered)
 		require.Equal(t, 200, pending, "failed rows remain visible and retryable")

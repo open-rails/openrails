@@ -32,15 +32,15 @@ func TestMaintenanceRunsKeepKindsAndAuthorizationEvidenceSeparate(t *testing.T) 
 		require.NoError(t, err)
 		for _, column := range []string{"kind", "actor", "coverage", "expected_rows", "psp_id", "inventory_manifest", "inventory_total_rows"} {
 			var canUpdate bool
-			require.NoError(t, database.Qx(ctx).QueryRow(ctx, `SELECT has_column_privilege('openrails_app','openrails.maintenance_runs',$1,'UPDATE')`, column).Scan(&canUpdate))
+			require.NoError(t, database.Qx(ctx).QueryRow(ctx, `SELECT has_column_privilege('openrails_app','billing.maintenance_runs',$1,'UPDATE')`, column).Scan(&canUpdate))
 			require.False(t, canUpdate, "authorization and inventory evidence must be immutable: %s", column)
 		}
 		var canDelete bool
-		require.NoError(t, database.Qx(ctx).QueryRow(ctx, `SELECT has_table_privilege('openrails_app','openrails.maintenance_runs','DELETE')`).Scan(&canDelete))
+		require.NoError(t, database.Qx(ctx).QueryRow(ctx, `SELECT has_table_privilege('openrails_app','billing.maintenance_runs','DELETE')`).Scan(&canDelete))
 		require.False(t, canDelete)
-		_, err = database.Qx(ctx).Exec(ctx, `INSERT INTO openrails.maintenance_runs(merchant_id,kind,status,finished_at,inventory_total_rows,inventory_manifest) VALUES($1,'purge_inventory','completed',now(),2,'{"total_rows":1}')`, mid.UUID())
+		_, err = database.Qx(ctx).Exec(ctx, `INSERT INTO billing.maintenance_runs(merchant_id,kind,status,finished_at,inventory_total_rows,inventory_manifest) VALUES($1,'purge_inventory','completed',now(),2,'{"total_rows":1}')`, mid.UUID())
 		require.Error(t, err, "inventory header and manifest must agree")
-		_, err = database.Qx(ctx).Exec(ctx, `INSERT INTO openrails.maintenance_runs(merchant_id,kind,actor) VALUES($1,'unimplemented','operator')`, mid.UUID())
+		_, err = database.Qx(ctx).Exec(ctx, `INSERT INTO billing.maintenance_runs(merchant_id,kind,actor) VALUES($1,'unimplemented','operator')`, mid.UUID())
 		require.Error(t, err, "unknown maintenance kinds must be refused")
 		return nil
 	}))
@@ -60,7 +60,7 @@ func TestMaintenanceRunChildReferencesAreClassRestricted(t *testing.T) {
 		destructive, err := q.CreateDestructiveRun(ctx, gen.CreateDestructiveRunParams{ID: uuid.New(), MerchantID: mid, PspID: &f.pspID, Kind: "prune", Actor: "operator"})
 		require.NoError(t, err)
 		inventory := uuid.New()
-		_, err = database.Qx(ctx).Exec(ctx, `INSERT INTO openrails.maintenance_runs(id,merchant_id,kind,status,finished_at,inventory_total_rows,inventory_manifest) VALUES($1,$2,'purge_inventory','completed',now(),1,'{"total_rows":1}')`, inventory, mid)
+		_, err = database.Qx(ctx).Exec(ctx, `INSERT INTO billing.maintenance_runs(id,merchant_id,kind,status,finished_at,inventory_total_rows,inventory_manifest) VALUES($1,$2,'purge_inventory','completed',now(),1,'{"total_rows":1}')`, inventory, mid)
 		require.NoError(t, err)
 
 		refused := func(sql string, args ...any) {
@@ -69,22 +69,22 @@ func TestMaintenanceRunChildReferencesAreClassRestricted(t *testing.T) {
 			require.ErrorContains(t, err, "foreign key", sql)
 		}
 		for _, run := range []uuid.UUID{observation.ID, inventory} {
-			refused(`UPDATE openrails.payments SET destructive_run_id=$1 WHERE merchant_id=$2 AND id=$3`, run, mid, f.payID)
-			refused(`UPDATE openrails.subscriptions SET destructive_run_id=$1 WHERE merchant_id=$2 AND id=$3`, run, mid, f.subID)
-			refused(`UPDATE openrails.checkout_sessions SET destructive_run_id=$1 WHERE merchant_id=$2 AND id=$3`, run, mid, f.sessID)
-			refused(`UPDATE openrails.entitlements SET destructive_run_id=$1 WHERE merchant_id=$2 AND id=$3`, run, mid, f.entID)
-			refused(`INSERT INTO openrails.destructive_run_before_images(merchant_id,destructive_run_id,table_name,row_id,before) VALUES($1,$2,'subscriptions',$3,'{}')`, mid, run, f.subID)
+			refused(`UPDATE billing.payments SET destructive_run_id=$1 WHERE merchant_id=$2 AND id=$3`, run, mid, f.payID)
+			refused(`UPDATE billing.subscriptions SET destructive_run_id=$1 WHERE merchant_id=$2 AND id=$3`, run, mid, f.subID)
+			refused(`UPDATE billing.checkout_sessions SET destructive_run_id=$1 WHERE merchant_id=$2 AND id=$3`, run, mid, f.sessID)
+			refused(`UPDATE billing.entitlements SET destructive_run_id=$1 WHERE merchant_id=$2 AND id=$3`, run, mid, f.entID)
+			refused(`INSERT INTO billing.destructive_run_before_images(merchant_id,destructive_run_id,table_name,row_id,before) VALUES($1,$2,'subscriptions',$3,'{}')`, mid, run, f.subID)
 		}
-		refused(`INSERT INTO openrails.reconciliation_findings(merchant_id,finding_type,subject_key,severity,status,first_seen_run,last_seen_run) VALUES($1,'pull.class_fk',$2,'low','reconcile_required',$3,$3)`, mid, uuid.NewString(), destructive.ID)
+		refused(`INSERT INTO billing.reconciliation_findings(merchant_id,finding_type,subject_key,severity,status,first_seen_run,last_seen_run) VALUES($1,'pull.class_fk',$2,'low','reconcile_required',$3,$3)`, mid, uuid.NewString(), destructive.ID)
 
-		_, err = database.Qx(ctx).Exec(ctx, `UPDATE openrails.payments SET destructive_run_id=$1 WHERE merchant_id=$2 AND id=$3`, destructive.ID, mid, f.payID)
+		_, err = database.Qx(ctx).Exec(ctx, `UPDATE billing.payments SET destructive_run_id=$1 WHERE merchant_id=$2 AND id=$3`, destructive.ID, mid, f.payID)
 		require.NoError(t, err)
-		_, err = database.Qx(ctx).Exec(ctx, `UPDATE openrails.payments SET destructive_run_id=NULL WHERE merchant_id=$1 AND id=$2`, mid, f.payID)
+		_, err = database.Qx(ctx).Exec(ctx, `UPDATE billing.payments SET destructive_run_id=NULL WHERE merchant_id=$1 AND id=$2`, mid, f.payID)
 		require.NoError(t, err)
 		finding := uuid.NewString()
-		_, err = database.Qx(ctx).Exec(ctx, `INSERT INTO openrails.reconciliation_findings(merchant_id,finding_type,subject_key,severity,status,first_seen_run,last_seen_run) VALUES($1,'pull.class_fk',$2,'low','reconcile_required',$3,$3)`, mid, finding, observation.ID)
+		_, err = database.Qx(ctx).Exec(ctx, `INSERT INTO billing.reconciliation_findings(merchant_id,finding_type,subject_key,severity,status,first_seen_run,last_seen_run) VALUES($1,'pull.class_fk',$2,'low','reconcile_required',$3,$3)`, mid, finding, observation.ID)
 		require.NoError(t, err)
-		_, err = database.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, mid, finding)
+		_, err = database.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, mid, finding)
 		return err
 	}))
 }

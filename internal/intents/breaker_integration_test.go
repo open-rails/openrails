@@ -46,24 +46,24 @@ func seedBreakerMerchant(t *testing.T, n int) breakerMerchant {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, m.id, "breaker-"+sfx)
+	exec(`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, m.id, "breaker-"+sfx)
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, m.id, "mobius")
 	productID, priceID := uuid.New(), uuid.New()
-	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+	exec(`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "breaker-prod-"+sfx, m.id)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, m.id)
 
 	now := time.Now().UTC()
 	for i := 0; i < n; i++ {
 		subID := uuid.New()
-		customer, err := gen.New(pool).EnsureCustomer(ctx, gen.EnsureCustomerParams{
+		customer, err := dbtest.Queries(pool).EnsureCustomer(ctx, gen.EnsureCustomerParams{
 			ID: uuid.New(), MerchantID: m.id,
 		})
 		require.NoError(t, err)
 		custID := customer.ID
 		psid := fmt.Sprintf("psid-%s-%d", sfx, i)
-		exec(`INSERT INTO openrails.subscriptions
+		exec(`INSERT INTO billing.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
 		         cancelled_at, cancel_type, deletion_scheduled_at, customer_id, merchant_id, psp_id)
@@ -88,14 +88,14 @@ func seedBreakerMerchant(t *testing.T, n int) breakerMerchant {
 	}
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.rail_mutation_logs WHERE merchant_id = $1`, m.id)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.rail_intents WHERE merchant_id = $1`, m.id)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1`, m.id)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.subscriptions WHERE merchant_id = $1`, m.id)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.prices WHERE merchant_id = $1`, m.id)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.products WHERE merchant_id = $1`, m.id)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.customers WHERE merchant_id = $1`, m.id)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.merchants WHERE id = $1`, m.id)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.rail_mutation_logs WHERE merchant_id = $1`, m.id)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.rail_intents WHERE merchant_id = $1`, m.id)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id = $1`, m.id)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.subscriptions WHERE merchant_id = $1`, m.id)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.prices WHERE merchant_id = $1`, m.id)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.products WHERE merchant_id = $1`, m.id)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.customers WHERE merchant_id = $1`, m.id)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.merchants WHERE id = $1`, m.id)
 	})
 	return m
 }
@@ -103,7 +103,7 @@ func seedBreakerMerchant(t *testing.T, n int) breakerMerchant {
 func (m breakerMerchant) statusCounts(t *testing.T, dbi *db.DB) map[string]int {
 	t.Helper()
 	rows, err := dbi.Pool().Query(context.Background(),
-		`SELECT status, count(*) FROM openrails.rail_intents WHERE merchant_id = $1 GROUP BY status`, m.id)
+		`SELECT status, count(*) FROM billing.rail_intents WHERE merchant_id = $1 GROUP BY status`, m.id)
 	require.NoError(t, err)
 	defer rows.Close()
 	out := map[string]int{}
@@ -163,7 +163,7 @@ func TestBreakerHaltsBulkDestructiveExecution(t *testing.T) {
 	var status string
 	var evidence []byte
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT id, status, evidence FROM openrails.reconciliation_findings
+		`SELECT id, status, evidence FROM billing.reconciliation_findings
 		 WHERE merchant_id = $1 AND finding_type = $2`, bulk.id, HeldBulkFindingType).
 		Scan(&findingID, &status, &evidence))
 	assert.Equal(t, "requires_review", status)
@@ -172,26 +172,26 @@ func TestBreakerHaltsBulkDestructiveExecution(t *testing.T) {
 	assert.Contains(t, string(evidence), `"executed_count"`)
 	var findingCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.reconciliation_findings WHERE merchant_id = $1`, bulk.id).Scan(&findingCount))
+		`SELECT count(*) FROM billing.reconciliation_findings WHERE merchant_id = $1`, bulk.id).Scan(&findingCount))
 	assert.Equal(t, 1, findingCount, "one standing finding per merchant")
 
 	// Held intents never expire out of the ledger while the finding is open,
 	// even past their relevance window.
 	heldID := heldIntent(t, bulk.db, bulk)
-	_, err = pool.Exec(ctx, `UPDATE openrails.rail_intents SET expires_at = now() - interval '1 minute' WHERE id = $1`, heldID)
+	_, err = pool.Exec(ctx, `UPDATE billing.rail_intents SET expires_at = now() - interval '1 minute' WHERE id = $1`, heldID)
 	require.NoError(t, err)
 	expired, err := NewStore(bulk.db).ExpireOverdue(ctx, time.Now().UTC())
 	require.NoError(t, err)
 	_ = expired // other tests' rows may expire; ours must not
 	var heldStatus string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM openrails.rail_intents WHERE id = $1`, heldID).Scan(&heldStatus))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM billing.rail_intents WHERE id = $1`, heldID).Scan(&heldStatus))
 	assert.Equal(t, StatusPending, heldStatus, "breaker-held intent must not expire while the finding is open")
-	_, err = pool.Exec(ctx, `UPDATE openrails.rail_intents SET expires_at = NULL WHERE id = $1`, heldID)
+	_, err = pool.Exec(ctx, `UPDATE billing.rail_intents SET expires_at = NULL WHERE id = $1`, heldID)
 	require.NoError(t, err)
 
 	// A second pass with the finding still open executes nothing more.
 	_, err = pool.Exec(ctx,
-		`UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE merchant_id = $1 AND status = $2`,
+		`UPDATE billing.rail_intents SET next_attempt_at = now() WHERE merchant_id = $1 AND status = $2`,
 		bulk.id, StatusPending)
 	require.NoError(t, err)
 	_, err = runner.RunExecuteOnce(ctx)
@@ -202,11 +202,11 @@ func TestBreakerHaltsBulkDestructiveExecution(t *testing.T) {
 
 	// Operator resolution (ack → fixed) resumes: the window restarts at the
 	// resolution instant, so the held intents drain.
-	n, err := gen.New(pool).AckReconciliationFinding(ctx, gen.AckReconciliationFindingParams{ID: findingID})
+	n, err := dbtest.Queries(pool).AckReconciliationFinding(ctx, gen.AckReconciliationFindingParams{ID: findingID})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n)
 	_, err = pool.Exec(ctx,
-		`UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE merchant_id = $1 AND status = $2`,
+		`UPDATE billing.rail_intents SET next_attempt_at = now() WHERE merchant_id = $1 AND status = $2`,
 		bulk.id, StatusPending)
 	require.NoError(t, err)
 	_, err = runner.RunExecuteOnce(ctx)
@@ -220,7 +220,7 @@ func heldIntent(t *testing.T, dbi *db.DB, m breakerMerchant) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID
 	require.NoError(t, dbi.Pool().QueryRow(context.Background(),
-		`SELECT id FROM openrails.rail_intents WHERE merchant_id = $1 AND status = $2 LIMIT 1`,
+		`SELECT id FROM billing.rail_intents WHERE merchant_id = $1 AND status = $2 LIMIT 1`,
 		m.id, StatusPending).Scan(&id))
 	return id
 }

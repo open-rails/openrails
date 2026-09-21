@@ -96,13 +96,13 @@ func newEnv(t *testing.T) *env {
 		merchant: dbtest.TestMerchantID,
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.host_outbox WHERE subject_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.customer_delinquency WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.merchant_configurations WHERE merchant_id = $1", dbtest.TestMerchantID.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.host_outbox WHERE subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.customer_delinquency WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.notifications WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.money_settings WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.merchant_configurations WHERE merchant_id = $1", dbtest.TestMerchantID.UUID())
 	})
 	return e
 }
@@ -148,7 +148,7 @@ func (e *env) accrueAndBill(t *testing.T, amount int64) uuid.UUID {
 func (e *env) seedCard(t *testing.T) uuid.UUID {
 	t.Helper()
 	pm := uuid.New()
-	_, err := gen.New(e.pool).CreatePaymentMethod(e.ctx, gen.CreatePaymentMethodParams{
+	_, err := dbtest.Queries(e.pool).CreatePaymentMethod(e.ctx, gen.CreatePaymentMethodParams{
 		ID:                   pm,
 		MerchantID:           e.merchant.UUID(),
 		CustomerID:           e.payer.UUID(),
@@ -159,7 +159,7 @@ func (e *env) seedCard(t *testing.T) uuid.UUID {
 	})
 	require.NoError(t, err)
 	dbtest.SeedNMIStoredCredentialRefs(e.ctx, t, e.pool, pm)
-	t.Cleanup(func() { _, _ = e.pool.Exec(e.ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm) })
+	t.Cleanup(func() { _, _ = e.pool.Exec(e.ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pm) })
 	return pm
 }
 
@@ -195,9 +195,9 @@ func (e *env) seedActiveSubscription(t *testing.T) uuid.UUID {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = e.pool.Exec(e.ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = e.pool.Exec(e.ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = e.pool.Exec(e.ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = e.pool.Exec(e.ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = e.pool.Exec(e.ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = e.pool.Exec(e.ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 	return subID
 }
@@ -292,11 +292,11 @@ func TestDelinquencyLifecycle(t *testing.T) {
 	requireSubscriptionActive(t, e, subID)
 	var cards int
 	require.NoError(t, e.pool.QueryRow(e.ctx,
-		`SELECT count(*) FROM openrails.payment_methods WHERE customer_id = $1`, e.payer.UUID()).Scan(&cards))
+		`SELECT count(*) FROM billing.payment_methods WHERE customer_id = $1`, e.payer.UUID()).Scan(&cards))
 	require.Equal(t, 1, cards, "delinquency must never delete a stored payment method")
 	var invoiceStatus string
 	require.NoError(t, e.pool.QueryRow(e.ctx,
-		`SELECT status FROM openrails.invoices WHERE id = $1`, invoiceID).Scan(&invoiceStatus))
+		`SELECT status FROM billing.invoices WHERE id = $1`, invoiceID).Scan(&invoiceStatus))
 	require.NotEqual(t, "uncollectible", invoiceStatus,
 		"delinquency is about SERVICE; writing the debt off is the collection schedule's decision, not the clock's")
 
@@ -394,11 +394,11 @@ func TestDelinquencyIsMerchantIsolated(t *testing.T) {
 
 	other := merchant.ID(uuid.New())
 	_, err = e.pool.Exec(e.ctx, `
-		INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		other.UUID(), "or878-other-"+uuid.NewString()[:8])
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = e.pool.Exec(context.Background(), "DELETE FROM openrails.merchants WHERE id = $1", other.UUID())
+		_, _ = e.pool.Exec(context.Background(), "DELETE FROM billing.merchants WHERE id = $1", other.UUID())
 	})
 
 	otherDB := dbtest.OpenMerchantDB(t, other.UUID())
@@ -504,7 +504,7 @@ func requireSubscriptionActive(t *testing.T, e *env, subID uuid.UUID) {
 	var status string
 	var cancelledAt *time.Time
 	require.NoError(t, e.pool.QueryRow(e.ctx,
-		`SELECT status, cancelled_at FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&status, &cancelledAt))
+		`SELECT status, cancelled_at FROM billing.subscriptions WHERE id = $1`, subID).Scan(&status, &cancelledAt))
 	require.Equal(t, string(models.StatusActive), status,
 		"delinquency must NEVER cancel a subscription: the operator owns the shutoff, and entitlements are never lost to our judgement")
 	require.Nil(t, cancelledAt)
@@ -514,7 +514,7 @@ func requireNotification(t *testing.T, e *env, eventType models.NotificationEven
 	t.Helper()
 	var n int
 	require.NoError(t, e.pool.QueryRow(e.ctx,
-		`SELECT count(*) FROM openrails.notifications WHERE customer_id = $1 AND event_type = $2`,
+		`SELECT count(*) FROM billing.notifications WHERE customer_id = $1 AND event_type = $2`,
 		e.payer.UUID(), string(eventType)).Scan(&n))
 	require.Equal(t, 1, n, "the payer is told exactly once on each rung it can act on: %s", eventType)
 }
@@ -524,7 +524,7 @@ func requireNotification(t *testing.T, e *env, eventType models.NotificationEven
 func settleInvoice(t *testing.T, e *env, invoiceID uuid.UUID) {
 	t.Helper()
 	_, err := e.pool.Exec(e.ctx, `
-		UPDATE openrails.invoices
+		UPDATE billing.invoices
 		   SET amount_paid = total_amount, amount_due = 0, status = 'paid', paid_at = $2, updated_at = $2
 		 WHERE id = $1`, invoiceID, e.clock.Now().UTC())
 	require.NoError(t, err)

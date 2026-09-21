@@ -31,7 +31,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 
 	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	clock := clockwork.NewFakeClockAt(t0)
@@ -114,12 +114,12 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.grants WHERE customer_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	entSvc := entitlements.NewEntitlementService(dbi)
@@ -140,7 +140,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	graceRowCount := func() int {
 		var n int
 		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements WHERE customer_id = $1 AND source_type = $2 AND source_id = $3`,
+			`SELECT count(*) FROM billing.entitlements WHERE customer_id = $1 AND source_type = $2 AND source_id = $3`,
 			tenantSubjectID, string(models.EntitlementSourceGrace), subID).Scan(&n))
 		return n
 	}
@@ -188,7 +188,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	require.Zero(t, graceRowCount(), "#691: dunning failures mint no grace windows")
 	var status string
 	var graceEndsAt *time.Time
-	require.NoError(t, pool.QueryRow(ctx, `SELECT status, grace_ends_at FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&status, &graceEndsAt))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status, grace_ends_at FROM billing.subscriptions WHERE id = $1`, subID).Scan(&status, &graceEndsAt))
 	require.Equal(t, "past_due", status)
 	require.NotNil(t, graceEndsAt, "grace_ends_at survives as the pacing marker")
 	require.True(t, entitled(clock.Now().UTC()), "access intact mid-dunning")
@@ -233,13 +233,13 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 	var newStatus string
 	var periodEnd time.Time
 	var clearedGrace *time.Time
-	require.NoError(t, pool.QueryRow(ctx, `SELECT status, current_period_ends_at, grace_ends_at FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&newStatus, &periodEnd, &clearedGrace))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status, current_period_ends_at, grace_ends_at FROM billing.subscriptions WHERE id = $1`, subID).Scan(&newStatus, &periodEnd, &clearedGrace))
 	require.Equal(t, "active", newStatus)
 	require.Equal(t, expectedPaidEnd.UTC(), periodEnd.UTC(), "paid-through fact = the rail-provided term end")
 	require.Nil(t, clearedGrace, "renewal clears the pacing marker")
 
 	rows, err := pool.Query(ctx,
-		`SELECT end_at, revoked_at, deleted_at FROM openrails.entitlements WHERE customer_id = $1 AND source_type = $2 AND source_id = $3`,
+		`SELECT end_at, revoked_at, deleted_at FROM billing.entitlements WHERE customer_id = $1 AND source_type = $2 AND source_id = $3`,
 		tenantSubjectID, string(models.EntitlementSourceSubscription), subID)
 	require.NoError(t, err)
 	liveWindows := 0
@@ -256,7 +256,7 @@ func TestEntitlements_CCBillDunning_StateMachine(t *testing.T) {
 
 	var periodGrants int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.grants WHERE source_type='subscription' AND source_id=$1 AND event='grant' AND ends_at IS NOT NULL`,
+		`SELECT count(*) FROM billing.grants WHERE source_type='subscription' AND source_id=$1 AND event='grant' AND ends_at IS NOT NULL`,
 		subID.String()).Scan(&periodGrants))
 	require.Equal(t, 1, periodGrants, "the renewal records its bounded per-period grant")
 

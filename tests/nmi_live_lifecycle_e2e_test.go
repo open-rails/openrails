@@ -224,7 +224,7 @@ func bindPriceToNMIProvider(t *testing.T, suite *TestContainerSuite, priceID uui
 
 func setPriceAmount(t *testing.T, suite *TestContainerSuite, p *models.Price, amount int64) {
 	t.Helper()
-	_, err := suite.Pool.Exec(context.Background(), "UPDATE openrails.prices SET amount = $1 WHERE id = $2", amount, p.ID)
+	_, err := suite.Pool.Exec(context.Background(), "UPDATE billing.prices SET amount = $1 WHERE id = $2", amount, p.ID)
 	require.NoError(t, err)
 	p.Amount = amount
 }

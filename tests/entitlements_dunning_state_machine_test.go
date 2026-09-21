@@ -97,10 +97,10 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", suite.ensureCustomer(ctx, userID))
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", suite.ensureCustomer(ctx, userID))
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	// (1) #691 standing access: entitled inside the paid window AND past its
@@ -117,7 +117,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 
 	countGrace := func() int {
 		return suite.Count(ctx, `
-			SELECT COUNT(*) FROM openrails.entitlements
+			SELECT COUNT(*) FROM billing.entitlements
 			WHERE customer_id = $1 AND entitlement = $2
 			  AND source_type = $3 AND source_id = $4
 			  AND deleted_at IS NULL`,

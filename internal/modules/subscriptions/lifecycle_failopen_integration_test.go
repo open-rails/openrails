@@ -56,7 +56,7 @@ func newFailopenFixture(t *testing.T, billingHours int32, autoRenew bool) *failo
 	// before any provider-bound row is written.
 	pspID := dbtest.EnsureTestPSP(context.Background(), t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	ctx := db.WithPSPID(dbtest.WithTestMerchant(context.Background()), pspID)
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	now := time.Now().UTC().Truncate(time.Second)
 
 	productID, priceID := uuid.New(), uuid.New()
@@ -87,13 +87,13 @@ func newFailopenFixture(t *testing.T, billingHours int32, autoRenew bool) *failo
 
 	f := &failopenFixture{dbi: dbi, pool: pool, q: q, lifecycle: lifecycle, entSvc: entitlementSvc, pspID: pspID, productID: productID, priceID: priceID, userID: userID, ent: entName}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE source_id IN (SELECT id FROM openrails.subscriptions WHERE product_id = $1)", productID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE customer_id::text = $1", userID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE price_id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id IN (SELECT id FROM openrails.customers WHERE id::text = $1)", userID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE product_id = $1", productID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE source_id IN (SELECT id FROM billing.subscriptions WHERE product_id = $1)", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.grants WHERE customer_id::text = $1", userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE price_id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.notifications WHERE customer_id IN (SELECT id FROM billing.customers WHERE id::text = $1)", userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE product_id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 	return f
 }
@@ -162,7 +162,7 @@ func (f *failopenFixture) windows(t *testing.T, subID uuid.UUID, sourceType stri
 	t.Helper()
 	rows, err := f.pool.Query(context.Background(),
 		`SELECT id, start_at, end_at, source_type, revoked_at, deleted_at
-		 FROM openrails.entitlements WHERE source_id = $1 AND source_type = $2 ORDER BY start_at`, subID, sourceType)
+		 FROM billing.entitlements WHERE source_id = $1 AND source_type = $2 ORDER BY start_at`, subID, sourceType)
 	require.NoError(t, err)
 	defer rows.Close()
 	var out []failopenWindow
@@ -279,15 +279,15 @@ func TestRenewMembership_DowngradeRevokeFailureRollsBack(t *testing.T) {
 		UpdatedAt:           now,
 	})
 	require.NoError(t, err)
-	_, err = f.pool.Exec(ctx, `UPDATE openrails.subscriptions SET scheduled_price_id=$2 WHERE id=$1`, sub.ID, targetPriceID)
+	_, err = f.pool.Exec(ctx, `UPDATE billing.subscriptions SET scheduled_price_id=$2 WHERE id=$1`, sub.ID, targetPriceID)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.entitlements WHERE source_id=$1`, sub.ID)
-		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.payments WHERE subscription_id=$1`, sub.ID)
-		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.notifications WHERE customer_id=$1`, sub.CustomerID)
-		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, sub.ID)
-		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, targetPriceID)
-		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, targetProductID)
+		_, _ = f.pool.Exec(ctx, `DELETE FROM billing.entitlements WHERE source_id=$1`, sub.ID)
+		_, _ = f.pool.Exec(ctx, `DELETE FROM billing.payments WHERE subscription_id=$1`, sub.ID)
+		_, _ = f.pool.Exec(ctx, `DELETE FROM billing.notifications WHERE customer_id=$1`, sub.CustomerID)
+		_, _ = f.pool.Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, sub.ID)
+		_, _ = f.pool.Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, targetPriceID)
+		_, _ = f.pool.Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, targetProductID)
 	})
 
 	periodStart := original.CurrentPeriodEndsAt.UTC()
@@ -315,7 +315,7 @@ func TestRenewMembership_DowngradeRevokeFailureRollsBack(t *testing.T) {
 	require.Equal(t, &targetPriceID, afterFailure.ScheduledPriceID)
 	require.Equal(t, original.CurrentPeriodEndsAt.UTC(), afterFailure.CurrentPeriodEndsAt.UTC())
 	var paymentCount int
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE transaction_id=$1`, txnID).Scan(&paymentCount))
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE transaction_id=$1`, txnID).Scan(&paymentCount))
 	require.Zero(t, paymentCount, "the renewal payment marker must roll back with the failed downgrade effect")
 	windows := f.windows(t, sub.ID, string(models.EntitlementSourceSubscription))
 	require.Len(t, windows, 1)
@@ -328,7 +328,7 @@ func TestRenewMembership_DowngradeRevokeFailureRollsBack(t *testing.T) {
 	require.Equal(t, targetProductID, afterRetry.ProductID)
 	require.Nil(t, afterRetry.ScheduledPriceID)
 	require.Equal(t, periodEnd, afterRetry.CurrentPeriodEndsAt.UTC())
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE transaction_id=$1`, txnID).Scan(&paymentCount))
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE transaction_id=$1`, txnID).Scan(&paymentCount))
 	require.Equal(t, 1, paymentCount)
 	windows = f.windows(t, sub.ID, string(models.EntitlementSourceSubscription))
 	require.Len(t, windows, 1)
@@ -354,7 +354,7 @@ func TestFailOpen_WebhookSilence(t *testing.T) {
 	// The grant ledger stays bounded: the activation grant carries the paid period.
 	var grantEnds *time.Time
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT ends_at FROM openrails.grants WHERE source_type='subscription' AND source_id=$1 AND event='grant'`,
+		`SELECT ends_at FROM billing.grants WHERE source_type='subscription' AND source_id=$1 AND event='grant'`,
 		sub.ID.String()).Scan(&grantEnds))
 	require.NotNil(t, grantEnds, "the activation grant is bounded to the paid period")
 
@@ -416,7 +416,7 @@ func TestFailOpen_RenewalRecordsPeriodGrantNotWindow(t *testing.T) {
 
 	var grantCount int
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.grants WHERE source_type='subscription' AND source_id=$1 AND event='grant' AND ends_at IS NOT NULL`,
+		`SELECT count(*) FROM billing.grants WHERE source_type='subscription' AND source_id=$1 AND event='grant' AND ends_at IS NOT NULL`,
 		sub.ID.String()).Scan(&grantCount))
 	assert.Equal(t, 2, grantCount, "activation + renewal each record a bounded per-period grant")
 
@@ -430,7 +430,7 @@ func TestFailOpen_RenewalRecordsPeriodGrantNotWindow(t *testing.T) {
 		TransactionID:         "txn_renew_replay_" + uuid.New().String(),
 	}))
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.grants WHERE source_type='subscription' AND source_id=$1 AND event='grant' AND ends_at IS NOT NULL`,
+		`SELECT count(*) FROM billing.grants WHERE source_type='subscription' AND source_id=$1 AND event='grant' AND ends_at IS NOT NULL`,
 		sub.ID.String()).Scan(&grantCount))
 	assert.Equal(t, 2, grantCount, "a replayed period appends no grant")
 
@@ -776,7 +776,7 @@ func TestFailOpen_MaterializeReplayIsIdempotent(t *testing.T) {
 
 	// Replay derive-2 over the full grant log (what a converge repair does).
 	require.NoError(t, f.dbi.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
+		q := dbtest.Queries(tx)
 		gl := grants.New(q, dbtest.TestMerchantID.UUID())
 		all, err := q.ListGrantsByCustomer(ctx, gen.ListGrantsByCustomerParams{
 			MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: customerID,

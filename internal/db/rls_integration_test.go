@@ -58,17 +58,17 @@ func newDBRetry(t *testing.T, dsn string) *DB {
 }
 
 const rlsSetupDDL = `
-CREATE SCHEMA IF NOT EXISTS openrails;
-CREATE TABLE IF NOT EXISTS openrails.rls_probe (
+CREATE SCHEMA IF NOT EXISTS billing;
+CREATE TABLE IF NOT EXISTS billing.rls_probe (
     id        UUID PRIMARY KEY,
     merchant_id UUID NOT NULL,
     val       TEXT NOT NULL
 );
 -- Exact migration-050 policy form.
-ALTER TABLE openrails.rls_probe ENABLE ROW LEVEL SECURITY;
-ALTER TABLE openrails.rls_probe FORCE  ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS merchant_isolation ON openrails.rls_probe;
-CREATE POLICY merchant_isolation ON openrails.rls_probe
+ALTER TABLE billing.rls_probe ENABLE ROW LEVEL SECURITY;
+ALTER TABLE billing.rls_probe FORCE  ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS merchant_isolation ON billing.rls_probe;
+CREATE POLICY merchant_isolation ON billing.rls_probe
     USING      (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid)
     WITH CHECK (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid);
 -- Unprivileged application role (migration-050 form) WITH LOGIN for the test.
@@ -78,8 +78,8 @@ CREATE POLICY merchant_isolation ON openrails.rls_probe
 	    END IF;
 	END $$;
 	ALTER ROLE openrails_app WITH LOGIN PASSWORD 'app_pw';
-	GRANT USAGE ON SCHEMA openrails TO openrails_app;
-	GRANT SELECT, INSERT, UPDATE, DELETE ON openrails.rls_probe TO openrails_app;
+	GRANT USAGE ON SCHEMA billing TO openrails_app;
+	GRANT SELECT, INSERT, UPDATE, DELETE ON billing.rls_probe TO openrails_app;
 	`
 
 func startRLSContainer(t *testing.T) (superDSN string, appDSN string) {

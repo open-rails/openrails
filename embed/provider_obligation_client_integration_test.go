@@ -56,7 +56,7 @@ type providerFixture struct {
 func newProviderFixture(t *testing.T, ctx context.Context, h *integrationharness.Harness, client *openrails.Client, funded int64) *providerFixture {
 	t.Helper()
 	payer := uuid.New()
-	_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.customers (id, merchant_id, issuer, created_at, last_seen_at)
+	_, err := h.Pool().Exec(ctx, `INSERT INTO billing.customers (id, merchant_id, issuer, created_at, last_seen_at)
 		VALUES ($1, $2, 'provider-obligations', now(), now())`, payer, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 	id := openrails.CustomerID(payer)

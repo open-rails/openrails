@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
@@ -25,7 +24,7 @@ func TestDirectoryReadsReuseOneConnection(t *testing.T) {
 	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
 	require.NoError(t, err)
 	defer pool.Close()
-	database, err := db.NewWithPGXPool(pool, "openrails")
+	database, err := db.NewWithPGXPool(pool, "billing")
 	require.NoError(t, err)
 	directory, err := NewDirectoryService(database.DataPool())
 	require.NoError(t, err)
@@ -62,7 +61,7 @@ func TestDBSecretReadsReuseOneConnectionAndKeepMerchantScope(t *testing.T) {
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	require.NoError(t, err)
 	defer pool.Close()
-	database, err := db.NewWithPGXPool(pool, "openrails")
+	database, err := db.NewWithPGXPool(pool, "billing")
 	require.NoError(t, err)
 	store, err := NewDBSecretStore(database.DataPool())
 	require.NoError(t, err)
@@ -74,7 +73,7 @@ func TestDBSecretReadsReuseOneConnectionAndKeepMerchantScope(t *testing.T) {
 	require.NoError(t, err)
 	account := "pin-" + uuid.NewString()
 	require.NoError(t, database.DataPool().MerchantTx(ctx, a.ID, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO openrails.psps(merchant_id,rail,environment,account_id) VALUES($1,'stripe','live',$2)`, a.ID.UUID(), account)
+		_, err := tx.Exec(ctx, `INSERT INTO billing.psps(merchant_id,rail,environment,account_id) VALUES($1,'stripe','live',$2)`, a.ID.UUID(), account)
 		return err
 	}))
 	name, err := PSPSecretName("stripe", "live", account, "secret_key")
@@ -112,21 +111,21 @@ func TestRestoreRefusesCommittedPurgeButAllowsFailedPreflight(t *testing.T) {
 	pool, err := pgxpool.New(context.Background(), dsn)
 	require.NoError(t, err)
 	defer pool.Close()
-	wrapped := db.WrapPool(pool, "openrails")
+	wrapped := db.WrapPool(pool, "billing")
 	directory, err := NewDirectoryService(wrapped)
 	require.NoError(t, err)
 	for _, committed := range []bool{false, true} {
 		row, _, err := directory.Provision(context.Background(), ProvisionRequest{Slug: "restore-" + uuid.NewString()[:8], PermissionGroupID: uuid.NewString()})
 		require.NoError(t, err)
 		require.NoError(t, wrapped.MerchantTx(context.Background(), row.ID, func(ctx context.Context, tx pgx.Tx) error {
-			_, err := tx.Exec(ctx, `INSERT INTO openrails.maintenance_runs(merchant_id,kind,actor,status,affected) VALUES($1,'merchant_purge','test','failed',jsonb_build_object('database_purged',$2::boolean))`, row.ID.UUID(), committed)
+			_, err := tx.Exec(ctx, `INSERT INTO billing.maintenance_runs(merchant_id,kind,actor,status,affected) VALUES($1,'merchant_purge','test','failed',jsonb_build_object('database_purged',$2::boolean))`, row.ID.UUID(), committed)
 			if err != nil {
 				return err
 			}
-			_, err = gen.New(tx).SoftDeletePlatformMerchant(ctx, row.ID.UUID())
+			_, err = dbtest.Queries(tx).SoftDeletePlatformMerchant(ctx, row.ID.UUID())
 			return err
 		}))
-		_, err = gen.New(wrapped).RestorePlatformMerchant(context.Background(), row.ID.UUID())
+		_, err = dbtest.Queries(wrapped).RestorePlatformMerchant(context.Background(), row.ID.UUID())
 		if committed {
 			require.ErrorContains(t, err, "cannot be restored")
 		} else {

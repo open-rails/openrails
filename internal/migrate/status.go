@@ -10,7 +10,7 @@ import (
 	"github.com/open-rails/migratekit"
 
 	"github.com/open-rails/openrails/config"
-	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
+	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 )
 
 // ErrMigrationStatusDrift means the applied ledger is not an exact, verifiable

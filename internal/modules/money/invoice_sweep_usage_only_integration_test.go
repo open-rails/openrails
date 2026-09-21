@@ -33,15 +33,15 @@ func TestInvoiceWorker_SweepInvoicesUsageOnlyPayer(t *testing.T) {
 	eventType := "platform.payment_volume." + uuid.NewString()[:8]
 	t.Cleanup(func() {
 		for _, p := range []uuid.UUID{payer.UUID(), ledgerPayer.UUID()} {
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", p)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", p)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", p)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.metered_rating_watermarks WHERE customer_id = $1", p)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.metered_rating_watermarks WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.money_settings WHERE customer_id = $1", p)
 		}
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meter)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meter)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	// Calendar-month periods so the window under test is exact; restore the
@@ -54,7 +54,7 @@ func TestInvoiceWorker_SweepInvoicesUsageOnlyPayer(t *testing.T) {
 	cfg.InvoiceBillingBoundary = money.InvoiceBoundaryCalendarMonth
 	require.NoError(t, store.Upsert(ctx, cfg))
 
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Payment volume', $3)`,
+	_, err = pool.Exec(ctx, `INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Payment volume', $3)`,
 		productID, "volume-"+uuid.NewString()[:8], merchantID)
 	require.NoError(t, err)
 	require.NoError(t, svc.EnsureUsageMeter(ctx, money.UsageMeterSpec{
@@ -89,7 +89,7 @@ func TestInvoiceWorker_SweepInvoicesUsageOnlyPayer(t *testing.T) {
 	require.NoError(t, err)
 
 	var ledgerRows int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.ledger_transfers WHERE customer_id = $1`, payer.UUID()).Scan(&ledgerRows))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.ledger_transfers WHERE customer_id = $1`, payer.UUID()).Scan(&ledgerRows))
 	require.Zero(t, ledgerRows, "precondition: a usage-only payer has no ledger row before rating")
 
 	worker := riverjobs.InvoiceWorker{DB: dbi, Money: svc, Clock: clockwork.NewFakeClockAt(now)}
@@ -127,11 +127,11 @@ func TestInvoiceWorker_SweepInvoicesUsageOnlyPayer(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, total)
 	var accrued int64
-	require.NoError(t, pool.QueryRow(ctx, `SELECT COALESCE(SUM(amount), 0) FROM openrails.ledger_transfers
+	require.NoError(t, pool.QueryRow(ctx, `SELECT COALESCE(SUM(amount), 0) FROM billing.ledger_transfers
 		WHERE customer_id = $1 AND transfer_type = 'owed_accrual'`, payer.UUID()).Scan(&accrued))
 	require.Equal(t, fee, accrued, "exactly-once rating across sweeps")
 	var pending int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.invoice_items
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.invoice_items
 		WHERE customer_id = $1 AND invoice_id IS NULL`, payer.UUID()).Scan(&pending))
 	require.Zero(t, pending, "the rated accrual is attached to the invoice")
 }

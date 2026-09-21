@@ -153,7 +153,7 @@ func newNMIReceiptEnv(t *testing.T) nmiReceiptEnv {
 	var custodian uuid.UUID
 	t.Cleanup(func() {
 		if custodian != uuid.Nil {
-			_, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM openrails.custodians WHERE id = $1`, custodian)
+			_, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM billing.custodians WHERE id = $1`, custodian)
 		}
 	})
 	seedPSPSecrets(t, dbi, msvc, string(models.RailNMI), "gw-receipt-"+uuid.NewString()[:8], map[string]string{"security_key": "synthetic-key"})
@@ -195,7 +195,7 @@ func nmiReceiptScenario(t *testing.T) nmiReceiptEnv {
 // methodRow is the instrument as it stands right now.
 func (e nmiReceiptEnv) methodRow(t *testing.T) gen.OpenrailsPaymentMethod {
 	t.Helper()
-	row, err := gen.New(e.pool).GetPaymentMethodByID(e.ctx, e.method)
+	row, err := dbtest.Queries(e.pool).GetPaymentMethodByID(e.ctx, e.method)
 	require.NoError(t, err)
 	return row
 }
@@ -227,7 +227,7 @@ func (e nmiReceiptEnv) custodianAccount(t *testing.T) uuid.UUID {
 	t.Cleanup(func() {
 		_ = e.merchants.Secrets().Delete(context.WithoutCancel(e.ctx), dbtest.TestMerchantID, ref.Name)
 	})
-	_, err = e.pool.Exec(e.ctx, `UPDATE openrails.psps SET custodian_id = $2 WHERE id = (SELECT psp_id FROM openrails.payment_methods WHERE id = $1)`, e.method, id)
+	_, err = e.pool.Exec(e.ctx, `UPDATE billing.psps SET custodian_id = $2 WHERE id = (SELECT psp_id FROM billing.payment_methods WHERE id = $1)`, e.method, id)
 	require.NoError(t, err)
 	*e.custodian = id
 	return id
@@ -239,7 +239,7 @@ func (e nmiReceiptEnv) custodianAccount(t *testing.T) uuid.UUID {
 func (e nmiReceiptEnv) holdAtCustodian(t *testing.T) {
 	t.Helper()
 	id := e.custodianAccount(t)
-	_, err := e.pool.Exec(e.ctx, `UPDATE openrails.payment_methods SET custodian = 'basis_theory', custodian_id = $2, rail_customer_ref = '', rail_method_ref = 'tok_'||$1::text WHERE id = $1`, e.method, id)
+	_, err := e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET custodian = 'basis_theory', custodian_id = $2, rail_customer_ref = '', rail_method_ref = 'tok_'||$1::text WHERE id = $1`, e.method, id)
 	require.NoError(t, err)
 }
 
@@ -250,7 +250,7 @@ func (e nmiReceiptEnv) holdAtCustodian(t *testing.T) {
 func (e nmiReceiptEnv) moveCustodyUnderTheOperation(t *testing.T) {
 	t.Helper()
 	id := e.custodianAccount(t)
-	_, err := e.pool.Exec(e.ctx, `UPDATE openrails.payment_methods SET custodian = 'basis_theory', custodian_id = $2, rail_method_ref = 'tok_'||$1::text WHERE id = $1`, e.method, id)
+	_, err := e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET custodian = 'basis_theory', custodian_id = $2, rail_method_ref = 'tok_'||$1::text WHERE id = $1`, e.method, id)
 	require.NoError(t, err)
 	row := e.methodRow(t)
 	require.Equal(t, models.CustodianBasisTheory, row.Custodian)
@@ -264,7 +264,7 @@ func (e nmiReceiptEnv) remapCustody(t *testing.T, token string) custodymigration
 	t.Helper()
 	id := e.custodianAccount(t)
 	var custodianKey string
-	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT key FROM openrails.custodians WHERE id = $1`, id).Scan(&custodianKey))
+	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT key FROM billing.custodians WHERE id = $1`, id).Scan(&custodianKey))
 	sourcePSP := e.methodRow(t).PspID
 	res, err := custodymigration.Migrate(e.ctx, custodymigration.Options{
 		Config: storeCollectionTestConfig(), PGXPool: e.pool, MerchantID: dbtest.TestMerchantID, Apply: true,
@@ -345,7 +345,7 @@ func TestInvoiceCollection_NMIReceiptRequiresExactReadToMatch(t *testing.T) {
 	require.Equal(t, intents.StatusSucceeded, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status)
 	e.requireSettledOnce(t)
 	var railPaymentID string
-	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail_payment_id FROM openrails.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&railPaymentID))
+	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail_payment_id FROM billing.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&railPaymentID))
 	require.Equal(t, "txn_ours", railPaymentID)
 	require.Equal(t, 1, e.gateway.sends, "resolution never resends")
 }
@@ -360,9 +360,9 @@ func TestInvoiceCollection_SettledReceiptIsUniquePerMerchant(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	var railPaymentID string
-	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail_payment_id FROM openrails.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&railPaymentID))
-	_, err = e.pool.Exec(e.ctx, `INSERT INTO openrails.invoice_payments (id, merchant_id, customer_id, invoice_id, currency, amount, status, rail, rail_payment_id, psp_id)
-		SELECT gen_random_uuid(), merchant_id, customer_id, invoice_id, currency, amount, 'settled', rail, rail_payment_id, psp_id FROM openrails.invoice_payments WHERE invoice_id = $1`, e.invoice)
+	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail_payment_id FROM billing.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&railPaymentID))
+	_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.invoice_payments (id, merchant_id, customer_id, invoice_id, currency, amount, status, rail, rail_payment_id, psp_id)
+		SELECT gen_random_uuid(), merchant_id, customer_id, invoice_id, currency, amount, 'settled', rail, rail_payment_id, psp_id FROM billing.invoice_payments WHERE invoice_id = $1`, e.invoice)
 	require.ErrorContains(t, err, "uq_invoice_payments_settled_rail_payment")
 }
 
@@ -401,7 +401,7 @@ func TestInvoiceCollection_AutonomousVerifierRequiresExactReadToMatch(t *testing
 	require.Equal(t, intents.StatusSucceeded, e.verify(t))
 	e.requireSettledOnce(t)
 	var railPaymentID string
-	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail_payment_id FROM openrails.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&railPaymentID))
+	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail_payment_id FROM billing.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&railPaymentID))
 	require.Equal(t, "txn_ours", railPaymentID)
 	require.Equal(t, 1, e.gateway.sends, "the verifier never resends")
 }
@@ -536,7 +536,7 @@ func TestInvoiceCollection_ReceiptJudgedAgainstFrozenInstrument(t *testing.T) {
 			}
 			e.requireSettledOnce(t)
 			var railPaymentID string
-			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail_payment_id FROM openrails.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&railPaymentID))
+			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail_payment_id FROM billing.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&railPaymentID))
 			require.Equal(t, "txn_ours", railPaymentID)
 			require.Equal(t, 1, e.gateway.sends, "resolution never resends")
 		})
@@ -552,7 +552,7 @@ func TestInvoiceCollection_InstrumentChangedBeforeSubmissionIsNeverSent(t *testi
 	for _, change := range []struct{ name, column, value string }{{"vault", "rail_customer_ref", "vault_moved"}, {"selected billing record", "rail_method_ref", "billing_moved"}, {"scoped credential", "stored_credential_unscheduled_ref", "approved_new_anchor"}} {
 		t.Run(change.name, func(t *testing.T) {
 			e := newNMIReceiptEnv(t)
-			_, err := e.pool.Exec(e.ctx, `UPDATE openrails.payment_methods SET rail_method_ref='billing_chosen' WHERE id=$1`, e.method)
+			_, err := e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET rail_method_ref='billing_chosen' WHERE id=$1`, e.method)
 			require.NoError(t, err)
 			// Freeze an operation without submitting it (the account is not armed yet).
 			_, err = e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, &fakeCharger{prepareFailures: 1}, nil), 0)
@@ -567,7 +567,7 @@ func TestInvoiceCollection_InstrumentChangedBeforeSubmissionIsNeverSent(t *testi
 			require.Equal(t, custodymigration.ReasonOperationUnresolved, blocked.Reason)
 
 			// Another writer changes an accepted wire term anyway.
-			_, err = e.pool.Exec(e.ctx, fmt.Sprintf(`UPDATE openrails.payment_methods SET %s=$2 WHERE id=$1`, change.column), e.method, change.value)
+			_, err = e.pool.Exec(e.ctx, fmt.Sprintf(`UPDATE billing.payment_methods SET %s=$2 WHERE id=$1`, change.column), e.method, change.value)
 			require.NoError(t, err)
 
 			dueNow(t, e.pool, e.ctx, op.ID)

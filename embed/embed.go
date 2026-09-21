@@ -44,9 +44,9 @@ type Options struct {
 	PGXPool *pgxpool.Pool
 	Redis   *redis.Client
 	Cache   cache.Cache
-	// River declares who owns the River job fleet. Required: use
-	// RiverFromHost(bind) when the host owns River, RiverManagedByOpenRails()
-	// to let OpenRails run its own.
+	// River declares who owns the job fleet. The zero value uses an
+	// OpenRails-managed client in public. RiverFromHost transfers ownership
+	// to the host; RiverManagedByOpenRails optionally selects another schema.
 	River RiverOwnership
 	// RunWorkers starts the River workers on a goroutine owned by the Runtime
 	// (stopped by Close), detached from the ctx passed to New. Leave false to
@@ -59,6 +59,12 @@ type Options struct {
 	// driving rail pushes against a fake Stripe. Refused with a live posture.
 	// Process-wide: this does not independently route concurrent runtimes.
 	StripeTransport http.RoundTripper
+	// UserDirectory and UsernameResolver are optional host identity adapters.
+	// OpenRails does not assume ownership of AuthKit's profiles schema; hosts
+	// opt in explicitly when they need notification email or CCBill username
+	// resolution.
+	UserDirectory    openrails.UserDirectory
+	UsernameResolver openrails.UsernameResolver
 }
 
 // Runtime is the in-process engine: Client() for the shared client, Handler()
@@ -98,8 +104,9 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
 	}
-	if !opts.River.declared() {
-		return nil, ErrRiverRequired
+	riverSchema, err := opts.River.managedSchema(opts.Config.DB.SchemaName())
+	if err != nil {
+		return nil, err
 	}
 	if err := applyEmbeddedDefaults(opts.Config); err != nil {
 		return nil, err
@@ -108,9 +115,12 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		return nil, fmt.Errorf("openrails embed: Options.StripeTransport is a test seam and is refused with config.TestMode=live")
 	}
 	application, err := app.BootstrapWithOptions(ctx, opts.Config, &app.BootstrapOptions{
-		PGXPool: opts.PGXPool,
-		Redis:   opts.Redis,
-		Cache:   opts.Cache,
+		PGXPool:          opts.PGXPool,
+		RiverSchema:      riverSchema,
+		Redis:            opts.Redis,
+		Cache:            opts.Cache,
+		UserDirectory:    opts.UserDirectory,
+		UsernameResolver: opts.UsernameResolver,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)

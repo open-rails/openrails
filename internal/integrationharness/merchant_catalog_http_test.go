@@ -26,7 +26,6 @@ import (
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/grants"
@@ -54,11 +53,11 @@ func TestExampleCatalogPublishesOverHTTP(t *testing.T) {
 		t.Helper()
 		var counts [5]int
 		require.NoError(t, h.Pool().QueryRow(t.Context(), `SELECT
-    (SELECT count(*) FROM openrails.products WHERE merchant_id=$1),
-    (SELECT count(*) FROM openrails.prices WHERE merchant_id=$1),
-    (SELECT count(*) FROM openrails.catalog_meters WHERE merchant_id=$1),
-    (SELECT count(*) FROM openrails.catalog_rate_cards WHERE merchant_id=$1),
-    (SELECT count(*) FROM openrails.prices WHERE merchant_id=$1 AND trial_unit_amount=0 AND trial_duration_hours=168)`, f.merchant.MerchantID.UUID()).Scan(&counts[0], &counts[1], &counts[2], &counts[3], &counts[4]))
+    (SELECT count(*) FROM billing.products WHERE merchant_id=$1),
+    (SELECT count(*) FROM billing.prices WHERE merchant_id=$1),
+    (SELECT count(*) FROM billing.catalog_meters WHERE merchant_id=$1),
+    (SELECT count(*) FROM billing.catalog_rate_cards WHERE merchant_id=$1),
+    (SELECT count(*) FROM billing.prices WHERE merchant_id=$1 AND trial_unit_amount=0 AND trial_duration_hours=168)`, f.merchant.MerchantID.UUID()).Scan(&counts[0], &counts[1], &counts[2], &counts[3], &counts[4]))
 		return counts
 	}
 	planned := f.publish(t, manifest, catalog.ApplyOptions{})
@@ -95,9 +94,9 @@ func TestCatalogPublishRateCardsHTTP(t *testing.T) {
 	dropletKey := "droplet-" + suffix
 	mid := dbtest.TestMerchantID.UUID()
 	t.Cleanup(func() {
-		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", mid, meterKey)
-		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", mid, meterKey)
-		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE merchant_id = $1 AND key = ANY($2::text[])", mid, []string{dropletKey})
+		_, _ = h.Pool().Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", mid, meterKey)
+		_, _ = h.Pool().Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2", mid, meterKey)
+		_, _ = h.Pool().Exec(ctx, "DELETE FROM billing.products WHERE merchant_id = $1 AND key = ANY($2::text[])", mid, []string{dropletKey})
 	})
 
 	manifest := catalog.Manifest{
@@ -139,8 +138,8 @@ func TestCatalogPublishRateCardsHTTP(t *testing.T) {
 	var model, rcMeter string
 	require.NoError(t, h.Pool().QueryRow(ctx, `
 SELECT rc.price ->> 'model', rc.meter_key
-FROM openrails.catalog_rate_cards rc
-JOIN openrails.products p ON p.id = rc.product_id
+FROM billing.catalog_rate_cards rc
+JOIN billing.products p ON p.id = rc.product_id
 WHERE p.merchant_id = $1 AND p.key = $2`, mid, dropletKey).Scan(&model, &rcMeter))
 	require.Equal(t, "per_unit", model)
 	require.Equal(t, meterKey, rcMeter)
@@ -148,7 +147,7 @@ WHERE p.merchant_id = $1 AND p.key = $2`, mid, dropletKey).Scan(&model, &rcMeter
 	// The rate-card meter persisted with its aggregation.
 	var agg string
 	require.NoError(t, h.Pool().QueryRow(ctx, `
-SELECT aggregation FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2`, mid, meterKey).Scan(&agg))
+SELECT aggregation FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2`, mid, meterKey).Scan(&agg))
 	require.Equal(t, "sum", agg)
 }
 
@@ -185,8 +184,8 @@ func TestCatalogPublishRefusesTrialOnRailsWithoutFirstPhase(t *testing.T) {
 		t.Helper()
 		productKey := "trial-guard-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 		t.Cleanup(func() {
-			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE merchant_id = $1 AND product_id IN (SELECT id FROM openrails.products WHERE merchant_id = $1 AND key = $2)", mid, productKey)
-			_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE merchant_id = $1 AND key = $2", mid, productKey)
+			_, _ = h.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE merchant_id = $1 AND product_id IN (SELECT id FROM billing.products WHERE merchant_id = $1 AND key = $2)", mid, productKey)
+			_, _ = h.Pool().Exec(ctx, "DELETE FROM billing.products WHERE merchant_id = $1 AND key = $2", mid, productKey)
 		})
 		manifest := catalog.Manifest{
 			Version: catalog.SupportedVersion,
@@ -222,8 +221,8 @@ func TestCatalogPublishRefusesTrialOnRailsWithoutFirstPhase(t *testing.T) {
 			// The refusal is total: no price row was written for the product.
 			var priceCount int
 			require.NoError(t, h.Pool().QueryRow(ctx, `
-SELECT count(*) FROM openrails.prices pr
-JOIN openrails.products p ON p.id = pr.product_id
+SELECT count(*) FROM billing.prices pr
+JOIN billing.products p ON p.id = pr.product_id
 WHERE p.merchant_id = $1 AND p.key = $2`, mid, productKey).Scan(&priceCount))
 			require.Zero(t, priceCount, "a refused trial must leave no price behind")
 		})
@@ -237,8 +236,8 @@ WHERE p.merchant_id = $1 AND p.key = $2`, mid, productKey).Scan(&priceCount))
 			var trialAmount *int64
 			var trialHours *int
 			require.NoError(t, h.Pool().QueryRow(ctx, `
-SELECT pr.trial_unit_amount, pr.trial_duration_hours FROM openrails.prices pr
-JOIN openrails.products p ON p.id = pr.product_id
+SELECT pr.trial_unit_amount, pr.trial_duration_hours FROM billing.prices pr
+JOIN billing.products p ON p.id = pr.product_id
 WHERE p.merchant_id = $1 AND p.key = $2`, mid, productKey).Scan(&trialAmount, &trialHours))
 			require.NotNil(t, trialAmount)
 			require.Equal(t, int64(0), *trialAmount)
@@ -357,12 +356,12 @@ func TestNativeCatalogRateCardUsageHTTP(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, prices)
 	var meterCount int
-	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2`, dbtest.TestMerchantID.UUID(), meterKey).Scan(&meterCount))
+	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2`, dbtest.TestMerchantID.UUID(), meterKey).Scan(&meterCount))
 	require.Equal(t, 1, meterCount)
 	var unitAmount, divideBy int64
 	require.NoError(t, h.Pool().QueryRow(ctx, `
 SELECT (price -> 'per_unit' ->> 'unit_amount')::bigint, (price -> 'per_unit' ->> 'divide_by')::bigint
-FROM openrails.catalog_rate_cards
+FROM billing.catalog_rate_cards
 WHERE merchant_id = $1 AND product_id = $2 AND meter_key = $3 AND payment_term = 'in_arrears'`,
 		dbtest.TestMerchantID.UUID(), product.ID, meterKey).Scan(&unitAmount, &divideBy))
 	require.Equal(t, int64(250_000), unitAmount)
@@ -377,9 +376,9 @@ WHERE merchant_id = $1 AND product_id = $2 AND meter_key = $3 AND payment_term =
 	pool := dbi.Pool()
 	payerID := uuid.New()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(mctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(mctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(mctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(mctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(mctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(mctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payerID)
 	})
 	moneySvc := money.NewMoneyService(dbi)
 	payer := identity.CustomerID(payerID)
@@ -419,14 +418,14 @@ func liveOwnershipGrantCount(t *testing.T, ctx context.Context, pool interface {
 	t.Helper()
 	var n int
 	require.NoError(t, pool.QueryRow(ctx, `
-SELECT count(*) FROM openrails.grants g
+SELECT count(*) FROM billing.grants g
 WHERE g.merchant_id = $1
   AND g.customer_id = $2
   AND g.product_id = $3
   AND g.kind = 'ownership'
   AND g.event = 'grant'
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants t
+      SELECT 1 FROM billing.grants t
       WHERE t.merchant_id = g.merchant_id
         AND t.supersedes_id = g.id
         AND t.event IN ('revoke', 'expire', 'supersede')
@@ -450,12 +449,12 @@ func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, pro
 	payerID := payer.UUID()
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, payerID.String())
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payerID)
 	})
 
-	grantLedger := grants.New(gen.New(pool), dbtest.TestMerchantID.UUID())
+	grantLedger := grants.New(dbtest.Queries(pool), dbtest.TestMerchantID.UUID())
 	entitlementGrant, err := grantLedger.Grant(ctx, grants.GrantInput{
 		Customer: payerID,
 		Product:  &productID,
@@ -767,11 +766,11 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	customerID := uuid.New()
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, customerID.String())
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2 AND event <> 'grant'", dbtest.TestMerchantID.UUID(), customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2", dbtest.TestMerchantID.UUID(), customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.grants WHERE merchant_id = $1 AND customer_id = $2 AND event <> 'grant'", dbtest.TestMerchantID.UUID(), customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.grants WHERE merchant_id = $1 AND customer_id = $2", dbtest.TestMerchantID.UUID(), customerID)
 	})
 
-	grantLedger := grants.New(gen.New(pool), dbtest.TestMerchantID.UUID())
+	grantLedger := grants.New(dbtest.Queries(pool), dbtest.TestMerchantID.UUID())
 
 	pastEnd := time.Now().Add(-24 * time.Hour)
 	premiumProduct := premium.ID.UUID()

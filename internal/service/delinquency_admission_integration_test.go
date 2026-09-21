@@ -80,7 +80,7 @@ func TestAdmitRefusesADelinquentPayerWithItsOwnDenyCode(t *testing.T) {
 
 	// Paying the bill restores admission on the next evaluation.
 	_, err = pool.Exec(ctx, `
-		UPDATE openrails.invoices
+		UPDATE billing.invoices
 		   SET amount_paid = total_amount, amount_due = 0, status = 'paid', paid_at = now(), updated_at = now()
 		 WHERE id = $1`, invoiceID)
 	require.NoError(t, err)
@@ -108,7 +108,7 @@ func seedOverdueInvoice(t *testing.T, ctx context.Context, pool *pgxpool.Pool, p
 	now := time.Now().UTC()
 	due := now.Add(-overdueBy)
 	_, err := pool.Exec(ctx, `
-		INSERT INTO openrails.invoices
+		INSERT INTO billing.invoices
 			(id, merchant_id, customer_id, currency, period_from, period_to,
 			 subtotal_amount, total_amount, amount_paid, amount_due, status, issued_at, due_at, finalized_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $7, 0, $7, 'open', $6, $8, $6)`,
@@ -116,10 +116,10 @@ func seedOverdueInvoice(t *testing.T, ctx context.Context, pool *pgxpool.Pool, p
 		due.Add(-24*time.Hour), due, amount, due)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.host_outbox WHERE subject_id = $1", payer.UUID())
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.customer_delinquency WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.notifications WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.invoices WHERE id = $1", id)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.host_outbox WHERE subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.customer_delinquency WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.notifications WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.invoices WHERE id = $1", id)
 	})
 	return id
 }
@@ -147,7 +147,7 @@ func TestAdmitRefusesWhenOutstandingOwedEatsTheCreditLine(t *testing.T) {
 	payer := identity.CustomerIDFromString(uuid.NewString())
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, payer.UUID().String())
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.money_settings WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.money_settings WHERE customer_id = $1", payer.UUID())
 	})
 	arrears := money.BillingModeArrears
 	_, err := ms.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: &arrears})

@@ -43,11 +43,11 @@ func TestMerchantAdminByIDQueriesScopeToTheRequestMerchant(t *testing.T) {
 	merchantA, merchantB := uuid.New(), uuid.New()
 	for id, slug := range map[uuid.UUID]string{merchantA: "sec18-a-" + suffix, merchantB: "sec18-b-" + suffix} {
 		_, err := pool.Exec(ctx,
-			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, id, slug)
+			`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, id, slug)
 		require.NoError(t, err)
 	}
 
-	seed := gen.New(pool)
+	seed := dbtest.Queries(pool)
 	newFinding := func(merchantID uuid.UUID) uuid.UUID {
 		t.Helper()
 		row, err := seed.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
@@ -70,7 +70,7 @@ func TestMerchantAdminByIDQueriesScopeToTheRequestMerchant(t *testing.T) {
 	defer conn.Release()
 	_, err = conn.Exec(ctx, `SELECT set_config('app.merchant_id', $1, false)`, merchantA.String())
 	require.NoError(t, err)
-	q := gen.New(conn)
+	q := dbtest.Queries(conn)
 
 	t.Run("read is scoped", func(t *testing.T) {
 		own, err := q.GetReconciliationFinding(ctx, findingA)
@@ -112,7 +112,7 @@ func TestMerchantAdminByIDQueriesScopeToTheRequestMerchant(t *testing.T) {
 		var status string
 		var operatorNotes *string
 		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT status, operator_notes FROM openrails.reconciliation_findings WHERE id = $1`,
+			`SELECT status, operator_notes FROM billing.reconciliation_findings WHERE id = $1`,
 			findingB).Scan(&status, &operatorNotes))
 		require.Equal(t, "requires_review", status)
 		require.Nil(t, operatorNotes)
@@ -131,7 +131,7 @@ func TestMerchantAdminByIDQueriesScopeToTheRequestMerchant(t *testing.T) {
 		bare, err := pool.Acquire(ctx)
 		require.NoError(t, err)
 		defer bare.Release()
-		_, err = gen.New(bare).GetReconciliationFinding(ctx, findingB)
+		_, err = dbtest.Queries(bare).GetReconciliationFinding(ctx, findingB)
 		require.ErrorIs(t, err, pgx.ErrNoRows, "no app.merchant_id ⇒ no by-id access; fail closed")
 	})
 }

@@ -83,7 +83,7 @@ func TestCCBillUpgradeSuccess_ParsesBilledInitialPrice(t *testing.T) {
 	postCCBillWebhook(t, suite.ServerURL, "UpgradeSuccess", payload)
 
 	count := suite.Count(ctx,
-		"SELECT COUNT(*) FROM openrails.payments WHERE rail = $1 AND transaction_id = $2",
+		"SELECT COUNT(*) FROM billing.payments WHERE rail = $1 AND transaction_id = $2",
 		string(models.RailCCBill), transactionID)
 	require.Equal(t, 1, count)
 

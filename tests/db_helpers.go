@@ -26,7 +26,7 @@ import (
 
 // Gen returns the sqlc query catalog bound to the suite's pgx pool.
 func (suite *TestContainerSuite) Gen() *gen.Queries {
-	return gen.New(suite.Pool)
+	return dbtest.Queries(suite.Pool)
 }
 
 // Count runs a `SELECT COUNT(*) ...` style query ($1 placeholders) and returns
@@ -101,7 +101,7 @@ func (suite *TestContainerSuite) PinPSP(ctx context.Context, rail string) contex
 	// resolves to. Only seed one if the rail has none.
 	var psp uuid.UUID
 	err = suite.FixtureDB().Pool().QueryRow(ctx,
-		`SELECT id FROM openrails.psps
+		`SELECT id FROM billing.psps
 		  WHERE merchant_id = $1 AND rail = lower($2) AND archived = false
 		  ORDER BY created_at DESC, id DESC LIMIT 1`,
 		tid.UUID(), rail).Scan(&psp)
@@ -154,7 +154,7 @@ func (suite *TestContainerSuite) InsertNotification(ctx context.Context, n *mode
 // gone, #512 hard cut). Returns the lot (grant) id.
 func (suite *TestContainerSuite) insertMoneyCreditLot(ctx context.Context, merchantID, customerID uuid.UUID, currency string, amount int64, expiresAt *time.Time, now time.Time) uuid.UUID {
 	suite.t.Helper()
-	gl := grants.New(gen.New(suite.Pool), merchantID)
+	gl := grants.New(dbtest.Queries(suite.Pool), merchantID)
 	gl.SetClock(func() time.Time { return now })
 	amt, cur := amount, currency
 	g, err := gl.Grant(ctx, grants.GrantInput{
@@ -173,11 +173,11 @@ func (suite *TestContainerSuite) lotRemaining(ctx context.Context, merchantID, l
 	var remaining int64
 	require.NoError(suite.t, suite.Pool.QueryRow(ctx, `
 		SELECT g.amount - COALESCE((
-			SELECT SUM(t.amount) FROM openrails.ledger_transfers t
+			SELECT SUM(t.amount) FROM billing.ledger_transfers t
 			WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
 			  AND t.transfer_type IN ('credit_spend', 'credit_expire')
 		), 0)
-		FROM openrails.grants g WHERE g.id = $1`, lotID).Scan(&remaining))
+		FROM billing.grants g WHERE g.id = $1`, lotID).Scan(&remaining))
 	return remaining
 }
 
@@ -220,7 +220,7 @@ const entitlementCols = `id, merchant_id, customer_id, entitlement, start_at, en
 // previously implied it.
 func (suite *TestContainerSuite) QueryEntitlements(ctx context.Context, tail string, args ...any) []models.Entitlement {
 	suite.t.Helper()
-	rows, err := suite.Pool.Query(ctx, "SELECT "+entitlementCols+" FROM openrails.entitlements "+tail, args...)
+	rows, err := suite.Pool.Query(ctx, "SELECT "+entitlementCols+" FROM billing.entitlements "+tail, args...)
 	require.NoError(suite.t, err, "Failed to query entitlements")
 	defer rows.Close()
 
@@ -262,7 +262,7 @@ func (suite *TestContainerSuite) GetSubscriptionByRailID(railSubID string) *mode
 
 	var id uuid.UUID
 	err := suite.Pool.QueryRow(ctx,
-		"SELECT id FROM openrails.subscriptions WHERE rail_subscription_id = $1 LIMIT 1",
+		"SELECT id FROM billing.subscriptions WHERE rail_subscription_id = $1 LIMIT 1",
 		railSubID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil

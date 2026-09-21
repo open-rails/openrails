@@ -85,7 +85,7 @@ func or897RatePayer(t *testing.T, ctx context.Context, ms *money.MoneyService, p
 	payer := or897ArrearsPayer(t, ctx, ms, pool)
 	require.NoError(t, ms.SetCreditLimit(ctx, payer, money.DefaultCurrency, 100_000*or897Dollar))
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.usage_events WHERE customer_id = $1", payer.UUID())
 	})
 	return payer
 }
@@ -123,7 +123,7 @@ func TestOr897_CollectionThresholdIsReadFromTheBoundPolicy(t *testing.T) {
 		PolicyName: "bill_eagerly", CustomerID: openrails.CustomerID(billed.UUID()),
 	}))
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.invoices WHERE customer_id = ANY($1)",
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.invoices WHERE customer_id = ANY($1)",
 			[]uuid.UUID{billed.UUID(), unbilled.UUID()})
 	})
 
@@ -152,6 +152,6 @@ func or897InvoiceCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, pa
 	t.Helper()
 	var n int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.invoices WHERE customer_id = $1", payer.UUID()).Scan(&n))
+		"SELECT count(*) FROM billing.invoices WHERE customer_id = $1", payer.UUID()).Scan(&n))
 	return n
 }

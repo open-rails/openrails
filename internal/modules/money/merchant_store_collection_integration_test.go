@@ -180,7 +180,7 @@ func TestChargeOutstanding_StoreOnlyNMICredentials_ChargesThroughStore(t *testin
 	var railPaymentID string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT COALESCE(MAX(rail_payment_id), '')
-		FROM openrails.invoice_payments
+		FROM billing.invoice_payments
 		WHERE invoice_id = $1 AND status = 'settled'
 	`, invID).Scan(&railPaymentID))
 	require.Equal(t, "txn_store_only_nmi", railPaymentID)
@@ -251,6 +251,6 @@ func TestInvoiceCollection_DelayedNMIReceiptNeverResubmits(t *testing.T) {
 	require.Equal(t, 1, e.gateway.sends)
 	e.requireSettledOnce(t)
 	var railPaymentID string
-	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail_payment_id FROM openrails.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&railPaymentID))
+	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail_payment_id FROM billing.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&railPaymentID))
 	require.Equal(t, transaction, railPaymentID)
 }

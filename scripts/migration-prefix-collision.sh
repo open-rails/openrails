@@ -54,7 +54,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-DIR="migrations/postgres"
+DIR="internal/migrate/postgres"
 REMOTE="${MIGRATION_PREFIX_REMOTE:-origin}"
 BRANCH="${MIGRATION_PREFIX_BRANCH:-master}"
 REF="refs/remotes/$REMOTE/$BRANCH"

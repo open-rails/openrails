@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
-	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 )
 
 // #832: transfer_type used to be free text while account_type had a closed-set

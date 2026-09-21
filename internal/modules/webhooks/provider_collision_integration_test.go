@@ -27,7 +27,7 @@ func TestNMIRefundWebhookIsolatesArchivedPSPWithCollidingReferences(t *testing.T
 	pspA, pspB := uuid.New(), uuid.New()
 	accountA, accountB := "account-a-"+uuid.NewString(), "account-b-"+uuid.NewString()
 	for id, account := range map[uuid.UUID]string{pspA: accountA, pspB: accountB} {
-		_, err := database.Qx(ctx).Exec(ctx, `INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id,key,archived) VALUES($1,$2,'nmi','test',$3,$3,$4)`, id, dbtest.TestMerchantID.UUID(), account, id == pspB)
+		_, err := database.Qx(ctx).Exec(ctx, `INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,key,archived) VALUES($1,$2,'nmi','test',$3,$3,$4)`, id, dbtest.TestMerchantID.UUID(), account, id == pspB)
 		require.NoError(t, err)
 	}
 	priceService, productService := catalog.NewPriceService(database), catalog.NewProductService(database)
@@ -36,9 +36,9 @@ func TestNMIRefundWebhookIsolatesArchivedPSPWithCollidingReferences(t *testing.T
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(database, productService, priceService, entitlementService, subscriptions.NewNotificationService(database, nil), paymentService)
 	subService := subscriptions.NewSubscriptionService(database, priceService, productService, nil, nil)
 	productID, priceID := uuid.New(), uuid.New()
-	_, err := database.Qx(ctx).Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Collision')`, productID, dbtest.TestMerchantID.UUID(), uuid.NewString())
+	_, err := database.Qx(ctx).Exec(ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Collision')`, productID, dbtest.TestMerchantID.UUID(), uuid.NewString())
 	require.NoError(t, err)
-	_, err = database.Qx(ctx).Exec(ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,amount,currency,auto_renew,access_duration_hours) VALUES($1,$2,$3,10000000,'USD',true,720)`, priceID, dbtest.TestMerchantID.UUID(), productID)
+	_, err = database.Qx(ctx).Exec(ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency,auto_renew,access_duration_hours) VALUES($1,$2,$3,10000000,'USD',true,720)`, priceID, dbtest.TestMerchantID.UUID(), productID)
 	require.NoError(t, err)
 	subRef, chargeRef, refundRef := "sub-"+uuid.NewString(), "charge-"+uuid.NewString(), "refund-"+uuid.NewString()
 	subIDs := map[uuid.UUID]uuid.UUID{}
@@ -50,7 +50,7 @@ func TestNMIRefundWebhookIsolatesArchivedPSPWithCollidingReferences(t *testing.T
 		subIDs[pspID] = subID
 		paymentIDs[pspID] = paymentID
 		start, end := time.Now().UTC().Add(-time.Hour), time.Now().UTC().Add(29*24*time.Hour)
-		_, err = database.Qx(ctx).Exec(ctx, `INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,rail,psp_id,rail_subscription_id,status,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,'nmi',$6,$7,'active',$8,$9)`, subID, dbtest.TestMerchantID.UUID(), customerID, productID, priceID, pspID, subRef, start, end)
+		_, err = database.Qx(ctx).Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,rail,psp_id,rail_subscription_id,status,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,'nmi',$6,$7,'active',$8,$9)`, subID, dbtest.TestMerchantID.UUID(), customerID, productID, priceID, pspID, subRef, start, end)
 		require.NoError(t, err)
 		require.NoError(t, paymentService.Create(scoped, &models.Payment{ID: paymentID, CustomerID: customerID, PriceID: priceID, SubscriptionID: &subID, Rail: models.RailNMI, PspID: &pspID, TransactionID: chargeRef, Amount: 10000000, ListAmount: 10000000, Currency: "USD", Status: "completed", MoneyMovement: models.MoneyMovementRail}))
 	}
@@ -99,7 +99,7 @@ func TestCustodianWebhookAndUpdaterIsolateCollidingAccounts(t *testing.T) {
 	custodianA := db.CustodianIDFromContext(ctx)
 	custodianB := dbtest.EnsureTestCustodian(ctx, t, fx.dbi.Pool(), dbtest.TestMerchantID.UUID())
 	pspB, methodB := uuid.New(), uuid.New()
-	_, err := fx.dbi.Qx(ctx).Exec(ctx, `INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id,key,custodian_id) VALUES($1,$2,'nmi','test',$3,$3,$4)`, pspB, dbtest.TestMerchantID.UUID(), uuid.NewString(), custodianB)
+	_, err := fx.dbi.Qx(ctx).Exec(ctx, `INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,key,custodian_id) VALUES($1,$2,'nmi','test',$3,$3,$4)`, pspB, dbtest.TestMerchantID.UUID(), uuid.NewString(), custodianB)
 	require.NoError(t, err)
 	_, err = fx.dbi.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID: methodB, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: fx.customerID,
@@ -108,7 +108,7 @@ func TestCustodianWebhookAndUpdaterIsolateCollidingAccounts(t *testing.T) {
 	})
 	require.NoError(t, err)
 	// Rename/archive the authenticated account after the instrument was stored.
-	_, err = fx.dbi.Qx(ctx).Exec(ctx, `UPDATE openrails.custodians SET key=$2,archived=true WHERE id=$1`, custodianA, uuid.NewString())
+	_, err = fx.dbi.Qx(ctx).Exec(ctx, `UPDATE billing.custodians SET key=$2,archived=true WHERE id=$1`, custodianA, uuid.NewString())
 	require.NoError(t, err)
 	eventID := uuid.NewString()
 	require.NoError(t, fx.deliver(t, eventID, basistheory.EventTokenExpired, map[string]any{"token": map[string]any{"id": fx.tokenID}}))
@@ -128,12 +128,12 @@ func TestCustodianWebhookAndUpdaterIsolateCollidingAccounts(t *testing.T) {
 	// Provider job references are also local to the custodian account.
 	jobRef := uuid.NewString()
 	for _, cid := range []uuid.UUID{custodianA, custodianB} {
-		_, err := fx.dbi.Qx(ctx).Exec(ctx, `INSERT INTO openrails.account_updater_batches(merchant_id,custodian_id,instruments,status,job_ref) VALUES($1,$2,'[]','submitted',$3)`, dbtest.TestMerchantID.UUID(), cid, jobRef)
+		_, err := fx.dbi.Qx(ctx).Exec(ctx, `INSERT INTO billing.account_updater_batches(merchant_id,custodian_id,instruments,status,job_ref) VALUES($1,$2,'[]','submitted',$3)`, dbtest.TestMerchantID.UUID(), cid, jobRef)
 		require.NoError(t, err)
 	}
 	require.NoError(t, CloseAccountUpdaterBatch(ctx, fx.dbi.Gen(ctx), jobRef, stats))
 	var state string
-	require.NoError(t, fx.dbi.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.account_updater_batches WHERE custodian_id=$1 AND job_ref=$2`, custodianB, jobRef).Scan(&state))
+	require.NoError(t, fx.dbi.Qx(ctx).QueryRow(ctx, `SELECT status FROM billing.account_updater_batches WHERE custodian_id=$1 AND job_ref=$2`, custodianB, jobRef).Scan(&state))
 	require.Equal(t, "submitted", state)
 
 	// Reusing A's event ID under B still applies B's own independent event.

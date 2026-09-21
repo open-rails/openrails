@@ -148,7 +148,7 @@ func TestScheduledDowngrade(t *testing.T) {
 		// Set scheduled downgrade to Premium
 		sub.ScheduledPriceID = &premiumPriceID
 		_, err := suite.Pool.Exec(ctx,
-			"UPDATE openrails.subscriptions SET scheduled_price_id = $1 WHERE id = $2",
+			"UPDATE billing.subscriptions SET scheduled_price_id = $1 WHERE id = $2",
 			sub.ScheduledPriceID, sub.ID)
 		require.NoError(t, err, "Should update scheduled price")
 
@@ -188,7 +188,7 @@ func TestScheduledDowngrade(t *testing.T) {
 		// Set scheduled downgrade to Premium
 		sub.ScheduledPriceID = &premiumPriceID
 		_, err := suite.Pool.Exec(ctx,
-			"UPDATE openrails.subscriptions SET scheduled_price_id = $1 WHERE id = $2",
+			"UPDATE billing.subscriptions SET scheduled_price_id = $1 WHERE id = $2",
 			sub.ScheduledPriceID, sub.ID)
 		require.NoError(t, err, "Should update scheduled price")
 
@@ -486,7 +486,7 @@ func TestAdminChangeTierParity(t *testing.T) {
 			})
 			defer suite.CleanupSubscriptionsForUser(userID)
 			_, err := suite.Pool.Exec(suite.MerchantCtx(),
-				"UPDATE openrails.subscriptions SET user_email = $1 WHERE id = $2", email, sub.ID)
+				"UPDATE billing.subscriptions SET user_email = $1 WHERE id = $2", email, sub.ID)
 			require.NoError(t, err)
 
 			self := preview(t, suite.Server.Handler(),
@@ -606,7 +606,7 @@ func TestAdminChangeTierGuards(t *testing.T) {
 		})
 		defer suite.CleanupSubscriptionsForUser(userID)
 		_, err := suite.Pool.Exec(suite.MerchantCtx(),
-			"UPDATE openrails.subscriptions SET scheduled_price_id = $1 WHERE id = $2", premiumPlusPriceID, sub.ID)
+			"UPDATE billing.subscriptions SET scheduled_price_id = $1 WHERE id = $2", premiumPlusPriceID, sub.ID)
 		require.NoError(t, err)
 
 		rec := post(t, sub.ID, "/preview")

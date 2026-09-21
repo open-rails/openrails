@@ -97,7 +97,7 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailNMI), railCustomerRef)
 	anchor := createNMISandboxUnscheduledAnchor(t, client, railCustomerRef, "nmi-anchor-619-")
 	_, err = pool.Exec(ctx,
-		"UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref = $2 WHERE id = $1",
+		"UPDATE billing.payment_methods SET stored_credential_unscheduled_ref = $2 WHERE id = $1",
 		pm, anchor)
 	require.NoError(t, err)
 
@@ -130,7 +130,7 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 		var failureCode, failureMessage string
 		_ = pool.QueryRow(ctx, `
 			SELECT COALESCE(failure_code, ''), COALESCE(failure_message, '')
-			FROM openrails.invoice_payments
+			FROM billing.invoice_payments
 			WHERE invoice_id = $1 AND status = 'failed'
 			ORDER BY created_at DESC
 			LIMIT 1
@@ -151,7 +151,7 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 	var settledCount int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*), COALESCE(MAX(rail), ''), COALESCE(MAX(rail_payment_id), '')
-		FROM openrails.invoice_payments
+		FROM billing.invoice_payments
 		WHERE invoice_id = $1 AND status = 'settled'
 	`, inv.ID).Scan(&settledCount, &rail, &railPaymentID))
 	require.Equal(t, 1, settledCount)
@@ -162,7 +162,7 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 	// customer-present transaction as its unscheduled sequence anchor.
 	var storedRef string
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT stored_credential_unscheduled_ref FROM openrails.payment_methods WHERE id = $1", pm).Scan(&storedRef))
+		"SELECT stored_credential_unscheduled_ref FROM billing.payment_methods WHERE id = $1", pm).Scan(&storedRef))
 	require.Equal(t, anchor, storedRef, "MIT must preserve the approved initial-CIT anchor")
 
 	t.Logf("APPROVED: OpenRails invoice %s settled via NMI sandbox; MIT transaction id = %s, CIT anchor = %s", inv.ID, railPaymentID, anchor)

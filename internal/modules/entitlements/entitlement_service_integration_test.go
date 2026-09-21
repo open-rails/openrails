@@ -59,7 +59,7 @@ func TestPushNewEntitlement_CoveredSourceSurvivesOtherSourceRefund(t *testing.T)
 
 	var count int
 	require.NoError(t, dbi.Pool().QueryRow(ctx,
-		`SELECT count(*) FROM openrails.entitlements
+		`SELECT count(*) FROM billing.entitlements
 		 WHERE customer_id = $1 AND entitlement = $2
 		   AND revoked_at IS NULL AND deleted_at IS NULL`,
 		tenantSubjectID, entName,
@@ -90,11 +90,11 @@ func TestPushNewEntitlement_NewPaidPeriodAfterSourceRevocation(t *testing.T) {
 	customer := dbtest.EnsureCustomerIDPgx(ctx, t, pool, user)
 	product, price, sub := uuid.New(), uuid.New(), uuid.New()
 	psp := dbtest.EnsureTestPSP(ctx, t, pool, mid, "stripe")
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Renewal')`, product, mid, uuid.NewString())
+	_, err := pool.Exec(ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Renewal')`, product, mid, uuid.NewString())
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,amount,currency,auto_renew,access_duration_hours) VALUES($1,$2,$3,100,'USD',true,24)`, price, mid, product)
+	_, err = pool.Exec(ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency,auto_renew,access_duration_hours) VALUES($1,$2,$3,100,'USD',true,24)`, price, mid, product)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,rail,psp_id,status) VALUES($1,$2,$3,$4,$5,'stripe',$6,'active')`, sub, mid, customer, product, price, psp)
+	_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,rail,psp_id,status) VALUES($1,$2,$3,$4,$5,'stripe',$6,'active')`, sub, mid, customer, product, price, psp)
 	require.NoError(t, err)
 	end := now.Add(24 * time.Hour)
 	req := PushNewEntitlementParams{UserID: user, Entitlement: "renewal-source", NotBefore: &now, EndAt: &end, SourceType: models.EntitlementSourceSubscription, SourceID: sub}

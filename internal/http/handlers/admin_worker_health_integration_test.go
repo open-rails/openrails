@@ -29,15 +29,15 @@ func TestGetAdminWorkerHealthReturnsRows(t *testing.T) {
 	kinds := []string{"test.admin_wh_ok", "test.admin_wh_failing"}
 	t.Cleanup(func() {
 		for _, kind := range kinds {
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.worker_state WHERE worker_kind = $1`, kind)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.worker_state WHERE worker_kind = $1`, kind)
 		}
 	})
 	_, err := dbi.Qx(ctx).Exec(ctx,
-		`INSERT INTO openrails.worker_state (worker_kind, expected_period_seconds, last_success_at, consecutive_failures)
+		`INSERT INTO billing.worker_state (worker_kind, expected_period_seconds, last_success_at, consecutive_failures)
 		 VALUES ($1, 3600, now(), 0)`, kinds[0])
 	require.NoError(t, err)
 	_, err = dbi.Qx(ctx).Exec(ctx,
-		`INSERT INTO openrails.worker_state (worker_kind, last_error_at, last_error, consecutive_failures)
+		`INSERT INTO billing.worker_state (worker_kind, last_error_at, last_error, consecutive_failures)
 		 VALUES ($1, now(), 'boom', 7)`, kinds[1])
 	require.NoError(t, err)
 
@@ -88,10 +88,10 @@ func TestGetPlatformWorkerHealthIncludesErrorText(t *testing.T) {
 
 	kind := "test.platform_wh_failing"
 	t.Cleanup(func() {
-		_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.worker_state WHERE worker_kind = $1`, kind)
+		_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.worker_state WHERE worker_kind = $1`, kind)
 	})
 	_, err := dbi.Qx(ctx).Exec(ctx,
-		`INSERT INTO openrails.worker_state (worker_kind, last_error_at, last_error, consecutive_failures)
+		`INSERT INTO billing.worker_state (worker_kind, last_error_at, last_error, consecutive_failures)
 		 VALUES ($1, now(), 'merchant acme-slug subscription 0f0f: PSP 100001 declined', 3)`, kind)
 	require.NoError(t, err)
 

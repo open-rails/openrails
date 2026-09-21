@@ -34,10 +34,10 @@ func reconcileBillingState(t *testing.T, appDB *db.DB, ctx context.Context) stri
 	var state string
 	require.NoError(t, appDB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		return appDB.Qx(ctx).QueryRow(ctx, `SELECT jsonb_build_object(
-		  'subscriptions', (SELECT coalesce(jsonb_agg(to_jsonb(s) ORDER BY id), '[]') FROM openrails.subscriptions s WHERE merchant_id=openrails.current_merchant_id()),
-		  'payments', (SELECT coalesce(jsonb_agg(to_jsonb(p) ORDER BY id), '[]') FROM openrails.payments p WHERE merchant_id=openrails.current_merchant_id()),
-		  'payment_methods', (SELECT coalesce(jsonb_agg(to_jsonb(p) ORDER BY id), '[]') FROM openrails.payment_methods p WHERE merchant_id=openrails.current_merchant_id()),
-		  'entitlements', (SELECT coalesce(jsonb_agg(to_jsonb(e) ORDER BY id), '[]') FROM openrails.entitlements e WHERE merchant_id=openrails.current_merchant_id())
+		  'subscriptions', (SELECT coalesce(jsonb_agg(to_jsonb(s) ORDER BY id), '[]') FROM billing.subscriptions s WHERE merchant_id=billing.current_merchant_id()),
+		  'payments', (SELECT coalesce(jsonb_agg(to_jsonb(p) ORDER BY id), '[]') FROM billing.payments p WHERE merchant_id=billing.current_merchant_id()),
+		  'payment_methods', (SELECT coalesce(jsonb_agg(to_jsonb(p) ORDER BY id), '[]') FROM billing.payment_methods p WHERE merchant_id=billing.current_merchant_id()),
+		  'entitlements', (SELECT coalesce(jsonb_agg(to_jsonb(e) ORDER BY id), '[]') FROM billing.entitlements e WHERE merchant_id=billing.current_merchant_id())
 		)::text`).Scan(&state)
 	}))
 	return state
@@ -102,7 +102,7 @@ func TestReconcileImplausibleRosterPreservesBilling(t *testing.T) {
 				require.True(t, result.Summary.Providers["nmi"].Aborted)
 				require.Empty(t, result.Findings)
 				var persisted int
-				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.reconciliation_findings WHERE last_seen_run=$1`, result.RunID).Scan(&persisted))
+				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.reconciliation_findings WHERE last_seen_run=$1`, result.RunID).Scan(&persisted))
 				require.Zero(t, persisted, "a refused roster must not persist absence findings")
 				return nil
 			}))

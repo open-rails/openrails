@@ -12,7 +12,7 @@ concrete account on a rail (e.g. `mobius` on nmi).
 Your Go binary imports the engine and runs it in-process: no second service, no
 network hop, no second credential. Concretely:
 
-- The engine owns the `openrails` schema inside **your** Postgres database.
+- The engine owns a configurable schema, defaulting to `billing`, inside **your** Postgres database.
 - Its HTTP routes mount on **your** mux under a prefix you choose; your users call
   them with their normal session credential.
 - Your backend calls the engine through `rt.Client()` — the **same**
@@ -41,31 +41,34 @@ flowchart LR
 go get github.com/open-rails/openrails
 ```
 
-Migrations ship in the module as an embedded FS. Apply them from your own migration
-step with [migratekit](https://github.com/open-rails/migratekit):
+OpenRails owns its migration source and applies it through one explicit
+initialization call. Your application supplies the privileged pool used for
+schema initialization; it does not import migratekit or OpenRails' migration
+files:
 
 ```go
-import (
-    "github.com/open-rails/openrails/config"
-    postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
-)
-
-migratekit.MigrationSource{
-    App:    config.MigratekitApp, // tracking key "openrails"
-    FS:     postgresmigrations.FS,
-    Schema: "openrails",
+if err := embed.ApplyMigrations(ctx, migrationPool, embed.MigrationOptions{}); err != nil {
+    return fmt.Errorf("initialize OpenRails database: %w", err)
 }
 ```
 
-Apply sibling migration chains in this order: **AuthKit (`profiles`), River
-(`public`), then OpenRails (`openrails`)**. The OpenRails baseline tolerates an
-absent sibling schema so isolated schema tests can apply it, but skipped grants
-are not retroactive: an embedded runtime needs AuthKit's schema to exist before
-OpenRails grants `openrails_app` access to it. Run every chain with the same
-owner/migration role so the default privileges also cover later sibling tables.
+Initialize AuthKit separately through AuthKit's own embedded migration API.
+`embed.ApplyMigrations` applies OpenRails' billing chain and the River chain
+used by `RiverManagedByOpenRails`, in the order OpenRails requires. A
+`RiverFromHost` integration is the explicit low-level exception: the host owns
+that River client's schema and migration lifecycle. Pass the same `RiverOwnership`
+value to `MigrationOptions.River` and `Options.River`; migrations never invoke
+the binder. Set `MigrationOptions.Schema` to match `cfg.DB.SchemaName()` when
+using a custom billing schema.
 
-The engine never runs migrations itself — it validates the tracking key at boot and
-refuses to start if any migration is missing.
+The engine validates the tracking key at boot and refuses to start if any
+OpenRails migration is missing or orphaned.
+
+OpenRails does not create or grant access to AuthKit's `profiles` schema. If
+the host enables notification email or CCBill username resolution, pass its
+identity adapter explicitly through `embed.Options.UserDirectory` and
+`embed.Options.UsernameResolver`; leaving them unset disables those optional
+lookups safely.
 
 ### 3. Config
 
@@ -80,7 +83,7 @@ to boot unless you declare posture explicitly (#745):
 | `TestMode` | yes | `config.CredentialPostureSandbox` or `config.CredentialPostureLive`. The zero value is UNSET and rejected — it can never silently mean "live". |
 | `ProviderWriteMode` | recommended | `config.ProviderWriteModeFull` etc.; unset fail-closes to readonly. |
 | `MerchantSource` | defaults to `config.MerchantSourceManifest` | Mode 1 (manifest-is-truth, secrets in memory, reboot to change) vs `MerchantSourceAPI` (mode 2: provision via HTTP APIs + persistent secret store). |
-| `DB` | yes | Schema defaults to `openrails`. The **pool you inject must connect as a non-superuser, `NOBYPASSRLS` role** — see below. |
+| `DB` | yes | Schema defaults to `billing`. The **pool you inject must connect as a non-superuser, `NOBYPASSRLS` role** — see below. |
 
 #### The database role you connect as (required)
 
@@ -105,10 +108,12 @@ What to do:
 
 1. Run migrations as your owner/admin role (DDL, `GRANT`s and role creation need
    it). `openrails migrate` is the only job that runs privileged.
-2. The baseline migration creates `openrails_app` `NOLOGIN NOBYPASSRLS` and
-   grants it exactly what the runtime needs: the `openrails` schema, AuthKit's
-   `profiles` schema, River's `public.river_*` tables, and `SELECT` on
-   `public.migrations`. Attach a login credential out of band
+2. Initialization creates `openrails_app` `NOLOGIN NOBYPASSRLS` and grants it
+   access to its configured billing tables and `SELECT` on `public.migrations`.
+   When OpenRails owns River, it migrates and grants only River's named runtime
+   tables and sequences in the selected schema. AuthKit access remains with the
+   host's identity adapter; OpenRails never grants `profiles` access. Attach a
+   login credential out of band
    (`ALTER ROLE openrails_app WITH LOGIN PASSWORD '…'`) — that grants no
    privilege and the role stays `NOBYPASSRLS`.
 3. Give OpenRails a pool on that role. Your own application tables are **not**
@@ -151,8 +156,7 @@ rt, err := embed.New(ctx, embed.Options{
     Config:     cfg,
     PGXPool:    pool, // share your app's pgx/v5 pool; nil = engine opens its own from Config.DB
     Redis:      rdb,  // optional — Redis-backed rate limits; omit for in-memory
-    River:      embed.RiverManagedByOpenRails(), // required; or RiverFromHost below
-    RunWorkers: true,
+    RunWorkers: false, // attach optional components before constructing the worker fleet
 })
 if err != nil { log.Fatal(err) }
 defer rt.Close(ctx)
@@ -164,7 +168,7 @@ defer rt.Close(ctx)
 | `PGXPool` | `*pgxpool.Pool` | Host-supplied pool (pgx/v5). |
 | `Redis` | `*redis.Client` | Optional (rate limits, admission holds). |
 | `Cache` | `cache.Cache` | Optional cache override. |
-| `River` | `embed.RiverOwnership` | Required. `RiverManagedByOpenRails()` or `RiverFromHost(bind)`; construction refuses without it. |
+| `River` | `embed.RiverOwnership` | Defaults to managed River in `public`. `RiverManagedByOpenRails("jobs")` selects another schema; `RiverFromHost(bind)` gives the host ownership. |
 | `RunWorkers` | `bool` | Runs the River background workers (renewals, dunning, credit/hold expiry, reconciliation) on a Runtime-owned goroutine, detached from the ctx you pass to `New` — `Close` stops them. Leave false to drive `rt.RunWorkers(ctx)` yourself. |
 | `ConsoleAssets` | `fs.FS` | Host-built admin console SPA (see §6). |
 | `StripeTransport` | `http.RoundTripper` | Test seam under the Stripe API choke point; refused with a live posture. |
@@ -182,8 +186,23 @@ hosted products) attach it with `embed/controlplane`:
 
 ```go
 cp, err := controlplane.Attach(ctx, rt, controlplane.Options{HostedPosture: true, EmailSender: sender})
+if err != nil { return err }
 handler, err := cp.Handler() // billing + AuthKit routes + admin console
+if err != nil { return err }
+
+// Start after attachment, alongside HTTP under the application's errgroup.
+workers.Go(func() error { return rt.RunWorkers(ctx) })
 ```
+
+Keep `RunWorkers: false` through component attachment, then supervise
+`rt.RunWorkers(ctx)` alongside the HTTP server (the `workers` errgroup above).
+`RunWorkers` blocks until shutdown; propagate its error through that supervisor.
+The control plane adds AuthKit maintenance to the same River registry before
+client construction, and attaching it after River initialization is refused.
+Billing-only hosts with no optional components to attach may use
+`RunWorkers: true` directly. Hosts owning a shared River fleet compose their own
+AuthKit workers in the binder before `river.NewClient` instead of attaching a
+control plane to an already-bound client.
 
 `cp` carries the operator mechanisms (`ProvisionMerchant`, directory reads,
 provider configuration, fleet aggregates, retirement, `UserAuthenticator`,

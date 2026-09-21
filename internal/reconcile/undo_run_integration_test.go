@@ -161,7 +161,7 @@ func TestUndoRun_PerPSPScope_RestoresOneAccountAndLeavesTheSiblingAlone(t *testi
 	var siblingImages int
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		return appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.destructive_run_before_images WHERE destructive_run_id=$1 AND row_id = ANY($2)`,
+			`SELECT count(*) FROM billing.destructive_run_before_images WHERE destructive_run_id=$1 AND row_id = ANY($2)`,
 			runID, sibling.subs).Scan(&siblingImages)
 	}))
 	require.Zero(t, siblingImages, "a run bound to one PSP must never capture another PSP's rows")
@@ -195,7 +195,7 @@ func TestUndoRun_IsInvisibleToAnotherMerchant(t *testing.T) {
 	var stillCancelled int
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		return appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.subscriptions WHERE id = ANY($1) AND status='cancelled'`, f.subs).Scan(&stillCancelled)
+			`SELECT count(*) FROM billing.subscriptions WHERE id = ANY($1) AND status='cancelled'`, f.subs).Scan(&stillCancelled)
 	}))
 	require.Positive(t, stillCancelled)
 }
@@ -231,7 +231,7 @@ func TestUndoRun_NeverResurrectsAnIndependentlyDeletedRow(t *testing.T) {
 	var imagesBefore int64
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		return appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.destructive_run_before_images
+			`SELECT count(*) FROM billing.destructive_run_before_images
 			  WHERE destructive_run_id=$1 AND table_name='subscriptions' AND restored_at IS NULL`, runID).Scan(&imagesBefore)
 	}))
 	require.Positive(t, imagesBefore)
@@ -240,20 +240,20 @@ func TestUndoRun_NeverResurrectsAnIndependentlyDeletedRow(t *testing.T) {
 	pruneRunID := uuid.New()
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		if _, err := appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.maintenance_runs (id, merchant_id, psp_id, kind, actor, dry_run, status)
+			`INSERT INTO billing.maintenance_runs (id, merchant_id, psp_id, kind, actor, dry_run, status)
 			 VALUES ($1,$2,$3,'prune','operator',false,'completed')`,
 			pruneRunID, dbtest.TestMerchantID.UUID(), f.pspID); err != nil {
 			return err
 		}
 		_, err := appDB.Qx(ctx).Exec(ctx,
-			`UPDATE openrails.subscriptions SET deleted_at = now(), destructive_run_id = $2 WHERE id = $1`,
+			`UPDATE billing.subscriptions SET deleted_at = now(), destructive_run_id = $2 WHERE id = $1`,
 			tombstoned, pruneRunID)
 		return err
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `UPDATE openrails.subscriptions SET deleted_at=NULL, destructive_run_id=NULL WHERE id=$1`, tombstoned)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.maintenance_runs WHERE id=$1`, pruneRunID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `UPDATE billing.subscriptions SET deleted_at=NULL, destructive_run_id=NULL WHERE id=$1`, tombstoned)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.maintenance_runs WHERE id=$1`, pruneRunID)
 			return nil
 		})
 	})
@@ -282,7 +282,7 @@ func TestUndoRun_NeverResurrectsAnIndependentlyDeletedRow(t *testing.T) {
 	)
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		return appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT deleted_at, destructive_run_id, status::text FROM openrails.subscriptions WHERE id=$1`, tombstoned).
+			`SELECT deleted_at, destructive_run_id, status::text FROM billing.subscriptions WHERE id=$1`, tombstoned).
 			Scan(&gotDeleted, &gotRun, &gotStatus)
 	}))
 	require.NotNil(t, gotDeleted, "a converge undo must never clear a tombstone another run set")
@@ -314,13 +314,13 @@ func TestUndoRun_RefusesTheNeverRollbackableClasses(t *testing.T) {
 		id := uuid.New()
 		require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			_, err := appDB.Qx(ctx).Exec(ctx,
-				`INSERT INTO openrails.maintenance_runs (id, merchant_id, kind, actor, dry_run, status)
+				`INSERT INTO billing.maintenance_runs (id, merchant_id, kind, actor, dry_run, status)
 				 VALUES ($1,$2,$3,'operator',false,'completed')`, id, dbtest.TestMerchantID.UUID(), kind)
 			return err
 		}))
 		t.Cleanup(func() {
 			_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.maintenance_runs WHERE id=$1`, id)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.maintenance_runs WHERE id=$1`, id)
 				return nil
 			})
 		})
@@ -339,7 +339,7 @@ func TestUndoRun_RefusesTheNeverRollbackableClasses(t *testing.T) {
 
 		// The purge was not marked reversed by the refusal.
 		var purgeStatus string
-		if err := appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.maintenance_runs WHERE id=$1`, purge).Scan(&purgeStatus); err != nil {
+		if err := appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM billing.maintenance_runs WHERE id=$1`, purge).Scan(&purgeStatus); err != nil {
 			return err
 		}
 
@@ -371,8 +371,8 @@ func TestNeverRollbackableTablesAreNotWritableByTheAppRole(t *testing.T) {
 		for _, priv := range privs {
 			var has bool
 			require.NoError(t, appDB.Pool().QueryRow(ctx,
-				`SELECT has_table_privilege('openrails_app', 'openrails.'||$1, $2)`, table, priv).Scan(&has))
-			require.False(t, has, "openrails_app must not hold %s on openrails.%s: %s",
+				`SELECT has_table_privilege('openrails_app', 'billing.'||$1, $2)`, table, priv).Scan(&has))
+			require.False(t, has, "openrails_app must not hold %s on billing.%s: %s",
 				priv, table, NeverRollbackableTables[table])
 		}
 	}
@@ -382,10 +382,10 @@ func TestNeverRollbackableTablesAreNotWritableByTheAppRole(t *testing.T) {
 	// run stops being safely reversible once it reaches past dedup retention.
 	var retentionDelete bool
 	require.NoError(t, appDB.Pool().QueryRow(ctx,
-		`SELECT has_table_privilege('openrails_app', 'openrails.webhook_events', 'DELETE')`).Scan(&retentionDelete))
+		`SELECT has_table_privilege('openrails_app', 'billing.webhook_events', 'DELETE')`).Scan(&retentionDelete))
 	require.True(t, retentionDelete, "the webhook_events retention sweep needs DELETE; see migration 0036")
 	var webhookUpdate bool
 	require.NoError(t, appDB.Pool().QueryRow(ctx,
-		`SELECT has_table_privilege('openrails_app', 'openrails.webhook_events', 'UPDATE')`).Scan(&webhookUpdate))
+		`SELECT has_table_privilege('openrails_app', 'billing.webhook_events', 'UPDATE')`).Scan(&webhookUpdate))
 	require.False(t, webhookUpdate, "dedup truth is never edited in place")
 }

@@ -24,15 +24,15 @@ func TestTierRegroupSerializesWithSubscriptionCreation(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			product, customer, sub := uuid.New(), uuid.New(), uuid.New()
-			_, err := pool.Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name,tier_group) VALUES($1,$2,$3,'Product','before')`, product, mid, uuid.NewString())
+			_, err := pool.Exec(ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name,tier_group) VALUES($1,$2,$3,'Product','before')`, product, mid, uuid.NewString())
 			require.NoError(t, err)
-			_, err = pool.Exec(ctx, `INSERT INTO openrails.customers(id,merchant_id) VALUES($1,$2)`, customer, mid)
+			_, err = pool.Exec(ctx, `INSERT INTO billing.customers(id,merchant_id) VALUES($1,$2)`, customer, mid)
 			require.NoError(t, err)
 			tx, err := pool.Begin(ctx)
 			require.NoError(t, err)
 			defer tx.Rollback(ctx)
-			insert := `INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,rail,psp_id,status) VALUES($1,$2,$3,$4,'stripe',$5,'pending')`
-			update := `UPDATE openrails.products SET tier_group='after' WHERE id=$1`
+			insert := `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,rail,psp_id,status) VALUES($1,$2,$3,$4,'stripe',$5,'pending')`
+			update := `UPDATE billing.products SET tier_group='after' WHERE id=$1`
 			result := make(chan error, 1)
 			if insertFirst {
 				_, err = tx.Exec(ctx, insert, sub, mid, customer, product, psp)
@@ -60,7 +60,7 @@ func TestTierRegroupSerializesWithSubscriptionCreation(t *testing.T) {
 				require.NoError(t, err)
 			}
 			var actual, cached string
-			require.NoError(t, pool.QueryRow(ctx, `SELECT p.tier_group,s.tier_group FROM openrails.products p JOIN openrails.subscriptions s ON s.product_id=p.id WHERE s.id=$1`, sub).Scan(&actual, &cached))
+			require.NoError(t, pool.QueryRow(ctx, `SELECT p.tier_group,s.tier_group FROM billing.products p JOIN billing.subscriptions s ON s.product_id=p.id WHERE s.id=$1`, sub).Scan(&actual, &cached))
 			require.Equal(t, actual, cached)
 			if insertFirst {
 				require.Equal(t, "before", actual)

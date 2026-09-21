@@ -198,13 +198,13 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 		Amount: 5_000_000, Currency: "USD", CreatedAt: now, UpdatedAt: now,
 	})
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = 'nmi_sale' AND price_id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.ledger_transfers WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE intent_type = 'nmi_sale' AND price_id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.ledger_transfers WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.grants WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	gateway, client := newFakeNMISaleGateway(t)
@@ -270,7 +270,7 @@ func (fx *saleIntentFixture) paymentCount(t *testing.T) int {
 	t.Helper()
 	var n int
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT count(*) FROM openrails.payments WHERE rail = 'nmi' AND transaction_id = $1", fx.gateway.txnID).Scan(&n))
+		"SELECT count(*) FROM billing.payments WHERE rail = 'nmi' AND transaction_id = $1", fx.gateway.txnID).Scan(&n))
 	return n
 }
 
@@ -318,7 +318,7 @@ func TestNMISaleIntent_ProductAccessFailureRetriesWithoutRecharging(t *testing.T
 	require.Equal(t, 1, fx.paymentCount(t))
 	var accessGrants int
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		`SELECT count(*) FROM openrails.grants WHERE customer_id=$1 AND product_id=$2 AND kind='ownership' AND event='grant'`,
+		`SELECT count(*) FROM billing.grants WHERE customer_id=$1 AND product_id=$2 AND kind='ownership' AND event='grant'`,
 		fx.customerID, fx.productID).Scan(&accessGrants))
 	require.Zero(t, accessGrants)
 
@@ -331,7 +331,7 @@ func TestNMISaleIntent_ProductAccessFailureRetriesWithoutRecharging(t *testing.T
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load(), "effect retry must verify the existing charge, never charge again")
 	require.Equal(t, 1, fx.paymentCount(t))
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		`SELECT count(*) FROM openrails.grants WHERE customer_id=$1 AND product_id=$2 AND kind='ownership' AND event='grant'`,
+		`SELECT count(*) FROM billing.grants WHERE customer_id=$1 AND product_id=$2 AND kind='ownership' AND event='grant'`,
 		fx.customerID, fx.productID).Scan(&accessGrants))
 	require.Equal(t, 1, accessGrants, "the retried ownership grant must be fulfilled exactly once")
 }
@@ -353,7 +353,7 @@ func TestNMISaleIntent_DeclineIsTerminal(t *testing.T) {
 	var failureCode, failureReason, tokenType, attemptKind string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
 		`SELECT COALESCE(failure_code,''), COALESCE(failure_reason,''), COALESCE(token_type,''), COALESCE(attempt_kind,'')
-		 FROM openrails.payments WHERE status='failed' AND transaction_id=$1`,
+		 FROM billing.payments WHERE status='failed' AND transaction_id=$1`,
 		"nmi_sale_declined:"+intent.ID.String()).Scan(&failureCode, &failureReason, &tokenType, &attemptKind))
 	require.Equal(t, "transaction_was_declined_by_processor", failureCode) // NMI 200, verbatim localization id
 	require.Equal(t, payments.FailureCardDeclined, failureReason)
@@ -412,15 +412,15 @@ func TestNMISaleIntent_ChargedButRegistrationFails_VerifierRepairs(t *testing.T)
 
 	// Repair the world: create the missing price (same product family).
 	var productID uuid.UUID
-	require.NoError(t, pool.QueryRow(fx.ctx, "SELECT product_id FROM openrails.prices WHERE id = $1", realPriceID).Scan(&productID))
+	require.NoError(t, pool.QueryRow(fx.ctx, "SELECT product_id FROM billing.prices WHERE id = $1", realPriceID).Scan(&productID))
 	// A different amount dodges the (product, amount, window) uniqueness; an
 	// explicit #774 key dodges the auto-default "<product-key>-onetime"
 	// collision with the product's other active price.
-	_, err := pool.Exec(fx.ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, key)
+	_, err := pool.Exec(fx.ctx, `INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id, key)
 		VALUES ($1, $2, 6000000, 'USD', $3, $4)`, missingPriceID, productID, dbtest.TestMerchantID.UUID(), "sale-repair-"+missingPriceID.String())
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.prices WHERE id = $1", missingPriceID)
+		_, _ = pool.Exec(fx.ctx, "DELETE FROM billing.prices WHERE id = $1", missingPriceID)
 	})
 
 	fx.advanceClock(2 * time.Minute)
@@ -444,7 +444,7 @@ func TestNMISaleIntent_DelayedReceiptNeverResubmits(t *testing.T) {
 	require.Equal(t, intents.StatusUnknownNeedsVerify, intent.Status)
 	require.True(t, fx.gateway.charged.Load())
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
-	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.rail_intents SET expires_at=now()-interval '1 minute',next_attempt_at=now() WHERE id=$1`, intent.ID)
+	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.rail_intents SET expires_at=now()-interval '1 minute',next_attempt_at=now() WHERE id=$1`, intent.ID)
 	require.NoError(t, err)
 	// New runner/store objects simulate process restart over the same durable row.
 	restart := *fx.runner
@@ -507,7 +507,7 @@ func TestNMISaleIntent_ExpiredClaimReconcilesButUnsentQueueExpires(t *testing.T)
 	fx.gateway.saleMode.Store("ambiguous500")
 	fx.gateway.hidden.Store(true)
 	row := fx.enqueueAndExecute(t, "sale-lease-"+uuid.NewString()[:8])
-	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.rail_intents SET status='in_flight',claimed_until=now()-interval '1 minute',expires_at=now()-interval '1 minute' WHERE id=$1`, row.ID)
+	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.rail_intents SET status='in_flight',claimed_until=now()-interval '1 minute',expires_at=now()-interval '1 minute' WHERE id=$1`, row.ID)
 	require.NoError(t, err)
 	fx.advanceClock(2 * time.Minute)
 	stats, err := fx.runner.RunExecuteOnce(fx.ctx)
@@ -520,7 +520,7 @@ func TestNMISaleIntent_ExpiredClaimReconcilesButUnsentQueueExpires(t *testing.T)
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 	// A later pre-send gate can park a reclaimed attempt, but that does not
 	// make its original payload mutable or restore expiry/revival semantics.
-	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.rail_intents SET status='pending' WHERE id=$1`, row.ID)
+	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.rail_intents SET status='pending' WHERE id=$1`, row.ID)
 	require.NoError(t, err)
 	changed := fx.payload
 	changed.AmountMicros += 1_000_000
@@ -548,7 +548,7 @@ func TestNMISaleIntent_ExpiredClaimReconcilesButUnsentQueueExpires(t *testing.T)
 	handler.Sale.ResolveNMIClient = func(context.Context, string) (*nmi.NMIClient, error) { return nil, errors.New("not armed") }
 	queued := fx.enqueueAndExecute(t, "sale-queued-"+uuid.NewString()[:8])
 	require.Zero(t, queued.Attempts)
-	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.rail_intents SET expires_at=now()-interval '1 minute' WHERE id=$1`, queued.ID)
+	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.rail_intents SET expires_at=now()-interval '1 minute' WHERE id=$1`, queued.ID)
 	require.NoError(t, err)
 	_, err = fx.runner.RunExecuteOnce(fx.ctx)
 	require.NoError(t, err)
@@ -573,7 +573,7 @@ func TestNMISaleIntent_DeadlineAfterAcceptanceReconcilesClaim(t *testing.T) {
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 	require.True(t, fx.gateway.charged.Load())
 	var id uuid.UUID
-	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT id FROM openrails.rail_intents WHERE merchant_id=$1 AND idempotency_key=$2`, dbtest.TestMerchantID.UUID(), key).Scan(&id))
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT id FROM billing.rail_intents WHERE merchant_id=$1 AND idempotency_key=$2`, dbtest.TestMerchantID.UUID(), key).Scan(&id))
 	pending, err := intents.NewStore(fx.db).Get(fx.ctx, id)
 	require.NoError(t, err)
 	require.Equal(t, intents.StatusUnknownNeedsVerify, pending.Status, "unknown mark must be durable despite the caller deadline")

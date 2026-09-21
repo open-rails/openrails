@@ -46,9 +46,9 @@ func TestUnknownSubscriptionCheckoutGuard(t *testing.T) {
 	tierGroup := "ug-tier-" + sfx
 	seedRecurringProduct := func(key string, group *string, rank int) (uuid.UUID, uuid.UUID) {
 		prod, price := uuid.New(), uuid.New()
-		exec(`INSERT INTO openrails.products (id,key,display_name,tier_group,tier_rank,entitlements_spec,merchant_id)
+		exec(`INSERT INTO billing.products (id,key,display_name,tier_group,tier_rank,entitlements_spec,merchant_id)
 		      VALUES ($1,$2,$2,$3,$4,'{}'::jsonb,$5)`, prod, "ug-"+key+"-"+sfx, group, rank, merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id)
+		exec(`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id)
 		      VALUES ($1,$2,5000000,'USD',720,true,$3)`, price, prod, merchantID)
 		return prod, price
 	}
@@ -58,17 +58,17 @@ func TestUnknownSubscriptionCheckoutGuard(t *testing.T) {
 	prodC, priceC := seedRecurringProduct("c", nil, 0)        // unrelated product, no group
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "nmi")
 	unknownSub := uuid.New()
-	exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,psp_id,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
+	exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,psp_id,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
 	      VALUES ($1,$2,$3,$4,$5,'unknown','nmi',$6,$7,$8,$8,$9)`,
 		unknownSub, merchantID, cust, prodA, priceA, pspID, "ug-sub-"+sfx, now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour))
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, unknownSub)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, unknownSub)
 		for _, p := range []uuid.UUID{priceA, priceB, priceC} {
-			_, _ = pool.Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, p)
+			_, _ = pool.Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, p)
 		}
 		for _, p := range []uuid.UUID{prodA, prodB, prodC} {
-			_, _ = pool.Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, p)
+			_, _ = pool.Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, p)
 		}
 	})
 
@@ -126,7 +126,7 @@ func TestUnknownSubscriptionCheckoutGuard(t *testing.T) {
 	require.Equal(t, ConflictCodeMembershipPendingVerification, resp.Code)
 
 	// The sub resolves to cancelled (provider-confirmed dead): checkout allowed.
-	exec(`UPDATE openrails.subscriptions SET status='cancelled', cancelled_at=$2, cancel_type='expired', ended_at=$2, updated_at=$2 WHERE id=$1`, unknownSub, now)
+	exec(`UPDATE billing.subscriptions SET status='cancelled', cancelled_at=$2, cancel_type='expired', ended_at=$2, updated_at=$2 WHERE id=$1`, unknownSub, now)
 	conflict, err = purchase.CheckSubscriptionConflict(ctx, userID, priceAm, productAm)
 	require.NoError(t, err)
 	require.False(t, conflict.Blocked, "a terminally-resolved sub frees the customer to subscribe again")

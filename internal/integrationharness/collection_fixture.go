@@ -38,7 +38,7 @@ func (h *Harness) ArmLoopbackNMI(rt *app.Runtime, mid merchant.ID) uuid.UUID {
 	account := "loopback-" + strings.ReplaceAll(mid.String(), "-", "")[:12]
 	SeedPSPs(h.ctx, h.t, rt, mid, config.PSPSet{"loopback": {Rail: models.RailNMI, AccountID: account, NMI: &config.NMIRailConfig{SecurityKey: LoopbackNMISecurityKey}}})
 	var id uuid.UUID
-	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT id FROM openrails.psps WHERE merchant_id=$1 AND rail='nmi' AND account_id=$2`, mid.UUID(), account).Scan(&id))
+	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT id FROM billing.psps WHERE merchant_id=$1 AND rail='nmi' AND account_id=$2`, mid.UUID(), account).Scan(&id))
 	return id
 }
 
@@ -68,9 +68,9 @@ func (h *Harness) SeedPastDueInvoiceForCustomer(rt *app.Runtime, mid merchant.ID
 	method := uuid.New()
 	vault := "vault-" + method.String()[:8]
 	pool := h.sharedPool()
-	_, err := pool.Exec(h.ctx, `INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2) ON CONFLICT DO NOTHING`, mid.UUID(), customer)
+	_, err := pool.Exec(h.ctx, `INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2) ON CONFLICT DO NOTHING`, mid.UUID(), customer)
 	require.NoError(h.t, err)
-	_, err = gen.New(pool).CreatePaymentMethod(h.ctx, gen.CreatePaymentMethodParams{
+	_, err = dbtest.Queries(pool).CreatePaymentMethod(h.ctx, gen.CreatePaymentMethodParams{
 		ID: method, MerchantID: mid.UUID(), CustomerID: customer, Rail: string(models.RailNMI), PspID: psp,
 		InitialTransactionID: "init-" + method.String(), RailCustomerRef: vault,
 	})
@@ -110,7 +110,7 @@ type CollectionOperation struct {
 func (h *Harness) LatestCollectionOperation(invoice uuid.UUID) CollectionOperation {
 	h.t.Helper()
 	var op CollectionOperation
-	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT id, status FROM openrails.rail_intents WHERE intent_type=$1 AND payload->>'invoice_id'=$2 ORDER BY created_at DESC LIMIT 1`,
+	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT id, status FROM billing.rail_intents WHERE intent_type=$1 AND payload->>'invoice_id'=$2 ORDER BY created_at DESC LIMIT 1`,
 		money.TypeInvoiceCollection, invoice.String()).Scan(&op.ID, &op.Status))
 	return op
 }
@@ -120,7 +120,7 @@ func (h *Harness) LatestCollectionOperation(invoice uuid.UUID) CollectionOperati
 func (h *Harness) OwedPaymentTransfers(customer uuid.UUID) int {
 	h.t.Helper()
 	var n int
-	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT count(*) FROM openrails.ledger_transfers WHERE customer_id=$1 AND transfer_type='owed_payment'`, customer).Scan(&n))
+	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT count(*) FROM billing.ledger_transfers WHERE customer_id=$1 AND transfer_type='owed_payment'`, customer).Scan(&n))
 	return n
 }
 
@@ -128,7 +128,7 @@ func (h *Harness) OwedPaymentTransfers(customer uuid.UUID) int {
 // so a verify pass looks at the operation now.
 func (h *Harness) MakeOperationDue(id uuid.UUID) {
 	h.t.Helper()
-	_, err := h.sharedPool().Exec(h.ctx, `UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1`, id)
+	_, err := h.sharedPool().Exec(h.ctx, `UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1`, id)
 	require.NoError(h.t, err)
 }
 

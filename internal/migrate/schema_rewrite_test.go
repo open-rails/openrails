@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/config"
+	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 )
 
 // TestRewriteMigrationsSchema verifies the #471 migration-DDL rewrite: identity
@@ -15,9 +16,9 @@ func TestRewriteMigrationsSchema(t *testing.T) {
 		return []migratekit.Migration{{Content: content}}
 	}
 
-	t.Run("default schema is identity", func(t *testing.T) {
+	t.Run("canonical schema is identity", func(t *testing.T) {
 		in := mig("CREATE TABLE openrails.merchants (id uuid);")
-		out, err := rewriteMigrationsSchema(in, config.DefaultSchema)
+		out, err := rewriteMigrationsSchema(in, config.CanonicalSchema)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -26,16 +27,17 @@ func TestRewriteMigrationsSchema(t *testing.T) {
 		}
 	})
 
-	t.Run("empty schema is identity", func(t *testing.T) {
-		in := mig("CREATE TABLE openrails.merchants (id uuid);")
-		out, err := rewriteMigrationsSchema(in, "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if out[0].Content != in[0].Content {
-			t.Fatalf("empty rewrite changed DDL: %q", out[0].Content)
-		}
-	})
+	for _, schema := range []string{"", config.DefaultSchema} {
+		t.Run("default billing schema "+schema, func(t *testing.T) {
+			out, err := rewriteMigrationsSchema(mig("CREATE TABLE openrails.merchants (id uuid);"), schema)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out[0].Content != "CREATE TABLE billing.merchants (id uuid);" {
+				t.Fatalf("got %q", out[0].Content)
+			}
+		})
+	}
 
 	t.Run("custom schema relocates qualifiers and bare schema DDL", func(t *testing.T) {
 		in := mig("CREATE SCHEMA IF NOT EXISTS openrails;\n" +
@@ -79,7 +81,7 @@ BEGIN
  RETURN 'openrails';
 END
 $body$;`
-	got, err := relocateSchemaSQL(input, "shop")
+	got, err := postgresmigrations.RewriteSchema(input, "shop")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +102,7 @@ func TestSchemaRelocationQuotedAndMalformedTokens(t *testing.T) {
 		"SELECT $$FROM openrails.payment_methods$$, $tag$openrails$tag$;",
 		`SELECT 'it''s openrails', E'it\'s openrails', "not openrails";`,
 	} {
-		got, err := relocateSchemaSQL(input, "shop")
+		got, err := postgresmigrations.RewriteSchema(input, "shop")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -109,7 +111,7 @@ func TestSchemaRelocationQuotedAndMalformedTokens(t *testing.T) {
 		}
 	}
 	for _, input := range []string{"SELECT 'unfinished", "SELECT \"unfinished", "/* outer /* inner */", "DO $body$BEGIN"} {
-		if _, err := relocateSchemaSQL(input, "shop"); err == nil {
+		if _, err := postgresmigrations.RewriteSchema(input, "shop"); err == nil {
 			t.Fatalf("accepted unterminated SQL: %q", input)
 		}
 	}

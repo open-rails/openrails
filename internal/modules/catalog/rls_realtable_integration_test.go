@@ -50,10 +50,10 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	require.NoError(t, err)
 	defer super.Close()
 	for _, stmt := range []string{
-		`INSERT INTO openrails.merchants (id, slug) VALUES
+		`INSERT INTO billing.merchants (id, slug) VALUES
 		   ('` + tenantA + `','merchant-` + suffix + `-a'), ('` + tenantB + `','merchant-` + suffix + `-b')
 		 ON CONFLICT (id) DO NOTHING`,
-		`INSERT INTO openrails.products (id, merchant_id, key, display_name) VALUES
+		`INSERT INTO billing.products (id, merchant_id, key, display_name) VALUES
 		   ('` + productA + `','` + tenantA + `','` + keyA + `','Product A'),
 		   ('` + productB + `','` + tenantB + `','` + keyB + `','Product B')
 		 ON CONFLICT (id) DO NOTHING`,

@@ -45,7 +45,7 @@ func TestProvisionKeepsImmutableGroupOwnership(t *testing.T) {
 		require.Equal(t, first.ID, got.ID)
 	})
 	t.Run("database refuses rebinding", func(t *testing.T) {
-		_, err := raw.Exec(ctx, `UPDATE openrails.merchants SET permission_group_id=$2 WHERE id=$1`, first.ID.UUID(), uuid.NewString())
+		_, err := raw.Exec(ctx, `UPDATE billing.merchants SET permission_group_id=$2 WHERE id=$1`, first.ID.UUID(), uuid.NewString())
 		require.ErrorContains(t, err, "merchant group binding is immutable")
 	})
 	t.Run("concurrent same-group provisions converge", func(t *testing.T) {
@@ -116,7 +116,7 @@ func TestProvisionKeepsImmutableGroupOwnership(t *testing.T) {
 		require.ErrorIs(t, err, ErrMerchantNotFound, "expired projection cannot resolve after authority says not found")
 	})
 	t.Run("retired binding cannot create a new billing identity", func(t *testing.T) {
-		_, err := raw.Exec(ctx, `UPDATE openrails.merchants SET status='deleted',deleted_at=now() WHERE id=$1`, first.ID.UUID())
+		_, err := raw.Exec(ctx, `UPDATE billing.merchants SET status='deleted',deleted_at=now() WHERE id=$1`, first.ID.UUID())
 		require.NoError(t, err)
 		_, _, err = svc.Provision(ctx, ProvisionRequest{Slug: slug + "-again", PermissionGroupID: group})
 		require.ErrorIs(t, err, ErrMerchantRetired)

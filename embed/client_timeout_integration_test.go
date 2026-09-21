@@ -62,7 +62,7 @@ func TestInProcessClientHonorsExplicitUnlimitedTimeout(t *testing.T) {
 	lockTx, err := lockPool.Begin(ctx)
 	require.NoError(t, err)
 	tag, err := lockTx.Exec(ctx,
-		`SELECT 1 FROM openrails.merchant_configurations WHERE merchant_id = $1 FOR UPDATE`,
+		`SELECT 1 FROM billing.merchant_configurations WHERE merchant_id = $1 FOR UPDATE`,
 		dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 	require.EqualValues(t, 1, tag.RowsAffected(),

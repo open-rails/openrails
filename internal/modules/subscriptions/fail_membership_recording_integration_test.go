@@ -33,7 +33,7 @@ func TestFailMembership_RecordsFailedAttemptAndTransition(t *testing.T) {
 	var amount int64
 	require.NoError(t, f.pool.QueryRow(ctx,
 		`SELECT status::text, attempt_kind, failure_code, failure_reason, amount
-		 FROM openrails.payments WHERE subscription_id = $1 AND status = 'failed'`, sub.ID).
+		 FROM billing.payments WHERE subscription_id = $1 AND status = 'failed'`, sub.ID).
 		Scan(&status, &attemptKind, &failureCode, &failureReason, &amount))
 	require.Equal(t, "failed", status)
 	require.Equal(t, "renewal", attemptKind)
@@ -43,7 +43,7 @@ func TestFailMembership_RecordsFailedAttemptAndTransition(t *testing.T) {
 
 	var fromStatus, toStatus string
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT from_status::text, to_status::text FROM openrails.subscription_status_transitions
+		`SELECT from_status::text, to_status::text FROM billing.subscription_status_transitions
 		 WHERE subscription_id = $1 AND from_status = 'active'`, sub.ID).
 		Scan(&fromStatus, &toStatus))
 	require.Equal(t, "past_due", toStatus)
@@ -55,14 +55,14 @@ func TestFailMembership_RecordsFailedAttemptAndTransition(t *testing.T) {
 	}))
 	var failedRows int
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM openrails.payments WHERE subscription_id = $1 AND status = 'failed'`, sub.ID).
+		`SELECT COUNT(*) FROM billing.payments WHERE subscription_id = $1 AND status = 'failed'`, sub.ID).
 		Scan(&failedRows))
 	require.Equal(t, 2, failedRows)
 
 	// Creation transition was recorded too (from NULL).
 	var creationRows int
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM openrails.subscription_status_transitions
+		`SELECT COUNT(*) FROM billing.subscription_status_transitions
 		 WHERE subscription_id = $1 AND from_status IS NULL AND to_status = 'active'`, sub.ID).
 		Scan(&creationRows))
 	require.Equal(t, 1, creationRows)
