@@ -14,18 +14,24 @@ import (
 
 const countProductsFiltered = `-- name: CountProductsFiltered :one
 SELECT count(*) FROM openrails.products
-WHERE products.merchant_id = $1::uuid AND ($2::boolean IS NULL OR archived = $2::boolean)
-  AND ($3::text = '' OR lower(btrim(tier_group)) = lower(btrim($3::text)))
+WHERE ($1::uuid IS NULL OR products.catalog_id=$1::uuid) AND products.merchant_id = $2::uuid AND ($3::boolean IS NULL OR archived = $3::boolean)
+  AND ($4::text = '' OR lower(btrim(tier_group)) = lower(btrim($4::text)))
 `
 
 type CountProductsFilteredParams struct {
+	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
 	Archived   *bool
 	TierGroup  string
 }
 
 func (q *Queries) CountProductsFiltered(ctx context.Context, arg CountProductsFilteredParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countProductsFiltered, arg.MerchantID, arg.Archived, arg.TierGroup)
+	row := q.db.QueryRow(ctx, countProductsFiltered,
+		arg.CatalogID,
+		arg.MerchantID,
+		arg.Archived,
+		arg.TierGroup,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -34,17 +40,18 @@ func (q *Queries) CountProductsFiltered(ctx context.Context, arg CountProductsFi
 const createProduct = `-- name: CreateProduct :execrows
 
 INSERT INTO openrails.products (
-    id, merchant_id, key, display_name, description, entitlements_spec,
+    id, merchant_id, catalog_id, key, display_name, description, entitlements_spec,
     tier_group, tier_rank, archived, created_at, updated_at
 ) VALUES (
     $1,
     $4::uuid,
-    $2, $3, $5, $6,
-    $7,
-    COALESCE(NULLIF($8::int, 0), 0),
-    $9::boolean,
-    COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    COALESCE(NULLIF($11::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
+    $5::uuid,
+    $2, $3, $6, $7,
+    $8,
+    COALESCE(NULLIF($9::int, 0), 0),
+    $10::boolean,
+    COALESCE(NULLIF($11::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
+    COALESCE(NULLIF($12::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
 )
 `
 
@@ -53,6 +60,7 @@ type CreateProductParams struct {
 	Key              string
 	DisplayName      string
 	MerchantID       uuid.UUID
+	CatalogID        *uuid.UUID
 	Description      *string
 	EntitlementsSpec []byte
 	TierGroup        *string
@@ -69,6 +77,7 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (i
 		arg.Key,
 		arg.DisplayName,
 		arg.MerchantID,
+		arg.CatalogID,
 		arg.Description,
 		arg.EntitlementsSpec,
 		arg.TierGroup,
@@ -84,16 +93,17 @@ func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (i
 }
 
 const getProductByID = `-- name: GetProductByID :one
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products WHERE products.merchant_id = $2::uuid AND id = $1
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id FROM openrails.products WHERE ($2::uuid IS NULL OR products.catalog_id=$2::uuid) AND products.merchant_id = $3::uuid AND id = $1
 `
 
 type GetProductByIDParams struct {
 	ID         uuid.UUID
+	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
 }
 
 func (q *Queries) GetProductByID(ctx context.Context, arg GetProductByIDParams) (OpenrailsProduct, error) {
-	row := q.db.QueryRow(ctx, getProductByID, arg.ID, arg.MerchantID)
+	row := q.db.QueryRow(ctx, getProductByID, arg.ID, arg.CatalogID, arg.MerchantID)
 	var i OpenrailsProduct
 	err := row.Scan(
 		&i.ID,
@@ -107,21 +117,23 @@ func (q *Queries) GetProductByID(ctx context.Context, arg GetProductByIDParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MerchantID,
+		&i.CatalogID,
 	)
 	return i, err
 }
 
 const getProductByKey = `-- name: GetProductByKey :one
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products WHERE products.merchant_id = $2::uuid AND key = $1
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id FROM openrails.products WHERE ($2::uuid IS NULL OR products.catalog_id=$2::uuid) AND products.merchant_id = $3::uuid AND key = $1
 `
 
 type GetProductByKeyParams struct {
 	Key        string
+	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
 }
 
 func (q *Queries) GetProductByKey(ctx context.Context, arg GetProductByKeyParams) (OpenrailsProduct, error) {
-	row := q.db.QueryRow(ctx, getProductByKey, arg.Key, arg.MerchantID)
+	row := q.db.QueryRow(ctx, getProductByKey, arg.Key, arg.CatalogID, arg.MerchantID)
 	var i OpenrailsProduct
 	err := row.Scan(
 		&i.ID,
@@ -135,16 +147,22 @@ func (q *Queries) GetProductByKey(ctx context.Context, arg GetProductByKeyParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MerchantID,
+		&i.CatalogID,
 	)
 	return i, err
 }
 
 const listActiveProducts = `-- name: ListActiveProducts :many
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products WHERE products.merchant_id = $1::uuid AND NOT archived
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id FROM openrails.products WHERE ($1::uuid IS NULL OR products.catalog_id=$1::uuid) AND products.merchant_id = $2::uuid AND NOT archived
 `
 
-func (q *Queries) ListActiveProducts(ctx context.Context, merchantID uuid.UUID) ([]OpenrailsProduct, error) {
-	rows, err := q.db.Query(ctx, listActiveProducts, merchantID)
+type ListActiveProductsParams struct {
+	CatalogID  *uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) ListActiveProducts(ctx context.Context, arg ListActiveProductsParams) ([]OpenrailsProduct, error) {
+	rows, err := q.db.Query(ctx, listActiveProducts, arg.CatalogID, arg.MerchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -164,6 +182,7 @@ func (q *Queries) ListActiveProducts(ctx context.Context, merchantID uuid.UUID) 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
+			&i.CatalogID,
 		); err != nil {
 			return nil, err
 		}
@@ -176,12 +195,17 @@ func (q *Queries) ListActiveProducts(ctx context.Context, merchantID uuid.UUID) 
 }
 
 const listAllProducts = `-- name: ListAllProducts :many
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products
-WHERE products.merchant_id = $1::uuid
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id FROM openrails.products
+WHERE ($1::uuid IS NULL OR products.catalog_id=$1::uuid) AND products.merchant_id = $2::uuid
 `
 
-func (q *Queries) ListAllProducts(ctx context.Context, merchantID uuid.UUID) ([]OpenrailsProduct, error) {
-	rows, err := q.db.Query(ctx, listAllProducts, merchantID)
+type ListAllProductsParams struct {
+	CatalogID  *uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) ListAllProducts(ctx context.Context, arg ListAllProductsParams) ([]OpenrailsProduct, error) {
+	rows, err := q.db.Query(ctx, listAllProducts, arg.CatalogID, arg.MerchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -201,6 +225,7 @@ func (q *Queries) ListAllProducts(ctx context.Context, merchantID uuid.UUID) ([]
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
+			&i.CatalogID,
 		); err != nil {
 			return nil, err
 		}
@@ -213,16 +238,17 @@ func (q *Queries) ListAllProducts(ctx context.Context, merchantID uuid.UUID) ([]
 }
 
 const listProductsByIDs = `-- name: ListProductsByIDs :many
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products WHERE products.merchant_id = $1::uuid AND id = ANY($2::uuid[])
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id FROM openrails.products WHERE ($1::uuid IS NULL OR products.catalog_id=$1::uuid) AND products.merchant_id = $2::uuid AND id = ANY($3::uuid[])
 `
 
 type ListProductsByIDsParams struct {
+	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
 	Ids        []uuid.UUID
 }
 
 func (q *Queries) ListProductsByIDs(ctx context.Context, arg ListProductsByIDsParams) ([]OpenrailsProduct, error) {
-	rows, err := q.db.Query(ctx, listProductsByIDs, arg.MerchantID, arg.Ids)
+	rows, err := q.db.Query(ctx, listProductsByIDs, arg.CatalogID, arg.MerchantID, arg.Ids)
 	if err != nil {
 		return nil, err
 	}
@@ -242,6 +268,7 @@ func (q *Queries) ListProductsByIDs(ctx context.Context, arg ListProductsByIDsPa
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
+			&i.CatalogID,
 		); err != nil {
 			return nil, err
 		}
@@ -254,14 +281,15 @@ func (q *Queries) ListProductsByIDs(ctx context.Context, arg ListProductsByIDsPa
 }
 
 const listProductsFiltered = `-- name: ListProductsFiltered :many
-SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products
-WHERE products.merchant_id = $1::uuid AND ($2::boolean IS NULL OR archived = $2::boolean)
-  AND ($3::text = '' OR lower(btrim(tier_group)) = lower(btrim($3::text)))
+SELECT id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id FROM openrails.products
+WHERE ($1::uuid IS NULL OR products.catalog_id=$1::uuid) AND products.merchant_id = $2::uuid AND ($3::boolean IS NULL OR archived = $3::boolean)
+  AND ($4::text = '' OR lower(btrim(tier_group)) = lower(btrim($4::text)))
 ORDER BY created_at DESC, id DESC
-LIMIT NULLIF($5::int, 0) OFFSET $4::int
+LIMIT NULLIF($6::int, 0) OFFSET $5::int
 `
 
 type ListProductsFilteredParams struct {
+	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
 	Archived   *bool
 	TierGroup  string
@@ -271,6 +299,7 @@ type ListProductsFilteredParams struct {
 
 func (q *Queries) ListProductsFiltered(ctx context.Context, arg ListProductsFilteredParams) ([]OpenrailsProduct, error) {
 	rows, err := q.db.Query(ctx, listProductsFiltered,
+		arg.CatalogID,
 		arg.MerchantID,
 		arg.Archived,
 		arg.TierGroup,
@@ -296,6 +325,7 @@ func (q *Queries) ListProductsFiltered(ctx context.Context, arg ListProductsFilt
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.MerchantID,
+			&i.CatalogID,
 		); err != nil {
 			return nil, err
 		}
@@ -316,8 +346,8 @@ UPDATE openrails.products SET
     tier_rank = COALESCE($8::int, tier_rank),
     archived = COALESCE($9::boolean, archived),
     updated_at = now()
-WHERE products.merchant_id = $10::uuid AND id = $11::uuid
-RETURNING id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id
+WHERE ($10::uuid IS NULL OR products.catalog_id=$10::uuid) AND products.merchant_id = $11::uuid AND id = $12::uuid
+RETURNING id, key, display_name, description, entitlements_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id, catalog_id
 `
 
 type PatchProductParams struct {
@@ -330,6 +360,7 @@ type PatchProductParams struct {
 	TierGroup        *string
 	TierRank         *int32
 	Archived         *bool
+	CatalogID        *uuid.UUID
 	MerchantID       uuid.UUID
 	ID               uuid.UUID
 }
@@ -346,6 +377,7 @@ func (q *Queries) PatchProduct(ctx context.Context, arg PatchProductParams) (Ope
 		arg.TierGroup,
 		arg.TierRank,
 		arg.Archived,
+		arg.CatalogID,
 		arg.MerchantID,
 		arg.ID,
 	)
@@ -362,6 +394,7 @@ func (q *Queries) PatchProduct(ctx context.Context, arg PatchProductParams) (Ope
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MerchantID,
+		&i.CatalogID,
 	)
 	return i, err
 }

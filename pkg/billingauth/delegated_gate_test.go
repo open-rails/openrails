@@ -103,7 +103,7 @@ func TestDelegatedGateAuthorize(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got.UserContext.UserID != "user-1" || got.UserContext.Merchant != "host-one" {
+		if got.Subject != "user-1" || got.UserContext.UserID != "user-1" || got.UserContext.Merchant != "host-one" {
 			t.Fatalf("principal mapping wrong: %+v", got)
 		}
 	})

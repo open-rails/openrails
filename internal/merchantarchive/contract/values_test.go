@@ -113,3 +113,21 @@ func TestSubscriptionGatewayMetadataContract(t *testing.T) {
 		}
 	}
 }
+
+func TestCatalogOwnerSubjectPreservesOpaqueIdentity(t *testing.T) {
+	p := Profile{Name: "catalogs", Columns: []Column{{"merchant_id", "uuid"}, {"owner_subject", "text"}}}
+	mid := testMerchant
+	for _, subject := range []string{"creator-A", "https://issuer.invalid/作者?identity=Case%2f#value", "4242424242424242"} {
+		if err := ValidateValues(p, []*string{&mid, &subject}); err != nil {
+			t.Fatalf("opaque subject %q: %v", subject, err)
+		}
+	}
+	for _, subject := range []string{"", "invalid\x00subject"} {
+		if err := ValidateValues(p, []*string{&mid, &subject}); err == nil {
+			t.Fatalf("accepted invalid subject %q", subject)
+		}
+	}
+	if err := ValidateValues(p, []*string{&mid, nil}); err != nil {
+		t.Fatalf("default catalog: %v", err)
+	}
+}

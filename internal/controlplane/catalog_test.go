@@ -1,8 +1,22 @@
 package controlplane
 
 import (
+	"github.com/open-rails/openrails/permissions"
+	"github.com/stretchr/testify/require"
 	"testing"
 )
+
+func TestCreatorRoleHasOnlySubjectBoundCatalogAuthority(t *testing.T) {
+	grants, ok := MerchantRolePermissions(MerchantRoleCreator)
+	require.True(t, ok)
+	require.ElementsMatch(t, []string{permissions.MerchantCatalogOwnRead, permissions.MerchantCatalogOwnUpdate}, grants)
+	require.Contains(t, MerchantRoles(), MerchantRoleCreator)
+	require.NotContains(t, MerchantAPIKeyRoles(), MerchantRoleCreator, "machine keys do not resolve an owner subject")
+	creator := &ResolvedServiceCredential{Permissions: grants}
+	for _, permission := range []string{permissions.MerchantCatalogUpdate, permissions.MerchantPaymentProvidersUpdate, permissions.MerchantPaymentsRefund, permissions.MerchantCustomerSettingsUpdate} {
+		require.False(t, creator.HasPermission(permission))
+	}
+}
 
 // TestAdmissionCreatePermission_GateSemantics proves the admission hot-path gate:
 // an API key WITHOUT merchant:admissions:create fails the admission gate while

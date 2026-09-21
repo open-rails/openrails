@@ -232,6 +232,8 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 			Gate: s.Gate,
 		}
 		httproutes.RegisterCatalogRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant/catalog", s.Runtime), s.Runtime, adminOpts)
+		httproutes.RegisterCatalogCollectionRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant/catalogs", s.Runtime), s.Runtime, adminOpts)
+		httproutes.RegisterOwnedCatalogRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/catalog", s.Runtime), s.Runtime, adminOpts)
 	}
 	if routeSets[RouteSetPaymentProviders] {
 		adminOpts := httproutes.Options{

@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -58,6 +59,9 @@ func resolvePriceKey(product *models.Product, req CreatePriceRequest) string {
 // row for that key. Used wherever checkout/API accept a price_key alongside a
 // price UUID.
 func (s *Service) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice, error) {
+	if err := catalog.ValidateOwnerScope(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -97,6 +101,9 @@ func (s *Service) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice,
 // repoint invariant CreatePrice/ActivatePrice enforce), so a rename can also
 // double as a manual repoint.
 func (s *Service) SetPriceKey(ctx context.Context, id openrails.PriceID, key string) (*CatalogPrice, error) {
+	if err := catalog.ValidateOwnerScope(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -166,6 +173,9 @@ type PriceKeyHistoryEntry struct {
 // wrong for a REACTIVATED row: its created_at is its ORIGINAL creation, not
 // the date it most recently became current again).
 func (s *Service) GetPriceKeyHistory(ctx context.Context, key string) ([]PriceKeyHistoryEntry, error) {
+	if err := catalog.ValidateOwnerScope(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr

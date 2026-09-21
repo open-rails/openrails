@@ -10,7 +10,7 @@ const (
 	RouteSetCustomer RouteSet = "customer"
 	// RouteSetMerchantAdmin mounts human merchant-admin customer/support routes.
 	RouteSetMerchantAdmin RouteSet = "merchant_admin"
-	// RouteSetCatalog mounts merchant catalog routes.
+	// RouteSetCatalog mounts merchant-admin and creator-owned catalog routes.
 	RouteSetCatalog RouteSet = "catalog"
 	// RouteSetPaymentProviders mounts provider config and secret routes.
 	RouteSetPaymentProviders RouteSet = "payment_providers"

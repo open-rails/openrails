@@ -430,7 +430,7 @@ func (cfg *Config) MerchantSourceMode() string {
 }
 
 // IsManifestMerchantSource reports MODE 1 (#723): manifest-is-truth, secrets
-// in memory, provider-configuration mutation APIs rejected.
+// in memory, provider-configuration mutation HTTP routes omitted.
 func (cfg *Config) IsManifestMerchantSource() bool {
 	return cfg.MerchantSourceMode() == MerchantSourceManifest
 }

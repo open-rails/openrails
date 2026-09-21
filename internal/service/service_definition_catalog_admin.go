@@ -56,6 +56,9 @@ type CatalogPage[T any] struct {
 
 // GetProduct returns a product by ID.
 func (s *Service) GetProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
+	if err := catalog.ValidateOwnerScope(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -79,6 +82,9 @@ func (s *Service) GetProduct(ctx context.Context, id openrails.ProductID) (*Cata
 
 // GetProductByKey returns a product by its key.
 func (s *Service) GetProductByKey(ctx context.Context, key string) (*CatalogProduct, error) {
+	if err := catalog.ValidateOwnerScope(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -108,6 +114,7 @@ func (s *Service) GetProductByKey(ctx context.Context, key string) (*CatalogProd
 //   - Limit=0: defaults to 100
 //   - Offset=0: start from the first row
 type ListProductsOptions struct {
+	CatalogID *uuid.UUID
 	Archived  *bool
 	TierGroup string
 	Limit     int
@@ -117,6 +124,9 @@ type ListProductsOptions struct {
 // ListProducts returns a paginated list of products with optional filters.
 // Total is the unfiltered-by-pagination count.
 func (s *Service) ListProducts(ctx context.Context, opts ListProductsOptions) (CatalogPage[CatalogProduct], error) {
+	if err := catalog.ValidateOwnerScope(ctx); err != nil {
+		return CatalogPage[CatalogProduct]{}, err
+	}
 	var page CatalogPage[CatalogProduct]
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
@@ -128,7 +138,7 @@ func (s *Service) ListProducts(ctx context.Context, opts ListProductsOptions) (C
 		return page, err
 	}
 	page.Limit, page.Offset = clampCatalogPage(opts.Limit, opts.Offset)
-	raws, total, err := products.GetPaginated(ctx, catalog.ProductFilter{Archived: opts.Archived, TierGroup: opts.TierGroup}, page.Limit, page.Offset)
+	raws, total, err := products.GetPaginated(ctx, catalog.ProductFilter{CatalogID: opts.CatalogID, Archived: opts.Archived, TierGroup: opts.TierGroup}, page.Limit, page.Offset)
 	if err != nil {
 		return page, err
 	}
@@ -143,6 +153,9 @@ func (s *Service) ListProducts(ctx context.Context, opts ListProductsOptions) (C
 
 // ActivateProduct sets status=active on a product.
 func (s *Service) ActivateProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
+	if err := catalog.ValidateOwnerScope(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -173,6 +186,9 @@ func (s *Service) ActivateProduct(ctx context.Context, id openrails.ProductID) (
 // DeactivateProduct archives a product. Existing subscriptions on its prices
 // are grandfathered and keep billing.
 func (s *Service) DeactivateProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
+	if err := catalog.ValidateOwnerScope(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -201,6 +217,9 @@ func (s *Service) DeactivateProduct(ctx context.Context, id openrails.ProductID)
 
 // GetPrice returns a price by ID.
 func (s *Service) GetPrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
+	if err := catalog.ValidateOwnerScope(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -224,6 +243,9 @@ func (s *Service) GetPrice(ctx context.Context, id openrails.PriceID) (*CatalogP
 
 // ListPricesByProduct returns all prices belonging to a product. Set activeOnly=true to filter inactive.
 func (s *Service) ListPricesByProduct(ctx context.Context, id openrails.ProductID, activeOnly bool) ([]CatalogPrice, error) {
+	if err := catalog.ValidateOwnerScope(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -256,6 +278,9 @@ func (s *Service) ListPricesByProduct(ctx context.Context, id openrails.ProductI
 
 // ListPrices returns a paginated list of prices across all products, with filters.
 func (s *Service) ListPrices(ctx context.Context, filter catalog.PriceFilter, limit, offset int) (CatalogPage[CatalogPrice], error) {
+	if err := catalog.ValidateOwnerScope(ctx); err != nil {
+		return CatalogPage[CatalogPrice]{}, err
+	}
 	var page CatalogPage[CatalogPrice]
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
@@ -308,6 +333,9 @@ func (s *Service) propagatePriceActiveToStripe(ctx context.Context, price *model
 // this row is un-archived, then one pointer-movement log entry records the
 // move. Activating an already-active row is a no-op (no movement logged).
 func (s *Service) ActivatePrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
+	if err := catalog.ValidateOwnerScope(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -365,6 +393,9 @@ func (s *Service) ActivatePrice(ctx context.Context, id openrails.PriceID) (*Cat
 // DeactivatePrice archives a price. Existing subscriptions on this price are
 // grandfathered and keep billing; new purchases are rejected.
 func (s *Service) DeactivatePrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
+	if err := catalog.ValidateOwnerScope(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -396,6 +427,9 @@ func (s *Service) DeactivatePrice(ctx context.Context, id openrails.PriceID) (*C
 // dispatcher merges per-provider drift / missing / configured signals into the
 // uniform ProviderState surface.
 func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[string]ProviderState, error) {
+	if err := catalog.RefuseOwnerOperation(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -499,6 +533,9 @@ type ReconcileResult struct {
 // ReconcilePrice walks every attached provider and re-applies OpenRails values
 // to the remote when drift is detected. OpenRails is authoritative.
 func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts ReconcileOptions) (*ReconcileResult, error) {
+	if err := catalog.RefuseOwnerOperation(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -641,6 +678,9 @@ type ProductReconcileResult struct {
 // provider link — the Stripe Product id is discovered via the product's prices.
 // This is the product-level analog of ReconcilePrice.
 func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opts ReconcileOptions) (*ProductReconcileResult, error) {
+	if err := catalog.RefuseOwnerOperation(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr

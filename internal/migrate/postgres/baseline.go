@@ -5,12 +5,11 @@ import (
 	"strings"
 )
 
-// BaselineName is the single consolidated schema migration. Everything the
-// schema is, it is because of this file; there is no migration history behind
-// it (or#893).
+// BaselineName is the initial consolidated migration. Additive migrations in
+// FS extend it; initialization and full-schema guards load the complete chain.
 const BaselineName = "0001_schema.up.sql"
 
-// Baseline returns the raw SQL of the consolidated baseline.
+// Baseline returns the initial migration, not the complete current schema.
 func Baseline() (string, error) {
 	b, err := FS.ReadFile(BaselineName)
 	if err != nil {
@@ -19,7 +18,7 @@ func Baseline() (string, error) {
 	return string(b), nil
 }
 
-// BaselineObjects returns the baseline DDL for the named objects, in baseline
+// BaselineObjects returns initial-migration DDL for named objects, in baseline
 // order. A function yields its CREATE, its COMMENT and its REVOKE/GRANT; a
 // table yields its CREATE and everything grouped with it (comments,
 // constraints, indexes, triggers and comments).

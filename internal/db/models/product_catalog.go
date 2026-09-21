@@ -12,6 +12,7 @@ import (
 type Product struct {
 	ID          uuid.UUID `json:"id"`
 	MerchantID  uuid.UUID `json:"merchant_id"`
+	CatalogID   uuid.UUID `json:"catalog_id"`
 	Key         string    `json:"key"`
 	DisplayName string    `json:"display_name"`
 	Description string    `json:"description"`
