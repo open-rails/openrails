@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -45,7 +46,11 @@ func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Contex
 		}
 	}
 	q := s.transactionDB.Gen(ctx)
-	original, err := q.ListOriginalPurchaseGrants(ctx, gen.ListOriginalPurchaseGrantsParams{MerchantID: mid.UUID(), PaymentID: payment, RowLimit: int32(len(names) + 2)})
+	limit, err := safecast.Convert[int32](len(names) + 2)
+	if err != nil {
+		return err
+	}
+	original, err := q.ListOriginalPurchaseGrants(ctx, gen.ListOriginalPurchaseGrantsParams{MerchantID: mid.UUID(), PaymentID: payment, RowLimit: limit})
 	if err != nil {
 		return err
 	}

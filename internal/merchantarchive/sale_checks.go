@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -101,7 +102,11 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.Openrails
 	if !reflect.DeepEqual(snapshot, p.Entitlements) {
 		return errors.New("sale payment has another benefit snapshot")
 	}
-	original, err := q.ListOriginalPurchaseGrants(ctx, gen.ListOriginalPurchaseGrantsParams{MerchantID: op.MerchantID, PaymentID: paymentID, RowLimit: int32(len(p.Entitlements) + 2)})
+	limit, err := safecast.Convert[int32](len(p.Entitlements) + 2)
+	if err != nil {
+		return err
+	}
+	original, err := q.ListOriginalPurchaseGrants(ctx, gen.ListOriginalPurchaseGrantsParams{MerchantID: op.MerchantID, PaymentID: paymentID, RowLimit: limit})
 	if err != nil {
 		return err
 	}
