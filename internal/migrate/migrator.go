@@ -155,8 +155,7 @@ func (e *OrphanedMigrationsError) Error() string {
 	return fmt.Sprintf(
 		"openrails: schema %q has applied migration(s) %s that this build does not carry (it carries %s) — "+
 			"the recorded history is ahead of, or divergent from, the embedded set, so migratekit applies nothing "+
-			"and the schema stays frozen while the binary advances. Rebuild the OpenRails schema from the current "+
-			"baseline (see or#899's post-squash reset recipe); do NOT renumber migrations to paper over this",
+			"and the schema stays frozen while the binary advances. Use a build carrying the deployed migration lineage or a reviewed additive upgrade; do NOT reset the book or renumber migrations to paper over this",
 		e.Schema, strings.Join(e.Orphaned, ", "), strings.Join(e.Embedded, ", "))
 }
 

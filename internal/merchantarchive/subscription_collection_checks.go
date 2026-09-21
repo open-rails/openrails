@@ -118,7 +118,7 @@ func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries
 	if err := subscriptions.ValidateInitialMembershipPayment(accepted, payment, models.Rail(op.Rail), transaction); err != nil {
 		return err
 	}
-	if payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptRenewal || payment.TokenType == nil || *payment.TokenType != payments.DefaultTokenType(op.Rail, models.CustodianHyperSwitch) {
+	if payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptRenewal || payment.TokenType == nil || *payment.TokenType != payments.DefaultTokenType(op.Rail, p.Instrument.Custodian) {
 		return errors.New("engine payment lacks its recurring custody stamp")
 	}
 	limit, err := safecast.Convert[int32](len(t.Entitlements) + 2)
