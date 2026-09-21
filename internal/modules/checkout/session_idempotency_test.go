@@ -3,7 +3,14 @@ package checkout
 import (
 	"context"
 	"encoding/json"
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/merchant"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -242,4 +249,85 @@ func TestValidatePaymentRejectsStripeSavedPaymentMethod(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "saved payment methods are not supported")
+}
+
+func TestInitialMembershipQuoteAndVerifiedPayerPreparation(t *testing.T) {
+	now := time.Date(2026, 9, 21, 0, 0, 0, 123456000, time.UTC)
+	mid, customer, psp, custodian := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	ctx := merchant.WithID(context.Background(), merchant.ID(mid))
+	hours, cap := 720, 7
+	if strconv.IntSize == 64 {
+		var large int64 = 9007199254740993
+		cap = int(large)
+	}
+	product := models.Product{ID: uuid.New(), DisplayName: "Quoted membership", EntitlementsSpec: map[string]*int{"quota": &cap}}
+	price := models.Price{ID: uuid.New(), ProductID: product.ID, Amount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours}
+	expiry := now.Add(time.Hour)
+	amount, currency := price.Amount, price.Currency
+	session := models.CheckoutSession{ID: uuid.New(), CustomerID: customer, PspID: psp, PriceID: &price.ID, Mode: models.CheckoutSessionModeSubscription, Rail: models.RailNMI, Status: models.CheckoutSessionStatusRequiresAction, Amount: &amount, Currency: &currency, ExpiresAt: &expiry}
+	method := gen.OpenrailsPaymentMethod{ID: uuid.New(), MerchantID: mid, CustomerID: customer, PspID: psp, Rail: "nmi", Custodian: models.CustodianHyperSwitch, CustodianID: &custodian}
+	require.NoError(t, quoteInitialMembership(ctx, &session, &price, &product, method, now))
+	// The generic RailState JSON roundtrip must not round a quoted integer cap.
+	encoded, err := json.Marshal(session)
+	require.NoError(t, err)
+	var restored models.CheckoutSession
+	require.NoError(t, json.Unmarshal(encoded, &restored))
+	quoted, err := readInitialMembershipQuote(&restored)
+	require.NoError(t, err)
+	require.Equal(t, cap, *quoted.Entitlements["quota"])
+	price.Amount = 123
+	product.EntitlementsSpec["other"] = nil
+	require.ErrorIs(t, quoteInitialMembership(ctx, &restored, &price, &product, method, now), ErrCheckoutSessionConflict)
+	unchanged, err := readInitialMembershipQuote(&restored)
+	require.NoError(t, err)
+	require.Equal(t, quoted, unchanged)
+	principal := billingauth.DelegatedPrincipal{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid.String(), SubjectID: customer.String()}
+	accepted, err := acceptedInitialMembershipQuote(ctx, &restored, principal, now.Add(10*time.Minute))
+	require.NoError(t, err)
+	require.Equal(t, quoted.SubscriptionID, accepted.SubscriptionID)
+	require.Equal(t, quoted.PaymentID, accepted.PaymentID)
+	require.Equal(t, quoted.Amount, accepted.Amount)
+	require.Equal(t, quoted.Entitlements, accepted.Entitlements)
+	require.Equal(t, now.Add(10*time.Minute), accepted.PeriodStart)
+	require.Equal(t, 30*24*time.Hour, accepted.PeriodEnd.Sub(accepted.PeriodStart))
+	for _, mutate := range []func(*billingauth.DelegatedPrincipal){
+		func(p *billingauth.DelegatedPrincipal) { p.CredentialClass = billingauth.CredentialClassAutomation },
+		func(p *billingauth.DelegatedPrincipal) { p.CredentialClass = billingauth.CredentialClassUnknown },
+		func(p *billingauth.DelegatedPrincipal) { p.Invoker = "device" },
+		func(p *billingauth.DelegatedPrincipal) { p.MerchantID = uuid.NewString() },
+		func(p *billingauth.DelegatedPrincipal) { p.SubjectID = uuid.NewString() },
+	} {
+		bad := principal
+		mutate(&bad)
+		_, err := acceptedInitialMembershipQuote(ctx, &restored, bad, now)
+		require.ErrorIs(t, err, ErrCheckoutSessionForbidden)
+	}
+	_, err = acceptedInitialMembershipQuote(ctx, &restored, principal, expiry)
+	require.ErrorIs(t, err, ErrCheckoutSessionExpired)
+	_, err = readInitialMembershipQuote(&restored)
+	require.NoError(t, err, "expired quote remains readable for canonical operation recovery")
+	changed := restored
+	otherAmount := int64(1)
+	changed.Amount = &otherAmount
+	_, err = readInitialMembershipQuote(&changed)
+	require.ErrorIs(t, err, ErrCheckoutSessionConflict)
+	require.Nil(t, restored.PaymentID)
+	require.Nil(t, restored.SubscriptionID, "quote construction does not claim completed payment or membership")
+	for _, mutate := range []func(*models.Price, *gen.OpenrailsPaymentMethod){
+		func(p *models.Price, _ *gen.OpenrailsPaymentMethod) { p.Amount = 0 },
+		func(p *models.Price, _ *gen.OpenrailsPaymentMethod) { zero := int64(0); p.TrialUnitAmount = &zero },
+		func(p *models.Price, _ *gen.OpenrailsPaymentMethod) { p.AutoRenew = false },
+		func(p *models.Price, _ *gen.OpenrailsPaymentMethod) { p.Archived = true },
+		func(_ *models.Price, m *gen.OpenrailsPaymentMethod) { m.CustomerID = uuid.New() },
+		func(_ *models.Price, m *gen.OpenrailsPaymentMethod) { m.ParkReason = "pending deletion" },
+	} {
+		candidate := session
+		candidate.RailState = nil
+		p := price
+		p.Amount = amount
+		m := method
+		mutate(&p, &m)
+		require.Error(t, quoteInitialMembership(ctx, &candidate, &p, &product, m, now))
+		require.Empty(t, candidate.RailState)
+	}
 }

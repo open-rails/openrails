@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -33,12 +35,14 @@ import (
 	"github.com/open-rails/openrails/internal/modules/replaycache"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/cardholdername"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -761,6 +765,109 @@ func (s *CheckoutSessionService) GetSession(ctx context.Context, sessionID uuid.
 	}
 
 	return s.sessionToResponse(session), nil
+}
+
+// The offer uses the shared commercial terms type, not a second membership
+// payload. A JSON string preserves integer benefit caps through RailState's
+// map[string]any database roundtrip. No quote is financial authority.
+const initialMembershipQuoteKey = "initial_membership_quote"
+
+func quoteInitialMembership(ctx context.Context, session *models.CheckoutSession, price *models.Price, product *models.Product, method gen.OpenrailsPaymentMethod, now time.Time) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil || session == nil || price == nil || product == nil || session.ID == uuid.Nil || session.CustomerID == uuid.Nil || session.Mode != models.CheckoutSessionModeSubscription || session.Rail != models.RailNMI || session.PriceID == nil || *session.PriceID != price.ID || price.ProductID != product.ID || method.MerchantID != mid.UUID() || method.CustomerID != session.CustomerID || method.PspID != session.PspID || method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil || method.ParkReason != "" || method.Rail != "nmi" {
+		return ErrCheckoutSessionConflict
+	}
+	if _, exists := session.RailState[initialMembershipQuoteKey]; exists {
+		return ErrCheckoutSessionConflict
+	}
+	if !price.IsPurchasable() || !product.IsPurchasable() || price.Amount <= 0 || price.TrialUnitAmount != nil || price.TrialDurationHours != nil || session.Amount == nil || *session.Amount != price.Amount || session.Currency == nil || *session.Currency != price.Currency {
+		return ErrCheckoutSessionValidation
+	}
+	hours := price.RecurringCycleHours()
+	if hours == nil || *hours <= 0 || int64(*hours) > math.MaxInt64/int64(time.Hour) || now.IsZero() {
+		return ErrCheckoutSessionValidation
+	}
+	now = now.UTC().Truncate(time.Microsecond)
+	if session.ExpiresAt == nil || !session.ExpiresAt.After(now) {
+		return ErrCheckoutSessionExpired
+	}
+	benefits := models.CloneEntitlementsSpec(product.EntitlementsSpec)
+	if benefits == nil {
+		benefits = map[string]*int{}
+	}
+	terms := subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(), CustomerID: session.CustomerID, PSPID: session.PspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Amount: price.Amount, RecurringAmount: price.Amount, Currency: price.Currency, AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(time.Duration(*hours) * time.Hour), Entitlements: benefits}
+	if err := terms.Validate(); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(terms)
+	if err != nil {
+		return err
+	}
+	if session.RailState == nil {
+		session.RailState = map[string]any{}
+	}
+	session.RailState[initialMembershipQuoteKey] = string(raw)
+	return nil
+}
+
+func readInitialMembershipQuote(session *models.CheckoutSession) (subscriptions.InitialMembershipTerms, error) {
+	var terms subscriptions.InitialMembershipTerms
+	if session == nil {
+		return terms, ErrCheckoutSessionNotFound
+	}
+	raw, ok := session.RailState[initialMembershipQuoteKey].(string)
+	if !ok || raw == "" {
+		return terms, ErrCheckoutSessionConflict
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&terms); err != nil {
+		return terms, ErrCheckoutSessionConflict
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return terms, ErrCheckoutSessionConflict
+	}
+	if err := terms.Validate(); err != nil {
+		return terms, err
+	}
+	if session.Mode != models.CheckoutSessionModeSubscription || session.Rail != models.RailNMI || terms.CollectionPolicy != models.CollectionPolicyEngine || terms.Pending || terms.Amount <= 0 || terms.Amount != terms.RecurringAmount || terms.CustomerID != session.CustomerID || terms.PSPID != session.PspID || session.PriceID == nil || terms.PriceID != *session.PriceID || session.Amount == nil || terms.Amount != *session.Amount || session.Currency == nil || terms.Currency != *session.Currency {
+		return terms, ErrCheckoutSessionConflict
+	}
+	duration := terms.PeriodEnd.Sub(terms.PeriodStart)
+	if !terms.AcceptedAt.Equal(terms.PeriodStart) || duration%time.Hour != 0 || !terms.PeriodStart.Add(duration).Equal(terms.PeriodEnd) {
+		return terms, ErrCheckoutSessionConflict
+	}
+	return terms, nil
+}
+
+func validateInitialMembershipPrincipal(ctx context.Context, session *models.CheckoutSession, principal billingauth.DelegatedPrincipal) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil || session == nil || session.ID == uuid.Nil || session.CustomerID == uuid.Nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid.String() || principal.SubjectID != session.CustomerID.String() {
+		return ErrCheckoutSessionForbidden
+	}
+	return nil
+}
+
+// acceptedInitialMembershipQuote prepares the FIRST confirmation only. The
+// real integration resolves an existing canonical operation before calling it,
+// so a repeated/uncertain confirmation cannot shift accepted period bounds.
+// It does not enqueue, charge, create membership, or return a checkout success.
+func acceptedInitialMembershipQuote(ctx context.Context, session *models.CheckoutSession, principal billingauth.DelegatedPrincipal, now time.Time) (subscriptions.InitialMembershipTerms, error) {
+	if err := validateInitialMembershipPrincipal(ctx, session, principal); err != nil {
+		return subscriptions.InitialMembershipTerms{}, err
+	}
+	terms, err := readInitialMembershipQuote(session)
+	if err != nil {
+		return terms, err
+	}
+	if now.IsZero() || session.Status != models.CheckoutSessionStatusRequiresAction || session.ExpiresAt == nil || !session.ExpiresAt.After(now) {
+		return terms, ErrCheckoutSessionExpired
+	}
+	duration := terms.PeriodEnd.Sub(terms.PeriodStart)
+	terms.AcceptedAt = now.UTC().Truncate(time.Microsecond)
+	terms.PeriodStart = terms.AcceptedAt
+	terms.PeriodEnd = terms.PeriodStart.Add(duration)
+	return terms, terms.Validate()
 }
 
 func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID uuid.UUID, req *CheckoutSessionConfirmRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {

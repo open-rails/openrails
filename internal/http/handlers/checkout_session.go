@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -182,6 +183,22 @@ func GetCheckoutSession(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(resp)
+}
+
+// checkoutCustomerActionPrincipal carries only already verified payer facts to
+// the future recurring confirmation entry. It never reads caller claims from
+// headers/body or promotes a merchant/device credential to customer initiation.
+func checkoutCustomerActionPrincipal(r *httprequest.Request) (billingauth.DelegatedPrincipal, bool) {
+	payer, ok := customerActionPayer(r)
+	if !ok {
+		return billingauth.DelegatedPrincipal{}, false
+	}
+	principal, ok := middleware.PrincipalFromRequest(r)
+	if !ok || principal.MerchantID.IsZero() || principal.Subject != payer.String() {
+		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "customer_action_required", "verified customer action required"))
+		return billingauth.DelegatedPrincipal{}, false
+	}
+	return billingauth.DelegatedPrincipal{CredentialClass: principal.CredentialClass, MerchantID: principal.MerchantID.String(), SubjectID: payer.String(), Invoker: principal.Invoker}, true
 }
 
 func ConfirmCheckoutSession(r *httprequest.Request) {
