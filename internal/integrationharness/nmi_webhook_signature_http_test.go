@@ -43,9 +43,12 @@ func TestNMIMerchantWebhookSignatureHTTP(t *testing.T) {
 	SeedPSPs(t.Context(), t, surface.App().Runtime, owned.MerchantID, config.PSPSet{"nmi": {Rail: "nmi", AccountID: account, NMI: &config.NMIRailConfig{SecurityKey: "synthetic-key", WebhookSigningSecret: secret}}})
 	pool := h.MerchantPool(owned.MerchantID.UUID())
 	rows := seedMerchantBillingRows(t, t.Context(), pool, owned.MerchantID)
-	var railSub string
-	require.NoError(t, pool.QueryRow(t.Context(), `SELECT rail_subscription_id FROM billing.subscriptions WHERE id=$1`, rows.subscriptionID).Scan(&railSub))
-	body := []byte(fmt.Sprintf(`{"event_id":"evt_%s","event_type":"recurring.subscription.delete","event_body":{"merchant":{"id":"%s"},"subscription_id":"%s"}}`, uuid.NewString(), account, railSub))
+	// A raw numeric provider ID above 2^53 must retain every digit, just like
+	// its quoted representation. A float round-trip would route the wrong job.
+	railSub := strconv.FormatUint(9_007_199_254_740_993+uint64(uuid.New().ID()), 10)
+	_, err := pool.Exec(t.Context(), `UPDATE billing.subscriptions SET rail_subscription_id=$2 WHERE id=$1`, rows.subscriptionID, railSub)
+	require.NoError(t, err)
+	body := []byte(fmt.Sprintf(`{"event_id":"evt_%s","event_type":"recurring.subscription.delete","event_body":{"merchant":{"id":"%s"},"subscription_id":%s}}`, uuid.NewString(), account, railSub))
 	post := func(body []byte, signature string) (int, []byte) {
 		t.Helper()
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, surface.BaseURL+"/v1/webhooks/nmi", bytes.NewReader(body))
@@ -66,7 +69,7 @@ func TestNMIMerchantWebhookSignatureHTTP(t *testing.T) {
 		signature string
 	}{
 		{body, ""}, {body, signNMIWebhook("wrong-account-secret", body)},
-		{bytes.Replace(body, []byte(railSub), []byte("other-subscription"), 1), signNMIWebhook(secret, body)},
+		{bytes.Replace(body, []byte(railSub), []byte("9007199254740992"), 1), signNMIWebhook(secret, body)},
 	} {
 		status, raw := post(row.body, row.signature)
 		require.Equal(t, http.StatusUnauthorized, status, string(raw))
@@ -78,8 +81,9 @@ func TestNMIMerchantWebhookSignatureHTTP(t *testing.T) {
 		_, err := h.Pool().Exec(context.Background(), `DELETE FROM public.river_job WHERE kind=$1 AND args->>'subscription_reference'=$2`, riverjobs.KindSubscriptionConverge, railSub)
 		require.NoError(t, err, "clean up this subscription's queued wakeup before another worker runs")
 	})
-	for range 2 {
-		status, raw := post(body, signNMIWebhook(secret, body))
+	quoted := bytes.Replace(body, []byte(`"subscription_id":`+railSub), []byte(`"subscription_id":"`+railSub+`"`), 1)
+	for _, payload := range [][]byte{body, quoted} {
+		status, raw := post(payload, signNMIWebhook(secret, payload))
 		require.Equal(t, http.StatusOK, status, string(raw))
 		require.Contains(t, string(raw), "accepted")
 	}
