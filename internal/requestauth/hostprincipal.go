@@ -16,6 +16,7 @@ import (
 type HostPrincipal struct {
 	MerchantID   merchant.ID
 	MerchantSlug string
+	Subject      string
 	Permissions  []string
 }
 

@@ -2,8 +2,19 @@ package openrails
 
 import "time"
 
+// Catalog is a subdivision of one merchant's products. A nil OwnerSubject is
+// the ordinary merchant-owned default; creators have an opaque host subject.
+type Catalog struct {
+	ID           CatalogID  `json:"id"`
+	MerchantID   MerchantID `json:"merchant_id"`
+	OwnerSubject *string    `json:"owner_subject"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
 type CatalogProduct struct {
 	ID               ProductID       `json:"id"`
+	CatalogID        CatalogID       `json:"catalog_id"`
 	Key              string          `json:"key"`
 	DisplayName      string          `json:"display_name"`
 	Description      string          `json:"description"`
@@ -16,6 +27,9 @@ type CatalogProduct struct {
 }
 
 type CreateProductRequest struct {
+	// CatalogID selects a catalog for authorized merchant administrators. An
+	// owner client derives its catalog from its verified subject.
+	CatalogID        CatalogID       `json:"catalog_id,omitzero"`
 	Key              string          `json:"key"`
 	DisplayName      string          `json:"display_name"`
 	Description      string          `json:"description"`

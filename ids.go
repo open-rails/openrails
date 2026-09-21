@@ -8,7 +8,7 @@ import (
 )
 
 // Typed resource identifiers. Each kind has exactly one wire spelling:
-// OpenRails-minted resources travel as prefixed text (prod_, price_, sub_,
+// OpenRails-minted resources travel as prefixed text (cat_, prod_, price_, sub_,
 // pay_, pm_, cs_) and host-owned identities (CustomerID, MerchantID) as the
 // plain UUID. A typed id marshals to that spelling and refuses any other — a
 // missing or wrong prefix, or a non-UUID body, is a decoding error. The zero
@@ -20,6 +20,7 @@ import (
 type (
 	// CustomerID is the host's stable subject UUID under the bound merchant.
 	CustomerID        uuid.UUID
+	CatalogID         uuid.UUID
 	ProductID         uuid.UUID
 	PriceID           uuid.UUID
 	SubscriptionID    uuid.UUID
@@ -29,6 +30,7 @@ type (
 )
 
 const (
+	CatalogIDPrefix         = "cat_"
 	ProductIDPrefix         = "prod_"
 	PriceIDPrefix           = "price_"
 	SubscriptionIDPrefix    = "sub_"
@@ -36,6 +38,11 @@ const (
 	PaymentMethodIDPrefix   = "pm_"
 	CheckoutSessionIDPrefix = "cs_"
 )
+
+func ParseCatalogID(s string) (CatalogID, error) {
+	u, err := parsePrefixedID("catalog", CatalogIDPrefix, s)
+	return CatalogID(u), err
+}
 
 func ParseProductID(s string) (ProductID, error) {
 	u, err := parsePrefixedID("product", ProductIDPrefix, s)
@@ -69,6 +76,7 @@ func ParseCustomerID(s string) (CustomerID, error) {
 }
 
 func (id CustomerID) UUID() uuid.UUID        { return uuid.UUID(id) }
+func (id CatalogID) UUID() uuid.UUID         { return uuid.UUID(id) }
 func (id ProductID) UUID() uuid.UUID         { return uuid.UUID(id) }
 func (id PriceID) UUID() uuid.UUID           { return uuid.UUID(id) }
 func (id SubscriptionID) UUID() uuid.UUID    { return uuid.UUID(id) }
@@ -77,6 +85,7 @@ func (id PaymentMethodID) UUID() uuid.UUID   { return uuid.UUID(id) }
 func (id CheckoutSessionID) UUID() uuid.UUID { return uuid.UUID(id) }
 
 func (id CustomerID) IsZero() bool        { return uuid.UUID(id) == uuid.Nil }
+func (id CatalogID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
 func (id ProductID) IsZero() bool         { return uuid.UUID(id) == uuid.Nil }
 func (id PriceID) IsZero() bool           { return uuid.UUID(id) == uuid.Nil }
 func (id SubscriptionID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
@@ -86,6 +95,7 @@ func (id CheckoutSessionID) IsZero() bool { return uuid.UUID(id) == uuid.Nil }
 
 // String is the wire spelling; the zero id is "".
 func (id CustomerID) String() string { return formatPrefixedID("", uuid.UUID(id)) }
+func (id CatalogID) String() string  { return formatPrefixedID(CatalogIDPrefix, uuid.UUID(id)) }
 func (id ProductID) String() string  { return formatPrefixedID(ProductIDPrefix, uuid.UUID(id)) }
 func (id PriceID) String() string    { return formatPrefixedID(PriceIDPrefix, uuid.UUID(id)) }
 func (id SubscriptionID) String() string {
@@ -100,6 +110,7 @@ func (id CheckoutSessionID) String() string {
 }
 
 func (id CustomerID) MarshalText() ([]byte, error)        { return []byte(id.String()), nil }
+func (id CatalogID) MarshalText() ([]byte, error)         { return []byte(id.String()), nil }
 func (id ProductID) MarshalText() ([]byte, error)         { return []byte(id.String()), nil }
 func (id PriceID) MarshalText() ([]byte, error)           { return []byte(id.String()), nil }
 func (id SubscriptionID) MarshalText() ([]byte, error)    { return []byte(id.String()), nil }
@@ -109,6 +120,11 @@ func (id CheckoutSessionID) MarshalText() ([]byte, error) { return []byte(id.Str
 
 func (id *CustomerID) UnmarshalText(text []byte) error {
 	parsed, err := ParseCustomerID(string(text))
+	*id = parsed
+	return err
+}
+func (id *CatalogID) UnmarshalText(text []byte) error {
+	parsed, err := ParseCatalogID(string(text))
 	*id = parsed
 	return err
 }

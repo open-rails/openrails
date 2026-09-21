@@ -170,6 +170,7 @@ func ProductFromGen(p gen.OpenrailsProduct) (*Product, error) {
 	m := &Product{
 		ID:          p.ID,
 		MerchantID:  p.MerchantID,
+		CatalogID:   p.CatalogID,
 		Key:         p.Key,
 		DisplayName: p.DisplayName,
 		Description: DerefStr(p.Description),

@@ -76,7 +76,7 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/v1/merchant/payment-providers/stripe", strings.NewReader(`{"credentials":{"secret_key":"replacement"}}`)))
 	require.Equal(t, http.StatusMethodNotAllowed, recorder.Code)
-	require.Contains(t, recorder.Body.String(), "manifest_driven")
+	require.NotContains(t, recorder.Body.String(), "manifest_driven")
 	require.Zero(t, merchantSecretRowCount(t, runtime.DB.Pool(), ctx, mid))
 	value, err = runtime.ManifestSecrets.Get(ctx, mid, name)
 	require.NoError(t, err)

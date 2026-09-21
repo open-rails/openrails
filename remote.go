@@ -23,6 +23,7 @@ import (
 type Client struct {
 	baseURL    string
 	merchantID MerchantID
+	ownCatalog bool
 	currency   string
 	client     *http.Client
 	timeout    time.Duration
@@ -37,6 +38,20 @@ type Client struct {
 
 // ClientOption configures NewRemote.
 type ClientOption func(*Client)
+
+// WithOwnCatalog selects creator-catalog endpoints for the catalog methods.
+// It grants no authority and carries no owner identity: the server's Gate must
+// resolve a verified Subject and the corresponding owner permissions.
+func WithOwnCatalog() ClientOption {
+	return func(c *Client) { c.ownCatalog = true }
+}
+
+func (c *Client) catalogPath() string {
+	if c.ownCatalog {
+		return "/v1/catalog"
+	}
+	return "/v1/merchant/catalog"
+}
 
 // WithMerchantID binds this client to one immutable merchant UUID. The server
 // checks the binding against the authenticated merchant before executing a
