@@ -338,3 +338,14 @@ WHERE sub.price_id = sqlc.arg(price_id)::uuid
   AND sub.status IN ('active'::openrails.subscription_status, 'past_due'::openrails.subscription_status)
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at;
+
+-- NMI deletion completion owns only this read-model marker. A full-row replay
+-- can undo another command's price/card/period/quote while waiting for the lock.
+-- name: ClearSubscriptionDeletionMarker :execrows
+UPDATE openrails.subscriptions
+SET deletion_scheduled_at=NULL, updated_at=sqlc.arg(now)::timestamptz
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
+  AND psp_id=sqlc.arg(psp_id)::uuid
+  AND rail_subscription_id=sqlc.arg(rail_subscription_id)::text
+  AND deleted_at IS NULL
+  AND deletion_scheduled_at IS NOT NULL;

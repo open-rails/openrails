@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/shared/apperr"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -127,7 +130,36 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 			}
 		}
 		row, err = bound.enqueue(ctx, p)
-		return err
+		if err != nil || p.IntentType != subscriptions.TypeNMIUpgrade {
+			return err
+		}
+		// A different subscription can win the merchant-wide key while this
+		// subscription is locked. Return its untouched canonical row to the
+		// caller's mandatory ownership check before reading its instrument.
+		if row.IntentType != p.IntentType || row.SubscriptionID == nil || *row.SubscriptionID != *p.SubscriptionID ||
+			(p.PriceID != nil && (row.PriceID == nil || *row.PriceID != *p.PriceID)) {
+			return nil
+		}
+		accepted, err := subscriptions.DecodeNMIUpgradePayload(row)
+		if err != nil {
+			return err
+		}
+		// This share lock participates in the same short admission transaction.
+		// A remap that won first causes rollback; a later remap observes the
+		// committed operation and cannot alter its accepted instrument.
+		method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: row.MerchantID, ID: accepted.PaymentMethodID})
+		if err != nil {
+			return err
+		}
+		if method.CustomerID.String() != accepted.UserID || method.Rail != row.Rail || method.ParkReason != "" {
+			return apperr.Conflictf("payment method changed before upgrade admission")
+		}
+		for _, agreement := range []charge.Agreement{charge.AgreementRecurring, charge.AgreementUnscheduled} {
+			if err := accepted.Instrument.Matches(method, agreement); err != nil {
+				return apperr.Conflictf("payment method changed before upgrade admission")
+			}
+		}
+		return nil
 	})
 	return row, err
 }

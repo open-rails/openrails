@@ -37,6 +37,40 @@ func (q *Queries) ClearStripePaymentMethodSubscriptions(ctx context.Context, arg
 	return result.RowsAffected(), nil
 }
 
+const clearSubscriptionDeletionMarker = `-- name: ClearSubscriptionDeletionMarker :execrows
+UPDATE openrails.subscriptions
+SET deletion_scheduled_at=NULL, updated_at=$1::timestamptz
+WHERE merchant_id=$2::uuid AND id=$3::uuid
+  AND psp_id=$4::uuid
+  AND rail_subscription_id=$5::text
+  AND deleted_at IS NULL
+  AND deletion_scheduled_at IS NOT NULL
+`
+
+type ClearSubscriptionDeletionMarkerParams struct {
+	Now                time.Time
+	MerchantID         uuid.UUID
+	ID                 uuid.UUID
+	PspID              uuid.UUID
+	RailSubscriptionID string
+}
+
+// NMI deletion completion owns only this read-model marker. A full-row replay
+// can undo another command's price/card/period/quote while waiting for the lock.
+func (q *Queries) ClearSubscriptionDeletionMarker(ctx context.Context, arg ClearSubscriptionDeletionMarkerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, clearSubscriptionDeletionMarker,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+		arg.PspID,
+		arg.RailSubscriptionID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countSubscriptionsByCustomer = `-- name: CountSubscriptionsByCustomer :one
 SELECT count(*) FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1

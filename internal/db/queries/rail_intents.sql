@@ -7,9 +7,9 @@
 -- merchants a 0022 SECURITY DEFINER work queue names and run each pass inside
 -- that merchant's own pinned scope (or#862).
 
--- ============================================================================
+-- =====================================================================
 -- Enqueue (effectively-once per logical intent)
--- ============================================================================
+-- =====================================================================
 
 -- Idempotent on (merchant_id, idempotency_key). Conflict semantics by current
 -- status:
@@ -81,9 +81,9 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     updated_at = now()
 RETURNING *;
 
--- ============================================================================
+-- =====================================================================
 -- Executor / verifier claims (single-executor lease, SKIP LOCKED)
--- ============================================================================
+-- =====================================================================
 
 -- Claims due executable intents: pending/failed_retryable whose
 -- next_attempt_at arrived, plus orphaned in_flight rows whose lease elapsed
@@ -186,9 +186,9 @@ WHERE id = sqlc.arg(id)
   AND claimed_until IS NOT NULL
   AND claimed_until > sqlc.arg(now)::timestamptz;
 
--- ============================================================================
+-- =====================================================================
 -- Outcome transitions (always release the lease)
--- ============================================================================
+-- =====================================================================
 
 -- name: MarkRailIntentSucceeded :execrows
 UPDATE openrails.rail_intents
@@ -270,9 +270,9 @@ SET status = 'superseded',
     updated_at = now()
 WHERE id = sqlc.arg(id) AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify');
 
--- ============================================================================
+-- =====================================================================
 -- Supersede-by-subject + relevance-window expiry
--- ============================================================================
+-- =====================================================================
 
 -- Supersedes every live intent of one type for one subscription (e.g. a
 -- resume superseding the pending deferred delete). in_flight rows are left to
@@ -309,9 +309,9 @@ WHERE (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts 
         )
       );
 
--- ============================================================================
+-- =====================================================================
 -- Reconcile (#107 PS-10): stuck-intent detection
--- ============================================================================
+-- =====================================================================
 
 -- Non-terminal intents that have sat in the ledger beyond the reconcile
 -- engine's hardcoded stuck thresholds: pending/failed_retryable older than the
@@ -325,9 +325,9 @@ WHERE (status IN ('pending', 'failed_retryable') AND created_at <= sqlc.arg(acti
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= sqlc.arg(verify_cutoff)::timestamptz)
 ORDER BY created_at, id;
 
--- ============================================================================
+-- =====================================================================
 -- Reads
--- ============================================================================
+-- =====================================================================
 
 -- name: GetRailIntent :one
 SELECT * FROM openrails.rail_intents WHERE id = $1;
@@ -348,9 +348,9 @@ WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
 ORDER BY created_at DESC, id
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
--- ============================================================================
+-- =====================================================================
 -- #679 destructive-volume circuit breaker
--- ============================================================================
+-- =====================================================================
 
 -- Destructive intents that REACHED the provider in the rolling window:
 -- succeeded rows count by executed_at; unresolved attempt outcomes
@@ -381,9 +381,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND finding_type = sqlc.arg(finding_type)
   AND subject_key = sqlc.arg(subject_key);
 
--- ============================================================================
+-- =====================================================================
 -- #732 anti-credential-compromise rate ceiling (per-actor + per-merchant)
--- ============================================================================
+-- =====================================================================
 -- The durable rail_intents ledger IS the counter (#674): every destructive
 -- user/admin op posts a row BEFORE it executes, so a rolling-hour COUNT over
 -- created_at is the burst gauge. Counts by CREATION (created_at), not execution:
@@ -421,9 +421,9 @@ SELECT openrails.count_destructive_intents_for_merchant_since(
     sqlc.arg(intent_types)::text[],
     sqlc.arg(since)::timestamptz);
 
--- ============================================================================
+-- =====================================================================
 -- or#862: deployment-wide executor / verifier fan-out
--- ============================================================================
+-- =====================================================================
 
 -- CROSS-MERCHANT: the merchants the executor pass must visit, through migration
 -- 0022's SECURITY DEFINER reader. The executor used to run ClaimDue on a bare
@@ -589,6 +589,16 @@ SELECT EXISTS (
             OR i.result_evidence->'qualified_receipt'->'nmi'->>'transaction_id'=p.transaction_id)
    )
 )::bool;
+
+-- Resume undoes only the current provider target's unsent cancellation. A
+-- previous binding may retain an independent historical deletion obligation.
+-- name: SupersedePendingNMIDelete :execrows
+UPDATE openrails.rail_intents
+SET status='superseded', last_failure_reason=sqlc.arg(reason), updated_at=now()
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid
+  AND idempotency_key=sqlc.arg(idempotency_key)::text
+  AND intent_type='nmi_delete_subscription'
+  AND (status='failed_retryable' OR (status='pending' AND attempts=0));
 
 -- A pending quote remains owned after a charge decline: provider preparation
 -- may already have changed its recurring amount. Applied/canceled historical
