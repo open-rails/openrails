@@ -82,17 +82,17 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 	if cfg == nil {
 		return fmt.Errorf("config not loaded; in-process mode requires config")
 	}
-	// #723 two-mode doctrine. MODE 2 (api): the catalog is API-owned DB data —
+	// API-owned catalogs are DB data —
 	// a mutating YAML push is a second truth and refuses (plan-only stays legal
-	// as a read-only diff). MODE 1 (manifest): the YAML wins unconditionally —
+	// as a read-only diff). For manifest catalogs the YAML wins unconditionally —
 	// a mutating push always runs the full converge (Insert+Overwrite+Prune),
 	// so partial flags cannot leave the DB projection drifted from the file.
 	if !opts.planOnly() {
-		if !cfg.IsManifestMerchantSource() {
-			return fmt.Errorf("merchant_source=api refuses a mutating catalog push (two truths, #723/#724): mutate the catalog via the API, or run merchant_source=manifest; plan-only remains available")
+		if !cfg.IsManifestCatalogSource() {
+			return fmt.Errorf("catalog_source=api refuses a mutating catalog push: mutate the catalog via the API, or select catalog_source=manifest; plan-only remains available")
 		}
 		if !opts.Insert || !opts.Overwrite || !opts.Prune {
-			log.Info("merchant_source=manifest: catalog push upgraded to full converge (insert+overwrite+prune) — the YAML is the truth (#723)")
+			log.Info("catalog_source=manifest: catalog push upgraded to full converge (insert+overwrite+prune)")
 			opts.Insert, opts.Overwrite, opts.Prune = true, true, true
 		}
 	}
