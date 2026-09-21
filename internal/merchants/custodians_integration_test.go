@@ -149,6 +149,20 @@ func TestCustodianStorePlaneUnderEnforcingRLS(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 7, ref.MinVersion, "a seeding write must not erase a rotation floor")
 
+	for _, invalid := range []map[string]int{{custodians.SecretAPIKey: -1}, {"API_KEY": 1}, {" api_key ": 1}, {"unknown_key": 1}} {
+		bad := entry
+		bad.CredentialVersions = invalid
+		_, err := svc.UpsertCustodian(ctx, owner, bad, "live")
+		require.Error(t, err, "invalid credential versions must refuse before persistence")
+	}
+	zero := entry
+	zero.CredentialVersions = map[string]int{custodians.SecretAPIKey: 0}
+	afterZero, err := svc.UpsertCustodian(ctx, owner, zero, "live")
+	require.NoError(t, err)
+	ref, err = afterZero.SecretRef(custodians.SecretAPIKey)
+	require.NoError(t, err)
+	require.Equal(t, 7, ref.MinVersion, "an explicit zero must not erase a rotation floor")
+
 	stale := entry
 	stale.CredentialVersions = map[string]int{custodians.SecretAPIKey: 1}
 	afterStale, err := svc.UpsertCustodian(ctx, owner, stale, "live")
