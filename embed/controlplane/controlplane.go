@@ -139,9 +139,8 @@ func graph(rt *embed.Runtime) (*app.App, error) {
 // Attach builds the control plane over the runtime's database and Redis and
 // wires it into the runtime's merchant directory. Attach once per runtime;
 // construction failure is fatal for a standalone or hosted process. Attach
-// before OpenRails initializes its managed River client. A host-owned River
-// fleet is already constructed during embed.New; compose its AuthKit engine
-// and workers directly in the host binder instead of attaching one afterwards.
+// before Runtime.RunWorkers (managed) or Runtime.BindRiver (host-owned).
+// Its AuthKit workers, queues and schedules join that same composed fleet.
 func Attach(ctx context.Context, rt *embed.Runtime, opts Options) (*ControlPlane, error) {
 	a, err := graph(rt)
 	if err != nil {

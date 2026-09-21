@@ -91,6 +91,12 @@ func (r *Runtime) stopRiverProgressMonitor() {
 // It is a pure read — no job runs, nothing is enqueued — so a host may call it
 // from its own health endpoint and get a truthful answer while River is down.
 func (r *Runtime) RiverProgress(ctx context.Context) (riverjobs.ProgressReport, error) {
+	if r != nil && r.riverClosed.Load() {
+		return riverjobs.ProgressReport{}, fmt.Errorf("runtime is closed")
+	}
+	if r != nil && r.hostRiver && !r.hostRiverBound.Load() {
+		return riverjobs.ProgressReport{}, fmt.Errorf("host-owned River is not bound; call BindRiver after composition")
+	}
 	if r == nil || r.DB == nil {
 		return riverjobs.ProgressReport{}, fmt.Errorf("river progress: runtime not initialized")
 	}

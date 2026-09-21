@@ -4,19 +4,27 @@ package embed_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
+	solanago "github.com/gagliardetto/solana-go"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
-	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/embed/controlplane"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // noopWorker is a trivial host worker added to the SAME registry as billing's
@@ -40,53 +48,106 @@ func (noopWorker) Work(context.Context, *river.Job[noopJobArgs]) error { return 
 // registered itself rather than trusting the host to.
 func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	ctx := context.Background()
+	schema := compositionRiverSchema(t)
 	dsn := dbtest.SharedPostgresDSN(t)
 
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
+	rdb, _ := dbtest.SharedRedisClient(t)
 	var client *river.Client[pgx.Tx]
 	var sawBillingWorkers bool
 
 	rt, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{
-			Env:      "dev",
-			TestMode: config.CredentialPostureSandbox,
-			DB:       &config.DBConfig{URL: dsn},
+			Env:            "dev",
+			TestMode:       config.CredentialPostureSandbox,
+			DB:             &config.DBConfig{URL: dsn},
+			MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB,
+			Auth: &config.AuthConfig{Issuer: "https://river-compose.test", KeysPath: t.TempDir()},
 		},
-		River: embed.RiverFromHost(func(ctx context.Context, fleet *embed.RiverFleet) (*river.Client[pgx.Tx], error) {
-			// Billing's workers are ALREADY in the registry, with their
-			// health bookkeeping attached — the host adds its own on top.
-			require.NotNil(t, fleet.Workers)
-			require.Equal(t, riverjobs.QueueBilling, fleet.QueueBilling)
-			sawBillingWorkers = true
-			require.NoError(t, river.AddWorkerSafely(fleet.Workers, &noopWorker{}))
-
-			c, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-				Queues: map[string]river.QueueConfig{
-					river.QueueDefault:     {MaxWorkers: 2},
-					fleet.QueueBilling:     {MaxWorkers: 2},
-					riverjobs.QueueBilling: {MaxWorkers: 2},
-				},
-				Workers: fleet.Workers,
-			})
-			if err != nil {
-				return nil, err
-			}
-			client = c
-			return c, nil
-		}),
+		River: embed.RiverFromHost(),
+		Redis: rdb,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	require.False(t, rt.HasExternalRiverClient())
+	require.ErrorContains(t, rt.Ready(ctx), "not bound")
+	_, err = rt.CheckJobProgress(ctx)
+	require.ErrorContains(t, err, "not bound")
+	require.ErrorContains(t, rt.RunWorkers(ctx), "not bound")
+	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{})
+	require.NoError(t, err)
+	suffix := uuid.NewString()[:8]
+	user, err := cp.Core().CreateUser(ctx, "river-"+suffix+"@example.test", "river"+suffix)
+	require.NoError(t, err)
+	provisioned, err := cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: "river-" + suffix, OwnerUserID: user.ID})
+	require.NoError(t, err)
+	expired, alive := uuid.New(), uuid.New()
+	for _, row := range []struct {
+		id      uuid.UUID
+		expires time.Time
+	}{{expired, time.Now().Add(-time.Hour)}, {alive, time.Now().Add(time.Hour)}} {
+		hash := sha256.Sum256([]byte(row.id.String()))
+		_, err = pool.Exec(ctx, `INSERT INTO profiles.refresh_sessions(id,user_id,issuer,current_token_hash,expires_at) VALUES($1,$2::uuid,$3,$4,$5)`, row.id, user.ID, "https://river-compose.test", hash[:], row.expires)
+		require.NoError(t, err)
+	}
+	client, err = rt.BindRiver(ctx, pool, func(ctx context.Context, cfg *river.Config) error {
+		require.NotNil(t, cfg.Workers)
+		cfg.Schema = schema
+		sawBillingWorkers = true
+		require.NoError(t, river.AddWorkerSafely(cfg.Workers, &noopWorker{}))
+		cfg.Queues[river.QueueDefault] = river.QueueConfig{MaxWorkers: 2}
+		cfg.Queues[embed.QueueBilling] = river.QueueConfig{MaxWorkers: 2}
+		return nil
+	})
+	require.NoError(t, err)
+	require.NoError(t, cp.Core().Start(ctx), "attached AuthKit maintenance was registered during binding")
+	_, err = controlplane.Attach(ctx, rt, controlplane.Options{})
+	require.Error(t, err, "components cannot attach after binding")
 
-	require.True(t, sawBillingWorkers, "binder must be invoked during New")
-	require.True(t, rt.HasExternalRiverClient(), "the binder's client must be injected by New")
+	require.True(t, sawBillingWorkers, "explicit binding composes billing workers")
+	require.True(t, rt.HasExternalRiverClient(), "explicit binding adopts the host client")
 	require.NotNil(t, client)
 
 	require.NoError(t, client.Start(ctx))
 	t.Cleanup(func() { _ = client.Stop(context.Background()) })
+	hostJob, err := client.Insert(ctx, noopJobArgs{}, nil)
+	require.NoError(t, err)
+	// The real non-River poller must remove an expired pending reference. Its
+	// RPC is pinned to loopback even though this expired entry needs no call.
+	graph := app.HostGraph(rt).Runtime
+	rpc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("expired reference unexpectedly called RPC: %s", r.URL.Path)
+		w.WriteHeader(500)
+	}))
+	t.Cleanup(rpc.Close)
+	graph.SolanaRPCResolver.Endpoint = rpc.URL
+	_, err = rt.DeclarePSP(ctx, provisioned.MerchantID, embed.PSPDeclaration{Key: "solana", Rail: "solana", AccountID: "11111111111111111111111111111111"})
+	require.NoError(t, err)
+	reference := solanago.NewWallet().PublicKey().String()
+	mctx := merchant.WithID(ctx, provisioned.MerchantID)
+	require.NoError(t, graph.SolanaPayService.RegisterPendingReference(mctx, reference))
+	loopCtx, cancelLoops := context.WithCancel(ctx)
+	loopDone := make(chan error, 1)
+	go func() { loopDone <- rt.RunWorkers(loopCtx) }()
+	var stopped sync.Once
+	stopLoops := func() { stopped.Do(func() { cancelLoops(); require.ErrorIs(t, <-loopDone, context.Canceled) }) }
+	t.Cleanup(stopLoops)
+	require.Eventually(t, func() bool {
+		pending, e := graph.SolanaPayService.PendingReferencesByMerchant(ctx)
+		return e == nil && len(pending[provisioned.MerchantID]) == 0
+	}, 30*time.Second, 100*time.Millisecond, "core non-River polling must run after explicit binding")
+	require.Eventually(t, func() bool {
+		var dead, live int
+		e := pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE id=$1),count(*) FILTER(WHERE id=$2) FROM profiles.refresh_sessions WHERE id IN($1,$2)`, expired, alive).Scan(&dead, &live)
+		return e == nil && dead == 0 && live == 1
+	}, 30*time.Second, 100*time.Millisecond, "the same client's AuthKit schedule removes only expired sessions")
+	require.Eventually(t, func() bool {
+		var state string
+		return pool.QueryRow(ctx, "SELECT state FROM "+pgx.Identifier{schema, "river_job"}.Sanitize()+" WHERE id=$1", hostJob.Job.ID).Scan(&state) == nil && state == "completed"
+	}, 30*time.Second, 100*time.Millisecond, "host jobs must run on the same client")
 
 	// A billing job enqueued through the SHARED client is drained by the billing
 	// worker the binder received — proving the registry was actually wired, not
@@ -96,7 +157,7 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		var state string
-		row := pool.QueryRow(ctx, `SELECT state FROM river_job WHERE id = $1`, res.Job.ID)
+		row := pool.QueryRow(ctx, "SELECT state FROM "+pgx.Identifier{schema, "river_job"}.Sanitize()+" WHERE id=$1", res.Job.ID)
 		return row.Scan(&state) == nil && state == "completed"
 	}, 30*time.Second, 100*time.Millisecond, "billing job must complete on the host's shared client")
 
@@ -115,6 +176,10 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, report.Kinds, "periodic kinds are registered")
 	require.NoError(t, report.Err())
+	stopLoops()
+	require.NoError(t, client.Stop(ctx))
+	require.NoError(t, rt.Close(ctx))
+	require.NoError(t, pool.Ping(ctx), "the host pool remains owned by the host")
 }
 
 // An omitted River option constructs the managed default fleet.
@@ -129,22 +194,12 @@ func TestRiverDefault_ConstructsManagedFleet(t *testing.T) {
 	require.False(t, rt.HasExternalRiverClient())
 }
 
-// TestRiverFromHost_NilClientRefuses closes the other half of the handoff: a
-// host may not declare ownership and then hand back nothing.
-func TestRiverFromHost_NilClientRefuses(t *testing.T) {
-	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
-
-	_, err := embed.New(ctx, embed.Options{
-		Config: &config.Config{
-			Env:      "dev",
-			TestMode: config.CredentialPostureSandbox,
-			DB:       &config.DBConfig{URL: dsn},
-		},
-		River: embed.RiverFromHost(func(context.Context, *embed.RiverFleet) (*river.Client[pgx.Tx], error) {
-			return nil, nil
-		}),
-	})
-	require.Error(t, err)
-	require.ErrorContains(t, err, "nil client")
+// A host must supply the pool it owns before any fleet can be constructed.
+func TestRiverFromHost_MissingPoolRefuses(t *testing.T) {
+	ctx := t.Context()
+	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}}, River: embed.RiverFromHost()})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	_, err = rt.BindRiver(ctx, nil, nil)
+	require.ErrorContains(t, err, "pool is required")
 }

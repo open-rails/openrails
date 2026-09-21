@@ -8,10 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
-	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -33,20 +31,17 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	t.Cleanup(pool.Close)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
-	var jobs *river.Client[pgx.Tx]
 	rt, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}},
-		River: embed.RiverFromHost(func(ctx context.Context, fleet *embed.RiverFleet) (*river.Client[pgx.Tx], error) {
-			c, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-				Queues:  map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: 1}, fleet.QueueBilling: {MaxWorkers: 1}},
-				Workers: fleet.Workers,
-			})
-			jobs = c
-			return c, err
-		}),
+		River:  embed.RiverFromHost(),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	jobs, err := rt.BindRiver(ctx, pool, func(_ context.Context, cfg *river.Config) error {
+		cfg.Queues[embed.QueueBilling] = river.QueueConfig{MaxWorkers: 1}
+		return nil
+	})
+	require.NoError(t, err)
 	require.NoError(t, jobs.Start(ctx))
 	t.Cleanup(func() { _ = jobs.Stop(context.Background()) })
 
