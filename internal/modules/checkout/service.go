@@ -216,6 +216,9 @@ func (s *CheckoutService) CheckSubscriptionConflict(ctx context.Context, userID 
 
 // Checkout processes a unified checkout request
 func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error) {
+	if response, found, err := s.replayInitialEnrollment(ctx, req, user); found || err != nil {
+		return response, err
+	}
 	if s.NMISaleService != nil {
 		if response, found, err := s.NMISaleService.replayAcceptedRequest(ctx, req, user); found || err != nil {
 			return response, err
@@ -602,197 +605,42 @@ type subscriptionIdempotencyResult struct {
 	DelayedStart   *string `json:"delayed_start,omitempty"`
 }
 
-func (s *CheckoutService) processNMISubscription(
-	ctx context.Context,
-	req *CheckoutRequest,
-	user *UserIdentity,
-	price *models.Price,
-	product *models.Product,
-	coverage *CoverageInfo,
-	target railTarget,
-) (*CheckoutResponse, error) {
-	// Rows and intents speak rail vocabulary; the provider (account key) picks
-	// the plan link and pins the NMI client.
-	provider := target.Rail
-	nmiPlanID, err := requireNMIPlanForTarget(price, target)
-	if err != nil {
-		return nil, err
-	}
-
-	// Fail fast on misconfiguration instead of parking a user-facing checkout.
-	if _, err := s.resolveNMIClient(ctx, target.PSP); err != nil {
-		return nil, fmt.Errorf("NMI provider '%s' is not configured: %w", target.PSP, err)
-	}
-
-	// Get idempotency key (client-provided or generated)
-	const idempOp = "nmi_subscription"
-	idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, idempOp)
-
-	// Check idempotency - have we already processed this request?
-	idempRec, alreadyExists, err := s.IdempotencyService.Begin(ctx, idempOp, idempotencyKey)
-	if err != nil {
-		return nil, fmt.Errorf("idempotency check failed: %w", err)
-	}
-
-	if alreadyExists {
-		switch idempRec.Status {
-		case IdempotencyStatusSuccess:
-			// Return cached result
-			var cached subscriptionIdempotencyResult
-			if err := json.Unmarshal(idempRec.Result, &cached); err != nil {
-				log.WithError(err).Warn("failed to unmarshal cached subscription result")
-				return &CheckoutResponse{
-					Status:        "success",
-					Action:        "new",
-					Message:       "Subscription already created",
-					TransactionID: cached.TransactionID,
-				}, nil
-			}
-			subID, _ := uuid.Parse(cached.SubscriptionID)
-			var delayedStart *time.Time
-			if cached.DelayedStart != nil {
-				if t, err := time.Parse(time.RFC3339, *cached.DelayedStart); err == nil {
-					delayedStart = &t
-				}
-			}
-			return &CheckoutResponse{
-				Status:         "success",
-				Action:         "new",
-				Message:        "Subscription already created",
-				SubscriptionID: &subID,
-				TransactionID:  cached.TransactionID,
-				DelayedStart:   delayedStart,
-			}, nil
-		case IdempotencyStatusPending:
-			return nil, errors.New("subscription creation already in progress, please wait")
-		case IdempotencyStatusFailed:
-			// Fall through: the durable intent below is the source of truth —
-			// it replays a success, reports a decline, or keeps verifying an
-			// ambiguous create under the ORIGINAL order id (#674).
-		}
-	}
-
-	// Get or create the payment method
-	railCustomerRef, railMethodRef, resolvedMethod, createdPaymentMethod, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
-	if err != nil {
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, err
-	}
-	// #297: the instrument's recurring-sequence stored-credential anchor. ""
-	// (fresh payment method or legacy instrument) makes this enrollment the sequence's
-	// initial CIT; the intent's finalize captures the first-charge txn id.
-	storedCredentialRef := ""
-	if resolvedMethod != nil {
-		storedCredentialRef = strings.TrimSpace(resolvedMethod.StoredCredentialRecurringRef)
-	}
-
-	// Determine start date for delayed start
-	now := s.now().UTC()
-	startDate, delayedStart := nmiSubscriptionStartDate(coverage, now)
-
-	// Local subscription ID for a FRESH intent; a replayed request maps onto
-	// the existing intent, whose stored payload (and so its original local
-	// subscription id) wins — enqueue conflicts never overwrite the payload.
-	subscriptionID := uuidutil.NewV7()
-	var paymentMethodID *uuid.UUID
-	if resolvedMethod != nil {
-		paymentMethodID = &resolvedMethod.ID
-	}
-
-	if _, err := customerIDFromUser(user.ID); err != nil {
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, err
-	}
+func (s *CheckoutService) processNMISubscription(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, coverage *CoverageInfo, target railTarget) (*CheckoutResponse, error) {
 	if s.Intents == nil {
-		return nil, errors.New("checkout intent executor not wired")
+		return nil, errors.New("checkout enrollment executor unavailable")
 	}
-	tid, err := merchant.Require(ctx)
+	key := s.getIdempotencyKey(req, user.ID, price.ID, "nmi_subscription")
+	_, _, method, created, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
 	if err != nil {
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
-
-	// #674 write-through: durable intent first, inline execution, NMI order id
-	// derived from the intent id. A crash/timeout at ANY point leaves an intent
-	// the executor/verifier resolves (sale search + roster scan) — never an
-	// orphaned live remote subscription, never a blind re-create.
-	// NMI sandbox accounts reject any email that is not the account owner's own
-	// address (E_ACCESS_DENIED), which fails add_subscription outright. The
-	// email is not needed to enrol a subscription, so leave it out of the
-	// intent payload in test mode — it is persisted, so filtering at execution
-	// time would still leave already-queued intents carrying it.
-	subscriptionEmail := req.Email
-	if s != nil && s.Config != nil && s.Config.IsTestMode() {
-		subscriptionEmail = ""
+	accepted, err := s.admitInitialEnrollment(ctx, req, user, price.ID, method, target, key)
+	if err != nil {
+		return nil, err
 	}
-	intent, err := s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
-		MerchantID: tid.UUID(),
-		Provider:   provider,
-		IntentType: TypeNMISubscriptionCreate,
-		PriceID:    &price.ID,
-		Payload: NMISubscriptionCreatePayload{
-			Provider:               provider,
-			PSP:                    target.PSP,
-			PlanID:                 nmiPlanID,
-			CustomerVaultID:        railCustomerRef,
-			BillingID:              railMethodRef,
-			AmountMicros:           price.Amount,
-			Currency:               price.Currency,
-			Email:                  subscriptionEmail,
-			UserID:                 user.ID,
-			PriceID:                price.ID,
-			LocalSubscriptionID:    subscriptionID,
-			PaymentMethodID:        paymentMethodID,
-			StartDate:              startDate,
-			DelayedStart:           delayedStart,
-			StoredCredentialRef:    storedCredentialRef,
-			E2ERunID:               strings.TrimSpace(req.Metadata["e2e_run_id"]),
-			CheckoutIdempotencyKey: idempotencyKey,
-			FirstName:              ResolveCheckoutFirstName(req, user),
-			LastName:               ResolveCheckoutLastName(req),
-			Address1:               DefaultIfEmpty(req.Address1, "N/A"),
-			City:                   DefaultIfEmpty(req.City, "N/A"),
-			State:                  DefaultIfEmpty(req.State, "N/A"),
-			Zip:                    DefaultIfEmpty(req.Zip, "00000"),
-			Country:                DefaultIfEmpty(req.Country, "US"),
-		},
-		IdempotencyKey: NMISubscriptionCreateIdempotencyKey(idempotencyKey),
-		NextAttemptAt:  time.Now().UTC(),
-		Origin:         intents.OriginUser,
-		OriginReason:   "checkout subscription create",
+	fingerprint := saleRequestFingerprint(req, user, price.ID, target)
+	intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialEnrollmentReplayParams(accepted), func(in gen.OpenrailsRailIntent) error {
+		return ownsInitialEnrollment(in, user.ID, price.ID, fingerprint)
 	})
 	if err != nil {
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, fmt.Errorf("post subscription create intent: %w", err)
+		return nil, err
 	}
-
-	switch intent.Status {
-	case intents.StatusSucceeded:
-		// finalize already completed the idempotency record.
-		return nmiSubscriptionResponseFromIntent(intent)
-	case intents.StatusFailedTerminal:
-		// Verified-clean decline/rejection. Direct best-effort cleanup of the
-		// payment method created for THIS attempt, NOT an intent (#674 tail): it is
-		// referenced nowhere — harmless if lost.
-		if createdPaymentMethod && resolvedMethod != nil && s.RailPaymentMethodService != nil {
-			if cleanupErr := s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, resolvedMethod); cleanupErr != nil {
-				log.WithError(cleanupErr).WithField("vault_id", railCustomerRef).Warn("failed to cleanup payment method after subscription error")
-			}
-		}
-		failErr := terminalCheckoutError(intent, "failed to create subscription")
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, failErr)
-		return nil, failErr
-	default:
-		// pending (parked), in_flight, unknown_needs_verify, failed_retryable:
-		// the intent ledger finishes it out-of-band.
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
-		return nil, ErrCheckoutProcessing
+	if intent.Status == intents.StatusFailedTerminal && created && method != nil && s.RailPaymentMethodService != nil {
+		_ = s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, method)
 	}
+	return nmiSubscriptionResponseFromIntent(intent)
 }
 
 // nmiSubscriptionResponseFromIntent rebuilds the checkout response from a
 // succeeded create intent's evidence.
 func nmiSubscriptionResponseFromIntent(intent gen.OpenrailsRailIntent) (*CheckoutResponse, error) {
+	if intent.Status == intents.StatusFailedTerminal {
+		return nil, terminalCheckoutError(intent, "initial enrollment refused")
+	}
+	if intent.Status != intents.StatusSucceeded {
+		return nil, ErrCheckoutProcessing
+	}
+
 	var evidence struct {
 		SubscriptionID string `json:"subscription_id"`
 		TransactionID  string `json:"transaction_id"`

@@ -24,6 +24,9 @@ type CardUserData struct {
 }
 
 type RecurringPaymentData struct {
+	// ScheduleOnly creates the accepted recurring schedule without a sale.
+	// Amount must be zero; no transaction or stored-credential proof is implied.
+	ScheduleOnly bool
 	CardUserData
 	PlanID          string
 	CustomerVaultID string
@@ -95,12 +98,11 @@ type ManualRebillResponse struct {
 	ResponseCode int
 }
 
-// AddRecurringSubscription stays on classic Direct Post DELIBERATELY (#663):
-// type=sale + recurring=add_subscription is an ATOMIC first-charge + enroll
-// (+ delayed start via start_date) in one call. v5's POST /subscriptions has
-// no documented start_date for plan-linked subscriptions and returns no
-// first-charge transaction, so porting it would split one atomic money op
-// into two non-atomic ones.
+// AddRecurringSubscription uses Classic Direct Post. Paid enrollment explicitly
+// combines sale and schedule; ScheduleOnly omits transaction fields entirely.
+// A future start_date controls the recurring schedule, never the sale amount.
+// https://docs.nmi.com/reference/subscriptions-management
+// https://docs.nmi.com/reference/transactions-processing
 func (c *NMIClient) AddRecurringSubscription(ctx context.Context, data RecurringPaymentData) (*AddSubscriptionResponse, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
@@ -111,21 +113,17 @@ func (c *NMIClient) AddRecurringSubscription(ctx context.Context, data Recurring
 	if data.CustomerVaultID == "" && data.PaymentToken == "" {
 		return nil, errors.New("either customer vault or payment token is required")
 	}
-	if err := data.StoredCredential.Validate(); err != nil {
-		return nil, err
-	}
-
-	amount, err := WireAmount(data.Amount, data.Currency)
-	if err != nil {
+	if data.ScheduleOnly {
+		if data.Amount != 0 || data.StoredCredential != nil {
+			return nil, errors.New("schedule-only enrollment cannot carry sale or credential-on-file fields")
+		}
+	} else if err := data.StoredCredential.Validate(); err != nil {
 		return nil, err
 	}
 
 	values := url.Values{
-		"type":              {"sale"},
-		"amount":            {amount},
 		"email":             {data.Email},
 		"plan_id":           {data.PlanID},
-		"billing_method":    {"recurring"},
 		"security_key":      {c.SecurityKey},
 		"currency":          {data.Currency},
 		"recurring":         {"add_subscription"},
@@ -160,9 +158,16 @@ func (c *NMIClient) AddRecurringSubscription(ctx context.Context, data Recurring
 	if trimmed := strings.TrimSpace(data.StartDate); trimmed != "" {
 		values.Set("start_date", trimmed)
 	}
-	// billing_method=recurring is already stamped above; ApplyToForm re-setting
-	// it for a recurring-agreement StoredCredential is idempotent.
-	data.StoredCredential.ApplyToForm(values)
+	if !data.ScheduleOnly {
+		amount, err := WireAmount(data.Amount, data.Currency)
+		if err != nil {
+			return nil, err
+		}
+		values.Set("type", "sale")
+		values.Set("amount", amount)
+		values.Set("billing_method", "recurring")
+		data.StoredCredential.ApplyToForm(values)
+	}
 
 	response, err := c.sendDirectRequest(ctx, values)
 	if err != nil {

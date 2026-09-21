@@ -14,6 +14,7 @@ import (
 // are schedule facts, not proof of a charge or a stored-credential agreement;
 // neither subscription API establishes the payment currency.
 type EnrollmentEvidence struct {
+	VaultBillingID string         `json:"vault_billing_id,omitempty"`
 	Subscription   V5Subscription `json:"subscription"`
 	OrderReference string         `json:"order_reference"`
 	PONumber       string         `json:"po_number"`

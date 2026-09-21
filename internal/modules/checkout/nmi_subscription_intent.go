@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -40,47 +41,7 @@ func NMISubscriptionCreateIdempotencyKey(checkoutIdempotencyKey string) string {
 // NMISubscriptionCreatePayload carries everything Execute and the async
 // verifier need to create the remote subscription AND register it locally
 // without the originating HTTP request.
-type NMISubscriptionCreatePayload struct {
-	// Provider is the RAIL ("nmi") — local row vocabulary.
-	Provider string `json:"provider"`
-	// PSP is the payment provider (account key, e.g. "mobius")
-	// this create charges through; "" resolves the rail's active account.
-	PSP             string `json:"psp,omitempty"`
-	PlanID          string `json:"plan_id"`
-	CustomerVaultID string `json:"customer_vault_id"`
-	// BillingID binds the subscription to ONE stored card in the vault (#682
-	// shared-vault support); "" uses the vault's priority-1 entry.
-	BillingID           string     `json:"billing_id,omitempty"`
-	AmountMicros        int64      `json:"amount_micros"`
-	Currency            string     `json:"currency"`
-	Email               string     `json:"email,omitempty"`
-	UserID              string     `json:"user_id"`
-	PriceID             uuid.UUID  `json:"price_id"`
-	LocalSubscriptionID uuid.UUID  `json:"local_subscription_id"`
-	PaymentMethodID     *uuid.UUID `json:"payment_method_id,omitempty"`
-	// StartDate (YYYYMMDD, "" = immediate) + DelayedStart mirror
-	// nmiSubscriptionStartDate's coverage-derived delayed start.
-	StartDate    string     `json:"start_date,omitempty"`
-	DelayedStart *time.Time `json:"delayed_start,omitempty"`
-	// StoredCredentialRef is the instrument's RECURRING-sequence
-	// stored-credential anchor at enqueue (#297). "" = this enrollment is the
-	// sequence's initial CIT (indicator=stored) and finalize captures the
-	// first-charge transaction id as the anchor (delayed starts produce no
-	// first charge — the anchor then back-fills from the first dunning MIT).
-	StoredCredentialRef string `json:"stored_credential_ref,omitempty"`
-	E2ERunID            string `json:"e2e_run_id,omitempty"`
-	// CheckoutIdempotencyKey lets finalize complete the request-level
-	// idempotency record so a client replay gets the cached response.
-	CheckoutIdempotencyKey string `json:"checkout_idempotency_key"`
-
-	FirstName string `json:"first_name,omitempty"`
-	LastName  string `json:"last_name,omitempty"`
-	Address1  string `json:"address1,omitempty"`
-	City      string `json:"city,omitempty"`
-	State     string `json:"state,omitempty"`
-	Zip       string `json:"zip,omitempty"`
-	Country   string `json:"country,omitempty"`
-}
+type NMISubscriptionCreatePayload = subscriptions.NMIInitialEnrollmentPayload
 
 // Evidence keys the producer reads back off a succeeded intent.
 const (
@@ -116,18 +77,7 @@ func (h *NMISubscriptionCreateIntentHandler) PrunePolicy() (keepPayload, keepEvi
 }
 
 func decodeNMISubscriptionCreatePayload(intent gen.OpenrailsRailIntent) (NMISubscriptionCreatePayload, error) {
-	var p NMISubscriptionCreatePayload
-	if len(intent.Payload) == 0 {
-		return p, errors.New("nmi subscription create intent has no payload")
-	}
-	if err := json.Unmarshal(intent.Payload, &p); err != nil {
-		return p, fmt.Errorf("decode nmi subscription create payload: %w", err)
-	}
-	if p.PlanID == "" || p.CustomerVaultID == "" || p.UserID == "" ||
-		p.PriceID == uuid.Nil || p.LocalSubscriptionID == uuid.Nil {
-		return p, errors.New("nmi subscription create payload is incomplete")
-	}
-	return p, nil
+	return subscriptions.DecodeNMIInitialEnrollmentPayload(intent)
 }
 
 // CheckRelevance: registration (finalize) is idempotent and a decline is
