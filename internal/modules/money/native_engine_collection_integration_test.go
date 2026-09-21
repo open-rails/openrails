@@ -76,6 +76,7 @@ func TestNativeEngineRecurringCollectionOwnsOnlyNewAgreement(t *testing.T) {
 			require.Equal(t, intents.OutcomeSucceeded, outcome.Class, outcome.Reason)
 			outcome = handler.Verify(e.ctx, op)
 			require.Equal(t, intents.OutcomeSucceeded, outcome.Class, outcome.Reason)
+			requireEngineArchiveValues(t, e, op.ID)
 			e.gateway.mu.Lock()
 			require.Equal(t, 1, e.gateway.sends)
 			require.Equal(t, []string{"engine-billing"}, e.gateway.saleBillingIDs)

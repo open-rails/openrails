@@ -45,3 +45,20 @@ policy. For an archive produced by the previous schema, first restore it using
 the matching published binary into an isolated database, then run the additive
 upgrade and export with this version. A width-mismatched historical archive is
 not silently reinterpreted as the new schema.
+
+The trusted process setting `new_subscription_collection_policy: engine` opts
+new supported enrollments into owned agreement confirmation. The default empty
+or `provider` value preserves native enrollment during rollout. Recurring NMI
+and Stripe prices need no provider catalog links in engine mode; explicit
+historical links remain usable. CCBill engine signup and unsupported free/trial
+terms refuse before payment. Fixed-hour catalog cycles are the supported new
+engine terms; this does not reinterpret old provider calendar/finite schedules.
+
+`engine_admission_hold: true` pauses creation of due renewal obligations while
+retaining existing operation verification and webhook handling. Provider write
+mode remains an additional existing execution gate. Neither setting mutates
+stored ownership. Existing engine sessions and accepted operations replay their
+stored terms after enrollment defaults change. Existing engine payments that
+require Stripe authentication resume the original PaymentIntent through the
+owned, non-cacheable authentication resource; a mutable declined PI is canceled
+and read back before the obligation becomes retryable.
