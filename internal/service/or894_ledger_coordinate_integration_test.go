@@ -113,7 +113,7 @@ func TestOr894_TwoUsageEventTypesAtOneSourceIDPostTwoDebits(t *testing.T) {
 
 	var debits int64
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.ledger_transfers
+		SELECT count(*) FROM billing.ledger_transfers
 		 WHERE customer_id = $1 AND source = 'invoke' AND source_id = $2
 		   AND transfer_type = 'credit_spend'
 	`, payer.UUID(), requestID).Scan(&debits))

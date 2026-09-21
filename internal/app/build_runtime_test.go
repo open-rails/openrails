@@ -8,30 +8,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestStandaloneRiverSchemaIsAlwaysPublic verifies the #545 rule: when OpenRails
-// constructs its own River client, River tables ALWAYS live in `public`
-// (config.RiverSchema, River's documented default) — decoupled from the
-// OpenRails billing schema (reversing the #165 coupling) so the billing schema
-// stays a clean whole-schema dump (#544). db.schema no longer changes it.
-func TestStandaloneRiverSchemaIsAlwaysPublic(t *testing.T) {
-	t.Parallel()
-
-	require.Equal(t, "public", config.RiverSchema)
-
-	t.Run("default", func(t *testing.T) {
-		require.Equal(t, config.RiverSchema, standaloneRiverSchema(config.GetDefaultBillingConfig()))
-	})
-
-	t.Run("custom db.schema does not change it", func(t *testing.T) {
-		cfg := config.GetDefaultBillingConfig()
-		cfg.DB.Schema = "host_billing"
-		require.Equal(t, config.RiverSchema, standaloneRiverSchema(cfg))
-	})
-
-	t.Run("nil db/config", func(t *testing.T) {
-		require.Equal(t, config.RiverSchema, standaloneRiverSchema(&config.Config{}))
-		require.Equal(t, config.RiverSchema, standaloneRiverSchema(nil))
-	})
+func TestRiverSchemaDefaultsAndOverride(t *testing.T) {
+	rt := &Runtime{}
+	require.Equal(t, "public", rt.riverSchemaOrDefault())
+	rt.SetRiverSchema("jobs")
+	require.Equal(t, "jobs", rt.riverSchemaOrDefault())
 }
 
 func pythCfg(t *testing.T, testMode bool) *config.Config {

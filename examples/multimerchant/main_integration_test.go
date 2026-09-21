@@ -20,7 +20,7 @@ func TestMultiMerchantExampleRuns(t *testing.T) {
 	h := integrationharness.New(t, ctx)
 	dbtest.EnsureTestMerchant(ctx, t, h.Pool())
 	second := uuid.New()
-	_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, 'example-second', 'active')`, second)
+	_, err := h.Pool().Exec(ctx, `INSERT INTO billing.merchants (id, slug, status) VALUES ($1, 'example-second', 'active')`, second)
 	require.NoError(t, err)
 	env := map[string]string{
 		"OPENRAILS_DATABASE_URL": h.DSN,

@@ -20,7 +20,7 @@ func TestUnifiedNotificationsKeepRecipientsAndReadStateIsolated(t *testing.T) {
 	seedMerchant(t, pool, a)
 	seedMerchant(t, pool, b)
 	payerA, payerB := uuid.New(), uuid.New()
-	exec(t, pool, `INSERT INTO openrails.customers(id,merchant_id) VALUES ($1,$2),($3,$2)`, payerA, a, payerB)
+	exec(t, pool, `INSERT INTO billing.customers(id,merchant_id) VALUES ($1,$2),($3,$2)`, payerA, a, payerB)
 	customerID, merchantID := uuid.New(), uuid.Nil
 	service := newService(t, appDB, nil)
 	customers := subscriptions.NewNotificationService(appDB, nil)

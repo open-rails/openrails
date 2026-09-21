@@ -30,11 +30,11 @@ func seedTierProduct(ctx context.Context, t *testing.T, pool *pgxpool.Pool, key,
 	require.NoError(t, err)
 	id := uuid.New()
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.products (id, merchant_id, key, display_name, entitlements_spec, tier_group, tier_rank, archived)
+		INSERT INTO billing.products (id, merchant_id, key, display_name, entitlements_spec, tier_group, tier_rank, archived)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		id, dbtest.TestMerchantID.UUID(), key, displayName, specJSON, group, rank, archived)
 	require.NoError(t, err)
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM openrails.products WHERE id = $1`, id) })
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM billing.products WHERE id = $1`, id) })
 	return id
 }
 

@@ -81,7 +81,7 @@ func ApplyEmbeddedReset(ctx context.Context, dsn, allowedTargets, confirmation s
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, target); err != nil {
 		return result, fmt.Errorf("lock embedded reset target: %w", err)
 	}
-	if _, err = tx.Exec(ctx, `DROP SCHEMA IF EXISTS openrails CASCADE`); err != nil {
+	if _, err = tx.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{embeddedResetSchema}.Sanitize()+" CASCADE"); err != nil {
 		return result, fmt.Errorf("drop openrails schema: %w", err)
 	}
 
@@ -235,8 +235,8 @@ func (p EmbeddedResetPlan) Report() string {
 		}
 	}
 	out.WriteString("plan (one transaction):\n")
-	out.WriteString("  DROP SCHEMA IF EXISTS openrails CASCADE;\n")
-	out.WriteString("  DELETE FROM public.migrations WHERE app = 'openrails' AND database = 'postgres' AND schema = 'openrails';\n")
+	fmt.Fprintf(&out, "  DROP SCHEMA IF EXISTS %s CASCADE;\n", embeddedResetSchema)
+	fmt.Fprintf(&out, "  DELETE FROM public.migrations WHERE app = 'openrails' AND database = 'postgres' AND schema = '%s';\n", embeddedResetSchema)
 	fmt.Fprintf(&out, "allow-list entry: %s\n", p.Target)
 	fmt.Fprintf(&out, "confirmation token: %s\n", EmbeddedResetConfirmation(p.Target))
 	return out.String()

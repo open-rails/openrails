@@ -59,12 +59,12 @@ func TestDeciderPlaneInterleaving_SameTerminalState(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "il-"+key+"-"+sfx, merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "il-"+key+"-"+sfx, merchantID)
+		exec(`INSERT INTO billing.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
+		exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$7,$8,$9)`, f.sub, merchantID, f.cust, prod, price, railSub, start, periodEnd, pspID)
 		if withEnt {
-			exec(`INSERT INTO openrails.entitlements (id, entitlement, start_at, end_at, source_id, source_type, customer_id, merchant_id)
+			exec(`INSERT INTO billing.entitlements (id, entitlement, start_at, end_at, source_id, source_type, customer_id, merchant_id)
 			      VALUES ($1,'premium-il-'||$2, $3, $4, $5, 'subscription', $6, $7)`,
 				uuid.New(), key+sfx, start, now.Add(10*24*time.Hour), f.sub, f.cust, merchantID)
 		}
@@ -82,13 +82,13 @@ func TestDeciderPlaneInterleaving_SameTerminalState(t *testing.T) {
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for _, f := range []fixture{renewA, renewB, goneA, goneB} {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE source_id=$1`, f.sub)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE subscription_id=$1`, f.sub)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+f.sub.String())
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, f.sub)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE source_id=$1`, f.sub)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE subscription_id=$1`, f.sub)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+f.sub.String())
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, f.sub)
 			}
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE product_id IN (SELECT id FROM openrails.products WHERE key LIKE 'il-%'||$1)`, "-"+sfx)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE key LIKE 'il-%'||$1`, "-"+sfx)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE product_id IN (SELECT id FROM billing.products WHERE key LIKE 'il-%'||$1)`, "-"+sfx)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE key LIKE 'il-%'||$1`, "-"+sfx)
 			return nil
 		})
 	})
@@ -156,12 +156,12 @@ func TestDeciderPlaneInterleaving_SameTerminalState(t *testing.T) {
 	load := func(ctx context.Context, f fixture) terminal {
 		var out terminal
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status::text, current_period_ends_at FROM openrails.subscriptions WHERE id=$1`, f.sub).
+			`SELECT status::text, current_period_ends_at FROM billing.subscriptions WHERE id=$1`, f.sub).
 			Scan(&out.status, &out.periodEnd))
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.payments WHERE subscription_id=$1 AND status='completed'`, f.sub).Scan(&out.payments))
+			`SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND status='completed'`, f.sub).Scan(&out.payments))
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements WHERE source_id=$1 AND revoked_at IS NULL AND deleted_at IS NULL AND (end_at IS NULL OR end_at > now())`, f.sub).Scan(&out.liveEnts))
+			`SELECT count(*) FROM billing.entitlements WHERE source_id=$1 AND revoked_at IS NULL AND deleted_at IS NULL AND (end_at IS NULL OR end_at > now())`, f.sub).Scan(&out.liveEnts))
 		return out
 	}
 

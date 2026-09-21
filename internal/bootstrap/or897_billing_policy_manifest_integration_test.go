@@ -41,7 +41,7 @@ func TestReconcileMerchantManifestAppliesBillingPolicies(t *testing.T) {
 	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantID string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM billing.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
 
 	// The window duration is stored in SECONDS, and the kind's limit lands in the
 	// kind's own field.
@@ -49,7 +49,7 @@ func TestReconcileMerchantManifestAppliesBillingPolicies(t *testing.T) {
 	var cap int64
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT policy ->> 'kind', (policy ->> 'outstanding_cap_amount')::bigint
-		FROM openrails.billing_policies
+		FROM billing.billing_policies
 		WHERE merchant_id = $1::uuid AND name = 'api_line'
 	`, merchantID).Scan(&kind, &cap))
 	require.Equal(t, "outstanding_cap", kind)
@@ -61,7 +61,7 @@ func TestReconcileMerchantManifestAppliesBillingPolicies(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT (policy ->> 'accrual_rate_cap_per_hour')::bigint,
 		       (policy ->> 'accrual_rate_window_seconds')::bigint
-		FROM openrails.billing_policies
+		FROM billing.billing_policies
 		WHERE merchant_id = $1::uuid AND name = 'cloud_quota'
 	`, merchantID).Scan(&ratePerHour, &rateWindow))
 	require.EqualValues(t, 10_000_000, ratePerHour)
@@ -71,7 +71,7 @@ func TestReconcileMerchantManifestAppliesBillingPolicies(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT (policy ->> 'collection_threshold_amount')::bigint,
 		       (policy ->> 'delinquency_grace_days')::bigint
-		FROM openrails.billing_policies
+		FROM billing.billing_policies
 		WHERE merchant_id = $1::uuid AND name = 'api_line'
 	`, merchantID).Scan(&storedThreshold, &storedGrace))
 	require.EqualValues(t, 50_000_000, storedThreshold)
@@ -80,7 +80,7 @@ func TestReconcileMerchantManifestAppliesBillingPolicies(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT (policy #>> '{spend_windows,0,window_seconds}')::bigint,
 		       (policy #>> '{spend_windows,0,limit}')::bigint
-		FROM openrails.billing_policies
+		FROM billing.billing_policies
 		WHERE merchant_id = $1::uuid AND name = 'cloud_monthly'
 	`, merchantID).Scan(&windowSeconds, &limit))
 	require.EqualValues(t, 720*3600, windowSeconds, "720h must reach the store as seconds")
@@ -89,12 +89,12 @@ func TestReconcileMerchantManifestAppliesBillingPolicies(t *testing.T) {
 	// Both rungs are bound, the default with a NULL tier.
 	var defaultPolicy, tierPolicy string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT policy_name FROM openrails.billing_policy_bindings
+		SELECT policy_name FROM billing.billing_policy_bindings
 		WHERE merchant_id = $1::uuid AND tier IS NULL AND customer_id IS NULL
 	`, merchantID).Scan(&defaultPolicy))
 	require.Equal(t, "api_line", defaultPolicy)
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT policy_name FROM openrails.billing_policy_bindings
+		SELECT policy_name FROM billing.billing_policy_bindings
 		WHERE merchant_id = $1::uuid AND tier = 'cloud'
 	`, merchantID).Scan(&tierPolicy))
 	require.Equal(t, "cloud_monthly", tierPolicy)
@@ -102,8 +102,8 @@ func TestReconcileMerchantManifestAppliesBillingPolicies(t *testing.T) {
 	// Re-applying the same manifest is idempotent (declarative, not append-only).
 	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 	var policies, bindings int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.billing_policies WHERE merchant_id = $1::uuid`, merchantID).Scan(&policies))
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.billing_policy_bindings WHERE merchant_id = $1::uuid`, merchantID).Scan(&bindings))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.billing_policies WHERE merchant_id = $1::uuid`, merchantID).Scan(&policies))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.billing_policy_bindings WHERE merchant_id = $1::uuid`, merchantID).Scan(&bindings))
 	require.Equal(t, 3, policies)
 	require.Equal(t, 2, bindings)
 }
@@ -150,6 +150,6 @@ func TestReconcileMerchantManifestRefusesInvalidBillingPolicy(t *testing.T) {
 
 	// Nothing from a refused manifest was written.
 	var count int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.billing_policies`).Scan(&count))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.billing_policies`).Scan(&count))
 	require.Zero(t, count, "a manifest that fails validation must install no policy at all")
 }

@@ -46,7 +46,7 @@ func TestProbeLiveRailPSPsUnderEnforcingRLS(t *testing.T) {
 	super := db.WrapPool(superRaw, config.DefaultSchema)
 
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug) VALUES ($1::uuid, $2) ON CONFLICT (id) DO NOTHING`,
+		`INSERT INTO billing.merchants (id, slug) VALUES ($1::uuid, $2) ON CONFLICT (id) DO NOTHING`,
 		merchantID, "sec19-"+suffix)
 	require.NoError(t, err)
 
@@ -65,7 +65,7 @@ func TestProbeLiveRailPSPsUnderEnforcingRLS(t *testing.T) {
 	require.Equal(t, LiveRailAbsent, got)
 
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
+		`INSERT INTO billing.psps (merchant_id, rail, environment, account_id, archived)
 		 VALUES ($1::uuid, 'ccbill', 'live', $2, false)
 		 ON CONFLICT (rail, environment, account_id) DO NOTHING`,
 		merchantID, "945280-"+suffix)
@@ -75,7 +75,7 @@ func TestProbeLiveRailPSPsUnderEnforcingRLS(t *testing.T) {
 	var naive bool
 	require.NoError(t, appPool.QueryRow(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM openrails.psps
+			SELECT 1 FROM billing.psps
 			 WHERE rail = lower($1) AND environment = 'live'
 		)`, "ccbill").Scan(&naive))
 	require.False(t, naive, "regression pin: a no-GUC read of psps under RLS sees nothing and reports no error")

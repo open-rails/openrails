@@ -108,7 +108,7 @@ func TestManifestPlaneEntryPointsRunAsAppRole(t *testing.T) {
 
 	merchantID := uuid.New()
 	slug := "rls-guard-" + strings.ReplaceAll(merchantID.String()[:8], "-", "")
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, merchantID, slug)
+	_, err = pool.Exec(ctx, `INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, merchantID, slug)
 	require.NoError(t, err)
 
 	cfg := &config.Config{

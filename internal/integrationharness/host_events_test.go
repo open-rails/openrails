@@ -29,11 +29,11 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	require.NoError(t, err)
 	pool := h.MerchantPool(a.MerchantID.UUID())
 	payer, product, price, payment := uuid.New(), uuid.New(), uuid.New(), uuid.New()
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.customers (id,merchant_id) VALUES ($1,$2)`, payer, a.MerchantID.UUID())
+	_, err = pool.Exec(ctx, `INSERT INTO billing.customers (id,merchant_id) VALUES ($1,$2)`, payer, a.MerchantID.UUID())
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id,merchant_id,key,display_name) VALUES ($1,$2,$3,'Host event test')`, product, a.MerchantID.UUID(), uuid.NewString())
+	_, err = pool.Exec(ctx, `INSERT INTO billing.products (id,merchant_id,key,display_name) VALUES ($1,$2,$3,'Host event test')`, product, a.MerchantID.UUID(), uuid.NewString())
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.prices (id,merchant_id,product_id,amount,currency) VALUES ($1,$2,$3,7000000,'USD')`, price, a.MerchantID.UUID(), product)
+	_, err = pool.Exec(ctx, `INSERT INTO billing.prices (id,merchant_id,product_id,amount,currency) VALUES ($1,$2,$3,7000000,'USD')`, price, a.MerchantID.UUID(), product)
 	require.NoError(t, err)
 	psp := dbtest.EnsureTestPSP(ctx, t, pool, a.MerchantID.UUID(), "nmi")
 	for _, client := range []*openrails.Client{remote, local} {
@@ -47,12 +47,12 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	lifecycleTx, err := pool.Begin(ctx)
 	require.NoError(t, err)
 	defer func() { _ = lifecycleTx.Rollback(ctx) }()
-	_, err = lifecycleTx.Exec(ctx, `INSERT INTO openrails.host_outbox
+	_, err = lifecycleTx.Exec(ctx, `INSERT INTO billing.host_outbox
 		(id,merchant_id,event_type,subject_type,subject_id,currency,data,dedupe_key)
 		VALUES ($1,$2,'delinquency.entered','customer',$3,'USD','{"from_state":"grace","to_state":"delinquent","overdue_amount":12000000}', $4)`, lifecycleID, a.MerchantID.UUID(), payer, uuid.NewString())
 	require.NoError(t, err)
 	settledAt := time.Now().UTC().Truncate(time.Microsecond)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.payments
+	_, err = pool.Exec(ctx, `INSERT INTO billing.payments
 		(id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,money_movement,psp_id,purchased_at)
 		VALUES ($1,$2,$3,$4,'nmi',$5,7000000,7000000,'USD','completed','rail',$6,$7)`, payment, a.MerchantID.UUID(), payer, price, uuid.NewString(), psp, settledAt)
 	require.NoError(t, err)
@@ -117,13 +117,13 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	// RLS remains fail-closed even when the SQL has no merchant predicate.
 	bPool := h.MerchantPool(b.MerchantID.UUID())
 	var visible int
-	require.NoError(t, bPool.QueryRow(ctx, `SELECT count(*) FROM openrails.host_outbox WHERE id=$1 OR id=$2`, first[0].ID, lifecycleID).Scan(&visible))
+	require.NoError(t, bPool.QueryRow(ctx, `SELECT count(*) FROM billing.host_outbox WHERE id=$1 OR id=$2`, first[0].ID, lifecycleID).Scan(&visible))
 	require.Zero(t, visible)
-	tag, err := bPool.Exec(ctx, `UPDATE openrails.host_outbox SET delivered_at=now() WHERE id=$1 OR id=$2`, first[0].ID, lifecycleID)
+	tag, err := bPool.Exec(ctx, `UPDATE billing.host_outbox SET delivered_at=now() WHERE id=$1 OR id=$2`, first[0].ID, lifecycleID)
 	require.NoError(t, err)
 	require.Zero(t, tag.RowsAffected())
 	// A bounded retention pass may delete acknowledged events only.
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	deleted, err := q.DeleteDeliveredPaymentSettlementsBefore(ctx, gen.DeleteDeliveredPaymentSettlementsBeforeParams{MerchantID: a.MerchantID.UUID(), Cutoff: time.Now().Add(time.Hour), RowLimit: 10})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, deleted)
@@ -147,12 +147,12 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	narrow := issuer.Mint(uuid.NewString(), "", "", []string{controlplane.PermMerchantHostEventsRead})
 	status, body = requestJSON(t, http.MethodGet, server.BaseURL+"/v1/merchant/customers/"+payer.String()+"/payment-settlement-status?price_id="+openrails.PriceID(price).String(), narrow, nil)
 	require.Equal(t, http.StatusForbidden, status, "host-event permission alone must not grant payment reads: %s", body)
-	_, err = pool.Exec(ctx, `UPDATE openrails.payments SET status='refunded' WHERE id=$1`, payment)
+	_, err = pool.Exec(ctx, `UPDATE billing.payments SET status='refunded' WHERE id=$1`, payment)
 	require.NoError(t, err)
 	settled, err = remote.HasSettledPayment(ctx, openrails.CustomerID(payer), openrails.PriceID(price))
 	require.NoError(t, err)
 	require.True(t, settled, "a refund cannot recreate first-payment eligibility")
-	_, err = pool.Exec(ctx, `UPDATE openrails.payments SET deleted_at=now() WHERE id=$1`, payment)
+	_, err = pool.Exec(ctx, `UPDATE billing.payments SET deleted_at=now() WHERE id=$1`, payment)
 	require.NoError(t, err)
 	settled, err = local.HasSettledPayment(ctx, openrails.CustomerID(payer), openrails.PriceID(price))
 	require.NoError(t, err)
@@ -164,7 +164,7 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 		{"pending", "rail", 7000000}, {"failed", "rail", 7000000},
 		{"completed", "none", 7000000}, {"completed", "rail", 0},
 	} {
-		_, err = pool.Exec(ctx, `UPDATE openrails.payments SET status=$2,money_movement=$3,amount=$4 WHERE id=$1`, payment, test.status, test.movement, test.amount)
+		_, err = pool.Exec(ctx, `UPDATE billing.payments SET status=$2,money_movement=$3,amount=$4 WHERE id=$1`, payment, test.status, test.movement, test.amount)
 		require.NoError(t, err)
 		settled, err = local.HasSettledPayment(ctx, openrails.CustomerID(payer), openrails.PriceID(price))
 		require.NoError(t, err)

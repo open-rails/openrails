@@ -46,11 +46,11 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, e := appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`,
+			`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`,
 			prod, "imp-"+sfx, merchantID)
 		require.NoError(t, e)
 		_, e = appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,23000000,'USD',720,true,$3)`,
+			`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,23000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
 		require.NoError(t, e)
 		// or#893: every declared provider row must attribute a PSP. The book is a
@@ -65,14 +65,14 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for _, c := range allCust {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
 			}
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, prod)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, price)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, prod)
 			return nil
 		})
 	})
@@ -176,7 +176,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT status::text, COALESCE(cancel_type::text,''), cancelled_at, ended_at, grace_ends_at,
 			        current_period_starts_at, current_period_ends_at, payment_method_id IS NOT NULL, deletion_scheduled_at
-			 FROM openrails.subscriptions WHERE rail_subscription_id=$1`, railSubID).
+			 FROM billing.subscriptions WHERE rail_subscription_id=$1`, railSubID).
 			Scan(&r.status, &ct, &r.cancelledAt, &r.endedAt, &r.graceEnd, &r.periodStart, &r.periodEnd, &r.pmLinked, &r.deletionScheduledAt))
 		if ct != nil {
 			r.cancelType = *ct
@@ -205,7 +205,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		var lastRetry *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT COALESCE(gateway_response->>'legacy_source',''), retry_attempts, last_retry_at
-			 FROM openrails.subscriptions WHERE rail_subscription_id=$1`, "sub-dunning-"+sfx).
+			 FROM billing.subscriptions WHERE rail_subscription_id=$1`, "sub-dunning-"+sfx).
 			Scan(&legacySource, &retries, &lastRetry))
 		require.Equal(t, "subscriptions", legacySource, "declared Evidence lands on gateway_response")
 		require.Equal(t, 2, retries)
@@ -236,10 +236,10 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		require.True(t, r.deletionScheduledAt.Equal(asOf))
 		var nmiSubID uuid.UUID
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT id FROM openrails.subscriptions WHERE rail_subscription_id=$1`, "sub-user-nmi-"+sfx).Scan(&nmiSubID))
+			`SELECT id FROM billing.subscriptions WHERE rail_subscription_id=$1`, "sub-user-nmi-"+sfx).Scan(&nmiSubID))
 		var declStatus, declOrigin string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, origin FROM openrails.rail_intents
+			`SELECT status, origin FROM billing.rail_intents
 			 WHERE subscription_id=$1 AND intent_type='nmi_delete_subscription'`, nmiSubID).
 			Scan(&declStatus, &declOrigin))
 		require.Equal(t, "pending", declStatus)
@@ -260,11 +260,11 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		var amt int64
 		var payStatus string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT amount, status FROM openrails.payments WHERE transaction_id=$1`, "tx-open-"+sfx).Scan(&amt, &payStatus))
+			`SELECT amount, status FROM billing.payments WHERE transaction_id=$1`, "tx-open-"+sfx).Scan(&amt, &payStatus))
 		require.Equal(t, int64(23_000_000), amt, "2300 cents → 23,000,000 micros")
 		require.Equal(t, "completed", payStatus)
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT amount, status FROM openrails.payments WHERE transaction_id=$1`, "tx-decl-"+sfx).Scan(&amt, &payStatus))
+			`SELECT amount, status FROM billing.payments WHERE transaction_id=$1`, "tx-decl-"+sfx).Scan(&amt, &payStatus))
 		require.Equal(t, "failed", payStatus, "declines land as the true attempt history")
 		return nil
 	}))
@@ -282,7 +282,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.payments WHERE transaction_id LIKE '%'||$1`, sfx).Scan(&n))
+			`SELECT count(*) FROM billing.payments WHERE transaction_id LIKE '%'||$1`, sfx).Scan(&n))
 		require.Equal(t, 3, n, "payments idempotent by (rail, transaction_id)")
 		r := load(ctx, "sub-user-"+sfx)
 		require.Equal(t, "user", r.cancelType, "re-import never regresses settled history")
@@ -334,11 +334,11 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	var subIncrID uuid.UUID
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		if err := appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT id FROM openrails.subscriptions WHERE rail_subscription_id=$1`, "sub-incr-"+sfx).Scan(&subIncrID); err != nil {
+			`SELECT id FROM billing.subscriptions WHERE rail_subscription_id=$1`, "sub-incr-"+sfx).Scan(&subIncrID); err != nil {
 			return err
 		}
 		_, err := appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.entitlements (entitlement, start_at, end_at, source_id, source_type, merchant_id, customer_id)
+			`INSERT INTO billing.entitlements (entitlement, start_at, end_at, source_id, source_type, merchant_id, customer_id)
 			 VALUES ('premium', $1, NULL, $2, 'subscription', $3, $4)`,
 			asOf.Add(-60*day), subIncrID, merchantID, cIncr)
 		return err
@@ -369,13 +369,13 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 
 		var intents int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.rail_intents
+			`SELECT count(*) FROM billing.rail_intents
 			  WHERE subscription_id=$1 AND intent_type='nmi_delete_subscription'`, subIncrID).Scan(&intents))
 		require.Zero(t, intents, "no provider delete may be enqueued without certainty")
 
 		var revokedAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT revoked_at FROM openrails.entitlements WHERE source_type='subscription' AND source_id=$1`,
+			`SELECT revoked_at FROM billing.entitlements WHERE source_type='subscription' AND source_id=$1`,
 			subIncrID).Scan(&revokedAt))
 		require.Nil(t, revokedAt, "entitlements are never lost to our own malfunction")
 		return nil
@@ -406,7 +406,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		require.Equal(t, "cancelled", r.status, "provider-confirmed dead IS certainty")
 		var revokedAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT revoked_at FROM openrails.entitlements WHERE source_type='subscription' AND source_id=$1`,
+			`SELECT revoked_at FROM billing.entitlements WHERE source_type='subscription' AND source_id=$1`,
 			subIncrID).Scan(&revokedAt))
 		require.NotNil(t, revokedAt, "entitlement window closed on a PROVEN terminal cancel")
 		return nil
@@ -432,12 +432,12 @@ func TestImportBilling_RollsBackWholeBookOnInfrastructureError(t *testing.T) {
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, err := appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id)
+			`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id)
 			 VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`,
 			productID, "atomic-import-"+sfx, merchantID)
 		require.NoError(t, err)
 		_, err = appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id)
+			`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id)
 			 VALUES ($1,$2,23000000,'USD',720,true,$3)`,
 			priceID, productID, merchantID)
 		require.NoError(t, err)
@@ -446,12 +446,12 @@ func TestImportBilling_RollsBackWholeBookOnInfrastructureError(t *testing.T) {
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customerID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customerID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customerID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.customers WHERE merchant_id=$1 AND id=$2`, merchantID, customerID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customerID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customerID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customerID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.customers WHERE merchant_id=$1 AND id=$2`, merchantID, customerID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -478,9 +478,9 @@ func TestImportBilling_RollsBackWholeBookOnInfrastructureError(t *testing.T) {
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		for name, query := range map[string]string{
-			"customer":       `SELECT count(*) FROM openrails.customers WHERE merchant_id=$1 AND id=$2`,
-			"payment method": `SELECT count(*) FROM openrails.payment_methods WHERE merchant_id=$1 AND customer_id=$2`,
-			"subscription":   `SELECT count(*) FROM openrails.subscriptions WHERE merchant_id=$1 AND customer_id=$2`,
+			"customer":       `SELECT count(*) FROM billing.customers WHERE merchant_id=$1 AND id=$2`,
+			"payment method": `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`,
+			"subscription":   `SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2`,
 		} {
 			var count int
 			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, query, merchantID, customerID).Scan(&count))
@@ -518,8 +518,8 @@ func TestImportBilling_RefusesPaymentMethodOwnerChange(t *testing.T) {
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payment_methods WHERE merchant_id=$1 AND rail_customer_ref=$2`, merchantID, vaultID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.customers WHERE merchant_id=$1 AND id = ANY($2::uuid[])`, merchantID, []uuid.UUID{owner, other})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payment_methods WHERE merchant_id=$1 AND rail_customer_ref=$2`, merchantID, vaultID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.customers WHERE merchant_id=$1 AND id = ANY($2::uuid[])`, merchantID, []uuid.UUID{owner, other})
 			return nil
 		})
 	})
@@ -548,7 +548,7 @@ func TestImportBilling_RefusesPaymentMethodOwnerChange(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var got uuid.UUID
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT customer_id FROM openrails.payment_methods WHERE merchant_id=$1 AND rail_customer_ref=$2`,
+			`SELECT customer_id FROM billing.payment_methods WHERE merchant_id=$1 AND rail_customer_ref=$2`,
 			merchantID, vaultID).Scan(&got))
 		require.Equal(t, owner, got)
 		return nil

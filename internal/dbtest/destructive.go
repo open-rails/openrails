@@ -31,10 +31,10 @@ func ArmDestructiveActions(ctx context.Context, t testing.TB, merchantID uuid.UU
 	tt, ok := t.(*testing.T)
 	require.True(t, ok, "ArmDestructiveActions needs a *testing.T to open a merchant-pinned pool")
 	pool := SharedMerchantPool(tt, merchantID)
-	_, err := pool.Exec(ctx, `UPDATE openrails.destructive_action_switch SET enabled = true`)
+	_, err := pool.Exec(ctx, `UPDATE billing.destructive_action_switch SET enabled = true`)
 	require.NoError(t, err, "arm destructive action switch")
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at)
+		`INSERT INTO billing.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at)
 		 VALUES ($1, true, now())
 		 ON CONFLICT (merchant_id) DO UPDATE SET destructive_actions_enabled = true, enforce_armed_at = now()`,
 		merchantID)
@@ -45,6 +45,6 @@ func ArmDestructiveActions(ctx context.Context, t testing.TB, merchantID uuid.UU
 // switch OFF), for tests that flip it mid-scenario.
 func DisarmDestructiveActions(ctx context.Context, t testing.TB, qx gen.DBTX) {
 	t.Helper()
-	_, err := qx.Exec(ctx, `UPDATE openrails.destructive_action_switch SET enabled = false`)
+	_, err := qx.Exec(ctx, `UPDATE billing.destructive_action_switch SET enabled = false`)
 	require.NoError(t, err, "disarm destructive action switch")
 }

@@ -60,10 +60,10 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	insertProductAndPrice(ctx, t, pool, product, price)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	fakeClock := clockwork.NewFakeClockAt(now)
@@ -90,7 +90,7 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 
 	var firstEndAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT end_at FROM openrails.entitlements
+		`SELECT end_at FROM billing.entitlements
 		 WHERE customer_id = $1 AND entitlement = $2 AND source_id = $3
 		   AND revoked_at IS NULL AND deleted_at IS NULL
 		 LIMIT 1`,
@@ -126,7 +126,7 @@ func TestRegisterPurchase_DuplicateTransactionDoesNotExtendEntitlements(t *testi
 	}
 	var ents []entRow
 	rows, err := pool.Query(ctx,
-		`SELECT entitlement, end_at FROM openrails.entitlements
+		`SELECT entitlement, end_at FROM billing.entitlements
 		 WHERE customer_id = $1 AND revoked_at IS NULL AND deleted_at IS NULL
 		 ORDER BY entitlement ASC`,
 		tenantSubjectID)
@@ -188,10 +188,10 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 	insertProductAndPrice(ctx, t, pool, product, price)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	fakeClock := clockwork.NewFakeClockAt(now)
@@ -249,7 +249,7 @@ func TestArchivedPriceStillBillsExistingSubscription(t *testing.T) {
 // queries (the model structs are plain data holders here).
 func insertProductAndPrice(ctx context.Context, t *testing.T, qx gen.DBTX, product *models.Product, price *models.Price) {
 	t.Helper()
-	q := gen.New(qx)
+	q := dbtest.Queries(qx)
 
 	var entSpec []byte
 	if product.EntitlementsSpec != nil {
@@ -331,7 +331,7 @@ func TestRegisterPurchase_PreservesSourceUnderIndefiniteAccess(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, first.PaymentID, replay.PaymentID)
 	var sources int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(DISTINCT source_id) FROM openrails.entitlements WHERE customer_id=$1 AND entitlement=$2`, userID, feature).Scan(&sources))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(DISTINCT source_id) FROM billing.entitlements WHERE customer_id=$1 AND entitlement=$2`, userID, feature).Scan(&sources))
 	require.Equal(t, 2, sources)
 	st := models.EntitlementSourceAdmin
 	require.NoError(t, entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{

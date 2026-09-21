@@ -28,17 +28,17 @@ func TestStandingCatalogFindingsAreAccountScopedAndCoverageBound(t *testing.T) {
 	a, b := uuid.New(), uuid.New()
 	stripe, nmiA, nmiB := uuid.New(), uuid.New(), uuid.New()
 	for _, id := range []uuid.UUID{a, b} {
-		_, err := admin.Exec(ctx, `INSERT INTO openrails.merchants(id,slug) VALUES($1,$2)`, id, "drift-"+id.String())
+		_, err := admin.Exec(ctx, `INSERT INTO billing.merchants(id,slug) VALUES($1,$2)`, id, "drift-"+id.String())
 		require.NoError(t, err)
 	}
 	for id, rail := range map[uuid.UUID]string{stripe: "stripe", nmiA: "nmi", nmiB: "nmi"} {
-		_, err := admin.Exec(ctx, `INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id) VALUES($1,$2,$3,'test',$4)`, id, a, rail, "acct-"+id.String())
+		_, err := admin.Exec(ctx, `INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id) VALUES($1,$2,$3,'test',$4)`, id, a, rail, "acct-"+id.String())
 		require.NoError(t, err)
 	}
 	t.Cleanup(func() {
-		_, _ = admin.Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id = ANY($1)`, []uuid.UUID{a, b})
-		_, _ = admin.Exec(ctx, `DELETE FROM openrails.psps WHERE merchant_id = ANY($1)`, []uuid.UUID{a, b})
-		_, _ = admin.Exec(ctx, `DELETE FROM openrails.merchants WHERE id = ANY($1)`, []uuid.UUID{a, b})
+		_, _ = admin.Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id = ANY($1)`, []uuid.UUID{a, b})
+		_, _ = admin.Exec(ctx, `DELETE FROM billing.psps WHERE merchant_id = ANY($1)`, []uuid.UUID{a, b})
+		_, _ = admin.Exec(ctx, `DELETE FROM billing.merchants WHERE id = ANY($1)`, []uuid.UUID{a, b})
 	})
 	mctx := merchant.WithID(ctx, merchant.ID(a))
 	t0 := time.Now().UTC().Truncate(time.Microsecond)
@@ -102,7 +102,7 @@ func TestStandingCatalogFindingsAreAccountScopedAndCoverageBound(t *testing.T) {
 	require.Equal(t, "unknown", *open()[stripe][0].ExternalValue)
 
 	// An operator-ignored identity stays ignored and is not reported as new drift.
-	_, err = admin.Exec(ctx, `UPDATE openrails.reconciliation_findings SET status='ignored', resolution='ignored', resolved_at=now() WHERE id=$1`, stripeID)
+	_, err = admin.Exec(ctx, `UPDATE billing.reconciliation_findings SET status='ignored', resolution='ignored', resolved_at=now() WHERE id=$1`, stripeID)
 	require.NoError(t, err)
 	stripeDrift.ExternalValue = "changed"
 	added, resolved, err = PersistDrift(mctx, database, []models.CatalogDriftEvent{stripeDrift}, []DriftCoverage{{PSPID: stripe}}, t0.Add(4*time.Second))
@@ -110,7 +110,7 @@ func TestStandingCatalogFindingsAreAccountScopedAndCoverageBound(t *testing.T) {
 	require.Zero(t, added)
 	require.Zero(t, resolved)
 	var status, external string
-	require.NoError(t, admin.QueryRow(ctx, `SELECT status, external_value FROM openrails.reconciliation_findings WHERE id=$1`, stripeID).Scan(&status, &external))
+	require.NoError(t, admin.QueryRow(ctx, `SELECT status, external_value FROM billing.reconciliation_findings WHERE id=$1`, stripeID).Scan(&status, &external))
 	require.Equal(t, "ignored", status)
 	require.Equal(t, "unknown", external)
 
@@ -120,7 +120,7 @@ func TestStandingCatalogFindingsAreAccountScopedAndCoverageBound(t *testing.T) {
 	require.Equal(t, 1, added)
 	require.Len(t, open()[nmiA], 1)
 	var findings int
-	require.NoError(t, admin.QueryRow(ctx, `SELECT count(*) FROM openrails.reconciliation_findings WHERE psp_id=$1`, nmiA).Scan(&findings))
+	require.NoError(t, admin.QueryRow(ctx, `SELECT count(*) FROM billing.reconciliation_findings WHERE psp_id=$1`, nmiA).Scan(&findings))
 	require.Equal(t, 1, findings)
 
 	// Kind, rail and account identity must agree.

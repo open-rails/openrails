@@ -67,7 +67,7 @@ func TestCatalogReconciliationPullRunsPerMerchant(t *testing.T) {
 
 	insertPSP := func(rail string) uuid.UUID {
 		var id uuid.UUID
-		require.NoError(t, pool.QueryRow(ctx, `INSERT INTO openrails.psps (merchant_id, rail, environment, account_id)
+		require.NoError(t, pool.QueryRow(ctx, `INSERT INTO billing.psps (merchant_id, rail, environment, account_id)
 			VALUES ($1, $2, 'test', $3) RETURNING id`, mid, rail, "acct_or877_"+uuid.NewString()[:8]).Scan(&id))
 		return id
 	}
@@ -75,7 +75,7 @@ func TestCatalogReconciliationPullRunsPerMerchant(t *testing.T) {
 	insertFinding := func(psp uuid.UUID, rail, kind string) uuid.UUID {
 		var id uuid.UUID
 		external := "obj_" + uuid.NewString()[:8]
-		require.NoError(t, pool.QueryRow(ctx, `INSERT INTO openrails.reconciliation_findings
+		require.NoError(t, pool.QueryRow(ctx, `INSERT INTO billing.reconciliation_findings
 			(merchant_id, finding_type, subject_key, severity, status, rail, psp_id, openrails_resource_type, external_resource_id, last_seen_at)
 			VALUES ($1, 'catalog.' || $4, jsonb_build_array($2::uuid::text, 'price', '', $5::text, '')::text, 'low', 'reconcile_required', $3, $2::uuid, 'price', $5, now() - interval '1 minute')
 			RETURNING id`, mid, psp, rail, kind, external).Scan(&id))
@@ -84,8 +84,8 @@ func TestCatalogReconciliationPullRunsPerMerchant(t *testing.T) {
 	stripeFinding := insertFinding(stripePSP, "stripe", "orphan_in_stripe")
 	nmiFinding := insertFinding(nmiPSP, "nmi", "orphan_in_nmi")
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.reconciliation_findings WHERE id = ANY($1)", []uuid.UUID{stripeFinding, nmiFinding})
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.psps WHERE id = ANY($1)", []uuid.UUID{stripePSP, nmiPSP})
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.reconciliation_findings WHERE id = ANY($1)", []uuid.UUID{stripeFinding, nmiFinding})
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.psps WHERE id = ANY($1)", []uuid.UUID{stripePSP, nmiPSP})
 	})
 
 	var calls atomic.Int32
@@ -103,8 +103,8 @@ func TestCatalogReconciliationPullRunsPerMerchant(t *testing.T) {
 	require.GreaterOrEqual(t, rails.pinned.Load(), int32(2), "every list call was pinned to the active account")
 
 	var stripeResolved, nmiResolved *time.Time
-	require.NoError(t, pool.QueryRow(ctx, "SELECT resolved_at FROM openrails.reconciliation_findings WHERE id = $1", stripeFinding).Scan(&stripeResolved))
-	require.NoError(t, pool.QueryRow(ctx, "SELECT resolved_at FROM openrails.reconciliation_findings WHERE id = $1", nmiFinding).Scan(&nmiResolved))
+	require.NoError(t, pool.QueryRow(ctx, "SELECT resolved_at FROM billing.reconciliation_findings WHERE id = $1", stripeFinding).Scan(&stripeResolved))
+	require.NoError(t, pool.QueryRow(ctx, "SELECT resolved_at FROM billing.reconciliation_findings WHERE id = $1", nmiFinding).Scan(&nmiResolved))
 	require.NotNil(t, stripeResolved, "a complete read of the merchant's Stripe account proves the orphan is gone")
 	require.Nil(t, nmiResolved, "an unread NMI account keeps its finding")
 }

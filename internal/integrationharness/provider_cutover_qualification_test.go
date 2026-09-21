@@ -69,12 +69,12 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 	g := newCutoverGateway(t)
 	s := h.StartStandalone("USD", WithConfig(func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeFull }))
 	var prior bool
-	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT enabled FROM openrails.destructive_action_switch`).Scan(&prior))
+	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT enabled FROM billing.destructive_action_switch`).Scan(&prior))
 	t.Cleanup(func() {
-		_, err := h.Pool().Exec(context.WithoutCancel(ctx), `UPDATE openrails.destructive_action_switch SET enabled=$1`, prior)
+		_, err := h.Pool().Exec(context.WithoutCancel(ctx), `UPDATE billing.destructive_action_switch SET enabled=$1`, prior)
 		require.NoError(t, err)
 	})
-	_, err := h.Pool().Exec(ctx, `UPDATE openrails.destructive_action_switch SET enabled=true`)
+	_, err := h.Pool().Exec(ctx, `UPDATE billing.destructive_action_switch SET enabled=true`)
 	require.NoError(t, err)
 	rt := s.App().Runtime
 	rt.CollectionResolver.(*money.MerchantCollectionAdapterBuilder).Endpoints.NMIV5BaseURL = g.Server.URL
@@ -160,7 +160,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, "unknown_needs_verify", operation.Status)
 				var payload []byte
-				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&payload))
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload FROM billing.rail_intents WHERE id=$1`, operation.ID).Scan(&payload))
 				var oldSource, oldTarget *nmi.NMIClient
 				require.NoError(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
 					var ok bool
@@ -196,7 +196,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 				require.NoError(t, resolve(operation.ID, approval))
 				require.NoError(t, resolve(operation.ID, approval), "same resolution replays")
 				var history []byte
-				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT result_evidence->'account_requalifications' FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&history))
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT result_evidence->'account_requalifications' FROM billing.rail_intents WHERE id=$1`, operation.ID).Scan(&history))
 				require.NotEmpty(t, history)
 				require.NoError(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
 					store := intents.NewStore(rt.DB)
@@ -224,15 +224,15 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 					require.Equal(t, "abandoned", operation.Stage)
 				}
 				var after []byte
-				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&after))
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload FROM billing.rail_intents WHERE id=$1`, operation.ID).Scan(&after))
 				require.JSONEq(t, string(payload), string(after))
 				var retained []byte
-				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT result_evidence->'account_requalifications' FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&retained))
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT result_evidence->'account_requalifications' FROM billing.rail_intents WHERE id=$1`, operation.ID).Scan(&retained))
 				require.JSONEq(t, string(history), string(retained), "terminal outcome must retain the exact account-continuity record")
 				require.NoError(t, resolve(operation.ID, approval), "the CLI resolution replays after terminal completion")
 				terminal[operation.ID] = approval
 				var evidence []byte
-				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT result_evidence FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&evidence))
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT result_evidence FROM billing.rail_intents WHERE id=$1`, operation.ID).Scan(&evidence))
 				require.NoError(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
 					store := intents.NewStore(rt.DB)
 					for _, keep := range [][2]bool{{false, false}, {true, false}, {false, true}} {
@@ -242,7 +242,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 					return nil
 				}))
 				var prunedPayload, prunedEvidence []byte
-				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload,result_evidence FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&prunedPayload, &prunedEvidence))
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload,result_evidence FROM billing.rail_intents WHERE id=$1`, operation.ID).Scan(&prunedPayload, &prunedEvidence))
 				require.JSONEq(t, string(payload), string(prunedPayload))
 				require.JSONEq(t, string(evidence), string(prunedEvidence), "generic pruning must preserve cutover replay and account custody")
 			})
@@ -327,7 +327,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 			proof := qualify(t, p, "source")
 			require.ErrorIs(t, resolve(operation.ID, intents.Resolution{Step: "source", RequalifyAccount: proof, Actor: "fixture-operator", Reason: "inadequate account continuity evidence"}), intents.ErrResolutionRejected)
 			var records int
-			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT jsonb_array_length(COALESCE(result_evidence->'account_requalifications','[]')) FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&records))
+			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT jsonb_array_length(COALESCE(result_evidence->'account_requalifications','[]')) FROM billing.rail_intents WHERE id=$1`, operation.ID).Scan(&records))
 			require.Zero(t, records)
 			g.mu.Lock()
 			deletes, activations := g.Accounts[wrongKey].Deletes, g.Accounts[p.TargetKey].Activations
@@ -467,7 +467,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 					Records []json.RawMessage `json:"account_requalifications"`
 				}
 				var raw []byte
-				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT result_evidence FROM openrails.rail_intents WHERE id=$1`, operation.ID).Scan(&raw))
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT result_evidence FROM billing.rail_intents WHERE id=$1`, operation.ID).Scan(&raw))
 				require.NoError(t, json.Unmarshal(raw, &evidence))
 				require.Len(t, evidence.Records, 2, "stale progress cannot overwrite qualified history")
 				operation, err = client.CutoverProvider(ctx, openrails.SubscriptionID(p.Sub), key, p.Req)
@@ -513,7 +513,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 		}
 		require.ErrorIs(t, set(uuid.New(), nil), providerqualification.ErrNotFound)
 		var operations int
-		require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1`, p.Sub).Scan(&operations))
+		require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1`, p.Sub).Scan(&operations))
 		require.Zero(t, operations)
 	})
 
@@ -523,7 +523,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 		tx, err := h.Pool().Begin(ctx)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = tx.Rollback(context.WithoutCancel(ctx)) })
-		_, err = tx.Exec(ctx, `SELECT id FROM openrails.psps WHERE id=$1 FOR NO KEY UPDATE`, p.Target)
+		_, err = tx.Exec(ctx, `SELECT id FROM billing.psps WHERE id=$1 FOR NO KEY UPDATE`, p.Target)
 		require.NoError(t, err)
 		type answer struct {
 			result *openrails.ProviderCutover
@@ -536,10 +536,10 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 		}()
 		require.Eventually(t, func() bool {
 			var marked bool
-			err := h.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM openrails.rail_intents WHERE subscription_id=$1 AND result_evidence->>'create_submitted'='true')`, p.Sub).Scan(&marked)
+			err := h.Pool().QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing.rail_intents WHERE subscription_id=$1 AND result_evidence->>'create_submitted'='true')`, p.Sub).Scan(&marked)
 			return err == nil && marked
 		}, 5*time.Second, 5*time.Millisecond)
-		_, err = tx.Exec(ctx, `UPDATE openrails.psps SET evidence=evidence #- '{settings,nmi_cutover_qualification}' WHERE id=$1`, p.Target)
+		_, err = tx.Exec(ctx, `UPDATE billing.psps SET evidence=evidence #- '{settings,nmi_cutover_qualification}' WHERE id=$1`, p.Target)
 		require.NoError(t, err)
 		require.NoError(t, tx.Commit(ctx))
 		out := <-done
@@ -627,7 +627,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 			pool, err := pgxpool.NewWithConfig(ctx, cfg)
 			require.NoError(t, err)
 			t.Cleanup(pool.Close)
-			database, err := db.NewWithPGXPool(pool, "openrails")
+			database, err := db.NewWithPGXPool(pool, "billing")
 			require.NoError(t, err)
 			return database
 		}
@@ -723,7 +723,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 				pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 				require.NoError(t, err)
 				t.Cleanup(pool.Close)
-				database, err = db.NewWithPGXPool(pool, "openrails")
+				database, err = db.NewWithPGXPool(pool, "billing")
 				require.NoError(t, err)
 				clients := cutoverScopedClients{}
 				for id, key := range map[uuid.UUID]string{p.Source: p.SourceKey, p.Target: p.TargetKey} {
@@ -773,7 +773,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 			}
 			require.NoError(t, fake.BlockUntilContext(ctx, 1))
 			var before, after time.Time
-			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT claimed_until FROM openrails.rail_intents WHERE subscription_id=$1`, p.Sub).Scan(&before))
+			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT claimed_until FROM billing.rail_intents WHERE subscription_id=$1`, p.Sub).Scan(&before))
 			fake.Advance(10 * time.Second)
 			<-store.attempts
 			if limited {
@@ -785,7 +785,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 				beat := <-store.beats
 				require.NoError(t, beat.err)
 				require.True(t, beat.renewed)
-				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT claimed_until FROM openrails.rail_intents WHERE subscription_id=$1`, p.Sub).Scan(&after))
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT claimed_until FROM billing.rail_intents WHERE subscription_id=$1`, p.Sub).Scan(&after))
 				require.True(t, after.After(before), "successful heartbeat must be visible outside the provider-lock transaction before HTTP returns")
 				require.NoError(t, finish())
 			}

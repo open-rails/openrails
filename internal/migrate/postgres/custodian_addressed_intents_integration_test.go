@@ -18,7 +18,7 @@ import (
 func (f pspFixture) insertIntent(t *testing.T, key string, psp, custodian *uuid.UUID) error {
 	t.Helper()
 	_, err := f.pool.Exec(context.Background(),
-		`INSERT INTO openrails.rail_intents
+		`INSERT INTO billing.rail_intents
 		   (merchant_id, rail, intent_type, idempotency_key, status, next_attempt_at,
 		    origin, psp_id, custodian_id)
 		 VALUES ($1, 'nmi', 'bt_account_updater_batch', $2, 'pending', now(), 'system', $3, $4)`,
@@ -30,7 +30,7 @@ func (f pspFixture) newCustodian(t *testing.T) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	_, err := f.pool.Exec(context.Background(),
-		`INSERT INTO openrails.custodians (id, merchant_id, key, kind, environment, account_id)
+		`INSERT INTO billing.custodians (id, merchant_id, key, kind, environment, account_id)
 		 VALUES ($1, $2, $3, 'basis_theory', 'live', $4)`,
 		id, f.merchant, "bt-"+uuid.NewString()[:8], "tnt_"+uuid.NewString()[:8])
 	require.NoError(t, err)
@@ -83,7 +83,7 @@ func TestAMutationLogCarriesEitherAddress(t *testing.T) {
 
 	insert := func(psp, custodian *uuid.UUID) error {
 		_, err := f.pool.Exec(ctx,
-			`INSERT INTO openrails.rail_mutation_logs
+			`INSERT INTO billing.rail_mutation_logs
 			   (merchant_id, rail, psp_id, custodian_id, intent_type, attempt, phase, created_at)
 			 VALUES ($1, 'nmi', $2, $3, 'bt_account_updater_batch', 1, 'attempting', $4)`,
 			f.merchant, psp, custodian, time.Now().UTC())

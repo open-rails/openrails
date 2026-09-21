@@ -78,7 +78,7 @@ func TestProvisionRepairKeepsCapturedIdentity(t *testing.T) {
 	require.False(t, again.Created)
 	require.Equal(t, attached.MerchantID, again.MerchantID)
 
-	_, err = cp.Pool().Exec(ctx, `UPDATE openrails.merchants SET deleted_at=now() WHERE id=$1`, attached.MerchantID.UUID())
+	_, err = cp.Pool().Exec(ctx, `UPDATE billing.merchants SET deleted_at=now() WHERE id=$1`, attached.MerchantID.UUID())
 	require.NoError(t, err)
 	_, err = embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{OwnerUserID: owner.ID, ExistingGroupID: missingID})
 	require.ErrorIs(t, err, merchants.ErrMerchantNotFound)

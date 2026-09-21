@@ -103,12 +103,12 @@ func newSolanaPullFixture(t *testing.T) *solanaPullFixture {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+	exec(`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "solpull-prod-"+suffix, tenantID)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 5000000, 'USD', 720, true, $3)`, priceID, productID, tenantID)
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, tenantID, "solana")
-	exec(`INSERT INTO openrails.subscriptions
+	exec(`INSERT INTO billing.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at,
 	         current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
 	      VALUES ($1, $2, $3, 'active', 'solana', $4, $5, $6, $5, $7, $8, $9)`,
@@ -131,11 +131,11 @@ func newSolanaPullFixture(t *testing.T) *solanaPullFixture {
 	}
 	require.NoError(t, solanasubs.NewSolanaSubscriptionRepo(dbi).Upsert(ctx, row))
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.solana_subscriptions WHERE subscription_id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.solana_subscriptions WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	life := &fakeLifecycle{}
@@ -242,7 +242,7 @@ func TestSolanaCrankWorker_RLSScopeCreatesIntent(t *testing.T) {
 
 	var count int
 	err := fx.db.Qx(fx.ctx).QueryRow(fx.ctx,
-		`SELECT count(*) FROM openrails.rail_intents WHERE subscription_id = $1`,
+		`SELECT count(*) FROM billing.rail_intents WHERE subscription_id = $1`,
 		fx.row.SubscriptionID,
 	).Scan(&count)
 	require.NoError(t, err)
@@ -288,13 +288,13 @@ func TestSolanaReconcileWorker_RLSScopeFindsRecordedPayment(t *testing.T) {
 	fx := newSolanaPullFixture(t)
 	sig := "reconcile-" + uuid.NewString()
 	_, err := fx.db.Qx(fx.ctx).Exec(fx.ctx,
-		`UPDATE openrails.solana_subscriptions SET last_signature = $1 WHERE id = $2`,
+		`UPDATE billing.solana_subscriptions SET last_signature = $1 WHERE id = $2`,
 		sig, fx.row.ID,
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = fx.db.Qx(fx.ctx).Exec(fx.ctx,
-			`DELETE FROM openrails.notifications WHERE data->>'transaction_id' = $1`, sig)
+			`DELETE FROM billing.notifications WHERE data->>'transaction_id' = $1`, sig)
 	})
 
 	subID := fx.row.SubscriptionID
@@ -322,7 +322,7 @@ func repairAlertCount(t *testing.T, fx *solanaPullFixture, signature string) int
 	var count int
 	err := fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `
 		SELECT count(*)
-		  FROM openrails.notifications
+		  FROM billing.notifications
 		 WHERE event_type = 'system_alert'
 		   AND data->>'operation' = 'solana_crank_unrecorded_pull'
 		   AND data->>'transaction_id' = $1`, signature,

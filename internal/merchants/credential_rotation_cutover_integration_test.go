@@ -170,7 +170,7 @@ func TestCredentialRotationCutsOverAcrossNodes(t *testing.T) {
 
 	var stored string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT value FROM openrails.merchant_secrets WHERE merchant_id = $1 AND name LIKE 'psps/nmi/%'
+		SELECT value FROM billing.merchant_secrets WHERE merchant_id = $1 AND name LIKE 'psps/nmi/%'
 	`, tn.ID.UUID()).Scan(&stored))
 	require.Equal(t, "key-v1", stored, "a refused rotation must never write the rejected credential")
 

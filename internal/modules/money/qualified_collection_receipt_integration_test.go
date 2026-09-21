@@ -34,7 +34,7 @@ func TestQualifiedCollectionReceiptCustody(t *testing.T) {
 	e.gateway.orderSale(e.op.String(), candidate.TransactionID)
 	e.gateway.payment(candidate.TransactionID, e.vault, "0.05", e.currency)
 	// Hold the real provider query open across the runner's lease renewal.
-	_, err = e.pool.Exec(e.ctx, `UPDATE openrails.rail_intents SET claimed_until=now()+interval '1 hour' WHERE id=$1`, e.op)
+	_, err = e.pool.Exec(e.ctx, `UPDATE billing.rail_intents SET claimed_until=now()+interval '1 hour' WHERE id=$1`, e.op)
 	require.NoError(t, err)
 	started, gate := make(chan struct{}), make(chan struct{})
 	e.gateway.queryStarted = started
@@ -92,7 +92,7 @@ func TestQualifiedCollectionReceiptCustody(t *testing.T) {
 	beforeReads := e.gateway.queryCalls
 	delete(e.gateway.saleForOrder, e.op.String())
 	e.gateway.mu.Unlock()
-	_, err = e.pool.Exec(e.ctx, `UPDATE openrails.rail_intents SET claimed_until=NULL WHERE id=$1`, e.op)
+	_, err = e.pool.Exec(e.ctx, `UPDATE billing.rail_intents SET claimed_until=NULL WHERE id=$1`, e.op)
 	require.NoError(t, err)
 	_, err = e.runner.Resolve(e.ctx, e.op, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "provider search later disappeared"})
 	require.ErrorIs(t, err, intents.ErrResolutionRejected)
@@ -136,7 +136,7 @@ func TestQualifiedCollectionReceiptCustody(t *testing.T) {
 	_, _, err = intents.ReadNMICollectionReceipt(e.ctx, operation, resolver, candidate.TransactionID)
 	require.ErrorContains(t, err, "another provider account")
 	// Release the test lease before driving the ordinary verifier.
-	_, err = e.pool.Exec(e.ctx, `UPDATE openrails.rail_intents SET claimed_until=NULL WHERE id=$1`, e.op)
+	_, err = e.pool.Exec(e.ctx, `UPDATE billing.rail_intents SET claimed_until=NULL WHERE id=$1`, e.op)
 	require.NoError(t, err)
 
 	// A second internally valid provider object still cannot replace custody.
@@ -149,7 +149,7 @@ func TestQualifiedCollectionReceiptCustody(t *testing.T) {
 	require.ErrorContains(t, err, "conflicting")
 
 	// Local failure cannot roll back the already committed provider receipt.
-	_, err = e.pool.Exec(e.ctx, `UPDATE openrails.invoices SET status='voided', amount_due=0 WHERE id=$1`, e.invoice)
+	_, err = e.pool.Exec(e.ctx, `UPDATE billing.invoices SET status='voided', amount_due=0 WHERE id=$1`, e.invoice)
 	require.NoError(t, err)
 	dueNow(t, e.pool, e.ctx, e.op)
 	_, err = e.runner.RunVerifyOnce(e.ctx)
@@ -160,7 +160,7 @@ func TestQualifiedCollectionReceiptCustody(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, candidate.TransactionID, retained.TransactionID())
-	_, err = e.pool.Exec(e.ctx, `UPDATE openrails.invoices SET status='open', amount_due=50000 WHERE id=$1`, e.invoice)
+	_, err = e.pool.Exec(e.ctx, `UPDATE billing.invoices SET status='open', amount_due=50000 WHERE id=$1`, e.invoice)
 	require.NoError(t, err)
 	// The changed provider answer must never be consulted after custody.
 	dueNow(t, e.pool, e.ctx, e.op)
@@ -189,7 +189,7 @@ func TestInvoiceCollectionRetainsReceiptBeforeLocalFailure(t *testing.T) {
 	e := nmiReceiptScenario(t)
 	e.gateway.orderSale(e.op.String(), "before-local-write")
 	e.gateway.payment("before-local-write", e.vault, "0.05", e.currency)
-	_, err := e.pool.Exec(e.ctx, `UPDATE openrails.invoices SET status='voided',amount_due=0 WHERE id=$1`, e.invoice)
+	_, err := e.pool.Exec(e.ctx, `UPDATE billing.invoices SET status='voided',amount_due=0 WHERE id=$1`, e.invoice)
 	require.NoError(t, err)
 	dueNow(t, e.pool, e.ctx, e.op)
 	_, err = e.runner.RunVerifyOnce(e.ctx)
@@ -204,7 +204,7 @@ func TestInvoiceCollectionRetainsReceiptBeforeLocalFailure(t *testing.T) {
 	e.gateway.saleForOrder = map[string]string{}
 	e.gateway.payments = map[string]map[string]any{}
 	e.gateway.mu.Unlock()
-	_, err = e.pool.Exec(e.ctx, `UPDATE openrails.invoices SET status='open',amount_due=50000 WHERE id=$1`, e.invoice)
+	_, err = e.pool.Exec(e.ctx, `UPDATE billing.invoices SET status='open',amount_due=50000 WHERE id=$1`, e.invoice)
 	require.NoError(t, err)
 	dueNow(t, e.pool, e.ctx, e.op)
 	_, err = e.runner.RunVerifyOnce(e.ctx)

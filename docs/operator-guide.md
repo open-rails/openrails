@@ -38,7 +38,7 @@ Postgres specifics worth knowing:
   development relaxations; every other non-empty label (including `staging`,
   `production`, or a misspelling) receives the strict posture.
 - Migrations: `openrails migrate up` applies AuthKit, River, and OpenRails
-  migrations (`migrations/postgres/`, baseline `0001_schema.up.sql`, new ones
+  migrations (`internal/migrate/postgres/`, baseline `0001_schema.up.sql`, new ones
   start at `0002`). The server validates at boot and refuses to start behind.
 - Local zero-config stack: `task docker-up` (Postgres 18 + Redis + OpenRails on
   `:3053`), `task docker-down` to tear down, `task docker-reset` to recreate the

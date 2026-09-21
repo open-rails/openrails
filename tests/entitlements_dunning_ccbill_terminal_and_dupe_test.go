@@ -99,10 +99,10 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	}
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", tenantSubjectID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", tenantSubjectID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
@@ -188,7 +188,7 @@ func TestEntitlementsDunningStateMachine_CCBill_TerminalExpiration(t *testing.T)
 	// No new paid window should have been pushed.
 	for _, entName := range []string{"premium", "extra"} {
 		n := suite.Count(ctx, `
-			SELECT COUNT(*) FROM openrails.entitlements
+			SELECT COUNT(*) FROM billing.entitlements
 			WHERE customer_id = $1 AND entitlement = $2
 			  AND source_type = $3 AND source_id = $4
 			  AND deleted_at IS NULL`,
@@ -276,10 +276,10 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", tenantSubjectID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", tenantSubjectID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	clock.Advance(paidEnd.Sub(clock.Now().UTC()))
@@ -326,7 +326,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	// subscription. The duplicate-webhook property is therefore even stronger:
 	// exactly one window exists no matter how many times the event replays.
 	n := suite.Count(ctx, `
-		SELECT COUNT(*) FROM openrails.entitlements
+		SELECT COUNT(*) FROM billing.entitlements
 		WHERE customer_id = $1 AND entitlement = $2
 		  AND source_type = $3 AND source_id = $4
 		  AND deleted_at IS NULL`,
@@ -334,7 +334,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 		string(models.EntitlementSourceSubscription), subID)
 	require.Equal(t, 1, n)
 	standing := suite.Count(ctx, `
-		SELECT COUNT(*) FROM openrails.entitlements
+		SELECT COUNT(*) FROM billing.entitlements
 		WHERE customer_id = $1 AND entitlement = $2
 		  AND source_type = $3 AND source_id = $4
 		  AND end_at IS NULL AND revoked_at IS NULL AND deleted_at IS NULL`,
@@ -346,7 +346,7 @@ func TestEntitlementsDunningStateMachine_CCBill_DuplicateRenewalSuccess(t *testi
 	// activation + exactly ONE renewal — the duplicate delivery appends no
 	// second period grant (idempotent via the latest recorded period end).
 	grantCount := suite.Count(ctx, `
-		SELECT COUNT(*) FROM openrails.grants
+		SELECT COUNT(*) FROM billing.grants
 		WHERE source_type = 'subscription' AND source_id = $1
 		  AND event = 'grant' AND ends_at IS NOT NULL`,
 		subID.String())

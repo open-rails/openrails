@@ -20,7 +20,7 @@ func seedPendingSubscriptionWithPayment(t *testing.T, f *failopenFixture, procSu
 	now := time.Now().UTC()
 	subID := uuid.New()
 	customerID := uuid.MustParse(f.userID)
-	_, err := f.pool.Exec(ctx, `INSERT INTO openrails.subscriptions
+	_, err := f.pool.Exec(ctx, `INSERT INTO billing.subscriptions
 		(id, price_id, product_id, status, rail, rail_subscription_id, started_at, customer_id, merchant_id, psp_id)
 		VALUES ($1, $2, $3, 'pending', 'nmi', $4, $5, $6, $7, $8)`,
 		subID, f.priceID, f.productID, procSubID, now, customerID, dbtest.TestMerchantID.UUID(), f.pspID)
@@ -50,9 +50,9 @@ func assertPendingActivatedOnce(t *testing.T, f *failopenFixture, subID uuid.UUI
 	require.Len(t, f.windows(t, subID, "subscription"), 1)
 	require.True(t, f.entitledAt(t, time.Now().UTC().Add(time.Minute)))
 	var paymentCount int
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE transaction_id = $1`, txnID).Scan(&paymentCount))
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE transaction_id = $1`, txnID).Scan(&paymentCount))
 	require.Equal(t, 1, paymentCount)
-	rows, err := f.pool.Query(ctx, `SELECT to_status::text FROM openrails.subscription_status_transitions WHERE subscription_id = $1 ORDER BY occurred_at, id`, subID)
+	rows, err := f.pool.Query(ctx, `SELECT to_status::text FROM billing.subscription_status_transitions WHERE subscription_id = $1 ORDER BY occurred_at, id`, subID)
 	require.NoError(t, err)
 	defer rows.Close()
 	var transitions []string
@@ -116,7 +116,7 @@ func TestCreateMembership_ReplaysRecordedPaymentForBillableSubscription(t *testi
 			subID := seedPendingSubscriptionWithPayment(t, f, "sub_billable_replay_"+uuid.NewString(), txnID)
 			periodStart := time.Now().UTC()
 			periodEnd := periodStart.Add(30 * 24 * time.Hour)
-			_, err := f.pool.Exec(ctx, `UPDATE openrails.subscriptions
+			_, err := f.pool.Exec(ctx, `UPDATE billing.subscriptions
 				SET status=$2, current_period_starts_at=$3, current_period_ends_at=$4
 				WHERE id=$1`, subID, status, periodStart, periodEnd)
 			require.NoError(t, err)
@@ -152,13 +152,13 @@ func TestCreateMembership_RejectsRecordedPaymentForNonBillableSubscription(t *te
 			periodEnd := periodStart.Add(30 * 24 * time.Hour)
 			if tt.status == models.StatusCancelled {
 				cancelType := models.CancelTypeExpired
-				_, err := f.pool.Exec(ctx, `UPDATE openrails.subscriptions
+				_, err := f.pool.Exec(ctx, `UPDATE billing.subscriptions
 					SET status=$2, current_period_starts_at=$3, current_period_ends_at=$4,
 					    cancelled_at=$3, cancel_type=$5
 					WHERE id=$1`, subID, tt.status, periodStart, periodEnd, cancelType)
 				require.NoError(t, err)
 			} else {
-				_, err := f.pool.Exec(ctx, `UPDATE openrails.subscriptions
+				_, err := f.pool.Exec(ctx, `UPDATE billing.subscriptions
 					SET status=$2, current_period_starts_at=$3, current_period_ends_at=$4
 					WHERE id=$1`, subID, tt.status, periodStart, periodEnd)
 				require.NoError(t, err)

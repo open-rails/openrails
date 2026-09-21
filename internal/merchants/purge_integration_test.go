@@ -48,28 +48,28 @@ func TestMerchantPurgeRefusesUntilTheBlastRadiusIsSeenAndTyped(t *testing.T) {
 	mid := merchant.ID(merchantID)
 
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1::uuid, $2, 'active')`, merchantID, slug)
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1::uuid, $2, 'active')`, merchantID, slug)
 	require.NoError(t, err)
 
 	// A small but real book: a product, its price, a customer and the local
 	// mirror of that customer's stored card.
 	productID, priceID, customerID := uuid.New(), uuid.New(), uuid.New()
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
+		`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		 VALUES ($1,$2,$2,$3,'{"pro": null}'::jsonb,$4)`,
 		productID, "or858-"+suffix, "or858-tier-"+suffix, merchantID)
 	require.NoError(t, err)
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+		`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 		 VALUES ($1,$2,999,'USD',720,true,$3)`, priceID, productID, merchantID)
 	require.NoError(t, err)
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`,
 		customerID, merchantID)
 	require.NoError(t, err)
 	pspID := dbtest.EnsureTestPSP(ctx, t, super, merchantID, "nmi")
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.payment_methods (merchant_id, customer_id, rail, initial_transaction_id, custodian, psp_id)
+		`INSERT INTO billing.payment_methods (merchant_id, customer_id, rail, initial_transaction_id, custodian, psp_id)
 		 VALUES ($1,$2,'nmi',$3,'psp',$4)`, merchantID, customerID, "txn-"+suffix, pspID)
 	require.NoError(t, err)
 
@@ -79,9 +79,9 @@ func TestMerchantPurgeRefusesUntilTheBlastRadiusIsSeenAndTyped(t *testing.T) {
 		t.Helper()
 		var n int
 		require.NoError(t, super.QueryRow(ctx, `
-			SELECT (SELECT count(*) FROM openrails.products WHERE merchant_id = $1)
-			     + (SELECT count(*) FROM openrails.prices WHERE merchant_id = $1)
-			     + (SELECT count(*) FROM openrails.payment_methods WHERE merchant_id = $1)
+			SELECT (SELECT count(*) FROM billing.products WHERE merchant_id = $1)
+			     + (SELECT count(*) FROM billing.prices WHERE merchant_id = $1)
+			     + (SELECT count(*) FROM billing.payment_methods WHERE merchant_id = $1)
 		`, merchantID).Scan(&n))
 		return n
 	}
@@ -129,7 +129,7 @@ func TestMerchantPurgeRefusesUntilTheBlastRadiusIsSeenAndTyped(t *testing.T) {
 		// table rather than the Go type.
 		var raw []byte
 		require.NoError(t, super.QueryRow(ctx,
-			`SELECT inventory_manifest FROM openrails.maintenance_runs WHERE id = $1::uuid AND kind='purge_inventory'`, inv.ID).Scan(&raw))
+			`SELECT inventory_manifest FROM billing.maintenance_runs WHERE id = $1::uuid AND kind='purge_inventory'`, inv.ID).Scan(&raw))
 		var manifest map[string]any
 		require.NoError(t, json.Unmarshal(raw, &manifest))
 		require.Equal(t, false, manifest["is_backup"])
@@ -173,7 +173,7 @@ func TestMerchantPurgeRefusesUntilTheBlastRadiusIsSeenAndTyped(t *testing.T) {
 	//        that no longer exists, so the inventory no longer authorises anything.
 	t.Run("a stale inventory does not authorise a purge", func(t *testing.T) {
 		_, err := super.Exec(ctx,
-			`INSERT INTO openrails.prices (product_id, key, amount, currency, access_duration_hours, auto_renew, merchant_id)
+			`INSERT INTO billing.prices (product_id, key, amount, currency, access_duration_hours, auto_renew, merchant_id)
 			 VALUES ($1,$2,1999,'USD',720,true,$3)`, productID, "or858-second-"+suffix, merchantID)
 		require.NoError(t, err)
 
@@ -200,14 +200,14 @@ func TestMerchantPurgeRefusesUntilTheBlastRadiusIsSeenAndTyped(t *testing.T) {
 
 		var status string
 		require.NoError(t, super.QueryRow(ctx,
-			`SELECT status FROM openrails.merchants WHERE id = $1::uuid`, merchantID).Scan(&status))
+			`SELECT status FROM billing.merchants WHERE id = $1::uuid`, merchantID).Scan(&status))
 		require.Equal(t, "deleted", status)
 
 		var kind, actor string
 		var expectedRows int64
 		var affected []byte
 		require.NoError(t, super.QueryRow(ctx, `
-			SELECT kind, actor, expected_rows, affected FROM openrails.maintenance_runs
+			SELECT kind, actor, expected_rows, affected FROM billing.maintenance_runs
 			 WHERE merchant_id = $1::uuid AND kind = $2`,
 			merchantID, DestructiveRunKindMerchantPurge).Scan(&kind, &actor, &expectedRows, &affected))
 		require.Equal(t, DestructiveRunKindMerchantPurge, kind)
@@ -249,22 +249,22 @@ func TestMerchantPurgeRefusesWhenRetainedHistoryPinsRows(t *testing.T) {
 	mid := merchant.ID(merchantID)
 
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1::uuid, $2, 'active')`, merchantID, slug)
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1::uuid, $2, 'active')`, merchantID, slug)
 	require.NoError(t, err)
 
 	productID, customerID := uuid.New(), uuid.New()
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
+		`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		 VALUES ($1,$2,$2,$3,'{"pro": null}'::jsonb,$4)`,
 		productID, "or858p-"+suffix, "or858p-tier-"+suffix, merchantID)
 	require.NoError(t, err)
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`,
 		customerID, merchantID)
 	require.NoError(t, err)
 	// The append-only grant that justifies the product's ownership.
 	_, err = super.Exec(ctx, `
-		INSERT INTO openrails.grants (merchant_id, customer_id, product_id, kind, source_type, event)
+		INSERT INTO billing.grants (merchant_id, customer_id, product_id, kind, source_type, event)
 		VALUES ($1,$2,$3,'ownership','purchase','grant')`, merchantID, customerID, productID)
 	require.NoError(t, err)
 
@@ -286,9 +286,9 @@ func TestMerchantPurgeRefusesWhenRetainedHistoryPinsRows(t *testing.T) {
 	var products, grants int
 	var status string
 	require.NoError(t, super.QueryRow(ctx,
-		`SELECT (SELECT count(*) FROM openrails.products WHERE merchant_id=$1),
-		        (SELECT count(*) FROM openrails.grants WHERE merchant_id=$1),
-		        (SELECT status FROM openrails.merchants WHERE id=$1)`,
+		`SELECT (SELECT count(*) FROM billing.products WHERE merchant_id=$1),
+		        (SELECT count(*) FROM billing.grants WHERE merchant_id=$1),
+		        (SELECT status FROM billing.merchants WHERE id=$1)`,
 		merchantID).Scan(&products, &grants, &status))
 	require.Equal(t, 1, products)
 	require.Equal(t, 1, grants)

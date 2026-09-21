@@ -65,7 +65,7 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx,
-			`DELETE FROM openrails.entitlements WHERE customer_id = $1 AND entitlement = $2`,
+			`DELETE FROM billing.entitlements WHERE customer_id = $1 AND entitlement = $2`,
 			tenantSubjectID, entName)
 	})
 
@@ -76,7 +76,7 @@ func TestExtendActiveBySubscription_ShiftsFollowingWindowsForward(t *testing.T) 
 	var gotStartAt time.Time
 	var gotEndAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT start_at, end_at FROM openrails.entitlements WHERE id = $1`, adminEnt.ID,
+		`SELECT start_at, end_at FROM billing.entitlements WHERE id = $1`, adminEnt.ID,
 	).Scan(&gotStartAt, &gotEndAt))
 
 	require.Equal(t, t1.Add(5*24*time.Hour), gotStartAt.UTC())
@@ -135,7 +135,7 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 	var gotEndAt, gotRevokedAt *time.Time
 	var gotRevokeReason *string
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT end_at, revoked_at, revoke_reason FROM openrails.entitlements WHERE id = $1`, active.ID,
+		`SELECT end_at, revoked_at, revoke_reason FROM billing.entitlements WHERE id = $1`, active.ID,
 	).Scan(&gotEndAt, &gotRevokedAt, &gotRevokeReason))
 	require.NotNil(t, gotEndAt)
 	require.Equal(t, now, gotEndAt.UTC())
@@ -147,7 +147,7 @@ func TestEndActiveByPayment_RevokesFiniteAndDeletesFutureWindows(t *testing.T) {
 	// The future window is soft-deleted; query it without the deleted_at filter.
 	var gotDeletedAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT deleted_at FROM openrails.entitlements WHERE id = $1`, future.ID,
+		`SELECT deleted_at FROM billing.entitlements WHERE id = $1`, future.ID,
 	).Scan(&gotDeletedAt))
 	require.NotNil(t, gotDeletedAt)
 	require.Equal(t, now, gotDeletedAt.UTC())
@@ -175,7 +175,7 @@ func TestEntitlementRepo_CustomerQueries(t *testing.T) {
 
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`,
 		tenantSubjectID,
 		dbtest.TestMerchantID.UUID(),
 	)
@@ -211,7 +211,7 @@ func TestEntitlementRepo_CustomerQueries(t *testing.T) {
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx,
-			`DELETE FROM openrails.entitlements WHERE customer_id = $1 AND entitlement = ANY($2)`,
+			`DELETE FROM billing.entitlements WHERE customer_id = $1 AND entitlement = ANY($2)`,
 			tenantSubjectID, []string{entName, indefiniteName})
 	})
 

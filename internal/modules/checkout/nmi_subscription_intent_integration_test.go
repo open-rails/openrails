@@ -156,13 +156,13 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 		CreatedAt: now, UpdatedAt: now,
 	})
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = 'nmi_subscription_create' AND price_id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE intent_type = 'nmi_subscription_create' AND price_id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.notifications WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	railCustomerRef := "vault-" + uuid.NewString()[:8]
@@ -300,15 +300,15 @@ func TestNMISubscriptionIntent_OrphanedRemoteCreateNeedsExactReceipt(t *testing.
 	require.NoError(t, err)
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "resolution never re-creates")
 	var count int
-	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM openrails.subscriptions WHERE rail_subscription_id=$1`, fx.gateway.subID).Scan(&count))
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.subscriptions WHERE rail_subscription_id=$1`, fx.gateway.subID).Scan(&count))
 	require.Equal(t, 1, count)
 }
 
 func TestNMISubscriptionIntent_ImmediateActivationIsOneMembership(t *testing.T) {
 	fx := newSubIntentFixture(t)
 	pool := fx.db.Pool()
-	_, err := pool.Exec(fx.ctx, `UPDATE openrails.products SET entitlements_spec = '{"premium": null}'
-		WHERE id = (SELECT product_id FROM openrails.prices WHERE id = $1)`, fx.priceID)
+	_, err := pool.Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec = '{"premium": null}'
+		WHERE id = (SELECT product_id FROM billing.prices WHERE id = $1)`, fx.priceID)
 	require.NoError(t, err)
 
 	intent := fx.enqueueAndExecute(t)
@@ -324,15 +324,15 @@ func TestNMISubscriptionIntent_ImmediateActivationIsOneMembership(t *testing.T) 
 	assertOneMembership := func() {
 		t.Helper()
 		var windows int
-		require.NoError(t, pool.QueryRow(fx.ctx, `SELECT count(*) FROM openrails.entitlements
+		require.NoError(t, pool.QueryRow(fx.ctx, `SELECT count(*) FROM billing.entitlements
 			WHERE source_type = 'subscription' AND source_id = $1 AND entitlement = 'premium'`, sub.ID).Scan(&windows))
 		require.Equal(t, 1, windows)
 		var txnID, orderID string
-		require.NoError(t, pool.QueryRow(fx.ctx, `SELECT transaction_id, metadata->>'order_id' FROM openrails.payments
+		require.NoError(t, pool.QueryRow(fx.ctx, `SELECT transaction_id, metadata->>'order_id' FROM billing.payments
 			WHERE subscription_id = $1 AND status = 'completed'`, sub.ID).Scan(&txnID, &orderID))
 		require.Equal(t, fx.gateway.txnID, txnID)
 		require.NotEmpty(t, orderID)
-		rows, err := pool.Query(fx.ctx, `SELECT to_status::text FROM openrails.subscription_status_transitions
+		rows, err := pool.Query(fx.ctx, `SELECT to_status::text FROM billing.subscription_status_transitions
 			WHERE subscription_id = $1 ORDER BY occurred_at, id`, sub.ID)
 		require.NoError(t, err)
 		defer rows.Close()

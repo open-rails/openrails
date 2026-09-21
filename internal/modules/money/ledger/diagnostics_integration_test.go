@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
 
@@ -58,7 +59,7 @@ func TestLedgerDiagnostics_CatchTriggerBypassDrift(t *testing.T) {
 	// Repair the log and the diagnostics go quiet again — the check is precise,
 	// not permanently red.
 	_, err = ledgerOwnerPool(t).Exec(ctx,
-		`DELETE FROM openrails.ledger_transfers WHERE merchant_id = $1 AND currency = $2 AND source = '833_test_bypass'`,
+		`DELETE FROM billing.ledger_transfers WHERE merchant_id = $1 AND currency = $2 AND source = '833_test_bypass'`,
 		merchantID, cur)
 	require.NoError(t, err)
 	requireIntegrityClean(t, ctx, pool, merchantID, cur)
@@ -67,7 +68,7 @@ func TestLedgerDiagnostics_CatchTriggerBypassDrift(t *testing.T) {
 	// A restore/COPY that rewrote one account's projection. Conservation is the
 	// cheap check that catches this class.
 	_, err = ledgerOwnerPool(t).Exec(ctx,
-		`UPDATE openrails.ledger_accounts SET credits_posted = credits_posted + 777 WHERE id = $1`, custAcc)
+		`UPDATE billing.ledger_accounts SET credits_posted = credits_posted + 777 WHERE id = $1`, custAcc)
 	require.NoError(t, err)
 
 	breaches := conservationForCurrency(t, ctx, pool, merchantID, cur)
@@ -84,7 +85,7 @@ func TestLedgerDiagnostics_CatchTriggerBypassDrift(t *testing.T) {
 	require.Equal(t, int64(1000), drifts[0].LoggedCredits)
 
 	_, err = ledgerOwnerPool(t).Exec(ctx,
-		`UPDATE openrails.ledger_accounts SET credits_posted = credits_posted - 777 WHERE id = $1`, custAcc)
+		`UPDATE billing.ledger_accounts SET credits_posted = credits_posted - 777 WHERE id = $1`, custAcc)
 	require.NoError(t, err)
 	requireIntegrityClean(t, ctx, pool, merchantID, cur)
 }
@@ -101,15 +102,15 @@ func bypassTriggerInsert(t *testing.T, ctx context.Context, _ *pgxpool.Pool, mer
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	// ALTER TABLE is transactional, so the trigger can never stay disabled.
-	_, err = tx.Exec(ctx, `ALTER TABLE openrails.ledger_transfers DISABLE TRIGGER trg_ledger_transfers_apply_counters`)
+	_, err = tx.Exec(ctx, `ALTER TABLE billing.ledger_transfers DISABLE TRIGGER trg_ledger_transfers_apply_counters`)
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `
-INSERT INTO openrails.ledger_transfers
+INSERT INTO billing.ledger_transfers
     (merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, operation, source, source_id)
 VALUES ($1, $2, $3, $4, $5, 'deposit', 'deposit', '833_test_bypass', gen_random_uuid()::text)`,
 		merchantID, debit, credit, amount, cur)
 	require.NoError(t, err)
-	_, err = tx.Exec(ctx, `ALTER TABLE openrails.ledger_transfers ENABLE TRIGGER trg_ledger_transfers_apply_counters`)
+	_, err = tx.Exec(ctx, `ALTER TABLE billing.ledger_transfers ENABLE TRIGGER trg_ledger_transfers_apply_counters`)
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit(ctx))
 }
@@ -119,7 +120,7 @@ VALUES ($1, $2, $3, $4, $5, 'deposit', 'deposit', '833_test_bypass', gen_random_
 // test's own currency.
 func conservationForCurrency(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchantID uuid.UUID, cur string) []ledger.ConservationBreach {
 	t.Helper()
-	all, err := ledger.CheckConservation(ctx, pool, merchantID)
+	all, err := ledger.CheckConservation(ctx, db.WrapPool(pool, ""), merchantID)
 	require.NoError(t, err)
 	var out []ledger.ConservationBreach
 	for _, b := range all {
@@ -132,7 +133,7 @@ func conservationForCurrency(t *testing.T, ctx context.Context, pool *pgxpool.Po
 
 func driftsForCurrency(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchantID uuid.UUID, cur string) []ledger.CounterDrift {
 	t.Helper()
-	all, err := ledger.CheckCounterDrift(ctx, pool, merchantID)
+	all, err := ledger.CheckCounterDrift(ctx, db.WrapPool(pool, ""), merchantID)
 	require.NoError(t, err)
 	var out []ledger.CounterDrift
 	for _, d := range all {
@@ -155,21 +156,21 @@ func TestLedgerDiagnostics_ReportComposesBothChecks(t *testing.T) {
 	_, err := l.Deposit(ctx, customer, cur, 500, ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: uuid.NewString()}, uuid.New())
 	require.NoError(t, err)
 
-	rep, err := ledger.CheckIntegrity(ctx, pool, merchantID)
+	rep, err := ledger.CheckIntegrity(ctx, db.WrapPool(pool, ""), merchantID)
 	require.NoError(t, err)
 	require.True(t, rep.OK(), "healthy ledger: %+v", rep)
 
 	custAcc, err := l.EnsureCustomerBalance(ctx, customer, cur)
 	require.NoError(t, err)
 	_, err = ledgerOwnerPool(t).Exec(ctx,
-		`UPDATE openrails.ledger_accounts SET debits_posted = debits_posted + 5 WHERE id = $1`, custAcc)
+		`UPDATE billing.ledger_accounts SET debits_posted = debits_posted + 5 WHERE id = $1`, custAcc)
 	require.NoError(t, err)
 
-	rep, err = ledger.CheckIntegrity(ctx, pool, merchantID)
+	rep, err = ledger.CheckIntegrity(ctx, db.WrapPool(pool, ""), merchantID)
 	require.NoError(t, err)
 	require.False(t, rep.OK(), "a corrupted counter must fail the report")
 
 	_, err = ledgerOwnerPool(t).Exec(ctx,
-		`UPDATE openrails.ledger_accounts SET debits_posted = debits_posted - 5 WHERE id = $1`, custAcc)
+		`UPDATE billing.ledger_accounts SET debits_posted = debits_posted - 5 WHERE id = $1`, custAcc)
 	require.NoError(t, err)
 }

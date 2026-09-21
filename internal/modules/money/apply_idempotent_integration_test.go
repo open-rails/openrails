@@ -39,7 +39,7 @@ func TestOr892_TheDatabaseRefusesADuplicateCoordinate(t *testing.T) {
 	customer := payer.UUID()
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, customer.String())
 
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	l := ledger.New(q, merchantID)
 	clearing, err := l.EnsureSystemAccount(ctx, ledger.RailClearing, cur)
 	require.NoError(t, err)
@@ -64,7 +64,7 @@ func TestOr892_TheDatabaseRefusesADuplicateCoordinate(t *testing.T) {
 	var rows int
 	var moved int64
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*), COALESCE(sum(amount), 0)::bigint FROM openrails.ledger_transfers
+		SELECT count(*), COALESCE(sum(amount), 0)::bigint FROM billing.ledger_transfers
 		 WHERE merchant_id = $1 AND source = 'or892-raw' AND source_id = $2
 	`, merchantID, sourceID).Scan(&rows, &moved))
 	require.Equal(t, 1, rows, "one coordinate, one row — enforced by the index alone")
@@ -87,7 +87,7 @@ func TestOr892_ApplyIdempotentReportsReplayInsteadOfErroring(t *testing.T) {
 	// normally materialize the customers row, so seed it for the account FK.
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, customer.String())
 
-	l := ledger.New(gen.New(pool), merchantID)
+	l := ledger.New(dbtest.Queries(pool), merchantID)
 	clearing, err := l.EnsureSystemAccount(ctx, ledger.RailClearing, cur)
 	require.NoError(t, err)
 	balance, err := l.EnsureCustomerBalance(ctx, customer, cur)
@@ -110,7 +110,7 @@ func TestOr892_ApplyIdempotentReportsReplayInsteadOfErroring(t *testing.T) {
 
 	var rows int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.ledger_transfers
+		SELECT count(*) FROM billing.ledger_transfers
 		 WHERE merchant_id = $1 AND customer_id = $2 AND source = 'or892' AND source_id = $3
 	`, merchantID, customer, coord.SourceID).Scan(&rows))
 	require.Equal(t, 1, rows, "the database holds exactly one row for one coordinate")
@@ -228,7 +228,7 @@ func TestOr892_TheLedgerRefusesABlankCoordinate(t *testing.T) {
 	// normally materialize the customers row, so seed it for the account FK.
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, customer.String())
 
-	l := ledger.New(gen.New(pool), merchantID)
+	l := ledger.New(dbtest.Queries(pool), merchantID)
 	clearing, err := l.EnsureSystemAccount(ctx, ledger.RailClearing, cur)
 	require.NoError(t, err)
 	balance, err := l.EnsureCustomerBalance(ctx, customer, cur)
@@ -248,7 +248,7 @@ func TestOr892_TheLedgerRefusesABlankCoordinate(t *testing.T) {
 
 	var blank int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.ledger_transfers
+		SELECT count(*) FROM billing.ledger_transfers
 		 WHERE merchant_id = $1 AND (operation = '' OR source = '' OR source_id = '')
 	`, merchantID).Scan(&blank))
 	require.Zero(t, blank, "chk_ledger_transfers_coordinate_not_blank holds")

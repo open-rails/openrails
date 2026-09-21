@@ -31,7 +31,7 @@ func TestEntitlementReverseLookupStandaloneHTTP(t *testing.T) {
 	}
 	insertEntitlement := func(customer uuid.UUID, entitlement string, start time.Time, end *time.Time) {
 		_, err := h.Pool().Exec(ctx, `
-			INSERT INTO openrails.entitlements (
+			INSERT INTO billing.entitlements (
 				id, merchant_id, customer_id, entitlement, start_at, end_at,
 				source_id, source_type, created_at, updated_at
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'admin', $8, $8)

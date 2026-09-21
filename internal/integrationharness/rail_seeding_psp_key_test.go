@@ -41,13 +41,13 @@ func TestSeedPSPsStampsPSPKeyForWireSelection(t *testing.T) {
 	mid := merchant.ID(uuid.New())
 	pool := h.Pool()
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		mid.UUID(), fmt.Sprintf("psp890-%d", nano))
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.psps WHERE merchant_id = $1`, mid.UUID())
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1`, mid.UUID())
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.merchants WHERE id = $1`, mid.UUID())
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.psps WHERE merchant_id = $1`, mid.UUID())
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.merchant_secrets WHERE merchant_id = $1`, mid.UUID())
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.merchants WHERE id = $1`, mid.UUID())
 	})
 
 	keyA := fmt.Sprintf("mobius-a-%d", nano)
@@ -62,7 +62,7 @@ func TestSeedPSPsStampsPSPKeyForWireSelection(t *testing.T) {
 
 	// 1. The seeder stamps the declared manifest key on the row.
 	rows, err := pool.Query(ctx,
-		`SELECT key, account_id FROM openrails.psps WHERE merchant_id = $1`, mid.UUID())
+		`SELECT key, account_id FROM billing.psps WHERE merchant_id = $1`, mid.UUID())
 	require.NoError(t, err)
 	defer rows.Close()
 	seeded := map[string]string{}

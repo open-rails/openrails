@@ -20,16 +20,17 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/migratekit"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/integrations/pyth"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/migrate"
+	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -54,7 +55,6 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
 )
 
 const (
@@ -66,23 +66,13 @@ const (
 	standaloneRiverProviderRefreshQueueMaxWorkers = 4
 )
 
-// standaloneRiverSchema returns the schema for River tables when OpenRails
-// constructs its own River client (standalone, or embedded with no injected
-// client). River tables ALWAYS live in `public` (#545, config.RiverSchema) —
-// River's own documented default — so the OpenRails billing schema stays free of
-// non-portable runtime state (keeps the #544 data move a clean whole-schema
-// dump). This is NO LONGER tied to db.schema (reversing the #165 coupling). In
-// embedded/library mode a host that runs River injects its own client via
-// embedded.SetRiverClient, and that client owns its schema; OpenRails never
-// overrides it.
-func standaloneRiverSchema(_ *config.Config) string {
-	return config.RiverSchema
-}
-
 type runtimeOverrides struct {
-	DB    *db.DB
-	Redis *redis.Client
-	Clock clockwork.Clock
+	RiverSchema      string
+	DB               *db.DB
+	Redis            *redis.Client
+	Clock            clockwork.Clock
+	UserDirectory    openrails.UserDirectory
+	UsernameResolver openrails.UsernameResolver
 }
 
 // effectiveSolanaNetwork derives the Solana network purely from the test_mode
@@ -229,7 +219,13 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		MerchantsFn: merchantsFn,
 	}
 
-	serviceInstances, err := createServices(database, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider)
+	var userDirectory openrails.UserDirectory
+	var usernameResolver openrails.UsernameResolver
+	if overrides != nil {
+		userDirectory = overrides.UserDirectory
+		usernameResolver = overrides.UsernameResolver
+	}
+	serviceInstances, err := createServices(database, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider, usernameResolver)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +241,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 				serviceInstances.SubscriptionService,
 				serviceInstances.ProductService,
 				serviceInstances.PriceService,
-				identity.NewProfilesDirectory(identity.NewProfileRepo(database)),
+				// OpenRails does not own the host identity schema. A host that
+				// wants subscription emails must wire its UserDirectory through
+				// its own integration boundary; leaving this nil makes email
+				// lookup fail closed instead of silently depending on AuthKit's
+				// profiles tables or grants.
+				userDirectory,
 			)
 		}
 	}
@@ -374,7 +375,10 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 	// River producer is always initialized in the runtime so HTTP handlers can enqueue jobs
 	// even when workers run in a separate process.
-	if producer, pool, err := buildRiverProducer(ctx, cfg); err != nil {
+	if overrides != nil {
+		runtime.SetRiverSchema(overrides.RiverSchema)
+	}
+	if producer, pool, err := buildRiverProducer(ctx, cfg, runtime.riverSchemaOrDefault()); err != nil {
 		return nil, fmt.Errorf("init river producer: %w", err)
 	} else {
 		runtime.RiverProducer = producer
@@ -472,7 +476,7 @@ func runtimeClock(overrides *runtimeOverrides) clockwork.Clock {
 	return clockwork.NewRealClock()
 }
 
-func buildRiverProducer(ctx context.Context, cfg *config.Config) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {
+func buildRiverProducer(ctx context.Context, cfg *config.Config, schema string) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {
 	if cfg.DB == nil {
 		return nil, nil, fmt.Errorf("missing database configuration for River producer")
 	}
@@ -486,7 +490,7 @@ func buildRiverProducer(ctx context.Context, cfg *config.Config) (*river.Client[
 	}
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-		Schema:              standaloneRiverSchema(cfg),
+		Schema:              schema,
 		SkipUnknownJobCheck: true,
 	})
 	if err != nil {
@@ -666,7 +670,7 @@ func alertingDashboardBaseURL(cfg *config.Config) string {
 	return base
 }
 
-func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider) (*servicesInstances, error) {
+func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver openrails.UsernameResolver) (*servicesInstances, error) {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
@@ -707,8 +711,6 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		Clock:      clock,
 	})
 	railCustomerService := payments.NewRailCustomerService(database)
-	profileRepo := identity.NewProfileRepo(database)
-
 	// Create FX provider for Solana token quoting and policy-currency admission.
 	// Runtime enforcement reads fresh cross-currency rates from Redis; same-currency
 	// paths do not require FX.
@@ -840,7 +842,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		SubscriptionService:          subscriptionService,
 		PaymentService:               purchaseService,
 		SubscriptionLifecycleService: subscriptionLifecycleService,
-		ProfileRepo:                  profileRepo,
+		ProfileRepo:                  usernameResolver,
 		DeduplicationService:         deduplicationService,
 		RailCustomerService:          railCustomerService,
 		RailConfigs:                  railConfigs,
@@ -934,7 +936,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	}, nil
 }
 
-func buildRiverClient(ctx context.Context, cfg *config.Config, workers *river.Workers, middleware []rivertype.Middleware) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {
+func buildRiverClient(ctx context.Context, cfg *config.Config, schema string, workers *river.Workers, middleware []rivertype.Middleware, configurers []func(context.Context, *river.Config) error) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {
 	if cfg.DB == nil {
 		return nil, nil, fmt.Errorf("missing database configuration for River")
 	}
@@ -948,7 +950,7 @@ func buildRiverClient(ctx context.Context, cfg *config.Config, workers *river.Wo
 	}
 
 	drv := riverpgxv5.New(pool)
-	client, err := river.NewClient(drv, &river.Config{
+	riverConfig := &river.Config{
 		Queues: map[string]river.QueueConfig{
 			river.QueueDefault:             {MaxWorkers: standaloneRiverDefaultQueueMaxWorkers},
 			riverjobs.QueueBilling:         {MaxWorkers: standaloneRiverBillingQueueMaxWorkers},
@@ -963,10 +965,17 @@ func buildRiverClient(ctx context.Context, cfg *config.Config, workers *river.Wo
 		// beat refreshing attempted_at it measures silence from a dead process,
 		// not the age of a live job.
 		JobTimeout: riverNoJobTimeout,
-		Schema:     standaloneRiverSchema(cfg),
+		Schema:     schema,
 		Workers:    workers,
 		Middleware: middleware,
-	})
+	}
+	for _, configure := range configurers {
+		if err := configure(ctx, riverConfig); err != nil {
+			pool.Close()
+			return nil, nil, fmt.Errorf("configure River component: %w", err)
+		}
+	}
+	client, err := river.NewClient(drv, riverConfig)
 	if err != nil {
 		pool.Close()
 		return nil, nil, fmt.Errorf("failed creating River client: %w", err)

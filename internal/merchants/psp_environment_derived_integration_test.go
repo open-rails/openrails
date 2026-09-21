@@ -15,7 +15,7 @@ func pspEnvironment(t *testing.T, svc *Service, accountID string) string {
 	t.Helper()
 	var env string
 	require.NoError(t, svc.pool.QueryRow(context.Background(), `
-		SELECT environment FROM openrails.psps WHERE account_id = $1
+		SELECT environment FROM billing.psps WHERE account_id = $1
 	`, accountID).Scan(&env))
 	return env
 }
@@ -44,7 +44,7 @@ func TestUpsertPaymentProviderConfigRefusesDeclaredEnvironment(t *testing.T) {
 
 	var count int
 	require.NoError(t, svc.pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.psps WHERE account_id LIKE '99882%'
+		SELECT count(*) FROM billing.psps WHERE account_id LIKE '99882%'
 	`).Scan(&count))
 	require.Zero(t, count, "a refused arm must never persist the PSP row")
 }

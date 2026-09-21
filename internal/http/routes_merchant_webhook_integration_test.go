@@ -191,7 +191,7 @@ func seedPSP(t *testing.T, pool *pgxpool.Pool, merchantID, provider, accountID s
 func seedArchivedPSPEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO billing.psps (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, $2, $3, $4, true)
 	`, merchantID, provider, environment, accountID)
 	require.NoError(t, err)
@@ -200,7 +200,7 @@ func seedArchivedPSPEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, 
 func seedPSPEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO billing.psps (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, $2, $3, $4, false)
 	`, merchantID, provider, environment, accountID)
 	require.NoError(t, err)

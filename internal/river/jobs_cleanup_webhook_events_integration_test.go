@@ -26,7 +26,7 @@ func TestCleanupWebhookEventsRetention(t *testing.T) {
 	recentID := "evt_retention_recent_" + uuid.NewString()
 	insert := func(eventID string, completedAt time.Time) {
 		_, err := pool.Exec(ctx,
-			`INSERT INTO openrails.webhook_events (merchant_id, op, event_id, created_at, completed_at)
+			`INSERT INTO billing.webhook_events (merchant_id, op, event_id, created_at, completed_at)
 			 VALUES ($1, 'webhook.ccbill.TestEvent', $2, $3, $3)`,
 			dbtest.TestMerchantID.UUID(), eventID, completedAt)
 		require.NoError(t, err)
@@ -34,7 +34,7 @@ func TestCleanupWebhookEventsRetention(t *testing.T) {
 	insert(oldID, now.Add(-91*24*time.Hour))
 	insert(recentID, now.Add(-24*time.Hour))
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.webhook_events WHERE event_id IN ($1, $2)", oldID, recentID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.webhook_events WHERE event_id IN ($1, $2)", oldID, recentID)
 	})
 
 	// Driven through Work on the BARE context a River job actually receives
@@ -47,7 +47,7 @@ func TestCleanupWebhookEventsRetention(t *testing.T) {
 	remaining := func(eventID string) int {
 		var n int
 		require.NoError(t, pool.QueryRow(ctx,
-			"SELECT count(*) FROM openrails.webhook_events WHERE event_id = $1", eventID).Scan(&n))
+			"SELECT count(*) FROM billing.webhook_events WHERE event_id = $1", eventID).Scan(&n))
 		return n
 	}
 	require.Equal(t, 0, remaining(oldID), "expired mark must be deleted")

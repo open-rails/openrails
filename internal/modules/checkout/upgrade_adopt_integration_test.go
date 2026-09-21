@@ -223,7 +223,7 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	oldSubID := uuid.New()
 	periodStart := now.Add(-24 * time.Hour)
 	periodEnd := now.Add(29 * 24 * time.Hour)
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.subscriptions
+	_, err := pool.Exec(ctx, `INSERT INTO billing.subscriptions
 	        (id, price_id, product_id, status, rail, psp_id, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,
 	         payment_method_id, customer_id, merchant_id)
@@ -233,13 +233,13 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE payload->>'user_id' = $1", userID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm.ID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = ANY($1)", []uuid.UUID{oldPriceID, newPriceID})
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = ANY($1)", []uuid.UUID{oldProductID, newProductID})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE payload->>'user_id' = $1", userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pm.ID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = ANY($1)", []uuid.UUID{oldPriceID, newPriceID})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = ANY($1)", []uuid.UUID{oldProductID, newProductID})
 	})
 
 	svc := newUpgradeCheckoutService(dbi, clock, client)

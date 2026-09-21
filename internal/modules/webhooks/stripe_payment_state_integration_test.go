@@ -39,12 +39,12 @@ func TestStripePortalPaymentMethodChangesConvergeFromProviderTruth(t *testing.T)
 	subscriptionID := createStripePaymentStateSubscription(t, ctx, pool, pspID, customerID, productID, "sub_portal", nil)
 	eventPrefix := "evt_stripe_state_" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(baseCtx, "DELETE FROM openrails.reconciliation_findings WHERE subject_key = $1", pspID.String()+":pm_new")
-		_, _ = pool.Exec(baseCtx, "DELETE FROM openrails.webhook_events WHERE event_id LIKE $1", eventPrefix+"%")
-		_, _ = pool.Exec(baseCtx, "DELETE FROM openrails.subscriptions WHERE id = $1", subscriptionID)
-		_, _ = pool.Exec(baseCtx, "DELETE FROM openrails.payment_methods WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(baseCtx, "DELETE FROM openrails.rail_customer_accounts WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(baseCtx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(baseCtx, "DELETE FROM billing.reconciliation_findings WHERE subject_key = $1", pspID.String()+":pm_new")
+		_, _ = pool.Exec(baseCtx, "DELETE FROM billing.webhook_events WHERE event_id LIKE $1", eventPrefix+"%")
+		_, _ = pool.Exec(baseCtx, "DELETE FROM billing.subscriptions WHERE id = $1", subscriptionID)
+		_, _ = pool.Exec(baseCtx, "DELETE FROM billing.payment_methods WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(baseCtx, "DELETE FROM billing.rail_customer_accounts WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(baseCtx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	idem := replaycache.NewStore(nil)
@@ -124,7 +124,7 @@ func TestStripeDetachIsIsolatedToExactPSP(t *testing.T) {
 	pspA := dbtest.EnsureTestPSP(baseCtx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailStripe))
 	pspB := uuid.New()
 	_, err := pool.Exec(baseCtx, `
-		INSERT INTO openrails.psps (id, merchant_id, rail, environment, account_id, key, archived)
+		INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id, key, archived)
 		VALUES ($1, $2, 'stripe', 'test', $3, $4, false)`,
 		pspB, dbtest.TestMerchantID.UUID(), "acct_test_"+uuid.NewString(), "stripe_test_"+uuid.NewString())
 	require.NoError(t, err)
@@ -150,11 +150,11 @@ func TestStripeDetachIsIsolatedToExactPSP(t *testing.T) {
 	subA := createStripePaymentStateSubscription(t, ctxA, pool, pspA, customerID, productA, "sub_a_"+uuid.NewString(), &methodA.ID)
 	subB := createStripePaymentStateSubscription(t, ctxB, pool, pspB, customerID, productB, "sub_b_"+uuid.NewString(), &methodB.ID)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(baseCtx, "DELETE FROM openrails.subscriptions WHERE id = ANY($1::uuid[])", []uuid.UUID{subA, subB})
-		_, _ = pool.Exec(baseCtx, "DELETE FROM openrails.payment_methods WHERE id = ANY($1::uuid[])", []uuid.UUID{methodA.ID, methodB.ID})
-		_, _ = pool.Exec(baseCtx, "DELETE FROM openrails.rail_customer_accounts WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(baseCtx, "DELETE FROM openrails.products WHERE id = ANY($1::uuid[])", []uuid.UUID{productA, productB})
-		_, _ = pool.Exec(baseCtx, "DELETE FROM openrails.psps WHERE id = $1", pspB)
+		_, _ = pool.Exec(baseCtx, "DELETE FROM billing.subscriptions WHERE id = ANY($1::uuid[])", []uuid.UUID{subA, subB})
+		_, _ = pool.Exec(baseCtx, "DELETE FROM billing.payment_methods WHERE id = ANY($1::uuid[])", []uuid.UUID{methodA.ID, methodB.ID})
+		_, _ = pool.Exec(baseCtx, "DELETE FROM billing.rail_customer_accounts WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(baseCtx, "DELETE FROM billing.products WHERE id = ANY($1::uuid[])", []uuid.UUID{productA, productB})
+		_, _ = pool.Exec(baseCtx, "DELETE FROM billing.psps WHERE id = $1", pspB)
 	})
 
 	parked, err := payments.ParkDetachedStripePaymentMethod(ctxA, dbi, "pm_shared")
@@ -244,7 +244,7 @@ func createStripePaymentStateProduct(t *testing.T, ctx context.Context, pool gen
 	now := time.Now().UTC()
 	id := uuid.New()
 	description := "Stripe payment-state test"
-	_, err := gen.New(pool).CreateProduct(ctx, gen.CreateProductParams{
+	_, err := dbtest.Queries(pool).CreateProduct(ctx, gen.CreateProductParams{
 		ID: id, MerchantID: dbtest.TestMerchantID.UUID(), Key: "stripe_state_" + uuid.NewString(),
 		DisplayName: "Stripe state", Description: &description, CreatedAt: now, UpdatedAt: now,
 	})
@@ -265,7 +265,7 @@ func createStripePaymentStateSubscription(
 	t.Helper()
 	now := time.Now().UTC()
 	id := uuid.New()
-	_, err := gen.New(pool).CreateSubscription(ctx, gen.CreateSubscriptionParams{
+	_, err := dbtest.Queries(pool).CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID: id, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: customerID,
 		ProductID: productID, Status: string(models.StatusActive), StartedAt: now,
 		Rail: string(models.RailStripe), RailSubscriptionID: railSubscriptionID,
@@ -286,7 +286,7 @@ func requireStripeMethod(t *testing.T, ctx context.Context, dbi *db.DB, pspID uu
 
 func requireSubscription(t *testing.T, ctx context.Context, pool gen.DBTX, id uuid.UUID) gen.OpenrailsSubscription {
 	t.Helper()
-	subscription, err := gen.New(pool).GetSubscriptionByID(ctx, id)
+	subscription, err := dbtest.Queries(pool).GetSubscriptionByID(ctx, id)
 	require.NoError(t, err)
 	return subscription
 }
@@ -295,7 +295,7 @@ func stripeDetachedFindingCount(t *testing.T, ctx context.Context, pool gen.DBTX
 	t.Helper()
 	var count int64
 	err := pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.reconciliation_findings
+		SELECT count(*) FROM billing.reconciliation_findings
 		WHERE finding_type = 'consistency.stripe_payment_method_detached'
 		  AND subject_key = $1`, pspID.String()+":"+methodRef).Scan(&count)
 	require.NoError(t, err)
@@ -305,7 +305,7 @@ func stripeDetachedFindingCount(t *testing.T, ctx context.Context, pool gen.DBTX
 func countStripeMethods(t *testing.T, ctx context.Context, pool gen.DBTX, pspID uuid.UUID) int64 {
 	t.Helper()
 	var count int64
-	err := pool.QueryRow(ctx, `SELECT count(*) FROM openrails.payment_methods WHERE rail = 'stripe' AND psp_id = $1`, pspID).Scan(&count)
+	err := pool.QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE rail = 'stripe' AND psp_id = $1`, pspID).Scan(&count)
 	require.NoError(t, err)
 	return count
 }

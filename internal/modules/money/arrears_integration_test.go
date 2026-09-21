@@ -49,7 +49,7 @@ func TestAccrueOwed_ConcurrentSameCoords(t *testing.T) {
 
 	var n int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.ledger_transfers
+		`SELECT count(*) FROM billing.ledger_transfers
 		 WHERE customer_id=$1 AND currency=$2 AND transfer_type='owed_accrual' AND source='usage' AND source_id='race-1'`,
 		payer.UUID(), cur).Scan(&n))
 	require.Equal(t, 1, n, "the ledger carries the debt exactly once")

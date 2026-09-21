@@ -46,7 +46,7 @@ type sfDriftWorker struct {
 func (sfDriftWorker) Work(context.Context, *river.Job[sfDriftArgs]) error {
 	return fmt.Errorf("catalog reconciliation: list armed merchants: %w", &pgconn.PgError{
 		Code:     "42883",
-		Message:  "function openrails.psp_rail_merchant_ids(text[], integer) does not exist",
+		Message:  "function billing.psp_rail_merchant_ids(text[], integer) does not exist",
 		Severity: "ERROR",
 	})
 }

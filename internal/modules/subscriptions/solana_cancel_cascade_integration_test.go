@@ -61,10 +61,10 @@ func TestCancelMembership_CascadesToSolanaCranker(t *testing.T) {
 	require.NoError(t, solRepo.Upsert(ctx, solRow))
 
 	t.Cleanup(func() {
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.solana_subscriptions WHERE subscription_id = $1", subID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.solana_subscriptions WHERE subscription_id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	// Sanity: ListDue returns it before cancellation.
@@ -109,9 +109,9 @@ func TestCancelMembership_SolanaWithoutEnrolledRow(t *testing.T) {
 	insertCatalogAndSub(ctx, t, dbi, now, billingDays, productID, priceID, subID, userID, now, now.Add(30*24*time.Hour))
 
 	t.Cleanup(func() {
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	lifecycle := newLifecycleForTest(dbi)
@@ -124,7 +124,7 @@ func TestCancelMembership_SolanaWithoutEnrolledRow(t *testing.T) {
 
 	var subStatus string
 	require.NoError(t, dbi.Pool().QueryRow(ctx,
-		"SELECT status FROM openrails.subscriptions WHERE id = $1", subID,
+		"SELECT status FROM billing.subscriptions WHERE id = $1", subID,
 	).Scan(&subStatus))
 	require.Equal(t, string(models.StatusCancelled), subStatus)
 }
@@ -144,10 +144,10 @@ func TestCancelMembership_SolanaCascadeFailureRollsBack(t *testing.T) {
 	solRow := newDueSolanaSubscription(now, subID)
 	require.NoError(t, solRepo.Upsert(ctx, solRow))
 	t.Cleanup(func() {
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.solana_subscriptions WHERE subscription_id = $1", subID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.solana_subscriptions WHERE subscription_id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	lifecycle := newLifecycleForTest(dbi)
@@ -161,7 +161,7 @@ func TestCancelMembership_SolanaCascadeFailureRollsBack(t *testing.T) {
 	require.ErrorIs(t, err, injected)
 
 	var parentStatus string
-	require.NoError(t, dbi.Pool().QueryRow(ctx, "SELECT status FROM openrails.subscriptions WHERE id = $1", subID).Scan(&parentStatus))
+	require.NoError(t, dbi.Pool().QueryRow(ctx, "SELECT status FROM billing.subscriptions WHERE id = $1", subID).Scan(&parentStatus))
 	require.Equal(t, string(models.StatusActive), parentStatus, "cascade failure must roll the parent cancellation back")
 	got, err := solRepo.GetBySubscriptionID(ctx, subID)
 	require.NoError(t, err)
@@ -173,7 +173,7 @@ func TestCancelMembership_SolanaCascadeFailureRollsBack(t *testing.T) {
 		CancelType:     models.CancelTypeUser,
 		RevokeAccess:   true,
 	}))
-	require.NoError(t, dbi.Pool().QueryRow(ctx, "SELECT status FROM openrails.subscriptions WHERE id = $1", subID).Scan(&parentStatus))
+	require.NoError(t, dbi.Pool().QueryRow(ctx, "SELECT status FROM billing.subscriptions WHERE id = $1", subID).Scan(&parentStatus))
 	require.Equal(t, string(models.StatusCancelled), parentStatus)
 	got, err = solRepo.GetBySubscriptionID(ctx, subID)
 	require.NoError(t, err)
@@ -195,10 +195,10 @@ func TestListDueSolanaSubscriptions_ExcludesTerminalParent(t *testing.T) {
 	solRow := newDueSolanaSubscription(now, subID)
 	require.NoError(t, solRepo.Upsert(ctx, solRow))
 	t.Cleanup(func() {
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.solana_subscriptions WHERE subscription_id = $1", subID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.solana_subscriptions WHERE subscription_id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	due, err := solRepo.ListDue(ctx, now, 0)
@@ -206,7 +206,7 @@ func TestListDueSolanaSubscriptions_ExcludesTerminalParent(t *testing.T) {
 	require.True(t, containsSolanaSub(due, solRow.ID))
 
 	_, err = dbi.Pool().Exec(ctx,
-		`UPDATE openrails.subscriptions
+		`UPDATE billing.subscriptions
 		 SET status = 'cancelled', cancel_type = 'user', cancelled_at = $2, ended_at = $2, updated_at = $2
 		 WHERE id = $1`, subID, now)
 	require.NoError(t, err)
@@ -237,7 +237,7 @@ func newDueSolanaSubscription(now time.Time, subID uuid.UUID) *models.SolanaSubs
 
 func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time.Time, billingDays int, productID, priceID, subID uuid.UUID, userID string, periodStart, paidEnd time.Time) {
 	t.Helper()
-	q := gen.New(dbi.Pool())
+	q := dbtest.Queries(dbi.Pool())
 
 	entSpec, err := json.Marshal(map[string]*int{"premium": nil})
 	require.NoError(t, err)

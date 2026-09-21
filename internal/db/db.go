@@ -191,9 +191,13 @@ func (d *DB) Close() error {
 // NewWithPgxTx returns a DB scoped to an open pgx transaction: Qx/Gen return
 // the transaction, so repos called with this DB run inside it.
 func NewWithPgxTx(tx pgx.Tx) *DB {
-	return &DB{pgtx: tx}
+	if scoped, ok := tx.(schemaTx); ok {
+		return &DB{pgtx: tx, rw: scoped.rw}
+	}
+	rw := newSchemaRewriter("")
+	return &DB{pgtx: rw.wrapTx(tx), rw: rw}
 }
 
 func (d *DB) NewWithPgxTx(tx pgx.Tx) *DB {
-	return &DB{pgtx: tx, rw: d.rw}
+	return &DB{pgtx: d.rw.wrapTx(tx), rw: d.rw}
 }

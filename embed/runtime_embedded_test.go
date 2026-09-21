@@ -89,16 +89,10 @@ func TestNewRejectsUnsetPostureBeforeTouchingTheDatabase(t *testing.T) {
 	require.ErrorContains(t, err, "config.TestMode is required")
 }
 
-// #895: an undeclared River owner is refused BEFORE the posture checks and
-// before any DB work — a host that forgot the fleet entirely must never get an
-// engine back, because every read API would keep working while the money stops.
-func TestNewRequiresRiverOwnership(t *testing.T) {
-	cfg := &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox}
-	_, err := New(context.Background(), Options{Config: cfg})
-	require.ErrorIs(t, err, ErrRiverRequired)
-
-	// And the declaration is the ONLY thing that changes: with it, construction
-	// proceeds far enough to reach the ordinary DB-dependent failure.
-	_, err = New(context.Background(), Options{Config: cfg, River: RiverManagedByOpenRails()})
-	require.NotErrorIs(t, err, ErrRiverRequired)
+// Omitting River selects a managed fleet and reaches normal posture validation.
+func TestNewDefaultsRiverOwnership(t *testing.T) {
+	_, err := New(context.Background(), Options{Config: &config.Config{}})
+	require.ErrorContains(t, err, "config.Env is required")
+	_, err = New(context.Background(), Options{Config: &config.Config{}, River: RiverFromHost(nil)})
+	require.ErrorContains(t, err, "non-nil binder")
 }

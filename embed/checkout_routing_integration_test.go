@@ -67,7 +67,7 @@ func bootRoutingFixture(
 	t.Cleanup(func() {
 		appDB := dbtest.OpenMerchantDB(t, id.UUID())
 		_, _ = appDB.Pool().Exec(context.Background(),
-			`DELETE FROM openrails.merchant_configurations WHERE merchant_id = $1`, id.UUID())
+			`DELETE FROM billing.merchant_configurations WHERE merchant_id = $1`, id.UUID())
 	})
 
 	// The catalog is pushed with only the ccbill link (operator-owned, so the
@@ -189,7 +189,7 @@ func sessionRoutingReason(t *testing.T, ctx context.Context, mid merchant.ID, se
 	t.Helper()
 	appDB := dbtest.OpenMerchantDB(t, mid.UUID())
 	require.NoError(t, appDB.Pool().QueryRow(ctx,
-		`SELECT rail, routing_reason FROM openrails.checkout_sessions WHERE merchant_id = $1`,
+		`SELECT rail, routing_reason FROM billing.checkout_sessions WHERE merchant_id = $1`,
 		mid.UUID()).Scan(&rail, &reason))
 	return rail, reason
 }
@@ -249,7 +249,7 @@ func TestCheckoutRoutingPolicyDecidesRecordsAndDryRuns(t *testing.T) {
 	var appDB = dbtest.OpenMerchantDB(t, fx.merchantID.UUID())
 	var sessionCount int
 	require.NoError(t, appDB.Pool().QueryRow(ctx,
-		`SELECT count(*) FROM openrails.checkout_sessions WHERE merchant_id = $1`, fx.merchantID.UUID()).Scan(&sessionCount))
+		`SELECT count(*) FROM billing.checkout_sessions WHERE merchant_id = $1`, fx.merchantID.UUID()).Scan(&sessionCount))
 	require.Zero(t, sessionCount, "a dry run must not create a session")
 
 	// The real checkout, with NO payment.rail, makes the same decision.

@@ -155,9 +155,9 @@ func newPaymentMethodUpdateFixture(t *testing.T) *paymentMethodUpdateFixture {
 	runner := &Runner{Store: store, Registry: NewRegistry(handler), Config: fullModeConfig()}
 	through := &PaymentMethodUpdateThrough{Runner: runner, DB: dbi}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = $1 AND idempotency_key = $2",
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE intent_type = $1 AND idempotency_key = $2",
 			TypeNMIPaymentMethodUpdate, NMIPaymentMethodUpdateIdempotencyKey(pm.ID, token))
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm.ID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pm.ID)
 	})
 	return &paymentMethodUpdateFixture{
 		db: dbi, runner: runner, handler: handler, through: through, gateway: gateway,
@@ -175,7 +175,7 @@ func (fx *paymentMethodUpdateFixture) execute(t *testing.T) paymentmethods.Payme
 func (fx *paymentMethodUpdateFixture) intent(t *testing.T) (status string, payload []byte, evidence []byte) {
 	t.Helper()
 	err := fx.db.Pool().QueryRow(fx.ctx,
-		`SELECT status, payload, result_evidence FROM openrails.rail_intents WHERE intent_type = $1 AND idempotency_key = $2`,
+		`SELECT status, payload, result_evidence FROM billing.rail_intents WHERE intent_type = $1 AND idempotency_key = $2`,
 		TypeNMIPaymentMethodUpdate, NMIPaymentMethodUpdateIdempotencyKey(fx.pm.ID, *fx.request.PaymentToken),
 	).Scan(&status, &payload, &evidence)
 	require.NoError(t, err)
@@ -186,11 +186,11 @@ func (fx *paymentMethodUpdateFixture) mutationPhases(t *testing.T) []string {
 	t.Helper()
 	var id uuid.UUID
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		`SELECT id FROM openrails.rail_intents WHERE intent_type = $1 AND idempotency_key = $2`,
+		`SELECT id FROM billing.rail_intents WHERE intent_type = $1 AND idempotency_key = $2`,
 		TypeNMIPaymentMethodUpdate, NMIPaymentMethodUpdateIdempotencyKey(fx.pm.ID, *fx.request.PaymentToken),
 	).Scan(&id))
 	rows, err := fx.db.Pool().Query(fx.ctx,
-		`SELECT phase FROM openrails.rail_mutation_logs WHERE rail_intent_id = $1 ORDER BY created_at, id`, id)
+		`SELECT phase FROM billing.rail_mutation_logs WHERE rail_intent_id = $1 ORDER BY created_at, id`, id)
 	require.NoError(t, err)
 	defer rows.Close()
 	var phases []string

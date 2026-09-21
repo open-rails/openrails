@@ -243,7 +243,7 @@ func runProviderArchiveLifecycle(t *testing.T, ctx context.Context, s providerAr
 	require.NoError(t, err)
 	var sessionPSP uuid.UUID
 	require.NoError(t, dbtest.SharedMerchantPool(t, s.mid.UUID()).QueryRow(ctx,
-		`SELECT psp_id FROM openrails.checkout_sessions WHERE merchant_id = $1 AND id = $2`, s.mid.UUID(), session.ID.UUID()).Scan(&sessionPSP))
+		`SELECT psp_id FROM billing.checkout_sessions WHERE merchant_id = $1 AND id = $2`, s.mid.UUID(), session.ID.UUID()).Scan(&sessionPSP))
 	require.Equal(t, b.ID, sessionPSP, "the new session is pinned to the active account")
 
 	// B is now the rail's only active account: refused without the override.

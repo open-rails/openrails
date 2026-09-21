@@ -85,7 +85,7 @@ func TestChargeOutstanding_StoredCredentialMITRequiresScopedAnchor(t *testing.T)
 				if scoped {
 					anchor = "approved-unscheduled-cit"
 				}
-				_, err := pool.Exec(ctx, `UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref=$2,initial_transaction_id=$3 WHERE id=$1`, pm, anchor, initial)
+				_, err := pool.Exec(ctx, `UPDATE billing.payment_methods SET stored_credential_unscheduled_ref=$2,initial_transaction_id=$3 WHERE id=$1`, pm, anchor, initial)
 				require.NoError(t, err)
 				if !scoped {
 					err := svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm)
@@ -107,7 +107,7 @@ func TestChargeOutstanding_StoredCredentialMITRequiresScopedAnchor(t *testing.T)
 				require.Equal(t, "used", form.Get("stored_credential_indicator"))
 				require.Equal(t, anchor, form.Get("initial_transaction_id"))
 				var retained string
-				require.NoError(t, pool.QueryRow(ctx, "SELECT stored_credential_unscheduled_ref FROM openrails.payment_methods WHERE id=$1", pm).Scan(&retained))
+				require.NoError(t, pool.QueryRow(ctx, "SELECT stored_credential_unscheduled_ref FROM billing.payment_methods WHERE id=$1", pm).Scan(&retained))
 				require.Equal(t, anchor, retained, "MIT never replaces the approved CIT anchor")
 			})
 		}

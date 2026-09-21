@@ -43,11 +43,11 @@ func TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant(t *testing.T) 
 	const accountID = "acct_no_default_merchant"
 	// The harness runs test_mode ⇒ posture resolves environment=test rows (#681).
 	_, err = fixturePool.Exec(ctx, `
-		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived)
+		INSERT INTO billing.psps (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, 'stripe', 'test', $2, false)
 		ON CONFLICT (rail, environment, account_id) DO UPDATE
 		SET archived = false, updated_at = now()
-		WHERE openrails.psps.merchant_id = EXCLUDED.merchant_id
+		WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
 	`, dbtest.TestMerchantID.String(), accountID)
 	require.NoError(t, err)
 	secretName, err := merchants.PSPSecretName("stripe", "test", accountID, "webhook_signing_secret")

@@ -51,9 +51,9 @@ func TestReconcileUnknownCohort_CCBillProbeResolves(t *testing.T) {
 			cust := dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 			prod, price := uuid.New(), uuid.New()
 			prices[id] = price
-			exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "ccp-"+railSub, merchantID)
-			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
-			exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+			exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "ccp-"+railSub, merchantID)
+			exec(`INSERT INTO billing.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
+			exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
 			      VALUES ($1,$2,$3,$4,$5,'unknown','ccbill',$6,$7,$7,$8,$9)`, id, merchantID, cust, prod, price, railSub, start, periodEnd, pspID)
 		}
 		mk(subAlive, rsAlive)
@@ -63,12 +63,12 @@ func TestReconcileUnknownCohort_CCBillProbeResolves(t *testing.T) {
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for id, price := range prices {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE source_id=$1`, id)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE subscription_id=$1`, id)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, id)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE source_id=$1`, id)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE subscription_id=$1`, id)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, id)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, price)
 			}
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE key LIKE 'ccp-cc-probe-%'||$1`, sfx)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE key LIKE 'ccp-cc-probe-%'||$1`, sfx)
 			return nil
 		})
 	})
@@ -113,13 +113,13 @@ func TestReconcileUnknownCohort_CCBillProbeResolves(t *testing.T) {
 		var status string
 		var end *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, current_period_ends_at FROM openrails.subscriptions WHERE id=$1`, subAlive).Scan(&status, &end))
+			`SELECT status, current_period_ends_at FROM billing.subscriptions WHERE id=$1`, subAlive).Scan(&status, &end))
 		assert.Equal(t, "active", status, "provider-alive: adopted back to active")
 		require.NotNil(t, end)
 		assert.True(t, end.After(now), "adopted the provider's future boundary")
 
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status FROM openrails.subscriptions WHERE id=$1`, subDead).Scan(&status))
+			`SELECT status FROM billing.subscriptions WHERE id=$1`, subDead).Scan(&status))
 		assert.Equal(t, "cancelled", status, "provider-dead: resolved cancelled")
 		return nil
 	}))

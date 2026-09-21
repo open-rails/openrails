@@ -1,11 +1,7 @@
-// Package authkit is the OPT-IN AuthKit verifier adapter for embedded hosts
-// (#284). The embedded CORE (pkg/embedded.New -> app.BootstrapWithOptions ->
-// internal/app) deliberately does NOT import AuthKit. Hosts (and the OpenRails
-// standalone binary) that want the AuthKit JWT-verifier auth boundary opt in
-// here and pass the result at HTTP mount time.
-//
-// Importing this package is what pulls github.com/open-rails/authkit onto a
-// host's dependency graph; pkg/embedded itself stays AuthKit-free.
+// Package authkit provides opt-in AuthKit authentication and directory adapters.
+// Hosts pass authenticators at HTTP mount time and NewDirectory through
+// embed.Options.UserDirectory and UsernameResolver. Billing depends on neutral
+// contracts; these adapters use AuthKit's public APIs.
 //
 // # Two ways in
 //
@@ -34,9 +30,7 @@
 // banned or deleted subject keeps a valid token until it expires, and a grant
 // like "is this user a billing admin?" is a live DB read, not a claim. Hosts
 // that had to hand-roll a bridge for those two decisions (host-one #803) plug
-// them in here instead. OpenRails never learns what a host's admission or
-// grant authority IS — the host injects it, and no OpenRails package imports
-// authkit's client to go looking.
+// them in here instead. The host injects its admission and grant authority.
 package authkit
 
 import (

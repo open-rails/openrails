@@ -39,15 +39,15 @@ func TestPrunePSPExcess(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.psps (id, merchant_id, rail, account_id, archived) VALUES ($1,$2,'nmi',$3,false)`,
+		exec(`INSERT INTO billing.psps (id, merchant_id, rail, account_id, archived) VALUES ($1,$2,'nmi',$3,false)`,
 			paID, merchantID, "acct-"+suffix)
 		// One product+price per sub (uq_subscriptions_customer_product_lifecycle
 		// forbids multiple live subs per customer/product).
 		sub := func(id, prodID, priceID uuid.UUID, tag, psub string) {
-			exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
+			exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 				prodID, "prune-"+tag+"-"+suffix, "prune-tier-"+tag+"-"+suffix, merchantID)
-			exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`, priceID, prodID, merchantID)
-			exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, psp_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
+			exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`, priceID, prodID, merchantID)
+			exec(`INSERT INTO billing.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, psp_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 			      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9)`,
 				id, priceID, prodID, psub, paID, time.Now().Add(-20*24*time.Hour), time.Now().Add(10*24*time.Hour), customer, merchantID)
 		}
@@ -55,18 +55,18 @@ func TestPrunePSPExcess(t *testing.T) {
 		sub(subGone, prodGone, priceGone, "gone", psubGone)
 		sub(subGrant, prodGrant, priceGrant, "grant", psubGrant)
 		// subGrant fed the grant ledger -> entangled -> must be skipped by prune.
-		exec(`INSERT INTO openrails.grants (merchant_id, customer_id, kind, source_type, source_id, event) VALUES ($1,$2,'entitlement','subscription',$3,'grant')`,
+		exec(`INSERT INTO billing.grants (merchant_id, customer_id, kind, source_type, source_id, event) VALUES ($1,$2,'entitlement','subscription',$3,'grant')`,
 			merchantID, customer, subGrant.String())
 		return nil
 	}))
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=ANY($1)`, []uuid.UUID{subKeep, subGone, subGrant})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=ANY($1)`, []uuid.UUID{priceKeep, priceGone, priceGrant})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=ANY($1)`, []uuid.UUID{prodKeep, prodGone, prodGrant})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.psps WHERE id=$1`, paID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=ANY($1)`, []uuid.UUID{subKeep, subGone, subGrant})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=ANY($1)`, []uuid.UUID{priceKeep, priceGone, priceGrant})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=ANY($1)`, []uuid.UUID{prodKeep, prodGone, prodGrant})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.psps WHERE id=$1`, paID)
 			return nil
 		})
 	})
@@ -88,12 +88,12 @@ func TestPrunePSPExcess(t *testing.T) {
 	// removed — subRowPresent proves that separately.
 	subExists := func(ctx context.Context, id uuid.UUID) bool {
 		var n int
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.subscriptions WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&n))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.subscriptions WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&n))
 		return n == 1
 	}
 	subRowPresent := func(ctx context.Context, id uuid.UUID) bool {
 		var n int
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.subscriptions WHERE id=$1`, id).Scan(&n))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.subscriptions WHERE id=$1`, id).Scan(&n))
 		return n == 1
 	}
 
@@ -195,33 +195,33 @@ func TestPrunePSPExcess_PaymentsRequireCompleteWindow(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.psps (id, merchant_id, rail, account_id, archived) VALUES ($1,$2,'nmi',$3,false)`,
+		exec(`INSERT INTO billing.psps (id, merchant_id, rail, account_id, archived) VALUES ($1,$2,'nmi',$3,false)`,
 			paID, merchantID, "acct-pay-"+suffix)
-		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
+		exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			productID, "prune-pay-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
 			priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, psp_id)
+		exec(`INSERT INTO billing.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, psp_id)
 		      VALUES ($1,$2,'nmi','txn-keep-' || $3,999,999,'USD','completed',$4,$5,$6,$7)`,
 			payKeep, priceID, suffix, since.Add(24*time.Hour), customer, merchantID, paID)
-		exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, psp_id)
+		exec(`INSERT INTO billing.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, psp_id)
 		      VALUES ($1,$2,'nmi','txn-gone-' || $3,999,999,'USD','completed',$4,$5,$6,$7)`,
 			payGone, priceID, suffix, since.Add(48*time.Hour), customer, merchantID, paID)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=ANY($1)`, []uuid.UUID{payKeep, payGone})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.psps WHERE id=$1`, paID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE id=ANY($1)`, []uuid.UUID{payKeep, payGone})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.psps WHERE id=$1`, paID)
 			return nil
 		})
 	})
 
 	paymentExists := func(ctx context.Context, id uuid.UUID) bool {
 		var n int
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&n))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&n))
 		return n == 1
 	}
 	binding := PSPBinding{ID: paID, Rail: "nmi", AccountID: "acct-pay-" + suffix}

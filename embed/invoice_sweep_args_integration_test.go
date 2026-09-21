@@ -92,7 +92,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	// Ledger reads go through a merchant-pinned connection: the tables force RLS.
 	ledger := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	var ledgerRows int
-	require.NoError(t, ledger.QueryRow(ctx, `SELECT count(*) FROM openrails.ledger_transfers WHERE customer_id = $1`, payer).Scan(&ledgerRows))
+	require.NoError(t, ledger.QueryRow(ctx, `SELECT count(*) FROM billing.ledger_transfers WHERE customer_id = $1`, payer).Scan(&ledgerRows))
 	require.Zero(t, ledgerRows, "precondition: the payer has no ledger row before rating")
 
 	sweep := func() {
@@ -139,7 +139,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	require.Equal(t, inv.ID, again[0].ID)
 	require.Equal(t, fee, again[0].AmountDue)
 	var accrued int64
-	require.NoError(t, ledger.QueryRow(ctx, `SELECT COALESCE(SUM(amount), 0) FROM openrails.ledger_transfers
+	require.NoError(t, ledger.QueryRow(ctx, `SELECT COALESCE(SUM(amount), 0) FROM billing.ledger_transfers
 		WHERE customer_id = $1 AND transfer_type = 'owed_accrual'`, payer).Scan(&accrued))
 	require.Equal(t, fee, accrued, "exactly-once rating across host-inserted sweeps")
 }

@@ -49,25 +49,25 @@ func seedSystemDeleteSubscription(ctx context.Context, t *testing.T, dbi *db.DB)
 		require.NoError(t, err)
 	}
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, f.merchant, "nmi")
-	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+	exec(`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "cool-prod-"+uuid.NewString()[:8], f.merchant)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, f.merchant)
 	// Period ended 10 days ago: the dominant automated shape (dunning exhausted
 	// on a lapsed period), and no known future rebill to clamp the window to.
-	exec(`INSERT INTO openrails.subscriptions
+	exec(`INSERT INTO billing.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
 	      VALUES ($1, $2, $3, 'past_due', 'nmi', $4, $5, $6, $5, $7, $8, $9)`,
 		f.subID, priceID, productID, f.psid, now.Add(-40*24*time.Hour), now.Add(-10*24*time.Hour), f.custID, f.merchant, pspID)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.rail_mutation_logs
-			WHERE rail_intent_id IN (SELECT id FROM openrails.rail_intents WHERE subscription_id = $1)`, f.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", f.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", f.custID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", f.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.rail_mutation_logs
+			WHERE rail_intent_id IN (SELECT id FROM billing.rail_intents WHERE subscription_id = $1)`, f.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE subscription_id = $1", f.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.notifications WHERE customer_id = $1", f.custID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", f.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 	return f
 }
@@ -98,7 +98,7 @@ func TestSystemOriginDeleteHasACoolingOffWindow(t *testing.T) {
 	var subStatus string
 	var marker *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status, deletion_scheduled_at FROM openrails.subscriptions WHERE id = $1`, f.subID).
+		`SELECT status, deletion_scheduled_at FROM billing.subscriptions WHERE id = $1`, f.subID).
 		Scan(&subStatus, &marker))
 	require.Equal(t, "cancelled", subStatus)
 	require.NotNil(t, marker)
@@ -107,7 +107,7 @@ func TestSystemOriginDeleteHasACoolingOffWindow(t *testing.T) {
 	var dueAt time.Time
 	var origin string
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT id, next_attempt_at, origin FROM openrails.rail_intents
+		`SELECT id, next_attempt_at, origin FROM billing.rail_intents
 		  WHERE subscription_id = $1 AND intent_type = $2`, f.subID, TypeNMIDeleteSubscription).
 		Scan(&intentID, &dueAt, &origin))
 	assert.Equal(t, string(OriginSystem), origin)
@@ -136,9 +136,9 @@ func TestSystemOriginDeleteHasACoolingOffWindow(t *testing.T) {
 	// converge pass that resurrects the row, an operator undo). The delete is due
 	// now — and supersedes itself instead of firing.
 	_, err = pool.Exec(ctx,
-		`UPDATE openrails.subscriptions SET status='active', deletion_scheduled_at=NULL WHERE id=$1`, f.subID)
+		`UPDATE billing.subscriptions SET status='active', deletion_scheduled_at=NULL WHERE id=$1`, f.subID)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1`, intentID)
+	_, err = pool.Exec(ctx, `UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1`, intentID)
 	require.NoError(t, err)
 	_, err = runner.RunExecuteOnce(ctx)
 	require.NoError(t, err)
@@ -162,7 +162,7 @@ func TestSystemOriginDeleteIsCountedByTheRateCeiling(t *testing.T) {
 	for i := 0; i < PerMerchantSystemHourlyCeiling; i++ {
 		id := uuid.New()
 		_, err := pool.Exec(ctx,
-			`INSERT INTO openrails.rail_intents
+			`INSERT INTO billing.rail_intents
 			   (id, merchant_id, rail, psp_id, intent_type, idempotency_key, status, origin, next_attempt_at, created_at)
 			 VALUES ($1, $2, 'mobius', $3, $4, $5, 'pending', 'system', now(), now())`,
 			id, f.merchant, ceilingPspID, TypeNMIPaymentMethodDelete, TypeNMIPaymentMethodDelete+":ceil:"+uuid.NewString())
@@ -170,9 +170,9 @@ func TestSystemOriginDeleteIsCountedByTheRateCeiling(t *testing.T) {
 		seeded = append(seeded, id)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM openrails.rail_intents WHERE id = ANY($1)`, seeded)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM billing.rail_intents WHERE id = ANY($1)`, seeded)
 		_, _ = pool.Exec(context.Background(),
-			`DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1 AND subject_key = $2`,
+			`DELETE FROM billing.reconciliation_findings WHERE merchant_id = $1 AND subject_key = $2`,
 			f.merchant, "system:"+f.merchant.String())
 	})
 
@@ -192,18 +192,18 @@ func TestSystemOriginDeleteIsCountedByTheRateCeiling(t *testing.T) {
 
 	var status string
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status FROM openrails.subscriptions WHERE id = $1`, f.subID).Scan(&status))
+		`SELECT status FROM billing.subscriptions WHERE id = $1`, f.subID).Scan(&status))
 	assert.Equal(t, "past_due", status, "the refused op must leave the customer's subscription untouched")
 
 	var queued int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.rail_intents WHERE subscription_id = $1`, f.subID).Scan(&queued))
+		`SELECT count(*) FROM billing.rail_intents WHERE subscription_id = $1`, f.subID).Scan(&queued))
 	assert.Zero(t, queued, "fail-closed: no write-ahead delete intent exists, so the delete cannot happen")
 
 	// And the operator hears about it.
 	var findings int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.reconciliation_findings
+		`SELECT count(*) FROM billing.reconciliation_findings
 		  WHERE merchant_id = $1 AND finding_type = $2 AND subject_key = $3 AND status = 'requires_review'`,
 		f.merchant, RateCeilingTrippedFindingType, "system:"+f.merchant.String()).Scan(&findings))
 	assert.Equal(t, 1, findings)
