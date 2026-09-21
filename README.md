@@ -176,10 +176,10 @@ build yourself, badly, under deadline:
   alone. A lost webhook, a dead pipe, or stale data parks the subscription for
   verification with access intact. Terminal cancellation is the last resort, not the
   default.
-- **Database-enforced merchant isolation.** Multi-merchant isolation isn't application
-  code you have to trust — it's Postgres row-level security on an unprivileged role,
-  with every merchant-scoped table behind a policy. A query without merchant context
-  returns nothing, by construction.
+- **Explicit merchant isolation.** Authorization selects the merchant; scoped SQL
+  predicates and composite relationships keep its records separate. Isolation
+  works with the application's owning database connection. Platform discovery
+  and cross-merchant operations have explicit entrypoints.
 - **Time is injected, and the build enforces it.** Every billing decision runs on an
   injectable clock, guarded by a lint that fails the build on naked `time.Now()` in
   business logic. That's why a year of renewals, dunning, and expiry can be

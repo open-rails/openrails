@@ -11,7 +11,6 @@
 
 # --- PERMANENT: the DB layer itself -----------------------------------------
 PERMANENT internal/db/db_pgx.go            # MerchantTx GUC + tx plumbing
-PERMANENT internal/db/rls.go               # RLS role/GUC probes
 PERMANENT internal/db/schema_rewrite.go    # execution-time schema rewriting wrapper
 PERMANENT internal/db/merchant_scope.go    # reads the app.merchant_id GUC (current_setting)
 PERMANENT internal/integrationharness/harness.go  # sets the app.merchant_id GUC (set_config)

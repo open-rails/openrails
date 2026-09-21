@@ -82,8 +82,13 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 		merchantID := *mid
 		progress.Mark(ctx, "credit expiry merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, merchant.ID(merchantID), "credit expiry sweep", func(ctx context.Context) error {
+			scopeMerchantID, scopeErr := merchant.Require(ctx)
+			if scopeErr != nil {
+				return scopeErr
+			}
 			rows, err := w.DB.Gen(ctx).ListCustomersWithLapsedCreditLots(ctx, gen.ListCustomersWithLapsedCreditLotsParams{
-				AsOf: now, BatchSize: batchSize32,
+				MerchantID: scopeMerchantID.UUID(),
+				AsOf:       now, BatchSize: batchSize32,
 			})
 			if err != nil {
 				return fmt.Errorf("list customers with lapsed credit lots: %w", err)

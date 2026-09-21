@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	boot "github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -490,7 +491,11 @@ func resolvePullPSPTarget(ctx context.Context, rt *pullProviderRuntime, pspStr s
 	if err != nil {
 		return "", reconcile.PSPBinding{}, fmt.Errorf("invalid --provider-account UUID: %w", err)
 	}
-	account, err := rt.DB.Gen(ctx).GetPSP(ctx, id)
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return "", reconcile.PSPBinding{}, err
+	}
+	account, err := rt.DB.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{ID: id, MerchantID: mid.UUID()})
 	if err != nil {
 		return "", reconcile.PSPBinding{}, fmt.Errorf("load PSP %s: %w", id, err)
 	}

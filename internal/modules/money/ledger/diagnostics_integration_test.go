@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -58,18 +59,14 @@ func TestLedgerDiagnostics_CatchTriggerBypassDrift(t *testing.T) {
 
 	// Repair the log and the diagnostics go quiet again — the check is precise,
 	// not permanently red.
-	_, err = ledgerOwnerPool(t).Exec(ctx,
-		`DELETE FROM billing.ledger_transfers WHERE merchant_id = $1 AND currency = $2 AND source = '833_test_bypass'`,
-		merchantID, cur)
-	require.NoError(t, err)
+	mutateDiagnosticFixture(t, ctx, "ledger_transfers", "immutable_ledger_transfers",
+		`DELETE FROM billing.ledger_transfers WHERE merchant_id=$1 AND currency=$2 AND source='833_test_bypass'`, merchantID, cur)
 	requireIntegrityClean(t, ctx, pool, merchantID, cur)
 
 	// --- drift 2: a one-sided counter corruption -----------------------------
 	// A restore/COPY that rewrote one account's projection. Conservation is the
 	// cheap check that catches this class.
-	_, err = ledgerOwnerPool(t).Exec(ctx,
-		`UPDATE billing.ledger_accounts SET credits_posted = credits_posted + 777 WHERE id = $1`, custAcc)
-	require.NoError(t, err)
+	mutateDiagnosticFixture(t, ctx, "ledger_accounts", "guard_ledger_account_facts", `UPDATE billing.ledger_accounts SET credits_posted = credits_posted + 777 WHERE id = $1`, custAcc)
 
 	breaches := conservationForCurrency(t, ctx, pool, merchantID, cur)
 	require.Len(t, breaches, 1, "the ledger no longer nets to zero")
@@ -84,9 +81,7 @@ func TestLedgerDiagnostics_CatchTriggerBypassDrift(t *testing.T) {
 	require.Equal(t, int64(1777), drifts[0].StoredCredits)
 	require.Equal(t, int64(1000), drifts[0].LoggedCredits)
 
-	_, err = ledgerOwnerPool(t).Exec(ctx,
-		`UPDATE billing.ledger_accounts SET credits_posted = credits_posted - 777 WHERE id = $1`, custAcc)
-	require.NoError(t, err)
+	mutateDiagnosticFixture(t, ctx, "ledger_accounts", "guard_ledger_account_facts", `UPDATE billing.ledger_accounts SET credits_posted = credits_posted - 777 WHERE id = $1`, custAcc)
 	requireIntegrityClean(t, ctx, pool, merchantID, cur)
 }
 
@@ -162,15 +157,29 @@ func TestLedgerDiagnostics_ReportComposesBothChecks(t *testing.T) {
 
 	custAcc, err := l.EnsureCustomerBalance(ctx, customer, cur)
 	require.NoError(t, err)
-	_, err = ledgerOwnerPool(t).Exec(ctx,
-		`UPDATE billing.ledger_accounts SET debits_posted = debits_posted + 5 WHERE id = $1`, custAcc)
-	require.NoError(t, err)
+	mutateDiagnosticFixture(t, ctx, "ledger_accounts", "guard_ledger_account_facts", `UPDATE billing.ledger_accounts SET debits_posted = debits_posted + 5 WHERE id = $1`, custAcc)
 
 	rep, err = ledger.CheckIntegrity(ctx, db.WrapPool(pool, ""), merchantID)
 	require.NoError(t, err)
 	require.False(t, rep.OK(), "a corrupted counter must fail the report")
 
-	_, err = ledgerOwnerPool(t).Exec(ctx,
-		`UPDATE billing.ledger_accounts SET debits_posted = debits_posted - 5 WHERE id = $1`, custAcc)
+	mutateDiagnosticFixture(t, ctx, "ledger_accounts", "guard_ledger_account_facts", `UPDATE billing.ledger_accounts SET debits_posted = debits_posted - 5 WHERE id = $1`, custAcc)
+}
+
+// Deliberate owner-DDL corruption is the failure mode this diagnostic tests.
+// Disable/re-enable is one transaction; failure rolls the DDL back as well.
+func mutateDiagnosticFixture(t *testing.T, ctx context.Context, table, trigger, statement string, args ...any) {
+	t.Helper()
+	tx, err := ledgerOwnerPool(t).Begin(ctx)
 	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	relation := pgx.Identifier{"billing", table}.Sanitize()
+	guard := pgx.Identifier{trigger}.Sanitize()
+	_, err = tx.Exec(ctx, "ALTER TABLE "+relation+" DISABLE TRIGGER "+guard)
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, statement, args...)
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, "ALTER TABLE "+relation+" ENABLE TRIGGER "+guard)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(ctx))
 }

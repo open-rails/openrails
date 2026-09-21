@@ -43,9 +43,9 @@ index, and adding the useful index clears the finding.
 This is an availability probe, not a production cost benchmark. The populated
 `internal/db/querytest` performance suite retains normal planner settings and
 checks actual execution time and buffer work.
-The session runs as **`openrails_app` with `app.merchant_id` set**, so RLS
-predicates appear in the plan exactly as production sees them — which is also
-how the auditor verifies the RLS `merchant_id` predicate is index-backed.
+The session uses the normal test login with explicit merchant parameters and
+session state for queries that call current_merchant_id(). Merchant predicates
+must be index-backed; no RLS policy adds a missing predicate for the query.
 
 `supabase/index_advisor` + `hypopg` are **opt-in advice, off in CI**
 (`SQLAUDIT_INDEX_ADVISOR=1`). They cannot gate: without statistics index_advisor
@@ -59,7 +59,7 @@ statement cache, so its connection uses `QueryExecModeExec`.)
 ### Rules
 
 Rule names are shared with host-four's equivalent gate so allowlists stay
-portable. `unindexed-filter` is openrails-only: host-four has no RLS.
+portable. `unindexed-filter` also checks the explicit merchant predicate path.
 
 - **`unbounded-many`** — a `:many` query over a merchant-scoped table with
   no `LIMIT` and no bounding predicate. Bounding means `col = $n` on an indexed
@@ -74,8 +74,7 @@ portable. `unindexed-filter` is openrails-only: host-four has no RLS.
   like any other finding; nothing is ever silently skipped.
 - **`unindexed-filter`** — the query looks something up by `col = $n`, the scan
   is narrowed by nothing but `merchant_id`, and no index on that table covers
-  `col`. This is what a missing index looks like *under RLS*, where the
-  merchant_id index always hands the planner some index path.
+  `col`. A merchant_id index alone must not hide a missing lookup index.
 
 ## AUDIT_ALLOWLIST.txt
 
@@ -103,7 +102,7 @@ generically; the merchant index bounds the scan, the page `LIMIT` the result.
   `DeleteNotificationsBefore`, `DeleteSeenNotificationsBefore`,
   `ExpireCheckoutSessions`, `AutoResolveVanishedReconciliationFindings`. A large
   backlog makes each one a single long transaction.
-- *Missing indexes* — `solana_subscriptions.merchant_id` (its RLS predicate is
+- *Missing indexes* — `solana_subscriptions.merchant_id` (its merchant predicate is
   not index-backed; the only true `Seq Scan` in the codebase),
   `grants.payment_id`,
   `checkout_sessions.payment_id`, `checkout_sessions.subscription_id`,
@@ -114,7 +113,7 @@ generically; the merchant index bounds the scan, the page `LIMIT` the result.
 ## LINT_ALLOWLIST.txt
 
 **PERMANENT** covers what sqlc cannot express: the DB layer itself (`MerchantTx`
-GUCs, RLS probes, the schema-rewrite wrapper, advisory locks), SQL built
+GUCs, the schema-rewrite wrapper, advisory locks), SQL built
 dynamically from operator definitions (metrics, fleet analytics, dump/restore
 over a dynamic table list), and privileged access that runs before merchant
 context exists (DEK bootstrap, merchant secret stores).
@@ -122,7 +121,7 @@ context exists (DEK bootstrap, merchant secret stores).
 `internal/merchantarchive/archive.go` and `checks.go` are PERMANENT: the typed
 archive profiles determine table/column projections, insert statements and
 schema coverage checks at runtime. The checks also inspect PostgreSQL catalogs
-for unclassified columns and enforced RLS. Identifiers come only from reviewed
+for unclassified columns and required merchant coordinates. Identifiers come only from reviewed
 profiles/classifications; merchant IDs and row values remain bound parameters.
 The same transaction owns snapshot isolation, session settings, retained-row
 inserts and restore-guard calls, so export/restore either validates the complete

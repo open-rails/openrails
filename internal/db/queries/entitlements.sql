@@ -55,7 +55,7 @@ LIMIT 1;
 -- name: ListActiveEntitlementNames :many
 -- No merchant_id predicate: matches the bun-era user-keyed variant exactly.
 SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
-WHERE ent.customer_id = $1
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.start_at <= sqlc.arg(at)::timestamptz
   AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
   AND ent.revoked_at IS NULL
@@ -104,7 +104,7 @@ LIMIT 1;
 -- zero uuid to start). merchant scoping is RLS (no explicit merchant_id), matching
 -- ListActiveEntitlementNames. Backs AuthKit's EntitlementFilterProvider (#91).
 SELECT DISTINCT ent.customer_id FROM openrails.entitlements ent
-WHERE ent.entitlement = sqlc.arg(entitlement)::text
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.entitlement = sqlc.arg(entitlement)::text
   AND ent.start_at <= sqlc.arg(at)::timestamptz
   AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
   AND ent.revoked_at IS NULL
@@ -125,7 +125,7 @@ ORDER BY ent.start_at ASC;
 
 -- name: ListDistinctEntitlementNamesBySource :many
 SELECT DISTINCT ent.entitlement FROM openrails.entitlements ent
-WHERE ent.source_type = $1
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = $1
   AND ent.source_id = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL;
@@ -141,7 +141,7 @@ UPDATE openrails.entitlements ent SET
     updated_at = sqlc.arg(now)::timestamptz,
     revoked_at = CASE WHEN sqlc.arg(set_revoked)::boolean THEN sqlc.arg(now)::timestamptz ELSE ent.revoked_at END,
     revoke_reason = CASE WHEN sqlc.arg(set_revoked)::boolean THEN sqlc.narg(revoke_reason) ELSE ent.revoke_reason END
-WHERE ent.source_type = 'subscription'
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -154,7 +154,7 @@ WHERE ent.source_type = 'subscription'
 UPDATE openrails.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.source_type = 'subscription'
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -162,7 +162,7 @@ WHERE ent.source_type = 'subscription'
 
 -- name: ListExtendableSubscriptionEntitlements :many
 SELECT * FROM openrails.entitlements ent
-WHERE ent.source_type = 'subscription'
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -172,7 +172,7 @@ WHERE ent.source_type = 'subscription'
 UPDATE openrails.entitlements ent SET
     end_at = sqlc.arg(new_end_at)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.id = $1
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
   AND ent.end_at = sqlc.arg(old_end_at)::timestamptz;
@@ -186,11 +186,11 @@ WHERE ent.id = $1
 UPDATE openrails.entitlements ent SET
     end_at = NULL,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.deleted_at IS NULL
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.deleted_at IS NULL
   AND ent.id IN (
     SELECT DISTINCT ON (e.customer_id, e.entitlement) e.id
     FROM openrails.entitlements e
-    WHERE e.source_type = 'subscription'
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid AND e.source_type = 'subscription'
       AND e.source_id = $1
       AND e.revoked_at IS NULL
       AND e.deleted_at IS NULL
@@ -202,7 +202,7 @@ WHERE ent.deleted_at IS NULL
 UPDATE openrails.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.source_type = 'one_off'
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'one_off'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -214,7 +214,7 @@ UPDATE openrails.entitlements ent SET
     revoked_at = sqlc.arg(now)::timestamptz,
     revoke_reason = sqlc.narg(revoke_reason),
     updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.source_type = 'one_off'
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'one_off'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -224,7 +224,7 @@ WHERE ent.source_type = 'one_off'
 -- name: EntitlementExistsBySource :one
 SELECT EXISTS (
     SELECT 1 FROM openrails.entitlements ent
-    WHERE ent.source_type = $1
+    WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = $1
       AND ent.source_id = $2
       AND ent.entitlement = $3
       AND ent.revoked_at IS NULL
@@ -233,13 +233,13 @@ SELECT EXISTS (
 
 -- name: ListEntitlementsByCustomer :many
 SELECT * FROM openrails.entitlements ent
-WHERE ent.customer_id = $1
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.deleted_at IS NULL
 ORDER BY ent.start_at DESC;
 
 -- name: GetEntitlementByID :one
 SELECT * FROM openrails.entitlements ent
-WHERE ent.id = $1
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.id = $1
   AND ent.deleted_at IS NULL
 LIMIT 1;
 
@@ -248,7 +248,7 @@ UPDATE openrails.entitlements ent SET
     revoked_at = sqlc.arg(now)::timestamptz,
     revoke_reason = sqlc.arg(revoke_reason)::text,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.id = $1
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL;
 
@@ -263,7 +263,7 @@ UPDATE openrails.entitlements ent SET
     end_at = CASE WHEN ent.end_at IS NULL THEN NULL
              ELSE ent.end_at + (sqlc.arg(delta_seconds)::bigint * interval '1 second') END,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.customer_id = $1
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -273,7 +273,7 @@ WHERE ent.customer_id = $1
 -- name: TimelineHasIndefinite :one
 SELECT EXISTS (
     SELECT 1 FROM openrails.entitlements ent
-    WHERE ent.customer_id = $1
+    WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
       AND ent.entitlement = $2
       AND ent.revoked_at IS NULL
       AND ent.deleted_at IS NULL
@@ -282,7 +282,7 @@ SELECT EXISTS (
 
 -- name: GetTimelineIndefinite :one
 SELECT * FROM openrails.entitlements ent
-WHERE ent.customer_id = $1
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -293,7 +293,7 @@ LIMIT 1;
 -- name: GetTimelineTailEnd :one
 -- The latest finite end on the timeline (the tail a new window starts after).
 SELECT ent.end_at FROM openrails.entitlements ent
-WHERE ent.customer_id = $1
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -304,7 +304,7 @@ LIMIT 1;
 -- name: GetTimelineCoveringWindow :one
 -- The window covering instant `at` (for already-covered EndAt requests).
 SELECT * FROM openrails.entitlements ent
-WHERE ent.customer_id = $1
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -317,7 +317,7 @@ LIMIT 1;
 UPDATE openrails.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.id = $1
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL;
 
@@ -328,7 +328,7 @@ UPDATE openrails.entitlements ent SET
     revoked_at = sqlc.arg(now)::timestamptz,
     revoke_reason = sqlc.arg(revoke_reason)::text,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.customer_id = $1
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
@@ -343,7 +343,7 @@ WHERE ent.customer_id = $1
 UPDATE openrails.entitlements ent SET
     deleted_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz
-WHERE ent.customer_id = $1
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = $1
   AND ent.entitlement = $2
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL

@@ -29,8 +29,8 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
-func genApplyParams(subID, toPriceID uuid.UUID) gen.ApplyScheduledRepriceForSubscriptionPriceParams {
-	return gen.ApplyScheduledRepriceForSubscriptionPriceParams{SubscriptionID: subID, ToPriceID: toPriceID}
+func genApplyParams(merchantID, subID, toPriceID uuid.UUID) gen.ApplyScheduledRepriceForSubscriptionPriceParams {
+	return gen.ApplyScheduledRepriceForSubscriptionPriceParams{MerchantID: merchantID, SubscriptionID: subID, ToPriceID: toPriceID}
 }
 
 // fakeStripePusher records rail pushes instead of calling Stripe.
@@ -273,10 +273,10 @@ func TestPlanMigration_StripeBoundaryPush(t *testing.T) {
 
 	// Converge hook: when the fetched price equals the target, the scheduled
 	// row is marked applied (idempotent).
-	n, err := f.dbi.Gen(ctx).ApplyScheduledRepriceForSubscriptionPrice(ctx, genApplyParams(subID, f.stripeTargetPriceID))
+	n, err := f.dbi.Gen(ctx).ApplyScheduledRepriceForSubscriptionPrice(ctx, genApplyParams(f.merchantID, subID, f.stripeTargetPriceID))
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n)
-	n, err = f.dbi.Gen(ctx).ApplyScheduledRepriceForSubscriptionPrice(ctx, genApplyParams(subID, f.stripeTargetPriceID))
+	n, err = f.dbi.Gen(ctx).ApplyScheduledRepriceForSubscriptionPrice(ctx, genApplyParams(f.merchantID, subID, f.stripeTargetPriceID))
 	require.NoError(t, err)
 	require.Zero(t, n, "second application is a no-op")
 }

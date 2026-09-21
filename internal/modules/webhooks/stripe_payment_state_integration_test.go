@@ -3,6 +3,8 @@
 package webhooks
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"encoding/json"
 	"sync"
@@ -286,7 +288,9 @@ func requireStripeMethod(t *testing.T, ctx context.Context, dbi *db.DB, pspID uu
 
 func requireSubscription(t *testing.T, ctx context.Context, pool gen.DBTX, id uuid.UUID) gen.OpenrailsSubscription {
 	t.Helper()
-	subscription, err := dbtest.Queries(pool).GetSubscriptionByID(ctx, id)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	require.NoError(t, scopeErr)
+	subscription, err := dbtest.Queries(pool).GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 	require.NoError(t, err)
 	return subscription
 }

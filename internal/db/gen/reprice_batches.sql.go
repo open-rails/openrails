@@ -209,19 +209,25 @@ const updatePlanMigrationBatchCounts = `-- name: UpdatePlanMigrationBatchCounts 
 UPDATE openrails.reprice_batches SET
     subscriptions_scheduled = $1::int,
     subscriptions_blocked = $2::int
-WHERE id = $3
+WHERE reprice_batches.merchant_id = $3::uuid AND id = $4
 `
 
 type UpdatePlanMigrationBatchCountsParams struct {
 	SubscriptionsScheduled int32
 	SubscriptionsBlocked   int32
+	MerchantID             uuid.UUID
 	ID                     uuid.UUID
 }
 
 // #813: re-sync a plan-migration batch header after rail pushes degrade
 // scheduled rows to blocked — the header must always agree with its rows.
 func (q *Queries) UpdatePlanMigrationBatchCounts(ctx context.Context, arg UpdatePlanMigrationBatchCountsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updatePlanMigrationBatchCounts, arg.SubscriptionsScheduled, arg.SubscriptionsBlocked, arg.ID)
+	result, err := q.db.Exec(ctx, updatePlanMigrationBatchCounts,
+		arg.SubscriptionsScheduled,
+		arg.SubscriptionsBlocked,
+		arg.MerchantID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}

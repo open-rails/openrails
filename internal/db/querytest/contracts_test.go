@@ -73,11 +73,11 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	product, err := q.GetProductByID(ctx, productID)
+	product, err := q.GetProductByID(ctx, gen.GetProductByIDParams{ID: productID, MerchantID: merchantID})
 	require.NoError(t, err)
 	require.Equal(t, "Query Contract Premium", product.DisplayName)
 
-	prices, err := q.ListActivePricesByProductOrdered(ctx, productID)
+	prices, err := q.ListActivePricesByProductOrdered(ctx, gen.ListActivePricesByProductOrderedParams{ProductID: productID, MerchantID: merchantID})
 	require.NoError(t, err)
 	require.Len(t, prices, 1)
 	require.Equal(t, int64(1999), prices[0].Amount)
@@ -104,6 +104,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	require.NoError(t, err)
 
 	activeSub, err := q.GetActiveSubscriptionByCustomerAt(ctx, gen.GetActiveSubscriptionByCustomerAtParams{
+		MerchantID: merchantID,
 		CustomerID: customerID,
 		Now:        now,
 	})
@@ -204,7 +205,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	latestPayment, err := q.GetLatestChargeBySubscriptionID(ctx, &subscriptionID)
+	latestPayment, err := q.GetLatestChargeBySubscriptionID(ctx, gen.GetLatestChargeBySubscriptionIDParams{SubscriptionID: &subscriptionID, MerchantID: merchantID})
 	require.NoError(t, err)
 	require.Equal(t, int64(1999), latestPayment.Amount)
 
@@ -324,6 +325,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	})
 	require.NoError(t, err)
 	claimed, err := q.ClaimRailIntentByID(ctx, gen.ClaimRailIntentByIDParams{
+		MerchantID: merchantID,
 		LeaseUntil: now.Add(time.Minute),
 		ID:         intent.ID,
 		Now:        now,
@@ -331,6 +333,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "in_flight", claimed.Status)
 	intents, err := q.ListRailIntents(ctx, gen.ListRailIntentsParams{
+		MerchantID:     merchantID,
 		Rail:           strptr("ccbill"),
 		SubscriptionID: &subscriptionID,
 		PageLimit:      10,
@@ -390,6 +393,7 @@ func TestPSPIdentityIsGlobal(t *testing.T) {
 	require.Error(t, err)
 
 	byIdentity, err := q.GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{
+		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Rail:        "stripe",
 		Environment: strptr("test"),
 		AccountID:   accountID,
@@ -400,8 +404,7 @@ func TestPSPIdentityIsGlobal(t *testing.T) {
 
 func TestUpsertPSPOnlyRecordsExplicitValidation(t *testing.T) {
 	ctx := context.Background()
-	// psps is RLS-FORCED and this contract test carries no app.merchant_id GUC,
-	// so it seeds through the owner like its sibling above (or#782).
+	// Exercise tenant predicates through the owner connection as well.
 	pool := dbtest.SharedSuperuserPGXPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	q := dbtest.Queries(pool)

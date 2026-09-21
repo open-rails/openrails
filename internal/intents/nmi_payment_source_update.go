@@ -518,6 +518,7 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 
 	subID := sub.ID
 	priorSwaps, err := t.DB.Gen(ctx).CountRailIntents(ctx, gen.CountRailIntentsParams{
+		MerchantID:     tid.UUID(),
 		Status:         ptr(StatusSucceeded),
 		IntentType:     ptr(TypeNMIPaymentSourceUpdate),
 		SubscriptionID: &subID,

@@ -122,11 +122,11 @@ func (s *CheckoutSessionService) resolveCapture(ctx context.Context, pspID uuid.
 	if _, err = s.captureEncryptor(); err != nil {
 		return state, nil, ErrCheckoutCaptureUnavailable
 	}
-	psp, err := s.db.Gen(ctx).GetPSP(ctx, pspID)
+	psp, err := s.db.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: owner.UUID(), ID: pspID})
 	if err != nil || psp.MerchantID != owner.UUID() || psp.Archived || psp.Rail != "nmi" || psp.CustodianID == nil {
 		return state, nil, ErrCheckoutCaptureUnavailable
 	}
-	custodian, err := s.db.Gen(ctx).GetCustodian(ctx, *psp.CustodianID)
+	custodian, err := s.db.Gen(ctx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: owner.UUID(), ID: *psp.CustodianID})
 	if err != nil || custodian.MerchantID != owner.UUID() || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != psp.Environment {
 		return state, nil, ErrCheckoutCaptureUnavailable
 	}

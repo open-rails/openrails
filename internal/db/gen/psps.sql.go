@@ -95,11 +95,16 @@ func (q *Queries) GetActivePSPForNewWork(ctx context.Context, arg GetActivePSPFo
 
 const getPSP = `-- name: GetPSP :one
 SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
-WHERE id = $1
+WHERE psps.merchant_id = $2::uuid AND id = $1
 `
 
-func (q *Queries) GetPSP(ctx context.Context, id uuid.UUID) (OpenrailsPsp, error) {
-	row := q.db.QueryRow(ctx, getPSP, id)
+type GetPSPParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) GetPSP(ctx context.Context, arg GetPSPParams) (OpenrailsPsp, error) {
+	row := q.db.QueryRow(ctx, getPSP, arg.ID, arg.MerchantID)
 	var i OpenrailsPsp
 	err := row.Scan(
 		&i.ID,
@@ -165,20 +170,26 @@ func (q *Queries) GetPSPByIdentity(ctx context.Context, arg GetPSPByIdentityPara
 
 const getPSPByRailIdentity = `-- name: GetPSPByRailIdentity :one
 SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
-WHERE rail = lower($1::text)
-  AND environment = COALESCE($2::text, 'live')
-  AND account_id = $3::text
+WHERE psps.merchant_id = $1::uuid AND rail = lower($2::text)
+  AND environment = COALESCE($3::text, 'live')
+  AND account_id = $4::text
 LIMIT 1
 `
 
 type GetPSPByRailIdentityParams struct {
+	MerchantID  uuid.UUID
 	Rail        string
 	Environment *string
 	AccountID   string
 }
 
 func (q *Queries) GetPSPByRailIdentity(ctx context.Context, arg GetPSPByRailIdentityParams) (OpenrailsPsp, error) {
-	row := q.db.QueryRow(ctx, getPSPByRailIdentity, arg.Rail, arg.Environment, arg.AccountID)
+	row := q.db.QueryRow(ctx, getPSPByRailIdentity,
+		arg.MerchantID,
+		arg.Rail,
+		arg.Environment,
+		arg.AccountID,
+	)
 	var i OpenrailsPsp
 	err := row.Scan(
 		&i.ID,

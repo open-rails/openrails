@@ -3,6 +3,8 @@
 package intents
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"fmt"
 	"testing"
@@ -38,6 +40,7 @@ func seedBreakerMerchant(t *testing.T, n int) breakerMerchant {
 	sfx := uuid.NewString()[:8]
 
 	m := breakerMerchant{id: uuid.New()}
+	ctx = merchant.WithID(ctx, merchant.ID(m.id))
 	m.db = dbtest.OpenMerchantDB(t, m.id)
 	pool := dbtest.SharedMerchantPool(t, m.id)
 	store := NewStore(m.db)
@@ -138,6 +141,7 @@ func TestBreakerHaltsBulkDestructiveExecution(t *testing.T) {
 	const over = 2 // intents beyond the budget floor
 	bulk := seedBreakerMerchant(t, DestructiveBudgetFloor+over)
 	other := seedBreakerMerchant(t, 1)
+	ctx = merchant.WithID(ctx, merchant.ID(bulk.id))
 	pool := bulk.db.Pool()
 
 	_, client := newFakeNMI(t, "any", true)
@@ -154,7 +158,7 @@ func TestBreakerHaltsBulkDestructiveExecution(t *testing.T) {
 	// The other merchant's single delete executed — breakers are per merchant.
 	// Its own scope and its own runner pass, exactly as the executor does in
 	// production; the bulk merchant's halt must not touch it.
-	_, err = breakerRunner(other.db, client).RunExecuteOnce(ctx)
+	_, err = breakerRunner(other.db, client).RunExecuteOnce(merchant.WithID(ctx, merchant.ID(other.id)))
 	require.NoError(t, err)
 	assert.Equal(t, map[string]int{StatusSucceeded: 1}, other.statusCounts(t, other.db))
 
@@ -202,7 +206,7 @@ func TestBreakerHaltsBulkDestructiveExecution(t *testing.T) {
 
 	// Operator resolution (ack → fixed) resumes: the window restarts at the
 	// resolution instant, so the held intents drain.
-	n, err := dbtest.Queries(pool).AckReconciliationFinding(ctx, gen.AckReconciliationFindingParams{ID: findingID})
+	n, err := dbtest.Queries(pool).AckReconciliationFinding(ctx, gen.AckReconciliationFindingParams{MerchantID: merchant.ID(bulk.id).UUID(), ID: findingID})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n)
 	_, err = pool.Exec(ctx,

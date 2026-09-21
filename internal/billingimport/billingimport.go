@@ -321,10 +321,6 @@ func openDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*db.DB
 			return nil, fmt.Errorf("open postgres: %w", err)
 		}
 	}
-	if err := database.EnforceRLSPosture(ctx); err != nil {
-		_ = database.Close()
-		return nil, err
-	}
 	return database, nil
 }
 
@@ -353,7 +349,7 @@ func importAdminGrants(ctx context.Context, q *gen.Queries, merchantID uuid.UUID
 		}
 		feats, ok := specs[g.Product.UUID()]
 		if !ok {
-			product, err := q.GetProductByID(ctx, g.Product.UUID())
+			product, err := q.GetProductByID(ctx, gen.GetProductByIDParams{ID: g.Product.UUID(), MerchantID: merchantID})
 			if err != nil {
 				return fmt.Errorf("import admin grant %s: load product %s: %w", g.SourceID, g.Product, err)
 			}

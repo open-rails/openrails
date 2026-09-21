@@ -97,7 +97,11 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 		if a.RefundedPaymentID == nil {
 			return false, nil
 		}
-		n, err := w.DB.Gen(ctx).ReconcileMarkPaymentRefunded(ctx, *a.RefundedPaymentID)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return false, scopeErr
+		}
+		n, err := w.DB.Gen(ctx).ReconcileMarkPaymentRefunded(ctx, gen.ReconcileMarkPaymentRefundedParams{MerchantID: scopeMerchantID.UUID(), ID: *a.RefundedPaymentID})
 		return n > 0, err
 	}
 	amount := moneyutil.CentsToMicros(moneyutil.Cents(a.AmountCents))
@@ -130,7 +134,7 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 		return false, err
 	}
 	if n > 0 && a.RefundedPaymentID != nil {
-		if _, err := w.DB.Gen(ctx).ReconcileMarkPaymentRefunded(ctx, *a.RefundedPaymentID); err != nil {
+		if _, err := w.DB.Gen(ctx).ReconcileMarkPaymentRefunded(ctx, gen.ReconcileMarkPaymentRefundedParams{MerchantID: tid.UUID(), ID: *a.RefundedPaymentID}); err != nil {
 			return true, err
 		}
 	}

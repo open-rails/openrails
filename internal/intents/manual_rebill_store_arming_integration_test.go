@@ -116,7 +116,7 @@ func TestManualRebillStoreOnlyNMICredentials_ChargesThroughStore(t *testing.T) {
 	_, err := fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()), `UPDATE billing.subscriptions SET psp_id=$2 WHERE id=$1`, *params.SubscriptionID, accountRowID)
 	require.NoError(t, err)
 
-	row, err := runner.EnqueueAndExecute(context.Background(), params)
+	row, err := runner.EnqueueAndExecute(fx.handlerCtx(), params)
 	require.NoError(t, err)
 	assert.Equal(t, StatusSucceeded, row.Status)
 	assert.EqualValues(t, 1, fake.saleCalls.Load())
@@ -142,7 +142,7 @@ func TestManualRebillDeclaredAccountMissingSecret_FailsClosed(t *testing.T) {
 	fx.bindProvider(t, accountRowID, "nmi")
 	params = fx.enqueueParams(1)
 
-	row, err := runner.EnqueueAndExecute(context.Background(), params)
+	row, err := runner.EnqueueAndExecute(fx.handlerCtx(), params)
 	require.NoError(t, err)
 	assert.Equal(t, StatusPending, row.Status, "unarmable charge parks, never fires")
 	require.NotNil(t, row.LastFailureReason)
@@ -180,7 +180,7 @@ func TestManualRebillNoStoreRow_ParksFailClosed(t *testing.T) {
 	fx.bindProvider(t, dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "nmi"), "nmi")
 	params = fx.enqueueParams(1)
 
-	row, err := runner.EnqueueAndExecute(context.Background(), params)
+	row, err := runner.EnqueueAndExecute(fx.handlerCtx(), params)
 	require.NoError(t, err)
 	assert.Equal(t, StatusPending, row.Status, "unarmed rail parks, never charges")
 	require.NotNil(t, row.LastFailureReason)

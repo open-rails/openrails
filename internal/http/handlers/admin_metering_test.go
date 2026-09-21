@@ -98,9 +98,10 @@ func TestAdminUsageMeterDTOOwnership(t *testing.T) {
 
 func TestAdminUsageMeterPageDTOOwnershipWithoutItems(t *testing.T) {
 	tests := []struct {
-		name          string
-		source        string
-		writesAllowed bool
+		name           string
+		source         string
+		merchantSource string
+		writesAllowed  bool
 	}{
 		{
 			name:          "api catalog stays writable",
@@ -112,13 +113,25 @@ func TestAdminUsageMeterPageDTOOwnershipWithoutItems(t *testing.T) {
 			source:        config.MerchantSourceManifest,
 			writesAllowed: false,
 		},
+		{
+			name:           "host credentials permit an API catalog",
+			merchantSource: config.MerchantSourceManifest,
+			source:         config.CatalogSourceAPI,
+			writesAllowed:  true,
+		},
+		{
+			name:           "managed credentials do not make a manifest catalog writable",
+			merchantSource: config.MerchantSourceAPI,
+			source:         config.CatalogSourceManifest,
+			writesAllowed:  false,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			r := httprequest.NewHTTP(
 				httptest.NewRecorder(),
 				httptest.NewRequest(http.MethodGet, "/", nil),
-				&app.Runtime{Config: &config.Config{MerchantSource: test.source}},
+				&app.Runtime{Config: &config.Config{MerchantSource: test.merchantSource, CatalogSource: test.source}},
 			)
 			page := adminUsageMeterPageDTO(
 				r,

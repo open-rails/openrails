@@ -18,14 +18,14 @@ WITH payment_products AS (
     FROM openrails.payments purch
     JOIN openrails.prices price ON purch.price_id = price.id
     JOIN openrails.products prod ON price.product_id = prod.id
-    WHERE purch.deleted_at IS NULL
+    WHERE purch.merchant_id = $1::uuid AND price.merchant_id = $1::uuid AND prod.merchant_id = $1::uuid AND purch.deleted_at IS NULL
       AND purch.amount > 0
       AND purch.refunded_payment_id IS NULL
       AND purch.status <> 'refunded'
       AND NOT EXISTS (
-          SELECT 1 FROM openrails.payments r WHERE r.refunded_payment_id = purch.id AND r.deleted_at IS NULL
+          SELECT 1 FROM openrails.payments r WHERE r.merchant_id = $1::uuid AND r.refunded_payment_id = purch.id AND r.deleted_at IS NULL
       )
-      AND ($1::uuid IS NULL OR purch.customer_id = $1::uuid)
+      AND ($2::uuid IS NULL OR purch.customer_id = $2::uuid)
 )
 SELECT
     customer_id::text AS user_id,
@@ -40,6 +40,11 @@ FROM payment_products
 GROUP BY customer_id, product_id, product_key, DATE_TRUNC('month', purchased_at)
 HAVING COUNT(*) > 1
 `
+
+type ConDuplicateChargesSamePeriodParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+}
 
 type ConDuplicateChargesSamePeriodRow struct {
 	UserID      string
@@ -56,8 +61,8 @@ type ConDuplicateChargesSamePeriodRow struct {
 // Refunds net out both ways (#690): a status='refunded' original AND an
 // original with a linked refund row (the admin path) stop counting, so an
 // approved refund self-confirms on the next sweep instead of reopening.
-func (q *Queries) ConDuplicateChargesSamePeriod(ctx context.Context, customerID *uuid.UUID) ([]ConDuplicateChargesSamePeriodRow, error) {
-	rows, err := q.db.Query(ctx, conDuplicateChargesSamePeriod, customerID)
+func (q *Queries) ConDuplicateChargesSamePeriod(ctx context.Context, arg ConDuplicateChargesSamePeriodParams) ([]ConDuplicateChargesSamePeriodRow, error) {
+	rows, err := q.db.Query(ctx, conDuplicateChargesSamePeriod, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
@@ -92,20 +97,20 @@ WITH live_ownership AS (
            pay.amount AS payment_amount, pay.currency AS payment_currency,
            pay.purchased_at
     FROM openrails.grants g
-    LEFT JOIN openrails.payments pay ON pay.id = g.payment_id AND pay.deleted_at IS NULL
-    WHERE g.event = 'grant' AND g.kind = 'ownership'
+    LEFT JOIN openrails.payments pay ON pay.merchant_id = $1::uuid AND pay.id = g.payment_id AND pay.deleted_at IS NULL
+    WHERE g.merchant_id = $1::uuid AND g.event = 'grant' AND g.kind = 'ownership'
       AND g.product_id IS NOT NULL
       AND g.source_type IN ('purchase', 'subscription')
       AND g.source_id NOT LIKE 'include:%'
-      AND g.starts_at <= $1::timestamptz
-      AND (g.ends_at IS NULL OR g.ends_at > $1::timestamptz)
-      AND ($2::uuid IS NULL OR g.customer_id = $2::uuid)
+      AND g.starts_at <= $2::timestamptz
+      AND (g.ends_at IS NULL OR g.ends_at > $2::timestamptz)
+      AND ($3::uuid IS NULL OR g.customer_id = $3::uuid)
       AND NOT EXISTS (
           SELECT 1 FROM openrails.grants t
-          WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
+          WHERE t.merchant_id = $1::uuid AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
       )
       AND (pay.id IS NULL OR (pay.status <> 'refunded' AND NOT EXISTS (
-          SELECT 1 FROM openrails.payments r WHERE r.refunded_payment_id = pay.id AND r.deleted_at IS NULL
+          SELECT 1 FROM openrails.payments r WHERE r.merchant_id = $1::uuid AND r.refunded_payment_id = pay.id AND r.deleted_at IS NULL
       )))
 )
 SELECT lo.customer_id, lo.product_id, prod.key AS product_key,
@@ -121,11 +126,14 @@ SELECT lo.customer_id, lo.product_id, prod.key AS product_key,
        ) ORDER BY COALESCE(lo.purchased_at, lo.starts_at), lo.created_at) AS purchases
 FROM live_ownership lo
 JOIN openrails.products prod ON prod.id = lo.product_id
+
+WHERE prod.merchant_id = $1::uuid
 GROUP BY lo.customer_id, lo.product_id, prod.key
 HAVING COUNT(*) > 1
 `
 
 type ConDuplicateOwnershipGrantsParams struct {
+	MerchantID uuid.UUID
 	Now        time.Time
 	CustomerID *uuid.UUID
 }
@@ -155,7 +163,7 @@ type ConDuplicateOwnershipGrantsRow struct {
 // cancel/refund target. RLS scopes the merchant. customer_id nullable:
 // NULL = merchant-wide sweep.
 func (q *Queries) ConDuplicateOwnershipGrants(ctx context.Context, arg ConDuplicateOwnershipGrantsParams) ([]ConDuplicateOwnershipGrantsRow, error) {
-	rows, err := q.db.Query(ctx, conDuplicateOwnershipGrants, arg.Now, arg.CustomerID)
+	rows, err := q.db.Query(ctx, conDuplicateOwnershipGrants, arg.MerchantID, arg.Now, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
@@ -183,13 +191,18 @@ func (q *Queries) ConDuplicateOwnershipGrants(ctx context.Context, arg ConDuplic
 const conOrphanEntitlementPaymentSource = `-- name: ConOrphanEntitlementPaymentSource :many
 SELECT ent.id AS ent_id, ent.customer_id::text AS user_id, ent.entitlement, ent.source_type, ent.source_id
 FROM openrails.entitlements ent
-LEFT JOIN openrails.payments purch ON ent.source_id = purch.id AND purch.deleted_at IS NULL
-WHERE ent.source_type = 'one_off'
+LEFT JOIN openrails.payments purch ON purch.merchant_id = $1::uuid AND ent.source_id = purch.id AND purch.deleted_at IS NULL
+WHERE ent.merchant_id = $1::uuid AND ent.source_type = 'one_off'
   AND ent.source_id IS NOT NULL
   AND ent.deleted_at IS NULL
   AND purch.id IS NULL
-  AND ($1::uuid IS NULL OR ent.customer_id = $1::uuid)
+  AND ($2::uuid IS NULL OR ent.customer_id = $2::uuid)
 `
+
+type ConOrphanEntitlementPaymentSourceParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+}
 
 type ConOrphanEntitlementPaymentSourceRow struct {
 	EntID       uuid.UUID
@@ -199,8 +212,8 @@ type ConOrphanEntitlementPaymentSourceRow struct {
 	SourceID    uuid.UUID
 }
 
-func (q *Queries) ConOrphanEntitlementPaymentSource(ctx context.Context, customerID *uuid.UUID) ([]ConOrphanEntitlementPaymentSourceRow, error) {
-	rows, err := q.db.Query(ctx, conOrphanEntitlementPaymentSource, customerID)
+func (q *Queries) ConOrphanEntitlementPaymentSource(ctx context.Context, arg ConOrphanEntitlementPaymentSourceParams) ([]ConOrphanEntitlementPaymentSourceRow, error) {
+	rows, err := q.db.Query(ctx, conOrphanEntitlementPaymentSource, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
@@ -229,18 +242,19 @@ const conOrphanEntitlementSubscriptionSource = `-- name: ConOrphanEntitlementSub
 
 SELECT ent.id AS ent_id, ent.customer_id::text AS user_id, ent.entitlement, ent.source_type, ent.source_id
 FROM openrails.entitlements ent
-LEFT JOIN openrails.subscriptions sub ON ent.source_id = sub.id AND sub.deleted_at IS NULL
-WHERE ent.source_type = 'subscription'
+LEFT JOIN openrails.subscriptions sub ON sub.merchant_id = $1::uuid AND ent.source_id = sub.id AND sub.deleted_at IS NULL
+WHERE ent.merchant_id = $1::uuid AND ent.source_type = 'subscription'
   AND ent.source_id IS NOT NULL
   AND ent.deleted_at IS NULL
   AND sub.id IS NULL
   AND NOT (ent.revoked_at IS NULL
-           AND ent.start_at <= $1::timestamptz
-           AND (ent.end_at IS NULL OR ent.end_at > $1::timestamptz))
-  AND ($2::uuid IS NULL OR ent.customer_id = $2::uuid)
+           AND ent.start_at <= $2::timestamptz
+           AND (ent.end_at IS NULL OR ent.end_at > $2::timestamptz))
+  AND ($3::uuid IS NULL OR ent.customer_id = $3::uuid)
 `
 
 type ConOrphanEntitlementSubscriptionSourceParams struct {
+	MerchantID uuid.UUID
 	Now        time.Time
 	CustomerID *uuid.UUID
 }
@@ -263,7 +277,7 @@ type ConOrphanEntitlementSubscriptionSourceRow struct {
 // recommendation) owns it. This check keeps only NON-LIVE dangling references
 // (revoked/expired history rows): referential hygiene, no access at stake.
 func (q *Queries) ConOrphanEntitlementSubscriptionSource(ctx context.Context, arg ConOrphanEntitlementSubscriptionSourceParams) ([]ConOrphanEntitlementSubscriptionSourceRow, error) {
-	rows, err := q.db.Query(ctx, conOrphanEntitlementSubscriptionSource, arg.Now, arg.CustomerID)
+	rows, err := q.db.Query(ctx, conOrphanEntitlementSubscriptionSource, arg.MerchantID, arg.Now, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}

@@ -38,7 +38,12 @@ func (s *store) createWebhook(ctx context.Context, id uuid.UUID, name, host stri
 }
 
 func (s *store) rotateWebhookURL(ctx context.Context, id uuid.UUID, host string, version int32) (Webhook, error) {
-	row, err := s.db.Gen(ctx).RotateMerchantWebhookURL(ctx, gen.RotateMerchantWebhookURLParams{ID: id, DestinationHost: host, SecretVersion: version})
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return Webhook{}, queryScopeErr
+	}
+
+	row, err := s.db.Gen(ctx).RotateMerchantWebhookURL(ctx, gen.RotateMerchantWebhookURLParams{MerchantID: queryMerchant.UUID(), ID: id, DestinationHost: host, SecretVersion: version})
 	if err != nil {
 		return Webhook{}, err
 	}
@@ -46,7 +51,12 @@ func (s *store) rotateWebhookURL(ctx context.Context, id uuid.UUID, host string,
 }
 
 func (s *store) getWebhook(ctx context.Context, id uuid.UUID) (Webhook, error) {
-	row, err := s.db.Gen(ctx).GetMerchantWebhook(ctx, id)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return Webhook{}, queryScopeErr
+	}
+
+	row, err := s.db.Gen(ctx).GetMerchantWebhook(ctx, gen.GetMerchantWebhookParams{MerchantID: queryMerchant.UUID(), ID: id})
 	if err != nil {
 		return Webhook{}, err
 	}
@@ -54,7 +64,12 @@ func (s *store) getWebhook(ctx context.Context, id uuid.UUID) (Webhook, error) {
 }
 
 func (s *store) listWebhooks(ctx context.Context) ([]Webhook, error) {
-	rows, err := s.db.Gen(ctx).ListMerchantWebhooks(ctx)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
+	rows, err := s.db.Gen(ctx).ListMerchantWebhooks(ctx, queryMerchant.UUID())
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +81,12 @@ func (s *store) listWebhooks(ctx context.Context) ([]Webhook, error) {
 }
 
 func (s *store) deleteWebhook(ctx context.Context, id uuid.UUID) (int64, error) {
-	return s.db.Gen(ctx).DeleteMerchantWebhook(ctx, id)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return 0, queryScopeErr
+	}
+
+	return s.db.Gen(ctx).DeleteMerchantWebhook(ctx, gen.DeleteMerchantWebhookParams{MerchantID: queryMerchant.UUID(), ID: id})
 }
 
 // --- notifications -----------------------------------------------------------

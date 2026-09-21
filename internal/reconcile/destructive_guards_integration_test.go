@@ -35,14 +35,18 @@ type guardCohort struct {
 // `premium` entitlement window, and registers their cleanup.
 func seedGuardCohort(t *testing.T, appDB *db.DB, baseCtx context.Context, n int, status string, periodEnd time.Time) guardCohort {
 	t.Helper()
-	return seedGuardCohortForPSP(t, appDB, baseCtx, n, status, periodEnd, seedTestPSPBinding(t, appDB, baseCtx, "nmi"))
+	mid, err := merchant.Require(baseCtx)
+	require.NoError(t, err)
+	return seedGuardCohortForPSP(t, appDB, baseCtx, n, status, periodEnd, seedTestPSPBindingFor(t, appDB, baseCtx, mid.UUID(), "nmi"))
 }
 
 // seedGuardCohortForPSP seeds the cohort under a NAMED PSP (or#893: mirror rows
 // carry the PSP that produced them, and a pull only ever sees its own).
 func seedGuardCohortForPSP(t *testing.T, appDB *db.DB, baseCtx context.Context, n int, status string, periodEnd time.Time, psp PSPBinding) guardCohort {
 	t.Helper()
-	merchantID := dbtest.TestMerchantID.UUID()
+	mid, err := merchant.Require(baseCtx)
+	require.NoError(t, err)
+	merchantID := mid.UUID()
 	c := guardCohort{suffix: uuid.NewString()[:8], psp: psp}
 	start := periodEnd.Add(-30 * 24 * time.Hour)
 
@@ -52,7 +56,7 @@ func seedGuardCohortForPSP(t *testing.T, appDB *db.DB, baseCtx context.Context, 
 			require.NoError(t, err)
 		}
 		for i := 0; i < n; i++ {
-			cust := dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+			cust := dbtest.EnsureCustomerIDPgxFor(ctx, t, appDB.Qx(ctx), merchantID, uuid.NewString())
 			prod, price, sub := uuid.New(), uuid.New(), uuid.New()
 			rs := fmt.Sprintf("rs-guard-%s-%d", c.suffix, i)
 			key := fmt.Sprintf("guard-%s-%d", c.suffix, i)
@@ -107,12 +111,14 @@ func guardCounts(t *testing.T, appDB *db.DB, baseCtx context.Context, c guardCoh
 
 func guardFindings(t *testing.T, appDB *db.DB, baseCtx context.Context, findingType FindingType) []string {
 	t.Helper()
+	mid, err := merchant.Require(baseCtx)
+	require.NoError(t, err)
 	var out []string
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		rows, err := appDB.Qx(ctx).Query(ctx,
 			`SELECT subject_key FROM billing.reconciliation_findings
 			  WHERE merchant_id=$1 AND finding_type=$2 AND status='requires_review'`,
-			dbtest.TestMerchantID.UUID(), string(findingType))
+			mid.UUID(), string(findingType))
 		require.NoError(t, err)
 		defer rows.Close()
 		for rows.Next() {
@@ -135,7 +141,8 @@ func guardLifecycle(appDB *db.DB) *subscriptions.SubscriptionLifecycleService {
 // The trigger is mundane: a 200 with zero rows from GET /v5/subscriptions.
 func TestUnknownCohort_EmptyRosterCancelsNothingAndRaisesAFinding(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	mid := newReconcileMerchant(t, appDB)
+	baseCtx := merchant.WithID(context.Background(), mid)
 	now := time.Now().UTC().Truncate(time.Second)
 	cohort := seedGuardCohort(t, appDB, baseCtx, 40, "unknown", now.Add(-60*24*time.Hour))
 
@@ -148,7 +155,7 @@ func TestUnknownCohort_EmptyRosterCancelsNothingAndRaisesAFinding(t *testing.T) 
 	var res UnknownReconcileResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var err error
-		res, err = ReconcileUnknownCohort(ctx, appDB, guardLifecycle(appDB), fetchers, nil, dbtest.TestMerchantID, now, UnknownReconcileOptions{})
+		res, err = ReconcileUnknownCohort(ctx, appDB, guardLifecycle(appDB), fetchers, nil, mid, now, UnknownReconcileOptions{})
 		return err
 	}))
 
@@ -166,7 +173,8 @@ func TestUnknownCohort_EmptyRosterCancelsNothingAndRaisesAFinding(t *testing.T) 
 // 15% clears it cleanly and would cancel 85% of the book.
 func TestUnknownCohort_TruncatedRosterTripsTheCancellationCap(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	mid := newReconcileMerchant(t, appDB)
+	baseCtx := merchant.WithID(context.Background(), mid)
 	now := time.Now().UTC().Truncate(time.Second)
 	cohort := seedGuardCohort(t, appDB, baseCtx, 40, "unknown", now.Add(-60*24*time.Hour))
 
@@ -188,7 +196,7 @@ func TestUnknownCohort_TruncatedRosterTripsTheCancellationCap(t *testing.T) {
 	var res UnknownReconcileResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var err error
-		res, err = ReconcileUnknownCohort(ctx, appDB, guardLifecycle(appDB), fetchers, nil, dbtest.TestMerchantID, now, UnknownReconcileOptions{})
+		res, err = ReconcileUnknownCohort(ctx, appDB, guardLifecycle(appDB), fetchers, nil, mid, now, UnknownReconcileOptions{})
 		return err
 	}))
 
@@ -204,7 +212,8 @@ func TestUnknownCohort_TruncatedRosterTripsTheCancellationCap(t *testing.T) {
 // so a nine-subscriber merchant could lose all nine.
 func TestUnknownCohort_NineSubscriberMerchantIsProtected(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	mid := newReconcileMerchant(t, appDB)
+	baseCtx := merchant.WithID(context.Background(), mid)
 	now := time.Now().UTC().Truncate(time.Second)
 	cohort := seedGuardCohort(t, appDB, baseCtx, 9, "unknown", now.Add(-60*24*time.Hour))
 
@@ -212,7 +221,7 @@ func TestUnknownCohort_NineSubscriberMerchantIsProtected(t *testing.T) {
 	fetchers := map[Provider]RailFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, snap: empty}}
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := ReconcileUnknownCohort(ctx, appDB, guardLifecycle(appDB), fetchers, nil, dbtest.TestMerchantID, now, UnknownReconcileOptions{})
+		res, err := ReconcileUnknownCohort(ctx, appDB, guardLifecycle(appDB), fetchers, nil, mid, now, UnknownReconcileOptions{})
 		require.NoError(t, err)
 		require.Zero(t, res.Cancelled)
 		return nil
@@ -229,11 +238,12 @@ func TestUnknownCohort_NineSubscriberMerchantIsProtected(t *testing.T) {
 // anywhere. This is what the first enforcing pass saw on boot.
 func TestUnknownCohort_StaleRosterDatesNeverCancel(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	now := time.Now().UTC().Truncate(time.Second)
 
 	for _, staleDays := range []int{15, 30, 90} {
 		t.Run(fmt.Sprintf("%dd_stale", staleDays), func(t *testing.T) {
+			mid := newReconcileMerchant(t, appDB)
+			baseCtx := merchant.WithID(context.Background(), mid)
 			periodEnd := now.AddDate(0, 0, -staleDays)
 			// Three rows, deliberately WITHIN the per-pass cancellation cap, so
 			// this test isolates the decider law (#821) rather than passing
@@ -257,7 +267,7 @@ func TestUnknownCohort_StaleRosterDatesNeverCancel(t *testing.T) {
 			fetchers := map[Provider]RailFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, snap: snap}}
 
 			require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-				res, err := ReconcileUnknownCohort(ctx, appDB, guardLifecycle(appDB), fetchers, nil, dbtest.TestMerchantID, now, UnknownReconcileOptions{})
+				res, err := ReconcileUnknownCohort(ctx, appDB, guardLifecycle(appDB), fetchers, nil, mid, now, UnknownReconcileOptions{})
 				require.NoError(t, err)
 				require.Zero(t, res.Cancelled, "a lapsed next_billing_date is a dunning state, not a death certificate")
 				return nil
@@ -284,11 +294,12 @@ func TestUnknownCohort_StaleRosterDatesNeverCancel(t *testing.T) {
 // cancelled as "absent from an exhaustive roster".
 func TestPull_SecondPSPBookSurvivesASinglePSPPull(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	mid := newReconcileMerchant(t, appDB)
+	baseCtx := merchant.WithID(context.Background(), mid)
 	now := time.Now().UTC().Truncate(time.Second)
 
-	armed := seedTestPSPBinding(t, appDB, baseCtx, "nmi")
-	sibling := seedTestPSPBinding(t, appDB, baseCtx, "nmi")
+	armed := seedTestPSPBindingFor(t, appDB, baseCtx, mid.UUID(), "nmi")
+	sibling := seedTestPSPBindingFor(t, appDB, baseCtx, mid.UUID(), "nmi")
 	pulled := seedGuardCohortForPSP(t, appDB, baseCtx, 6, "active", now.Add(30*24*time.Hour), armed)
 	unpulled := seedGuardCohortForPSP(t, appDB, baseCtx, 6, "active", now.Add(30*24*time.Hour), sibling)
 

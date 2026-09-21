@@ -75,13 +75,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 SELECT s.rail, count(*) AS billable
 FROM openrails.subscriptions s
 JOIN openrails.prices pr ON pr.id = s.price_id
-WHERE pr.auto_renew
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.auto_renew
   AND s.deleted_at IS NULL
   AND s.status IN ('pending','active','past_due','unknown')
   AND s.cancelled_at IS NULL
   AND s.deletion_scheduled_at IS NULL
   AND EXISTS (
       SELECT 1 FROM openrails.psps rma
-      WHERE rma.merchant_id = s.merchant_id AND rma.rail = s.rail
+      WHERE rma.merchant_id = sqlc.arg(merchant_id)::uuid AND rma.merchant_id = s.merchant_id AND rma.rail = s.rail
   )
 GROUP BY s.rail;

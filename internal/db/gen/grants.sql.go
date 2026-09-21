@@ -325,22 +325,23 @@ func (q *Queries) LatestEntitlementGrantEndForSource(ctx context.Context, arg La
 const listCustomersWithLapsedCreditLots = `-- name: ListCustomersWithLapsedCreditLots :many
 SELECT DISTINCT g.merchant_id, g.customer_id, g.currency
 FROM openrails.grants g
-WHERE g.kind = 'credit' AND g.event = 'grant'
-  AND g.ends_at IS NOT NULL AND g.ends_at <= $1::timestamptz
+WHERE g.merchant_id = $1::uuid AND g.kind = 'credit' AND g.event = 'grant'
+  AND g.ends_at IS NOT NULL AND g.ends_at <= $2::timestamptz
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants tt WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
+      SELECT 1 FROM openrails.grants tt WHERE tt.merchant_id = $1::uuid AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
   )
   AND (g.amount - COALESCE((
         SELECT SUM(t.amount) FROM openrails.ledger_transfers t
-        WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
+        WHERE t.merchant_id = $1::uuid AND t.merchant_id = g.merchant_id AND t.grant_id = g.id
           AND t.transfer_type IN ('credit_spend', 'credit_expire')
     ), 0)) > 0
-LIMIT $2::int
+LIMIT $3::int
 `
 
 type ListCustomersWithLapsedCreditLotsParams struct {
-	AsOf      time.Time
-	BatchSize int32
+	MerchantID uuid.UUID
+	AsOf       time.Time
+	BatchSize  int32
 }
 
 type ListCustomersWithLapsedCreditLotsRow struct {
@@ -353,7 +354,7 @@ type ListCustomersWithLapsedCreditLotsRow struct {
 // have at least one past-expiry credit lot with an unspent remainder — the work
 // list for the credit-expiry job's per-customer ExpireLapsed sweep. Bounded batch.
 func (q *Queries) ListCustomersWithLapsedCreditLots(ctx context.Context, arg ListCustomersWithLapsedCreditLotsParams) ([]ListCustomersWithLapsedCreditLotsRow, error) {
-	rows, err := q.db.Query(ctx, listCustomersWithLapsedCreditLots, arg.AsOf, arg.BatchSize)
+	rows, err := q.db.Query(ctx, listCustomersWithLapsedCreditLots, arg.MerchantID, arg.AsOf, arg.BatchSize)
 	if err != nil {
 		return nil, err
 	}
