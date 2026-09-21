@@ -270,7 +270,10 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 	// The ledger intentionally has no control-plane FKs. Archive restoration
 	// still refuses missing/cross-payer retained business references.
 	checks := []struct{ table, predicate string }{
-		{"rail_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM openrails.payment_methods m WHERE m.merchant_id=$1 AND m.id::text=rail_intents.payload->>'payment_method_id')`},
+		{"rail_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM openrails.payment_methods m WHERE m.merchant_id=$1 AND
+          (m.id::text=rail_intents.payload->>'payment_method_id' OR
+           (m.custodian='psp' AND m.psp_id=rail_intents.psp_id AND m.rail_customer_ref=rail_intents.payload->>'rail_customer_ref' AND m.rail_customer_ref<>'' AND
+            (rail_intents.payload->>'billing_entry_only' IS DISTINCT FROM 'true' OR m.rail_method_ref=rail_intents.payload->>'rail_method_ref'))))`},
 		{"rail_intents", `intent_type='hyperswitch_method_delete' AND
           (NOT EXISTS(SELECT 1 FROM openrails.customers c WHERE c.merchant_id=$1 AND c.id::text=rail_intents.payload->>'customer_id') OR
            EXISTS(SELECT 1 FROM openrails.payment_methods m WHERE m.merchant_id=$1 AND

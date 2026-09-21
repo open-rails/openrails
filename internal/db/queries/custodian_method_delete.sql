@@ -50,7 +50,7 @@ SET status = 'succeeded', result_evidence = sqlc.arg(evidence)::jsonb,
     claimed_until = NULL, executed_at = sqlc.arg(now)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz, last_failure_reason = NULL
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND intent_type = 'hyperswitch_method_delete'
+  AND intent_type IN ('hyperswitch_method_delete','nmi_vault_delete')
   AND status IN ('in_flight', 'unknown_needs_verify');
 
 -- name: ListMethodDeletesForArchive :many
@@ -60,3 +60,25 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'succeeded'
                           'nmi_vault_delete:' || sqlc.arg(payment_method_id)::uuid::text)
   AND NOT EXISTS (SELECT 1 FROM openrails.payment_methods m
                   WHERE m.merchant_id=sqlc.arg(merchant_id)::uuid AND m.id=sqlc.arg(payment_method_id)::uuid);
+
+-- name: LockNativeMethodDelete :one
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND intent_type = 'nmi_vault_delete'
+FOR UPDATE;
+
+-- name: NativeVaultDeletionState :one
+SELECT COALESCE(bool_or(status NOT IN ('succeeded','failed_terminal','superseded','expired')),false)::boolean AS pending,
+       COALESCE(bool_or(status='succeeded' AND
+         (payload->>'billing_entry_only' IS DISTINCT FROM 'true' OR payload->>'rail_method_ref'=sqlc.arg(method_ref)::text)),false)::boolean AS erased
+FROM openrails.rail_intents
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
+  AND intent_type='nmi_vault_delete' AND payload->>'rail_customer_ref'=sqlc.arg(customer_ref)::text;
+
+-- A PSP account owns the vault namespace; a differently cased imported rail
+-- label cannot make another local billing entry disappear from the decision.
+-- name: CountNativeVaultAliases :one
+SELECT count(*) FROM openrails.payment_methods
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
+  AND custodian='psp' AND rail_customer_ref=sqlc.arg(customer_ref)::text
+  AND rail_customer_ref<>'' AND id<>sqlc.arg(exclude_id)::uuid;

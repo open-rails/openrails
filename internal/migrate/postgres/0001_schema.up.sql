@@ -1982,6 +1982,9 @@ CREATE INDEX idx_rail_intents_custodian ON openrails.rail_intents USING btree (c
 CREATE INDEX idx_rail_intents_custodian_method_delete ON openrails.rail_intents
     (merchant_id, custodian_id, (payload->'instrument'->>'rail_method_ref'))
     WHERE intent_type='hyperswitch_method_delete';
+CREATE INDEX idx_rail_intents_native_vault_delete ON openrails.rail_intents
+    (merchant_id, psp_id, (payload->>'rail_customer_ref'))
+    WHERE intent_type='nmi_vault_delete';
 
 CREATE INDEX idx_rail_intents_destructive_actor_window ON openrails.rail_intents USING btree (actor, created_at, intent_type) WHERE (origin = ANY (ARRAY['user'::text, 'admin'::text]));
 

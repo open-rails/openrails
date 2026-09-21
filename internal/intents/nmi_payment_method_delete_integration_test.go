@@ -31,8 +31,11 @@ import (
 // touches: the id-filtered v5 customer roster (the verify read) and the v5
 // customer / billing-entry DELETE.
 type fakeNMIVaultGateway struct {
-	vaultID   string
-	billingID string
+	extraBilling   bool
+	beforeDelete   chan struct{}
+	continueDelete chan struct{}
+	vaultID        string
+	billingID      string
 
 	present          atomic.Bool  // customer exists at NMI
 	deleteMode       atomic.Value // "ok" | "ambiguous500"
@@ -52,6 +55,10 @@ func newFakeNMIVaultGateway(t *testing.T, vaultID, billingID string) (*fakeNMIVa
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/customers"):
 			f.listCalls.Add(1)
 			if f.present.Load() && r.URL.Query().Get("id") == f.vaultID {
+				if f.extraBilling {
+					fmt.Fprintf(w, `{"customers":[{"object":"customer","id":"%s","billing":[{"id":"%s","priority":1},{"id":"external-entry","priority":2}]}],"next_cursor":null,"has_more":false}`, f.vaultID, f.billingID)
+					return
+				}
 				fmt.Fprintf(w, `{"customers":[{"object":"customer","id":"%s","billing":[{"id":"%s","priority":1}]}],"next_cursor":null,"has_more":false}`,
 					f.vaultID, f.billingID)
 				return
@@ -66,6 +73,10 @@ func newFakeNMIVaultGateway(t *testing.T, vaultID, billingID string) (*fakeNMIVa
 			f.present.Store(false)
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodDelete:
+			if f.beforeDelete != nil {
+				close(f.beforeDelete)
+				<-f.continueDelete
+			}
 			f.vaultDeleteCalls.Add(1)
 			if f.deleteMode.Load().(string) == "ambiguous500" {
 				w.WriteHeader(http.StatusBadGateway)

@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -52,14 +54,14 @@ func NMIPaymentMethodDeleteIdempotencyKey(paymentMethodID uuid.UUID) string {
 	return TypeNMIPaymentMethodDelete + ":" + paymentMethodID.String()
 }
 
-// NMIPaymentMethodDeletePayload is the stored payload. The payment-method row is
-// re-read at execution time when it still exists; the ref copies let the
-// handler finish the remote delete even if the local row vanished out-of-band.
+// NMIPaymentMethodDeletePayload freezes the owned target and deletion scope.
+// Recovery re-reads the accepted local fence before verifying this exact target.
 type NMIPaymentMethodDeletePayload struct {
-	UserID          string    `json:"user_id"`
-	PaymentMethodID uuid.UUID `json:"payment_method_id"`
-	RailCustomerRef string    `json:"rail_customer_ref,omitempty"`
-	RailMethodRef   string    `json:"rail_method_ref,omitempty"`
+	BillingEntryOnly bool      `json:"billing_entry_only"`
+	UserID           string    `json:"user_id"`
+	PaymentMethodID  uuid.UUID `json:"payment_method_id"`
+	RailCustomerRef  string    `json:"rail_customer_ref,omitempty"`
+	RailMethodRef    string    `json:"rail_method_ref,omitempty"`
 }
 
 // RailClientResolver resolves the per-merchant NMI client for a payment
@@ -68,29 +70,24 @@ type RailClientResolver interface {
 	ResolveClientForPaymentMethod(ctx context.Context, pm *models.PaymentMethod) (*nmi.NMIClient, error)
 }
 
-// NMIPaymentMethodDeleteHandler implements verify-then-execute deletion of an NMI
-// customer vault (or, for #682 shared vaults, of ONE billing entry):
-//
-//   - relevance: superseded only when the payment method is back in use by an
-//     active, pending, or past-due subscription (never destroy billing state
-//     in use). A missing local row does NOT supersede — the remote delete may
-//     still be pending and the payload refs carry everything needed to finish it.
-//   - execute: read the vault first — absent IS success (deletes are
-//     idempotent by observation); present -> delete. Transport-ambiguous
-//     outcomes go to the verifier; parsed clean rejections retry.
-//   - finalize: remove the local row (idempotent — already-gone is fine).
+// NMIPaymentMethodDeleteHandler verifies the accepted native-vault target,
+// retains its admission fence through uncertainty, and commits removal with
+// the terminal receipt. Live subscriptions and unresolved operations block
+// admission and execution; a missing local row cannot prove remote erasure.
 type NMIPaymentMethodDeleteHandler struct {
 	DB     *db.DB
 	Rails  RailClientResolver
 	Policy BackoffPolicy
+	Clock  clockwork.Clock
 }
 
-func NewNMIPaymentMethodDeleteHandler(d *db.DB, rails RailClientResolver) *NMIPaymentMethodDeleteHandler {
-	return &NMIPaymentMethodDeleteHandler{DB: d, Rails: rails, Policy: DefaultBackoff}
+func NewNMIPaymentMethodDeleteHandler(d *db.DB, rails RailClientResolver, clocks ...clockwork.Clock) *NMIPaymentMethodDeleteHandler {
+	return &NMIPaymentMethodDeleteHandler{DB: d, Rails: rails, Policy: DefaultBackoff, Clock: timeutil.FirstClock(clocks...)}
 }
 
-func (h *NMIPaymentMethodDeleteHandler) Type() string            { return TypeNMIPaymentMethodDelete }
-func (*NMIPaymentMethodDeleteHandler) PrunePolicy() (bool, bool) { return true, true }
+func (h *NMIPaymentMethodDeleteHandler) Type() string               { return TypeNMIPaymentMethodDelete }
+func (*NMIPaymentMethodDeleteHandler) CommitsTerminalOutcome() bool { return true }
+func (*NMIPaymentMethodDeleteHandler) PrunePolicy() (bool, bool)    { return true, true }
 func (h *NMIPaymentMethodDeleteHandler) Backoff(attempts int32) time.Duration {
 	return h.Policy.Delay(attempts)
 }
@@ -103,7 +100,7 @@ func decodeNMIVaultDeletePayload(intent gen.OpenrailsRailIntent) (NMIPaymentMeth
 	if err := json.Unmarshal(intent.Payload, &p); err != nil {
 		return p, fmt.Errorf("decode nmi vault delete payload: %w", err)
 	}
-	if p.PaymentMethodID == uuid.Nil {
+	if p.PaymentMethodID == uuid.Nil || p.BillingEntryOnly && p.RailMethodRef == "" {
 		return p, errors.New("nmi vault delete payload is incomplete")
 	}
 	return p, nil
@@ -124,7 +121,7 @@ func (h *NMIPaymentMethodDeleteHandler) CheckRelevance(ctx context.Context, inte
 func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
 	p, err := decodeNMIVaultDeletePayload(intent)
 	if err != nil {
-		return Terminal(err.Error())
+		return Parked(err.Error())
 	}
 	pm, err := h.loadPaymentMethod(ctx, intent, p)
 	if err != nil {
@@ -144,20 +141,14 @@ func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.
 	vaultID := strings.TrimSpace(pm.RailCustomerRef)
 	if vaultID == "" {
 		// Nothing exists remotely; finalize locally.
-		if err := h.finalize(ctx, p.PaymentMethodID); err != nil {
-			return Ambiguous("no rail customer ref, but local finalize failed: " + err.Error())
-		}
-		return Succeeded(map[string]any{"no_rail_customer_ref": true})
+		return h.complete(ctx, intent, p, map[string]any{"no_rail_customer_ref": true})
 	}
 
-	shared, err := h.sharedVault(ctx, pm)
-	if err != nil {
-		return Retryable("check vault sharing: " + err.Error())
-	}
+	shared := p.BillingEntryOnly
 	if shared && strings.TrimSpace(pm.RailMethodRef) == "" {
 		// Cannot identify WHICH billing entry is this card — refuse rather than
 		// destroy the siblings (#682 shared-vault contract).
-		return Terminal(fmt.Sprintf("vault %s is shared by other stored payment methods and this row carries no billing id to scope the delete", vaultID))
+		return Parked(fmt.Sprintf("vault %s is shared by other stored payment methods and this row carries no billing id to scope the delete", vaultID))
 	}
 
 	// Verify-then-execute: absent at the provider IS success.
@@ -166,18 +157,17 @@ func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.
 		return Retryable("provider read before delete failed: " + err.Error())
 	}
 	if !present {
-		if err := h.finalize(ctx, p.PaymentMethodID); err != nil {
-			return Ambiguous("verified absent at provider, but local finalize failed: " + err.Error())
-		}
-		return Succeeded(map[string]any{"verified_absent": true, "vault_id": vaultID})
+		return h.complete(ctx, intent, p, map[string]any{"verified_absent": true, "vault_id": vaultID})
 	}
 	if shared && !billingEntryPresent(customer, pm.RailMethodRef) {
-		if err := h.finalize(ctx, p.PaymentMethodID); err != nil {
-			return Ambiguous("verified billing entry absent at provider, but local finalize failed: " + err.Error())
-		}
-		return Succeeded(map[string]any{"verified_entry_absent": true, "vault_id": vaultID, "billing_id": pm.RailMethodRef})
+		return h.complete(ctx, intent, p, map[string]any{"verified_entry_absent": true, "vault_id": vaultID, "billing_id": pm.RailMethodRef})
 	}
 
+	// Local aliases alone cannot authorize erasing provider-only addresses.
+	// NMI's whole-customer DELETE removes every billing/shipping entry.
+	if !shared && (len(customer.Billing) != 1 || pm.RailMethodRef == "" || customer.Billing[0].ID != pm.RailMethodRef) {
+		return Parked("native vault contains unqualified billing entries; whole-vault deletion refused")
+	}
 	if shared {
 		err = client.DeleteCustomerBillingEntry(ctx, vaultID, pm.RailMethodRef)
 	} else {
@@ -189,10 +179,7 @@ func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.
 			return Parked("nmi provider writes blocked (mode=readonly)")
 		case errors.Is(err, nmi.ErrV5NotFound):
 			// Already gone (raced delete): absent is success.
-			if ferr := h.finalize(ctx, p.PaymentMethodID); ferr != nil {
-				return Ambiguous("already absent at provider, but local finalize failed: " + ferr.Error())
-			}
-			return Succeeded(map[string]any{"already_absent": true, "vault_id": vaultID})
+			return h.complete(ctx, intent, p, map[string]any{"already_absent": true, "vault_id": vaultID})
 		case nmi.IsTransportAmbiguous(err):
 			// The delete MAY have landed; the verifier resolves via reads.
 			return Ambiguous("vault delete outcome unknown: " + err.Error())
@@ -202,16 +189,11 @@ func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.
 		}
 	}
 
-	if err := h.finalize(ctx, p.PaymentMethodID); err != nil {
-		// The provider delete DID happen; the verifier retries finalize (its
-		// read will see the vault/entry absent).
-		return Ambiguous("deleted at provider, but local finalize failed: " + err.Error())
-	}
 	evidence := map[string]any{"deleted": true, "vault_id": vaultID}
 	if shared {
 		evidence["scoped_to_billing_entry"] = pm.RailMethodRef
 	}
-	return Succeeded(evidence)
+	return h.complete(ctx, intent, p, evidence)
 }
 
 // Verify resolves an ambiguous delete via provider READS: vault (or billing
@@ -220,7 +202,7 @@ func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.
 func (h *NMIPaymentMethodDeleteHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
 	p, err := decodeNMIVaultDeletePayload(intent)
 	if err != nil {
-		return Terminal(err.Error())
+		return Parked(err.Error())
 	}
 	pm, err := h.loadPaymentMethod(ctx, intent, p)
 	if err != nil {
@@ -235,37 +217,24 @@ func (h *NMIPaymentMethodDeleteHandler) Verify(ctx context.Context, intent gen.O
 	}
 	vaultID := strings.TrimSpace(pm.RailCustomerRef)
 	if vaultID == "" {
-		if err := h.finalize(ctx, p.PaymentMethodID); err != nil {
-			return Ambiguous("no rail customer ref, but local finalize failed: " + err.Error())
-		}
-		return Succeeded(map[string]any{"no_rail_customer_ref": true})
+		return h.complete(ctx, intent, p, map[string]any{"no_rail_customer_ref": true})
 	}
-	shared, err := h.sharedVault(ctx, pm)
-	if err != nil {
-		return Ambiguous("check vault sharing: " + err.Error())
-	}
+	shared := p.BillingEntryOnly
 	customer, present, err := h.vaultCustomer(ctx, client, vaultID)
 	if err != nil {
 		return Ambiguous("provider read failed: " + err.Error())
 	}
 	if !present {
-		if err := h.finalize(ctx, p.PaymentMethodID); err != nil {
-			return Ambiguous("verified absent at provider, but local finalize failed: " + err.Error())
-		}
-		return Succeeded(map[string]any{"verified_absent": true, "vault_id": vaultID})
+		return h.complete(ctx, intent, p, map[string]any{"verified_absent": true, "vault_id": vaultID})
 	}
 	if shared && strings.TrimSpace(pm.RailMethodRef) != "" && !billingEntryPresent(customer, pm.RailMethodRef) {
-		if err := h.finalize(ctx, p.PaymentMethodID); err != nil {
-			return Ambiguous("verified billing entry absent at provider, but local finalize failed: " + err.Error())
-		}
-		return Succeeded(map[string]any{"verified_entry_absent": true, "vault_id": vaultID, "billing_id": pm.RailMethodRef})
+		return h.complete(ctx, intent, p, map[string]any{"verified_entry_absent": true, "vault_id": vaultID, "billing_id": pm.RailMethodRef})
 	}
 	return Retryable("vault still present at provider; delete verified not executed")
 }
 
-// loadPaymentMethod re-reads the row when it exists; a row deleted out-of-band
-// falls back to a synthetic method built from the immutable payload refs so
-// the remote delete can still be finished.
+// loadPaymentMethod requires the canonical accepted row and its fence. Atomic
+// completion retains that row until the terminal receipt commits with removal.
 func (h *NMIPaymentMethodDeleteHandler) loadPaymentMethod(ctx context.Context, intent gen.OpenrailsRailIntent, p NMIPaymentMethodDeletePayload) (*models.PaymentMethod, error) {
 	scope, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil || scope.UUID() != intent.MerchantID || intent.IntentType != TypeNMIPaymentMethodDelete {
@@ -281,6 +250,9 @@ func (h *NMIPaymentMethodDeleteHandler) loadPaymentMethod(ctx context.Context, i
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: intent.MerchantID, ID: customer}); err != nil {
 			return err
 		}
+		if err := paymentmethods.LockNativeVault(ctx, q, intent.MerchantID, derefUUID(intent.PspID), p.RailCustomerRef); err != nil {
+			return err
+		}
 		row, err := q.LockPaymentMethodForCustodyRemap(ctx, gen.LockPaymentMethodForCustodyRemapParams{MerchantID: intent.MerchantID, ID: p.PaymentMethodID})
 		if err != nil {
 			return err
@@ -294,33 +266,7 @@ func (h *NMIPaymentMethodDeleteHandler) loadPaymentMethod(ctx context.Context, i
 		pm, err = models.PaymentMethodFromGen(row)
 		return err
 	})
-	if err == nil {
-		return pm, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return nil, err
-	}
-	return &models.PaymentMethod{
-		ID:              p.PaymentMethodID,
-		Custodian:       models.CustodianPSP,
-		Rail:            models.Rail(strings.ToLower(intent.Rail)),
-		RailCustomerRef: p.RailCustomerRef,
-		RailMethodRef:   p.RailMethodRef,
-		PspID:           derefUUID(intent.PspID),
-	}, nil
-}
-
-// sharedVault reports whether OTHER local payment-method rows still share the
-// vault id (#682) — recomputed at execution time, never trusted from enqueue.
-func (h *NMIPaymentMethodDeleteHandler) sharedVault(ctx context.Context, pm *models.PaymentMethod) (bool, error) {
-	if strings.TrimSpace(pm.RailCustomerRef) == "" {
-		return false, nil
-	}
-	n, err := paymentmethods.NewPaymentMethodRepo(h.DB).CountSharingCustomerRef(ctx, strings.ToLower(string(pm.Rail)), pm.PspID, pm.RailCustomerRef, pm.ID)
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
+	return pm, err
 }
 
 // vaultCustomer reads the id-filtered v5 customer roster: absent means the
@@ -351,14 +297,74 @@ func billingEntryPresent(customer *nmi.V5Customer, billingID string) bool {
 	return false
 }
 
-// finalize removes the local payment-method row. Idempotent — already-gone is
-// success.
-func (h *NMIPaymentMethodDeleteHandler) finalize(ctx context.Context, paymentMethodID uuid.UUID) error {
-	err := paymentmethods.NewPaymentMethodRepo(h.DB).Delete(ctx, paymentMethodID)
-	if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
-		return nil
+// complete commits the exact fenced local removal and retained receipt together.
+// A failed ledger write rolls back removal, so recovery can still resolve the
+// canonical method and verify its accepted native-vault target.
+func (h *NMIPaymentMethodDeleteHandler) complete(ctx context.Context, in gen.OpenrailsRailIntent, p NMIPaymentMethodDeletePayload, evidence map[string]any) Outcome {
+	ctx, cancel := LedgerWriteContext(ctx)
+	defer cancel()
+	customer, err := uuid.Parse(p.UserID)
+	if err != nil {
+		return Ambiguous("invalid accepted deletion payer")
 	}
-	return err
+	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := h.DB.NewWithPgxTx(tx)
+		q := d.Gen(ctx)
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: customer}); err != nil {
+			return err
+		}
+		if err := paymentmethods.LockNativeVault(ctx, q, in.MerchantID, derefUUID(in.PspID), p.RailCustomerRef); err != nil {
+			return err
+		}
+		method, err := q.LockPaymentMethodForCustodyRemap(ctx, gen.LockPaymentMethodForCustodyRemapParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID})
+		methodErr := err
+		current, err := q.LockNativeMethodDelete(ctx, gen.LockNativeMethodDeleteParams{MerchantID: in.MerchantID, ID: in.ID})
+		if err != nil {
+			return err
+		}
+		accepted, err := decodeNMIVaultDeletePayload(current)
+		if err != nil {
+			return err
+		}
+		if accepted != p || current.PspID == nil || in.PspID == nil || *current.PspID != *in.PspID || current.Rail != in.Rail || current.IdempotencyKey != NMIPaymentMethodDeleteIdempotencyKey(p.PaymentMethodID) {
+			return paymentmethods.ErrPaymentMethodDeleteUnsafe
+		}
+		if current.Status == StatusSucceeded {
+			return nil
+		}
+		if methodErr != nil {
+			return methodErr
+		}
+		if current.Status != StatusInFlight && current.Status != StatusUnknownNeedsVerify {
+			return paymentmethods.ErrPaymentMethodDeleteUnsafe
+		}
+		if method.CustomerID != customer || method.PspID != *current.PspID || method.Custodian != models.CustodianPSP || method.CustodianID != nil || method.Rail != current.Rail || method.RailCustomerRef != p.RailCustomerRef || method.RailMethodRef != p.RailMethodRef {
+			return paymentmethods.ErrPaymentMethodDeleteUnsafe
+		}
+		n, err := q.DeleteFencedPaymentMethod(ctx, gen.DeleteFencedPaymentMethodParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, OperationID: in.ID})
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return paymentmethods.ErrPaymentMethodDeleteUnsafe
+		}
+		raw, err := json.Marshal(evidence)
+		if err != nil {
+			return err
+		}
+		n, err = q.CompleteCustodianMethodDelete(ctx, gen.CompleteCustodianMethodDeleteParams{MerchantID: in.MerchantID, ID: in.ID, Evidence: raw, Now: h.Clock.Now().UTC()})
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return paymentmethods.ErrPaymentMethodDeleteUnsafe
+		}
+		return nil
+	})
+	if err != nil {
+		return Ambiguous("native deletion confirmed; atomic local completion pending: " + err.Error())
+	}
+	return Succeeded(evidence)
 }
 
 // PaymentMethodDeleteThrough adapts the write-through Runner to the producer surface

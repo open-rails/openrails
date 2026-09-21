@@ -18,7 +18,7 @@ SET status = 'succeeded', result_evidence = $1::jsonb,
     claimed_until = NULL, executed_at = $2::timestamptz,
     updated_at = $2::timestamptz, last_failure_reason = NULL
 WHERE merchant_id = $3::uuid AND id = $4::uuid
-  AND intent_type = 'hyperswitch_method_delete'
+  AND intent_type IN ('hyperswitch_method_delete','nmi_vault_delete')
   AND status IN ('in_flight', 'unknown_needs_verify')
 `
 
@@ -73,6 +73,34 @@ func (q *Queries) CountCustodianMethodAliases(ctx context.Context, arg CountCust
 	var i CountCustodianMethodAliasesRow
 	err := row.Scan(&i.Total, &i.ForeignPayers)
 	return i, err
+}
+
+const countNativeVaultAliases = `-- name: CountNativeVaultAliases :one
+SELECT count(*) FROM openrails.payment_methods
+WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
+  AND custodian='psp' AND rail_customer_ref=$3::text
+  AND rail_customer_ref<>'' AND id<>$4::uuid
+`
+
+type CountNativeVaultAliasesParams struct {
+	MerchantID  uuid.UUID
+	PspID       uuid.UUID
+	CustomerRef string
+	ExcludeID   uuid.UUID
+}
+
+// A PSP account owns the vault namespace; a differently cased imported rail
+// label cannot make another local billing entry disappear from the decision.
+func (q *Queries) CountNativeVaultAliases(ctx context.Context, arg CountNativeVaultAliasesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countNativeVaultAliases,
+		arg.MerchantID,
+		arg.PspID,
+		arg.CustomerRef,
+		arg.ExcludeID,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const custodianMethodDeletionState = `-- name: CustodianMethodDeletionState :one
@@ -298,4 +326,83 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 func (q *Queries) LockCustodianMethodHandle(ctx context.Context, lockKey string) error {
 	_, err := q.db.Exec(ctx, lockCustodianMethodHandle, lockKey)
 	return err
+}
+
+const lockNativeMethodDelete = `-- name: LockNativeMethodDelete :one
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+  AND intent_type = 'nmi_vault_delete'
+FOR UPDATE
+`
+
+type LockNativeMethodDeleteParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) LockNativeMethodDelete(ctx context.Context, arg LockNativeMethodDeleteParams) (OpenrailsRailIntent, error) {
+	row := q.db.QueryRow(ctx, lockNativeMethodDelete, arg.MerchantID, arg.ID)
+	var i OpenrailsRailIntent
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.IntentType,
+		&i.SubscriptionID,
+		&i.PaymentID,
+		&i.PriceID,
+		&i.Payload,
+		&i.IdempotencyKey,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ClaimedUntil,
+		&i.Origin,
+		&i.OriginReason,
+		&i.Actor,
+		&i.LastFailureReason,
+		&i.ExpiresAt,
+		&i.ResultEvidence,
+		&i.CreatedAt,
+		&i.ExecutedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.CustodianID,
+	)
+	return i, err
+}
+
+const nativeVaultDeletionState = `-- name: NativeVaultDeletionState :one
+SELECT COALESCE(bool_or(status NOT IN ('succeeded','failed_terminal','superseded','expired')),false)::boolean AS pending,
+       COALESCE(bool_or(status='succeeded' AND
+         (payload->>'billing_entry_only' IS DISTINCT FROM 'true' OR payload->>'rail_method_ref'=$1::text)),false)::boolean AS erased
+FROM openrails.rail_intents
+WHERE merchant_id=$2::uuid AND psp_id=$3::uuid
+  AND intent_type='nmi_vault_delete' AND payload->>'rail_customer_ref'=$4::text
+`
+
+type NativeVaultDeletionStateParams struct {
+	MethodRef   string
+	MerchantID  uuid.UUID
+	PspID       uuid.UUID
+	CustomerRef string
+}
+
+type NativeVaultDeletionStateRow struct {
+	Pending bool
+	Erased  bool
+}
+
+func (q *Queries) NativeVaultDeletionState(ctx context.Context, arg NativeVaultDeletionStateParams) (NativeVaultDeletionStateRow, error) {
+	row := q.db.QueryRow(ctx, nativeVaultDeletionState,
+		arg.MethodRef,
+		arg.MerchantID,
+		arg.PspID,
+		arg.CustomerRef,
+	)
+	var i NativeVaultDeletionStateRow
+	err := row.Scan(&i.Pending, &i.Erased)
+	return i, err
 }

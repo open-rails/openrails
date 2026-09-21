@@ -47,13 +47,21 @@ func (s *Store) enqueueNMIMethodDelete(ctx context.Context, p EnqueueParams) (ge
 			if err != nil {
 				return err
 			}
-			if accepted != terms || prior.PspID == nil || *prior.PspID != p.PspID || prior.Rail != p.Provider {
+			requested := accepted
+			requested.BillingEntryOnly = terms.BillingEntryOnly
+			if requested != terms || prior.PspID == nil || *prior.PspID != p.PspID || prior.Rail != p.Provider {
 				return paymentmethods.ErrPaymentMethodDeleteUnsafe
 			}
 			row = prior
 			return nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err := paymentmethods.LockNativeVault(ctx, q, p.MerchantID, p.PspID, terms.RailCustomerRef); err != nil {
+			return err
+		}
+		if err := paymentmethods.RequireNativeVaultAvailable(ctx, q, p.MerchantID, p.PspID, terms.RailCustomerRef, terms.RailMethodRef); err != nil {
 			return err
 		}
 		method, err := q.LockPaymentMethodForCustodyRemap(ctx, gen.LockPaymentMethodForCustodyRemapParams{MerchantID: p.MerchantID, ID: terms.PaymentMethodID})
@@ -66,6 +74,15 @@ func (s *Store) enqueueNMIMethodDelete(ctx context.Context, p EnqueueParams) (ge
 		if err := deletionMethodUnused(ctx, q, p.MerchantID, method.ID, 0); err != nil {
 			return err
 		}
+		aliases, err := q.CountNativeVaultAliases(ctx, gen.CountNativeVaultAliasesParams{MerchantID: p.MerchantID, PspID: p.PspID, CustomerRef: terms.RailCustomerRef, ExcludeID: method.ID})
+		if err != nil {
+			return err
+		}
+		terms.BillingEntryOnly = aliases > 0
+		if terms.BillingEntryOnly && terms.RailMethodRef == "" {
+			return paymentmethods.ErrPaymentMethodDeleteUnsafe
+		}
+		p.Payload = terms
 		row, err = store.enqueue(ctx, p)
 		if err != nil {
 			return err

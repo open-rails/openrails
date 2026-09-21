@@ -353,7 +353,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	// #674 tail: durable user-initiated vault deletes (an unwired RailPaymentMethodService
 	// resolves no client, so the handler parks — never fails).
 	if r.RailPaymentMethodService != nil {
-		registry.Register(intents.NewNMIPaymentMethodDeleteHandler(r.DB, r.RailPaymentMethodService))
+		registry.Register(intents.NewNMIPaymentMethodDeleteHandler(r.DB, r.RailPaymentMethodService, r.Clock))
 		registry.Register(intents.NewHyperSwitchMethodDeleteHandler(r.DB, r.RailPaymentMethodService, clock))
 		registry.Register(intents.NewNMIPaymentMethodUpdateHandler(r.DB, r.RailPaymentMethodService, intents.NewStore(r.DB), clock))
 	}

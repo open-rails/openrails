@@ -48,6 +48,14 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Ope
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: p.merchantID.UUID(), ID: existing.CustomerID}); err != nil {
 			return err
 		}
+		if existing.Custodian == models.CustodianPSP && existing.Rail == "nmi" {
+			if err := paymentmethods.LockNativeVault(ctx, q, p.merchantID.UUID(), existing.PspID, existing.RailCustomerRef); err != nil {
+				return err
+			}
+			if err := paymentmethods.RequireNativeVaultAvailable(ctx, q, p.merchantID.UUID(), existing.PspID, existing.RailCustomerRef, existing.RailMethodRef); err != nil {
+				return err
+			}
+		}
 		old := paymentmethods.CustodianHandle{Method: existing.RailMethodRef}
 		if existing.CustodianID != nil {
 			old.Custodian = *existing.CustodianID
