@@ -60,18 +60,18 @@ func TestExampleCatalogPublishesOverHTTP(t *testing.T) {
     (SELECT count(*) FROM billing.prices WHERE merchant_id=$1 AND trial_unit_amount=0 AND trial_duration_hours=168)`, f.merchant.MerchantID.UUID()).Scan(&counts[0], &counts[1], &counts[2], &counts[3], &counts[4]))
 		return counts
 	}
-	planned := f.publish(t, manifest, catalog.ApplyOptions{})
+	planned := f.publish(t, manifest, openrails.CatalogPublishRequest{})
 	require.Nil(t, planned.Result)
-	require.Equal(t, expected[0], countProductActions(planned.Plan, catalog.ProductCreate))
-	require.Equal(t, expected[1], countPriceActions(planned.Plan, catalog.PriceCreate))
+	require.Equal(t, expected[0], countProductActions(planned.Plan, openrails.CatalogProductCreate))
+	require.Equal(t, expected[1], countPriceActions(planned.Plan, openrails.CatalogPriceCreate))
 	require.Equal(t, [5]int{}, rows())
-	applied := f.publish(t, manifest, catalog.ApplyOptions{Insert: true})
+	applied := f.publish(t, manifest, openrails.CatalogPublishRequest{Insert: true})
 	require.Equal(t, expected[0], applied.Result.ProductsCreated)
 	require.Equal(t, expected[1], applied.Result.PricesCreated)
 	require.Equal(t, expected, rows())
-	again := f.publish(t, manifest, catalog.ApplyOptions{})
-	require.Zero(t, countProductActions(again.Plan, catalog.ProductCreate))
-	require.Zero(t, countPriceActions(again.Plan, catalog.PriceCreate))
+	again := f.publish(t, manifest, openrails.CatalogPublishRequest{})
+	require.Zero(t, countProductActions(again.Plan, openrails.CatalogProductCreate))
+	require.Zero(t, countPriceActions(again.Plan, openrails.CatalogPriceCreate))
 }
 
 // TestCatalogPublishRateCardsHTTP drives the full manifest -> apply -> DB path for
@@ -433,7 +433,7 @@ WHERE g.merchant_id = $1
 	return n
 }
 
-func mustCatalogProduct(t *testing.T, ctx context.Context, applier catalogClientApplier, key string) billingservice.CatalogProduct {
+func mustCatalogProduct(t *testing.T, ctx context.Context, applier *openrails.Client, key string) billingservice.CatalogProduct {
 	t.Helper()
 	product, err := applier.GetProductByKey(ctx, key)
 	require.NoError(t, err)
@@ -570,7 +570,7 @@ func (a httpCatalogApplier) ListPricesByProduct(ctx context.Context, id openrail
 	if err != nil {
 		return nil, err
 	}
-	return (catalogClientApplier{client}).ListPricesByProduct(ctx, id, activeOnly)
+	return catalogPrices(ctx, client, id, activeOnly)
 }
 
 type exampleCatalogFile struct {
@@ -621,7 +621,7 @@ func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
 	return m
 }
 
-func countProductActions(plan *catalog.ApplyPlan, action catalog.ProductAction) int {
+func countProductActions(plan *openrails.CatalogPlan, action openrails.CatalogProductAction) int {
 	if plan == nil {
 		return 0
 	}
@@ -636,7 +636,7 @@ func countProductActions(plan *catalog.ApplyPlan, action catalog.ProductAction) 
 	return n
 }
 
-func countPriceActions(plan *catalog.ApplyPlan, action catalog.PriceAction) int {
+func countPriceActions(plan *openrails.CatalogPlan, action openrails.CatalogPriceAction) int {
 	if plan == nil {
 		return 0
 	}
@@ -732,7 +732,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, status, string(body))
 
-	applier := catalogClientApplier{standalone.Client(openrails.WithAPIKey(token))}
+	applier := standalone.Client(openrails.WithAPIKey(token))
 	premium := mustCatalogProduct(t, ctx, applier, premiumKey)
 	basic := mustCatalogProduct(t, ctx, applier, basicKey)
 	pro := mustCatalogProduct(t, ctx, applier, proKey)
@@ -744,7 +744,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	require.Equal(t, tierGroup, *pro.TierGroup)
 	require.Equal(t, 2, pro.TierRank)
 
-	proPrices, err := applier.ListPricesByProduct(ctx, pro.ID, true)
+	proPrices, err := catalogPrices(ctx, applier, pro.ID, true)
 	require.NoError(t, err)
 	require.Len(t, proPrices, 1)
 	require.True(t, proPrices[0].AutoRenew)
@@ -755,7 +755,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	require.NotNil(t, proPrices[0].TrialDurationHours)
 	require.Equal(t, 168, *proPrices[0].TrialDurationHours)
 
-	moviePrices, err := applier.ListPricesByProduct(ctx, movie.ID, true)
+	moviePrices, err := catalogPrices(ctx, applier, movie.ID, true)
 	require.NoError(t, err)
 	require.Len(t, moviePrices, 1)
 	require.Nil(t, moviePrices[0].AccessDurationHours)

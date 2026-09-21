@@ -1,21 +1,6 @@
-// Package catalog implements a terraform-style declarative "catalog-as-code"
-// apply for the OpenRails billing catalog (issue #162).
-//
-// A manifest is a YAML file describing the desired catalog: products > prices.
-// Applying it converges OpenRails (and, via
-// the existing declarative-provider dispatch in issue #208, every configured
-// payment rail) onto that desired state. The pipeline is load → validate →
-// plan → print → apply, with two
-// identity rules:
-//
-//   - A product's identity is its key.
-//   - A price's identity is its FINANCIAL SUBSTANCE (currency, unit_amount,
-//     access duration, renewal flag, and trial terms). There is no price slug. Prices are a SET:
-//     declared prices are ensured active; an active OpenRails price whose
-//     financial identity is not declared is archived.
-//
-// Each price declares its own `providers:` list and optional `provider_links`
-// so apply can fan out explicitly across Stripe, NMI, CCBill and Solana.
+// Package catalog defines and validates merchant catalog declarations: products,
+// prices, meters and rate cards. Publish them through openrails.Client.PublishCatalog
+// or use embed.Runtime.PushCatalog for manifest-owned bootstrap tooling.
 package catalog
 
 // Manifest is the root of a catalog-as-code document.
