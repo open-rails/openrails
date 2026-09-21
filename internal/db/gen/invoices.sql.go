@@ -789,6 +789,96 @@ func (q *Queries) ListChargeableOpenInvoices(ctx context.Context, arg ListCharge
 	return items, nil
 }
 
+const listEncodedInvoiceAttemptsForArchive = `-- name: ListEncodedInvoiceAttemptsForArchive :many
+SELECT a.id, a.merchant_id, a.customer_id, a.invoice_id, a.ledger_transfer_id, a.currency, a.amount, a.status, a.rail, a.rail_payment_id, a.failure_code, a.failure_message, a.attempted_at, a.settled_at, a.created_at, a.updated_at, a.psp_id, a.failure_reason, a.payment_method_id, a.idempotency_key, i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.claimed_until, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id,
+    COALESCE(l.merchant_id = a.merchant_id AND l.customer_id = a.customer_id
+        AND l.invoice_id = a.invoice_id AND l.currency = a.currency
+        AND l.source = 'invoice_charge' AND l.source_id = i.idempotency_key
+        AND l.operation = 'invoice_payment' AND l.transfer_type = 'owed_payment'
+        AND l.amount = (i.payload->>'amount')::numeric, false)::boolean AS ledger_matches
+FROM openrails.invoice_payments a
+JOIN openrails.rail_intents i ON i.merchant_id = a.merchant_id
+    AND i.idempotency_key = a.idempotency_key AND i.intent_type = 'invoice_collection'
+LEFT JOIN openrails.ledger_transfers l ON l.merchant_id = a.merchant_id AND l.id = a.ledger_transfer_id
+WHERE a.merchant_id = $1 AND a.idempotency_key LIKE 'invoice_collection:%'
+`
+
+type ListEncodedInvoiceAttemptsForArchiveRow struct {
+	OpenrailsInvoicePayment OpenrailsInvoicePayment
+	OpenrailsRailIntent     OpenrailsRailIntent
+	LedgerMatches           bool
+}
+
+// The archive validates both copies of the generated payer-scoped coordinate
+// against the canonical collection operation before exporting or restoring it.
+func (q *Queries) ListEncodedInvoiceAttemptsForArchive(ctx context.Context, merchantID uuid.UUID) ([]ListEncodedInvoiceAttemptsForArchiveRow, error) {
+	rows, err := q.db.Query(ctx, listEncodedInvoiceAttemptsForArchive, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEncodedInvoiceAttemptsForArchiveRow
+	for rows.Next() {
+		var i ListEncodedInvoiceAttemptsForArchiveRow
+		if err := rows.Scan(
+			&i.OpenrailsInvoicePayment.ID,
+			&i.OpenrailsInvoicePayment.MerchantID,
+			&i.OpenrailsInvoicePayment.CustomerID,
+			&i.OpenrailsInvoicePayment.InvoiceID,
+			&i.OpenrailsInvoicePayment.LedgerTransferID,
+			&i.OpenrailsInvoicePayment.Currency,
+			&i.OpenrailsInvoicePayment.Amount,
+			&i.OpenrailsInvoicePayment.Status,
+			&i.OpenrailsInvoicePayment.Rail,
+			&i.OpenrailsInvoicePayment.RailPaymentID,
+			&i.OpenrailsInvoicePayment.FailureCode,
+			&i.OpenrailsInvoicePayment.FailureMessage,
+			&i.OpenrailsInvoicePayment.AttemptedAt,
+			&i.OpenrailsInvoicePayment.SettledAt,
+			&i.OpenrailsInvoicePayment.CreatedAt,
+			&i.OpenrailsInvoicePayment.UpdatedAt,
+			&i.OpenrailsInvoicePayment.PspID,
+			&i.OpenrailsInvoicePayment.FailureReason,
+			&i.OpenrailsInvoicePayment.PaymentMethodID,
+			&i.OpenrailsInvoicePayment.IdempotencyKey,
+			&i.OpenrailsRailIntent.ID,
+			&i.OpenrailsRailIntent.MerchantID,
+			&i.OpenrailsRailIntent.Rail,
+			&i.OpenrailsRailIntent.IntentType,
+			&i.OpenrailsRailIntent.SubscriptionID,
+			&i.OpenrailsRailIntent.PaymentID,
+			&i.OpenrailsRailIntent.PriceID,
+			&i.OpenrailsRailIntent.Payload,
+			&i.OpenrailsRailIntent.IdempotencyKey,
+			&i.OpenrailsRailIntent.Status,
+			&i.OpenrailsRailIntent.Attempts,
+			&i.OpenrailsRailIntent.NextAttemptAt,
+			&i.OpenrailsRailIntent.ClaimedUntil,
+			&i.OpenrailsRailIntent.Origin,
+			&i.OpenrailsRailIntent.OriginReason,
+			&i.OpenrailsRailIntent.Actor,
+			&i.OpenrailsRailIntent.LastFailureReason,
+			&i.OpenrailsRailIntent.ExpiresAt,
+			&i.OpenrailsRailIntent.ResultEvidence,
+			&i.OpenrailsRailIntent.CreatedAt,
+			&i.OpenrailsRailIntent.ExecutedAt,
+			&i.OpenrailsRailIntent.UpdatedAt,
+			&i.OpenrailsRailIntent.PspID,
+			&i.OpenrailsRailIntent.DestructiveRunID,
+			&i.OpenrailsRailIntent.DestructiveRunClass,
+			&i.OpenrailsRailIntent.CustodianID,
+			&i.LedgerMatches,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listInvoicePayers = `-- name: ListInvoicePayers :many
 
 SELECT customer_id::uuid AS customer_id, currency, MIN(period_anchor)::timestamptz AS period_anchor
