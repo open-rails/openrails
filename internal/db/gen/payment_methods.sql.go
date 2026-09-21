@@ -1160,6 +1160,7 @@ WHERE merchant_id = $6::uuid
   AND custodian_id = $7::uuid
   AND custodian = $8
   AND rail_method_ref = $9
+  AND park_reason NOT LIKE 'delete:%'
 `
 
 type RotateCustodianMethodRefParams struct {
@@ -1245,6 +1246,7 @@ UPDATE openrails.payment_methods SET
     network_token_par = $3,
     updated_at = now()
 WHERE merchant_id = $4 AND id = $5
+  AND park_reason NOT LIKE 'delete:%'
 `
 
 type SetPaymentMethodNetworkTokenParams struct {

@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 )
 
 // remap is the custody flip for ONE instrument.
@@ -44,11 +45,37 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Ope
 
 	err = p.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: p.merchantID.UUID(), ID: existing.CustomerID}); err != nil {
+			return err
+		}
+		if existing.Custodian == models.CustodianPSP && existing.Rail == "nmi" {
+			if err := paymentmethods.LockNativeVault(ctx, q, p.merchantID.UUID(), existing.PspID, existing.RailCustomerRef); err != nil {
+				return err
+			}
+			if err := paymentmethods.RequireNativeVaultAvailable(ctx, q, p.merchantID.UUID(), existing.PspID, existing.RailCustomerRef, existing.RailMethodRef); err != nil {
+				return err
+			}
+		}
+		old := paymentmethods.CustodianHandle{Method: existing.RailMethodRef}
+		if existing.CustodianID != nil {
+			old.Custodian = *existing.CustodianID
+		}
+		next := paymentmethods.CustodianHandle{Custodian: p.custodian.ID, Method: token}
+		if err := paymentmethods.LockCustodianHandles(ctx, q, p.merchantID.UUID(), old, next); err != nil {
+			return err
+		}
+		if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, p.merchantID.UUID(), next); err != nil {
+			return err
+		}
 		locked, lerr := q.LockPaymentMethodForCustodyRemap(ctx, gen.LockPaymentMethodForCustodyRemapParams{
 			MerchantID: p.merchantID.UUID(), ID: existing.ID,
 		})
 		if lerr != nil {
 			return fmt.Errorf("lock instrument %s: %w", existing.ID, lerr)
+		}
+		if locked.CustomerID != existing.CustomerID || locked.RailMethodRef != existing.RailMethodRef || (locked.CustodianID == nil) != (existing.CustodianID == nil) || locked.CustodianID != nil && *locked.CustodianID != *existing.CustodianID || strings.HasPrefix(locked.ParkReason, "delete:") {
+			out.Outcome, out.Reason = OutcomeBlocked, ReasonCustodyConflict
+			return nil
 		}
 		fromPSP := locked.PspID
 		// Re-decide under the lock. A concurrent run may have moved it; a
@@ -152,6 +179,16 @@ func (p *planner) create(ctx context.Context, tk ImportedToken, out RowResult) (
 	newID := uuid.New()
 	err := p.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: p.merchantID.UUID(), ID: *tk.Customer}); err != nil {
+			return err
+		}
+		handle := paymentmethods.CustodianHandle{Custodian: p.custodian.ID, Method: token}
+		if err := paymentmethods.LockCustodianHandles(ctx, q, p.merchantID.UUID(), handle); err != nil {
+			return err
+		}
+		if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, p.merchantID.UUID(), handle); err != nil {
+			return err
+		}
 		if _, cerr := q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 			ID:         newID,
 			MerchantID: p.merchantID.UUID(),

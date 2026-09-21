@@ -415,3 +415,26 @@ func (fx *paymentMethodUpdateFixture) throughPayload() NMIPaymentMethodUpdatePay
 		},
 	}
 }
+
+func TestStoredCardReplacementAndDeletionAdmissionExcludeEachOther(t *testing.T) {
+	for _, order := range []string{"update first", "delete first"} {
+		t.Run(order, func(t *testing.T) {
+			f := newPaymentMethodUpdateFixture(t)
+			f.runner.Config = &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
+			f.runner.Registry.Register(NewNMIPaymentMethodDeleteHandler(f.db, nil))
+			deletion := &PaymentMethodDeleteThrough{Runner: f.runner}
+			if order == "update first" {
+				require.False(t, f.execute(t).Done)
+				_, err := deletion.ExecutePaymentMethodDelete(f.ctx, f.pm)
+				require.ErrorIs(t, err, paymentmethods.ErrPaymentMethodInUse)
+			} else {
+				pending, err := deletion.ExecutePaymentMethodDelete(f.ctx, f.pm)
+				require.NoError(t, err)
+				require.False(t, pending.Done)
+				_, err = f.through.ExecutePaymentMethodUpdate(f.ctx, f.pm, f.request)
+				require.ErrorIs(t, err, paymentmethods.ErrPaymentMethodDeleteProcessing)
+			}
+			require.Zero(t, f.gateway.patchCalls.Load(), "neither parked mutation consumes a replacement token")
+		})
+	}
+}

@@ -1218,7 +1218,7 @@
       "type Customer struct {\n\tID        string `json:\"id\"`\n\tReference string `json:\"merchant_reference_id\"`\n}",
       "type Method struct {\n\tID          string       `json:\"id\"`\n\tMerchantID  string       `json:\"merchant_id\"`\n\tCustomerID  string       `json:\"customer_id\"`\n\tStorageType string       `json:\"storage_type\"`\n\tRaw         forbiddenRaw `json:\"raw_payment_method_data\"`\n\tData        struct {\n\t\tCard *struct {\n\t\t\tLast4 string       `json:\"last4_digits\"`\n\t\t\tMonth string       `json:\"expiry_month\"`\n\t\t\tYear  string       `json:\"expiry_year\"`\n\t\t\tBrand string       `json:\"card_network\"`\n\t\t\tRaw   forbiddenRaw `json:\"card_number\"`\n\t\t} `json:\"card\"`\n\t} `json:\"payment_method_data\"`\n}",
       "type Session struct {\n\tID                string             `json:\"id\"`\n\tCustomerID        string             `json:\"customer_id\"`\n\tStorageType       string             `json:\"storage_type\"`\n\tExpiresAt         Instant            `json:\"expires_at\"`\n\tClientSecret      Secret             `json:\"client_secret\"`\n\tSDKAuthorization  Secret             `json:\"sdk_authorization\"`\n\tAssociatedMethods []AssociatedMethod `json:\"associated_payment_methods\"`\n}",
-      "type proxyContract struct {\n\tContract         string `json:\"contract\"`\n\tStrict           bool   `json:\"strict\"`\n\tMaxResponseBytes int    `json:\"max_response_bytes\"`\n\tRoutes           []struct {\n\t\tDestination string `json:\"destination_url\"`\n\t\tMethod      string `json:\"method\"`\n\t\tProfile     string `json:\"response_profile\"`\n\t} `json:\"routes\"`\n}"
+      "type proxyContract struct {\n\tNativeVaultDeleteContract string `json:\"native_vault_delete_contract,omitempty\"`\n\tContract                  string `json:\"contract\"`\n\tStrict                    bool   `json:\"strict\"`\n\tMaxResponseBytes          int    `json:\"max_response_bytes\"`\n\tRoutes                    []struct {\n\t\tDestination string `json:\"destination_url\"`\n\t\tMethod      string `json:\"method\"`\n\t\tProfile     string `json:\"response_profile\"`\n\t} `json:\"routes\"`\n}"
     ],
     "internal/integrations/nmi": [
       "func (c *V5Cursor) UnmarshalJSON(raw []byte) error {\n\ttrimmed := strings.TrimSpace(string(raw))\n\tif trimmed == \"null\" || trimmed == `\"\"` {\n\t\t*c = \"\"\n\t\treturn nil\n\t}\n\tvar s string\n\tif err := json.Unmarshal(raw, \u0026s); err == nil {\n\t\t*c = V5Cursor(s)\n\t\treturn nil\n\t}\n\tvar n json.Number\n\tif err := json.Unmarshal(raw, \u0026n); err != nil {\n\t\treturn fmt.Errorf(\"unrecognized cursor %s\", trimmed)\n\t}\n\t*c = V5Cursor(n.String())\n\treturn nil\n}",
@@ -1252,9 +1252,10 @@
       "type AccountUpdaterBatchPayload struct {\n\tBatchID uuid.UUID `json:\"batch_id\"`\n\n\tCustodianKind      string `json:\"custodian_kind\"`\n\tCustodianAccountID string `json:\"custodian_account_id\"`\n}",
       "type CCBillCancelPayload struct {\n\tUserID             string `json:\"user_id\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id,omitempty\"`\n}",
       "type CollectionCandidate struct {\n\tTransactionID     string `json:\"transaction_id\"`\n\tExternalInvoiceID string `json:\"external_invoice_id,omitempty\"`\n}",
+      "type HyperSwitchMethodDeletePayload struct {\n\tCustomerID      uuid.UUID                 `json:\"customer_id\"`\n\tPaymentMethodID uuid.UUID                 `json:\"payment_method_id\"`\n\tInstrument      charge.FrozenInstrument   `json:\"instrument\"`\n\tBinding         charge.HyperSwitchBinding `json:\"binding\"`\n\tEnvironment     string                    `json:\"environment\"`\n\tDetachOnly      bool                      `json:\"detach_only\"`\n}",
       "type InvoiceCollectionPayload struct {\n\tInitiator           charge.Initiator           `json:\"initiator\"`\n\tInvoiceID           uuid.UUID                  `json:\"invoice_id\"`\n\tCustomerID          uuid.UUID                  `json:\"customer_id\"`\n\tAttemptID           uuid.UUID                  `json:\"attempt_id\"`\n\tPaymentMethodID     uuid.UUID                  `json:\"payment_method_id\"`\n\tRail                string                     `json:\"rail\"`\n\tInstrument          charge.FrozenInstrument    `json:\"instrument\"`\n\tHyperSwitch         *charge.HyperSwitchBinding `json:\"hyperswitch,omitempty\"`\n\tCurrency            string                     `json:\"currency\"`\n\tAmount              int64                      `json:\"amount\"`\n\tAmountMinor         moneyutil.Cents            `json:\"amount_minor\"`\n\tProviderCustomerRef string                     `json:\"provider_customer_ref\"`\n\tDescription         string                     `json:\"description\"`\n}",
       "type NMIDeletePayload struct {\n\tUserID             string `json:\"user_id\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n}",
-      "type NMIPaymentMethodDeletePayload struct {\n\tUserID          string    `json:\"user_id\"`\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tRailCustomerRef string    `json:\"rail_customer_ref,omitempty\"`\n\tRailMethodRef   string    `json:\"rail_method_ref,omitempty\"`\n}",
+      "type NMIPaymentMethodDeletePayload struct {\n\tBillingEntryOnly bool      `json:\"billing_entry_only\"`\n\tUserID           string    `json:\"user_id\"`\n\tPaymentMethodID  uuid.UUID `json:\"payment_method_id\"`\n\tRailCustomerRef  string    `json:\"rail_customer_ref,omitempty\"`\n\tRailMethodRef    string    `json:\"rail_method_ref,omitempty\"`\n}",
       "type NMIPaymentMethodUpdatePayload struct {\n\tUserID          string    `json:\"user_id\"`\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tRailCustomerRef string    `json:\"rail_customer_ref\"`\n\tRailMethodRef   string    `json:\"rail_method_ref,omitempty\"`\n\tPaymentToken    string    `json:\"payment_token\"`\n\tNameOnCard      string    `json:\"name_on_card,omitempty\"`\n\tFirstName       string    `json:\"first_name,omitempty\"`\n\tLastName        string    `json:\"last_name,omitempty\"`\n\tAddress1        string    `json:\"address1,omitempty\"`\n\tCity            string    `json:\"city,omitempty\"`\n\tState           string    `json:\"state,omitempty\"`\n\tZip             string    `json:\"zip,omitempty\"`\n\tCountry         string    `json:\"country,omitempty\"`\n\tPhone           string    `json:\"phone,omitempty\"`\n\tEmail           string    `json:\"email,omitempty\"`\n\tCompany         string    `json:\"company,omitempty\"`\n\tAddress2        string    `json:\"address2,omitempty\"`\n\tTargetCard      nmiCard   `json:\"target_card\"`\n}",
       "type NMIPaymentSourceUpdatePayload struct {\n\tUserID             string     `json:\"user_id\"`\n\tRailSubscriptionID string     `json:\"rail_subscription_id,omitempty\"`\n\tNewPaymentMethodID uuid.UUID  `json:\"new_payment_method_id\"`\n\tNewRailCustomerRef string     `json:\"new_vault_id\"`\n\tNewPspID           uuid.UUID  `json:\"new_psp_id\"`\n\tOldPaymentMethodID *uuid.UUID `json:\"old_payment_method_id,omitempty\"`\n\tOldRailCustomerRef string     `json:\"old_vault_id,omitempty\"`\n}",
       "type RefundPayload struct {\n\tOriginalPaymentID uuid.UUID `json:\"original_payment_id\"`\n\n\tReservationID uuid.UUID `json:\"reservation_id\"`\n\n\tAmountCents  moneyutil.Cents `json:\"amount_cents\"`\n\tCurrency     string          `json:\"currency\"`\n\tReason       string          `json:\"reason,omitempty\"`\n\tRevokeAccess bool            `json:\"revoke_access\"`\n\n\tProviderTarget string `json:\"provider_target\"`\n\n\tProviderTransactionID string `json:\"provider_transaction_id,omitempty\"`\n}",
@@ -2781,6 +2782,27 @@
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time"
     },
+    "internal/intents/hyperswitch_method_delete.go": {
+      "bytes": "bytes",
+      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
+      "clockwork": "github.com/jonboulle/clockwork",
+      "config": "github.com/open-rails/openrails/config",
+      "context": "context",
+      "custodians": "github.com/open-rails/openrails/internal/custodians",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "hyperswitch": "github.com/open-rails/openrails/internal/integrations/hyperswitch",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/pkg/merchant",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
+      "railresolve": "github.com/open-rails/openrails/internal/railresolve",
+      "time": "time",
+      "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
     "internal/intents/invoice_submission.go": {
       "bytes": "bytes",
       "context": "context",
@@ -2838,6 +2860,7 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/intents/nmi_payment_method_delete.go": {
+      "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
@@ -2850,7 +2873,9 @@
       "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
       "strings": "strings",
       "time": "time",
-      "uuid": "github.com/google/uuid"
+      "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/intents/nmi_payment_method_update.go": {
       "clockwork": "github.com/jonboulle/clockwork",
@@ -4851,7 +4876,7 @@
     "internal/http/handlers/merchant_team.go": "48cff76896e2e525ef1ebee703a2cc8e7f13af8465d96f841efa511e352a5051",
     "internal/http/handlers/notifications.go": "c0a31605497bf64b1c3bfbeee00dccdfd2bc43bf7bd87bf90f0e2a8ee125d460",
     "internal/http/handlers/payment_api.go": "3ef439eecadfad218b6df203d579afedec40bed4d0c77a7ac079f0cf4a89413d",
-    "internal/http/handlers/payment_methods.go": "43845f109c93410e47dcd7992f6e0db28f51e40f9b7adc3392e87f5fd97fb3f7",
+    "internal/http/handlers/payment_methods.go": "4b6b9d2d1947bb1b2f1d480ba04101d85a6918c3b936883a4ade802bcc7c26b6",
     "internal/http/handlers/platform_merchants.go": "67e49f7eb7272dccd479c4cec4937c9a48351cfcf572c64b201c2bac57e3d85c",
     "internal/http/handlers/portal.go": "a08623bb9092c9dd138bb1748e0a9e8a0c3a409e296eecf653f56a1bff13021c",
     "internal/http/handlers/product_access.go": "18d8b64895a421e0da32b4d4ac086a8fc85e2142e776bc2d5a64bc69cd38ada1",
@@ -4906,9 +4931,10 @@
     "internal/http/routes_self.go": "f87be5d91c28b31e405b2244f20cf14b03866f2834de36b35b0f519e6ea6b73a",
     "internal/http/routesurface/provider_routes.go": "6a49245b179c577ea3d0d997234eb7314c19827b152931efd581625d54aab909",
     "internal/http/server.go": "8c37de35c4cf2d8091ff0d7eb7b8eab18ebf4688ec9c48e795bac783e3cdaef7",
+    "internal/intents/payment_method_delete_authority.go": "edc67d168ceae15e148a920c5bacf5f3cfcb10c82f549265f61f8e9ff4855e7b",
     "internal/intents/rate_ceiling.go": "2f14ccb694839b19af499b5346cb052d3296a9346590d15f7f1ed5e4271da962",
-    "internal/migrate/postgres/0001_schema.up.sql": "51de4f8dd224fdd0679ac8f19ca1e4b0a0826fb833de4e9d8ad7d58df8e39aaf",
-    "internal/migrate/postgres/0002_creator_catalogs.up.sql": "c1725b9b5ac73ba45ec763ed7ce54c18368cf76c41a5f7af81ff0e3556ee09db",
+    "internal/migrate/postgres/0001_schema.up.sql": "ab467cc7da47b6b84f43780e8b3f0ab8a6fde30522e8c2026fef3bb1752381e1",
+    "internal/migrate/postgres/0002_creator_catalogs.up.sql": "45f8f02034064d947f809ba9766a48a4298aeee9af11ee9e821db61925eb0a42",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
     "internal/migrate/postgres/schema.go": "a399bef4859e1c1f8c1f952d279d8b70718d7aa7e8a1ce116cea49c9d5f6b090",

@@ -285,10 +285,11 @@ func (m Method) MaskedExpiry() string {
 // The single patched deployment contract covers the SDK resource binding and
 // proxy boundaries. Capture must not issue authority against stock v2 either.
 type proxyContract struct {
-	Contract         string `json:"contract"`
-	Strict           bool   `json:"strict"`
-	MaxResponseBytes int    `json:"max_response_bytes"`
-	Routes           []struct {
+	NativeVaultDeleteContract string `json:"native_vault_delete_contract,omitempty"`
+	Contract                  string `json:"contract"`
+	Strict                    bool   `json:"strict"`
+	MaxResponseBytes          int    `json:"max_response_bytes"`
+	Routes                    []struct {
 		Destination string `json:"destination_url"`
 		Method      string `json:"method"`
 		Profile     string `json:"response_profile"`
