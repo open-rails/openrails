@@ -75,6 +75,7 @@ var providerWriteSurface = map[string]string{
 	"ConfirmApprovedUnvaultedSale": "read",
 	"ConfirmLiveSubscription":      "read",
 	"ReadEnrollmentEvidence":       "read",
+	"ReadSingleCardVaultBilling":   "read",
 	"ConfirmRefund":                "read",
 	"ReadSaleEvidence":             "read",
 	"AccountIdentity":              "read",
