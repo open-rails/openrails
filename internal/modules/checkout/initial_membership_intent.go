@@ -497,7 +497,7 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 			if p.Email != "" {
 				email = &p.Email
 			}
-			if _, _, err := h.Checkout.Lifecycle.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &p.Terms, UserID: p.Terms.CustomerID.String(), PriceID: p.Terms.PriceID, Rail: models.Rail(in.Rail), RailSubscriptionID: &providerSub, UserEmail: email, TransactionID: transaction, Amount: p.Terms.Amount, AmountProvided: true, Currency: p.Terms.Currency, PurchasedAt: &p.Terms.AcceptedAt, PaymentMetadata: metadata}); err != nil {
+			if _, _, err := h.Checkout.Lifecycle.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &p.Terms, PaymentCustodian: p.Instrument.Custodian, UserID: p.Terms.CustomerID.String(), PriceID: p.Terms.PriceID, Rail: models.Rail(in.Rail), RailSubscriptionID: &providerSub, UserEmail: email, TransactionID: transaction, Amount: p.Terms.Amount, AmountProvided: true, Currency: p.Terms.Currency, PurchasedAt: &p.Terms.AcceptedAt, PaymentMetadata: metadata}); err != nil {
 				return err
 			}
 			if paid {
