@@ -374,6 +374,9 @@ func (s *CheckoutSessionService) confirmPaymentMethodSetup(ctx context.Context, 
 	if !sameCaptureAccount(state, current) {
 		return nil, ErrCheckoutSessionConflict
 	}
+	if err := client.CheckCaptureContract(ctx); err != nil {
+		return nil, ErrCheckoutCaptureUnavailable
+	}
 	vendorSession, err := client.GetSession(ctx, state.VendorSessionID, state.VendorCustomerID)
 	if err != nil || !vendorSession.OwnsToken(reference.Token) || !s.now().Before(vendorSession.ExpiresAt.Time) {
 		return nil, ErrCheckoutSessionConflict

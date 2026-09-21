@@ -60,6 +60,8 @@ func newCaptureFixture(t *testing.T) *captureFixture {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/v2/proxy":
 			switch g.preflight {
+			case "v1":
+				write(map[string]any{"contract": "openrails-nmi-form-v1", "strict": true, "max_response_bytes": 65536, "routes": []any{map[string]string{"destination_url": "https://secure.nmi.com/api/transact.php", "method": "POST", "response_profile": "nmi_classic"}}})
 			case "missing":
 				w.WriteHeader(404)
 			case "stock":
@@ -205,6 +207,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 	request := func() openrails.CreateCheckoutSessionRequest {
 		return openrails.CreateCheckoutSessionRequest{Mode: "payment_method", IdempotencyKey: uuid.NewString(), Customer: openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()), VerifiedEmail: "capture@example.test", Username: "capture"}, Payment: openrails.CheckoutPayment{PSPID: psp}}
 	}
+	completedMethods := map[openrails.CheckoutSessionID]openrails.PaymentMethodID{}
 	for label, client := range map[string]*openrails.Client{"remote": remote, "embedded": embedded} {
 		t.Run(label, func(t *testing.T) {
 			req := request()
@@ -248,6 +251,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "succeeded", completed.Status)
 			require.NotNil(t, completed.PaymentMethodID)
+			completedMethods[completed.ID] = *completed.PaymentMethodID
 			require.Nil(t, completed.Capture)
 			replay, err := client.ConfirmCheckoutSession(ctx, created.ID, confirm)
 			require.NoError(t, err)
@@ -382,6 +386,33 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			require.Len(t, g.users, users)
 			g.preflight = ""
 			g.mu.Unlock()
+		}
+	})
+	t.Run("deployment downgrade refuses new attachment but preserves terminal replay", func(t *testing.T) {
+		for _, mode := range []string{"missing", "v1", "disabled"} {
+			t.Run(mode, func(t *testing.T) {
+				req := request()
+				session, err := remote.CreateCheckoutSession(ctx, req)
+				require.NoError(t, err)
+				confirm := openrails.ConfirmCheckoutSessionRequest{CustomerID: req.Customer.ID, Payment: openrails.ConfirmPayment{Capture: &openrails.CustodianCaptureReference{CustodianID: custodian, SessionID: session.Capture.SessionID, Token: g.complete(session.Capture.SessionID)}}}
+				setMode := func(value string) { g.mu.Lock(); g.preflight = value; g.mu.Unlock() }
+				t.Cleanup(func() { setMode("") })
+				setMode(mode)
+				got, err := remote.ConfirmCheckoutSession(ctx, session.ID, confirm)
+				require.Error(t, err)
+				require.Nil(t, got)
+				var methods int
+				require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID.UUID()).Scan(&methods))
+				require.Zero(t, methods)
+				setMode("")
+				attached, err := remote.ConfirmCheckoutSession(ctx, session.ID, confirm)
+				require.NoError(t, err)
+				setMode(mode)
+				replayed, err := remote.ConfirmCheckoutSession(ctx, session.ID, confirm)
+				require.NoError(t, err)
+				require.Equal(t, attached.PaymentMethodID, replayed.PaymentMethodID)
+				completedMethods[attached.ID] = *attached.PaymentMethodID
+			})
 		}
 	})
 	t.Run("account change during metadata read refuses attachment", func(t *testing.T) {
@@ -562,12 +593,15 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			}
 			return raw.Err()
 		}))
-		require.Len(t, rows, 2)
+		require.NotEmpty(t, completedMethods)
+		require.Len(t, rows, len(completedMethods))
 		for _, row := range rows {
 			got, err := client.GetCheckoutSession(ctx, openrails.CustomerID(row.CustomerID), openrails.CheckoutSessionID(row.ID))
 			require.NoError(t, err)
 			require.Equal(t, "succeeded", got.Status)
 			require.NotNil(t, got.PaymentMethodID)
+			require.Contains(t, completedMethods, got.ID)
+			require.Equal(t, completedMethods[got.ID], *got.PaymentMethodID)
 			require.Nil(t, got.Capture)
 		}
 		require.Equal(t, before, g.count(), "restore and terminal replay never call vendor mutation")
