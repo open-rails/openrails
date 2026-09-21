@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/shared/normalize"
@@ -726,6 +727,11 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		}
 		if params.Prepared != nil {
 			payment.ID = params.Prepared.PaymentID
+			token := charge.TokenTypePSPToken
+			if params.Prepared.CollectionPolicy == models.CollectionPolicyEngine {
+				token = charge.TokenTypePANViaProxy
+			}
+			payment.TokenType = &token
 		}
 		if err := paymentService.Create(ctx, payment); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{

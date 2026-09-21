@@ -42,7 +42,7 @@ func ValidateInitialMembershipTerminal(in gen.OpenrailsRailIntent) error {
 	}
 	switch in.Status {
 	case StatusSucceeded:
-		if !scheduled || !evidence.Submitted || evidence.SubscriptionID != p.Terms.SubscriptionID || evidence.ProviderSubscriptionID != schedule.SubscriptionID() || evidence.Declined || evidence.NotExecuted || evidence.RequestRefused || (p.Terms.Amount > 0) != paid {
+		if (p.NativeSchedule != nil) != scheduled || !evidence.Submitted || evidence.SubscriptionID != p.Terms.SubscriptionID || evidence.ProviderSubscriptionID != schedule.SubscriptionID() || evidence.Declined || evidence.NotExecuted || evidence.RequestRefused || (p.Terms.Amount > 0) != paid {
 			return errors.New("initial terminal result contradicts accepted schedule and payment custody")
 		}
 		if paid && evidence.TransactionID != receipt.TransactionID() || !paid && evidence.TransactionID != "" {
