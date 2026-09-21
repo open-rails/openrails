@@ -12,6 +12,36 @@ import (
 	"github.com/google/uuid"
 )
 
+const completeCustodianMethodDelete = `-- name: CompleteCustodianMethodDelete :execrows
+UPDATE openrails.rail_intents
+SET status = 'succeeded', result_evidence = $1::jsonb,
+    claimed_until = NULL, executed_at = $2::timestamptz,
+    updated_at = $2::timestamptz, last_failure_reason = NULL
+WHERE merchant_id = $3::uuid AND id = $4::uuid
+  AND intent_type = 'hyperswitch_method_delete'
+  AND status IN ('in_flight', 'unknown_needs_verify')
+`
+
+type CompleteCustodianMethodDeleteParams struct {
+	Evidence   []byte
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) CompleteCustodianMethodDelete(ctx context.Context, arg CompleteCustodianMethodDeleteParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeCustodianMethodDelete,
+		arg.Evidence,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countCustodianMethodAliases = `-- name: CountCustodianMethodAliases :one
 SELECT count(*) AS total,
        count(*) FILTER (WHERE customer_id <> $1::uuid) AS foreign_payers
@@ -117,6 +147,67 @@ func (q *Queries) FencePaymentMethodDeletion(ctx context.Context, arg FencePayme
 	return result.RowsAffected(), nil
 }
 
+const listMethodDeletesForArchive = `-- name: ListMethodDeletesForArchive :many
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id = $1::uuid AND status = 'succeeded'
+  AND idempotency_key IN ('hyperswitch_method_delete:' || $2::uuid::text,
+                          'nmi_vault_delete:' || $2::uuid::text)
+  AND NOT EXISTS (SELECT 1 FROM openrails.payment_methods m
+                  WHERE m.merchant_id=$1::uuid AND m.id=$2::uuid)
+`
+
+type ListMethodDeletesForArchiveParams struct {
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
+}
+
+func (q *Queries) ListMethodDeletesForArchive(ctx context.Context, arg ListMethodDeletesForArchiveParams) ([]OpenrailsRailIntent, error) {
+	rows, err := q.db.Query(ctx, listMethodDeletesForArchive, arg.MerchantID, arg.PaymentMethodID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsRailIntent
+	for rows.Next() {
+		var i OpenrailsRailIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ClaimedUntil,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockCustodianDeletionAccount = `-- name: LockCustodianDeletionAccount :one
 SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM openrails.custodians
 WHERE merchant_id = $1::uuid AND id = $2::uuid
@@ -143,6 +234,52 @@ func (q *Queries) LockCustodianDeletionAccount(ctx context.Context, arg LockCust
 		&i.Archived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockCustodianMethodDelete = `-- name: LockCustodianMethodDelete :one
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+  AND intent_type = 'hyperswitch_method_delete'
+FOR UPDATE
+`
+
+type LockCustodianMethodDeleteParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) LockCustodianMethodDelete(ctx context.Context, arg LockCustodianMethodDeleteParams) (OpenrailsRailIntent, error) {
+	row := q.db.QueryRow(ctx, lockCustodianMethodDelete, arg.MerchantID, arg.ID)
+	var i OpenrailsRailIntent
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.IntentType,
+		&i.SubscriptionID,
+		&i.PaymentID,
+		&i.PriceID,
+		&i.Payload,
+		&i.IdempotencyKey,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ClaimedUntil,
+		&i.Origin,
+		&i.OriginReason,
+		&i.Actor,
+		&i.LastFailureReason,
+		&i.ExpiresAt,
+		&i.ResultEvidence,
+		&i.CreatedAt,
+		&i.ExecutedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.CustodianID,
 	)
 	return i, err
 }

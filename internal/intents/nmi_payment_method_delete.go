@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -88,7 +89,8 @@ func NewNMIPaymentMethodDeleteHandler(d *db.DB, rails RailClientResolver) *NMIPa
 	return &NMIPaymentMethodDeleteHandler{DB: d, Rails: rails, Policy: DefaultBackoff}
 }
 
-func (h *NMIPaymentMethodDeleteHandler) Type() string { return TypeNMIPaymentMethodDelete }
+func (h *NMIPaymentMethodDeleteHandler) Type() string            { return TypeNMIPaymentMethodDelete }
+func (*NMIPaymentMethodDeleteHandler) PrunePolicy() (bool, bool) { return true, true }
 func (h *NMIPaymentMethodDeleteHandler) Backoff(attempts int32) time.Duration {
 	return h.Policy.Delay(attempts)
 }
@@ -107,26 +109,16 @@ func decodeNMIVaultDeletePayload(intent gen.OpenrailsRailIntent) (NMIPaymentMeth
 	return p, nil
 }
 
-// CheckRelevance: the delete stays applicable unless the payment method is
-// back in use by a live subscription (enqueue-to-execute race with a new
-// checkout picking the stored card). Missing rows stay relevant — Execute
-// resolves them off the payload refs.
+// Accepted deletion remains pending if an external observation makes the
+// method live again. Preserve its fence until use resolves; never strand a
+// delete fence behind a superseded operation. Missing rows retain target refs.
 func (h *NMIPaymentMethodDeleteHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
 	p, err := decodeNMIVaultDeletePayload(intent)
 	if err != nil {
 		return StillRelevant(), nil // Execute reports the terminal payload error
 	}
-	subs, err := h.DB.Gen(ctx).ListSubscriptionsByPaymentMethodIDs(ctx, []uuid.UUID{p.PaymentMethodID})
-	if err != nil {
-		return Relevance{}, err
-	}
-	for _, sub := range subs {
-		status := string(sub.Status)
-		if status == string(models.StatusActive) || status == string(models.StatusPending) || status == string(models.StatusPastDue) {
-			return SupersededBy(fmt.Sprintf("payment method back in use by subscription %s (status=%s); delete no longer applies", sub.ID, status)), nil
-		}
-	}
-	return StillRelevant(), nil
+	_, err = h.loadPaymentMethod(ctx, intent, p)
+	return StillRelevant(), err
 }
 
 func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
@@ -275,15 +267,38 @@ func (h *NMIPaymentMethodDeleteHandler) Verify(ctx context.Context, intent gen.O
 // falls back to a synthetic method built from the immutable payload refs so
 // the remote delete can still be finished.
 func (h *NMIPaymentMethodDeleteHandler) loadPaymentMethod(ctx context.Context, intent gen.OpenrailsRailIntent, p NMIPaymentMethodDeletePayload) (*models.PaymentMethod, error) {
-	pm, err := paymentmethods.NewPaymentMethodRepo(h.DB).GetByID(ctx, p.PaymentMethodID)
+	var pm *models.PaymentMethod
+	customer, err := uuid.Parse(p.UserID)
+	if err != nil {
+		return nil, paymentmethods.ErrPaymentMethodDeleteUnsafe
+	}
+	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: intent.MerchantID, ID: customer}); err != nil {
+			return err
+		}
+		row, err := q.LockPaymentMethodForCustodyRemap(ctx, gen.LockPaymentMethodForCustodyRemapParams{MerchantID: intent.MerchantID, ID: p.PaymentMethodID})
+		if err != nil {
+			return err
+		}
+		if intent.PspID == nil || row.PspID != *intent.PspID || row.CustomerID != customer || row.Custodian != models.CustodianPSP || row.RailCustomerRef != p.RailCustomerRef || row.RailMethodRef != p.RailMethodRef || row.ParkReason != "delete:"+intent.ID.String() {
+			return paymentmethods.ErrPaymentMethodDeleteUnsafe
+		}
+		if err := deletionMethodUnused(ctx, q, intent.MerchantID, p.PaymentMethodID, 1); err != nil {
+			return err
+		}
+		pm, err = models.PaymentMethodFromGen(row)
+		return err
+	})
 	if err == nil {
 		return pm, nil
 	}
-	if !errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
+	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 	return &models.PaymentMethod{
 		ID:              p.PaymentMethodID,
+		Custodian:       models.CustodianPSP,
 		Rail:            models.Rail(strings.ToLower(intent.Rail)),
 		RailCustomerRef: p.RailCustomerRef,
 		RailMethodRef:   p.RailMethodRef,
@@ -353,10 +368,27 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 	if t == nil || t.Runner == nil {
 		return paymentmethods.PaymentMethodDeleteOutcome{}, errors.New("vault delete intent runner not wired")
 	}
+	if pm != nil && pm.Custodian == models.CustodianHyperSwitch {
+		h, ok := t.Runner.Registry.Lookup(TypeHyperSwitchMethodDelete).(*HyperSwitchMethodDeleteHandler)
+		store, stored := t.Runner.Store.(*Store)
+		if !ok || !stored {
+			return paymentmethods.PaymentMethodDeleteOutcome{}, errors.New("custodian delete admission is not wired")
+		}
+		row, err := h.admit(ctx, store, pm)
+		if err != nil {
+			return paymentmethods.PaymentMethodDeleteOutcome{}, err
+		}
+		row, err = t.Runner.ExecuteByID(ctx, row.ID)
+		if err != nil {
+			return paymentmethods.PaymentMethodDeleteOutcome{}, err
+		}
+		return paymentmethods.PaymentMethodDeleteOutcome{Done: row.Status == StatusSucceeded}, nil
+	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return paymentmethods.PaymentMethodDeleteOutcome{}, err
 	}
+	origin, actor := paymentMethodDeleteAuthority(ctx, pm.CustomerID)
 	row, err := t.Runner.EnqueueAndExecute(ctx, EnqueueParams{
 		MerchantID: tid.UUID(),
 		Provider:   strings.ToLower(string(pm.Rail)),
@@ -369,8 +401,9 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 			RailMethodRef:   pm.RailMethodRef,
 		},
 		IdempotencyKey: NMIPaymentMethodDeleteIdempotencyKey(pm.ID),
-		NextAttemptAt:  time.Now().UTC(),
-		Origin:         OriginUser,
+		NextAttemptAt:  t.Runner.now(),
+		Origin:         origin,
+		Actor:          actor,
 		OriginReason:   "user payment-method delete",
 	})
 	if err != nil {

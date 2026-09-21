@@ -1208,6 +1208,7 @@ UPDATE openrails.payment_methods SET
     network_token_par = $3,
     updated_at = now()
 WHERE merchant_id = $4 AND id = $5
+  AND park_reason NOT LIKE 'delete:%'
 `
 
 type SetPaymentMethodNetworkTokenParams struct {

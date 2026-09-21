@@ -224,7 +224,8 @@ UPDATE openrails.payment_methods SET
     network_token_status = sqlc.arg(network_token_status),
     network_token_par = sqlc.arg(network_token_par),
     updated_at = now()
-WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id);
+WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id)
+  AND park_reason NOT LIKE 'delete:%';
 
 -- name: SetNetworkTokenStatusByNetworkTokenID :execrows
 -- #795 webhook fold: NT lifecycle status/enrichment only (idempotent). Keyed on

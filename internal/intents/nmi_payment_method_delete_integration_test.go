@@ -20,8 +20,10 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -112,6 +114,7 @@ func newVaultDeleteFixture(t *testing.T) *vaultDeleteFixture {
 
 	userID := uuid.New().String()
 	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	ctx = billingauth.SetUserContext(ctx, billingauth.UserContext{UserID: customerID.String()})
 	vaultID := "vault-del-" + uuid.NewString()[:8]
 	billingID := "bill-del-" + uuid.NewString()[:8]
 
@@ -205,7 +208,7 @@ func TestNMIVaultDeleteIntent_CrashBeforeExecute(t *testing.T) {
 
 	_, err := NewStore(fx.db).Enqueue(fx.ctx, EnqueueParams{
 		MerchantID: dbtest.TestMerchantID.UUID(),
-		Provider:   "mobius",
+		Provider:   string(fx.pm.Rail),
 		PspID:      fx.pspID,
 		IntentType: TypeNMIPaymentMethodDelete,
 		Payload: NMIPaymentMethodDeletePayload{
@@ -318,7 +321,7 @@ func TestNMIVaultDeleteIntent_SharedVaultScopesToBillingEntry(t *testing.T) {
 // Relevance guard: a payment method that went back into use by an active
 // subscription between enqueue and execute supersedes the delete — billing
 // state in use is never destroyed.
-func TestNMIVaultDeleteIntent_SupersededWhenBackInUse(t *testing.T) {
+func TestNMIVaultDeleteIntent_ParksWhenBackInUse(t *testing.T) {
 	fx := newVaultDeleteFixture(t)
 	pool := fx.db.Pool()
 
@@ -326,7 +329,7 @@ func TestNMIVaultDeleteIntent_SupersededWhenBackInUse(t *testing.T) {
 	// method goes back into use before the executor drains it.
 	_, err := NewStore(fx.db).Enqueue(fx.ctx, EnqueueParams{
 		MerchantID: dbtest.TestMerchantID.UUID(),
-		Provider:   "mobius",
+		Provider:   string(fx.pm.Rail),
 		PspID:      fx.pspID,
 		IntentType: TypeNMIPaymentMethodDelete,
 		Payload: NMIPaymentMethodDeletePayload{
@@ -369,9 +372,21 @@ func TestNMIVaultDeleteIntent_SupersededWhenBackInUse(t *testing.T) {
 
 	_, err = fx.runner.RunExecuteOnce(fx.ctx)
 	require.NoError(t, err)
-	require.Equal(t, StatusSuperseded, fx.intentStatus(t))
+	require.Equal(t, StatusPending, fx.intentStatus(t))
 	require.EqualValues(t, 0, fx.gateway.vaultDeleteCalls.Load(), "in-use billing state is never destroyed")
 	require.EqualValues(t, 0, fx.gateway.entryDeleteCalls.Load())
 	require.True(t, fx.localRowExists(t))
-	require.True(t, fx.executeThrough(t).InUse, "the producer must expose superseded as an in-use refusal")
+	require.False(t, fx.executeThrough(t).Done, "accepted deletion remains fenced and pending while in use")
+}
+
+func TestNativeDeleteSystemOriginRetainsMaintenanceGate(t *testing.T) {
+	f := newVaultDeleteFixture(t)
+	f.runner.Destructive = destructive.New(f.db)
+	row, err := NewStore(f.db).Enqueue(f.ctx, EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: string(f.pm.Rail), PspID: f.pspID, IntentType: TypeNMIPaymentMethodDelete, IdempotencyKey: NMIPaymentMethodDeleteIdempotencyKey(f.pm.ID), Origin: OriginSystem, NextAttemptAt: time.Now().UTC(), Payload: NMIPaymentMethodDeletePayload{UserID: f.pm.CustomerID.String(), PaymentMethodID: f.pm.ID, RailCustomerRef: f.pm.RailCustomerRef, RailMethodRef: f.pm.RailMethodRef}})
+	require.NoError(t, err)
+	row, err = f.runner.ExecuteByID(f.ctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, StatusPending, row.Status)
+	require.Zero(t, f.gateway.vaultDeleteCalls.Load())
+	require.Zero(t, f.gateway.entryDeleteCalls.Load())
 }

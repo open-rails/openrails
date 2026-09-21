@@ -3,9 +3,11 @@
 package integrationharness
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -13,14 +15,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit/authhttp"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	embedauth "github.com/open-rails/openrails/embed/authkit"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -36,10 +45,36 @@ func TestHyperSwitchInvoiceClientWorkflow(t *testing.T) {
 	original := g.server.Config.Handler
 	var mu sync.Mutex
 	forms := map[string]map[string]string{}
+	blockReceipt, lostDelete := true, true
+	deletes := 0
+	nativeVault := "native-vault-" + uuid.NewString()
+	nativeDeleted := false
+	nativeDeletes := 0
 	g.server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/nmi/customers":
+			require.Equal(t, "native-delete-key", r.Header.Get("Authorization"))
+			if nativeDeleted {
+				fmt.Fprint(w, `{"customers":[],"has_more":false}`)
+				return
+			}
+			require.Equal(t, nativeVault, r.URL.Query().Get("id"))
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"customers": []any{map[string]any{"object": "customer", "id": nativeVault, "billing": []any{map[string]any{"id": "native-billing", "priority": 1}}}}, "has_more": false}))
+		case r.Method == http.MethodDelete && r.URL.Path == "/nmi/customers/"+nativeVault:
+			require.Equal(t, "native-delete-key", r.Header.Get("Authorization"))
+			nativeDeletes++
+			nativeDeleted = true
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/v2/payment-methods/"):
+			require.Equal(t, "api-key=capture-fixture-key", r.Header.Get("Authorization"))
+			deletes++
+			if lostDelete {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]string{"id": strings.TrimPrefix(r.URL.Path, "/v2/payment-methods/")}))
 		case r.Method == "POST" && r.URL.Path == "/v2/proxy":
 			require.Equal(t, "api-key=capture-fixture-key", r.Header.Get("Authorization"))
 			var input struct {
@@ -66,6 +101,10 @@ func TestHyperSwitchInvoiceClientWorkflow(t *testing.T) {
 			}
 			_, _ = fmt.Fprint(w, "</nm_response>")
 		case r.Method == "GET" && r.URL.Path == "/nmi/payments/invoice_receipt":
+			if blockReceipt {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
 			require.Equal(t, "invoice-key", r.Header.Get("Authorization"))
 			_, _ = fmt.Fprint(w, `{"id":"invoice_receipt","object":"transaction","response":"1","amount":"5.00","currency":"USD","actions":[{"id":"invoice_sale","type":"sale","amount":"5.00","success":true,"response":"1"}]}`)
 		default:
@@ -87,6 +126,9 @@ func TestHyperSwitchInvoiceClientWorkflow(t *testing.T) {
 	})
 	owned := surface.ProvisionOwnedMerchant("hs-invoice-" + uuid.NewString()[:8])
 	rt := surface.App().Runtime
+	var maintenanceEnabled bool
+	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT enabled FROM billing.destructive_action_switch`).Scan(&maintenanceEnabled))
+	require.False(t, maintenanceEnabled, "self-service deletion uses default maintenance settings")
 	core := operator.Get(surface.App()).Core()
 	auth, err := authhttp.New(core, authhttp.Config{DirectPeerIP: true})
 	require.NoError(t, err)
@@ -144,6 +186,50 @@ func TestHyperSwitchInvoiceClientWorkflow(t *testing.T) {
 	payerClient, err := openrails.NewRemote(surface.BaseURL, openrails.WithMerchantID(owned.MerchantID), openrails.WithTokenProvider(func(context.Context) (string, error) { return token, nil }))
 	require.NoError(t, err)
 	request := openrails.PayInvoiceNowRequest{InvoiceID: invoice, PaymentMethodID: *complete.PaymentMethodID, IdempotencyKey: uuid.NewString()}
+	deleteMethod := func(access string, selected ...openrails.PaymentMethodID) int {
+		method := *complete.PaymentMethodID
+		if len(selected) > 0 {
+			method = selected[0]
+		}
+		wire, err := http.NewRequestWithContext(ctx, http.MethodDelete, surface.BaseURL+"/v1/me/payment-methods/"+method.String(), nil)
+		require.NoError(t, err)
+		if access != "" {
+			wire.Header.Set("Authorization", "Bearer "+access)
+		}
+		wire.Header.Set(merchant.BindingHeader, owned.MerchantID.String())
+		response, err := http.DefaultClient.Do(wire)
+		require.NoError(t, err)
+		_, err = io.Copy(io.Discard, response.Body)
+		require.NoError(t, err)
+		require.NoError(t, response.Body.Close())
+		return response.StatusCode
+	}
+	require.Equal(t, http.StatusUnauthorized, deleteMethod(""))
+	foreign, err := core.CreateUser(ctx, "foreign-"+uuid.NewString()+"@example.test", "foreign"+uuid.NewString()[:8])
+	require.NoError(t, err)
+	require.NoError(t, core.MarkEmailVerified(ctx, foreign.ID))
+	foreignToken, _, err := core.MintAccessToken(ctx, foreign.ID, nil)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusForbidden, deleteMethod(foreignToken))
+	pending, err := payerClient.PayInvoiceNow(ctx, request)
+	require.NoError(t, err)
+	require.Equal(t, "unknown_needs_verify", pending.Operation.Status, "accepted charge lacks exact receipt")
+	require.Equal(t, http.StatusConflict, deleteMethod(token), "unresolved charge pins its saved method")
+	var collection uuid.UUID
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT collection_intent_id FROM billing.invoices WHERE id=$1`, invoice).Scan(&collection))
+	mu.Lock()
+	blockReceipt = false
+	require.Zero(t, deletes)
+	mu.Unlock()
+	require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(ctx, owned.MerchantID), func(c context.Context) error {
+		runner := rt.IntentRunner()
+		runner.Clock = clockwork.NewFakeClockAt(time.Now().Add(time.Hour))
+		row, err := runner.VerifyByID(c, collection)
+		if err == nil {
+			require.Equal(t, "succeeded", row.Status)
+		}
+		return err
+	}))
 	paid, err := payerClient.PayInvoiceNow(ctx, request)
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", paid.Operation.Status)
@@ -156,16 +242,158 @@ func TestHyperSwitchInvoiceClientWorkflow(t *testing.T) {
 	_, err = payerClient.PayInvoiceNow(ctx, request)
 	require.ErrorIs(t, err, openrails.ErrConflict)
 	mu.Lock()
-	defer mu.Unlock()
 	require.Len(t, forms, 1)
 	for _, form := range forms {
 		require.Equal(t, "5.00", form["amount"])
 		require.Equal(t, "customer", form["initiated_by"])
 		require.Equal(t, "stored", form["stored_credential_indicator"])
 	}
+	mu.Unlock()
+	require.Equal(t, http.StatusAccepted, deleteMethod(token), "lost native response keeps a durable pending delete")
+	var deletion uuid.UUID
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT id FROM billing.rail_intents WHERE merchant_id=$1 AND intent_type='hyperswitch_method_delete' AND payload->>'payment_method_id'=$2`, owned.MerchantID.UUID(), complete.PaymentMethodID.UUID().String()).Scan(&deletion))
+	mu.Lock()
+	require.Equal(t, 1, deletes)
+	lostDelete = false
+	mu.Unlock()
+	require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(ctx, owned.MerchantID), func(c context.Context) error {
+		runner := rt.IntentRunner()
+		clock := clockwork.NewFakeClockAt(time.Now().Add(time.Hour))
+		runner.Clock = clock
+		_, err := runner.VerifyByID(c, deletion)
+		if err != nil {
+			return err
+		}
+		clock.Advance(time.Hour)
+		row, err := runner.ExecuteByID(c, deletion)
+		if err == nil {
+			require.Equal(t, "succeeded", row.Status)
+		}
+		return err
+	}))
+	require.Equal(t, http.StatusNotFound, deleteMethod(token))
+	replay, err = payerClient.PayInvoiceNow(ctx, request)
+	require.Error(t, err, "the deliberately changed method remains a key conflict")
+	request.PaymentMethodID = *complete.PaymentMethodID
+	replay, err = payerClient.PayInvoiceNow(ctx, request)
+	require.NoError(t, err)
+	require.True(t, replay.Replayed)
+	mu.Lock()
+	require.Len(t, forms, 1)
+	require.Equal(t, 2, deletes)
+	mu.Unlock()
+	// Native NMI uses the same authenticated self-service policy at defaults.
+	nativePSP, nativeMethod := uuid.New(), uuid.New()
+	nativeAccount := "native-delete-" + nativePSP.String()
+	_, err = h.sharedPool().Exec(ctx, `INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id) VALUES($1,$2,'nmi','test',$3)`, nativePSP, owned.MerchantID.UUID(), nativeAccount)
+	require.NoError(t, err)
+	secretName, err := merchants.PSPSecretName("nmi", "test", nativeAccount, "security_key")
+	require.NoError(t, err)
+	_, err = rt.Merchants.Secrets().Put(ctx, owned.MerchantID, secretName, "native-delete-key")
+	require.NoError(t, err)
+	require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(ctx, owned.MerchantID), func(c context.Context) error {
+		return paymentmethods.NewPaymentMethodRepo(rt.DB).Create(c, &models.PaymentMethod{ID: nativeMethod, CustomerID: customer.UUID(), PspID: nativePSP, Rail: models.RailNMI, Custodian: models.CustodianPSP, RailCustomerRef: nativeVault, RailMethodRef: "native-billing"})
+	}))
+	rt.RailPaymentMethodService.NMIEndpointOverride = g.server.URL + "/nmi"
+	require.Equal(t, http.StatusNoContent, deleteMethod(token, openrails.PaymentMethodID(nativeMethod)))
+	mu.Lock()
+	require.True(t, nativeDeleted)
+	require.Equal(t, 1, nativeDeletes)
+	mu.Unlock()
 	var settled, transfers int
 	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.invoice_payments WHERE invoice_id=$1 AND status='settled'`, invoice).Scan(&settled))
 	require.Equal(t, 1, settled)
 	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.ledger_transfers WHERE customer_id=$1 AND transfer_type='owed_payment'`, customer.UUID()).Scan(&transfers))
 	require.Equal(t, 1, transfers)
+	t.Run("deleted method archive stays deleted", func(t *testing.T) {
+		_, err := client.EnsureCustomer(ctx, openrails.CustomerID(uuid.MustParse(foreign.ID)))
+		require.NoError(t, err)
+		var original []byte
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT to_jsonb(i) FROM billing.rail_intents i WHERE id=$1`, deletion).Scan(&original))
+		replaceRecord := func(raw []byte) {
+			_, err := h.sharedPool().Exec(context.WithoutCancel(ctx), `UPDATE billing.rail_intents i SET payload=r.payload,result_evidence=r.result_evidence,actor=r.actor,idempotency_key=r.idempotency_key FROM jsonb_populate_record(NULL::billing.rail_intents,$1) r WHERE i.id=r.id`, raw)
+			require.NoError(t, err)
+		}
+		for _, mode := range []string{"missing", "wrong payer", "forged completion"} {
+			t.Run(mode, func(t *testing.T) {
+				defer replaceRecord(original)
+				var row map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(original, &row))
+				if mode == "forged completion" {
+					var evidence map[string]json.RawMessage
+					require.NoError(t, json.Unmarshal(row["result_evidence"], &evidence))
+					evidence["physically_deleted"] = json.RawMessage("false")
+					row["result_evidence"], err = json.Marshal(evidence)
+					require.NoError(t, err)
+				} else {
+					var payload map[string]json.RawMessage
+					require.NoError(t, json.Unmarshal(row["payload"], &payload))
+					if mode == "wrong payer" {
+						payload["customer_id"], err = json.Marshal(foreign.ID)
+						require.NoError(t, err)
+						row["actor"], err = json.Marshal(foreign.ID)
+						require.NoError(t, err)
+					} else {
+						other := uuid.NewString()
+						payload["payment_method_id"], err = json.Marshal(other)
+						require.NoError(t, err)
+						row["idempotency_key"], err = json.Marshal(intents.TypeHyperSwitchMethodDelete + ":" + other)
+						require.NoError(t, err)
+					}
+					row["payload"], err = json.Marshal(payload)
+					require.NoError(t, err)
+				}
+				modified, err := json.Marshal(row)
+				require.NoError(t, err)
+				replaceRecord(modified)
+				var invalid bytes.Buffer
+				require.Error(t, merchantarchive.Export(ctx, rt.DB, owned.MerchantID, &invalid), "nullable invoice history requires exact completed deletion")
+				require.Zero(t, invalid.Len())
+			})
+		}
+		require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(ctx, owned.MerchantID), func(c context.Context) error {
+			restored, err := intents.NewStore(rt.DB).Get(c, deletion)
+			require.NoError(t, err)
+			method, payer, err := intents.DeletedMethod(restored)
+			require.NoError(t, err)
+			require.Equal(t, complete.PaymentMethodID.UUID(), method)
+			require.Equal(t, customer.UUID(), payer)
+			return nil
+		}))
+		var artifact bytes.Buffer
+		require.NoError(t, merchantarchive.Export(ctx, rt.DB, owned.MerchantID, &artifact))
+		adminDSN, appDSN := dbtest.SharedRLSPostgres(t)
+		schema := "custody_delete_" + uuid.NewString()[:8]
+		require.NoError(t, migrate.RunPostgres(ctx, &config.Config{DB: &config.DBConfig{URL: adminDSN, Schema: schema}}))
+		target, err := db.NewDB(ctx, &config.DBConfig{URL: appDSN, Schema: schema})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = target.Close() })
+		_, err = target.Qx(ctx).Exec(ctx, `INSERT INTO openrails.merchants(id,slug) VALUES($1,'custody-delete-restore')`, owned.MerchantID.UUID())
+		require.NoError(t, err)
+		_, err = merchantarchive.Restore(ctx, target, owned.MerchantID, bytes.NewReader(artifact.Bytes()))
+		require.NoError(t, err)
+		var again bytes.Buffer
+		require.NoError(t, merchantarchive.Export(ctx, target, owned.MerchantID, &again))
+		require.Equal(t, artifact.String(), again.String())
+		require.NoError(t, target.RunInMerchantConn(merchant.WithID(ctx, owned.MerchantID), func(c context.Context) error {
+			var count int
+			require.NoError(t, target.Qx(c).QueryRow(c, `SELECT count(*) FROM openrails.payment_methods WHERE id=$1`, complete.PaymentMethodID.UUID()).Scan(&count))
+			require.Zero(t, count)
+			operation, err := (&intents.Runner{Store: intents.NewStore(target)}).ExecuteByID(c, deletion)
+			require.NoError(t, err)
+			require.Equal(t, intents.StatusSucceeded, operation.Status)
+			accepted, err := intents.DecodeHyperSwitchMethodDelete(operation)
+			require.NoError(t, err)
+			require.NoError(t, paymentmethods.NewPaymentMethodRepo(target).Create(c, &models.PaymentMethod{ID: accepted.PaymentMethodID, CustomerID: accepted.CustomerID, PspID: accepted.Instrument.PSPID, Rail: models.RailNMI, Custodian: models.CustodianHyperSwitch, CustodianID: accepted.Instrument.CustodianID, RailCustomerRef: accepted.Instrument.RailCustomerRef, RailMethodRef: accepted.Instrument.RailMethodRef}))
+			return nil
+		}))
+		var corrupt bytes.Buffer
+		require.Error(t, merchantarchive.Export(ctx, target, owned.MerchantID, &corrupt), "archive must refuse a resurrected deleted method")
+		mu.Lock()
+		require.Equal(t, 2, deletes)
+		require.Equal(t, 1, nativeDeletes)
+		require.Len(t, forms, 1)
+		mu.Unlock()
+	})
+
 }

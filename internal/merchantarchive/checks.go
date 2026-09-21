@@ -268,6 +268,12 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 	// The ledger intentionally has no control-plane FKs. Archive restoration
 	// still refuses missing/cross-payer retained business references.
 	checks := []struct{ table, predicate string }{
+		{"rail_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM openrails.payment_methods m WHERE m.merchant_id=$1 AND m.id::text=rail_intents.payload->>'payment_method_id')`},
+		{"rail_intents", `intent_type='hyperswitch_method_delete' AND
+          (NOT EXISTS(SELECT 1 FROM openrails.customers c WHERE c.merchant_id=$1 AND c.id::text=rail_intents.payload->>'customer_id') OR
+           EXISTS(SELECT 1 FROM openrails.payment_methods m WHERE m.merchant_id=$1 AND
+             (m.id::text=rail_intents.payload->>'payment_method_id' OR
+              (rail_intents.payload->>'detach_only'='false' AND m.custodian_id=rail_intents.custodian_id AND m.rail_method_ref=rail_intents.payload->'instrument'->>'rail_method_ref'))))`},
 		{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
 		 OR (grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.grants g WHERE g.merchant_id=$1 AND g.id=ledger_transfers.grant_id AND g.customer_id=ledger_transfers.customer_id))
 		 OR (invoice_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.invoices i WHERE i.merchant_id=$1 AND i.id=ledger_transfers.invoice_id AND i.customer_id=ledger_transfers.customer_id AND i.currency=ledger_transfers.currency))`},
@@ -311,10 +317,21 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 			if err != nil {
 				return &Error{Code: "unsupported_state", Table: "invoice_payments", Err: err}
 			}
+			methodMatches := a.PaymentMethodID != nil && *a.PaymentMethodID == p.PaymentMethodID
+			if a.PaymentMethodID == nil {
+				deletions, err := gen.New(tx).ListMethodDeletesForArchive(ctx, gen.ListMethodDeletesForArchiveParams{MerchantID: operation.MerchantID, PaymentMethodID: p.PaymentMethodID})
+				if err != nil {
+					return err
+				}
+				if len(deletions) == 1 {
+					method, customer, err := intents.DeletedMethod(deletions[0])
+					methodMatches = err == nil && method == p.PaymentMethodID && customer == p.CustomerID
+				}
+			}
 			receipt, collected, receiptErr := intents.LoadCollectedReceipt(operation)
 			amount, amountErr := moneyutil.RailMinorToNative(p.Currency, p.AmountMinor)
 			matches := a.MerchantID == operation.MerchantID && a.ID == p.AttemptID && a.CustomerID == p.CustomerID && a.InvoiceID == p.InvoiceID &&
-				a.PaymentMethodID != nil && *a.PaymentMethodID == p.PaymentMethodID && a.PspID != nil && *a.PspID == p.Instrument.PSPID &&
+				methodMatches && a.PspID != nil && *a.PspID == p.Instrument.PSPID &&
 				a.IdempotencyKey != nil && *a.IdempotencyKey == operation.IdempotencyKey && a.Currency == p.Currency && a.Amount == amount &&
 				(p.Initiator == charge.InitiatorCustomer || operation.Origin == string(intents.OriginAdmin) && intents.InvoiceCollectionRetryKeyValid(p.InvoiceID, operation.IdempotencyKey) || p.Initiator == charge.InitiatorMerchant && operation.Origin == string(intents.OriginSystem)) && a.Rail != nil && *a.Rail == p.Rail
 			terminal := operation.Status == intents.StatusFailedTerminal && a.Status == "failed" && !collected ||

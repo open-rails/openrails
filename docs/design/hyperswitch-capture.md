@@ -80,3 +80,11 @@ local validation, masked-method readback, or contract preflight failed before
 entering the proxy POST. This permits a new payment key after repair. Existing
 submission markers and every uncertain error after POST entry remain verify-only;
 a proxy HTTP error never proves that the PSP did not execute.
+
+### Customer-requested stored-card deletion
+
+The existing authenticated payment-method DELETE supports native NMI and qualified HyperSwitch native custody. The operation freezes the owned method and rejects live subscription use or unresolved operations. Acceptance parks the method with its durable operation ID, so a subsequent charge cannot start. HyperSwitch serializes all local aliases of a vendor handle with capture/import/remap: an unused alias detaches locally, and only the final reference requests physical erasure. Pending detach decisions participate in that same exclusion.
+
+Verified self-service deletion works with the default maintenance/destructive-convergence switch off. This exception requires canonical admission from the authenticated payer and retained matching actor/target attribution; an `origin=user` label alone grants nothing. Operator, system and unattributed commands retain the maintenance gate. Provider read-only mode, ownership checks, unresolved-operation fences, and existing destructive rate and volume ceilings still apply to customer deletion. There is no new public setting.
+
+An uncertain delete returns HTTP202 and retains its fence. HyperSwitch recovery retries only the exact native DELETE authorized by the pinned vendor contract;404, redacted metadata or lookup absence is not physical-erasure evidence. Terminal replay does not delete a newly captured method. Archive history preserves the original decision without restoring a deleted local method.

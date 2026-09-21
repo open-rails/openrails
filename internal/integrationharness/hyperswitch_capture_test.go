@@ -68,7 +68,7 @@ func newCaptureFixture(t *testing.T) *captureFixture {
 			case "stock":
 				write(map[string]any{"status": "ok"})
 			default:
-				write(map[string]any{"contract": "openrails-nmi-form-v2", "strict": g.preflight != "disabled", "max_response_bytes": 65536, "routes": []any{map[string]string{"destination_url": "https://secure.nmi.com/api/transact.php", "method": "POST", "response_profile": "nmi_classic"}}})
+				write(map[string]any{"contract": "openrails-nmi-form-v2", "native_vault_delete_contract": "openrails-native-vault-delete-v1", "strict": g.preflight != "disabled", "max_response_bytes": 65536, "routes": []any{map[string]string{"destination_url": "https://secure.nmi.com/api/transact.php", "method": "POST", "response_profile": "nmi_classic"}}})
 			}
 		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v2/customers/reference/"):
 			ref := strings.TrimPrefix(r.URL.Path, "/v2/customers/reference/")

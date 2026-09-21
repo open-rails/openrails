@@ -36,3 +36,26 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 SELECT * FROM openrails.custodians
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
 FOR SHARE;
+
+-- name: LockCustodianMethodDelete :one
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND intent_type = 'hyperswitch_method_delete'
+FOR UPDATE;
+
+-- name: CompleteCustodianMethodDelete :execrows
+UPDATE openrails.rail_intents
+SET status = 'succeeded', result_evidence = sqlc.arg(evidence)::jsonb,
+    claimed_until = NULL, executed_at = sqlc.arg(now)::timestamptz,
+    updated_at = sqlc.arg(now)::timestamptz, last_failure_reason = NULL
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND intent_type = 'hyperswitch_method_delete'
+  AND status IN ('in_flight', 'unknown_needs_verify');
+
+-- name: ListMethodDeletesForArchive :many
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'succeeded'
+  AND idempotency_key IN ('hyperswitch_method_delete:' || sqlc.arg(payment_method_id)::uuid::text,
+                          'nmi_vault_delete:' || sqlc.arg(payment_method_id)::uuid::text)
+  AND NOT EXISTS (SELECT 1 FROM openrails.payment_methods m
+                  WHERE m.merchant_id=sqlc.arg(merchant_id)::uuid AND m.id=sqlc.arg(payment_method_id)::uuid);

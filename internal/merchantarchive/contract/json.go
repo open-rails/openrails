@@ -163,6 +163,13 @@ var captureJSON = object(map[string]jsonRule{
 })
 
 var jsonRules = map[string]jsonRule{
+	"rail_intents.nmi_vault_delete.payload":         object(map[string]jsonRule{"user_id": uuidValue, "payment_method_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue}),
+	"rail_intents.nmi_vault_delete.result_evidence": object(map[string]jsonRule{"deleted": booleanValue, "verified_absent": booleanValue, "verified_entry_absent": booleanValue, "already_absent": booleanValue, "no_rail_customer_ref": booleanValue, "vault_id": textValue, "billing_id": textValue, "scoped_to_billing_entry": textValue}),
+	"rail_intents.hyperswitch_method_delete.payload": object(map[string]jsonRule{
+		"customer_id": uuidValue, "payment_method_id": uuidValue, "instrument": cutoverInstrumentJSON, "environment": textValue, "detach_only": booleanValue,
+		"binding": object(map[string]jsonRule{"account_id": textValue, "profile_id": textValue, "api_base_url": textValue}),
+	}),
+	"rail_intents.hyperswitch_method_delete.result_evidence": object(map[string]jsonRule{"physically_deleted": booleanValue, "detached": booleanValue, "vendor_method_id": textValue}),
 	"rail_intents.nmi_provider_cutover.payload": object(map[string]jsonRule{
 		"source_qualification": cutoverQualificationJSON, "target_qualification": cutoverQualificationJSON,
 		"source_credential_fingerprint": sha256Value, "target_credential_fingerprint": sha256Value,
