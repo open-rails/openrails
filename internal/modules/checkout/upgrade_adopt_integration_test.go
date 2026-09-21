@@ -228,13 +228,13 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 
 	// Stored payment method the upgrade charges against.
 	pm := &models.PaymentMethod{
-		ID:                   uuid.New(),
-		CustomerID:           customerID,
-		Rail:                 models.Rail("nmi"),
-		PspID:                pspID,
-		RailCustomerRef:      railCustomerRef,
-		RailMethodRef:        "bill-upg-" + sfx,
-		RebillDriver:         models.RebillDriverProvider,
+		ID:              uuid.New(),
+		CustomerID:      customerID,
+		Rail:            models.Rail("nmi"),
+		PspID:           pspID,
+		RailCustomerRef: railCustomerRef,
+		RailMethodRef:   "bill-upg-" + sfx,
+
 		InitialTransactionID: "txn-" + sfx,
 		CreatedAt:            now, UpdatedAt: now,
 	}

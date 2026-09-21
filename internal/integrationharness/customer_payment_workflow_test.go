@@ -302,13 +302,13 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			periodEnd := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
 			psp := h.ArmLoopbackNMI(runtime, f.Merchant)
 			billing, railSub := "billing-"+f.Method.String(), "subscription-"+subscription.String()
-			_, err = h.sharedPool().Exec(ctx, `UPDATE billing.payment_methods SET rail_method_ref=$2,rebill_driver='openrails',stored_credential_recurring_ref='approved-recurring' WHERE id=$1`, f.Method, billing)
+			_, err = h.sharedPool().Exec(ctx, `UPDATE billing.payment_methods SET rail_method_ref=$2,stored_credential_recurring_ref='approved-recurring' WHERE id=$1`, f.Method, billing)
 			require.NoError(t, err)
 			_, err = h.sharedPool().Exec(ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name,entitlements_spec) VALUES($1,$2,$3,'Recovery','{"paid":null}')`, product, f.Merchant.UUID(), product.String())
 			require.NoError(t, err)
 			_, err = h.sharedPool().Exec(ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,9990000,'USD',720,true)`, price, f.Merchant.UUID(), product, price.String())
 			require.NoError(t, err)
-			_, err = h.sharedPool().Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,rail_subscription_id,payment_method_id,status,started_at,current_period_starts_at,current_period_ends_at,next_retry_at,retry_attempts,entitlements_spec_snapshot) VALUES($1,$2,$3,$4,$5,$6,'nmi',$7,$8,'past_due',$9,$9,$10,$11,1,'{"paid":null}')`, subscription, f.Merchant.UUID(), customer, product, price, psp, railSub, f.Method, periodEnd.Add(-30*24*time.Hour), periodEnd, time.Now().Add(48*time.Hour))
+			_, err = h.sharedPool().Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,rail_subscription_id,payment_method_id,status,started_at,current_period_starts_at,current_period_ends_at,next_retry_at,retry_attempts,entitlements_spec_snapshot,collection_policy) VALUES($1,$2,$3,$4,$5,$6,'nmi',$7,$8,'past_due',$9,$9,$10,$11,1,'{"paid":null}','provider_dunning')`, subscription, f.Merchant.UUID(), customer, product, price, psp, railSub, f.Method, periodEnd.Add(-30*24*time.Hour), periodEnd, time.Now().Add(48*time.Hour))
 			require.NoError(t, err)
 			mu.Lock()
 			obligations[railSub] = recurringObligation{f.Vault, billing, "9.99", "USD", periodEnd.Add(30 * 24 * time.Hour).Format("2006-01-02")}
@@ -316,6 +316,7 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			retry := openrails.RetrySubscriptionNowRequest{SubscriptionID: openrails.SubscriptionID(subscription), IdempotencyKey: uuid.NewString()}
 			due, err := client.GetMySubscription(ctx, retry.SubscriptionID)
 			require.NoError(t, err)
+			require.Equal(t, "provider_dunning", due.CollectionPolicy)
 			require.True(t, due.Recovery.Retryable)
 			refusedRetry := retry
 			gateway.SetMode(NMISaleDecline)

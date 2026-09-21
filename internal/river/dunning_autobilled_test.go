@@ -10,13 +10,13 @@ import (
 // always; NMI by the EXPLICIT RebillDriver mode (#682), no longer inferred
 // from method-ref emptiness.
 func TestSubscriptionProviderAutoBilled(t *testing.T) {
-	withVault := &models.PaymentMethod{RailMethodRef: "vault-123", RailCustomerRef: "cust-1", RebillDriver: models.RebillDriverOpenRails}
-	noVault := &models.PaymentMethod{RebillDriver: models.RebillDriverProvider}
+	withVault := &models.Subscription{CollectionPolicy: models.CollectionPolicyProviderDunning}
+	noVault := &models.Subscription{CollectionPolicy: models.CollectionPolicyProvider}
 
 	cases := []struct {
 		name string
 		rail string
-		pm   *models.PaymentMethod
+		pm   *models.Subscription
 		want bool
 	}{
 		{"ccbill always auto-billed", "ccbill", nil, true},
@@ -27,8 +27,8 @@ func TestSubscriptionProviderAutoBilled(t *testing.T) {
 		// #682: the mode column decides — a billing id WITHOUT the openrails
 		// mode stays provider-billed (native vaults may capture billing ids
 		// without flipping lanes), and the mode alone flips it.
-		{"nmi ref without openrails mode → auto-billed", "nmi", &models.PaymentMethod{RailMethodRef: "vault-123", RebillDriver: models.RebillDriverProvider}, true},
-		{"nmi openrails mode without ref → our-rebill", "nmi", &models.PaymentMethod{RebillDriver: models.RebillDriverOpenRails}, false},
+		{"nmi ref without openrails mode → auto-billed", "nmi", &models.Subscription{CollectionPolicy: models.CollectionPolicyProvider}, true},
+		{"nmi openrails mode without ref → our-rebill", "nmi", &models.Subscription{CollectionPolicy: models.CollectionPolicyProviderDunning}, false},
 		{"stripe → not this path", "stripe", nil, false},
 		{"unknown rail → false", "unknown", nil, false},
 	}

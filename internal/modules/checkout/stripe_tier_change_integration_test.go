@@ -367,7 +367,7 @@ func newStripeTierFixture(t *testing.T) *stripeTierFixture {
 	periodStart, periodEnd := now.Add(-5*24*time.Hour), now.Add(25*24*time.Hour)
 	stripe.declare(railSub, "si_"+sfx, basicRef, periodStart.Unix(), periodEnd.Unix())
 
-	pm := &models.PaymentMethod{ID: uuid.New(), CustomerID: customerID, Rail: models.RailStripe, PspID: pspID, RailCustomerRef: "cus_" + sfx, RailMethodRef: "pm_" + sfx, RebillDriver: models.RebillDriverProvider, CreatedAt: now, UpdatedAt: now}
+	pm := &models.PaymentMethod{ID: uuid.New(), CustomerID: customerID, Rail: models.RailStripe, PspID: pspID, RailCustomerRef: "cus_" + sfx, RailMethodRef: "pm_" + sfx, CreatedAt: now, UpdatedAt: now}
 	require.NoError(t, paymentmethods.NewPaymentMethodRepo(dbi).Create(ctx, pm))
 	subID := uuid.New()
 	_, err := pool.Exec(ctx, `INSERT INTO billing.subscriptions

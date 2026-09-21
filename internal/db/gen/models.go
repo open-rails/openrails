@@ -873,7 +873,6 @@ type OpenrailsPaymentMethod struct {
 	RailCustomerRef string
 	// Instrument-scope rail handle (e.g. NMI billing_id, Stripe pm_, Spreedly/HyperSwitch token).
 	RailMethodRef string
-	RebillDriver  string
 	// Rail-scoped stored-credential replay reference for the RECURRING card-network agreement (NMI: gateway transactionid of the initial recurring CIT, replayed as initial_transaction_id on recurring MITs). Empty = not captured yet.
 	StoredCredentialRecurringRef string
 	// Rail-scoped stored-credential replay reference for the UNSCHEDULED card-network agreement (NMI: gateway transactionid of the initial unscheduled CIT, replayed as initial_transaction_id on unscheduled MITs). Empty = not captured yet.
@@ -1219,6 +1218,7 @@ type OpenrailsSubscription struct {
 	ProductID             uuid.UUID
 	Status                OpenrailsSubscriptionStatus
 	Rail                  string
+	CollectionPolicy      string
 	RailSubscriptionID    string
 	UserEmail             *string
 	PaymentMethodID       *uuid.UUID

@@ -66,6 +66,7 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 		CurrentPeriodEndsAt:      s.CurrentPeriodEndsAt,
 		Rail:                     string(s.Rail),
 		RailSubscriptionID:       s.RailSubscriptionID,
+		CollectionPolicy:         string(s.CollectionPolicy),
 		UserEmail:                s.UserEmail,
 		PaymentMethodID:          s.PaymentMethodID,
 		LastRetryAt:              s.LastRetryAt,

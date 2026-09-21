@@ -170,7 +170,7 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: "nmi",
 		PspID:           pspID,
 		RailCustomerRef: vaultID, RailMethodRef: billingID,
-		RebillDriver:         "openrails",
+
 		InitialTransactionID: "txn_initial_" + uuid.New().String(),
 		CreatedAt:            now, UpdatedAt: now,
 	})
@@ -179,7 +179,8 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 
 	periodEnd := periodStart.Add(simCycleHours * time.Hour)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
+		CollectionPolicy: string(models.CollectionPolicyProviderDunning),
+		ID:               subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusActive), Rail: "nmi",
 		PspID:                 pspID,
 		RailSubscriptionID:    providerID,

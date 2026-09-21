@@ -812,6 +812,55 @@ func (q *Queries) GetLatestManualRebillForPeriod(ctx context.Context, arg GetLat
 	return i, err
 }
 
+const getLatestSubscriptionCollectionForPeriod = `-- name: GetLatestSubscriptionCollectionForPeriod :one
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id = $1::uuid
+  AND subscription_id = $2::uuid
+  AND intent_type = 'subscription_collection'
+  AND (payload->>'previous_period_end')::timestamptz = $3::timestamptz
+ORDER BY (payload->>'attempt')::integer DESC, id DESC LIMIT 1
+`
+
+type GetLatestSubscriptionCollectionForPeriodParams struct {
+	MerchantID        uuid.UUID
+	SubscriptionID    uuid.UUID
+	PreviousPeriodEnd time.Time
+}
+
+func (q *Queries) GetLatestSubscriptionCollectionForPeriod(ctx context.Context, arg GetLatestSubscriptionCollectionForPeriodParams) (OpenrailsRailIntent, error) {
+	row := q.db.QueryRow(ctx, getLatestSubscriptionCollectionForPeriod, arg.MerchantID, arg.SubscriptionID, arg.PreviousPeriodEnd)
+	var i OpenrailsRailIntent
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.IntentType,
+		&i.SubscriptionID,
+		&i.PaymentID,
+		&i.PriceID,
+		&i.Payload,
+		&i.IdempotencyKey,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ClaimedUntil,
+		&i.Origin,
+		&i.OriginReason,
+		&i.Actor,
+		&i.LastFailureReason,
+		&i.ExpiresAt,
+		&i.ResultEvidence,
+		&i.CreatedAt,
+		&i.ExecutedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.CustodianID,
+	)
+	return i, err
+}
+
 const getLiveTierChangeRailIntent = `-- name: GetLiveTierChangeRailIntent :one
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
 WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
@@ -1070,6 +1119,54 @@ type GetUnresolvedSaleForCustomerProductParams struct {
 
 func (q *Queries) GetUnresolvedSaleForCustomerProduct(ctx context.Context, arg GetUnresolvedSaleForCustomerProductParams) (OpenrailsRailIntent, error) {
 	row := q.db.QueryRow(ctx, getUnresolvedSaleForCustomerProduct, arg.MerchantID, arg.CustomerID, arg.ProductID)
+	var i OpenrailsRailIntent
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.IntentType,
+		&i.SubscriptionID,
+		&i.PaymentID,
+		&i.PriceID,
+		&i.Payload,
+		&i.IdempotencyKey,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ClaimedUntil,
+		&i.Origin,
+		&i.OriginReason,
+		&i.Actor,
+		&i.LastFailureReason,
+		&i.ExpiresAt,
+		&i.ResultEvidence,
+		&i.CreatedAt,
+		&i.ExecutedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.CustodianID,
+	)
+	return i, err
+}
+
+const getUnresolvedSubscriptionCollection = `-- name: GetUnresolvedSubscriptionCollection :one
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id = $1::uuid
+  AND subscription_id = $2::uuid
+  AND intent_type = 'subscription_collection'
+  AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+ORDER BY created_at, id LIMIT 1
+`
+
+type GetUnresolvedSubscriptionCollectionParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+func (q *Queries) GetUnresolvedSubscriptionCollection(ctx context.Context, arg GetUnresolvedSubscriptionCollectionParams) (OpenrailsRailIntent, error) {
+	row := q.db.QueryRow(ctx, getUnresolvedSubscriptionCollection, arg.MerchantID, arg.SubscriptionID)
 	var i OpenrailsRailIntent
 	err := row.Scan(
 		&i.ID,

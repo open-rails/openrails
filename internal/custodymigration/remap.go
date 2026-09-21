@@ -197,10 +197,10 @@ func (p *planner) create(ctx context.Context, tk ImportedToken, out RowResult) (
 			// The card's provenance: it came out of THIS PSP vault entry. The
 			// handle is dead as an address the moment the custodian holds the
 			// card, and it is the only link back to charges made before.
-			RailCustomerRef:    strings.TrimSpace(tk.SourceRailCustomerRef),
-			RailMethodRef:      token,
-			PspID:              p.targetPSP.ID,
-			RebillDriver:       models.RebillDriverOpenRails,
+			RailCustomerRef: strings.TrimSpace(tk.SourceRailCustomerRef),
+			RailMethodRef:   token,
+			PspID:           p.targetPSP.ID,
+
 			Custodian:          p.custodianKind(),
 			CustodianID:        &p.custodian.ID,
 			Fingerprint:        strings.TrimSpace(tk.Fingerprint),

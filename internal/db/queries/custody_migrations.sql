@@ -69,7 +69,6 @@ UPDATE openrails.payment_methods SET
     network_token_status = sqlc.arg(network_token_status)::text,
     network_token_par = sqlc.arg(network_token_par)::text,
     psp_id = COALESCE(sqlc.narg(to_psp_id)::uuid, psp_id),
-    rebill_driver = 'openrails',
     last_four = COALESCE(NULLIF(sqlc.arg(last_four)::text, ''), last_four),
     card_type = COALESCE(NULLIF(sqlc.arg(card_type)::text, ''), card_type),
     expiry_date = COALESCE(NULLIF(sqlc.arg(expiry_date)::text, ''), expiry_date),

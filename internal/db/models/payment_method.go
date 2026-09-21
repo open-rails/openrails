@@ -26,15 +26,8 @@ type PaymentMethod struct {
 	// person with N cards is N unrelated NMI vault ids. NMI has no person-level
 	// remote identity in our model; the person is the local customer_id UUID.
 	RailCustomerRef      string `json:"-"` // customer-scope handle (NMI customer_vault_id — per-card by policy, see #682; "" for Stripe — see rail_customer_accounts)
-	RailMethodRef        string `json:"-"` // instrument-scope handle (NMI billing_id — legacy imports only, see RebillDriver; Stripe pm_, Spreedly/HyperSwitch token)
+	RailMethodRef        string `json:"-"` // instrument-scope handle (NMI billing_id — legacy imports only; Stripe pm_, Spreedly/HyperSwitch token)
 	InitialTransactionID string `json:"-"` // Transaction that created this vault
-
-	// RebillDriver (#682) is the EXPLICIT rebill-driver mode, decoupled from
-	// identity: RebillDriverProvider = the rail's own recurring engine bills the
-	// subscription; RebillDriverOpenRails = the OpenRails dunning worker drives
-	// manual rebills. Previously inferred from RailMethodRef emptiness on NMI,
-	// which made an identity field load-bearing as a behavior flag.
-	RebillDriver string `json:"-"`
 
 	// Stored-credential (CIT/MIT) replay references (#297), one per card-network
 	// agreement type — the networks track separate credential-on-file sequences
@@ -78,12 +71,6 @@ type PaymentMethod struct {
 	// Relationships
 	Subscriptions []*Subscription `json:"subscriptions,omitempty"`
 }
-
-// RebillDriver values (#682).
-const (
-	RebillDriverProvider  = "provider"
-	RebillDriverOpenRails = "openrails"
-)
 
 // Custodian values (or#880) — payment_methods.custodian. Custody (who holds
 // the card) is orthogonal to the processor (Rail + PspID, who charges it):

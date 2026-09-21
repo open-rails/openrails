@@ -268,12 +268,13 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: customerID, Rail: string(models.RailNMI),
 		PspID:           pspID,
 		RailCustomerRef: "", RailMethodRef: "", // missing vault!
-		RebillDriver:         "openrails", // OpenRails drives rebills — NOT provider-auto-billed
+
 		InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: customerID, ProductID: productID, PriceID: &priceID,
+		CollectionPolicy: string(models.CollectionPolicyProviderDunning),
+		ID:               subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: customerID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
 		PspID:              pspID,
 		RailSubscriptionID: "sub_nopm_" + uuid.New().String(), PaymentMethodID: &paymentMethodID,
@@ -287,7 +288,8 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	autoBilledSubID := uuid.New()
 	autoBilledCustomer := dbtest.EnsureCustomerIDPgx(ctx, t, pool, uuid.New().String())
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: autoBilledSubID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: autoBilledCustomer, ProductID: productID, PriceID: &priceID,
+		CollectionPolicy: string(models.CollectionPolicyProvider),
+		ID:               autoBilledSubID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: autoBilledCustomer, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
 		PspID:                 pspID,
 		RailSubscriptionID:    "sub_autobilled_" + uuid.New().String(),

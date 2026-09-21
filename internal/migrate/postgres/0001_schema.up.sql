@@ -251,6 +251,7 @@ BEGIN
       FROM openrails.subscriptions s
      WHERE s.rail = ANY(p_rails)
        AND s.status = 'past_due'
+       AND s.collection_policy <> 'engine'
        AND s.next_retry_at IS NOT NULL AND s.next_retry_at <= p_now
        AND s.deleted_at IS NULL
      GROUP BY s.merchant_id
@@ -2566,7 +2567,6 @@ CREATE TABLE openrails.payment_methods (
     psp_id uuid NOT NULL,
     rail_customer_ref text DEFAULT ''::text NOT NULL,
     rail_method_ref text DEFAULT ''::text NOT NULL,
-    rebill_driver text DEFAULT 'provider'::text NOT NULL,
     stored_credential_recurring_ref text DEFAULT ''::text NOT NULL,
     stored_credential_unscheduled_ref text DEFAULT ''::text NOT NULL,
     custodian text DEFAULT 'psp'::text NOT NULL,
@@ -2581,8 +2581,7 @@ CREATE TABLE openrails.payment_methods (
     parked_at timestamp with time zone,
     account_updater_checked_at timestamp with time zone,
     CONSTRAINT payment_methods_charge_via_check CHECK ((charge_via = ANY (ARRAY['pan_proxy'::text, 'network_token'::text]))),
-    CONSTRAINT payment_methods_custodian_check CHECK ((custodian = ANY (ARRAY['psp'::text, 'basis_theory'::text, 'hyperswitch'::text]))),
-    CONSTRAINT payment_methods_rebill_driver_check CHECK ((rebill_driver = ANY (ARRAY['provider'::text, 'openrails'::text])))
+    CONSTRAINT payment_methods_custodian_check CHECK ((custodian = ANY (ARRAY['psp'::text, 'basis_theory'::text, 'hyperswitch'::text])))
 );
 
 COMMENT ON TABLE openrails.payment_methods IS 'Generalized payment method table supporting multiple rails.';
@@ -2714,6 +2713,7 @@ CREATE TABLE openrails.subscriptions (
     product_id uuid NOT NULL,
     status openrails.subscription_status DEFAULT 'pending'::openrails.subscription_status NOT NULL,
     rail text NOT NULL,
+    collection_policy text DEFAULT 'provider' NOT NULL,
     rail_subscription_id text DEFAULT ''::text NOT NULL,
     user_email text,
     payment_method_id uuid,
@@ -2741,6 +2741,9 @@ CREATE TABLE openrails.subscriptions (
     deleted_at timestamp with time zone,
     destructive_run_id uuid,
     destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
+    CONSTRAINT subscriptions_collection_policy_check CHECK (collection_policy IN ('provider', 'provider_dunning', 'engine')),
+    CONSTRAINT subscriptions_engine_binding_check CHECK (collection_policy <> 'engine' OR (rail = 'nmi' AND rail_subscription_id = '' AND (payment_method_id IS NOT NULL OR status = 'cancelled'))),
+    CONSTRAINT subscriptions_dunning_rail_check CHECK (collection_policy <> 'provider_dunning' OR rail = 'nmi'),
     CONSTRAINT chk_cancelled_has_timestamp CHECK (((status <> 'cancelled'::openrails.subscription_status) OR (cancelled_at IS NOT NULL))),
     CONSTRAINT chk_cancelled_has_type CHECK (((status <> 'cancelled'::openrails.subscription_status) OR (cancel_type IS NOT NULL))),
     CONSTRAINT chk_cancelled_no_retry_schedule CHECK (((status <> 'cancelled'::openrails.subscription_status) OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL)))),
@@ -2775,6 +2778,8 @@ CREATE INDEX idx_subscriptions_customer ON openrails.subscriptions USING btree (
 CREATE INDEX idx_subscriptions_customer_active_created ON openrails.subscriptions USING btree (customer_id, created_at DESC) WHERE (status = 'active'::openrails.subscription_status);
 
 CREATE INDEX idx_subscriptions_destructive_run ON openrails.subscriptions USING btree (destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
+
+CREATE INDEX idx_subscriptions_engine_due ON openrails.subscriptions (merchant_id, current_period_ends_at, next_retry_at) WHERE collection_policy = 'engine' AND status IN ('active', 'past_due') AND deleted_at IS NULL;
 
 CREATE INDEX idx_subscriptions_due_dunning ON openrails.subscriptions USING btree (next_retry_at, rail) WHERE ((status = 'past_due'::openrails.subscription_status) AND (next_retry_at IS NOT NULL));
 

@@ -23,7 +23,8 @@ func (r *UserSubscriptionResponse) View() openrails.Subscription {
 // shared openrails.Subscription: the merchant and self routes both serve it.
 func SubscriptionView(sub *models.Subscription, price *models.Price, now time.Time) openrails.Subscription {
 	out := openrails.Subscription{
-		LastRetryAt: sub.LastRetryAt, RetryAttempts: sub.RetryAttempts, NextRetryAt: sub.NextRetryAt, GraceEndsAt: sub.GraceEndsAt, DeletionScheduledAt: sub.DeletionScheduledAt,
+		CollectionPolicy: string(sub.CollectionPolicy),
+		LastRetryAt:      sub.LastRetryAt, RetryAttempts: sub.RetryAttempts, NextRetryAt: sub.NextRetryAt, GraceEndsAt: sub.GraceEndsAt, DeletionScheduledAt: sub.DeletionScheduledAt,
 		ID: openrails.SubscriptionID(sub.ID), CustomerID: openrails.CustomerID(sub.CustomerID), ProductID: openrails.ProductID(sub.ProductID), PriceID: openrails.PriceID(sub.PriceID),
 		PSPID: sub.PspID.String(), Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, Status: string(sub.Status),
 		StartedAt: sub.StartedAt, EndedAt: sub.EndedAt, CurrentPeriodStartsAt: sub.CurrentPeriodStartsAt, CurrentPeriodEndsAt: sub.CurrentPeriodEndsAt,

@@ -70,7 +70,7 @@ func (q *Queries) CountUnresolvedOperationsNamingPaymentMethod(ctx context.Conte
 }
 
 const getPaymentMethodForCustodianToken = `-- name: GetPaymentMethodForCustodianToken :one
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods
 WHERE merchant_id = $1::uuid
   AND custodian_id = $2::uuid
   AND custodian = $3::text
@@ -112,7 +112,6 @@ func (q *Queries) GetPaymentMethodForCustodianToken(ctx context.Context, arg Get
 		&i.PspID,
 		&i.RailCustomerRef,
 		&i.RailMethodRef,
-		&i.RebillDriver,
 		&i.StoredCredentialRecurringRef,
 		&i.StoredCredentialUnscheduledRef,
 		&i.Custodian,
@@ -131,7 +130,7 @@ func (q *Queries) GetPaymentMethodForCustodianToken(ctx context.Context, arg Get
 
 const lockPaymentMethodForCustodyRemap = `-- name: LockPaymentMethodForCustodyRemap :one
 
-SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods
 WHERE merchant_id = $1::uuid
   AND id = $2::uuid
 FOR UPDATE
@@ -164,7 +163,6 @@ func (q *Queries) LockPaymentMethodForCustodyRemap(ctx context.Context, arg Lock
 		&i.PspID,
 		&i.RailCustomerRef,
 		&i.RailMethodRef,
-		&i.RebillDriver,
 		&i.StoredCredentialRecurringRef,
 		&i.StoredCredentialUnscheduledRef,
 		&i.Custodian,
@@ -271,7 +269,6 @@ UPDATE openrails.payment_methods SET
     network_token_status = $7::text,
     network_token_par = $8::text,
     psp_id = COALESCE($9::uuid, psp_id),
-    rebill_driver = 'openrails',
     last_four = COALESCE(NULLIF($10::text, ''), last_four),
     card_type = COALESCE(NULLIF($11::text, ''), card_type),
     expiry_date = COALESCE(NULLIF($12::text, ''), expiry_date),

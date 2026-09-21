@@ -29,7 +29,7 @@ func newPaymentDefaultsFixture(t *testing.T) *findingsFixture {
 }
 func seedDefaultMethod(t *testing.T, fx *findingsFixture, customer uuid.UUID) *models.PaymentMethod {
 	t.Helper()
-	pm := &models.PaymentMethod{ID: uuid.New(), CustomerID: customer, Rail: models.RailNMI, PspID: fx.pspFor("nmi"), RailCustomerRef: "default-" + uuid.NewString(), RebillDriver: models.RebillDriverProvider, CreatedAt: fx.rt.Clock.Now(), UpdatedAt: fx.rt.Clock.Now()}
+	pm := &models.PaymentMethod{ID: uuid.New(), CustomerID: customer, Rail: models.RailNMI, PspID: fx.pspFor("nmi"), RailCustomerRef: "default-" + uuid.NewString(), CreatedAt: fx.rt.Clock.Now(), UpdatedAt: fx.rt.Clock.Now()}
 	require.NoError(t, paymentmethods.NewPaymentMethodRepo(fx.dbi).Create(fx.ctx, pm))
 	// This boundary fixture represents a prior approved customer-present charge;
 	// vault creation alone does not establish an off-session agreement.
