@@ -231,10 +231,14 @@ var jsonRules = map[string]jsonRule{
 	})),
 	// Successful checkout intents prune their submission payloads. Nonempty
 	// payloads remain unqualified; retain only the exact typed replay results.
-	"rail_intents.nmi_sale.payload": nullable(emptyObject),
+	"rail_intents.nmi_sale.payload": object(map[string]jsonRule{
+		"request_fingerprint": sha256Value, "provider": textValue, "psp": textValue, "amount": moneyStringValue, "currency": textValue, "description": textValue, "user_id": uuidValue, "price_id": uuidValue, "e2e_run_id": textValue,
+		"payment_method_id": uuidValue, "payment_id": uuidValue, "product_id": uuidValue, "list_amount": moneyStringValue, "accepted_at": textValue, "entitlements": dictionary(nullable(integerValue)), "access_duration_hours": nullable(integerValue), "entitlement_start": textValue, "ownership_start": textValue, "ownership_end": nullable(textValue), "eligibility": textValue,
+		"instrument": object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue}),
+	}),
 	"rail_intents.nmi_sale.result_evidence": nullable(object(map[string]jsonRule{
-		"transaction_id": textValue, "payment_id": uuidValue, "delayed_start": textValue, "verified_existing": booleanValue,
-		"declined": booleanValue, "response_code": integerValue, "localization_id": textValue,
+		"qualified_receipt": collectedReceiptJSON, "sale_submitted": booleanValue, "transaction_id": textValue, "payment_id": uuidValue, "delayed_start": textValue,
+		"declined": booleanValue, "not_executed": booleanValue, "request_refused": booleanValue, "response_code": integerValue, "localization_id": textValue, "operator_resolution": operatorResolutionJSON,
 	})),
 	"rail_intents.nmi_subscription_create.payload": nullable(emptyObject),
 	"rail_intents.nmi_subscription_create.result_evidence": nullable(object(map[string]jsonRule{

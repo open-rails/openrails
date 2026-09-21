@@ -761,6 +761,59 @@ func (q *Queries) ListLiveOwnershipGrantIDsByPayment(ctx context.Context, arg Li
 	return items, nil
 }
 
+const listOriginalPurchaseGrants = `-- name: ListOriginalPurchaseGrants :many
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM openrails.grants
+WHERE merchant_id=$1::uuid AND source_type='purchase'
+  AND source_id=$2::uuid::text AND event='grant'
+ORDER BY id LIMIT $3::int
+`
+
+type ListOriginalPurchaseGrantsParams struct {
+	MerchantID uuid.UUID
+	PaymentID  uuid.UUID
+	RowLimit   int32
+}
+
+// Original immutable events, including later-revoked sources. Accepted purchase
+// replay validates the original windows without reopening revoked projections.
+func (q *Queries) ListOriginalPurchaseGrants(ctx context.Context, arg ListOriginalPurchaseGrantsParams) ([]OpenrailsGrant, error) {
+	rows, err := q.db.Query(ctx, listOriginalPurchaseGrants, arg.MerchantID, arg.PaymentID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsGrant
+	for rows.Next() {
+		var i OpenrailsGrant
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.ProductID,
+			&i.Kind,
+			&i.SourceType,
+			&i.SourceID,
+			&i.PaymentID,
+			&i.Event,
+			&i.SupersedesID,
+			&i.SpecSnapshot,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.Amount,
+			&i.Currency,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOwnershipGrantsWithStatus = `-- name: ListOwnershipGrantsWithStatus :many
 SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.source_type, g.source_id,
        g.payment_id, g.starts_at, g.ends_at, g.created_at,

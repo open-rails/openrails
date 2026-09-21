@@ -256,6 +256,9 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 }
 
 func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
+	if err := validateSaleReferences(ctx, tx, id); err != nil {
+		return err
+	}
 	invalid, err := gen.New(tx).CountInvalidCheckoutCaptureReferences(ctx, id.UUID())
 	if err != nil {
 		return err

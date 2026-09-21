@@ -64,6 +64,10 @@ type CheckoutCustomerIdentity struct {
 
 // CreateCheckoutSessionRequest creates a purchase for a merchant-owned customer.
 // IdempotencyKey must identify this checkout attempt across retries.
+// The merchant endpoint trusts the host to invoke checkout for a real customer
+// action. Merchant credentials authorize the host; they do not prove customer
+// interaction. Do not use this command as an unattended way to establish a
+// customer-initiated stored-card agreement.
 type CreateCheckoutSessionRequest struct {
 	Customer       CheckoutCustomerIdentity `json:"customer"`
 	SubscriptionID SubscriptionID           `json:"subscription_id,omitzero"`

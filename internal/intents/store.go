@@ -92,6 +92,9 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	if scope.UUID() != p.MerchantID {
 		return gen.OpenrailsRailIntent{}, errors.New("intent merchant does not match context")
 	}
+	if p.IntentType == "nmi_sale" {
+		return s.enqueueSale(ctx, p)
+	}
 	if p.IntentType != "nmi_upgrade" && p.IntentType != subscriptions.TypeManualRebill {
 		return s.enqueue(ctx, p)
 	}

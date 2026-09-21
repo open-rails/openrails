@@ -212,10 +212,13 @@ ON CONFLICT (kind, environment, account_id) DO UPDATE SET
     -- or#812: a floor NEVER goes backwards. An upsert that carries no floors
     -- (the manifest plane, which seeds rather than rotates) leaves the stored
     -- ones alone rather than clearing a rotation another writer recorded.
-    credential_versions = CASE
-        WHEN EXCLUDED.credential_versions = '{}'::jsonb THEN openrails.custodians.credential_versions
-        ELSE openrails.custodians.credential_versions || EXCLUDED.credential_versions
-    END,
+    credential_versions = openrails.custodians.credential_versions || COALESCE((
+        SELECT jsonb_object_agg(incoming.key, greatest(
+            incoming.value::bigint,
+            (openrails.custodians.credential_versions ->> incoming.key)::bigint
+        ))
+        FROM jsonb_each_text(EXCLUDED.credential_versions) AS incoming
+    ), '{}'::jsonb),
     updated_at = now()
 WHERE openrails.custodians.merchant_id = EXCLUDED.merchant_id
 RETURNING id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at

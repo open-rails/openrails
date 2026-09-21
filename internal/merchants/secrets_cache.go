@@ -2,6 +2,7 @@ package merchants
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -76,6 +77,9 @@ func (c *cachedSecretStore) Get(ctx context.Context, merchantID merchant.ID, nam
 // a pre-N cache entry, however much TTL is left. minVersion 0 is the
 // unversioned path and behaves exactly as before.
 func (c *cachedSecretStore) GetAtLeastVersion(ctx context.Context, merchantID merchant.ID, name string, minVersion int) (Secret, error) {
+	if minVersion < 0 {
+		return Secret{}, fmt.Errorf("%w: invalid credential version floor", ErrSecretBackendUnavailable)
+	}
 	key := cacheKey{merchant: merchantID.String(), name: name}
 
 	c.mu.Lock()
@@ -94,12 +98,9 @@ func (c *cachedSecretStore) GetAtLeastVersion(ctx context.Context, merchantID me
 	}
 
 	if sec.Version < minVersion {
-		// The backend has not caught up with a version the shared PSP row says
-		// is committed. Serve what the backend authoritatively holds — refusing
-		// would take a live merchant down over a replication lag — but do NOT
-		// cache it, so the very next call retries instead of pinning the stale
-		// value for a whole TTL.
-		return sec, nil
+		// Replication lag cannot authorize reuse of a retired credential.
+		// Do not return or cache it; the next read can observe recovery.
+		return Secret{}, fmt.Errorf("%w: credential version %d is below required version %d", ErrSecretBackendUnavailable, sec.Version, minVersion)
 	}
 
 	c.mu.Lock()

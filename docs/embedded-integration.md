@@ -548,3 +548,9 @@ managers are attached. A plain embedded billing runtime has no placeholder
 management routes; the host continues to own its identity/team UI. Standalone
 and SaaS deployments with a control plane retain the same permission-gated
 management endpoints.
+
+### Merchant checkout authority
+
+`Client.CreateCheckoutSession` uses the privileged merchant checkout endpoint. The host supplies the customer identity and is trusted to invoke this command for a real customer action. A merchant API key authorizes the host; it does not itself establish that a customer is interacting. Do not use merchant checkout as an unattended way to establish an initial customer-initiated stored-card agreement. Customer-facing self routes retain their authenticated payer boundary.
+
+This receipt/completion cut preserves that existing host contract. The product and authority review before v1 must decide whether merchant checkout should keep this explicit host trust or require verified per-customer interaction credentials. No request boolean can manufacture that verification.

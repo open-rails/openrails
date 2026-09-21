@@ -7,6 +7,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"strconv"
@@ -21,7 +22,7 @@ func ValidateValues(p Profile, values []*string) error {
 	// Canonical collection operations carry typed engine-encoded keys.
 	// Validate the accepted payer/authority/payload and retained custody before
 	// treating that one coordinate as an identity rather than arbitrary text.
-	encodedKey, err := validateRetainedCollection(p, values)
+	encodedKey, err := validateRetainedPayment(p, values)
 	if err != nil {
 		return err
 	}
@@ -197,7 +198,7 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "rail_intents" {
 		typ := value(p, values, "intent_type")
 		payload := value(p, values, "payload")
-		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection" && *typ != "manual_rebill" && *typ != "nmi_provider_cutover")) {
+		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection" && *typ != "nmi_sale" && *typ != "manual_rebill" && *typ != "nmi_provider_cutover")) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
 		if typ != nil && (*typ == "nmi_refund" || *typ == "stripe_refund" || *typ == "ccbill_refund") {
@@ -213,9 +214,9 @@ func ValidateValues(p Profile, values []*string) error {
 	return nil
 }
 
-// validateRetainedCollection also identifies an engine-generated key. A caller key or arbitrary metadata
+// validateRetainedPayment also identifies an engine-generated key. A caller key or arbitrary metadata
 // never reaches this exception merely by resembling a hash.
-func validateRetainedCollection(p Profile, values []*string) (bool, error) {
+func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 	if p.Name != "rail_intents" {
 		return false, nil
 	}
@@ -226,7 +227,7 @@ func validateRetainedCollection(p Profile, values []*string) (bool, error) {
 		return ""
 	}
 	typ := field("intent_type")
-	if typ != "invoice_collection" && typ != subscriptions.TypeManualRebill {
+	if typ != "invoice_collection" && typ != subscriptions.TypeManualRebill && typ != payments.TypeNMISale {
 		return false, nil
 	}
 	id, _ := uuid.Parse(field("id"))
@@ -244,6 +245,9 @@ func validateRetainedCollection(p Profile, values []*string) (bool, error) {
 			}
 			*target = &parsed
 		}
+	}
+	if typ == payments.TypeNMISale {
+		return false, intents.ValidateNMISaleTerminal(row)
 	}
 	if typ == subscriptions.TypeManualRebill {
 		if err := intents.ValidateManualRebillTerminal(row); err != nil {
