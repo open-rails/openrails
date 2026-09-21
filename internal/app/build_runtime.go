@@ -685,6 +685,11 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	entitlementService := entitlements.NewEntitlementService(database, clock)
 	productAccessService := productaccess.NewService(database, clock)
 	moneyService := money.NewMoneyService(database, clock)
+	if cfg.HyperSwitch != nil {
+		if err := moneyService.SetHyperSwitchDeployment(cfg.HyperSwitch.APIBaseURL); err != nil {
+			return nil, err
+		}
+	}
 	metricsService := metrics.NewService(database)
 	// #741 dashboard: NL widget generation is armed only when an LLM key is
 	// configured — nil LLM = the generate endpoint fail-closes with 501.

@@ -383,6 +383,9 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 	}
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: tid.UUID(), ID: payer.UUID()}); err != nil {
+			return fmt.Errorf("lock invoice payer: %w", err)
+		}
 		row, err := q.GetInvoiceForPayerForUpdate(ctx, gen.GetInvoiceForPayerForUpdateParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), ID: invoiceID})
 		if errors.Is(err, pgx.ErrNoRows) && !opts.manual {
 			return nil
@@ -435,6 +438,14 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		if err != nil || method == nil {
 			return err
 		}
+		var custody *charge.HyperSwitchBinding
+		if method.Custodian == models.CustodianHyperSwitch {
+			binding, err := collectionHyperSwitchBinding(ctx, q, *method, s.hyperSwitchDeployment)
+			if err != nil {
+				return err
+			}
+			custody = &binding
+		}
 		amountMinor, err := moneyutil.NativeToRailMinor(invoice.Currency, invoice.AmountDue)
 		if err != nil {
 			return fmt.Errorf("invoice %s amount is not representable on rail %s: %w", invoice.ID, method.Rail, err)
@@ -467,7 +478,8 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 			Payload: intents.InvoiceCollectionPayload{
 				InvoiceID: invoiceID, CustomerID: payer.UUID(), AttemptID: attemptID, PaymentMethodID: method.ID, Initiator: opts.initiator,
 				Rail: normalizeRail(method.Rail), Instrument: charge.FreezeInstrument(*method),
-				Currency: invoice.Currency, Amount: invoice.AmountDue, AmountMinor: amountMinor,
+				HyperSwitch: custody,
+				Currency:    invoice.Currency, Amount: invoice.AmountDue, AmountMinor: amountMinor,
 				ProviderCustomerRef: providerCustomerRef,
 				Description:         fmt.Sprintf("invoice %s", invoiceID),
 			},
@@ -556,7 +568,7 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 	if descriptor, ok := rails.Lookup(models.Rail(method.Rail)); !ok || !descriptor.SupportsChargeSavedMethod {
 		return nil, ErrCollectionPaymentMethodInvalid
 	}
-	if opts.initiator == charge.InitiatorCustomer && (!rails.IsNMI(models.Rail(method.Rail)) || method.Custodian != models.CustodianPSP) {
+	if opts.initiator == charge.InitiatorCustomer && (!rails.IsNMI(models.Rail(method.Rail)) || (method.Custodian != models.CustodianPSP && method.Custodian != models.CustodianHyperSwitch)) {
 		return nil, ErrCustomerPaymentUnsupported
 	}
 	return &method, nil

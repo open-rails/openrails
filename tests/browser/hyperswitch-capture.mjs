@@ -90,11 +90,42 @@ try {
   assert.equal(result.proof.method, result.proof.replayMethod);
   assert.equal(result.proof.secretCleared, true);
   } else assert.equal(result.proof.status, "refused_without_storage_consent");
+  let invoicePay;
+  if (config.invoice_fixture) {
+    const seeded = await fetch(config.invoice_fixture,{method:'POST'});
+    assert.equal(seeded.status,200);
+    config.invoice_id=(await seeded.json()).invoice_id;
+    await page.evaluate(config => {
+      const button = document.createElement('button'); button.textContent='Pay invoice'; document.body.append(button);
+      const key = crypto.randomUUID();
+      button.onclick=async()=>{
+        try {
+          const response=await fetch(config.api+`/v1/me/invoices/${config.invoice_id}/pay-now`,{method:'POST',headers:{Authorization:`Bearer ${config.token}`,'Content-Type':'application/json','Idempotency-Key':key},body:JSON.stringify({payment_method_id:window.captureProof.method})});
+          const body=await response.json();
+          if(!response.ok)throw Error(`Invoice payment refused ${response.status}/${body.error?.code}`);
+          window.invoiceProof=body;
+          window.invoiceKey=key;
+        } catch(error){window.invoiceFailure=error.message;}
+      };
+    },config);
+    await page.getByRole('button',{name:'Pay invoice',exact:true}).click();
+    await page.waitForFunction(()=>window.invoiceProof||window.invoiceFailure);
+    const payment=await page.evaluate(()=>({result:window.invoiceProof,failure:window.invoiceFailure}));
+    assert.equal(payment.failure,undefined);
+    assert.equal(payment.result.operation.status,'succeeded');
+    assert.equal(payment.result.invoice.status,'paid');
+    invoicePay=payment.result;
+    await page.getByRole('button',{name:'Pay invoice',exact:true}).click();
+    await page.waitForFunction(()=>window.invoiceProof?.replayed===true);
+    const replay=await page.evaluate(()=>window.invoiceProof);
+    assert.equal(replay.operation.id,invoicePay.operation.id);
+    assert.equal(replay.invoice.status,'paid');
+  }
   assert.deepEqual(failures, []);
   assert.deepEqual(blocked, [], "real CSP must stop every unused external resource before network dispatch");
   if (process.env.OPENRAILS_BROWSER_PRIVATE) writeFileSync(process.env.OPENRAILS_BROWSER_PRIVATE, JSON.stringify(await page.evaluate(() => window.captureSecretValues)), {mode:0o600});
   const cspBlocked = [];
   for (const frame of page.frames()) cspBlocked.push(...await frame.evaluate(() => window.captureCSP ?? []));
-  console.log(JSON.stringify({ cspBlocked, externalHTTPRequests:0, vendorBrowserCapture: 'pass', vendorSession:result.proof.vendorSession, vendorCustomer:result.proof.vendorCustomer, persistent:config.store==='true', corePANRequests: 0, coreRequests, terminalReplay:config.store==='true', secretCleared:config.store==='true' }));
+  console.log(JSON.stringify({ cspBlocked, externalHTTPRequests:0, vendorBrowserCapture: 'pass', vendorSession:result.proof.vendorSession, vendorCustomer:result.proof.vendorCustomer, method:result.proof.method, invoicePay, invoiceKey:await page.evaluate(()=>window.invoiceKey), persistent:config.store==='true', corePANRequests: 0, coreRequests, terminalReplay:config.store==='true', secretCleared:config.store==='true' }));
   await context.close();
 } finally { await browser.close(); }

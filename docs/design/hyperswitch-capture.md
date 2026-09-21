@@ -58,3 +58,25 @@ The qualified local router source is 77db63fd08b404dbcc6b62fbee25c754ebcb5963, b
 Actual Chromium coverage uses default volatile tokenization and explicit Save card. Only Save card attaches a persistent method, with zero financial rows. Both merchant-page and vendor-iframe responses serve restrictive CSP; optional wallet, Braintree, font and telemetry attempts are recorded and blocked, with zero external HTTP requests. Production must preserve equivalent CSP and disabled preload/logging settings on both documents. Exact PAN, merchant API-key, SDK-authorization and native-token log checks pass on the v2 image.
 
 A deployment may be downgraded after setup preparation. Before a new attachment, confirm repeats the same authenticated concrete preflight; missing, v1 and disabled-policy responses refuse without a local method. A historical terminal replay remains local and does not require the vendor to be available or qualified.
+
+The invoice extension uses the captured permanent card through the qualified v2
+NMI form proxy. Save card remains nonfinancial. An explicit customer invoice
+payment establishes an unscheduled agreement; later merchant invoice collection
+uses that agreement. Recurring subscription enrollment is outside this cut.
+
+`TestHyperSwitchInvoiceClientWorkflow` is the ordinary standalone HTTP Client
+gate in `compatibility/workflows.tsv`. The separately selected
+`TestHyperSwitchActualBrowserInvoice` (tags `integration browser hyperswitch`)
+uses `OPENRAILS_HYPERSWITCH_FIXTURE` and the pinned local vendor SDK/router. It
+covers default volatile refusal, explicit persistent Save card with no financial
+effects, browser Pay invoice and same-key replay/conflict, exact USD/JPY amounts,
+CIT/MIT agreement continuity, lost reply and a new-process verifier without
+resubmission, decline, and terminal archive restore without a provider adapter.
+This replaces the former capture-only manual selector; no external-vendor CI job
+or live financial qualification is implied.
+
+A fresh submission owner may finish a typed pre-dispatch refusal as not executed:
+local validation, masked-method readback, or contract preflight failed before
+entering the proxy POST. This permits a new payment key after repair. Existing
+submission markers and every uncertain error after POST entry remain verify-only;
+a proxy HTTP error never proves that the PSP did not execute.
