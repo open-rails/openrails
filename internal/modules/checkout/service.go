@@ -216,6 +216,11 @@ func (s *CheckoutService) CheckSubscriptionConflict(ctx context.Context, userID 
 
 // Checkout processes a unified checkout request
 func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error) {
+	if s.NMISaleService != nil {
+		if response, found, err := s.NMISaleService.replayAcceptedRequest(ctx, req, user); found || err != nil {
+			return response, err
+		}
+	}
 	// #774: price_id accepts either a price UUID/opaque id or a price_key.
 	price, err := catalog.ResolveReference(ctx, s.PriceService, req.PriceID)
 	if err != nil {

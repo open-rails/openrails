@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -138,6 +138,14 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		if _, err := bound.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: tid.UUID(), ID: customer}); err != nil {
 			return err
 		}
+		prior, err := intents.NewStore(bound).GetByIdempotencyKey(ctx, NMISaleIdempotencyKey(idempotencyKey))
+		if err == nil {
+			intent = prior
+			return ownsSaleRequest(prior, user.ID, price.ID, fingerprint)
+		}
+		if !db.IsNotFound(err) {
+			return err
+		}
 		prepared, err := s.prepareAcceptedSale(ctx, bound, req, user, price.ID, resolvedMethod.ID, target, fingerprint)
 		if err != nil {
 			return err
@@ -162,6 +170,38 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		_ = s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, resolvedMethod)
 	}
 	return renderSaleOperation(intent)
+}
+
+// A committed request is replayed before current catalog, provider routing or
+// coverage can reinterpret the accepted purchase. Caller/body checks still run.
+func (s *CheckoutNMISaleService) replayAcceptedRequest(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, bool, error) {
+	if req == nil || user == nil || req.IdempotencyKey == "" || s.RailPaymentMethodService == nil || s.RailPaymentMethodService.DB == nil {
+		return nil, false, nil
+	}
+	prior, err := intents.NewStore(s.RailPaymentMethodService.DB).GetByIdempotencyKey(ctx, NMISaleIdempotencyKey(req.IdempotencyKey))
+	if db.IsNotFound(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	p, err := payments.DecodeNMISalePayload(prior)
+	if err != nil {
+		return nil, true, err
+	}
+	fingerprint := saleRequestFingerprint(req, user, p.PriceID, railTarget{PSP: p.PSP})
+	if err := ownsSaleRequest(prior, user.ID, p.PriceID, fingerprint); err != nil {
+		return nil, true, err
+	}
+	if s.Intents == nil {
+		return nil, true, errors.New("sale executor is unavailable")
+	}
+	operation, err := s.Intents.EnqueueOwnedAndExecute(ctx, saleReplayParams(prior), func(in gen.OpenrailsRailIntent) error { return ownsSaleRequest(in, user.ID, p.PriceID, fingerprint) })
+	if err != nil {
+		return nil, true, err
+	}
+	response, err := renderSaleOperation(operation)
+	return response, true, err
 }
 
 func renderSaleOperation(intent gen.OpenrailsRailIntent) (*CheckoutResponse, error) {

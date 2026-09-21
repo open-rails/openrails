@@ -27,6 +27,7 @@ import (
 
 func (s *CheckoutPurchaseService) transactionBound(d *db.DB) *CheckoutPurchaseService {
 	out := NewCheckoutPurchaseService(catalog.NewPriceService(d), catalog.NewProductService(d), payments.NewPaymentService(d, s.clock), entitlements.NewEntitlementService(d, s.clock), nil, s.clock)
+	out.transactionDB = d
 	if s.SubscriptionService != nil {
 		out.SubscriptionService = subscriptions.NewSubscriptionService(d, out.PriceService, out.ProductService, nil, s.clock)
 	}
@@ -92,7 +93,7 @@ func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.
 	if target.Scope == nil || method.PspID != target.Scope.ID || method.CustomerID.String() != user.ID || method.Custodian != models.CustodianPSP || method.ParkReason != "" {
 		return out, errors.New("sale instrument does not match customer and provider")
 	}
-	now := purchase.now().UTC()
+	now := purchase.now().UTC().Truncate(time.Microsecond)
 	start := now
 	if eligibility.Coverage != nil && eligibility.Coverage.EndDate != nil && eligibility.Coverage.EndDate.After(start) {
 		start = eligibility.Coverage.EndDate.UTC()

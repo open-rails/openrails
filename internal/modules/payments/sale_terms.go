@@ -53,6 +53,11 @@ func DecodeNMISalePayload(in gen.OpenrailsRailIntent) (NMISalePayload, error) {
 	if err != nil || customer == uuid.Nil || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMISale || in.Rail != "nmi" || in.PspID == nil || *in.PspID != p.Instrument.PSPID || in.CustodianID != nil || in.PriceID == nil || *in.PriceID != p.PriceID || p.PaymentID == uuid.Nil || p.ProductID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.ListAmount < 0 || p.Currency != strings.ToUpper(strings.TrimSpace(p.Currency)) || p.AcceptedAt.IsZero() || p.EntitlementStart.IsZero() || p.OwnershipStart.IsZero() || p.Entitlements == nil {
 		return p, errors.New("sale operation contradicts its accepted purchase")
 	}
+	for _, instant := range []time.Time{p.AcceptedAt, p.EntitlementStart, p.OwnershipStart} {
+		if !instant.Equal(instant.Truncate(time.Microsecond)) {
+			return p, errors.New("accepted purchase instants require database precision")
+		}
+	}
 	digest, err := hex.DecodeString(p.RequestFingerprint)
 	if err != nil || len(digest) != 32 || p.RequestFingerprint != strings.ToLower(p.RequestFingerprint) {
 		return p, errors.New("sale has no canonical request binding")
