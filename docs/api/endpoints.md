@@ -383,7 +383,7 @@ Full request and state-transition details are in
 ### Catalog (`/v1/merchant/catalog`)
 
 Merchant administrators retain this surface. Creator operations use the separate
-`/v1/catalog` prefix and `merchant:catalog:own:read/update` permissions, with
+`/v1/catalog` prefix and `merchant:catalog:read-own` / `merchant:catalog:update-own` permissions, with
 owner identity supplied by the verified Gate principal. They expose product and
 price get/list/create/patch/activate/deactivate, price-key rename and history,
 plus `PUT /v1/catalog` to ensure the caller's catalog. Provider configuration,

@@ -17,6 +17,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
@@ -24,6 +25,7 @@ import (
 // retirement. Every other merchant-scoped table must be a MerchantHasActivity
 // blocker or reach one through a NOT NULL foreign key.
 var retirementNeutralTables = map[string]string{
+	"catalogs":                      "immutable default/creator ownership metadata retained with the merchant; products, not empty catalog identities, are activity",
 	"admission_denials_hourly":      "refused-traffic telemetry anyone can create",
 	"webhook_health":                "inbound delivery counters include rejected, unsigned requests",
 	"webhook_health_daily":          "rollup of webhook_health",
@@ -193,4 +195,32 @@ func TestRetireUnusedWaitsForConcurrentActivity(t *testing.T) {
 	live, err := svc.Get(ctx, m.ID)
 	require.NoError(t, err)
 	require.Equal(t, StatusActive, live.Status)
+}
+
+// Merely materializing a default/creator catalog creates no billable activity.
+// Retirement retains those immutable ownership identities with its tombstone.
+func TestRetireUnusedRetainsCatalogIdentityMetadata(t *testing.T) {
+	ctx := t.Context()
+	pool := dbtest.SharedPGXPool(t)
+	svc, err := NewDirectoryService(db.WrapPool(pool, config.DefaultSchema))
+	require.NoError(t, err)
+	group := uuid.NewString()
+	m, created, err := svc.Provision(ctx, ProvisionRequest{Slug: "retire-catalog-" + uuid.NewString()[:8], PermissionGroupID: group})
+	require.NoError(t, err)
+	require.True(t, created)
+	q := dbtest.Queries(pool)
+	defaults, err := q.EnsureDefaultCatalog(ctx, m.ID.UUID())
+	require.NoError(t, err)
+	owned, err := q.EnsureOwnedCatalog(ctx, gen.EnsureOwnedCatalogParams{MerchantID: m.ID.UUID(), OwnerSubject: "creator/retirement-metadata"})
+	require.NoError(t, err)
+	released := false
+	result, err := svc.RetireUnused(ctx, m.ID, group, nil, func(_ context.Context, id string) error { require.Equal(t, group, id); released = true; return nil })
+	require.NoError(t, err)
+	require.True(t, result.Retired)
+	require.True(t, released)
+	for _, before := range []gen.OpenrailsCatalog{defaults, owned} {
+		after, err := q.GetCatalog(ctx, gen.GetCatalogParams{MerchantID: m.ID.UUID(), ID: before.ID})
+		require.NoError(t, err)
+		require.Equal(t, before.OwnerSubject, after.OwnerSubject)
+	}
 }

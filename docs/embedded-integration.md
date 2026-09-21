@@ -373,7 +373,8 @@ reads, lists, edits, archive actions and price-key history. Prices inherit their
 catalog from the product, and a purchased product cannot be moved to another
 catalog through an ordinary update. Content ACLs and authentication remain yours.
 
-`CatalogClient` captures only `merchant:catalog:own:read/update`; its options
+`CatalogClient` captures only `merchant:catalog:read-own` and
+`merchant:catalog:update-own`; its options
 cannot replace that transport/credential with a merchant administrator's. It
 supports product display/archive and price terms, not entitlement/tier definitions,
 raw provider bindings, provider selection, meters or bulk publishing. The engine
