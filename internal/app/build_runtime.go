@@ -15,7 +15,6 @@ import (
 	redis "github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
-	"github.com/riverqueue/river/rivertype"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
@@ -932,53 +931,6 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		CopilotService:               copilotService,
 		RailCustomerService:          railCustomerService,
 	}, nil
-}
-
-func buildRiverClient(ctx context.Context, cfg *config.Config, schema string, workers *river.Workers, middleware []rivertype.Middleware, configurers []func(context.Context, *river.Config) error) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {
-	if cfg.DB == nil {
-		return nil, nil, fmt.Errorf("missing database configuration for River")
-	}
-	dbURL := cfg.DB.GetConnectionString()
-	if dbURL == "" {
-		return nil, nil, fmt.Errorf("missing database configuration for River (DB_URL or DB_HOST/DB_PORT/etc.)")
-	}
-	pool, err := db.NewPGXPoolWithRetry(ctx, dbURL)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed creating pgx pool for River: %w", err)
-	}
-
-	drv := riverpgxv5.New(pool)
-	riverConfig := &river.Config{
-		Queues: map[string]river.QueueConfig{
-			river.QueueDefault:             {MaxWorkers: standaloneRiverDefaultQueueMaxWorkers},
-			riverjobs.QueueBilling:         {MaxWorkers: standaloneRiverBillingQueueMaxWorkers},
-			riverjobs.QueueProviderRefresh: {MaxWorkers: standaloneRiverProviderRefreshQueueMaxWorkers},
-		},
-		// xs-007 row 31: -1 is River's "never cancel on elapsed time". Every
-		// OpenRails worker already declares it (healthTrackedWorker.Timeout);
-		// stating it on the client too means a worker registered outside
-		// addTrackedWorker cannot silently inherit River's 1-minute default.
-		// Jobs end on observed lack of progress (riverjobs.JobLivenessMiddleware).
-		// RescueStuckJobsAfter is left at River's default: with the liveness
-		// beat refreshing attempted_at it measures silence from a dead process,
-		// not the age of a live job.
-		JobTimeout: riverNoJobTimeout,
-		Schema:     schema,
-		Workers:    workers,
-		Middleware: middleware,
-	}
-	for _, configure := range configurers {
-		if err := configure(ctx, riverConfig); err != nil {
-			pool.Close()
-			return nil, nil, fmt.Errorf("configure River component: %w", err)
-		}
-	}
-	client, err := river.NewClient(drv, riverConfig)
-	if err != nil {
-		pool.Close()
-		return nil, nil, fmt.Errorf("failed creating River client: %w", err)
-	}
-	return client, pool, nil
 }
 
 // runtimeConvergeEnqueuer adapts the runtime's enqueue-only River producer to

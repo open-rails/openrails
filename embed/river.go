@@ -52,14 +52,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/riverkit"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"github.com/open-rails/openrails/config"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -147,66 +143,14 @@ func (o RiverOwnership) managedSchema(billingSchema string) (string, error) {
 	return schema, nil
 }
 
-// BindRiver constructs and binds the host-owned fleet after component
-// composition. The optional configure callback extends the supplied complete
-// config; required workers, queues and schedules must remain. The host owns the
-// pool and the returned client's Start/Stop lifecycle. Call once before serving
-// traffic. A failed attempt requires closing and recreating the runtime.
-func (r *Runtime) BindRiver(ctx context.Context, pool *pgxpool.Pool, configure func(context.Context, *river.Config) error) (*river.Client[pgx.Tx], error) {
+// RiverJobs contributes billing and any already attached control-plane jobs.
+// Attach components first, then pass this contribution to riverkit.New alongside
+// other libraries. The host owns the returned client's Start/Stop lifecycle.
+func (r *Runtime) RiverJobs() riverkit.Contribution {
 	if r == nil || r.app == nil || r.app.Runtime == nil {
-		return nil, ErrNotInitialized
+		return riverkit.NewContribution("openrails", func(context.Context, *river.Config) error { return ErrNotInitialized }, nil, nil)
 	}
-	if pool == nil {
-		return nil, fmt.Errorf("embedded billing: host River pool is required")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	rt := r.app.Runtime
-	cfg, err := rt.PrepareHostRiverConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	workers := cfg.Workers
-	queues := maps.Clone(cfg.Queues)
-	periodic := slices.Clone(cfg.PeriodicJobs)
-	if configure != nil {
-		if err := configure(ctx, cfg); err != nil {
-			return nil, fmt.Errorf("embedded billing: configure host River: %w", err)
-		}
-	}
-	if cfg.Workers != workers {
-		return nil, fmt.Errorf("embedded billing: preserve the composed River worker registry")
-	}
-	for name := range queues {
-		if cfg.Queues[name].MaxWorkers < 1 {
-			return nil, fmt.Errorf("embedded billing: required River queue %q was removed or disabled", name)
-		}
-	}
-	for _, job := range periodic {
-		if !slices.Contains(cfg.PeriodicJobs, job) {
-			return nil, fmt.Errorf("embedded billing: preserve the composed River periodic jobs")
-		}
-	}
-	schema, err := resolveHostRiverSchema(cfg.Schema, r.app.Config.DB.SchemaName())
-	if err != nil {
-		return nil, err
-	}
-	cfg.Schema = schema
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	client, err := river.NewClient(riverpgxv5.New(pool), cfg)
-	if err != nil {
-		return nil, fmt.Errorf("embedded billing: construct host River: %w", err)
-	}
-	if err := rt.BindHostRiverClient(ctx, client, schema); err != nil {
-		return nil, err // the unstarted client acquired no external lifecycle
-	}
-	return client, nil
+	return r.app.Runtime.RiverJobs()
 }
 
 // HasExternalRiverClient reports whether BindRiver has successfully bound the
