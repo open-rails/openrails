@@ -297,7 +297,11 @@ Semantics by mode:
 - **Mode 1 (`merchant_source=manifest`, the default)**: this call IS the manifest —
   it steamrolls the DB projections and seeds secrets into the runtime's **in-memory**
   plane (never a persistent store) on every run, then arms checkout/vault/webhooks
-  immediately. Change credentials = change the config + reboot.
+  immediately. Change credentials = change the config + reboot. Provider PUT,
+  DELETE and account-archive HTTP routes are omitted; reads and routing dry
+  runs remain available. The advertised `secret_write` capability is false,
+  including with explicit provider route selections. This does not disable
+  separately configured managed alert-webhook URL updates.
 - **Mode 2 (`merchant_source=api`)**: a manifest-shaped upsert (PSPs, profile,
   invoice, remote-application trust) refuses loudly — two truths. Only a bare
   identity bind (slug + top-level `DisplayName`) is legal; arm providers through
@@ -347,6 +351,54 @@ converge (insert+overwrite+prune); with `catalog_source=api`, a mutating push
 refuses (plan-only diff stays legal). `rt.Converge(ctx, merchantID)` runs the
 merchant-wide derive pass on demand after an import. The manifest is
 `version: 1` + `catalogs: [{merchant, tier_groups, products, meters}]`.
+
+### Creator-owned catalogs
+
+One merchant may have a default catalog and catalogs owned by opaque host
+subjects. Ordinary `rt.Client()` calls continue to create products in the default
+catalog unless an authorized administrator supplies `CreateProductRequest.CatalogID`.
+Product and price keys remain unique within the merchant.
+
+For a creator, pass an identity obtained from your authenticated user:
+
+```go
+author, err := rt.CatalogClient(verifiedSubject)
+if err != nil { return err }
+catalog, err := author.EnsureOwnCatalog(ctx)
+if err != nil { return err }
+product, err := author.CreateProduct(ctx, openrails.CreateProductRequest{
+    Key: "post-" + postID, DisplayName: title,
+})
+```
+
+The subject is a nonempty opaque string; it need not be a UUID or email. The
+library owns its catalog mapping and enforces creator scope on product/price
+reads, lists, edits, archive actions and price-key history. Prices inherit their
+catalog from the product, and a purchased product cannot be moved to another
+catalog through an ordinary update. Content ACLs and authentication remain yours.
+
+`CatalogClient` captures only `merchant:catalog:read-own` and
+`merchant:catalog:update-own`; its options
+cannot replace that transport/credential with a merchant administrator's. It
+supports product display/archive and price terms, not entitlement/tier definitions,
+raw provider bindings, provider selection, meters or bulk publishing. The engine
+selects applicable configured providers for creator prices. It does not create
+separate merchants, provider accounts, payout policies or checkout authority.
+
+HTTP hosts mount these endpoints through the existing `RouteSetCatalog`, under
+`/v1/catalog`. Their existing Gate must return a verified `Principal.Subject`
+and authorize the narrow owner permission. If Subject is absent, the library
+uses only that Gate result's `UserContext.UserID`; both absent is a refusal.
+An owner ID in a body, query, header or ambient host context never supplies
+authority. Remote clients use `openrails.WithOwnCatalog()` with their normal
+verified credential; this option only selects the owner paths.
+
+Administrators keep `/v1/merchant/catalog/*` and use `EnsureCatalogForOwner`,
+`GetCatalog`, and `ListCatalogs` under `/v1/merchant/catalogs`. Verify the admin
+permission separately; never impersonate another creator by constructing a
+CatalogClient from an owner read out of a product or content row. The optional
+OpenRails control-plane adapter includes a `creator` role with only the two owner
+grants; it is not assigned automatically.
 
 ### 6. Mounting HTTP
 

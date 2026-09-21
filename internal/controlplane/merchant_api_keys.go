@@ -10,6 +10,7 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -37,17 +38,16 @@ type MerchantAPIKey struct {
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 }
 
-// MerchantRoles returns the fixed merchant catalog roles (#567), least privilege
-// first. The one source of truth for the role vocabulary shared by API keys
-// (#757) and team membership (#760).
+// MerchantRoles returns fixed team roles. Creator is a subject-bound role;
+// merchant-scoped machine keys cannot supply that owner identity.
 func MerchantRoles() []string {
-	return []string{MerchantRoleViewer, MerchantRoleSupport, MerchantRoleOwner}
+	return []string{MerchantRoleCreator, MerchantRoleViewer, MerchantRoleSupport, MerchantRoleOwner}
 }
 
 // MerchantAPIKeyRoles returns the fixed catalog roles a merchant API key may
 // hold, least privilege first.
 func MerchantAPIKeyRoles() []string {
-	return MerchantRoles()
+	return []string{MerchantRoleViewer, MerchantRoleSupport, MerchantRoleOwner}
 }
 
 // MerchantRolePermissions resolves a fixed merchant catalog role to its
@@ -108,7 +108,7 @@ func (c *ControlPlane) MintMerchantAPIKey(ctx context.Context, mid merchant.ID, 
 		return MerchantAPIKey{}, "", ErrNoControlPlane
 	}
 	role = strings.ToLower(strings.TrimSpace(role))
-	if _, ok := MerchantRolePermissions(role); !ok {
+	if !slices.Contains(MerchantAPIKeyRoles(), role) {
 		return MerchantAPIKey{}, "", ErrUnknownMerchantRole
 	}
 	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)

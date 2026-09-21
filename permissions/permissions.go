@@ -18,6 +18,8 @@ const (
 	MerchantPaymentProvidersUpdate = "merchant:payment-providers:update"
 	MerchantCatalogRead            = "merchant:catalog:read"
 	MerchantCatalogUpdate          = "merchant:catalog:update"
+	MerchantCatalogOwnRead         = "merchant:catalog:read-own"
+	MerchantCatalogOwnUpdate       = "merchant:catalog:update-own"
 	MerchantCustomerSettingsRead   = "merchant:customer-settings:read"
 	MerchantCustomerSettingsUpdate = "merchant:customer-settings:update"
 	MerchantInvoicesRead           = "merchant:invoices:read"

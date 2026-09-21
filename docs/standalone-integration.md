@@ -97,7 +97,7 @@ openrails run-server --config /etc/openrails/config.yaml \
 | Source of truth | YAML mounted at boot, held in memory | DB + Vault, mutated over HTTP APIs |
 | Change a merchant/credential | edit file(s) + reboot | call the API |
 | Provider credentials at rest | never persisted (in-memory) | Vault KV or DEK-encrypted DB (required outside dev) |
-| Merchant/PSP mutation APIs | 405 `manifest_driven` (reads work) | full surface |
+| Provider configuration mutation APIs | routes omitted (reads and dry runs work) | credential writes require a writable secret backend; metadata archives remain available |
 | Pick when | one/few merchants you operate yourself; secrets rendered by Vault Agent/k8s | merchants managed at runtime, SaaS-style |
 
 `catalog_source` independently selects `manifest` or `api`; empty follows

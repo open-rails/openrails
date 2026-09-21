@@ -9,22 +9,21 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // UpdatePSPLinks resolves input labels once and atomically replaces normalized
 // bindings. A captured psp_id is authoritative through a label rename/archive.
 func (s *PriceService) UpdatePSPLinks(ctx context.Context, priceID uuid.UUID, links map[string]map[string]string) error {
-	mid, err := merchant.Require(ctx)
+	mid, catalogID, err := queryCatalogScope(ctx)
 	if err != nil {
 		return err
 	}
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		if _, err := q.LockPriceForBindingUpdate(ctx, gen.LockPriceForBindingUpdateParams{MerchantID: mid.UUID(), PriceID: priceID}); err != nil {
+		if _, err := q.LockPriceForBindingUpdate(ctx, gen.LockPriceForBindingUpdateParams{MerchantID: mid.UUID(), CatalogID: catalogID, PriceID: priceID}); err != nil {
 			return err
 		}
-		if err := q.DeletePricePSPBindings(ctx, gen.DeletePricePSPBindingsParams{MerchantID: mid.UUID(), PriceID: priceID}); err != nil {
+		if err := q.DeletePricePSPBindings(ctx, gen.DeletePricePSPBindingsParams{MerchantID: mid.UUID(), CatalogID: catalogID, PriceID: priceID}); err != nil {
 			return err
 		}
 		seen := map[uuid.UUID]bool{}
@@ -67,7 +66,7 @@ func (s *PriceService) UpdatePSPLinks(ctx context.Context, priceID uuid.UUID, li
 				}
 				return &value
 			}
-			params := gen.InsertPricePSPBindingParams{MerchantID: mid.UUID(), PriceID: priceID, PspID: account.ID,
+			params := gen.InsertPricePSPBindingParams{MerchantID: mid.UUID(), CatalogID: catalogID, PriceID: priceID, PspID: account.ID,
 				PlanID: pop(models.RailKeyPlanID), PriceRef: pop(models.RailKeyStripePriceID),
 				RecurringBillingOptionID: pop(models.RailKeyCCBillRecurringBillingOption), PlanPda: pop("plan_pda"), FlexID: pop(models.RailKeyCCBillFlexID)}
 			delete(cfg, models.RailKeyPSPID)
