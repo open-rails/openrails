@@ -302,7 +302,7 @@ func (h *SubscriptionCollectionHandler) completeDeclined(ctx context.Context, in
 			if gate := destructive.New(d).Check(ctx, in.MerchantID); !gate.Allowed {
 				blocked = gate.Reason
 			}
-			return h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Rail: models.RailNMI, SubscriptionID: &p.Renewal.SubscriptionID, FailureCode: &code, FailureReason: &reason, Decline: verdict.Outcome, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked})
+			return h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Prepared: &p.Renewal, Rail: models.RailNMI, SubscriptionID: &p.Renewal.SubscriptionID, FailureCode: &code, FailureReason: &reason, Decline: verdict.Outcome, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked})
 		}
 		return nil
 	})

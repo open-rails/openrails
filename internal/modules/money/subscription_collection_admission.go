@@ -121,7 +121,7 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 		if accounts.OpenrailsPsp.Archived || accounts.OpenrailsCustodian.Archived {
 			return errors.New("archived accounts cannot admit a new engine renewal")
 		}
-		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, admittedAt)
+		terms, err := intents.PrepareEngineRenewalTerms(ctx, d, sub, admittedAt)
 		if err != nil {
 			return err
 		}

@@ -28,13 +28,14 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/testfixture"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
 
 // Internal engine fixtures exercise the production fleet/handler/renewal writer
 // on the same loopback HyperSwitch and NMI receipt boundaries as invoice tests.
-// Public initial enrollment and runtime registration are deliberately absent.
+// The prior agreement is accepted through the real initial workflow; this matrix uses loopback provider observations.
 func TestEngineRecurringCollectionExecution(t *testing.T) {
 	for _, mode := range []string{"on_time", "missed_periods", "lost_reply", "late_receipt", "declined", "preflight_not_dispatched", "cancel_after_submit", "chargeback_after_submit", "cancel_uncertain", "archived_before_send", "archived_account_recovery", "atomic_completion", "fence_without_dispatch", "native_control"} {
 		t.Run(mode, func(t *testing.T) {
@@ -56,19 +57,19 @@ func TestEngineRecurringCollectionExecution(t *testing.T) {
 			_, err = e.merchants.Secrets().Put(e.ctx, dbtest.TestMerchantID, secret, "engine-key")
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = e.merchants.Secrets().Delete(context.WithoutCancel(e.ctx), dbtest.TestMerchantID, secret) })
-			_, err = e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET custodian='hyperswitch',custodian_id=$2,rail_customer_ref='engine_customer',rail_method_ref='engine_method',stored_credential_recurring_ref='original_recurring',stored_credential_unscheduled_ref='' WHERE id=$1`, e.method, custodian)
+			_, err = e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET charge_via='pan_proxy',custodian='hyperswitch',custodian_id=$2,rail_customer_ref='engine_customer',rail_method_ref='engine_method',stored_credential_recurring_ref='original_recurring',stored_credential_unscheduled_ref='' WHERE id=$1`, e.method, custodian)
 			require.NoError(t, err)
 			method := e.methodRow(t)
 			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name,entitlements_spec) VALUES($1,$2,$3,'Engine recurring','{"engine":null}')`, product, mid, product.String())
 			require.NoError(t, err)
 			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency,auto_renew,access_duration_hours) VALUES($1,$2,$3,9990000,'USD',true,720)`, price, mid, product)
 			require.NoError(t, err)
-			policy, remote := "engine", ""
 			if mode == "native_control" {
-				policy, remote = "provider", "native-existing"
+				_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,payment_method_id,rail,collection_policy,rail_subscription_id,status,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7,'nmi','provider','native-existing','active',$8,$9,'{"engine":null}')`, sub, mid, e.payer.UUID(), product, price, method.PspID, e.method, prior.Add(-30*24*time.Hour), prior)
+				require.NoError(t, err)
+			} else {
+				testfixture.EngineMembership(t, e.ctx, e.db, subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: sub, PaymentID: uuid.New(), CustomerID: e.payer.UUID(), PSPID: method.PspID, ProductID: product, PriceID: price, PaymentMethodID: e.method, ProductName: "Engine recurring", Amount: 9990000, RecurringAmount: 9990000, Currency: "USD", AcceptedAt: prior.Add(-30 * 24 * time.Hour), PeriodStart: prior.Add(-30 * 24 * time.Hour), PeriodEnd: prior, Entitlements: map[string]*int{"engine": nil}})
 			}
-			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,payment_method_id,rail,collection_policy,rail_subscription_id,status,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7,'nmi',$8,$9,'active',$10,$11,'{"engine":null}')`, sub, mid, e.payer.UUID(), product, price, method.PspID, e.method, policy, remote, prior.Add(-30*24*time.Hour), prior)
-			require.NoError(t, err)
 			t.Cleanup(func() {
 				c := context.WithoutCancel(e.ctx)
 				_, _ = e.pool.Exec(c, `UPDATE billing.subscriptions SET deleted_at=now() WHERE id=$1`, sub)
@@ -78,6 +79,12 @@ func TestEngineRecurringCollectionExecution(t *testing.T) {
 				_, _ = e.pool.Exec(c, `DELETE FROM billing.prices WHERE id=$1`, price)
 				_, _ = e.pool.Exec(c, `DELETE FROM billing.products WHERE id=$1`, product)
 			})
+			if mode != "native_control" {
+				_, err = e.pool.Exec(e.ctx, `UPDATE billing.prices SET amount=1000000,access_duration_hours=24 WHERE id=$1`, price)
+				require.NoError(t, err)
+				_, err = e.pool.Exec(e.ctx, `UPDATE billing.products SET display_name='Changed live product',entitlements_spec='{"unaccepted":null}' WHERE id=$1`, product)
+				require.NoError(t, err)
+			}
 			lc := subscriptions.NewSubscriptionLifecycleService(e.db, nil, nil, nil, nil, nil, clock)
 			var mu sync.Mutex
 			var forms []map[string]string
@@ -269,6 +276,10 @@ func TestEngineRecurringCollectionExecution(t *testing.T) {
 				requireEngineArchiveValues(t, e, current.ID)
 				var next *time.Time
 				require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT next_retry_at FROM billing.subscriptions WHERE id=$1`, sub).Scan(&next))
+				if mode == "declined" {
+					require.NotNil(t, next)
+					require.True(t, next.Equal(now.Add(48*time.Hour)), "retry cadence follows the accepted720-hour agreement, not the mutated24-hour catalog")
+				}
 				if next != nil {
 					clock.Advance(next.Sub(clock.Now()) + time.Second)
 				} else {
@@ -326,7 +337,7 @@ func TestEngineRecurringCollectionExecution(t *testing.T) {
 					require.JSONEq(t, string(current.ResultEvidence), string(get().ResultEvidence))
 				}
 				if mode == "atomic_completion" {
-					require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1`, sub).Scan(&count))
+					require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND attempt_kind='renewal'`, sub).Scan(&count))
 					require.Zero(t, count)
 					_, err = dbtest.SharedSuperuserPGXPool(t).Exec(e.ctx, "DROP FUNCTION billing."+trigger+"() CASCADE")
 					require.NoError(t, err)
@@ -368,20 +379,20 @@ func TestEngineRecurringCollectionExecution(t *testing.T) {
 			require.Equal(t, intents.OutcomeSucceeded, handler.Execute(e.ctx, current).Class, "terminal replay uses retained receipt without another provider call")
 			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.grants WHERE customer_id=$1`, e.payer.UUID()).Scan(&grantsAfter))
 			require.Equal(t, grantsBefore, grantsAfter)
-			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND status='completed'`, sub).Scan(&count))
+			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND attempt_kind='renewal' AND status='completed'`, sub).Scan(&count))
 			require.Equal(t, 1, count)
-			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.host_outbox WHERE payment_id IN (SELECT id FROM billing.payments WHERE subscription_id=$1 AND status='completed')`, sub).Scan(&count))
+			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.host_outbox WHERE payment_id IN (SELECT id FROM billing.payments WHERE subscription_id=$1 AND attempt_kind='renewal' AND status='completed')`, sub).Scan(&count))
 			require.Equal(t, 1, count)
 			var state, token string
 			var start, end time.Time
 			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT status,current_period_starts_at,current_period_ends_at FROM billing.subscriptions WHERE id=$1`, sub).Scan(&state, &start, &end))
-			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT token_type FROM billing.payments WHERE subscription_id=$1 AND status='completed'`, sub).Scan(&token))
+			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT token_type FROM billing.payments WHERE subscription_id=$1 AND attempt_kind='renewal' AND status='completed'`, sub).Scan(&token))
 			require.Equal(t, "pan_via_proxy", token)
 			terminal := strings.HasPrefix(mode, "cancel_") || mode == "chargeback_after_submit"
 			if terminal {
 				require.Equal(t, "cancelled", state)
 				var review string
-				require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT metadata->>'refund_review' FROM billing.payments WHERE subscription_id=$1 AND status='completed'`, sub).Scan(&review))
+				require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT metadata->>'refund_review' FROM billing.payments WHERE subscription_id=$1 AND attempt_kind='renewal' AND status='completed'`, sub).Scan(&review))
 				require.NotEmpty(t, review)
 			} else {
 				require.Equal(t, "active", state)
@@ -401,6 +412,17 @@ func TestEngineRecurringCollectionExecution(t *testing.T) {
 			e.gateway.mu.Lock()
 			require.Zero(t, e.gateway.sends, "no native vault sale or recurring schedule request")
 			e.gateway.mu.Unlock()
+			if mode == "on_time" {
+				clock.Advance(terms.Renewal.PeriodEnd.Sub(clock.Now()))
+				next, err := e.svc.AdmitDueSubscriptionCollection(e.ctx, sub, clock.Now())
+				require.NoError(t, err)
+				nextTerms, err := subscriptions.DecodeSubscriptionCollectionPayload(next)
+				require.NoError(t, err)
+				require.Equal(t, int64(9990000), nextTerms.Renewal.Amount)
+				require.Equal(t, 720*time.Hour, nextTerms.Renewal.PeriodEnd.Sub(nextTerms.Renewal.PeriodStart))
+				require.Equal(t, map[string]*int{"engine": nil}, nextTerms.Renewal.Entitlements)
+				require.True(t, nextTerms.PreviousPeriodEnd.Equal(terms.Renewal.PeriodEnd), "next agreement comes from the completed engine obligation")
+			}
 		})
 	}
 }

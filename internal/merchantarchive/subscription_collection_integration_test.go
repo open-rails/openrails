@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/testfixture"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
@@ -60,8 +61,8 @@ func TestEngineRecurringArchiveHistory(t *testing.T) {
 			exec(`INSERT INTO openrails.prices(merchant_id,id,product_id,amount,currency,auto_renew,access_duration_hours) VALUES($1,$2,$3,9990000,'USD',true,720)`, mid.UUID(), price, product)
 			exec(`INSERT INTO openrails.psps(merchant_id,id,key,rail,account_id,environment,evidence) VALUES($1,$2,'engine','nmi',$2::uuid::text,'test','{"settings":{}}')`, mid.UUID(), psp)
 			exec(`INSERT INTO openrails.custodians(merchant_id,id,key,kind,account_id,environment,settings) VALUES($1,$2,'engine','hyperswitch',$2::uuid::text,'test','{"profile_id":"engine","public_api_key":"synthetic"}')`, mid.UUID(), custodian)
-			exec(`INSERT INTO openrails.payment_methods(merchant_id,id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,stored_credential_recurring_ref,initial_transaction_id) VALUES($1,$2,$3,$4,'nmi','hyperswitch',$5,'customer','method','recurring-anchor','initial-fixture')`, mid.UUID(), method, customer, psp, custodian)
-			exec(`INSERT INTO openrails.subscriptions(merchant_id,id,customer_id,psp_id,product_id,price_id,payment_method_id,rail,rail_subscription_id,collection_policy,status,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7,'nmi','','engine','active',$8,$9,'{"engine":null}')`, mid.UUID(), sub, customer, psp, product, price, method, now.Add(-30*24*time.Hour), now)
+			exec(`INSERT INTO openrails.payment_methods(merchant_id,id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,stored_credential_recurring_ref,initial_transaction_id,charge_via) VALUES($1,$2,$3,$4,'nmi','hyperswitch',$5,'customer','method','recurring-anchor','initial-fixture','pan_proxy')`, mid.UUID(), method, customer, psp, custodian)
+			testfixture.EngineMembership(t, ctx, source, subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: sub, PaymentID: uuid.New(), CustomerID: customer, PSPID: psp, ProductID: product, PriceID: price, PaymentMethodID: method, ProductName: "Engine", Amount: 9990000, RecurringAmount: 9990000, Currency: "USD", AcceptedAt: now.Add(-30 * 24 * time.Hour), PeriodStart: now.Add(-30 * 24 * time.Hour), PeriodEnd: now, Entitlements: map[string]*int{"engine": nil}})
 			svc := money.NewMoneyService(source, clock)
 			require.NoError(t, svc.SetHyperSwitchDeployment("http://127.0.0.1:1"))
 			op, err := svc.AdmitDueSubscriptionCollection(ctx, sub, now)
@@ -124,9 +125,9 @@ func TestEngineRecurringArchiveHistory(t *testing.T) {
 			for _, corruption := range []string{"missing_payment", "wrong_amount"} {
 				t.Run(corruption, func(t *testing.T) {
 					if corruption == "missing_payment" {
-						exec(`UPDATE openrails.payments SET transaction_id='wrong' WHERE subscription_id=$1`, sub)
+						exec(`UPDATE openrails.payments SET transaction_id='wrong' WHERE subscription_id=$1 AND attempt_kind='renewal'`, sub)
 					} else {
-						exec(`UPDATE openrails.payments SET amount=amount+10000 WHERE subscription_id=$1`, sub)
+						exec(`UPDATE openrails.payments SET amount=amount+10000 WHERE subscription_id=$1 AND attempt_kind='renewal'`, sub)
 					}
 					var rejected bytes.Buffer
 					require.ErrorContains(t, Export(ctx, source, mid, &rejected), "rail_intents")
@@ -137,9 +138,9 @@ func TestEngineRecurringArchiveHistory(t *testing.T) {
 					require.Error(t, err)
 					assertEmptyBook(t, target, mid)
 					if corruption == "missing_payment" {
-						exec(`UPDATE openrails.payments SET transaction_id=$2 WHERE subscription_id=$1`, sub, original)
+						exec(`UPDATE openrails.payments SET transaction_id=$2 WHERE subscription_id=$1 AND attempt_kind='renewal'`, sub, original)
 					} else {
-						exec(`UPDATE openrails.payments SET amount=amount-10000 WHERE subscription_id=$1`, sub)
+						exec(`UPDATE openrails.payments SET amount=amount-10000 WHERE subscription_id=$1 AND attempt_kind='renewal'`, sub)
 					}
 				})
 			}

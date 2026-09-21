@@ -2209,7 +2209,23 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			// billing cycle (monthly: 5 failures total, progressive retries at
 			// +2d/+5d/+9d/+13d; weekly-ish: retries at +1d/+2d; daily-ish: the
 			// first failure is terminal). See collection.RetryOffsets.
-			cycleHours := collection.BillingCycleHoursOf(subscription.Price)
+			cycleHours := 0
+			if subscription.CollectionPolicy == models.CollectionPolicyEngine {
+				accepted := params.Prepared
+				if accepted == nil {
+					return errors.New("engine failure requires its accepted renewal agreement")
+				}
+				if err := accepted.Validate(); err != nil {
+					return err
+				}
+				cycle := accepted.PeriodEnd.Sub(accepted.PeriodStart)
+				if accepted.SubscriptionID != subscription.ID || accepted.CustomerID != subscription.CustomerID || accepted.PSPID != subscription.PspID || accepted.FromPriceID != subscription.PriceID || accepted.FromProductID != subscription.ProductID || cycle%time.Hour != 0 || !accepted.PeriodStart.Add(cycle).Equal(accepted.PeriodEnd) {
+					return errors.New("engine failure cadence contradicts its accepted agreement")
+				}
+				cycleHours = int(cycle / time.Hour)
+			} else {
+				cycleHours = collection.BillingCycleHoursOf(subscription.Price)
+			}
 			if cycleHours <= 0 {
 				if price, perr := priceService.GetByID(ctx, subscription.PriceID); perr == nil {
 					cycleHours = collection.BillingCycleHoursOf(price)
