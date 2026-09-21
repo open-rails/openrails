@@ -107,6 +107,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	h := New(t, ctx)
 	var delegated billingauth.DelegatedAuthenticator
 	surface := h.StartStandalone("USD", WithConfig(func(c *config.Config) {
+		c.NewSubscriptionCollectionPolicy = "engine"
 		c.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: vendor.APIBaseURL, SDKURL: vendor.SDKURL}
 		c.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 		{

@@ -64,16 +64,16 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		_, err = d.Gen(ctx).GetLifecycleSubscriptionByCustomerAndProduct(ctx, gen.GetLifecycleSubscriptionByCustomerAndProductParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID})
+		_, err = d.Gen(ctx).GetConflictingInitialEnrollmentSubscription(ctx, gen.GetConflictingInitialEnrollmentSubscriptionParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID})
 		if err == nil {
-			return apperr.Conflictf("customer already has a subscription for this product")
+			return apperr.Conflictf("customer already has a subscription for this product or tier group")
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		_, err = d.Gen(ctx).GetUnresolvedInitialEnrollmentForCustomerProduct(ctx, gen.GetUnresolvedInitialEnrollmentForCustomerProductParams{MerchantID: p.MerchantID, CustomerID: customer.String(), ProductID: terms.Terms.ProductID.String()})
+		_, err = d.Gen(ctx).GetConflictingInitialEnrollmentOperation(ctx, gen.GetConflictingInitialEnrollmentOperationParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID})
 		if err == nil {
-			return apperr.Conflictf("another enrollment of this product is unresolved")
+			return apperr.Conflictf("another enrollment of this product or tier group is unresolved")
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err

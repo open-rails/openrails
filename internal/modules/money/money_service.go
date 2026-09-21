@@ -76,6 +76,8 @@ func derefInt(v *int64) int64 {
 var ErrInsufficientCredits = openrails.ErrInsufficientCredits
 
 type MoneyService struct {
+	// EngineAdmissionHold is fixed during runtime wiring; accepted work still reconciles.
+	EngineAdmissionHold   bool
 	hyperSwitchDeployment string
 	db                    *db.DB
 	clock                 clockwork.Clock

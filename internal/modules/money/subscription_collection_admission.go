@@ -60,6 +60,9 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if s.EngineAdmissionHold {
+			return errors.New("new engine payment admission is held")
+		}
 		if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.After(admittedAt) || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) || (sub.Status == models.StatusPastDue && (sub.NextRetryAt == nil || sub.NextRetryAt.After(admittedAt))) {
 			return errors.New("engine subscription is not due")
 		}

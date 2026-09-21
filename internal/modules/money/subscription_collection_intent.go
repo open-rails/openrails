@@ -67,6 +67,9 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 	if h.Config == nil {
 		return intents.Parked("engine execution mode is not configured")
 	}
+	if h.Config.EngineAdmissionHold {
+		return intents.Parked("new engine payment submission is held")
+	}
 	if blocked, reason := intents.GateExecution(h.Config, intents.Origin(in.Origin)); blocked {
 		return intents.Parked(reason)
 	}

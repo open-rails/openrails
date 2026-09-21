@@ -985,7 +985,7 @@ func (s *CheckoutSessionService) ConfirmCustomerSession(ctx context.Context, ses
 	if err := validateInitialMembershipPrincipal(ctx, session, principal); err != nil {
 		return nil, err
 	}
-	if req == nil || req.Payment.Rail != "nmi" || req.Payment.Capture != nil || req.Payment.Signature != "" || req.Payment.Wallet != "" {
+	if req == nil || req.Payment.Rail != string(session.Rail) || req.Payment.Capture != nil || req.Payment.Signature != "" || req.Payment.Wallet != "" {
 		return nil, ErrCheckoutSessionValidation
 	}
 	terms, err := readInitialMembershipQuote(session)

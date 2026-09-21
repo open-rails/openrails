@@ -673,6 +673,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	entitlementService := entitlements.NewEntitlementService(database, clock)
 	productAccessService := productaccess.NewService(database, clock)
 	moneyService := money.NewMoneyService(database, clock)
+	moneyService.EngineAdmissionHold = cfg.EngineAdmissionHold
 	if cfg.HyperSwitch != nil {
 		if err := moneyService.SetHyperSwitchDeployment(cfg.HyperSwitch.APIBaseURL); err != nil {
 			return nil, err

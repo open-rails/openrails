@@ -179,6 +179,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 	h := New(t, ctx)
 	g := newCaptureFixture(t)
 	configure := func(cfg *config.Config) {
+		cfg.NewSubscriptionCollectionPolicy = "engine"
 		cfg.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: g.server.URL, SDKURL: g.server.URL + "/sdk.js"}
 		cfg.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 	}

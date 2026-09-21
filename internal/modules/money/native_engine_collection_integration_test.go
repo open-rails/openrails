@@ -40,8 +40,13 @@ func TestNativeEngineRecurringCollectionOwnsOnlyNewAgreement(t *testing.T) {
 			}
 			_, err = e.svc.AdmitDueSubscriptionCollection(e.ctx, legacy, now)
 			require.ErrorContains(t, err, "engine-owned")
+			e.svc.EngineAdmissionHold = true
+			_, err = e.svc.AdmitDueSubscriptionCollection(e.ctx, sub, now)
+			require.ErrorContains(t, err, "admission is held")
+			e.svc.EngineAdmissionHold = false
 			op, err := e.svc.AdmitDueSubscriptionCollection(e.ctx, sub, now)
 			require.NoError(t, err)
+			e.svc.EngineAdmissionHold = true
 			same, err := e.svc.AdmitDueSubscriptionCollection(e.ctx, sub, now)
 			require.NoError(t, err)
 			require.Equal(t, op.ID, same.ID)
@@ -60,9 +65,14 @@ func TestNativeEngineRecurringCollectionOwnsOnlyNewAgreement(t *testing.T) {
 				e.gateway.orderSale(p.OrderReference, txn)
 				e.gateway.payment(txn, method.RailCustomerRef, "9.99", "USD")
 			}
+			e.plane.Config.EngineAdmissionHold = true
 			outcome := handler.Execute(e.ctx, op)
+			require.Equal(t, intents.OutcomeParked, outcome.Class)
+			e.plane.Config.EngineAdmissionHold = false
+			outcome = handler.Execute(e.ctx, op)
 			if mode != "paid" {
 				require.Equal(t, intents.OutcomeAmbiguous, outcome.Class, outcome.Reason)
+				e.plane.Config.EngineAdmissionHold = true
 				outcome = handler.Verify(e.ctx, op)
 				require.Equal(t, intents.OutcomeAmbiguous, outcome.Class)
 				if mode == "cancel_unknown" {
