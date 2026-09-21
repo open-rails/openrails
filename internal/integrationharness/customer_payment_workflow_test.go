@@ -332,6 +332,31 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			require.NotNil(t, declinedSubscription.RetryAttempts)
 			require.Greater(t, *declinedSubscription.RetryAttempts, *due.RetryAttempts)
 			require.NotNil(t, declinedSubscription.NextRetryAt)
+			replacementPSP := dbtest.EnsureTestPSP(ctx, t, h.sharedPool(), owned.MerchantID.UUID(), "replacement-nmi-"+uuid.NewString())
+			for _, replacement := range []struct {
+				account   uuid.UUID
+				reference string
+			}{
+				{psp, railSub + "-replacement"}, {replacementPSP, railSub},
+			} {
+				tx, err := h.sharedPool().Begin(ctx)
+				require.NoError(t, err)
+				_, err = tx.Exec(ctx, `UPDATE openrails.payment_methods SET psp_id=$2 WHERE id=$1`, f.Method, replacement.account)
+				require.NoError(t, err)
+				_, err = tx.Exec(ctx, `UPDATE openrails.subscriptions SET psp_id=$2,rail_subscription_id=$3 WHERE id=$1`, subscription, replacement.account, replacement.reference)
+				require.NoError(t, err)
+				require.NoError(t, tx.Commit(ctx))
+				rebound, err := client.GetMySubscription(ctx, retry.SubscriptionID)
+				require.NoError(t, err, "a valid prior account/refusal cannot break current readback")
+				require.Empty(t, rebound.Recovery.LastFailureReason)
+			}
+			tx, err := h.sharedPool().Begin(ctx)
+			require.NoError(t, err)
+			_, err = tx.Exec(ctx, `UPDATE openrails.payment_methods SET psp_id=$2 WHERE id=$1`, f.Method, psp)
+			require.NoError(t, err)
+			_, err = tx.Exec(ctx, `UPDATE openrails.subscriptions SET psp_id=$2,rail_subscription_id=$3 WHERE id=$1`, subscription, psp, railSub)
+			require.NoError(t, err)
+			require.NoError(t, tx.Commit(ctx))
 
 			gateway.SetMode(NMISaleApprove)
 			retry.IdempotencyKey = uuid.NewString()

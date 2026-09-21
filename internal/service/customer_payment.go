@@ -163,13 +163,17 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 			if err != nil {
 				return nil, err
 			}
-			if accepted.Renewal.CustomerID != sub.CustomerID || accepted.Renewal.PSPID != sub.PspID || accepted.Rail != string(sub.Rail) || accepted.RailSubscriptionID != sub.RailSubscriptionID || !accepted.Renewal.PeriodStart.Equal(*sub.CurrentPeriodEndsAt) {
+			if accepted.Renewal.CustomerID != sub.CustomerID || !accepted.Renewal.PeriodStart.Equal(*sub.CurrentPeriodEndsAt) {
 				return nil, errors.New("latest rebill refusal does not match this subscription period")
 			}
 			var refusal *CustomerPaymentRefusal
 			err = customerPaymentRefusal(latest)
 			if errors.As(err, &refusal) {
-				out.LastFailureReason = payments.NormalizeFailureReason(accepted.Rail, refusal.Code)
+				// A valid historical account/refusal remains valid custody after a cutover,
+				// but it is not a failure of the replacement provider binding.
+				if accepted.Renewal.PSPID == sub.PspID && accepted.Rail == string(sub.Rail) && accepted.RailSubscriptionID == sub.RailSubscriptionID {
+					out.LastFailureReason = payments.NormalizeFailureReason(accepted.Rail, refusal.Code)
+				}
 			} else if err != nil && !errors.Is(err, intents.ErrRebillNotRetryable) {
 				return nil, err
 			}
