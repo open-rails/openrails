@@ -120,7 +120,13 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 			if delegated == nil {
 				return nil, billingauth.ErrUnauthenticated
 			}
-			return delegated.AuthenticateDelegated(ctx, r)
+			principal, err := delegated.AuthenticateDelegated(ctx, r)
+			// A trusted host may omit interaction classification for nonfinancial
+			// capture. Downgrade only; the real engine CIT retains AuthKit's class.
+			if err == nil && principal != nil && r.Header.Get("X-Qualification-Unknown-Class") == "true" {
+				principal.CredentialClass = billingauth.CredentialClassUnknown
+			}
+			return principal, err
 		})
 	})
 	owned := surface.ProvisionOwnedMerchant("actual-capture-" + uuid.NewString()[:8])
@@ -165,6 +171,23 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	require.NoError(t, err)
 	sdkOrigin := sdkURL.Scheme + "://" + sdkURL.Host
 	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/membership-recover" {
+			var input struct {
+				OperationID uuid.UUID `json:"operation_id"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
+			var financial int
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1)`, owned.MerchantID.UUID()).Scan(&financial))
+			require.Zero(t, financial, "unknown payment grants no membership before exact receipt")
+			require.NoError(t, rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {
+				operation, err := rt.IntentRunner().VerifyByID(c, input.OperationID)
+				require.NoError(t, err)
+				require.Equal(t, intents.StatusSucceeded, operation.Status)
+				return err
+			}))
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.Method == http.MethodPost && r.URL.Path == "/membership-expired" {
 			var input struct {
 				SessionID openrails.CheckoutSessionID `json:"session_id"`
@@ -191,6 +214,10 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 			require.NoError(t, err)
 			_, err = h.sharedPool().Exec(ctx, `UPDATE billing.products SET entitlements_spec='{"changed_after_quote":null}' WHERE merchant_id=$1 AND id=(SELECT product_id FROM billing.prices WHERE merchant_id=$1 AND id=$2)`, owned.MerchantID.UUID(), input.PriceID.UUID())
 			require.NoError(t, err)
+			control, err := http.Post(vendor.NMIReadBase+"/control", "application/json", bytes.NewBufferString(`{"Next":"lost"}`))
+			require.NoError(t, err)
+			require.Equal(t, http.StatusNoContent, control.StatusCode)
+			_ = control.Body.Close()
 			require.NoError(t, json.NewEncoder(w).Encode(map[string]int{"financial": financial, "provider_calls": len(observations())}))
 			return
 		}
@@ -576,7 +603,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 		price, err := owner.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 		require.NoError(t, err)
 		beforeMembership := len(observations())
-		params, _ := json.Marshal(map[string]string{"phase": "membership", "page": page.URL, "checkpoint": page.URL + "/membership-quoted", "expire": page.URL + "/membership-expired", "before_provider_calls": strconv.Itoa(beforeMembership), "api": surface.BaseURL, "token": token, "psp_id": psp.String(), "price_id": price.ID.String(), "method": savedMethod.String()})
+		params, _ := json.Marshal(map[string]string{"phase": "membership", "page": page.URL, "checkpoint": page.URL + "/membership-quoted", "expire": page.URL + "/membership-expired", "recover": page.URL + "/membership-recover", "before_provider_calls": strconv.Itoa(beforeMembership), "api": surface.BaseURL, "token": token, "psp_id": psp.String(), "price_id": price.ID.String(), "method": savedMethod.String()})
 		command := exec.CommandContext(ctx, "node", script)
 		command.Env = append(os.Environ(), "OPENRAILS_BROWSER_FIXTURE="+string(params))
 		output, err := command.CombinedOutput()

@@ -25,13 +25,12 @@ func TestCustomerPaymentRequiresVerifiedInteractionClass(t *testing.T) {
 			request.Set(middleware.PrincipalContextKey, &middleware.Principal{CredentialType: middleware.CredentialHostDelegatedUser, CredentialClass: class, Invoker: invoker, MerchantID: mid, Subject: payer})
 			_, ok := customerActionPayer(request)
 			require.Equal(t, class == billingauth.CredentialClassUserSession && invoker == "", ok)
-			checkoutPrincipal, checkoutOK := checkoutCustomerActionPrincipal(request)
-			require.Equal(t, ok, checkoutOK)
-			if checkoutOK {
-				require.Equal(t, payer, checkoutPrincipal.SubjectID)
-				require.Equal(t, mid.String(), checkoutPrincipal.MerchantID)
-				require.Equal(t, billingauth.CredentialClassUserSession, checkoutPrincipal.CredentialClass)
-			}
+			checkoutPrincipal := checkoutVerifiedPrincipal(request)
+			require.Equal(t, class, checkoutPrincipal.CredentialClass)
+			require.Equal(t, invoker, checkoutPrincipal.Invoker)
+			require.Equal(t, payer, checkoutPrincipal.SubjectID)
+			require.Equal(t, mid.String(), checkoutPrincipal.MerchantID)
+
 			if !ok {
 				require.Equal(t, 403, response.Code)
 				require.Contains(t, response.Body.String(), "customer_action_required")

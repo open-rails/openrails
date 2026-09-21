@@ -366,6 +366,9 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 				if err != nil {
 					return nil, err
 				}
+				if cached.MembershipQuote != nil {
+					return s.GetSession(ctx, cached.ID.UUID(), user)
+				}
 				return cached, nil
 			case IdempotencyStatusPending:
 				if s.now().Sub(rec.CreatedAt) < s.lease() {
@@ -743,6 +746,9 @@ func (s *CheckoutSessionService) resumeIdempotentSession(
 		return nil, fmt.Errorf("%w: idempotency key reused with different checkout session parameters", ErrCheckoutSessionConflict)
 	}
 
+	if response, found, err := s.initialMembershipSessionResponse(ctx, existing); found || err != nil {
+		return response, err
+	}
 	switch existing.Status {
 	case models.CheckoutSessionStatusRequiresAction, models.CheckoutSessionStatusSucceeded:
 		return s.sessionToResponse(existing), nil
@@ -781,6 +787,9 @@ func (s *CheckoutSessionService) GetSession(ctx context.Context, sessionID uuid.
 		return nil, ErrCheckoutSessionForbidden
 	}
 
+	if response, found, err := s.initialMembershipSessionResponse(ctx, session); found || err != nil {
+		return response, err
+	}
 	if session.Mode == models.CheckoutSessionModePaymentMethod {
 		return s.renderPaymentMethodSetup(ctx, session)
 	}
@@ -898,6 +907,53 @@ func acceptedInitialMembershipQuote(ctx context.Context, session *models.Checkou
 	return terms, terms.Validate()
 }
 
+// initialMembershipSessionResponse is a read-only projection of the accepted
+// operation. Session expiry is an offer deadline, never a payment outcome.
+func (s *CheckoutSessionService) initialMembershipSessionResponse(ctx context.Context, session *models.CheckoutSession) (*CheckoutSessionResponse, bool, error) {
+	if _, quoted := session.RailState[initialMembershipQuoteKey]; !quoted {
+		return nil, false, nil
+	}
+	terms, err := readInitialMembershipQuote(session)
+	if err != nil {
+		return nil, false, err
+	}
+	operation, err := intents.NewStore(s.db).GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey("checkout_session:"+session.ID.String()))
+	if db.IsNotFound(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if err := ownsInitialMembership(operation, session.CustomerID.String(), terms.PriceID, initialMembershipQuoteFingerprint(terms)); err != nil {
+		return nil, true, err
+	}
+	projection := *session
+	projection.PaymentID, projection.SubscriptionID, projection.TransactionID = nil, nil, nil
+	projection.ExpiresAt = nil
+	switch operation.Status {
+	case intents.StatusSucceeded:
+		result, err := initialMembershipResponseFromIntent(operation)
+		if err != nil {
+			return nil, true, err
+		}
+		if err := s.applyCheckoutResponse(&projection, result); err != nil {
+			return nil, true, err
+		}
+	case intents.StatusFailedTerminal:
+		if err := intents.ValidateInitialMembershipTerminal(operation); err != nil {
+			return nil, true, err
+		}
+		projection.Status = models.CheckoutSessionStatusFailed
+	default:
+		// This response-only state is not a second persisted operation status.
+		projection.Status = models.CheckoutSessionStatus("processing")
+	}
+	response := s.sessionToResponse(&projection)
+	response.Operation = &openrails.PaymentOperation{ID: operation.ID, Status: operation.Status}
+	response.NextAction = nil
+	return response, true, nil
+}
+
 // ConfirmCustomerSession is the self-service boundary. The operation ledger,
 // rather than the session projection or quote expiry, owns accepted replay.
 func (s *CheckoutSessionService) ConfirmCustomerSession(ctx context.Context, sessionID uuid.UUID, req *CheckoutSessionConfirmRequest, user *UserIdentity, principal billingauth.DelegatedPrincipal) (*CheckoutSessionResponse, error) {
@@ -939,21 +995,18 @@ func (s *CheckoutSessionService) ConfirmCustomerSession(ctx context.Context, ses
 	if !ok {
 		return nil, errors.New("initial membership service unavailable")
 	}
-	result, err := confirmer.ConfirmInitialMembership(ctx, terms, key, principal)
-	if err != nil {
+	_, err = confirmer.ConfirmInitialMembership(ctx, terms, key, principal)
+	if err != nil && !errors.Is(err, ErrCheckoutProcessing) {
 		return nil, err
 	}
-	if result == nil || result.Status != "success" {
-		return nil, ErrCheckoutProcessing
+	response, found, readErr := s.initialMembershipSessionResponse(ctx, session)
+	if readErr != nil {
+		return nil, readErr
 	}
-	if err := s.applyCheckoutResponse(session, result); err != nil {
-		return nil, err
+	if !found {
+		return nil, errors.New("accepted membership operation unavailable")
 	}
-	session.UpdatedAt = s.now()
-	if err := s.repo.Update(ctx, session); err != nil {
-		return nil, err
-	}
-	return s.sessionToResponse(session), nil
+	return response, nil
 }
 
 func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID uuid.UUID, req *CheckoutSessionConfirmRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {

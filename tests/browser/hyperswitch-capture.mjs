@@ -22,14 +22,18 @@ try {
         const response=await fetch(config.api+path,{method,headers:{Authorization:`Bearer ${config.token}`,'Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{})},body:body===undefined?undefined:JSON.stringify(body)});
         const value=await response.json();
         if(!response.ok)throw Error(`Membership ${response.status}: ${JSON.stringify(value)}`);
-        return value;
+        return {...value,http_status:response.status};
       };
+      window.membershipRequest=request;
       const key=crypto.randomUUID();
       const input={mode:'subscription',price_id:config.price_id,payment:{rail:'nmi',psp_id:config.psp_id,payment_method_id:config.method}};
-      const quote=await request('POST','/v1/me/checkout',input,key);
+      window.membershipCreate=()=>request('POST','/v1/me/checkout',input,key);
+      const quote=await window.membershipCreate();
       const repeated=await request('POST','/v1/me/checkout',input,key);
       if(quote.id!==repeated.id||quote.status!=='requires_action'||quote.subscription_id||quote.payment_id||!quote.membership_quote)throw Error('Quote is not an unaccepted stable agreement');
       window.membershipQuote=quote;
+      const unclassified=await fetch(config.api+`/v1/me/checkout/${quote.id}/confirm`,{method:'POST',headers:{Authorization:`Bearer ${config.token}`,'Content-Type':'application/json','X-Qualification-Unknown-Class':'true'},body:JSON.stringify({payment:{rail:'nmi'}})});
+      if(unclassified.status!==403)throw Error('Unclassified host principal accepted recurring agreement');
       const terms=document.createElement('p');
       const micros=BigInt(quote.amount);
       const displayed=`${micros/1000000n}.${(micros%1000000n).toString().padStart(6,'0').replace(/0+$/,'').padEnd(2,'0')}`;
@@ -37,7 +41,7 @@ try {
       document.body.append(terms);
       const button=document.createElement('button');button.textContent='Subscribe';document.body.append(button);
       button.onclick=async()=>{
-        try { window.membershipResult=await request('POST',`/v1/me/checkout/${quote.id}/confirm`,{payment:{rail:'nmi'}});window.membershipClicks=(window.membershipClicks??0)+1; }
+        try { window.membershipResult=await request('POST',`/v1/me/checkout/${quote.id}/confirm`,{payment:{rail:'nmi'}});window.membershipClicks=(window.membershipClicks??0)+1;if(window.membershipResult.status==='processing'){button.disabled=true;button.textContent='Processing payment';} }
         catch(error){window.membershipFailure=error.message;}
       };
     },config);
@@ -55,18 +59,38 @@ try {
     await page.waitForFunction(()=>window.membershipResult||window.membershipFailure);
     const first=await page.evaluate(()=>({result:window.membershipResult,failure:window.membershipFailure}));
     assert.equal(first.failure,undefined);
-    assert.equal(first.result.status,'succeeded');
-    assert.match(first.result.subscription_id,/^sub_/);
-    assert.match(first.result.payment_id,/^pay_/);
+    assert.equal(first.result.status,'processing');
+    assert.equal(first.result.http_status,202);
+    assert.equal(first.result.operation.status,'unknown_needs_verify');
+    assert.equal(first.result.subscription_id,undefined);
+    assert.equal(first.result.payment_id,undefined);
+    assert.equal(await page.getByRole('button',{name:'Processing payment',exact:true}).isDisabled(),true);
     const expired=await fetch(config.expire,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:quote.id})});
     assert.equal(expired.status,204);
-    await page.getByRole('button',{name:'Subscribe',exact:true}).click();
-    await page.waitForFunction(()=>window.membershipClicks===2||window.membershipFailure);
-    const replay=await page.evaluate(()=>window.membershipResult);
-    assert.equal(replay.subscription_id,first.result.subscription_id);
-    assert.equal(replay.payment_id,first.result.payment_id);
+    const pending=await page.evaluate(async id=>window.membershipRequest('GET',`/v1/me/checkout/${id}`),quote.id);
+    assert.equal(pending.status,'processing');
+    assert.equal(pending.operation.id,first.result.operation.id);
+    assert.equal(pending.expires_at,undefined);
+    assert.equal(pending.next_action,undefined);
+    const createReplay=await page.evaluate(()=>window.membershipCreate());
+    assert.equal(createReplay.status,'processing');
+    assert.equal(createReplay.operation.id,first.result.operation.id);
+    const replay=await page.evaluate(async id=>window.membershipRequest('POST',`/v1/me/checkout/${id}/confirm`,{payment:{rail:'nmi'}}),quote.id);
+    assert.equal(replay.http_status,202);
+    assert.equal(replay.operation.id,first.result.operation.id);
+    const recovered=await fetch(config.recover,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({operation_id:first.result.operation.id})});
+    assert.equal(recovered.status,204);
+    const completed=await page.evaluate(async id=>window.membershipRequest('GET',`/v1/me/checkout/${id}`),quote.id);
+    assert.equal(completed.status,'succeeded');
+    assert.equal(completed.operation.id,first.result.operation.id);
+    assert.equal(completed.operation.status,'succeeded');
+    assert.match(completed.subscription_id,/^sub_/);
+    assert.match(completed.payment_id,/^pay_/);
+    const terminal=await page.evaluate(async id=>window.membershipRequest('POST',`/v1/me/checkout/${id}/confirm`,{payment:{rail:'nmi'}}),quote.id);
+    assert.equal(terminal.subscription_id,completed.subscription_id);
+    assert.equal(terminal.payment_id,completed.payment_id);
     assert.deepEqual(blocked,[]);
-    console.log(JSON.stringify({membership:first.result,quote,externalHTTPRequests:0}));
+    console.log(JSON.stringify({membership:completed,quote,processing:first.result.operation,externalHTTPRequests:0}));
     await context.close();
   } else {
   const context = await browser.newContext();
@@ -102,8 +126,8 @@ try {
   await page.goto(config.page);
   await page.evaluate(async config => {
     const key = crypto.randomUUID();
-    const request = async (method, path, body) => {
-      const response = await fetch(config.api + path, { method, headers: { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json', 'Idempotency-Key': key }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const request = async (method, path, body, unclassified = false) => {
+      const response = await fetch(config.api + path, { method, headers: { Authorization: `Bearer ${config.token}`, 'Content-Type': 'application/json', 'Idempotency-Key': key, ...(unclassified ? {'X-Qualification-Unknown-Class':'true'} : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
       if (response.headers.get('Cache-Control') !== 'no-store') throw Error('Capture response is cacheable');
       const result = await response.json();
       if (!response.ok) throw Error(`Core capture refused ${response.status}/${result.error?.code}`);
@@ -133,7 +157,7 @@ try {
           return;
         }
         const confirmed = await request('POST', `/v1/me/checkout/${setup.id}/confirm`, { payment });
-        const replay = await request('POST', `/v1/me/checkout/${setup.id}/confirm`, { payment });
+        const replay = await request('POST', `/v1/me/checkout/${setup.id}/confirm`, { payment }, true);
         const read = await request('GET', `/v1/me/checkout/${setup.id}`);
         window.captureProof = { vendorSession:action.session_id, vendorCustomer:action.customer_id, status: confirmed.status, method: confirmed.payment_method_id, replayMethod: replay.payment_method_id, secretCleared: !confirmed.capture && !replay.capture && !read.capture };
       } catch (error) { window.captureFailure = error.message; }

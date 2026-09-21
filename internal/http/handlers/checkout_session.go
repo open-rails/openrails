@@ -185,20 +185,14 @@ func GetCheckoutSession(r *httprequest.Request) {
 	r.SuccessJSON(resp)
 }
 
-// checkoutCustomerActionPrincipal carries only already verified payer facts to
-// the future recurring confirmation entry. It never reads caller claims from
-// headers/body or promotes a merchant/device credential to customer initiation.
-func checkoutCustomerActionPrincipal(r *httprequest.Request) (billingauth.DelegatedPrincipal, bool) {
-	payer, ok := customerActionPayer(r)
-	if !ok {
-		return billingauth.DelegatedPrincipal{}, false
-	}
+// checkoutVerifiedPrincipal copies middleware-verified facts without promoting
+// any credential class. The engine branch alone requires interactive initiation.
+func checkoutVerifiedPrincipal(r *httprequest.Request) billingauth.DelegatedPrincipal {
 	principal, ok := middleware.PrincipalFromRequest(r)
-	if !ok || principal.MerchantID.IsZero() || principal.Subject != payer.String() {
-		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "customer_action_required", "verified customer action required"))
-		return billingauth.DelegatedPrincipal{}, false
+	if !ok {
+		return billingauth.DelegatedPrincipal{}
 	}
-	return billingauth.DelegatedPrincipal{CredentialClass: principal.CredentialClass, MerchantID: principal.MerchantID.String(), SubjectID: payer.String(), Invoker: principal.Invoker}, true
+	return billingauth.DelegatedPrincipal{CredentialClass: principal.CredentialClass, MerchantID: principal.MerchantID.String(), SubjectID: principal.Subject, Invoker: principal.Invoker}
 }
 
 func ConfirmCheckoutSession(r *httprequest.Request) {
@@ -228,10 +222,7 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 	}
 	parsedID := typedParsedID.UUID()
 	svcReq := &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Capture: req.Payment.Capture, Rail: req.Payment.Rail, Signature: req.Payment.Signature, Wallet: req.Payment.Wallet}}
-	principal, ok := checkoutCustomerActionPrincipal(r)
-	if !ok {
-		return
-	}
+	principal := checkoutVerifiedPrincipal(r)
 	resp, err := r.State.CheckoutSessionService.ConfirmCustomerSession(r.Request.Context(), parsedID, svcReq, user, principal)
 	if err != nil {
 		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{
@@ -239,6 +230,10 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 			Wallet:            req.Payment.Wallet,
 			CheckoutSessionID: sessionID,
 		})
+		return
+	}
+	if resp.Status == "processing" {
+		r.JSON(http.StatusAccepted, resp)
 		return
 	}
 	r.SuccessJSON(resp)
