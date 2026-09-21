@@ -19,6 +19,7 @@ import (
 // -> admission_denials_hourly -> metrics query.
 func TestMetrics_DenialFlushEndToEnd(t *testing.T) {
 	_, svc, _, ctxB := seed(t)
+	mB, cB := seededIDs(ctxB).merchantB, seededIDs(ctxB).payerB
 	rdb, rctx := dbtest.SharedRedisClient(t)
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 

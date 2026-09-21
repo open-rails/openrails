@@ -71,16 +71,16 @@ func TestProbeLiveRailPSPsUnderEnforcingRLS(t *testing.T) {
 		merchantID, "945280-"+suffix)
 	require.NoError(t, err)
 
-	// The retired probe shape, verbatim, on the SAME enforcing pool.
+	// An intentional platform scan no longer depends on RLS bypass or a GUC.
 	var naive bool
 	require.NoError(t, appPool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM billing.psps
 			 WHERE rail = lower($1) AND environment = 'live'
 		)`, "ccbill").Scan(&naive))
-	require.False(t, naive, "regression pin: a no-GUC read of psps under RLS sees nothing and reports no error")
+	require.True(t, naive, "the normal pool sees the declared live account without session scope")
 
 	got, err = svc.ProbeLiveRailPSPs(ctx, "ccbill")
 	require.NoError(t, err)
-	require.Equal(t, LiveRailPresent, got, "the live PSP must be visible to the fixed probe under enforcing RLS")
+	require.Equal(t, LiveRailPresent, got, "the explicit platform probe must see the live PSP")
 }

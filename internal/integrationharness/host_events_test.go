@@ -114,14 +114,16 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	require.Equal(t, openrails.CustomerID(payer), lifecycle[0].Delinquency.CustomerID)
 	require.Equal(t, "delinquent", lifecycle[0].Delinquency.ToState)
 	require.EqualValues(t, 12000000, lifecycle[0].Delinquency.OverdueAmount)
-	// RLS remains fail-closed even when the SQL has no merchant predicate.
+	// SQL visibility is unrestricted by session scope; the public API still
+	// rejects the other merchant's acknowledgment and list requests.
 	bPool := h.MerchantPool(b.MerchantID.UUID())
 	var visible int
 	require.NoError(t, bPool.QueryRow(ctx, `SELECT count(*) FROM billing.host_outbox WHERE id=$1 OR id=$2`, first[0].ID, lifecycleID).Scan(&visible))
-	require.Zero(t, visible)
-	tag, err := bPool.Exec(ctx, `UPDATE billing.host_outbox SET delivered_at=now() WHERE id=$1 OR id=$2`, first[0].ID, lifecycleID)
+	require.Equal(t, 2, visible)
+	require.ErrorIs(t, other.AcknowledgeHostEvent(ctx, lifecycleID), openrails.ErrNotFound)
+	missing, err = other.ListHostEvents(ctx, openrails.HostEventListOptions{})
 	require.NoError(t, err)
-	require.Zero(t, tag.RowsAffected())
+	require.Empty(t, missing)
 	// A bounded retention pass may delete acknowledged events only.
 	q := dbtest.Queries(pool)
 	deleted, err := q.DeleteDeliveredPaymentSettlementsBefore(ctx, gen.DeleteDeliveredPaymentSettlementsBeforeParams{MerchantID: a.MerchantID.UUID(), Cutoff: time.Now().Add(time.Hour), RowLimit: 10})

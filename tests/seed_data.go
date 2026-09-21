@@ -1091,26 +1091,21 @@ func (suite *TestContainerSuite) SeedCCBillTestDataWithSubscription() *models.Su
 	})
 }
 
-// CleanupSubscriptionsForUser deletes all subscriptions for a user
-// Use this for test isolation when tests share the same suite
+// CleanupSubscriptionsForUser removes a user's live fixture projections while
+// preserving the immutable subscription transition history.
 func (suite *TestContainerSuite) CleanupSubscriptionsForUser(userID string) {
 	suite.t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
 	tenantSubjectID := suite.resolveCustomer(ctx, userID)
 
-	// Also delete entitlements for this user
-	_, _ = suite.Pool.Exec(ctx,
-		"DELETE FROM billing.entitlements WHERE customer_id = $1", tenantSubjectID)
-
-	_, _ = suite.Pool.Exec(ctx,
-		"DELETE FROM billing.checkout_sessions WHERE customer_id = $1", tenantSubjectID)
-
-	// Delete subscriptions
-	_, err := suite.Pool.Exec(ctx,
-		"DELETE FROM billing.subscriptions WHERE customer_id = $1", tenantSubjectID)
-	if err != nil {
-		suite.t.Logf("Warning: failed to cleanup subscriptions for user %s: %v", userID, err)
+	tx, err := suite.Pool.Begin(ctx)
+	require.NoError(suite.t, err)
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	for _, table := range []string{"entitlements", "checkout_sessions", "subscriptions"} {
+		_, err := tx.Exec(ctx, "UPDATE billing."+table+" SET deleted_at=$1, updated_at=$1 WHERE merchant_id=$2 AND customer_id=$3 AND deleted_at IS NULL", suite.GetClock().Now(), dbtest.TestMerchantID.UUID(), tenantSubjectID)
+		require.NoError(suite.t, err, "clean up live %s fixture rows", table)
 	}
+	require.NoError(suite.t, tx.Commit(ctx))
 }
 
 // Helper functions for pointers

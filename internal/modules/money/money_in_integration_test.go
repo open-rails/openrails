@@ -7,13 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/intents"
@@ -36,6 +37,7 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -195,7 +197,9 @@ func collectionRunnerFull(dbi *db.DB, charger money.Charger, verifier money.Coll
 // collectionIntents lists the invoice's collection operations, oldest first.
 func collectionIntents(t *testing.T, pool *pgxpool.Pool, ctx context.Context, invoiceID uuid.UUID) []gen.OpenrailsRailIntent {
 	t.Helper()
-	rows, err := pool.Query(ctx, `SELECT id FROM billing.rail_intents WHERE intent_type = $1 AND payload->>'invoice_id' = $2 ORDER BY created_at, id`, money.TypeInvoiceCollection, invoiceID.String())
+	mid, err := merchant.Require(ctx)
+	require.NoError(t, err)
+	rows, err := pool.Query(ctx, `SELECT id FROM billing.rail_intents WHERE merchant_id=$1 AND intent_type = $2 AND payload->>'invoice_id' = $3 ORDER BY created_at, id`, mid.UUID(), money.TypeInvoiceCollection, invoiceID.String())
 	require.NoError(t, err)
 	var ids []uuid.UUID
 	for rows.Next() {
@@ -206,7 +210,7 @@ func collectionIntents(t *testing.T, pool *pgxpool.Pool, ctx context.Context, in
 	rows.Close()
 	out := make([]gen.OpenrailsRailIntent, 0, len(ids))
 	for _, id := range ids {
-		row, err := dbtest.Queries(pool).GetRailIntent(ctx, gen.GetRailIntentParams{MerchantID: dbtest.TestMerchantID.UUID(), ID: id})
+		row, err := dbtest.Queries(pool).GetRailIntent(ctx, gen.GetRailIntentParams{MerchantID: mid.UUID(), ID: id})
 		require.NoError(t, err)
 		out = append(out, row)
 	}

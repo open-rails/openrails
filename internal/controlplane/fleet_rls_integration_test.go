@@ -46,13 +46,12 @@ func TestFleetAggregatesUnderTheEnforcingRole(t *testing.T) {
 	mid := uuid.New()
 	seedFleetMerchantWithRevenue(t, mid, sfx)
 
-	t.Run("failing_before: the same aggregate on the base pool sees nothing", func(t *testing.T) {
+	t.Run("explicit merchant aggregate does not depend on session state", func(t *testing.T) {
 		var payments int64
 		require.NoError(t, appPool.QueryRow(ctx, `
 SELECT count(*) FROM billing.payments
  WHERE status = 'completed' AND reversal_kind IS NULL AND merchant_id = $1`, mid).Scan(&payments))
-		require.Zero(t, payments,
-			"a GUC-less read of payments returns zero rows and no error — the silence this whole class is made of")
+		require.EqualValues(t, 1, payments, "an explicit merchant predicate works without RLS or session state")
 	})
 
 	t.Run("FleetAnalytics reports the merchant's real revenue", func(t *testing.T) {

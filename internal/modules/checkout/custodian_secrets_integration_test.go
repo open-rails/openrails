@@ -33,18 +33,20 @@ func TestCustodianHeldCardResolvesFromStoreBothModes(t *testing.T) {
 	dbtest.EnsureTestMerchant(context.Background(), t, pool)
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 
-	const tenantID = "tnt_c12_test"
-	const primaryGateway = "100001-c12"
-	const backupGateway = "579146-c12"
+	suffix := uuid.NewString()
+	tenantID := "tnt_c12_" + suffix
+	primaryGateway := "100001-c12-" + suffix
+	backupGateway := "579146-c12-" + suffix
+	custodianKey := "bt-c12-" + suffix
 
 	// Layer B rows (identical in both modes — mode 1 converges the same rows).
 	var custodianID uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx, `
 		INSERT INTO billing.custodians (merchant_id, key, kind, environment, account_id, settings)
-		VALUES ($1::uuid, 'bt', 'basis_theory', 'test', $2, '{"public_api_key":"key_pub_c12","network_tokens":true}'::jsonb)
+		VALUES ($1::uuid, $3, 'basis_theory', 'test', $2, '{"public_api_key":"key_pub_c12","network_tokens":true}'::jsonb)
 		ON CONFLICT (kind, environment, account_id) DO UPDATE SET settings = EXCLUDED.settings
 		RETURNING id
-	`, dbtest.TestMerchantID.String(), tenantID).Scan(&custodianID))
+	`, dbtest.TestMerchantID.String(), tenantID, custodianKey).Scan(&custodianID))
 	for _, gateway := range []string{primaryGateway, backupGateway} {
 		_, err := pool.Exec(ctx, `
 			INSERT INTO billing.psps (merchant_id, rail, environment, account_id, archived, evidence, custodian_id)
@@ -108,7 +110,7 @@ func TestCustodianHeldCardResolvesFromStoreBothModes(t *testing.T) {
 				require.Equal(t, gatewayKey, rc.NMI.SecurityKey)
 				// The custody half: ONE declaration, shared.
 				require.NotNil(t, rc.Custody)
-				require.Equal(t, "bt", rc.Custody.Key)
+				require.Equal(t, custodianKey, rc.Custody.Key)
 				require.Equal(t, models.CustodianBasisTheory, rc.Custody.Custodian)
 				require.Equal(t, tenantID, rc.Custody.AccountID)
 				require.Equal(t, "key_private_c12_"+name, rc.Custody.APIKey)

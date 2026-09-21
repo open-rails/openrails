@@ -276,29 +276,37 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 
 	// BIGINT-edge capacity must fail closed: MaxInt64 prepaid plus one unit of
 	// remaining arrears credit cannot wrap into an apparently usable capacity.
-	overflowPayer := fundPayer(10_000)
-	admin, err := pgx.Connect(ctx, dbtest.SharedSuperuserDSN(t))
+	// Use a fresh merchant so its clearing counter starts at zero, and fund
+	// through an actual balanced deposit instead of rewriting immutable facts.
+	overflowRuntime, err := New(ctx, Options{
+		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
+		Redis:  rdb, River: RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
-	tag, err := admin.Exec(ctx, `
-		UPDATE billing.ledger_accounts
-		SET credits_posted = $1, debits_posted = 0
-		WHERE merchant_id = $2
-		  AND customer_id = $3
-		  AND currency = 'USD'
-		  AND account_type = 'customer_balance'
-	`, int64(math.MaxInt64), dbtest.TestMerchantID.UUID(), overflowPayer.UUID())
+	t.Cleanup(func() { _ = overflowRuntime.Close(context.Background()) })
+	overflowMerchant, err := overflowRuntime.UpsertMerchantConfig(ctx, "auth-overflow-"+uuid.NewString(), MerchantConfig{})
 	require.NoError(t, err)
-	require.Equal(t, int64(1), tag.RowsAffected())
-	require.NoError(t, admin.Close(ctx))
+	overflowClient, err := overflowRuntime.Client()
+	require.NoError(t, err)
+	overflowCustomer := openrails.CustomerID(uuid.New())
+	_, err = overflowClient.EnsureCustomer(ctx, overflowCustomer)
+	require.NoError(t, err)
+	_, err = overflowClient.DepositCredits(ctx, openrails.DepositCreditsRequest{
+		CustomerID: &overflowCustomer, Invoker: overflowCustomer.String(), Currency: "USD",
+		Amount: math.MaxInt64, Source: "th-005-overflow", SourceID: uuid.NewString(),
+	})
+	require.NoError(t, err)
+	overflowPayer := identity.CustomerID(overflowCustomer)
+	overflowCtx := merchant.WithID(ctx, overflowMerchant)
 	arrears := money.BillingModeArrears
-	require.NoError(t, rt.svc.SetCreditAccountSettings(merchantCtx, overflowPayer, "USD", money.AccountSettingsInput{
+	require.NoError(t, overflowRuntime.svc.SetCreditAccountSettings(overflowCtx, overflowPayer, "USD", money.AccountSettingsInput{
 		BillingMode: &arrears,
 	}))
-	require.NoError(t, rt.svc.SetCreditLimit(merchantCtx, overflowPayer, "USD", 1))
+	require.NoError(t, overflowRuntime.svc.SetCreditLimit(overflowCtx, overflowPayer, "USD", 1))
 	overflowRequest := newAuthorization(overflowPayer, 1)
-	_, err = openOperationAuthorizationInCommittedTx(ctx, rt, overflowRequest)
+	_, err = openOperationAuthorizationInCommittedTx(ctx, overflowRuntime, overflowRequest)
 	require.ErrorContains(t, err, "capacity overflow")
-	_, err = client.GetOperationAuthorization(ctx, overflowRequest.OperationID)
+	_, err = overflowClient.GetOperationAuthorization(ctx, overflowRequest.OperationID)
 	require.ErrorIs(t, err, openrails.ErrOperationAuthorizationNotFound, "overflow refusal must not leave an authorization row")
 }
 
