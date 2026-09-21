@@ -462,4 +462,7 @@ FROM openrails.invoice_payments a
 JOIN openrails.rail_intents i ON i.merchant_id = a.merchant_id
     AND i.idempotency_key = a.idempotency_key AND i.intent_type = 'invoice_collection'
 LEFT JOIN openrails.ledger_transfers l ON l.merchant_id = a.merchant_id AND l.id = a.ledger_transfer_id
-WHERE a.merchant_id = $1 AND a.idempotency_key LIKE 'invoice_collection:%';
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.idempotency_key LIKE 'invoice_collection:%'
+  AND (sqlc.narg(after_id)::uuid IS NULL OR a.id > sqlc.narg(after_id)::uuid)
+ORDER BY a.id
+LIMIT sqlc.arg(page_size)::int;
