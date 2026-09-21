@@ -317,9 +317,11 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.rail = ANY(sqlc.arg(
   AND ((sub.collection_policy <> 'engine' AND sub.status='past_due' AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz)
        OR (sqlc.arg(include_engine)::boolean AND sub.collection_policy='engine' AND sub.current_period_ends_at <= sqlc.arg(now)::timestamptz
            AND (sub.status='active' OR (sub.status='past_due' AND sub.next_retry_at <= sqlc.arg(now)::timestamptz))
-           AND EXISTS (SELECT 1 FROM openrails.payment_methods pm JOIN openrails.psps p ON p.id=pm.psp_id AND p.merchant_id=pm.merchant_id JOIN openrails.custodians c ON c.id=pm.custodian_id AND c.merchant_id=pm.merchant_id
+           AND EXISTS (SELECT 1 FROM openrails.payment_methods pm JOIN openrails.psps p ON p.id=pm.psp_id AND p.merchant_id=pm.merchant_id LEFT JOIN openrails.custodians c ON c.id=pm.custodian_id AND c.merchant_id=pm.merchant_id
                        WHERE pm.id=sub.payment_method_id AND pm.merchant_id=sub.merchant_id AND pm.customer_id=sub.customer_id AND pm.psp_id=sub.psp_id
-                         AND pm.custodian='hyperswitch' AND pm.park_reason='' AND pm.stored_credential_recurring_ref<>'' AND NOT p.archived AND NOT c.archived AND p.environment=c.environment)
+                         AND pm.park_reason='' AND pm.stored_credential_recurring_ref<>'' AND NOT p.archived
+                         AND ((pm.custodian='hyperswitch' AND pm.rail='nmi' AND NOT c.archived AND p.environment=c.environment)
+                              OR (pm.custodian='psp' AND pm.rail IN ('nmi','stripe') AND pm.rail_customer_ref<>'' AND pm.rail_method_ref<>'')))
            AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
   AND sub.deleted_at IS NULL
 ORDER BY CASE WHEN sub.collection_policy='engine' AND sub.status='active' THEN sub.current_period_ends_at ELSE sub.next_retry_at END, sub.id
