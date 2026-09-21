@@ -82,7 +82,16 @@ type CheckoutSessionNextAction = openrails.CheckoutSessionNextAction
 
 type CheckoutSessionPaymentResponse = openrails.CheckoutSessionPaymentResponse
 
+// CheckoutSessionMembershipQuote is the immutable commercial agreement shown
+// before the customer confirms. It carries no provider or execution authority.
+type CheckoutSessionMembershipQuote struct {
+	ProductName  string          `json:"product_name"`
+	CycleHours   int64           `json:"cycle_hours"`
+	Entitlements map[string]*int `json:"entitlements"`
+}
+
 type CheckoutSessionResponse struct {
+	MembershipQuote *CheckoutSessionMembershipQuote   `json:"membership_quote,omitempty"`
 	Capture         *openrails.CustodianCaptureAction `json:"capture,omitempty"`
 	PaymentMethodID *openrails.PaymentMethodID        `json:"payment_method_id,omitempty"`
 	Object          string                            `json:"object"`

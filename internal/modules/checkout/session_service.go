@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -661,6 +662,29 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		}
 	}
 
+	// A saved custodian card creates a priced agreement for a later verified
+	// customer action. Persist the quote with the row before returning it.
+	if mode == models.CheckoutSessionModeSubscription && rail == "nmi" && req.Payment.PaymentMethodID != "" {
+		methodID, err := openrails.ParsePaymentMethodID(req.Payment.PaymentMethodID)
+		if err != nil {
+			return nil, ErrCheckoutSessionValidation
+		}
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return nil, err
+		}
+		method, err := s.db.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: methodID.UUID()})
+		if err != nil {
+			return nil, err
+		}
+		if method.Custodian == models.CustodianHyperSwitch {
+			if err := quoteInitialMembership(ctx, session, price, product, method, now); err != nil {
+				return nil, err
+			}
+			session.Status = models.CheckoutSessionStatusRequiresAction
+		}
+	}
+
 	if err := s.repo.Create(ctx, session); err != nil {
 		if idempotencyKey != "" {
 			existing, getErr := s.repo.GetByID(ctx, session.ID)
@@ -669,6 +693,10 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 			}
 		}
 		return nil, fmt.Errorf("failed to create checkout session: %w", err)
+	}
+
+	if _, quoted := session.RailState[initialMembershipQuoteKey]; quoted {
+		return s.sessionToResponse(session), nil
 	}
 
 	if err := s.initializeSession(ctx, session, &req.Payment, req.SuccessURL, req.CancelURL, user); err != nil {
@@ -870,6 +898,64 @@ func acceptedInitialMembershipQuote(ctx context.Context, session *models.Checkou
 	return terms, terms.Validate()
 }
 
+// ConfirmCustomerSession is the self-service boundary. The operation ledger,
+// rather than the session projection or quote expiry, owns accepted replay.
+func (s *CheckoutSessionService) ConfirmCustomerSession(ctx context.Context, sessionID uuid.UUID, req *CheckoutSessionConfirmRequest, user *UserIdentity, principal billingauth.DelegatedPrincipal) (*CheckoutSessionResponse, error) {
+	session, err := s.repo.GetByID(ctx, sessionID)
+	if err != nil {
+		if db.IsNotFound(err) {
+			return nil, ErrCheckoutSessionNotFound
+		}
+		return nil, err
+	}
+	if user == nil || user.ID != session.CustomerID.String() {
+		return nil, ErrCheckoutSessionForbidden
+	}
+	if _, quoted := session.RailState[initialMembershipQuoteKey]; !quoted {
+		return s.ConfirmSession(ctx, sessionID, req, user)
+	}
+	if err := validateInitialMembershipPrincipal(ctx, session, principal); err != nil {
+		return nil, err
+	}
+	if req == nil || req.Payment.Rail != "nmi" || req.Payment.Capture != nil || req.Payment.Signature != "" || req.Payment.Wallet != "" {
+		return nil, ErrCheckoutSessionValidation
+	}
+	terms, err := readInitialMembershipQuote(session)
+	if err != nil {
+		return nil, err
+	}
+	key := "checkout_session:" + session.ID.String()
+	ctx = db.WithPSPID(ctx, session.PspID)
+	_, err = intents.NewStore(s.db).GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey(key))
+	if db.IsNotFound(err) {
+		terms, err = acceptedInitialMembershipQuote(ctx, session, principal, s.now())
+	}
+	if err != nil {
+		return nil, err
+	}
+	confirmer, ok := s.checkoutService.(interface {
+		ConfirmInitialMembership(context.Context, subscriptions.InitialMembershipTerms, string, billingauth.DelegatedPrincipal) (*CheckoutResponse, error)
+	})
+	if !ok {
+		return nil, errors.New("initial membership service unavailable")
+	}
+	result, err := confirmer.ConfirmInitialMembership(ctx, terms, key, principal)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || result.Status != "success" {
+		return nil, ErrCheckoutProcessing
+	}
+	if err := s.applyCheckoutResponse(session, result); err != nil {
+		return nil, err
+	}
+	session.UpdatedAt = s.now()
+	if err := s.repo.Update(ctx, session); err != nil {
+		return nil, err
+	}
+	return s.sessionToResponse(session), nil
+}
+
 func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID uuid.UUID, req *CheckoutSessionConfirmRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
@@ -879,6 +965,10 @@ func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID u
 		return nil, err
 	}
 	if user == nil || strings.TrimSpace(user.ID) == "" || session.CustomerID.String() != user.ID {
+		return nil, ErrCheckoutSessionForbidden
+	}
+
+	if _, quoted := session.RailState[initialMembershipQuoteKey]; quoted {
 		return nil, ErrCheckoutSessionForbidden
 	}
 
@@ -1980,6 +2070,10 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 		} else if val, ok := session.RailState["failure_reason"].(string); ok && strings.TrimSpace(val) != "" {
 			resp.Message = strings.TrimSpace(val)
 		}
+	}
+
+	if terms, err := readInitialMembershipQuote(session); err == nil {
+		resp.MembershipQuote = &CheckoutSessionMembershipQuote{ProductName: terms.ProductName, CycleHours: int64(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour), Entitlements: models.CloneEntitlementsSpec(terms.Entitlements)}
 	}
 
 	if action := s.buildNextAction(resp); action != nil {

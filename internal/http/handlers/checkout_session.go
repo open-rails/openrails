@@ -228,7 +228,11 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 	}
 	parsedID := typedParsedID.UUID()
 	svcReq := &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Capture: req.Payment.Capture, Rail: req.Payment.Rail, Signature: req.Payment.Signature, Wallet: req.Payment.Wallet}}
-	resp, err := r.State.CheckoutSessionService.ConfirmSession(r.Request.Context(), parsedID, svcReq, user)
+	principal, ok := checkoutCustomerActionPrincipal(r)
+	if !ok {
+		return
+	}
+	resp, err := r.State.CheckoutSessionService.ConfirmCustomerSession(r.Request.Context(), parsedID, svcReq, user, principal)
 	if err != nil {
 		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{
 			Rail:              req.Payment.Rail,

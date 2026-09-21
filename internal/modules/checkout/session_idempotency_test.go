@@ -275,6 +275,13 @@ func TestInitialMembershipQuoteAndVerifiedPayerPreparation(t *testing.T) {
 	quoted, err := readInitialMembershipQuote(&restored)
 	require.NoError(t, err)
 	require.Equal(t, cap, *quoted.Entitlements["quota"])
+	view := (&CheckoutSessionService{}).sessionToResponse(&restored)
+	require.NotNil(t, view.MembershipQuote)
+	require.Equal(t, "Quoted membership", view.MembershipQuote.ProductName)
+	require.EqualValues(t, 720, view.MembershipQuote.CycleHours)
+	require.Equal(t, cap, *view.MembershipQuote.Entitlements["quota"])
+	*view.MembershipQuote.Entitlements["quota"] = 0
+	require.Equal(t, cap, *quoted.Entitlements["quota"], "display cannot mutate the accepted quote")
 	price.Amount = 123
 	product.EntitlementsSpec["other"] = nil
 	require.ErrorIs(t, quoteInitialMembership(ctx, &restored, &price, &product, method, now), ErrCheckoutSessionConflict)
