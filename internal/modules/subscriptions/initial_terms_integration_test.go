@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -21,7 +22,7 @@ func TestAcceptedInitialMembershipUsesFrozenTermsAtomically(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			f := newFailopenFixture(t, 720, true)
 			ctx := f.ctx()
-			now := time.Now().UTC().Truncate(time.Microsecond)
+			now := time.Now().UTC().Add(-10 * 24 * time.Hour).Truncate(time.Microsecond)
 			terms := InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyProvider, SubscriptionID: uuid.New(), PaymentID: uuid.New(), CustomerID: uuid.MustParse(f.userID), PSPID: f.pspID, ProductID: f.productID, PriceID: f.priceID, PaymentMethodID: uuid.New(), ProductName: "accepted product", Amount: 9_990_000, RecurringAmount: 9_990_000, Currency: "USD", AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(720 * time.Hour), Entitlements: map[string]*int{f.ent: nil}}
 			transaction := "initial-" + uuid.NewString()
 			if mode != "paid" && mode != "engine" {
@@ -97,6 +98,55 @@ func TestAcceptedInitialMembershipUsesFrozenTermsAtomically(t *testing.T) {
 			} else {
 				require.Equal(t, 1, count)
 			}
+			if mode == "pending" {
+				paid := terms
+				paid.Pending = false
+				paid.Amount = paid.RecurringAmount
+				paid.PaymentID = uuid.New()
+				f.lifecycle.SetClock(clockwork.NewFakeClockAt(paid.PeriodStart.Add(time.Minute)))
+				first := *params
+				first.Prepared = &paid
+				first.TransactionID = "first-paid-" + uuid.NewString()
+				first.PurchasedAt = &paid.PeriodStart
+				require.NoError(t, f.dbi.MerchantTx(ctx, func(txctx context.Context, tx pgx.Tx) error {
+					sub, notices, err := f.lifecycle.CreateMembershipTx(txctx, db.NewWithPgxTx(tx), &first)
+					if err != nil {
+						return err
+					}
+					require.Equal(t, terms.SubscriptionID, sub.ID)
+					require.Equal(t, models.StatusActive, sub.Status)
+					require.Len(t, notices, 1)
+					require.WithinDuration(t, terms.PeriodStart, *sub.CurrentPeriodStartsAt, time.Microsecond)
+					require.WithinDuration(t, terms.PeriodEnd, *sub.CurrentPeriodEndsAt, time.Microsecond)
+					return nil
+				}))
+				// Replaying the original no-charge enrollment never reinterprets its
+				// already-active membership as a new charge or duplicates its first event.
+				require.NoError(t, f.dbi.MerchantTx(ctx, func(txctx context.Context, tx pgx.Tx) error {
+					sub, notices, err := f.lifecycle.CreateMembershipTx(txctx, db.NewWithPgxTx(tx), params)
+					if err != nil {
+						return err
+					}
+					require.Equal(t, models.StatusActive, sub.Status)
+					require.Empty(t, notices)
+					return nil
+				}))
+			} else {
+				require.NoError(t, f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &terms.SubscriptionID, CancelType: models.CancelTypeUser, RevokeAccess: true}))
+				require.NoError(t, f.dbi.MerchantTx(ctx, func(txctx context.Context, tx pgx.Tx) error {
+					sub, notices, err := f.lifecycle.CreateMembershipTx(txctx, db.NewWithPgxTx(tx), params)
+					if err != nil {
+						return err
+					}
+					require.Equal(t, models.StatusCancelled, sub.Status)
+					require.Empty(t, notices)
+					return nil
+				}))
+				var active int
+				require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements WHERE source_id=$1 AND revoked_at IS NULL AND deleted_at IS NULL`, terms.SubscriptionID).Scan(&active))
+				require.Zero(t, active, "accepted replay preserves later revocation")
+			}
+
 		})
 	}
 }

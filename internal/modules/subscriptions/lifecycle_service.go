@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
@@ -15,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
@@ -25,7 +27,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
+	"reflect"
 )
 
 // SubscriptionLifecycleService handles the complete lifecycle of subscriptions
@@ -225,6 +229,61 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 		if (terms.Amount > 0 && s.PaymentService == nil) || params.UserID != terms.CustomerID.String() || params.PriceID != terms.PriceID || db.PSPIDFromContext(ctx) != terms.PSPID || (terms.Amount > 0) != (strings.TrimSpace(params.TransactionID) != "") || (terms.CollectionPolicy != models.CollectionPolicyEngine && (params.RailSubscriptionID == nil || strings.TrimSpace(*params.RailSubscriptionID) == "")) || (terms.CollectionPolicy == models.CollectionPolicyEngine && params.RailSubscriptionID != nil && strings.TrimSpace(*params.RailSubscriptionID) != "") {
 			return nil, nil, errors.New("membership completion contradicts accepted terms")
 		}
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		prior, err := txDB.Gen(ctx).GetInitialMembershipForUpdate(ctx, gen.GetInitialMembershipForUpdateParams{MerchantID: mid.UUID(), ID: terms.SubscriptionID})
+		if err != nil && !db.IsNotFound(err) {
+			return nil, nil, err
+		}
+		if err == nil {
+			sub, err := models.SubscriptionFromGen(prior)
+			if err != nil {
+				return nil, nil, err
+			}
+			provider := ""
+			if params.RailSubscriptionID != nil {
+				provider = strings.TrimSpace(*params.RailSubscriptionID)
+			}
+			if err := terms.ValidateSubscriptionIdentity(sub, params.Rail, provider); err != nil {
+				return nil, nil, err
+			}
+			if sub.Status != models.StatusPending || terms.Pending {
+				if terms.Amount > 0 {
+					payment, err := payments.NewPaymentRepo(txDB).GetByID(ctx, terms.PaymentID)
+					if err != nil {
+						return nil, nil, err
+					}
+					if err := ValidateInitialMembershipPayment(*terms, payment, params.Rail, params.TransactionID); err != nil {
+						return nil, nil, err
+					}
+				}
+				before := terms.PeriodEnd
+				if terms.Pending {
+					before = terms.PeriodStart
+				}
+				limit, err := safecast.Convert[int32](len(terms.Entitlements) + 2)
+				if err != nil {
+					return nil, nil, err
+				}
+				rows, err := txDB.Gen(ctx).ListInitialMembershipGrants(ctx, gen.ListInitialMembershipGrantsParams{MerchantID: mid.UUID(), SubscriptionID: terms.SubscriptionID, Before: before, RowLimit: limit})
+				if err != nil {
+					return nil, nil, err
+				}
+				if err := ValidateInitialMembershipHistory(mid.UUID(), *terms, rows); err != nil {
+					return nil, nil, err
+				}
+				return sub, nil, nil
+			}
+			snapshot := sub.EntitlementsSpecSnapshot
+			if snapshot == nil {
+				snapshot = map[string]*int{}
+			}
+			if prior.DeletedAt != nil || sub.PriceID != terms.PriceID || sub.ProductID != terms.ProductID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != terms.PaymentMethodID || sub.CurrentPeriodStartsAt != nil || sub.CurrentPeriodEndsAt != nil || !reflect.DeepEqual(snapshot, terms.Entitlements) {
+				return nil, nil, errors.New("pending membership contradicts accepted first paid period")
+			}
+		}
 		copy := *params
 		copy.Amount, copy.Currency, copy.AmountProvided = terms.Amount, terms.Currency, true
 		copy.CurrentPeriodStartsAt, copy.CurrentPeriodEndsAt = &terms.PeriodStart, &terms.PeriodEnd
@@ -275,9 +334,10 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		if err != nil && !db.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("failed to check existing subscription by rail subscription ID: %w", err)
 		}
-		if err == nil && params.Prepared != nil {
-			return nil, nil, errors.New("accepted initial enrollment already has a local provider subscription; reconcile canonical completion")
+		if err == nil && params.Prepared != nil && found.ID != params.Prepared.SubscriptionID {
+			return nil, nil, errors.New("provider schedule belongs to another local membership")
 		}
+
 		if err == nil && found.Status == models.StatusPending {
 			if found.CustomerID.String() != params.UserID || found.ProductID != price.ProductID {
 				return nil, nil, fmt.Errorf("rail subscription belongs to a different pending subscription")
@@ -296,7 +356,9 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		}
 		if err == nil {
 			if params.Prepared != nil {
-				return nil, nil, errors.New("accepted initial enrollment already has a local payment; reconcile canonical completion")
+				if err := ValidateInitialMembershipPayment(*params.Prepared, existingPayment, params.Rail, params.TransactionID); err != nil {
+					return nil, nil, err
+				}
 			}
 			if existingPayment.CustomerID.String() != params.UserID {
 				return nil, nil, fmt.Errorf("payment transaction belongs to a different user")

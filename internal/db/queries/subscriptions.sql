@@ -351,3 +351,9 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
   AND rail_subscription_id=sqlc.arg(rail_subscription_id)::text
   AND deleted_at IS NULL
   AND deletion_scheduled_at IS NOT NULL;
+
+-- name: GetInitialMembershipForUpdate :one
+-- Accepted completion must see tombstones so it never resurrects a membership.
+SELECT * FROM openrails.subscriptions
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
+FOR UPDATE;
