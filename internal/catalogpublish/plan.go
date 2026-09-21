@@ -1,4 +1,4 @@
-package catalog
+package catalogpublish
 
 import (
 	"context"
@@ -16,105 +16,17 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// ProductAction is the per-product change a plan records.
-type ProductAction string
-
-const (
-	ProductCreate    ProductAction = "create"
-	ProductUpdate    ProductAction = "update"
-	ProductUnchanged ProductAction = "unchanged"
-	ProductArchive   ProductAction = "archive" // active in OpenRails, removed from manifest
-)
-
-// PriceAction is the per-price change a plan records.
-type PriceAction string
-
-const (
-	PriceCreate    PriceAction = "create"
-	PriceActivate  PriceAction = "activate"
-	PriceArchive   PriceAction = "archive"
-	PriceUnchanged PriceAction = "unchanged"
-)
-
-// ApplyPlan is the full terraform-style diff between the manifest (desired) and
-// OpenRails (current). It is computed without mutating anything, printed, and
-// then converged by Apply.
-type ApplyPlan struct {
-	Groups   []GroupPlan `json:"groups"`
-	Manifest *Manifest   `json:"-"`
-}
-
-// PlanOptions controls how the manifest is compared to the live catalog.
-type PlanOptions struct {
-	// ArchiveMissingProducts archives active products in a declared tier group
-	// when they are absent from the manifest. The push-merchant-catalog command keeps this
-	// terraform-style convergence behavior.
-	ArchiveMissingProducts bool
-	// ArchiveMissingPrices archives active prices for a declared product when
-	// their financial identity is absent from the manifest.
-	ArchiveMissingPrices bool
-}
-
-// GroupPlan is the diff for one tier group.
-type GroupPlan struct {
-	Key      string        `json:"key"`
-	Products []ProductPlan `json:"products"`
-	// RemovedProducts are active OpenRails products in this tier group not
-	// declared in the manifest; they are archived (deactivated) on apply.
-	RemovedProducts []billingservice.CatalogProduct `json:"removed_products,omitempty"`
-}
-
-// ProductPlan is the diff for one product plus its price set.
-type ProductPlan struct {
-	Key    string        `json:"key"`
-	Action ProductAction `json:"action"`
-
-	// CreateReq / UpdateReq / UpdateID are prepared for apply.
-	CreateReq billingservice.CreateProductRequest `json:"create_req,omitempty"`
-	UpdateReq billingservice.UpdateProductRequest `json:"update_req,omitempty"`
-	UpdateID  openrails.ProductID                 `json:"update_id,omitzero"`
-
-	Prices []PricePlan `json:"prices,omitempty"`
-}
-
-// PricePlan is the diff for one price (identity = financial substance).
-type PricePlan struct {
-	Label  string      `json:"label"`
-	Action PriceAction `json:"action"`
-
-	// ExistingID is the matched OpenRails price (zero when creating).
-	ExistingID openrails.PriceID                 `json:"existing_id,omitzero"`
-	CreateReq  billingservice.CreatePriceRequest `json:"create_req,omitempty"`
-
-	// Key (#774) is this declared price's resolved key (explicit or
-	// auto-defaulted). For Action==PriceCreate it rides CreateReq.Key; for a
-	// MATCHED price (Unchanged/Activate/Archive) it is set ONLY when it
-	// differs from the matched row's current key — signaling apply must
-	// relabel (a plain key rename, no substance change) via SetPriceKey.
-	Key string `json:"key,omitempty"`
-
-	// PSPLinks is set ONLY for a MATCHED price whose manifest declares a
-	// psp_links entry the stored link does not already satisfy (a key missing
-	// or holding a different value) — e.g. `solana: {token: DUSD}` against a
-	// row still bound to a USDC plan. Apply merges exactly these entries via
-	// UpdatePrice, whose rail adapters validate/publish the new link, so a
-	// link rotation is a manifest edit like any other change instead of a
-	// blocked admin PATCH. Once stored, the same declaration reads as
-	// satisfied and the plan is quiet again.
-	PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
-}
-
-// Plan computes the convergence diff for a manifest against the catalog exposed
+// plan computes the convergence diff for a manifest against the catalog exposed
 // by applier. It performs only reads (GetProductByKey, ListProducts,
 // ListPricesByProduct).
-func Plan(ctx context.Context, applier Applier, m *Manifest) (*ApplyPlan, error) {
-	return PlanWithOptions(ctx, applier, m, PlanOptions{ArchiveMissingProducts: true, ArchiveMissingPrices: true})
+func plan(ctx context.Context, applier applier, m *Manifest) (*ApplyPlan, error) {
+	return planWithOptions(ctx, applier, m, PlanOptions{ArchiveMissingProducts: true, ArchiveMissingPrices: true})
 }
 
-// PlanWithOptions computes the convergence diff using explicit reconciliation
+// planWithOptions computes the convergence diff using explicit reconciliation
 // semantics.
-func PlanWithOptions(ctx context.Context, applier Applier, m *Manifest, opts PlanOptions) (*ApplyPlan, error) {
-	plan := &ApplyPlan{Manifest: m}
+func planWithOptions(ctx context.Context, applier applier, m *Manifest, opts PlanOptions) (*ApplyPlan, error) {
+	plan := &ApplyPlan{}
 	for _, group := range m.TierGroups {
 		gp := GroupPlan{Key: group.Key}
 
@@ -158,7 +70,7 @@ func PlanWithOptions(ctx context.Context, applier Applier, m *Manifest, opts Pla
 	return plan, nil
 }
 
-func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGroup, product Product, opts PlanOptions) (*ProductPlan, error) {
+func planProduct(ctx context.Context, applier applier, m *Manifest, group TierGroup, product Product, opts PlanOptions) (*ProductPlan, error) {
 	entitlements := entitlementsSpec(product.Entitlements)
 	// Usage-metered products carry no tier_group — they aren't tier-exclusive
 	// subscriptions (#642). The loader put them in a synthetic singleton group;
@@ -167,7 +79,7 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 	if len(product.RateCards) > 0 {
 		tierGroupPtr = nil
 	}
-	tierRank := product.tierRank()
+	tierRank := declaredTierRank(product)
 
 	pp := &ProductPlan{Key: product.Key}
 
@@ -267,7 +179,7 @@ func productUnchanged(existing *billingservice.CatalogProduct, product Product, 
 // matched). Any ACTIVE OpenRails price whose financial identity is not declared
 // -> archive. existing is the matched OpenRails product (nil when the product
 // is being created, in which case no OpenRails prices can exist yet).
-func planPrices(ctx context.Context, applier Applier, m *Manifest, product Product, existing *billingservice.CatalogProduct, pp *ProductPlan, opts PlanOptions) error {
+func planPrices(ctx context.Context, applier applier, m *Manifest, product Product, existing *billingservice.CatalogProduct, pp *ProductPlan, opts PlanOptions) error {
 	var current []billingservice.CatalogPrice
 	if existing != nil && !existing.ID.IsZero() {
 		var err error
@@ -501,31 +413,15 @@ func entitlementsSpec(entitlements []string) map[string]*int {
 	return out
 }
 
-// HasChanges reports whether the plan would mutate anything.
-func (plan *ApplyPlan) HasChanges() bool {
-	for gi := range plan.Groups {
-		gp := &plan.Groups[gi]
-		if len(gp.RemovedProducts) > 0 {
-			return true
-		}
-		for pi := range gp.Products {
-			pp := &gp.Products[pi]
-			if pp.Action != ProductUnchanged {
-				return true
-			}
-			for _, price := range pp.Prices {
-				if price.Action != PriceUnchanged || price.Key != "" || len(price.PSPLinks) > 0 {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
 // String renders the plan as a terraform-style change log.
-func (plan *ApplyPlan) String() string {
+func planString(plan *ApplyPlan) string {
 	var b strings.Builder
+	if plan.MetersChanged {
+		fmt.Fprintln(&b, "~ meter definitions")
+	}
+	if plan.RateCardsChanged {
+		fmt.Fprintln(&b, "~ rate-card definitions")
+	}
 	for gi := range plan.Groups {
 		gp := &plan.Groups[gi]
 		fmt.Fprintf(&b, "tier_group %s\n", gp.Key)
@@ -555,13 +451,13 @@ func (plan *ApplyPlan) String() string {
 }
 
 // Print writes the plan to out, with an optional dry-run banner.
-func (plan *ApplyPlan) Print(out io.Writer, dryRun bool) {
+func PrintPlan(plan *ApplyPlan, out io.Writer, dryRun bool) {
 	if dryRun {
 		fmt.Fprintln(out, "catalog plan (dry run; no changes applied):")
 	} else {
 		fmt.Fprintln(out, "catalog plan:")
 	}
-	fmt.Fprint(out, plan.String())
+	fmt.Fprint(out, planString(plan))
 }
 
 func symbol(action string) string {

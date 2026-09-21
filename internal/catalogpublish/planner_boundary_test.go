@@ -1,4 +1,4 @@
-package catalog
+package catalogpublish
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 // Only the error-returning read is scripted. Successful catalog state belongs
 // to the real Client/HTTP workflow, not a second in-memory catalog backend.
 type refusedCatalogLookup struct {
-	Applier
+	applier
 	err error
 }
 
@@ -29,7 +29,7 @@ func TestCatalogPlannerRefusesIncompleteReadsAndInvalidInput(t *testing.T) {
 		return &Manifest{TierGroups: []TierGroup{{Key: "memberships", Products: []Product{{Key: "premium", DisplayName: "Premium", Prices: prices}}}}}
 	}
 	for _, cause := range []error{nil, errors.New("database unavailable"), errors.New("provider lookup failed")} {
-		plan, err := Plan(context.Background(), refusedCatalogLookup{err: cause}, manifest(price))
+		plan, err := plan(context.Background(), refusedCatalogLookup{err: cause}, manifest(price))
 		if err == nil || plan != nil {
 			t.Fatalf("incomplete read produced a plan: %v, %v", plan, err)
 		}
@@ -52,7 +52,7 @@ func TestCatalogPlannerRefusesIncompleteReadsAndInvalidInput(t *testing.T) {
 		if kind == "key collision" {
 			m = manifest(price, price)
 		}
-		_, err := Plan(context.Background(), refusedCatalogLookup{err: openrails.ErrNotFound}, m)
+		_, err := plan(context.Background(), refusedCatalogLookup{err: openrails.ErrNotFound}, m)
 		if !errors.Is(err, openrails.ErrInvalid) {
 			t.Fatalf("%s lacks typed input refusal: %v", kind, err)
 		}
@@ -60,7 +60,7 @@ func TestCatalogPlannerRefusesIncompleteReadsAndInvalidInput(t *testing.T) {
 }
 
 type catalogLinkRecorder struct {
-	Applier
+	applier
 	id      openrails.PriceID
 	request billingservice.UpdatePriceRequest
 	calls   int
@@ -81,17 +81,17 @@ func TestCatalogPriceLinkRotationPreservesUnchangedBindings(t *testing.T) {
 	}
 	priceID := openrails.PriceID(uuid.New())
 	plan := &ApplyPlan{Groups: []GroupPlan{{Key: "membership", Products: []ProductPlan{{Key: "premium", Action: ProductUnchanged, UpdateID: openrails.ProductID(uuid.New()), Prices: []PricePlan{{Action: PriceUnchanged, ExistingID: priceID, PSPLinks: delta}}}}}}}
-	if !plan.HasChanges() || !strings.Contains(plan.String(), "rotate psp_links: solana") {
-		t.Fatalf("rotation omitted from operator plan: %s", plan)
+	if !plan.HasChanges() || !strings.Contains(planString(plan), "rotate psp_links: solana") {
+		t.Fatalf("rotation omitted from operator plan: %s", planString(plan))
 	}
 	recorder := &catalogLinkRecorder{}
-	if _, err := ApplyWithOptions(context.Background(), recorder, plan, ApplyOptions{Insert: true, Prune: true}); err != nil {
+	if _, err := applyWithOptions(context.Background(), recorder, plan, ApplyOptions{Insert: true, Prune: true}); err != nil {
 		t.Fatal(err)
 	}
 	if recorder.calls != 0 {
 		t.Fatal("link rotation bypassed overwrite option")
 	}
-	result, err := Apply(context.Background(), recorder, plan)
+	result, err := apply(context.Background(), recorder, plan)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,16 +1,17 @@
 package handlers
 
-import "testing"
+import (
+	"encoding/json"
+	"github.com/open-rails/openrails"
+	"strings"
+	"testing"
+)
 
-func TestCatalogPublishPlanOnly(t *testing.T) {
-	if !catalogPublishPlanOnly(merchantCatalogPublishRequest{}) {
-		t.Fatal("empty request should be plan-only")
-	}
-	if catalogPublishPlanOnly(merchantCatalogPublishRequest{Insert: true}) {
-		t.Fatal("insert should apply")
-	}
-	yes := true
-	if !catalogPublishPlanOnly(merchantCatalogPublishRequest{Insert: true, PlanOnly: &yes}) {
-		t.Fatal("explicit plan_only should win")
+func TestCatalogPublishRefusesRetiredPreviewFlag(t *testing.T) {
+	var req openrails.CatalogPublishRequest
+	decoder := json.NewDecoder(strings.NewReader(`{"plan_only":true}`))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err == nil {
+		t.Fatal("retired plan_only field accepted")
 	}
 }
