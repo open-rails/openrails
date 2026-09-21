@@ -104,28 +104,39 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 			} `json:"payment"`
 		}
 		require.NoError(t, json.Unmarshal(raw, &response))
-		require.Equal(t, "succeeded", response.Status)
+		if recurring {
+			require.Contains(t, []string{"succeeded", "pending"}, response.Status)
+		} else {
+			require.Equal(t, "succeeded", response.Status)
+		}
 		require.NotEmpty(t, response.Payment.TransactionID)
 		verifyNMITransaction(t, provider, key, response.Payment.TransactionID, amount)
 		var subscription uuid.UUID
 		var providerSub string
 		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 			q := rt.DB.Qx(ctx)
+			if recurring {
+				return q.QueryRow(ctx, `SELECT id,rail_subscription_id FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2`, f.merchant.MerchantID.UUID(), customer.UUID()).Scan(&subscription, &providerSub)
+			}
 			var count int
 			err := q.QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2 AND transaction_id=$3 AND amount=$4 AND currency='USD' AND status='completed'`, f.merchant.MerchantID.UUID(), customer.UUID(), response.Payment.TransactionID, amount).Scan(&count)
 			if err != nil {
 				return err
 			}
 			require.Equal(t, 1, count)
-			if !recurring {
-				return nil
-			}
-			return q.QueryRow(ctx, `SELECT id,rail_subscription_id FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2 AND status='active'`, f.merchant.MerchantID.UUID(), customer.UUID()).Scan(&subscription, &providerSub)
+			return nil
 		}))
 		if recurring {
 			require.NotEmpty(t, response.SubscriptionID)
 			require.NotEmpty(t, providerSub)
 			verifyNMIRecurring(t, provider, key, providerSub)
+			require.Eventually(t, func() bool {
+				var activeAndPaid bool
+				err := rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+					return rt.DB.Qx(ctx).QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing.subscriptions s JOIN billing.payments p ON p.subscription_id=s.id AND p.merchant_id=s.merchant_id WHERE s.id=$1 AND s.status='active' AND p.transaction_id=$2 AND p.amount=$3 AND p.currency='USD' AND p.status='completed')`, subscription, response.Payment.TransactionID, amount).Scan(&activeAndPaid)
+				})
+				return err == nil && activeAndPaid
+			}, 30*time.Second, 500*time.Millisecond)
 			status, raw = requestWorkflowJSON(t, http.MethodPost, f.hostURL+"/v1/me/subscriptions/"+openrails.SubscriptionID(subscription).String()+"/cancel", token, map[string]string{"feedback": "sandbox qualification complete"})
 			require.Contains(t, []int{http.StatusOK, http.StatusAccepted}, status, string(raw))
 			require.Eventually(t, func() bool {
