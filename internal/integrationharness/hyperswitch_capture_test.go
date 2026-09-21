@@ -218,6 +218,13 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			require.Nil(t, created.PriceID)
 			require.Nil(t, created.Amount)
 			require.Nil(t, created.Currency)
+			require.NotPanics(t, func() {
+				require.NoError(t, surface.App().Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(scoped context.Context) error {
+					_, err := surface.App().Runtime.CheckoutSessionService.FindOpenCCBillReservation(scoped, created.ID.String(), req.Customer.ID.String(), uuid.New())
+					require.Error(t, err, "a card-setup session is not a CCBill price reservation")
+					return nil
+				}))
+			})
 			_, err = surface.Client().GetCheckoutSession(ctx, req.Customer.ID, created.ID)
 			require.Error(t, err, "another merchant must not read the action")
 			var state string
@@ -605,6 +612,22 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			require.Nil(t, got.Capture)
 		}
 		require.Equal(t, before, g.count(), "restore and terminal replay never call vendor mutation")
+		// Archive validates tombstoned history too: filtering deleted sessions
+		// would make a corrupt retained binding silently portable.
+		id := rows[0].ID
+		var original []byte
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT rail_state FROM billing.checkout_sessions WHERE merchant_id=$1 AND id=$2`, mid.UUID(), id).Scan(&original))
+		t.Cleanup(func() {
+			_, err := h.sharedPool().Exec(context.WithoutCancel(ctx), `UPDATE billing.checkout_sessions SET rail_state=$3::jsonb,deleted_at=NULL WHERE merchant_id=$1 AND id=$2`, mid.UUID(), id, original)
+			require.NoError(t, err)
+		})
+		_, err = h.sharedPool().Exec(ctx, `UPDATE billing.checkout_sessions SET deleted_at=now(),rail_state=jsonb_set(rail_state,'{capture,account_id}',to_jsonb($3::text)) WHERE merchant_id=$1 AND id=$2`, mid.UUID(), id, uuid.NewString())
+		require.NoError(t, err)
+		var corrupt bytes.Buffer
+		err = merchantarchive.Export(ctx, rt.DB, mid, &corrupt)
+		require.ErrorAs(t, err, &archiveErr)
+		require.Equal(t, "checkout_sessions", archiveErr.Table)
+		require.Zero(t, corrupt.Len())
 	})
 
 }

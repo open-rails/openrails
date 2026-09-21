@@ -1404,7 +1404,7 @@ COMMENT ON TABLE openrails.custodians IS 'or#880: merchant custodian registry. A
 
 COMMENT ON COLUMN openrails.custodians.key IS 'The custodian''s manifest key (merchants.<slug>.custodians.<key>) — the name a PSP entry references.';
 
-COMMENT ON COLUMN openrails.custodians.kind IS 'The custodian VENDOR: basis_theory today. Same vocabulary as payment_methods.custodian, minus ''psp'' (which is the absence of a third-party custodian, not an account).';
+COMMENT ON COLUMN openrails.custodians.kind IS 'The custodian VENDOR: basis_theory or hyperswitch. Same vocabulary as payment_methods.custodian, minus ''psp'' (which is the absence of a third-party custodian, not an account).';
 
 COMMENT ON COLUMN openrails.custodians.account_id IS 'The custodian-native tenant identity (Basis Theory: the tenant id). Operator-declared — there is no runtime whoami (#592).';
 
@@ -1419,6 +1419,9 @@ ALTER TABLE ONLY openrails.custodians
 
 ALTER TABLE ONLY openrails.custodians
     ADD CONSTRAINT uq_custodians_id_merchant UNIQUE (id, merchant_id);
+
+ALTER TABLE ONLY openrails.custodians
+    ADD CONSTRAINT uq_custodians_merchant_id_kind UNIQUE (merchant_id, id, kind);
 
 CREATE INDEX idx_custodians_merchant ON openrails.custodians USING btree (merchant_id);
 
@@ -3025,7 +3028,7 @@ COMMENT ON COLUMN openrails.payment_methods.stored_credential_recurring_ref IS '
 
 COMMENT ON COLUMN openrails.payment_methods.stored_credential_unscheduled_ref IS 'Rail-scoped stored-credential replay reference for the UNSCHEDULED card-network agreement (NMI: gateway transactionid of the initial unscheduled CIT, replayed as initial_transaction_id on unscheduled MITs). Empty = not captured yet.';
 
-COMMENT ON COLUMN openrails.payment_methods.custodian IS 'or#880 who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory = neutral third-party vault (#795). Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.';
+COMMENT ON COLUMN openrails.payment_methods.custodian IS 'or#880 who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory or hyperswitch = neutral third-party vault. Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.';
 
 COMMENT ON COLUMN openrails.payment_methods.fingerprint IS 'Custodian-issued stable fingerprint of the underlying PAN (Basis Theory''s default fingerprint expression), for dedup/lookup. '''' = the custodian issues none.';
 
@@ -3079,7 +3082,7 @@ ALTER TABLE ONLY openrails.payment_methods
     ADD CONSTRAINT payment_methods_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.payment_methods
-    ADD CONSTRAINT payment_methods_custodian_fk FOREIGN KEY (custodian_id, merchant_id) REFERENCES openrails.custodians(id, merchant_id);
+    ADD CONSTRAINT payment_methods_custodian_fk FOREIGN KEY (merchant_id, custodian_id, custodian) REFERENCES openrails.custodians(merchant_id, id, kind);
 
 ALTER TABLE ONLY openrails.payment_methods
     ADD CONSTRAINT payment_methods_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id);

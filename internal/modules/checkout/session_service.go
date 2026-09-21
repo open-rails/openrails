@@ -701,7 +701,7 @@ func (s *CheckoutSessionService) resumeIdempotentSession(
 	storedFingerprint, _ := existing.RailState[checkoutSessionFingerprintKey].(string)
 	requestedFingerprint, _ := requested.RailState[checkoutSessionFingerprintKey].(string)
 	parametersMatch := existing.CustomerID == requested.CustomerID &&
-		existing.PriceID == requested.PriceID &&
+		existing.PriceID != nil && requested.PriceID != nil && *existing.PriceID == *requested.PriceID &&
 		existing.Mode == requested.Mode &&
 		existing.Rail == requested.Rail &&
 		existing.PspID == requested.PspID &&
@@ -2367,7 +2367,7 @@ func (s *CheckoutSessionService) FindOpenCCBillReservation(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	if session.CustomerID.String() != userID || *session.PriceID != priceID || session.Rail != models.RailCCBill {
+	if session.CustomerID.String() != userID || session.Rail != models.RailCCBill || session.PriceID == nil || *session.PriceID != priceID {
 		return nil, ErrCheckoutSessionConflict
 	}
 	if s.isTerminal(session.Status) || s.isExpired(session) {
