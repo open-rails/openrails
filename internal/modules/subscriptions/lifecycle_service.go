@@ -667,13 +667,19 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 			}
 		}
 
-		metadata := map[string]any{}
-		for key, value := range params.PaymentMetadata {
-			metadata[key] = value
+		var metadata map[string]any
+		if params.PreviousPeriodEnd != nil && len(params.PaymentMetadata) > 0 {
+			metadata = make(map[string]any, len(params.PaymentMetadata))
+			for key, value := range params.PaymentMetadata {
+				metadata[key] = value
+			}
 		}
 		_, terminal := TerminalCancelReason(subscription)
 		terminal = terminal || (subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCancelled)
 		if terminal {
+			if metadata == nil {
+				metadata = map[string]any{}
+			}
 			metadata["refund_review"] = "confirmed charge on a cancelled subscription"
 		}
 		now := s.now().UTC()
