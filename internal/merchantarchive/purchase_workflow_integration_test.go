@@ -405,6 +405,23 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 		})
 	}
 	if recurring {
+		t.Run("conflicting_refusal_custody", func(t *testing.T) {
+			var evidence map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(operation.ResultEvidence, &evidence))
+			var paid struct {
+				Binding json.RawMessage `json:"binding"`
+			}
+			require.NoError(t, json.Unmarshal(evidence["qualified_receipt"], &paid))
+			refusal, err := json.Marshal(map[string]any{"binding": paid.Binding, "kind": "provider_declined", "response_code": 200, "localization_id": ""})
+			require.NoError(t, err)
+			evidence["qualified_initial_refusal"] = refusal
+			encoded, err := json.Marshal(evidence)
+			require.NoError(t, err)
+			changed := string(encoded)
+			_, err = Restore(t.Context(), target, id, bytes.NewReader(alteredArchive(t, artifact.Bytes(), "rail_intents", "result_evidence", &changed)))
+			require.Error(t, err, "successful membership cannot carry simultaneous sealed refusal")
+			assertEmptyBook(t, target, id)
+		})
 		var evidence map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(operation.ResultEvidence, &evidence))
 		delete(evidence, "qualified_enrollment")
