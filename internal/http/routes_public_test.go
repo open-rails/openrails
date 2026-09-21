@@ -8,7 +8,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 )
 
 func TestReadyVerboseReplacesHealthServices(t *testing.T) {
@@ -62,4 +65,24 @@ func TestStandaloneRootBannerIsExact(t *testing.T) {
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/nope", nil))
 	require.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestStandaloneCapabilitiesCredentialAuthority(t *testing.T) {
+	for _, source := range []string{config.MerchantSourceManifest, config.MerchantSourceAPI} {
+		for _, writable := range []bool{false, true} {
+			srv := &Server{runtime: &app.Runtime{
+				Config:            &config.Config{MerchantSource: source},
+				RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable},
+			}}
+			mux := http.NewServeMux()
+			srv.registerStandaloneMetaRoutes(mux)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/capabilities", nil))
+			require.Equal(t, http.StatusOK, w.Code)
+			var caps embedhttp.Capabilities
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &caps))
+			want := source == config.MerchantSourceAPI && writable
+			require.Equal(t, want, caps.Routes["secret_write"], "source=%s writable=%v", source, writable)
+		}
+	}
 }

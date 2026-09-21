@@ -14,7 +14,10 @@ type Gate interface {
 
 // Principal is the caller identity resolved by a Gate.
 type Principal struct {
-	MerchantID  merchant.ID
+	MerchantID merchant.ID
+	// Subject is the opaque host identity verified by the Gate. Catalog owner
+	// routes require it; request fields and headers never supply this authority.
+	Subject     string
 	UserContext UserContext
 	// Permissions is the credential's resolved grant set for NON-USER principals
 	// (API keys, service JWTs, host/delegated principals) — consumers that need

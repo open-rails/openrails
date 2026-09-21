@@ -414,7 +414,8 @@ never routed to a default merchant.
 
 OpenRails core exposes no cross-merchant lifecycle or credential routes.
 Merchant admin APIs are scoped to the authenticated merchant. Payment-provider
-mutation routes answer `405 manifest_driven` when `merchant_source=manifest`;
-catalog mutation routes do so when `catalog_source=manifest`. Catalog source
+mutation routes are omitted when `merchant_source=manifest`; provider reads
+and routing dry runs remain available. Catalog mutation routes return
+`405 manifest_driven` when `catalog_source=manifest`. Catalog source
 defaults to merchant source but can be selected independently
 ([self-hosting-mode1.md](self-hosting-mode1.md)).

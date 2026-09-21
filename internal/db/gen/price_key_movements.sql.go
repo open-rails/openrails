@@ -16,10 +16,13 @@ const insertPriceKeyMovement = `-- name: InsertPriceKeyMovement :execrows
 
 INSERT INTO openrails.price_key_movements (
     merchant_id, key, price_id, effective_at
-) VALUES (
+) SELECT
     $1::uuid, $2::text, $3::uuid,
     COALESCE(NULLIF($4::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
-)
+FROM openrails.prices owned_price JOIN openrails.products catalog_product
+  ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id
+WHERE owned_price.merchant_id=$1::uuid AND owned_price.id=$3::uuid
+  AND ($5::uuid IS NULL OR catalog_product.catalog_id=$5::uuid)
 `
 
 type InsertPriceKeyMovementParams struct {
@@ -27,6 +30,7 @@ type InsertPriceKeyMovementParams struct {
 	Key         string
 	PriceID     uuid.UUID
 	EffectiveAt time.Time
+	CatalogID   *uuid.UUID
 }
 
 // openrails.price_key_movements (#774): pointer-movement history log.
@@ -36,6 +40,7 @@ func (q *Queries) InsertPriceKeyMovement(ctx context.Context, arg InsertPriceKey
 		arg.Key,
 		arg.PriceID,
 		arg.EffectiveAt,
+		arg.CatalogID,
 	)
 	if err != nil {
 		return 0, err
@@ -45,17 +50,23 @@ func (q *Queries) InsertPriceKeyMovement(ctx context.Context, arg InsertPriceKey
 
 const listPriceKeyMovements = `-- name: ListPriceKeyMovements :many
 SELECT id, merchant_id, key, price_id, effective_at, created_at FROM openrails.price_key_movements
-WHERE merchant_id = $1::uuid AND key = $2::text
+WHERE ($1::uuid IS NULL OR EXISTS (
+ SELECT 1 FROM openrails.prices owned_price JOIN openrails.products catalog_product
+ ON catalog_product.merchant_id=owned_price.merchant_id AND catalog_product.id=owned_price.product_id
+ WHERE owned_price.merchant_id=price_key_movements.merchant_id AND owned_price.id=price_key_movements.price_id
+ AND catalog_product.catalog_id=$1::uuid))
+ AND merchant_id = $2::uuid AND key = $3::text
 ORDER BY effective_at DESC
 `
 
 type ListPriceKeyMovementsParams struct {
+	CatalogID  *uuid.UUID
 	MerchantID uuid.UUID
 	Key        string
 }
 
 func (q *Queries) ListPriceKeyMovements(ctx context.Context, arg ListPriceKeyMovementsParams) ([]OpenrailsPriceKeyMovement, error) {
-	rows, err := q.db.Query(ctx, listPriceKeyMovements, arg.MerchantID, arg.Key)
+	rows, err := q.db.Query(ctx, listPriceKeyMovements, arg.CatalogID, arg.MerchantID, arg.Key)
 	if err != nil {
 		return nil, err
 	}

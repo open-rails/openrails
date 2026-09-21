@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -56,19 +57,33 @@ func TestEmbeddedResetIsTransactionalAndLedgerScoped(t *testing.T) {
 	status, err := migrate.InspectPostgres(ctx, cfg)
 	require.NoError(t, err)
 	require.True(t, status.Exact, status.Report())
+	// Orphans must stay beyond the real embedded chain as new features add
+	// migrations. Insert the larger prefix first to retain numeric-order coverage.
+	maxEmbedded := 0
+	expectedLedger := make([]string, 0, len(status.Embedded)+2)
+	for _, entry := range status.Embedded {
+		n, err := strconv.Atoi(entry.Key)
+		require.NoError(t, err)
+		if n > maxEmbedded {
+			maxEmbedded = n
+		}
+		expectedLedger = append(expectedLedger, entry.Key)
+	}
+	near, far := maxEmbedded+1, maxEmbedded+10
+	expectedLedger = append(expectedLedger, strconv.Itoa(near), strconv.Itoa(far))
 	_, err = target.Exec(ctx, `
 		INSERT INTO public.migrations (app, database, schema, sequence) VALUES
-			('openrails', 'postgres', 'billing', 10),
-			('openrails', 'postgres', 'billing', 2),
+			('openrails', 'postgres', 'billing', $1),
+			('openrails', 'postgres', 'billing', $2),
 			('openrails', 'postgres', 'another_schema', 1),
 			('another_app', 'postgres', 'billing', 1);
-	`)
+	`, far, near)
 	require.NoError(t, err)
 
 	plan, err := migrate.PlanEmbeddedReset(ctx, targetDSN)
 	require.NoError(t, err)
 	require.True(t, plan.SchemaExists)
-	require.Equal(t, []string{"1", "2", "10"}, plan.LedgerRows)
+	require.Equal(t, expectedLedger, plan.LedgerRows)
 	require.NotContains(t, plan.Report(), "admin_password")
 
 	_, err = migrate.ApplyEmbeddedReset(ctx, targetDSN, "other:5432/db",
@@ -91,7 +106,7 @@ func TestEmbeddedResetIsTransactionalAndLedgerScoped(t *testing.T) {
 	result, err := migrate.ApplyEmbeddedReset(ctx, targetDSN, plan.Target,
 		migrate.EmbeddedResetConfirmation(plan.Target))
 	require.NoError(t, err)
-	require.Equal(t, int64(3), result.DeletedLedgerRows)
+	require.Equal(t, int64(len(expectedLedger)), result.DeletedLedgerRows)
 	require.NoError(t, target.QueryRow(ctx, `SELECT to_regnamespace('billing') IS NOT NULL`).Scan(&schemaExists))
 	require.False(t, schemaExists)
 	var retained int

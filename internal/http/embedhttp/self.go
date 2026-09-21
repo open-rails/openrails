@@ -78,28 +78,32 @@ func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, p
 }
 
 // ProviderRoutesForRuntime derives provider-specific route gating from the
-// bound merchant's DB-armed rail accounts + probed capabilities (#661/#775/
-// #788 — the ONE armed-state seam); an explicit override wins; no runtime
-// information means the permissive default.
+// bound merchant's DB-armed rail accounts and probed capabilities. Explicit
+// selections override rail discovery, but cannot enable host-owned credential
+// writes or writes unsupported by the secret backend.
 func ProviderRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRoutes) routesurface.ProviderRoutes {
+	r := routesurface.AllProviderRoutes()
 	if override != nil {
-		return *override
-	}
-	if rt == nil {
-		return routesurface.AllProviderRoutes()
-	}
-	if mid := rt.ConfiguredMerchant(); !mid.IsZero() && rt.Merchants != nil {
-		r := armedProviderRoutes(context.Background(), rt, mid)
-		if caps := rt.RouteCapabilities; caps != nil {
-			r.SolanaSigning = r.Solana && caps.SolanaCanSign
-			r.SecretWrite = caps.SecretWrite
-		} else {
+		r = *override
+	} else if rt != nil {
+		if mid := rt.ConfiguredMerchant(); !mid.IsZero() && rt.Merchants != nil {
+			r = armedProviderRoutes(context.Background(), rt, mid)
 			r.SolanaSigning = r.Solana
 			r.SecretWrite = true
+			if caps := rt.RouteCapabilities; caps != nil {
+				r.SolanaSigning = r.Solana && caps.SolanaCanSign
+			}
 		}
-		return r
 	}
-	return routesurface.AllProviderRoutes()
+	if rt != nil {
+		if rt.Config.IsManifestMerchantSource() {
+			r.SecretWrite = false
+		}
+		if caps := rt.RouteCapabilities; caps != nil {
+			r.SecretWrite = r.SecretWrite && caps.SecretWrite
+		}
+	}
+	return r
 }
 
 // armedProviderRoutes derives the route surface from mid's DB-armed rail

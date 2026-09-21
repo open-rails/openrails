@@ -43,6 +43,10 @@ index, and adding the useful index clears the finding.
 This is an availability probe, not a production cost benchmark. The populated
 `internal/db/querytest` performance suite retains normal planner settings and
 checks actual execution time and buffer work.
+An indexed equality is the structural rule's heuristic, not a hard row limit.
+Creator HTTP lists use paginated queries. Internal catalog `GetAll` operations
+still return the full selected collection; their catalog-ID predicate satisfies
+the indexed-equality rule, so their earlier exemptions are no longer needed.
 The session uses the normal test login with explicit merchant parameters and
 session state for queries that call current_merchant_id(). Merchant predicates
 must be index-backed; no RLS policy adds a missing predicate for the query.
@@ -248,3 +252,23 @@ initialization SQL is outside sqlc's runtime query catalog. The standalone
 AuthKit initializer delegates identity migration and access to AuthKit's API
 and contains no raw SQL. Embedded billing never installs AuthKit grants or
 initializes a host-owned River fleet.
+
+### Creator catalog atomic upgrade (#1022)
+
+`0002_creator_catalogs.up.sql` is an atomic additive backfill: it creates one
+merchant default catalog for each existing product-owning merchant, fills the
+new product binding, validates it and installs immutable identity guards before
+committing. Product UUIDs, prices and purchase relationships are unchanged.
+It intentionally holds the product ALTER lock through this work; run it before
+starting upgraded application writers. It is not an online expand/contract plan.
+Explicit transaction-local lock/statement timeouts bound lock acquisition and
+statement execution; a failure rolls back the migration rather than publishing
+partial ownership.
+
+The two `constraint-missing-not-valid` exceptions on VALIDATE retain that atomic
+boundary. NOT VALID is followed by validation in the same transaction, so no
+claim is made that the lock is released between them. The
+`adding-not-nullable-field` exception is backed by the already validated
+`products_catalog_present` CHECK; PostgreSQL can prove non-nullness without a
+second table scan when setting the column flag. These are statement-specific
+exceptions, not exclusions of the file or rule.

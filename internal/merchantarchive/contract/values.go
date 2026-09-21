@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
@@ -58,6 +59,14 @@ func ValidateValues(p Profile, values []*string) error {
 			continue
 		}
 		v := *values[i]
+		// An owner subject is an opaque host identity, not free-form metadata.
+		// Preserve exact UTF-8 bytes (including URL/non-UUID subject formats).
+		if p.Name == "catalogs" && c.Name == "owner_subject" {
+			if err := catalogscope.ValidateSubject(v); err != nil {
+				return err
+			}
+			continue
+		}
 		if c.Type == "text" || strings.HasPrefix(c.Type, "character varying") {
 			if !(encodedKey && (c.Name == "idempotency_key" || p.Name == "ledger_transfers" && c.Name == "source_id")) && !safeText(v) {
 				return fmt.Errorf("sensitive text in %s.%s", p.Name, c.Name)
