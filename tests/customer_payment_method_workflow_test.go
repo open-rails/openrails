@@ -23,11 +23,12 @@ import (
 )
 
 func TestCustomerPaymentMethodAuthorityAndSavedSourceUpdate(t *testing.T) {
-	var writes atomic.Int64
+	var writes, calls atomic.Int64
 	var vault atomic.Value
 	vault.Store("old-vault")
 	railSub := "source-" + uuid.NewString()
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
 		if r.Method == http.MethodGet && r.URL.Path == "/subscriptions/"+railSub {
 			fmt.Fprintf(w, `{"id":%q,"customer_vault_id":%q,"delayed_condition":"active"}`, railSub, vault.Load().(string))
 			return
@@ -131,19 +132,30 @@ func TestCustomerPaymentMethodAuthorityAndSavedSourceUpdate(t *testing.T) {
 			if row.code != "" {
 				require.Contains(t, string(raw), row.code)
 			}
-			require.Zero(t, writes.Load())
+			require.Zero(t, calls.Load())
 		})
 	}
 	// The same credential can see its own list but cannot change another payer's card.
 	for _, method := range []string{http.MethodPut, http.MethodDelete} {
 		status, raw := requestWorkflowJSON(t, method, f.hostURL+"/v1/me/payment-methods/"+openrails.PaymentMethodID(foreign).String(), token, map[string]string{"payment_token": "opaque"})
 		require.Equal(t, http.StatusForbidden, status, string(raw))
-		require.Zero(t, writes.Load())
+		require.Zero(t, calls.Load())
 	}
 	status, raw := requestWorkflowJSON(t, http.MethodGet, f.hostURL+"/v1/me/payment-methods", token, nil)
 	require.Equal(t, http.StatusOK, status, string(raw))
 	require.Contains(t, string(raw), openrails.PaymentMethodID(newMethod).String())
 	require.False(t, strings.Contains(string(raw), openrails.PaymentMethodID(foreign).String()))
+	require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		var observed uuid.UUID
+		if err := rt.DB.Qx(ctx).QueryRow(ctx, `SELECT payment_method_id FROM billing.subscriptions WHERE id=$1`, sub).Scan(&observed); err != nil {
+			return err
+		}
+		require.Equal(t, old, observed)
+		var pending int
+		err := rt.DB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.rail_intents WHERE merchant_id=$1`, mid).Scan(&pending)
+		require.Zero(t, pending)
+		return err
+	}))
 	status, raw = requestWorkflowJSON(t, http.MethodPut, target(sub), token, map[string]string{"payment_method_id": openrails.PaymentMethodID(newMethod).String()})
 	require.Equal(t, http.StatusOK, status, string(raw))
 	require.EqualValues(t, 1, writes.Load())

@@ -2,27 +2,10 @@
 
 package tests
 
-// Live NMI lifecycle E2E — the Go replacement for the old
-// scripts/mobius_live_lifecycle_e2e.sh shell script. It drives the real
-// OpenRails HTTP API surface against a real NMI *sandbox* account (creds from
-// the environment) and verifies remote state through NMI's Query API:
-//
-//	register a live "nmi" provider -> ensure an NMI sandbox recurring plan ->
-//	seed catalog (one-off + recurring prices on the "nmi" provider) ->
-//	vault a sandbox card -> one-off checkout -> subscription checkout ->
-//	verify both at NMI (query.php) -> signed merchant webhook (idempotent x2)
-//	-> subscription active -> cancel.
-//
-// The ONE step that cannot run in-process is browser Collect.js tokenization
-// (OpenRails never accepts a raw PAN, #547 — POST /v1/me/payment-methods
-// requires an opaque, origin-restricted Collect.js token). Its exact
-// server-side equivalent is the NMI Customer Vault (security-key based), so the
-// payment method is vaulted directly at NMI here and recorded in OpenRails with
-// that real vault id; every subsequent step is the real HTTP API + real NMI.
-//
-// Requires a real NMI sandbox account: NMI_SANDBOX_SECURITY_KEY and
-// NMI_WEBHOOK_SIGNING_SECRET. Skips otherwise.
-
+// Explicit real NMI sandbox qualification. This is never fake-provider proof.
+// Run only with NMI_SANDBOX_SECURITY_KEY and NMI_WEBHOOK_SIGNING_SECRET set.
+// Browser Collect.js tokenization remains a separate qualification: this test
+// creates a sandbox vault directly, then uses verified customer HTTP checkout.
 import (
 	"context"
 	"encoding/json"
@@ -36,230 +19,135 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-rails/openrails"
-
 	"github.com/google/uuid"
-	"github.com/stretchr/testify/require"
-
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/permissions"
+	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/stretchr/testify/require"
 )
 
 const (
-	nmiE2EProvider   = "nmi"
 	nmiE2ETestCard   = "4111111111111111"
-	nmiE2ECardExpiry = "1228" // MMYY
+	nmiE2ECardExpiry = "1228"
 	nmiE2ECardCVV    = "123"
 )
 
-// TestNMILiveLifecycleE2E exercises the full card lifecycle through the OpenRails
-// HTTP API against a real NMI sandbox account.
 func TestNMILiveLifecycleE2E(t *testing.T) {
-	securityKey := strings.TrimSpace(os.Getenv("NMI_SANDBOX_SECURITY_KEY"))
-	if securityKey == "" {
-		t.Skip("NMI_SANDBOX_SECURITY_KEY with a real NMI sandbox account key is required for the live lifecycle E2E")
+	key, secret := strings.TrimSpace(os.Getenv("NMI_SANDBOX_SECURITY_KEY")), strings.TrimSpace(os.Getenv("NMI_WEBHOOK_SIGNING_SECRET"))
+	if key == "" || secret == "" {
+		t.Skip("real sandbox NMI_SANDBOX_SECURITY_KEY and NMI_WEBHOOK_SIGNING_SECRET required")
 	}
-
-	suite := getSharedTestSuite(t)
-	runID := uuid.NewString()
-
-	// 1. Register a LIVE "nmi" provider backed by the real sandbox account and
-	// rewire the runtime services to use it (mirrors configureSecondaryNMIProvider
-	// but with the real NMI endpoints + sandbox key, not a mock).
-	client := registerLiveNMIProvider(t, suite, securityKey)
-
-	// 2. Pick a USD recurring price and a USD one-off price, and bind them to the
-	// "nmi" provider. Ensure a matching NMI sandbox recurring plan exists.
-	recurring, oneOff := pickUSDPrices(t, suite)
-	// NMI flags an identical amount+card as a duplicate transaction, so give each
-	// run a unique charge amount (the old shell harness did the same).
-	nowUnixNano := time.Now().UnixNano()
-	setPriceAmount(t, suite, oneOff, (100+(nowUnixNano%400))*10_000)
-	setPriceAmount(t, suite, recurring, (100+((nowUnixNano/7)%400))*10_000)
-	planID := fmt.Sprintf("openrails_e2e_nmi_%d_d%d", recurring.Amount, derefInt(recurring.RecurringCycleDays()))
-	ensureNMISandboxPlan(t, client, securityKey, planID, recurring)
-	bindPriceToNMIProvider(t, suite, recurring.ID, planID)
-	bindPriceToNMIProvider(t, suite, oneOff.ID, "")
-
-	// 4. Vault a sandbox card directly at NMI (the browser-Collect.js-equivalent
-	// server-side step) and record the OpenRails payment method with the real
-	// vault id.
-	// Isolate the one-off and subscription flows under separate customers so the
-	// one-off entitlement grant doesn't conflict with the subscription purchase.
-	// Each gets its own NMI sandbox vault (vault_id is unique per payment method).
-	mkVaultedPM := func(user string) *models.PaymentMethod {
-		return suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
-			UserID:     user,
-			Rail:       models.Rail(nmiE2EProvider),
-			VaultID:    createNMISandboxVault(t, client, securityKey),
-			LastFour:   nmiE2ETestCard[len(nmiE2ETestCard)-4:],
-			CardType:   "Visa",
-			ExpiryDate: "12/28",
-		})
-	}
-	oneOffUser := uuid.NewString()
-	subUser := uuid.NewString()
-	oneOffPM := mkVaultedPM(oneOffUser)
-	subPM := mkVaultedPM(subUser)
-	t.Logf("vaulted NMI sandbox cards: one_off_pm=%s(vault=%s) sub_pm=%s(vault=%s)", oneOffPM.ID, oneOffPM.RailCustomerRef, subPM.ID, subPM.RailCustomerRef)
-
-	oneOffRouter := newHostSeamSelfRouter(t, suite, oneOffUser, nil)
-	subRouter := newHostSeamSelfRouter(t, suite, subUser, nil)
-
-	// 5. One-off checkout charging the saved vault, through the HTTP API.
-	oneOffResp := postSelfCheckout(t, oneOffRouter, map[string]any{
-		"price_id": openrails.PriceID(oneOff.ID).String(),
-		"mode":     "one_off",
-		"metadata": map[string]string{"e2e_run_id": runID},
-		"payment":  map[string]any{"rail": nmiE2EProvider, "payment_method_id": openrails.PaymentMethodID(oneOffPM.ID).String()},
+	f := newTreasuryWorkflow(t)
+	rt := f.surface.App().Runtime
+	integrationharness.SeedPSPs(t.Context(), t, rt, f.merchant.MerchantID, config.PSPSet{"nmi": {Rail: "nmi", AccountID: "qualification-" + uuid.NewString(), NMI: &config.NMIRailConfig{SecurityKey: key, WebhookSigningSecret: secret}}})
+	provider, err := nmi.NewClient("nmi", &config.NMIProviderSettings{SecurityKey: key, WebhookSecret: secret}, true)
+	require.NoError(t, err)
+	require.Equal(t, nmi.DefaultDirectPostURL, provider.DirectPostURL)
+	require.Equal(t, nmi.DefaultQueryAPIURL, provider.QueryURL)
+	ctx := merchant.WithID(t.Context(), f.merchant.MerchantID)
+	// The actual host cancel route queues River work; run the existing fleet to
+	// consume that public request, with the test owning its lifetime.
+	workerCtx, cancel := context.WithCancel(context.Background())
+	require.NoError(t, rt.InitRiver(workerCtx))
+	workers := make(chan error, 1)
+	go func() { workers <- rt.RunWorkers(workerCtx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-workers; err != nil {
+			require.ErrorIs(t, err, context.Canceled)
+		}
 	})
-	require.Equal(t, "succeeded", oneOffResp.Status, "one-off checkout should be immediately approved by NMI: %+v", oneOffResp)
-	require.NotEmpty(t, oneOffResp.Payment.TransactionID, "one-off should carry an NMI transaction id")
-	t.Logf("one-off charge approved: nmi_txn=%s", oneOffResp.Payment.TransactionID)
-
-	// DB: a completed payment exists for the one-off.
-	assertCompletedPayment(t, suite, oneOffUser, oneOff.Amount, oneOff.Currency)
-
-	// 6. Subscription checkout with the same vault (separate customer).
-	subResp := postSelfCheckout(t, subRouter, map[string]any{
-		"price_id": openrails.PriceID(recurring.ID).String(),
-		"mode":     "subscription",
-		"metadata": map[string]string{"e2e_run_id": runID},
-		"payment":  map[string]any{"rail": nmiE2EProvider, "payment_method_id": openrails.PaymentMethodID(subPM.ID).String()},
+	t.Cleanup(func() {
+		require.NoError(t, rt.DB.RunInMerchantConn(context.WithoutCancel(ctx), func(ctx context.Context) error {
+			_, err := rt.DB.Qx(ctx).Exec(ctx, `UPDATE billing.psps SET archived=true WHERE merchant_id=$1`, f.merchant.MerchantID.UUID())
+			return err
+		}))
 	})
-	require.Contains(t, []string{"succeeded", "pending"}, subResp.Status, "subscription checkout status: %+v", subResp)
-	require.NotEmpty(t, subResp.SubscriptionID, "subscription checkout should return a subscription id")
-	require.NotEmpty(t, subResp.Payment.TransactionID, "subscription checkout should carry an NMI transaction id")
-
-	subs := suite.GetAllSubscriptionsByUserID(subUser)
-	require.NotEmpty(t, subs, "expected a local subscription row")
-	sub := subs[0]
-	providerSubID := sub.RailSubscriptionID
-	require.NotEmpty(t, providerSubID, "expected the local subscription to carry the NMI recurring id")
-	t.Logf("subscription created: local=%s provider=%s nmi_txn=%s", sub.ID, providerSubID, subResp.Payment.TransactionID)
-
-	// 7. Verify remote state at NMI via the Query API.
-	verifyNMITransaction(t, client, securityKey, oneOffResp.Payment.TransactionID, oneOff.Amount)
-	verifyNMITransaction(t, client, securityKey, subResp.Payment.TransactionID, recurring.Amount)
-	verifyNMIRecurring(t, client, securityKey, providerSubID)
-
-	// 8. The immediate NMI approval should have activated the subscription
-	// synchronously (#330) — no webhook required for the happy path. (Inbound
-	// merchant-webhook signature verification is covered separately by
-	// internal/http/routes_merchant_webhook_integration_test.go.)
-	requireSubscriptionStatus(t, suite, sub.ID, models.StatusActive, 30*time.Second)
-
-	// 9. Cancel through the HTTP API. Cancellation is async (enqueues a River job
-	// that calls NMI and flips the local status), so poll for the terminal state.
-	wc := doHostSeamSelf(subRouter, http.MethodPost, "/v1/me/subscriptions/"+openrails.SubscriptionID(sub.ID).String()+"/cancel", `{"feedback":"nmi live e2e cancel"}`)
-	require.Contains(t, []int{http.StatusOK, http.StatusAccepted}, wc.Code, "cancel should be accepted: %s", wc.Body.String())
-	requireSubscriptionStatus(t, suite, sub.ID, models.StatusCancelled, 90*time.Second)
-	t.Logf("== PASS live NMI lifecycle E2E (run %s) ==", runID)
-}
-
-// --- checkout response decoding ---
-
-type selfCheckoutResponse struct {
-	Status         string `json:"status"`
-	SubscriptionID string `json:"subscription_id"`
-	Payment        struct {
-		TransactionID string `json:"transaction_id"`
-	} `json:"payment"`
-}
-
-func postSelfCheckout(t *testing.T, router http.Handler, body map[string]any) selfCheckoutResponse {
-	t.Helper()
-	w := doHostSeamSelf(router, http.MethodPost, "/v1/me/checkout", string(mustJSON(t, body)))
-	require.Equalf(t, http.StatusOK, w.Code, "checkout should return 200: %s", w.Body.String())
-	var resp selfCheckoutResponse
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp), w.Body.String())
-	return resp
-}
-
-// --- live NMI provider wiring (mirror of configureSecondaryNMIProvider, real account) ---
-
-func registerLiveNMIProvider(t *testing.T, suite *TestContainerSuite, securityKey string) *nmi.NMIClient {
-	t.Helper()
-	suite.Rails[nmiE2EProvider] = &config.PSPConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: securityKey}}
-
-	client, err := nmi.NewClient(nmiE2EProvider, &config.NMIProviderSettings{
-		SecurityKey: securityKey,
-	}, true)
-	require.NoError(t, err)
-	// Real NMI sandbox endpoints (defaults) — NOT a mock.
-	require.Equal(t, nmi.DefaultDirectPostURL, client.DirectPostURL)
-	require.Equal(t, nmi.DefaultQueryAPIURL, client.QueryURL)
-
-	rt := suite.App.Runtime
-
-	// The checkout money path resolves the NMI client from MERCHANT SECRETS
-	// first (production posture); the suite seeds a placeholder key there, so
-	// overwrite it with the real sandbox key or every charge 401s at NMI.
-	secretName, err := merchants.PSPSecretName("nmi", config.ExpectedProviderEnvironment(suite.Config.IsTestMode()), testNMIPSPID(), "security_key")
-	require.NoError(t, err)
-	_, err = rt.Merchants.PutCredential(dbtest.WithTestMerchant(context.Background()), dbtest.TestMerchantID, secretName, securityKey)
-	require.NoError(t, err)
-
-	return client
-}
-
-func bindPriceToNMIProvider(t *testing.T, suite *TestContainerSuite, priceID uuid.UUID, planID string) {
-	t.Helper()
-	price := suite.GetPrice(priceID)
-	if price.PSPLinks == nil {
-		price.PSPLinks = map[string]map[string]string{}
-	}
-	entry := map[string]string{}
-	if planID != "" {
-		entry[models.RailKeyPlanID] = planID
-	}
-	price.PSPLinks[nmiE2EProvider] = entry
-	price.PSPLinks[nmiE2EProvider][models.RailKeyRail] = string(models.RailNMI)
-	require.NoError(t, catalog.NewPriceService(suite.FixtureDB()).UpdatePSPLinks(dbtest.WithTestMerchant(context.Background()), price.ID, price.PSPLinks))
-}
-
-func setPriceAmount(t *testing.T, suite *TestContainerSuite, p *models.Price, amount int64) {
-	t.Helper()
-	_, err := suite.Pool.Exec(context.Background(), "UPDATE billing.prices SET amount = $1 WHERE id = $2", amount, p.ID)
-	require.NoError(t, err)
-	p.Amount = amount
-}
-
-func pickUSDPrices(t *testing.T, suite *TestContainerSuite) (recurring, oneOff *models.Price) {
-	t.Helper()
-	for _, product := range suite.SeedProducts() {
-		for _, p := range product.Prices {
-			if !strings.EqualFold(p.Currency, "USD") {
-				continue
+	run := uuid.NewString()
+	for _, recurring := range []bool{false, true} {
+		customer, token := f.actor(t, []string{permissions.CustomerAll})
+		amount := (100 + time.Now().UnixNano()%400) * 10_000
+		product, err := f.client.CreateProduct(t.Context(), openrails.CreateProductRequest{Key: "live-" + uuid.NewString(), DisplayName: "NMI sandbox qualification"})
+		require.NoError(t, err)
+		request := openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: amount, Currency: "USD", PSPLinks: map[string]map[string]string{"nmi": {"rail": "nmi"}}}
+		mode := "one_off"
+		if recurring {
+			mode = "subscription"
+			hours := 720
+			request.AccessDurationHours = &hours
+			request.AutoRenew = true
+			plan := fmt.Sprintf("openrails_e2e_nmi_%d_d30", amount)
+			ensureNMISandboxPlan(t, provider, key, plan, amount, 30)
+			request.PSPLinks["nmi"]["plan_id"] = plan
+		}
+		price, err := f.client.CreatePrice(t.Context(), request)
+		require.NoError(t, err)
+		vault := createNMISandboxVault(t, provider, key)
+		method := uuid.New()
+		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			q := rt.DB.Qx(ctx)
+			psp := dbtest.EnsureTestPSP(ctx, t, q, f.merchant.MerchantID.UUID(), "nmi")
+			_, err := q.Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,rail_customer_ref,initial_transaction_id,last_four,card_type,expiry_date) VALUES($1,$2,$3,$4,'nmi','psp',$5,'','1111','Visa','12/28')`, method, f.merchant.MerchantID.UUID(), customer.UUID(), psp, vault)
+			return err
+		}))
+		status, raw := requestWorkflowJSON(t, http.MethodPost, f.hostURL+"/v1/me/checkout", token, map[string]any{"price_id": price.ID.String(), "mode": mode, "metadata": map[string]string{"e2e_run_id": run}, "payment": map[string]any{"rail": "nmi", "payment_method_id": openrails.PaymentMethodID(method).String()}})
+		require.Equal(t, http.StatusOK, status, string(raw))
+		var response struct {
+			Status         string `json:"status"`
+			SubscriptionID string `json:"subscription_id"`
+			Payment        struct {
+				TransactionID string `json:"transaction_id"`
+			} `json:"payment"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &response))
+		require.Equal(t, "succeeded", response.Status)
+		require.NotEmpty(t, response.Payment.TransactionID)
+		verifyNMITransaction(t, provider, key, response.Payment.TransactionID, amount)
+		var subscription uuid.UUID
+		var providerSub string
+		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			q := rt.DB.Qx(ctx)
+			var count int
+			err := q.QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2 AND transaction_id=$3 AND amount=$4 AND currency='USD' AND status='completed'`, f.merchant.MerchantID.UUID(), customer.UUID(), response.Payment.TransactionID, amount).Scan(&count)
+			if err != nil {
+				return err
 			}
-			if p.RecurringCycleDays() != nil && recurring == nil {
-				recurring = p
+			require.Equal(t, 1, count)
+			if !recurring {
+				return nil
 			}
-			if p.RecurringCycleDays() == nil && oneOff == nil {
-				oneOff = p
-			}
+			return q.QueryRow(ctx, `SELECT id,rail_subscription_id FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2 AND status='active'`, f.merchant.MerchantID.UUID(), customer.UUID()).Scan(&subscription, &providerSub)
+		}))
+		if recurring {
+			require.NotEmpty(t, response.SubscriptionID)
+			require.NotEmpty(t, providerSub)
+			verifyNMIRecurring(t, provider, key, providerSub)
+			status, raw = requestWorkflowJSON(t, http.MethodPost, f.hostURL+"/v1/me/subscriptions/"+openrails.SubscriptionID(subscription).String()+"/cancel", token, map[string]string{"feedback": "sandbox qualification complete"})
+			require.Contains(t, []int{http.StatusOK, http.StatusAccepted}, status, string(raw))
+			require.Eventually(t, func() bool {
+				var state string
+				err := rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+					return rt.DB.Qx(ctx).QueryRow(ctx, `SELECT status FROM billing.subscriptions WHERE id=$1`, subscription).Scan(&state)
+				})
+				return err == nil && state == "cancelled"
+			}, 90*time.Second, 500*time.Millisecond)
 		}
 	}
-	require.NotNil(t, recurring, "seed data should include a USD recurring price")
-	require.NotNil(t, oneOff, "seed data should include a USD one-off price")
-	return recurring, oneOff
 }
 
-// --- direct NMI sandbox calls (plan, vault, query) ---
-
-func ensureNMISandboxPlan(t *testing.T, client *nmi.NMIClient, securityKey, planID string, recurring *models.Price) {
+func ensureNMISandboxPlan(t *testing.T, client *nmi.NMIClient, securityKey, planID string, amount int64, cycleDays int) {
 	t.Helper()
 	out := postNMIForm(t, client.DirectPostURL, url.Values{
 		"security_key":  {securityKey},
 		"recurring":     {"add_plan"},
 		"plan_id":       {planID},
 		"plan_name":     {"OpenRails E2E " + planID},
-		"plan_amount":   {microUSDDecimalAmount(recurring.Amount)},
-		"day_frequency": {strconv.Itoa(derefInt(recurring.RecurringCycleDays()))},
+		"plan_amount":   {microUSDDecimalAmount(amount)},
+		"day_frequency": {strconv.Itoa(cycleDays)},
 		"plan_payments": {"0"},
 	})
 	// add_plan returns response=1 on create; an already-existing plan_id (NMI
@@ -348,50 +236,7 @@ func postNMIQuery(t *testing.T, urlStr string, values url.Values) string {
 	return string(raw)
 }
 
-// --- assertions / helpers ---
-
-func assertCompletedPayment(t *testing.T, suite *TestContainerSuite, userID string, amount int64, currency string) {
-	t.Helper()
-	for _, p := range suite.GetPaymentsByUserID(userID) {
-		if p.Status == "completed" && p.Amount == amount && strings.EqualFold(p.Currency, currency) {
-			return
-		}
-	}
-	t.Fatalf("expected a completed payment of %d %s for user %s", amount, currency, userID)
-}
-
-func requireSubscriptionStatus(t *testing.T, suite *TestContainerSuite, subID uuid.UUID, want models.SubscriptionStatus, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	var last models.SubscriptionStatus
-	for time.Now().Before(deadline) {
-		s := suite.GetSubscription(subID)
-		if s != nil {
-			last = s.Status
-			if s.Status == want {
-				return
-			}
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	t.Fatalf("subscription %s did not reach status %q within %s (last=%q)", subID, want, timeout, last)
-}
-
 func microUSDDecimalAmount(micros int64) string {
 	cents := micros / 10_000
 	return fmt.Sprintf("%d.%02d", cents/100, cents%100)
-}
-
-func derefInt(p *int) int {
-	if p == nil {
-		return 0
-	}
-	return *p
-}
-
-func mustJSON(t *testing.T, v any) []byte {
-	t.Helper()
-	b, err := json.Marshal(v)
-	require.NoError(t, err)
-	return b
 }
