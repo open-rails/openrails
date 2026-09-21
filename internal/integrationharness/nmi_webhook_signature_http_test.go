@@ -78,7 +78,9 @@ func TestNMIMerchantWebhookSignatureHTTP(t *testing.T) {
 	require.NoError(t, pool.QueryRow(t.Context(), `SELECT status FROM billing.subscriptions WHERE id=$1`, rows.subscriptionID).Scan(&state))
 	require.Equal(t, "active", state)
 	t.Cleanup(func() {
-		_, err := h.Pool().Exec(context.Background(), `DELETE FROM public.river_job WHERE kind=$1 AND args->>'subscription_reference'=$2`, riverjobs.KindSubscriptionConverge, railSub)
+		_, err := pool.Exec(context.Background(), `UPDATE billing.psps SET archived=true WHERE merchant_id=$1`, owned.MerchantID.UUID())
+		require.NoError(t, err)
+		_, err = h.Pool().Exec(context.Background(), `DELETE FROM public.river_job WHERE kind=$1 AND args->>'subscription_reference'=$2`, riverjobs.KindSubscriptionConverge, railSub)
 		require.NoError(t, err, "clean up this subscription's queued wakeup before another worker runs")
 	})
 	quoted := bytes.Replace(body, []byte(`"subscription_id":`+railSub), []byte(`"subscription_id":"`+railSub+`"`), 1)

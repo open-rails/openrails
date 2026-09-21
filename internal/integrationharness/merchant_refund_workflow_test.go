@@ -4,6 +4,7 @@ package integrationharness
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -66,6 +67,10 @@ func TestMerchantRefundAuthorityAndReplayWorkflow(t *testing.T) {
 		"ccbill": {Rail: "ccbill", AccountID: ccbillAccount, CCBill: &config.CCBillRailConfig{Salt: "synthetic", DataLinkUsername: "synthetic", DataLinkPassword: "synthetic"}},
 	})
 	pool := h.MerchantPool(owned.MerchantID.UUID())
+	t.Cleanup(func() {
+		_, err := pool.Exec(context.Background(), `UPDATE billing.psps SET archived=true WHERE merchant_id=$1`, owned.MerchantID.UUID())
+		require.NoError(t, err)
+	})
 	payment := func(rail string) openrails.PaymentID {
 		t.Helper()
 		customer := openrails.CustomerID(uuid.New())
