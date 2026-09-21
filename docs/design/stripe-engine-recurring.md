@@ -11,7 +11,13 @@ or paginate that customer's PaymentIntents to find the exact operation metadata.
 An absent response/list match never authorizes another create, including after
 Stripe's idempotency retention expires. Successful PI state is insufficient: a
 separate captured Charge read must match the PI, customer, actual card, amount and
-currency. Already refunded/disputed charges cannot confer fresh paid access.
+currency. Already fully refunded or disputed charges cannot confer fresh paid access.
+Partial refunds preserve the existing access policy and are recorded separately.
+Their original capture is recorded with its separate reversal facts. Initial
+completion creates a canceled agreement with no grants or activation notification;
+renewal records original money without extending the period. Existing refund and
+dispute convergence can then link the out-of-order reversal to that original
+payment, including duplicate events.
 
 Authentication is an unresolved original payment, not a decline. A failed PI is
 canceled and read back canceled before terminal refusal releases the operation.

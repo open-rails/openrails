@@ -11,6 +11,11 @@ import (
 )
 
 type CreateMembershipParams struct {
+	// InitialPaymentReversal records a captured initial engine payment whose
+	// refund/dispute already exists at first readback. It creates accounting and
+	// a canceled agreement without granting access or announcing activation.
+	InitialPaymentReversal string
+
 	// PaymentCustodian is the frozen credential custody of the accepted payment.
 	PaymentCustodian string
 	// Prepared is supplied by a qualified durable initial-enrollment operation.

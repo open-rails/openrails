@@ -49,17 +49,20 @@ type StripeEnginePaymentResult struct {
 }
 
 type StripeEngineReceipt struct {
-	PaymentIntentID string          `json:"payment_intent_id"`
-	ChargeID        string          `json:"charge_id"`
-	CustomerRef     string          `json:"customer_ref"`
-	MethodRef       string          `json:"method_ref"`
-	AmountMinor     moneyutil.Cents `json:"amount_minor,string"`
-	Currency        string          `json:"currency"`
-	MerchantID      uuid.UUID       `json:"merchant_id"`
-	PSPID           uuid.UUID       `json:"psp_id"`
-	CustomerID      uuid.UUID       `json:"customer_id"`
-	OperationID     uuid.UUID       `json:"operation_id"`
-	Initial         bool            `json:"initial"`
+	RefundedAmountMinor moneyutil.Cents `json:"refunded_amount_minor,string,omitempty"`
+	Refunded            bool            `json:"refunded,omitempty"`
+	Disputed            bool            `json:"disputed,omitempty"`
+	PaymentIntentID     string          `json:"payment_intent_id"`
+	ChargeID            string          `json:"charge_id"`
+	CustomerRef         string          `json:"customer_ref"`
+	MethodRef           string          `json:"method_ref"`
+	AmountMinor         moneyutil.Cents `json:"amount_minor,string"`
+	Currency            string          `json:"currency"`
+	MerchantID          uuid.UUID       `json:"merchant_id"`
+	PSPID               uuid.UUID       `json:"psp_id"`
+	CustomerID          uuid.UUID       `json:"customer_id"`
+	OperationID         uuid.UUID       `json:"operation_id"`
+	Initial             bool            `json:"initial"`
 }
 
 func (p StripeEnginePaymentParams) validate() error {
@@ -318,14 +321,17 @@ func (s *StripeService) engineReceipt(ctx context.Context, p StripeEnginePayment
 		Disputed       bool            `json:"disputed"`
 		AmountRefunded int64           `json:"amount_refunded"`
 	}
-	if json.Unmarshal(body, &ch) != nil || ch.ID != ref || ch.Amount != int64(p.AmountMinor) || ch.AmountCaptured != int64(p.AmountMinor) || !strings.EqualFold(ch.Currency, p.Currency) || rawID(ch.Customer) != p.Instrument.RailCustomerRef || ch.PaymentMethod != p.Instrument.RailMethodRef || rawID(ch.PaymentIntent) != pi.ID || ch.Status != "succeeded" || !ch.Paid || !ch.Captured || ch.Refunded || ch.Disputed || ch.AmountRefunded != 0 {
+	if json.Unmarshal(body, &ch) != nil || ch.ID != ref || ch.Amount != int64(p.AmountMinor) || ch.AmountCaptured != int64(p.AmountMinor) || !strings.EqualFold(ch.Currency, p.Currency) || rawID(ch.Customer) != p.Instrument.RailCustomerRef || ch.PaymentMethod != p.Instrument.RailMethodRef || rawID(ch.PaymentIntent) != pi.ID || ch.Status != "succeeded" || !ch.Paid || !ch.Captured || ch.AmountRefunded < 0 || ch.AmountRefunded > ch.Amount || (ch.Refunded && ch.AmountRefunded != ch.Amount) {
 		return StripeEngineReceipt{}, errors.New("Stripe engine captured charge does not match accepted payment")
 	}
-	return StripeEngineReceipt{pi.ID, ref, p.Instrument.RailCustomerRef, p.Instrument.RailMethodRef, p.AmountMinor, p.Currency, p.MerchantID, p.PSPID, p.CustomerID, p.OperationID, p.Initial}, nil
+	return StripeEngineReceipt{PaymentIntentID: pi.ID, ChargeID: ref, CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef, AmountMinor: p.AmountMinor, Currency: p.Currency, MerchantID: p.MerchantID, PSPID: p.PSPID, CustomerID: p.CustomerID, OperationID: p.OperationID, Initial: p.Initial, RefundedAmountMinor: moneyutil.Cents(ch.AmountRefunded), Refunded: ch.Refunded, Disputed: ch.Disputed}, nil
 }
 func (r StripeEngineReceipt) Matches(p StripeEnginePaymentParams) error {
 	if err := p.validate(); err != nil {
 		return err
+	}
+	if r.RefundedAmountMinor < 0 || r.RefundedAmountMinor > r.AmountMinor || (r.Refunded && r.RefundedAmountMinor != r.AmountMinor) {
+		return errors.New("Stripe charge reversal facts are inconsistent")
 	}
 	if !stripeEngineID(r.PaymentIntentID, "pi_") || !stripeEngineID(r.ChargeID, "ch_") || r.CustomerRef != p.Instrument.RailCustomerRef || r.MethodRef != p.Instrument.RailMethodRef || r.AmountMinor != p.AmountMinor || r.Currency != p.Currency || r.MerchantID != p.MerchantID || r.PSPID != p.PSPID || r.CustomerID != p.CustomerID || r.OperationID != p.OperationID || r.Initial != p.Initial {
 		return errors.New("Stripe engine receipt differs from accepted operation")
@@ -398,4 +404,17 @@ func (s *StripeService) FinalizeEngineDecline(ctx context.Context, p StripeEngin
 		return canceled, errors.New("Stripe engine decline remains executable")
 	}
 	return canceled, nil
+}
+
+// ReversalKind preserves the original capture while withholding fresh access.
+// Existing refund/dispute convergence records the separate reversal after the
+// original charge is present locally; it must never be treated as a new charge.
+func (r StripeEngineReceipt) ReversalKind() string {
+	if r.Disputed {
+		return "dispute"
+	}
+	if r.Refunded || (r.AmountMinor > 0 && r.RefundedAmountMinor == r.AmountMinor) {
+		return "refund"
+	}
+	return ""
 }

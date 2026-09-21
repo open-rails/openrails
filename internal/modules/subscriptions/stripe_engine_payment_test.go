@@ -204,8 +204,6 @@ func TestStripeEngineRejectsWrongEvidence(t *testing.T) {
 		{"charge_capture", func(pi, ch map[string]any) { ch["captured"] = false }},
 		{"charge_amount", func(pi, ch map[string]any) { ch["amount_captured"] = 1 }},
 		{"charge_refunded", func(pi, ch map[string]any) { ch["refunded"] = true }},
-		{"charge_disputed", func(pi, ch map[string]any) { ch["disputed"] = true }},
-		{"charge_part_refunded", func(pi, ch map[string]any) { ch["amount_refunded"] = 1 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, p := engineFixture()
@@ -292,4 +290,41 @@ func TestStripeEngineConcurrentRecoveryReads(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestStripeEngineReversalRetainsOriginalCapture(t *testing.T) {
+	for _, kind := range []string{"refund", "dispute", "partial_refund"} {
+		t.Run(kind, func(t *testing.T) {
+			s, p := engineFixture()
+			ch := engineCharge(p)
+			if kind == "refund" {
+				ch["refunded"] = true
+				ch["amount_refunded"] = 1299
+			} else if kind == "partial_refund" {
+				ch["amount_refunded"] = 1
+			} else {
+				ch["disputed"] = true
+			}
+			installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/v1/charges/ch_fixture" {
+					return engineResponse(200, ch), nil
+				}
+				return engineResponse(200, enginePI(p)), nil
+			})
+			result, found, err := s.ReadEnginePayment(context.Background(), p, "pi_fixture")
+			if err != nil || !found || result.Receipt == nil {
+				t.Fatalf("%+v %v", result, err)
+			}
+			want := kind
+			if kind == "partial_refund" {
+				want = ""
+			}
+			if result.Receipt.ReversalKind() != want {
+				t.Fatal("lost reversal facts")
+			}
+			if err := result.Receipt.Matches(p); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }

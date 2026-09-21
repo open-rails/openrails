@@ -91,3 +91,10 @@ func (r CollectedReceipt) StripeEnginePaymentIntentID() string {
 	}
 	return ""
 }
+
+func (r CollectedReceipt) ReversalKind() string {
+	if r.data.StripeEngine != nil {
+		return r.data.StripeEngine.ReversalKind()
+	}
+	return ""
+}

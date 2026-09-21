@@ -18,14 +18,26 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	orauthkit "github.com/open-rails/openrails/embed/authkit"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/modules/webhooks"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
 // Real self HTTP/auth/session/runtime/ledger path with a deterministic Stripe
 // transport. Card entry and issuer authentication still require sandbox proof.
 func TestStripeEngineSignupSelfHTTP(t *testing.T) {
+	for _, reversal := range []string{"", "refund", "dispute", "partial_refund"} {
+		name := reversal
+		if name == "" {
+			name = "authentication"
+		}
+		t.Run(name, func(t *testing.T) { stripeEngineSignupSelfHTTP(t, reversal) })
+	}
+}
+func stripeEngineSignupSelfHTTP(t *testing.T, reversal string) {
 	h := New(t, t.Context())
 	var mu sync.Mutex
 	var setup, payment map[string]any
@@ -75,7 +87,15 @@ func TestStripeEngineSignupSelfHTTP(t *testing.T) {
 			require.Equal(t, "off_session", r.PostForm.Get("setup_future_usage"))
 			require.Equal(t, "false", r.PostForm.Get("off_session"))
 			payment = map[string]any{"id": "pi_signup", "status": "requires_action", "customer": "cus_signup", "payment_method": "pm_signup", "amount": 999, "amount_received": 0, "currency": "usd", "setup_future_usage": "off_session", "capture_method": "automatic", "confirmation_method": "automatic", "livemode": false, "metadata": meta, "client_secret": "pi_signup_secret_private", "latest_charge": "ch_signup"}
+			if reversal != "" {
+				paymentPaid = true
+				w.WriteHeader(http.StatusBadGateway)
+				write(map[string]any{"error": "simulated accepted payment with lost response"})
+				return
+			}
 			write(payment)
+		case r.Method == "GET" && r.URL.Path == "/v1/payment_intents":
+			write(map[string]any{"data": []any{payment}, "has_more": false})
 		case r.Method == "GET" && r.URL.Path == "/v1/payment_intents/pi_signup":
 			if paymentPaid {
 				payment["status"] = "succeeded"
@@ -83,7 +103,18 @@ func TestStripeEngineSignupSelfHTTP(t *testing.T) {
 			}
 			write(payment)
 		case r.Method == "GET" && r.URL.Path == "/v1/charges/ch_signup":
-			write(map[string]any{"id": "ch_signup", "payment_intent": "pi_signup", "customer": "cus_signup", "payment_method": "pm_signup", "amount": 999, "amount_captured": 999, "currency": "usd", "status": "succeeded", "paid": true, "captured": true})
+			ch := map[string]any{"id": "ch_signup", "payment_intent": "pi_signup", "customer": "cus_signup", "payment_method": "pm_signup", "amount": 999, "amount_captured": 999, "currency": "usd", "status": "succeeded", "paid": true, "captured": true}
+			if reversal == "refund" {
+				ch["refunded"] = true
+				ch["amount_refunded"] = 999
+			}
+			if reversal == "partial_refund" {
+				ch["amount_refunded"] = 400
+			}
+			if reversal == "dispute" {
+				ch["disputed"] = true
+			}
+			write(ch)
 		default:
 			t.Errorf("unexpected Stripe native catalog/schedule or wire route: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(500)
@@ -161,11 +192,33 @@ func TestStripeEngineSignupSelfHTTP(t *testing.T) {
 	enrollment := call("POST", fmt.Sprintf("/checkout/%s/confirm", quote["id"]), "", map[string]any{"payment": map[string]string{"rail": "stripe"}})
 	operation := enrollment["operation"].(map[string]any)
 	require.Equal(t, "unknown_needs_verify", operation["status"])
-	recovery := call("GET", fmt.Sprintf("/payment-operations/%s/authentication", operation["id"]), "", nil)
-	require.Equal(t, "pi_signup_secret_private", recovery["client_secret"])
-	mu.Lock()
-	paymentPaid = true
-	mu.Unlock()
+	var reversalEvent []byte
+	webhookService := &webhooks.StripeWebhookService{DB: rt.DB, PaymentService: rt.PaymentService, SubscriptionService: rt.SubscriptionService, PriceService: rt.PriceService, SubscriptionLifecycleService: rt.SubscriptionLifecycleService, Clock: rt.Clock}
+	deliverReversal := func() error {
+		return rt.DB.RunInMerchantConn(db.WithPSPID(merchant.WithID(t.Context(), owned.MerchantID), psp), func(ctx context.Context) error { return webhookService.HandleStripeWebhook(ctx, reversalEvent) })
+	}
+	if reversal == "" {
+		recovery := call("GET", fmt.Sprintf("/payment-operations/%s/authentication", operation["id"]), "", nil)
+		require.Equal(t, "pi_signup_secret_private", recovery["client_secret"])
+		require.Equal(t, "pm_signup", recovery["provider_payment_method_id"])
+		mu.Lock()
+		paymentPaid = true
+		mu.Unlock()
+	} else {
+		eventType, status, ref := "refund.created", "succeeded", "re_signup"
+		if reversal == "dispute" {
+			eventType = "charge.dispute.created"
+			status = "needs_response"
+			ref = "dp_signup"
+		}
+		refundAmount := 999
+		if reversal == "partial_refund" {
+			refundAmount = 400
+		}
+		reversalEvent, err = json.Marshal(map[string]any{"id": "evt_reversal", "type": eventType, "data": map[string]any{"object": map[string]any{"id": ref, "charge": "ch_signup", "payment_intent": "pi_signup", "amount": refundAmount, "currency": "usd", "status": status, "reason": "fraudulent"}}})
+		require.NoError(t, err)
+		require.Error(t, deliverReversal(), "out-of-order reversal waits for the original payment")
+	}
 	result := call("POST", fmt.Sprintf("/payment-operations/%s/authentication/confirm", operation["id"]), "", nil)
 	require.Equal(t, "succeeded", result["status"])
 	completed := call("GET", fmt.Sprintf("/checkout/%s", quote["id"]), "", nil)
@@ -181,6 +234,36 @@ func TestStripeEngineSignupSelfHTTP(t *testing.T) {
 	require.NoError(t, pool.QueryRow(t.Context(), `SELECT collection_policy,coalesce(rail_subscription_id,'') FROM billing.subscriptions WHERE customer_id=$1`, user.ID).Scan(&policy, &external))
 	require.Equal(t, "engine", policy)
 	require.Empty(t, external)
+	if reversal != "" {
+		require.NoError(t, deliverReversal())
+		require.NoError(t, deliverReversal(), "duplicate reversal converges once")
+		var count, grants int
+		var status string
+		require.NoError(t, pool.QueryRow(t.Context(), `SELECT count(*) FROM billing.payments WHERE customer_id=$1`, user.ID).Scan(&count))
+		require.Equal(t, 2, count, "one original and one refund/dispute movement")
+		require.NoError(t, pool.QueryRow(t.Context(), `SELECT status FROM billing.subscriptions WHERE customer_id=$1`, user.ID).Scan(&status))
+		if reversal == "partial_refund" {
+			require.Equal(t, "active", status)
+		} else {
+			require.Equal(t, "cancelled", status)
+		}
+		require.NoError(t, pool.QueryRow(t.Context(), `SELECT count(*) FROM billing.grants WHERE customer_id=$1 AND event='grant'`, user.ID).Scan(&grants))
+		if reversal == "partial_refund" {
+			require.Positive(t, grants, "partial refund preserves existing paid-access policy")
+		} else {
+			require.Zero(t, grants, "fully reversed signup must never grant access")
+		}
+		if reversal == "dispute" {
+			reversalEvent, err = json.Marshal(map[string]any{"id": "evt_dispute_won", "type": "charge.dispute.closed", "data": map[string]any{"object": map[string]any{"id": "dp_signup", "charge": "ch_signup", "payment_intent": "pi_signup", "amount": 999, "currency": "usd", "status": "won"}}})
+			require.NoError(t, err)
+			require.NoError(t, deliverReversal())
+			require.NoError(t, deliverReversal())
+			require.NoError(t, pool.QueryRow(t.Context(), `SELECT count(*) FROM billing.payments WHERE customer_id=$1`, user.ID).Scan(&count))
+			require.Equal(t, 3, count)
+			require.NoError(t, pool.QueryRow(t.Context(), `SELECT status FROM billing.subscriptions WHERE customer_id=$1`, user.ID).Scan(&status))
+			require.Equal(t, "cancelled", status, "won dispute restores money without restarting an engine agreement")
+		}
+	}
 	mu.Lock()
 	require.Equal(t, 1, setupCreates)
 	require.Equal(t, 1, paymentCreates)
