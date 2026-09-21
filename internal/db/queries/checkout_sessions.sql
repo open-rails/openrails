@@ -78,7 +78,8 @@ LIMIT 1;
 -- or#837: batched — row_limit bounds one statement, the caller loops.
 -- name: ExpireCheckoutSessions :execrows
 UPDATE openrails.checkout_sessions
-SET status = 'expired', updated_at = sqlc.arg(now)
+SET rail_state = CASE WHEN mode='payment_method' THEN rail_state #- '{capture,secret_ciphertext}' ELSE rail_state END,
+    status = 'expired', updated_at = sqlc.arg(now)
 WHERE deleted_at IS NULL
   AND ctid IN (
     SELECT cs.ctid FROM openrails.checkout_sessions cs
@@ -103,7 +104,71 @@ ORDER BY expires_at;
 -- name: ExpireCheckoutSessionByID :execrows
 -- Repair for life.checkout_session.stale: mark one stale session expired.
 UPDATE openrails.checkout_sessions
-SET status = 'expired', updated_at = sqlc.arg(now)::timestamptz
+SET rail_state = CASE WHEN mode='payment_method' THEN rail_state #- '{capture,secret_ciphertext}' ELSE rail_state END,
+    status = 'expired', updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND status IN ('created', 'requires_action')
   AND deleted_at IS NULL;
+
+-- A setup row is addressed by the stable merchant/customer/idempotency-key
+-- UUID. The first writer owns its immutable request fingerprint and binding.
+-- name: CreatePaymentMethodSetupSession :execrows
+INSERT INTO openrails.checkout_sessions
+(id,merchant_id,customer_id,psp_id,mode,rail,status,expires_at,rail_state,metadata,created_at,updated_at)
+VALUES(sqlc.arg(id),sqlc.arg(merchant_id),sqlc.arg(customer_id),sqlc.arg(psp_id),'payment_method','nmi','created',sqlc.arg(expires_at),sqlc.arg(rail_state),sqlc.arg(metadata),sqlc.arg(now),sqlc.arg(now))
+ON CONFLICT (id) DO NOTHING;
+
+-- Only one prepared vendor session is accepted and exposed to the browser.
+-- Concurrent losers reload that same action; no accepted session is retargeted.
+-- name: AcceptPaymentMethodSetupSession :execrows
+UPDATE openrails.checkout_sessions
+SET rail_state=jsonb_set(rail_state,'{capture}',sqlc.arg(capture)::jsonb),
+    expires_at=sqlc.arg(expires_at),status='requires_action',updated_at=sqlc.arg(now)
+WHERE id=sqlc.arg(id) AND merchant_id=sqlc.arg(merchant_id)
+  AND mode='payment_method' AND status='created' AND deleted_at IS NULL
+  AND expires_at>sqlc.arg(now) AND rail_state->'capture'=sqlc.arg(previous)::jsonb;
+
+-- name: GetPaymentMethodSetupSessionForUpdate :one
+SELECT * FROM openrails.checkout_sessions
+WHERE id=sqlc.arg(id) AND merchant_id=sqlc.arg(merchant_id)
+  AND mode='payment_method' AND deleted_at IS NULL
+FOR UPDATE;
+
+-- Completion and erasure of the short-lived secret commit with attachment.
+-- name: CompletePaymentMethodSetupSession :execrows
+UPDATE openrails.checkout_sessions
+SET rail_state=jsonb_set(rail_state,'{capture}',sqlc.arg(capture)::jsonb),
+    status='succeeded',updated_at=sqlc.arg(now)
+WHERE id=sqlc.arg(id) AND merchant_id=sqlc.arg(merchant_id)
+  AND mode='payment_method' AND status='requires_action' AND deleted_at IS NULL
+  AND expires_at>sqlc.arg(now);
+
+-- Capture attachment never reparents an existing instrument to another payer.
+-- name: AttachCapturedPaymentMethod :one
+INSERT INTO openrails.payment_methods
+(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,last_four,card_type,expiry_date,charge_via,initial_transaction_id,created_at,updated_at)
+VALUES(sqlc.arg(id),sqlc.arg(merchant_id),sqlc.arg(customer_id),sqlc.arg(psp_id),'nmi','hyperswitch',sqlc.arg(custodian_id),sqlc.arg(vendor_customer_id),sqlc.arg(vendor_method_id),sqlc.arg(last_four),sqlc.arg(card_type),sqlc.arg(expiry_date),'pan_proxy','',sqlc.arg(now),sqlc.arg(now))
+ON CONFLICT (merchant_id,psp_id,custodian_id,rail_customer_ref,rail_method_ref)
+DO UPDATE SET id=openrails.payment_methods.id
+WHERE openrails.payment_methods.customer_id=EXCLUDED.customer_id
+  AND openrails.payment_methods.custodian='hyperswitch'
+RETURNING *;
+
+-- name: CountInvalidCheckoutCaptureReferences :one
+-- Terminal replay retains the original capture authority even after a later
+-- legitimate instrument remap. A still-present method must belong to this payer; its legitimate later
+-- deletion leaves historical replay intact and does not recreate the method.
+SELECT count(*) FROM openrails.checkout_sessions cs
+WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.mode='payment_method'
+AND (
+ NOT EXISTS(SELECT 1 FROM openrails.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
+ OR (cs.status='succeeded' AND EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id<>cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
+);
+
+-- name: GetCheckoutCaptureAccountsForShare :one
+-- Recheck current authority after vendor metadata readback, inside only the
+-- short local attachment transaction. Archive/reconfiguration serializes here.
+SELECT sqlc.embed(p),sqlc.embed(c) FROM openrails.psps p
+JOIN openrails.custodians c ON c.id=p.custodian_id AND c.merchant_id=p.merchant_id
+WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(psp_id)::uuid
+FOR SHARE OF p,c;

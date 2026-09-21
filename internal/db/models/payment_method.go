@@ -96,10 +96,11 @@ const (
 	// CustodianBasisTheory: the PAN lives in the Basis Theory neutral vault
 	// (#795) and is proxied to the processor at charge time.
 	CustodianBasisTheory = "basis_theory"
+	CustodianHyperSwitch = "hyperswitch"
 )
 
 // Custodians lists the declared custody values in stable order.
-func Custodians() []string { return []string{CustodianPSP, CustodianBasisTheory} }
+func Custodians() []string { return []string{CustodianPSP, CustodianBasisTheory, CustodianHyperSwitch} }
 
 // PaymentMethodCharge is the DERIVED last-charge health for a payment method
 // (#589) — computed at query time from openrails.payments, never a stored column.

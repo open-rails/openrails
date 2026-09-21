@@ -81,6 +81,7 @@ func (s *Service) CreateCheckoutSessionForCustomer(ctx context.Context, customer
 		SuccessURL:     req.SuccessURL,
 		CancelURL:      req.CancelURL,
 		Payment: checkout.CheckoutSessionPaymentRequest{
+			PSPID:           req.Payment.PSPID,
 			Rail:            req.Payment.Rail,
 			PaymentMethodID: req.Payment.PaymentMethodID.String(),
 			PaymentToken:    req.Payment.PaymentToken,
@@ -189,6 +190,7 @@ func (s *Service) ConfirmCheckoutSession(ctx context.Context, userID string, ses
 
 	svcReq := &checkout.CheckoutSessionConfirmRequest{
 		Payment: checkout.CheckoutSessionConfirmPayment{
+			Capture:   req.Payment.Capture,
 			Rail:      req.Payment.Rail,
 			Signature: req.Payment.Signature,
 			Wallet:    req.Payment.Wallet,
@@ -300,15 +302,17 @@ func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string)
 
 func checkoutSessionFromResponse(resp *checkout.CheckoutSessionResponse) *CheckoutSession {
 	result := &CheckoutSession{
-		ID:        resp.ID,
-		Status:    resp.Status,
-		Mode:      resp.Mode,
-		PriceID:   resp.PriceID,
-		Amount:    resp.Amount,
-		Currency:  resp.Currency,
-		CreatedAt: resp.CreatedAt,
-		ExpiresAt: resp.ExpiresAt,
-		Metadata:  resp.Metadata,
+		Capture:         resp.Capture,
+		PaymentMethodID: resp.PaymentMethodID,
+		ID:              resp.ID,
+		Status:          resp.Status,
+		Mode:            resp.Mode,
+		PriceID:         resp.PriceID,
+		Amount:          resp.Amount,
+		Currency:        resp.Currency,
+		CreatedAt:       resp.CreatedAt,
+		ExpiresAt:       resp.ExpiresAt,
+		Metadata:        resp.Metadata,
 	}
 	if resp.PaymentID != nil {
 		result.PaymentID = resp.PaymentID

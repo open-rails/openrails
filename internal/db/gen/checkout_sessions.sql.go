@@ -12,6 +12,114 @@ import (
 	"github.com/google/uuid"
 )
 
+const acceptPaymentMethodSetupSession = `-- name: AcceptPaymentMethodSetupSession :execrows
+UPDATE openrails.checkout_sessions
+SET rail_state=jsonb_set(rail_state,'{capture}',$1::jsonb),
+    expires_at=$2,status='requires_action',updated_at=$3
+WHERE id=$4 AND merchant_id=$5
+  AND mode='payment_method' AND status='created' AND deleted_at IS NULL
+  AND expires_at>$3 AND rail_state->'capture'=$6::jsonb
+`
+
+type AcceptPaymentMethodSetupSessionParams struct {
+	Capture    []byte
+	ExpiresAt  *time.Time
+	Now        time.Time
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	Previous   []byte
+}
+
+// Only one prepared vendor session is accepted and exposed to the browser.
+// Concurrent losers reload that same action; no accepted session is retargeted.
+func (q *Queries) AcceptPaymentMethodSetupSession(ctx context.Context, arg AcceptPaymentMethodSetupSessionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, acceptPaymentMethodSetupSession,
+		arg.Capture,
+		arg.ExpiresAt,
+		arg.Now,
+		arg.ID,
+		arg.MerchantID,
+		arg.Previous,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const attachCapturedPaymentMethod = `-- name: AttachCapturedPaymentMethod :one
+INSERT INTO openrails.payment_methods
+(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,last_four,card_type,expiry_date,charge_via,initial_transaction_id,created_at,updated_at)
+VALUES($1,$2,$3,$4,'nmi','hyperswitch',$5,$6,$7,$8,$9,$10,'pan_proxy','',$11,$11)
+ON CONFLICT (merchant_id,psp_id,custodian_id,rail_customer_ref,rail_method_ref)
+DO UPDATE SET id=openrails.payment_methods.id
+WHERE openrails.payment_methods.customer_id=EXCLUDED.customer_id
+  AND openrails.payment_methods.custodian='hyperswitch'
+RETURNING id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at
+`
+
+type AttachCapturedPaymentMethodParams struct {
+	ID               uuid.UUID
+	MerchantID       uuid.UUID
+	CustomerID       uuid.UUID
+	PspID            uuid.UUID
+	CustodianID      *uuid.UUID
+	VendorCustomerID string
+	VendorMethodID   string
+	LastFour         *string
+	CardType         *string
+	ExpiryDate       *string
+	Now              time.Time
+}
+
+// Capture attachment never reparents an existing instrument to another payer.
+func (q *Queries) AttachCapturedPaymentMethod(ctx context.Context, arg AttachCapturedPaymentMethodParams) (OpenrailsPaymentMethod, error) {
+	row := q.db.QueryRow(ctx, attachCapturedPaymentMethod,
+		arg.ID,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.PspID,
+		arg.CustodianID,
+		arg.VendorCustomerID,
+		arg.VendorMethodID,
+		arg.LastFour,
+		arg.CardType,
+		arg.ExpiryDate,
+		arg.Now,
+	)
+	var i OpenrailsPaymentMethod
+	err := row.Scan(
+		&i.ID,
+		&i.Rail,
+		&i.InitialTransactionID,
+		&i.LastFour,
+		&i.CardType,
+		&i.ExpiryDate,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.PspID,
+		&i.RailCustomerRef,
+		&i.RailMethodRef,
+		&i.RebillDriver,
+		&i.StoredCredentialRecurringRef,
+		&i.StoredCredentialUnscheduledRef,
+		&i.Custodian,
+		&i.CustodianID,
+		&i.Fingerprint,
+		&i.NetworkTokenID,
+		&i.NetworkTokenStatus,
+		&i.NetworkTokenPar,
+		&i.ChargeVia,
+		&i.ParkReason,
+		&i.ParkedAt,
+		&i.AccountUpdaterCheckedAt,
+	)
+	return i, err
+}
+
 const bindSolanaCheckoutSession = `-- name: BindSolanaCheckoutSession :execrows
 UPDATE openrails.checkout_sessions SET
     reference = $2,
@@ -47,6 +155,55 @@ func (q *Queries) BindSolanaCheckoutSession(ctx context.Context, arg BindSolanaC
 	return result.RowsAffected(), nil
 }
 
+const completePaymentMethodSetupSession = `-- name: CompletePaymentMethodSetupSession :execrows
+UPDATE openrails.checkout_sessions
+SET rail_state=jsonb_set(rail_state,'{capture}',$1::jsonb),
+    status='succeeded',updated_at=$2
+WHERE id=$3 AND merchant_id=$4
+  AND mode='payment_method' AND status='requires_action' AND deleted_at IS NULL
+  AND expires_at>$2
+`
+
+type CompletePaymentMethodSetupSessionParams struct {
+	Capture    []byte
+	Now        time.Time
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+// Completion and erasure of the short-lived secret commit with attachment.
+func (q *Queries) CompletePaymentMethodSetupSession(ctx context.Context, arg CompletePaymentMethodSetupSessionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completePaymentMethodSetupSession,
+		arg.Capture,
+		arg.Now,
+		arg.ID,
+		arg.MerchantID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const countInvalidCheckoutCaptureReferences = `-- name: CountInvalidCheckoutCaptureReferences :one
+SELECT count(*) FROM openrails.checkout_sessions cs
+WHERE cs.merchant_id=$1::uuid AND cs.mode='payment_method'
+AND (
+ NOT EXISTS(SELECT 1 FROM openrails.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
+ OR (cs.status='succeeded' AND EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id<>cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
+)
+`
+
+// Terminal replay retains the original capture authority even after a later
+// legitimate instrument remap. A still-present method must belong to this payer; its legitimate later
+// deletion leaves historical replay intact and does not recreate the method.
+func (q *Queries) CountInvalidCheckoutCaptureReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countInvalidCheckoutCaptureReferences, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createCheckoutSession = `-- name: CreateCheckoutSession :execrows
 
 INSERT INTO openrails.checkout_sessions (
@@ -69,13 +226,13 @@ INSERT INTO openrails.checkout_sessions (
 type CreateCheckoutSessionParams struct {
 	ID             uuid.UUID
 	CustomerID     uuid.UUID
-	PriceID        uuid.UUID
+	PriceID        *uuid.UUID
 	Mode           string
 	Rail           string
 	Status         string
-	Amount         int64
+	Amount         *int64
 	MerchantID     uuid.UUID
-	Currency       string
+	Currency       *string
 	ExpiresAt      *time.Time
 	Reference      *string
 	TransactionID  *string
@@ -121,9 +278,47 @@ func (q *Queries) CreateCheckoutSession(ctx context.Context, arg CreateCheckoutS
 	return result.RowsAffected(), nil
 }
 
+const createPaymentMethodSetupSession = `-- name: CreatePaymentMethodSetupSession :execrows
+INSERT INTO openrails.checkout_sessions
+(id,merchant_id,customer_id,psp_id,mode,rail,status,expires_at,rail_state,metadata,created_at,updated_at)
+VALUES($1,$2,$3,$4,'payment_method','nmi','created',$5,$6,$7,$8,$8)
+ON CONFLICT (id) DO NOTHING
+`
+
+type CreatePaymentMethodSetupSessionParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	PspID      uuid.UUID
+	ExpiresAt  *time.Time
+	RailState  []byte
+	Metadata   []byte
+	Now        time.Time
+}
+
+// A setup row is addressed by the stable merchant/customer/idempotency-key
+// UUID. The first writer owns its immutable request fingerprint and binding.
+func (q *Queries) CreatePaymentMethodSetupSession(ctx context.Context, arg CreatePaymentMethodSetupSessionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, createPaymentMethodSetupSession,
+		arg.ID,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.PspID,
+		arg.ExpiresAt,
+		arg.RailState,
+		arg.Metadata,
+		arg.Now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const expireCheckoutSessionByID = `-- name: ExpireCheckoutSessionByID :execrows
 UPDATE openrails.checkout_sessions
-SET status = 'expired', updated_at = $1::timestamptz
+SET rail_state = CASE WHEN mode='payment_method' THEN rail_state #- '{capture,secret_ciphertext}' ELSE rail_state END,
+    status = 'expired', updated_at = $1::timestamptz
 WHERE merchant_id = $2::uuid AND id = $3::uuid
   AND status IN ('created', 'requires_action')
   AND deleted_at IS NULL
@@ -146,7 +341,8 @@ func (q *Queries) ExpireCheckoutSessionByID(ctx context.Context, arg ExpireCheck
 
 const expireCheckoutSessions = `-- name: ExpireCheckoutSessions :execrows
 UPDATE openrails.checkout_sessions
-SET status = 'expired', updated_at = $1
+SET rail_state = CASE WHEN mode='payment_method' THEN rail_state #- '{capture,secret_ciphertext}' ELSE rail_state END,
+    status = 'expired', updated_at = $1
 WHERE deleted_at IS NULL
   AND ctid IN (
     SELECT cs.ctid FROM openrails.checkout_sessions cs
@@ -174,6 +370,58 @@ func (q *Queries) ExpireCheckoutSessions(ctx context.Context, arg ExpireCheckout
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const getCheckoutCaptureAccountsForShare = `-- name: GetCheckoutCaptureAccountsForShare :one
+SELECT p.id, p.merchant_id, p.rail, p.environment, p.account_id, p.key, p.evidence, p.first_seen_at, p.last_verified_at, p.replaced_at, p.created_at, p.updated_at, p.archived, p.custodian_id,c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at FROM openrails.psps p
+JOIN openrails.custodians c ON c.id=p.custodian_id AND c.merchant_id=p.merchant_id
+WHERE p.merchant_id=$1::uuid AND p.id=$2::uuid
+FOR SHARE OF p,c
+`
+
+type GetCheckoutCaptureAccountsForShareParams struct {
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+type GetCheckoutCaptureAccountsForShareRow struct {
+	OpenrailsPsp       OpenrailsPsp
+	OpenrailsCustodian OpenrailsCustodian
+}
+
+// Recheck current authority after vendor metadata readback, inside only the
+// short local attachment transaction. Archive/reconfiguration serializes here.
+func (q *Queries) GetCheckoutCaptureAccountsForShare(ctx context.Context, arg GetCheckoutCaptureAccountsForShareParams) (GetCheckoutCaptureAccountsForShareRow, error) {
+	row := q.db.QueryRow(ctx, getCheckoutCaptureAccountsForShare, arg.MerchantID, arg.PspID)
+	var i GetCheckoutCaptureAccountsForShareRow
+	err := row.Scan(
+		&i.OpenrailsPsp.ID,
+		&i.OpenrailsPsp.MerchantID,
+		&i.OpenrailsPsp.Rail,
+		&i.OpenrailsPsp.Environment,
+		&i.OpenrailsPsp.AccountID,
+		&i.OpenrailsPsp.Key,
+		&i.OpenrailsPsp.Evidence,
+		&i.OpenrailsPsp.FirstSeenAt,
+		&i.OpenrailsPsp.LastVerifiedAt,
+		&i.OpenrailsPsp.ReplacedAt,
+		&i.OpenrailsPsp.CreatedAt,
+		&i.OpenrailsPsp.UpdatedAt,
+		&i.OpenrailsPsp.Archived,
+		&i.OpenrailsPsp.CustodianID,
+		&i.OpenrailsCustodian.ID,
+		&i.OpenrailsCustodian.MerchantID,
+		&i.OpenrailsCustodian.Key,
+		&i.OpenrailsCustodian.Kind,
+		&i.OpenrailsCustodian.Environment,
+		&i.OpenrailsCustodian.AccountID,
+		&i.OpenrailsCustodian.Settings,
+		&i.OpenrailsCustodian.CredentialVersions,
+		&i.OpenrailsCustodian.Archived,
+		&i.OpenrailsCustodian.CreatedAt,
+		&i.OpenrailsCustodian.UpdatedAt,
+	)
+	return i, err
 }
 
 const getCheckoutSessionByID = `-- name: GetCheckoutSessionByID :one
@@ -266,7 +514,7 @@ LIMIT 1
 
 type GetLatestOpenCheckoutSessionParams struct {
 	CustomerID uuid.UUID
-	PriceID    uuid.UUID
+	PriceID    *uuid.UUID
 	Rail       string
 	Now        time.Time
 }
@@ -278,6 +526,50 @@ func (q *Queries) GetLatestOpenCheckoutSession(ctx context.Context, arg GetLates
 		arg.Rail,
 		arg.Now,
 	)
+	var i OpenrailsCheckoutSession
+	err := row.Scan(
+		&i.ID,
+		&i.PriceID,
+		&i.Mode,
+		&i.Rail,
+		&i.Status,
+		&i.Amount,
+		&i.Currency,
+		&i.ExpiresAt,
+		&i.Reference,
+		&i.TransactionID,
+		&i.PaymentID,
+		&i.SubscriptionID,
+		&i.RailFields,
+		&i.RailState,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.RoutingReason,
+	)
+	return i, err
+}
+
+const getPaymentMethodSetupSessionForUpdate = `-- name: GetPaymentMethodSetupSessionForUpdate :one
+SELECT id, price_id, mode, rail, status, amount, currency, expires_at, reference, transaction_id, payment_id, subscription_id, rail_fields, rail_state, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, routing_reason FROM openrails.checkout_sessions
+WHERE id=$1 AND merchant_id=$2
+  AND mode='payment_method' AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type GetPaymentMethodSetupSessionForUpdateParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) GetPaymentMethodSetupSessionForUpdate(ctx context.Context, arg GetPaymentMethodSetupSessionForUpdateParams) (OpenrailsCheckoutSession, error) {
+	row := q.db.QueryRow(ctx, getPaymentMethodSetupSessionForUpdate, arg.ID, arg.MerchantID)
 	var i OpenrailsCheckoutSession
 	err := row.Scan(
 		&i.ID,
@@ -372,12 +664,12 @@ WHERE id = $1
 type UpdateCheckoutSessionParams struct {
 	ID             uuid.UUID
 	CustomerID     uuid.UUID
-	PriceID        uuid.UUID
+	PriceID        *uuid.UUID
 	Mode           string
 	Rail           string
 	Status         string
-	Amount         int64
-	Currency       string
+	Amount         *int64
+	Currency       *string
 	ExpiresAt      *time.Time
 	Reference      *string
 	TransactionID  *string

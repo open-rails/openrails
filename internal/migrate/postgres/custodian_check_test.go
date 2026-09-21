@@ -18,7 +18,7 @@ func TestCustodianColumnIsStated(t *testing.T) {
 
 	for _, want := range []string{
 		"custodian text default 'psp'::text not null",
-		"constraint payment_methods_custodian_check check ((custodian = any (array['psp'::text, 'basis_theory'::text])))",
+		"constraint payment_methods_custodian_check check ((custodian = any (array['psp'::text, 'basis_theory'::text, 'hyperswitch'::text])))",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("baseline: expected %q", want)

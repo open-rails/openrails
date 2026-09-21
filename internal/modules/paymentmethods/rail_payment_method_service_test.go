@@ -103,7 +103,8 @@ func TestUpdatePaymentMethodMapsDurableOutcome(t *testing.T) {
 	require.NoError(t, err)
 	_, err = store.Put(ctx, dbtest.TestMerchantID, secretName, "merchant-mobius-key")
 	require.NoError(t, err)
-	pm := &models.PaymentMethod{ID: uuid.New(), CustomerID: uuid.New(), Rail: models.RailNMI, RailCustomerRef: "vault-1"}
+	pm := &models.PaymentMethod{
+		Custodian: models.CustodianPSP, ID: uuid.New(), CustomerID: uuid.New(), Rail: models.RailNMI, RailCustomerRef: "vault-1"}
 	token, lastFour, cardType, expiry := "token-1", "4242", "Visa", "12/30"
 	request := func() *UpdatePaymentMethodRequest {
 		return &UpdatePaymentMethodRequest{PaymentToken: &token, LastFour: &lastFour, CardType: &cardType, ExpiryDate: &expiry}
@@ -421,6 +422,7 @@ func deleteVaultTestService(exec PaymentMethodDeleteExecutor) (*RailPaymentMetho
 		ProviderSecrets:     vaultStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"},
 	}
 	pm := &models.PaymentMethod{
+		Custodian:       models.CustodianPSP,
 		ID:              uuid.New(),
 		CustomerID:      uuid.New(),
 		Rail:            models.RailNMI,
@@ -501,4 +503,20 @@ func TestDeleteVaultRequiresIntentExecutor(t *testing.T) {
 	err := svc.DeletePaymentMethod(merchant.WithID(context.Background(), dbtest.TestMerchantID), pm)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not wired")
+}
+
+func TestCustodianMethodsNeverReachNMIUpdateOrDelete(t *testing.T) {
+	ctx := merchant.WithID(t.Context(), dbtest.TestMerchantID)
+	for _, kind := range []string{models.CustodianBasisTheory, models.CustodianHyperSwitch, ""} {
+		exec := &fakeVaultDeleteExecutor{out: PaymentMethodDeleteOutcome{Done: true}}
+		svc, pm := deleteVaultTestService(exec)
+		pm.Custodian = kind
+		require.ErrorIs(t, svc.DeletePaymentMethod(ctx, pm), ErrPaymentMethodCustodianUnsupported)
+		require.ErrorIs(t, svc.CleanupPaymentMethodBestEffort(ctx, pm), ErrPaymentMethodCustodianUnsupported)
+		_, err := svc.ResolveClientForPaymentMethod(ctx, pm)
+		require.ErrorIs(t, err, ErrPaymentMethodCustodianUnsupported)
+		_, err = svc.UpdatePaymentMethod(ctx, pm, &UpdatePaymentMethodRequest{})
+		require.ErrorIs(t, err, ErrPaymentMethodCustodianUnsupported)
+		require.Zero(t, exec.called)
+	}
 }

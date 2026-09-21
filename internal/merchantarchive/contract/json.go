@@ -153,6 +153,15 @@ var cutoverSubscriptionJSON = object(map[string]jsonRule{
 	"paused_subscription": func(v any) bool { return booleanValue(v) || integerValue(v) || textValue(v) }, "plan": nullable(cutoverPlanJSON),
 })
 
+// Temporary encrypted capture secrets are deliberately absent. Only terminal
+// nonsecret binding/history has a portable shape; semantic validation below
+// uses the same decoder as the checkout service.
+var captureJSON = object(map[string]jsonRule{
+	"merchant_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "custodian_id": uuidValue,
+	"account_id": textValue, "environment": textValue, "profile_id": textValue, "public_api_key": textValue, "api_base_url": textValue, "sdk_url": textValue,
+	"vendor_customer_id": textValue, "vendor_session_id": textValue, "expires_at": textValue, "payment_method_id": uuidValue, "vendor_method_id": textValue, "accepted_token_hash": sha256Value,
+})
+
 var jsonRules = map[string]jsonRule{
 	"rail_intents.nmi_provider_cutover.payload": object(map[string]jsonRule{
 		"source_qualification": cutoverQualificationJSON, "target_qualification": cutoverQualificationJSON,
@@ -233,7 +242,7 @@ var jsonRules = map[string]jsonRule{
 		"declined": booleanValue, "response_code": integerValue, "localization_id": textValue, "provider_subscription_id": textValue,
 	})),
 
-	"custodians.settings":                      object(map[string]jsonRule{"public_api_key": textValue, "network_tokens": booleanSetting, "account_updater": booleanSetting, "account_updater_lookahead_days": integerSetting}),
+	"custodians.settings":                      object(map[string]jsonRule{"public_api_key": textValue, "profile_id": textValue, "network_tokens": booleanSetting, "account_updater": booleanSetting, "account_updater_lookahead_days": integerSetting}),
 	"products.entitlements_spec":               nullable(dictionary(nullable(integerValue))),
 	"subscriptions.entitlements_spec_snapshot": nullable(dictionary(nullable(integerValue))),
 	// Checkout writes correlation coordinates and delayed-start metadata;
@@ -266,7 +275,7 @@ var jsonRules = map[string]jsonRule{
 	"usage_events.dimensions":            dictionary(integerValue),
 	"checkout_sessions.metadata":         nullable(emptyObject),
 	"checkout_sessions.rail_fields":      nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
-	"checkout_sessions.rail_state":       nullable(object(map[string]jsonRule{"_openrails_request_fingerprint": textValue, "subscription_id": textValue, "message": textValue, "failure_reason": textValue, "failure_code": textValue})),
+	"checkout_sessions.rail_state":       nullable(object(map[string]jsonRule{"capture": captureJSON, "_openrails_request_fingerprint": textValue, "subscription_id": textValue, "message": textValue, "failure_reason": textValue, "failure_code": textValue})),
 	"checkout_sessions.routing_reason":   nullable(object(map[string]jsonRule{"policy": textValue, "rule": integerValue, "selected": textValue, "rail": textValue, "fallbacks": array(textValue), "skipped": array(object(map[string]jsonRule{"selector": textValue, "reason": textValue}))})),
 	"host_outbox.data":                   object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_since": textValue, "overdue_amount": integerValue, "overdue_invoices": integerValue, "entered_at": textValue, "evaluated_at": textValue}),
 	"rail_intents.payload":               nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),

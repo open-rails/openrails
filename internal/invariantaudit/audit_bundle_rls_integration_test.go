@@ -414,8 +414,8 @@ func TestCUR1_CurrencyColumnsAreNotNull(t *testing.T) {
 		nullable = append(nullable, n)
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, []string{"grants"}, nullable,
-		"CUR-1: only grants.currency may be nullable (CUR-2 makes it conditionally required)")
+	require.Equal(t, []string{"checkout_sessions", "grants"}, nullable,
+		"CUR-1: currency is required except nonmonetary checkout setup and grants; each has a conditional schema constraint")
 }
 
 // GAP-10: a UNIQUE index that omits merchant_id lets one merchant block
