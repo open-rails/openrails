@@ -25,8 +25,8 @@ import (
 
 var errEngineObligationChanged = errors.New("accepted engine obligation changed before submission")
 
-// SubscriptionCollectionHandler uses the existing collected-payment custody
-// protocol and renewal writer. It is deliberately not registered at runtime.
+// SubscriptionCollectionHandler uses the collected-payment custody protocol
+// and shared renewal writer for qualified engine card obligations.
 type SubscriptionCollectionHandler struct {
 	DB       *db.DB
 	Resolver CollectionPlane

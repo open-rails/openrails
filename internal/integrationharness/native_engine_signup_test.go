@@ -19,6 +19,7 @@ import (
 	embcp "github.com/open-rails/openrails/internal/operator"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -45,7 +46,7 @@ func TestNativeEngineSignupSelfHTTPAndDueWorker(t *testing.T) {
 		gateway.serve(w, r)
 	}))
 	defer wire.Close()
-	clock := clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Microsecond))
+	clock := clockwork.NewFakeClockAt(time.Now().UTC().Add(-31 * 24 * time.Hour).Truncate(time.Microsecond))
 	var host billingauth.DelegatedAuthenticator
 	surface := h.StartStandalone("USD", WithClock(clock), WithConfig(func(c *config.Config) {
 		c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: wire.URL}
@@ -99,11 +100,23 @@ func TestNativeEngineSignupSelfHTTPAndDueWorker(t *testing.T) {
 	require.NoError(t, pool.QueryRow(t.Context(), `SELECT collection_policy,rail_subscription_id FROM billing.subscriptions WHERE customer_id=$1`, user.ID).Scan(&policy, &external))
 	require.Equal(t, "engine", policy)
 	require.Empty(t, external)
+	checkAccess := func(want bool) {
+		require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), owned.MerchantID), func(ctx context.Context) error {
+			has, err := rt.EntitlementService.IsEntitled(ctx, user.ID, "engine_access", clock.Now())
+			if err != nil {
+				return err
+			}
+			require.Equal(t, want, has)
+			return nil
+		}))
+	}
+	checkAccess(true)
 	clock.Advance(720*time.Hour + time.Second)
+	checkAccess(false) // Paid access expires even before any worker runs.
 	worker := riverjobs.DunningWorker{DB: rt.DB, Config: rt.Config, Clock: clock, NMIResolver: rt.CollectionResolver, EngineCollections: rt.MoneyService}
 	require.NoError(t, worker.Work(t.Context(), &river.Job[riverjobs.DunningArgs]{}))
-	_, err = rt.IntentRunner().RunExecuteOnce(t.Context())
-	require.NoError(t, err)
+	require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(t.Context(), owned.MerchantID), func(ctx context.Context) error { _, err := rt.IntentRunner().RunExecuteOnce(ctx); return err }))
+	checkAccess(true)
 	var paid int
 	require.NoError(t, pool.QueryRow(t.Context(), `SELECT count(*) FROM billing.payments WHERE customer_id=$1 AND status='completed'`, user.ID).Scan(&paid))
 	require.Equal(t, 2, paid)

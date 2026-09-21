@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// TypeSubscriptionCollection is deliberately not registered with a worker yet.
+// TypeSubscriptionCollection identifies an accepted engine renewal.
 const TypeSubscriptionCollection = "subscription_collection"
 
 // SubscriptionCollectionPayload is one accepted engine renewal. PreviousPeriodEnd

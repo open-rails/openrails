@@ -28,7 +28,7 @@ func TestStripeSetupArchiveRetainsOwnedConsentAndMethod(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO openrails.payment_methods(merchant_id,id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref) SELECT $1,$2,id,$3,'stripe','cus_setup','pm_setup' FROM openrails.customers WHERE merchant_id=$1 LIMIT 1`, mid.UUID(), method, psp)
+		_, err = tx.Exec(ctx, `INSERT INTO openrails.payment_methods(merchant_id,id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id) SELECT $1,$2,id,$3,'stripe','cus_setup','pm_setup','' FROM openrails.customers WHERE merchant_id=$1 LIMIT 1`, mid.UUID(), method, psp)
 		if err != nil {
 			return err
 		}

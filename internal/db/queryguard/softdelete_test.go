@@ -47,6 +47,8 @@ var allow = map[string]string{
 	"GetInitialMembershipForArchive":        "archive validates retained initial membership identity and grant history including later tombstones; never used as a live subscription lookup",
 	"ListObservedInitialMembershipPayments": "archive validates the original observed first-payment history, including retained payment tombstones; no collection or access mutation",
 
+	"CountInvalidEngineCheckoutReferences":  "canonical archive validates terminal engine checkout history including tombstones",
+	"CountInvalidStripeSetupReferences":     "canonical archive retains completed setup history including removed methods and tombstones",
 	"CountInvalidCheckoutCaptureReferences": "archive integrity audit validates every retained capture binding, including tombstones; this is not a live-session read",
 	"HasSettledPayment":                     "historical positive rail-payment proof survives archival and event retention; a tombstone must not grant another first-payment trial",
 	"MerchantHasActivity":                   "retirement is only for never-used merchants; historical and soft-deleted payments/subscriptions must disqualify them",

@@ -177,3 +177,14 @@ FOR SHARE OF p,c;
 SELECT count(*) FROM openrails.checkout_sessions cs
 WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.mode='payment_method' AND cs.rail='stripe' AND cs.status='succeeded'
 AND EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.id::text=cs.rail_state->>'payment_method_id' AND pm.customer_id<>cs.customer_id);
+
+-- name: CountInvalidEngineCheckoutReferences :one
+SELECT count(*) FROM openrails.checkout_sessions cs
+LEFT JOIN openrails.rail_intents i ON i.merchant_id=cs.merchant_id
+ AND i.idempotency_key='initial_membership:checkout_session:'||cs.id::text AND i.intent_type='initial_membership'
+WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.rail_state ? 'initial_membership_quote'
+AND ((cs.status='succeeded' AND (i.id IS NULL OR i.status<>'succeeded'))
+ OR (i.id IS NOT NULL AND (
+   i.rail<>cs.rail OR i.psp_id<>cs.psp_id OR i.price_id<>cs.price_id OR i.payload->'terms'->>'customer_id'<>cs.customer_id::text
+   OR (i.status='succeeded' AND (cs.status<>'succeeded' OR cs.subscription_id::text IS DISTINCT FROM i.payload->'terms'->>'subscription_id' OR cs.payment_id::text IS DISTINCT FROM i.payload->'terms'->>'payment_id'))
+   OR (i.status='failed_terminal' AND cs.status<>'failed'))));

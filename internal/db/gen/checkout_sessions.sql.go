@@ -206,6 +206,25 @@ func (q *Queries) CountInvalidCheckoutCaptureReferences(ctx context.Context, mer
 	return count, err
 }
 
+const countInvalidEngineCheckoutReferences = `-- name: CountInvalidEngineCheckoutReferences :one
+SELECT count(*) FROM openrails.checkout_sessions cs
+LEFT JOIN openrails.rail_intents i ON i.merchant_id=cs.merchant_id
+ AND i.idempotency_key='initial_membership:checkout_session:'||cs.id::text AND i.intent_type='initial_membership'
+WHERE cs.merchant_id=$1::uuid AND cs.rail_state ? 'initial_membership_quote'
+AND ((cs.status='succeeded' AND (i.id IS NULL OR i.status<>'succeeded'))
+ OR (i.id IS NOT NULL AND (
+   i.rail<>cs.rail OR i.psp_id<>cs.psp_id OR i.price_id<>cs.price_id OR i.payload->'terms'->>'customer_id'<>cs.customer_id::text
+   OR (i.status='succeeded' AND (cs.status<>'succeeded' OR cs.subscription_id::text IS DISTINCT FROM i.payload->'terms'->>'subscription_id' OR cs.payment_id::text IS DISTINCT FROM i.payload->'terms'->>'payment_id'))
+   OR (i.status='failed_terminal' AND cs.status<>'failed'))))
+`
+
+func (q *Queries) CountInvalidEngineCheckoutReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countInvalidEngineCheckoutReferences, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countInvalidStripeSetupReferences = `-- name: CountInvalidStripeSetupReferences :one
 SELECT count(*) FROM openrails.checkout_sessions cs
 WHERE cs.merchant_id=$1::uuid AND cs.mode='payment_method' AND cs.rail='stripe' AND cs.status='succeeded'

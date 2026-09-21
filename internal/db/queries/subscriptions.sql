@@ -268,6 +268,7 @@ SELECT EXISTS (
       AND s.id = sqlc.arg(id)::uuid
       AND s.deleted_at IS NULL
       AND p.auto_renew
+      AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
       AND s.status IN ('pending', 'active', 'past_due', 'unknown')
 ) AS standing;
 

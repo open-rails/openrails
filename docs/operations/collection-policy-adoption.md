@@ -54,8 +54,9 @@ historical links remain usable. CCBill engine signup and unsupported free/trial
 terms refuse before payment. Fixed-hour catalog cycles are the supported new
 engine terms; this does not reinterpret old provider calendar/finite schedules.
 
-`engine_admission_hold: true` pauses creation of due renewal obligations while
-retaining existing operation verification and webhook handling. Provider write
+`engine_admission_hold: true` pauses new initial/renewal payment admission and
+first submission while retaining possibly submitted operation verification and
+webhook handling. Provider write
 mode remains an additional existing execution gate. Neither setting mutates
 stored ownership. Existing engine sessions and accepted operations replay their
 stored terms after enrollment defaults change. Existing engine payments that

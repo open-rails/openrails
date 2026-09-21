@@ -18,9 +18,8 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// AdmitDueSubscriptionCollection freezes one due engine obligation. Runtime
-// producer/handler registration and public enrollment remain disabled until
-// the complete recurring CIT-to-MIT workflow is qualified.
+// AdmitDueSubscriptionCollection freezes one due engine obligation. Existing
+// accepted work is recovered before a hold can refuse a new admission.
 func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subscriptionID uuid.UUID, admittedAt time.Time) (gen.OpenrailsRailIntent, error) {
 	var accepted gen.OpenrailsRailIntent
 	mid, err := merchant.Require(ctx)
