@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
@@ -98,7 +97,7 @@ func testInvoiceCollectionArchive(t *testing.T, resolution string) {
 
 	adminDSN, appDSN := dbtest.SharedRLSPostgres(t)
 	schema := "collected_invoice_archive_" + resolution
-	require.NoError(t, migrate.RunPostgres(t.Context(), &config.Config{DB: &config.DBConfig{URL: adminDSN, Schema: schema}}))
+	dbtest.ApplyPostgresMigrations(t, adminDSN, appDSN, schema)
 	target, err := db.NewDB(t.Context(), &config.DBConfig{URL: appDSN, Schema: schema})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = target.Close() })

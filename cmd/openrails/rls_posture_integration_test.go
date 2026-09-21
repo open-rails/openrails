@@ -56,7 +56,7 @@ func TestCLICommandsRefuseBypassRLSRoleOutsideDev(t *testing.T) {
 			err := runCLI(t, build(), ctx, "--merchant="+dbtest.TestMerchantSlug)
 			require.Error(t, err, "%s must refuse a BYPASSRLS role outside development", name)
 			require.ErrorContains(t, err, "bypasses RLS")
-			require.ErrorContains(t, err, "openrails_app")
+			require.ErrorContains(t, err, "host runtime login")
 		})
 	}
 }

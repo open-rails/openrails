@@ -25,7 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
@@ -484,7 +483,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		first, err := remote.CreateCheckoutSession(ctx, req)
 		require.NoError(t, err)
 		schema := "capture_owner_" + uuid.NewString()[:8]
-		require.NoError(t, migrate.RunPostgres(ctx, &config.Config{DB: &config.DBConfig{URL: h.SuperDSN, Schema: schema}}))
+		dbtest.ApplyPostgresMigrations(t, h.SuperDSN, h.DSN, schema)
 		rt, _ := newEmbedded(schema)
 		runtime := app.HostGraph(rt).Runtime
 		other := merchant.ID(uuid.New())
@@ -579,7 +578,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		}
 		g.mu.Unlock()
 		schema := "capture_archive_" + uuid.NewString()[:8]
-		require.NoError(t, migrate.RunPostgres(ctx, &config.Config{DB: &config.DBConfig{URL: h.SuperDSN, Schema: schema}}))
+		dbtest.ApplyPostgresMigrations(t, h.SuperDSN, h.DSN, schema)
 		restored, client := newEmbedded(schema)
 		target := app.HostGraph(restored).Runtime.DB
 		_, err = target.Qx(ctx).Exec(ctx, `INSERT INTO openrails.merchants(id,slug) VALUES($1,$2)`, mid.UUID(), "restored-capture")
