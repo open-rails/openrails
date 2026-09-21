@@ -20,6 +20,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	embcp "github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/reconcile/converge"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -102,8 +104,9 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 		require.NoError(t, resumeWorker.Work(t.Context(), &river.Job[riverjobs.ResumeSubscriptionArgs]{Args: args}))
 	}
 	require.NoError(t, rt.MoneyService.SetHyperSwitchDeployment(gateway.URL))
-	for _, scenario := range []string{"engine", "engine_expired", "engine_chargeback", "engine_past_due_customer", "engine_past_due_merchant", "provider"} {
+	for _, scenario := range []string{"engine", "engine_expired", "engine_chargeback", "engine_past_due_customer", "engine_past_due_merchant", "engine_maintenance", "provider"} {
 		t.Run(scenario, func(t *testing.T) {
+			maintenance := scenario == "engine_maintenance"
 			pastDue := scenario == "engine_past_due_customer" || scenario == "engine_past_due_merchant"
 			policy := "engine"
 			if scenario == "provider" {
@@ -112,8 +115,8 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 			customer, user, token := newCustomer()
 			id := uuid.New()
 			end := now.Add(20 * 24 * time.Hour)
-			if scenario == "engine_expired" || pastDue {
-				end = now.Add(-time.Hour)
+			if scenario == "engine_expired" || pastDue || maintenance {
+				end = now.Add(-100 * 24 * time.Hour)
 			}
 			remote := ""
 			if policy == "provider" {
@@ -128,7 +131,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 			require.NoError(t, err)
 			var operation uuid.UUID
 			var payload []byte
-			if pastDue {
+			if pastDue || maintenance {
 				_, err = pool.Exec(ctx, `UPDATE billing.subscriptions SET status='past_due',next_retry_at=$2,retry_attempts=1 WHERE id=$1`, id, now)
 				require.NoError(t, err)
 				accepted, err := rt.MoneyService.AdmitDueSubscriptionCollection(ctx, id, now)
@@ -137,6 +140,36 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 				// No executor exists: uncertainty is explicitly synthetic.
 				_, err = pool.Exec(ctx, `UPDATE billing.rail_intents SET status='unknown_needs_verify',result_evidence='{"submission":"synthetic uncertainty"}' WHERE id=$1`, operation)
 				require.NoError(t, err)
+			}
+			if maintenance {
+				engine := converge.NewConvergeEngine(rt.DB)
+				engine.Now = func() time.Time { return now }
+				fetcher := &engineMaintenanceFetcher{}
+				for _, state := range []string{"active", "past_due", "unknown"} {
+					for _, grace := range []time.Time{now.Add(-time.Hour), now.Add(time.Hour)} {
+						_, err = pool.Exec(ctx, `UPDATE billing.subscriptions SET status=$2,next_retry_at=NULL,grace_ends_at=$3 WHERE id=$1`, id, state, grace)
+						require.NoError(t, err)
+						require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(c context.Context) error {
+							if _, err := engine.Converge(c, converge.Scope{Merchant: owned.MerchantID, Customer: &user}); err != nil {
+								return err
+							}
+							_, err := reconcile.ReconcileUnknownCohort(c, rt.DB, rt.SubscriptionLifecycleService, map[reconcile.Provider]reconcile.RailFetcher{reconcile.ProviderNMI: fetcher}, nil, owned.MerchantID, now, reconcile.UnknownReconcileOptions{})
+							return err
+						}))
+						var observed string
+						var next *time.Time
+						require.NoError(t, pool.QueryRow(ctx, `SELECT status,next_retry_at FROM billing.subscriptions WHERE id=$1`, id).Scan(&observed, &next))
+						require.Equal(t, state, observed)
+						require.Nil(t, next)
+						replay, err := rt.MoneyService.AdmitDueSubscriptionCollection(ctx, id, now)
+						require.NoError(t, err)
+						require.Equal(t, operation, replay.ID)
+						require.Equal(t, "unknown_needs_verify", replay.Status)
+						require.JSONEq(t, string(payload), string(replay.Payload))
+					}
+				}
+				require.Zero(t, fetcher.calls.Load(), "engine-only cohort must not read the native provider")
+				return
 			}
 			sid := openrails.SubscriptionID(id)
 			path := surface.BaseURL + "/v1/me/subscriptions/" + sid.String()
@@ -227,4 +260,17 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 		})
 	}
 	require.Zero(t, sends.Load())
+}
+
+// A native operational reader remains supplied so filtering, not missing
+// configuration, is what prevents an engine-only unknown cohort from probing.
+type engineMaintenanceFetcher struct{ calls atomic.Int64 }
+
+func (*engineMaintenanceFetcher) Name() string { return "nmi" }
+func (*engineMaintenanceFetcher) Capabilities() reconcile.Capabilities {
+	return reconcile.Capabilities{Subscriptions: true}
+}
+func (f *engineMaintenanceFetcher) Fetch(context.Context, reconcile.FetchParams) (*reconcile.RemoteSnapshot, error) {
+	f.calls.Add(1)
+	return &reconcile.RemoteSnapshot{Provider: reconcile.ProviderNMI}, nil
 }

@@ -533,7 +533,7 @@ SELECT COALESCE((
 --   watermark_newer_than_period_end — provider truth synced since the lapse
 --                              and saw no renewal (ownership)
 -- name: ListLapsedSubscriptionsWithEvidence :many
-SELECT s.id, s.status, s.rail,
+SELECT s.id, s.status, s.rail, s.collection_policy,
        (s.payment_method_id IS NOT NULL)::bool AS has_payment_method,
        s.rail_subscription_id,
        s.current_period_ends_at, s.grace_ends_at, s.next_retry_at, s.retry_attempts,
@@ -634,6 +634,7 @@ SELECT id, rail, current_period_ends_at, rail_subscription_id FROM openrails.sub
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
   AND deleted_at IS NULL
+  AND collection_policy <> 'engine'
   AND status = 'unknown'
   AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
 ORDER BY current_period_ends_at ASC NULLS FIRST
@@ -646,6 +647,7 @@ SELECT id FROM openrails.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
   AND deleted_at IS NULL
+  AND collection_policy <> 'engine'
   AND status = 'past_due'
   AND next_retry_at IS NULL
   AND (grace_ends_at IS NULL OR grace_ends_at > sqlc.arg(now)::timestamptz)

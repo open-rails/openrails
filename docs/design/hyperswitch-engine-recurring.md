@@ -14,6 +14,8 @@ Engine cancellation uses the existing local subscription lifecycle and exact sub
 
 This behavior is qualified through internal engine fixtures, authenticated customer HTTP requests, the public merchant Client and existing River workers. Public engine enrollment and delayed engine settlement remain disabled and unqualified.
 
+Native LIFE cadence repair reads the explicit collection policy. It leaves engine active, past-due and unknown state to accepted-operation recovery, while preserving shared terminal-charge certainty checks. Engine rows are excluded from native unknown-cohort bulk probes and native retry-schedule repair. Cancellation and an unknown lifecycle never remove an already accepted unresolved operation.
+
 ## Native recovery reachability gap
 
 Fresh native NMI vault creation previously stamped the card-level provider mode. Billing import also defaulted to provider. Production writes of the old OpenRails mode belonged to custodian remap/import and the Basis Theory instrument creator, whose non-PSP methods are refused by verified-customer manual retry. Qualified native Pay-now and automatic dunning controls therefore do not establish that normal fresh native checkout can reach those paths. The prototype preserves provider as the native default; it does not silently turn on retries.

@@ -1144,6 +1144,7 @@ SELECT id FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND deleted_at IS NULL
+  AND collection_policy <> 'engine'
   AND status = 'past_due'
   AND next_retry_at IS NULL
   AND (grace_ends_at IS NULL OR grace_ends_at > $3::timestamptz)
@@ -1179,7 +1180,7 @@ func (q *Queries) ListDunningStalledSubscriptions(ctx context.Context, arg ListD
 }
 
 const listLapsedSubscriptionsWithEvidence = `-- name: ListLapsedSubscriptionsWithEvidence :many
-SELECT s.id, s.status, s.rail,
+SELECT s.id, s.status, s.rail, s.collection_policy,
        (s.payment_method_id IS NOT NULL)::bool AS has_payment_method,
        s.rail_subscription_id,
        s.current_period_ends_at, s.grace_ends_at, s.next_retry_at, s.retry_attempts,
@@ -1229,6 +1230,7 @@ type ListLapsedSubscriptionsWithEvidenceRow struct {
 	ID                          uuid.UUID
 	Status                      OpenrailsSubscriptionStatus
 	Rail                        string
+	CollectionPolicy            string
 	HasPaymentMethod            bool
 	RailSubscriptionID          string
 	CurrentPeriodEndsAt         *time.Time
@@ -1275,6 +1277,7 @@ func (q *Queries) ListLapsedSubscriptionsWithEvidence(ctx context.Context, arg L
 			&i.ID,
 			&i.Status,
 			&i.Rail,
+			&i.CollectionPolicy,
 			&i.HasPaymentMethod,
 			&i.RailSubscriptionID,
 			&i.CurrentPeriodEndsAt,
@@ -1772,6 +1775,7 @@ SELECT id, rail, current_period_ends_at, rail_subscription_id FROM openrails.sub
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND deleted_at IS NULL
+  AND collection_policy <> 'engine'
   AND status = 'unknown'
   AND ($3::text IS NULL OR rail = $3::text)
 ORDER BY current_period_ends_at ASC NULLS FIRST
