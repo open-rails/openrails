@@ -214,8 +214,8 @@ func New(deps Dependencies) (*Server, error) {
 	}
 
 	// Build the merchant provisioning/lifecycle/secret service (issue #225). It
-	// reuses the control plane's pgx pool (the OpenRails-owned openrails.*
-	// control-plane DB) and permission-group provisioner. MODE 1 (#723,
+	// uses the runtime data pool for request-time secret custody, matching the
+	// merchant pin, and the control plane for provisioning. MODE 1 (#723,
 	// merchant_source=manifest) serves read-only provider credentials from the
 	// manifest and operator webhook URLs from managed encrypted storage. Provider
 	// write routes retain their manifest_driven 405. MODE 2 uses managed storage.
@@ -225,13 +225,13 @@ func New(deps Dependencies) (*Server, error) {
 			if deps.Runtime == nil || deps.Runtime.ManifestSecrets == nil {
 				return nil, fmt.Errorf("merchant_source=manifest requires the runtime manifest secret plane (#723)")
 			}
-			b, err := merchantsecrets.BuildManifest(context.Background(), deps.Config, deps.Runtime.ManifestSecrets, deps.ControlPlane.Pool())
+			b, err := merchantsecrets.BuildManifest(context.Background(), deps.Config, deps.Runtime.ManifestSecrets, deps.Runtime.DB.DataPool())
 			if err != nil {
 				return nil, err
 			}
 			secretBackend = b
 		} else {
-			b, err := merchantsecrets.Build(context.Background(), deps.Config, deps.ControlPlane.Pool())
+			b, err := merchantsecrets.Build(context.Background(), deps.Config, deps.Runtime.DB.DataPool())
 			if err != nil {
 				return nil, err
 			}

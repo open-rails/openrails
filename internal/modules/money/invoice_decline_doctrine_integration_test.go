@@ -125,9 +125,9 @@ func seedActiveSubscription(t *testing.T, dbi *db.DB, pool *pgxpool.Pool, ctx co
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 	return subID
 }
@@ -137,7 +137,7 @@ func requireSubscriptionUntouched(t *testing.T, pool *pgxpool.Pool, ctx context.
 	var status string
 	var cancelledAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status, cancelled_at FROM openrails.subscriptions WHERE id = $1`, subID).
+		`SELECT status, cancelled_at FROM billing.subscriptions WHERE id = $1`, subID).
 		Scan(&status, &cancelledAt))
 	require.Equal(t, string(models.StatusActive), status,
 		"an invoice decline must never cancel a subscription — an invoice is not a subscription")
@@ -148,14 +148,14 @@ func requireStoredMethodsIntact(t *testing.T, pool *pgxpool.Pool, ctx context.Co
 	t.Helper()
 	var n int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.payment_methods WHERE customer_id = $1`, payer.UUID()).Scan(&n))
+		`SELECT count(*) FROM billing.payment_methods WHERE customer_id = $1`, payer.UUID()).Scan(&n))
 	require.Equal(t, want, n, "OpenRails NEVER deletes a stored payment method — only the end user does")
 }
 
 func notificationEventTypes(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID) []string {
 	t.Helper()
 	rows, err := pool.Query(ctx,
-		`SELECT event_type FROM openrails.notifications WHERE customer_id = $1 ORDER BY created_at, id`,
+		`SELECT event_type FROM billing.notifications WHERE customer_id = $1 ORDER BY created_at, id`,
 		payer.UUID())
 	require.NoError(t, err)
 	defer rows.Close()
@@ -173,7 +173,7 @@ func notificationData(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pay
 	t.Helper()
 	var data map[string]any
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT data FROM openrails.notifications
+		`SELECT data FROM billing.notifications
 		 WHERE customer_id = $1 AND event_type = $2 ORDER BY created_at DESC, id DESC LIMIT 1`,
 		payer.UUID(), eventType).Scan(&data))
 	return data
@@ -181,7 +181,7 @@ func notificationData(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pay
 
 func cleanupNotifications(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID) {
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.notifications WHERE customer_id = $1", payer.UUID())
 	})
 }
 

@@ -84,10 +84,10 @@ func TestDelegationProxyStorageAndMerchantAdmission(t *testing.T) {
 	status, _ = request(external)
 	require.Equal(t, 200, status)
 
-	_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.merchants SET status='deleted',deleted_at=now() WHERE id=$1`, dbtest.TestMerchantID.UUID())
+	_, err = h.sharedPool().Exec(ctx, `UPDATE billing.merchants SET status='deleted',deleted_at=now() WHERE id=$1`, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, err := h.sharedPool().Exec(context.Background(), `UPDATE openrails.merchants SET status='active',deleted_at=NULL WHERE id=$1`, dbtest.TestMerchantID.UUID())
+		_, err := h.sharedPool().Exec(context.Background(), `UPDATE billing.merchants SET status='active',deleted_at=NULL WHERE id=$1`, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)
 	})
 	status, _ = request(external)

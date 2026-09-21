@@ -52,7 +52,7 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 	var psps, methods, subs []uuid.UUID
 	psp := func(rail string, archived bool) uuid.UUID {
 		id := uuid.New()
-		exec(`INSERT INTO openrails.psps (id, merchant_id, rail, environment, account_id, archived) VALUES ($1, $2, $3, 'test', $4, $5)`,
+		exec(`INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id, archived) VALUES ($1, $2, $3, 'test', $4, $5)`,
 			id, mid, rail, rail+"-"+id.String()[:8], archived)
 		psps = append(psps, id)
 		return id
@@ -60,14 +60,14 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 	customer := func() uuid.UUID { return dbtest.EnsureCustomerIDPgx(mctx, t, pool, uuid.NewString()) }
 	card := func(customerID uuid.UUID, rail string, pspID uuid.UUID) uuid.UUID {
 		id := uuid.New()
-		exec(`INSERT INTO openrails.payment_methods (id, merchant_id, customer_id, rail, rail_customer_ref, psp_id, custodian, initial_transaction_id, created_at, updated_at)
+		exec(`INSERT INTO billing.payment_methods (id, merchant_id, customer_id, rail, rail_customer_ref, psp_id, custodian, initial_transaction_id, created_at, updated_at)
 		      VALUES ($1, $2, $3, $4, $5, $6, 'psp', $7, $8, $8)`, id, mid, customerID, rail, "vault-"+id.String()[:8], pspID, "txn-"+id.String()[:8], now)
 		methods = append(methods, id)
 		return id
 	}
 	productID, priceID := uuid.New(), uuid.New()
-	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`, productID, "cutover-"+sfx, mid)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, mid)
+	exec(`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`, productID, "cutover-"+sfx, mid)
+	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, mid)
 	sub := func(customerID uuid.UUID, rail, status string, pspID uuid.UUID, method *uuid.UUID) uuid.UUID {
 		id := uuid.New()
 		var cancelledAt *time.Time
@@ -75,7 +75,7 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 		if status == "cancelled" {
 			cancelledAt, cancelType = &now, strPtr("user")
 		}
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at,
+		exec(`INSERT INTO billing.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at,
 		        payment_method_id, customer_id, merchant_id, psp_id, cancelled_at, cancel_type)
 		      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $7, $9, $10, $11, $12, $13, $14)`,
 			id, priceID, productID, status, rail, "psid-"+id.String()[:8], now.Add(-time.Hour), now.Add(720*time.Hour), method, customerID, mid, pspID, cancelledAt, cancelType)
@@ -84,11 +84,11 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		bg := context.Background()
-		_, _ = pool.Exec(bg, `DELETE FROM openrails.subscriptions WHERE id = ANY($1)`, subs)
-		_, _ = pool.Exec(bg, `DELETE FROM openrails.prices WHERE id = $1`, priceID)
-		_, _ = pool.Exec(bg, `DELETE FROM openrails.products WHERE id = $1`, productID)
-		_, _ = pool.Exec(bg, `DELETE FROM openrails.payment_methods WHERE id = ANY($1)`, methods)
-		_, _ = pool.Exec(bg, `DELETE FROM openrails.psps WHERE id = ANY($1)`, psps)
+		_, _ = pool.Exec(bg, `DELETE FROM billing.subscriptions WHERE id = ANY($1)`, subs)
+		_, _ = pool.Exec(bg, `DELETE FROM billing.prices WHERE id = $1`, priceID)
+		_, _ = pool.Exec(bg, `DELETE FROM billing.products WHERE id = $1`, productID)
+		_, _ = pool.Exec(bg, `DELETE FROM billing.payment_methods WHERE id = ANY($1)`, methods)
+		_, _ = pool.Exec(bg, `DELETE FROM billing.psps WHERE id = ANY($1)`, psps)
 	})
 
 	archived, active, other := psp("nmi", true), psp("nmi", false), psp("nmi", false)
@@ -118,9 +118,9 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 	snapshot := func() string {
 		var out string
 		require.NoError(t, pool.QueryRow(mctx, `
-			SELECT (SELECT string_agg(id::text || ':' || psp_id::text || ':' || coalesce(payment_method_id::text, '-') || ':' || status::text, ',' ORDER BY id) FROM openrails.subscriptions WHERE id = ANY($1))
-			    || '|' || (SELECT string_agg(id::text || ':' || psp_id::text, ',' ORDER BY id) FROM openrails.payment_methods WHERE id = ANY($2))
-			    || '|' || (SELECT count(*)::text FROM openrails.rail_intents WHERE subscription_id = ANY($1))`, subs, methods).Scan(&out))
+			SELECT (SELECT string_agg(id::text || ':' || psp_id::text || ':' || coalesce(payment_method_id::text, '-') || ':' || status::text, ',' ORDER BY id) FROM billing.subscriptions WHERE id = ANY($1))
+			    || '|' || (SELECT string_agg(id::text || ':' || psp_id::text, ',' ORDER BY id) FROM billing.payment_methods WHERE id = ANY($2))
+			    || '|' || (SELECT count(*)::text FROM billing.rail_intents WHERE subscription_id = ANY($1))`, subs, methods).Scan(&out))
 		return out
 	}
 	before := snapshot()
@@ -220,9 +220,9 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 
 	foreignMerchant, foreignPSP := uuid.New(), uuid.New()
 	super := dbtest.SharedSuperuserPGXPool(t)
-	_, err = super.Exec(ctx, `INSERT INTO openrails.merchants(id,slug) VALUES($1,$2)`, foreignMerchant, "foreign-cutover-"+foreignMerchant.String())
+	_, err = super.Exec(ctx, `INSERT INTO billing.merchants(id,slug) VALUES($1,$2)`, foreignMerchant, "foreign-cutover-"+foreignMerchant.String())
 	require.NoError(t, err)
-	_, err = super.Exec(ctx, `INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id) VALUES($1,$2,'nmi','test','hidden-foreign-provider')`, foreignPSP, foreignMerchant)
+	_, err = super.Exec(ctx, `INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id) VALUES($1,$2,'nmi','test','hidden-foreign-provider')`, foreignPSP, foreignMerchant)
 	require.NoError(t, err)
 	_, err = cp.PlanProviderAccountCutover(ctx, dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), TargetPSPID: &foreignPSP})
 	require.ErrorIs(t, err, openrails.ErrNotFound, "a foreign PSP is indistinguishable from a missing one")

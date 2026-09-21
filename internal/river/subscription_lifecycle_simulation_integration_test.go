@@ -132,7 +132,7 @@ type simSub struct {
 func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodStart time.Time, withInitialPayment bool) simSub {
 	t.Helper()
 	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	entName := "sim_pro_access_" + uuid.New().String()[:8]
 	productID := uuid.New()
 	priceID := uuid.New()
@@ -213,14 +213,14 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 
 	t.Cleanup(func() {
 		bg := context.Background()
-		_, _ = pool.Exec(bg, "DELETE FROM openrails.grants WHERE source_id LIKE '%' || $1 || '%'", subID.String())
-		_, _ = pool.Exec(bg, "DELETE FROM openrails.entitlements WHERE source_id = $1", subID)
-		_, _ = pool.Exec(bg, "DELETE FROM openrails.payments WHERE subscription_id = $1", subID)
-		_, _ = pool.Exec(bg, "DELETE FROM openrails.reconciliation_findings WHERE subject_key = $1", "subscription:"+subID.String())
-		_, _ = pool.Exec(bg, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(bg, "DELETE FROM openrails.payment_methods WHERE id = $1", paymentMethodID)
-		_, _ = pool.Exec(bg, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(bg, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(bg, "DELETE FROM billing.grants WHERE source_id LIKE '%' || $1 || '%'", subID.String())
+		_, _ = pool.Exec(bg, "DELETE FROM billing.entitlements WHERE source_id = $1", subID)
+		_, _ = pool.Exec(bg, "DELETE FROM billing.payments WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(bg, "DELETE FROM billing.reconciliation_findings WHERE subject_key = $1", "subscription:"+subID.String())
+		_, _ = pool.Exec(bg, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(bg, "DELETE FROM billing.payment_methods WHERE id = $1", paymentMethodID)
+		_, _ = pool.Exec(bg, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(bg, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	return simSub{subID: subID, customerID: tenantSubjectID, entName: entName, pspID: pspID, providerID: providerID, vaultID: vaultID}
@@ -494,7 +494,7 @@ func creditGrantCount(t *testing.T, ctx context.Context, dbi *db.DB, subID uuid.
 	t.Helper()
 	var n int
 	require.NoError(t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()).QueryRow(ctx,
-		"SELECT count(*) FROM openrails.grants WHERE source_id LIKE '%' || $1 || '%' AND kind = 'credit' AND event = 'grant'",
+		"SELECT count(*) FROM billing.grants WHERE source_id LIKE '%' || $1 || '%' AND kind = 'credit' AND event = 'grant'",
 		subID.String()).Scan(&n))
 	return n
 }
@@ -503,7 +503,7 @@ func paymentCount(t *testing.T, ctx context.Context, dbi *db.DB, subID uuid.UUID
 	t.Helper()
 	var n int
 	require.NoError(t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()).QueryRow(ctx,
-		"SELECT count(*) FROM openrails.payments WHERE subscription_id = $1 AND status = $2",
+		"SELECT count(*) FROM billing.payments WHERE subscription_id = $1 AND status = $2",
 		subID, status).Scan(&n))
 	return n
 }

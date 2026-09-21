@@ -10,11 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
-	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/stretchr/testify/require"
 )
 
 // or#833: the checks existed and were proven to catch a real drift; NOTHING RAN
@@ -39,19 +37,19 @@ func TestLedgerIntegrityWorker_RaisesAFindingOnInducedDrift(t *testing.T) {
 	currency := "TL" + strings.ToUpper(strings.ReplaceAll(uuid.NewString(), "-", "")[:10])
 	customer := uuid.New()
 	_, err := merchantPool.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+		`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
 		customer, merchantID)
 	require.NoError(t, err)
-	l := ledger.New(gen.New(merchantPool), merchantID)
+	l := ledger.New(dbtest.Queries(merchantPool), merchantID)
 	_, err = l.Deposit(mctx, customer, currency, 1000, ledger.Coord{Operation: ledger.OpDeposit, Source: "grant", SourceID: uuid.NewString()}, uuid.New())
 	require.NoError(t, err)
 	custAcc, err := l.EnsureCustomerBalance(mctx, customer, currency)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = merchantPool.Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE merchant_id=$1 AND currency=$2`, merchantID, currency)
-		_, _ = merchantPool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, currency)
-		_, _ = merchantPool.Exec(ctx, `DELETE FROM openrails.reconciliation_findings
+		_, _ = merchantPool.Exec(ctx, `DELETE FROM billing.ledger_transfers WHERE merchant_id=$1 AND currency=$2`, merchantID, currency)
+		_, _ = merchantPool.Exec(ctx, `DELETE FROM billing.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, currency)
+		_, _ = merchantPool.Exec(ctx, `DELETE FROM billing.reconciliation_findings
 			WHERE merchant_id=$1 AND (subject_key=$2 OR subject_key=$3)`,
 			merchantID, custAcc.String(), strings.ToLower(currency))
 	})
@@ -65,7 +63,7 @@ func TestLedgerIntegrityWorker_RaisesAFindingOnInducedDrift(t *testing.T) {
 	// with triggers disabled. Silent by construction: no error, no event, and
 	// every balance read on this account is wrong from here on.
 	_, err = superuserPool(t).Exec(ctx,
-		`UPDATE openrails.ledger_accounts SET credits_posted = credits_posted + 777 WHERE id = $1`, custAcc)
+		`UPDATE billing.ledger_accounts SET credits_posted = credits_posted + 777 WHERE id = $1`, custAcc)
 	require.NoError(t, err)
 
 	require.NoError(t, worker.Work(ctx, nil))
@@ -84,7 +82,7 @@ func TestLedgerIntegrityWorker_RaisesAFindingOnInducedDrift(t *testing.T) {
 
 	// Repaired: the audit is precise, not permanently red.
 	_, err = superuserPool(t).Exec(ctx,
-		`UPDATE openrails.ledger_accounts SET credits_posted = credits_posted - 777 WHERE id = $1`, custAcc)
+		`UPDATE billing.ledger_accounts SET credits_posted = credits_posted - 777 WHERE id = $1`, custAcc)
 	require.NoError(t, err)
 	require.NoError(t, worker.Work(ctx, nil))
 	require.Equal(t, "fixed", findingStatus(t, ctx, merchantPool, merchantID, FindingLedgerCounterDrift, custAcc.String()).status)
@@ -103,7 +101,7 @@ func findingStatus(t *testing.T, ctx context.Context, pool *pgxpool.Pool, mercha
 	var f ledgerFinding
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*), coalesce(max(severity),''), coalesce(max(status),''), coalesce(max(recommended_action),'')
-		   FROM openrails.reconciliation_findings
+		   FROM billing.reconciliation_findings
 		  WHERE merchant_id=$1 AND finding_type=$2 AND subject_key=$3`,
 		merchantID, findingType, subject).Scan(&f.count, &f.severity, &f.status, &f.action))
 	return f

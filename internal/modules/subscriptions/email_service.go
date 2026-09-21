@@ -92,6 +92,15 @@ func (s *EmailService) SetDomainServices(
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
+// SetDefaultUserDirectory fills the optional identity seam during startup.
+// An explicit host directory always takes precedence. Call before serving or
+// starting workers, alongside SetDomainServices.
+func (s *EmailService) SetDefaultUserDirectory(users identity.UserDirectory) {
+	if s.users == nil {
+		s.users = users
+	}
+}
+
 func (s *EmailService) now() time.Time {
 	if s.clock != nil {
 		return s.clock.Now()

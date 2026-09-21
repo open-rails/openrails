@@ -52,15 +52,15 @@ func TestLatestChargeByMethodIDs(t *testing.T) {
 	priceID := uuid.New()
 	subID := uuid.New()
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.products (id, merchant_id, key, display_name) VALUES ($1,$2,$3,$3)`,
+		`INSERT INTO billing.products (id, merchant_id, key, display_name) VALUES ($1,$2,$3,$3)`,
 		productID, merchantID, "prod-"+uuid.NewString()[:8])
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency) VALUES ($1,$2,$3,$4,$5)`,
+		`INSERT INTO billing.prices (id, product_id, merchant_id, amount, currency) VALUES ($1,$2,$3,$4,$5)`,
 		priceID, productID, merchantID, 1000, "USD")
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.subscriptions (id, product_id, price_id, payment_method_id, rail, psp_id, merchant_id, customer_id)
+		`INSERT INTO billing.subscriptions (id, product_id, price_id, payment_method_id, rail, psp_id, merchant_id, customer_id)
 		 VALUES ($1,$2,$3,$4,'mobius',$5,$6,$7)`,
 		subID, productID, priceID, charged.ID, mobiusPSP, merchantID, customerID)
 	require.NoError(t, err)
@@ -68,7 +68,7 @@ func TestLatestChargeByMethodIDs(t *testing.T) {
 	// Older successful charge, then a newer failed charge: the newer one must win.
 	insertPayment := func(txID string, status string, purchasedAt time.Time) {
 		_, e := pool.Exec(ctx,
-			`INSERT INTO openrails.payments
+			`INSERT INTO billing.payments
 			   (id, price_id, rail, psp_id, transaction_id, amount, list_amount, currency, status, subscription_id, merchant_id, customer_id, purchased_at)
 			 VALUES ($1,$2,'mobius',$3,$4,$5,$5,'USD',$6,$7,$8,$9,$10)`,
 			uuid.New(), priceID, mobiusPSP, txID, 1000, status, subID, merchantID, customerID, purchasedAt)
@@ -78,11 +78,11 @@ func TestLatestChargeByMethodIDs(t *testing.T) {
 	insertPayment("tx-new-"+uuid.NewString()[:8], "failed", now.Add(-24*time.Hour))
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.payments WHERE subscription_id = $1`, subID)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id = $1`, subID)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.payment_methods WHERE id = ANY($1)`, []uuid.UUID{charged.ID, uncharged.ID})
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.prices WHERE id = $1`, priceID)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.products WHERE id = $1`, productID)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.payments WHERE subscription_id = $1`, subID)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.subscriptions WHERE id = $1`, subID)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.payment_methods WHERE id = ANY($1)`, []uuid.UUID{charged.ID, uncharged.ID})
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.prices WHERE id = $1`, priceID)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.products WHERE id = $1`, productID)
 	})
 
 	got, err := pmRepo.LatestChargeByMethodIDs(ctx, []uuid.UUID{charged.ID, uncharged.ID})
@@ -122,7 +122,7 @@ func TestMultiInstrumentPerVaultUniqueness(t *testing.T) {
 	second := mk("bill-2")
 	dup := mk("bill-1")
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.payment_methods WHERE id = ANY($1)`,
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.payment_methods WHERE id = ANY($1)`,
 			[]uuid.UUID{first.ID, second.ID, dup.ID})
 	})
 

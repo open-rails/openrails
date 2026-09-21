@@ -37,14 +37,14 @@ func TestConverge_DeriveGrantEffectMismatch_GrantDirection(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1,$2,$2,$3, jsonb_build_object($4::text, null), $5)`,
 			productID, "gd-prod-"+suffix, "gd-tier-"+suffix, feature, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		// Active sub, RUNNING period [now-5d, now+25d).
-		exec(`INSERT INTO openrails.subscriptions
+		exec(`INSERT INTO billing.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
 		         entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
@@ -66,23 +66,23 @@ func TestConverge_DeriveGrantEffectMismatch_GrantDirection(t *testing.T) {
 			StartsAt: now.Add(-40 * 24 * time.Hour), EndsAt: &oldEnd,
 		})
 		require.NoError(t, err)
-		exec(`INSERT INTO openrails.entitlements (id, merchant_id, customer_id, entitlement, start_at, end_at, source_id, source_type, grant_id)
+		exec(`INSERT INTO billing.entitlements (id, merchant_id, customer_id, entitlement, start_at, end_at, source_id, source_type, grant_id)
 		      VALUES ($1,$2,$3,$4,$5,$6,$7,'subscription',$8)`,
 			uuid.New(), merchantID, customer, feature, now.Add(-40*24*time.Hour), oldEnd, subID, g.ID)
 		// Independent standing access must not hide this subscription's missing period.
-		exec(`INSERT INTO openrails.entitlements(id,merchant_id,customer_id,entitlement,start_at,source_id,source_type)
+		exec(`INSERT INTO billing.entitlements(id,merchant_id,customer_id,entitlement,start_at,source_id,source_type)
             VALUES($1,$2,$3,$4,$5,$6,'admin')`, uuid.New(), merchantID, customer, feature, now.Add(-24*time.Hour), uuid.New())
 		return nil
 	}))
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE customer_id=$1`, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE customer_id=$1`, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE customer_id=$1`, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE customer_id=$1`, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, subID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -95,14 +95,14 @@ func TestConverge_DeriveGrantEffectMismatch_GrantDirection(t *testing.T) {
 
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.grant_effect.mismatch' AND subject_key=$2`,
+			`SELECT status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND finding_type='derive.grant_effect.mismatch' AND subject_key=$2`,
 			merchantID, "subscription:"+subID.String()).Scan(&status))
 		require.Equal(t, "auto_fixed", status)
 
 		// A live window for the current period exists now, via a NEW grant.
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements
+			`SELECT count(*) FROM billing.entitlements
 			 WHERE customer_id=$1 AND entitlement=$2 AND revoked_at IS NULL AND deleted_at IS NULL
 			   AND start_at <= now() AND (end_at IS NULL OR end_at > now()) AND grant_id IS NOT NULL`,
 			customer, feature).Scan(&n))
@@ -143,13 +143,13 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 		}
 		// Empty entitlements_spec: keeps derive.subscription.missing quiet — the
 		// revoke direction keys on the live windows alone.
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`, productID, "rd-prod-"+suffix, "rd-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
 		seedSub := func(id uuid.UUID, status, railSubID string) {
-			exec(`INSERT INTO openrails.subscriptions
+			exec(`INSERT INTO billing.subscriptions
 			        (id, price_id, product_id, status, rail, rail_subscription_id,
 			         current_period_starts_at, current_period_ends_at, started_at,
 			         entitlements_spec_snapshot, customer_id, merchant_id, cancelled_at, cancel_type, ended_at, psp_id)
@@ -167,7 +167,7 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 		// sub's window is STANDING even though its terminal bound has passed;
 		// the unknown sub keeps the same shape (access intact, #664/#691).
 		seedEnt := func(id, subID uuid.UUID, feature string, endAt *time.Time) {
-			exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
+			exec(`INSERT INTO billing.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 			      VALUES ($1,$2,$3,$4,$5,$6,'subscription',$7)`,
 				id, customer, feature, now.Add(-40*24*time.Hour), endAt, subID, merchantID)
 		}
@@ -178,14 +178,14 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
 				merchantID, []string{"subscription:" + deadSub.String(), "subscription:" + unknownSub.String(), "customer:" + customer.String()})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notifications WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE customer_id=$1`, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE customer_id=$1`, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=ANY($1)`, []uuid.UUID{deadSub, unknownSub})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.notifications WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE customer_id=$1`, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE customer_id=$1`, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=ANY($1)`, []uuid.UUID{deadSub, unknownSub})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -199,7 +199,7 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 		require.Equal(t, 2, res.AutoFixed)
 		var findingStatus string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status FROM openrails.reconciliation_findings
+			`SELECT status FROM billing.reconciliation_findings
 			 WHERE merchant_id=$1 AND finding_type='derive.grant_effect.mismatch' AND subject_key=$2`,
 			merchantID, "subscription:"+deadSub.String()).Scan(&findingStatus))
 		require.Equal(t, "auto_fixed", findingStatus, "standing terminal access must use the exact AUTO mismatch finding")
@@ -207,11 +207,11 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 		// Repair = the missed #691 closure: the window is BOUNDED at the
 		// entitled bound (GREATEST(paid-through, ended_at)), not revoked.
 		var endAt, revokedAt *time.Time
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT end_at, revoked_at FROM openrails.entitlements WHERE id=$1`, deadEnt).Scan(&endAt, &revokedAt))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT end_at, revoked_at FROM billing.entitlements WHERE id=$1`, deadEnt).Scan(&endAt, &revokedAt))
 		require.NotNil(t, endAt)
 		require.WithinDuration(t, now.Add(-10*24*time.Hour), *endAt, 2*time.Second, "dead sub's overrun window bounded at ended_at/paid-through")
 		require.Nil(t, revokedAt, "closure writes end_at, not a revoke")
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT revoked_at FROM openrails.entitlements WHERE id=$1`, unknownEnt).Scan(&revokedAt))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT revoked_at FROM billing.entitlements WHERE id=$1`, unknownEnt).Scan(&revokedAt))
 		require.Nil(t, revokedAt, "unknown sub keeps access (#664: no revoke on a guess)")
 		return nil
 	}))
@@ -246,14 +246,14 @@ func TestConverge_DeriveGrantEffectMismatch_ExpiredBoundedResume(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1,$2,$2,$3,jsonb_build_object($4::text, null),$5)`,
 			productID, "resume-prod-"+suffix, "resume-tier-"+suffix, feature, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "stripe")
 		periodStart, periodEnd := now.Add(-20*24*time.Hour), now.Add(10*24*time.Hour)
-		exec(`INSERT INTO openrails.subscriptions
+		exec(`INSERT INTO billing.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
 		         entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
@@ -270,7 +270,7 @@ func TestConverge_DeriveGrantEffectMismatch_ExpiredBoundedResume(t *testing.T) {
 			StartsAt: periodStart, EndsAt: &boundedEnd,
 		})
 		require.NoError(t, err)
-		exec(`INSERT INTO openrails.entitlements
+		exec(`INSERT INTO billing.entitlements
 		        (id, merchant_id, customer_id, entitlement, start_at, end_at, source_id, source_type, grant_id)
 		      VALUES ($1,$2,$3,$4,$5,$6,$7,'subscription',$8)`,
 			uuid.New(), merchantID, customer, feature, periodStart, boundedEnd, subID, g.ID)
@@ -279,12 +279,12 @@ func TestConverge_DeriveGrantEffectMismatch_ExpiredBoundedResume(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE customer_id=$1`, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE customer_id=$1`, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE customer_id=$1`, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE customer_id=$1`, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, subID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -297,7 +297,7 @@ func TestConverge_DeriveGrantEffectMismatch_ExpiredBoundedResume(t *testing.T) {
 
 		var findingType, status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT finding_type, status FROM openrails.reconciliation_findings
+			`SELECT finding_type, status FROM billing.reconciliation_findings
 			 WHERE merchant_id=$1 AND subject_key=$2`,
 			merchantID, "subscription:"+subID.String()).Scan(&findingType, &status))
 		require.Equal(t, "derive.grant_effect.mismatch", findingType, "acceptance requires the exact finding type")
@@ -305,7 +305,7 @@ func TestConverge_DeriveGrantEffectMismatch_ExpiredBoundedResume(t *testing.T) {
 
 		var endAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT end_at FROM openrails.entitlements
+			`SELECT end_at FROM billing.entitlements
 			 WHERE source_type='subscription' AND source_id=$1 AND revoked_at IS NULL AND deleted_at IS NULL`, subID).Scan(&endAt))
 		require.Nil(t, endAt, "the active auto-renew window must be standing again")
 		return nil

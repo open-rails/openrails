@@ -13,7 +13,7 @@ import (
 
 func TestInitialInvoiceAgreementsSettleWithoutReplacingFirstAnchor(t *testing.T) {
 	e := newNMIReceiptEnv(t)
-	_, err := e.pool.Exec(e.ctx, `UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref='' WHERE id=$1`, e.method)
+	_, err := e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET stored_credential_unscheduled_ref='' WHERE id=$1`, e.method)
 	require.NoError(t, err)
 	require.NoError(t, e.svc.SetCreditLimit(e.ctx, e.payer, e.currency, 1_000_000))
 	_, err = e.svc.AccrueOwed(e.ctx, e.payer, e.currency, "review", uuid.NewString(), 50_000)

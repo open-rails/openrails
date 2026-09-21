@@ -3,9 +3,8 @@
 // Package dbtest provides a shared Postgres database for integration tests.
 //
 // SharedPostgresDSN spins up a single postgres:18-alpine testcontainer once per
-// test-package process (via sync.Once), bootstraps the openrails/profiles schemas,
-// applies all migrations via internal/migrate.RunPostgres, and hands the same DSN
-// to every caller. Because the container is shared for the lifetime of the
+// test-package process (via sync.Once), initializes billing and profiles through
+// their owning libraries, and hands the same DSN to every caller. Because the container is shared for the lifetime of the
 // package's test binary, state persists across tests in that package — callers
 // are responsible for any per-test isolation/cleanup they need (most scope rows
 // by a freshly-generated owner id).
@@ -32,6 +31,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
+	"github.com/open-rails/openrails/internal/standalonedb"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -280,18 +280,23 @@ func bootstrapAndMigrate(ctx context.Context, dsn string) error {
 		return fmt.Errorf("wait for postgres: %w", err)
 	}
 
-	// migrate.RunPostgres owns the full schema: ensurePostgresBootstrap creates
-	// the configured OpenRails schema (default openrails) + pgcrypto, then the authkit migrations create the
-	// profiles schema and all of its tables (users, *_roles, the role_id()
-	// function, etc.). We deliberately do NOT pre-create any profiles tables —
-	// doing so shadows authkit's own migration-managed definitions and breaks
-	// later authkit migrations (e.g. missing users.phone_number).
+	// Each library owns its own migration source. AuthKit initializes profiles;
+	// OpenRails initializes billing and its managed River tables. The harness
+	// intentionally does not import either package's embedded migration FS.
 	cfg := &config.Config{
 		Env: "dev",
 		DB:  &config.DBConfig{URL: dsn},
 	}
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("open postgres pool for AuthKit migrations: %w", err)
+	}
+	defer pool.Close()
 	if err := migrate.RunPostgres(ctx, cfg); err != nil {
-		return fmt.Errorf("run migrations: %w", err)
+		return fmt.Errorf("apply OpenRails migrations: %w", err)
+	}
+	if err := standalonedb.ApplyAuthKit(ctx, pool); err != nil {
+		return err
 	}
 
 	// Seed the canonical test merchant once per provisioned DB so every test has a
@@ -300,7 +305,7 @@ func bootstrapAndMigrate(ctx context.Context, dsn string) error {
 	// without first calling EnsureTestMerchant; seeding it here makes that robust and
 	// order-independent. Idempotent — EnsureTestMerchant remains a safe no-op.
 	if _, err := sqlDB.ExecContext(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (id) DO NOTHING`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (id) DO NOTHING`,
 		TestMerchantID.UUID(), TestMerchantSlug); err != nil {
 		return fmt.Errorf("seed test merchant: %w", err)
 	}

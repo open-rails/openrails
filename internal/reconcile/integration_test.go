@@ -51,7 +51,7 @@ func newReconcileMerchant(t *testing.T, appDB *db.DB) merchant.ID {
 	t.Helper()
 	id := merchant.ID(uuid.New())
 	_, err := appDB.Pool().Exec(context.Background(),
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1,$2,'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1,$2,'active')`,
 		id.UUID(), "reconcile-"+id.UUID().String()[:8])
 	require.NoError(t, err)
 	return id
@@ -104,12 +104,12 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB, merc
 		// entitlements_tenant_subject_no_overlap exclusion constraint forbids
 		// overlapping windows of one entitlement for one subject.
 		entName := fmt.Sprintf("premium-%d", i)
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
 			productID, fmt.Sprintf("reconcile-prod-%d-%s", i, suffix), fmt.Sprintf("reconcile-tier-%d-%s", i, suffix), entName, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 		      VALUES ($1, $2, 9990000, 'USD', 720, true, $3)`, priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.subscriptions
+		exec(`INSERT INTO billing.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
 		         entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
@@ -120,7 +120,7 @@ func seedReconcileFixtures(t *testing.T, ctx context.Context, appDB *db.DB, merc
 		if subID == s.subDead {
 			entID = s.entDeadID
 		}
-		exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
+		exec(`INSERT INTO billing.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 		      VALUES ($1, $2, $3, $4, $5, $6, 'subscription', $7)`,
 			entID, s.subjectID, entName, periodStart, periodEnd, subID, merchantID)
 	}
@@ -135,7 +135,7 @@ func reconcileSnapshot(t *testing.T, ctx context.Context, appDB *db.DB, seeded s
 	t.Helper()
 	var alivePSID string
 	require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-		`SELECT rail_subscription_id FROM openrails.subscriptions WHERE id = $1`, seeded.subAlive).Scan(&alivePSID))
+		`SELECT rail_subscription_id FROM billing.subscriptions WHERE id = $1`, seeded.subAlive).Scan(&alivePSID))
 
 	now := time.Now().UTC()
 	end := now.Add(20 * 24 * time.Hour)
@@ -190,7 +190,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 				snap = reconcileSnapshot(t, ctx, appDB, seeded)
 				if remoteStatus != "" {
 					var deadID string
-					require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT rail_subscription_id FROM openrails.subscriptions WHERE id=$1`, seeded.subDead).Scan(&deadID))
+					require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT rail_subscription_id FROM billing.subscriptions WHERE id=$1`, seeded.subDead).Scan(&deadID))
 					snap.Subscriptions = append(snap.Subscriptions, RemoteSubscription{RailSubscriptionID: deadID, Status: remoteStatus, RawStatus: string(remoteStatus)})
 				}
 				return nil
@@ -236,10 +236,10 @@ func TestReconcileEngineIntegration(t *testing.T) {
 			// ...but wrote nothing to billing state.
 			require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 				var status string
-				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id = $1`, seeded.subDead).Scan(&status))
+				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM billing.subscriptions WHERE id = $1`, seeded.subDead).Scan(&status))
 				assert.Equal(t, "active", status, "advisory must not cancel anything")
 				var n int
-				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE transaction_id LIKE 'itxn-%'`).Scan(&n))
+				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE transaction_id LIKE 'itxn-%'`).Scan(&n))
 				assert.Zero(t, n, "advisory must not backfill payments")
 				return nil
 			}))
@@ -261,7 +261,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 				// schedule cleared, entitlement revoked.
 				var status, cancelType string
 				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-					`SELECT status::text, COALESCE(cancel_type, '') FROM openrails.subscriptions WHERE id = $1`, seeded.subDead).
+					`SELECT status::text, COALESCE(cancel_type, '') FROM billing.subscriptions WHERE id = $1`, seeded.subDead).
 					Scan(&status, &cancelType))
 				assert.Equal(t, "cancelled", status)
 				assert.Equal(t, "expired", cancelType)
@@ -277,19 +277,19 @@ func TestReconcileEngineIntegration(t *testing.T) {
 				// period end, so nothing is stamped early and nothing survives past it.
 				var revokedAt, entEndAt *time.Time
 				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-					`SELECT revoked_at, end_at FROM openrails.entitlements WHERE id = $1`, seeded.entDeadID).Scan(&revokedAt, &entEndAt))
+					`SELECT revoked_at, end_at FROM billing.entitlements WHERE id = $1`, seeded.entDeadID).Scan(&revokedAt, &entEndAt))
 				assert.Nil(t, revokedAt, "paid-for window is honored: no early revoke on a provider-dead cancel")
 				require.NotNil(t, entEndAt)
 				var deadPeriodEnd time.Time
 				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-					`SELECT current_period_ends_at FROM openrails.subscriptions WHERE id = $1`, seeded.subDead).Scan(&deadPeriodEnd))
+					`SELECT current_period_ends_at FROM billing.subscriptions WHERE id = $1`, seeded.subDead).Scan(&deadPeriodEnd))
 				assert.False(t, entEndAt.After(deadPeriodEnd), "no access beyond the paid-for period")
 
 				// PS-4: the missing charge is backfilled, deduped identity.
 				var amount int64
 				var subjectID uuid.UUID
 				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-					`SELECT amount, customer_id FROM openrails.payments WHERE rail = 'nmi' AND transaction_id LIKE 'itxn-%'`).
+					`SELECT amount, customer_id FROM billing.payments WHERE rail = 'nmi' AND transaction_id LIKE 'itxn-%'`).
 					Scan(&amount, &subjectID))
 				assert.Equal(t, int64(9_990_000), amount)
 				assert.Equal(t, seeded.subjectID, subjectID)
@@ -408,15 +408,15 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		}
 		// Catalog: product with an entitlements spec + a price whose
 		// provider_links blob carries the NMI plan id.
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 		      VALUES ($1, $2, $2, $3, jsonb_build_object($4::text, null), $5)`,
 			productID, "mat-prod-"+suffix, "mat-tier-"+suffix, entName, dbtest.TestMerchantID.UUID())
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 		      VALUES ($1, $2, 14990000, 'USD', 720, true, $3)`,
 			priceID, productID, dbtest.TestMerchantID.UUID())
-		exec(`INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,plan_id) VALUES($1,$2,$3,$4)`, dbtest.TestMerchantID.UUID(), priceID, psp.ID, planID)
+		exec(`INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,plan_id) VALUES($1,$2,$3,$4)`, dbtest.TestMerchantID.UUID(), priceID, psp.ID, planID)
 		// Identity anchor: a stored payment method holding the remote vault id.
-		exec(`INSERT INTO openrails.payment_methods (id, customer_id, rail, rail_customer_ref, initial_transaction_id, last_four, expiry_date, merchant_id, psp_id)
+		exec(`INSERT INTO billing.payment_methods (id, customer_id, rail, rail_customer_ref, initial_transaction_id, last_four, expiry_date, merchant_id, psp_id)
 		      VALUES ($1, $2, 'nmi', $3, 'init-txn-'||$4::text, '1111', '1029', $5, $6)`, pmID, subjectIDHolder, railCustomerRef, suffix, dbtest.TestMerchantID.UUID(), psp.ID)
 		return nil
 	}))
@@ -484,7 +484,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		}
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.subscriptions WHERE rail_subscription_id = $1`, resolvablePSID).Scan(&n))
+			`SELECT count(*) FROM billing.subscriptions WHERE rail_subscription_id = $1`, resolvablePSID).Scan(&n))
 		assert.Zero(t, n, "no subscription created by an advisory run")
 		return nil
 	}))
@@ -507,7 +507,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		var gotPeriodEnd time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT id, status::text, rail, customer_id, current_period_ends_at
-			 FROM openrails.subscriptions WHERE rail_subscription_id = $1`, resolvablePSID).
+			 FROM billing.subscriptions WHERE rail_subscription_id = $1`, resolvablePSID).
 			Scan(&subID, &status, &rail, &gotSubject, &gotPeriodEnd))
 		assert.Equal(t, "active", status)
 		assert.Equal(t, "nmi", rail)
@@ -518,7 +518,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		var amount int64
 		var paySub uuid.UUID
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT amount, subscription_id FROM openrails.payments WHERE transaction_id = $1`, txnID).
+			`SELECT amount, subscription_id FROM billing.payments WHERE transaction_id = $1`, txnID).
 			Scan(&amount, &paySub))
 		assert.Equal(t, int64(14_990_000), amount)
 		assert.Equal(t, subID, paySub)
@@ -526,7 +526,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		// Entitlements granted through the normal subscription-sourced path.
 		var entCount int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements
+			`SELECT count(*) FROM billing.entitlements
 			 WHERE source_type = 'subscription' AND source_id = $1
 			   AND entitlement = $2 AND revoked_at IS NULL`, subID, entName).Scan(&entCount))
 		assert.Equal(t, 1, entCount)
@@ -569,7 +569,7 @@ func TestReconcileMaterializeIntegration(t *testing.T) {
 		}
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.subscriptions WHERE rail_subscription_id = $1`, resolvablePSID).Scan(&n))
+			`SELECT count(*) FROM billing.subscriptions WHERE rail_subscription_id = $1`, resolvablePSID).Scan(&n))
 		assert.Equal(t, 1, n, "exactly one materialized subscription after a re-run")
 		return nil
 	}))
@@ -628,16 +628,16 @@ func TestReconcileAdoptPreservesScheduledProviderActions(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1,$2,$2,$3)`, productID, "sa-prod-"+suffix, merchantID)
+		exec(`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1,$2,$2,$3)`, productID, "sa-prod-"+suffix, merchantID)
 		// Two prices for the SAME product (the scheduled downgrade target), so the
 		// subscriptions_price_product_merchant composite FK is satisfied. Both
 		// default to auto_renew=false/access_duration_hours=NULL, so the
 		// trg_prices_default_key trigger would derive the SAME "<product>-onetime"
 		// key for both and collide on uq_prices_merchant_key_current (#774) —
 		// supply distinct explicit keys, per insertPriceIfAbsent in tests/seed_data.go.
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, key, merchant_id) VALUES ($1,$2,9990000,'USD',$3,$4),($5,$2,4990000,'USD',$6,$4)`,
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, key, merchant_id) VALUES ($1,$2,9990000,'USD',$3,$4),($5,$2,4990000,'USD',$6,$4)`,
 			priceID, productID, "sa-price-"+suffix+"-current", merchantID, schedPriceID, "sa-price-"+suffix+"-scheduled")
-		exec(`INSERT INTO openrails.subscriptions
+		exec(`INSERT INTO billing.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
 		         current_period_starts_at, current_period_ends_at, started_at,
 		         deletion_scheduled_at, scheduled_price_id, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
@@ -649,9 +649,9 @@ func TestReconcileAdoptPreservesScheduledProviderActions(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=ANY($1)`, []uuid.UUID{priceID, schedPriceID})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, subID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=ANY($1)`, []uuid.UUID{priceID, schedPriceID})
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -667,7 +667,7 @@ func TestReconcileAdoptPreservesScheduledProviderActions(t *testing.T) {
 		var schedPrice *uuid.UUID
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT deletion_scheduled_at, scheduled_price_id, status::text, current_period_ends_at FROM openrails.subscriptions WHERE id=$1`, subID).
+			`SELECT deletion_scheduled_at, scheduled_price_id, status::text, current_period_ends_at FROM billing.subscriptions WHERE id=$1`, subID).
 			Scan(&delAt, &schedPrice, &status, &gotEnd))
 		require.Equal(t, "active", status)
 		require.NotNil(t, gotEnd)

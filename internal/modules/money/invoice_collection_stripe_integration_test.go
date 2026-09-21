@@ -317,7 +317,7 @@ const frozenStripeMinor = int64(5) // seedArrearsInvoice: 50_000 native = 5 cent
 
 func (e collectionEnv) dueAgain(t *testing.T) {
 	t.Helper()
-	_, err := e.pool.Exec(e.ctx, `UPDATE openrails.invoices SET next_collection_attempt_at = now() - interval '1 minute' WHERE id = $1`, e.invoice)
+	_, err := e.pool.Exec(e.ctx, `UPDATE billing.invoices SET next_collection_attempt_at = now() - interval '1 minute' WHERE id = $1`, e.invoice)
 	require.NoError(t, err)
 }
 
@@ -375,7 +375,7 @@ func TestInvoiceCollection_StripeWindowElapsedRequiresExactReceipt(t *testing.T)
 
 	later := clockwork.NewFakeClockAt(time.Now().UTC().Add(24 * time.Hour))
 	stale := collectionRunnerClock(e.db, charger, plane, later)
-	_, err = e.pool.Exec(e.ctx, "UPDATE openrails.rail_intents SET next_attempt_at = $2 WHERE id = $1", op.ID, later.Now().Add(-time.Minute))
+	_, err = e.pool.Exec(e.ctx, "UPDATE billing.rail_intents SET next_attempt_at = $2 WHERE id = $1", op.ID, later.Now().Add(-time.Minute))
 	require.NoError(t, err)
 	_, err = stale.RunVerifyOnce(e.ctx)
 	require.NoError(t, err)
@@ -394,7 +394,7 @@ func TestInvoiceCollection_StripeWindowElapsedRequiresExactReceipt(t *testing.T)
 	require.Equal(t, intents.StatusSucceeded, resolved.Status)
 	e.requireSettledOnce(t)
 	var railPaymentID string
-	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail_payment_id FROM openrails.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&railPaymentID))
+	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail_payment_id FROM billing.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&railPaymentID))
 	require.Equal(t, "ch_in_1", railPaymentID)
 	require.Equal(t, []int64{frozenStripeMinor}, stripe.chargedAmounts())
 }

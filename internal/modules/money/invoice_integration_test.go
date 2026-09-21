@@ -23,9 +23,9 @@ func findItem(items []models.InvoiceLineItem, eventType string) *models.InvoiceL
 func TestFinalizeInvoice_PrepaidStatement(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payer.UUID())
 	})
 
 	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000, Source: "purchase"})
@@ -69,7 +69,7 @@ func TestFinalizeInvoice_PrepaidStatement(t *testing.T) {
 	// #726: prepaid statements never touch the pending-accrual workspace — the
 	// itemization above IS the line_items snapshot, no invoiced-copy rows.
 	var wsCount int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.invoice_items WHERE customer_id = $1`, payer.UUID()).Scan(&wsCount))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.invoice_items WHERE customer_id = $1`, payer.UUID()).Scan(&wsCount))
 	require.Equal(t, 0, wsCount)
 
 	// Idempotent.
@@ -96,7 +96,7 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 	var pendingBefore int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*)
-		FROM openrails.invoice_items
+		FROM billing.invoice_items
 		WHERE customer_id = $1 AND invoice_id IS NULL AND status = 'pending'
 	`, payer.UUID()).Scan(&pendingBefore))
 	require.Equal(t, 1, pendingBefore, "arrears spill creates a pending invoice item before invoice finalization")
@@ -114,12 +114,12 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 	require.Equal(t, int64(500), inv.MoneyMovements["owed_accrual"])
 
 	var itemCount int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.invoice_items WHERE invoice_id = $1`, inv.ID).Scan(&itemCount))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.invoice_items WHERE invoice_id = $1`, inv.ID).Scan(&itemCount))
 	require.Equal(t, 1, itemCount)
 	var pendingAfter int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*)
-		FROM openrails.invoice_items
+		FROM billing.invoice_items
 		WHERE customer_id = $1 AND invoice_id IS NULL AND status = 'pending'
 	`, payer.UUID()).Scan(&pendingAfter))
 	require.Equal(t, 0, pendingAfter, "finalization attaches pending invoice items")
@@ -171,7 +171,7 @@ func TestInvoiceCollectionDeclineMarksInvoicePastDueAndBlocksArrears(t *testing.
 	var failedAttempts int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*)
-		FROM openrails.invoice_payments
+		FROM billing.invoice_payments
 		WHERE invoice_id = $1 AND status = 'failed'
 	`, inv.ID).Scan(&failedAttempts))
 	require.Equal(t, 1, failedAttempts)
@@ -221,10 +221,10 @@ func TestFinalizeThresholdInvoices_CapHitCreatesCollectableInvoice(t *testing.T)
 func TestRecordOutOfBandInvoicePayment_PartialThenPaid(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_payments WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payer.UUID())
 	})
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
 	require.NoError(t, err)
@@ -259,7 +259,7 @@ func TestRecordOutOfBandInvoicePayment_PartialThenPaid(t *testing.T) {
 	var paymentSum int64
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*), COALESCE(SUM(amount), 0)
-		FROM openrails.invoice_payments
+		FROM billing.invoice_payments
 		WHERE invoice_id = $1 AND status = 'settled' AND rail = 'manual'
 	`, inv.ID).Scan(&paymentCount, &paymentSum))
 	require.Equal(t, 2, paymentCount)
@@ -269,7 +269,7 @@ func TestRecordOutOfBandInvoicePayment_PartialThenPaid(t *testing.T) {
 	var ledgerSum int64
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*), COALESCE(SUM(amount), 0)
-		FROM openrails.ledger_transfers
+		FROM billing.ledger_transfers
 		WHERE invoice_id = $1 AND transfer_type = 'owed_payment'
 	`, inv.ID).Scan(&ledgerCount, &ledgerSum))
 	require.Equal(t, 2, ledgerCount)
@@ -279,10 +279,10 @@ func TestRecordOutOfBandInvoicePayment_PartialThenPaid(t *testing.T) {
 func TestInvoiceVoidAndUncollectibleLifecycle(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_payments WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payer.UUID())
 	})
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
 	require.NoError(t, err)
@@ -303,10 +303,10 @@ func TestInvoiceVoidAndUncollectibleLifecycle(t *testing.T) {
 
 	svc2, pool2, payer2, _, ctx2 := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = pool2.Exec(ctx2, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer2.UUID())
-		_, _ = pool2.Exec(ctx2, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer2.UUID())
-		_, _ = pool2.Exec(ctx2, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer2.UUID())
-		_, _ = pool2.Exec(ctx2, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer2.UUID())
+		_, _ = pool2.Exec(ctx2, "DELETE FROM billing.invoice_payments WHERE customer_id = $1", payer2.UUID())
+		_, _ = pool2.Exec(ctx2, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payer2.UUID())
+		_, _ = pool2.Exec(ctx2, "DELETE FROM billing.usage_events WHERE customer_id = $1", payer2.UUID())
+		_, _ = pool2.Exec(ctx2, "DELETE FROM billing.invoices WHERE customer_id = $1", payer2.UUID())
 	})
 	_, err = svc2.UpsertAccountSettings(ctx2, payer2, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
 	require.NoError(t, err)
@@ -327,9 +327,9 @@ func TestInvoiceVoidAndUncollectibleLifecycle(t *testing.T) {
 func TestFinalizeDueInvoices_EnumeratesAccount(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payer.UUID())
 	})
 	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 5_000, Source: "seed"})
 	require.NoError(t, err)

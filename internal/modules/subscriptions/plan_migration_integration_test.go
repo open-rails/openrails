@@ -124,18 +124,18 @@ func newPlanMigrationFixture(t *testing.T) *planMigrationFixture {
 	// Target product B with distinct entitlements (cutover must swap specs).
 	targetProductID := uuid.New()
 	_, err := base.pool.Exec(ctx, `
-		INSERT INTO openrails.products (id, merchant_id, key, display_name, entitlements_spec)
+		INSERT INTO billing.products (id, merchant_id, key, display_name, entitlements_spec)
 		VALUES ($1,$2,$3,$3,'{"plan_b_access": null}'::jsonb)`,
 		targetProductID, base.merchantID, "planmig-target-"+suffix)
 	require.NoError(t, err)
 	// Source product entitlements: plan_a_access (so the diff pass revokes it).
 	_, err = base.pool.Exec(ctx, `
-		UPDATE openrails.products SET entitlements_spec = '{"plan_a_access": null}'::jsonb WHERE id = $1`, base.productID)
+		UPDATE billing.products SET entitlements_spec = '{"plan_a_access": null}'::jsonb WHERE id = $1`, base.productID)
 	require.NoError(t, err)
 
 	insertPrice := func(id, productID uuid.UUID, amount int64, key string, psp string) {
 		_, e := base.pool.Exec(ctx, `
-			INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
+			INSERT INTO billing.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
 			VALUES ($1,$2,$3,$4,'USD',720,true,false,$5,$6,$6)`,
 			id, productID, base.merchantID, amount, key, now)
 		require.NoError(t, e)
@@ -173,9 +173,9 @@ func newPlanMigrationFixture(t *testing.T) *planMigrationFixture {
 		stripeSourcePriceID: stripeSourcePriceID,
 	}
 	t.Cleanup(func() {
-		_, _ = base.pool.Exec(context.Background(), "DELETE FROM openrails.subscriptions WHERE product_id = $1", targetProductID)
-		_, _ = base.pool.Exec(context.Background(), "DELETE FROM openrails.prices WHERE product_id = $1", targetProductID)
-		_, _ = base.pool.Exec(context.Background(), "DELETE FROM openrails.products WHERE id = $1", targetProductID)
+		_, _ = base.pool.Exec(context.Background(), "DELETE FROM billing.subscriptions WHERE product_id = $1", targetProductID)
+		_, _ = base.pool.Exec(context.Background(), "DELETE FROM billing.prices WHERE product_id = $1", targetProductID)
+		_, _ = base.pool.Exec(context.Background(), "DELETE FROM billing.products WHERE id = $1", targetProductID)
 	})
 	return f
 }
@@ -185,18 +185,18 @@ func newPlanMigrationFixture(t *testing.T) *planMigrationFixture {
 func (f *planMigrationFixture) createSubscriptionOnRail(t *testing.T, ctx context.Context, priceID uuid.UUID, rail string, withPM bool) (subID uuid.UUID, railSubID string) {
 	t.Helper()
 	var productID uuid.UUID
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT product_id FROM openrails.prices WHERE id = $1`, priceID).Scan(&productID))
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT product_id FROM billing.prices WHERE id = $1`, priceID).Scan(&productID))
 	subject := uuid.NewString()
 	var customerID uuid.UUID
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`INSERT INTO openrails.customers (merchant_id, id) VALUES ($1,$2) RETURNING id`,
+		`INSERT INTO billing.customers (merchant_id, id) VALUES ($1,$2) RETURNING id`,
 		f.merchantID, subject).Scan(&customerID))
 	pspID := dbtest.EnsureTestPSP(ctx, t, f.pool, f.merchantID, rail)
 	var pmID *uuid.UUID
 	if withPM {
 		id := uuid.New()
 		_, err := f.pool.Exec(ctx, `
-			INSERT INTO openrails.payment_methods (id, customer_id, rail, psp_id, rail_customer_ref, initial_transaction_id, stored_credential_recurring_ref, merchant_id)
+			INSERT INTO billing.payment_methods (id, customer_id, rail, psp_id, rail_customer_ref, initial_transaction_id, stored_credential_recurring_ref, merchant_id)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
 			id, customerID, rail, pspID, "cust-"+uuid.NewString()[:8], "init-"+uuid.NewString()[:8], "anchor-"+uuid.NewString()[:8], f.merchantID)
 		require.NoError(t, err)
@@ -206,7 +206,7 @@ func (f *planMigrationFixture) createSubscriptionOnRail(t *testing.T, ctx contex
 	now := f.clock.Now()
 	periodEnd := now.Add(30 * 24 * time.Hour)
 	require.NoError(t, f.pool.QueryRow(ctx, `
-		INSERT INTO openrails.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, psp_id, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at)
+		INSERT INTO billing.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, psp_id, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at)
 		VALUES ($1,$2,$3,$4,'active',$5,$6,$7,$8,$9,$10,$9) RETURNING id`,
 		f.merchantID, customerID, productID, priceID, rail, pspID, railSubID, pmID, now, periodEnd).Scan(&subID))
 	return subID, railSubID
@@ -215,7 +215,7 @@ func (f *planMigrationFixture) createSubscriptionOnRail(t *testing.T, ctx contex
 func (f *planMigrationFixture) subscriptionRow(t *testing.T, ctx context.Context, subID uuid.UUID) (priceID, productID uuid.UUID) {
 	t.Helper()
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT price_id, product_id FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&priceID, &productID))
+		`SELECT price_id, product_id FROM billing.subscriptions WHERE id = $1`, subID).Scan(&priceID, &productID))
 	return priceID, productID
 }
 
@@ -238,7 +238,7 @@ func TestPlanMigration_ImmediateOnNMIRecord(t *testing.T) {
 	// No payment row was created by the flip.
 	var payments int
 	require.NoError(t, f.pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.payments p JOIN openrails.subscriptions s ON s.id = p.subscription_id
+		SELECT count(*) FROM billing.payments p JOIN billing.subscriptions s ON s.id = p.subscription_id
 		WHERE s.id = $1`, subID).Scan(&payments))
 	require.Zero(t, payments, "immediate migration must never charge")
 
@@ -362,8 +362,8 @@ func TestPlanMigration_CapabilityClassification(t *testing.T) {
 
 	// Preview wrote nothing.
 	var batches, reprices int
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.reprice_batches WHERE merchant_id = $1 AND kind = 'plan_change'`, f.merchantID).Scan(&batches))
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.subscription_reprices WHERE merchant_id = $1 AND kind = 'plan_change'`, f.merchantID).Scan(&reprices))
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM billing.reprice_batches WHERE merchant_id = $1 AND kind = 'plan_change'`, f.merchantID).Scan(&batches))
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM billing.subscription_reprices WHERE merchant_id = $1 AND kind = 'plan_change'`, f.merchantID).Scan(&reprices))
 	require.Zero(t, batches)
 	require.Zero(t, reprices)
 
@@ -425,7 +425,7 @@ func TestPlanMigration_Validation(t *testing.T) {
 	// Cross-currency: source usd (low), target eur on other product.
 	eurTargetID := uuid.New()
 	_, e := f.pool.Exec(ctx, `
-		INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
+		INSERT INTO billing.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
 		VALUES ($1,$2,$3,9000000,'EUR',720,true,false,$4,$5,$5)`,
 		eurTargetID, f.targetProductID, f.merchantID, "planmig-eur-"+uuid.NewString()[:8], f.clock.Now())
 	require.NoError(t, e)
@@ -559,7 +559,7 @@ func TestPlanMigration_StripeFarFutureEffectiveBlocksHonestly(t *testing.T) {
 
 	// Simulate the sub renewing into its final pre-effective period
 	// (period now ends +60d > effective +45d): re-run succeeds.
-	_, err = f.pool.Exec(ctx, `UPDATE openrails.subscriptions SET current_period_ends_at = $1 WHERE id = $2`,
+	_, err = f.pool.Exec(ctx, `UPDATE billing.subscriptions SET current_period_ends_at = $1 WHERE id = $2`,
 		f.clock.Now().Add(60*24*time.Hour), subID)
 	require.NoError(t, err)
 	res2, err := f.pm.Migrate(ctx, PlanMigrationRequest{

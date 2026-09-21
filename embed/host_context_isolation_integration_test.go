@@ -118,7 +118,7 @@ func TestHostContextNeverReachesTheEngine(t *testing.T) {
 func observeHostContext(t *testing.T, ctx context.Context, h *integrationharness.Harness, client *openrails.Client, hook *auditHook) hostContextObservation {
 	t.Helper()
 	customer := uuid.New()
-	_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, dbtest.TestMerchantID.UUID(), customer)
+	_, err := h.Pool().Exec(ctx, `INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, dbtest.TestMerchantID.UUID(), customer)
 	require.NoError(t, err)
 
 	// What a host handler's context looks like mid-request: the session user

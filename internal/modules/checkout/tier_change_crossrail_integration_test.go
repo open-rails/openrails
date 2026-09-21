@@ -26,12 +26,12 @@ func TestTierChangeCrossRailKeyReuseDuringPreflightIsRefused(t *testing.T) {
 			stripe := newStripeTierFixture(t)
 			nmi := newUpgradeAdoptFixture(t)
 			nmi.svc.ProviderSecrets = fakePSPCatalog{scopes: []merchants.PSPScope{*nmi.target.Scope}}
-			_, err := nmi.db.Qx(nmi.ctx).Exec(nmi.ctx, `INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,plan_id) VALUES($1,$2,$3,$4)`, nmi.existingSub.MerchantID, nmi.newPrice.ID, nmi.existingSub.PspID, nmi.gateway.planID)
+			_, err := nmi.db.Qx(nmi.ctx).Exec(nmi.ctx, `INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,plan_id) VALUES($1,$2,$3,$4)`, nmi.existingSub.MerchantID, nmi.newPrice.ID, nmi.existingSub.PspID, nmi.gateway.planID)
 			require.NoError(t, err)
-			_, err = nmi.db.Qx(nmi.ctx).Exec(nmi.ctx, `UPDATE openrails.prices SET amount=60000000 WHERE id=$1`, nmi.newPrice.ID)
+			_, err = nmi.db.Qx(nmi.ctx).Exec(nmi.ctx, `UPDATE billing.prices SET amount=60000000 WHERE id=$1`, nmi.newPrice.ID)
 			require.NoError(t, err)
 			t.Cleanup(func() {
-				_, _ = nmi.db.Qx(nmi.ctx).Exec(nmi.ctx, `DELETE FROM openrails.price_psp_bindings WHERE price_id=$1`, nmi.newPrice.ID)
+				_, _ = nmi.db.Qx(nmi.ctx).Exec(nmi.ctx, `DELETE FROM billing.price_psp_bindings WHERE price_id=$1`, nmi.newPrice.ID)
 			})
 			key := "cross-rail-" + uuid.NewString()
 			stripeReq := &TierChangeRequest{PriceID: openrails.PriceID(stripe.pro.ID).String(), SubscriptionID: stripe.sub.ID, IdempotencyKey: key}
@@ -65,7 +65,7 @@ func TestTierChangeCrossRailKeyReuseDuringPreflightIsRefused(t *testing.T) {
 				t.Fatal("request never reached its preflight")
 			}
 			var rows int
-			require.NoError(t, nmi.db.Qx(nmi.ctx).QueryRow(nmi.ctx, `SELECT count(*) FROM openrails.rail_intents WHERE payload->>'user_id' IN ($1,$2)`, nmi.user.ID, stripe.user.ID).Scan(&rows))
+			require.NoError(t, nmi.db.Qx(nmi.ctx).QueryRow(nmi.ctx, `SELECT count(*) FROM billing.rail_intents WHERE payload->>'user_id' IN ($1,$2)`, nmi.user.ID, stripe.user.ID).Scan(&rows))
 			require.Zero(t, rows, "both requests see a new key before the first admission")
 			accepted, err := winner()
 			require.NoError(t, err)
@@ -78,7 +78,7 @@ func TestTierChangeCrossRailKeyReuseDuringPreflightIsRefused(t *testing.T) {
 			require.ErrorAs(t, rejected.err, &conflict)
 			require.Equal(t, http.StatusConflict, conflict.HTTPStatus)
 			require.Equal(t, openrails.CodeTierChangeIdempotencyConflict, conflict.Code)
-			require.NoError(t, nmi.db.Qx(nmi.ctx).QueryRow(nmi.ctx, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id IN ($1,$2) AND intent_type IN ('nmi_upgrade','stripe_tier_change')`, nmi.existingSub.ID, stripe.sub.ID).Scan(&rows))
+			require.NoError(t, nmi.db.Qx(nmi.ctx).QueryRow(nmi.ctx, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id IN ($1,$2) AND intent_type IN ('nmi_upgrade','stripe_tier_change')`, nmi.existingSub.ID, stripe.sub.ID).Scan(&rows))
 			require.Equal(t, 1, rows, "one merchant/client key owns exactly one durable tier operation")
 			again, err := winner()
 			require.NoError(t, err)

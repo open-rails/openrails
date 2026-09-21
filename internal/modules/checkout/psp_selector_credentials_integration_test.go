@@ -32,13 +32,13 @@ func TestCheckoutResolvesSpecificPSPKeyAmongMultipleArmed(t *testing.T) {
 	pool := dbi.Pool()
 	slug := fmt.Sprintf("psp848-%d", nano)
 	_, err := pool.Exec(context.Background(),
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		mid.UUID(), slug)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM openrails.psps WHERE merchant_id = $1`, mid.UUID())
-		_, _ = pool.Exec(context.Background(), `DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1`, mid.UUID())
-		_, _ = pool.Exec(context.Background(), `DELETE FROM openrails.merchants WHERE id = $1`, mid.UUID())
+		_, _ = pool.Exec(context.Background(), `DELETE FROM billing.psps WHERE merchant_id = $1`, mid.UUID())
+		_, _ = pool.Exec(context.Background(), `DELETE FROM billing.merchant_secrets WHERE merchant_id = $1`, mid.UUID())
+		_, _ = pool.Exec(context.Background(), `DELETE FROM billing.merchants WHERE id = $1`, mid.UUID())
 	})
 	ctx := merchant.WithID(context.Background(), mid)
 
@@ -55,7 +55,7 @@ func TestCheckoutResolvesSpecificPSPKeyAmongMultipleArmed(t *testing.T) {
 
 	seed := func(key, accountID string) {
 		_, err := pool.Exec(ctx, `
-			INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, key, archived, evidence)
+			INSERT INTO billing.psps (merchant_id, rail, environment, account_id, key, archived, evidence)
 			VALUES ($1::uuid, 'nmi', 'test', $2, $3, false, '{"source":"test_848"}'::jsonb)
 		`, mid.String(), accountID, key)
 		require.NoError(t, err)

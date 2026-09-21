@@ -110,22 +110,22 @@ func proveMerchantMeteringRouteToInvoice(
 	negotiatedCustomer := uuid.New()
 	for _, customerID := range []uuid.UUID{defaultCustomer, negotiatedCustomer} {
 		_, err := pool.Exec(ctx, `
-INSERT INTO openrails.customers (id, merchant_id)
+INSERT INTO billing.customers (id, merchant_id)
 VALUES ($1, $2)`, customerID, merchantID)
 		require.NoError(t, err)
 	}
 	t.Cleanup(func() {
 		for _, customerID := range []uuid.UUID{defaultCustomer, negotiatedCustomer} {
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", customerID)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", customerID)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", customerID)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.metered_rating_watermarks WHERE customer_id = $1", customerID)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", customerID)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.customers WHERE id = $1", customerID)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", customerID)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", customerID)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", customerID)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.metered_rating_watermarks WHERE customer_id = $1", customerID)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.money_settings WHERE customer_id = $1", customerID)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.customers WHERE id = $1", customerID)
 		}
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meterKey)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meterKey)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meterKey)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meterKey)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	svc := money.NewMoneyService(h.MerchantDB(merchantID))
@@ -193,7 +193,7 @@ VALUES ($1, $2)`, customerID, merchantID)
 	require.Equal(t, http.StatusOK, status, string(body))
 	var persistedAmount int64
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT amount_due FROM openrails.invoices WHERE id = $1",
+		"SELECT amount_due FROM billing.invoices WHERE id = $1",
 		negotiatedInvoice.ID,
 	).Scan(&persistedAmount))
 	require.Equal(t, int64(600_000), persistedAmount, "replacing a card must not rewrite finalized history")

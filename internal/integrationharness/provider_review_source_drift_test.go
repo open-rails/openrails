@@ -41,12 +41,12 @@ func TestProviderCutoverRefusesSourceDriftAfterPausedTarget(t *testing.T) {
 	g := newCutoverGateway(t)
 	s := h.StartStandalone("USD", WithConfig(func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeFull }))
 	var previousEnabled bool
-	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT enabled FROM openrails.destructive_action_switch`).Scan(&previousEnabled))
+	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT enabled FROM billing.destructive_action_switch`).Scan(&previousEnabled))
 	t.Cleanup(func() {
-		_, err := h.Pool().Exec(context.WithoutCancel(ctx), `UPDATE openrails.destructive_action_switch SET enabled=$1`, previousEnabled)
+		_, err := h.Pool().Exec(context.WithoutCancel(ctx), `UPDATE billing.destructive_action_switch SET enabled=$1`, previousEnabled)
 		require.NoError(t, err)
 	})
-	_, err := h.Pool().Exec(ctx, `UPDATE openrails.destructive_action_switch SET enabled=true`)
+	_, err := h.Pool().Exec(ctx, `UPDATE billing.destructive_action_switch SET enabled=true`)
 	require.NoError(t, err)
 	s.App().Runtime.CollectionResolver.(*money.MerchantCollectionAdapterBuilder).Endpoints.NMIV5BaseURL = g.Server.URL
 	owner := s.ProvisionOwnedMerchant("cutover-drift-review-" + uuid.NewString())
@@ -93,7 +93,7 @@ func TestProviderCutoverRefusesSourceDriftAfterPausedTarget(t *testing.T) {
 			deletes, activations := g.Accounts[p.SourceKey].Deletes, g.Accounts[p.TargetKey].Activations
 			g.mu.Unlock()
 			var actual uuid.UUID
-			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT psp_id FROM openrails.subscriptions WHERE id=$1`, p.Sub).Scan(&actual))
+			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT psp_id FROM billing.subscriptions WHERE id=$1`, p.Sub).Scan(&actual))
 			t.Logf("drift=%s status=%s source_deletes=%d target_activations=%d repointed=%v", drift, resumed.Status, deletes, activations, actual == p.Target)
 			require.Equal(t, initialDeletes, deletes, "source with drifted or unproven terms must not be cancelled")
 			require.Zero(t, activations, "target must remain paused after source drift")
@@ -127,7 +127,7 @@ func TestProviderCutoverRefusesSourceDriftAfterPausedTarget(t *testing.T) {
 			require.Equal(t, 1, creates, "resume must reuse the original paused target")
 			require.Equal(t, 1, deletes)
 			require.Equal(t, 1, activations)
-			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT psp_id FROM openrails.subscriptions WHERE id=$1`, p.Sub).Scan(&actual))
+			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT psp_id FROM billing.subscriptions WHERE id=$1`, p.Sub).Scan(&actual))
 			require.Equal(t, p.Target, actual)
 		})
 	}

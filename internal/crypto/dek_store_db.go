@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -29,10 +30,10 @@ func NewDBDEKStore(pool *db.Pool) (DEKStore, error) {
 
 func (s *dbDEKStore) GetWrappedDEK(ctx context.Context, merchantID merchant.ID) ([]byte, bool, error) {
 	var wrapped []byte
-	err := s.pool.MerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `
-			SELECT wrapped_dek FROM openrails.merchant_deks WHERE merchant_id = $1::uuid
-		`, merchantID.String()).Scan(&wrapped)
+	err := s.pool.CommittedMerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		wrapped, err = gen.New(tx).GetMerchantWrappedDEK(ctx, merchantID.UUID())
+		return err
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -49,14 +50,10 @@ func (s *dbDEKStore) GetWrappedDEK(ctx context.Context, merchantID merchant.ID) 
 // yields the row that actually persists, so racing creators converge.
 func (s *dbDEKStore) PutWrappedDEK(ctx context.Context, merchantID merchant.ID, wrapped []byte) ([]byte, error) {
 	var stored []byte
-	err := s.pool.MerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `
-			INSERT INTO openrails.merchant_deks (merchant_id, wrapped_dek)
-			VALUES ($1::uuid, $2)
-			ON CONFLICT (merchant_id) DO UPDATE
-			   SET merchant_id = openrails.merchant_deks.merchant_id
-			RETURNING wrapped_dek
-		`, merchantID.String(), wrapped).Scan(&stored)
+	err := s.pool.CommittedMerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		stored, err = gen.New(tx).PutMerchantWrappedDEK(ctx, gen.PutMerchantWrappedDEKParams{MerchantID: merchantID.UUID(), WrappedDek: wrapped})
+		return err
 	})
 	if err != nil {
 		return nil, fmt.Errorf("crypto: put wrapped DEK: %w", err)

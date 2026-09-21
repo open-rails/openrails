@@ -855,7 +855,7 @@ func TestDBConfig_SchemaName(t *testing.T) {
 		raw  string
 		want string
 	}{
-		{"empty defaults to openrails", "", "openrails"},
+		{"empty defaults to billing", "", "billing"},
 		{"explicit value preserved", "host_billing", "host_billing"},
 		{"trimmed", "  custom  ", "custom"},
 		{"lower-cased", "Openrails", "openrails"},
@@ -866,13 +866,14 @@ func TestDBConfig_SchemaName(t *testing.T) {
 		})
 	}
 
-	t.Run("nil receiver defaults to openrails", func(t *testing.T) {
+	t.Run("nil receiver defaults to billing", func(t *testing.T) {
 		var c *DBConfig
-		assert.Equal(t, "openrails", c.SchemaName())
+		assert.Equal(t, "billing", c.SchemaName())
 	})
 
 	// The exported default constant is the OpenRails schema (#471).
-	assert.Equal(t, "openrails", DefaultSchema)
+	assert.Equal(t, "billing", DefaultSchema)
+	assert.Equal(t, "openrails", CanonicalSchema)
 }
 
 // TestValidateSchema enforces that only safe SQL identifiers are accepted (#165).
@@ -893,7 +894,7 @@ func TestLoad_DBSchemaEnv(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
 		cfg, err := Load("nonexistent-config.yaml")
 		assert.NoError(t, err)
-		assert.Equal(t, "openrails", cfg.DB.SchemaName())
+		assert.Equal(t, "billing", cfg.DB.SchemaName())
 	})
 
 	t.Run("custom honored and normalized", func(t *testing.T) {

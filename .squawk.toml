@@ -2,7 +2,7 @@
 #
 # Each migration file is applied inside one transaction — migratekit's
 # applyOne() does BeginTx / Exec(whole file) / Commit, and scripts/sqlc-vet-db.sh
-# mirrors that with `psql -1`. So per-statement rerunnability rules do not apply,
+# uses the same migratekit runner. So per-statement rerunnability rules do not apply,
 # and a file must NOT open a transaction of its own (transaction-nesting).
 assume_in_transaction = true
 
@@ -23,5 +23,5 @@ excluded_rules = [
 # internal/db/queries/EXEMPTIONS.md. It is the ONLY path excluded, and the only
 # one that ever should be: any file after it edits a live schema and must pass.
 excluded_paths = [
-    "migrations/postgres/0001_schema.up.sql",
+    "internal/migrate/postgres/0001_schema.up.sql",
 ]

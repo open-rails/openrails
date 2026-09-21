@@ -92,7 +92,7 @@ func newVaultPurgeFixture(t *testing.T) *vaultPurgeFixture {
 	require.NoError(t, err)
 	f.id = merchant.ID(uuid.New())
 	f.slug = "vault-purge-" + uuid.NewString()[:8]
-	_, err = f.pool.Exec(ctx, `INSERT INTO openrails.merchants(id,slug,status) VALUES($1,$2,'active')`, f.id.UUID(), f.slug)
+	_, err = f.pool.Exec(ctx, `INSERT INTO billing.merchants(id,slug,status) VALUES($1,$2,'active')`, f.id.UUID(), f.slug)
 	require.NoError(t, err)
 	f.cfg = &config.Config{Env: "production", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendVault, Vault: &config.VaultConfig{Enabled: true, Address: server.URL, AuthMethod: "token", Token: token}}
 	f.store, err = merchantsecrets.Build(ctx, f.cfg, f.pool)
@@ -127,10 +127,10 @@ func TestVaultUUIDPathsSurviveRenameAndReclaim(t *testing.T) {
 		return err
 	}))
 	old := f.slug
-	_, err = f.pool.Exec(ctx, `UPDATE openrails.merchants SET slug=$2 WHERE id=$1`, f.id.UUID(), old+"-renamed")
+	_, err = f.pool.Exec(ctx, `UPDATE billing.merchants SET slug=$2 WHERE id=$1`, f.id.UUID(), old+"-renamed")
 	require.NoError(t, err)
 	second := merchant.ID(uuid.New())
-	_, err = f.pool.Exec(ctx, `INSERT INTO openrails.merchants(id,slug,status) VALUES($1,$2,'active')`, second.UUID(), old)
+	_, err = f.pool.Exec(ctx, `INSERT INTO billing.merchants(id,slug,status) VALUES($1,$2,'active')`, second.UUID(), old)
 	require.NoError(t, err)
 	restarted, err := merchantsecrets.Build(ctx, f.cfg, f.pool)
 	require.NoError(t, err)
@@ -161,11 +161,11 @@ func TestVaultPurgeCleanupSurvivesFailureAndRestart(t *testing.T) {
 	var run uuid.UUID
 	var status string
 	var finished *time.Time
-	require.NoError(t, admin.QueryRow(ctx, `SELECT id,status,finished_at FROM openrails.maintenance_runs WHERE merchant_id=$1 AND kind='merchant_purge'`, f.id.UUID()).Scan(&run, &status, &finished))
+	require.NoError(t, admin.QueryRow(ctx, `SELECT id,status,finished_at FROM billing.maintenance_runs WHERE merchant_id=$1 AND kind='merchant_purge'`, f.id.UUID()).Scan(&run, &status, &finished))
 	require.Equal(t, "failed", status)
 	require.Nil(t, finished)
 	var deleted bool
-	require.NoError(t, admin.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM openrails.merchants WHERE id=$1`, f.id.UUID()).Scan(&deleted))
+	require.NoError(t, admin.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM billing.merchants WHERE id=$1`, f.id.UUID()).Scan(&deleted))
 	require.True(t, deleted)
 	data, version, err := f.root.ReadSecret(ctx, "secret/openrails/merchants/"+f.id.String()+"/"+name)
 	require.NoError(t, err)
@@ -182,7 +182,7 @@ func TestVaultPurgeCleanupSurvivesFailureAndRestart(t *testing.T) {
 	require.NoError(t, err)
 	worker := riverjobs.MerchantSecretCleanupWorker{DB: f.database, Merchants: service}
 	require.NoError(t, worker.Work(ctx, nil))
-	require.NoError(t, admin.QueryRow(ctx, `SELECT status,finished_at FROM openrails.maintenance_runs WHERE id=$1`, run).Scan(&status, &finished))
+	require.NoError(t, admin.QueryRow(ctx, `SELECT status,finished_at FROM billing.maintenance_runs WHERE id=$1`, run).Scan(&status, &finished))
 	require.Equal(t, "completed", status)
 	require.NotNil(t, finished)
 	metadata, err := vaulttest.RootClient(t).Logical().ReadWithContext(ctx, "secret/metadata/openrails/merchants/"+f.id.String()+"/"+name)
@@ -257,7 +257,7 @@ func TestVaultCleanupCannotRunBeforeDatabaseCommit(t *testing.T) {
 	// Delete the matching inventory before applying: the transaction must fail
 	// without a committed cleanup run, and must leave Vault untouched.
 	admin := dbtest.SharedSuperuserPGXPool(t)
-	_, err = admin.Exec(ctx, `DELETE FROM openrails.maintenance_runs WHERE merchant_id=$1 AND kind='purge_inventory'`, f.id.UUID())
+	_, err = admin.Exec(ctx, `DELETE FROM billing.maintenance_runs WHERE merchant_id=$1 AND kind='purge_inventory'`, f.id.UUID())
 	require.NoError(t, err)
 	err = f.service.Delete(ctx, f.id, merchants.DeleteOptions{ConfirmPhrase: merchants.PurgeConfirmPhrase(f.slug), ExpectRows: &inventory.TotalRows, InventoryID: inventory.ID})
 	var stale *merchants.ErrPurgeInventoryStale
@@ -265,7 +265,7 @@ func TestVaultCleanupCannotRunBeforeDatabaseCommit(t *testing.T) {
 	got, err := f.store.Secrets.Get(ctx, f.id, name)
 	require.NoError(t, err)
 	require.Equal(t, "whsec_keep", got.Value)
-	rows, err := gen.New(f.pool).ListPendingMerchantSecretCleanups(ctx, gen.ListPendingMerchantSecretCleanupsParams{PageLimit: 100})
+	rows, err := dbtest.Queries(f.pool).ListPendingMerchantSecretCleanups(ctx, gen.ListPendingMerchantSecretCleanupsParams{PageLimit: 100})
 	require.NoError(t, err)
 	for _, row := range rows {
 		require.NotEqual(t, f.id.UUID(), *row.MerchantID)

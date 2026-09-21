@@ -22,20 +22,20 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
 func TestEnsureCustomerID_UUIDReusesExistingPayableID(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
+	pool := db.WrapPool(dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), "")
 
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	tenantID := dbtest.TestMerchantID.UUID()
 	userID := uuid.New()
 	createdAt := time.Now().UTC().Add(-time.Hour)
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id, created_at, last_seen_at)
+		`INSERT INTO billing.customers (id, merchant_id, created_at, last_seen_at)
 		 VALUES ($1, $2, $3, $4)`,
 		userID, tenantID, createdAt, createdAt,
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.customers WHERE id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.customers WHERE id = $1`, userID)
 	})
 
 	resolved, err := db.EnsureCustomerID(ctx, pool, tenantID, userID.String())
@@ -46,7 +46,7 @@ func TestEnsureCustomerID_UUIDReusesExistingPayableID(t *testing.T) {
 	// refreshes last_seen_at (#491: customers is a pure balance keyed by id).
 	var lastSeenAt time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT last_seen_at FROM openrails.customers WHERE id = $1`, userID,
+		`SELECT last_seen_at FROM billing.customers WHERE id = $1`, userID,
 	).Scan(&lastSeenAt))
 	require.True(t, lastSeenAt.After(createdAt))
 }
@@ -60,16 +60,16 @@ func seedForeignCustomer(ctx context.Context, t *testing.T, pool gen.DBTX) (uuid
 	otherMerchantID := uuid.New()
 	customerID := uuid.New()
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		otherMerchantID, "cross-merchant-"+otherMerchantID.String()[:8])
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`,
 		customerID, otherMerchantID)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.customers WHERE id = $1`, customerID)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.merchants WHERE id = $1`, otherMerchantID)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.customers WHERE id = $1`, customerID)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.merchants WHERE id = $1`, otherMerchantID)
 	})
 	return otherMerchantID, customerID
 }
@@ -80,7 +80,7 @@ func TestEnsureCustomerID_SameSubjectHasIndependentMerchantRows(t *testing.T) {
 	ctx := context.Background()
 	// Import/bootstrap can span merchants; its explicit ownership tuple must
 	// preserve both rows even on a privileged handle.
-	pool := dbtest.SharedSuperuserPGXPool(t)
+	pool := db.WrapPool(dbtest.SharedSuperuserPGXPool(t), "")
 
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	otherMerchantID, customerID := seedForeignCustomer(ctx, t, pool)
@@ -90,7 +90,7 @@ func TestEnsureCustomerID_SameSubjectHasIndependentMerchantRows(t *testing.T) {
 
 	var owners []uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT array_agg(merchant_id) FROM openrails.customers WHERE id = $1`, customerID,
+		`SELECT array_agg(merchant_id) FROM billing.customers WHERE id = $1`, customerID,
 	).Scan(&owners))
 	require.ElementsMatch(t, []uuid.UUID{otherMerchantID, dbtest.TestMerchantID.UUID()}, owners)
 }
@@ -99,7 +99,7 @@ func TestEnsureCustomerID_SameSubjectHasIndependentMerchantRows(t *testing.T) {
 func TestEnsureCustomerRow_SameSubjectHasIndependentMerchantRows(t *testing.T) {
 	ctx := context.Background()
 	// Privileged to exercise explicit merchant identity independent of RLS.
-	pool := dbtest.SharedSuperuserPGXPool(t)
+	pool := db.WrapPool(dbtest.SharedSuperuserPGXPool(t), "")
 
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	otherMerchantID, customerID := seedForeignCustomer(ctx, t, pool)
@@ -109,7 +109,7 @@ func TestEnsureCustomerRow_SameSubjectHasIndependentMerchantRows(t *testing.T) {
 
 	var owners []uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT array_agg(merchant_id) FROM openrails.customers WHERE id = $1`, customerID,
+		`SELECT array_agg(merchant_id) FROM billing.customers WHERE id = $1`, customerID,
 	).Scan(&owners))
 	require.ElementsMatch(t, []uuid.UUID{otherMerchantID, dbtest.TestMerchantID.UUID()}, owners)
 }
@@ -119,13 +119,13 @@ func TestEnsureCustomerRow_RepeatIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	// One merchant's own rows: the RLS-enforcing pinned pool, so the policies
 	// stay live and the fixture proves the merchant can write its own customer.
-	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
+	pool := db.WrapPool(dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), "")
 
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	tenantID := dbtest.TestMerchantID.UUID()
 	customerID := uuid.New()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.customers WHERE id = $1`, customerID)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.customers WHERE id = $1`, customerID)
 	})
 
 	require.NoError(t, db.EnsureCustomerRow(ctx, pool, tenantID, customerID))
@@ -133,7 +133,7 @@ func TestEnsureCustomerRow_RepeatIsIdempotent(t *testing.T) {
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.customers WHERE id = $1 AND merchant_id = $2`,
+		`SELECT count(*) FROM billing.customers WHERE id = $1 AND merchant_id = $2`,
 		customerID, tenantID,
 	).Scan(&count))
 	require.Equal(t, 1, count)
@@ -143,13 +143,13 @@ func TestEnsureCustomerRow_RepeatIsIdempotent(t *testing.T) {
 // A waiting insert completes after the other transaction commits.
 func TestEnsureCustomerRow_ConcurrentFirstTouchConverges(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
+	pool := db.WrapPool(dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), "")
 
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	tenantID := dbtest.TestMerchantID.UUID()
 	customerID := uuid.New()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.customers WHERE id = $1`, customerID)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.customers WHERE id = $1`, customerID)
 	})
 
 	tx, err := pool.Begin(ctx)
@@ -160,7 +160,7 @@ func TestEnsureCustomerRow_ConcurrentFirstTouchConverges(t *testing.T) {
 	// turning a one-line assertion failure into a whole-package hang.
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`,
 		customerID, tenantID)
 	require.NoError(t, err)
 
@@ -178,7 +178,7 @@ func TestEnsureCustomerRow_ConcurrentFirstTouchConverges(t *testing.T) {
 // empty subject stays a documented no-op.
 func TestEnsureCustomerID_RejectsNonUUIDSubject(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
+	pool := db.WrapPool(dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), "")
 
 	_, err := db.EnsureCustomerID(ctx, pool, dbtest.TestMerchantID.UUID(), "legacy-user-123")
 	require.ErrorContains(t, err, "UUID-only")

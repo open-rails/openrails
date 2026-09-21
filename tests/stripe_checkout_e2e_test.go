@@ -204,7 +204,7 @@ func TestCheckoutSessionStripeRedirect(t *testing.T) {
 	fixturePool := suite.MerchantPool()
 	t.Cleanup(func() {
 		archived, err := fixturePool.Exec(context.Background(),
-			`UPDATE openrails.psps SET archived = true
+			`UPDATE billing.psps SET archived = true
 			 WHERE merchant_id = $1 AND rail = 'stripe' AND environment = $2 AND account_id = $3 AND archived = false`,
 			dbtest.TestMerchantID.UUID(), env, "acct_openrails_test")
 		require.NoError(t, err)
@@ -252,7 +252,7 @@ func TestCheckoutSessionStripeRedirect(t *testing.T) {
 	var status, rail, redirectURL string
 	require.NoError(t, suite.Pool.QueryRow(context.Background(), `
 		SELECT status, rail, COALESCE(rail_state->>'redirect_url', '')
-		  FROM openrails.checkout_sessions
+		  FROM billing.checkout_sessions
 		 WHERE id = $1
 	`, sessionID).Scan(&status, &rail, &redirectURL))
 	assert.Equal(t, "requires_action", status)
@@ -311,7 +311,7 @@ func TestCheckoutSessionStripeRedirect(t *testing.T) {
 	// local row persisted the redirect. The next cache-miss retry must reuse both
 	// the local session id and Stripe key, so every provider parameter is stable.
 	_, err = suite.Pool.Exec(context.Background(), `
-		UPDATE openrails.checkout_sessions
+		UPDATE billing.checkout_sessions
 		   SET status = 'created', rail_state = rail_state - 'redirect_url'
 		 WHERE id = $1
 	`, sessionID)
@@ -340,7 +340,7 @@ func TestCheckoutSessionStripeRedirect(t *testing.T) {
 	// The user's rail-customer mapping was recorded at checkout time (#212).
 	var mapped string
 	require.NoError(t, suite.Pool.QueryRow(context.Background(), `
-		SELECT account_id FROM openrails.rail_customer_accounts
+		SELECT account_id FROM billing.rail_customer_accounts
 		 WHERE customer_id = $1::uuid AND rail = 'stripe'
 	`, userID).Scan(&mapped))
 	assert.Equal(t, "cus_e2e_test", mapped)

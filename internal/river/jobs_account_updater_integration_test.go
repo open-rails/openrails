@@ -211,11 +211,11 @@ func newAUFixture(t *testing.T) *auFixture {
 	}
 	// The cursor is deployment-global; other packages' fixtures must not decide
 	// where this pass starts.
-	_, err := fx.super.Exec(ctx, "DELETE FROM openrails.worker_state WHERE worker_kind = $1", KindAccountUpdaterBatch)
+	_, err := fx.super.Exec(ctx, "DELETE FROM billing.worker_state WHERE worker_kind = $1", KindAccountUpdaterBatch)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = fx.super.Exec(context.Background(),
-			"DELETE FROM openrails.worker_state WHERE worker_kind = $1", KindAccountUpdaterBatch)
+			"DELETE FROM billing.worker_state WHERE worker_kind = $1", KindAccountUpdaterBatch)
 	})
 	return fx
 }
@@ -258,7 +258,7 @@ func (fx *auFixture) seedMerchant(declareCustodian, armed bool, lookaheadDays in
 		_, err := fx.super.Exec(fx.ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+	exec(`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		m.id, "or795-"+m.id.String()[:8])
 
 	// Every merchant charges through a PSP whether or not it declares a
@@ -267,7 +267,7 @@ func (fx *auFixture) seedMerchant(declareCustodian, armed bool, lookaheadDays in
 	// below carry psp_id, so the row has to exist for all four fixtures, and
 	// only custodian_id is conditional.
 	m.pspID = uuid.New()
-	exec(`INSERT INTO openrails.psps (id, merchant_id, rail, environment, account_id)
+	exec(`INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id)
 	      VALUES ($1, $2, 'nmi', 'live', $3)`,
 		m.pspID, m.id, "gw-"+m.id.String()[:6])
 
@@ -282,11 +282,11 @@ func (fx *auFixture) seedMerchant(declareCustodian, armed bool, lookaheadDays in
 		}
 		raw, err := json.Marshal(settings)
 		require.NoError(t, err)
-		exec(`INSERT INTO openrails.custodians (id, merchant_id, key, kind, environment, account_id, settings)
+		exec(`INSERT INTO billing.custodians (id, merchant_id, key, kind, environment, account_id, settings)
 		      VALUES ($1, $2, $3, 'basis_theory', 'live', $4, $5)`,
 			m.custID, m.id, "bt-"+m.id.String()[:8], m.tenantID, raw)
 
-		exec(`UPDATE openrails.psps SET custodian_id = $2 WHERE id = $1`, m.pspID, m.custID)
+		exec(`UPDATE billing.psps SET custodian_id = $2 WHERE id = $1`, m.pspID, m.custID)
 
 		days := lookaheadDays
 		if days <= 0 {
@@ -311,15 +311,15 @@ func (fx *auFixture) seedMerchant(declareCustodian, armed bool, lookaheadDays in
 	t.Cleanup(func() {
 		bg := context.Background()
 		for _, stmt := range []string{
-			"DELETE FROM openrails.rail_intents WHERE merchant_id = $1",
-			"DELETE FROM openrails.account_updater_batches WHERE merchant_id = $1",
-			"DELETE FROM openrails.subscriptions WHERE merchant_id = $1",
-			"DELETE FROM openrails.payment_methods WHERE merchant_id = $1",
-			"DELETE FROM openrails.psps WHERE merchant_id = $1",
-			"DELETE FROM openrails.custodians WHERE merchant_id = $1",
-			"DELETE FROM openrails.products WHERE merchant_id = $1",
-			"DELETE FROM openrails.customers WHERE merchant_id = $1",
-			"DELETE FROM openrails.merchants WHERE id = $1",
+			"DELETE FROM billing.rail_intents WHERE merchant_id = $1",
+			"DELETE FROM billing.account_updater_batches WHERE merchant_id = $1",
+			"DELETE FROM billing.subscriptions WHERE merchant_id = $1",
+			"DELETE FROM billing.payment_methods WHERE merchant_id = $1",
+			"DELETE FROM billing.psps WHERE merchant_id = $1",
+			"DELETE FROM billing.custodians WHERE merchant_id = $1",
+			"DELETE FROM billing.products WHERE merchant_id = $1",
+			"DELETE FROM billing.customers WHERE merchant_id = $1",
+			"DELETE FROM billing.merchants WHERE id = $1",
 		} {
 			_, _ = fx.super.Exec(bg, stmt, m.id)
 		}
@@ -349,11 +349,11 @@ func (fx *auFixture) seedInstrument(m *auMerchant, opts instrumentOpts) (uuid.UU
 	t.Helper()
 	customer, product := uuid.New(), uuid.New()
 	_, err := fx.super.Exec(fx.ctx,
-		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`,
 		customer, m.id)
 	require.NoError(t, err)
 	_, err = fx.super.Exec(fx.ctx,
-		`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+		`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		product, "or795-prod-"+uuid.NewString()[:8], m.id)
 	require.NoError(t, err)
 
@@ -374,7 +374,7 @@ func (fx *auFixture) seedInstrument(m *auMerchant, opts instrumentOpts) (uuid.UU
 		parkedAt = &at
 	}
 	_, err = fx.super.Exec(fx.ctx, `
-		INSERT INTO openrails.payment_methods
+		INSERT INTO billing.payment_methods
 		  (id, rail, initial_transaction_id, merchant_id, customer_id, custodian,
 		   rail_method_ref, expiry_date, last_four, card_type, fingerprint,
 		   account_updater_checked_at, park_reason, parked_at, psp_id, custodian_id)
@@ -397,7 +397,7 @@ func (fx *auFixture) seedInstrument(m *auMerchant, opts instrumentOpts) (uuid.UU
 			cancelledAt, cancelType = &at, &ct
 		}
 		_, err := fx.super.Exec(fx.ctx, `
-			INSERT INTO openrails.subscriptions
+			INSERT INTO billing.subscriptions
 			  (id, product_id, status, rail, current_period_starts_at, current_period_ends_at,
 			   started_at, payment_method_id, customer_id, merchant_id, cancelled_at, cancel_type, psp_id)
 			VALUES ($1, $2, $3, 'nmi', $4, $5, $4, $6, $7, $8, $9, $10, $11)`,
@@ -420,7 +420,7 @@ func (fx *auFixture) methodRow(m *auMerchant, id uuid.UUID) map[string]any {
 	require.NoError(fx.t, m.pool.QueryRow(fx.ctx, `
 		SELECT rail_method_ref, park_reason, COALESCE(card_type,''), fingerprint, expiry_date,
 		       last_four, account_updater_checked_at, parked_at
-		  FROM openrails.payment_methods WHERE id = $1`, id).
+		  FROM billing.payment_methods WHERE id = $1`, id).
 		Scan(&methodRef, &parkReason, &cardType, &fingerprint, &expiry, &lastFour, &checkedAt, &parkedAt))
 	row["rail_method_ref"] = methodRef
 	row["park_reason"] = parkReason
@@ -448,7 +448,7 @@ func (fx *auFixture) batches(m *auMerchant) []batchRow {
 	fx.t.Helper()
 	rows, err := m.pool.Query(fx.ctx, `
 		SELECT id, job_ref, status, result_counts, submitted_at, last_polled_at, completed_at, failure_reason
-		  FROM openrails.account_updater_batches WHERE merchant_id = $1 ORDER BY created_at`, m.id)
+		  FROM billing.account_updater_batches WHERE merchant_id = $1 ORDER BY created_at`, m.id)
 	require.NoError(fx.t, err)
 	defer rows.Close()
 	var out []batchRow
@@ -690,7 +690,7 @@ func TestAccountUpdaterCappedPassResumesWhereItLeftOff(t *testing.T) {
 
 	var cursor *uuid.UUID
 	require.NoError(t, fx.super.QueryRow(fx.ctx,
-		"SELECT cursor_merchant_id FROM openrails.worker_state WHERE worker_kind = $1",
+		"SELECT cursor_merchant_id FROM billing.worker_state WHERE worker_kind = $1",
 		KindAccountUpdaterBatch).Scan(&cursor))
 	require.NotNil(t, cursor, "a capped pass must leave a resume point")
 	require.Equal(t, first.SubmitMerchants[len(first.SubmitMerchants)-1], *cursor)
@@ -729,11 +729,11 @@ func TestAccountUpdaterBatchesAreMerchantIsolated(t *testing.T) {
 	// b's RLS-enforcing handle cannot see a's row, by id or at all.
 	var n int
 	require.NoError(t, b.pool.QueryRow(fx.ctx,
-		"SELECT count(*) FROM openrails.account_updater_batches WHERE id = $1", fx.batches(a)[0].ID).Scan(&n))
+		"SELECT count(*) FROM billing.account_updater_batches WHERE id = $1", fx.batches(a)[0].ID).Scan(&n))
 	require.Zero(t, n, "merchant B must not be able to read merchant A's batch")
 
 	require.NoError(t, b.pool.QueryRow(fx.ctx,
-		"SELECT count(*) FROM openrails.account_updater_batches WHERE merchant_id = $1", a.id).Scan(&n))
+		"SELECT count(*) FROM billing.account_updater_batches WHERE merchant_id = $1", a.id).Scan(&n))
 	require.Zero(t, n)
 }
 
@@ -779,7 +779,7 @@ func TestAccountUpdaterSubmitIsCustodianAddressedNotPSPAddressed(t *testing.T) {
 
 	var pspID, custodianID *uuid.UUID
 	require.NoError(t, fx.super.QueryRow(fx.ctx,
-		`SELECT psp_id, custodian_id FROM openrails.rail_intents
+		`SELECT psp_id, custodian_id FROM billing.rail_intents
 		  WHERE merchant_id = $1 AND intent_type = $2`,
 		m.id, intents.TypeAccountUpdaterBatchSubmit).Scan(&pspID, &custodianID))
 	require.Nil(t, pspID, "the batch is not sent to a gateway account, so it must not claim one")
@@ -788,7 +788,7 @@ func TestAccountUpdaterSubmitIsCustodianAddressedNotPSPAddressed(t *testing.T) {
 
 	var logPSP, logCustodian *uuid.UUID
 	require.NoError(t, fx.super.QueryRow(fx.ctx,
-		`SELECT psp_id, custodian_id FROM openrails.rail_mutation_logs
+		`SELECT psp_id, custodian_id FROM billing.rail_mutation_logs
 		  WHERE merchant_id = $1 AND intent_type = $2 ORDER BY created_at LIMIT 1`,
 		m.id, intents.TypeAccountUpdaterBatchSubmit).Scan(&logPSP, &logCustodian))
 	require.Nil(t, logPSP)
@@ -812,7 +812,7 @@ func TestAccountUpdaterSubmittedBatchEndsOnTheCustodianVerdictNotAClock(t *testi
 
 	// The batch has been sitting for a month; the custodian still says
 	// "processing". The old 14-day deadline would have abandoned it here.
-	_, err = m.pool.Exec(fx.ctx, `UPDATE openrails.account_updater_batches SET submitted_at = now() - interval '30 days', created_at = now() - interval '30 days' WHERE id = $1`, batch.ID)
+	_, err = m.pool.Exec(fx.ctx, `UPDATE billing.account_updater_batches SET submitted_at = now() - interval '30 days', created_at = now() - interval '30 days' WHERE id = $1`, batch.ID)
 	require.NoError(t, err)
 	fx.build()
 	result, err := fx.worker.RunPass(fx.ctx)

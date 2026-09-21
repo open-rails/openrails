@@ -70,7 +70,7 @@ func seedPSPSecrets(t *testing.T, dbi *db.DB, svc *merchants.Service, rail, acco
 	}))
 	t.Cleanup(func() {
 		_, _ = dbi.Pool().Exec(context.Background(),
-			`DELETE FROM openrails.psps WHERE merchant_id = $1 AND rail = $2 AND environment = $3 AND account_id = $4`,
+			`DELETE FROM billing.psps WHERE merchant_id = $1 AND rail = $2 AND environment = $3 AND account_id = $4`,
 			dbtest.TestMerchantID.UUID(), rail, env, accountID)
 	})
 }

@@ -73,7 +73,7 @@ func seedNMIRailAccountForRebill(t *testing.T, dbi *db.DB, svc *merchants.Servic
 	}))
 	t.Cleanup(func() {
 		_, _ = dbi.Pool().Exec(context.Background(),
-			`DELETE FROM openrails.psps WHERE id = $1`, rowID)
+			`DELETE FROM billing.psps WHERE id = $1`, rowID)
 	})
 	return rowID
 }
@@ -113,7 +113,7 @@ func TestManualRebillStoreOnlyNMICredentials_ChargesThroughStore(t *testing.T) {
 	params := fx.enqueueParams(1)
 	fx.bindProvider(t, accountRowID, "nmi")
 	params = fx.enqueueParams(1)
-	_, err := fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()), `UPDATE openrails.subscriptions SET psp_id=$2 WHERE id=$1`, *params.SubscriptionID, accountRowID)
+	_, err := fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()), `UPDATE billing.subscriptions SET psp_id=$2 WHERE id=$1`, *params.SubscriptionID, accountRowID)
 	require.NoError(t, err)
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
@@ -194,9 +194,9 @@ func TestManualRebillNoStoreRow_ParksFailClosed(t *testing.T) {
 func (fx *rebillFixture) bindProvider(t *testing.T, pspID uuid.UUID, rail string) {
 	t.Helper()
 	ctx := fx.handlerCtx()
-	_, err := fx.db.Pool().Exec(ctx, `UPDATE openrails.payment_methods SET psp_id=$2, rail=$3 WHERE id=$1`, fx.payload.PaymentMethodID, pspID, rail)
+	_, err := fx.db.Pool().Exec(ctx, `UPDATE billing.payment_methods SET psp_id=$2, rail=$3 WHERE id=$1`, fx.payload.PaymentMethodID, pspID, rail)
 	require.NoError(t, err)
-	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET psp_id=$2, rail=$3 WHERE id=$1`, fx.subID, pspID, rail)
+	_, err = fx.db.Pool().Exec(ctx, `UPDATE billing.subscriptions SET psp_id=$2, rail=$3 WHERE id=$1`, fx.subID, pspID, rail)
 	require.NoError(t, err)
 	fx.pspID, fx.payload.Instrument.PSPID, fx.payload.Renewal.PSPID = pspID, pspID, pspID
 	fx.payload.Rail = rail

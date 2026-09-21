@@ -99,7 +99,7 @@ func TestProviderBillingObservationQualificationLifecycle(t *testing.T) {
 		"exact observation replay cannot report an authorization released around its qualification")
 
 	_, err = owner.Exec(ctx, `
-		UPDATE openrails.provider_billing_qualifications
+		UPDATE billing.provider_billing_qualifications
 		SET provider_lifetime_end = provider_lifetime_start
 		WHERE merchant_id = $1 AND operation_id = $2`,
 		dbtest.TestMerchantID.UUID(), mainAuth.OperationID,
@@ -135,7 +135,7 @@ func TestProviderBillingObservationQualificationLifecycle(t *testing.T) {
 	settleTx, err := owner.Begin(ctx)
 	require.NoError(t, err)
 	defer func() { _ = settleTx.Rollback(context.Background()) }()
-	_, err = settleTx.Exec(ctx, "LOCK TABLE openrails.operation_authorizations IN ACCESS EXCLUSIVE MODE")
+	_, err = settleTx.Exec(ctx, "LOCK TABLE billing.operation_authorizations IN ACCESS EXCLUSIVE MODE")
 	require.NoError(t, err)
 	settleCtx, settleDB, err := dbi.BindMerchantTx(ctx, settleTx, dbtest.TestMerchantID)
 	require.NoError(t, err)
@@ -156,7 +156,7 @@ func TestProviderBillingObservationQualificationLifecycle(t *testing.T) {
 			SELECT EXISTS (
 				SELECT 1
 				FROM pg_catalog.pg_locks
-				WHERE relation = 'openrails.operation_authorizations'::regclass
+				WHERE relation = 'billing.operation_authorizations'::regclass
 				  AND mode = 'AccessShareLock'
 				  AND NOT granted
 			)`).Scan(&waiting)
@@ -208,7 +208,7 @@ func TestProviderBillingObservationQualificationLifecycle(t *testing.T) {
 	var raw []byte
 	err = owner.QueryRow(ctx, `
 		SELECT raw_body_bytes
-		FROM openrails.provider_billing_observations
+		FROM billing.provider_billing_observations
 		WHERE merchant_id = $1 AND operation_id = $2 AND observation_id = $3`,
 		dbtest.TestMerchantID.UUID(), refusedAuth.OperationID, refusedInput.ObservationID,
 	).Scan(&raw)
@@ -216,7 +216,7 @@ func TestProviderBillingObservationQualificationLifecycle(t *testing.T) {
 	require.Equal(t, refusedInput.RawBody, raw, "typed SDK refusal retains exact bounded provider bytes")
 
 	_, err = owner.Exec(ctx, `
-		UPDATE openrails.provider_billing_observations
+		UPDATE billing.provider_billing_observations
 		SET raw_body_available = false,
 		    raw_body_bytes = ''::bytea,
 		    raw_body_digest = public.digest(''::bytea, 'sha256')
@@ -225,7 +225,7 @@ func TestProviderBillingObservationQualificationLifecycle(t *testing.T) {
 	)
 	require.Error(t, err, "Postgres must refuse discarding exact bytes from a bounded parser refusal")
 	_, err = owner.Exec(ctx, `
-		UPDATE openrails.provider_billing_observations
+		UPDATE billing.provider_billing_observations
 		SET refusal_kind = 'response_too_large'
 		WHERE merchant_id = $1 AND operation_id = $2 AND observation_id = $3`,
 		dbtest.TestMerchantID.UUID(), refusedAuth.OperationID, refusedInput.ObservationID,

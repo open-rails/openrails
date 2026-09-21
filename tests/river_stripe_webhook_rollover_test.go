@@ -231,7 +231,7 @@ func openWebhookFinding(t *testing.T, suite *TestContainerSuite, accountID strin
 		func(ctx context.Context) error {
 			row := suite.App.Runtime.DB.Qx(ctx).QueryRow(ctx, `
 				SELECT COALESCE(recommended_action, '')
-				  FROM openrails.reconciliation_findings
+				  FROM billing.reconciliation_findings
 				 WHERE merchant_id = $1::uuid AND finding_type = $2 AND subject_key = $3
 				   AND status IN ('reconcile_required', 'requires_review')
 			`, dbtest.TestMerchantID.String(), riverjobs.FindingStripeWebhookEndpoint, "stripe:"+accountID)
@@ -248,6 +248,6 @@ func openWebhookFinding(t *testing.T, suite *TestContainerSuite, accountID strin
 func dropPSP(t *testing.T, suite *TestContainerSuite, accountID string) {
 	t.Helper()
 	_, err := suite.Pool.Exec(context.Background(),
-		`DELETE FROM openrails.psps WHERE account_id = $1`, accountID)
+		`DELETE FROM billing.psps WHERE account_id = $1`, accountID)
 	require.NoError(t, err)
 }

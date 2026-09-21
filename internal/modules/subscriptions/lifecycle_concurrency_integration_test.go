@@ -47,7 +47,7 @@ func TestConcurrentRenewalLifecycle(t *testing.T) {
 			insertCatalogAndSub(ctx, t, database, now, 30, productID, priceID, subID, uuid.NewString(), now, paidEnd)
 			ctx = db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "solana"))
 			railSubID := "lifecycle-" + uuid.NewString()
-			_, err := database.Pool().Exec(ctx, "UPDATE openrails.subscriptions SET rail_subscription_id=$2 WHERE id=$1", subID, railSubID)
+			_, err := database.Pool().Exec(ctx, "UPDATE billing.subscriptions SET rail_subscription_id=$2 WHERE id=$1", subID, railSubID)
 			require.NoError(t, err)
 
 			barrier := &lifecycleReadBarrier{Clock: clockwork.NewFakeClockAt(now), reached: make(chan struct{}), resume: make(chan struct{})}
@@ -101,12 +101,12 @@ func TestConcurrentRenewalLifecycle(t *testing.T) {
 			var status string
 			var cancelType *string
 			var periodEnd time.Time
-			require.NoError(t, database.Pool().QueryRow(ctx, "SELECT status, cancel_type, current_period_ends_at FROM openrails.subscriptions WHERE id=$1", subID).Scan(&status, &cancelType, &periodEnd))
+			require.NoError(t, database.Pool().QueryRow(ctx, "SELECT status, cancel_type, current_period_ends_at FROM billing.subscriptions WHERE id=$1", subID).Scan(&status, &cancelType, &periodEnd))
 			if action == "distinct_renewal" {
 				require.Equal(t, string(models.StatusActive), status)
 				require.Equal(t, paidEnd.Add(60*24*time.Hour), periodEnd.UTC(), "both distinct renewal periods must survive")
 				var count int
-				require.NoError(t, database.Pool().QueryRow(ctx, "SELECT count(*) FROM openrails.payments WHERE subscription_id=$1 AND status='completed'", subID).Scan(&count))
+				require.NoError(t, database.Pool().QueryRow(ctx, "SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND status='completed'", subID).Scan(&count))
 				require.Equal(t, 2, count)
 			} else {
 				require.Equal(t, string(models.StatusCancelled), status, "a concurrent renewal must not undo chargeback cancellation")
@@ -151,7 +151,7 @@ func TestStaleLifecycleSnapshotPreservesChargeback(t *testing.T) {
 			productID, priceID, subID := uuid.New(), uuid.New(), uuid.New()
 			insertCatalogAndSub(ctx, t, database, now, 30, productID, priceID, subID, uuid.NewString(), now, now.Add(30*24*time.Hour))
 			if action == "resolve_unknown" {
-				_, err := database.Pool().Exec(ctx, "UPDATE openrails.subscriptions SET status='unknown' WHERE id=$1", subID)
+				_, err := database.Pool().Exec(ctx, "UPDATE billing.subscriptions SET status='unknown' WHERE id=$1", subID)
 				require.NoError(t, err)
 			}
 			repo := NewSubscriptionRepo(database)

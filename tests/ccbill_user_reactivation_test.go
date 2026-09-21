@@ -18,7 +18,7 @@ func TestCCBillUserReactivation_RestoresEntitlementsAfterExpiration(t *testing.T
 	expiredAt := now
 	expiredPeriodEnd := now.Add(-time.Hour)
 	_, err := suite.Pool.Exec(ctx,
-		"UPDATE openrails.subscriptions SET current_period_ends_at = $1 WHERE id = $2",
+		"UPDATE billing.subscriptions SET current_period_ends_at = $1 WHERE id = $2",
 		expiredPeriodEnd, subscriptionID)
 	require.NoError(t, err)
 	postCCBillTerminalEvent(t, suite, "Expiration", "testdata/webhooks/ccbill/expiration.json", railSubID, expiredAt)
@@ -142,7 +142,7 @@ func TestCCBillRenewalSuccess_BlocksTerminalChargebackTransition(t *testing.T) {
 	require.False(t, entitled)
 
 	count := suite.Count(ctx,
-		"SELECT COUNT(*) FROM openrails.payments WHERE rail = $1 AND transaction_id = $2",
+		"SELECT COUNT(*) FROM billing.payments WHERE rail = $1 AND transaction_id = $2",
 		string(models.RailCCBill), renewalTxnID)
 	require.Equal(t, 0, count)
 }
@@ -168,7 +168,7 @@ func TestCCBillChargeback_DedupesDuplicateDelivery(t *testing.T) {
 	require.Eventually(t, func() bool {
 		var count int
 		err := suite.Pool.QueryRow(ctx,
-			"SELECT COUNT(*) FROM openrails.notifications WHERE customer_id = $1 AND event_type = $2",
+			"SELECT COUNT(*) FROM billing.notifications WHERE customer_id = $1 AND event_type = $2",
 			suite.ensureCustomer(ctx, userID), string(models.NotificationPremiumEnded)).Scan(&count)
 		if err != nil {
 			return false

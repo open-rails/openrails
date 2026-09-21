@@ -39,13 +39,13 @@ func seedTenantAndProduct(t *testing.T, ctx context.Context, appDB *db.DB, tid m
 	t.Helper()
 	require.NoError(t, appDB.MerchantTx(merchant.WithID(ctx, tid), func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (id) DO NOTHING`,
+			`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (id) DO NOTHING`,
 			tid.UUID(), "t-"+tid.String()[:8],
 		); err != nil {
 			return err
 		}
 		_, err := tx.Exec(ctx,
-			`INSERT INTO openrails.products (id, merchant_id, key, display_name) VALUES ($1, $2, $3, $3)`,
+			`INSERT INTO billing.products (id, merchant_id, key, display_name) VALUES ($1, $2, $3, $3)`,
 			productID, tid.UUID(), productKey,
 		)
 		return err
@@ -73,23 +73,23 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 
 	require.NoError(t, appDB.MerchantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx,
-			`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+			`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`,
 			customerA, tA.UUID(),
 		)
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx,
-			`INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew)
+			`INSERT INTO billing.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew)
 			 VALUES ($1, $2, $3, 1250000, 'USD', 720, true)`,
 			priceA, productA, tA.UUID(),
 		)
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx,
-			`INSERT INTO openrails.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'count')`,
+			`INSERT INTO billing.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'count')`,
 			tA.UUID(), meterKey,
 		)
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx,
-			`INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
+			`INSERT INTO billing.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 			 VALUES ($1, $2, 1, $3, 'in_arrears', '{"model":"per_unit","per_unit":{"unit_amount":"100000","divide_by":100}}'::jsonb)`,
 			tA.UUID(), productA, meterKey,
 		)
@@ -98,8 +98,8 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 
 	require.NoError(t, appDB.MerchantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
 		var meterCount, rateCardCount int
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_meters WHERE key = $1`, meterKey).Scan(&meterCount))
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_rate_cards WHERE meter_key = $1`, meterKey).Scan(&rateCardCount))
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.catalog_meters WHERE key = $1`, meterKey).Scan(&meterCount))
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.catalog_rate_cards WHERE meter_key = $1`, meterKey).Scan(&rateCardCount))
 		require.Equal(t, 1, meterCount)
 		require.Equal(t, 1, rateCardCount)
 		return nil
@@ -107,15 +107,15 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 
 	require.NoError(t, appDB.MerchantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx,
-			`INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew)
+			`INSERT INTO billing.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew)
 			 VALUES ($1, $2, $3, 1500000, 'USD', 720, true)`,
 			priceB, productB, tB.UUID(),
 		)
 		require.NoError(t, err)
 
 		var meterCount, rateCardCount int
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_meters WHERE key = $1`, meterKey).Scan(&meterCount))
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_rate_cards WHERE meter_key = $1`, meterKey).Scan(&rateCardCount))
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.catalog_meters WHERE key = $1`, meterKey).Scan(&meterCount))
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.catalog_rate_cards WHERE meter_key = $1`, meterKey).Scan(&rateCardCount))
 		require.Equal(t, 0, meterCount)
 		require.Equal(t, 0, rateCardCount)
 		return nil
@@ -123,7 +123,7 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 
 	err := appDB.MerchantTx(ctxB, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx,
-			`INSERT INTO openrails.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'count')`,
+			`INSERT INTO billing.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'count')`,
 			tA.UUID(), "cross-tenant-"+suffix,
 		)
 		return err

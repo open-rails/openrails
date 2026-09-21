@@ -25,7 +25,7 @@ import (
 // A new query, or a new soft-deletable table, is covered the day it lands.
 
 const (
-	migrationsDir = "../../../migrations/postgres"
+	migrationsDir = "../../../internal/migrate/postgres"
 	genDir        = "../gen"
 )
 

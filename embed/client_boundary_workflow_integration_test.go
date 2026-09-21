@@ -105,20 +105,20 @@ func clientBoundaryErrors(t *testing.T, ctx context.Context, h *integrationharne
 	// and accounts together when its boundary checks finish.
 	t.Cleanup(func() {
 		for _, sql := range []string{
-			`DELETE FROM openrails.subscriptions WHERE merchant_id=$1 AND psp_id IN ($2,$3)`,
-			`DELETE FROM openrails.payment_methods WHERE merchant_id=$1 AND psp_id IN ($2,$3)`,
-			`DELETE FROM openrails.psps WHERE merchant_id=$1 AND id IN ($2,$3)`,
+			`DELETE FROM billing.subscriptions WHERE merchant_id=$1 AND psp_id IN ($2,$3)`,
+			`DELETE FROM billing.payment_methods WHERE merchant_id=$1 AND psp_id IN ($2,$3)`,
+			`DELETE FROM billing.psps WHERE merchant_id=$1 AND id IN ($2,$3)`,
 		} {
 			_, err := h.Pool().Exec(context.Background(), sql, mid, nmi, stripe)
 			require.NoError(t, err)
 		}
 	})
-	exec(`INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, mid, customer)
-	exec(`INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Parity plan')`, product, mid, product.String())
-	exec(`INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,auto_renew,access_duration_hours) VALUES($1,$2,$3,$4,1000000,'USD',true,720)`, price, mid, product, price.String())
-	exec(`INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id,key) VALUES($1,$2,'nmi','test',$3,$3),($4,$2,'stripe','test',$5,$5)`, nmi, mid, nmi.String(), stripe, stripe.String())
-	exec(`INSERT INTO openrails.payment_methods(id,merchant_id,customer_id,psp_id,rail,initial_transaction_id,last_four,card_type) VALUES($1,$2,$3,$4,'nmi','parity-anchor','4242','visa'),($5,$2,$3,$6,'stripe','parity-portal','4444','mastercard')`, card, mid, customer, nmi, portalCard, stripe)
-	exec(`INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,'nmi','active',$7,$8,$9,$10)`, sub, mid, customer, product, price, nmi, sub.String(), card, now, now.Add(48*time.Hour))
+	exec(`INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, mid, customer)
+	exec(`INSERT INTO billing.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Parity plan')`, product, mid, product.String())
+	exec(`INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,auto_renew,access_duration_hours) VALUES($1,$2,$3,$4,1000000,'USD',true,720)`, price, mid, product, price.String())
+	exec(`INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,key) VALUES($1,$2,'nmi','test',$3,$3),($4,$2,'stripe','test',$5,$5)`, nmi, mid, nmi.String(), stripe, stripe.String())
+	exec(`INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,initial_transaction_id,last_four,card_type) VALUES($1,$2,$3,$4,'nmi','parity-anchor','4242','visa'),($5,$2,$3,$6,'stripe','parity-portal','4444','mastercard')`, card, mid, customer, nmi, portalCard, stripe)
+	exec(`INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,'nmi','active',$7,$8,$9,$10)`, sub, mid, customer, product, price, nmi, sub.String(), card, now, now.Add(48*time.Hour))
 
 	out := map[string]errorObservation{}
 	_, err := client.DeletePaymentMethod(ctx, openrails.CustomerID(customer), openrails.PaymentMethodID(card))
@@ -135,7 +135,7 @@ func clientBoundaryErrors(t *testing.T, ctx context.Context, h *integrationharne
 	require.Equal(t, errorObservation{StatusError: true, Status: 404, Type: "invalid_request_error", Code: "product_not_found", NotFound: true, HasRequestID: true}, observeClientError(t, "product not found", err))
 	err = client.CancelSubscription(ctx, openrails.SubscriptionID(uuid.New()), openrails.CancelSubscriptionRequest{Reason: "parity"})
 	require.Equal(t, errorObservation{StatusError: true, Status: 404, Type: "invalid_request_error", Code: "subscription_not_found", NotFound: true, HasRequestID: true}, observeClientError(t, "subscription not found", err))
-	exec(`UPDATE openrails.subscriptions SET status='cancelled',cancelled_at=now(),cancel_type='merchant' WHERE id=$1`, sub)
+	exec(`UPDATE billing.subscriptions SET status='cancelled',cancelled_at=now(),cancel_type='merchant' WHERE id=$1`, sub)
 	err = client.CancelSubscription(ctx, openrails.SubscriptionID(sub), openrails.CancelSubscriptionRequest{Reason: "parity"})
 	require.Equal(t, errorObservation{StatusError: true, Status: 409, Type: "invalid_request_error", Code: "subscription_not_active", Conflict: true, HasRequestID: true}, observeClientError(t, "subscription already cancelled", err))
 	_, err = client.Admit(ctx, openrails.AdmitRequest{Currency: "USD"})
@@ -201,12 +201,12 @@ func checkClientDTOShapes(t *testing.T, ctx context.Context, h *integrationharne
 		require.NoError(t, err)
 	}
 	now := microInstant(time.Now())
-	exec(`INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, mid, f.customer.UUID())
-	exec(`INSERT INTO openrails.payment_methods(id,merchant_id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,last_four,card_type,created_at,updated_at) VALUES($1,$2,$3,$4,'nmi',$5::text,$5::text,$5::text,'4242','visa',$6,$6)`,
+	exec(`INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, mid, f.customer.UUID())
+	exec(`INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,last_four,card_type,created_at,updated_at) VALUES($1,$2,$3,$4,'nmi',$5::text,$5::text,$5::text,'4242','visa',$6,$6)`,
 		f.method.UUID(), mid, f.customer.UUID(), psp, "shape-"+f.method.UUID().String(), now)
-	exec(`INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,'nmi','active',$7,$8,$9,$10)`,
+	exec(`INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,'nmi','active',$7,$8,$9,$10)`,
 		f.subscription.UUID(), mid, f.customer.UUID(), product.ID.UUID(), price.ID.UUID(), psp, f.subscription.UUID().String(), f.method.UUID(), now, now.Add(720*time.Hour))
-	exec(`INSERT INTO openrails.payments(id,merchant_id,customer_id,price_id,subscription_id,psp_id,rail,transaction_id,amount,list_amount,currency,status,money_movement,purchased_at) VALUES($1,$2,$3,$4,$5,$6,'nmi',$7,1000000,1000000,'USD','completed','rail',$8)`,
+	exec(`INSERT INTO billing.payments(id,merchant_id,customer_id,price_id,subscription_id,psp_id,rail,transaction_id,amount,list_amount,currency,status,money_movement,purchased_at) VALUES($1,$2,$3,$4,$5,$6,'nmi',$7,1000000,1000000,'USD','completed','rail',$8)`,
 		f.payment.UUID(), mid, f.customer.UUID(), price.ID.UUID(), f.subscription.UUID(), psp, "shape-txn-"+f.payment.UUID().String(), now)
 
 	var o dtoShapeObservation

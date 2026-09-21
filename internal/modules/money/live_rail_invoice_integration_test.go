@@ -148,7 +148,7 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailNMI), railCustomerRef)
 	anchor := createNMISandboxUnscheduledAnchor(t, client, railCustomerRef, "live-nmi-anchor-")
 	_, err = pool.Exec(ctx,
-		"UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref = $2 WHERE id = $1",
+		"UPDATE billing.payment_methods SET stored_credential_unscheduled_ref = $2 WHERE id = $1",
 		pm, anchor)
 	require.NoError(t, err)
 	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
@@ -172,7 +172,7 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 		var failureCode, failureMessage string
 		_ = pool.QueryRow(ctx, `
 			SELECT COALESCE(failure_code, ''), COALESCE(failure_message, '')
-			FROM openrails.invoice_payments
+			FROM billing.invoice_payments
 			WHERE invoice_id = $1 AND status = 'failed'
 			ORDER BY created_at DESC
 			LIMIT 1

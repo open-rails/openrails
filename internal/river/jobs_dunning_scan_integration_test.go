@@ -71,7 +71,7 @@ func TestDunningScan_DueQueryFilters(t *testing.T) {
 	// RLS-enforcing harness: every row here is the test merchant's own; the
 	// merchants row itself is control plane.
 	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	dbtest.EnsureTestMerchant(ctx, t, dbtest.OpenAppDB(t, dbtest.SharedSuperuserDSN(t)).Pool())
 	now := time.Now().UTC().Truncate(time.Second)
 
@@ -111,10 +111,10 @@ func TestDunningScan_DueQueryFilters(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		for id := range seeded {
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", id)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", id)
 		}
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	got := map[uuid.UUID]bool{}
@@ -143,7 +143,7 @@ func TestDunningWorker_ReadOnlyScansWithoutMutating(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
 	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	dbtest.EnsureTestMerchant(ctx, t, dbtest.OpenAppDB(t, dbtest.SharedSuperuserDSN(t)).Pool())
 	now := time.Now().UTC().Truncate(time.Second)
 
@@ -167,17 +167,17 @@ func TestDunningWorker_ReadOnlyScansWithoutMutating(t *testing.T) {
 	subID := seedScanSubscription(ctx, t, q, productID, priceID, customerID, pspID, string(models.RailNMI), models.StatusPastDue, &nextRetryAt)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	var beforeStatus string
 	var beforeNextRetryAt *time.Time
 	var beforeUpdatedAt time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status, next_retry_at, updated_at FROM openrails.subscriptions WHERE id=$1`, subID).
+		`SELECT status, next_retry_at, updated_at FROM billing.subscriptions WHERE id=$1`, subID).
 		Scan(&beforeStatus, &beforeNextRetryAt, &beforeUpdatedAt))
 
 	hook := logtest.NewGlobal()
@@ -202,7 +202,7 @@ func TestDunningWorker_ReadOnlyScansWithoutMutating(t *testing.T) {
 	var afterNextRetryAt *time.Time
 	var afterUpdatedAt time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status, next_retry_at, updated_at FROM openrails.subscriptions WHERE id=$1`, subID).
+		`SELECT status, next_retry_at, updated_at FROM billing.subscriptions WHERE id=$1`, subID).
 		Scan(&afterStatus, &afterNextRetryAt, &afterUpdatedAt))
 	require.Equal(t, beforeStatus, afterStatus)
 	require.Equal(t, beforeNextRetryAt, afterNextRetryAt)
@@ -210,7 +210,7 @@ func TestDunningWorker_ReadOnlyScansWithoutMutating(t *testing.T) {
 
 	var intentCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1`, subID).Scan(&intentCount))
+		`SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1`, subID).Scan(&intentCount))
 	require.Zero(t, intentCount, "read-only scan must not materialize a charge intent")
 }
 
@@ -233,7 +233,7 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	// RLS-enforcing harness: every row here is the test merchant's own; the
 	// merchants row itself is control plane.
 	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	dbtest.EnsureTestMerchant(ctx, t, dbtest.OpenAppDB(t, dbtest.SharedSuperuserDSN(t)).Pool())
 	now := time.Now().UTC().Truncate(time.Second)
 
@@ -297,11 +297,11 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = ANY($1)", []uuid.UUID{subID, autoBilledSubID})
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = ANY($1)", []uuid.UUID{subID, autoBilledSubID})
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", paymentMethodID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE subscription_id = ANY($1)", []uuid.UUID{subID, autoBilledSubID})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = ANY($1)", []uuid.UUID{subID, autoBilledSubID})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", paymentMethodID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	// Configured client whose only allowed traffic is the read-only profile
@@ -354,7 +354,7 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	// No charge intent reaches the ledger — the pm check runs before enqueue.
 	var intentCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.rail_intents WHERE subscription_id = $1`, subID).Scan(&intentCount))
+		`SELECT count(*) FROM billing.rail_intents WHERE subscription_id = $1`, subID).Scan(&intentCount))
 	assert.Zero(t, intentCount, "missing vault refs never record a charge intent")
 
 	// #840: parked for provider verification — NOT failed. No retry ordinal is
@@ -363,7 +363,7 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	var retryAttempts *int32
 	var lastRetryAt, nextRetryAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status, retry_attempts, last_retry_at, next_retry_at FROM openrails.subscriptions WHERE id = $1`, subID).
+		`SELECT status, retry_attempts, last_retry_at, next_retry_at FROM billing.subscriptions WHERE id = $1`, subID).
 		Scan(&status, &retryAttempts, &lastRetryAt, &nextRetryAt))
 	assert.Equal(t, string(models.StatusUnknown), status,
 		"missing local vault refs park the row; the unknown-cohort probe verifies it against the provider")
@@ -388,13 +388,13 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	var autoRetryAttempts *int32
 	var autoNextRetryAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status, retry_attempts, next_retry_at FROM openrails.subscriptions WHERE id = $1`, autoBilledSubID).
+		`SELECT status, retry_attempts, next_retry_at FROM billing.subscriptions WHERE id = $1`, autoBilledSubID).
 		Scan(&autoStatus, &autoRetryAttempts, &autoNextRetryAt))
 	assert.Equal(t, string(models.StatusPastDue), autoStatus, "provider-billed sub awaits provider-pull reconciliation")
 	assert.Nil(t, autoRetryAttempts, "no failure policy applied — the provider owns billing")
 	require.NotNil(t, autoNextRetryAt)
 	assert.WithinDuration(t, nextRetry, autoNextRetryAt.UTC(), time.Second, "retry state untouched (no claim)")
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.rail_intents WHERE subscription_id = $1`, autoBilledSubID).Scan(&intentCount))
+		`SELECT count(*) FROM billing.rail_intents WHERE subscription_id = $1`, autoBilledSubID).Scan(&intentCount))
 	assert.Zero(t, intentCount, "no charge intent for a provider-billed sub")
 }

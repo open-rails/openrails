@@ -73,7 +73,7 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	custodianID := dbtest.EnsureTestCustodian(ctx, t, pool, dbtest.TestMerchantID.UUID())
 	fx.ctx = db.WithCustodianID(ctx, custodianID)
-	_, err := gen.New(pool).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
+	_, err := dbtest.Queries(pool).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   fx.methodID,
 		MerchantID:           dbtest.TestMerchantID.UUID(),
 		CustomerID:           fx.customerID,
@@ -97,8 +97,8 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", fx.methodID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.webhook_events WHERE rail = 'basis_theory'")
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", fx.methodID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.webhook_events WHERE rail = 'basis_theory'")
 	})
 
 	btCustodian := &config.CustodianConfig{

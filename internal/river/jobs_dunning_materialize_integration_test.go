@@ -35,7 +35,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	ctx := context.Background()
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	now := time.Now().UTC().Truncate(time.Second)
 
@@ -85,11 +85,11 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", paymentMethodID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", paymentMethodID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	// Materialize must never send a provider MUTATION. The only NMI traffic
@@ -151,7 +151,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	var expiresAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT status, origin, intent_type, psp_id, expires_at
-		 FROM openrails.rail_intents WHERE subscription_id = $1`, subID).
+		 FROM billing.rail_intents WHERE subscription_id = $1`, subID).
 		Scan(&status, &origin, &intentType, &gotPSPID, &expiresAt))
 	assert.Equal(t, intents.StatusPending, status)
 	assert.Equal(t, string(intents.OriginSystem), origin)
@@ -164,7 +164,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	var subStatus string
 	var lastRetryAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status, last_retry_at FROM openrails.subscriptions WHERE id = $1`, subID).
+		`SELECT status, last_retry_at FROM billing.subscriptions WHERE id = $1`, subID).
 		Scan(&subStatus, &lastRetryAt))
 	assert.Equal(t, string(models.StatusPastDue), subStatus)
 	assert.Nil(t, lastRetryAt, "materialize must not write last_retry_at (dunning forensics evidence)")
@@ -178,7 +178,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
 	var intentCount int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.rail_intents WHERE subscription_id = $1`, subID).Scan(&intentCount))
+		`SELECT count(*) FROM billing.rail_intents WHERE subscription_id = $1`, subID).Scan(&intentCount))
 	assert.Equal(t, 1, intentCount)
 }
 
@@ -196,7 +196,7 @@ func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 	// RLS-enforcing harness: this fixture seeds and asserts on ONE merchant's
 	// own rows, so it uses the merchant-pinned pool rather than a raw one.
 	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	dbtest.EnsureTestMerchant(ctx, t,
 		dbtest.OpenAppDB(t, dbtest.SharedSuperuserDSN(t)).Pool())
 	now := time.Now().UTC().Truncate(time.Second)
@@ -236,10 +236,10 @@ func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	var nmiMutations atomic.Int64
@@ -290,7 +290,7 @@ func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 	var cancelledAt *time.Time
 	var deletionScheduledAt *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT status, cancelled_at, deletion_scheduled_at FROM openrails.subscriptions WHERE id = $1`, subID).
+		`SELECT status, cancelled_at, deletion_scheduled_at FROM billing.subscriptions WHERE id = $1`, subID).
 		Scan(&subStatus, &cancelledAt, &deletionScheduledAt))
 	assert.Equal(t, string(models.StatusUnknown), subStatus,
 		"a stale subscription parks for provider verification; staleness is a clock reading, not a death certificate (#839)")

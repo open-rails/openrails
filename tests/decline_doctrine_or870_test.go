@@ -34,10 +34,10 @@ func storedPaymentMethodDestruction(t *testing.T, suite *TestContainerSuite, pmI
 	t.Helper()
 	ctx := suite.MerchantCtx()
 	require.NoError(t, suite.Pool.QueryRow(ctx, `
-		SELECT EXISTS (SELECT 1 FROM openrails.payment_methods WHERE id = $1)`,
+		SELECT EXISTS (SELECT 1 FROM billing.payment_methods WHERE id = $1)`,
 		pmID).Scan(&rowPresent))
 	require.NoError(t, suite.Pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM openrails.rail_intents WHERE intent_type = $1 AND idempotency_key = $2`,
+		SELECT COUNT(*) FROM billing.rail_intents WHERE intent_type = $1 AND idempotency_key = $2`,
 		intents.TypeNMIPaymentMethodDelete, intents.NMIPaymentMethodDeleteIdempotencyKey(pmID)).Scan(&vaultDeleteIntents))
 	return rowPresent, vaultDeleteIntents
 }
@@ -46,7 +46,7 @@ func notificationEventTypes(t *testing.T, suite *TestContainerSuite, customerID 
 	t.Helper()
 	ctx := suite.MerchantCtx()
 	rows, err := suite.Pool.Query(ctx, `
-		SELECT event_type FROM openrails.notifications
+		SELECT event_type FROM billing.notifications
 		WHERE customer_id = $1
 		ORDER BY created_at`, customerID)
 	require.NoError(t, err)
@@ -204,7 +204,7 @@ func TestOr870Bucket3CancelsAtTheRailAndDeletesNoPaymentMethod(t *testing.T) {
 
 	var reason string
 	require.NoError(t, suite.Pool.QueryRow(suite.MerchantCtx(), `
-		SELECT COALESCE(data->>'reason', '') FROM openrails.notifications
+		SELECT COALESCE(data->>'reason', '') FROM billing.notifications
 		WHERE event_type = $1 AND customer_id = $2
 		ORDER BY created_at DESC LIMIT 1`,
 		models.NotificationPremiumEnded, sub.CustomerID).Scan(&reason))
@@ -296,7 +296,7 @@ func TestOr870NoAutomatedPathEverDeletesAStoredPaymentMethod(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	var beforeDeletes int
 	require.NoError(t, suite.Pool.QueryRow(suite.MerchantCtx(), `
-		SELECT COUNT(*) FROM openrails.rail_intents WHERE intent_type = $1`,
+		SELECT COUNT(*) FROM billing.rail_intents WHERE intent_type = $1`,
 		intents.TypeNMIPaymentMethodDelete).Scan(&beforeDeletes))
 
 	for _, code := range []string{"202", "223", "252", "261", "999"} {
@@ -309,7 +309,7 @@ func TestOr870NoAutomatedPathEverDeletesAStoredPaymentMethod(t *testing.T) {
 
 	var vaultDeletes int
 	require.NoError(t, suite.Pool.QueryRow(suite.MerchantCtx(), `
-		SELECT COUNT(*) FROM openrails.rail_intents WHERE intent_type = $1`,
+		SELECT COUNT(*) FROM billing.rail_intents WHERE intent_type = $1`,
 		intents.TypeNMIPaymentMethodDelete).Scan(&vaultDeletes))
 	assert.Equal(t, beforeDeletes, vaultDeletes,
 		"no decline outcome, and no dunning exhaustion, may ever queue a stored-payment-method delete")

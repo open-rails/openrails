@@ -60,7 +60,7 @@ func moneyInEnvWithDB(t *testing.T) (*money.MoneyService, *db.DB, *pgxpool.Pool,
 	t.Cleanup(func() {
 		// money_spend_limits (#513 B1), money_blocks + money_transactions (#512)
 		// were dropped; only money_settings remains to reset.
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.money_settings WHERE customer_id = $1", payerID)
 	})
 	return money.NewMoneyService(dbi), dbi, pool, payer, money.DefaultCurrency, ctx
 }
@@ -195,7 +195,7 @@ func collectionRunnerFull(dbi *db.DB, charger money.Charger, verifier money.Coll
 // collectionIntents lists the invoice's collection operations, oldest first.
 func collectionIntents(t *testing.T, pool *pgxpool.Pool, ctx context.Context, invoiceID uuid.UUID) []gen.OpenrailsRailIntent {
 	t.Helper()
-	rows, err := pool.Query(ctx, `SELECT id FROM openrails.rail_intents WHERE intent_type = $1 AND payload->>'invoice_id' = $2 ORDER BY created_at, id`, money.TypeInvoiceCollection, invoiceID.String())
+	rows, err := pool.Query(ctx, `SELECT id FROM billing.rail_intents WHERE intent_type = $1 AND payload->>'invoice_id' = $2 ORDER BY created_at, id`, money.TypeInvoiceCollection, invoiceID.String())
 	require.NoError(t, err)
 	var ids []uuid.UUID
 	for rows.Next() {
@@ -206,7 +206,7 @@ func collectionIntents(t *testing.T, pool *pgxpool.Pool, ctx context.Context, in
 	rows.Close()
 	out := make([]gen.OpenrailsRailIntent, 0, len(ids))
 	for _, id := range ids {
-		row, err := gen.New(pool).GetRailIntent(ctx, id)
+		row, err := dbtest.Queries(pool).GetRailIntent(ctx, id)
 		require.NoError(t, err)
 		out = append(out, row)
 	}
@@ -222,20 +222,20 @@ func latestCollectionIntent(t *testing.T, pool *pgxpool.Pool, ctx context.Contex
 
 func dueNow(t *testing.T, pool *pgxpool.Pool, ctx context.Context, intentID uuid.UUID) {
 	t.Helper()
-	_, err := pool.Exec(ctx, "UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", intentID)
+	_, err := pool.Exec(ctx, "UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", intentID)
 	require.NoError(t, err)
 }
 
 func cleanupCollection(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID) {
 	t.Helper()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "UPDATE openrails.invoices SET collection_intent_id = NULL WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_mutation_logs WHERE rail_intent_id IN (SELECT id FROM openrails.rail_intents WHERE intent_type = $1 AND (payload->>'customer_id' = $2 OR payload IS NULL))", money.TypeInvoiceCollection, payer.UUID().String())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = $1 AND (payload->>'customer_id' = $2 OR (payload IS NULL AND merchant_id = $3))", money.TypeInvoiceCollection, payer.UUID().String(), dbtest.TestMerchantID.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "UPDATE billing.invoices SET collection_intent_id = NULL WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_mutation_logs WHERE rail_intent_id IN (SELECT id FROM billing.rail_intents WHERE intent_type = $1 AND (payload->>'customer_id' = $2 OR payload IS NULL))", money.TypeInvoiceCollection, payer.UUID().String())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE intent_type = $1 AND (payload->>'customer_id' = $2 OR (payload IS NULL AND merchant_id = $3))", money.TypeInvoiceCollection, payer.UUID().String(), dbtest.TestMerchantID.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_payments WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payer.UUID())
 	})
 }
 
@@ -246,7 +246,7 @@ func latestBlockExpiry(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pa
 	t.Helper()
 	var exp *time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT ends_at FROM openrails.grants WHERE customer_id = $1 AND kind = 'credit' AND event = 'grant' ORDER BY created_at DESC LIMIT 1",
+		"SELECT ends_at FROM billing.grants WHERE customer_id = $1 AND kind = 'credit' AND event = 'grant' ORDER BY created_at DESC LIMIT 1",
 		payerID).Scan(&exp))
 	return exp
 }
@@ -255,7 +255,7 @@ func latestBlockExpiry(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pa
 // charge states the instrument it was armed against.
 func frozenInstrumentOf(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pm uuid.UUID) charge.FrozenInstrument {
 	t.Helper()
-	row, err := gen.New(pool).GetPaymentMethodByID(ctx, pm)
+	row, err := dbtest.Queries(pool).GetPaymentMethodByID(ctx, pm)
 	require.NoError(t, err)
 	return charge.FreezeInstrument(row)
 }
@@ -284,7 +284,7 @@ func testPSPForRail(t *testing.T, pool *pgxpool.Pool, ctx context.Context, rail 
 	t.Helper()
 	var existing uuid.UUID
 	err := pool.QueryRow(ctx,
-		`SELECT id FROM openrails.psps WHERE merchant_id = $1 AND rail = $2 AND archived = false
+		`SELECT id FROM billing.psps WHERE merchant_id = $1 AND rail = $2 AND archived = false
 		 ORDER BY created_at DESC LIMIT 1`,
 		dbtest.TestMerchantID.UUID(), rail).Scan(&existing)
 	if err == nil {
@@ -312,7 +312,7 @@ func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 	} else {
 		params.RailMethodRef = railCustomerRef
 	}
-	_, err := gen.New(pool).CreatePaymentMethod(ctx, params)
+	_, err := dbtest.Queries(pool).CreatePaymentMethod(ctx, params)
 	require.NoError(t, err)
 	if rail == "stripe" {
 		seedRailCustomer(t, pool, ctx, payer, rail, "cus_"+payer.UUID().String())
@@ -321,7 +321,7 @@ func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 		dbtest.SeedNMIStoredCredentialRefs(ctx, t, pool, pm)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pm)
 	})
 	return pm
 }
@@ -330,7 +330,7 @@ func seedRailCustomer(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pay
 	t.Helper()
 	now := time.Now().UTC()
 	pspID := testPSPForRail(t, pool, ctx, rail)
-	require.NoError(t, gen.New(pool).UpsertRailCustomerAccount(ctx, gen.UpsertRailCustomerAccountParams{
+	require.NoError(t, dbtest.Queries(pool).UpsertRailCustomerAccount(ctx, gen.UpsertRailCustomerAccountParams{
 		ID:         uuidutil.NewV7(),
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		CustomerID: payer.UUID(),
@@ -341,7 +341,7 @@ func seedRailCustomer(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pay
 		UpdatedAt:  now,
 	}))
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_customer_accounts WHERE merchant_id = $1 AND customer_id = $2 AND rail = $3", dbtest.TestMerchantID.UUID(), payer.UUID(), rail)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_customer_accounts WHERE merchant_id = $1 AND customer_id = $2 AND rail = $3", dbtest.TestMerchantID.UUID(), payer.UUID(), rail)
 	})
 }
 
@@ -614,7 +614,7 @@ func TestChargeOutstanding_WithNMIAdapter_SettlesInvoiceThroughGateway(t *testin
 	var railPaymentID string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT COALESCE(MAX(rail_payment_id), '')
-		FROM openrails.invoice_payments
+		FROM billing.invoice_payments
 		WHERE invoice_id = $1 AND status = 'settled'
 	`, inv.ID).Scan(&railPaymentID))
 	require.Equal(t, "txn_nmi_invoice_settled", railPaymentID)
@@ -714,7 +714,7 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 	var rail, railPaymentID string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT COALESCE(MAX(rail), ''), COALESCE(MAX(rail_payment_id), '')
-		FROM openrails.invoice_payments
+		FROM billing.invoice_payments
 		WHERE invoice_id = $1 AND status = 'settled'
 	`, inv.ID).Scan(&rail, &railPaymentID))
 	require.Equal(t, string(models.RailStripe), rail)
@@ -732,7 +732,7 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 	var settledPayments int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*)
-		FROM openrails.invoice_payments
+		FROM billing.invoice_payments
 		WHERE invoice_id = $1 AND status = 'settled'
 	`, inv.ID).Scan(&settledPayments))
 	require.Equal(t, 1, settledPayments)
@@ -818,7 +818,7 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 	var rail, failureCode, failureMessage string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT COALESCE(rail, ''), COALESCE(failure_code, ''), COALESCE(failure_message, '')
-		FROM openrails.invoice_payments
+		FROM billing.invoice_payments
 		WHERE invoice_id = $1 AND status = 'failed'
 		ORDER BY created_at DESC
 		LIMIT 1
@@ -873,7 +873,7 @@ func TestChargeOutstanding_WithScopedCharger_SettlesInvoiceAndRecordsRail(t *tes
 	var paymentCount int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*), COALESCE(MAX(rail), ''), COALESCE(MAX(rail_payment_id), '')
-		FROM openrails.invoice_payments
+		FROM billing.invoice_payments
 		WHERE invoice_id = $1 AND status = 'settled'
 	`, inv.ID).Scan(&paymentCount, &rail, &railPaymentID))
 	require.Equal(t, 1, paymentCount)
@@ -921,7 +921,7 @@ func TestChargeOutstanding_WithScopedCharger_DeclineRecordsFailureMetadata(t *te
 	var rail, railPaymentID, failureCode, failureMessage string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT COALESCE(rail, ''), COALESCE(rail_payment_id, ''), COALESCE(failure_code, ''), COALESCE(failure_message, '')
-		FROM openrails.invoice_payments
+		FROM billing.invoice_payments
 		WHERE invoice_id = $1 AND status = 'failed'
 		ORDER BY created_at DESC
 		LIMIT 1
@@ -980,7 +980,7 @@ func TestChargeOutstanding_WithScopedCharger_PrepareFailureParksWithoutProviderT
 	var settled int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*)
-		FROM openrails.invoice_payments
+		FROM billing.invoice_payments
 		WHERE invoice_id = $1 AND status = 'settled'
 	`, inv.ID).Scan(&settled))
 	require.Equal(t, 1, settled)

@@ -41,19 +41,19 @@ func seedRepriceSubscription(t *testing.T, ctx context.Context, h *Harness, prod
 	pool := h.Pool()
 	var customerID uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx,
-		`INSERT INTO openrails.customers (merchant_id, id) VALUES ($1,$2) RETURNING id`,
+		`INSERT INTO billing.customers (merchant_id, id) VALUES ($1,$2) RETURNING id`,
 		dbtest.TestMerchantID.UUID(), uuid.NewString()).Scan(&customerID))
 
 	now := time.Now().UTC()
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
 	var subID uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx, `
-		INSERT INTO openrails.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, psp_id)
+		INSERT INTO billing.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, psp_id)
 		VALUES ($1,$2,$3,$4,'active','nmi',$5,$6,$7,$8) RETURNING id`,
 		dbtest.TestMerchantID.UUID(), customerID, productID.UUID(), priceID.UUID(), "wizard-rail-sub-"+uuid.NewString(), now, now.Add(30*24*time.Hour), pspID).Scan(&subID))
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.customers WHERE id = $1", customerID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.customers WHERE id = $1", customerID)
 	})
 	return subID
 }
@@ -145,7 +145,7 @@ func TestStandaloneMerchantRepriceWizardIncreaseHTTP(t *testing.T) {
 	// ...grandfather is the DEFAULT outcome on increase: without an explicit
 	// migrate call, the existing subscriber's price_id is untouched.
 	var pinnedPriceID uuid.UUID
-	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT price_id FROM openrails.subscriptions WHERE product_id = $1 AND status = 'active' LIMIT 1`, v1.ProductID).Scan(&pinnedPriceID))
+	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT price_id FROM billing.subscriptions WHERE product_id = $1 AND status = 'active' LIMIT 1`, v1.ProductID).Scan(&pinnedPriceID))
 	require.Equal(t, v1.ID.UUID(), pinnedPriceID, "increase defaults to grandfather: subscriber stays on the old price")
 
 	// Version-chain history, most-recent-first, resolved from the movement
@@ -229,7 +229,7 @@ func TestStandaloneMerchantRepriceWizardIncreaseHTTP(t *testing.T) {
 	require.Equal(t, http.StatusConflict, recancelStatus, string(recancelBody))
 
 	// The subscriber is provably untouched throughout.
-	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT price_id FROM openrails.subscriptions WHERE product_id = $1 AND status = 'active' LIMIT 1`, v1.ProductID).Scan(&pinnedPriceID))
+	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT price_id FROM billing.subscriptions WHERE product_id = $1 AND status = 'active' LIMIT 1`, v1.ProductID).Scan(&pinnedPriceID))
 	require.Equal(t, v1.ID.UUID(), pinnedPriceID, "canceled-before-effective reprice never touches the subscription")
 }
 
@@ -300,6 +300,6 @@ func TestStandaloneMerchantRepriceWizardDecreaseHTTP(t *testing.T) {
 	// Scheduled, not yet applied (v1's only effective moment is the next
 	// renewal on/after effective_at — never instant, even for a decrease).
 	var status models.RepriceStatus
-	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT status FROM openrails.subscription_reprices WHERE reprice_batch_id = $1`, batchResult.BatchID).Scan(&status))
+	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT status FROM billing.subscription_reprices WHERE reprice_batch_id = $1`, batchResult.BatchID).Scan(&status))
 	require.Equal(t, models.RepriceStatusScheduled, status)
 }

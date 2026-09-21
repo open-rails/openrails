@@ -9,7 +9,7 @@ import (
 )
 
 // satisfiesEndedNotBeforeCancelled mirrors the DB CHECK constraint
-// chk_ended_not_before_cancelled defined in migrations/postgres/001_schema.up.sql:
+// chk_ended_not_before_cancelled defined in internal/migrate/postgres/001_schema.up.sql:
 //
 //	ended_at IS NULL OR cancelled_at IS NULL OR ended_at >= cancelled_at
 func satisfiesEndedNotBeforeCancelled(s *Subscription) bool {

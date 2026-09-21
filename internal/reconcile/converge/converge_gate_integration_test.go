@@ -30,17 +30,17 @@ func TestConverge_ConfirmedAbsenceGateFlipsOnExhaustivePull(t *testing.T) {
 	gateMerchant := merchant.ID(uuid.New())
 	baseCtx := merchant.WithID(context.Background(), gateMerchant)
 	_, err := appDB.Pool().Exec(context.Background(),
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		gateMerchant.UUID(), "gate-"+suffix)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for _, table := range []string{"reconciliation_state", "psps"} {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.`+table+` WHERE merchant_id=$1`, gateMerchant.UUID())
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.`+table+` WHERE merchant_id=$1`, gateMerchant.UUID())
 			}
 			return nil
 		})
-		_, _ = appDB.Pool().Exec(context.Background(), `DELETE FROM openrails.merchants WHERE id=$1`, gateMerchant.UUID())
+		_, _ = appDB.Pool().Exec(context.Background(), `DELETE FROM billing.merchants WHERE id=$1`, gateMerchant.UUID())
 	})
 
 	e := NewConvergeEngine(appDB)
@@ -135,17 +135,17 @@ func TestConverge_EmptyStripeRosterNeverOpensTheAbsenceGate(t *testing.T) {
 	gateMerchant := merchant.ID(uuid.New())
 	baseCtx := merchant.WithID(context.Background(), gateMerchant)
 	_, err := appDB.Pool().Exec(context.Background(),
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		gateMerchant.UUID(), "gate-stripe-"+suffix)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for _, table := range []string{"reconciliation_state", "psps"} {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.`+table+` WHERE merchant_id=$1`, gateMerchant.UUID())
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.`+table+` WHERE merchant_id=$1`, gateMerchant.UUID())
 			}
 			return nil
 		})
-		_, _ = appDB.Pool().Exec(context.Background(), `DELETE FROM openrails.merchants WHERE id=$1`, gateMerchant.UUID())
+		_, _ = appDB.Pool().Exec(context.Background(), `DELETE FROM billing.merchants WHERE id=$1`, gateMerchant.UUID())
 	})
 
 	// A live Stripe answering every list with an empty page.

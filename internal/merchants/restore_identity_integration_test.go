@@ -80,7 +80,7 @@ func TestRestoreIdentityPreservesUUIDAndNeverRebinds(t *testing.T) {
 		require.ErrorIs(t, err, ErrPermissionGroupRequired)
 		_, _, err = directory.RegisterForRestore(ctx, merchant.ID(uuid.New()), "")
 		require.Error(t, err)
-		_, err = pool.Exec(ctx, `UPDATE openrails.merchants SET status='deleted', deleted_at=now() WHERE id=$1`, id.UUID())
+		_, err = pool.Exec(ctx, `UPDATE billing.merchants SET status='deleted', deleted_at=now() WHERE id=$1`, id.UUID())
 		require.NoError(t, err)
 		_, _, err = directory.ProvisionForRestore(ctx, id, req)
 		require.ErrorIs(t, err, ErrMerchantRestoreConflict)

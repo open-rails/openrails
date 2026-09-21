@@ -52,7 +52,7 @@ func TestEmbeddedTranscribedPathPinsTheMerchantConnection(t *testing.T) {
 	boundPool := dbtest.SharedMerchantPool(t, uuid.UUID(boundID))
 	customerID := uuid.New()
 	_, err = boundPool.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`,
 		customerID, uuid.UUID(boundID))
 	require.NoError(t, err)
 
@@ -92,7 +92,7 @@ func TestEmbeddedTranscribedPathPinsTheMerchantConnection(t *testing.T) {
 
 		var rows int
 		require.NoError(t, boundPool.QueryRow(ctx, `
-SELECT count(*) FROM openrails.invoker_spend_limits
+SELECT count(*) FROM billing.invoker_spend_limits
  WHERE merchant_id = $1 AND customer_id = $2 AND scope_key = $3`,
 			uuid.UUID(boundID), customerID, "or868-b3-invoker").Scan(&rows))
 		require.Equal(t, 1, rows, "the delegation must be visible inside the bound merchant's RLS scope")

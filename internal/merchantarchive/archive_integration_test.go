@@ -26,7 +26,7 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 func archiveDB(t *testing.T, schema string) *db.DB {
 	t.Helper()
 	super, app := dbtest.SharedRLSPostgres(t)
-	if schema != "openrails" {
+	if schema != config.DefaultSchema {
 		require.NoError(t, migrate.RunPostgres(t.Context(), &config.Config{DB: &config.DBConfig{URL: super, Schema: schema}}))
 	}
 	d, err := db.NewDB(t.Context(), &config.DBConfig{URL: app, Schema: schema})

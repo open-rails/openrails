@@ -16,6 +16,8 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 
 	"github.com/google/uuid"
+	authcore "github.com/open-rails/authkit/embedded"
+	billingauthkit "github.com/open-rails/openrails/embed/authkit"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -88,23 +90,27 @@ catalogs:
 	return flexID, formName
 }
 
-// seedProfileUser inserts the profiles.users row the webhook's username
-// resolution reads (AuthKit-managed identity in production).
-func seedProfileUser(t *testing.T, ctx context.Context, dsn, username string) (userID string) {
+// ccbillIdentity explicitly selects AuthKit as this host's identity provider.
+func ccbillIdentity(t *testing.T, ctx context.Context, dsn string) *authcore.Client {
 	t.Helper()
 	appDB := dbtest.OpenAppDB(t, dsn)
-	userID = uuid.NewString()
-	now := time.Now().UTC()
-	_, err := appDB.Pool().Exec(ctx, `
-		INSERT INTO profiles.users (id, username, email, email_verified, created_at, updated_at)
-		VALUES ($1, $2, $3, true, $4, $4)
-		ON CONFLICT (id) DO UPDATE SET username = EXCLUDED.username, updated_at = EXCLUDED.updated_at
-	`, userID, username, username+"@test.example.com", now)
+	core, err := authcore.New(authcore.Config{
+		Keys:      authcore.KeysConfig{VerifyOnly: true},
+		Token:     authcore.TokenConfig{Issuer: "https://ccbill.test", IssuedAudiences: []string{"test"}},
+		Ephemeral: authcore.EphemeralConfig{AllowMemory: true},
+	}, authcore.Deps{Postgres: appDB.Pool()})
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, _ = appDB.Pool().Exec(context.Background(), `DELETE FROM profiles.users WHERE id = $1`, userID)
-	})
-	return userID
+	t.Cleanup(core.Close)
+	return core
+}
+
+func seedProfileUser(t *testing.T, ctx context.Context, dsn, username string) string {
+	t.Helper()
+	core := ccbillIdentity(t, ctx, dsn)
+	user, err := core.CreateUser(ctx, username+"@test.example.com", username)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, core.HardDeleteUser(context.Background(), user.ID)) })
+	return user.ID
 }
 
 func ccbillNewSalePayload(accountID, flexID, formName, username, reservationID, subID, txnID string) map[string]any {
@@ -168,7 +174,7 @@ func assertCCBillSubscriptionActive(t *testing.T, ctx context.Context, mid merch
 	appDB := dbtest.OpenMerchantDB(t, mid.UUID())
 	var status string
 	require.NoError(t, appDB.Pool().QueryRow(ctx,
-		`SELECT status FROM openrails.subscriptions WHERE merchant_id = $1 AND rail = 'ccbill' AND rail_subscription_id = $2`,
+		`SELECT status FROM billing.subscriptions WHERE merchant_id = $1 AND rail = 'ccbill' AND rail_subscription_id = $2`,
 		mid.UUID(), railSubID).Scan(&status), "webhook must create the ccbill subscription")
 	require.Equal(t, "active", status)
 }
@@ -182,25 +188,25 @@ func cleanupCCBillWebhookMerchant(t *testing.T, mid merchant.ID) {
 	t.Cleanup(func() {
 		pool := appDB.Pool()
 		for _, stmt := range []string{
-			`DELETE FROM openrails.webhook_events WHERE merchant_id = $1`,
-			`DELETE FROM openrails.entitlements WHERE merchant_id = $1`,
-			`DELETE FROM openrails.checkout_sessions WHERE merchant_id = $1`,
-			`DELETE FROM openrails.payments WHERE merchant_id = $1`,
-			`DELETE FROM openrails.subscriptions WHERE merchant_id = $1`,
-			`DELETE FROM openrails.notifications WHERE merchant_id = $1`,
-			`DELETE FROM openrails.grants WHERE merchant_id = $1`,
-			`DELETE FROM openrails.customers WHERE merchant_id = $1`,
-			`DELETE FROM openrails.price_key_movements WHERE merchant_id = $1`,
-			`DELETE FROM openrails.price_psp_bindings WHERE merchant_id = $1`,
-			`DELETE FROM openrails.prices WHERE merchant_id = $1`,
-			`DELETE FROM openrails.products WHERE merchant_id = $1`,
-			`DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1`,
-			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
-			`DELETE FROM openrails.merchants WHERE id = $1`,
+			`DELETE FROM billing.webhook_events WHERE merchant_id = $1`,
+			`DELETE FROM billing.entitlements WHERE merchant_id = $1`,
+			`DELETE FROM billing.checkout_sessions WHERE merchant_id = $1`,
+			`DELETE FROM billing.payments WHERE merchant_id = $1`,
+			`DELETE FROM billing.subscriptions WHERE merchant_id = $1`,
+			`DELETE FROM billing.notifications WHERE merchant_id = $1`,
+			`DELETE FROM billing.grants WHERE merchant_id = $1`,
+			`DELETE FROM billing.customers WHERE merchant_id = $1`,
+			`DELETE FROM billing.price_key_movements WHERE merchant_id = $1`,
+			`DELETE FROM billing.price_psp_bindings WHERE merchant_id = $1`,
+			`DELETE FROM billing.prices WHERE merchant_id = $1`,
+			`DELETE FROM billing.products WHERE merchant_id = $1`,
+			`DELETE FROM billing.merchant_secrets WHERE merchant_id = $1`,
+			`DELETE FROM billing.psps WHERE merchant_id = $1`,
+			`DELETE FROM billing.merchants WHERE id = $1`,
 		} {
 			deleted, err := pool.Exec(context.Background(), stmt, mid.UUID())
 			require.NoError(t, err, "clean owned merchant fixture: %s", stmt)
-			if stmt == `DELETE FROM openrails.merchants WHERE id = $1` {
+			if stmt == `DELETE FROM billing.merchants WHERE id = $1` {
 				require.EqualValues(t, 1, deleted.RowsAffected(), "owned merchant was actually removed")
 			}
 		}
@@ -222,7 +228,7 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	ccbillAccount := fmt.Sprintf("94%04d-0001", nano%10_000)
 
 	cfg := sandboxModeConfig(dsn, config.MerchantSourceManifest)
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
@@ -280,7 +286,7 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	appDB := dbtest.OpenMerchantDB(t, id.UUID())
 	var sessionStatus string
 	require.NoError(t, appDB.Pool().QueryRow(ctx,
-		`SELECT status FROM openrails.checkout_sessions WHERE merchant_id = $1`, id.UUID()).Scan(&sessionStatus))
+		`SELECT status FROM billing.checkout_sessions WHERE merchant_id = $1`, id.UUID()).Scan(&sessionStatus))
 	require.Equal(t, "succeeded", sessionStatus, "NewSaleSuccess must mark the reservation succeeded")
 }
 
@@ -297,7 +303,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	ccbillAccount := fmt.Sprintf("95%04d-0002", nano%10_000)
 
 	cfg := sandboxModeConfig(dsn, config.MerchantSourceAPI)
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	// API mode: bare identity bind; rail truth arrives over the HTTP API.
@@ -345,7 +351,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	appDB := dbtest.OpenMerchantDB(t, id.UUID())
 	var priceCount int
 	require.NoError(t, appDB.Pool().QueryRow(ctx,
-		`SELECT count(*) FROM openrails.price_psp_bindings WHERE merchant_id = $1 AND flex_id = $2`,
+		`SELECT count(*) FROM billing.price_psp_bindings WHERE merchant_id = $1 AND flex_id = $2`,
 		id.UUID(), flexID).Scan(&priceCount))
 	require.Equal(t, 1, priceCount, "publish response: %s", string(raw))
 
@@ -382,7 +388,7 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 	slug := fmt.Sprintf("mwhoff%d", nano)
 
 	cfg := sandboxModeConfig(dsn, config.MerchantSourceManifest)
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	// Merchant exists but declares NO rail accounts at all.
@@ -412,7 +418,7 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 	appDB := dbtest.OpenMerchantDB(t, id.UUID())
 	var n int
 	require.NoError(t, appDB.Pool().QueryRow(ctx,
-		`SELECT count(*) FROM openrails.subscriptions WHERE merchant_id = $1`, id.UUID()).Scan(&n))
+		`SELECT count(*) FROM billing.subscriptions WHERE merchant_id = $1`, id.UUID()).Scan(&n))
 	require.Zero(t, n, "no subscription may be created from an unarmed rail's webhook")
 }
 

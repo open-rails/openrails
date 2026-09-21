@@ -40,30 +40,30 @@ func TestConverge_FailOpen_StandingWindowSurvivesParking(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
+		exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,$4)`,
 			prod, "fo-prod-"+sfx, []byte(`{"`+feat+`": null}`), merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
+		exec(`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,5000000,'USD',720,true,$3)`,
 			price, prod, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "ccbill")
 		// ccbill: provider-auto-billed, no local vault — the pure silence shape.
-		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+		exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'active','ccbill',$6,$7,$7,$8,$9)`, sub, merchantID, cust, prod, price, "fo-sub-"+sfx, start, elapsed, pspID)
 		// The #691 shape: bounded per-period grant + ONE standing window.
-		exec(`INSERT INTO openrails.grants (id,merchant_id,customer_id,kind,source_type,source_id,event,spec_snapshot,starts_at,ends_at)
+		exec(`INSERT INTO billing.grants (id,merchant_id,customer_id,kind,source_type,source_id,event,spec_snapshot,starts_at,ends_at)
 		      VALUES ($1,$2,$3,'entitlement','subscription',$4,'grant',$5,$6,$7)`,
 			grantID, merchantID, cust, sub.String(), []byte(`{"entitlements":["`+feat+`"]}`), start, elapsed)
-		exec(`INSERT INTO openrails.entitlements (id,merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type,grant_id)
+		exec(`INSERT INTO billing.entitlements (id,merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type,grant_id)
 		      VALUES ($1,$2,$3,$4,$5,NULL,$6,'subscription',$7)`, entID, merchantID, cust, feat, start, sub, grantID)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE id=$1`, entID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE customer_id=$1`, cust)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, sub)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, prod)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = $2`, merchantID, "subscription:"+sub.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE id=$1`, entID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE customer_id=$1`, cust)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, sub)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, price)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, prod)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key = $2`, merchantID, "subscription:"+sub.String())
 			return nil
 		})
 	})
@@ -72,7 +72,7 @@ func TestConverge_FailOpen_StandingWindowSurvivesParking(t *testing.T) {
 		t.Helper()
 		var endAt, revokedAt, deletedAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT end_at, revoked_at, deleted_at FROM openrails.entitlements WHERE id=$1`, entID).Scan(&endAt, &revokedAt, &deletedAt))
+			`SELECT end_at, revoked_at, deleted_at FROM billing.entitlements WHERE id=$1`, entID).Scan(&endAt, &revokedAt, &deletedAt))
 		require.Nil(t, endAt, "standing window must stay open-ended")
 		require.Nil(t, revokedAt, "standing window must not be revoked by convergence")
 		require.Nil(t, deletedAt)
@@ -83,7 +83,7 @@ func TestConverge_FailOpen_StandingWindowSurvivesParking(t *testing.T) {
 		_, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &cust})
 		require.NoError(t, err)
 		var status string
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.subscriptions WHERE id=$1`, sub).Scan(&status))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM billing.subscriptions WHERE id=$1`, sub).Scan(&status))
 		require.Equal(t, "unknown", status, "silence parks unknown")
 		windowIntact(ctx)
 		return nil
@@ -96,7 +96,7 @@ func TestConverge_FailOpen_StandingWindowSurvivesParking(t *testing.T) {
 			require.NoError(t, err)
 		}
 		var status string
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.subscriptions WHERE id=$1`, sub).Scan(&status))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM billing.subscriptions WHERE id=$1`, sub).Scan(&status))
 		require.Equal(t, "unknown", status)
 		windowIntact(ctx)
 		return nil
@@ -113,7 +113,7 @@ func TestConverge_FailOpen_StandingWindowSurvivesParking(t *testing.T) {
 		require.NoError(t, lc.ResolveUnknownSubscription(ctx, appDB, m, subscriptions.ResolveRenewed, &newEnd, time.Now().UTC()))
 		var status string
 		var periodEnd time.Time
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status, current_period_ends_at FROM openrails.subscriptions WHERE id=$1`, sub).Scan(&status, &periodEnd))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status, current_period_ends_at FROM billing.subscriptions WHERE id=$1`, sub).Scan(&status, &periodEnd))
 		require.Equal(t, "active", status)
 		require.WithinDuration(t, newEnd, periodEnd, time.Second, "paid-through fact advanced")
 		windowIntact(ctx)

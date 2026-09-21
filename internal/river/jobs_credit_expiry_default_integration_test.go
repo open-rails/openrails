@@ -111,7 +111,7 @@ func lotEndsAt(t *testing.T, ctx context.Context, dbi *db.DB, lot creditLot) *ti
 	t.Helper()
 	var endsAt *time.Time
 	require.NoError(t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()).QueryRow(ctx,
-		`SELECT ends_at FROM openrails.grants
+		`SELECT ends_at FROM billing.grants
 		  WHERE customer_id = $1 AND kind = 'credit' AND event = 'grant'`,
 		lot.customer.UUID()).Scan(&endsAt))
 	return endsAt
