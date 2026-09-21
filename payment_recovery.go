@@ -11,9 +11,13 @@ import (
 // It is a view, not permission to charge: acceptance checks the same facts
 // again under the resource lock.
 type PaymentRecovery struct {
-	Retryable     bool              `json:"retryable"`
-	BlockedReason string            `json:"blocked_reason,omitempty"`
-	Operation     *PaymentOperation `json:"operation,omitempty"`
+	// LastFailureReason is the normalized machine category of the latest applicable
+	// failure, never raw provider text. It is absent for successful recovery, old
+	// subscription periods, or a newer pending attempt.
+	LastFailureReason string            `json:"last_failure_reason,omitempty"`
+	Retryable         bool              `json:"retryable"`
+	BlockedReason     string            `json:"blocked_reason,omitempty"`
+	Operation         *PaymentOperation `json:"operation,omitempty"`
 }
 
 type PaymentOperation struct {

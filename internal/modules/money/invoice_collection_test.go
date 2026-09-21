@@ -1,6 +1,7 @@
 package money
 
 import (
+	"github.com/open-rails/openrails/internal/intents"
 	"testing"
 	"time"
 
@@ -11,14 +12,14 @@ import (
 func TestInvoiceRetryOperationKey(t *testing.T) {
 	t.Parallel()
 	invoiceID := uuid.New()
-	key := invoiceRetryOperationKey(invoiceID, "client-key")
-	if key != invoiceRetryOperationKey(invoiceID, "client-key") {
+	key := intents.InvoiceCollectionRetryKey(invoiceID, "client-key")
+	if key != intents.InvoiceCollectionRetryKey(invoiceID, "client-key") {
 		t.Fatal("operation key is not deterministic")
 	}
-	if key == invoiceRetryOperationKey(uuid.New(), "client-key") {
+	if key == intents.InvoiceCollectionRetryKey(uuid.New(), "client-key") {
 		t.Fatal("operation key does not include invoice scope")
 	}
-	if key == invoiceRetryOperationKey(invoiceID, "other-key") {
+	if key == intents.InvoiceCollectionRetryKey(invoiceID, "other-key") {
 		t.Fatal("operation key does not include the client key")
 	}
 }

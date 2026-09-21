@@ -30,3 +30,20 @@ func TestCustomerPaymentRequiresVerifiedInteractionClass(t *testing.T) {
 		}
 	}
 }
+
+func TestCustomerPaymentKeyScansCallerTextBeforeHashing(t *testing.T) {
+	for _, key := range []string{"archive-key-1461", "4111111111111111", "opaque-4111 1111 1111 1111"} {
+		response := httptest.NewRecorder()
+		wire := httptest.NewRequest("POST", "/v1/me/invoices/id/pay-now", nil)
+		wire.Header.Set("Idempotency-Key", key)
+		accepted, ok := paymentActionKey(httprequest.NewHTTP(response, wire, nil))
+		if key == "archive-key-1461" {
+			require.True(t, ok)
+			require.Equal(t, key, accepted)
+		} else {
+			require.False(t, ok)
+			require.Equal(t, 400, response.Code)
+			require.Contains(t, response.Body.String(), "invalid_param")
+		}
+	}
+}

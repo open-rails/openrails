@@ -6,8 +6,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -262,6 +267,15 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 		 AND (status IN ('active','pending','past_due','unknown') OR COALESCE(current_period_ends_at,ended_at)>now())
 		 AND EXISTS(SELECT 1 FROM openrails.products p WHERE p.merchant_id=$1 AND p.id=subscriptions.product_id AND p.tier_group IS DISTINCT FROM subscriptions.tier_group)`},
 		{"metered_rating_watermarks", `NOT EXISTS(SELECT 1 FROM openrails.customers c WHERE c.merchant_id=$1 AND c.id=metered_rating_watermarks.customer_id)`},
+		{"ledger_transfers", `source_id LIKE 'invoice_collection:%' AND
+		 (source<>'invoice_charge' OR operation<>'invoice_payment' OR transfer_type<>'owed_payment' OR
+		 NOT EXISTS(SELECT 1 FROM openrails.invoice_payments a WHERE a.merchant_id=$1
+		 AND a.ledger_transfer_id=ledger_transfers.id AND a.idempotency_key=ledger_transfers.source_id
+		 AND a.customer_id=ledger_transfers.customer_id AND a.invoice_id=ledger_transfers.invoice_id
+		 AND a.currency=ledger_transfers.currency AND a.status='settled'))`},
+		{"invoice_payments", `idempotency_key LIKE 'invoice_collection:%'
+		 AND NOT EXISTS(SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=$1
+		 AND i.intent_type='invoice_collection' AND i.idempotency_key=invoice_payments.idempotency_key)`},
 		{"rail_intents", `(subscription_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.subscriptions s WHERE s.merchant_id=$1 AND s.id=rail_intents.subscription_id))
 		 OR (payment_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.payments p WHERE p.merchant_id=$1 AND p.id=rail_intents.payment_id))
 		 OR (price_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.prices p WHERE p.merchant_id=$1 AND p.id=rail_intents.price_id))`},
@@ -271,5 +285,34 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 			return err
 		}
 	}
-	return nil
+	var after *uuid.UUID
+	for {
+		rows, err := gen.New(tx).ListEncodedInvoiceAttemptsForArchive(ctx, gen.ListEncodedInvoiceAttemptsForArchiveParams{MerchantID: id.UUID(), AfterID: after, PageSize: 256})
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		for _, row := range rows {
+			a, operation := row.OpenrailsInvoicePayment, row.OpenrailsRailIntent
+			p, err := intents.DecodeInvoiceCollectionPayload(operation)
+			if err != nil {
+				return &Error{Code: "unsupported_state", Table: "invoice_payments", Err: err}
+			}
+			receipt, collected, receiptErr := intents.LoadCollectedReceipt(operation)
+			amount, amountErr := moneyutil.RailMinorToNative(p.Currency, p.AmountMinor)
+			matches := a.MerchantID == operation.MerchantID && a.ID == p.AttemptID && a.CustomerID == p.CustomerID && a.InvoiceID == p.InvoiceID &&
+				a.PaymentMethodID != nil && *a.PaymentMethodID == p.PaymentMethodID && a.PspID != nil && *a.PspID == p.Instrument.PSPID &&
+				a.IdempotencyKey != nil && *a.IdempotencyKey == operation.IdempotencyKey && a.Currency == p.Currency && a.Amount == amount &&
+				(p.Initiator == charge.InitiatorCustomer || operation.Origin == string(intents.OriginAdmin) && intents.InvoiceCollectionRetryKeyValid(p.InvoiceID, operation.IdempotencyKey) || p.Initiator == charge.InitiatorMerchant && operation.Origin == string(intents.OriginSystem)) && a.Rail != nil && *a.Rail == p.Rail
+			terminal := operation.Status == intents.StatusFailedTerminal && a.Status == "failed" && !collected ||
+				operation.Status == intents.StatusSucceeded && a.Status == "settled" && collected && row.LedgerMatches && row.LedgerAmount != nil && *row.LedgerAmount == p.Amount && a.RailPaymentID != nil && *a.RailPaymentID == receipt.TransactionID()
+			if receiptErr != nil || amountErr != nil || !matches || !terminal {
+				return &Error{Code: "unsupported_state", Table: "invoice_payments", Err: fmt.Errorf("encoded attempt key does not name its canonical collection outcome")}
+			}
+		}
+		next := rows[len(rows)-1].OpenrailsInvoicePayment.ID
+		after = &next
+	}
 }

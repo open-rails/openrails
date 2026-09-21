@@ -207,7 +207,7 @@ SET status = 'succeeded',
     claimed_until = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('invoice_collection', 'manual_rebill');
+  AND intent_type NOT IN ('invoice_collection', 'manual_rebill', 'nmi_upgrade', 'stripe_tier_change');
 
 -- name: MarkRailIntentFailedRetryable :execrows
 UPDATE openrails.rail_intents
@@ -246,7 +246,7 @@ SET status = 'failed_terminal',
     claimed_until = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('invoice_collection', 'manual_rebill');
+  AND intent_type NOT IN ('invoice_collection', 'manual_rebill', 'nmi_upgrade', 'stripe_tier_change');
 
 -- Park: the attempt was deliberately NOT made (mode gate, kill switch,
 -- unconfigured client). The intent goes back to pending with the reason
@@ -621,3 +621,21 @@ WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid
     )
     OR s.scheduled_price_id::text=i.payload->'renewal'->>'scheduled_price_id'
   );
+
+-- The subscription/domain lock precedes the operation lock, as at admission.
+-- name: LockRailIntentForTierCompletion :one
+SELECT * FROM openrails.rail_intents
+WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid
+  AND intent_type IN ('nmi_upgrade','stripe_tier_change')
+FOR UPDATE;
+
+-- name: CompleteTierChangeOutcome :execrows
+UPDATE openrails.rail_intents
+SET status=sqlc.arg(status)::text,
+    result_evidence=sqlc.arg(evidence)::jsonb,
+    last_failure_reason=CASE WHEN sqlc.arg(status)::text='succeeded' THEN NULL ELSE sqlc.narg(reason)::text END,
+    executed_at=CASE WHEN sqlc.arg(status)::text='succeeded' THEN sqlc.arg(now)::timestamptz ELSE executed_at END,
+    claimed_until=NULL, updated_at=sqlc.arg(now)::timestamptz
+WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid
+  AND intent_type IN ('nmi_upgrade','stripe_tier_change')
+  AND status IN ('in_flight','unknown_needs_verify');

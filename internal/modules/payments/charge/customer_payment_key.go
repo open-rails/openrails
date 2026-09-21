@@ -20,6 +20,10 @@ func CustomerPaymentKeyValid(kind string, payer uuid.UUID, key string) bool {
 	if !strings.HasPrefix(key, prefix) {
 		return false
 	}
-	digest, err := hex.DecodeString(strings.TrimPrefix(key, prefix))
+	encoded := strings.TrimPrefix(key, prefix)
+	if encoded != strings.ToLower(encoded) {
+		return false
+	}
+	digest, err := hex.DecodeString(encoded)
 	return err == nil && len(digest) == sha256.Size
 }

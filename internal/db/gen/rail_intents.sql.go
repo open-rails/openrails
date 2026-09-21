@@ -323,6 +323,42 @@ func (q *Queries) CompleteRailIntentCollection(ctx context.Context, arg Complete
 	return result.RowsAffected(), nil
 }
 
+const completeTierChangeOutcome = `-- name: CompleteTierChangeOutcome :execrows
+UPDATE openrails.rail_intents
+SET status=$1::text,
+    result_evidence=$2::jsonb,
+    last_failure_reason=CASE WHEN $1::text='succeeded' THEN NULL ELSE $3::text END,
+    executed_at=CASE WHEN $1::text='succeeded' THEN $4::timestamptz ELSE executed_at END,
+    claimed_until=NULL, updated_at=$4::timestamptz
+WHERE id=$5::uuid AND merchant_id=$6::uuid
+  AND intent_type IN ('nmi_upgrade','stripe_tier_change')
+  AND status IN ('in_flight','unknown_needs_verify')
+`
+
+type CompleteTierChangeOutcomeParams struct {
+	Status     string
+	Evidence   []byte
+	Reason     *string
+	Now        time.Time
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) CompleteTierChangeOutcome(ctx context.Context, arg CompleteTierChangeOutcomeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeTierChangeOutcome,
+		arg.Status,
+		arg.Evidence,
+		arg.Reason,
+		arg.Now,
+		arg.ID,
+		arg.MerchantID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countActiveSubscriptionsByMerchant = `-- name: CountActiveSubscriptionsByMerchant :one
 SELECT count(*) FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid AND status = 'active'
@@ -1423,6 +1459,53 @@ func (q *Queries) LockRailIntentForCollectionCompletion(ctx context.Context, arg
 	return i, err
 }
 
+const lockRailIntentForTierCompletion = `-- name: LockRailIntentForTierCompletion :one
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE id=$1::uuid AND merchant_id=$2::uuid
+  AND intent_type IN ('nmi_upgrade','stripe_tier_change')
+FOR UPDATE
+`
+
+type LockRailIntentForTierCompletionParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+// The subscription/domain lock precedes the operation lock, as at admission.
+func (q *Queries) LockRailIntentForTierCompletion(ctx context.Context, arg LockRailIntentForTierCompletionParams) (OpenrailsRailIntent, error) {
+	row := q.db.QueryRow(ctx, lockRailIntentForTierCompletion, arg.ID, arg.MerchantID)
+	var i OpenrailsRailIntent
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.IntentType,
+		&i.SubscriptionID,
+		&i.PaymentID,
+		&i.PriceID,
+		&i.Payload,
+		&i.IdempotencyKey,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ClaimedUntil,
+		&i.Origin,
+		&i.OriginReason,
+		&i.Actor,
+		&i.LastFailureReason,
+		&i.ExpiresAt,
+		&i.ResultEvidence,
+		&i.CreatedAt,
+		&i.ExecutedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.CustodianID,
+	)
+	return i, err
+}
+
 const markRailIntentFailedRetryable = `-- name: MarkRailIntentFailedRetryable :execrows
 UPDATE openrails.rail_intents
 SET status = 'failed_retryable',
@@ -1463,7 +1546,7 @@ SET status = 'failed_terminal',
     claimed_until = NULL,
     updated_at = now()
 WHERE id = $3 AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('invoice_collection', 'manual_rebill')
+  AND intent_type NOT IN ('invoice_collection', 'manual_rebill', 'nmi_upgrade', 'stripe_tier_change')
 `
 
 type MarkRailIntentFailedTerminalParams struct {
@@ -1498,7 +1581,7 @@ SET status = 'succeeded',
     claimed_until = NULL,
     updated_at = now()
 WHERE id = $3 AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('invoice_collection', 'manual_rebill')
+  AND intent_type NOT IN ('invoice_collection', 'manual_rebill', 'nmi_upgrade', 'stripe_tier_change')
 `
 
 type MarkRailIntentSucceededParams struct {
