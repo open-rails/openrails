@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
@@ -218,6 +219,12 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			require.Nil(t, created.PriceID)
 			require.Nil(t, created.Amount)
 			require.Nil(t, created.Currency)
+			for _, change := range []string{"mode='one_off'", "amount=0", "currency='USD'", "payment_id='00000000-0000-0000-0000-000000000001'"} {
+				_, err := h.sharedPool().Exec(ctx, "UPDATE billing.checkout_sessions SET "+change+" WHERE merchant_id=$1 AND id=$2", mid.UUID(), created.ID.UUID())
+				var pgErr *pgconn.PgError
+				require.ErrorAs(t, err, &pgErr)
+				require.Equal(t, "checkout_sessions_monetary_terms", pgErr.ConstraintName, "null terms are only valid for nonmonetary setup")
+			}
 			require.NotPanics(t, func() {
 				require.NoError(t, surface.App().Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(scoped context.Context) error {
 					_, err := surface.App().Runtime.CheckoutSessionService.FindOpenCCBillReservation(scoped, created.ID.String(), req.Customer.ID.String(), uuid.New())
