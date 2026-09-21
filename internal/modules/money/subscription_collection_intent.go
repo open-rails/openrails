@@ -334,6 +334,9 @@ func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in 
 		}
 		if (sub.Status == models.StatusActive || sub.Status == models.StatusPastDue) && sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) && failures == p.FailureCount {
 			verdict := collection.ClassifyDeclineDetail(in.Rail, code)
+			if in.Rail == "stripe" && code == "canceled" {
+				verdict.Outcome = collection.DeclineFixPaymentMethod
+			}
 			certainty := ""
 			if verdict.Outcome == collection.DeclineNonRecoverable {
 				certainty = collection.CertaintyNonRetryableDecline

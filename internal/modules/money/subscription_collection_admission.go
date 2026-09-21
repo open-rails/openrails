@@ -91,6 +91,9 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 			if _, err := subscriptions.DecodeSubscriptionCollectionPayload(current); err != nil {
 				return err
 			}
+			if payer != uuid.Nil {
+				return intents.ErrRebillInProgress
+			}
 			if requestedMethod != nil {
 				p, _ := subscriptions.DecodeSubscriptionCollectionPayload(current)
 				if *requestedMethod != p.PaymentMethodID {
