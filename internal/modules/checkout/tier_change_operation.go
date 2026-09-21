@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails"
@@ -43,7 +45,7 @@ type tierChangeSubject struct {
 	PriceID        uuid.UUID
 }
 
-func (p NMIUpgradePayload) subject() tierChangeSubject {
+func nmiUpgradeSubject(p subscriptions.NMIUpgradePayload) tierChangeSubject {
 	return tierChangeSubject{UserID: p.UserID, SubscriptionID: p.OldSubscriptionID, RequestedPrice: p.RequestedPrice, PriceID: p.PriceID}
 }
 
@@ -54,11 +56,11 @@ func (p StripeTierChangePayload) subject() tierChangeSubject {
 func decodeTierChangeSubject(in gen.OpenrailsRailIntent) (tierChangeSubject, error) {
 	switch in.IntentType {
 	case TypeNMIUpgrade:
-		var p NMIUpgradePayload
+		var p subscriptions.NMIUpgradePayload
 		if err := json.Unmarshal(in.Payload, &p); err != nil {
 			return tierChangeSubject{}, err
 		}
-		return p.subject(), nil
+		return nmiUpgradeSubject(p), nil
 	case TypeStripeTierChange:
 		var p StripeTierChangePayload
 		if err := json.Unmarshal(in.Payload, &p); err != nil {

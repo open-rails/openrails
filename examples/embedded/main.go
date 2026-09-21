@@ -37,7 +37,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, getenv func(string) string) error {
+func run(ctx context.Context, getenv func(string) string) (runErr error) {
 	dsn, slug := getenv("OPENRAILS_DATABASE_URL"), getenv("OPENRAILS_MERCHANT")
 	if dsn == "" || slug == "" {
 		return errors.New("OPENRAILS_DATABASE_URL and OPENRAILS_MERCHANT are required")
@@ -49,8 +49,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	defer pool.Close()
 
 	// River is mandatory: renewals, dunning, invoices and reconciliation run
-	// there. The host adds its own workers to fleet.Workers before building.
-	var jobs *river.Client[pgx.Tx]
+	// there. Compose components before binding; extend the supplied config.
 	runtime, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{
 			Env: "development", TestMode: config.CredentialPostureSandbox,
@@ -58,33 +57,42 @@ func run(ctx context.Context, getenv func(string) string) error {
 			DB: &config.DBConfig{URL: dsn},
 		},
 		PGXPool: pool,
-		River: embed.RiverFromHost(func(_ context.Context, fleet *embed.RiverFleet) (*river.Client[pgx.Tx], error) {
-			jobs, err = river.NewClient(riverpgxv5.New(pool), &river.Config{
-				Workers: fleet.Workers,
-				Schema:  fleet.Schema,
-				Queues: map[string]river.QueueConfig{
-					river.QueueDefault: {MaxWorkers: 4},
-					fleet.QueueBilling: {MaxWorkers: 4},
-				},
-			})
-			return jobs, err
-		}),
+		River:   embed.RiverFromHost(),
 	})
 	if err != nil {
 		return err
 	}
 	defer runtime.Close(context.WithoutCancel(ctx))
+	jobs, err := runtime.BindRiver(ctx, func(_ context.Context, cfg *river.Config) (*river.Client[pgx.Tx], error) {
+		cfg.Queues[river.QueueDefault] = river.QueueConfig{MaxWorkers: 4}
+		cfg.Queues[embed.QueueBilling] = river.QueueConfig{MaxWorkers: 4}
+		return river.NewClient(riverpgxv5.New(pool), cfg)
+	})
+	if err != nil {
+		if jobs != nil {
+			_ = jobs.Stop(context.WithoutCancel(ctx))
+		}
+		return err
+	}
 	merchantID, err := runtime.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{})
 	if err != nil {
 		return err
 	}
+	defer jobs.StopAndCancel(context.WithoutCancel(ctx))
 	if err := jobs.Start(ctx); err != nil {
 		return err
 	}
+	loopsCtx, cancelLoops := context.WithCancel(ctx)
+	loopsDone := make(chan error, 1)
+	go func() {
+		loopsDone <- runtime.RunWorkers(loopsCtx)
+		cancelLoops() // a worker failure also stops HTTP
+	}()
 	defer func() {
-		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
-		_ = jobs.Stop(stopCtx)
+		cancelLoops()
+		if err := <-loopsDone; err != nil && !errors.Is(err, context.Canceled) {
+			runErr = errors.Join(runErr, err)
+		}
 	}()
 
 	client, err := runtime.Client(openrails.WithCurrency("USD"))
@@ -119,7 +127,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
-		<-ctx.Done()
+		<-loopsCtx.Done()
 		_ = server.Shutdown(context.WithoutCancel(ctx))
 	}()
 	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {

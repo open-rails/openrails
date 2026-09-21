@@ -33,7 +33,7 @@ type ReadinessDependency struct {
 // wrapped error naming the FIRST failing one; nil when everything the running
 // configuration actually depends on is healthy.
 func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
-	if r == nil {
+	if r == nil || r.riverClosed.Load() {
 		dep := ReadinessDependency{Name: "runtime", Err: fmt.Errorf("not initialized")}
 		return []ReadinessDependency{dep}, fmt.Errorf("readiness: %s: %w", dep.Name, dep.Err)
 	}
@@ -60,11 +60,13 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 	probe("merchant_secrets", r.merchantSecretsReady(ctx))
 
 	var riverErr error
-	if r.RiverProducer == nil {
+	if r.hostRiver && !r.hostRiverBound.Load() {
+		riverErr = fmt.Errorf("host-owned River is not bound; call BindRiver after composition")
+	} else if r.RiverProducer == nil {
 		riverErr = fmt.Errorf("river producer not initialized")
 	}
 	probe("river", riverErr)
-	if !r.externalRiverClient {
+	if !r.hostRiver && !r.externalRiverClient {
 		var consumerErr error
 		if !r.workerConsumerRunning.Load() {
 			consumerErr = fmt.Errorf("managed River worker consumer is not running")

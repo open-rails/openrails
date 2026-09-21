@@ -54,13 +54,11 @@ func TestApplyMigrationsFreshOwnershipAndSchemas(t *testing.T) {
 	for _, tc := range []struct {
 		name, billing, jobs string
 		host                bool
-		migrationOnly       bool
 	}{
 		{name: "defaults", billing: "billing", jobs: "public"},
 		{name: "custom", billing: "store_billing", jobs: "store_jobs"},
 		{name: "canonical", billing: "openrails", jobs: "jobs"},
 		{name: "host_owned", billing: "billing", jobs: "host_jobs", host: true},
-		{name: "host_declaration_only", billing: "billing", jobs: "host_jobs", host: true, migrationOnly: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			database := fmt.Sprintf("migration_contract_%d", time.Now().UnixNano())
@@ -84,21 +82,14 @@ func TestApplyMigrationsFreshOwnershipAndSchemas(t *testing.T) {
 				opts.Schema = tc.billing
 				opts.River = RiverManagedByOpenRails(tc.jobs)
 			}
-			if tc.migrationOnly {
-				opts.River = RiverFromHost(nil)
-			} else if tc.host {
+			if tc.host {
 				_, err = pool.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{tc.jobs}.Sanitize())
 				require.NoError(t, err)
 				migrator, err := rivermigrate.New(riverpgxv5.New(pool), &rivermigrate.Config{Schema: tc.jobs})
 				require.NoError(t, err)
 				_, err = migrator.Migrate(ctx, rivermigrate.DirectionUp, nil)
 				require.NoError(t, err)
-				opts.River = RiverFromHost(func(_ context.Context, fleet *RiverFleet) (*river.Client[pgx.Tx], error) {
-					binderCalled = true
-					client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{Schema: tc.jobs, Workers: fleet.Workers, Queues: map[string]river.QueueConfig{fleet.QueueBilling: {MaxWorkers: 1}}})
-					hostClient = client
-					return client, err
-				})
+				opts.River = RiverFromHost()
 			}
 			require.NoError(t, ApplyMigrations(ctx, pool, opts))
 			require.NoError(t, ApplyMigrations(ctx, pool, opts), "repeated initialization is idempotent")
@@ -119,17 +110,6 @@ func TestApplyMigrationsFreshOwnershipAndSchemas(t *testing.T) {
 			require.False(t, exists, "AuthKit remains independently owned")
 			require.NoError(t, pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, tc.billing+".river_job").Scan(&exists))
 			require.False(t, exists)
-			if tc.migrationOnly {
-				var count int
-				require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN ('public','host_jobs') AND c.relname IN ('river_job','river_queue','river_leader','river_notification','river_migration')`).Scan(&count))
-				require.Zero(t, count, "host ownership must not initialize any River objects")
-				require.NoError(t, pool.QueryRow(ctx, `SELECT to_regnamespace('host_jobs') IS NOT NULL`).Scan(&exists))
-				require.False(t, exists, "host chooses and creates its own River schema")
-				rt, err := New(ctx, Options{Config: &config.Config{DB: &config.DBConfig{Schema: tc.billing}}, River: RiverFromHost(nil)})
-				require.Nil(t, rt)
-				require.ErrorContains(t, err, "requires a non-nil binder", "runtime refusal precedes any initialization")
-				return
-			}
 			for _, table := range []string{"river_job", "river_queue", "river_leader", "river_notification"} {
 				var allowed bool
 				require.NoError(t, pool.QueryRow(ctx, `SELECT has_table_privilege('openrails_app',$1,'SELECT,INSERT,UPDATE,DELETE')`, tc.jobs+"."+table).Scan(&allowed))
@@ -165,6 +145,16 @@ func TestApplyMigrationsFreshOwnershipAndSchemas(t *testing.T) {
 			rt, err := New(ctx, Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: runtimeDSN, Schema: runtimeSchema}}, PGXPool: runtimePool, River: opts.River})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
+			require.False(t, binderCalled, "New must leave composition open")
+			if tc.host {
+				hostClient, err = rt.BindRiver(ctx, func(_ context.Context, cfg *river.Config) (*river.Client[pgx.Tx], error) {
+					binderCalled = true
+					cfg.Schema = tc.jobs
+					cfg.Queues[QueueBilling] = river.QueueConfig{MaxWorkers: 1}
+					return river.NewClient(riverpgxv5.New(pool), cfg)
+				})
+				require.NoError(t, err)
+			}
 			require.Equal(t, tc.host, rt.HasExternalRiverClient())
 			require.Equal(t, tc.billing, rt.app.Runtime.DB.DataPool().Schema())
 			// A nested service reconstructing DB from a library transaction must

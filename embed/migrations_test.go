@@ -37,12 +37,12 @@ func TestRiverOwnershipDefaultsAndValidation(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "public", schema)
 	}
+	hostSchema, err := RiverFromHost().managedSchema("billing")
+	require.NoError(t, err)
+	require.Empty(t, hostSchema, "host ownership does not need a construction callback for migrations")
 	schema, err := RiverManagedByOpenRails("jobs").managedSchema("billing")
 	require.NoError(t, err)
 	require.Equal(t, "jobs", schema)
-	schema, err = RiverFromHost(nil).managedSchema("billing")
-	require.NoError(t, err)
-	require.Empty(t, schema)
 	for _, ownership := range []RiverOwnership{RiverManagedByOpenRails("billing"), RiverManagedByOpenRails("bad;sql"), RiverManagedByOpenRails("one", "two")} {
 		_, err := ownership.managedSchema("billing")
 		require.Error(t, err)

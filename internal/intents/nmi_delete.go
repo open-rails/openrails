@@ -2,6 +2,8 @@ package intents
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -23,19 +25,35 @@ import (
 // the NMIDeleteSubscription River job + boot rescan.
 const TypeNMIDeleteSubscription = "nmi_delete_subscription"
 
+var errNMIDeleteTargetChanged = errors.New("NMI delete target binding changed; historical target requires explicit resolution")
+
 // NMIDeletePayload is the stored payload for TypeNMIDeleteSubscription. The
-// rail subscription id is re-read from the subscription row at execution
-// time; the payload copy is evidence/forensics.
+// captured provider subscription reference is authoritative. The live binding
+// must still match before any new provider request; there is no current-row fallback.
 type NMIDeletePayload struct {
 	UserID             string `json:"user_id"`
-	RailSubscriptionID string `json:"rail_subscription_id,omitempty"`
+	RailSubscriptionID string `json:"rail_subscription_id"`
 }
 
-// NMIDeleteIdempotencyKey is the logical identity of "the deferred delete of
-// this subscription". Stable across re-cancels: a resume supersedes the
-// intent and the next cancel's enqueue revives it.
-func NMIDeleteIdempotencyKey(subscriptionID uuid.UUID) string {
-	return TypeNMIDeleteSubscription + ":" + subscriptionID.String()
+// NMIDeleteIdempotencyKey names one exact provider target. Re-canceling that
+// target reuses its operation; a replacement binding gets a different command.
+func NMIDeleteIdempotencyKey(subscriptionID, pspID uuid.UUID, reference string) string {
+	digest := sha256.Sum256([]byte(reference))
+	return fmt.Sprintf("%s:%s:%s:%x", TypeNMIDeleteSubscription, subscriptionID, pspID, digest)
+}
+
+func acceptedNMIDeleteTarget(in gen.OpenrailsRailIntent) (NMIDeletePayload, error) {
+	var target NMIDeletePayload
+	if in.SubscriptionID == nil || in.PspID == nil || *in.PspID == uuid.Nil {
+		return target, fmt.Errorf("NMI delete has no accepted subscription/provider address")
+	}
+	if err := json.Unmarshal(in.Payload, &target); err != nil {
+		return target, fmt.Errorf("decode accepted NMI delete target: %w", err)
+	}
+	if strings.TrimSpace(target.RailSubscriptionID) == "" {
+		return target, fmt.Errorf("NMI delete has no accepted remote subscription target")
+	}
+	return target, nil
 }
 
 // NMIDeleteHandler implements verify-then-execute deletion of an NMI
@@ -95,6 +113,9 @@ func (h *NMIDeleteHandler) CheckRelevance(ctx context.Context, intent gen.Openra
 }
 
 func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+	if _, err := acceptedNMIDeleteTarget(intent); err != nil {
+		return Parked(err.Error())
+	}
 	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
 	if err != nil {
 		return Parked("nmi rail not armable (fail closed): " + err.Error())
@@ -108,19 +129,17 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {
+		if errors.Is(err, errNMIDeleteTargetChanged) {
+			return Parked(err.Error())
+		}
 		// Relevance passed moments ago; treat a read failure here as a clean
 		// (no provider write attempted) retryable failure.
 		return Retryable("load subscription: " + err.Error())
 	}
-	psid := strings.TrimSpace(sub.RailSubscriptionID)
-	if psid == "" {
-		// Nothing exists remotely to delete; finalize locally.
-		if err := h.finalize(ctx, intent); err != nil {
-			return Ambiguous("no rail subscription id, but local finalize failed: " + err.Error())
-		}
-		return Succeeded(map[string]any{"no_rail_subscription_id": true})
+	if sub.Status != models.StatusCancelled || sub.DeletionScheduledAt == nil {
+		return Parked("subscription is no longer awaiting this deletion")
 	}
-
+	psid := strings.TrimSpace(sub.RailSubscriptionID)
 	// Verify-then-execute: absent = success.
 	present, err := h.subscriptionPresent(ctx, client, psid)
 	if err != nil {
@@ -133,6 +152,15 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 		return Succeeded(map[string]any{"verified_absent": true, "rail_subscription_id": psid})
 	}
 
+	// Readback may have waited while the local binding or undo state changed.
+	// Revalidate before the destructive request, still using the captured target.
+	current, err := h.loadSubscription(ctx, intent)
+	if err != nil {
+		return Parked(err.Error())
+	}
+	if current.Status != models.StatusCancelled || current.DeletionScheduledAt == nil {
+		return Parked("subscription is no longer awaiting this deletion")
+	}
 	if err := client.DeleteRecurringSubscription(ctx, psid); err != nil {
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
 			return Parked("nmi provider writes blocked (mode=readonly)")
@@ -154,21 +182,15 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 // the delete (whenever it happened) is done; present means it definitely has
 // not happened and the executor may retry.
 func (h *NMIDeleteHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
-	if err != nil || !ok || client == nil {
-		return Ambiguous(fmt.Sprintf("nmi rail not armed for provider %q; cannot verify", intent.Rail))
-	}
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {
 		return Ambiguous("load subscription: " + err.Error())
 	}
-	psid := strings.TrimSpace(sub.RailSubscriptionID)
-	if psid == "" {
-		if err := h.finalize(ctx, intent); err != nil {
-			return Ambiguous("no rail subscription id, but local finalize failed: " + err.Error())
-		}
-		return Succeeded(map[string]any{"no_rail_subscription_id": true})
+	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
+	if err != nil || !ok || client == nil {
+		return Ambiguous(fmt.Sprintf("nmi rail not armed for provider %q; cannot verify", intent.Rail))
 	}
+	psid := strings.TrimSpace(sub.RailSubscriptionID)
 	present, err := h.subscriptionPresent(ctx, client, psid)
 	if err != nil {
 		return Ambiguous("provider read failed: " + err.Error())
@@ -183,28 +205,36 @@ func (h *NMIDeleteHandler) Verify(ctx context.Context, intent gen.OpenrailsRailI
 }
 
 func (h *NMIDeleteHandler) loadSubscription(ctx context.Context, intent gen.OpenrailsRailIntent) (*models.Subscription, error) {
-	if intent.SubscriptionID == nil {
-		return nil, fmt.Errorf("intent has no subscription_id")
+	target, err := acceptedNMIDeleteTarget(intent)
+	if err != nil {
+		return nil, err
 	}
-	return subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, *intent.SubscriptionID)
+	if h.DB == nil {
+		return nil, fmt.Errorf("subscription database unavailable")
+	}
+	sub, err := subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, *intent.SubscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	if sub.MerchantID != intent.MerchantID || sub.PspID != *intent.PspID || sub.RailSubscriptionID != target.RailSubscriptionID {
+		return nil, errNMIDeleteTargetChanged
+	}
+	return sub, nil
 }
 
 // finalize clears the DeletionScheduledAt read model: the cancellation is now
 // destructive (no longer resumable). Idempotent — a cleared marker is left
 // alone.
 func (h *NMIDeleteHandler) finalize(ctx context.Context, intent gen.OpenrailsRailIntent) error {
-	sub, err := h.loadSubscription(ctx, intent)
+	target, err := acceptedNMIDeleteTarget(intent)
 	if err != nil {
-		if db.IsNotFound(err) {
-			return nil
-		}
 		return err
 	}
-	if sub.DeletionScheduledAt == nil {
-		return nil
-	}
-	sub.DeletionScheduledAt = nil
-	return subscriptions.NewSubscriptionRepo(h.DB).UpdateAt(ctx, sub, h.now())
+	// A historical completion owns only the marker for its frozen provider target.
+	// It must not clear a replacement account/reference on the same local row or
+	// replay billing fields read before a concurrent renewal/card/quote change.
+	_, err = h.DB.Gen(ctx).ClearSubscriptionDeletionMarker(ctx, gen.ClearSubscriptionDeletionMarkerParams{MerchantID: intent.MerchantID, ID: *intent.SubscriptionID, PspID: *intent.PspID, RailSubscriptionID: target.RailSubscriptionID, Now: h.now()})
+	return err
 }
 
 // subscriptionPresent reads GET /v5/subscriptions/{id}. NMI drops deleted/

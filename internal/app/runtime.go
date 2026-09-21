@@ -225,11 +225,16 @@ type Runtime struct {
 	// configured (safe no-op).
 	CardAbuseGuard *abuse.CardAbuseGuard
 
-	riverConfigurers      []func(context.Context, *river.Config) error
-	riverStarted          bool
-	workerConsumerRunning atomic.Bool
-	externalRiverClient   bool
-	riverSchema           string // managed override or actual host-client schema
+	riverCompositionMu     sync.Mutex
+	riverCompositionSealed bool
+	riverClosed            atomic.Bool
+	hostRiver              bool
+	hostRiverBound         atomic.Bool
+	riverConfigurers       []func(context.Context, *river.Config) error
+	riverStarted           bool
+	workerConsumerRunning  atomic.Bool
+	externalRiverClient    bool
+	riverSchema            string // managed override or actual host-client schema
 
 	// progressLifecycle owns the #895 out-of-River progress detector: a plain
 	// goroutine that answers "is the periodic fleet progressing?" without
@@ -290,6 +295,15 @@ func (r *Runtime) Close(ctx context.Context) error {
 	if r == nil {
 		return nil
 	}
+	r.riverCompositionMu.Lock()
+	if r.riverClosed.Load() {
+		r.riverCompositionMu.Unlock()
+		return nil
+	}
+	r.riverClosed.Store(true)
+	r.riverCompositionSealed = true
+	r.riverCompositionMu.Unlock()
+
 	if r.releaseStripeTransport != nil {
 		defer r.releaseStripeTransport()
 	}
@@ -357,9 +371,8 @@ func (r *Runtime) Close(ctx context.Context) error {
 }
 
 // AddRiverConfigurer composes an optional component's workers and schedules into
-// the managed fleet before river.NewClient fixes the worker registry. Call only
-// during startup, before InitRiver. External fleets must compose their own full
-// registry before returning their client from the host binder.
+// the fleet before river.NewClient fixes the worker registry. Call only
+// during startup, before InitRiver or host binding.
 func (r *Runtime) AddRiverConfigurer(configure func(context.Context, *river.Config) error) error {
 	if r == nil {
 		return fmt.Errorf("runtime is nil")
@@ -367,16 +380,26 @@ func (r *Runtime) AddRiverConfigurer(configure func(context.Context, *river.Conf
 	if configure == nil {
 		return fmt.Errorf("River configurer is required")
 	}
-	if r.RiverClient != nil || r.externalRiverClient {
-		return fmt.Errorf("River is already initialized: attach optional components before InitRiver; host-owned fleets must compose their workers before binding")
+	r.riverCompositionMu.Lock()
+	defer r.riverCompositionMu.Unlock()
+	if err := r.riverConfigurableLocked(); err != nil {
+		return err
 	}
 	r.riverConfigurers = append(r.riverConfigurers, configure)
 	return nil
 }
 
 // InitRiver initialises the River client for background workers.
-// If an external client was provided via SetExternalRiverClient, this is a no-op.
+// If a host client was bound, this is a no-op.
 func (r *Runtime) InitRiver(ctx context.Context) error {
+	r.riverCompositionMu.Lock()
+	defer r.riverCompositionMu.Unlock()
+	if r.riverClosed.Load() {
+		return fmt.Errorf("runtime is closed")
+	}
+	if r.hostRiver && !r.hostRiverBound.Load() {
+		return fmt.Errorf("host-owned River is not bound; call BindRiver after composition")
+	}
 	if r.RiverClient != nil {
 		return nil
 	}
@@ -384,6 +407,7 @@ func (r *Runtime) InitRiver(ctx context.Context) error {
 	if r.externalRiverClient {
 		return nil
 	}
+	r.riverCompositionSealed = true
 	workers, err := r.buildRiverWorkers(ctx)
 	if err != nil {
 		return fmt.Errorf("build river workers: %w", err)
@@ -401,7 +425,7 @@ func (r *Runtime) InitRiver(ctx context.Context) error {
 
 // RunWorkers starts River workers (and other background loops) and blocks until ctx is done.
 //
-// If an external River client was provided via SetExternalRiverClient, this only starts
+// If a host River client was bound, this only starts
 // non-River background loops (e.g., Solana Pay poller). The host is responsible for
 // starting the shared River client.
 func (r *Runtime) RunWorkers(ctx context.Context) error {
@@ -409,13 +433,27 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 		return fmt.Errorf("runtime is nil")
 	}
 
-	// Start Solana Pay poller if configured (regardless of River setup). No
-	// boot-rail gate (#728): a store-only merchant declares Solana purely in the
-	// merchant store, and each merchant pass arms its own RPC; without pending
-	// references a tick is a single cheap Redis read.
-	if r.SolanaPayPoller != nil {
-		go r.SolanaPayPoller.Start(ctx)
+	if r.riverClosed.Load() {
+		return fmt.Errorf("runtime is closed")
 	}
+	if r.hostRiver && !r.hostRiverBound.Load() {
+		return fmt.Errorf("host-owned River is not bound; call BindRiver after composition")
+	}
+
+	// Join core-owned non-River work before RunWorkers returns. The host can
+	// then stop its shared fleet before closing dependent runtimes and pools.
+	loopCtx, stopLoops := context.WithCancel(ctx)
+	var pollerDone chan struct{}
+	if r.SolanaPayPoller != nil {
+		pollerDone = make(chan struct{})
+		go func() { defer close(pollerDone); r.SolanaPayPoller.Start(loopCtx) }()
+	}
+	defer func() {
+		stopLoops()
+		if pollerDone != nil {
+			<-pollerDone
+		}
+	}()
 
 	// If external client, don't start River workers - host is responsible
 	if r.externalRiverClient {
@@ -471,17 +509,24 @@ func (r *Runtime) GetBillingPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	return r.buildRiverPeriodicJobs(ctx)
 }
 
-// SetExternalRiverClient sets an external River client for billing to use.
-// When set, billing will use this client for enqueueing and will not create its own.
-// The host is responsible for registering billing workers (via AddBillingWorkersTo)
-// and starting the client.
-func (r *Runtime) SetExternalRiverClient(client *river.Client[pgx.Tx]) {
-	if r == nil {
-		return
+// BindHostRiverClient adopts a constructed client after the one composition
+// attempt. The host owns Start/Stop and any client returned with a bind error.
+func (r *Runtime) BindHostRiverClient(ctx context.Context, client *river.Client[pgx.Tx], schema string) error {
+	r.riverCompositionMu.Lock()
+	defer r.riverCompositionMu.Unlock()
+	if r.riverClosed.Load() {
+		return fmt.Errorf("runtime is closed")
 	}
+	if !r.hostRiver || !r.riverCompositionSealed || r.hostRiverBound.Load() {
+		return fmt.Errorf("host River binding is not pending")
+	}
+	r.SetRiverSchema(schema)
 	r.RiverClient = client
-	r.RiverProducer = client // Use same client for enqueueing
+	r.RiverProducer = client
 	r.externalRiverClient = true
+	r.hostRiverBound.Store(true)
+	r.StartRiverProgressMonitor(ctx)
+	return nil
 }
 
 // SetRiverSchema records the schema the bound River client keeps its tables
@@ -507,7 +552,7 @@ func (r *Runtime) HasExternalRiverClient() bool {
 	if r == nil {
 		return false
 	}
-	return r.externalRiverClient
+	return r.hostRiverBound.Load()
 }
 
 // SetSolanaCranker injects the recurring Solana cranker built once the merchant

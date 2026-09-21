@@ -82,16 +82,15 @@ func (m *MockNMIServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 	if r.Form.Get("report_type") == "transaction" {
 		m.rebillMu.Lock()
 		defer m.rebillMu.Unlock()
-		if m.rebillOrders != nil {
-			fmt.Fprint(w, "<nm_response>")
-			for id, order := range m.rebillOrders {
-				if order == r.Form.Get("order_id") {
-					fmt.Fprintf(w, `<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction>`, id, order)
-				}
+		w.Header().Set("Content-Type", "application/xml")
+		fmt.Fprint(w, "<nm_response>")
+		for id, order := range m.rebillOrders {
+			if order == r.Form.Get("order_id") {
+				fmt.Fprintf(w, `<transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction>`, id, order)
 			}
-			fmt.Fprint(w, "</nm_response>")
-			return
 		}
+		fmt.Fprint(w, "</nm_response>")
+		return
 	}
 
 	// Determine what type of request this is
@@ -157,6 +156,19 @@ func (m *MockNMIServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 				m.rebillOrders[id] = r.Form.Get("orderid")
 				m.rebillReceipts[id] = map[string]any{"id": id, "amount": obligation["amount"], "currency": "USD", "response": "1", "customer_vault_id": obligation["customer_vault_id"], "actions": []map[string]any{{"type": "sale", "amount": obligation["amount"], "success": true, "response": "1"}}}
 			}
+			m.rebillMu.Unlock()
+		}
+	}
+	if recurring == "" && r.Form.Get("type") == "sale" {
+		values, _ := url.ParseQuery(response)
+		if id := values.Get("transactionid"); values.Get("response") == "1" && id != "" {
+			m.rebillMu.Lock()
+			if m.rebillReceipts == nil {
+				m.rebillReceipts = map[string]map[string]any{}
+				m.rebillOrders = map[string]string{}
+			}
+			m.rebillOrders[id] = r.Form.Get("orderid")
+			m.rebillReceipts[id] = map[string]any{"id": id, "amount": r.Form.Get("amount"), "currency": r.Form.Get("currency"), "response": "1", "customer_vault_id": r.Form.Get("customer_vault_id"), "actions": []map[string]any{{"type": "sale", "amount": r.Form.Get("amount"), "success": true, "response": "1"}}}
 			m.rebillMu.Unlock()
 		}
 	}

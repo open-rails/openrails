@@ -5,58 +5,26 @@ package checkout
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"net/http"
+	"net/http/httptrace"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 )
 
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-type closeHookBody struct {
-	io.ReadCloser
-	closed func()
-}
-
-func (b closeHookBody) Close() error {
-	err := b.ReadCloser.Close()
-	b.closed()
-	return err
-}
-
-// cancelAfterProviderReceipt cancels the request once the n-th provider write
-// response has been read in full: the exact receipt is in hand, then the request
-// is gone. A literal NMIClient uses http.DefaultTransport, which this swaps for
-// the duration of the test.
-func cancelAfterProviderReceipt(t *testing.T, fake *nmi.NMIClient, n int64, cancel context.CancelFunc) *nmi.NMIClient {
-	t.Helper()
-	original := http.DefaultTransport
-	t.Cleanup(func() { http.DefaultTransport = original })
-	var writes atomic.Int64
-	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		resp, err := original.RoundTrip(req)
-		if err != nil || req.Method != http.MethodPost {
-			return resp, err
+// The first two gateway responses in this fixture are successor creation and
+// proration. PutIdleConn runs after the response body is consumed, so cancellation
+// occurs with those bytes in hand without replacing the account-bound transport.
+func cancelAfterProviderReceipt(ctx context.Context, n int64, cancel context.CancelFunc) context.Context {
+	var responses atomic.Int64
+	return httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{PutIdleConn: func(err error) {
+		if err == nil && responses.Add(1) == n {
+			cancel()
 		}
-		resp.Body = closeHookBody{resp.Body, func() {
-			if writes.Add(1) == n {
-				cancel()
-			}
-		}}
-		return resp, nil
-	})
-	return &nmi.NMIClient{
-		SecurityKey: fake.SecurityKey, WebhookSecret: fake.WebhookSecret, TestMode: true,
-		DirectPostURL: fake.DirectPostURL, QueryURL: fake.QueryURL, V5BaseURL: fake.V5BaseURL,
-	}
+	}})
 }
 
 // The upgrade runs as a request does: on a connection the request pins, from a
@@ -81,7 +49,8 @@ func TestUpgradeReceiptsSurviveCanceledRequestOnPinnedConnection(t *testing.T) {
 			defer release()
 			ctx, cancel := context.WithCancel(pinned)
 			defer cancel()
-			svc := newUpgradeCheckoutService(app, fx.svc.Clock(), cancelAfterProviderReceipt(t, fake, tc.cancelAfter, cancel))
+			ctx = cancelAfterProviderReceipt(ctx, tc.cancelAfter, cancel)
+			svc := newUpgradeCheckoutService(app, fx.svc.Clock(), fake)
 
 			_, err = svc.processUpgrade(ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, fx.target)
 			require.Error(t, err)

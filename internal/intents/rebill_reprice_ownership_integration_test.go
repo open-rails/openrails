@@ -201,7 +201,7 @@ func TestHistoricalScheduledTargetDoesNotOwnANewerQuote(t *testing.T) {
 
 	// The actual tier-change admission path must likewise ignore the old
 	// completed quote. This tests admission only; it sends no second upgrade.
-	_, err = fx.store.Enqueue(ctx, EnqueueParams{MerchantID: fx.merchantID, Provider: "nmi", PspID: fx.pspID, IntentType: "nmi_upgrade", SubscriptionID: &fx.subID, PriceID: &target, IdempotencyKey: "later-upgrade-" + uuid.NewString(), NextAttemptAt: clock.Now(), Origin: OriginUser})
+	_, err = fx.store.Enqueue(ctx, EnqueueParams{MerchantID: fx.merchantID, Provider: "nmi", PspID: fx.pspID, IntentType: "nmi_upgrade", SubscriptionID: &fx.subID, PriceID: &target, Payload: testUpgradeTerms(fx, target), IdempotencyKey: "later-upgrade-" + uuid.NewString(), NextAttemptAt: clock.Now(), Origin: OriginUser})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, gateway.saleCalls.Load())
 }
@@ -210,11 +210,23 @@ func TestRebillAdmissionRefusesAnAcceptedNMIUpgrade(t *testing.T) {
 	fx := seedPastDueSubscription(t)
 	ctx := fx.handlerCtx()
 	_, client := newFakeNMIRebillGateway(t, fx)
-	_, err := fx.store.Enqueue(ctx, EnqueueParams{MerchantID: fx.merchantID, Provider: "nmi", PspID: fx.pspID, IntentType: "nmi_upgrade", SubscriptionID: &fx.subID, PriceID: &fx.payload.Renewal.PriceID, IdempotencyKey: "first-upgrade-" + uuid.NewString(), NextAttemptAt: time.Now(), Origin: OriginUser})
+	_, err := fx.store.Enqueue(ctx, EnqueueParams{MerchantID: fx.merchantID, Provider: "nmi", PspID: fx.pspID, IntentType: "nmi_upgrade", SubscriptionID: &fx.subID, PriceID: &fx.payload.Renewal.PriceID, Payload: testUpgradeTerms(fx, fx.payload.Renewal.PriceID), IdempotencyKey: "first-upgrade-" + uuid.NewString(), NextAttemptAt: time.Now(), Origin: OriginUser})
 	require.NoError(t, err)
 	_, err = NewManualRebillHandler(fx.db, fullModeConfig(), fakeNMIResolver{client: client}, nil).EnqueueScheduled(ctx, fx.subID)
 	require.ErrorIs(t, err, subscriptions.ErrRebillTermsCommitted)
 	var count int
 	require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1 AND intent_type='manual_rebill'`, fx.subID).Scan(&count))
 	require.Zero(t, count)
+}
+
+// Valid accepted upgrade terms for the admission-only ownership tests. Their
+// runner is intentionally not invoked; the tests exercise the real shared gate.
+func testUpgradeTerms(fx rebillFixture, target uuid.UUID) subscriptions.NMIUpgradePayload {
+	return subscriptions.NMIUpgradePayload{
+		UserID: fx.payload.Renewal.CustomerID.String(), OldSubscriptionID: fx.subID, OldPriceID: fx.payload.Renewal.FromPriceID,
+		OldProviderSubscriptionID: fx.payload.RailSubscriptionID, NewSubscriptionID: uuid.New(), NewPaymentID: uuid.New(),
+		PriceID: target, ProductID: fx.payload.Renewal.ProductID, PlanID: "admission-only", PaymentMethodID: fx.payload.PaymentMethodID,
+		Instrument: fx.payload.Instrument, RecurringAmount: fx.payload.Renewal.Amount, Currency: fx.payload.Renewal.Currency,
+		PeriodStart: fx.payload.Renewal.PeriodStart, PeriodEnd: fx.payload.Renewal.PeriodEnd,
+	}
 }

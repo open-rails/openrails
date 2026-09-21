@@ -67,6 +67,7 @@ const (
 )
 
 type runtimeOverrides struct {
+	HostRiver        bool
 	RiverSchema      string
 	DB               *db.DB
 	Redis            *redis.Client
@@ -373,16 +374,20 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		serviceInstances.SolanaPayPoller.SetMerchantRPC(solanaRPCResolver)
 	}
 
-	// River producer is always initialized in the runtime so HTTP handlers can enqueue jobs
-	// even when workers run in a separate process.
+	// Managed HTTP processes need a producer even when their workers run
+	// elsewhere. A host-owned fleet publishes its one producer only at BindRiver;
+	// construction must never target an undeclared public queue in the meantime.
 	if overrides != nil {
 		runtime.SetRiverSchema(overrides.RiverSchema)
+		runtime.hostRiver = overrides.HostRiver
 	}
-	if producer, pool, err := buildRiverProducer(ctx, cfg, runtime.riverSchemaOrDefault()); err != nil {
-		return nil, fmt.Errorf("init river producer: %w", err)
-	} else {
-		runtime.RiverProducer = producer
-		runtime.riverProducerPool = pool
+	if !runtime.hostRiver {
+		if producer, pool, err := buildRiverProducer(ctx, cfg, runtime.riverSchemaOrDefault()); err != nil {
+			return nil, fmt.Errorf("init river producer: %w", err)
+		} else {
+			runtime.RiverProducer = producer
+			runtime.riverProducerPool = pool
+		}
 	}
 
 	// Wire the deferred NMI delete schedulers (issue 216). Since #358 phase A
@@ -432,7 +437,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 	// #684: fetch-and-converge wake-ups. Late-bound to the runtime so it works
 	// whether the producer came from config or an embedded host's external
-	// River client (SetExternalRiverClient).
+	// River client (BindRiver).
 	runtime.WebhookDispatcher.ConvergeEnqueuer = &runtimeConvergeEnqueuer{runtime: runtime}
 
 	// #674: write-through provider intents. Producers post a durable intent and

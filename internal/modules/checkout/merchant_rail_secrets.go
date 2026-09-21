@@ -357,7 +357,11 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 		return nil, fmt.Errorf("missing scoped merchant NMI secret for PSP")
 	}
 	proc := &config.PSPConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: value}}
-	client, err := nmi.NewClient(target.PSP, proc.ToNMIProviderSettings(), s.Config != nil && s.Config.IsTestMode())
+	owner, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	client, err := nmi.NewAccountClient(owner.UUID(), target.Scope.ID, target.PSP, proc.ToNMIProviderSettings(), s.Config != nil && s.Config.IsTestMode())
 	if err != nil {
 		return nil, err
 	}

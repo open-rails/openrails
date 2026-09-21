@@ -32,22 +32,24 @@ func newTestNMIClient(t *testing.T, url string) *nmi.NMIClient {
 
 func nmiDeleteIntent() gen.OpenrailsRailIntent {
 	subID := uuid.New()
+	pspID := uuid.New()
 	return gen.OpenrailsRailIntent{
 		ID:             uuid.New(),
 		IntentType:     TypeNMIDeleteSubscription,
 		Rail:           "mobius",
 		SubscriptionID: &subID,
-		Origin:         string(OriginUser),
-		Attempts:       1,
-		Status:         StatusInFlight,
+		PspID:          &pspID, Payload: []byte(`{"rail_subscription_id":"sub-target"}`),
+		Origin:   string(OriginUser),
+		Attempts: 1,
+		Status:   StatusInFlight,
 	}
 }
 
 func TestNMIDeleteIdempotencyKeyIsDeterministic(t *testing.T) {
 	id := uuid.MustParse("11111111-2222-3333-4444-555555555555")
-	key := NMIDeleteIdempotencyKey(id)
-	assert.Equal(t, "nmi_delete_subscription:11111111-2222-3333-4444-555555555555", key)
-	assert.Equal(t, key, NMIDeleteIdempotencyKey(id), "stable across calls (re-cancels revive the same intent)")
+	key := NMIDeleteIdempotencyKey(id, id, "provider-target")
+	assert.NotEqual(t, key, NMIDeleteIdempotencyKey(id, id, "replacement-target"))
+	assert.Equal(t, key, NMIDeleteIdempotencyKey(id, id, "provider-target"), "stable across calls (re-cancels revive the same intent)")
 }
 
 func TestNMIDeleteExecuteReadOnlyClientParks(t *testing.T) {
