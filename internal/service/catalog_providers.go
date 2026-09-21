@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 
@@ -240,8 +241,15 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 	pending []PendingAction,
 	err error,
 ) {
-	adapters := s.providerAdapters()
+	return s.resolveProvidersWithAdapters(ctx, product, req, priceID, s.providerAdapters())
+}
 
+func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *models.Product, req CreatePriceRequest, priceID uuid.UUID, adapters map[string]providerAdapter) (
+	rails map[string]map[string]string,
+	states map[string]ProviderState,
+	pending []PendingAction,
+	err error,
+) {
 	// Build the unique attach set: union of req.PSPs and the keys of
 	// req.PSPLinks. Lowercase + trimmed for stable dispatch.
 	want := map[string]struct{}{}
@@ -460,6 +468,10 @@ type railAccountRef struct {
 	accountID string
 }
 
+func (s *Service) catalogProviderEnvironment() string {
+	return config.ExpectedProviderEnvironment(s.rt != nil && s.rt.Config != nil && s.rt.Config.IsTestMode())
+}
+
 // merchantAccountRails maps the ctx merchant's declared account keys
 // (psps.key — the manifest `psps.<key>` name,
 // e.g. "mobius") to their rails. Best-effort: no merchant ctx / DB means only
@@ -480,8 +492,9 @@ func (s *Service) merchantAccountRails(ctx context.Context) map[string]railAccou
 		log.WithContext(ctx).WithError(err).Warn("catalog: list declared rail accounts failed; only rail names resolve")
 		return out
 	}
+	environment := s.catalogProviderEnvironment()
 	for _, row := range rows {
-		if row.Archived || row.Key == nil {
+		if row.Archived || row.Environment != environment || row.Key == nil {
 			continue
 		}
 		name := strings.ToLower(strings.TrimSpace(*row.Key))
@@ -518,8 +531,9 @@ func (s *Service) syncSecondaryCatalogAccounts(ctx context.Context, rail string,
 			Warn("secondary catalog sync: list declared accounts failed")
 		return
 	}
+	environment := s.catalogProviderEnvironment()
 	for _, acct := range rows {
-		if acct.Archived {
+		if acct.Archived || acct.Environment != environment {
 			continue
 		}
 		sctx := pctx

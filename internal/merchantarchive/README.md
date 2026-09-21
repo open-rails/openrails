@@ -114,3 +114,13 @@ and confirms the original result; the retained intent also replays. Provider
 request counts, payments, subscriptions, paid periods and benefits remain
 unchanged. Public Client/HTTP/CLI and live-provider qualification are separate
 gates.
+
+Creator catalogs are business ownership records. A whole-book operator restore
+preserves catalog UUIDs, opaque owner subjects, and each product's catalog UUID.
+The destination host must preserve the subject namespace; changing authentication
+identity mappings is an explicit operator decision, never an automatic remap.
+Creator catalog authority does not authorize export or restore.
+
+The destination must be empty, including catalogs. Creating a default or owned
+catalog before restore produces the ordinary `not_empty` refusal; the importer
+never reassigns existing catalog ownership or rewrites incoming product IDs.

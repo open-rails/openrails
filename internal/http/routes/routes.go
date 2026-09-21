@@ -451,7 +451,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		if !resolved.HasPermission(perm) {
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
 		}
-		return billingauth.Principal{MerchantID: hp.MerchantID, Permissions: resolved.Permissions}, nil
+		return billingauth.Principal{MerchantID: hp.MerchantID, Subject: hp.Subject, Permissions: resolved.Permissions}, nil
 	}
 	if resolved, err, handled := g.resolveServiceCredential(ctx, req, g.Authenticator != nil); handled {
 		if err != nil {
@@ -495,6 +495,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 				}
 				return billingauth.Principal{
 					MerchantID: resolved.MerchantID,
+					Subject:    resolved.DelegatedSubject,
 					UserContext: billingauth.UserContext{
 						UserID:        resolved.DelegatedSubject,
 						Email:         resolved.Email,
@@ -521,6 +522,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		}
 		return billingauth.Principal{
 			MerchantID: resolved.MerchantID,
+			Subject:    resolved.DelegatedSubject,
 			UserContext: billingauth.UserContext{
 				UserID:        resolved.DelegatedSubject,
 				Email:         resolved.Email,
@@ -587,7 +589,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	if mid != membershipMID {
 		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_context_mismatch"}
 	}
-	return billingauth.Principal{MerchantID: mid, UserContext: uc}, nil
+	return billingauth.Principal{MerchantID: mid, Subject: uc.UserID, UserContext: uc}, nil
 }
 
 func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Request, allowJWTFallthrough bool) (*controlplane.ResolvedServiceCredential, error, bool) {
@@ -727,9 +729,19 @@ func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtim
 	// captured as a provider name.
 	providers.Handle(http.MethodPost, "/routing/dry-run", h(httphandlers.MerchantDryRunCheckoutRouting), readMW...)
 	providers.Handle(http.MethodGet, "/:provider", h(httphandlers.MerchantGetPaymentProvider), readMW...)
+	// Host-owned provider configuration has no mutation HTTP surface. Keep
+	// reads and routing dry runs available, independently of catalog ownership.
+	if rt != nil && rt.Config.IsManifestMerchantSource() {
+		return
+	}
 	// Provider-config WRITE surface persists secrets; mount it only when OpenRails
-	// can actually write them (#661). Nil ProviderRoutes = permissive (standalone).
-	if opts.ProviderRoutes == nil || opts.ProviderRoutes.SecretWrite {
+	// can actually write them (#661). Explicit route selection cannot override
+	// the runtime backend, and callers may omit ProviderRoutes entirely.
+	secretWrite := opts.ProviderRoutes == nil || opts.ProviderRoutes.SecretWrite
+	if rt != nil && rt.RouteCapabilities != nil {
+		secretWrite = secretWrite && rt.RouteCapabilities.SecretWrite
+	}
+	if secretWrite {
 		providers.Handle(http.MethodPut, "/:provider", h(httphandlers.MerchantPutPaymentProvider), writeMW...)
 	}
 	// Lifecycle archives (#655/#656) write only the PSP row — never a secret,

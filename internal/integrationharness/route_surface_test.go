@@ -34,10 +34,14 @@ func TestStandaloneRouteSurface(t *testing.T) {
 	cfg := &config.Config{
 		Env:      "dev",
 		TestMode: config.CredentialPostureSandbox,
-		Host:     "127.0.0.1",
-		Port:     0,
-		DB:       &config.DBConfig{URL: appDSN},
-		Auth:     &config.AuthConfig{Issuer: "https://controlplane.openrails.test"},
+		// Pin the complete API-owned provider surface; host-owned mode omits mutations.
+		MerchantSource:    config.MerchantSourceAPI,
+		SecretBackend:     config.SecretBackendDB,
+		ProviderWriteMode: config.ProviderWriteModeFull,
+		Host:              "127.0.0.1",
+		Port:              0,
+		DB:                &config.DBConfig{URL: appDSN},
+		Auth:              &config.AuthConfig{Issuer: "https://controlplane.openrails.test"},
 		// The golden documents the FULL surface: LLM-backed routes register only
 		// when configured, so arm them here (the key is never used).
 		LLM: &config.LLMConfig{APIKey: "route-surface-never-used", AskEnabled: true, CatalogCopilotEnabled: true},

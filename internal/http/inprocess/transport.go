@@ -9,10 +9,12 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/requestauth"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/middleware"
+	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -28,10 +30,24 @@ func hostPermissions() []string {
 // clients and database-only operator commands. configuredMerchant is read on
 // each call so a runtime may be bound after constructing its client.
 func NewTransport(handler http.Handler, configuredMerchant func() merchant.ID) (http.RoundTripper, string) {
+	return newTransport(handler, configuredMerchant, "", hostPermissions())
+}
+
+// NewCatalogTransport captures verified host subject authority with only
+// creator-catalog permissions. It never inherits the host's merchant wildcard.
+func NewCatalogTransport(handler http.Handler, configuredMerchant func() merchant.ID, subject string) (http.RoundTripper, string, error) {
+	if err := catalogscope.ValidateSubject(subject); err != nil {
+		return nil, "", err
+	}
+	transport, capability := newTransport(handler, configuredMerchant, subject, []string{permissions.MerchantCatalogOwnRead, permissions.MerchantCatalogOwnUpdate})
+	return transport, capability, nil
+}
+
+func newTransport(handler http.Handler, configuredMerchant func() merchant.ID, subject string, grants []string) (http.RoundTripper, string) {
 	// Only the constructor's private default token provider receives this
 	// per-client capability. A forwarded caller credential cannot name a mode.
 	capability := rand.Text()
-	return &inprocessTransport{handler: handler, configuredMerchant: configuredMerchant, hostCredential: capability}, capability
+	return &inprocessTransport{handler: handler, configuredMerchant: configuredMerchant, hostCredential: capability, subject: subject, permissions: grants}, capability
 }
 
 // inprocessTransport dispatches SDK requests directly into the in-process
@@ -43,6 +59,8 @@ type inprocessTransport struct {
 	handler            http.Handler
 	configuredMerchant func() merchant.ID
 	hostCredential     string
+	subject            string
+	permissions        []string
 }
 
 func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -78,7 +96,7 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// context value is dropped (engineContext).
 	ctx = engineContext(ctx)
 	if req.Header.Get("Authorization") == "Bearer "+t.hostCredential {
-		ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: mid, Permissions: hostPermissions()})
+		ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: mid, Subject: t.subject, Permissions: append([]string(nil), t.permissions...)})
 	}
 
 	// The in-process analogue of middleware.ResolveMerchantHTTP: pin the

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -34,6 +35,9 @@ func (d *DB) LoadPricePSPBindings(ctx context.Context, prices []*models.Price, p
 	if err != nil {
 		return err
 	}
+	if scope, ok := catalogscope.FromContext(ctx); ok && scope.MerchantID != mid {
+		return fmt.Errorf("catalog scope does not match the authorized merchant")
+	}
 	ids := make([]uuid.UUID, 0, len(prices))
 	byID := make(map[uuid.UUID]*models.Price, len(prices))
 	for _, price := range prices {
@@ -44,7 +48,7 @@ func (d *DB) LoadPricePSPBindings(ctx context.Context, prices []*models.Price, p
 		ids = append(ids, price.ID)
 		byID[price.ID] = price
 	}
-	rows, err := d.Gen(ctx).ListPricePSPBindings(ctx, gen.ListPricePSPBindingsParams{MerchantID: mid.UUID(), PriceIds: ids, PspID: pspID})
+	rows, err := d.Gen(ctx).ListPricePSPBindings(ctx, gen.ListPricePSPBindingsParams{MerchantID: mid.UUID(), CatalogID: catalogscope.QueryID(ctx), PriceIds: ids, PspID: pspID})
 	if err != nil {
 		return err
 	}

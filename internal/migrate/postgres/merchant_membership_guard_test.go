@@ -25,6 +25,7 @@ var reMembershipName = regexp.MustCompile(`(?:^|_)(user|users|member|members|mem
 // Adding an entry here is a DECISION that the column is not merchant-team
 // state — say why.
 var membershipAllowlist = map[string]string{
+	"catalogs.owner_subject": "immutable business catalog ownership by an opaque verified host subject; no merchant team membership or role",
 	// Host Four's immutable billing-record principal, not an OpenRails
 	// merchant member or role.
 	"operation_authorizations.record_owner": "external billing record principal, not team state",

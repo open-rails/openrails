@@ -61,7 +61,7 @@ func (s *Server) registerStandaloneMetaRoutes(mux *http.ServeMux) {
 	// Standalone mounts the full surface, so it advertises StandaloneDefaultRouteSets.
 	// Same hand-written handler the embedded surface serves at /billing/v1/capabilities.
 	s.handle(mux, http.MethodGet+" "+StandaloneV1Prefix+"/capabilities",
-		embedhttp.CapabilitiesHandler(embedhttp.StandaloneDefaultRouteSets))
+		embedhttp.CapabilitiesHandler(embedhttp.StandaloneDefaultRouteSets, embedhttp.ProviderRoutesForRuntime(s.runtime, nil)))
 
 	// Kubernetes-style health check endpoints (aliases)
 	s.handle(mux, http.MethodGet+" /healthz", live)

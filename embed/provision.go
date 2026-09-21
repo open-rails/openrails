@@ -110,8 +110,9 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 		}
 		secretBackend = backend
 		req.SolanaTransit = backend.SolanaTransit
-		// Write routes stay mounted so mode-1 mutation calls receive the pointed
-		// 405 rejection (not a bare 404); Solana signing keys can live in memory.
+		// Preserve backend capabilities for managed alert-webhook URLs. Provider
+		// route discovery separately omits host-owned credential mutations;
+		// Solana signing keys can live in memory.
 		a.Runtime.RouteCapabilities = &routesurface.RuntimeCapabilities{
 			SolanaCanSign: backend.SolanaCanSign,
 			SecretWrite:   backend.SecretWrite,

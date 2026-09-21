@@ -47,6 +47,7 @@ const (
 	MerchantRoleOwner   = "owner"
 	MerchantRoleSupport = "support"
 	MerchantRoleViewer  = "viewer"
+	MerchantRoleCreator = "creator"
 
 	// Customer roles (#567). owner is auto-seeded by authkit (= `customer:*`).
 	CustomerRoleOwner  = "owner"
@@ -109,6 +110,10 @@ func Groups() []authcore.PersonaDef {
 			},
 			Roles: []authcore.RoleDef{
 				// owner (= merchant:*) is auto-seeded; declared elsewhere implicitly.
+				{
+					Name:        MerchantRoleCreator,
+					Permissions: []string{permissions.MerchantCatalogOwnRead, permissions.MerchantCatalogOwnUpdate},
+				},
 				{
 					Name: MerchantRoleSupport,
 					Permissions: []string{

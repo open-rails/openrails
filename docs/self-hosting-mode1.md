@@ -78,11 +78,12 @@ manifest outright: two truths.
 
 ## What is rejected in mode 1
 
-- Payment-provider **mutation** APIs —
-  `PUT/DELETE /v1/merchant/payment-providers/:provider`, and their embedded
-  `/billing/v1` twins — answer **405** with machine code `manifest_driven`:
-  update host configuration and restart. Reads stay available, and the routes
-  stay mounted so callers get the pointed error, never a bare 404.
+- Payment-provider **mutation** routes are not mounted: provider PUT/DELETE
+  and account archive are absent from both standalone and embedded surfaces.
+  Update host configuration and restart. Provider reads and routing dry runs
+  stay available. Requests to omitted routes receive the router's ordinary
+  404 or 405; the advertised `secret_write` capability is false. Optional
+  managed alert-webhook URLs remain independently editable when configured.
 - Catalog APIs also return 405 by default. Set `catalog_source: api` to permit
   authorized dynamic product/price/metering edits while keeping provider
   credentials host-owned. `catalog_source: manifest` uses the catalog push

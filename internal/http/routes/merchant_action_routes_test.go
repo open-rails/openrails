@@ -375,7 +375,7 @@ func TestCatalogAuthorityDoesNotChangeProviderAuthority(t *testing.T) {
 
 // The lifecycle archives stay mounted when the secret backend is read-only
 // (they never write a secret), while the credential-writing PUT is hidden;
-// both archives still carry the manifest-mode guard.
+// host-owned provider configuration omits both archives entirely.
 func TestPaymentProviderArchivesMountWithoutSecretWrite(t *testing.T) {
 	checker := &merchantActionChecker{}
 	gate := NewGate(GateOptions{Authenticator: merchantActionAuth{}, AdminPermissionChecker: checker})
@@ -405,9 +405,9 @@ func TestPaymentProviderArchivesMountWithoutSecretWrite(t *testing.T) {
 	checker.perm = ""
 	rec = httptest.NewRecorder()
 	manifest.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/billing/v1/merchant/payment-providers/stripe/accounts/11111111-1111-1111-1111-111111111111/archive", nil))
-	require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
-	require.Contains(t, rec.Body.String(), `"code":"manifest_driven"`)
-	require.Empty(t, checker.perm, "manifest guard must run before authorization")
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.NotContains(t, rec.Body.String(), "manifest_driven")
+	require.Empty(t, checker.perm, "unmounted routes must not authorize")
 }
 
 func TestMerchantTierChangeUsesOffChannelAdminLimit(t *testing.T) {
@@ -527,5 +527,71 @@ func TestServiceRoutesDelegatedAdmitGatedByPermission(t *testing.T) {
 				t.Fatalf("expected %d, got %d: %s", tc.want, rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+// Record actual ServeMux registrations: a generic 405 alone cannot distinguish
+// an absent mutation route from a mounted handler rejecting the request.
+func TestProviderMutationRouteInventory(t *testing.T) {
+	for _, source := range []string{config.MerchantSourceManifest, config.MerchantSourceAPI} {
+		for _, secretWrite := range []bool{false, true} {
+			name := source + "/read-only"
+			if secretWrite {
+				name = source + "/writable"
+			}
+			t.Run(name, func(t *testing.T) {
+				rt := &app.Runtime{Config: &config.Config{MerchantSource: source, CatalogSource: config.CatalogSourceAPI}}
+				providerRoutes := routesurface.AllProviderRoutes()
+				providerRoutes.SecretWrite = secretWrite
+				opts := Options{ProviderRoutes: &providerRoutes}
+				var inventory []string
+				mux := http.NewServeMux()
+				record := func(pattern string) { inventory = append(inventory, pattern) }
+				RegisterPaymentProviderRoutes(router.NewMuxRecorded(mux, "/providers", rt, record), rt, opts)
+				RegisterCatalogRoutes(router.NewMuxRecorded(mux, "/catalog", rt, record), rt, opts)
+				RegisterMerchantActionRoutes(router.NewMuxRecorded(mux, "/merchant", rt, record), rt, opts)
+				for _, route := range []string{"GET /providers", "GET /providers/{provider}", "POST /providers/routing/dry-run", "POST /catalog/products", "PUT /catalog/meters/{key}", "POST /merchant/webhooks", "PUT /merchant/webhooks/{id}/url", "DELETE /merchant/webhooks/{id}"} {
+					require.Contains(t, inventory, route)
+				}
+				if source == config.MerchantSourceAPI && secretWrite {
+					require.Contains(t, inventory, "PUT /providers/{provider}")
+				} else {
+					require.NotContains(t, inventory, "PUT /providers/{provider}")
+				}
+				for _, route := range []string{"DELETE /providers/{provider}", "POST /providers/{provider}/accounts/{psp_id}/archive"} {
+					if source == config.MerchantSourceAPI {
+						require.Contains(t, inventory, route)
+					} else {
+						require.NotContains(t, inventory, route)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestProviderRuntimeCapabilityLimitsRouteRegistration(t *testing.T) {
+	for _, writable := range []bool{false, true} {
+		for _, explicit := range []bool{false, true} {
+			rt := &app.Runtime{
+				Config:            &config.Config{MerchantSource: config.MerchantSourceAPI},
+				RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable},
+			}
+			opts := Options{}
+			if explicit {
+				all := routesurface.AllProviderRoutes()
+				opts.ProviderRoutes = &all
+			}
+			var inventory []string
+			rr := router.NewMuxRecorded(http.NewServeMux(), "/providers", rt, func(pattern string) { inventory = append(inventory, pattern) })
+			RegisterPaymentProviderRoutes(rr, rt, opts)
+			if writable {
+				require.Contains(t, inventory, "PUT /providers/{provider}", "explicit=%v", explicit)
+			} else {
+				require.NotContains(t, inventory, "PUT /providers/{provider}", "explicit=%v", explicit)
+			}
+			require.Contains(t, inventory, "DELETE /providers/{provider}")
+			require.Contains(t, inventory, "POST /providers/{provider}/accounts/{psp_id}/archive")
+		}
 	}
 }
