@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/handlers"
@@ -296,6 +297,15 @@ func assertCutoverCommitted(t *testing.T, h *Harness, g *cutoverGateway, p cutov
 	profile := contract.Profile{Name: "rail_intents", Columns: []contract.Column{{Name: "intent_type", Type: "text"}, {Name: "status", Type: "text"}, {Name: "payload", Type: "jsonb"}, {Name: "result_evidence", Type: "jsonb"}}}
 	typ, status := intents.TypeNMIProviderCutover, "succeeded"
 	require.NoError(t, contract.ValidateValues(profile, []*string{&typ, &status, &payload, &evidence}), "real cutover receipts must survive merchant archive")
+	var mid uuid.UUID
+	require.NoError(t, h.Pool().QueryRow(context.Background(), `SELECT merchant_id FROM billing.rail_intents WHERE id=$1`, result.ID).Scan(&mid))
+	var frozen struct {
+		SourceSubscriptionID string `json:"source_subscription_id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(payload), &frozen))
+	retained := gen.OpenrailsRailIntent{ID: result.ID, MerchantID: mid, Rail: "nmi", IntentType: typ, Status: status, SubscriptionID: &p.Sub, PspID: &p.Target, Payload: []byte(payload), ResultEvidence: []byte(evidence)}
+	require.NoError(t, intents.ValidateProviderCutoverLineage(mid, p.Sub, p.Customer, p.Source, frozen.SourceSubscriptionID, p.Target, result.TargetSubscriptionID, []gen.OpenrailsRailIntent{retained}), "actual completed transition preserves initial account history")
+
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	source := g.Accounts[p.SourceKey]

@@ -309,3 +309,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::u
   AND card_last4 IS NOT NULL
   AND deleted_at IS NULL
 LIMIT 1;
+
+-- name: ListObservedInitialMembershipPayments :many
+-- The first observed paid event retains the original accepted enrollment order.
+SELECT * FROM openrails.payments
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid
+  AND subscription_id=sqlc.arg(subscription_id)::uuid
+  AND metadata->>'order_id'=sqlc.arg(order_reference)::text
+ORDER BY created_at,id LIMIT 2;

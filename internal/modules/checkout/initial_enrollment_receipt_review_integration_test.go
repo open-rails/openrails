@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -348,7 +349,67 @@ func TestInitialMembershipNestedMethodFenceRefusesDeletion(t *testing.T) {
 	count, err := fx.db.Gen(fx.ctx).CountUnresolvedOperationsNamingPaymentMethod(fx.ctx, gen.CountUnresolvedOperationsNamingPaymentMethodParams{MerchantID: dbtest.TestMerchantID.UUID(), PaymentMethodID: fx.payload.Terms.PaymentMethodID})
 	require.NoError(t, err)
 	require.Positive(t, count)
-	_, err = intents.NewStore(fx.db).Enqueue(fx.ctx, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", PspID: fx.payload.Terms.PSPID, IntentType: intents.TypeNMIPaymentMethodDelete, Payload: intents.NMIPaymentMethodDeletePayload{UserID: fx.payload.Terms.CustomerID.String(), PaymentMethodID: fx.payload.Terms.PaymentMethodID, RailCustomerRef: fx.payload.Instrument.RailCustomerRef, RailMethodRef: fx.payload.Instrument.RailMethodRef}, IdempotencyKey: intents.NMIPaymentMethodDeleteIdempotencyKey(fx.payload.Terms.PaymentMethodID), NextAttemptAt: time.Now(), Origin: intents.OriginUser})
-	require.Error(t, err, "accepted initial membership pins its actual method against destructive admission")
+	_, err = intents.NewStore(fx.db).Enqueue(fx.ctx, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", PspID: fx.payload.Terms.PSPID, IntentType: intents.TypeNMIPaymentMethodDelete, Payload: intents.NMIPaymentMethodDeletePayload{UserID: fx.payload.Terms.CustomerID.String(), PaymentMethodID: fx.payload.Terms.PaymentMethodID, RailCustomerRef: fx.payload.Instrument.RailCustomerRef, RailMethodRef: fx.payload.Instrument.RailMethodRef}, IdempotencyKey: intents.NMIPaymentMethodDeleteIdempotencyKey(fx.payload.Terms.PaymentMethodID), NextAttemptAt: time.Now(), Origin: intents.OriginAdmin})
+	require.ErrorIs(t, err, paymentmethods.ErrPaymentMethodInUse, "accepted initial membership pins its actual method against destructive admission")
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+}
+
+func TestInitialMembershipDeletionAdmissionOrdering(t *testing.T) {
+	for _, concurrent := range []bool{false, true} {
+		t.Run(fmt.Sprint("concurrent=", concurrent), func(t *testing.T) {
+			fx := newSubIntentFixture(t)
+			fx.prepare(t)
+			store := intents.NewStore(fx.db)
+			deletion := intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", PspID: fx.payload.Terms.PSPID, IntentType: intents.TypeNMIPaymentMethodDelete, Payload: intents.NMIPaymentMethodDeletePayload{UserID: fx.payload.Terms.CustomerID.String(), PaymentMethodID: fx.payload.Terms.PaymentMethodID, RailCustomerRef: fx.payload.Instrument.RailCustomerRef, RailMethodRef: fx.payload.Instrument.RailMethodRef}, IdempotencyKey: intents.NMIPaymentMethodDeleteIdempotencyKey(fx.payload.Terms.PaymentMethodID), NextAttemptAt: time.Now(), Origin: intents.OriginAdmin}
+			initial := intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", PspID: fx.payload.Terms.PSPID, IntentType: TypeInitialMembership, PriceID: &fx.priceID, Payload: fx.payload, IdempotencyKey: InitialMembershipIdempotencyKey(fx.payload.CheckoutIdempotencyKey), NextAttemptAt: fx.payload.Terms.AcceptedAt, Origin: intents.OriginUser}
+			if !concurrent {
+				_, err := store.Enqueue(fx.ctx, deletion)
+				require.NoError(t, err)
+				_, err = store.Enqueue(fx.ctx, initial)
+				require.ErrorContains(t, err, "instrument changed before admission")
+			} else {
+				start := make(chan struct{})
+				initialDone, deleteDone := make(chan error, 1), make(chan error, 1)
+				go func() { <-start; _, err := store.Enqueue(fx.ctx, initial); initialDone <- err }()
+				go func() { <-start; _, err := store.Enqueue(fx.ctx, deletion); deleteDone <- err }()
+				close(start)
+				initialErr, deleteErr := <-initialDone, <-deleteDone
+				require.NotEqual(t, initialErr == nil, deleteErr == nil, "exactly one conflicting admission may commit")
+				if initialErr == nil {
+					require.ErrorIs(t, deleteErr, paymentmethods.ErrPaymentMethodInUse)
+				} else {
+					require.ErrorContains(t, initialErr, "instrument changed before admission")
+				}
+			}
+			require.Zero(t, fx.gateway.createCalls.Load(), "admission ordering performs no provider mutation")
+		})
+	}
+}
+
+func TestInitialMembershipUnsubmittedProviderEffectsCannotAuthorizeSale(t *testing.T) {
+	fx := newSubIntentFixture(t)
+	fx.prepare(t)
+	in, err := fx.runner.Store.Enqueue(fx.ctx, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", PspID: fx.payload.Terms.PSPID, IntentType: TypeInitialMembership, PriceID: &fx.priceID, Payload: fx.payload, IdempotencyKey: InitialMembershipIdempotencyKey(fx.payload.CheckoutIdempotencyKey), NextAttemptAt: fx.payload.Terms.AcceptedAt, Origin: intents.OriginUser})
+	require.NoError(t, err)
+	order := intents.NMIEnrollmentOrder(in)
+	fx.gateway.createForm.Store(url.Values{"orderid": {order}, "ponumber": {order}, "amount": {"9.99"}, "currency": {"USD"}, "start_date": {fx.payload.NativeSchedule.StartDate}})
+	fx.gateway.subExists.Store(true)
+	fx.gateway.charged.Store(true)
+	handler := NewInitialMembershipIntentHandler(fx.svc)
+	_, err = handler.Resolve(fx.ctx, in, intents.Resolution{ProviderReference: fx.gateway.subID})
+	require.ErrorContains(t, err, "receipt custody refused")
+	require.Zero(t, fx.gateway.createCalls.Load(), "a schedule observed before submission cannot authorize a new sale")
+	client, err := fx.svc.resolveNMIClient(fx.ctx, "mobius")
+	require.NoError(t, err)
+	receipt, found, err := intents.ReadNMICollectionReceipt(fx.ctx, in, upgradeReceiptResolver{client}, fx.gateway.txnID)
+	require.NoError(t, err)
+	require.True(t, found)
+	_, err = intents.NewStore(fx.db).RetainCollectedReceipt(fx.ctx, in, receipt)
+	require.ErrorContains(t, err, "receipt custody refused")
+	var memberships, payments int
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.subscriptions WHERE customer_id=$1`, fx.payload.Terms.CustomerID).Scan(&memberships))
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.payments WHERE customer_id=$1`, fx.payload.Terms.CustomerID).Scan(&payments))
+	require.Zero(t, memberships)
+	require.Zero(t, payments)
+	require.Zero(t, fx.gateway.createCalls.Load())
 }
