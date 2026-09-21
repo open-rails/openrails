@@ -4944,7 +4944,7 @@
     "internal/migrate/postgres/schema_tokens.go": "db02b2faeecf3343919ebf74de33c7e72e918a00737d054e86dedb15ed5a8e6d",
     "internal/migrate/postgres/unique_scope_exemptions.go": "50f144594711a439c71aa95954b102a9ea0b423488a3e850dd6853fccf91ccd8",
     "internal/modules/checkout/initial_membership_confirmation.go": "c2debc87c207881407748c491e3065bb960d1763b52045a4d5a9f8d927082eb2",
-    "internal/modules/checkout/session_service.go": "dc03b81a452130a2897d52c63a08d7d4c1b088537a3642c688e187fe7bddaa9c",
+    "internal/modules/checkout/session_service.go": "40a52abc26b2b954503ca52390b0562ba787c8eb16adf59278915a3460421a43",
     "internal/operator/profile.go": "084d6f735001ff56c70898a2abc5d967b438b24b99c7e5afe8a7d7fef70ea369",
     "internal/requestauth/cache.go": "275b8a83d62c567041a6a3ed307dc4fce74c54f5c061b0cd96a91d08e401bd83",
     "internal/requestauth/hostprincipal.go": "da329e07de292fd17e2a6d7345ead3d766eb9702707a61f7fe62f9a6d357a8a6",
