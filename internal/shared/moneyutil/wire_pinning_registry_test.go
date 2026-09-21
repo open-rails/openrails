@@ -74,13 +74,15 @@ var pinnedBoundaries = map[string]string{
 // the gate is honest from day one instead of being made green by suppression.
 // Shrinking this map is the work; growing it needs a reason.
 var deferredBoundaries = map[string]string{
-	"internal/integrations/nmi/probe.go":                   "the $0.01 test-mode probe: a fixed literal amount, not a customer amount",
-	"internal/modules/checkout/service.go":                 "upgrade proration + checkout sale — amounts reach the wire via nmi/payments.go, which IS pinned; the arithmetic above it is covered by unit tests, not a wire pin",
-	"internal/modules/checkout/initial_membership_intent.go": "same",
-	"internal/modules/checkout/custodian_sale.go":          "same",
-	"internal/modules/subscriptions/plan_migration.go":     "or#815 plan migration: successor amount reaches NMI through the pinned client",
-	"internal/http/handlers/admin_payments.go":             "admin-initiated refund amount; reaches the wire through the pinned nmi/stripe clients",
-	"internal/service/service_definition_catalog_admin.go": "catalog definition admin; pushes through the pinned provider adapters",
+	"internal/modules/money/subscription_collection_admission.go": "or#297/#578 unexposed engine admission prototype; no handler or worker registered. Promote only with actual recurring CIT/MIT wire qualification before enablement",
+	"internal/modules/subscriptions/engine_collection_terms.go":   "or#297/#578 accepted engine terms only; actual recurring wire qualification remains an explicit enablement gate",
+	"internal/integrations/nmi/probe.go":                          "the $0.01 test-mode probe: a fixed literal amount, not a customer amount",
+	"internal/modules/checkout/service.go":                        "upgrade proration + checkout sale — amounts reach the wire via nmi/payments.go, which IS pinned; the arithmetic above it is covered by unit tests, not a wire pin",
+	"internal/modules/checkout/initial_membership_intent.go":      "same",
+	"internal/modules/checkout/custodian_sale.go":                 "same",
+	"internal/modules/subscriptions/plan_migration.go":            "or#815 plan migration: successor amount reaches NMI through the pinned client",
+	"internal/http/handlers/admin_payments.go":                    "admin-initiated refund amount; reaches the wire through the pinned nmi/stripe clients",
+	"internal/service/service_definition_catalog_admin.go":        "catalog definition admin; pushes through the pinned provider adapters",
 }
 
 // GAP-15 stays open and is deliberately NOT hidden in deferredBoundaries: the

@@ -4950,7 +4950,7 @@
     "pkg/billingauth/gate.go": "8a96485f89878e5d855ef6df4ad077020aba64db26fe2149f48b2599cdd141b2",
     "pkg/billingauth/token.go": "0731f6ad20b1d7e8fd7911cbe31d2b154d9ab3a8c14f34ff4fc87f9324a0abb7",
     "pkg/billingauth/user_context.go": "d26d00cb4c8ab3f7afb88a18d41491dacacaa525213c009c1922786d2e53a9bb",
-    "testdata/wire/billing_status.json": "c085eb3c00b97b4814d2d327fbc346a3f805c3cad4c27fb5fcbc65635d04754e",
+    "testdata/wire/billing_status.json": "264a1823c9d7db04de8e067b946b12cb579c261c6d4248e7de823a91329b71bc",
     "testdata/wire/catalog_price.json": "868768e3ff1c55d651cf4be5f07debdabe955f75a54be6f1a049771eb94479b9",
     "testdata/wire/checkout_session.json": "52caeb03cbd611722d63f1d78633af1daf4e0e5ef16a4ba516b3aff1cadcf379",
     "testdata/wire/credit_transaction.json": "0c511d42f14783ea88dfb306165778127cd21c85eedf7f45195de0c1ad70d224",
@@ -4964,6 +4964,6 @@
     "testdata/wire/payment.json": "e85143321516734df604898ba44badbddf9098a3ce946f72f161001ef37c33a1",
     "testdata/wire/provider_billing_qualification.json": "7d72251ead70d10ea1d52e24164d094fb0a0022bab0b607cb3796c16734a1e85",
     "testdata/wire/spend_delegations.json": "889b95772edcb5495b3eecaef5446b354be2e6195c81b78047b9872b04651c18",
-    "testdata/wire/subscription.json": "a4592f61a2bfb39b83e164f049218ccb85f662f5cab85dd7a87f8732cac7c1c2"
+    "testdata/wire/subscription.json": "b37e34df4a3c1e9550bec3ac320aab399f7fe1434f17bd20cafeb432b2d11e5c"
   }
 }

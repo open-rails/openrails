@@ -108,6 +108,7 @@ func TestFreshNativeProviderRecoveryGap(t *testing.T) {
 	require.NoError(t, err)
 	observed, err := customerClient.GetMySubscription(t.Context(), *session.SubscriptionID)
 	require.NoError(t, err)
+	require.Equal(t, "provider", observed.CollectionPolicy)
 	require.NotNil(t, observed.Recovery)
 	require.False(t, observed.Recovery.Retryable)
 	require.Equal(t, "customer_payment_unsupported", observed.Recovery.BlockedReason)
