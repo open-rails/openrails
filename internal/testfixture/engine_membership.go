@@ -95,7 +95,7 @@ func EngineMembership(t testing.TB, ctx context.Context, d *db.DB, terms subscri
 			order.Store(input.Form["orderid"])
 			fmt.Fprintf(w, `{"response":{"response":"1","response_code":"100","responsetext":"Approved","transactionid":%q},"status_code":200,"response_headers":{}}`, transaction)
 		case r.URL.Path == "/payments/"+transaction:
-			json.NewEncoder(w).Encode(map[string]any{"object": "transaction", "id": transaction, "amount": amount, "currency": terms.Currency, "response": "1", "actions": []map[string]any{{"id": transaction + "-a", "type": "sale", "amount": amount, "success": true, "response": "1"}}})
+			fmt.Fprintf(w, `{"object":"transaction","id":%q,"amount":%q,"currency":%q,"response":"1","actions":[{"id":%q,"type":"sale","amount":%q,"success":true,"response":"1"}]}`, transaction, amount, terms.Currency, transaction+"-a", amount)
 		case r.URL.Path == "/query":
 			require.NoError(t, r.ParseForm())
 			require.Equal(t, order.Load(), r.Form.Get("order_id"))
