@@ -231,6 +231,9 @@ func LoadCollectedReceipt(in gen.OpenrailsRailIntent) (CollectedReceipt, bool, e
 	if err := decoder.Decode(&r.data); err != nil {
 		return r, true, err
 	}
+	if _, exists := evidence[qualifiedInitialRefusalKey]; exists {
+		return r, true, errors.New("collected receipt contradicts retained initial refusal")
+	}
 	return r, true, r.Validate(in)
 }
 

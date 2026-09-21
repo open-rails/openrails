@@ -2401,8 +2401,10 @@ WHERE id = $3::uuid
   AND psp_id = $5::uuid
   AND intent_type = $6::text
   AND payload = $7::jsonb
-  AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale','initial_membership'))
-       OR ($1::text = 'qualified_enrollment' AND intent_type IN ('nmi_upgrade','initial_membership'))
+  AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale','initial_membership')
+            AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_initial_refusal'))
+       OR ($1::text = 'qualified_enrollment' AND intent_type IN ('nmi_upgrade','initial_membership')
+            AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_initial_refusal'))
        OR ($1::text='qualified_initial_refusal' AND intent_type='initial_membership'
            AND NOT (coalesce(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','qualified_enrollment'])
            AND (($2::jsonb->>'kind'='not_submitted' AND NOT (coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted'))

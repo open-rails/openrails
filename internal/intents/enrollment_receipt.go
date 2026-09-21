@@ -165,6 +165,9 @@ func LoadNMIEnrollmentReceipt(in gen.OpenrailsRailIntent) (NMIEnrollmentReceipt,
 	if err := decoder.Decode(&receipt.data); err != nil {
 		return receipt, true, err
 	}
+	if _, refused := evidence[qualifiedInitialRefusalKey]; refused {
+		return receipt, true, errors.New("enrollment receipt contradicts retained initial refusal")
+	}
 	return receipt, true, receipt.Validate(in)
 }
 
