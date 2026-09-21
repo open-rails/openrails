@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -380,6 +381,16 @@ func (s *CheckoutSessionService) confirmPaymentMethodSetup(ctx context.Context, 
 	}
 	err = s.db.MerchantTx(ctx, func(c context.Context, tx pgx.Tx) error {
 		queries := s.db.NewWithPgxTx(tx).Gen(c)
+		if _, err := queries.LockCustomerForSpend(c, gen.LockCustomerForSpendParams{MerchantID: owner.UUID(), ID: session.CustomerID}); err != nil {
+			return err
+		}
+		handle := paymentmethods.CustodianHandle{Custodian: state.CustodianID, Method: method.ID}
+		if err := paymentmethods.LockCustodianHandles(c, queries, owner.UUID(), handle); err != nil {
+			return err
+		}
+		if err := paymentmethods.RequireCustodianHandleAvailable(c, queries, owner.UUID(), handle); err != nil {
+			return err
+		}
 		row, err := queries.GetPaymentMethodSetupSessionForUpdate(c, gen.GetPaymentMethodSetupSessionForUpdateParams{ID: session.ID, MerchantID: owner.UUID()})
 		if err != nil {
 			return err

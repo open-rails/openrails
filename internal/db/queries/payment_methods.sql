@@ -279,7 +279,8 @@ UPDATE openrails.payment_methods SET
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND custodian_id = sqlc.arg(custodian_id)::uuid
   AND custodian = sqlc.arg(custodian)
-  AND rail_method_ref = sqlc.arg(old_method_ref);
+  AND rail_method_ref = sqlc.arg(old_method_ref)
+  AND park_reason NOT LIKE 'delete:%';
 
 -- name: RefreshCustodianCardMetadata :execrows
 -- #795 token.updated fold: refresh masked metadata from the custodian's read.
