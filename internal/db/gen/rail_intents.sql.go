@@ -1396,6 +1396,7 @@ WHERE i.merchant_id=$1::uuid
     OR EXISTS (
       SELECT 1 FROM openrails.subscription_reprices r
       WHERE r.merchant_id=i.merchant_id AND r.subscription_id=i.subscription_id
+        AND r.merchant_id=$1::uuid
         AND r.status IN ('scheduled','blocked')
         AND r.id::text=i.payload->'renewal'->>'reprice_id'
     )

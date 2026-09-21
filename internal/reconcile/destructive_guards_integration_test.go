@@ -238,12 +238,12 @@ func TestUnknownCohort_NineSubscriberMerchantIsProtected(t *testing.T) {
 // anywhere. This is what the first enforcing pass saw on boot.
 func TestUnknownCohort_StaleRosterDatesNeverCancel(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	mid := newReconcileMerchant(t, appDB)
-	baseCtx := merchant.WithID(context.Background(), mid)
 	now := time.Now().UTC().Truncate(time.Second)
 
 	for _, staleDays := range []int{15, 30, 90} {
 		t.Run(fmt.Sprintf("%dd_stale", staleDays), func(t *testing.T) {
+			mid := newReconcileMerchant(t, appDB)
+			baseCtx := merchant.WithID(context.Background(), mid)
 			periodEnd := now.AddDate(0, 0, -staleDays)
 			// Three rows, deliberately WITHIN the per-pass cancellation cap, so
 			// this test isolates the decider law (#821) rather than passing
