@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -32,7 +31,7 @@ func (s *Service) creatorProviderKeys(ctx context.Context) ([]string, error) {
 	if s.rt == nil || s.rt.DB == nil {
 		return nil, fmt.Errorf("merchant database is required for creator collection policy")
 	}
-	environment := config.ExpectedProviderEnvironment(s.rt.Config != nil && s.rt.Config.IsTestMode())
+	environment := s.catalogProviderEnvironment()
 	rows, err := s.rt.DB.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: mid.UUID()})
 	if err != nil {
 		return nil, fmt.Errorf("load creator collection policy: %w", err)

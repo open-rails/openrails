@@ -43,6 +43,10 @@ index, and adding the useful index clears the finding.
 This is an availability probe, not a production cost benchmark. The populated
 `internal/db/querytest` performance suite retains normal planner settings and
 checks actual execution time and buffer work.
+An indexed equality is the structural rule's heuristic, not a hard row limit.
+Creator HTTP lists use paginated queries. Internal catalog `GetAll` operations
+still return the full selected collection; their catalog-ID predicate satisfies
+the indexed-equality rule, so their earlier exemptions are no longer needed.
 The session uses the normal test login with explicit merchant parameters and
 session state for queries that call current_merchant_id(). Merchant predicates
 must be index-backed; no RLS policy adds a missing predicate for the query.
