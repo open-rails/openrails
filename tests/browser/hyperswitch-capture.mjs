@@ -55,6 +55,8 @@ try {
     assert.equal(first.result.status,'succeeded');
     assert.match(first.result.subscription_id,/^sub_/);
     assert.match(first.result.payment_id,/^pay_/);
+    const expired=await fetch(config.expire,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:quote.id})});
+    assert.equal(expired.status,204);
     await page.getByRole('button',{name:'Subscribe',exact:true}).click();
     await page.waitForFunction(()=>window.membershipClicks===2||window.membershipFailure);
     const replay=await page.evaluate(()=>window.membershipResult);

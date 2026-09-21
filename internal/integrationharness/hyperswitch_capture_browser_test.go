@@ -165,6 +165,16 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	require.NoError(t, err)
 	sdkOrigin := sdkURL.Scheme + "://" + sdkURL.Host
 	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/membership-expired" {
+			var input struct {
+				SessionID openrails.CheckoutSessionID `json:"session_id"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
+			_, err := h.sharedPool().Exec(ctx, `UPDATE billing.checkout_sessions SET status='expired',expires_at=now()-interval '1 hour' WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), input.SessionID.UUID())
+			require.NoError(t, err)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.Method == http.MethodPost && r.URL.Path == "/membership-quoted" {
 			var input struct {
 				PriceID   openrails.PriceID           `json:"price_id"`
@@ -178,6 +188,8 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1)`, owned.MerchantID.UUID()).Scan(&financial))
 			require.Zero(t, financial, "priced quote is not payment or membership")
 			_, err := h.sharedPool().Exec(ctx, `UPDATE billing.prices SET amount=1000000,access_duration_hours=24 WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), input.PriceID.UUID())
+			require.NoError(t, err)
+			_, err = h.sharedPool().Exec(ctx, `UPDATE billing.products SET entitlements_spec='{"changed_after_quote":null}' WHERE merchant_id=$1 AND id=(SELECT product_id FROM billing.prices WHERE merchant_id=$1 AND id=$2)`, owned.MerchantID.UUID(), input.PriceID.UUID())
 			require.NoError(t, err)
 			require.NoError(t, json.NewEncoder(w).Encode(map[string]int{"financial": financial, "provider_calls": len(observations())}))
 			return
@@ -564,7 +576,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 		price, err := owner.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 		require.NoError(t, err)
 		beforeMembership := len(observations())
-		params, _ := json.Marshal(map[string]string{"phase": "membership", "page": page.URL, "checkpoint": page.URL + "/membership-quoted", "before_provider_calls": strconv.Itoa(beforeMembership), "api": surface.BaseURL, "token": token, "psp_id": psp.String(), "price_id": price.ID.String(), "method": savedMethod.String()})
+		params, _ := json.Marshal(map[string]string{"phase": "membership", "page": page.URL, "checkpoint": page.URL + "/membership-quoted", "expire": page.URL + "/membership-expired", "before_provider_calls": strconv.Itoa(beforeMembership), "api": surface.BaseURL, "token": token, "psp_id": psp.String(), "price_id": price.ID.String(), "method": savedMethod.String()})
 		command := exec.CommandContext(ctx, "node", script)
 		command.Env = append(os.Environ(), "OPENRAILS_BROWSER_FIXTURE="+string(params))
 		output, err := command.CombinedOutput()
@@ -581,7 +593,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 		require.Len(t, rows, 1, "confirmation and replay submit exactly one recurring CIT")
 		require.Equal(t, "recurring", rows[0].BillingMethod)
 		require.Equal(t, "customer", rows[0].Initiator)
-		require.Equal(t, "initial", rows[0].Indicator)
+		require.Equal(t, "stored", rows[0].Indicator)
 		require.Equal(t, "9.99", rows[0].Amount)
 		var policy, providerID, anchor, status string
 		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT collection_policy,rail_subscription_id,status FROM billing.subscriptions WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), proof.Membership.SubscriptionID.UUID()).Scan(&policy, &providerID, &status))
@@ -596,14 +608,14 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 		require.EqualValues(t, 9_990_000, amount, "post-quote catalog edit cannot change accepted price")
 		require.Equal(t, "completed", paidStatus)
 		require.Equal(t, rows[0].Transaction, transaction)
-		access, err := owner.HasProductAccess(ctx, openrails.CustomerID(uuid.MustParse(user.ID)), product.ID)
+		access, err := owner.HasEntitlement(ctx, openrails.CustomerID(uuid.MustParse(user.ID)), "browser_member", time.Now())
 		require.NoError(t, err)
-		require.True(t, access, "shared membership commit grants actual product access")
-		response, err := http.Get(vendor.NMIReadBase + "/invoice/schedule-calls")
+		require.True(t, access, "shared membership commit grants the accepted entitlement")
+		response, err := http.Get(vendor.NMIReadBase + "/schedule-calls")
 		require.NoError(t, err)
 		defer response.Body.Close()
-		var scheduleCalls int
+		var scheduleCalls struct{ Count int }
 		require.NoError(t, json.NewDecoder(response.Body).Decode(&scheduleCalls))
-		require.Zero(t, scheduleCalls, "engine enrollment never creates a native schedule")
+		require.Zero(t, scheduleCalls.Count, "engine enrollment never creates a native schedule")
 	})
 }
