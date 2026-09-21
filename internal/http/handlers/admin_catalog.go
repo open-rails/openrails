@@ -61,6 +61,15 @@ func AdminListProducts(r *httprequest.Request) {
 		Limit:     parseIntDefault(r.Query("limit"), 100),
 		Offset:    parseIntDefault(r.Query("offset"), 0),
 	}
+	if raw := r.Query("catalog_id"); raw != "" {
+		id, err := openrails.ParseCatalogID(raw)
+		if err != nil || id.IsZero() {
+			r.ErrorJSON(http.StatusBadRequest, "invalid catalog_id")
+			return
+		}
+		catalogID := id.UUID()
+		opts.CatalogID = &catalogID
+	}
 	// archived=false lists live products, archived=true archived ones; absent
 	// lists both.
 	if v := strings.TrimSpace(r.Query("archived")); v != "" {
@@ -196,6 +205,15 @@ func AdminListPrices(r *httprequest.Request) {
 	filter := catalog.PriceFilter{
 		Currency: moneyutil.NormalizeCurrency(r.Query("currency")),
 		Type:     strings.TrimSpace(r.Query("type")),
+	}
+	if raw := r.Query("catalog_id"); raw != "" {
+		id, err := openrails.ParseCatalogID(raw)
+		if err != nil || id.IsZero() {
+			r.ErrorJSON(http.StatusBadRequest, "invalid catalog_id")
+			return
+		}
+		catalogID := id.UUID()
+		filter.CatalogID = &catalogID
 	}
 	if raw := strings.TrimSpace(r.Query("product_id")); raw != "" {
 		id, err := openrails.ParseProductID(raw)

@@ -382,6 +382,23 @@ Full request and state-transition details are in
 
 ### Catalog (`/v1/merchant/catalog`)
 
+Merchant administrators retain this surface. Creator operations use the separate
+`/v1/catalog` prefix and `merchant:catalog:own:read/update` permissions, with
+owner identity supplied by the verified Gate principal. They expose product and
+price get/list/create/patch/activate/deactivate, price-key rename and history,
+plus `PUT /v1/catalog` to ensure the caller's catalog. Provider configuration,
+meters, entitlement/tier definitions and bulk publish are not creator operations.
+Product/price keys remain merchant-wide; every owner lookup also constrains the
+owned catalog.
+
+Catalog administration uses `GET/POST /v1/merchant/catalogs` and
+`GET /v1/merchant/catalogs/{catalog_id}`. POST idempotently ensures a catalog for
+its explicit `owner_subject` and requires merchant-wide catalog update authority.
+Catalog IDs use `cat_<uuid>`. Product responses include `catalog_id`; creators
+cannot reassign it. Administrators can select a catalog in product creation and
+in product/price list filters. Ordinary merchant product creation continues to
+use the merchant-owned default catalog.
+
 Reads need `merchant:catalog:read`; writes need `merchant:catalog:update`. In
 `catalog_source=manifest` deployments every catalog WRITE answers `405` with
 code `manifest_driven` — update and apply the catalog manifest instead. Empty

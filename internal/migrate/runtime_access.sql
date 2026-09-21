@@ -113,3 +113,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON openrails.price_psp_bindings TO :"runtim
 GRANT EXECUTE ON FUNCTION openrails.begin_billing_restore(uuid) TO :"runtime_user";
 GRANT EXECUTE ON FUNCTION openrails.check_billing_restore_ledger(uuid) TO :"runtime_user";
 GRANT EXECUTE ON FUNCTION openrails.finish_billing_restore(uuid,text,bigint) TO :"runtime_user";
+GRANT SELECT, INSERT ON TABLE openrails.catalogs TO :"runtime_user";
+GRANT UPDATE(updated_at) ON TABLE openrails.catalogs TO :"runtime_user";
+GRANT EXECUTE ON FUNCTION openrails.ensure_default_catalog(uuid) TO :"runtime_user";

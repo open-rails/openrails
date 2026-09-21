@@ -174,6 +174,15 @@ type OpenrailsBillingPolicyBinding struct {
 	UpdatedAt  time.Time
 }
 
+// Immutable catalog identity within one merchant. NULL owner_subject is its default merchant catalog; non-NULL is an opaque verified host subject. Subject namespace must be preserved on authorized archive relocation.
+type OpenrailsCatalog struct {
+	ID           uuid.UUID
+	MerchantID   uuid.UUID
+	OwnerSubject *string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 type OpenrailsCatalogDriftEvent struct {
 	ID                    uuid.UUID
 	PspID                 *uuid.UUID
@@ -950,6 +959,7 @@ type OpenrailsProduct struct {
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
+	CatalogID  uuid.UUID
 }
 
 // Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement.

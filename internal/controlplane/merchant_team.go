@@ -116,7 +116,7 @@ func (c *ControlPlane) ListMerchantTeam(ctx context.Context, mid merchant.ID) ([
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Role != out[j].Role {
-			// owner first, then support, then viewer (reverse of least-privilege).
+			// Show merchant administrators before the bounded creator role.
 			return teamRoleRank(out[i].Role) < teamRoleRank(out[j].Role)
 		}
 		return teamMemberLabel(out[i]) < teamMemberLabel(out[j])
@@ -420,8 +420,10 @@ func teamRoleRank(role string) int {
 		return 1
 	case MerchantRoleViewer:
 		return 2
-	default:
+	case MerchantRoleCreator:
 		return 3
+	default:
+		return 4
 	}
 }
 

@@ -22,7 +22,7 @@ const (
 	RouteSetCustomer = embedhttp.RouteSetCustomer
 	// RouteSetMerchantAdmin mounts human merchant-admin customer/support routes.
 	RouteSetMerchantAdmin = embedhttp.RouteSetMerchantAdmin
-	// RouteSetCatalog mounts merchant catalog routes.
+	// RouteSetCatalog mounts merchant-admin and creator-owned catalog routes.
 	RouteSetCatalog = embedhttp.RouteSetCatalog
 	// RouteSetPaymentProviders mounts provider config and secret routes.
 	RouteSetPaymentProviders = embedhttp.RouteSetPaymentProviders

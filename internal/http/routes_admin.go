@@ -28,6 +28,8 @@ func (s *Server) registerMerchantActionRoutesAt(mux *http.ServeMux, apiPrefix st
 	// and the machine billing API.
 	httproutes.RegisterMerchantActionRoutes(router.NewMuxRecorded(mux, prefix, s.runtime, s.recordRoute), s.runtime, opts)
 	httproutes.RegisterCatalogRoutes(router.NewMuxRecorded(mux, prefix+"/catalog", s.runtime, s.recordRoute), s.runtime, opts)
+	httproutes.RegisterCatalogCollectionRoutes(router.NewMuxRecorded(mux, prefix+"/catalogs", s.runtime, s.recordRoute), s.runtime, opts)
+	httproutes.RegisterOwnedCatalogRoutes(router.NewMuxRecorded(mux, apiPrefix+"/catalog", s.runtime, s.recordRoute), s.runtime, opts)
 	httproutes.RegisterPaymentProviderRoutes(router.NewMuxRecorded(mux, prefix+"/payment-providers", s.runtime, s.recordRoute), s.runtime, opts)
 	httproutes.RegisterServiceRoutes(router.NewMuxRecorded(mux, prefix, s.runtime, s.recordRoute), s.runtime, opts)
 	// #737: DeclaredBilling import (POST <api>/import/billing), merchant from

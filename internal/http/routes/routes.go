@@ -451,7 +451,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		if !resolved.HasPermission(perm) {
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
 		}
-		return billingauth.Principal{MerchantID: hp.MerchantID, Permissions: resolved.Permissions}, nil
+		return billingauth.Principal{MerchantID: hp.MerchantID, Subject: hp.Subject, Permissions: resolved.Permissions}, nil
 	}
 	if resolved, err, handled := g.resolveServiceCredential(ctx, req, g.Authenticator != nil); handled {
 		if err != nil {
@@ -495,6 +495,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 				}
 				return billingauth.Principal{
 					MerchantID: resolved.MerchantID,
+					Subject:    resolved.DelegatedSubject,
 					UserContext: billingauth.UserContext{
 						UserID:        resolved.DelegatedSubject,
 						Email:         resolved.Email,
@@ -521,6 +522,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		}
 		return billingauth.Principal{
 			MerchantID: resolved.MerchantID,
+			Subject:    resolved.DelegatedSubject,
 			UserContext: billingauth.UserContext{
 				UserID:        resolved.DelegatedSubject,
 				Email:         resolved.Email,
@@ -587,7 +589,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	if mid != membershipMID {
 		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_context_mismatch"}
 	}
-	return billingauth.Principal{MerchantID: mid, UserContext: uc}, nil
+	return billingauth.Principal{MerchantID: mid, Subject: uc.UserID, UserContext: uc}, nil
 }
 
 func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Request, allowJWTFallthrough bool) (*controlplane.ResolvedServiceCredential, error, bool) {

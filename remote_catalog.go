@@ -18,6 +18,7 @@ type CatalogPage[T any] struct {
 // lists live products only; true lists archived products only.
 type ProductFilter struct {
 	PageOptions
+	CatalogID CatalogID
 	Archived  *bool
 	TierGroup string
 }
@@ -26,6 +27,7 @@ type ProductFilter struct {
 // live prices only; true lists archived prices only.
 type PriceFilter struct {
 	PageOptions
+	CatalogID CatalogID
 	ProductID ProductID
 	Archived  *bool
 	Currency  string
@@ -34,7 +36,7 @@ type PriceFilter struct {
 
 func (c *Client) CreateProduct(ctx context.Context, request CreateProductRequest) (*CatalogProduct, error) {
 	var out CatalogProduct
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/products", request, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, c.catalogPath()+"/products", request, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -45,7 +47,7 @@ func (c *Client) GetProduct(ctx context.Context, id ProductID) (*CatalogProduct,
 		return nil, err
 	}
 	var out CatalogProduct
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products/"+product, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/products/"+product, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -56,19 +58,22 @@ func (c *Client) GetProductByKey(ctx context.Context, key string) (*CatalogProdu
 		return nil, err
 	}
 	var out CatalogProduct
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products/by-key/"+key, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/products/by-key/"+key, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 func (c *Client) ListProducts(ctx context.Context, filter ProductFilter) (*CatalogPage[CatalogProduct], error) {
 	q := pageQuery(filter.PageOptions)
+	if !filter.CatalogID.IsZero() {
+		q.Set("catalog_id", filter.CatalogID.String())
+	}
 	if filter.Archived != nil {
 		q.Set("archived", strconv.FormatBool(*filter.Archived))
 	}
 	q.Set("tier_group", filter.TierGroup)
 	var out CatalogPage[CatalogProduct]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products?"+q.Encode(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/products?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -79,14 +84,14 @@ func (c *Client) UpdateProduct(ctx context.Context, id ProductID, request Update
 		return nil, err
 	}
 	var out CatalogProduct
-	if err := c.do(ctx, http.MethodPatch, "/v1/merchant/catalog/products/"+product, request, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, c.catalogPath()+"/products/"+product, request, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 func (c *Client) CreatePrice(ctx context.Context, request CreatePriceRequest) (*CatalogPrice, error) {
 	var out CatalogPrice
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/prices", request, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, c.catalogPath()+"/prices", request, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -97,7 +102,7 @@ func (c *Client) GetPrice(ctx context.Context, id PriceID) (*CatalogPrice, error
 		return nil, err
 	}
 	var out CatalogPrice
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/prices/"+price, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/prices/"+price, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -108,13 +113,16 @@ func (c *Client) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice, 
 		return nil, err
 	}
 	var out CatalogPrice
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/prices/by-key/"+key, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/prices/by-key/"+key, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 func (c *Client) ListPrices(ctx context.Context, filter PriceFilter) (*CatalogPage[CatalogPrice], error) {
 	q := pageQuery(filter.PageOptions)
+	if !filter.CatalogID.IsZero() {
+		q.Set("catalog_id", filter.CatalogID.String())
+	}
 	if filter.Archived != nil {
 		q.Set("archived", strconv.FormatBool(*filter.Archived))
 	}
@@ -124,7 +132,7 @@ func (c *Client) ListPrices(ctx context.Context, filter PriceFilter) (*CatalogPa
 		q.Set("product_id", filter.ProductID.String())
 	}
 	var out CatalogPage[CatalogPrice]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/prices?"+q.Encode(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/prices?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -135,7 +143,7 @@ func (c *Client) UpdatePrice(ctx context.Context, id PriceID, request UpdatePric
 		return nil, err
 	}
 	var out CatalogPrice
-	if err := c.do(ctx, http.MethodPatch, "/v1/merchant/catalog/prices/"+price, request, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, c.catalogPath()+"/prices/"+price, request, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -153,7 +161,7 @@ func (c *Client) SetPriceKey(ctx context.Context, id PriceID, key string) (*Cata
 		return nil, err
 	}
 	var out CatalogPrice
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/prices/"+price+"/key", struct {
+	if err := c.do(ctx, http.MethodPost, c.catalogPath()+"/prices/"+price+"/key", struct {
 		Key string `json:"key"`
 	}{Key: key}, &out); err != nil {
 		return nil, err

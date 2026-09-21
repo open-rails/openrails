@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 
+	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -69,6 +70,16 @@ type CatalogProduct = openrails.CatalogProduct
 type CreateProductRequest = openrails.CreateProductRequest
 
 func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (*CatalogProduct, error) {
+	owned, err := catalogOwnerRequest(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if owned && (req.EntitlementsSpec != nil || req.TierGroup != nil || req.TierRank != 0) {
+		return nil, catalog.ErrOwnerOperation
+	}
+	if owned && !req.CatalogID.IsZero() && req.CatalogID.UUID() != *catalogscope.QueryID(ctx) {
+		return nil, catalog.ErrOwnerScope
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -99,6 +110,7 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 		// (merchant_id, key) — same logical product → same id in every DB.
 		ID:               uuidutil.DeterministicID(uuidutil.DeterministicNamespace, tid.UUID().String(), req.Key),
 		MerchantID:       tid.UUID(),
+		CatalogID:        req.CatalogID.UUID(),
 		Key:              req.Key,
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
@@ -126,6 +138,13 @@ var ErrProductTierGroupInUse = catalog.ErrProductTierGroupInUse
 type UpdateProductRequest = openrails.UpdateProductRequest
 
 func (s *Service) UpdateProduct(ctx context.Context, id openrails.ProductID, req UpdateProductRequest) (*CatalogProduct, error) {
+	owned, err := catalogOwnerRequest(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if owned && (req.EntitlementsSpec != nil || req.SetEntitlements || req.TierGroup != nil || req.SetTierGroup || req.TierRank != nil || req.SkipRailSync) {
+		return nil, catalog.ErrOwnerOperation
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -242,6 +261,7 @@ func (s *Service) lookupStripeProductID(ctx context.Context, productID uuid.UUID
 func productToCatalogProduct(p *models.Product) *CatalogProduct {
 	return &CatalogProduct{
 		ID:               openrails.ProductID(p.ID),
+		CatalogID:        openrails.CatalogID(p.CatalogID),
 		Key:              p.Key,
 		DisplayName:      p.DisplayName,
 		Description:      p.Description,
@@ -322,6 +342,13 @@ func priceRequestCycleDays(req CreatePriceRequest) *int {
 }
 
 func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*CatalogPrice, error) {
+	owned, err := catalogOwnerRequest(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if owned && (req.PSPs != nil || req.PSPLinks != nil) {
+		return nil, catalog.ErrOwnerOperation
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -382,6 +409,12 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	// to a NEW id (the archived old row keeps its own); equal terms always hash
 	// equal, so the id can never violate that unique constraint.
 	priceID := priceDeterministicID(req.ProductID.UUID(), req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)
+	if owned {
+		req.PSPs, err = s.creatorProviderKeys(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	rails, providerStates, pending, err := s.resolveProviders(ctx, product, req, priceID)
 	if err != nil {
@@ -506,6 +539,13 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 type UpdatePriceRequest = openrails.UpdatePriceRequest
 
 func (s *Service) UpdatePrice(ctx context.Context, id openrails.PriceID, req UpdatePriceRequest) (*CatalogPrice, error) {
+	owned, err := catalogOwnerRequest(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if owned && (req.PSPLinks != nil || req.ReplacePSPLinks || req.SkipRailSync) {
+		return nil, catalog.ErrOwnerOperation
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
