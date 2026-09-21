@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
 // NMISaleMode scripts how the loopback gateway answers a classic sale.
@@ -220,10 +221,10 @@ func (g *FakeNMIGateway) serveSubscription(w http.ResponseWriter, method, id str
 			http.Error(w, "fixture enrollment has invalid first charge date", http.StatusInternalServerError)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"object": "subscription", "id": enrollment.SubscriptionID, "customer_vault_id": enrollment.Vault,
-			"delayed_condition": "active", "paused_subscription": false, "next_billing_date": start.Format("2006-01-02"),
-			"plan": map[string]any{"id": enrollment.Plan, "plan_amount": enrollment.Amount, "day_frequency": "30", "plan_payments": "0"},
+		_ = json.NewEncoder(w).Encode(nmi.V5Subscription{
+			Object: "subscription", ID: enrollment.SubscriptionID, CustomerVaultID: enrollment.Vault,
+			DelayedCondition: "active", PausedSubscription: false, NextBillingDate: start.Format("2006-01-02"),
+			Plan: &nmi.V5Plan{ID: enrollment.Plan, PlanAmount: enrollment.Amount, DayFrequency: "30", PlanPayments: "0"},
 		})
 		return
 	}
