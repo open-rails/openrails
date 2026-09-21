@@ -239,6 +239,9 @@ func LoadCollectedReceipt(in gen.OpenrailsRailIntent) (CollectedReceipt, bool, e
 	}
 	// A receipt is not usable custody when the same operation also claims
 	// definitive refusal/nonexecution, including legacy contradictory rows.
+	if _, exists := evidence[qualifiedInitialRefusalKey]; exists {
+		return r, true, errors.New("collected receipt contradicts retained initial refusal")
+	}
 	if _, exists := evidence[rebillDeclineKey]; exists {
 		return r, true, errors.New("collected receipt contradicts retained decline")
 	}

@@ -510,8 +510,9 @@ WHERE id = sqlc.arg(id)::uuid
   AND intent_type = sqlc.arg(intent_type)::text
   AND payload = sqlc.arg(payload)::jsonb
   AND ((sqlc.arg(evidence_key)::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale','initial_membership', 'subscription_collection')
-           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['rebill_decline','qualified_invoice_nonexecution']))
-       OR (sqlc.arg(evidence_key)::text = 'qualified_enrollment' AND intent_type IN ('nmi_upgrade','initial_membership'))
+           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['rebill_decline','qualified_invoice_nonexecution','qualified_initial_refusal']))
+       OR (sqlc.arg(evidence_key)::text = 'qualified_enrollment' AND intent_type IN ('nmi_upgrade','initial_membership')
+           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_initial_refusal'))
        OR (sqlc.arg(evidence_key)::text='qualified_initial_refusal' AND intent_type='initial_membership'
            AND NOT (coalesce(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','qualified_enrollment'])
            AND ((sqlc.arg(receipt)::jsonb->>'kind'='not_submitted' AND NOT (coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted'))
