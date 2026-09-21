@@ -22,7 +22,7 @@ func TestDefaultTokenTypeNeedsBothAxes(t *testing.T) {
 		// silently skew the approval_rate dimension it exists to measure.
 		{"nmi", "", ""},
 		// Non-card rails stamp nothing regardless.
-		{"stripe", models.CustodianPSP, ""},
+		{"stripe", models.CustodianPSP, charge.TokenTypePSPToken},
 		{"ccbill", "", ""},
 		{"solana", "", ""},
 		// The retired rail value is not a rail.

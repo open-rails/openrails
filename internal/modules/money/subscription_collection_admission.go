@@ -120,6 +120,15 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 		if err != nil {
 			return err
 		}
+		if method.CustodianID != nil {
+			custodian, err := q.GetCustodian(ctx, gen.GetCustodianParams{MerchantID: mid.UUID(), ID: *method.CustodianID})
+			if err != nil {
+				return err
+			}
+			if custodian.Archived {
+				return errors.New("archived custodian cannot admit a new engine renewal")
+			}
+		}
 		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method), engineHyperSwitchPointer(method.Custodian, binding), true); err != nil {
 			return err
 		}
