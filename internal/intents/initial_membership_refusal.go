@@ -23,6 +23,7 @@ type initialMembershipRefusal struct {
 	LocalizationID        string         `json:"localization_id"`
 	StripePaymentIntentID string         `json:"stripe_payment_intent_id,omitempty"`
 	StripeFailureCode     string         `json:"stripe_failure_code,omitempty"`
+	StripeDeclineCode     string         `json:"stripe_decline_code,omitempty"`
 }
 
 func (r InitialMembershipRefusal) Validate(in gen.OpenrailsRailIntent) error {
@@ -74,7 +75,11 @@ func (r InitialMembershipRefusal) Outcome() Outcome {
 		return TerminalWithEvidence("initial payment was refused before provider dispatch", map[string]any{"not_executed": true})
 	}
 	if r.data.Kind == "stripe_canceled" {
-		return TerminalWithEvidence("Stripe enrollment declined", map[string]any{"declined": true, "failure_code": r.data.StripeFailureCode, "stripe_payment_intent_id": r.data.StripePaymentIntentID})
+		code := r.data.StripeDeclineCode
+		if code == "" {
+			code = r.data.StripeFailureCode
+		}
+		return TerminalWithEvidence("Stripe enrollment declined", map[string]any{"declined": true, "failure_code": code, "stripe_payment_intent_id": r.data.StripePaymentIntentID})
 	}
 	if r.data.Kind == "provider_declined" {
 		return TerminalWithEvidence("native enrollment declined", map[string]any{"declined": true, "response_code": r.data.ResponseCode, "localization_id": r.data.LocalizationID})
@@ -182,7 +187,7 @@ func (s *Store) RetainInitialStripeDecline(ctx context.Context, in gen.Openrails
 	if err != nil {
 		return err
 	}
-	fact := InitialMembershipRefusal{data: initialMembershipRefusal{Binding: binding, Kind: "stripe_canceled", StripePaymentIntentID: result.PaymentIntentID, StripeFailureCode: result.FailureCode}}
+	fact := InitialMembershipRefusal{data: initialMembershipRefusal{Binding: binding, Kind: "stripe_canceled", StripePaymentIntentID: result.PaymentIntentID, StripeFailureCode: result.FailureCode, StripeDeclineCode: result.DeclineCode}}
 	if err := fact.Validate(current); err != nil {
 		return err
 	}

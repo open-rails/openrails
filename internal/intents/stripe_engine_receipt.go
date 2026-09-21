@@ -48,6 +48,7 @@ func StripeEngineParams(in gen.OpenrailsRailIntent) (subscriptions.StripeEngineP
 		if err != nil {
 			return params, err
 		}
+		params.CustomerInitiated = in.Origin == string(OriginUser)
 		params.CustomerID = p.Renewal.CustomerID
 		params.Instrument = p.Instrument
 		params.AmountMinor = p.AmountMinor

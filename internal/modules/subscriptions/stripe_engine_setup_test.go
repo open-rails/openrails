@@ -83,3 +83,26 @@ func TestStripeEngineDeclineCancelsOriginalBeforeTerminal(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, 1, cancels)
 }
+
+func TestStripeEngineCanceledProofPreservesIssuerDecline(t *testing.T) {
+	for _, code := range []string{"insufficient_funds", "expired_card", "stolen_card"} {
+		t.Run(code, func(t *testing.T) {
+			s, p := engineFixture()
+			pi := enginePI(p)
+			pi["status"] = "requires_payment_method"
+			pi["last_payment_error"] = map[string]any{"code": "card_declined", "decline_code": code}
+			installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+				if r.Method == "POST" {
+					require.Equal(t, "/v1/payment_intents/pi_fixture/cancel", r.URL.Path)
+					pi["status"] = "canceled"
+					delete(pi, "last_payment_error")
+				}
+				return engineResponse(200, pi), nil
+			})
+			result, err := s.FinalizeEngineDecline(context.Background(), p, "pi_fixture")
+			require.NoError(t, err)
+			require.Equal(t, "canceled", result.FailureCode)
+			require.Equal(t, code, result.DeclineCode)
+		})
+	}
+}
