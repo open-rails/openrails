@@ -161,15 +161,17 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 				return err
 			}
 			payload, ok := p.Payload.(subscriptions.SubscriptionCollectionPayload)
-			if !ok || p.Origin != OriginSystem || p.PspID == uuid.Nil || p.CustodianID == uuid.Nil {
+			if !ok || p.Origin != OriginSystem || p.PspID == uuid.Nil {
 				return errors.New("engine admission requires typed system-owned terms")
 			}
-			handle := paymentmethods.CustodianHandle{Custodian: p.CustodianID, Method: payload.Instrument.RailMethodRef}
-			if err := paymentmethods.LockCustodianHandles(ctx, d.Gen(ctx), p.MerchantID, handle); err != nil {
-				return err
-			}
-			if err := paymentmethods.RequireCustodianHandleAvailable(ctx, d.Gen(ctx), p.MerchantID, handle); err != nil {
-				return err
+			if p.CustodianID != uuid.Nil {
+				handle := paymentmethods.CustodianHandle{Custodian: p.CustodianID, Method: payload.Instrument.RailMethodRef}
+				if err := paymentmethods.LockCustodianHandles(ctx, d.Gen(ctx), p.MerchantID, handle); err != nil {
+					return err
+				}
+				if err := paymentmethods.RequireCustodianHandleAvailable(ctx, d.Gen(ctx), p.MerchantID, handle); err != nil {
+					return err
+				}
 			}
 			method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: p.MerchantID, ID: payload.PaymentMethodID})
 			if err != nil {

@@ -11,6 +11,8 @@ import (
 )
 
 type CreateMembershipParams struct {
+	// PaymentCustodian is the frozen credential custody of the accepted payment.
+	PaymentCustodian string
 	// Prepared is supplied by a qualified durable initial-enrollment operation.
 	Prepared              *InitialMembershipTerms
 	UserID                string
