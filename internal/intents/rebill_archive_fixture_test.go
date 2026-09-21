@@ -33,7 +33,9 @@ func terminalRebillArchiveFixture(t *testing.T, refused, customer bool) (*db.DB,
 	var accepted gen.OpenrailsRailIntent
 	var err error
 	if customer {
-		accepted, _, err = handler.EnqueueCustomer(fx.handlerCtx(), fx.subID, fx.payload.Renewal.CustomerID, uuid.NewString(), nil)
+		// This real key hashes to a PAN-looking digit run. Its typed identity
+		// must survive export without exempting arbitrary customer text.
+		accepted, _, err = handler.EnqueueCustomer(fx.handlerCtx(), fx.subID, fx.payload.Renewal.CustomerID, "archive-key-1461", nil)
 	} else {
 		accepted, err = handler.EnqueueScheduled(fx.handlerCtx(), fx.subID)
 	}
