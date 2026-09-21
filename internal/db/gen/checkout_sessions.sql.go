@@ -189,7 +189,7 @@ func (q *Queries) CompletePaymentMethodSetupSession(ctx context.Context, arg Com
 
 const countInvalidCheckoutCaptureReferences = `-- name: CountInvalidCheckoutCaptureReferences :one
 SELECT count(*) FROM openrails.checkout_sessions cs
-WHERE cs.merchant_id=$1::uuid AND cs.mode='payment_method'
+WHERE cs.merchant_id=$1::uuid AND cs.mode='payment_method' AND cs.rail='nmi'
 AND (
  NOT EXISTS(SELECT 1 FROM openrails.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
  OR (cs.status='succeeded' AND EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id<>cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
@@ -201,6 +201,19 @@ AND (
 // deletion leaves historical replay intact and does not recreate the method.
 func (q *Queries) CountInvalidCheckoutCaptureReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countInvalidCheckoutCaptureReferences, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countInvalidStripeSetupReferences = `-- name: CountInvalidStripeSetupReferences :one
+SELECT count(*) FROM openrails.checkout_sessions cs
+WHERE cs.merchant_id=$1::uuid AND cs.mode='payment_method' AND cs.rail='stripe' AND cs.status='succeeded'
+AND EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.id::text=cs.rail_state->>'payment_method_id' AND pm.customer_id<>cs.customer_id)
+`
+
+func (q *Queries) CountInvalidStripeSetupReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countInvalidStripeSetupReferences, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err

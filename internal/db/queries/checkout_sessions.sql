@@ -159,7 +159,7 @@ RETURNING *;
 -- legitimate instrument remap. A still-present method must belong to this payer; its legitimate later
 -- deletion leaves historical replay intact and does not recreate the method.
 SELECT count(*) FROM openrails.checkout_sessions cs
-WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.mode='payment_method'
+WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.mode='payment_method' AND cs.rail='nmi'
 AND (
  NOT EXISTS(SELECT 1 FROM openrails.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
  OR (cs.status='succeeded' AND EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id<>cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
@@ -172,3 +172,8 @@ SELECT sqlc.embed(p),sqlc.embed(c) FROM openrails.psps p
 JOIN openrails.custodians c ON c.id=p.custodian_id AND c.merchant_id=p.merchant_id
 WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(psp_id)::uuid
 FOR SHARE OF p,c;
+
+-- name: CountInvalidStripeSetupReferences :one
+SELECT count(*) FROM openrails.checkout_sessions cs
+WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.mode='payment_method' AND cs.rail='stripe' AND cs.status='succeeded'
+AND EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.id::text=cs.rail_state->>'payment_method_id' AND pm.customer_id<>cs.customer_id);
