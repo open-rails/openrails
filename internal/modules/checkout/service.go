@@ -627,6 +627,11 @@ func (s *CheckoutService) processNMISubscription(ctx context.Context, req *Check
 // initialMembershipResponseFromIntent rebuilds the checkout response from a
 // succeeded create intent's evidence.
 func initialMembershipResponseFromIntent(intent gen.OpenrailsRailIntent) (*CheckoutResponse, error) {
+	if intent.Status == intents.StatusSucceeded {
+		if err := intents.ValidateInitialMembershipTerminal(intent); err != nil {
+			return nil, err
+		}
+	}
 	if intent.Status == intents.StatusFailedTerminal {
 		return nil, terminalCheckoutError(intent, "initial enrollment refused")
 	}
@@ -647,11 +652,18 @@ func initialMembershipResponseFromIntent(intent gen.OpenrailsRailIntent) (*Check
 	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
 		return nil, fmt.Errorf("subscription created but evidence unreadable: %w", err)
 	}
+	accepted, err := subscriptions.DecodeInitialMembershipPayload(intent)
+	if err != nil {
+		return nil, err
+	}
 	resp := &CheckoutResponse{
 		Status:        evidence.Status,
 		Action:        "new",
 		Message:       evidence.Message,
 		TransactionID: evidence.TransactionID,
+	}
+	if accepted.Terms.PaymentID != uuid.Nil {
+		resp.PaymentID = &accepted.Terms.PaymentID
 	}
 	if resp.Status == "" {
 		resp.Status = "success"

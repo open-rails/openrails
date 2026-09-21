@@ -246,7 +246,7 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 	}
 }
 
-func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailIntent {
+func (fx *subIntentFixture) prepare(t *testing.T) {
 	t.Helper()
 	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
 	if !fx.prepared {
@@ -291,6 +291,12 @@ func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailInt
 			fx.gateway.recurringAmount = "0.00"
 		}
 	}
+
+}
+
+func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailIntent {
+	fx.prepare(t)
+	pspID := fx.payload.Terms.PSPID
 
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),

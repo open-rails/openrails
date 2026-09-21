@@ -69,6 +69,12 @@ func TestInitialEnrollmentAcceptedModes(t *testing.T) {
 		replay := fx.enqueueAndExecute(t)
 		require.Equal(t, intents.StatusSucceeded, replay.Status)
 		require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+		another := fx.payload
+		another.CheckoutIdempotencyKey = "second-session-" + uuid.NewString()
+		another.Terms.SubscriptionID, another.Terms.PaymentID = uuid.New(), uuid.New()
+		_, err := fx.runner.Store.Enqueue(fx.ctx, intents.EnqueueParams{MerchantID: result.MerchantID, Provider: result.Rail, PspID: another.Terms.PSPID, IntentType: TypeInitialMembership, PriceID: &another.Terms.PriceID, Payload: another, IdempotencyKey: InitialMembershipIdempotencyKey(another.CheckoutIdempotencyKey), NextAttemptAt: another.Terms.AcceptedAt, Origin: intents.OriginUser, OriginReason: "second session"})
+		require.ErrorContains(t, err, "already has a subscription")
+		require.EqualValues(t, 1, fx.gateway.createCalls.Load())
 	})
 	t.Run("paid_now_requires_charge", initialEnrollmentMissingChargeCannotActivatePaidAccess)
 	t.Run("provider_decline_has_bound_custody", func(t *testing.T) {
@@ -80,6 +86,18 @@ func TestInitialEnrollmentAcceptedModes(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, found)
 		require.NoError(t, intents.ValidateInitialMembershipTerminal(in))
+		for _, mutation := range []map[string]any{{"declined": false, "request_refused": true}, {"not_executed": true}, {"response_code": 299}, {"localization_id": "another-refusal"}, {"transaction_id": "another-payment"}} {
+			var altered map[string]any
+			require.NoError(t, json.Unmarshal(in.ResultEvidence, &altered))
+			for key, value := range mutation {
+				altered[key] = value
+			}
+			forged := in
+			forged.ResultEvidence, err = json.Marshal(altered)
+			require.NoError(t, err)
+			require.Error(t, intents.ValidateInitialMembershipTerminal(forged), "terminal flags must match sealed refusal")
+		}
+
 		var attempts int
 		require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.payments WHERE id=$1 AND status='failed' AND money_movement='none'`, fx.payload.Terms.PaymentID).Scan(&attempts))
 		require.Equal(t, 1, attempts)

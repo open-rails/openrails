@@ -34,13 +34,15 @@ func ValidateInitialMembershipTerminal(in gen.OpenrailsRailIntent) error {
 		Declined               bool      `json:"declined"`
 		NotExecuted            bool      `json:"not_executed"`
 		RequestRefused         bool      `json:"request_refused"`
+		ResponseCode           int       `json:"response_code"`
+		LocalizationID         string    `json:"localization_id"`
 	}
 	if err := json.Unmarshal(in.ResultEvidence, &evidence); err != nil {
 		return err
 	}
 	switch in.Status {
 	case StatusSucceeded:
-		if !scheduled || !evidence.Submitted || evidence.SubscriptionID != p.Terms.SubscriptionID || evidence.ProviderSubscriptionID != schedule.SubscriptionID() || evidence.Declined || evidence.NotExecuted || evidence.RequestRefused || (p.Terms.Amount > 0) != paid {
+		if (p.NativeSchedule != nil) != scheduled || !evidence.Submitted || evidence.SubscriptionID != p.Terms.SubscriptionID || evidence.ProviderSubscriptionID != schedule.SubscriptionID() || evidence.Declined || evidence.NotExecuted || evidence.RequestRefused || (p.Terms.Amount > 0) != paid {
 			return errors.New("initial terminal result contradicts accepted schedule and payment custody")
 		}
 		if paid && evidence.TransactionID != receipt.TransactionID() || !paid && evidence.TransactionID != "" {
@@ -54,14 +56,15 @@ func ValidateInitialMembershipTerminal(in gen.OpenrailsRailIntent) error {
 			return errors.New("initial immediate result has another phase")
 		}
 	case StatusFailedTerminal:
-		_, refused, err := LoadInitialMembershipRefusal(in)
+		refusal, refused, err := LoadInitialMembershipRefusal(in)
 		if err != nil {
 			return err
 		}
 		if !refused {
 			return errors.New("initial terminal refusal has no bound custody")
 		}
-		if scheduled || paid || (!evidence.Declined && !evidence.NotExecuted && !evidence.RequestRefused) || (evidence.NotExecuted && evidence.Submitted) {
+		declined := refusal.data.Kind == "provider_declined"
+		if scheduled || paid || evidence.RequestRefused || evidence.Declined != declined || evidence.NotExecuted == declined || evidence.Submitted != declined || evidence.ResponseCode != refusal.data.ResponseCode || evidence.LocalizationID != refusal.data.LocalizationID || evidence.SubscriptionID != uuid.Nil || evidence.ProviderSubscriptionID != "" || evidence.TransactionID != "" {
 			return errors.New("initial refusal contradicts provider custody or its submission fence")
 		}
 	default:

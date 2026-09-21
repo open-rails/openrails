@@ -187,6 +187,25 @@ func (q *Queries) GrantCreditDeposited(ctx context.Context, arg GrantCreditDepos
 	return deposited, err
 }
 
+const hasInitialMembershipGrant = `-- name: HasInitialMembershipGrant :one
+SELECT EXISTS(SELECT 1 FROM openrails.grants
+WHERE merchant_id=$1::uuid AND source_type='subscription'
+  AND source_id=$2::uuid::text AND event='grant')::boolean
+`
+
+type HasInitialMembershipGrantParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// Refused or still-pending initial membership cannot own a grant at any instant.
+func (q *Queries) HasInitialMembershipGrant(ctx context.Context, arg HasInitialMembershipGrantParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasInitialMembershipGrant, arg.MerchantID, arg.SubscriptionID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const insertGrant = `-- name: InsertGrant :one
 
 INSERT INTO openrails.grants (
