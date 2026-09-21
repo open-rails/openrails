@@ -58,13 +58,13 @@ func TestCollectionPolicyUpgradePreservesLegacyBook(t *testing.T) {
 	}
 	for _, c := range []cohort{{"stripe", "provider", "provider", false}, {"nmi", "provider", "provider", false}, {"nmi", "openrails", "provider_dunning", false}, {"ccbill", "provider", "provider", false}, {"solana", "provider", "engine", true}, {"solana", "provider", "provider", false}} {
 		psp, pm, product, price, sub := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
-		exec(`INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id) VALUES($1,$2,$3,'test',$1::text)`, psp, mid, c.rail)
+		exec(`INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id) VALUES($1,$2,$3,'test',$1::uuid::text)`, psp, mid, c.rail)
 		exec(`INSERT INTO openrails.payment_methods(id,merchant_id,customer_id,psp_id,rail,rebill_driver,rail_customer_ref,initial_transaction_id) VALUES($1,$2,$3,$4,$5,$6,'original-vault','original-initial')`, pm, mid, cid, psp, c.rail, c.driver)
-		exec(`INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$1::text,'Preserved')`, product, mid)
+		exec(`INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$1::uuid::text,'Preserved')`, product, mid)
 		exec(`INSERT INTO openrails.prices(id,merchant_id,product_id,amount,currency) VALUES($1,$2,$3,5000000,'USD')`, price, mid, product)
-		exec(`INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,payment_method_id,rail,rail_subscription_id,status,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$1::text,'active','2026-09-01','2026-10-01')`, sub, mid, cid, product, price, psp, pm, c.rail)
+		exec(`INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,payment_method_id,rail,rail_subscription_id,status,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$1::uuid::text,'active','2026-09-01','2026-10-01')`, sub, mid, cid, product, price, psp, pm, c.rail)
 		if c.sidecar {
-			exec(`INSERT INTO openrails.solana_subscriptions(merchant_id,subscription_id,subscriber_wallet,authority_pda,subscription_pda,plan_pda,merchant_address,mint,plan_created_at_fingerprint,next_pull_at) VALUES($1,$2,'wallet','authority',$2::text,'plan','merchant','mint',1,'2026-10-01')`, mid, sub)
+			exec(`INSERT INTO openrails.solana_subscriptions(merchant_id,subscription_id,subscriber_wallet,authority_pda,subscription_pda,plan_pda,merchant_address,mint,plan_created_at_fingerprint,next_pull_at) VALUES($1,$2,'wallet','authority',$2::uuid::text,'plan','merchant','mint',1,'2026-10-01')`, mid, sub)
 		}
 	}
 	tables := []string{"subscriptions", "payment_methods", "products", "prices", "solana_subscriptions"}
