@@ -728,6 +728,8 @@ SET status = 'expired',
     claimed_until = NULL,
     updated_at = now()
 WHERE pi.merchant_id = $1::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
+  AND NOT (pi.intent_type = 'invoice_collection' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
   AND pi.expires_at IS NOT NULL
   AND pi.expires_at <= $2::timestamptz
   AND NOT (
@@ -1737,6 +1739,8 @@ SET status = 'failed_retryable',
     claimed_until = NULL,
     updated_at = now()
 WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
+  AND NOT (intent_type = 'invoice_collection' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (intent_type = 'nmi_sale' AND coalesce(result_evidence, '{}'::jsonb) ? 'sale_submitted')
 `
 
 type MarkRailIntentFailedRetryableParams struct {
@@ -1913,6 +1917,7 @@ SET status = 'pending',
     claimed_until = NULL,
     updated_at = now()
 WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status = 'in_flight'
+  AND NOT (intent_type = 'invoice_collection' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
   -- A stale no-send result must not undo another executor's payment fence.
   AND (intent_type <> 'nmi_sale' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'sale_submitted'))
 `
@@ -2049,7 +2054,10 @@ WHERE id = $3::uuid
   AND intent_type = $6::text
   AND payload = $7::jsonb
   AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale'))
-       OR ($1::text = 'qualified_enrollment' AND intent_type = 'nmi_upgrade'))
+       OR ($1::text = 'qualified_enrollment' AND intent_type = 'nmi_upgrade')
+       OR ($1::text = 'qualified_invoice_nonexecution' AND intent_type = 'invoice_collection'
+           AND COALESCE(result_evidence->>'submitted_at', '') = $2::jsonb->>'submitted_at'
+           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')))
   AND status IN ('in_flight', 'unknown_needs_verify')
   AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? $1::text)
        OR result_evidence->$1::text = $2::jsonb)

@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -134,19 +135,7 @@ func (s *CheckoutSessionService) resolveCapture(ctx context.Context, pspID uuid.
 	if err != nil {
 		return state, nil, err
 	}
-	var versions map[string]int
-	if json.Unmarshal(custodian.CredentialVersions, &versions) != nil || versions[custodians.SecretAPIKey] < 0 {
-		return state, nil, ErrCheckoutCaptureUnavailable
-	}
-	name, err := merchants.CustodianSecretName(custodian.Kind, custodian.Environment, custodian.AccountID, custodians.SecretAPIKey)
-	if err != nil {
-		return state, nil, err
-	}
-	secret, err := merchants.ReadSecretRef(ctx, s.captureSecrets, owner, merchants.SecretRef{Name: name, MinVersion: versions[custodians.SecretAPIKey]})
-	if err != nil {
-		return state, nil, ErrCheckoutCaptureUnavailable
-	}
-	client, err := hyperswitch.New(hyperswitch.Config{BaseURL: state.APIBaseURL, MerchantID: state.AccountID, ProfileID: state.ProfileID, APIKey: hyperswitch.Secret(secret.Value), ReadOnly: s.config.IsProviderReadOnly()})
+	client, err := railresolve.HyperSwitchClient(ctx, s.config, s.captureSecrets, owner, custodian)
 	return state, client, err
 }
 func sameCaptureAccount(a, b models.CheckoutCapture) bool {

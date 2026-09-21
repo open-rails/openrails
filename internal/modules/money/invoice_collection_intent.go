@@ -100,6 +100,11 @@ func (h *InvoiceCollectionHandler) CheckRelevance(context.Context, gen.Openrails
 }
 
 func (h *InvoiceCollectionHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
+	current, err := intents.NewStore(h.DB).Get(ctx, intent.ID)
+	if err != nil {
+		return intents.Ambiguous("load canonical collection progress: " + err.Error())
+	}
+	intent = current
 	p, err := intents.DecodeInvoiceCollectionPayload(intent)
 	if err != nil {
 		return intents.Parked(err.Error())
@@ -107,7 +112,7 @@ func (h *InvoiceCollectionHandler) Execute(ctx context.Context, intent gen.Openr
 	if outcome, done := h.finalizeFromEvidence(ctx, intent, p); done {
 		return outcome
 	}
-	if intent.Attempts > 1 || intents.EvidenceString(intent, collectionEvidenceSubmittedAt) != "" {
+	if intents.EvidenceString(intent, collectionEvidenceSubmittedAt) != "" {
 		// Resumed after a possible submission. Stripe replays its idempotent
 		// sequence; NMI-family rails may only read.
 		if p.Rail == string(models.RailStripe) {
@@ -130,14 +135,26 @@ func (h *InvoiceCollectionHandler) Execute(ctx context.Context, intent gen.Openr
 	}
 	// Write-ahead fence: from here on the charge may exist at the provider.
 	store := intents.NewStore(h.DB)
-	first, err := store.RecordProgressIfAbsent(ctx, intent.ID, collectionEvidenceSubmittedAt, h.now().Format(time.RFC3339Nano))
+	proof, first, err := store.BeginInvoiceCollection(ctx, intent, h.now())
 	if err != nil {
 		return intents.Parked("record submission fence: " + err.Error())
 	}
 	if !first {
 		return h.Verify(ctx, intent)
 	}
+
 	res, err := prepared.Submit(ctx)
+	if errors.Is(err, charge.ErrInstrumentChanged) {
+		// Only this executor owns the freshly inserted fence, and the scoped
+		// charger raises this refusal before entering its provider callback.
+		// An existing marker never reaches this path or authorizes nonexecution.
+		return h.finalizeNotExecuted(ctx, intent, p, "instrument_changed", err.Error(), proof)
+	}
+	if errors.Is(err, charge.ErrNotDispatched) {
+		// This fresh owner alone knows its call never entered a provider POST.
+		// Resumed operations branch to Verify before reaching Submit above.
+		return h.finalizeNotExecuted(ctx, intent, p, "not_dispatched", charge.ErrNotDispatched.Error(), proof)
+	}
 	return h.classify(ctx, intent, p, res, err)
 }
 
@@ -154,6 +171,7 @@ func (h *InvoiceCollectionHandler) chargeRequest(intent gen.OpenrailsRailIntent,
 		IdempotencyKey:      intent.ID.String(),
 		Description:         p.Description,
 		Instrument:          p.Instrument,
+		HyperSwitch:         p.HyperSwitch,
 		Initiator:           p.Initiator,
 		ProviderCustomerRef: p.ProviderCustomerRef,
 	}
@@ -218,12 +236,20 @@ func (h *InvoiceCollectionHandler) stripeReplayable(intent gen.OpenrailsRailInte
 // Verify reconciles a submitted operation from retained evidence or a
 // positive provider read. An empty search never authorizes another send.
 func (h *InvoiceCollectionHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
+	current, err := intents.NewStore(h.DB).Get(ctx, intent.ID)
+	if err != nil {
+		return intents.Ambiguous("load canonical collection progress: " + err.Error())
+	}
+	intent = current
 	p, err := intents.DecodeInvoiceCollectionPayload(intent)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
 	if outcome, done := h.finalizeFromEvidence(ctx, intent, p); done {
 		return outcome
+	}
+	if intents.EvidenceString(intent, collectionEvidenceSubmittedAt) == "" {
+		return intents.Retryable("collection has no submission fence; resume execution")
 	}
 	if p.Rail == string(models.RailStripe) {
 		if !h.stripeReplayable(intent) {
@@ -257,7 +283,10 @@ func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.Openr
 	if receipt := intents.EvidenceString(intent, collectionEvidenceTransactionID); receipt != "" {
 		return intents.Outcome{}, intents.RejectResolution("operation already holds receipt %s; its verifier completes settlement", receipt)
 	}
-	if intents.EvidenceString(intent, collectionEvidenceFailureCode) != "" || intents.EvidenceString(intent, collectionEvidenceNotExecuted) != "" {
+	if _, found, err := intents.LoadInvoiceNonexecution(intent); err != nil || found {
+		return intents.Outcome{}, intents.RejectResolution("operation holds nonexecution custody; its verifier must complete it")
+	}
+	if intents.EvidenceString(intent, collectionEvidenceFailureCode) != "" {
 		return intents.Outcome{}, intents.RejectResolution("operation already holds a definitive provider answer; its verifier completes it")
 	}
 	if h.Verifier == nil {
@@ -267,10 +296,11 @@ func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.Openr
 		if contradiction := intents.EvidenceString(intent, collectionEvidenceContradiction); contradiction != "" {
 			return intents.Outcome{}, intents.RejectResolution("provider evidence contradicts this operation (%s); non-execution cannot be attested, repair from the provider record", contradiction)
 		}
-		if err := h.Verifier.ConfirmCollectionNotExecuted(ctx, intent); err != nil {
+		proof, err := intents.NewStore(h.DB).ConfirmInvoiceNotExecuted(ctx, intent, h.Verifier)
+		if err != nil {
 			return intents.Outcome{}, intents.RejectResolution("%v", err)
 		}
-		return h.finalizeProviderNotExecuted(ctx, intent, p), nil
+		return h.finalizeNotExecuted(ctx, intent, p, "", "", proof), nil
 	}
 	receipt, found, err := h.Verifier.ReadCollectionReceipt(ctx, intent, resolution.ProviderReference)
 	if err != nil {
@@ -293,6 +323,11 @@ func contradicted(err error) intents.Outcome {
 // attempt fails without a decline and the invoice becomes due again. An
 // operation carrying the fence belongs to its verifier.
 func (h *InvoiceCollectionHandler) ResolveUnsent(ctx context.Context, intent gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+	current, err := intents.NewStore(h.DB).Get(ctx, intent.ID)
+	if err != nil {
+		return intents.Outcome{}, err
+	}
+	intent = current
 	p, err := intents.DecodeInvoiceCollectionPayload(intent)
 	if err != nil {
 		return intents.Outcome{}, err
@@ -306,7 +341,7 @@ func (h *InvoiceCollectionHandler) ResolveUnsent(ctx context.Context, intent gen
 	if intents.EvidenceString(intent, collectionEvidenceSubmittedAt) != "" {
 		return intents.Outcome{}, intents.RejectResolution("operation %s crossed its submission fence; only its verifier or an unknown-state resolution can close it", intent.ID)
 	}
-	return h.finalizeProviderNotExecuted(ctx, intent, p), nil
+	return h.finalizeNotExecuted(ctx, intent, p, "not_executed", "collection was not submitted"), nil
 }
 
 // finalizeFromEvidence retries local effects for an answer the operation
@@ -316,10 +351,23 @@ func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, int
 	if rail == "" {
 		rail = p.Rail
 	}
-	if receipt, found, err := intents.LoadCollectedReceipt(intent); err != nil {
+	nonexecution, hasNonexecution, err := intents.LoadInvoiceNonexecution(intent)
+	if err != nil {
+		return intents.Ambiguous("stored nonexecution rejected: " + err.Error()), true
+	}
+	receipt, hasReceipt, err := intents.LoadCollectedReceipt(intent)
+	if err != nil {
 		return intents.Ambiguous("stored receipt rejected: " + err.Error()), true
-	} else if found {
+	}
+	if hasReceipt && hasNonexecution {
+		return intents.Ambiguous("qualified payment contradicts qualified nonexecution"), true
+	}
+	if hasReceipt {
 		return h.finalizeSettle(ctx, intent, receipt), true
+	}
+	if hasNonexecution {
+		code, reason := nonexecution.Refusal()
+		return h.finalizeNotExecuted(ctx, intent, p, code, reason), true
 	}
 	if candidate, found, err := intents.LoadCollectionCandidate(intent); err != nil {
 		return intents.Ambiguous(err.Error()), true
@@ -330,7 +378,8 @@ func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, int
 		}
 		return h.qualifyAndSettle(ctx, intent, reference), true
 	}
-	if intents.EvidenceString(intent, collectionEvidenceNotExecuted) != "" {
+
+	if intent.Status == intents.StatusFailedTerminal && intents.EvidenceString(intent, collectionEvidenceNotExecuted) != "" {
 		code := intents.EvidenceString(intent, collectionEvidenceFailureCodeNotExecuted)
 		return h.finalizeNotExecuted(ctx, intent, p, code, intents.EvidenceString(intent, collectionEvidenceFailureMsg)), true
 	}
@@ -487,6 +536,9 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 	var invoice *models.Invoice
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: intent.MerchantID, ID: p.CustomerID}); err != nil {
+			return err
+		}
 		complete := func() error {
 			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteInvoiceCollection(ctx, intent, intents.TerminalWithEvidence("collection refused: "+failureCode, evidence), now)
 		}
@@ -546,23 +598,29 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 	return intents.TerminalWithEvidence("collection refused: "+failureCode, evidence)
 }
 
-// finalizeProviderNotExecuted records provider-confirmed non-execution.
-func (h *InvoiceCollectionHandler) finalizeProviderNotExecuted(ctx context.Context, intent gen.OpenrailsRailIntent, p intents.InvoiceCollectionPayload) intents.Outcome {
-	return h.finalizeNotExecuted(ctx, intent, p, "", "")
-}
-
 // finalizeNotExecuted records a collection that provably never charged: the
 // attempt fails without a decline and the invoice is due again immediately.
 // code/reason default to provider-confirmed non-execution.
-func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, intent gen.OpenrailsRailIntent, p intents.InvoiceCollectionPayload, code, reason string) intents.Outcome {
+func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, intent gen.OpenrailsRailIntent, p intents.InvoiceCollectionPayload, code, reason string, proof ...intents.InvoiceNonexecutionProof) intents.Outcome {
 	if code == "" {
 		code, reason = "not_executed", "provider confirmed the collection was not executed"
+	}
+	if len(proof) != 0 {
+		if len(proof) != 1 {
+			return intents.Ambiguous("invalid nonexecution capability")
+		}
+		if err := intents.NewStore(h.DB).RetainInvoiceNonexecution(ctx, intent, proof[0], code, reason); err != nil {
+			return intents.Ambiguous("retain nonexecution proof: " + err.Error())
+		}
 	}
 	evidence := map[string]any{collectionEvidenceNotExecuted: true, collectionEvidenceDeclined: false,
 		collectionEvidenceFailureCodeNotExecuted: code, collectionEvidenceFailureMsg: reason}
 	now := h.now()
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: intent.MerchantID, ID: p.CustomerID}); err != nil {
+			return err
+		}
 		complete := func() error {
 			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteInvoiceCollection(ctx, intent, intents.TerminalWithEvidence(reason, evidence), now)
 		}
@@ -592,7 +650,9 @@ func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, inte
 		return complete()
 	})
 	if err != nil {
-		return intents.AmbiguousWithEvidence("non-execution confirmed, but local release failed: "+err.Error(), evidence)
+		// Only sealed custody can survive a failed local transaction. Never
+		// promote an arbitrary or stale outcome map to replayable proof.
+		return intents.Ambiguous("collection nonexecution could not commit: " + err.Error())
 	}
 	return intents.TerminalWithEvidence(reason, evidence)
 }

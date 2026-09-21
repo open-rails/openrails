@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -22,18 +23,19 @@ import (
 // payment_method_id also pins the method against custody remap while the
 // operation is unresolved (or#297).
 type InvoiceCollectionPayload struct {
-	Initiator           charge.Initiator        `json:"initiator"`
-	InvoiceID           uuid.UUID               `json:"invoice_id"`
-	CustomerID          uuid.UUID               `json:"customer_id"`
-	AttemptID           uuid.UUID               `json:"attempt_id"`
-	PaymentMethodID     uuid.UUID               `json:"payment_method_id"`
-	Rail                string                  `json:"rail"`
-	Instrument          charge.FrozenInstrument `json:"instrument"`
-	Currency            string                  `json:"currency"`
-	Amount              int64                   `json:"amount"`
-	AmountMinor         moneyutil.Cents         `json:"amount_minor"`
-	ProviderCustomerRef string                  `json:"provider_customer_ref"`
-	Description         string                  `json:"description"`
+	Initiator           charge.Initiator           `json:"initiator"`
+	InvoiceID           uuid.UUID                  `json:"invoice_id"`
+	CustomerID          uuid.UUID                  `json:"customer_id"`
+	AttemptID           uuid.UUID                  `json:"attempt_id"`
+	PaymentMethodID     uuid.UUID                  `json:"payment_method_id"`
+	Rail                string                     `json:"rail"`
+	Instrument          charge.FrozenInstrument    `json:"instrument"`
+	HyperSwitch         *charge.HyperSwitchBinding `json:"hyperswitch,omitempty"`
+	Currency            string                     `json:"currency"`
+	Amount              int64                      `json:"amount"`
+	AmountMinor         moneyutil.Cents            `json:"amount_minor"`
+	ProviderCustomerRef string                     `json:"provider_customer_ref"`
+	Description         string                     `json:"description"`
 }
 
 func DecodeInvoiceCollectionPayload(intent gen.OpenrailsRailIntent) (InvoiceCollectionPayload, error) {
@@ -50,11 +52,18 @@ func DecodeInvoiceCollectionPayload(intent gen.OpenrailsRailIntent) (InvoiceColl
 	if p.Initiator != charge.InitiatorMerchant && p.Initiator != charge.InitiatorCustomer {
 		return p, errors.New("collection initiation is not established")
 	}
-	if p.Initiator == charge.InitiatorCustomer && (intent.Origin != string(OriginUser) || intent.Actor == nil || *intent.Actor != p.CustomerID.String() || p.Rail != "nmi" || p.Instrument.CustodianHeld() || !charge.CustomerPaymentKeyValid("invoice_collection", p.CustomerID, intent.IdempotencyKey)) {
+	if p.Initiator == charge.InitiatorCustomer && (intent.Origin != string(OriginUser) || intent.Actor == nil || *intent.Actor != p.CustomerID.String() || p.Rail != "nmi" || (p.Instrument.Custodian != models.CustodianPSP && p.Instrument.Custodian != models.CustodianHyperSwitch) || !charge.CustomerPaymentKeyValid("invoice_collection", p.CustomerID, intent.IdempotencyKey)) {
 		return p, errors.New("customer collection has an unsupported authority or rail")
 	}
 	if err := p.Instrument.Validate(); err != nil {
 		return p, fmt.Errorf("invoice collection payload: %w", err)
+	}
+	if p.Instrument.Custodian == models.CustodianHyperSwitch {
+		if p.HyperSwitch == nil || p.HyperSwitch.Validate() != nil || p.Rail != "nmi" {
+			return p, errors.New("HyperSwitch collection has no exact accepted custody binding")
+		}
+	} else if p.HyperSwitch != nil {
+		return p, errors.New("non-HyperSwitch collection carries foreign custody policy")
 	}
 	if intent.PspID == nil || *intent.PspID != p.Instrument.PSPID {
 		return p, errors.New("invoice collection payload's provider account is not the operation's")

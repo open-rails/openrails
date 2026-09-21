@@ -66,6 +66,7 @@ var pinnedBoundaries = map[string]string{
 	"internal/service/catalog_provider_stripe.go":             "internal/modules/subscriptions/stripe_wire_pinning_test.go",
 	"internal/service/catalog_provider_nmi.go":                "internal/integrations/nmi/recurring_plan_test.go",
 	"internal/integrations/nmi/direct_response.go":            "internal/integrations/nmi/refund_evidence_test.go",
+	"internal/modules/payments/rails/hyperswitch/charger.go":  "internal/modules/payments/rails/hyperswitch/charger_test.go",
 	"internal/modules/payments/rails/nmiproxy/expressions.go": "internal/modules/payments/rails/nmiproxy/expressions_test.go",
 }
 

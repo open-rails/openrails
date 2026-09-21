@@ -645,10 +645,17 @@ func (s *Store) MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttem
 	if scopeErr != nil {
 		return scopeErr
 	}
-	return one(s.db.Gen(ctx).MarkRailIntentFailedRetryable(ctx, gen.MarkRailIntentFailedRetryableParams{
+	rows, err := s.db.Gen(ctx).MarkRailIntentFailedRetryable(ctx, gen.MarkRailIntentFailedRetryableParams{
 		MerchantID: scopeMerchantID.UUID(),
 		ID:         id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
-	}))
+	})
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return errors.New("intent retry transition did not commit")
+	}
+	return nil
 }
 
 func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, evidence map[string]any) error {
