@@ -42,8 +42,8 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	}
 	// #723: in manifest mode there is no store to dump — the YAML the operator
 	// already holds IS the truth (DB rows are projections of it).
-	if cfg.IsManifestMerchantSource() {
-		return nil, fmt.Errorf("merchant_source=manifest has no merchant-secret store to dump (#723): the boot manifest is already the export; dump-merchant-config serves merchant_source=api deployments")
+	if cfg.IsManifestMerchantConfigSource() {
+		return nil, fmt.Errorf("merchant_config_source=manifest has no merchant-secret store to dump (#723): the boot manifest is already the export; dump-merchant-config serves merchant_config_source=api deployments")
 	}
 	secretBackend, err := merchantsecrets.Build(ctx, cfg, cp.Pool())
 	if err != nil {

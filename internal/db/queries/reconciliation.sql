@@ -666,6 +666,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.deleted_at IS NULL
   AND s.status = 'active'
   AND p.auto_renew
+  AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
   AND EXISTS (
       SELECT 1 FROM openrails.entitlements expired
       WHERE expired.merchant_id = s.merchant_id

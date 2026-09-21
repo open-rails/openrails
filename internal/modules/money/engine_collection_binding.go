@@ -46,6 +46,7 @@ func engineCollectionBinding(ctx context.Context, q *gen.Queries, method gen.Ope
 }
 
 type recurringNMICharger interface {
+	ChargeInitialRecurring(context.Context, charge.Request) (charge.Result, *nmi.CustomerVaultError, error)
 	ChargeRecurringMIT(context.Context, charge.Request) (charge.Result, *nmi.CustomerVaultError, error)
 }
 

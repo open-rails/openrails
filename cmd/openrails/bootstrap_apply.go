@@ -66,7 +66,7 @@ func newPushMerchantConfigCmd() *cobra.Command {
 		"create missing merchant/config objects declared by the manifest",
 		"re-assert manifest secret/config values over existing state",
 		"delete merchant secrets that are absent from the manifest")
-	cmd.Flags().BoolVar(&opts.seed, "seed", false, "merchant_source=api only (#851): seed-once import — create missing merchants/PSPs/secrets into the persistent stores; existing values are never touched and the HTTP APIs own merchant config afterward")
+	cmd.Flags().BoolVar(&opts.seed, "seed", false, "merchant_config_source=api only (#851): seed-once import — create missing merchants/PSPs/secrets into the persistent stores; existing values are never touched and the HTTP APIs own merchant config afterward")
 	return cmd
 }
 

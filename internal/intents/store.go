@@ -161,7 +161,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 				return err
 			}
 			payload, ok := p.Payload.(subscriptions.SubscriptionCollectionPayload)
-			if !ok || p.Origin != OriginSystem || p.PspID == uuid.Nil {
+			if !ok || p.PspID == uuid.Nil || (p.Origin != OriginSystem && (p.Origin != OriginUser || payload.Initiator != charge.InitiatorCustomer || p.Actor != engineCustomer.String())) {
 				return errors.New("engine admission requires typed system-owned terms")
 			}
 			if p.CustodianID != uuid.Nil {
@@ -183,7 +183,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 			if err := payload.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
 				return err
 			}
-			if sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(payload.PreviousPeriodEnd) || (sub.Status != "active" && sub.Status != "past_due") || (sub.Status == "past_due" && (sub.NextRetryAt == nil || sub.NextRetryAt.After(payload.AcceptedAt))) {
+			if sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(payload.PreviousPeriodEnd) || (sub.Status != "active" && sub.Status != "past_due") || (p.Origin == OriginSystem && sub.Status == "past_due" && (sub.NextRetryAt == nil || sub.NextRetryAt.After(payload.AcceptedAt))) || (p.Origin == OriginUser && sub.Status != "past_due") {
 				return errors.New("engine admission is not a due obligation")
 			}
 			failures := 0
@@ -220,6 +220,9 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 				ordinal = previous.Attempt + 1
 			} else if !errors.Is(err, pgx.ErrNoRows) {
 				return err
+			}
+			if p.Origin == OriginUser && ordinal == 0 {
+				return ErrRebillNotRetryable
 			}
 			if payload.Attempt != ordinal {
 				return errors.New("engine admission changed its accepted attempt ordinal")

@@ -94,7 +94,7 @@ func newVaultPurgeFixture(t *testing.T) *vaultPurgeFixture {
 	f.slug = "vault-purge-" + uuid.NewString()[:8]
 	_, err = f.pool.Exec(ctx, `INSERT INTO billing.merchants(id,slug,status) VALUES($1,$2,'active')`, f.id.UUID(), f.slug)
 	require.NoError(t, err)
-	f.cfg = &config.Config{Env: "production", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendVault, Vault: &config.VaultConfig{Enabled: true, Address: server.URL, AuthMethod: "token", Token: token}}
+	f.cfg = &config.Config{Env: "production", MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendVault, Vault: &config.VaultConfig{Enabled: true, Address: server.URL, AuthMethod: "token", Token: token}}
 	f.store, err = merchantsecrets.Build(ctx, f.cfg, f.pool)
 	require.NoError(t, err)
 	f.service, err = merchants.NewService(f.pool, f.store.Secrets, "test")
@@ -277,7 +277,7 @@ func TestManifestManagedWebhookPurge(t *testing.T) {
 			ctx := context.Background()
 			cfg := *f.cfg
 			cfg.SecretBackend = backend
-			cfg.MerchantSource = config.MerchantSourceManifest
+			cfg.MerchantConfigSource = config.MerchantConfigSourceManifest
 			cfg.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 			manifest := merchants.NewManifestSecretStore()
 			providerName, err := merchants.PSPSecretName("stripe", "test", "acct_manifest", "secret_key")

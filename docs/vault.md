@@ -13,13 +13,13 @@ override them with `vault.kv_mount` and `vault.transit_mount` when needed.
 
 ## Where merchant secrets live
 
-Where secrets live follows the two-mode doctrine (`merchant_source`, see
+Where secrets live follows the two-mode doctrine (`merchant_config_source`, see
 [operator-guide.md](operator-guide.md)):
 
-- **`merchant_source: manifest` (MODE 1, default)** — the boot YAML is the truth; secrets are held
+- **`merchant_config_source: manifest` (MODE 1, default)** — the boot YAML is the truth; secrets are held
   in memory, **no persistent secret store is constructed**, `secret_backend` is not consulted.
   Vault, if enabled, serves Transit signing only.
-- **`merchant_source: api` (MODE 2)** — a persistent backend selected by `secret_backend`
+- **`merchant_config_source: api` (MODE 2)** — a persistent backend selected by `secret_backend`
   (env `SECRET_BACKEND`), which is **required**:
 
 ```yaml
@@ -29,7 +29,7 @@ vault:
 ```
 
 `secret_backend` is **declared intent** — never auto-detected, never auto-fallback (the data lives
-in exactly one place; a store that lacks it would run silently empty). `merchant_source: api`
+in exactly one place; a store that lacks it would run silently empty). `merchant_config_source: api`
 refuses to boot without it; `vault.enabled` is a Vault *connection* (Transit signing counts) and
 never stands in for the declaration. `secret_backend: vault` requires `vault.enabled`;
 `secret_backend: db` outside development requires `ENCRYPTION_MASTER_KEY` (#667/#723).
@@ -158,7 +158,7 @@ webhook routes return 503 so the provider redelivers; workers retry rather than 
 
 - **Adding a merchant's rail secrets** — MODE 1: edit the boot manifest (or its env/secret-file
   overlay) and reboot. `push-merchant-config` converges DB projection rows only; it does **not**
-  persist secrets (the server reads them from its own boot manifest), and `merchant_source: api`
+  persist secrets (the server reads them from its own boot manifest), and `merchant_config_source: api`
   refuses the command outright. MODE 2: `PUT /v1/merchant/payment-providers/<provider>`, or
   pre-provision with `vault kv put` at the canonical path — OpenRails discovers it lazily.
 - **Rotation** — rotate via the admin API (validated, idempotent on value, version-bumped) or

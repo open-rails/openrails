@@ -147,7 +147,7 @@ func (h *Harness) StartStandaloneProcess(opts ...ProcessOption) *StandaloneProce
 		redisAddr = h.Redis.Options().Addr
 	}
 	cfgYAML := fmt.Sprintf(`env: dev
-merchant_source: api
+merchant_config_source: api
 secret_backend: db
 test_mode: sandbox
 provider_write_mode: full

@@ -346,7 +346,7 @@ func TestEmbeddedProviderAccountArchiveLifecycle(t *testing.T) {
 	h := New(t, ctx)
 	rt, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{
-			Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI,
+			Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
 			SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
 			DB: &config.DBConfig{URL: h.DSN},
 		},

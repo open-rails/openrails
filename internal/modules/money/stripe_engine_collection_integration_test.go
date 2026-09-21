@@ -4,7 +4,6 @@ package money_test
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,7 +20,7 @@ import (
 )
 
 func TestStripeEngineRecurringExactPaymentWorkflow(t *testing.T) {
-	for _, mode := range []string{"paid", "lost_reply", "authentication", "declined"} {
+	for _, mode := range []string{"paid", "lost_reply", "authentication", "declined", "refunded", "disputed", "partial_refund"} {
 		t.Run(mode, func(t *testing.T) {
 			e := newNMIReceiptEnv(t)
 			now := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
@@ -34,11 +33,11 @@ func TestStripeEngineRecurringExactPaymentWorkflow(t *testing.T) {
 			_, err := e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET rail='stripe',psp_id=$2,rail_customer_ref='cus_engine',rail_method_ref='pm_engine',stored_credential_recurring_ref='pi_initial' WHERE id=$1`, e.method, psp)
 			require.NoError(t, err)
 			product, price, sub := uuid.New(), uuid.New(), uuid.New()
-			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name) VALUES($1,$2,$1::uuid::text,'Engine Stripe')`, product, mid)
+			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name,entitlements_spec) VALUES($1,$2,$1::uuid::text,'Engine Stripe','{"engine_access":null}')`, product, mid)
 			require.NoError(t, err)
 			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency,auto_renew,access_duration_hours) VALUES($1,$2,$3,9990000,'USD',true,720)`, price, mid, product)
 			require.NoError(t, err)
-			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,payment_method_id,rail,collection_policy,status,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,$7,'stripe','engine','active',$8,$9)`, sub, mid, e.payer.UUID(), product, price, psp, e.method, now.Add(-30*24*time.Hour), now)
+			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,payment_method_id,rail,collection_policy,status,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7,'stripe','engine','active',$8,$9,'{"engine_access":null}')`, sub, mid, e.payer.UUID(), product, price, psp, e.method, now.Add(-30*24*time.Hour), now)
 			require.NoError(t, err)
 			var mu sync.Mutex
 			var pi map[string]any
@@ -84,7 +83,18 @@ func TestStripeEngineRecurringExactPaymentWorkflow(t *testing.T) {
 				case r.Method == "GET" && r.URL.Path == "/v1/payment_intents/pi_renewal":
 					_ = json.NewEncoder(w).Encode(pi)
 				case r.Method == "GET" && r.URL.Path == "/v1/charges/ch_renewal":
-					fmt.Fprint(w, `{"id":"ch_renewal","amount":999,"amount_captured":999,"currency":"usd","customer":"cus_engine","payment_method":"pm_engine","payment_intent":"pi_renewal","paid":true,"captured":true,"status":"succeeded"}`)
+					charge := map[string]any{"id": "ch_renewal", "amount": 999, "amount_captured": 999, "currency": "usd", "customer": "cus_engine", "payment_method": "pm_engine", "payment_intent": "pi_renewal", "paid": true, "captured": true, "status": "succeeded"}
+					if mode == "refunded" {
+						charge["refunded"] = true
+						charge["amount_refunded"] = 999
+					}
+					if mode == "partial_refund" {
+						charge["amount_refunded"] = 100
+					}
+					if mode == "disputed" {
+						charge["disputed"] = true
+					}
+					_ = json.NewEncoder(w).Encode(charge)
 				default:
 					t.Errorf("unexpected Stripe provider write/read %s %s", r.Method, r.URL.Path)
 					http.Error(w, "unexpected", 400)
@@ -127,6 +137,18 @@ func TestStripeEngineRecurringExactPaymentWorkflow(t *testing.T) {
 			var count int
 			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1`, sub).Scan(&count))
 			require.Equal(t, 1, count)
+			var grants int
+			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.grants WHERE source_id=$1 AND source_type='subscription' AND event='grant'`, sub.String()).Scan(&grants))
+			if mode == "refunded" || mode == "disputed" || mode == "declined" {
+				require.Zero(t, grants)
+			} else {
+				require.Positive(t, grants)
+			}
+			if mode == "refunded" || mode == "disputed" {
+				var status string
+				require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT status FROM billing.subscriptions WHERE id=$1`, sub).Scan(&status))
+				require.Equal(t, "cancelled", status)
+			}
 		})
 	}
 }

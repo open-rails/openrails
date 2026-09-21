@@ -8,7 +8,7 @@ import (
 func providerSandboxConfig(posture CredentialPosture, sandbox ProviderSandboxConfig) *Config {
 	return &Config{
 		Env: "dev", TestMode: posture, ProviderWriteMode: ProviderWriteModeFull,
-		MerchantSource: MerchantSourceAPI, SecretBackend: SecretBackendDB,
+		MerchantConfigSource: MerchantConfigSourceAPI, SecretBackend: SecretBackendDB,
 		DB:              &DBConfig{URL: "postgresql://openrails:openrails@127.0.0.1:5432/openrails?sslmode=disable"},
 		ProviderSandbox: &sandbox,
 	}

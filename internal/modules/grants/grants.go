@@ -216,11 +216,12 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) err
 			return err
 		}
 		// #691 projection inversion: a grant sourced from an AUTO-RENEW sub in a
-		// non-terminal state projects one STANDING open window (end_at NULL) per
+		// non-terminal provider-owned state projects one STANDING open window (end_at NULL) per
 		// (customer, entitlement, source) instead of per-period windows. The grant
 		// ledger stays per-period/bounded; only the projection is standing. Access
-		// then ends only by PROOF (cancel closure, terminal dunning, provider-
-		// confirmed death) — never by our own machinery going silent.
+		// for that legacy cohort ends only by PROOF (cancel closure, terminal dunning, provider-
+		// confirmed death). Engine card access keeps its paid period end even when
+		// renewal workers are unavailable; the policy query makes that distinction.
 		standing := false
 		var standingSubID uuid.UUID
 		if SourceType(g.SourceType) == Subscription {

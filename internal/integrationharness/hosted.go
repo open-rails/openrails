@@ -30,7 +30,7 @@ import (
 )
 
 // Hosted is the SaaS-style deployment (Server 3): ONE shared multi-merchant
-// engine (embed.New, merchant_source=api) with the OpenRails control plane
+// engine (embed.New, merchant_config_source=api) with the OpenRails control plane
 // attached in hosted posture and its full HTTP surface — AuthKit under /auth,
 // /v1/merchant/*, /v1/me/* — served over httptest. This is the shape
 // openrails-saas mounts (internal/engine/engine.go): merchants are provisioned
@@ -130,7 +130,7 @@ func (s *Hosted) Start() {
 		return
 	}
 	cfg := &config.Config{
-		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI,
+		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
 		SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
 		APIURL: s.BaseURL, CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
 		DB:   &config.DBConfig{URL: h.DSN},

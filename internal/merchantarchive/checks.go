@@ -266,6 +266,20 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 	if err := validateSaleReferences(ctx, tx, id); err != nil {
 		return err
 	}
+	quoteInvalid, quoteErr := gen.New(tx).CountInvalidEngineCheckoutReferences(ctx, id.UUID())
+	if quoteErr != nil {
+		return quoteErr
+	}
+	if quoteInvalid != 0 {
+		return &Error{Code: "unsupported_state", Table: "checkout_sessions", Count: quoteInvalid}
+	}
+	stripeInvalid, stripeErr := gen.New(tx).CountInvalidStripeSetupReferences(ctx, id.UUID())
+	if stripeErr != nil {
+		return stripeErr
+	}
+	if stripeInvalid != 0 {
+		return &Error{Code: "unsupported_state", Table: "checkout_sessions", Count: stripeInvalid}
+	}
 	invalid, err := gen.New(tx).CountInvalidCheckoutCaptureReferences(ctx, id.UUID())
 	if err != nil {
 		return err

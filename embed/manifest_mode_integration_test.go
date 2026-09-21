@@ -35,7 +35,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// #723 MODE 1 conformance: merchant_source=manifest — the boot YAML (+ mounted
+// #723 MODE 1 conformance: merchant_config_source=manifest — the boot YAML (+ mounted
 // secret files) is the truth, held in memory; the DB carries projections only.
 
 func manifestModeConfig(dsn string) *config.Config {
@@ -43,7 +43,7 @@ func manifestModeConfig(dsn string) *config.Config {
 		Env:      "dev",
 		TestMode: config.CredentialPostureLive,
 		// Explicit default (#723): manifest-is-truth.
-		MerchantSource: config.MerchantSourceManifest,
+		MerchantConfigSource: config.MerchantConfigSourceManifest,
 		// full: the loop test executes a (fake-provider) charge.
 		ProviderWriteMode: config.ProviderWriteModeFull,
 		DB:                &config.DBConfig{URL: dsn},
@@ -394,7 +394,7 @@ func TestManifestMode_MutationRoutesOmitted(t *testing.T) {
 }
 
 // TestAPIMode_MutationRoutesWork: the same PUT works against the existing
-// store path when merchant_source=api (quick mode-2 smoke; the full api-mode
+// store path when merchant_config_source=api (quick mode-2 smoke; the full api-mode
 // HTTP behavior is covered by the standalone integrationharness suites).
 func TestAPIMode_MutationRoutesWork(t *testing.T) {
 	ctx := context.Background()
@@ -404,12 +404,12 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 	nano := time.Now().UnixNano()
 	slug := fmt.Sprintf("mapi%d", nano)
 	cfg := &config.Config{
-		Env:               "dev",
-		TestMode:          config.CredentialPostureLive,
-		MerchantSource:    config.MerchantSourceAPI,
-		SecretBackend:     config.SecretBackendDB,
-		ProviderWriteMode: config.ProviderWriteModeFull,
-		DB:                &config.DBConfig{URL: dsn},
+		Env:                  "dev",
+		TestMode:             config.CredentialPostureLive,
+		MerchantConfigSource: config.MerchantConfigSourceAPI,
+		SecretBackend:        config.SecretBackendDB,
+		ProviderWriteMode:    config.ProviderWriteModeFull,
+		DB:                   &config.DBConfig{URL: dsn},
 	}
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)

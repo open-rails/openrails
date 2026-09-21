@@ -61,10 +61,10 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 
 	rt, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{
-			Env:            "dev",
-			TestMode:       config.CredentialPostureSandbox,
-			DB:             &config.DBConfig{URL: dsn},
-			MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB,
+			Env:                  "dev",
+			TestMode:             config.CredentialPostureSandbox,
+			DB:                   &config.DBConfig{URL: dsn},
+			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
 			Auth: &config.AuthConfig{Issuer: "https://river-compose.test", KeysPath: t.TempDir()},
 		},
 		River: embed.RiverFromHost(),

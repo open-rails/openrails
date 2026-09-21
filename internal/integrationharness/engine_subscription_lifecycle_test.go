@@ -35,8 +35,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Engine rows are explicit internal fixtures: public engine enrollment and a
-// collection executor are not enabled. Customer requests use the actual Client,
+// Engine rows are explicit internal fixtures. Customer requests use the actual Client,
 // HTTP authentication, durable River job and production lifecycle worker.
 func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)

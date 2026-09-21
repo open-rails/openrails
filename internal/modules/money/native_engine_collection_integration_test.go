@@ -17,11 +17,12 @@ import (
 )
 
 func TestNativeEngineRecurringCollectionOwnsOnlyNewAgreement(t *testing.T) {
-	for _, mode := range []string{"paid", "unknown_then_paid", "cancel_unknown"} {
+	for _, mode := range []string{"paid", "unknown_then_paid", "cancel_unknown", "declined_customer_retry"} {
 		t.Run(mode, func(t *testing.T) {
 			e := newNMIReceiptEnv(t)
 			now := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
 			clock := clockwork.NewFakeClockAt(now)
+			e.svc.SetClock(clock)
 			mid := dbtest.TestMerchantID.UUID()
 			product, price, sub, legacy := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 			_, err := e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET rail_method_ref='engine-billing',stored_credential_recurring_ref='original-recurring' WHERE id=$1`, e.method)
@@ -65,11 +66,51 @@ func TestNativeEngineRecurringCollectionOwnsOnlyNewAgreement(t *testing.T) {
 				e.gateway.orderSale(p.OrderReference, txn)
 				e.gateway.payment(txn, method.RailCustomerRef, "9.99", "USD")
 			}
+			if mode == "declined_customer_retry" {
+				e.gateway.mu.Lock()
+				e.gateway.saleResponse = "response=2&response_code=200"
+				e.gateway.mu.Unlock()
+			}
 			e.plane.Config.EngineAdmissionHold = true
 			outcome := handler.Execute(e.ctx, op)
 			require.Equal(t, intents.OutcomeParked, outcome.Class)
 			e.plane.Config.EngineAdmissionHold = false
 			outcome = handler.Execute(e.ctx, op)
+			if mode == "declined_customer_retry" {
+				require.Equal(t, intents.OutcomeTerminal, outcome.Class, outcome.Reason)
+				_, err = e.svc.AdmitDueSubscriptionCollection(e.ctx, sub, now)
+				require.Error(t, err)
+				_, _, err = e.svc.AdmitCustomerSubscriptionCollection(e.ctx, sub, e.payer.UUID(), "retry-key", &e.method)
+				require.ErrorContains(t, err, "held")
+				e.svc.EngineAdmissionHold = false
+				retry, replayed, err := e.svc.AdmitCustomerSubscriptionCollection(e.ctx, sub, e.payer.UUID(), "retry-key", &e.method)
+				require.NoError(t, err)
+				require.False(t, replayed)
+				terms, err := subscriptions.DecodeSubscriptionCollectionPayload(retry)
+				require.NoError(t, err)
+				require.Equal(t, "customer", string(terms.Initiator))
+				e.gateway.mu.Lock()
+				e.gateway.saleResponse = "response=1&response_code=100&transactionid=" + txn
+				e.gateway.mu.Unlock()
+				e.gateway.orderSale(terms.OrderReference, txn)
+				e.gateway.payment(txn, method.RailCustomerRef, "9.99", "USD")
+				retry, claimed, err = intents.NewStore(e.db).ClaimByID(e.ctx, retry.ID, now, now.Add(time.Minute))
+				require.NoError(t, err)
+				require.True(t, claimed)
+				outcome = handler.Execute(e.ctx, retry)
+				require.Equal(t, intents.OutcomeSucceeded, outcome.Class, outcome.Reason)
+				e.svc.EngineAdmissionHold = true
+				again, replayed, err := e.svc.AdmitCustomerSubscriptionCollection(e.ctx, sub, e.payer.UUID(), "retry-key", &e.method)
+				require.NoError(t, err)
+				require.True(t, replayed)
+				require.Equal(t, retry.ID, again.ID)
+				requireEngineArchiveValues(t, e, retry.ID)
+				e.gateway.mu.Lock()
+				require.Equal(t, 2, e.gateway.sends)
+				require.Equal(t, []string{"merchant", "customer"}, e.gateway.saleInitiators)
+				e.gateway.mu.Unlock()
+				return
+			}
 			if mode != "paid" {
 				require.Equal(t, intents.OutcomeAmbiguous, outcome.Class, outcome.Reason)
 				e.plane.Config.EngineAdmissionHold = true

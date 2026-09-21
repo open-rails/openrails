@@ -246,6 +246,8 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
           -- sweep never converges).
           AND NOT (g.source_type = 'subscription' AND EXISTS (
             SELECT 1 FROM openrails.entitlements e2
+            JOIN openrails.subscriptions s2 ON s2.id=e2.source_id AND s2.merchant_id=e2.merchant_id AND s2.deleted_at IS NULL
+              AND NOT (s2.collection_policy='engine' AND s2.rail IN ('nmi','stripe'))
             WHERE e2.merchant_id = g.merchant_id
               AND e2.customer_id = g.customer_id
               AND e2.entitlement = feat
@@ -350,6 +352,8 @@ JOIN openrails.products pd ON pd.id = s.product_id AND pd.merchant_id = s.mercha
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
   AND s.deleted_at IS NULL
+  -- Engine card access is authored only by its atomic accepted-payment writer.
+  AND NOT (s.collection_policy='engine' AND s.rail IN ('nmi','stripe'))
   AND s.status IN ('active', 'cancelled', 'unknown')
   AND NOT (s.status = 'cancelled' AND s.cancel_type = 'chargeback')
   AND pd.entitlements_spec IS NOT NULL AND pd.entitlements_spec <> '{}'::jsonb

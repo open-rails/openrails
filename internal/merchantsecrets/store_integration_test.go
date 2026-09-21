@@ -50,22 +50,22 @@ func testMasterKey(t *testing.T) string {
 	return base64.StdEncoding.EncodeToString(k)
 }
 
-// vaultBackedConfig is a mode-2 config (#723 merchant_source=api): secrets
+// vaultBackedConfig is a mode-2 config (#723 merchant_config_source=api): secrets
 // declared to live in Vault, reached with the given token (#724 — always a REAL
 // Vault, never a mock).
 func vaultBackedConfig(env, addr, token string) *config.Config {
 	return &config.Config{
-		Env:            env,
-		MerchantSource: config.MerchantSourceAPI,
-		SecretBackend:  config.SecretBackendVault,
-		Vault:          &config.VaultConfig{Enabled: true, Address: addr, AuthMethod: "token", Token: token},
+		Env:                  env,
+		MerchantConfigSource: config.MerchantConfigSourceAPI,
+		SecretBackend:        config.SecretBackendVault,
+		Vault:                &config.VaultConfig{Enabled: true, Address: addr, AuthMethod: "token", Token: token},
 	}
 }
 
 // #667 (a): production posture + DB store + no ENCRYPTION_MASTER_KEY refuses boot.
 func TestBuild_ProdDBStoreNoMasterKey_RefusesBoot(t *testing.T) {
 	pool, ctx := startSecretsPostgres(t)
-	cfg := &config.Config{Env: "production", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB}
+	cfg := &config.Config{Env: "production", MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB}
 	_, err := Build(ctx, cfg, pool)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "ENCRYPTION_MASTER_KEY")
@@ -90,7 +90,7 @@ func TestBuild_DevDBStoreNoMasterKey_BootsWithWarning(t *testing.T) {
 	pool, ctx := startSecretsPostgres(t)
 	hook := logtest.NewGlobal()
 	defer hook.Reset()
-	cfg := &config.Config{Env: "dev", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB}
+	cfg := &config.Config{Env: "dev", MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB}
 	store, err := Build(ctx, cfg, pool)
 	require.NoError(t, err)
 	require.NotNil(t, store.Secrets)
@@ -108,10 +108,10 @@ func TestBuild_DevDBStoreNoMasterKey_BootsWithWarning(t *testing.T) {
 func TestBuild_ProdDBStoreWithKey_RoundTripsEncrypted(t *testing.T) {
 	pool, ctx := startSecretsPostgres(t)
 	cfg := &config.Config{
-		Env:            "production",
-		MerchantSource: config.MerchantSourceAPI,
-		SecretBackend:  config.SecretBackendDB,
-		Encryption:     &config.EncryptionConfig{MasterKey: testMasterKey(t)},
+		Env:                  "production",
+		MerchantConfigSource: config.MerchantConfigSourceAPI,
+		SecretBackend:        config.SecretBackendDB,
+		Encryption:           &config.EncryptionConfig{MasterKey: testMasterKey(t)},
 	}
 	store, err := Build(ctx, cfg, pool)
 	require.NoError(t, err)
@@ -141,7 +141,7 @@ func TestBuild_ProdDBStoreWithKey_RoundTripsEncrypted(t *testing.T) {
 // landed plaintext in openrails.merchant_secrets.
 func TestBuild_DevDBStoreNoMasterKey_RefusesSolanaPrivateKey(t *testing.T) {
 	pool, ctx := startSecretsPostgres(t)
-	cfg := &config.Config{Env: "dev", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB}
+	cfg := &config.Config{Env: "dev", MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB}
 	store, err := Build(ctx, cfg, pool)
 	require.NoError(t, err)
 

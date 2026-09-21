@@ -181,12 +181,38 @@ func ValidateValues(p Profile, values []*string) error {
 			return ""
 		}
 		var state struct {
-			Capture json.RawMessage `json:"capture"`
+			Capture         json.RawMessage `json:"capture"`
+			Kind            string          `json:"kind"`
+			CustomerRef     string          `json:"customer_ref"`
+			Consent         string          `json:"consent"`
+			PaymentMethodID string          `json:"payment_method_id"`
+			Quote           string          `json:"initial_membership_quote"`
 		}
 		if raw := value(p, values, "rail_state"); raw != nil && json.Unmarshal([]byte(*raw), &state) != nil {
 			return fmt.Errorf("invalid checkout state")
 		}
-		if field("mode") == string(models.CheckoutSessionModePaymentMethod) {
+		if state.Quote != "" {
+			var quote subscriptions.InitialMembershipTerms
+			if json.Unmarshal([]byte(state.Quote), &quote) != nil || quote.Validate() != nil || quote.CollectionPolicy != models.CollectionPolicyEngine || quote.CustomerID.String() != field("customer_id") || quote.PSPID.String() != field("psp_id") || quote.PriceID.String() != field("price_id") || strconv.FormatInt(quote.Amount, 10) != field("amount") || quote.Currency != field("currency") || field("mode") != "subscription" || (field("rail") != "nmi" && field("rail") != "stripe") {
+				return fmt.Errorf("invalid retained engine checkout quote")
+			}
+		}
+		if field("mode") == string(models.CheckoutSessionModePaymentMethod) && field("rail") == "stripe" {
+			for _, name := range []string{"price_id", "amount", "currency", "payment_id", "subscription_id", "transaction_id"} {
+				if value(p, values, name) != nil {
+					return fmt.Errorf("Stripe setup contains monetary terms")
+				}
+			}
+			if len(state.Capture) != 0 || state.Quote != "" || state.Kind != "stripe_engine_setup" || state.Consent != "save_for_agreed_off_session_payments_v1" || !strings.HasPrefix(state.CustomerRef, "cus_") {
+				return fmt.Errorf("invalid Stripe setup binding")
+			}
+			if field("reference") != "" && !strings.HasPrefix(field("reference"), "seti_") {
+				return fmt.Errorf("invalid Stripe setup identity")
+			}
+			if field("status") == "succeeded" && (field("reference") == "" || !uuidPattern.MatchString(state.PaymentMethodID)) {
+				return fmt.Errorf("completed Stripe setup lacks retained method")
+			}
+		} else if field("mode") == string(models.CheckoutSessionModePaymentMethod) {
 			for _, name := range []string{"price_id", "amount", "currency", "payment_id", "subscription_id", "reference", "transaction_id"} {
 				if value(p, values, name) != nil {
 					return fmt.Errorf("capture setup contains monetary/provider payment terms")

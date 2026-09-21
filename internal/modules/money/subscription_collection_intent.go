@@ -25,8 +25,8 @@ import (
 
 var errEngineObligationChanged = errors.New("accepted engine obligation changed before submission")
 
-// SubscriptionCollectionHandler uses the existing collected-payment custody
-// protocol and renewal writer. It is deliberately not registered at runtime.
+// SubscriptionCollectionHandler uses the collected-payment custody protocol
+// and shared renewal writer for qualified engine card obligations.
 type SubscriptionCollectionHandler struct {
 	DB       *db.DB
 	Resolver CollectionPlane
@@ -100,9 +100,15 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 	if !first {
 		return h.Verify(ctx, in)
 	}
-	result, refusal, err := charger.ChargeRecurringMIT(ctx, charge.Request{
+	chargeContext := charge.RecurringMIT(p.Instrument.StoredCredentialRecurringRef)
+	execute := charger.ChargeRecurringMIT
+	if p.Initiator == charge.InitiatorCustomer {
+		chargeContext = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
+		execute = charger.ChargeInitialRecurring
+	}
+	result, refusal, err := execute(ctx, charge.Request{
 		Instrument:  charge.Instrument{PaymentMethodID: p.PaymentMethodID, Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef},
-		AmountMinor: p.AmountMinor, Currency: p.Renewal.Currency, OrderRef: p.OrderReference, Description: "OpenRails subscription renewal", Context: charge.RecurringMIT(p.Instrument.StoredCredentialRecurringRef),
+		AmountMinor: p.AmountMinor, Currency: p.Renewal.Currency, OrderRef: p.OrderReference, Description: "OpenRails subscription renewal", Context: chargeContext,
 	})
 	if errors.Is(err, charge.ErrNotDispatched) {
 		return h.completeNotExecuted(ctx, in, p, "not_dispatched", charge.ErrNotDispatched.Error(), proof)
@@ -288,6 +294,21 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 		params := &subscriptions.RenewMembershipParams{Prepared: &p.Renewal, PreviousPeriodEnd: &p.PreviousPeriodEnd, PaymentCustodian: p.Instrument.Custodian, Rail: models.Rail(in.Rail), TransactionID: retained.TransactionID(), Amount: p.Renewal.Amount, AmountProvided: true, Currency: p.Renewal.Currency}
 		current := sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) && sub.PriceID == p.Renewal.FromPriceID && sub.ProductID == p.Renewal.FromProductID
 		replay := sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodEnd) && sub.PriceID == p.Renewal.PriceID && sub.ProductID == p.Renewal.ProductID
+		if reversal := retained.ReversalKind(); reversal != "" {
+			params.PaymentMetadata = map[string]any{"refund_review": "confirmed charge on a cancelled subscription"}
+			if err := h.lifecycle(d).RecordConfirmedChargeWithoutRenewal(ctx, params); err != nil {
+				return err
+			}
+			if sub.Status != models.StatusCancelled {
+				kind := models.CancelTypeMerchant
+				if reversal == "dispute" {
+					kind = models.CancelTypeChargeback
+				}
+				_, err := h.lifecycle(d).CancelMembershipTx(ctx, d, &subscriptions.CancelMembershipParams{SubscriptionID: &sub.ID, CancelType: kind, RevokeAccess: true})
+				return err
+			}
+			return nil
+		}
 		if sub.Status == models.StatusCancelled || (!current && !replay) {
 			params.PaymentMetadata = map[string]any{"refund_review": "accepted engine charge completed after lifecycle changed"}
 			return h.lifecycle(d).RecordConfirmedChargeWithoutRenewal(ctx, params)

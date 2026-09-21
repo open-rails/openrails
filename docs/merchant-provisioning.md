@@ -37,7 +37,7 @@ All three share one **mutation-flag contract**: a bare command is plan-only
 
 The flags compose; full reconciliation is `--insert --overwrite --prune`.
 
-MODE 2 (`merchant_source: api`) replaces this contract for
+MODE 2 (`merchant_config_source: api`) replaces this contract for
 `push-merchant-config` with a single flag: `--seed` runs the command as a
 **seed-once importer** (create-only — missing merchants/PSPs/secrets are
 created into the persistent stores; existing values are never touched).
@@ -48,10 +48,10 @@ manifest is never re-asserted over them.
 Startup behavior: if `/etc/openrails/bootstrap.yaml` exists, the server applies
 it **first-run only** (gated by AuthKit's bootstrap marker). Normal restarts
 never reapply merchant config or catalog manifests — with one deliberate
-exception: in MODE 1 (`merchant_source: manifest`, the default) the server
+exception: in MODE 1 (`merchant_config_source: manifest`, the default) the server
 itself re-converges the merchant manifest on **every** boot
 (insert+overwrite+prune, secrets held in memory). In MODE 2
-(`merchant_source: api`) boot manifests refuse to load; the one-time bootstrap
+(`merchant_config_source: api`) boot manifests refuse to load; the one-time bootstrap
 path is `push-merchant-config --seed`, which imports the manifest into the
 persistent stores. Mode comparison:
 [standalone-integration.md](standalone-integration.md#two-merchant-source-modes);
@@ -305,10 +305,10 @@ registry — unknown keys are rejected.
 
 Where the values live depends on the mode:
 
-- **MODE 1** (`merchant_source: manifest`): in memory only, seeded from the
+- **MODE 1** (`merchant_config_source: manifest`): in memory only, seeded from the
   manifest every boot. Nothing is persisted; there is no store to rotate —
   edit the file/env and reboot.
-- **MODE 2** (`merchant_source: api`): a persistent backend, selected by
+- **MODE 2** (`merchant_config_source: api`): a persistent backend, selected by
   `secret_backend`:
   - `vault` — Vault KV-v2 at `<mount>/openrails/merchants/<merchant-uuid>/<name>`
     (e.g. `secret/openrails/merchants/myapp/psps/nmi/live/100001/security_key`);
@@ -414,7 +414,7 @@ never routed to a default merchant.
 
 OpenRails core exposes no cross-merchant lifecycle or credential routes.
 Merchant admin APIs are scoped to the authenticated merchant. Payment-provider
-mutation routes are omitted when `merchant_source=manifest`; provider reads
+mutation routes are omitted when `merchant_config_source=manifest`; provider reads
 and routing dry runs remain available. Catalog mutation routes return
 `405 manifest_driven` when `catalog_source=manifest`. Catalog source
 defaults to merchant source but can be selected independently
