@@ -37,7 +37,7 @@ func (s initialMembershipFixtureSecrets) Get(_ context.Context, owner merchant.I
 }
 
 func TestHyperSwitchInitialMembershipAtomicWorkflow(t *testing.T) {
-	for _, mode := range []string{"paid", "declined", "lost response"} {
+	for _, mode := range []string{"paid", "declined", "lost response", "wrong destination", "park before fence", "profile before fence"} {
 		t.Run(mode, func(t *testing.T) {
 			fx := newSubIntentFixture(t)
 			_, seedErr := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{"initial_engine_access":null}' WHERE id=(SELECT product_id FROM billing.prices WHERE id=$1)`, fx.priceID)
@@ -67,7 +67,19 @@ func TestHyperSwitchInitialMembershipAtomicWorkflow(t *testing.T) {
 				}
 				require.Equal(t, "/v2/proxy", r.URL.Path)
 				if r.Method == http.MethodGet {
-					fmt.Fprintf(w, `{"contract":"openrails-nmi-form-v2","strict":true,"max_response_bytes":65536,"routes":[{"destination_url":%q,"method":"POST","response_profile":"nmi_classic"}]}`, gateway.DirectPostURL)
+					destination := gateway.DirectPostURL
+					if mode == "wrong destination" {
+						destination += "/unaccepted"
+					}
+					if mode == "park before fence" {
+						_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.payment_methods SET park_reason='fixture revoked',parked_at=now() WHERE id=$1`, terms.PaymentMethodID)
+						require.NoError(t, err)
+					}
+					if mode == "profile before fence" {
+						_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.custodians SET settings=jsonb_set(settings,'{profile_id}','"changed_profile"') WHERE id=$1`, custody)
+						require.NoError(t, err)
+					}
+					fmt.Fprintf(w, `{"contract":"openrails-nmi-form-v2","strict":true,"max_response_bytes":65536,"routes":[{"destination_url":%q,"method":"POST","response_profile":"nmi_classic"}]}`, destination)
 					return
 				}
 				posts.Add(1)
@@ -114,6 +126,24 @@ func TestHyperSwitchInitialMembershipAtomicWorkflow(t *testing.T) {
 			t.Logf("confirmation: %v", confirmationErr)
 			in, err := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, InitialMembershipIdempotencyKey(key))
 			require.NoError(t, err)
+			if mode == "wrong destination" || mode == "park before fence" || mode == "profile before fence" {
+				require.NotEqual(t, intents.StatusSucceeded, in.Status)
+				var progress map[string]any
+				if len(in.ResultEvidence) > 0 {
+					require.NoError(t, json.Unmarshal(in.ResultEvidence, &progress))
+				}
+				require.NotContains(t, progress, "initial_submitted")
+				require.Zero(t, posts.Load())
+				require.Zero(t, fx.gateway.createCalls.Load())
+				var payments, subscriptions, access int
+				require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.payments WHERE customer_id=$1`, terms.CustomerID).Scan(&payments))
+				require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.subscriptions WHERE customer_id=$1`, terms.CustomerID).Scan(&subscriptions))
+				require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.entitlements WHERE customer_id=$1`, terms.CustomerID).Scan(&access))
+				require.Zero(t, payments)
+				require.Zero(t, subscriptions)
+				require.Zero(t, access)
+				return
+			}
 			if mode == "lost response" {
 				in, err = fx.runner.VerifyByID(fx.ctx, in.ID)
 				require.NoError(t, err)

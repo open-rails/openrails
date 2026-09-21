@@ -78,3 +78,11 @@ WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND payload = sqlc.arg(accepted_payload)::jsonb
   AND status IN ('in_flight','unknown_needs_verify') AND claimed_until IS NOT NULL
   AND COALESCE(NULLIF(result_evidence->'account_requalifications', 'null'::jsonb), '[]'::jsonb) = sqlc.arg(previous)::jsonb;
+
+-- name: ListCompletedProviderCutoversForSubscription :many
+-- Retained forward custody transitions explain historical initial PSP identity.
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid
+  AND subscription_id=sqlc.arg(subscription_id)::uuid
+  AND intent_type='nmi_provider_cutover' AND status='succeeded'
+ORDER BY created_at,id;

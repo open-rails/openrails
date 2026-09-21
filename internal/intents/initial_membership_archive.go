@@ -24,6 +24,10 @@ func ValidateInitialMembershipTerminal(in gen.OpenrailsRailIntent) error {
 	if err != nil {
 		return err
 	}
+	refusal, refused, err := LoadInitialMembershipRefusal(in)
+	if err != nil {
+		return err
+	}
 	var evidence struct {
 		SubscriptionID         uuid.UUID `json:"subscription_id"`
 		ProviderSubscriptionID string    `json:"provider_subscription_id"`
@@ -42,7 +46,7 @@ func ValidateInitialMembershipTerminal(in gen.OpenrailsRailIntent) error {
 	}
 	switch in.Status {
 	case StatusSucceeded:
-		if (p.NativeSchedule != nil) != scheduled || !evidence.Submitted || evidence.SubscriptionID != p.Terms.SubscriptionID || evidence.ProviderSubscriptionID != schedule.SubscriptionID() || evidence.Declined || evidence.NotExecuted || evidence.RequestRefused || (p.Terms.Amount > 0) != paid {
+		if refused || (p.NativeSchedule != nil) != scheduled || !evidence.Submitted || evidence.SubscriptionID != p.Terms.SubscriptionID || evidence.ProviderSubscriptionID != schedule.SubscriptionID() || evidence.Declined || evidence.NotExecuted || evidence.RequestRefused || (p.Terms.Amount > 0) != paid {
 			return errors.New("initial terminal result contradicts accepted schedule and payment custody")
 		}
 		if paid && evidence.TransactionID != receipt.TransactionID() || !paid && evidence.TransactionID != "" {
@@ -56,10 +60,6 @@ func ValidateInitialMembershipTerminal(in gen.OpenrailsRailIntent) error {
 			return errors.New("initial immediate result has another phase")
 		}
 	case StatusFailedTerminal:
-		refusal, refused, err := LoadInitialMembershipRefusal(in)
-		if err != nil {
-			return err
-		}
 		if !refused {
 			return errors.New("initial terminal refusal has no bound custody")
 		}

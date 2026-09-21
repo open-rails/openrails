@@ -825,6 +825,73 @@ func (q *Queries) LinkRefundedPayment(ctx context.Context, arg LinkRefundedPayme
 	return result.RowsAffected(), nil
 }
 
+const listObservedInitialMembershipPayments = `-- name: ListObservedInitialMembershipPayments :many
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement FROM openrails.payments
+WHERE merchant_id=$1::uuid
+  AND subscription_id=$2::uuid
+  AND metadata->>'order_id'=$3::text
+ORDER BY created_at,id LIMIT 2
+`
+
+type ListObservedInitialMembershipPaymentsParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	OrderReference string
+}
+
+// The first observed paid event retains the original accepted enrollment order.
+func (q *Queries) ListObservedInitialMembershipPayments(ctx context.Context, arg ListObservedInitialMembershipPaymentsParams) ([]OpenrailsPayment, error) {
+	rows, err := q.db.Query(ctx, listObservedInitialMembershipPayments, arg.MerchantID, arg.SubscriptionID, arg.OrderReference)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsPayment
+	for rows.Next() {
+		var i OpenrailsPayment
+		if err := rows.Scan(
+			&i.ID,
+			&i.PriceID,
+			&i.Rail,
+			&i.TransactionID,
+			&i.Amount,
+			&i.ListAmount,
+			&i.Currency,
+			&i.Status,
+			&i.SubscriptionID,
+			&i.RefundedPaymentID,
+			&i.DiscountCode,
+			&i.DiscountReason,
+			&i.DiscountMetadata,
+			&i.EntitlementsSpecSnapshot,
+			&i.Metadata,
+			&i.PurchasedAt,
+			&i.CreatedAt,
+			&i.CardBrand,
+			&i.CardLast4,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.PspID,
+			&i.AttemptKind,
+			&i.FailureCode,
+			&i.FailureReason,
+			&i.ReversalKind,
+			&i.TokenType,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.MoneyMovement,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPaymentsByCustomer = `-- name: ListPaymentsByCustomer :many
 SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement FROM openrails.payments purch
 WHERE purch.merchant_id = $1::uuid
