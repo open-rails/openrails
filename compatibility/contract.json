@@ -5313,7 +5313,7 @@
   "boundary_sources_sha256": {
     "embed/authkit/authkit.go": "05aeab359a5540dc96f204a0c72cc993023817c2a66af6dd0b362bb002026944",
     "embed/controlplane/controlplane.go": "b553cff0f76cf85074ac3ef5cbb3314877e99b21a4f3fe64f0e70a74ea1b215c",
-    "embed/embed.go": "3c2b302911a63418a77eaa733604c2d4df037f30f5d0268e70e68ab9589e990d",
+    "embed/embed.go": "4b3c605baac26825f92962e54f57e10107805693ec172fea56efe748eb0f92fd",
     "embed/mount.go": "d1030f96f9c5324d5da440b176f7c0950266a7a03446ef84e928fac5f7df373d",
     "embed/transport.go": "e70853c4608f1bf738c217c1bfe1b0713f3b4114c991fca894d70ff704c2553a",
     "errors.go": "bea224812329fcb558d6b087b3a524107ce5d939d16b303b99354d35a6397d55",

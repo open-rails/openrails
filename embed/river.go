@@ -141,6 +141,8 @@ type RiverOwnership struct {
 
 // RiverFromHost gives the host ownership of River's migrations and client
 // lifecycle. bind runs during New, after billing workers have been registered.
+// A nil binder is valid only for ApplyMigrations, which does not construct River.
+// New requires a non-nil binder and refuses before initializing the runtime.
 func RiverFromHost(bind RiverBinder) RiverOwnership {
 	return RiverOwnership{host: true, bind: bind}
 }
@@ -162,9 +164,6 @@ func (o RiverOwnership) managedSchema(billingSchema string) (string, error) {
 		return "", o.err
 	}
 	if o.host {
-		if o.bind == nil {
-			return "", fmt.Errorf("embedded billing: RiverFromHost requires a non-nil binder")
-		}
 		return "", nil
 	}
 	schema := strings.TrimSpace(o.schema)
