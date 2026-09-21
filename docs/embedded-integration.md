@@ -83,6 +83,7 @@ to boot unless you declare posture explicitly (#745):
 | `TestMode` | yes | `config.CredentialPostureSandbox` or `config.CredentialPostureLive`. The zero value is UNSET and rejected — it can never silently mean "live". |
 | `ProviderWriteMode` | recommended | `config.ProviderWriteModeFull` etc.; unset fail-closes to readonly. |
 | `MerchantSource` | defaults to `config.MerchantSourceManifest` | Mode 1 (manifest-is-truth, secrets in memory, reboot to change) vs `MerchantSourceAPI` (mode 2: provision via HTTP APIs + persistent secret store). |
+| `CatalogSource` | empty follows `MerchantSource` | `CatalogSourceManifest` uses `PushCatalog`; `CatalogSourceAPI` permits authorized product, price and metering APIs independently of provider credentials. |
 | `DB` | yes | Schema defaults to `billing`. The injected pool can be the same owning connection used for initialization. |
 
 #### Database ownership and optional separate runtime credentials
@@ -302,7 +303,7 @@ Semantics by mode:
   identity bind (slug + top-level `DisplayName`) is legal; arm providers through
   `embed/controlplane` (`cp.UpsertPaymentProviderConfig`) or
   `PUT /v1/merchant/payment-providers/{provider}` (`RouteSetPaymentProviders`),
-  and author the catalog through the Client.
+  Catalog authoring is selected independently below.
 
 YAML-first hosts can keep the merchant in a file: `embed.ParseMerchantConfig` (one
 merchant, strict — unknown fields rejected) or
@@ -310,10 +311,27 @@ merchant, strict — unknown fields rejected) or
 manifest plus the host's mounted YAML secret overlays, so committed files hold
 placeholders and the host supplies real secrets from its own config tree).
 
-**Catalog authoring**: manifest hosts (`merchant_source=manifest`) author their
-catalog through `rt.PushCatalog`; the Client's catalog writes are refused for
-them (405 `manifest_driven`). API hosts author through the Client
-(`CreateProduct`, `CreatePrice`, `SetPriceKey`, ...).
+**Catalog authoring**: `CatalogSource` selects `manifest` or `api`; when omitted
+it follows `MerchantSource`, preserving existing behavior. Manifest catalogs use
+`rt.PushCatalog`; catalog API writes return 405 `manifest_driven`. API catalogs
+use the Client (`CreateProduct`, `CreatePrice`, `SetPriceKey`, ...); mutating
+manifest pushes are refused, while plan-only comparisons remain available.
+
+For dynamic products with host-owned Stripe credentials, construct the runtime
+with `MerchantSource: config.MerchantSourceManifest` and
+`CatalogSource: config.CatalogSourceAPI`, then pass the host's account and secrets
+through `UpsertMerchantConfig` as above. OpenRails keeps provider credentials in
+memory and refuses provider-configuration API writes. The host rotates credentials
+by updating its configuration and constructing a new runtime. Existing API catalog
+rows survive restart. Do not bootstrap host credentials through a provider PUT:
+that operation selects managed persistence when `MerchantSource` is `api`.
+
+Host-supplied provider credentials alone need no encryption master key. Optional
+DB-backed alert-webhook URLs and HyperSwitch SDK capture authorization still
+require encrypted persistence. Managed provider credentials use the explicitly
+selected DB or Vault backend; they never fall back to host credentials on a miss.
+`ProviderWriteMode` remains independent: readonly limits provider network writes,
+and an API-owned catalog can still update local definitions.
 
 ```go
 err := rt.PushCatalog(ctx, embed.PushCatalogOptions{
@@ -324,8 +342,8 @@ err := rt.PushCatalog(ctx, embed.PushCatalogOptions{
 
 A product may carry several prices (for example two monthly tiers) by giving
 each an explicit `key`; the key is the durable handle repricing and checkout
-refer to. In mode 1 a mutating push always upgrades to full converge
-(insert+overwrite+prune — the YAML is the truth); in mode 2 a mutating push
+refer to. With `catalog_source=manifest`, a mutating push upgrades to full
+converge (insert+overwrite+prune); with `catalog_source=api`, a mutating push
 refuses (plan-only diff stays legal). `rt.Converge(ctx, merchantID)` runs the
 merchant-wide derive pass on demand after an import. The manifest is
 `version: 1` + `catalogs: [{merchant, tier_groups, products, meters}]`.
