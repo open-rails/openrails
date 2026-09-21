@@ -509,7 +509,6 @@ export const cancelReprice = (id: string) =>
 export const publishCatalog = (
   manifest: unknown,
   opts: {
-    plan_only?: boolean
     insert?: boolean
     overwrite?: boolean
     prune?: boolean

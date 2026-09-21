@@ -1,4 +1,4 @@
-package catalog
+package catalogpublish
 
 import (
 	"context"
@@ -7,11 +7,8 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// Applier is the narrow facade surface the plan/apply pipeline drives. It
-// covers exactly the methods this package calls, so it can be satisfied by a
-// fake in tests, by an in-process *service.Service adapter, or by a remote HTTP
-// client — all decoupled from *service.Service.
-type Applier interface {
+// applier is the private catalog method set used by the planner and executor.
+type applier interface {
 	// GetProductByKey returns openrails.ErrNotFound (or a wrapping typed refusal)
 	// only when the product is absent. Other failures stop planning.
 	GetProductByKey(ctx context.Context, key string) (*billingservice.CatalogProduct, error)
