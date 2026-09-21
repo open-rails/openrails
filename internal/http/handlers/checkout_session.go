@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -184,6 +185,16 @@ func GetCheckoutSession(r *httprequest.Request) {
 	r.SuccessJSON(resp)
 }
 
+// checkoutVerifiedPrincipal copies middleware-verified facts without promoting
+// any credential class. The engine branch alone requires interactive initiation.
+func checkoutVerifiedPrincipal(r *httprequest.Request) billingauth.DelegatedPrincipal {
+	principal, ok := middleware.PrincipalFromRequest(r)
+	if !ok {
+		return billingauth.DelegatedPrincipal{}
+	}
+	return billingauth.DelegatedPrincipal{CredentialClass: principal.CredentialClass, MerchantID: principal.MerchantID.String(), SubjectID: principal.Subject, Invoker: principal.Invoker}
+}
+
 func ConfirmCheckoutSession(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
 	sessionID := strings.TrimSpace(r.Param("id"))
@@ -211,13 +222,18 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 	}
 	parsedID := typedParsedID.UUID()
 	svcReq := &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Capture: req.Payment.Capture, Rail: req.Payment.Rail, Signature: req.Payment.Signature, Wallet: req.Payment.Wallet}}
-	resp, err := r.State.CheckoutSessionService.ConfirmSession(r.Request.Context(), parsedID, svcReq, user)
+	principal := checkoutVerifiedPrincipal(r)
+	resp, err := r.State.CheckoutSessionService.ConfirmCustomerSession(r.Request.Context(), parsedID, svcReq, user, principal)
 	if err != nil {
 		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{
 			Rail:              req.Payment.Rail,
 			Wallet:            req.Payment.Wallet,
 			CheckoutSessionID: sessionID,
 		})
+		return
+	}
+	if resp.Status == "processing" {
+		r.JSON(http.StatusAccepted, resp)
 		return
 	}
 	r.SuccessJSON(resp)
