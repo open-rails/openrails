@@ -23,9 +23,12 @@ ledger accounts/transfers, invoices, grants, entitlements, admission receipts,
 rating and provider-refresh watermarks, webhook deduplication, acknowledged host
 events, and completed checkout and provider-intent coordinates. Scalar money is
 encoded as decimal strings; nested money contracts use integer JSON tokens.
-The archive targets the current fresh schema only. Unknown tables (including
-unscoped tables), unknown columns on retained or excluded tables, and unsupported
-nested shapes refuse export. New schema fields
+The archive targets the reviewed OpenRails table inventory. Co-located host,
+AuthKit and River tables are outside that ownership boundary and are never
+exported, restored or counted as destination billing data. Unclassified
+OpenRails-owned tables, unknown columns on retained or excluded tables, and
+unsupported nested shapes refuse export. Migration-inventory tests require new
+OpenRails tables to receive an explicit ownership decision. New schema fields
 require an explicit portability decision; a list of known table names alone is
 not sufficient coverage.
 

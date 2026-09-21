@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/config"
+	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 )
 
 const embeddedResetSchema = config.DefaultSchema
@@ -80,6 +81,17 @@ func ApplyEmbeddedReset(ctx context.Context, dsn, allowedTargets, confirmation s
 	}()
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, target); err != nil {
 		return result, fmt.Errorf("lock embedded reset target: %w", err)
+	}
+	// A default namespace is not exclusive ownership. Refuse a shared schema
+	// rather than cascading through another application's tables or queue.
+	var shared bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS (
+ SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+ WHERE n.nspname=$1 AND c.relkind IN ('r','p','v','m','f') AND NOT c.relname=ANY($2::text[]))`, embeddedResetSchema, postgresmigrations.OwnedTables).Scan(&shared); err != nil {
+		return result, err
+	}
+	if shared {
+		return result, errors.New("embedded reset refuses a shared schema containing host-owned relations")
 	}
 	if _, err = tx.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{embeddedResetSchema}.Sanitize()+" CASCADE"); err != nil {
 		return result, fmt.Errorf("drop openrails schema: %w", err)

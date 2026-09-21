@@ -70,9 +70,6 @@ func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, opts Optio
 	if riverSchema == "" {
 		riverSchema = config.RiverSchema
 	}
-	if !opts.HostRiver && riverSchema == schema {
-		return fmt.Errorf("River schema must differ from billing schema")
-	}
 
 	var runtimeUser string
 	if opts.RuntimePool != nil {
