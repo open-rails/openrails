@@ -148,4 +148,33 @@ func TestCustodianStorePlaneUnderEnforcingRLS(t *testing.T) {
 	ref, err = afterSeed.SecretRef(custodians.SecretAPIKey)
 	require.NoError(t, err)
 	require.Equal(t, 7, ref.MinVersion, "a seeding write must not erase a rotation floor")
+
+	stale := entry
+	stale.CredentialVersions = map[string]int{custodians.SecretAPIKey: 1}
+	afterStale, err := svc.UpsertCustodian(ctx, owner, stale, "live")
+	require.NoError(t, err)
+	ref, err = afterStale.SecretRef(custodians.SecretAPIKey)
+	require.NoError(t, err)
+	require.Equal(t, 7, ref.MinVersion, "an explicit stale declaration must not lower a rotation floor")
+
+	start, results := make(chan struct{}), make(chan error, 3)
+	for _, version := range []int{8, 9, 1} {
+		go func() {
+			<-start
+			declared := entry
+			declared.CredentialVersions = map[string]int{custodians.SecretAPIKey: version}
+			_, err := svc.UpsertCustodian(ctx, owner, declared, "live")
+			results <- err
+		}()
+	}
+	close(start)
+	for range 3 {
+		require.NoError(t, <-results)
+	}
+	final, found, err := svc.CustodianScopeByKey(ctx, owner, "bt")
+	require.NoError(t, err)
+	require.True(t, found)
+	ref, err = final.SecretRef(custodians.SecretAPIKey)
+	require.NoError(t, err)
+	require.Equal(t, 9, ref.MinVersion, "concurrent rotations and stale declarations retain the highest floor")
 }
