@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -21,55 +22,55 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-func ownsInitialEnrollment(in gen.OpenrailsRailIntent, user string, price uuid.UUID, fingerprint string) error {
-	p, err := subscriptions.DecodeNMIInitialEnrollmentPayload(in)
+func ownsInitialMembership(in gen.OpenrailsRailIntent, user string, price uuid.UUID, fingerprint string) error {
+	p, err := subscriptions.DecodeInitialMembershipPayload(in)
 	if err != nil {
 		return err
 	}
-	if p.UserID != user || p.PriceID != price || p.RequestFingerprint != fingerprint {
+	if p.Terms.CustomerID.String() != user || p.Terms.PriceID != price || p.RequestFingerprint != fingerprint {
 		return apperr.Conflictf("checkout key belongs to another accepted enrollment")
 	}
 	return nil
 }
 
-func initialEnrollmentReplayParams(in gen.OpenrailsRailIntent) intents.EnqueueParams {
+func initialMembershipReplayParams(in gen.OpenrailsRailIntent) intents.EnqueueParams {
 	return intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: *in.PspID, IntentType: in.IntentType, PriceID: in.PriceID, Payload: json.RawMessage(in.Payload), IdempotencyKey: in.IdempotencyKey, NextAttemptAt: in.NextAttemptAt, Origin: intents.Origin(in.Origin)}
 }
 
-func (s *CheckoutService) replayInitialEnrollment(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, bool, error) {
+func (s *CheckoutService) replayInitialMembership(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, bool, error) {
 	if req == nil || user == nil || req.IdempotencyKey == "" || s.SubscriptionService == nil {
 		return nil, false, nil
 	}
-	prior, err := intents.NewStore(s.SubscriptionService.Database()).GetByIdempotencyKey(ctx, NMISubscriptionCreateIdempotencyKey(req.IdempotencyKey))
+	prior, err := intents.NewStore(s.SubscriptionService.Database()).GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey(req.IdempotencyKey))
 	if db.IsNotFound(err) {
 		return nil, false, nil
 	}
 	if err != nil {
 		return nil, true, err
 	}
-	p, err := subscriptions.DecodeNMIInitialEnrollmentPayload(prior)
+	p, err := subscriptions.DecodeInitialMembershipPayload(prior)
 	if err != nil {
 		return nil, true, err
 	}
 	target := railTarget{PSP: p.PSP, Rail: "nmi"}
-	fingerprint := saleRequestFingerprint(req, user, p.PriceID, target)
-	if err := ownsInitialEnrollment(prior, user.ID, p.PriceID, fingerprint); err != nil {
+	fingerprint := saleRequestFingerprint(req, user, p.Terms.PriceID, target)
+	if err := ownsInitialMembership(prior, user.ID, p.Terms.PriceID, fingerprint); err != nil {
 		return nil, true, err
 	}
 	if s.Intents == nil {
 		return nil, true, errors.New("enrollment executor unavailable")
 	}
-	current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialEnrollmentReplayParams(prior), func(in gen.OpenrailsRailIntent) error {
-		return ownsInitialEnrollment(in, user.ID, p.PriceID, fingerprint)
+	current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(prior), func(in gen.OpenrailsRailIntent) error {
+		return ownsInitialMembership(in, user.ID, p.Terms.PriceID, fingerprint)
 	})
 	if err != nil {
 		return nil, true, err
 	}
-	response, err := nmiSubscriptionResponseFromIntent(current)
+	response, err := initialMembershipResponseFromIntent(current)
 	return response, true, err
 }
 
-func (s *CheckoutService) admitInitialEnrollment(ctx context.Context, req *CheckoutRequest, user *UserIdentity, priceID uuid.UUID, method *models.PaymentMethod, target railTarget, key string) (gen.OpenrailsRailIntent, error) {
+func (s *CheckoutService) admitInitialMembership(ctx context.Context, req *CheckoutRequest, user *UserIdentity, priceID uuid.UUID, method *models.PaymentMethod, target railTarget, key string) (gen.OpenrailsRailIntent, error) {
 	var in gen.OpenrailsRailIntent
 	if method == nil || s.PurchaseService == nil || target.Scope == nil {
 		return in, errors.New("initial enrollment requires a saved instrument and provider account")
@@ -102,10 +103,10 @@ func (s *CheckoutService) admitInitialEnrollment(ctx context.Context, req *Check
 		if _, err = d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: customer}); err != nil {
 			return err
 		}
-		prior, err := intents.NewStore(d).GetByIdempotencyKey(ctx, NMISubscriptionCreateIdempotencyKey(key))
+		prior, err := intents.NewStore(d).GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey(key))
 		if err == nil {
 			in = prior
-			return ownsInitialEnrollment(prior, user.ID, priceID, fingerprint)
+			return ownsInitialMembership(prior, user.ID, priceID, fingerprint)
 		}
 		if !db.IsNotFound(err) {
 			return err
@@ -168,12 +169,12 @@ func (s *CheckoutService) admitInitialEnrollment(ctx context.Context, req *Check
 		if s.Config != nil && s.Config.IsTestMode() {
 			email = ""
 		}
-		payload := NMISubscriptionCreatePayload{Terms: terms, Instrument: charge.FreezeInstrument(saved), RequestFingerprint: fingerprint, DayFrequency: *days, PlanPayments: 0, Provider: "nmi", PSP: target.PSP, PlanID: plan, CustomerVaultID: saved.RailCustomerRef, BillingID: saved.RailMethodRef, AmountMicros: amount, Currency: price.Currency, Email: email, UserID: user.ID, PriceID: price.ID, LocalSubscriptionID: terms.SubscriptionID, PaymentMethodID: &terms.PaymentMethodID, StartDate: startDate, DelayedStart: delayed, StoredCredentialRef: strings.TrimSpace(saved.StoredCredentialRecurringRef), E2ERunID: strings.TrimSpace(req.Metadata["e2e_run_id"]), CheckoutIdempotencyKey: key, FirstName: ResolveCheckoutFirstName(req, user), LastName: ResolveCheckoutLastName(req), Address1: DefaultIfEmpty(req.Address1, "N/A"), City: DefaultIfEmpty(req.City, "N/A"), State: DefaultIfEmpty(req.State, "N/A"), Zip: DefaultIfEmpty(req.Zip, "00000"), Country: DefaultIfEmpty(req.Country, "US")}
-		in, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: "nmi", PspID: saved.PspID, IntentType: TypeNMISubscriptionCreate, PriceID: &price.ID, Payload: payload, IdempotencyKey: NMISubscriptionCreateIdempotencyKey(key), NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "checkout initial enrollment"})
+		payload := InitialMembershipPayload{Terms: terms, Instrument: charge.FreezeInstrument(saved), RequestFingerprint: fingerprint, CheckoutIdempotencyKey: key, PSP: target.PSP, Email: email, E2ERunID: strings.TrimSpace(req.Metadata["e2e_run_id"]), NativeSchedule: &subscriptions.NMIInitialScheduleTerms{PlanID: plan, StartDate: startDate, DayFrequency: *days, PlanPayments: 0, Card: nmi.CardUserData{FirstName: ResolveCheckoutFirstName(req, user), LastName: ResolveCheckoutLastName(req), Address1: DefaultIfEmpty(req.Address1, "N/A"), City: DefaultIfEmpty(req.City, "N/A"), State: DefaultIfEmpty(req.State, "N/A"), Zip: DefaultIfEmpty(req.Zip, "00000"), Country: DefaultIfEmpty(req.Country, "US")}}}
+		in, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: "nmi", PspID: saved.PspID, IntentType: TypeInitialMembership, PriceID: &price.ID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "checkout initial enrollment"})
 		if err != nil {
 			return err
 		}
-		return ownsInitialEnrollment(in, user.ID, priceID, fingerprint)
+		return ownsInitialMembership(in, user.ID, priceID, fingerprint)
 	})
 	return in, err
 }

@@ -34,7 +34,7 @@ func (s *NMIConvergeService) activateAcceptedInitialPayment(ctx context.Context,
 		return true, errors.New("pending membership has ambiguous accepted enrollment")
 	}
 	in := rows[0]
-	p, err := subscriptions.DecodeNMIInitialEnrollmentPayload(in)
+	p, err := subscriptions.DecodeInitialMembershipPayload(in)
 	if err != nil {
 		return true, err
 	}
@@ -44,7 +44,7 @@ func (s *NMIConvergeService) activateAcceptedInitialPayment(ctx context.Context,
 	if in.Status != intents.StatusSucceeded {
 		return true, fmt.Errorf("%w: initial schedule custody is not terminal", ErrConvergeRetryLater)
 	}
-	if err := intents.ValidateInitialEnrollmentTerminal(in); err != nil {
+	if err := intents.ValidateInitialMembershipTerminal(in); err != nil {
 		return true, err
 	}
 	schedule, _, err := intents.LoadNMIEnrollmentReceipt(in)
@@ -79,11 +79,11 @@ func (s *NMIConvergeService) activateAcceptedInitialPayment(ctx context.Context,
 	if !found {
 		return true, fmt.Errorf("%w: first scheduled payment is not qualified", ErrConvergeRetryLater)
 	}
-	minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.Terms.RecurringAmount)
+	minor, err := moneyutil.NativeToRailMinorExact(p.Terms.Currency, p.Terms.RecurringAmount)
 	if err != nil {
 		return true, err
 	}
-	if paid.Amount != minor || !strings.EqualFold(paid.Currency, p.Currency) || paid.CustomerVaultID != p.Instrument.RailCustomerRef {
+	if paid.Amount != minor || !strings.EqualFold(paid.Currency, p.Terms.Currency) || paid.CustomerVaultID != p.Instrument.RailCustomerRef {
 		return true, errors.New("first scheduled payment contradicts frozen enrollment money or instrument")
 	}
 	if _, err := s.NMIClient.ReadSingleCardVaultBilling(ctx, p.Instrument.RailCustomerRef, p.Instrument.RailMethodRef); err != nil {
@@ -92,7 +92,7 @@ func (s *NMIConvergeService) activateAcceptedInitialPayment(ctx context.Context,
 	return true, s.activateInitialPhaseTx(ctx, in, p, schedule.SubscriptionID(), paid.TransactionID, probe.SuccessAt)
 }
 
-func (s *NMIConvergeService) activateInitialPhaseTx(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIInitialEnrollmentPayload, providerRef, transaction string, purchasedAt time.Time) error {
+func (s *NMIConvergeService) activateInitialPhaseTx(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.InitialMembershipPayload, providerRef, transaction string, purchasedAt time.Time) error {
 	var notices []*models.NotificationQueue
 	ctx = db.WithPSPID(ctx, p.Terms.PSPID)
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -118,7 +118,7 @@ func (s *NMIConvergeService) activateInitialPhaseTx(ctx context.Context, in gen.
 			}
 		}
 		var err error
-		_, notices, err = s.SubscriptionLifecycleService.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &terms, UserID: p.UserID, PriceID: p.PriceID, Rail: models.RailNMI, RailSubscriptionID: &providerRef, TransactionID: transaction, PurchasedAt: &purchasedAt, PaymentMetadata: map[string]any{"order_id": intents.NMIEnrollmentOrder(in), "provider_transaction_id": transaction}})
+		_, notices, err = s.SubscriptionLifecycleService.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &terms, UserID: p.Terms.CustomerID.String(), PriceID: p.Terms.PriceID, Rail: models.RailNMI, RailSubscriptionID: &providerRef, TransactionID: transaction, PurchasedAt: &purchasedAt, PaymentMetadata: map[string]any{"order_id": intents.NMIEnrollmentOrder(in), "provider_transaction_id": transaction}})
 		// A provider-observed sale does not establish customer-initiated recurring
 		// consent. Preserve any existing anchor; never infer one from this event.
 		return err

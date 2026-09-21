@@ -216,7 +216,7 @@ func (s *CheckoutService) CheckSubscriptionConflict(ctx context.Context, userID 
 
 // Checkout processes a unified checkout request
 func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error) {
-	if response, found, err := s.replayInitialEnrollment(ctx, req, user); found || err != nil {
+	if response, found, err := s.replayInitialMembership(ctx, req, user); found || err != nil {
 		return response, err
 	}
 	if s.NMISaleService != nil {
@@ -607,13 +607,13 @@ func (s *CheckoutService) processNMISubscription(ctx context.Context, req *Check
 	if err != nil {
 		return nil, err
 	}
-	accepted, err := s.admitInitialEnrollment(ctx, req, user, price.ID, method, target, key)
+	accepted, err := s.admitInitialMembership(ctx, req, user, price.ID, method, target, key)
 	if err != nil {
 		return nil, err
 	}
 	fingerprint := saleRequestFingerprint(req, user, price.ID, target)
-	intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialEnrollmentReplayParams(accepted), func(in gen.OpenrailsRailIntent) error {
-		return ownsInitialEnrollment(in, user.ID, price.ID, fingerprint)
+	intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(accepted), func(in gen.OpenrailsRailIntent) error {
+		return ownsInitialMembership(in, user.ID, price.ID, fingerprint)
 	})
 	if err != nil {
 		return nil, err
@@ -621,12 +621,12 @@ func (s *CheckoutService) processNMISubscription(ctx context.Context, req *Check
 	if intent.Status == intents.StatusFailedTerminal && created && method != nil && s.RailPaymentMethodService != nil {
 		_ = s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, method)
 	}
-	return nmiSubscriptionResponseFromIntent(intent)
+	return initialMembershipResponseFromIntent(intent)
 }
 
-// nmiSubscriptionResponseFromIntent rebuilds the checkout response from a
+// initialMembershipResponseFromIntent rebuilds the checkout response from a
 // succeeded create intent's evidence.
-func nmiSubscriptionResponseFromIntent(intent gen.OpenrailsRailIntent) (*CheckoutResponse, error) {
+func initialMembershipResponseFromIntent(intent gen.OpenrailsRailIntent) (*CheckoutResponse, error) {
 	if intent.Status == intents.StatusFailedTerminal {
 		return nil, terminalCheckoutError(intent, "initial enrollment refused")
 	}

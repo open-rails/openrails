@@ -76,7 +76,7 @@ var pinnedBoundaries = map[string]string{
 var deferredBoundaries = map[string]string{
 	"internal/integrations/nmi/probe.go":                   "the $0.01 test-mode probe: a fixed literal amount, not a customer amount",
 	"internal/modules/checkout/service.go":                 "upgrade proration + checkout sale — amounts reach the wire via nmi/payments.go, which IS pinned; the arithmetic above it is covered by unit tests, not a wire pin",
-	"internal/modules/checkout/nmi_subscription_intent.go": "same",
+	"internal/modules/checkout/initial_membership_intent.go": "same",
 	"internal/modules/checkout/custodian_sale.go":          "same",
 	"internal/modules/subscriptions/plan_migration.go":     "or#815 plan migration: successor amount reaches NMI through the pinned client",
 	"internal/http/handlers/admin_payments.go":             "admin-initiated refund amount; reaches the wire through the pinned nmi/stripe clients",

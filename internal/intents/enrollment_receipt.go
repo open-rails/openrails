@@ -30,8 +30,8 @@ type enrollmentReceipt struct {
 }
 
 func NMIEnrollmentOrder(in gen.OpenrailsRailIntent) string {
-	if in.IntentType == subscriptions.TypeNMIInitialEnrollment {
-		p, err := subscriptions.DecodeNMIInitialEnrollmentPayload(in)
+	if in.IntentType == subscriptions.TypeInitialMembership {
+		p, err := subscriptions.DecodeInitialMembershipPayload(in)
 		if err != nil {
 			return ""
 		}
@@ -49,13 +49,16 @@ type enrollmentTerms struct {
 }
 
 func decodeEnrollmentTerms(in gen.OpenrailsRailIntent) (enrollmentTerms, error) {
-	if in.IntentType == subscriptions.TypeNMIInitialEnrollment {
-		p, err := subscriptions.DecodeNMIInitialEnrollmentPayload(in)
+	if in.IntentType == subscriptions.TypeInitialMembership {
+		p, err := subscriptions.DecodeInitialMembershipPayload(in)
 		if err != nil {
 			return enrollmentTerms{}, err
 		}
+		if p.NativeSchedule == nil {
+			return enrollmentTerms{}, errors.New("engine membership has no native schedule")
+		}
 
-		return enrollmentTerms{Instrument: p.Instrument, PlanID: p.PlanID, Currency: p.Currency, StartDate: p.StartDate, RecurringAmount: p.Terms.RecurringAmount, PeriodStart: p.Terms.PeriodStart, PeriodEnd: p.Terms.PeriodStart.Add(time.Duration(p.DayFrequency) * 24 * time.Hour), PlanPayments: &p.PlanPayments}, nil
+		return enrollmentTerms{Instrument: p.Instrument, PlanID: p.NativeSchedule.PlanID, Currency: p.Terms.Currency, StartDate: p.NativeSchedule.StartDate, RecurringAmount: p.Terms.RecurringAmount, PeriodStart: p.Terms.PeriodStart, PeriodEnd: p.Terms.PeriodStart.Add(time.Duration(p.NativeSchedule.DayFrequency) * 24 * time.Hour), PlanPayments: &p.NativeSchedule.PlanPayments}, nil
 	}
 	p, err := subscriptions.DecodeNMIUpgradePayload(in)
 	return enrollmentTerms{Instrument: p.Instrument, OldProviderSubscriptionID: p.OldProviderSubscriptionID, PlanID: p.PlanID, Currency: p.Currency, StartDate: p.StartDate, RecurringAmount: p.RecurringAmount, PeriodStart: p.PeriodStart, PeriodEnd: p.PeriodEnd}, err
@@ -74,7 +77,7 @@ func (r NMIEnrollmentReceipt) Validate(in gen.OpenrailsRailIntent) error {
 	}
 	f := r.data.Facts
 	sub := f.Subscription
-	if in.IntentType == subscriptions.TypeNMIInitialEnrollment && (f.VaultBillingID == "" || (p.Instrument.RailMethodRef != "" && f.VaultBillingID != p.Instrument.RailMethodRef)) {
+	if in.IntentType == subscriptions.TypeInitialMembership && (f.VaultBillingID == "" || (p.Instrument.RailMethodRef != "" && f.VaultBillingID != p.Instrument.RailMethodRef)) {
 		return errors.New("initial schedule does not prove its accepted sole vault billing entry")
 	}
 	if sub.ID == "" || sub.ID == p.OldProviderSubscriptionID || sub.CustomerVaultID != p.Instrument.RailCustomerRef || sub.Plan == nil || sub.Plan.ID != p.PlanID || sub.DelayedCondition != "active" || f.OrderReference != NMIEnrollmentOrder(in) || f.PONumber != NMIEnrollmentOrder(in) {
@@ -127,8 +130,8 @@ func ReadNMIEnrollmentReceipt(ctx context.Context, in gen.OpenrailsRailIntent, r
 	if err != nil || !found {
 		return NMIEnrollmentReceipt{}, false, err
 	}
-	if in.IntentType == subscriptions.TypeNMIInitialEnrollment {
-		p, err := subscriptions.DecodeNMIInitialEnrollmentPayload(in)
+	if in.IntentType == subscriptions.TypeInitialMembership {
+		p, err := subscriptions.DecodeInitialMembershipPayload(in)
 		if err != nil {
 			return NMIEnrollmentReceipt{}, false, err
 		}

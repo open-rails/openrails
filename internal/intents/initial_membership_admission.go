@@ -9,13 +9,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-func (s *Store) enqueueInitialEnrollment(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
+func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
 	var row gen.OpenrailsRailIntent
 	mid, err := merchant.Require(ctx)
 	if err != nil || mid.UUID() != p.MerchantID {
@@ -34,12 +35,12 @@ func (s *Store) enqueueInitialEnrollment(ctx context.Context, p EnqueueParams) (
 	}
 	// Read only the requested lock coordinates here. Full canonical validation
 	// runs against the real inserted/existing row before this transaction commits.
-	var terms subscriptions.NMIInitialEnrollmentPayload
+	var terms subscriptions.InitialMembershipPayload
 	if err := json.Unmarshal(raw, &terms); err != nil {
 		return row, err
 	}
-	customer, err := uuid.Parse(terms.UserID)
-	if err != nil || customer == uuid.Nil || p.PriceID == nil || *p.PriceID != terms.PriceID || terms.Instrument.PSPID != target {
+	customer, err := uuid.Parse(terms.Terms.CustomerID.String())
+	if err != nil || customer == uuid.Nil || p.PriceID == nil || *p.PriceID != terms.Terms.PriceID || terms.Instrument.PSPID != target {
 		return row, errors.New("initial enrollment admission coordinates contradict requested enrollment")
 	}
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -50,11 +51,11 @@ func (s *Store) enqueueInitialEnrollment(ctx context.Context, p EnqueueParams) (
 		store := s.withTxDB(d)
 		previous, err := store.GetByIdempotencyKey(ctx, p.IdempotencyKey)
 		if err == nil {
-			accepted, err := subscriptions.DecodeNMIInitialEnrollmentPayload(previous)
+			accepted, err := subscriptions.DecodeInitialMembershipPayload(previous)
 			if err != nil {
 				return err
 			}
-			if accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.Terms.PaymentMethodID != terms.Terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
+			if accepted.Terms.CustomerID.String() != terms.Terms.CustomerID.String() || accepted.Terms.PriceID != terms.Terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.Terms.PaymentMethodID != terms.Terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
 				return apperr.Conflictf("checkout key belongs to another accepted enrollment")
 			}
 			row = previous
@@ -80,15 +81,27 @@ func (s *Store) enqueueInitialEnrollment(ctx context.Context, p EnqueueParams) (
 		if err := terms.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
 			return err
 		}
+		if terms.Terms.CollectionPolicy == models.CollectionPolicyEngine {
+			if terms.HyperSwitch == nil {
+				return errors.New("engine membership requires accepted custody binding")
+			}
+			binding, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, terms.HyperSwitch.APIBaseURL)
+			if err != nil {
+				return err
+			}
+			if binding != *terms.HyperSwitch {
+				return charge.ErrInstrumentChanged
+			}
+		}
 		row, err = store.enqueue(ctx, p)
 		if err != nil {
 			return err
 		}
-		accepted, err := subscriptions.DecodeNMIInitialEnrollmentPayload(row)
+		accepted, err := subscriptions.DecodeInitialMembershipPayload(row)
 		if err != nil {
 			return err
 		}
-		if accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.Terms.PaymentMethodID != terms.Terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
+		if accepted.Terms.CustomerID.String() != terms.Terms.CustomerID.String() || accepted.Terms.PriceID != terms.Terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.Terms.PaymentMethodID != terms.Terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
 			return apperr.Conflictf("checkout key belongs to another accepted enrollment")
 		}
 		return nil

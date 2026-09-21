@@ -22,41 +22,41 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-const TypeNMISubscriptionCreate = subscriptions.TypeNMIInitialEnrollment
+const TypeInitialMembership = subscriptions.TypeInitialMembership
 
-type NMISubscriptionCreatePayload = subscriptions.NMIInitialEnrollmentPayload
+type InitialMembershipPayload = subscriptions.InitialMembershipPayload
 
-func NMISubscriptionCreateIdempotencyKey(key string) string {
-	return TypeNMISubscriptionCreate + ":" + strings.TrimSpace(key)
+func InitialMembershipIdempotencyKey(key string) string {
+	return TypeInitialMembership + ":" + strings.TrimSpace(key)
 }
-func decodeNMISubscriptionCreatePayload(in gen.OpenrailsRailIntent) (NMISubscriptionCreatePayload, error) {
-	return subscriptions.DecodeNMIInitialEnrollmentPayload(in)
+func decodeInitialMembershipPayload(in gen.OpenrailsRailIntent) (InitialMembershipPayload, error) {
+	return subscriptions.DecodeInitialMembershipPayload(in)
 }
 
-type NMISubscriptionCreateIntentHandler struct {
+type InitialMembershipIntentHandler struct {
 	Checkout *CheckoutService
 	Policy   intents.BackoffPolicy
 }
 
-func NewNMISubscriptionCreateIntentHandler(s *CheckoutService) *NMISubscriptionCreateIntentHandler {
-	return &NMISubscriptionCreateIntentHandler{Checkout: s, Policy: intents.DefaultBackoff}
+func NewInitialMembershipIntentHandler(s *CheckoutService) *InitialMembershipIntentHandler {
+	return &InitialMembershipIntentHandler{Checkout: s, Policy: intents.DefaultBackoff}
 }
-func (h *NMISubscriptionCreateIntentHandler) Type() string { return TypeNMISubscriptionCreate }
-func (h *NMISubscriptionCreateIntentHandler) Backoff(attempts int32) time.Duration {
+func (h *InitialMembershipIntentHandler) Type() string { return TypeInitialMembership }
+func (h *InitialMembershipIntentHandler) Backoff(attempts int32) time.Duration {
 	return h.Policy.Delay(attempts)
 }
-func (h *NMISubscriptionCreateIntentHandler) PrunePolicy() (bool, bool)    { return true, true }
-func (h *NMISubscriptionCreateIntentHandler) CommitsTerminalOutcome() bool { return true }
-func (h *NMISubscriptionCreateIntentHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (intents.Relevance, error) {
+func (h *InitialMembershipIntentHandler) PrunePolicy() (bool, bool)    { return true, true }
+func (h *InitialMembershipIntentHandler) CommitsTerminalOutcome() bool { return true }
+func (h *InitialMembershipIntentHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
-func (h *NMISubscriptionCreateIntentHandler) database() *db.DB {
+func (h *InitialMembershipIntentHandler) database() *db.DB {
 	if h.Checkout == nil || h.Checkout.SubscriptionService == nil {
 		return nil
 	}
 	return h.Checkout.SubscriptionService.Database()
 }
-func (h *NMISubscriptionCreateIntentHandler) client(ctx context.Context, in gen.OpenrailsRailIntent, p NMISubscriptionCreatePayload) (*nmi.NMIClient, error) {
+func (h *InitialMembershipIntentHandler) client(ctx context.Context, in gen.OpenrailsRailIntent, p InitialMembershipPayload) (*nmi.NMIClient, error) {
 	client, err := h.Checkout.resolveNMIClient(db.WithPSPID(ctx, *in.PspID), p.PSP)
 	if err != nil {
 		return nil, err
@@ -68,7 +68,7 @@ func (h *NMISubscriptionCreateIntentHandler) client(ctx context.Context, in gen.
 	return client, nil
 }
 
-func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
 	if h.database() == nil || h.Checkout.Lifecycle == nil {
 		return intents.Parked("initial membership services unavailable")
 	}
@@ -80,21 +80,24 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, in gen
 	if len(current.ResultEvidence) > 0 && json.Unmarshal(current.ResultEvidence, &progress) != nil {
 		return intents.Ambiguous("invalid enrollment progress")
 	}
-	if value, present := progress["enrollment_submitted"]; present && value != true {
+	if value, present := progress["initial_submitted"]; present && value != true {
 		return intents.Ambiguous("invalid initial submission fence")
 	}
-	if _, refused, err := intents.LoadInitialEnrollmentRefusal(current); err != nil {
+	if _, refused, err := intents.LoadInitialMembershipRefusal(current); err != nil {
 		return intents.Ambiguous(err.Error())
 	} else if refused {
 		return h.Verify(ctx, current)
 	}
-	if progress["enrollment_submitted"] == true || current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
+	if progress["initial_submitted"] == true || current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
 		return h.Verify(ctx, current)
 	}
 	in = current
-	p, err := decodeNMISubscriptionCreatePayload(in)
+	p, err := decodeInitialMembershipPayload(in)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
+	}
+	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
+		return intents.Parked("engine initial membership is not enabled")
 	}
 	client, err := h.client(ctx, in, p)
 	if err != nil {
@@ -103,7 +106,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, in gen
 	if client.ReadOnly {
 		return intents.Parked("native enrollment account is read-only")
 	}
-	if _, err = client.ReadSingleCardVaultBilling(ctx, p.CustomerVaultID, p.BillingID); err != nil {
+	if _, err = client.ReadSingleCardVaultBilling(ctx, p.Instrument.RailCustomerRef, p.Instrument.RailMethodRef); err != nil {
 		return intents.Parked("enrollment instrument readback unavailable or unqualified")
 	}
 	submitted := false
@@ -122,7 +125,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, in gen
 		if err = p.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
 			return err
 		}
-		submitted, err = intents.NewStore(d).RecordProgressIfAbsent(ctx, in.ID, "enrollment_submitted", true)
+		submitted, err = intents.NewStore(d).RecordProgressIfAbsent(ctx, in.ID, "initial_submitted", true)
 		return err
 	})
 	if err != nil {
@@ -131,20 +134,20 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, in gen
 	if !submitted {
 		return h.Verify(ctx, in)
 	}
-	minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.AmountMicros)
+	minor, err := moneyutil.NativeToRailMinorExact(p.Terms.Currency, p.Terms.Amount)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
 	var credential *nmi.StoredCredential
-	if p.AmountMicros > 0 {
+	if p.Terms.Amount > 0 {
 		mode := charge.InitialRecurring()
-		if p.StoredCredentialRef != "" {
-			mode = charge.RecurringReuse(p.StoredCredentialRef)
+		if p.Instrument.StoredCredentialRecurringRef != "" {
+			mode = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
 		}
 		credential = nmidirect.StoredCredentialFor(mode)
 	}
 	order := intents.NMIEnrollmentOrder(in)
-	response, callErr := client.AddRecurringSubscription(ctx, nmi.RecurringPaymentData{ScheduleOnly: p.AmountMicros == 0, PlanID: p.PlanID, CustomerVaultID: p.CustomerVaultID, BillingID: p.BillingID, Amount: minor, Currency: p.Currency, Email: p.Email, OrderID: order, PONumber: order, StartDate: p.StartDate, StoredCredential: credential, CardUserData: nmi.CardUserData{FirstName: p.FirstName, LastName: p.LastName, Address1: p.Address1, City: p.City, State: p.State, Zip: p.Zip, Country: p.Country}})
+	response, callErr := client.AddRecurringSubscription(ctx, nmi.RecurringPaymentData{ScheduleOnly: p.Terms.Amount == 0, PlanID: p.NativeSchedule.PlanID, CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: minor, Currency: p.Terms.Currency, Email: p.Email, OrderID: order, PONumber: order, StartDate: p.NativeSchedule.StartDate, StoredCredential: credential, CardUserData: nmi.CardUserData{FirstName: p.NativeSchedule.Card.FirstName, LastName: p.NativeSchedule.Card.LastName, Address1: p.NativeSchedule.Card.Address1, City: p.NativeSchedule.Card.City, State: p.NativeSchedule.Card.State, Zip: p.NativeSchedule.Card.Zip, Country: p.NativeSchedule.Card.Country}})
 	if callErr != nil {
 		if nmi.RequiresVerification(callErr) {
 			return intents.Ambiguous("native enrollment outcome requires exact provider verification")
@@ -153,7 +156,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, in gen
 		if !errors.As(callErr, &refusal) {
 			return intents.Ambiguous("native enrollment rejection has no qualified refusal proof")
 		}
-		if err := intents.NewStore(h.database()).RetainInitialEnrollmentDecline(ctx, in, refusal); err != nil {
+		if err := intents.NewStore(h.database()).RetainInitialMembershipDecline(ctx, in, refusal); err != nil {
 			return intents.Ambiguous("native enrollment refusal could not be qualified: " + err.Error())
 		}
 		return h.Verify(ctx, in)
@@ -167,7 +170,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, in gen
 	return h.Verify(ctx, in)
 }
 
-func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+func (h *InitialMembershipIntentHandler) Verify(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
 	if h.database() == nil || h.Checkout.Lifecycle == nil {
 		return intents.Ambiguous("initial membership recovery unavailable")
 	}
@@ -176,7 +179,7 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, in gen.
 		return intents.Ambiguous(err.Error())
 	}
 	in = current
-	p, err := decodeNMISubscriptionCreatePayload(in)
+	p, err := decodeInitialMembershipPayload(in)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
@@ -188,25 +191,28 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, in gen.
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
-	if scheduled && (p.AmountMicros == 0 || paid) {
+	if scheduled && (p.Terms.Amount == 0 || paid) {
 		return h.complete(ctx, in, intents.Succeeded(nil))
 	}
 	var progress map[string]any
 	if len(in.ResultEvidence) > 0 && json.Unmarshal(in.ResultEvidence, &progress) != nil {
 		return intents.Ambiguous("invalid enrollment progress")
 	}
-	refusal, refused, err := intents.LoadInitialEnrollmentRefusal(in)
+	refusal, refused, err := intents.LoadInitialMembershipRefusal(in)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
 	if refused {
 		return h.complete(ctx, in, refusal.Outcome())
 	}
-	if value, present := progress["enrollment_submitted"]; present && value != true {
+	if value, present := progress["initial_submitted"]; present && value != true {
 		return intents.Ambiguous("invalid initial submission fence")
 	}
-	if progress["enrollment_submitted"] != true {
+	if progress["initial_submitted"] != true {
 		return h.Execute(ctx, in)
+	}
+	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
+		return intents.Ambiguous("engine initial membership is not enabled")
 	}
 	client, err := h.client(ctx, in, p)
 	if err != nil {
@@ -214,13 +220,13 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, in gen.
 	}
 	store := intents.NewStore(h.database())
 	var paymentErr error
-	if p.AmountMicros > 0 && !paid {
+	if p.Terms.Amount > 0 && !paid {
 		paymentErr = h.retainInitialPayment(ctx, in, client)
 	}
 	if !scheduled {
 		refs := []string{intents.EvidenceString(in, "provider_subscription_id")}
 		if refs[0] == "" {
-			roster, err := scanRemoteSubscriptions(db.WithPSPID(ctx, *in.PspID), h.Checkout.SubscriptionService, client, "nmi", p.CustomerVaultID, p.PlanID, intents.NMIEnrollmentOrder(in))
+			roster, err := scanRemoteSubscriptions(db.WithPSPID(ctx, *in.PspID), h.Checkout.SubscriptionService, client, "nmi", p.Instrument.RailCustomerRef, p.NativeSchedule.PlanID, intents.NMIEnrollmentOrder(in))
 			if err != nil {
 				return intents.Ambiguous(err.Error())
 			}
@@ -239,7 +245,7 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, in gen.
 			schedule = candidate
 		}
 		if matches != 1 {
-			return intents.Ambiguous("native enrollment has no unique qualified schedule receipt")
+			return intents.AmbiguousWithEvidence("native enrollment has no unique qualified schedule receipt", map[string]any{"candidate_subscription_ids": refs})
 		}
 		schedule, err = store.RetainNMIEnrollmentReceipt(ctx, in, schedule)
 		if err != nil {
@@ -252,7 +258,7 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, in gen.
 	return h.complete(ctx, in, intents.Succeeded(map[string]any{"provider_subscription_id": schedule.SubscriptionID()}))
 }
 
-func (h *NMISubscriptionCreateIntentHandler) retainInitialPayment(ctx context.Context, in gen.OpenrailsRailIntent, client *nmi.NMIClient) error {
+func (h *InitialMembershipIntentHandler) retainInitialPayment(ctx context.Context, in gen.OpenrailsRailIntent, client *nmi.NMIClient) error {
 	var err error
 	ref := intents.EvidenceString(in, "transaction_id")
 	if ref == "" {
@@ -272,11 +278,11 @@ func (h *NMISubscriptionCreateIntentHandler) retainInitialPayment(ctx context.Co
 	return nil
 }
 
-func (h *NMISubscriptionCreateIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+func (h *InitialMembershipIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
 	if resolution.Step != "" {
 		return intents.Outcome{}, intents.RejectResolution("initial enrollment has no steps")
 	}
-	if _, err := decodeNMISubscriptionCreatePayload(in); err != nil {
+	if _, err := decodeInitialMembershipPayload(in); err != nil {
 		return intents.Outcome{}, err
 	}
 	if resolution.NotExecuted {
@@ -288,7 +294,7 @@ func (h *NMISubscriptionCreateIntentHandler) Resolve(ctx context.Context, in gen
 		if len(current.ResultEvidence) > 0 && json.Unmarshal(current.ResultEvidence, &progress) != nil {
 			return intents.Outcome{}, errors.New("invalid enrollment progress")
 		}
-		if progress["enrollment_submitted"] == true {
+		if progress["initial_submitted"] == true {
 			return intents.Outcome{}, intents.RejectResolution("submitted NMI enrollment has no positive nonexecution proof contract")
 		}
 		return h.complete(ctx, current, intents.TerminalWithEvidence("enrollment was never submitted", map[string]any{"not_executed": true})), nil
@@ -296,7 +302,7 @@ func (h *NMISubscriptionCreateIntentHandler) Resolve(ctx context.Context, in gen
 	if strings.TrimSpace(resolution.ProviderReference) == "" {
 		return intents.Outcome{}, intents.RejectResolution("exact schedule reference required")
 	}
-	p, _ := decodeNMISubscriptionCreatePayload(in)
+	p, _ := decodeInitialMembershipPayload(in)
 	client, err := h.client(ctx, in, p)
 	if err != nil {
 		return intents.Outcome{}, err
@@ -311,8 +317,8 @@ func (h *NMISubscriptionCreateIntentHandler) Resolve(ctx context.Context, in gen
 	return h.Verify(ctx, in), nil
 }
 
-func (h *NMISubscriptionCreateIntentHandler) complete(ctx context.Context, in gen.OpenrailsRailIntent, outcome intents.Outcome) intents.Outcome {
-	p, err := decodeNMISubscriptionCreatePayload(in)
+func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.OpenrailsRailIntent, outcome intents.Outcome) intents.Outcome {
+	p, err := decodeInitialMembershipPayload(in)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
@@ -339,20 +345,20 @@ func (h *NMISubscriptionCreateIntentHandler) complete(ctx context.Context, in ge
 		if err != nil {
 			return err
 		}
-		refusal, refused, err := intents.LoadInitialEnrollmentRefusal(current)
+		refusal, refused, err := intents.LoadInitialMembershipRefusal(current)
 		if err != nil {
 			return err
 		}
 		success := outcome.Class == intents.OutcomeSucceeded
 		if !success && !refused && outcome.Evidence["not_executed"] == true {
-			if err := intents.NewStore(d).RetainUnsubmittedInitialEnrollment(ctx, current); err != nil {
+			if err := intents.NewStore(d).RetainUnsubmittedInitialMembership(ctx, current); err != nil {
 				return err
 			}
 			current, err = intents.NewStore(d).Get(ctx, current.ID)
 			if err != nil {
 				return err
 			}
-			refusal, refused, err = intents.LoadInitialEnrollmentRefusal(current)
+			refusal, refused, err = intents.LoadInitialMembershipRefusal(current)
 			if err != nil {
 				return err
 			}
@@ -364,7 +370,7 @@ func (h *NMISubscriptionCreateIntentHandler) complete(ctx context.Context, in ge
 			outcome = refusal.Outcome()
 		}
 
-		if success && (!scheduled || (p.AmountMicros > 0) != paid) {
+		if success && (!scheduled || (p.Terms.Amount > 0) != paid) {
 			return errors.New("initial completion lacks exact required schedule/payment receipts")
 		}
 		if !success && (scheduled || paid) {
@@ -401,14 +407,14 @@ func (h *NMISubscriptionCreateIntentHandler) complete(ctx context.Context, in ge
 				transaction = receipt.TransactionID()
 			}
 			metadata := map[string]any{"order_id": intents.NMIEnrollmentOrder(in), "provider_transaction_id": transaction}
-			if p.DelayedStart != nil {
-				metadata["delayed_start"] = p.DelayedStart.UTC().Format(time.RFC3339Nano)
+			if p.DelayedStart() != nil {
+				metadata["delayed_start"] = p.DelayedStart().UTC().Format(time.RFC3339Nano)
 			}
 			var email *string
 			if p.Email != "" {
 				email = &p.Email
 			}
-			if _, _, err := h.Checkout.Lifecycle.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &p.Terms, UserID: p.UserID, PriceID: p.PriceID, Rail: "nmi", RailSubscriptionID: &providerSub, UserEmail: email, TransactionID: transaction, Amount: p.AmountMicros, AmountProvided: true, Currency: p.Currency, PurchasedAt: &p.Terms.AcceptedAt, PaymentMetadata: metadata}); err != nil {
+			if _, _, err := h.Checkout.Lifecycle.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &p.Terms, UserID: p.Terms.CustomerID.String(), PriceID: p.Terms.PriceID, Rail: "nmi", RailSubscriptionID: &providerSub, UserEmail: email, TransactionID: transaction, Amount: p.Terms.Amount, AmountProvided: true, Currency: p.Terms.Currency, PurchasedAt: &p.Terms.AcceptedAt, PaymentMetadata: metadata}); err != nil {
 				return err
 			}
 			if paid {
@@ -421,15 +427,15 @@ func (h *NMISubscriptionCreateIntentHandler) complete(ctx context.Context, in ge
 				evidence["status"] = "pending"
 				evidence["message"] = "Subscription scheduled for its accepted start date"
 			}
-			if p.DelayedStart != nil {
-				evidence["delayed_start"] = p.DelayedStart.UTC().Format(time.RFC3339Nano)
+			if p.DelayedStart() != nil {
+				evidence["delayed_start"] = p.DelayedStart().UTC().Format(time.RFC3339Nano)
 			}
 		} else {
-			if outcome.Evidence["declined"] == true && p.AmountMicros > 0 {
+			if outcome.Evidence["declined"] == true && p.Terms.Amount > 0 {
 				code := fmt.Sprint(outcome.Evidence["response_code"])
 				reason := payments.NormalizeFailureReason("nmi", code)
 				kind, token := payments.AttemptInitial, charge.TokenTypePSPToken
-				if err := payments.NewPaymentService(d, h.Checkout.Clock()).Create(ctx, &models.Payment{ID: p.Terms.PaymentID, CustomerID: p.Terms.CustomerID, PriceID: p.PriceID, PspID: in.PspID, Rail: "nmi", TransactionID: "nmi_sub_declined:" + in.ID.String(), Amount: p.AmountMicros, ListAmount: p.Terms.RecurringAmount, Currency: p.Currency, Status: payments.PaymentStatusFailedValue, AttemptKind: &kind, TokenType: &token, FailureCode: &code, FailureReason: &reason, MoneyMovement: models.MoneyMovementNone, PurchasedAt: p.Terms.AcceptedAt, CreatedAt: p.Terms.AcceptedAt}); err != nil {
+				if err := payments.NewPaymentService(d, h.Checkout.Clock()).Create(ctx, &models.Payment{ID: p.Terms.PaymentID, CustomerID: p.Terms.CustomerID, PriceID: p.Terms.PriceID, PspID: in.PspID, Rail: "nmi", TransactionID: "nmi_sub_declined:" + in.ID.String(), Amount: p.Terms.Amount, ListAmount: p.Terms.RecurringAmount, Currency: p.Terms.Currency, Status: payments.PaymentStatusFailedValue, AttemptKind: &kind, TokenType: &token, FailureCode: &code, FailureReason: &reason, MoneyMovement: models.MoneyMovementNone, PurchasedAt: p.Terms.AcceptedAt, CreatedAt: p.Terms.AcceptedAt}); err != nil {
 					return err
 				}
 			}
