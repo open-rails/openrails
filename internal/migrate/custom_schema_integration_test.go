@@ -46,16 +46,35 @@ func TestCustomSchemaKeepsBillingValuesAndRestoreFunctions(t *testing.T) {
 	method := uuid.New()
 	_, err = conn.Exec(ctx, "INSERT INTO "+schema+".payment_methods(id,merchant_id,customer_id,psp_id,rail,rail_customer_ref,initial_transaction_id) VALUES($1,$2,$3,$4,'nmi','relocation-vault','fixture')", method, mid, cid, psp)
 	require.NoError(t, err)
-	var product uuid.UUID
+	var product, subscription uuid.UUID
 	for _, policy := range []string{"provider", "provider_dunning", "engine"} {
 		product = uuid.New()
 		_, err = conn.Exec(ctx, "INSERT INTO "+schema+".products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Policy')", product, mid, product.String())
 		require.NoError(t, err)
-		_, err = conn.Exec(ctx, "INSERT INTO "+schema+".subscriptions(merchant_id,customer_id,product_id,psp_id,rail,collection_policy,payment_method_id) VALUES($1,$2,$3,$4,'nmi',$5,$6)", mid, cid, product, psp, policy, method)
+		err = conn.QueryRow(ctx, "INSERT INTO "+schema+".subscriptions(merchant_id,customer_id,product_id,psp_id,rail,collection_policy,payment_method_id) VALUES($1,$2,$3,$4,'nmi',$5,$6) RETURNING id", mid, cid, product, psp, policy, method).Scan(&subscription)
 		require.NoError(t, err, "schema relocation preserves collection policy")
 	}
 	_, err = conn.Exec(ctx, "INSERT INTO "+schema+".subscriptions(merchant_id,customer_id,product_id,psp_id,rail,collection_policy,payment_method_id) VALUES($1,$2,$3,$4,'nmi',$5,$6)", mid, cid, product, psp, schema, method)
 	require.ErrorContains(t, err, "subscriptions_collection_policy_check")
+
+	// The method FK uses ON DELETE SET NULL. A live engine obligation must
+	// refuse deletion; resolved cancelled history must allow it without a
+	// shadow payment-method identifier or a post-provider local failure.
+	for _, status := range []string{"pending", "active", "past_due"} {
+		_, err = conn.Exec(ctx, "UPDATE "+schema+".subscriptions SET status=$2::"+schema+".subscription_status,current_period_starts_at=now()-interval '30 days',current_period_ends_at=now() WHERE id=$1", subscription, status)
+		require.NoError(t, err)
+		_, err = conn.Exec(ctx, "DELETE FROM "+schema+".payment_methods WHERE id=$1", method)
+		require.ErrorContains(t, err, "subscriptions_engine_binding_check", status)
+	}
+	_, err = conn.Exec(ctx, "UPDATE "+schema+".subscriptions SET status='cancelled',cancelled_at=now(),cancel_type='user' WHERE id=$1", subscription)
+	require.NoError(t, err)
+	_, err = conn.Exec(ctx, "DELETE FROM "+schema+".payment_methods WHERE id=$1", method)
+	require.NoError(t, err, "cancelled engine history permits the real FK SET NULL")
+	var linked *uuid.UUID
+	require.NoError(t, conn.QueryRow(ctx, "SELECT payment_method_id FROM "+schema+".subscriptions WHERE id=$1", subscription).Scan(&linked))
+	require.Nil(t, linked)
+	_, err = conn.Exec(ctx, "UPDATE "+schema+".subscriptions SET status='active',cancelled_at=NULL,cancel_type=NULL WHERE id=$1", subscription)
+	require.ErrorContains(t, err, "subscriptions_engine_binding_check", "history without a method cannot become active")
 
 	var badPaths, relocatedPaths int
 	require.NoError(t, conn.QueryRow(ctx, `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON p.pronamespace=n.oid
