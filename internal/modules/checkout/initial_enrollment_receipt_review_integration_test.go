@@ -4,16 +4,24 @@ package checkout
 
 import (
 	"encoding/json"
+	"fmt"
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/models"
 	"net/http"
 	"net/url"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"sync/atomic"
 )
 
 // A native paid-now enrollment needs a qualified initial charge. An approved
@@ -195,4 +203,112 @@ func TestSubmittedInitialEnrollmentStaysInUnresolvedCensus(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNMIObservationBeforeInitialCompletionIsHarmless(t *testing.T) {
+	fx := newSubIntentFixture(t)
+	ctx := db.WithPSPID(fx.ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "mobius"))
+	client, err := fx.svc.resolveNMIClient(ctx, "mobius")
+	require.NoError(t, err)
+	observer := webhooks.NMIConvergeService{DB: fx.db, Clock: fx.svc.Clock(), Rail: "nmi", NMIClient: client, SubscriptionService: fx.svc.SubscriptionService, PaymentService: fx.svc.PurchaseService.PaymentService, PriceService: fx.svc.PriceService, SubscriptionLifecycleService: fx.svc.Lifecycle}
+	var observed atomic.Bool
+	fx.gateway.beforeResponse = func() error {
+		customer, err := observer.Converge(ctx, fx.gateway.subID)
+		if err != nil {
+			return err
+		}
+		if customer != uuid.Nil {
+			return fmt.Errorf("early provider observation unexpectedly established a membership")
+		}
+		observed.Store(true)
+		return nil
+	}
+	in := fx.enqueueAndExecute(t)
+	require.Equal(t, intents.StatusSucceeded, in.Status, string(in.ResultEvidence))
+	require.True(t, observed.Load())
+	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+}
+
+func TestDeferredNativeFirstPaymentUsesAcceptedTerms(t *testing.T) {
+	fx := newSubIntentFixture(t)
+	accepted := time.Now().UTC().Add(-70 * 24 * time.Hour).Truncate(24 * time.Hour)
+	fx.svc.SetClock(clockwork.NewFakeClockAt(accepted))
+	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{"deferred_original":null}' WHERE id=(SELECT product_id FROM billing.prices WHERE id=$1)`, fx.priceID)
+	require.NoError(t, err)
+
+	start := accepted.Add(3 * 24 * time.Hour)
+	fx.payload.DelayedStart = &start
+	fx.payload.StartDate = start.Format("20060102")
+	fx.gateway.txnID = ""
+	in := fx.enqueueAndExecute(t)
+	require.Equal(t, intents.StatusSucceeded, in.Status, string(in.ResultEvidence))
+	require.Zero(t, fx.payload.Terms.Amount)
+	require.Equal(t, uuid.Nil, fx.payload.Terms.PaymentID)
+	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.prices SET amount=25000000,access_duration_hours=24 WHERE id=$1`, fx.priceID)
+	require.NoError(t, err)
+	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{"changed":null}' WHERE id=(SELECT product_id FROM billing.prices WHERE id=$1)`, fx.priceID)
+	require.NoError(t, err)
+	fx.gateway.txnID = "scheduled-" + uuid.NewString()
+	fx.gateway.observedAmount = "9.99"
+	fx.gateway.observedAt = start.Add(time.Hour)
+	fx.gateway.charged.Store(true)
+	ctx := db.WithPSPID(fx.ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "mobius"))
+	client, err := fx.svc.resolveNMIClient(ctx, "mobius")
+	require.NoError(t, err)
+	observer := webhooks.NMIConvergeService{DB: fx.db, Clock: clockwork.NewRealClock(), Rail: "nmi", NMIClient: client, SubscriptionService: fx.svc.SubscriptionService, PaymentService: fx.svc.PurchaseService.PaymentService, PriceService: fx.svc.PriceService, SubscriptionLifecycleService: fx.svc.Lifecycle}
+	_, err = observer.Converge(ctx, fx.gateway.subID)
+	require.NoError(t, err)
+	sub, err := fx.svc.SubscriptionService.GetByID(ctx, fx.payload.LocalSubscriptionID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusActive, sub.Status)
+	require.WithinDuration(t, fx.payload.Terms.PeriodStart, *sub.CurrentPeriodStartsAt, time.Microsecond)
+	require.WithinDuration(t, fx.payload.Terms.PeriodEnd, *sub.CurrentPeriodEndsAt, time.Microsecond)
+	var amount int64
+	require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT amount FROM billing.payments WHERE subscription_id=$1 AND transaction_id=$2`, sub.ID, fx.gateway.txnID).Scan(&amount))
+	require.EqualValues(t, 9990000, amount)
+	var originalGrants int
+	require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.grants WHERE source_id=$1 AND source_type='subscription' AND event='grant' AND spec_snapshot->'entitlements' ? 'deferred_original' AND starts_at=$2 AND ends_at=$3`, sub.ID.String(), fx.payload.Terms.PeriodStart, fx.payload.Terms.PeriodEnd).Scan(&originalGrants))
+	require.Equal(t, 1, originalGrants)
+	var recurringAnchor string
+	require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT stored_credential_recurring_ref FROM billing.payment_methods WHERE id=$1`, fx.payload.Terms.PaymentMethodID).Scan(&recurringAnchor))
+	require.Empty(t, recurringAnchor, "observed provider payment alone does not establish recurring CIT consent")
+
+	original, err := fx.runner.Store.Get(ctx, in.ID)
+	require.NoError(t, err)
+	require.NoError(t, intents.ValidateInitialEnrollmentTerminal(original))
+	var terms NMISubscriptionCreatePayload
+	require.NoError(t, json.Unmarshal(original.Payload, &terms))
+	require.Zero(t, terms.Terms.Amount)
+	require.Equal(t, uuid.Nil, terms.Terms.PaymentID)
+	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "observing the provider's first collection never resubmits enrollment")
+}
+
+func TestDeferredNativeFreePhaseDoesNotInventPayment(t *testing.T) {
+	fx := newSubIntentFixture(t)
+	accepted := time.Now().UTC().Add(-40 * 24 * time.Hour).Truncate(24 * time.Hour)
+	fx.svc.SetClock(clockwork.NewFakeClockAt(accepted))
+	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.prices SET amount=0 WHERE id=$1`, fx.priceID)
+	require.NoError(t, err)
+	start := accepted.Add(3 * 24 * time.Hour)
+	fx.payload.DelayedStart = &start
+	fx.payload.StartDate = start.Format("20060102")
+	fx.payload.AmountMicros = 0
+	fx.gateway.txnID = ""
+	in := fx.enqueueAndExecute(t)
+	require.Equal(t, intents.StatusSucceeded, in.Status, string(in.ResultEvidence))
+	ctx := db.WithPSPID(fx.ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "mobius"))
+	client, err := fx.svc.resolveNMIClient(ctx, "mobius")
+	require.NoError(t, err)
+	observer := webhooks.NMIConvergeService{DB: fx.db, Clock: clockwork.NewRealClock(), Rail: "nmi", NMIClient: client, SubscriptionService: fx.svc.SubscriptionService, PaymentService: fx.svc.PurchaseService.PaymentService, PriceService: fx.svc.PriceService, SubscriptionLifecycleService: fx.svc.Lifecycle}
+	_, err = observer.Converge(ctx, fx.gateway.subID)
+	require.NoError(t, err)
+	sub, err := fx.svc.SubscriptionService.GetByID(ctx, fx.payload.LocalSubscriptionID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusActive, sub.Status)
+	var payments int
+	require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1`, sub.ID).Scan(&payments))
+	require.Zero(t, payments)
+	original, err := fx.runner.Store.Get(ctx, in.ID)
+	require.NoError(t, err)
+	require.NoError(t, intents.ValidateInitialEnrollmentTerminal(original))
 }

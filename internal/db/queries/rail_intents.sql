@@ -729,3 +729,15 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND intent_type = 'subscription_collection'
   AND (payload->>'previous_period_end')::timestamptz = sqlc.arg(previous_period_end)::timestamptz
 ORDER BY (payload->>'attempt')::integer DESC, id DESC LIMIT 1;
+
+-- name: ListRetainedInitialEnrollmentsForArchive :many
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='nmi_subscription_create'
+  AND (sqlc.narg(after_id)::uuid IS NULL OR id>sqlc.narg(after_id)::uuid)
+ORDER BY id LIMIT sqlc.arg(page_size)::int;
+
+-- name: ListInitialEnrollmentsForMembership :many
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='nmi_subscription_create'
+  AND payload->'terms'->>'subscription_id'=sqlc.arg(subscription_id)::uuid::text
+ORDER BY id LIMIT 2;

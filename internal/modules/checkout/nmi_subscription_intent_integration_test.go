@@ -63,6 +63,9 @@ type fakeNMISubGateway struct {
 	txnID           string
 	charged         atomic.Bool
 	recurringAmount string
+	observedAmount  string
+	observedAt      time.Time
+	beforeResponse  func() error
 }
 
 func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNMISubGateway, *nmi.NMIClient) {
@@ -81,12 +84,16 @@ func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNM
 			return
 		}
 		form, _ := f.createForm.Load().(url.Values)
+		amount := form.Get("amount")
+		if f.observedAmount != "" {
+			amount = f.observedAmount
+		}
 		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/payments/") {
 			if f.txnID == "" || !f.charged.Load() {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","amount":"%s","currency":"USD","customer_vault_id":"%s","actions":[{"id":"%s","type":"sale","success":true,"amount":"%s"}]}`, f.txnID, form.Get("amount"), f.railCustomerRef, f.txnID, form.Get("amount"))
+			fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","amount":"%s","currency":"USD","customer_vault_id":"%s","actions":[{"id":"%s","type":"sale","success":true,"amount":"%s"}]}`, f.txnID, amount, f.railCustomerRef, f.txnID, amount)
 			return
 		}
 
@@ -129,14 +136,24 @@ func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNM
 			default:
 				f.subExists.Store(true)
 				f.charged.Store(r.Form.Get("type") == "sale" && f.txnID != "")
+				if f.beforeResponse != nil {
+					if err := f.beforeResponse(); err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+				}
 				fmt.Fprintf(w, "response=1&responsetext=SUCCESS&subscription_id=%s&transactionid=%s&authcode=OK", f.subID, f.txnID)
 			}
 			return
 		}
 		// classic query.php transaction search
 		orderID := r.Form.Get("order_id")
-		if f.charged.Load() {
-			fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, f.txnID, orderID)
+		if f.charged.Load() && orderID == form.Get("orderid") {
+			at := f.observedAt
+			if at.IsZero() {
+				at = time.Now().UTC()
+			}
+			fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><currency>USD</currency><action><action_type>sale</action_type><success>1</success><amount>%s</amount><date>%s</date></action></transaction></nm_response>`, f.txnID, orderID, amount, at.UTC().Format("20060102150405"))
 			return
 		}
 		fmt.Fprint(w, `<nm_response></nm_response>`)

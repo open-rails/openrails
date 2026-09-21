@@ -1490,6 +1490,65 @@ func (q *Queries) ListDueVerifyRailIntentMerchants(ctx context.Context, arg List
 	return items, nil
 }
 
+const listInitialEnrollmentsForMembership = `-- name: ListInitialEnrollmentsForMembership :many
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id=$1::uuid AND intent_type='nmi_subscription_create'
+  AND payload->'terms'->>'subscription_id'=$2::uuid::text
+ORDER BY id LIMIT 2
+`
+
+type ListInitialEnrollmentsForMembershipParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+func (q *Queries) ListInitialEnrollmentsForMembership(ctx context.Context, arg ListInitialEnrollmentsForMembershipParams) ([]OpenrailsRailIntent, error) {
+	rows, err := q.db.Query(ctx, listInitialEnrollmentsForMembership, arg.MerchantID, arg.SubscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsRailIntent
+	for rows.Next() {
+		var i OpenrailsRailIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ClaimedUntil,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRailIntents = `-- name: ListRailIntents :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
 WHERE rail_intents.merchant_id = $1::uuid AND ($2::text IS NULL OR status = $2::text)
@@ -1596,6 +1655,66 @@ type ListRebillTermOwnersParams struct {
 // quotes do not lock future price changes. Call under the subscription lock.
 func (q *Queries) ListRebillTermOwners(ctx context.Context, arg ListRebillTermOwnersParams) ([]OpenrailsRailIntent, error) {
 	rows, err := q.db.Query(ctx, listRebillTermOwners, arg.MerchantID, arg.SubscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsRailIntent
+	for rows.Next() {
+		var i OpenrailsRailIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ClaimedUntil,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRetainedInitialEnrollmentsForArchive = `-- name: ListRetainedInitialEnrollmentsForArchive :many
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id=$1::uuid AND intent_type='nmi_subscription_create'
+  AND ($2::uuid IS NULL OR id>$2::uuid)
+ORDER BY id LIMIT $3::int
+`
+
+type ListRetainedInitialEnrollmentsForArchiveParams struct {
+	MerchantID uuid.UUID
+	AfterID    *uuid.UUID
+	PageSize   int32
+}
+
+func (q *Queries) ListRetainedInitialEnrollmentsForArchive(ctx context.Context, arg ListRetainedInitialEnrollmentsForArchiveParams) ([]OpenrailsRailIntent, error) {
+	rows, err := q.db.Query(ctx, listRetainedInitialEnrollmentsForArchive, arg.MerchantID, arg.AfterID, arg.PageSize)
 	if err != nil {
 		return nil, err
 	}

@@ -114,14 +114,26 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if !recurring && (r.Method == http.MethodGet || r.Form.Get("order_id") != "") {
+		if recurring && r.Method == http.MethodGet && r.URL.Path == "/customers/archive-vault" {
+			fmt.Fprint(w, `{"object":"customer","id":"archive-vault","billing":[{"id":"archive-card","priority":1}]}`)
+			return
+		}
+		if r.Method == http.MethodGet || r.Form.Get("order_id") != "" || r.Form.Get("report_type") == "recurring" {
 			readMu.Lock()
 			defer readMu.Unlock()
 			if acceptedForm == nil {
 				http.NotFound(w, r)
 				return
 			}
-			if r.Method == http.MethodGet {
+			if recurring && r.Method == http.MethodGet && r.URL.Path == "/subscriptions/"+providerSubscription {
+				start, err := time.Parse("20060102", acceptedForm.Get("start_date"))
+				require.NoError(t, err)
+				_ = json.NewEncoder(w).Encode(nmi.V5Subscription{Object: "subscription", ID: providerSubscription, CustomerVaultID: "archive-vault", DelayedCondition: "active", PausedSubscription: false, NextBillingDate: start.Format("2006-01-02"), Plan: &nmi.V5Plan{ID: "writer-plan", PlanAmount: "2.50", DayFrequency: "2", PlanPayments: "0"}})
+			} else if recurring && r.Form.Get("report_type") == "recurring" {
+				start, err := time.Parse("20060102", acceptedForm.Get("start_date"))
+				require.NoError(t, err)
+				fmt.Fprintf(w, `<nm_response><subscription id="%s"><subscription_id>%s</subscription_id><plan><plan_id>writer-plan</plan_id></plan><orderid>%s</orderid><ponumber>%s</ponumber><next_charge_date>%s</next_charge_date></subscription></nm_response>`, providerSubscription, providerSubscription, acceptedForm.Get("orderid"), acceptedForm.Get("ponumber"), start.Format("2006-01-02"))
+			} else if r.Method == http.MethodGet {
 				require.Equal(t, "/payments/"+transaction, r.URL.Path)
 				_ = json.NewEncoder(w).Encode(map[string]any{"id": transaction, "response": "1", "amount": acceptedForm.Get("amount"), "currency": acceptedForm.Get("currency"), "customer_vault_id": acceptedForm.Get("customer_vault_id"), "actions": []map[string]any{{"id": transaction, "type": "sale", "success": true, "amount": acceptedForm.Get("amount")}}})
 			} else if r.Form.Get("order_id") == acceptedForm.Get("orderid") {
@@ -189,7 +201,8 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 	require.Equal(t, intents.StatusSucceeded, operation.Status)
 	require.NotEmpty(t, operation.ResultEvidence, "ordinary durable checkout must retain replay receipt")
 	if recurring {
-		require.Contains(t, []string{"", "null", "{}"}, string(operation.Payload), "unchanged enrollment family prunes submission payload")
+		require.NoError(t, intents.ValidateInitialEnrollmentTerminal(operation))
+		require.NotEmpty(t, operation.Payload, "accepted enrollment terms and both receipts remain in custody")
 	} else {
 		require.NoError(t, intents.ValidateNMISaleTerminal(operation))
 		require.NotEmpty(t, operation.Payload, "accepted sale terms and custody survive terminal replay")
@@ -287,6 +300,21 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 			require.Error(t, err)
 			assertEmptyBook(t, target, id)
 		})
+	}
+	if recurring {
+		var evidence map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(operation.ResultEvidence, &evidence))
+		delete(evidence, "qualified_enrollment")
+		changed, err := json.Marshal(evidence)
+		require.NoError(t, err)
+		missing := string(changed)
+		_, err = Restore(t.Context(), target, id, bytes.NewReader(alteredArchive(t, artifact.Bytes(), "rail_intents", "result_evidence", &missing)))
+		require.Error(t, err)
+		assertEmptyBook(t, target, id)
+		start := now.Add(time.Hour).UTC().Format("2006-01-02 15:04:05.999999-07")
+		_, err = Restore(t.Context(), target, id, bytes.NewReader(alteredArchive(t, artifact.Bytes(), "grants", "starts_at", &start)))
+		require.Error(t, err)
+		assertEmptyBook(t, target, id)
 	}
 	_, err = Restore(t.Context(), target, id, bytes.NewReader(artifact.Bytes()))
 	require.NoError(t, err)

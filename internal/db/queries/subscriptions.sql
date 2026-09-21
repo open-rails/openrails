@@ -357,3 +357,7 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
 SELECT * FROM openrails.subscriptions
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
 FOR UPDATE;
+
+-- name: GetInitialMembershipForArchive :one
+SELECT * FROM openrails.subscriptions
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
