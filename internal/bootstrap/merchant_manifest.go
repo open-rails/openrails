@@ -767,10 +767,11 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 	if manifest.Version != BootstrapManifestVersion {
 		return fmt.Errorf("merchant bootstrap: manifest version must be %d", BootstrapManifestVersion)
 	}
-	if err := lockMerchantManifestBootstrap(ctx, cp); err != nil {
+	release, err := lockMerchantManifestBootstrap(ctx, cp)
+	if err != nil {
 		return err
 	}
-	defer unlockMerchantManifestBootstrap(context.Background(), cp)
+	defer release()
 
 	if len(manifest.Merchants) == 0 {
 		log.Info("merchant bootstrap manifest has no merchants")
@@ -2221,16 +2222,24 @@ func manifestRemoteApplicationToAuthKit(merchantSlug, groupID string, app *Remot
 	}, nil
 }
 
-func lockMerchantManifestBootstrap(ctx context.Context, cp *controlplane.ControlPlane) error {
-	_, err := cp.Pool().Exec(ctx, `SELECT pg_advisory_lock($1)`, merchantManifestAdvisoryLock)
+// PostgreSQL session locks belong to a physical connection, not a pool. Own
+// this session until reconciliation returns. Hijack frees its pool slot so a
+// one-connection host pool can still perform the reconciliation itself. Always
+// close the owned connection instead of returning a possibly locked session.
+func lockMerchantManifestBootstrap(ctx context.Context, cp *controlplane.ControlPlane) (func(), error) {
+	pooled, err := cp.Pool().Raw().Acquire(ctx)
 	if err != nil {
-		return fmt.Errorf("merchant bootstrap: acquire advisory lock: %w", err)
+		return nil, fmt.Errorf("merchant bootstrap: acquire lock connection: %w", err)
 	}
-	return nil
-}
-
-func unlockMerchantManifestBootstrap(ctx context.Context, cp *controlplane.ControlPlane) {
-	if _, err := cp.Pool().Exec(ctx, `SELECT pg_advisory_unlock($1)`, merchantManifestAdvisoryLock); err != nil {
-		log.WithError(err).Warn("merchant bootstrap: release advisory lock failed")
+	conn := pooled.Hijack()
+	release := func() {
+		if err := conn.Close(context.WithoutCancel(ctx)); err != nil {
+			log.WithError(err).Warn("merchant bootstrap: close advisory-lock session failed")
+		}
 	}
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, merchantManifestAdvisoryLock); err != nil {
+		release()
+		return nil, fmt.Errorf("merchant bootstrap: acquire advisory lock: %w", err)
+	}
+	return release, nil
 }
