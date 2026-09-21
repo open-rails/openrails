@@ -31,6 +31,7 @@ type SubscriptionConvergence struct {
 // SubscriptionStateOf maps a local row onto the decider's view of it.
 func SubscriptionStateOf(sub *models.Subscription) SubscriptionState {
 	return SubscriptionState{
+		CollectionPolicy:   sub.CollectionPolicy,
 		Status:             string(sub.Status),
 		Rail:               string(sub.Rail),
 		HasPaymentMethod:   sub.PaymentMethodID != nil,

@@ -456,3 +456,27 @@ ORDER BY id LIMIT sqlc.arg(row_limit)::int;
 SELECT EXISTS(SELECT 1 FROM openrails.grants
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND source_type='subscription'
   AND source_id=sqlc.arg(subscription_id)::uuid::text AND event='grant')::boolean;
+
+-- name: ListRenewalGrantsForArchive :many
+SELECT * FROM openrails.grants
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND source_type='subscription'
+  AND source_id=sqlc.arg(subscription_id)::uuid::text AND event='grant'
+  AND starts_at=sqlc.arg(period_start)::timestamptz
+ORDER BY id LIMIT sqlc.arg(row_limit)::int;
+
+-- name: CountUnpaidEngineRenewalGrants :one
+-- Initial and pre-engine history precedes the first accepted engine period.
+-- Every later source grant needs its own successful accepted period, including
+-- grants following a declined attempt whose later retry bought the same window.
+SELECT count(*) FROM openrails.grants g
+WHERE g.merchant_id=sqlc.arg(merchant_id)::uuid AND g.source_type='subscription'
+  AND g.event='grant'
+  AND EXISTS (SELECT 1 FROM openrails.rail_intents i
+    WHERE i.merchant_id=g.merchant_id AND i.intent_type='subscription_collection'
+      AND i.subscription_id::text=g.source_id
+      AND g.starts_at >= (i.payload->'renewal'->>'period_start')::timestamptz)
+  AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i
+    WHERE i.merchant_id=g.merchant_id AND i.intent_type='subscription_collection'
+      AND i.subscription_id::text=g.source_id AND i.status='succeeded'
+      AND g.starts_at=(i.payload->'renewal'->>'period_start')::timestamptz
+      AND g.ends_at=(i.payload->'renewal'->>'period_end')::timestamptz);

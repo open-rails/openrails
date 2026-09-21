@@ -123,7 +123,7 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 			actor = payer.String()
 		}
 		store := NewStore(d)
-		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, now)
+		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, now, nil)
 		if err != nil {
 			return err
 		}

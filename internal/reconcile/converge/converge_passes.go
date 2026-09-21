@@ -515,6 +515,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	for i := range lapsed {
 		row := lapsed[i]
 		state := reconcile.SubscriptionState{
+			CollectionPolicy:   models.CollectionPolicy(row.CollectionPolicy),
 			Status:             string(row.Status),
 			Rail:               row.Rail,
 			HasPaymentMethod:   row.HasPaymentMethod,

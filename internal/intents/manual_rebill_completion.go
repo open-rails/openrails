@@ -107,12 +107,22 @@ func loadRebillDecline(in gen.OpenrailsRailIntent) (rebillDecline, bool, error) 
 	if err != nil {
 		return fact, true, err
 	}
-	if in.IntentType != subscriptions.TypeManualRebill || fact.Binding != binding || (fact.ResponseCode <= 0 || nmi.UncertainResponseCode(fact.ResponseCode)) {
+	if (in.IntentType != subscriptions.TypeManualRebill && in.IntentType != subscriptions.TypeSubscriptionCollection) || fact.Binding != binding || (fact.ResponseCode <= 0 || nmi.UncertainResponseCode(fact.ResponseCode)) {
 		return fact, true, errors.New("rebill refusal is not bound to accepted terms")
 	}
 	return fact, true, nil
 }
 func (h *ManualRebillHandler) retainDecline(ctx context.Context, in gen.OpenrailsRailIntent, code int, reference string) error {
+	return NewStore(h.DB).RetainRecurringDecline(ctx, in, code, reference)
+}
+
+// LoadRecurringDecline exposes only bound, positive refusal facts.
+func LoadRecurringDecline(in gen.OpenrailsRailIntent) (int, string, bool, error) {
+	fact, found, err := loadRebillDecline(in)
+	return fact.ResponseCode, fact.ProviderReference, found, err
+}
+
+func (s *Store) RetainRecurringDecline(ctx context.Context, in gen.OpenrailsRailIntent, code int, reference string) error {
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return err
@@ -126,7 +136,7 @@ func (h *ManualRebillHandler) retainDecline(ctx context.Context, in gen.Openrail
 	}
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
-	n, err := h.DB.Gen(ctx).RetainRailIntentRebillDecline(ctx, gen.RetainRailIntentRebillDeclineParams{ID: in.ID, MerchantID: in.MerchantID, PspID: *in.PspID, Payload: in.Payload, Decline: raw})
+	n, err := s.db.Gen(ctx).RetainRailIntentRebillDecline(ctx, gen.RetainRailIntentRebillDeclineParams{ID: in.ID, MerchantID: in.MerchantID, PspID: *in.PspID, Payload: in.Payload, Decline: raw})
 	if err != nil {
 		return err
 	}

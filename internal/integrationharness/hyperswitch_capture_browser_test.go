@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit/authhttp"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
@@ -35,9 +36,12 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/operator"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
 
@@ -105,8 +109,9 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	before = len(observations())
 
 	h := New(t, ctx)
+	billingClock := NewSettableClock(nil)
 	var delegated billingauth.DelegatedAuthenticator
-	surface := h.StartStandalone("USD", WithConfig(func(c *config.Config) {
+	surface := h.StartStandalone("USD", WithClock(billingClock), WithConfig(func(c *config.Config) {
 		c.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: vendor.APIBaseURL, SDKURL: vendor.SDKURL}
 		c.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 		{
@@ -120,7 +125,13 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 			if delegated == nil {
 				return nil, billingauth.ErrUnauthenticated
 			}
-			return delegated.AuthenticateDelegated(ctx, r)
+			principal, err := delegated.AuthenticateDelegated(ctx, r)
+			// A trusted host may omit interaction classification for nonfinancial
+			// capture. Downgrade only; the real engine CIT retains AuthKit's class.
+			if err == nil && principal != nil && r.Header.Get("X-Qualification-Unknown-Class") == "true" {
+				principal.CredentialClass = billingauth.CredentialClassUnknown
+			}
+			return principal, err
 		})
 	})
 	owned := surface.ProvisionOwnedMerchant("actual-capture-" + uuid.NewString()[:8])
@@ -148,6 +159,17 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	require.NoError(t, err)
 	rt := surface.App().Runtime
 	ownerCtx := merchant.WithID(ctx, owned.MerchantID)
+	recoverOperation := func(t *testing.T, operationID uuid.UUID) {
+		private := filepath.Join(t.TempDir(), "recovery.json")
+		input, err := json.Marshal(recovery{DB: rt.Config.DB, Redis: rt.Config.Redis, HyperSwitch: rt.Config.HyperSwitch, ProviderSandbox: rt.Config.ProviderSandbox, Encryption: rt.Config.Encryption, MerchantID: owned.MerchantID, OperationID: operationID})
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(private, input, 0600))
+		child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestHyperSwitchActualBrowserInvoice$", "-test.v")
+		child.Env = append(os.Environ(), "OPENRAILS_HS_INVOICE_RECOVERY="+private)
+		output, err := child.CombinedOutput()
+		require.NoError(t, err, "%s", output)
+	}
+
 	payer := identity.CustomerID(uuid.MustParse(user.ID))
 	{
 		// The same fake PSP is reached from two isolated network namespaces:
@@ -165,6 +187,56 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	require.NoError(t, err)
 	sdkOrigin := sdkURL.Scheme + "://" + sdkURL.Host
 	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/membership-recover" {
+			var input struct {
+				OperationID uuid.UUID `json:"operation_id"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
+			var financial int
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1)`, owned.MerchantID.UUID()).Scan(&financial))
+			require.Zero(t, financial, "unknown payment grants no membership before exact receipt")
+			require.NoError(t, rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {
+				operation, err := rt.IntentRunner().VerifyByID(c, input.OperationID)
+				require.NoError(t, err)
+				require.Equal(t, intents.StatusSucceeded, operation.Status)
+				return err
+			}))
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/membership-expired" {
+			var input struct {
+				SessionID openrails.CheckoutSessionID `json:"session_id"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
+			_, err := h.sharedPool().Exec(ctx, `UPDATE billing.checkout_sessions SET status='expired',expires_at=$3 WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), input.SessionID.UUID(), billingClock.Now().Add(-time.Hour))
+			require.NoError(t, err)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/membership-quoted" {
+			var input struct {
+				PriceID   openrails.PriceID           `json:"price_id"`
+				SessionID openrails.CheckoutSessionID `json:"session_id"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
+			owner := surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID))
+			_, denied := owner.ConfirmCheckoutSession(ctx, input.SessionID, openrails.ConfirmCheckoutSessionRequest{CustomerID: openrails.CustomerID(uuid.MustParse(user.ID)), Payment: openrails.ConfirmPayment{Rail: "nmi"}})
+			require.ErrorIs(t, denied, openrails.ErrDenied, "merchant authority and body customer ID cannot accept recurring agreement")
+			var financial int
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1)`, owned.MerchantID.UUID()).Scan(&financial))
+			require.Zero(t, financial, "priced quote is not payment or membership")
+			_, err := h.sharedPool().Exec(ctx, `UPDATE billing.prices SET amount=1000000,access_duration_hours=24 WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), input.PriceID.UUID())
+			require.NoError(t, err)
+			_, err = h.sharedPool().Exec(ctx, `UPDATE billing.products SET entitlements_spec='{"changed_after_quote":null}' WHERE merchant_id=$1 AND id=(SELECT product_id FROM billing.prices WHERE merchant_id=$1 AND id=$2)`, owned.MerchantID.UUID(), input.PriceID.UUID())
+			require.NoError(t, err)
+			control, err := http.Post(vendor.NMIReadBase+"/control", "application/json", bytes.NewBufferString(`{"Next":"lost"}`))
+			require.NoError(t, err)
+			require.Equal(t, http.StatusNoContent, control.StatusCode)
+			_ = control.Body.Close()
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]int{"financial": financial, "provider_calls": len(observations())}))
+			return
+		}
 		if r.Method == http.MethodPost && r.URL.Path == "/invoice-fixture" {
 			var invoiceID uuid.UUID
 			// Called by the test driver only after Save card completed.
@@ -205,6 +277,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	protected := []string{vendor.APIKey, "4111111111111111"}
 	stores := []bool{false, true}
 	protected = append(protected, vendor.NMIKey)
+	var savedMethod openrails.PaymentMethodID
 	for _, store := range stores {
 		browserParams := map[string]string{"page": page.URL, "vendor_api": vendor.APIBaseURL, "vendor_sdk": vendor.SDKURL, "api": surface.BaseURL, "token": token, "psp_id": psp.String(), "email": "capture-browser@example.test", "name": "Capture Browser", "store": strconv.FormatBool(store)}
 		if store {
@@ -243,6 +316,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 		}
 		t.Logf("Explicit storage consent=%t; vendor readback storage_type=%s", store, method.StorageType)
 		if store {
+			savedMethod = proof.Method
 			require.NotNil(t, proof.InvoicePay)
 			invoiceID := proof.InvoicePay.Invoice.ID
 			require.Equal(t, "succeeded", proof.InvoicePay.Operation.Status)
@@ -314,14 +388,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 						require.Equal(t, "unknown_needs_verify", result.Operation.Status)
 						// Re-exec the test binary: a new process and embedded runtime use
 						// only committed operation data and configured read credentials.
-						private := filepath.Join(t.TempDir(), "recovery.json")
-						input, err := json.Marshal(recovery{DB: rt.Config.DB, Redis: rt.Config.Redis, HyperSwitch: rt.Config.HyperSwitch, ProviderSandbox: rt.Config.ProviderSandbox, Encryption: rt.Config.Encryption, MerchantID: owned.MerchantID, OperationID: result.Operation.ID})
-						require.NoError(t, err)
-						require.NoError(t, os.WriteFile(private, input, 0600))
-						child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestHyperSwitchActualBrowserInvoice$", "-test.v")
-						child.Env = append(os.Environ(), "OPENRAILS_HS_INVOICE_RECOVERY="+private)
-						output, err := child.CombinedOutput()
-						require.NoError(t, err, "%s", output)
+						recoverOperation(t, result.Operation.ID)
 
 					} else {
 						var refusal *openrails.StatusError
@@ -536,4 +603,174 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	require.Equal(t, 1, methods)
 	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2)`, owned.MerchantID.UUID(), user.ID).Scan(&financial))
 	require.Zero(t, financial, "invoice collections do not create checkout payments or subscriptions")
+
+	t.Run("verified browser initial membership", func(t *testing.T) {
+		// Inject business time at the original acceptance, then advance to the
+		// real paid boundary. Provider/River IO keeps its ordinary wall clock.
+		acceptedAt := time.Now().UTC().Add(-720 * time.Hour).Truncate(time.Microsecond)
+		clock := clockwork.NewFakeClockAt(acceptedAt)
+		billingClock.Set(clock)
+		defer billingClock.Set(nil)
+
+		owner := surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID))
+		product, err := owner.CreateProduct(ctx, openrails.CreateProductRequest{Key: uuid.NewString(), DisplayName: "Browser membership", EntitlementsSpec: map[string]*int{"browser_member": nil}})
+		require.NoError(t, err)
+		hours := 720
+		price, err := owner.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+		require.NoError(t, err)
+		beforeMembership := len(observations())
+		params, _ := json.Marshal(map[string]string{"phase": "membership", "page": page.URL, "checkpoint": page.URL + "/membership-quoted", "expire": page.URL + "/membership-expired", "recover": page.URL + "/membership-recover", "before_provider_calls": strconv.Itoa(beforeMembership), "api": surface.BaseURL, "token": token, "psp_id": psp.String(), "price_id": price.ID.String(), "method": savedMethod.String()})
+		command := exec.CommandContext(ctx, "node", script)
+		command.Env = append(os.Environ(), "OPENRAILS_BROWSER_FIXTURE="+string(params))
+		output, err := command.CombinedOutput()
+		t.Log(string(output))
+		require.NoError(t, err)
+		var proof struct {
+			Membership struct {
+				SubscriptionID openrails.SubscriptionID `json:"subscription_id"`
+				PaymentID      openrails.PaymentID      `json:"payment_id"`
+			} `json:"membership"`
+		}
+		require.NoError(t, json.Unmarshal(output, &proof))
+		rows := observations()[beforeMembership:]
+		require.Len(t, rows, 1, "confirmation and replay submit exactly one recurring CIT")
+		require.Equal(t, "recurring", rows[0].BillingMethod)
+		require.Equal(t, "customer", rows[0].Initiator)
+		require.Equal(t, "stored", rows[0].Indicator)
+		require.Equal(t, "9.99", rows[0].Amount)
+		var policy, providerID, anchor, status string
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT collection_policy,rail_subscription_id,status FROM billing.subscriptions WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), proof.Membership.SubscriptionID.UUID()).Scan(&policy, &providerID, &status))
+		require.Equal(t, "engine", policy)
+		require.Empty(t, providerID)
+		require.Equal(t, "active", status)
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT stored_credential_recurring_ref FROM billing.payment_methods WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), savedMethod.UUID()).Scan(&anchor))
+		require.Equal(t, rows[0].Transaction, anchor)
+		var amount int64
+		var paidStatus, transaction string
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT amount,status,transaction_id FROM billing.payments WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), proof.Membership.PaymentID.UUID()).Scan(&amount, &paidStatus, &transaction))
+		require.EqualValues(t, 9_990_000, amount, "post-quote catalog edit cannot change accepted price")
+		require.Equal(t, "completed", paidStatus)
+		require.Equal(t, rows[0].Transaction, transaction)
+		access, err := owner.HasEntitlement(ctx, openrails.CustomerID(uuid.MustParse(user.ID)), "browser_member", time.Now())
+		require.NoError(t, err)
+		require.True(t, access, "shared membership commit grants the accepted entitlement")
+		var initialStart, initialEnd time.Time
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT current_period_starts_at,current_period_ends_at FROM billing.subscriptions WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), proof.Membership.SubscriptionID.UUID()).Scan(&initialStart, &initialEnd))
+		require.Equal(t, 720*time.Hour, initialEnd.Sub(initialStart))
+		require.True(t, initialStart.Equal(acceptedAt))
+		clock.Advance(initialEnd.Sub(clock.Now()))
+
+		// Use Runtime's production worker registry and one ordinary River
+		// client. A dedicated owned queue isolates these explicit ticks from
+		// unrelated periodic maintenance without replacing any worker.
+		const queue = "engine_browser"
+		require.NoError(t, rt.AddRiverConfigurer(func(_ context.Context, c *river.Config) error {
+			c.Queues = map[string]river.QueueConfig{queue: {MaxWorkers: 1}}
+			return nil
+		}))
+		require.NoError(t, rt.InitRiver(ctx))
+		require.NoError(t, rt.RiverClient.Start(ctx))
+		defer func() { require.NoError(t, rt.RiverClient.Stop(context.WithoutCancel(ctx))) }()
+		runJob := func(args river.JobArgs) {
+			job, err := rt.RiverClient.Insert(ctx, args, &river.InsertOpts{Queue: queue, MaxAttempts: 1})
+			require.NoError(t, err)
+			require.Eventually(t, func() bool {
+				row, err := rt.RiverClient.JobGet(ctx, job.Job.ID)
+				return err == nil && (string(row.State) == "completed" || string(row.State) == "discarded")
+			}, 20*time.Second, 20*time.Millisecond, "registered worker must finish")
+			row, err := rt.RiverClient.JobGet(ctx, job.Job.ID)
+			require.NoError(t, err)
+			require.Equal(t, "completed", string(row.State), "%+v", row.Errors)
+		}
+		runJob(riverjobs.DunningArgs{})
+		var renewal gen.OpenrailsRailIntent
+		require.NoError(t, rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {
+			var err error
+			renewal, err = rt.DB.Gen(c).GetUnresolvedSubscriptionCollection(c, gen.GetUnresolvedSubscriptionCollectionParams{MerchantID: owned.MerchantID.UUID(), SubscriptionID: proof.Membership.SubscriptionID.UUID()})
+			return err
+		}))
+		terms, err := subscriptions.DecodeSubscriptionCollectionPayload(renewal)
+		require.NoError(t, err)
+		require.EqualValues(t, 9_990_000, terms.Renewal.Amount)
+		require.Equal(t, "USD", terms.Renewal.Currency)
+		require.Equal(t, 720*time.Hour, terms.Renewal.PeriodEnd.Sub(terms.Renewal.PeriodStart))
+		require.Equal(t, map[string]*int{"browser_member": nil}, terms.Renewal.Entitlements)
+		require.True(t, terms.PreviousPeriodEnd.Equal(initialEnd))
+		require.True(t, terms.Renewal.PeriodStart.Equal(initialEnd))
+		var liveAmount int64
+		var liveHours int
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT amount,access_duration_hours FROM billing.prices WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), price.ID.UUID()).Scan(&liveAmount, &liveHours))
+		require.EqualValues(t, 1_000_000, liveAmount)
+		require.Equal(t, 24, liveHours, "qualification must not reset the mutated catalog")
+
+		beforeMIT := len(observations())
+		control, err := http.Post(vendor.NMIReadBase+"/control", "application/json", bytes.NewBufferString(`{"Next":"lost"}`))
+		require.NoError(t, err)
+		require.Equal(t, http.StatusNoContent, control.StatusCode)
+		control.Body.Close()
+		runJob(riverjobs.ProviderIntentExecuteArgs{})
+		loadRenewal := func() gen.OpenrailsRailIntent {
+			var row gen.OpenrailsRailIntent
+			require.NoError(t, rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {
+				var err error
+				row, err = intents.NewStore(rt.DB).Get(c, renewal.ID)
+				return err
+			}))
+			return row
+		}
+		uncertain := loadRenewal()
+		require.Equal(t, intents.StatusUnknownNeedsVerify, uncertain.Status)
+		require.JSONEq(t, string(renewal.Payload), string(uncertain.Payload))
+		var renewalPayments int
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND subscription_id=$2 AND attempt_kind='renewal'`, owned.MerchantID.UUID(), proof.Membership.SubscriptionID.UUID()).Scan(&renewalPayments))
+		require.Zero(t, renewalPayments, "lost reply must not manufacture payment/access")
+		runJob(riverjobs.DunningArgs{})
+		require.Equal(t, uncertain.ID, loadRenewal().ID)
+		require.NoError(t, rt.RiverClient.Stop(context.WithoutCancel(ctx)))
+		recoverOperation(t, renewal.ID)
+		completed := loadRenewal()
+		require.Equal(t, intents.StatusSucceeded, completed.Status)
+		require.NoError(t, intents.ValidateSubscriptionCollectionTerminal(completed))
+		received := observations()[beforeMIT:]
+		require.Len(t, received, 1, "lost MIT plus process restart must keep one POST")
+		require.Equal(t, "merchant", received[0].Initiator)
+		require.Equal(t, "recurring", received[0].BillingMethod)
+		require.Equal(t, "used", received[0].Indicator)
+		require.Equal(t, anchor, received[0].Anchor)
+		require.Equal(t, "9.99", received[0].Amount)
+		require.Equal(t, "USD", received[0].Currency)
+		require.True(t, received[0].Approved)
+		require.True(t, received[0].CardMatched)
+		var renewedStart, renewedEnd time.Time
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT current_period_starts_at,current_period_ends_at FROM billing.subscriptions WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), proof.Membership.SubscriptionID.UUID()).Scan(&renewedStart, &renewedEnd))
+		require.True(t, renewedStart.Equal(terms.Renewal.PeriodStart))
+		require.True(t, renewedEnd.Equal(terms.Renewal.PeriodEnd))
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT amount,status,transaction_id FROM billing.payments WHERE merchant_id=$1 AND subscription_id=$2 AND attempt_kind='renewal'`, owned.MerchantID.UUID(), proof.Membership.SubscriptionID.UUID()).Scan(&amount, &paidStatus, &transaction))
+		require.EqualValues(t, 9_990_000, amount)
+		require.Equal(t, "completed", paidStatus)
+		require.Equal(t, received[0].Transaction, transaction)
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND subscription_id=$2 AND attempt_kind='renewal'`, owned.MerchantID.UUID(), proof.Membership.SubscriptionID.UUID()).Scan(&renewalPayments))
+		require.Equal(t, 1, renewalPayments)
+		var settlementEvents, paidGrants int
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.host_outbox WHERE merchant_id=$1 AND payment_id IN (SELECT id FROM billing.payments WHERE merchant_id=$1 AND subscription_id=$2 AND attempt_kind='renewal')`, owned.MerchantID.UUID(), proof.Membership.SubscriptionID.UUID()).Scan(&settlementEvents))
+		require.Equal(t, 1, settlementEvents)
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.grants WHERE merchant_id=$1 AND source_type='subscription' AND source_id=$2 AND event='grant' AND starts_at=$3 AND ends_at=$4`, owned.MerchantID.UUID(), proof.Membership.SubscriptionID.UUID().String(), renewedStart, renewedEnd).Scan(&paidGrants))
+		require.Equal(t, 1, paidGrants, "one accepted benefit window is committed with the payment")
+
+		var grantsBefore, grantsAfter int
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.grants WHERE merchant_id=$1 AND source_id=$2`, owned.MerchantID.UUID(), proof.Membership.SubscriptionID.UUID().String()).Scan(&grantsBefore))
+		require.NoError(t, rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error { _, err := rt.IntentRunner().VerifyByID(c, renewal.ID); return err }))
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.grants WHERE merchant_id=$1 AND source_id=$2`, owned.MerchantID.UUID(), proof.Membership.SubscriptionID.UUID().String()).Scan(&grantsAfter))
+		require.Equal(t, grantsBefore, grantsAfter)
+		require.Len(t, observations()[beforeMIT:], 1)
+		changed, err := owner.HasEntitlement(ctx, openrails.CustomerID(uuid.MustParse(user.ID)), "changed_after_quote", renewedStart.Add(time.Hour))
+		require.NoError(t, err)
+		require.False(t, changed)
+		response, err := http.Get(vendor.NMIReadBase + "/schedule-calls")
+		require.NoError(t, err)
+		defer response.Body.Close()
+		var scheduleCalls struct{ Count int }
+		require.NoError(t, json.NewDecoder(response.Body).Decode(&scheduleCalls))
+		require.Zero(t, scheduleCalls.Count, "engine enrollment never creates a native schedule")
+	})
 }

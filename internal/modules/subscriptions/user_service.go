@@ -319,6 +319,11 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		return fmt.Errorf("load active subscription: %w", err)
 	}
 
+	if subscription.CollectionPolicy == models.CollectionPolicyEngine {
+		lifecycle := NewSubscriptionLifecycleService(s.SubscriptionService.Database(), s.ProductService, s.PriceService, s.EntitlementService, s.NotificationService, s.PaymentService, s.Clock())
+		return lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeUser, CancelFeedback: &feedback})
+	}
+
 	now := s.now()
 
 	// enqueueRemoteIntent commits the rail's durable remote-mutation intent in
