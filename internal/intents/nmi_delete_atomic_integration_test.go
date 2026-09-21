@@ -145,3 +145,27 @@ func TestNMIVaultAliasAdmissionRejectsNoncanonicalReferences(t *testing.T) {
 	}
 	require.Zero(t, fx.gateway.vaultDeleteCalls.Load())
 }
+
+// A sole provider entry still cannot authorize erasing an unknown or different
+// locally accepted card. This retains the refusal exposed by the retired
+// legacy fixture, whose empty method reference contradicted provider entry B1.
+func TestNMIVaultDeleteRefusesUnqualifiedSoleEntry(t *testing.T) {
+	for _, ref := range []string{"", "different-billing-entry"} {
+		name := ref
+		if name == "" {
+			name = "missing accepted billing entry"
+		}
+		t.Run(name, func(t *testing.T) {
+			fx := newVaultDeleteFixture(t)
+			fx.pm.RailMethodRef = ref
+			_, err := fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE openrails.payment_methods SET rail_method_ref=$3 WHERE merchant_id=$1 AND id=$2`, dbtest.TestMerchantID.UUID(), fx.pm.ID, ref)
+			require.NoError(t, err)
+			out := fx.executeThrough(t)
+			require.False(t, out.Done)
+			require.Zero(t, fx.gateway.vaultDeleteCalls.Load())
+			require.Zero(t, fx.gateway.entryDeleteCalls.Load())
+			require.True(t, fx.localRowExists(t))
+			require.Equal(t, StatusPending, fx.intentStatus(t))
+		})
+	}
+}
