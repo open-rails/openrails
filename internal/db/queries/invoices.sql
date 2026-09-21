@@ -453,12 +453,11 @@ FOR UPDATE;
 -- name: ListEncodedInvoiceAttemptsForArchive :many
 -- The archive validates both copies of the generated payer-scoped coordinate
 -- against the canonical collection operation before exporting or restoring it.
-SELECT sqlc.embed(a), sqlc.embed(i),
+SELECT sqlc.embed(a), sqlc.embed(i), l.amount AS ledger_amount,
     COALESCE(l.merchant_id = a.merchant_id AND l.customer_id = a.customer_id
         AND l.invoice_id = a.invoice_id AND l.currency = a.currency
         AND l.source = 'invoice_charge' AND l.source_id = i.idempotency_key
-        AND l.operation = 'invoice_payment' AND l.transfer_type = 'owed_payment'
-        AND l.amount = (i.payload->>'amount')::numeric, false)::boolean AS ledger_matches
+        AND l.operation = 'invoice_payment' AND l.transfer_type = 'owed_payment', false)::boolean AS ledger_matches
 FROM openrails.invoice_payments a
 JOIN openrails.rail_intents i ON i.merchant_id = a.merchant_id
     AND i.idempotency_key = a.idempotency_key AND i.intent_type = 'invoice_collection'

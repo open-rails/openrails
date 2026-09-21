@@ -301,7 +301,7 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 			a.IdempotencyKey != nil && *a.IdempotencyKey == operation.IdempotencyKey && a.Currency == p.Currency && a.Amount == amount &&
 			(p.Initiator == charge.InitiatorCustomer || operation.Origin == string(intents.OriginAdmin) && intents.InvoiceCollectionRetryKeyValid(p.InvoiceID, operation.IdempotencyKey) || p.Initiator == charge.InitiatorMerchant && operation.Origin == string(intents.OriginSystem)) && a.Rail != nil && *a.Rail == p.Rail
 		terminal := operation.Status == intents.StatusFailedTerminal && a.Status == "failed" && !collected ||
-			operation.Status == intents.StatusSucceeded && a.Status == "settled" && collected && row.LedgerMatches && a.RailPaymentID != nil && *a.RailPaymentID == receipt.TransactionID()
+			operation.Status == intents.StatusSucceeded && a.Status == "settled" && collected && row.LedgerMatches && row.LedgerAmount != nil && *row.LedgerAmount == p.Amount && a.RailPaymentID != nil && *a.RailPaymentID == receipt.TransactionID()
 		if receiptErr != nil || amountErr != nil || !matches || !terminal {
 			return &Error{Code: "unsupported_state", Table: "invoice_payments", Err: fmt.Errorf("encoded attempt key does not name its canonical collection outcome")}
 		}

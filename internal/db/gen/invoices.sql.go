@@ -790,12 +790,11 @@ func (q *Queries) ListChargeableOpenInvoices(ctx context.Context, arg ListCharge
 }
 
 const listEncodedInvoiceAttemptsForArchive = `-- name: ListEncodedInvoiceAttemptsForArchive :many
-SELECT a.id, a.merchant_id, a.customer_id, a.invoice_id, a.ledger_transfer_id, a.currency, a.amount, a.status, a.rail, a.rail_payment_id, a.failure_code, a.failure_message, a.attempted_at, a.settled_at, a.created_at, a.updated_at, a.psp_id, a.failure_reason, a.payment_method_id, a.idempotency_key, i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.claimed_until, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id,
+SELECT a.id, a.merchant_id, a.customer_id, a.invoice_id, a.ledger_transfer_id, a.currency, a.amount, a.status, a.rail, a.rail_payment_id, a.failure_code, a.failure_message, a.attempted_at, a.settled_at, a.created_at, a.updated_at, a.psp_id, a.failure_reason, a.payment_method_id, a.idempotency_key, i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.claimed_until, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, l.amount AS ledger_amount,
     COALESCE(l.merchant_id = a.merchant_id AND l.customer_id = a.customer_id
         AND l.invoice_id = a.invoice_id AND l.currency = a.currency
         AND l.source = 'invoice_charge' AND l.source_id = i.idempotency_key
-        AND l.operation = 'invoice_payment' AND l.transfer_type = 'owed_payment'
-        AND l.amount = (i.payload->>'amount')::numeric, false)::boolean AS ledger_matches
+        AND l.operation = 'invoice_payment' AND l.transfer_type = 'owed_payment', false)::boolean AS ledger_matches
 FROM openrails.invoice_payments a
 JOIN openrails.rail_intents i ON i.merchant_id = a.merchant_id
     AND i.idempotency_key = a.idempotency_key AND i.intent_type = 'invoice_collection'
@@ -806,6 +805,7 @@ WHERE a.merchant_id = $1 AND a.idempotency_key LIKE 'invoice_collection:%'
 type ListEncodedInvoiceAttemptsForArchiveRow struct {
 	OpenrailsInvoicePayment OpenrailsInvoicePayment
 	OpenrailsRailIntent     OpenrailsRailIntent
+	LedgerAmount            *int64
 	LedgerMatches           bool
 }
 
@@ -867,6 +867,7 @@ func (q *Queries) ListEncodedInvoiceAttemptsForArchive(ctx context.Context, merc
 			&i.OpenrailsRailIntent.DestructiveRunID,
 			&i.OpenrailsRailIntent.DestructiveRunClass,
 			&i.OpenrailsRailIntent.CustodianID,
+			&i.LedgerAmount,
 			&i.LedgerMatches,
 		); err != nil {
 			return nil, err

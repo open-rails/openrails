@@ -5,6 +5,8 @@ package money_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
@@ -133,6 +135,32 @@ func testInvoiceCollectionArchive(t *testing.T, resolution string) {
 				require.Zero(t, count, "refused restore rolls back every row")
 			})
 		}
+		t.Run("malformed accepted amount", func(t *testing.T) {
+			const canary = "invalid-amount-4111111111111111"
+			var payload map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(original.Payload, &payload))
+			payload["amount"], err = json.Marshal(canary)
+			require.NoError(t, err)
+			malformed, err := json.Marshal(payload)
+			require.NoError(t, err)
+			_, err = database.Pool().Exec(e.ctx, `UPDATE billing.rail_intents SET payload=$2 WHERE id=$1`, original.ID, malformed)
+			require.NoError(t, err)
+			defer func() {
+				_, err := database.Pool().Exec(e.ctx, `UPDATE billing.rail_intents SET payload=$2 WHERE id=$1`, original.ID, original.Payload)
+				require.NoError(t, err)
+			}()
+			var refused bytes.Buffer
+			exportErr := merchantarchive.Export(t.Context(), database, mid, &refused)
+			require.Error(t, exportErr)
+			var classified *merchantarchive.Error
+			require.True(t, errors.As(exportErr, &classified))
+			require.Equal(t, "unsupported_state", classified.Code, "the canonical decoder must refuse before any SQL numeric cast")
+			require.NotContains(t, exportErr.Error(), canary)
+			_, restoreErr := merchantarchive.Restore(t.Context(), target, mid, bytes.NewReader(rewriteCollectionArchive(t, archive.Bytes(), "rail_intents", "payload", string(malformed))))
+			require.Error(t, restoreErr)
+			require.NotContains(t, restoreErr.Error(), canary)
+		})
+
 	}
 	_, err = merchantarchive.Restore(t.Context(), target, mid, bytes.NewReader(archive.Bytes()))
 	require.NoError(t, err)
