@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/providerqualification"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -107,7 +108,7 @@ func SetProviderCutoverQualification(ctx context.Context, a *app.App, id merchan
 		if record == nil {
 			return providerqualification.Set(ctx, a.Runtime.DB, pspID, nil, "", 0)
 		}
-		row, err := a.Runtime.DB.Gen(ctx).GetPSP(ctx, pspID)
+		row, err := a.Runtime.DB.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{ID: pspID, MerchantID: id.UUID()})
 		if db.IsNotFound(err) || (err == nil && row.MerchantID != id.UUID()) {
 			return providerqualification.ErrNotFound
 		}

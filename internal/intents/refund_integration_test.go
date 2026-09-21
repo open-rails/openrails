@@ -6,13 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -108,7 +109,7 @@ type refundFixture struct {
 // charge) plus the open admin refund reservation the intent finalizes.
 func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 	t.Helper()
-	ctx := dbtest.WithTestMerchant(context.Background())
+	ctx := dbtest.WithTestMerchant(dbtest.WithTestMerchant(context.Background()))
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
@@ -192,14 +193,14 @@ func (fx refundFixture) refundRunner(client *nmi.NMIClient, cfg *config.Config) 
 
 func (fx refundFixture) reservation(t *testing.T) (status, transactionID string, metadata map[string]any) {
 	t.Helper()
-	row, err := payments.NewPaymentService(fx.db).GetByID(context.Background(), fx.reservationID)
+	row, err := payments.NewPaymentService(fx.db).GetByID(dbtest.WithTestMerchant(context.Background()), fx.reservationID)
 	require.NoError(t, err)
 	return row.Status, row.TransactionID, row.Metadata
 }
 
 func (fx refundFixture) intentByID(t *testing.T, id uuid.UUID) gen.OpenrailsRailIntent {
 	t.Helper()
-	row, err := fx.db.Gen(context.Background()).GetRailIntent(context.Background(), id)
+	row, err := fx.db.Gen(dbtest.WithTestMerchant(context.Background())).GetRailIntent(dbtest.WithTestMerchant(context.Background()), gen.GetRailIntentParams{MerchantID: dbtest.TestMerchantID.UUID(), ID: id})
 	require.NoError(t, err)
 	return row
 }
@@ -211,7 +212,7 @@ func TestNMIRefundSynchronousSuccess(t *testing.T) {
 	fx := seedRefundablePayment(t, 500)
 	fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
 
-	row, err := fx.refundRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
+	row, err := fx.refundRunner(client, fullModeConfig()).EnqueueAndExecute(dbtest.WithTestMerchant(context.Background()), fx.enqueueParams(500))
 	require.NoError(t, err)
 	assert.Equal(t, StatusSucceeded, row.Status)
 	// #607: the refund tombstone retains its PAYLOAD (the admin producer reads
@@ -222,7 +223,7 @@ func TestNMIRefundSynchronousSuccess(t *testing.T) {
 	assert.NotContains(t, string(row.ResultEvidence), "txn_refund_1", "forensic evidence slimmed off the tombstone")
 	assert.EqualValues(t, 1, fake.refundCalls.Load())
 	var amount int64
-	require.NoError(t, fx.db.Pool().QueryRow(context.Background(), "SELECT amount FROM billing.payments WHERE id=$1", fx.reservationID).Scan(&amount))
+	require.NoError(t, fx.db.Pool().QueryRow(dbtest.WithTestMerchant(context.Background()), "SELECT amount FROM billing.payments WHERE id=$1", fx.reservationID).Scan(&amount))
 	require.EqualValues(t, -5_000_000, amount, "the local USD refund is the same five dollars sent to NMI")
 
 	status, txn, metadata := fx.reservation(t)
@@ -242,7 +243,7 @@ func TestNMIRefundParksUnderReadonlyAndDrainsUnderFull(t *testing.T) {
 	fx := seedRefundablePayment(t, 500)
 	fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
 
-	row, err := fx.refundRunner(client, readonlyModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
+	row, err := fx.refundRunner(client, readonlyModeConfig()).EnqueueAndExecute(dbtest.WithTestMerchant(context.Background()), fx.enqueueParams(500))
 	require.NoError(t, err)
 	assert.Equal(t, StatusPending, row.Status, "parked is a state, not an error")
 	require.NotNil(t, row.LastFailureReason)
@@ -253,10 +254,10 @@ func TestNMIRefundParksUnderReadonlyAndDrainsUnderFull(t *testing.T) {
 	assert.Equal(t, "pending", status, "reservation stays open while the intent waits")
 
 	// Mode lifts; the scheduled executor pass drains the queue.
-	_, err = fx.db.Pool().Exec(context.Background(),
+	_, err = fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()),
 		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
-	_, err = fx.refundRunner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	_, err = fx.refundRunner(client, fullModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 
 	assert.Equal(t, StatusSucceeded, fx.intentByID(t, row.ID).Status)
@@ -274,13 +275,13 @@ func TestNMIRefundLostResponseNeedsExactReceipt(t *testing.T) {
 			fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
 			fake.refundStatus.Store(http.StatusBadGateway)
 			runner := fx.refundRunner(client, fullModeConfig())
-			row, err := runner.EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
+			row, err := runner.EnqueueAndExecute(dbtest.WithTestMerchant(context.Background()), fx.enqueueParams(500))
 			require.NoError(t, err)
 			require.Equal(t, StatusUnknownNeedsVerify, row.Status)
 			fake.refunded.Store(priorRefund)
-			_, err = fx.db.Pool().Exec(context.Background(), "UPDATE billing.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
+			_, err = fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()), "UPDATE billing.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
 			require.NoError(t, err)
-			_, err = runner.RunVerifyOnce(context.Background())
+			_, err = runner.RunVerifyOnce(dbtest.WithTestMerchant(context.Background()))
 			require.NoError(t, err)
 			got := fx.intentByID(t, row.ID)
 			assert.Equal(t, StatusUnknownNeedsVerify, got.Status)
@@ -300,7 +301,7 @@ func TestCCBillRefundReservationsAndReceiptsRemainUnresolved(t *testing.T) {
 	for _, receipt := range []string{"", "ccbill_refund:sub_x:requested_charge:old-operation"} {
 		t.Run(receipt, func(t *testing.T) {
 			fx := seedRefundablePayment(t, 500)
-			ctx := dbtest.WithTestMerchant(context.Background())
+			ctx := dbtest.WithTestMerchant(dbtest.WithTestMerchant(context.Background()))
 			fx.pspID = dbtest.EnsureTestPSP(ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "ccbill")
 			_, err := fx.db.Pool().Exec(ctx, `UPDATE billing.payments SET rail='ccbill',psp_id=$3 WHERE id=$1 OR id=$2`, fx.paymentID, fx.reservationID, fx.pspID)
 			require.NoError(t, err)
@@ -351,7 +352,7 @@ func TestNMIRefundDeclineReleasesReservation(t *testing.T) {
 	fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
 	fake.refundBody.Store(`{"object":"transaction","id":"txn_refund_1","response":"2","response_text":"DECLINED","response_code":"300"}`)
 
-	row, err := fx.refundRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
+	row, err := fx.refundRunner(client, fullModeConfig()).EnqueueAndExecute(dbtest.WithTestMerchant(context.Background()), fx.enqueueParams(500))
 	require.NoError(t, err)
 	assert.Equal(t, StatusFailedTerminal, row.Status)
 	require.NotNil(t, row.LastFailureReason)
@@ -367,7 +368,7 @@ func TestNMIRefundConflictReturnsDurableOutcome(t *testing.T) {
 	fx := seedRefundablePayment(t, 500)
 	fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
 
-	first, err := fx.refundRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
+	first, err := fx.refundRunner(client, fullModeConfig()).EnqueueAndExecute(dbtest.WithTestMerchant(context.Background()), fx.enqueueParams(500))
 	require.NoError(t, err)
 	require.Equal(t, StatusSucceeded, first.Status)
 
@@ -377,7 +378,7 @@ func TestNMIRefundConflictReturnsDurableOutcome(t *testing.T) {
 	otherReservation.ReservationID = uuid.New()
 	params.Payload = otherReservation
 
-	second, err := fx.refundRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), params)
+	second, err := fx.refundRunner(client, fullModeConfig()).EnqueueAndExecute(dbtest.WithTestMerchant(context.Background()), params)
 	require.NoError(t, err)
 	assert.Equal(t, first.ID, second.ID, "one intent per logical refund")
 	assert.Equal(t, StatusSucceeded, second.Status)
@@ -466,7 +467,7 @@ func (fx refundFixture) stripeRunner(cfg *config.Config, baseURL string) *Runner
 func (fx refundFixture) stripeEnqueueParams(t *testing.T, amountCents int64) EnqueueParams {
 	params := fx.enqueueParams(amountCents)
 	params.Provider = "stripe"
-	params.PspID = dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "stripe")
+	params.PspID = dbtest.EnsureTestPSP(dbtest.WithTestMerchant(context.Background()), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "stripe")
 	params.IntentType = TypeStripeRefund
 	payload := fx.payload(amountCents)
 	payload.ProviderTarget = "ch_1"
@@ -483,7 +484,7 @@ func TestStripeRefundSynchronousSuccessCarriesIdempotencyKey(t *testing.T) {
 	stripe := newFakeStripeServer(t)
 	cfg := stripeIntegrationConfig(config.ProviderWriteModeFull)
 
-	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(context.Background(), fx.stripeEnqueueParams(t, 500))
+	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(dbtest.WithTestMerchant(context.Background()), fx.stripeEnqueueParams(t, 500))
 	require.NoError(t, err)
 	assert.Equal(t, StatusSucceeded, row.Status)
 
@@ -505,17 +506,17 @@ func TestStripeRefundAmbiguousResolvedByVerifier(t *testing.T) {
 	stripe.createStatus.Store(http.StatusInternalServerError)
 	cfg := stripeIntegrationConfig(config.ProviderWriteModeFull)
 
-	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(context.Background(), fx.stripeEnqueueParams(t, 500))
+	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(dbtest.WithTestMerchant(context.Background()), fx.stripeEnqueueParams(t, 500))
 	require.NoError(t, err)
 	require.Equal(t, StatusUnknownNeedsVerify, row.Status)
 
 	// The refund DID get created server-side despite the 500.
 	stripe.created.Store(true)
 	stripe.gotMetadata.Store(RefundIdempotencyKey(fx.paymentID, "it-key"))
-	_, err = fx.db.Pool().Exec(context.Background(),
+	_, err = fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()),
 		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
-	_, err = fx.stripeRunner(cfg, stripe.srv.URL).RunVerifyOnce(context.Background())
+	_, err = fx.stripeRunner(cfg, stripe.srv.URL).RunVerifyOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 
 	assert.Equal(t, StatusSucceeded, fx.intentByID(t, row.ID).Status)
@@ -534,7 +535,7 @@ func TestStripeRefundRefusalReleasesReservation(t *testing.T) {
 	stripe.createStatus.Store(http.StatusBadRequest)
 	cfg := stripeIntegrationConfig(config.ProviderWriteModeFull)
 
-	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(context.Background(), fx.stripeEnqueueParams(t, 500))
+	row, err := fx.stripeRunner(cfg, stripe.srv.URL).EnqueueAndExecute(dbtest.WithTestMerchant(context.Background()), fx.stripeEnqueueParams(t, 500))
 	require.NoError(t, err)
 	assert.Equal(t, StatusFailedTerminal, row.Status)
 	status, _, _ := fx.reservation(t)

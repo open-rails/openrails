@@ -115,11 +115,16 @@ func (q *Queries) CreateMerchantWebhook(ctx context.Context, arg CreateMerchantW
 }
 
 const deleteMerchantWebhook = `-- name: DeleteMerchantWebhook :execrows
-DELETE FROM openrails.merchant_webhooks WHERE id = $1
+DELETE FROM openrails.merchant_webhooks WHERE merchant_webhooks.merchant_id = $2::uuid AND id = $1
 `
 
-func (q *Queries) DeleteMerchantWebhook(ctx context.Context, id uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteMerchantWebhook, id)
+type DeleteMerchantWebhookParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) DeleteMerchantWebhook(ctx context.Context, arg DeleteMerchantWebhookParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteMerchantWebhook, arg.ID, arg.MerchantID)
 	if err != nil {
 		return 0, err
 	}
@@ -127,11 +132,16 @@ func (q *Queries) DeleteMerchantWebhook(ctx context.Context, id uuid.UUID) (int6
 }
 
 const getMerchantWebhook = `-- name: GetMerchantWebhook :one
-SELECT id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at FROM openrails.merchant_webhooks WHERE id = $1
+SELECT id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at FROM openrails.merchant_webhooks WHERE merchant_webhooks.merchant_id = $2::uuid AND id = $1
 `
 
-func (q *Queries) GetMerchantWebhook(ctx context.Context, id uuid.UUID) (OpenrailsMerchantWebhook, error) {
-	row := q.db.QueryRow(ctx, getMerchantWebhook, id)
+type GetMerchantWebhookParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) GetMerchantWebhook(ctx context.Context, arg GetMerchantWebhookParams) (OpenrailsMerchantWebhook, error) {
+	row := q.db.QueryRow(ctx, getMerchantWebhook, arg.ID, arg.MerchantID)
 	var i OpenrailsMerchantWebhook
 	err := row.Scan(
 		&i.ID,
@@ -195,11 +205,13 @@ func (q *Queries) ListMerchantNotifications(ctx context.Context, arg ListMerchan
 }
 
 const listMerchantWebhooks = `-- name: ListMerchantWebhooks :many
-SELECT id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at FROM openrails.merchant_webhooks ORDER BY created_at DESC, id
+SELECT id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at FROM openrails.merchant_webhooks
+WHERE merchant_webhooks.merchant_id = $1::uuid
+ORDER BY created_at DESC, id
 `
 
-func (q *Queries) ListMerchantWebhooks(ctx context.Context) ([]OpenrailsMerchantWebhook, error) {
-	rows, err := q.db.Query(ctx, listMerchantWebhooks)
+func (q *Queries) ListMerchantWebhooks(ctx context.Context, merchantID uuid.UUID) ([]OpenrailsMerchantWebhook, error) {
+	rows, err := q.db.Query(ctx, listMerchantWebhooks, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +259,7 @@ UPDATE openrails.merchant_webhooks
    SET destination_host = $1,
        secret_version = $2::integer,
        updated_at = current_timestamp
- WHERE id = $3::uuid
+ WHERE merchant_webhooks.merchant_id = $3::uuid AND id = $4::uuid
    AND secret_version <= $2::integer
 RETURNING id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at
 `
@@ -255,11 +267,17 @@ RETURNING id, merchant_id, name, destination_host, secret_version, format, enabl
 type RotateMerchantWebhookURLParams struct {
 	DestinationHost string
 	SecretVersion   int32
+	MerchantID      uuid.UUID
 	ID              uuid.UUID
 }
 
 func (q *Queries) RotateMerchantWebhookURL(ctx context.Context, arg RotateMerchantWebhookURLParams) (OpenrailsMerchantWebhook, error) {
-	row := q.db.QueryRow(ctx, rotateMerchantWebhookURL, arg.DestinationHost, arg.SecretVersion, arg.ID)
+	row := q.db.QueryRow(ctx, rotateMerchantWebhookURL,
+		arg.DestinationHost,
+		arg.SecretVersion,
+		arg.MerchantID,
+		arg.ID,
+	)
 	var i OpenrailsMerchantWebhook
 	err := row.Scan(
 		&i.ID,

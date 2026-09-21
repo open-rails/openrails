@@ -45,14 +45,11 @@ func TestRuntimeRegistersRestoreDestinationBeforeClient(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `SELECT permission_group_id, api_host FROM billing.merchants WHERE id=$1`, id.UUID()).Scan(&group, &host))
 	require.Nil(t, group)
 	require.Nil(t, host)
-	tx, err := pool.Begin(ctx)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = tx.Rollback(ctx) })
-	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, id.String())
-	require.NoError(t, err)
-	require.NoError(t, tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.merchant_configurations) + (SELECT count(*) FROM billing.psps) + (SELECT count(*) FROM billing.merchant_secrets)`).Scan(&count))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM billing.merchant_configurations WHERE merchant_id=$1) +
+		(SELECT count(*) FROM billing.psps WHERE merchant_id=$1) +
+		(SELECT count(*) FROM billing.merchant_secrets WHERE merchant_id=$1)`, id.UUID()).Scan(&count))
 	require.Zero(t, count, "registration creates directory identity only")
-	require.NoError(t, tx.Rollback(ctx))
 	client, err := rt.Client()
 	require.NoError(t, err)
 	_, err = client.GetMerchantSettings(ctx)

@@ -105,7 +105,7 @@ RETURNING *;
 UPDATE openrails.reconciliation_findings
 SET notified_at = sqlc.arg(notified_at)::timestamptz,
     notified_severity = sqlc.arg(severity)::text
-WHERE id = sqlc.arg(id)::uuid
+WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND status = 'requires_review'
   AND severity = sqlc.arg(severity)::text
   AND (notified_at IS NULL OR
@@ -119,7 +119,7 @@ WHERE id = sqlc.arg(id)::uuid
 UPDATE openrails.reconciliation_findings
 SET notified_at = sqlc.arg(notified_at)::timestamptz,
     notified_severity = sqlc.arg(severity)::text
-WHERE id = sqlc.arg(id);
+WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id);
 
 -- SEC-18: the merchant predicate is DEFENCE IN DEPTH, not decoration. This is a
 -- merchant-admin by-id surface (GET /v1/merchant/findings/:id, and the resolve
@@ -135,7 +135,7 @@ WHERE id = $1 AND merchant_id = openrails.current_merchant_id();
 
 -- name: ListReconciliationFindings :many
 SELECT * FROM openrails.reconciliation_findings
-WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
+WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(provider)::text IS NULL OR COALESCE(NULLIF(rail,''),evidence->>'provider') = sqlc.narg(provider)::text)
   AND (sqlc.narg(finding_type)::text IS NULL OR finding_type = sqlc.narg(finding_type)::text)
   AND (NOT sqlc.arg(only_review_queue)::boolean OR status = 'requires_review')
@@ -144,7 +144,7 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- name: ListActionableReconciliationFindingsByProvider :many
 SELECT * FROM openrails.reconciliation_findings
-WHERE evidence->>'provider' = $1 AND status IN ('reconcile_required', 'requires_review')
+WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND evidence->>'provider' = $1 AND status IN ('reconcile_required', 'requires_review')
 ORDER BY finding_type, subject_key;
 
 -- Findings of the given state-roster types absent from the just-completed run
@@ -198,7 +198,7 @@ SET status = 'fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
+WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
 
 -- name: MarkReconciliationFindingAutoFixed :execrows
 UPDATE openrails.reconciliation_findings
@@ -208,7 +208,7 @@ SET status = 'auto_fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
+WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
 
 -- name: AckReconciliationFinding :execrows
 UPDATE openrails.reconciliation_findings
@@ -218,7 +218,7 @@ SET status = 'fixed',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed');
+WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed');
 
 -- name: DismissReconciliationFinding :execrows
 UPDATE openrails.reconciliation_findings
@@ -228,7 +228,7 @@ SET status = 'ignored',
     resolved_at = now(),
     notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed', 'fixed');
+WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed', 'fixed');
 
 -- ============================================================================
 -- #692 operator findings queue (admin API)
@@ -325,7 +325,7 @@ SELECT id, customer_id, price_id, product_id, status, rail,
        last_retry_at, retry_attempts, next_retry_at,
        entitlements_spec_snapshot
 FROM openrails.subscriptions
-WHERE rail = ANY (sqlc.arg(rails)::text[])
+WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = ANY (sqlc.arg(rails)::text[])
   AND deleted_at IS NULL
   AND psp_id = sqlc.arg(psp_id)::uuid;
 
@@ -333,7 +333,7 @@ WHERE rail = ANY (sqlc.arg(rails)::text[])
 SELECT id, customer_id, rail, transaction_id, amount, status,
        subscription_id, refunded_payment_id, purchased_at
 FROM openrails.payments
-WHERE rail::text = ANY (sqlc.arg(rails)::text[])
+WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND rail::text = ANY (sqlc.arg(rails)::text[])
   AND deleted_at IS NULL
   AND transaction_id = ANY (sqlc.arg(transaction_ids)::text[])
   AND psp_id = sqlc.arg(psp_id)::uuid;
@@ -345,12 +345,14 @@ WHERE rail::text = ANY (sqlc.arg(rails)::text[])
 SELECT id, customer_id, rail, rail_customer_ref, last_four, card_type,
        expiry_date
 FROM openrails.payment_methods
-WHERE rail = ANY (sqlc.arg(rails)::text[])
+WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = ANY (sqlc.arg(rails)::text[])
   AND psp_id = sqlc.arg(psp_id)::uuid;
 
 -- name: ReconcileListSolanaSubscriptionRefs :many
 SELECT subscription_pda, plan_pda, subscriber_wallet
-FROM openrails.solana_subscriptions;
+FROM openrails.solana_subscriptions
+WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid
+;
 
 -- Billable prices with their rail link blobs (provider_links): the PS-1
 -- materializer maps a remote plan id onto the local price whose psp_links
@@ -359,7 +361,7 @@ FROM openrails.solana_subscriptions;
 -- name: ReconcileListPricesWithPSPLinks :many
 SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived
 FROM openrails.prices
-WHERE EXISTS (SELECT 1 FROM openrails.price_psp_bindings b WHERE b.price_id = openrails.prices.id AND b.merchant_id = openrails.prices.merchant_id AND b.psp_id = sqlc.arg(psp_id)::uuid);
+WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND EXISTS (SELECT 1 FROM openrails.price_psp_bindings b WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.price_id = openrails.prices.id AND b.merchant_id = openrails.prices.merchant_id AND b.psp_id = sqlc.arg(psp_id)::uuid);
 
 -- ============================================================================
 -- Enforce appliers: idempotent LOCAL writes only (never a provider call)
@@ -386,7 +388,7 @@ SELECT sqlc.arg(merchant_id), sqlc.arg(customer_id), sqlc.arg(entitlement),
        sqlc.arg(subscription_id), 'subscription'
 WHERE NOT EXISTS (
     SELECT 1 FROM openrails.entitlements ent
-    WHERE ent.customer_id = sqlc.arg(customer_id)
+    WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.customer_id = sqlc.arg(customer_id)
       AND ent.entitlement = sqlc.arg(entitlement)
       AND ent.source_type = 'subscription'
       AND ent.source_id = sqlc.arg(subscription_id)
@@ -439,7 +441,7 @@ ON CONFLICT DO NOTHING;
 -- name: ReconcileMarkPaymentRefunded :execrows
 UPDATE openrails.payments
 SET status = 'refunded'
-WHERE id = sqlc.arg(id) AND status <> 'refunded' AND deleted_at IS NULL;
+WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status <> 'refunded' AND deleted_at IS NULL;
 
 -- PS-1 materialization (bootstrap mode, --materialize): create the local
 -- subscription for a rail subscription that resolved unambiguously to an
@@ -463,10 +465,10 @@ SELECT sqlc.arg(merchant_id)::uuid, pr.id, pr.product_id, sqlc.arg(status)::open
        p.entitlements_spec, sqlc.arg(customer_id), sqlc.arg(psp_id)::uuid
 FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
-WHERE pr.id = sqlc.arg(price_id)
+WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.id = sqlc.arg(price_id)
   AND NOT EXISTS (
       SELECT 1 FROM openrails.subscriptions s
-      WHERE s.rail_subscription_id = sqlc.arg(rail_subscription_id)
+      WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.rail_subscription_id = sqlc.arg(rail_subscription_id)
         AND s.deleted_at IS NULL
         AND s.rail = ANY (sqlc.arg(rails)::text[])
         -- or#893: every writer resolves a PSP now, including the declared

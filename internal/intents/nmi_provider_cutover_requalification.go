@@ -1,6 +1,8 @@
 package intents
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"bytes"
 	"context"
 	"encoding/json"
@@ -86,7 +88,11 @@ func (h *NMIProviderCutover) boundCutoverClient(ctx context.Context, client *nmi
 	if !cutoverAccountMatches(client, merchantID, binding.Qualification.PSPID) || cutoverCredentialFingerprint(client) != binding.Fingerprint {
 		return false
 	}
-	row, err := h.DB.Gen(ctx).GetPSP(ctx, binding.Qualification.PSPID)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return false
+	}
+	row, err := h.DB.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: scopeMerchantID.UUID(), ID: binding.Qualification.PSPID})
 	if err != nil || row.MerchantID != merchantID || row.Environment != binding.Qualification.Environment {
 		return false
 	}
@@ -174,7 +180,11 @@ func (h *NMIProviderCutover) requalifyAccount(ctx context.Context, in gen.Openra
 				subscriptionID = progress.Target.ID
 			}
 		}
-		method, err := q.GetPaymentMethodByID(ctx, methodID)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return scopeErr
+		}
+		method, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: scopeMerchantID.UUID(), ID: methodID})
 		if err != nil || method.MerchantID != in.MerchantID || method.CustomerID != p.CustomerID || instrument.Matches(method, charge.AgreementRecurring) != nil {
 			return ErrResolutionRejected
 		}

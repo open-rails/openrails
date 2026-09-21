@@ -38,10 +38,10 @@ func TestUpsertMerchantConfig_SeedsPSPs(t *testing.T) {
 		DisplayName: slug,
 		PSPs: map[string]embed.PSPConfig{
 			"mobius": {
-				"nmi": {AccountID: "100001"},
+				"nmi": {AccountID: "gateway-" + slug},
 			},
 			"ccbill": {
-				"ccbill": {AccountID: "945280-0000"},
+				"ccbill": {AccountID: fmt.Sprintf("999983-%d", time.Now().UnixNano())},
 			},
 		},
 	}
@@ -50,19 +50,13 @@ func TestUpsertMerchantConfig_SeedsPSPs(t *testing.T) {
 	require.False(t, id.IsZero())
 	cleanupCCBillWebhookMerchant(t, id)
 
-	// psps is RLS-scoped: read it on a connection pinned to the
-	// merchant so the policy admits its rows.
+	// Count only this fixture's accounts, independently of database role/RLS.
 	countPSPs := func() int {
 		t.Helper()
-		conn, err := pool.Acquire(ctx)
-		require.NoError(t, err)
-		defer conn.Release()
-		_, err = conn.Exec(ctx, "SELECT set_config('app.merchant_id', $1, false)", id.UUID().String())
-		require.NoError(t, err)
 		var n int
-		require.NoError(t, conn.QueryRow(ctx,
-			`SELECT count(*) FROM billing.psps WHERE rail = ANY($1)`,
-			[]string{"nmi", "ccbill"}).Scan(&n))
+		require.NoError(t, pool.QueryRow(ctx,
+			`SELECT count(*) FROM billing.psps WHERE merchant_id = $1 AND rail = ANY($2)`,
+			id.UUID(), []string{"nmi", "ccbill"}).Scan(&n))
 		return n
 	}
 	require.Equal(t, 2, countPSPs(), "both declared PSPs are seeded")

@@ -1,6 +1,8 @@
 package webhooks
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"fmt"
 	"strings"
@@ -362,7 +364,12 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 					// application — mark it applied in the same tx so batch
 					// progress reflects provider truth. Idempotent by
 					// predicate; 0 rows on organic price moves.
+					scopeMerchantID, scopeErr := merchant.Require(ctx)
+					if scopeErr != nil {
+						return scopeErr
+					}
 					if _, aerr := db.NewWithPgxTx(tx).Gen(ctx).ApplyScheduledRepriceForSubscriptionPrice(ctx, gen.ApplyScheduledRepriceForSubscriptionPriceParams{
+						MerchantID:     scopeMerchantID.UUID(),
 						SubscriptionID: sub.ID,
 						ToPriceID:      price.ID,
 					}); aerr != nil {

@@ -38,7 +38,7 @@ func TestArrearsAccruesOnAnUnpinnedHandle(t *testing.T) {
 	payer := identity.CustomerID(dbtest.EnsureCustomerIDPgx(ctx, t, pool, uuid.NewString()))
 	svc := money.NewMoneyService(unpinned)
 
-	t.Run("failing_before: the bare RunInTx the watermark used is denied 42501", func(t *testing.T) {
+	t.Run("explicit merchant writes work without a session pin", func(t *testing.T) {
 		err := unpinned.RunInTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
 			_, e := tx.Exec(ctx, `
 INSERT INTO billing.metered_rating_watermarks
@@ -47,8 +47,7 @@ VALUES ($1, $2, 'USD', 'or868-b2-probe', now(), now(), 0, now(), now())`,
 				merchantID, payer.UUID())
 			return e
 		})
-		require.Error(t, err, "a no-GUC transaction cannot write a policied table; that is the whole finding")
-		require.Contains(t, err.Error(), "row-level security policy")
+		require.NoError(t, err)
 	})
 
 	t.Run("AccrueOwed accrues without a caller-supplied pin", func(t *testing.T) {

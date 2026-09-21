@@ -40,14 +40,14 @@ const listWebhookExpectedRails = `-- name: ListWebhookExpectedRails :many
 SELECT s.rail, count(*) AS billable
 FROM openrails.subscriptions s
 JOIN openrails.prices pr ON pr.id = s.price_id
-WHERE pr.auto_renew
+WHERE s.merchant_id = $1::uuid AND pr.merchant_id = $1::uuid AND pr.auto_renew
   AND s.deleted_at IS NULL
   AND s.status IN ('pending','active','past_due','unknown')
   AND s.cancelled_at IS NULL
   AND s.deletion_scheduled_at IS NULL
   AND EXISTS (
       SELECT 1 FROM openrails.psps rma
-      WHERE rma.merchant_id = s.merchant_id AND rma.rail = s.rail
+      WHERE rma.merchant_id = $1::uuid AND rma.merchant_id = s.merchant_id AND rma.rail = s.rail
   )
 GROUP BY s.rail
 `
@@ -61,8 +61,8 @@ type ListWebhookExpectedRailsRow struct {
 // (declared in psps; archived rows count — drain accounts
 // still receive provider events, #655) AND carry subscriptions projected to
 // keep billing (billable_subscriptions doctrine). RLS-scoped.
-func (q *Queries) ListWebhookExpectedRails(ctx context.Context) ([]ListWebhookExpectedRailsRow, error) {
-	rows, err := q.db.Query(ctx, listWebhookExpectedRails)
+func (q *Queries) ListWebhookExpectedRails(ctx context.Context, merchantID uuid.UUID) ([]ListWebhookExpectedRailsRow, error) {
+	rows, err := q.db.Query(ctx, listWebhookExpectedRails, merchantID)
 	if err != nil {
 		return nil, err
 	}

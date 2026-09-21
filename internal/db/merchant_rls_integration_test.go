@@ -130,242 +130,51 @@ func seedTenantsAndEntitlements(t *testing.T, ctx context.Context, superDSN stri
 	}
 }
 
-// TestRLS_AppRoleCannotSeeOtherTenantRows proves the migration-050 policies
-// enforce when connecting AS the unprivileged app role: with app.merchant_id set
-// to merchant A, a SELECT WITHOUT any merchant predicate returns ONLY merchant A's
-// rows, and an attempt to read merchant B by explicit predicate returns nothing.
-func TestRLS_AppRoleCannotSeeOtherTenantRows(t *testing.T) {
-	superDSN, appDSN, ctx := startRLSPostgres(t)
-	tA := merchant.ID(uuid.New())
-	tB := merchant.ID(uuid.New())
-	seedTenantsAndEntitlements(t, ctx, superDSN, tA, tB)
-
-	appPool, err := pgxpool.New(ctx, appDSN)
-	require.NoError(t, err)
-	defer appPool.Close()
-
-	// As the app role, in a tx scoped to merchant A: NO merchant predicate, yet only
-	// merchant A's row is visible (RLS supplies the predicate).
-	tx, err := appPool.Begin(ctx)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, tA.String())
-	require.NoError(t, err)
-
-	var total int
-	require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements`).Scan(&total))
-	require.Equal(t, 1, total, "RLS must restrict an un-predicated SELECT to the active merchant")
-
-	// Even explicitly asking for merchant B returns nothing under merchant A's GUC.
-	var leaked int
-	require.NoError(t, tx.QueryRow(ctx,
-		`SELECT count(*) FROM billing.entitlements WHERE merchant_id = $1::uuid`, tB.String(),
-	).Scan(&leaked))
-	require.Equal(t, 0, leaked, "RLS must deny reading another merchant's rows even with an explicit predicate")
-}
-
-// TestRLS_GUCScopesCorrectly proves switching the GUC switches the visible
-// merchant, and that an UNSET GUC sees nothing (fail-closed).
-func TestRLS_GUCScopesCorrectly(t *testing.T) {
-	superDSN, appDSN, ctx := startRLSPostgres(t)
-	tA := merchant.ID(uuid.New())
-	tB := merchant.ID(uuid.New())
-	seedTenantsAndEntitlements(t, ctx, superDSN, tA, tB)
-
-	appPool, err := pgxpool.New(ctx, appDSN)
-	require.NoError(t, err)
-	defer appPool.Close()
-
-	count := func(setTenant string) int {
-		tx, err := appPool.Begin(ctx)
-		require.NoError(t, err)
-		defer func() { _ = tx.Rollback(ctx) }()
-		if setTenant != "" {
-			_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, setTenant)
+// The schema deliberately performs no hidden tenant filtering. Both connection
+// kinds see all rows through unscoped raw SQL; tenant methods must predicate it.
+func TestMerchantSchemaHasNoRoleDependentFiltering(t *testing.T) {
+	ownerDSN, appDSN, ctx := startRLSPostgres(t)
+	a, b := merchant.ID(uuid.New()), merchant.ID(uuid.New())
+	seedTenantsAndEntitlements(t, ctx, ownerDSN, a, b)
+	for name, dsn := range map[string]string{"owner": ownerDSN, "runtime": appDSN} {
+		t.Run(name, func(t *testing.T) {
+			pool, err := pgxpool.New(ctx, dsn)
 			require.NoError(t, err)
-		}
-		var n int
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements`).Scan(&n))
-		return n
+			defer pool.Close()
+			tx, err := pool.Begin(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback(ctx)
+			_, err = tx.Exec(ctx, "SELECT set_config('app.merchant_id',$1,true)", a.String())
+			require.NoError(t, err)
+			var total int
+			require.NoError(t, tx.QueryRow(ctx, "SELECT count(*) FROM billing.entitlements").Scan(&total))
+			require.Equal(t, 2, total)
+			require.NoError(t, tx.QueryRow(ctx, "SELECT count(*) FROM billing.entitlements WHERE merchant_id=$1", a.UUID()).Scan(&total))
+			require.Equal(t, 1, total)
+		})
 	}
-
-	require.Equal(t, 1, count(tA.String()), "merchant A scope sees A's row")
-	require.Equal(t, 1, count(tB.String()), "merchant B scope sees B's row")
-	require.Equal(t, 0, count(""), "no GUC set => fail-closed, zero rows")
 }
 
-// TestMerchantTx_ScopesGUC proves the db.DB.MerchantTx helper sets the GUC from
-// context so a merchant-owned query through it is RLS-scoped.
+// Session binding remains required by the explicitly scoped legacy SQL and
+// restore guards; it no longer changes visibility of unrelated raw queries.
 func TestMerchantTx_ScopesGUC(t *testing.T) {
-	superDSN, appDSN, ctx := startRLSPostgres(t)
-	tA := merchant.ID(uuid.New())
-	tB := merchant.ID(uuid.New())
-	seedTenantsAndEntitlements(t, ctx, superDSN, tA, tB)
-
-	// Open over the APP role so RLS applies.
+	ownerDSN, appDSN, ctx := startRLSPostgres(t)
+	a, b := merchant.ID(uuid.New()), merchant.ID(uuid.New())
+	seedTenantsAndEntitlements(t, ctx, ownerDSN, a, b)
 	d, err := NewDB(t.Context(), &config.DBConfig{URL: appDSN})
 	require.NoError(t, err)
 	defer d.Close()
-
-	ctxA := merchant.WithID(ctx, tA)
-	var n int
-	err = d.MerchantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements`).Scan(&n)
-	})
-	require.NoError(t, err)
-	require.Equal(t, 1, n, "MerchantTx must scope the query to the context merchant")
-}
-
-type merchantBoundarySeed struct {
-	customerID       uuid.UUID
-	subscriptionID   uuid.UUID
-	nextSubscription uuid.UUID
-}
-
-func seedMerchantBoundaryRows(t *testing.T, ctx context.Context, superDSN string, merchantID merchant.ID) merchantBoundarySeed {
-	t.Helper()
-	pool, err := pgxpool.New(ctx, superDSN)
-	require.NoError(t, err)
-	defer pool.Close()
-
-	customerID := uuid.New()
-	productID := uuid.New()
-	subscriptionID := uuid.New()
-	nextSubscriptionID := uuid.New()
-	suffix := strings.ReplaceAll(merchantID.String()[:13], "-", "")
-
-	_, err = pool.Exec(ctx, `
-		INSERT INTO billing.merchants (id, slug, status)
-		VALUES ($1::uuid, $2, 'active')
-		ON CONFLICT (id) DO NOTHING
-	`, merchantID.String(), "merchant-"+suffix)
-	require.NoError(t, err)
-
-	_, err = pool.Exec(ctx, `
-		INSERT INTO billing.customers (id, merchant_id)
-		VALUES ($1::uuid, $2::uuid)
-	`, customerID.String(), merchantID.String())
-	require.NoError(t, err)
-
-	_, err = pool.Exec(ctx, `
-		INSERT INTO billing.products (id, merchant_id, key, display_name)
-		VALUES ($1::uuid, $2::uuid, $3, $3)
-	`, productID.String(), merchantID.String(), "prod-"+suffix)
-	require.NoError(t, err)
-
-	// dbtest.EnsureTestPSP is unusable here (internal/dbtest imports internal/db —
-	// this file is `package db`, so importing it back is a cycle); seed inline.
-	pspID := uuid.New()
-	_, err = pool.Exec(ctx, `
-		INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id, key)
-		VALUES ($1::uuid, $2::uuid, 'nmi', 'live', $3, 'nmi')
-	`, pspID.String(), merchantID.String(), "boundary-nmi-"+suffix)
-	require.NoError(t, err)
-
-	for _, sub := range []struct {
-		id     uuid.UUID
-		status string
-	}{
-		{id: subscriptionID, status: "active"},
-		{id: nextSubscriptionID, status: "unknown"},
-	} {
-		_, err = pool.Exec(ctx, `
-			INSERT INTO billing.subscriptions (id, merchant_id, customer_id, product_id, status, rail, psp_id)
-			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, 'nmi', $6::uuid)
-		`, sub.id.String(), merchantID.String(), customerID.String(), productID.String(), sub.status, pspID.String())
-		require.NoError(t, err)
-	}
-
-	_, err = pool.Exec(ctx, `
-		INSERT INTO billing.solana_subscriptions
-			(id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda,
-			 plan_pda, merchant_address, mint, plan_created_at_fingerprint, next_pull_at)
-		VALUES
-			(gen_random_uuid(), $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, 1, current_timestamp)
-	`, merchantID.String(), subscriptionID.String(), "subscriber-"+suffix, "authority-"+suffix,
-		"subscription-"+suffix, "plan-"+suffix, "merchant-wallet-"+suffix, "mint-"+suffix)
-	require.NoError(t, err)
-
-	_, err = pool.Exec(ctx, `
-		INSERT INTO billing.merchant_configurations (merchant_id, config)
-		VALUES ($1::uuid, '{"source":"seed"}'::jsonb)
-	`, merchantID.String())
-	require.NoError(t, err)
-
-	return merchantBoundarySeed{customerID: customerID, subscriptionID: subscriptionID, nextSubscription: nextSubscriptionID}
-}
-
-func TestRLS_AppRoleCannotCrossMerchantBoundariesForIssue504Tables(t *testing.T) {
-	superDSN, appDSN, ctx := startRLSPostgres(t)
-	tA := merchant.ID(uuid.New())
-	tB := merchant.ID(uuid.New())
-	seedMerchantBoundaryRows(t, ctx, superDSN, tA)
-	seedB := seedMerchantBoundaryRows(t, ctx, superDSN, tB)
-
-	appPool, err := pgxpool.New(ctx, appDSN)
-	require.NoError(t, err)
-	defer appPool.Close()
-
-	tx, err := appPool.Begin(ctx)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback(ctx) }()
-	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, tA.String())
-	require.NoError(t, err)
-
-	assertOneOwnZeroOther := func(table string) {
-		t.Helper()
-		var own int
-		require.NoError(t, tx.QueryRow(ctx, "SELECT count(*) FROM billing."+table).Scan(&own))
-		require.Equal(t, 1, own, "%s should expose only merchant A's row under merchant A GUC", table)
-		var other int
-		require.NoError(t, tx.QueryRow(ctx, "SELECT count(*) FROM billing."+table+" WHERE merchant_id = $1::uuid", tB.String()).Scan(&other))
-		require.Equal(t, 0, other, "%s should hide merchant B's row under merchant A GUC", table)
-	}
-
-	for _, table := range []string{
-		"customers",
-		"solana_subscriptions",
-		"merchant_configurations",
-	} {
-		assertOneOwnZeroOther(table)
-	}
-
-	_, err = tx.Exec(ctx, `
-		INSERT INTO billing.customers (id, merchant_id)
-		VALUES (gen_random_uuid(), $1::uuid)
-	`, tB.String())
-	require.Error(t, err, "customers must reject writes for another merchant")
-	require.NoError(t, tx.Rollback(ctx))
-
-	tx, err = appPool.Begin(ctx)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback(ctx) }()
-	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, tA.String())
-	require.NoError(t, err)
-
-	_, err = tx.Exec(ctx, `
-		INSERT INTO billing.solana_subscriptions
-			(id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda,
-			 plan_pda, merchant_address, mint, plan_created_at_fingerprint, next_pull_at)
-		VALUES
-			(gen_random_uuid(), $1::uuid, $2::uuid, 'subscriber-cross', 'authority-cross',
-			 'subscription-cross', 'plan-cross', 'merchant-wallet-cross', 'mint-cross', 1, current_timestamp)
-	`, tB.String(), seedB.nextSubscription.String())
-	require.Error(t, err, "solana_subscriptions must reject writes for another merchant")
-	require.NoError(t, tx.Rollback(ctx))
-
-	tx, err = appPool.Begin(ctx)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback(ctx) }()
-	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, tA.String())
-	require.NoError(t, err)
-
-	tag, err := tx.Exec(ctx, `
-		UPDATE billing.merchant_configurations
-		   SET config = '{"source":"cross"}'::jsonb
-		 WHERE merchant_id = $1::uuid
-	`, tB.String())
-	require.NoError(t, err)
-	require.Zero(t, tag.RowsAffected(), "merchant_configurations must not update another merchant's row")
+	require.NoError(t, d.MerchantTx(merchant.WithID(ctx, a), func(ctx context.Context, tx pgx.Tx) error {
+		var id string
+		if err := tx.QueryRow(ctx, "SELECT current_setting('app.merchant_id')").Scan(&id); err != nil {
+			return err
+		}
+		require.Equal(t, a.String(), id)
+		var n int
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM billing.entitlements WHERE merchant_id=nullif(current_setting('app.merchant_id',true),'')::uuid").Scan(&n); err != nil {
+			return err
+		}
+		require.Equal(t, 1, n)
+		return nil
+	}))
 }

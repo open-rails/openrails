@@ -57,7 +57,7 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.Openrails
 	if op.Status == intents.StatusFailedTerminal {
 		paymentID = p.PaymentID
 	}
-	observed, err := q.GetPaymentByID(ctx, paymentID)
+	observed, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: paymentID})
 	if op.Status == intents.StatusFailedTerminal && !evidence.Declined {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
@@ -83,7 +83,7 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.Openrails
 	if !payments.PaymentStatusCompleted(string(observed.Status)) || observed.MoneyMovement != "rail" || observed.TransactionID != evidence.TransactionID {
 		return errors.New("sale result is not its exact completed payment")
 	}
-	price, err := q.GetPriceByID(ctx, p.PriceID)
+	price, err := q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: op.MerchantID, ID: p.PriceID})
 	if err != nil {
 		return err
 	}

@@ -201,7 +201,7 @@ func Read(ctx context.Context, database *db.DB, pspID uuid.UUID) (*BoundRecord, 
 	if err != nil {
 		return nil, err
 	}
-	row, err := database.Gen(ctx).GetPSP(ctx, pspID)
+	row, err := database.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{ID: pspID, MerchantID: mid.UUID()})
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && row.MerchantID != mid.UUID()) {
 		return nil, ErrNotFound
 	}

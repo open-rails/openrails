@@ -1,6 +1,8 @@
 package payments
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"errors"
 	"fmt"
@@ -60,6 +62,11 @@ func ConvergeStripeCustomerPaymentState(
 	reader StripePaymentStateReader,
 	customerID string,
 ) error {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return queryScopeErr
+	}
+
 	if database == nil || customers == nil {
 		return errors.New("stripe payment state dependencies are not configured")
 	}
@@ -104,7 +111,7 @@ func ConvergeStripeCustomerPaymentState(
 				localMethodID = &id
 			}
 		}
-		if _, err := q.SetStripeSubscriptionPaymentMethod(ctx, gen.SetStripeSubscriptionPaymentMethodParams{
+		if _, err := q.SetStripeSubscriptionPaymentMethod(ctx, gen.SetStripeSubscriptionPaymentMethodParams{MerchantID: queryMerchant.UUID(),
 			PaymentMethodID:    localMethodID,
 			PspID:              pspID,
 			RailSubscriptionID: railSubscriptionID,
@@ -118,6 +125,11 @@ func ConvergeStripeCustomerPaymentState(
 // ParkDetachedStripePaymentMethod preserves a detached method as evidence and
 // clears every exact-PSP subscription link that could otherwise charge it.
 func ParkDetachedStripePaymentMethod(ctx context.Context, database *db.DB, paymentMethodID string) (*models.PaymentMethod, error) {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
 	if database == nil {
 		return nil, errors.New("stripe payment state database is not configured")
 	}
@@ -138,14 +150,14 @@ func ParkDetachedStripePaymentMethod(ctx context.Context, database *db.DB, payme
 		return nil, fmt.Errorf("load detached stripe payment method: %w", err)
 	}
 	q := database.Gen(ctx)
-	if _, err := q.ParkStripePaymentMethodByRef(ctx, gen.ParkStripePaymentMethodByRefParams{
+	if _, err := q.ParkStripePaymentMethodByRef(ctx, gen.ParkStripePaymentMethodByRefParams{MerchantID: queryMerchant.UUID(),
 		ParkReason:    StripeDetachedParkReason,
 		PspID:         pspID,
 		RailMethodRef: paymentMethodID,
 	}); err != nil {
 		return nil, fmt.Errorf("park detached stripe payment method: %w", err)
 	}
-	if _, err := q.ClearStripePaymentMethodSubscriptions(ctx, gen.ClearStripePaymentMethodSubscriptionsParams{
+	if _, err := q.ClearStripePaymentMethodSubscriptions(ctx, gen.ClearStripePaymentMethodSubscriptionsParams{MerchantID: queryMerchant.UUID(),
 		PspID:           pspID,
 		PaymentMethodID: method.ID,
 	}); err != nil {

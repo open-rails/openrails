@@ -134,8 +134,7 @@ SELECT merchant_id,
        SUM(credits_posted - debits_posted)::bigint AS net,
        COUNT(*)::bigint AS accounts
 FROM openrails.ledger_accounts
-WHERE (sqlc.narg(merchant_id)::uuid IS NULL
-    OR merchant_id = sqlc.narg(merchant_id)::uuid)
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 GROUP BY merchant_id, currency
 HAVING SUM(credits_posted - debits_posted) <> 0
 ORDER BY merchant_id, currency;
@@ -148,13 +147,11 @@ WITH logged AS (
     FROM (
         SELECT credit_account_id AS account_id, amount AS credit, 0::bigint AS debit
         FROM openrails.ledger_transfers
-        WHERE (sqlc.narg(merchant_id)::uuid IS NULL
-            OR merchant_id = sqlc.narg(merchant_id)::uuid)
+        WHERE merchant_id = sqlc.arg(merchant_id)::uuid
         UNION ALL
         SELECT debit_account_id, 0::bigint, amount
         FROM openrails.ledger_transfers
-        WHERE (sqlc.narg(merchant_id)::uuid IS NULL
-            OR merchant_id = sqlc.narg(merchant_id)::uuid)
+        WHERE merchant_id = sqlc.arg(merchant_id)::uuid
     ) legs
     GROUP BY account_id
 )
@@ -169,8 +166,7 @@ SELECT a.id AS account_id,
        COALESCE(l.debits, 0)::bigint AS logged_debits
 FROM openrails.ledger_accounts a
 LEFT JOIN logged l ON l.account_id = a.id
-WHERE (sqlc.narg(merchant_id)::uuid IS NULL
-    OR a.merchant_id = sqlc.narg(merchant_id)::uuid)
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (a.credits_posted <> COALESCE(l.credits, 0)
     OR a.debits_posted <> COALESCE(l.debits, 0))
 ORDER BY a.merchant_id, a.currency, a.id;

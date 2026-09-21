@@ -505,7 +505,11 @@ func (w AccountUpdaterBatchWorker) client(ctx context.Context, custodianID uuid.
 	if w.Rails == nil {
 		return nil, errors.New("custodian resolution is not configured")
 	}
-	row, err := w.DB.Gen(ctx).GetCustodian(ctx, custodianID)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	row, err := w.DB.Gen(ctx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: scopeMerchantID.UUID(), ID: custodianID})
 	if err != nil {
 		return nil, fmt.Errorf("load custodian %s: %w", custodianID, err)
 	}

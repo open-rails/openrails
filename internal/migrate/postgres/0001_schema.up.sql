@@ -11,7 +11,6 @@ SET standard_conforming_strings = on;
 SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
-SET row_security = off;
 
 -- btree_gist backs the EXCLUDE constraints on uuid+tstzrange
 CREATE EXTENSION IF NOT EXISTS btree_gist;
@@ -54,7 +53,6 @@ CREATE FUNCTION openrails.account_updater_open_batch_merchant_ids(p_limit intege
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT b.merchant_id
       FROM openrails.account_updater_batches b
@@ -76,7 +74,6 @@ CREATE FUNCTION openrails.account_updater_work_merchant_ids(p_custodian text, p_
     SET search_path TO 'openrails', 'pg_catalog'
     AS $_$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT c.merchant_id
       FROM openrails.custodians c
@@ -102,7 +99,7 @@ BEGIN
        -- the network has no NEW work, only results to ingest.
        AND NOT EXISTS (
              SELECT 1 FROM openrails.account_updater_batches b
-              WHERE b.custodian_id = c.id
+              WHERE b.custodian_id = c.id AND b.merchant_id = c.merchant_id
                 AND b.status IN ('pending', 'submitted'))
        AND EXISTS (
              SELECT 1
@@ -115,7 +112,7 @@ BEGIN
                 AND EXISTS (
                       SELECT 1
                         FROM openrails.subscriptions s
-                       WHERE s.payment_method_id = pm.id
+                       WHERE s.payment_method_id = pm.id AND s.merchant_id = pm.merchant_id
                          AND s.deleted_at IS NULL
                          AND s.status IN ('active', 'past_due')
                          AND s.current_period_ends_at IS NOT NULL
@@ -129,25 +126,6 @@ COMMENT ON FUNCTION openrails.account_updater_work_merchant_ids(p_custodian text
 
 REVOKE ALL ON FUNCTION openrails.account_updater_work_merchant_ids(p_custodian text, p_environment text, p_now timestamp with time zone, p_default_lookahead_days integer, p_after uuid, p_limit integer) FROM PUBLIC;
 
-CREATE FUNCTION openrails.assert_cross_merchant_reader() RETURNS void
-    LANGUAGE plpgsql STABLE
-    SET search_path TO 'openrails', 'pg_catalog'
-    AS $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_catalog.pg_roles
-         WHERE rolname = current_user AND (rolsuper OR rolbypassrls)
-    ) THEN
-        RAISE EXCEPTION
-            'openrails: cross-merchant directory lookup requires a definer that bypasses RLS, but %I does not (#824)', current_user
-            USING ERRCODE = 'insufficient_privilege',
-                  HINT = 'apply migrations as a superuser (or a BYPASSRLS role) so the SECURITY DEFINER directory functions can read across merchants; otherwise webhook routing silently resolves nothing';
-    END IF;
-END;
-$$;
-
-REVOKE ALL ON FUNCTION openrails.assert_cross_merchant_reader() FROM PUBLIC;
-
 CREATE FUNCTION openrails.count_destructive_intents_by_actor_since(p_actor text, p_intent_types text[], p_since timestamp with time zone) RETURNS bigint
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'openrails', 'pg_catalog'
@@ -155,7 +133,6 @@ CREATE FUNCTION openrails.count_destructive_intents_by_actor_since(p_actor text,
 DECLARE
     n bigint;
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     SELECT count(*) INTO n
       FROM openrails.rail_intents
      WHERE actor = p_actor
@@ -177,7 +154,6 @@ CREATE FUNCTION openrails.count_destructive_intents_for_merchant_since(p_merchan
 DECLARE
     n bigint;
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     SELECT count(*) INTO n
       FROM openrails.rail_intents
      WHERE merchant_id = p_merchant
@@ -192,7 +168,6 @@ COMMENT ON FUNCTION openrails.count_destructive_intents_for_merchant_since(p_mer
 
 REVOKE ALL ON FUNCTION openrails.count_destructive_intents_for_merchant_since(p_merchant uuid, p_origins text[], p_intent_types text[], p_since timestamp with time zone) FROM PUBLIC;
 
-
 CREATE FUNCTION openrails.current_merchant_id() RETURNS uuid
     LANGUAGE sql STABLE
     SET search_path TO 'openrails', 'pg_catalog'
@@ -200,7 +175,7 @@ CREATE FUNCTION openrails.current_merchant_id() RETURNS uuid
     SELECT NULLIF(current_setting('app.merchant_id', true), '')::uuid
 $$;
 
-COMMENT ON FUNCTION openrails.current_merchant_id() IS 'The request''s merchant from the app.merchant_id GUC, or NULL when unset. Same expression the merchant_isolation RLS policies use, so a query carrying `merchant_id = openrails.current_merchant_id()` enforces the SAME scope in the application layer — defence in depth for by-id admin surfaces whose only other control is a role that might bypass RLS (SEC-18).';
+COMMENT ON FUNCTION openrails.current_merchant_id() IS 'The request''s merchant from the app.merchant_id GUC, or NULL when unset. Used only by explicitly scoped SQL and restore transaction guards. Merely setting it does not filter other queries; their merchant predicates are mandatory.';
 
 REVOKE ALL ON FUNCTION openrails.current_merchant_id() FROM PUBLIC;
 
@@ -209,7 +184,6 @@ CREATE FUNCTION openrails.custodian_owner_by_identity(p_kind text, p_environment
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id
       FROM openrails.custodians c
@@ -229,7 +203,6 @@ CREATE FUNCTION openrails.customer_merchant_ids_for_subject(p_subject uuid) RETU
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT DISTINCT c.merchant_id
       FROM openrails.customers c
@@ -246,7 +219,6 @@ CREATE FUNCTION openrails.delinquency_work_merchant_ids(p_now timestamp with tim
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT q.mid
       FROM (
@@ -274,7 +246,6 @@ CREATE FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timesta
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT s.merchant_id
       FROM openrails.subscriptions s
@@ -297,7 +268,6 @@ CREATE FUNCTION openrails.due_rail_intent_merchant_ids(p_now timestamp with time
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT DISTINCT i.merchant_id
       FROM openrails.rail_intents i
@@ -329,7 +299,6 @@ CREATE FUNCTION openrails.due_verify_rail_intent_merchant_ids(p_now timestamp wi
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT DISTINCT i.merchant_id
       FROM openrails.rail_intents i
@@ -383,7 +352,6 @@ CREATE FUNCTION openrails.fleet_merchant_funnel(p_exclude uuid, p_since timestam
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT count(*)::bigint,
            (count(*) FILTER (WHERE EXISTS (
@@ -413,12 +381,11 @@ CREATE FUNCTION openrails.fleet_mrr_by_currency(p_exclude uuid) RETURNS TABLE(cu
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT pr.currency::text, count(*)::bigint,
            COALESCE(sum((pr.amount::numeric * 720 / pr.access_duration_hours)::bigint), 0)::bigint
       FROM openrails.subscriptions s
-      JOIN openrails.prices pr ON pr.id = s.price_id
+      JOIN openrails.prices pr ON pr.id = s.price_id AND pr.merchant_id = s.merchant_id
      WHERE s.status = 'active' AND pr.auto_renew AND pr.access_duration_hours > 0
        AND (p_exclude IS NULL OR s.merchant_id <> p_exclude)
      GROUP BY pr.currency ORDER BY pr.currency;
@@ -434,7 +401,6 @@ CREATE FUNCTION openrails.fleet_rail_health(p_exclude uuid, p_since timestamp wi
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT p.rail::text,
            (count(*) FILTER (WHERE p.status = 'completed' AND p.reversal_kind IS NULL))::bigint,
@@ -456,7 +422,6 @@ CREATE FUNCTION openrails.fleet_revenue_by_currency(p_exclude uuid, p_since time
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT p.currency::text, count(*)::bigint, COALESCE(sum(p.amount), 0)::bigint
       FROM openrails.payments p
@@ -475,7 +440,6 @@ CREATE FUNCTION openrails.fleet_weekly_active_merchants(p_exclude uuid, p_since 
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT date_trunc('week', p.purchased_at), (count(DISTINCT p.merchant_id))::bigint
       FROM openrails.payments p
@@ -495,7 +459,6 @@ CREATE FUNCTION openrails.fleet_weekly_cancelled_subscriptions(p_exclude uuid, p
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT date_trunc('week', s.cancelled_at), count(*)::bigint
       FROM openrails.subscriptions s
@@ -515,7 +478,6 @@ CREATE FUNCTION openrails.fleet_weekly_volume(p_exclude uuid, p_since timestamp 
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT date_trunc('week', p.purchased_at), p.currency::text, count(*)::bigint, COALESCE(sum(p.amount), 0)::bigint
       FROM openrails.payments p
@@ -551,7 +513,7 @@ BEGIN
         RAISE EXCEPTION 'merchant retirement is irreversible' USING ERRCODE='23514';
     END IF;
     IF NEW.deleted_at IS NULL AND NEW.status='active' THEN
-        PERFORM openrails.assert_cross_merchant_reader();
+
         IF (
         OLD.retired_at IS NOT NULL OR EXISTS (
             SELECT 1 FROM openrails.maintenance_runs r
@@ -573,7 +535,6 @@ CREATE FUNCTION openrails.lapsed_credit_lot_merchant_ids(p_as_of timestamp with 
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT DISTINCT g.merchant_id
       FROM openrails.grants g
@@ -581,7 +542,7 @@ BEGIN
        AND g.ends_at IS NOT NULL AND g.ends_at <= p_as_of
        AND NOT EXISTS (
              SELECT 1 FROM openrails.grants tt
-              WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
+              WHERE tt.supersedes_id = g.id AND tt.merchant_id = g.merchant_id AND tt.event IN ('revoke', 'supersede')
            )
      LIMIT p_limit;
 END;
@@ -639,10 +600,10 @@ BEGIN
 
     UPDATE openrails.ledger_accounts
     SET debits_posted = debits_posted + NEW.amount
-    WHERE id = NEW.debit_account_id;
+    WHERE merchant_id = NEW.merchant_id AND id = NEW.debit_account_id;
     UPDATE openrails.ledger_accounts
     SET credits_posted = credits_posted + NEW.amount
-    WHERE id = NEW.credit_account_id;
+    WHERE merchant_id = NEW.merchant_id AND id = NEW.credit_account_id;
 
     RETURN NEW;
 END;
@@ -653,7 +614,7 @@ CREATE FUNCTION openrails.pending_merchant_secret_cleanups(p_after uuid, p_limit
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
- PERFORM openrails.assert_cross_merchant_reader();
+
  RETURN QUERY SELECT r.merchant_id,r.id FROM openrails.maintenance_runs r
  JOIN openrails.merchants m ON m.id=r.merchant_id
  WHERE r.kind='merchant_purge' AND r.status IN ('running','failed')
@@ -675,7 +636,7 @@ BEGIN
     IF NEW.key IS NOT NULL AND btrim(NEW.key) <> '' THEN
         RETURN NEW;
     END IF;
-    SELECT key INTO product_key FROM openrails.products WHERE id = NEW.product_id;
+    SELECT key INTO product_key FROM openrails.products WHERE id = NEW.product_id AND merchant_id = NEW.merchant_id;
     IF product_key IS NULL THEN
         RAISE EXCEPTION 'prices_default_key: product % not found for price %', NEW.product_id, NEW.id;
     END IF;
@@ -702,7 +663,6 @@ CREATE FUNCTION openrails.psp_owner_by_identity(p_rail text, p_environment text,
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT p.id, p.merchant_id, p.rail, p.environment, p.account_id
       FROM openrails.psps p
@@ -722,7 +682,6 @@ CREATE FUNCTION openrails.psp_rail_merchant_ids(p_rails text[], p_limit integer,
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT DISTINCT p.merchant_id
       FROM openrails.psps p
@@ -745,7 +704,6 @@ CREATE FUNCTION openrails.redrivable_plan_change_merchant_ids(p_limit integer) R
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT DISTINCT r.merchant_id
       FROM openrails.subscription_reprices r
@@ -765,7 +723,6 @@ CREATE FUNCTION openrails.retention_work_merchant_ids(p_now timestamp with time 
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
 BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
     RETURN QUERY
     SELECT q.mid
       FROM (
@@ -879,13 +836,12 @@ CREATE TABLE openrails.destructive_action_switch (
     CONSTRAINT chk_destructive_action_switch_singleton CHECK ((singleton = true))
 );
 
-COMMENT ON TABLE openrails.destructive_action_switch IS 'RLS-exempt by design: instance-level operator kill switch for destructive convergence (#836), not tenant data. One row. Read from the no-GUC background connections the intent runner and sweep scheduler use, so it cannot be defeated by the connection scope it polices. Default disabled: a fresh deployment cancels nothing until an operator arms it.';
+COMMENT ON TABLE openrails.destructive_action_switch IS 'Global by design: instance-level operator kill switch for destructive convergence (#836), not tenant data. One row. Read from the no-GUC background connections the intent runner and sweep scheduler use, so it cannot be defeated by the connection scope it polices. Default disabled: a fresh deployment cancels nothing until an operator arms it.';
 
 ALTER TABLE ONLY openrails.destructive_action_switch
     ADD CONSTRAINT destructive_action_switch_pkey PRIMARY KEY (id);
 
 CREATE UNIQUE INDEX uq_destructive_action_switch_singleton ON openrails.destructive_action_switch USING btree (singleton);
-
 
 INSERT INTO openrails.destructive_action_switch (enabled, reason)
 VALUES (false, 'default safe (#836): arm deliberately once the first pull''s findings have been reviewed');
@@ -905,7 +861,7 @@ CREATE TABLE openrails.merchants (
     CONSTRAINT merchants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'deleted'::text])))
 );
 
-COMMENT ON TABLE openrails.merchants IS 'Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant. RLS-exempt by design: it IS the tenant directory — the scope, not a scoped row.';
+COMMENT ON TABLE openrails.merchants IS 'Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant. Global by design: it IS the tenant directory — the scope, not a scoped row.';
 
 COMMENT ON COLUMN openrails.merchants.slug IS 'Mirror of the merchant permission-group''s CURRENT instance slug (or#914): the group namespace is the naming authority — claim arbitration, renames (ak#264 tombstone forwarding) and release-on-delete happen there; this column is kept in sync for fast lookup (lazily re-synced after a rename) and is unique among LIVE rows only.';
 
@@ -930,7 +886,6 @@ CREATE TRIGGER guard_merchant_restore BEFORE UPDATE ON openrails.merchants FOR E
 
 CREATE TRIGGER immutable_merchant_group_binding BEFORE UPDATE OF permission_group_id ON openrails.merchants FOR EACH ROW EXECUTE FUNCTION openrails.guard_merchant_group_binding();
 
-
 CREATE TABLE openrails.metered_rating_watermarks (
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
@@ -945,8 +900,6 @@ CREATE TABLE openrails.metered_rating_watermarks (
     CONSTRAINT metered_rating_watermarks_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text)))
 );
 
-ALTER TABLE ONLY openrails.metered_rating_watermarks FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.metered_rating_watermarks IS '#672 per-period metered-rating watermark: cumulative accrued amount + rated-through cutoff per (payer, currency, meter source, period start), so overlapping invoice closes bill each unit of usage exactly once.';
 
 COMMENT ON COLUMN openrails.metered_rating_watermarks.source IS 'Meter accrual source key (metered:<meter>[:rate_card:<id>][:dim:<value>]).';
@@ -958,11 +911,6 @@ ALTER TABLE ONLY openrails.metered_rating_watermarks
 
 ALTER TABLE ONLY openrails.metered_rating_watermarks
     ADD CONSTRAINT metered_rating_watermarks_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.metered_rating_watermarks USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.metered_rating_watermarks ENABLE ROW LEVEL SECURITY;
-
 
 CREATE TABLE openrails.products (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -978,10 +926,7 @@ CREATE TABLE openrails.products (
     merchant_id uuid NOT NULL
 );
 
-ALTER TABLE ONLY openrails.products FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.products IS 'Product definitions that can be purchased or subscribed to';
-
 
 COMMENT ON COLUMN openrails.products.tier_group IS 'Semantic group name for mutually-exclusive products (e.g., "premium"). Products in same group require upgrade/downgrade, not parallel ownership.';
 
@@ -1006,11 +951,6 @@ CREATE INDEX idx_products_tier_group ON openrails.products USING btree (tier_gro
 
 ALTER TABLE ONLY openrails.products
     ADD CONSTRAINT products_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.products USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.products ENABLE ROW LEVEL SECURITY;
-
 
 CREATE TABLE openrails.maintenance_runs (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1068,7 +1008,6 @@ CREATE TABLE openrails.maintenance_runs (
     ) IS TRUE)
 );
 
-ALTER TABLE ONLY openrails.maintenance_runs FORCE ROW LEVEL SECURITY;
 COMMENT ON TABLE openrails.maintenance_runs IS 'Typed maintenance run headers: reconciliation observations, reversible destructive work, and immutable purge inventories. Each kind has explicit columns and constraints; before-images remain in destructive_run_before_images.';
 COMMENT ON COLUMN openrails.maintenance_runs.coverage IS 'The coverage proof authorizing a destructive run, retained unchanged for audit and undo.';
 COMMENT ON COLUMN openrails.maintenance_runs.expected_rows IS 'The operator-confirmed or planned affected row count.';
@@ -1081,9 +1020,6 @@ ALTER TABLE ONLY openrails.maintenance_runs ADD CONSTRAINT maintenance_runs_merc
 CREATE INDEX maintenance_runs_merchant_kind_started ON openrails.maintenance_runs (merchant_id,kind,started_at DESC);
 CREATE INDEX maintenance_runs_pending_secret_cleanup_idx ON openrails.maintenance_runs (id)
     WHERE kind='merchant_purge' AND status IN ('running','failed') AND affected->>'database_purged'='true' AND coverage ? 'secret_cleanup';
-ALTER TABLE openrails.maintenance_runs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY merchant_isolation ON openrails.maintenance_runs
-    USING (merchant_id = openrails.current_merchant_id()) WITH CHECK (merchant_id = openrails.current_merchant_id());
 
 CREATE TABLE openrails.reconciliation_state (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1093,8 +1029,6 @@ CREATE TABLE openrails.reconciliation_state (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT chk_reconciliation_state_domain CHECK ((source_domain = ANY (ARRAY['subscriptions'::text, 'payments'::text, 'grants'::text])))
 );
-
-ALTER TABLE ONLY openrails.reconciliation_state FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.reconciliation_state IS '#511 per-(merchant, source_domain) reconciliation watermark. fully_reconciled gates the confirmed-absence rule: a destructive EXCESS repair is HELD until its source domain (subscriptions|payments|grants) is proven fully reconciled.';
 
@@ -1106,11 +1040,6 @@ CREATE UNIQUE INDEX uq_reconciliation_state_identity ON openrails.reconciliation
 ALTER TABLE ONLY openrails.reconciliation_state
     ADD CONSTRAINT reconciliation_state_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-CREATE POLICY merchant_isolation ON openrails.reconciliation_state USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.reconciliation_state ENABLE ROW LEVEL SECURITY;
-
-
 CREATE TABLE openrails.webhook_events (
     merchant_id uuid NOT NULL,
     op text NOT NULL,
@@ -1118,8 +1047,6 @@ CREATE TABLE openrails.webhook_events (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     completed_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
-
-ALTER TABLE ONLY openrails.webhook_events FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.webhook_events IS '#678 webhook dedup truth: one row per applied webhook event (merchant, op, event_id). Pending/lease state stays in Redis (coordination, not truth); a row here means effects are durably applied.';
 
@@ -1135,11 +1062,6 @@ CREATE INDEX ix_webhook_events_retention ON openrails.webhook_events USING btree
 ALTER TABLE ONLY openrails.webhook_events
     ADD CONSTRAINT webhook_events_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-CREATE POLICY merchant_isolation ON openrails.webhook_events USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.webhook_events ENABLE ROW LEVEL SECURITY;
-
-
 CREATE TABLE openrails.webhook_health (
     merchant_id uuid NOT NULL,
     rail text NOT NULL,
@@ -1149,8 +1071,6 @@ CREATE TABLE openrails.webhook_health (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT webhook_health_rail_nonempty CHECK ((btrim(rail) <> ''::text))
 );
-
-ALTER TABLE ONLY openrails.webhook_health FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.webhook_health IS '#786 per-(merchant, rail) inbound-webhook health: accepted/rejected/drift watermarks + counters. last_accepted_at is stamped only by signature-verified webhooks; last_pull_at is the provider-refresh pull watermark the drift gate uses.';
 
@@ -1162,11 +1082,6 @@ ALTER TABLE ONLY openrails.webhook_health
 ALTER TABLE ONLY openrails.webhook_health
     ADD CONSTRAINT webhook_health_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
 
-CREATE POLICY merchant_isolation ON openrails.webhook_health USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.webhook_health ENABLE ROW LEVEL SECURITY;
-
-
 CREATE TABLE openrails.webhook_health_daily (
     merchant_id uuid NOT NULL,
     rail text NOT NULL,
@@ -1176,8 +1091,6 @@ CREATE TABLE openrails.webhook_health_daily (
     CONSTRAINT webhook_health_daily_rail_nonempty CHECK ((btrim(rail) <> ''::text))
 );
 
-ALTER TABLE ONLY openrails.webhook_health_daily FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.webhook_health_daily IS '#786 UTC-day webhook counter buckets backing the #733 webhook_rejects / webhook_drift_events windowed metrics.';
 
 ALTER TABLE ONLY openrails.webhook_health_daily
@@ -1185,11 +1098,6 @@ ALTER TABLE ONLY openrails.webhook_health_daily
 
 ALTER TABLE ONLY openrails.webhook_health_daily
     ADD CONSTRAINT webhook_health_daily_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
-
-CREATE POLICY merchant_isolation ON openrails.webhook_health_daily USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.webhook_health_daily ENABLE ROW LEVEL SECURITY;
-
 
 CREATE TABLE openrails.worker_state (
     worker_kind text NOT NULL,
@@ -1205,7 +1113,7 @@ CREATE TABLE openrails.worker_state (
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-COMMENT ON TABLE openrails.worker_state IS 'RLS-exempt by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.';
+COMMENT ON TABLE openrails.worker_state IS 'Global by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.';
 
 COMMENT ON COLUMN openrails.worker_state.cursor_version IS 'Opaque compare-and-swap token for fair-sweep cursor saves: +1 per applied save, never touched by health writes, independent of any clock.';
 
@@ -1220,8 +1128,6 @@ COMMENT ON COLUMN openrails.worker_state.last_alerted_at IS 'When the health che
 ALTER TABLE ONLY openrails.worker_state
     ADD CONSTRAINT worker_state_pkey PRIMARY KEY (worker_kind);
 
-
-
 CREATE TABLE openrails.admission_denials_hourly (
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
@@ -1233,8 +1139,6 @@ CREATE TABLE openrails.admission_denials_hourly (
     CONSTRAINT chk_adh_hour_aligned CHECK ((hour_at = date_trunc('hour'::text, hour_at)))
 );
 
-ALTER TABLE ONLY openrails.admission_denials_hourly FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.admission_denials_hourly IS '#733 hourly admission-denial aggregates (merchant x payer x reason), flushed periodically from Redis counters — the hot path never writes PG per-request.';
 
 ALTER TABLE ONLY openrails.admission_denials_hourly
@@ -1245,11 +1149,6 @@ CREATE INDEX idx_adh_merchant_hour ON openrails.admission_denials_hourly USING b
 ALTER TABLE ONLY openrails.admission_denials_hourly
     ADD CONSTRAINT adh_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-ALTER TABLE openrails.admission_denials_hourly ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.admission_denials_hourly USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.billing_policies (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -1258,8 +1157,6 @@ CREATE TABLE openrails.billing_policies (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
-
-ALTER TABLE ONLY openrails.billing_policies FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.billing_policies IS 'or#897: the merchant''s named billing policies. The policy body declares WHICH quantity is capped (kind=outstanding_cap | window_spend_cap | accrual_rate_cap) and the limit. Merchants bind names to customers/tiers via billing_policy_bindings; OpenRails enforces, the merchant decides who gets which.';
 
@@ -1274,11 +1171,6 @@ ALTER TABLE ONLY openrails.billing_policies
 ALTER TABLE ONLY openrails.billing_policies
     ADD CONSTRAINT billing_policies_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-ALTER TABLE openrails.billing_policies ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.billing_policies USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.catalog_meters (
     merchant_id uuid NOT NULL,
     key text NOT NULL,
@@ -1292,8 +1184,6 @@ CREATE TABLE openrails.catalog_meters (
     CONSTRAINT catalog_meters_aggregation_check CHECK (((aggregation IS NULL) OR (aggregation = ANY (ARRAY['sum'::text, 'count'::text, 'max'::text, 'min'::text, 'unique_count'::text, 'latest'::text])))),
     CONSTRAINT catalog_meters_key_nonempty CHECK ((btrim(key) <> ''::text))
 );
-
-ALTER TABLE ONLY openrails.catalog_meters FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.catalog_meters IS '#599 billing meter registry. Meters are billed-later usage streams, distinct from #594 usage limits.';
 
@@ -1311,11 +1201,6 @@ ALTER TABLE ONLY openrails.catalog_meters
 ALTER TABLE ONLY openrails.catalog_meters
     ADD CONSTRAINT catalog_meters_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-ALTER TABLE openrails.catalog_meters ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.catalog_meters USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.custodians (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -1332,8 +1217,6 @@ CREATE TABLE openrails.custodians (
     CONSTRAINT custodians_kind_check CHECK ((kind = ANY (ARRAY['basis_theory'::text, 'hyperswitch'::text]))),
     CONSTRAINT custodians_nonempty CHECK (((btrim(key) <> ''::text) AND (btrim(account_id) <> ''::text)))
 );
-
-ALTER TABLE ONLY openrails.custodians FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.custodians IS 'or#880: merchant custodian registry. A row is one merchant-owned account with a third-party card custodian (Basis Theory today). Custody is orthogonal to the rail: this says WHO HOLDS the card, openrails.psps says who charges it. Referenced by psps.custodian_id — one custodian can back many PSPs.';
 
@@ -1367,11 +1250,6 @@ CREATE UNIQUE INDEX uq_custodians_key ON openrails.custodians USING btree (merch
 ALTER TABLE ONLY openrails.custodians
     ADD CONSTRAINT custodians_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
 
-ALTER TABLE openrails.custodians ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.custodians USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.customers (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -1379,8 +1257,6 @@ CREATE TABLE openrails.customers (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     last_seen_at timestamp with time zone DEFAULT now() NOT NULL
 );
-
-ALTER TABLE ONLY openrails.customers FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.customers IS 'OpenRails payable identity. Customer identity is merchant_id plus the host/AuthKit stable UUID subject; id is that payable UUID. issuer is audit/last-seen source only.';
 
@@ -1396,19 +1272,12 @@ CREATE INDEX idx_customers_id_merchant ON openrails.customers USING btree (id, m
 ALTER TABLE ONLY openrails.customers
     ADD CONSTRAINT customers_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id);
 
-ALTER TABLE openrails.customers ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.customers USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.dashboard_configs (
     merchant_id uuid NOT NULL,
     layout jsonb NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_by text
 );
-
-ALTER TABLE ONLY openrails.dashboard_configs FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.dashboard_configs IS '#741 per-merchant dashboard widget layout: [{id, title, viz(stat|line|area|bar|donut|table), query(#733 body), grid{x,y,w,h}}]. Absent row = seeded default template (in code, not DB).';
 
@@ -1419,11 +1288,6 @@ ALTER TABLE ONLY openrails.dashboard_configs
 
 ALTER TABLE ONLY openrails.dashboard_configs
     ADD CONSTRAINT dashboard_configs_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE openrails.dashboard_configs ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.dashboard_configs USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
 
 CREATE TABLE openrails.host_outbox (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1447,8 +1311,6 @@ CREATE TABLE openrails.host_outbox (
     )
 );
 
-ALTER TABLE ONLY openrails.host_outbox FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.host_outbox IS 'Typed durable host events: successful rail payment settlements and delinquency lifecycle transitions. Acknowledge after idempotent processing; acknowledgments are separate from notification read state.';
 
 COMMENT ON COLUMN openrails.host_outbox.currency IS 'The transition''s currency. NOT NULL (CUR-1): every lifecycle event is per-(merchant, payer, currency) and the currency is part of its dedupe key, so an event without one is not a well-formed event.';
@@ -1466,11 +1328,6 @@ CREATE UNIQUE INDEX uq_host_outbox_dedupe ON openrails.host_outbox USING btree (
 
 ALTER TABLE ONLY openrails.host_outbox
     ADD CONSTRAINT host_outbox_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
-
-ALTER TABLE openrails.host_outbox ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.host_outbox USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
 
 CREATE UNIQUE INDEX uq_host_outbox_payment ON openrails.host_outbox (merchant_id, payment_id) WHERE payment_id IS NOT NULL;
 
@@ -1521,8 +1378,6 @@ CREATE TABLE openrails.invoices (
     CONSTRAINT invoices_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'open'::text, 'paid'::text, 'past_due'::text, 'voided'::text, 'uncollectible'::text, 'finalized'::text])))
 );
 
-ALTER TABLE ONLY openrails.invoices FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.invoices IS 'Period invoices/statements. For arrears, an open invoice is the receivable and payments are allocated to it. Prepaid invoices remain informational receipts/statements.';
 
 COMMENT ON COLUMN openrails.invoices.amount_due IS 'Outstanding amount for this invoice in the row currency internal precision. Open arrears balance is derived from open/past-due invoices.';
@@ -1566,11 +1421,6 @@ ALTER TABLE ONLY openrails.invoices
 ALTER TABLE ONLY openrails.invoices
     ADD CONSTRAINT invoices_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-ALTER TABLE openrails.invoices ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.invoices USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.invoker_spend_limits (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -1583,8 +1433,6 @@ CREATE TABLE openrails.invoker_spend_limits (
     provenance text DEFAULT ''::text NOT NULL,
     CONSTRAINT invoker_spend_limits_scope_check CHECK ((scope = ANY (ARRAY['invoker'::text, 'role'::text, 'invoker_tier'::text])))
 );
-
-ALTER TABLE ONLY openrails.invoker_spend_limits FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.invoker_spend_limits IS 'Per-invoker spend limits (#473/#517): the payer caps how much a delegated invoker/role can spend of the payer''s money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.';
 
@@ -1604,11 +1452,6 @@ ALTER TABLE ONLY openrails.invoker_spend_limits
 ALTER TABLE ONLY openrails.invoker_spend_limits
     ADD CONSTRAINT invoker_spend_limits_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-ALTER TABLE openrails.invoker_spend_limits ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.invoker_spend_limits USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.ledger_accounts (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -1623,8 +1466,6 @@ CREATE TABLE openrails.ledger_accounts (
     CONSTRAINT ledger_accounts_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
     CONSTRAINT ledger_accounts_type_check CHECK ((account_type = ANY (ARRAY['customer_balance'::text, 'platform_revenue'::text, 'processor_clearing'::text, 'arrears_liability'::text, 'expired_credits'::text, 'revoked_credits'::text, 'fx_liquidity'::text, 'world'::text])))
 );
-
-ALTER TABLE ONLY openrails.ledger_accounts FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.ledger_accounts IS '#512 double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, fx_liquidity, world).';
 
@@ -1661,11 +1502,6 @@ ALTER TABLE ONLY openrails.ledger_accounts
 ALTER TABLE ONLY openrails.ledger_accounts
     ADD CONSTRAINT ledger_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-ALTER TABLE openrails.ledger_accounts ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.ledger_accounts USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.ledger_transfers (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -1692,8 +1528,6 @@ CREATE TABLE openrails.ledger_transfers (
     CONSTRAINT ledger_transfers_distinct_accounts CHECK ((debit_account_id <> credit_account_id)),
     CONSTRAINT ledger_transfers_type_check CHECK ((transfer_type = ANY (ARRAY['deposit'::text, 'credit_spend'::text, 'credit_expire'::text, 'credit_revoke'::text, 'credit_reinstate'::text, 'owed_accrual'::text, 'owed_payment'::text, 'owed_writeoff'::text])))
 );
-
-ALTER TABLE ONLY openrails.ledger_transfers FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.ledger_transfers IS '#512 immutable double-entry transfers. Append-only (role granted SELECT,INSERT only). A transfer moves amount debit->credit within ONE (merchant, currency) ledger; capture/void/refund/expiry are NEW rows, never updates. ledger_accounts counters are a maintained projection of this table.';
 
@@ -1745,19 +1579,12 @@ ALTER TABLE ONLY openrails.ledger_transfers
 ALTER TABLE ONLY openrails.ledger_transfers
     ADD CONSTRAINT ledger_transfers_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-ALTER TABLE openrails.ledger_transfers ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.ledger_transfers USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.merchant_configurations (
     merchant_id uuid NOT NULL,
     config jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
-
-ALTER TABLE ONLY openrails.merchant_configurations FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.merchant_configurations IS 'One merchant-scoped JSON configuration row. Missing keys use service defaults.';
 
@@ -1769,11 +1596,6 @@ ALTER TABLE ONLY openrails.merchant_configurations
 ALTER TABLE ONLY openrails.merchant_configurations
     ADD CONSTRAINT merchant_configurations_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id);
 
-ALTER TABLE openrails.merchant_configurations ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.merchant_configurations USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.merchant_deks (
     merchant_id uuid NOT NULL,
     wrapped_dek bytea NOT NULL,
@@ -1781,9 +1603,7 @@ CREATE TABLE openrails.merchant_deks (
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-ALTER TABLE ONLY openrails.merchant_deks FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.merchant_deks IS 'Wrapped per-merchant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = merchant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. Merchant-owned and RLS protected.';
+COMMENT ON TABLE openrails.merchant_deks IS 'Wrapped per-merchant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = merchant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. Merchant-owned; queries carry explicit merchant predicates.';
 
 COMMENT ON COLUMN openrails.merchant_deks.wrapped_dek IS 'AES-256-GCM(master_key, merchant_dek): nonce(12) || ciphertext(32) || tag(16).';
 
@@ -1792,11 +1612,6 @@ ALTER TABLE ONLY openrails.merchant_deks
 
 ALTER TABLE ONLY openrails.merchant_deks
     ADD CONSTRAINT merchant_deks_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE openrails.merchant_deks ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.merchant_deks USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
 
 CREATE TABLE openrails.merchant_destructive_policy (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1808,8 +1623,6 @@ CREATE TABLE openrails.merchant_destructive_policy (
     reason text,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
-
-ALTER TABLE ONLY openrails.merchant_destructive_policy FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.merchant_destructive_policy IS '#836/#835 per-merchant destructive-action policy: destructive_actions_enabled is the per-merchant emergency stop (the instance switch in destructive_action_switch gates it globally); enforce_armed_at is the first-enforce gate — NULL means the merchant''s provider pull runs advisory (findings only, zero mutations) until an operator reviews the first pull and arms it.';
 
@@ -1823,12 +1636,6 @@ CREATE UNIQUE INDEX uq_merchant_destructive_policy_merchant ON openrails.merchan
 ALTER TABLE ONLY openrails.merchant_destructive_policy
     ADD CONSTRAINT merchant_destructive_policy_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-ALTER TABLE openrails.merchant_destructive_policy ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.merchant_destructive_policy USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
-
 CREATE TABLE openrails.merchant_secrets (
     merchant_id uuid NOT NULL,
     name text NOT NULL,
@@ -1838,20 +1645,13 @@ CREATE TABLE openrails.merchant_secrets (
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-ALTER TABLE ONLY openrails.merchant_secrets FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.merchant_secrets IS 'DB-backed per-merchant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned and RLS protected.';
+COMMENT ON TABLE openrails.merchant_secrets IS 'DB-backed per-merchant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned; queries carry explicit merchant predicates.';
 
 ALTER TABLE ONLY openrails.merchant_secrets
     ADD CONSTRAINT pk_merchant_secrets PRIMARY KEY (merchant_id, name);
 
 ALTER TABLE ONLY openrails.merchant_secrets
     ADD CONSTRAINT merchant_secrets_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.merchant_secrets USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.merchant_secrets ENABLE ROW LEVEL SECURITY;
-
 
 CREATE TABLE openrails.merchant_webhooks (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1866,8 +1666,6 @@ CREATE TABLE openrails.merchant_webhooks (
     CONSTRAINT merchant_webhooks_format_check CHECK ((format = ANY (ARRAY['generic'::text, 'discord'::text, 'slack'::text])))
 );
 
-ALTER TABLE ONLY openrails.merchant_webhooks FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.merchant_webhooks IS '#736 operator-configured OUTBOUND alert sinks. format shapes the POST body: generic=our alert JSON, discord={content}, slack={text}. NOT the inbound provider-webhook ingestion surface.';
 
 ALTER TABLE ONLY openrails.merchant_webhooks
@@ -1877,11 +1675,6 @@ CREATE INDEX merchant_webhooks_merchant_idx ON openrails.merchant_webhooks USING
 
 ALTER TABLE ONLY openrails.merchant_webhooks
     ADD CONSTRAINT merchant_webhooks_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.merchant_webhooks USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.merchant_webhooks ENABLE ROW LEVEL SECURITY;
-
 
 CREATE TABLE openrails.notifications (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1902,8 +1695,6 @@ CREATE TABLE openrails.notifications (
         OR (recipient_kind = 'merchant' AND customer_id IS NULL AND event_type = 'operator.alert' AND emailed_at IS NULL AND title <> '')
     )
 );
-
-ALTER TABLE ONLY openrails.notifications FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.notifications IS 'Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox.';
 
@@ -1932,11 +1723,6 @@ ALTER TABLE ONLY openrails.notifications
 ALTER TABLE ONLY openrails.notifications
     ADD CONSTRAINT notifications_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-CREATE POLICY merchant_isolation ON openrails.notifications USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.notifications ENABLE ROW LEVEL SECURITY;
-
-
 CREATE TABLE openrails.prices (
     id uuid DEFAULT uuidv7() NOT NULL,
     product_id uuid NOT NULL,
@@ -1961,12 +1747,9 @@ CREATE TABLE openrails.prices (
     CONSTRAINT prices_trial_period_positive_chk CHECK (((trial_duration_hours IS NULL) OR (trial_duration_hours > 0)))
 );
 
-ALTER TABLE ONLY openrails.prices FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.prices IS 'Pricing tiers for products with rail-specific identifiers';
 
 COMMENT ON COLUMN openrails.prices.amount IS 'Price amount in row currency micros (1 major unit = 1,000,000).';
-
 
 COMMENT ON COLUMN openrails.prices.access_duration_hours IS 'access window in HOURS a purchase grants; NULL = indefinite/durable. For auto_renew, hours/24 is the provider billing cadence in days.';
 
@@ -1995,7 +1778,6 @@ CREATE INDEX idx_prices_merchant_key ON openrails.prices USING btree (merchant_i
 
 CREATE INDEX idx_prices_product_id ON openrails.prices USING btree (product_id);
 
-
 CREATE UNIQUE INDEX uq_prices_id_product_merchant ON openrails.prices USING btree (id, product_id, merchant_id);
 
 CREATE UNIQUE INDEX uq_prices_merchant_key_current ON openrails.prices USING btree (merchant_id, key) WHERE (NOT archived);
@@ -2008,11 +1790,6 @@ ALTER TABLE ONLY openrails.prices
 ALTER TABLE ONLY openrails.prices
     ADD CONSTRAINT prices_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES openrails.products(merchant_id, id) ON DELETE RESTRICT;
 
-CREATE POLICY merchant_isolation ON openrails.prices USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.prices ENABLE ROW LEVEL SECURITY;
-
-
 CREATE TABLE openrails.price_key_movements (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -2021,8 +1798,6 @@ CREATE TABLE openrails.price_key_movements (
     effective_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
-
-ALTER TABLE ONLY openrails.price_key_movements FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.price_key_movements IS '#774: append-only log of when a price key''s current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation).';
 
@@ -2038,11 +1813,6 @@ ALTER TABLE ONLY openrails.price_key_movements
 
 ALTER TABLE ONLY openrails.price_key_movements
     ADD CONSTRAINT price_key_movements_price_fk FOREIGN KEY (merchant_id, price_id) REFERENCES openrails.prices(merchant_id, id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.price_key_movements USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.price_key_movements ENABLE ROW LEVEL SECURITY;
-
 
 CREATE TABLE openrails.psps (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2062,8 +1832,6 @@ CREATE TABLE openrails.psps (
     CONSTRAINT psps_environment_check CHECK ((environment = ANY (ARRAY['live'::text, 'test'::text]))),
     CONSTRAINT psps_nonempty CHECK (((btrim(rail) <> ''::text) AND (btrim(environment) <> ''::text) AND (btrim(account_id) <> ''::text)))
 );
-
-ALTER TABLE ONLY openrails.psps FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.psps IS 'Merchant PSP registry. A row is one merchant-owned payment-service-provider account on one rail.';
 
@@ -2102,11 +1870,6 @@ ALTER TABLE ONLY openrails.psps
 ALTER TABLE ONLY openrails.psps
     ADD CONSTRAINT psps_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
 
-CREATE POLICY merchant_isolation ON openrails.psps USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.psps ENABLE ROW LEVEL SECURITY;
-
-
 CREATE TABLE openrails.rail_customer_accounts (
     id uuid DEFAULT uuidv7() NOT NULL,
     rail text NOT NULL,
@@ -2117,8 +1880,6 @@ CREATE TABLE openrails.rail_customer_accounts (
     customer_id uuid NOT NULL,
     psp_id uuid NOT NULL
 );
-
-ALTER TABLE ONLY openrails.rail_customer_accounts FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.rail_customer_accounts IS 'customer <-> rail customer-id mapping, per PSP. Two accounts on one rail hold independent mappings (or#893 supersedes #704, which dropped psp_id when no writer set it).';
 
@@ -2145,11 +1906,6 @@ ALTER TABLE ONLY openrails.rail_customer_accounts
 
 ALTER TABLE ONLY openrails.rail_customer_accounts
     ADD CONSTRAINT rail_customer_accounts_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id) ON DELETE CASCADE;
-
-CREATE POLICY merchant_isolation ON openrails.rail_customer_accounts USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.rail_customer_accounts ENABLE ROW LEVEL SECURITY;
-
 
 CREATE TABLE openrails.rail_intents (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2183,8 +1939,6 @@ CREATE TABLE openrails.rail_intents (
     CONSTRAINT chk_rail_intents_status CHECK ((status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'succeeded'::text, 'unknown_needs_verify'::text, 'failed_retryable'::text, 'failed_terminal'::text, 'superseded'::text, 'expired'::text]))),
     CONSTRAINT rail_intents_addressed CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL)))
 );
-
-ALTER TABLE ONLY openrails.rail_intents FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.rail_intents IS 'Durable, effectively-once outbox for outbound provider mutations (#358). One row per logical intent (unique per tenant on idempotency_key); the executor worker drains whatever is currently executable, the verifier resolves ambiguous outcomes via provider reads.';
 
@@ -2252,11 +2006,6 @@ ALTER TABLE ONLY openrails.rail_intents
 ALTER TABLE ONLY openrails.rail_intents
     ADD CONSTRAINT rail_intents_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id);
 
-CREATE POLICY merchant_isolation ON openrails.rail_intents USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.rail_intents ENABLE ROW LEVEL SECURITY;
-
-
 CREATE TABLE openrails.rail_mutation_logs (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -2274,8 +2023,6 @@ CREATE TABLE openrails.rail_mutation_logs (
     CONSTRAINT rail_mutation_logs_addressed CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL))),
     CONSTRAINT rail_mutation_logs_phase_check CHECK ((phase = ANY (ARRAY['attempting'::text, 'succeeded'::text, 'failed'::text, 'unknown'::text, 'parked'::text])))
 );
-
-ALTER TABLE ONLY openrails.rail_mutation_logs FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.rail_mutation_logs IS 'Append-only operator history for external provider mutations executed from provider intents/convergence (#533). or#859 Class A: the record of what we did to the outside world — INSERT plus the whole-merchant purge DELETE only, never UPDATE, and never rolled back.';
 
@@ -2312,11 +2059,6 @@ ALTER TABLE ONLY openrails.rail_mutation_logs
 ALTER TABLE ONLY openrails.rail_mutation_logs
     ADD CONSTRAINT rail_mutation_logs_rail_intent_fk FOREIGN KEY (merchant_id, rail_intent_id) REFERENCES openrails.rail_intents(merchant_id, id) ON DELETE SET NULL (rail_intent_id);
 
-CREATE POLICY merchant_isolation ON openrails.rail_mutation_logs USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.rail_mutation_logs ENABLE ROW LEVEL SECURITY;
-
-
 CREATE TABLE openrails.rail_refresh_watermarks (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -2329,8 +2071,6 @@ CREATE TABLE openrails.rail_refresh_watermarks (
     CONSTRAINT rail_refresh_watermarks_event_domain_check CHECK ((event_domain = ANY (ARRAY['events'::text]))),
     CONSTRAINT rail_refresh_watermarks_rail_check CHECK ((rail = ANY (ARRAY['nmi'::text, 'ccbill'::text, 'stripe'::text, 'solana'::text])))
 );
-
-ALTER TABLE ONLY openrails.rail_refresh_watermarks FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.rail_refresh_watermarks IS 'Durable Provider Refresh watermarks: the exclusive lower bound for the next bounded event window, per (merchant, rail, PSP, domain). A failed or partial provider read simply never advances watermark_at — the failure itself is recorded by the job, not here.';
 
@@ -2355,11 +2095,6 @@ ALTER TABLE ONLY openrails.rail_refresh_watermarks
 
 ALTER TABLE ONLY openrails.rail_refresh_watermarks
     ADD CONSTRAINT rail_refresh_watermarks_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id) ON DELETE CASCADE;
-
-CREATE POLICY merchant_isolation ON openrails.rail_refresh_watermarks USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.rail_refresh_watermarks ENABLE ROW LEVEL SECURITY;
-
 
 CREATE TABLE openrails.reconciliation_findings (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2407,8 +2142,6 @@ CREATE TABLE openrails.reconciliation_findings (
     CONSTRAINT chk_reconciliation_findings_type CHECK ((finding_type ~ '^(pull|derive|life|consistency|notify|catalog)\.[a-z0-9_]+(\.[a-z0-9_]+)?$'::text))
 );
 
-ALTER TABLE ONLY openrails.reconciliation_findings FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.reconciliation_findings IS 'Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored (#573).';
 
 COMMENT ON COLUMN openrails.reconciliation_findings.subject_key IS 'Stable identity of the drifted subject within (provider, finding_type): rail subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.';
@@ -2454,11 +2187,6 @@ ALTER TABLE ONLY openrails.reconciliation_findings
 ALTER TABLE ONLY openrails.reconciliation_findings
     ADD CONSTRAINT reconciliation_findings_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-CREATE POLICY merchant_isolation ON openrails.reconciliation_findings USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.reconciliation_findings ENABLE ROW LEVEL SECURITY;
-
-
 -- Read-only projection of the standing findings owner; no second lifecycle.
 CREATE VIEW openrails.catalog_drift_events WITH (security_invoker=true) AS
 SELECT id,psp_id,rail,substr(finding_type,9)::text AS kind,openrails_resource_type,openrails_resource_id,
@@ -2483,8 +2211,6 @@ CREATE TABLE openrails.reprice_batches (
     CONSTRAINT reprice_batches_fallback_chk CHECK ((fallback_policy = ANY (ARRAY[''::text, 'keep_grandfathered'::text, 'cancel_at_period_end'::text]))),
     CONSTRAINT reprice_batches_kind_chk CHECK ((kind = ANY (ARRAY['reprice'::text, 'plan_change'::text])))
 );
-
-ALTER TABLE ONLY openrails.reprice_batches FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.reprice_batches IS '#773: header row for one bulk reprice operation (reprice_all_prior_versions or a single ad-hoc reprice); subscription_reprices rows carry reprice_batch_id back to it for per-subscription progress.';
 
@@ -2511,12 +2237,6 @@ ALTER TABLE ONLY openrails.reprice_batches
 ALTER TABLE ONLY openrails.reprice_batches
     ADD CONSTRAINT reprice_batches_to_price_fk FOREIGN KEY (merchant_id, to_price_id) REFERENCES openrails.prices(merchant_id, id) ON DELETE RESTRICT;
 
-CREATE POLICY merchant_isolation ON openrails.reprice_batches USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.reprice_batches ENABLE ROW LEVEL SECURITY;
-
-
-
 CREATE TABLE openrails.usage_events (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -2538,8 +2258,6 @@ CREATE TABLE openrails.usage_events (
     CONSTRAINT usage_events_amount_check CHECK ((amount >= 0)),
     CONSTRAINT usage_events_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text)))
 );
-
-ALTER TABLE ONLY openrails.usage_events FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.usage_events IS 'Append-only multi-dimensional metered usage (issue #289). Source of truth for usage reporting + #303 invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path (#298) never reads this table.';
 
@@ -2575,11 +2293,6 @@ ALTER TABLE ONLY openrails.usage_events
 ALTER TABLE ONLY openrails.usage_events
     ADD CONSTRAINT usage_events_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-CREATE POLICY merchant_isolation ON openrails.usage_events USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.usage_events ENABLE ROW LEVEL SECURITY;
-
-
 CREATE TABLE openrails.account_updater_batches (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -2597,8 +2310,6 @@ CREATE TABLE openrails.account_updater_batches (
     CONSTRAINT account_updater_batches_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'submitted'::text, 'completed'::text, 'failed'::text]))),
     CONSTRAINT account_updater_batches_submitted_has_job CHECK (((status <> 'submitted'::text) OR (btrim(job_ref) <> ''::text)))
 );
-
-ALTER TABLE ONLY openrails.account_updater_batches FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.account_updater_batches IS 'or#795: one batch account-updater cycle for one custodian. Written BEFORE the provider is touched and kept until the results are folded, so a worker restart between submit and ingest RESUMES POLLING the recorded job instead of resubmitting a paid batch. The membership is recorded verbatim; the result vocabulary is counted verbatim.';
 
@@ -2621,11 +2332,6 @@ ALTER TABLE ONLY openrails.account_updater_batches
 ALTER TABLE ONLY openrails.account_updater_batches
     ADD CONSTRAINT account_updater_batches_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
 
-ALTER TABLE openrails.account_updater_batches ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.account_updater_batches USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.billing_policy_bindings (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -2636,8 +2342,6 @@ CREATE TABLE openrails.billing_policy_bindings (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT billing_policy_bindings_rung_ck CHECK (((customer_id IS NULL) OR (tier IS NULL)))
 );
-
-ALTER TABLE ONLY openrails.billing_policy_bindings FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.billing_policy_bindings IS 'or#897: which named policy applies to whom. Three rungs, most specific wins: per-customer (customer_id set) > per-tier (tier set) > merchant default (both NULL). The binding is JUST a name reference — rebinding is the merchant''s runtime lever and moves no money.';
 
@@ -2663,11 +2367,6 @@ ALTER TABLE ONLY openrails.billing_policy_bindings
 ALTER TABLE ONLY openrails.billing_policy_bindings
     ADD CONSTRAINT billing_policy_bindings_policy_fk FOREIGN KEY (merchant_id, policy_name) REFERENCES openrails.billing_policies(merchant_id, name) ON DELETE RESTRICT;
 
-ALTER TABLE openrails.billing_policy_bindings ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.billing_policy_bindings USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.catalog_rate_cards (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -2685,8 +2384,6 @@ CREATE TABLE openrails.catalog_rate_cards (
     CONSTRAINT catalog_rate_cards_payment_term_check CHECK ((payment_term = ANY (ARRAY['in_advance'::text, 'in_arrears'::text]))),
     CONSTRAINT catalog_rate_cards_product_scope_chk CHECK (((customer_id IS NOT NULL) OR (product_id IS NOT NULL)))
 );
-
-ALTER TABLE ONLY openrails.catalog_rate_cards FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.catalog_rate_cards IS '#638 rate-card sidecars: product usage/flat prices expressed as shared charge-model JSON. The ONLY metered-pricing engine (#707): legacy manifest metered: price declarations are translated into rate-card rows at push time (catalog_price_metered is gone).';
 
@@ -2713,11 +2410,6 @@ ALTER TABLE ONLY openrails.catalog_rate_cards
 ALTER TABLE ONLY openrails.catalog_rate_cards
     ADD CONSTRAINT catalog_rate_cards_product_fk FOREIGN KEY (merchant_id, product_id) REFERENCES openrails.products(merchant_id, id) ON DELETE CASCADE;
 
-ALTER TABLE openrails.catalog_rate_cards ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.catalog_rate_cards USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.customer_delinquency (
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
@@ -2737,8 +2429,6 @@ CREATE TABLE openrails.customer_delinquency (
     CONSTRAINT customer_delinquency_state_chk CHECK ((state = ANY (ARRAY['current'::text, 'grace'::text, 'delinquent'::text])))
 );
 
-ALTER TABLE ONLY openrails.customer_delinquency FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.customer_delinquency IS 'or#878 per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant''s declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.';
 
 COMMENT ON COLUMN openrails.customer_delinquency.overdue_since IS 'The oldest overdue due_at behind this state — the clock the grace window is measured on, not the moment we noticed.';
@@ -2756,11 +2446,6 @@ ALTER TABLE ONLY openrails.customer_delinquency
 ALTER TABLE ONLY openrails.customer_delinquency
     ADD CONSTRAINT customer_delinquency_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-ALTER TABLE openrails.customer_delinquency ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.customer_delinquency USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.customer_invoice_profiles (
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
@@ -2776,8 +2461,6 @@ CREATE TABLE openrails.customer_invoice_profiles (
     CONSTRAINT customer_invoice_profiles_net_terms_chk CHECK ((net_terms_days >= 0))
 );
 
-ALTER TABLE ONLY openrails.customer_invoice_profiles FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.customer_invoice_profiles IS '#798 per-payer enterprise invoicing profile: net-N terms, collection method (charge_automatically | send_invoice for manual remittance) and document fields (PO, tax, contacts) snapshotted onto invoices at finalize.';
 
 ALTER TABLE ONLY openrails.customer_invoice_profiles
@@ -2788,11 +2471,6 @@ ALTER TABLE ONLY openrails.customer_invoice_profiles
 
 ALTER TABLE ONLY openrails.customer_invoice_profiles
     ADD CONSTRAINT customer_invoice_profiles_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE openrails.customer_invoice_profiles ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.customer_invoice_profiles USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
 
 CREATE TABLE openrails.destructive_run_before_images (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2806,8 +2484,6 @@ CREATE TABLE openrails.destructive_run_before_images (
     destructive_run_class text GENERATED ALWAYS AS ('destructive') STORED NOT NULL,
     CONSTRAINT chk_destructive_run_before_images_table CHECK ((table_name = ANY (ARRAY['subscriptions'::text, 'entitlements'::text])))
 );
-
-ALTER TABLE ONLY openrails.destructive_run_before_images FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.destructive_run_before_images IS 'or#859 tier 1: the row as it stood immediately before a destructive run overwrote it. or#858''s soft-delete stamp reverses DELETEs; this reverses UPDATEs — which is the damage the empty-roster mass-cancellation actually did. One image per (run, table, row); FK-pinned to exactly one run.';
 
@@ -2828,12 +2504,6 @@ ALTER TABLE ONLY openrails.destructive_run_before_images
 ALTER TABLE ONLY openrails.destructive_run_before_images
     ADD CONSTRAINT destructive_run_before_images_run_fk FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES openrails.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;
 
-ALTER TABLE openrails.destructive_run_before_images ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.destructive_run_before_images USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
-
 CREATE TABLE openrails.invoice_items (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -2852,8 +2522,6 @@ CREATE TABLE openrails.invoice_items (
     CONSTRAINT invoice_items_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
     CONSTRAINT invoice_items_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'invoiced'::text, 'voided'::text])))
 );
-
-ALTER TABLE ONLY openrails.invoice_items FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.invoice_items IS 'Pending-accrual workspace (#726): owed accruals queue as pending rows gating arrears exposure; finalization attaches them (invoice_id, status=invoiced) so they cannot bill twice. NOT the statement itemization — that is invoices.line_items.';
 
@@ -2874,11 +2542,6 @@ ALTER TABLE ONLY openrails.invoice_items
 
 ALTER TABLE ONLY openrails.invoice_items
     ADD CONSTRAINT invoice_items_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE openrails.invoice_items ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.invoice_items USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
 
 CREATE TABLE openrails.payment_methods (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2913,8 +2576,6 @@ CREATE TABLE openrails.payment_methods (
     CONSTRAINT payment_methods_custodian_check CHECK ((custodian = ANY (ARRAY['psp'::text, 'basis_theory'::text, 'hyperswitch'::text]))),
     CONSTRAINT payment_methods_rebill_driver_check CHECK ((rebill_driver = ANY (ARRAY['provider'::text, 'openrails'::text])))
 );
-
-ALTER TABLE ONLY openrails.payment_methods FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.payment_methods IS 'Generalized payment method table supporting multiple rails.';
 
@@ -2989,11 +2650,6 @@ ALTER TABLE ONLY openrails.payment_methods
 ALTER TABLE ONLY openrails.payment_methods
     ADD CONSTRAINT payment_methods_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id);
 
-CREATE POLICY merchant_isolation ON openrails.payment_methods USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.payment_methods ENABLE ROW LEVEL SECURITY;
-
-
 CREATE TABLE openrails.custody_migrations (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -3016,8 +2672,6 @@ CREATE TABLE openrails.custody_migrations (
     CONSTRAINT chk_custody_migrations_outcome CHECK ((outcome = ANY (ARRAY['remapped'::text, 'created'::text]))),
     CONSTRAINT chk_custody_migrations_target CHECK (((btrim(to_rail_method_ref) <> ''::text) AND (btrim(to_custodian) <> ''::text)))
 );
-
-ALTER TABLE ONLY openrails.custody_migrations FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.custody_migrations IS 'or#297 Phase C: one row per instrument whose CUSTODY changed — the durable memory of a vault-export remap. Records where the card used to live (the PSP vault handle the processor holds) and where it lives now (the custodian token), on an unchanged payment_method_id so subscriptions never move. Reversible in RECORD, never in custody: the fields to re-point an instrument back are all here, but a processor that deleted the vault entry or terminated the merchant cannot be undone by a row.';
 
@@ -3045,11 +2699,6 @@ ALTER TABLE ONLY openrails.custody_migrations
 
 ALTER TABLE ONLY openrails.custody_migrations
     ADD CONSTRAINT custody_migrations_payment_method_fk FOREIGN KEY (merchant_id, payment_method_id) REFERENCES openrails.payment_methods(merchant_id, id) ON DELETE CASCADE;
-
-ALTER TABLE openrails.custody_migrations ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.custody_migrations USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
 
 CREATE TABLE openrails.subscriptions (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3091,8 +2740,6 @@ CREATE TABLE openrails.subscriptions (
     CONSTRAINT chk_past_due_has_period_end CHECK (((status <> 'past_due'::openrails.subscription_status) OR (current_period_ends_at IS NOT NULL))),
     CONSTRAINT chk_valid_period CHECK (((current_period_starts_at IS NULL) OR (current_period_ends_at IS NULL) OR (current_period_starts_at < current_period_ends_at)))
 );
-
-ALTER TABLE ONLY openrails.subscriptions FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.subscriptions IS 'Core subscription records tracking user billing relationships';
 
@@ -3195,11 +2842,6 @@ ALTER TABLE ONLY openrails.subscriptions
 ALTER TABLE ONLY openrails.subscriptions
     ADD CONSTRAINT subscriptions_scheduled_price_id_fkey FOREIGN KEY (merchant_id, scheduled_price_id) REFERENCES openrails.prices(merchant_id, id);
 
-CREATE POLICY merchant_isolation ON openrails.subscriptions USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.subscriptions ENABLE ROW LEVEL SECURITY;
-
-
 CREATE TABLE openrails.invoice_payments (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -3226,8 +2868,6 @@ CREATE TABLE openrails.invoice_payments (
     CONSTRAINT invoice_payments_psp_required_on_rail CHECK (((psp_id IS NOT NULL) OR (rail = ANY (ARRAY['manual'::text, 'admin'::text])))),
     CONSTRAINT invoice_payments_status_check CHECK ((status = ANY (ARRAY['attempted'::text, 'settled'::text, 'failed'::text])))
 );
-
-ALTER TABLE ONLY openrails.invoice_payments FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.invoice_payments IS 'Payment attempts and settled payments allocated to a specific invoice.';
 
@@ -3264,11 +2904,6 @@ ALTER TABLE ONLY openrails.invoice_payments
 ALTER TABLE ONLY openrails.invoice_payments
     ADD CONSTRAINT invoice_payments_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id);
 
-ALTER TABLE openrails.invoice_payments ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.invoice_payments USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.money_settings (
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
@@ -3284,12 +2919,7 @@ CREATE TABLE openrails.money_settings (
     CONSTRAINT money_settings_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text)))
 );
 
-ALTER TABLE ONLY openrails.money_settings FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.money_settings IS 'Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; per-invoker caps live in payer/invoker_spend_limits; arrears owed exposure is derived from open invoices.';
-
-
-
 
 COMMENT ON COLUMN openrails.money_settings.currency IS 'System currency code (USD/EUR/JPY); the Go registry is the authority. Stablecoins and crypto tokens are payment assets, not account currencies.';
 
@@ -3306,11 +2936,6 @@ ALTER TABLE ONLY openrails.money_settings
 
 ALTER TABLE ONLY openrails.money_settings
     ADD CONSTRAINT money_settings_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.money_settings USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.money_settings ENABLE ROW LEVEL SECURITY;
-
 
 CREATE TABLE openrails.solana_subscriptions (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3331,8 +2956,6 @@ CREATE TABLE openrails.solana_subscriptions (
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
-ALTER TABLE ONLY openrails.solana_subscriptions FORCE ROW LEVEL SECURITY;
-
 ALTER TABLE ONLY openrails.solana_subscriptions
     ADD CONSTRAINT solana_subscriptions_pkey PRIMARY KEY (id);
 
@@ -3350,11 +2973,6 @@ ALTER TABLE ONLY openrails.solana_subscriptions
 
 ALTER TABLE ONLY openrails.solana_subscriptions
     ADD CONSTRAINT solana_subscriptions_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES openrails.subscriptions(merchant_id, id) ON DELETE CASCADE;
-
-CREATE POLICY merchant_isolation ON openrails.solana_subscriptions USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.solana_subscriptions ENABLE ROW LEVEL SECURITY;
-
 
 CREATE TABLE openrails.subscription_reprices (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3377,8 +2995,6 @@ CREATE TABLE openrails.subscription_reprices (
     CONSTRAINT subscription_reprices_kind_chk CHECK ((kind = ANY (ARRAY['reprice'::text, 'plan_change'::text]))),
     CONSTRAINT subscription_reprices_status_chk CHECK ((status = ANY (ARRAY['scheduled'::text, 'applied'::text, 'canceled'::text, 'blocked'::text])))
 );
-
-ALTER TABLE ONLY openrails.subscription_reprices FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.subscription_reprices IS '#773: a scheduled, applied, or canceled price move for one subscription. Applied at the subscription''s first renewal on/after effective_at (v1: no proration/mid-cycle).';
 
@@ -3418,11 +3034,6 @@ ALTER TABLE ONLY openrails.subscription_reprices
 ALTER TABLE ONLY openrails.subscription_reprices
     ADD CONSTRAINT subscription_reprices_to_price_fk FOREIGN KEY (merchant_id, to_price_id) REFERENCES openrails.prices(merchant_id, id) ON DELETE RESTRICT;
 
-CREATE POLICY merchant_isolation ON openrails.subscription_reprices USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.subscription_reprices ENABLE ROW LEVEL SECURITY;
-
-
 CREATE TABLE openrails.subscription_status_transitions (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -3433,8 +3044,6 @@ CREATE TABLE openrails.subscription_status_transitions (
     occurred_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT chk_sst_real_transition CHECK ((from_status IS DISTINCT FROM to_status))
 );
-
-ALTER TABLE ONLY openrails.subscription_status_transitions FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.subscription_status_transitions IS '#733 append-only subscription status audit, written by trg_subscriptions_status_transition in the SAME tx as the status change. from_status NULL = row creation. Not retroactive: history begins at go-live.';
 
@@ -3452,11 +3061,6 @@ ALTER TABLE ONLY openrails.subscription_status_transitions
 
 ALTER TABLE ONLY openrails.subscription_status_transitions
     ADD CONSTRAINT sst_subscription_fk FOREIGN KEY (merchant_id, subscription_id) REFERENCES openrails.subscriptions(merchant_id, id) ON DELETE CASCADE;
-
-CREATE POLICY merchant_isolation ON openrails.subscription_status_transitions USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.subscription_status_transitions ENABLE ROW LEVEL SECURITY;
-
 
 CREATE TABLE openrails.payments (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3498,8 +3102,6 @@ CREATE TABLE openrails.payments (
     CONSTRAINT payments_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
     CONSTRAINT payments_psp_required_on_rail CHECK (((psp_id IS NOT NULL) OR (rail = ANY (ARRAY['manual'::text, 'admin'::text]))))
 );
-
-ALTER TABLE ONLY openrails.payments FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.payments IS 'Records of all payment transactions (formerly purchases table)';
 
@@ -3588,11 +3190,6 @@ ALTER TABLE ONLY openrails.payments
 ALTER TABLE ONLY openrails.payments
     ADD CONSTRAINT payments_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES openrails.subscriptions(merchant_id, customer_id, id) ON DELETE SET NULL (subscription_id);
 
-CREATE POLICY merchant_isolation ON openrails.payments USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.payments ENABLE ROW LEVEL SECURITY;
-
-
 ALTER TABLE ONLY openrails.host_outbox
     ADD CONSTRAINT host_outbox_payment_fk FOREIGN KEY (merchant_id, payment_id) REFERENCES openrails.payments(merchant_id, id) ON DELETE CASCADE;
 
@@ -3628,8 +3225,6 @@ CREATE TABLE openrails.checkout_sessions (
       OR (mode <> 'payment_method' AND price_id IS NOT NULL AND amount IS NOT NULL AND currency IS NOT NULL)
     )
 );
-
-ALTER TABLE ONLY openrails.checkout_sessions FORCE ROW LEVEL SECURITY;
 
 COMMENT ON COLUMN openrails.checkout_sessions.psp_id IS 'PSP selected for this provider checkout/session. Required (or#893).';
 
@@ -3681,11 +3276,6 @@ ALTER TABLE ONLY openrails.checkout_sessions
 ALTER TABLE ONLY openrails.checkout_sessions
     ADD CONSTRAINT checkout_sessions_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES openrails.subscriptions(merchant_id, customer_id, id);
 
-ALTER TABLE openrails.checkout_sessions ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.checkout_sessions USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.grants (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -3714,8 +3304,6 @@ CREATE TABLE openrails.grants (
     CONSTRAINT grants_termination_no_window CHECK (((event = 'grant'::text) OR (ends_at IS NULL))),
     CONSTRAINT grants_valid_window CHECK (((ends_at IS NULL) OR (starts_at < ends_at)))
 );
-
-ALTER TABLE ONLY openrails.grants FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.grants IS '#514 append-only grant ledger: the access-domain sibling of the #512 money ledger. Immutable events (grant/revoke/expire/supersede/adjust); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount+currency and IS the FIFO credit lot (subsumes the old money_blocks role); derive-2 emits its #512 deposit transfer tagged source=grant.';
 
@@ -3775,11 +3363,6 @@ ALTER TABLE ONLY openrails.grants
 ALTER TABLE ONLY openrails.grants
     ADD CONSTRAINT grants_supersedes_fk FOREIGN KEY (merchant_id, customer_id, supersedes_id) REFERENCES openrails.grants(merchant_id, customer_id, id);
 
-ALTER TABLE openrails.grants ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.grants USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
 CREATE TABLE openrails.entitlements (
     id uuid DEFAULT uuidv7() NOT NULL,
     entitlement text NOT NULL,
@@ -3802,8 +3385,6 @@ CREATE TABLE openrails.entitlements (
     CONSTRAINT chk_revoke_fields_together CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL))),
     CONSTRAINT chk_valid_time_window CHECK (((end_at IS NULL) OR (start_at < end_at)))
 );
-
-ALTER TABLE ONLY openrails.entitlements FORCE ROW LEVEL SECURITY;
 
 COMMENT ON COLUMN openrails.entitlements.customer_id IS 'OpenRails payable tenant subject for this entitlement window.';
 
@@ -3849,12 +3430,6 @@ ALTER TABLE ONLY openrails.entitlements
 ALTER TABLE ONLY openrails.entitlements
     ADD CONSTRAINT entitlements_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-ALTER TABLE openrails.entitlements ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.entitlements USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-
-
 CREATE TABLE openrails.operation_authorizations (
     operation_id text NOT NULL,
     merchant_id uuid NOT NULL,
@@ -3891,8 +3466,6 @@ CREATE TABLE openrails.operation_authorizations (
     CONSTRAINT operation_authorizations_terminal_shape CHECK ((((state = 'open'::text) AND (terminal_reference IS NULL) AND (released_at IS NULL) AND (settled_at IS NULL)) OR ((state = 'released'::text) AND (terminal_reference <> ''::text) AND (released_at IS NOT NULL) AND (settled_at IS NULL)) OR ((state = 'settled'::text) AND (terminal_reference <> ''::text) AND (released_at IS NULL) AND (settled_at IS NOT NULL))))
 );
 
-ALTER TABLE ONLY openrails.operation_authorizations FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.operation_authorizations IS 'Merchant-scoped durable th-005 financial reservations for exact provider-operation bodies. Open rows reserve USD-micro capacity against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire.';
 
 COMMENT ON COLUMN openrails.operation_authorizations.authorization_body_bytes IS 'Exact canonical bytes authored by the embedding host. OpenRails binds them byte-for-byte but does not interpret their format.';
@@ -3922,19 +3495,6 @@ ALTER TABLE ONLY openrails.operation_authorizations
 
 ALTER TABLE ONLY openrails.operation_authorizations
     ADD CONSTRAINT operation_authorizations_payer_fk FOREIGN KEY (merchant_id, payer_id) REFERENCES openrails.customers(merchant_id, id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.operation_authorizations USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.operation_authorizations ENABLE ROW LEVEL SECURITY;
-
-
-
-
-
-
-
-
-
 
 CREATE TABLE openrails.provider_billing_qualifications (
     merchant_id uuid NOT NULL,
@@ -3967,8 +3527,6 @@ CREATE TABLE openrails.provider_billing_qualifications (
     CONSTRAINT provider_billing_qualification_state_shape CHECK (((state = ANY (ARRAY['pending'::text, 'refused'::text, 'eligible'::text])) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])) AND ((baseline_observation_id IS NULL) OR ((baseline_observation_id <> ''::text) AND (baseline_observation_id = btrim(baseline_observation_id)) AND (octet_length(baseline_observation_id) <= 255))) AND ((qualified_observation_id IS NULL) OR ((qualified_observation_id <> ''::text) AND (qualified_observation_id = btrim(qualified_observation_id)) AND (octet_length(qualified_observation_id) <= 255))) AND (((state = 'pending'::text) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text])) AND (qualified_observation_id IS NULL) AND (qualified_provider_cost_usd_micros IS NULL) AND (qualified_at IS NULL)) OR ((state = 'refused'::text) AND (reason = ANY (ARRAY['provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text])) AND (qualified_observation_id IS NULL) AND (qualified_provider_cost_usd_micros IS NULL) AND (qualified_at IS NULL)) OR ((state = 'eligible'::text) AND (reason = 'eligible'::text) AND (baseline_observation_id IS NOT NULL) AND (qualified_observation_id IS NOT NULL) AND (qualified_provider_cost_usd_micros IS NOT NULL) AND (qualified_provider_cost_usd_micros >= 0) AND (qualified_at IS NOT NULL)))))
 );
 
-ALTER TABLE ONLY openrails.provider_billing_qualifications FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.provider_billing_qualifications IS 'OpenRails-owned th-045 post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality.';
 
 ALTER TABLE ONLY openrails.provider_billing_qualifications
@@ -3976,18 +3534,6 @@ ALTER TABLE ONLY openrails.provider_billing_qualifications
 
 ALTER TABLE ONLY openrails.provider_billing_qualifications
     ADD CONSTRAINT provider_billing_qualification_operation_fk FOREIGN KEY (merchant_id, operation_id) REFERENCES openrails.operation_authorizations(merchant_id, operation_id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.provider_billing_qualifications USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.provider_billing_qualifications ENABLE ROW LEVEL SECURITY;
-
-
-
-
-
-
-
-
 
 CREATE TABLE openrails.provider_billing_observations (
     merchant_id uuid NOT NULL,
@@ -4014,8 +3560,6 @@ CREATE TABLE openrails.provider_billing_observations (
     CONSTRAINT provider_billing_observation_reason_shape CHECK ((qualification_reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])))
 );
 
-ALTER TABLE ONLY openrails.provider_billing_observations FORCE ROW LEVEL SECURITY;
-
 COMMENT ON TABLE openrails.provider_billing_observations IS 'Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement.';
 
 ALTER TABLE ONLY openrails.provider_billing_observations
@@ -4025,11 +3569,6 @@ CREATE INDEX idx_provider_billing_observations_operation_time ON openrails.provi
 
 ALTER TABLE ONLY openrails.provider_billing_observations
     ADD CONSTRAINT provider_billing_observation_qualification_fk FOREIGN KEY (merchant_id, operation_id) REFERENCES openrails.provider_billing_qualifications(merchant_id, operation_id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.provider_billing_observations USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.provider_billing_observations ENABLE ROW LEVEL SECURITY;
-
 
 -- ---------------------------------------------------------------------------
 -- VIEW objects
@@ -4108,7 +3647,6 @@ CREATE VIEW openrails.freeloader_episodes WITH (security_invoker='true') AS
 
 COMMENT ON VIEW openrails.freeloader_episodes IS '#690 episode analytics: spans of entitlement access NOT covered by payment (subscription paid-through snapshot, completed one_off payment, or a live matching grant). Open episodes (window still granting) end at now(). Causes label sanctioned unpaid access (sanctioned_dunning, awaiting_verification) vs failure (unsanctioned). Approximations: paid-through is the current-period snapshot (renewals overwrite it, healed historical lapses are invisible); coverage is contiguous-from-the-left (uncovered TAIL only); cause reads the sub''s CURRENT state; refund time falls back to the purchase time when no refund row links.';
 
-
 CREATE VIEW openrails.orphaned_episodes WITH (security_invoker='true') AS
  WITH cov AS (
          SELECT s.merchant_id,
@@ -4161,7 +3699,6 @@ CREATE VIEW openrails.orphaned_episodes WITH (security_invoker='true') AS
 
 COMMENT ON VIEW openrails.orphaned_episodes IS '#690 episode analytics, the mirror of freeloader_episodes: spans where payment coverage existed (subscription paid-through snapshot, or a completed one_off payment with a finite access window for an entitlement-promising product) but no entitlement window covered the time. Open episodes (paid-through still in the future) end at now(). Same approximations: paid-through is the current-period snapshot; window coverage is contiguous-from-the-left (uncovered TAIL only — a wrongly-early revocation shows as the tail from revoked_at to paid-through).';
 
-
 -- Admission operation reservations (issue989)
 CREATE TABLE openrails.admission_operations (
     merchant_id uuid NOT NULL,
@@ -4196,11 +3733,6 @@ CREATE INDEX admission_operations_windows ON openrails.admission_operations (mer
     WHERE state <> 'released';
 CREATE INDEX admission_operations_window_keys ON openrails.admission_operations USING gin (window_keys)
     WHERE state <> 'released';
-ALTER TABLE openrails.admission_operations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE openrails.admission_operations FORCE ROW LEVEL SECURITY;
-CREATE POLICY merchant_isolation ON openrails.admission_operations
-    USING (merchant_id = NULLIF(current_setting('app.merchant_id', true), '')::uuid)
-    WITH CHECK (merchant_id = NULLIF(current_setting('app.merchant_id', true), '')::uuid);
 
 -- One derived financial hold total, shared by every spend and authorization path.
 CREATE FUNCTION openrails.financial_held_amount(merchant uuid, payer uuid, unit text, as_of timestamptz)
@@ -4240,11 +3772,6 @@ CREATE UNIQUE INDEX uq_price_psp_bindings_plan ON openrails.price_psp_bindings (
 CREATE UNIQUE INDEX uq_price_psp_bindings_price ON openrails.price_psp_bindings (merchant_id, psp_id, price_ref) WHERE price_ref IS NOT NULL;
 CREATE UNIQUE INDEX uq_price_psp_bindings_rbo ON openrails.price_psp_bindings (merchant_id, psp_id, recurring_billing_option_id) WHERE recurring_billing_option_id IS NOT NULL;
 CREATE UNIQUE INDEX uq_price_psp_bindings_pda ON openrails.price_psp_bindings (merchant_id, psp_id, plan_pda) WHERE plan_pda IS NOT NULL;
-ALTER TABLE openrails.price_psp_bindings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE openrails.price_psp_bindings FORCE ROW LEVEL SECURITY;
-CREATE POLICY merchant_isolation ON openrails.price_psp_bindings
-    USING (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid)
-    WITH CHECK (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid);
 
 ALTER TABLE ONLY openrails.invoices
     ADD CONSTRAINT invoices_collection_intent_fk FOREIGN KEY (merchant_id, collection_intent_id) REFERENCES openrails.rail_intents(merchant_id, id) ON DELETE RESTRICT;
@@ -4260,12 +3787,51 @@ CREATE UNIQUE INDEX uq_maintenance_billing_restore ON openrails.maintenance_runs
 
 CREATE FUNCTION openrails.guard_billing_restore_receipt() RETURNS trigger
     LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
+DECLARE item record; occupied boolean;
 BEGIN
-    IF ((TG_OP<>'DELETE' AND NEW.kind='billing_restore') OR (TG_OP<>'INSERT' AND OLD.kind='billing_restore'))
-       AND current_user <> pg_get_userbyid((SELECT relowner FROM pg_class WHERE oid='openrails.maintenance_runs'::regclass)) THEN
-        RAISE EXCEPTION 'billing restore receipts are managed only by restore functions' USING ERRCODE='42501';
+    IF TG_OP='DELETE' THEN
+        IF OLD.kind='billing_restore' THEN
+            RAISE EXCEPTION 'billing restore receipts are immutable' USING ERRCODE='23514';
+        END IF;
+        RETURN OLD;
     END IF;
-    IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+    IF NEW.kind<>'billing_restore' AND (TG_OP='INSERT' OR OLD.kind<>'billing_restore') THEN RETURN NEW; END IF;
+    IF NEW.merchant_id IS DISTINCT FROM openrails.current_merchant_id() THEN
+        RAISE EXCEPTION 'billing restore merchant mismatch' USING ERRCODE='42501';
+    END IF;
+    -- The merchant row is the serialization point used by begin_billing_restore
+    -- and by FK-backed first writes. No database-owner exemption or GUC-only
+    -- permission can create a receipt for an occupied destination.
+    PERFORM 1 FROM openrails.merchants WHERE id=NEW.merchant_id AND status='active' AND deleted_at IS NULL FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'billing restore merchant missing or inactive' USING ERRCODE='P0002'; END IF;
+    IF TG_OP='INSERT' THEN
+        IF NEW.status<>'running' OR NEW.finished_at IS NOT NULL OR NEW.summary IS NOT NULL THEN
+            RAISE EXCEPTION 'billing restore receipts must begin running and unfinished' USING ERRCODE='23514';
+        END IF;
+        FOR item IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped
+            WHERE n.nspname=TG_TABLE_SCHEMA AND c.relkind IN ('r','p')
+        LOOP
+            EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.%I WHERE merchant_id=$1)',TG_TABLE_SCHEMA,item.relname)
+                INTO occupied USING NEW.merchant_id;
+            IF occupied THEN RAISE EXCEPTION 'billing restore destination is not empty: %',item.relname USING ERRCODE='55000'; END IF;
+        END LOOP;
+    ELSE
+        IF OLD.kind<>'billing_restore' OR NEW.kind<>'billing_restore'
+           OR OLD.status<>'running' OR NEW.status<>'completed'
+           OR NEW.finished_at IS NULL
+           OR (to_jsonb(NEW)-ARRAY['status','finished_at','summary','run_class']) IS DISTINCT FROM (to_jsonb(OLD)-ARRAY['status','finished_at','summary','run_class'])
+           OR NOT EXISTS (SELECT 1 FROM openrails.maintenance_runs r WHERE r.id=OLD.id AND r.merchant_id=OLD.merchant_id
+               AND r.xmin=pg_current_xact_id_if_assigned()::xid)
+           OR OLD.id::text IS DISTINCT FROM current_setting('app.billing_restore_id',true)
+           OR NEW.summary->>'digest' IS NULL OR NEW.summary->>'digest' !~ '^[0-9a-f]{64}$'
+           OR jsonb_typeof(NEW.summary->'rows') IS DISTINCT FROM 'number'
+           OR (NEW.summary->>'rows')::numeric < 0
+           OR (NEW.summary->>'rows')::numeric <> trunc((NEW.summary->>'rows')::numeric) THEN
+            RAISE EXCEPTION 'invalid billing restore receipts transition' USING ERRCODE='23514';
+        END IF;
+        PERFORM openrails.check_billing_restore_ledger(NEW.merchant_id);
+    END IF;
     RETURN NEW;
 END;
 $$;
@@ -4274,7 +3840,7 @@ CREATE TRIGGER guard_billing_restore_receipt BEFORE INSERT OR UPDATE OR DELETE O
 
 CREATE FUNCTION openrails.begin_billing_restore(p_merchant uuid) RETURNS uuid
     LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
-DECLARE receipt uuid; item record; occupied boolean; current_schema_name text;
+DECLARE receipt uuid;
 BEGIN
     IF p_merchant IS DISTINCT FROM openrails.current_merchant_id() THEN
         RAISE EXCEPTION 'billing restore merchant mismatch' USING ERRCODE='42501';
@@ -4283,17 +3849,6 @@ BEGIN
     IF NOT FOUND THEN RAISE EXCEPTION 'billing restore merchant missing or inactive' USING ERRCODE='P0002'; END IF;
     SELECT id INTO receipt FROM openrails.maintenance_runs WHERE merchant_id=p_merchant AND kind='billing_restore' AND status='completed';
     IF receipt IS NOT NULL THEN RETURN receipt; END IF;
-    SELECT n.nspname INTO current_schema_name FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.oid='openrails.merchants'::regclass;
-    -- Inspect all merchant-scoped tables, including future and currently retired
-    -- tables. The merchant row lock serializes the FK-backed first writes.
-    FOR item IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-        JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped
-        WHERE n.nspname=current_schema_name AND c.relkind IN ('r','p')
-    LOOP
-        EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.%I WHERE merchant_id=$1)',current_schema_name,item.relname)
-            INTO occupied USING p_merchant;
-        IF occupied THEN RAISE EXCEPTION 'billing restore destination is not empty: %',item.relname USING ERRCODE='55000'; END IF;
-    END LOOP;
     INSERT INTO openrails.maintenance_runs(merchant_id,kind,actor) VALUES(p_merchant,'billing_restore','merchantarchive') RETURNING id INTO receipt;
     PERFORM set_config('app.billing_restore_id',receipt::text,true);
     RETURN receipt;
@@ -4341,7 +3896,7 @@ CREATE FUNCTION openrails.require_finished_billing_restore() RETURNS trigger
 BEGIN
     IF NEW.kind='billing_restore' THEN
         IF NOT EXISTS (SELECT 1 FROM openrails.maintenance_runs WHERE id=NEW.id AND merchant_id=NEW.merchant_id AND status='completed') THEN
-            RAISE EXCEPTION 'unfinished billing restore cannot commit' USING ERRCODE='23514';
+            RAISE EXCEPTION 'unfinished billing restore receipts cannot commit' USING ERRCODE='23514';
         END IF;
         PERFORM openrails.check_billing_restore_ledger(NEW.merchant_id);
     END IF;
@@ -4421,3 +3976,75 @@ BEGIN
 END $$;
 CREATE TRIGGER guard_provider_cutover_intent BEFORE INSERT OR UPDATE OF status ON openrails.rail_intents
 FOR EACH ROW EXECUTE FUNCTION openrails.guard_provider_cutover_intent();
+
+-- Financial facts remain protected during ordinary DML even when the host
+-- connection owns the schema. Intentional owner DDL (ALTER/DROP) is outside
+-- this boundary; permissions are an optional additional deployment restriction.
+CREATE FUNCTION openrails.reject_immutable_billing_fact() RETURNS trigger
+LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
+BEGIN
+    RAISE EXCEPTION '% is not permitted on immutable billing facts in %', TG_OP, TG_TABLE_NAME USING ERRCODE='23514';
+END;
+$$;
+
+CREATE FUNCTION openrails.guard_billing_fact_columns() RETURNS trigger
+LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
+BEGIN
+    IF TG_OP='DELETE' OR (to_jsonb(NEW)-TG_ARGV) IS DISTINCT FROM (to_jsonb(OLD)-TG_ARGV) THEN
+        RAISE EXCEPTION 'immutable billing facts in % cannot be rewritten', TG_TABLE_NAME USING ERRCODE='23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE FUNCTION openrails.guard_ledger_account_facts() RETURNS trigger
+LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
+BEGIN
+    -- Only a nested trigger may maintain counters. The existing transfer
+    -- AFTER INSERT trigger is their sole writer; ordinary UPDATE cannot forge
+    -- trigger nesting, and no caller-set session setting grants this permission.
+    -- Keep the existing row locks/arithmetic: rescanning transfers here would
+    -- change multi-row insertion and concurrent transfer snapshot semantics.
+    IF TG_OP='DELETE' OR pg_trigger_depth()<2
+       OR (to_jsonb(NEW)-ARRAY['debits_posted','credits_posted']) IS DISTINCT FROM
+          (to_jsonb(OLD)-ARRAY['debits_posted','credits_posted']) THEN
+        RAISE EXCEPTION 'ledger account facts are immutable; counters are maintained by transfer insertion' USING ERRCODE='23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER guard_ledger_account_facts BEFORE UPDATE OR DELETE ON openrails.ledger_accounts
+FOR EACH ROW EXECUTE FUNCTION openrails.guard_ledger_account_facts();
+
+CREATE TRIGGER immutable_ledger_transfers BEFORE UPDATE OR DELETE ON openrails.ledger_transfers
+FOR EACH ROW EXECUTE FUNCTION openrails.reject_immutable_billing_fact();
+CREATE TRIGGER immutable_grants BEFORE UPDATE OR DELETE ON openrails.grants
+FOR EACH ROW EXECUTE FUNCTION openrails.reject_immutable_billing_fact();
+CREATE TRIGGER immutable_provider_billing_observations BEFORE UPDATE OR DELETE ON openrails.provider_billing_observations
+FOR EACH ROW EXECUTE FUNCTION openrails.reject_immutable_billing_fact();
+CREATE TRIGGER immutable_subscription_status_transitions BEFORE UPDATE OR DELETE ON openrails.subscription_status_transitions
+FOR EACH ROW EXECUTE FUNCTION openrails.reject_immutable_billing_fact();
+CREATE TRIGGER immutable_webhook_event_content BEFORE UPDATE ON openrails.webhook_events
+FOR EACH ROW EXECUTE FUNCTION openrails.reject_immutable_billing_fact();
+CREATE TRIGGER immutable_rail_mutation_log_content BEFORE UPDATE ON openrails.rail_mutation_logs
+FOR EACH ROW EXECUTE FUNCTION openrails.reject_immutable_billing_fact();
+
+CREATE TRIGGER immutable_maintenance_run_facts BEFORE UPDATE OR DELETE ON openrails.maintenance_runs
+FOR EACH ROW EXECUTE FUNCTION openrails.guard_billing_fact_columns('finished_at','status','summary','error','affected','reversed_at','reversed_by','note','run_class');
+CREATE TRIGGER immutable_destructive_before_images BEFORE UPDATE OR DELETE ON openrails.destructive_run_before_images
+FOR EACH ROW EXECUTE FUNCTION openrails.guard_billing_fact_columns('restored_at','destructive_run_class');
+CREATE TRIGGER immutable_operation_authorization_facts BEFORE UPDATE OR DELETE ON openrails.operation_authorizations
+FOR EACH ROW EXECUTE FUNCTION openrails.guard_billing_fact_columns('state','terminal_reference','released_at','settled_at','settlement_provider_cost_usd_micros','settlement_rated_usd_micros','settlement_body_bytes','settlement_body_digest');
+CREATE TRIGGER immutable_provider_qualification_facts BEFORE UPDATE OR DELETE ON openrails.provider_billing_qualifications
+FOR EACH ROW EXECUTE FUNCTION openrails.guard_billing_fact_columns('state','reason','baseline_observation_id','qualified_observation_id','qualified_provider_cost_usd_micros','qualified_at','updated_at');
+CREATE TRIGGER immutable_admission_operation_facts BEFORE UPDATE OR DELETE ON openrails.admission_operations
+FOR EACH ROW EXECUTE FUNCTION openrails.guard_billing_fact_columns('expires_at','state','capture_terms','captured_amount','captured_at','released_at');
+
+CREATE TRIGGER immutable_ledger_accounts_truncate BEFORE TRUNCATE ON openrails.ledger_accounts
+EXECUTE FUNCTION openrails.reject_immutable_billing_fact();
+CREATE TRIGGER immutable_ledger_transfers_truncate BEFORE TRUNCATE ON openrails.ledger_transfers
+EXECUTE FUNCTION openrails.reject_immutable_billing_fact();
+CREATE TRIGGER immutable_grants_truncate BEFORE TRUNCATE ON openrails.grants
+EXECUTE FUNCTION openrails.reject_immutable_billing_fact();
+CREATE TRIGGER immutable_maintenance_runs_truncate BEFORE TRUNCATE ON openrails.maintenance_runs
+EXECUTE FUNCTION openrails.reject_immutable_billing_fact();

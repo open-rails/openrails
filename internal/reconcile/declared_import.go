@@ -1,6 +1,8 @@
 package reconcile
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"errors"
 	"fmt"
@@ -213,7 +215,11 @@ func ImportDeclaredSubscriptions(
 
 		price, ok := priceCache[f.PriceID]
 		if !ok {
-			p, err := q.GetPriceByID(ctx, f.PriceID)
+			scopeMerchantID, scopeErr := merchant.Require(ctx)
+			if scopeErr != nil {
+				return nil, scopeErr
+			}
+			p, err := q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: scopeMerchantID.UUID(), ID: f.PriceID})
 			if err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
 					block("price not found")
@@ -283,8 +289,8 @@ func ImportDeclaredSubscriptions(
 					gateway_response = COALESCE($1::jsonb, gateway_response),
 					retry_attempts = GREATEST(retry_attempts, $2),
 					last_retry_at = COALESCE($3, last_retry_at)
-				 WHERE id = $4`,
-				nilIfEmptyBytes(f.Evidence), f.DunningRetries, f.DunningLastRetryAt, subID); err != nil {
+				 WHERE id = $4 AND merchant_id = $5`,
+				nilIfEmptyBytes(f.Evidence), f.DunningRetries, f.DunningLastRetryAt, subID, merchantID); err != nil {
 				return out, fmt.Errorf("declared import: stamp evidence for %s: %w", f.SourceID, err)
 			}
 		}
@@ -292,8 +298,8 @@ func ImportDeclaredSubscriptions(
 		// Vault linkage (dunning rebills need subscription→payment_method).
 		if f.PaymentMethodID != nil && *f.PaymentMethodID != uuid.Nil {
 			if _, err := database.Qx(ctx).Exec(ctx,
-				`UPDATE openrails.subscriptions SET payment_method_id = $1 WHERE id = $2 AND payment_method_id IS NULL`,
-				*f.PaymentMethodID, subID); err != nil {
+				`UPDATE openrails.subscriptions SET payment_method_id = $1 WHERE id = $2 AND merchant_id = $3 AND payment_method_id IS NULL`,
+				*f.PaymentMethodID, subID, merchantID); err != nil {
 				return out, fmt.Errorf("declared import: link payment method for %s: %w", f.SourceID, err)
 			}
 		}
@@ -318,8 +324,8 @@ func ImportDeclaredSubscriptions(
 					if _, err := tx.Exec(ctx,
 						`UPDATE openrails.subscriptions
 						 SET deletion_scheduled_at = $1, updated_at = $1
-						 WHERE id = $2 AND deletion_scheduled_at IS NULL`,
-						asOf, subID); err != nil {
+						 WHERE id = $2 AND merchant_id = $3 AND deletion_scheduled_at IS NULL`,
+						asOf, subID, merchantID); err != nil {
 						return err
 					}
 					return deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, f.Customer.String(), subID, asOf)
@@ -378,7 +384,11 @@ func insertDeclaredCancelled(
 ) (uuid.UUID, error) {
 	product, ok := productCache[price.ProductID]
 	if !ok {
-		p, err := q.GetProductByID(ctx, price.ProductID)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return uuid.UUID{}, scopeErr
+		}
+		p, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: scopeMerchantID.UUID(), ID: price.ProductID})
 		if err != nil {
 			return uuid.Nil, fmt.Errorf("load product: %w", err)
 		}

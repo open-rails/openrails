@@ -4,6 +4,8 @@
 -- name: GetDashboardConfig :one
 SELECT merchant_id, layout, updated_at, updated_by
 FROM openrails.dashboard_configs
+
+WHERE dashboard_configs.merchant_id = sqlc.arg(merchant_id)::uuid
 LIMIT 1;
 
 -- name: UpsertDashboardConfig :one
@@ -16,5 +18,7 @@ RETURNING merchant_id, layout, updated_at, updated_by;
 -- name: HasUsageActivity :one
 -- Any usage-stream signal for the merchant: metered events or purchased credit
 -- lots. Drives seeding usage widgets into the #741 default dashboard template.
-SELECT (EXISTS (SELECT 1 FROM openrails.usage_events)
-    OR EXISTS (SELECT 1 FROM openrails.grants WHERE kind = 'credit' AND event = 'grant' AND source_type = 'purchase'))::boolean AS has_activity;
+SELECT (EXISTS (SELECT 1 FROM openrails.usage_events
+WHERE usage_events.merchant_id = sqlc.arg(merchant_id)::uuid
+)
+    OR EXISTS (SELECT 1 FROM openrails.grants WHERE grants.merchant_id = sqlc.arg(merchant_id)::uuid AND kind = 'credit' AND event = 'grant' AND source_type = 'purchase'))::boolean AS has_activity;

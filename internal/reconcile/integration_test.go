@@ -239,7 +239,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM billing.subscriptions WHERE id = $1`, seeded.subDead).Scan(&status))
 				assert.Equal(t, "active", status, "advisory must not cancel anything")
 				var n int
-				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE transaction_id LIKE 'itxn-%'`).Scan(&n))
+				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND transaction_id LIKE 'itxn-%'`, mid.UUID()).Scan(&n))
 				assert.Zero(t, n, "advisory must not backfill payments")
 				return nil
 			}))
@@ -289,7 +289,7 @@ func TestReconcileEngineIntegration(t *testing.T) {
 				var amount int64
 				var subjectID uuid.UUID
 				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-					`SELECT amount, customer_id FROM billing.payments WHERE rail = 'nmi' AND transaction_id LIKE 'itxn-%'`).
+					`SELECT amount, customer_id FROM billing.payments WHERE merchant_id=$1 AND rail = 'nmi' AND transaction_id LIKE 'itxn-%'`, mid.UUID()).
 					Scan(&amount, &subjectID))
 				assert.Equal(t, int64(9_990_000), amount)
 				assert.Equal(t, seeded.subjectID, subjectID)

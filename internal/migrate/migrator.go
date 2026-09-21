@@ -48,7 +48,7 @@ type Options struct {
 
 // ApplyPostgresMigrations applies OpenRails' embedded billing migrations and
 // the River migrations it owns. The pool must use a role permitted to create
-// the configured schema, extensions, and RLS policy objects. AuthKit's
+// the configured schema, extensions, and database objects. AuthKit's
 // profiles schema is deliberately outside this package: callers initialize it
 // through AuthKit's own embedded migration API.
 func ApplyPostgresMigrations(ctx context.Context, pool *pgxpool.Pool, opts Options) error {

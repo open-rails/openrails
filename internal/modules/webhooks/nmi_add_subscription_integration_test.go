@@ -3,6 +3,8 @@
 package webhooks
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"encoding/json"
 	"errors"
@@ -218,7 +220,9 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 
 func (f *nmiConvergeFixture) status(t *testing.T, ctx context.Context) string {
 	t.Helper()
-	row, err := dbtest.Queries(f.dbi.Pool()).GetSubscriptionByID(ctx, f.subscriptionID)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	require.NoError(t, scopeErr)
+	row, err := dbtest.Queries(f.dbi.Pool()).GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: f.subscriptionID})
 	require.NoError(t, err)
 	return string(row.Status)
 }

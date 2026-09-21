@@ -195,7 +195,7 @@ func nmiReceiptScenario(t *testing.T) nmiReceiptEnv {
 // methodRow is the instrument as it stands right now.
 func (e nmiReceiptEnv) methodRow(t *testing.T) gen.OpenrailsPaymentMethod {
 	t.Helper()
-	row, err := dbtest.Queries(e.pool).GetPaymentMethodByID(e.ctx, e.method)
+	row, err := dbtest.Queries(e.pool).GetPaymentMethodByID(e.ctx, gen.GetPaymentMethodByIDParams{MerchantID: dbtest.TestMerchantID.UUID(), ID: e.method})
 	require.NoError(t, err)
 	return row
 }

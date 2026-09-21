@@ -13,11 +13,16 @@ import (
 
 const getCustodian = `-- name: GetCustodian :one
 SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM openrails.custodians
-WHERE id = $1
+WHERE custodians.merchant_id = $2::uuid AND id = $1
 `
 
-func (q *Queries) GetCustodian(ctx context.Context, id uuid.UUID) (OpenrailsCustodian, error) {
-	row := q.db.QueryRow(ctx, getCustodian, id)
+type GetCustodianParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) GetCustodian(ctx context.Context, arg GetCustodianParams) (OpenrailsCustodian, error) {
+	row := q.db.QueryRow(ctx, getCustodian, arg.ID, arg.MerchantID)
 	var i OpenrailsCustodian
 	err := row.Scan(
 		&i.ID,

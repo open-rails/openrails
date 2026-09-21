@@ -368,10 +368,6 @@ func TestWorkerHealth_AlertFanoutReachesEveryMerchantUnderRLS(t *testing.T) {
 	super := dbtest.OpenAppDB(t, superDSN)
 	appDB := dbtest.OpenAppDB(t, appDSN)
 
-	posture, err := appDB.CheckRLSPosture(ctx)
-	require.NoError(t, err)
-	require.True(t, posture.Enforcing, "test must use the RLS-enforcing app role")
-
 	suffix := uuid.NewString()[:8]
 	merchantA := merchant.ID(uuid.New())
 	merchantB := merchant.ID(uuid.New())
@@ -401,7 +397,7 @@ func TestWorkerHealth_AlertFanoutReachesEveryMerchantUnderRLS(t *testing.T) {
 	cleanupNewFanoutSystemCustomers(t, super, kind)
 
 	monitor := &ProgressMonitor{DB: appDB}
-	err = monitor.raiseAlert(ctx, gen.OpenrailsWorkerState{WorkerKind: kind}, "stale", time.Now().UTC(), ProgressReport{})
+	err := monitor.raiseAlert(ctx, gen.OpenrailsWorkerState{WorkerKind: kind}, "stale", time.Now().UTC(), ProgressReport{})
 	require.NoError(t, err)
 
 	for _, merchantID := range []merchant.ID{merchantA, merchantB} {
@@ -412,7 +408,7 @@ func TestWorkerHealth_AlertFanoutReachesEveryMerchantUnderRLS(t *testing.T) {
 			var customerID uuid.UUID
 			err := appDB.Qx(ctx).QueryRow(ctx,
 				`SELECT customer_id FROM billing.notifications
-				 WHERE data->'metadata'->>'worker_kind' = $1`, kind,
+				 WHERE data->'metadata'->>'worker_kind' = $1 AND merchant_id = $2`, kind, merchantID.UUID(),
 			).Scan(&customerID)
 			if err != nil {
 				return err

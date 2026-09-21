@@ -21,6 +21,7 @@ WHERE c.merchant_id = $1
         SELECT 1 FROM openrails.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
+          AND se.merchant_id = $1
           AND se.deleted_at IS NULL
           AND se.user_email ILIKE '%' || $2 || '%'))
 `
@@ -171,6 +172,7 @@ WHERE c.merchant_id = $1
         SELECT 1 FROM openrails.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
+          AND se.merchant_id = $1
           AND se.deleted_at IS NULL
           AND se.user_email ILIKE '%' || $2 || '%'))
 ORDER BY c.last_seen_at DESC

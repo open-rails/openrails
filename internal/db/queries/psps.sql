@@ -42,7 +42,7 @@ RETURNING *;
 
 -- name: GetPSP :one
 SELECT * FROM openrails.psps
-WHERE id = $1;
+WHERE psps.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: GetPSPByIdentity :one
 SELECT * FROM openrails.psps
@@ -54,7 +54,7 @@ LIMIT 1;
 
 -- name: GetPSPByRailIdentity :one
 SELECT * FROM openrails.psps
-WHERE rail = lower(sqlc.arg(rail)::text)
+WHERE psps.merchant_id = sqlc.arg(merchant_id)::uuid AND rail = lower(sqlc.arg(rail)::text)
   AND environment = COALESCE(sqlc.narg(environment)::text, 'live')
   AND account_id = sqlc.arg(account_id)::text
 LIMIT 1;

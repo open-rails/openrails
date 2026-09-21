@@ -40,6 +40,7 @@ WHERE c.merchant_id = sqlc.arg(merchant_id)
         SELECT 1 FROM openrails.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
+          AND se.merchant_id = sqlc.arg(merchant_id)
           AND se.deleted_at IS NULL
           AND se.user_email ILIKE '%' || sqlc.arg(q) || '%'))
 ORDER BY c.last_seen_at DESC
@@ -54,6 +55,7 @@ WHERE c.merchant_id = sqlc.arg(merchant_id)
         SELECT 1 FROM openrails.subscriptions se
         WHERE se.customer_id = c.id
           AND se.merchant_id = c.merchant_id
+          AND se.merchant_id = sqlc.arg(merchant_id)
           AND se.deleted_at IS NULL
           AND se.user_email ILIKE '%' || sqlc.arg(q) || '%'));
 

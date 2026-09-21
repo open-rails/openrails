@@ -3,6 +3,8 @@
 package webhooks
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"testing"
 	"time"
@@ -113,7 +115,9 @@ func TestCustodianWebhookAndUpdaterIsolateCollidingAccounts(t *testing.T) {
 	eventID := uuid.NewString()
 	require.NoError(t, fx.deliver(t, eventID, basistheory.EventTokenExpired, map[string]any{"token": map[string]any{"id": fx.tokenID}}))
 	require.Equal(t, "bt_token_expired", fx.methodRow(t).ParkReason)
-	other, err := fx.dbi.Gen(ctx).GetPaymentMethodByID(ctx, methodB)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	require.NoError(t, scopeErr)
+	other, err := fx.dbi.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: scopeMerchantID.UUID(), ID: methodB})
 	require.NoError(t, err)
 	require.Empty(t, other.ParkReason)
 
@@ -121,7 +125,7 @@ func TestCustodianWebhookAndUpdaterIsolateCollidingAccounts(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, stats.Rotated)
 	require.Empty(t, fx.methodRow(t).ParkReason)
-	other, err = fx.dbi.Gen(ctx).GetPaymentMethodByID(ctx, methodB)
+	other, err = fx.dbi.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: scopeMerchantID.UUID(), ID: methodB})
 	require.NoError(t, err)
 	require.Equal(t, fx.tokenID, other.RailMethodRef)
 
@@ -139,7 +143,7 @@ func TestCustodianWebhookAndUpdaterIsolateCollidingAccounts(t *testing.T) {
 	// Reusing A's event ID under B still applies B's own independent event.
 	fx.ctx = db.WithCustodianID(ctx, custodianB)
 	require.NoError(t, fx.deliver(t, eventID, basistheory.EventTokenExpired, map[string]any{"token": map[string]any{"id": fx.tokenID}}))
-	other, err = fx.dbi.Gen(ctx).GetPaymentMethodByID(ctx, methodB)
+	other, err = fx.dbi.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: scopeMerchantID.UUID(), ID: methodB})
 	require.NoError(t, err)
 	require.Equal(t, "bt_token_expired", other.ParkReason)
 }

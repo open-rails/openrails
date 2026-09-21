@@ -300,7 +300,7 @@ func Migrate(ctx context.Context, opts Options) (Result, error) {
 	ctx = merchant.WithID(ctx, merchantID)
 
 	if err := database.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		source, err := database.Gen(ctx).GetPSP(ctx, exp.SourcePSPID)
+		source, err := database.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{ID: exp.SourcePSPID, MerchantID: merchantID.UUID()})
 		if err != nil {
 			return fmt.Errorf("custody migration: source PSP: %w", err)
 		}

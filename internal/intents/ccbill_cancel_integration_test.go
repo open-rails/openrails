@@ -5,13 +5,15 @@ package intents
 import (
 	"context"
 	"fmt"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/pkg/merchant"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -424,6 +426,7 @@ func TestBreakerCountsCCBillCancelsTowardDestructiveBudget(t *testing.T) {
 	ctx := context.Background()
 	const over = 2
 	mid := uuid.New()
+	ctx = merchant.WithID(ctx, merchant.ID(mid))
 	dbi := dbtest.OpenMerchantDB(t, mid)
 	pool := dbi.Pool()
 	store := NewStore(dbi)

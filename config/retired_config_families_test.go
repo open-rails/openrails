@@ -39,7 +39,7 @@ func TestRetiredConfigFamiliesRefuseBootFromEnv(t *testing.T) {
 		{
 			name: "db.require_rls",
 			env:  map[string]string{"DB_REQUIRE_RLS": "true"},
-			want: "db.require_rls config was removed: RLS enforcement is derived from env — development may bypass RLS, every other env requires an RLS-enforcing DB role; delete the db.require_rls yaml key and DB_REQUIRE_RLS env var",
+			want: "db.require_rls config was removed: merchant isolation uses explicit scoped queries, not PostgreSQL RLS; delete the db.require_rls yaml key and DB_REQUIRE_RLS env var",
 		},
 		{
 			name: "auth.issuers (#521/#527)",

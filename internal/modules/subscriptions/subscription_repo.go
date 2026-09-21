@@ -157,7 +157,12 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		ct := string(*s.CancelType)
 		cancelType = &ct
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
 	rows, err := r.db.Gen(ctx).UpdateSubscriptionAt(ctx, gen.UpdateSubscriptionAtParams{
+		MerchantID:               scopeMerchantID.UUID(),
 		ID:                       s.ID,
 		PriceID:                  priceID,
 		ProductID:                s.ProductID,
@@ -193,7 +198,11 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 }
 
 func (r *SubscriptionRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	rows, err := r.db.Gen(ctx).DeleteSubscription(ctx, id)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
+	rows, err := r.db.Gen(ctx).DeleteSubscription(ctx, gen.DeleteSubscriptionParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 	if err != nil {
 		return err
 	}
@@ -229,7 +238,11 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 	prices := map[uuid.UUID]*models.Price{}
 	if len(priceIDs) > 0 {
 		if withProduct {
-			rows, err := q.ListPricesWithProductByIDs(ctx, priceIDs)
+			scopeMerchantID, scopeErr := merchant.Require(ctx)
+			if scopeErr != nil {
+				return scopeErr
+			}
+			rows, err := q.ListPricesWithProductByIDs(ctx, gen.ListPricesWithProductByIDsParams{MerchantID: scopeMerchantID.UUID(), Ids: priceIDs})
 			if err != nil {
 				return err
 			}
@@ -246,7 +259,11 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 				prices[price.ID] = price
 			}
 		} else {
-			rows, err := q.ListPricesByIDs(ctx, priceIDs)
+			scopeMerchantID, scopeErr := merchant.Require(ctx)
+			if scopeErr != nil {
+				return scopeErr
+			}
+			rows, err := q.ListPricesByIDs(ctx, gen.ListPricesByIDsParams{MerchantID: scopeMerchantID.UUID(), Ids: priceIDs})
 			if err != nil {
 				return err
 			}
@@ -268,7 +285,11 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 	}
 	pms := map[uuid.UUID]*models.PaymentMethod{}
 	if len(pmIDs) > 0 {
-		rows, err := q.ListPaymentMethodsByIDs(ctx, pmIDs)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return scopeErr
+		}
+		rows, err := q.ListPaymentMethodsByIDs(ctx, gen.ListPaymentMethodsByIDsParams{MerchantID: scopeMerchantID.UUID(), Ids: pmIDs})
 		if err != nil {
 			return err
 		}
@@ -313,7 +334,11 @@ func (r *SubscriptionRepo) manyWithDetails(ctx context.Context, rows []gen.Openr
 }
 
 func (r *SubscriptionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Subscription, error) {
-	row, err := r.db.Gen(ctx).GetSubscriptionByID(ctx, id)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	row, err := r.db.Gen(ctx).GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +348,11 @@ func (r *SubscriptionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.S
 // GetByIDForUpdate holds the subscription row until the caller's transaction
 // finishes. Lifecycle mutations must lock before reading a full-row snapshot.
 func (r *SubscriptionRepo) GetByIDForUpdate(ctx context.Context, id uuid.UUID) (*models.Subscription, error) {
-	row, err := r.db.Gen(ctx).GetSubscriptionByIDForUpdate(ctx, id)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	row, err := r.db.Gen(ctx).GetSubscriptionByIDForUpdate(ctx, gen.GetSubscriptionByIDForUpdateParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +364,11 @@ func (r *SubscriptionRepo) GetLatestByUserID(ctx context.Context, userID string)
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetLatestSubscriptionByCustomer(ctx, tsid)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	row, err := r.db.Gen(ctx).GetLatestSubscriptionByCustomer(ctx, gen.GetLatestSubscriptionByCustomerParams{MerchantID: scopeMerchantID.UUID(), CustomerID: tsid})
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +380,12 @@ func (r *SubscriptionRepo) GetByUserIDAndPriceID(ctx context.Context, userID str
 	if err != nil {
 		return nil, err
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	row, err := r.db.Gen(ctx).GetSubscriptionByCustomerAndPrice(ctx, gen.GetSubscriptionByCustomerAndPriceParams{
+		MerchantID: scopeMerchantID.UUID(),
 		CustomerID: tsid,
 		PriceID:    &priceID,
 	})
@@ -364,7 +402,12 @@ func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndProductID(ctx context.Co
 	if err != nil {
 		return nil, err
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	row, err := r.db.Gen(ctx).GetLifecycleSubscriptionByCustomerAndProduct(ctx, gen.GetLifecycleSubscriptionByCustomerAndProductParams{
+		MerchantID: scopeMerchantID.UUID(),
 		CustomerID: tsid,
 		ProductID:  productID,
 	})
@@ -386,7 +429,12 @@ func (r *SubscriptionRepo) GetActiveSubscriptionAt(ctx context.Context, userID s
 	if err != nil {
 		return nil, err
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	row, err := r.db.Gen(ctx).GetActiveSubscriptionByCustomerAt(ctx, gen.GetActiveSubscriptionByCustomerAtParams{
+		MerchantID: scopeMerchantID.UUID(),
 		CustomerID: tsid,
 		Now:        now,
 	})
@@ -521,13 +569,18 @@ func (r *SubscriptionRepo) GetSubscriptionsWithDetailsForUser(ctx context.Contex
 		return nil, 0, err
 	}
 	q := r.db.Gen(ctx)
-	total, err := q.CountSubscriptionsByCustomer(ctx, tsid)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, 0, scopeErr
+	}
+	total, err := q.CountSubscriptionsByCustomer(ctx, gen.CountSubscriptionsByCustomerParams{MerchantID: scopeMerchantID.UUID(), CustomerID: tsid})
 	if err != nil {
 		return nil, 0, err
 	}
 	pageSize32, _ := safecast.Convert[int32](pageSize)
 	pageOffset32, _ := safecast.Convert[int32]((page - 1) * pageSize)
 	rows, err := q.ListSubscriptionsByCustomerPaged(ctx, gen.ListSubscriptionsByCustomerPagedParams{
+		MerchantID: scopeMerchantID.UUID(),
 		CustomerID: tsid,
 		PageLimit:  pageSize32,
 		PageOffset: pageOffset32,
@@ -565,7 +618,12 @@ func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.Quer
 	}
 
 	q := r.db.Gen(ctx)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, 0, scopeErr
+	}
 	total, err := q.CountSubscriptionsFiltered(ctx, gen.CountSubscriptionsFilteredParams{
+		MerchantID:      scopeMerchantID.UUID(),
 		CustomerID:      tsid,
 		Status:          status,
 		PriceID:         priceID,
@@ -589,6 +647,7 @@ func (r *SubscriptionRepo) GetSubscribers(ctx context.Context, params query.Quer
 	paramsLimit32, _ := safecast.Convert[int32](params.Limit)
 	paramsOffset32, _ := safecast.Convert[int32](params.Offset)
 	rows, err := q.ListSubscriptionsFiltered(ctx, gen.ListSubscriptionsFilteredParams{
+		MerchantID:      scopeMerchantID.UUID(),
 		CustomerID:      tsid,
 		Status:          status,
 		PriceID:         priceID,
@@ -621,7 +680,12 @@ func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndTierGroup(ctx context.Co
 	if err != nil {
 		return nil, err
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	row, err := r.db.Gen(ctx).GetLifecycleSubscriptionByCustomerAndTierGroup(ctx, gen.GetLifecycleSubscriptionByCustomerAndTierGroupParams{
+		MerchantID: scopeMerchantID.UUID(),
 		CustomerID: tsid,
 		TierGroup:  &tierGroup,
 	})
@@ -639,7 +703,12 @@ func (r *SubscriptionRepo) GetUnknownByUserIDAndProductID(ctx context.Context, u
 	if err != nil {
 		return nil, err
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	row, err := r.db.Gen(ctx).GetUnknownSubscriptionByCustomerAndProduct(ctx, gen.GetUnknownSubscriptionByCustomerAndProductParams{
+		MerchantID: scopeMerchantID.UUID(),
 		CustomerID: tsid,
 		ProductID:  productID,
 	})
@@ -656,7 +725,12 @@ func (r *SubscriptionRepo) GetUnknownByUserIDAndTierGroup(ctx context.Context, u
 	if err != nil {
 		return nil, err
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	row, err := r.db.Gen(ctx).GetUnknownSubscriptionByCustomerAndTierGroup(ctx, gen.GetUnknownSubscriptionByCustomerAndTierGroupParams{
+		MerchantID: scopeMerchantID.UUID(),
 		CustomerID: tsid,
 		TierGroup:  &tierGroup,
 	})
@@ -685,10 +759,15 @@ const DueDunningBatch = 500
 // rails whose next retry is due (Price + PaymentMethod relations
 // attached) — the dunning worker's work list, capped at DueDunningBatch.
 func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rails []string, now time.Time) ([]models.Subscription, error) {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	rows, err := r.db.Gen(ctx).ListDueDunningSubscriptions(ctx, gen.ListDueDunningSubscriptionsParams{
-		Rails:    rails,
-		Now:      now,
-		RowLimit: DueDunningBatch,
+		MerchantID: scopeMerchantID.UUID(),
+		Rails:      rails,
+		Now:        now,
+		RowLimit:   DueDunningBatch,
 	})
 	if err != nil {
 		return nil, err
@@ -708,7 +787,12 @@ func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rail
 // subscription whose paid period has not elapsed (resume candidate), or
 // pgx.ErrNoRows.
 func (r *SubscriptionRepo) GetLatestResumableCancelled(ctx context.Context, tenantSubjectID uuid.UUID, now time.Time) (*models.Subscription, error) {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	row, err := r.db.Gen(ctx).GetLatestResumableCancelledSubscription(ctx, gen.GetLatestResumableCancelledSubscriptionParams{
+		MerchantID: scopeMerchantID.UUID(),
 		CustomerID: tenantSubjectID,
 		Now:        now,
 	})

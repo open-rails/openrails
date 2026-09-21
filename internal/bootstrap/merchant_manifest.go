@@ -1814,7 +1814,7 @@ func reconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 		// #662: derive the id from the global natural key and store the SAME
 		// normalized (rail, environment, account_id) it is hashed from.
 		railAcctID, nRail, nEnv, nAccount := merchants.PSPNaturalKey(rail, environment, accountID)
-		qualifiedRow, readErr := database.Gen(ctx).GetPSP(ctx, railAcctID)
+		qualifiedRow, readErr := database.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: merchantID.UUID(), ID: railAcctID})
 		if errors.Is(readErr, pgx.ErrNoRows) {
 			qualifiedRow = gen.OpenrailsPsp{ID: railAcctID, Rail: nRail, Environment: nEnv}
 		} else if readErr != nil {
