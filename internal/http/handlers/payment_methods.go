@@ -382,6 +382,12 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	if err != nil {
 		fields := log.Fields{"payment_method_id": methodID, "user_id": user.ID, "rail": pm.Rail}
 		switch {
+		case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteUnsafe):
+			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, api.CodeResourceConflict, "Payment method changed before the update could be accepted"))
+			return
+		case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteProcessing):
+			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, api.CodeResourceConflict, "Payment method deletion is already processing"))
+			return
 		case errors.Is(err, paymentmethods.ErrPaymentMethodCustodianUnsupported):
 			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "payment_method_update_unsupported", err.Error()).WithMetadata(map[string]any{"custodian": pm.Custodian}))
 			return

@@ -2126,7 +2126,7 @@ SET status = 'failed_terminal',
     claimed_until = NULL,
     updated_at = now()
 WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('invoice_collection', 'manual_rebill', 'nmi_upgrade', 'stripe_tier_change', 'nmi_sale', 'nmi_subscription_create')
+  AND intent_type NOT IN ('invoice_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','nmi_subscription_create','nmi_vault_delete','hyperswitch_method_delete')
 `
 
 type MarkRailIntentFailedTerminalParams struct {
@@ -2169,7 +2169,7 @@ SET status = 'succeeded',
     claimed_until = NULL,
     updated_at = now()
 WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('invoice_collection', 'manual_rebill', 'nmi_upgrade', 'stripe_tier_change', 'nmi_sale', 'nmi_subscription_create')
+  AND intent_type NOT IN ('invoice_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','nmi_subscription_create','nmi_vault_delete','hyperswitch_method_delete')
 `
 
 type MarkRailIntentSucceededParams struct {

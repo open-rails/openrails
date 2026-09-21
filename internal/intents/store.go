@@ -95,6 +95,15 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	if p.IntentType == subscriptions.TypeNMIInitialEnrollment {
 		return s.enqueueInitialEnrollment(ctx, p)
 	}
+	if p.IntentType == TypeNMIPaymentMethodUpdate {
+		return s.enqueueNMIMethodUpdate(ctx, p)
+	}
+	if p.IntentType == TypeNMIPaymentMethodDelete {
+		return s.enqueueNMIMethodDelete(ctx, p)
+	}
+	if p.IntentType == TypeHyperSwitchMethodDelete {
+		return gen.OpenrailsRailIntent{}, errors.New("custodian deletion requires owned method admission")
+	}
 	if p.IntentType == "nmi_sale" {
 		return s.enqueueSale(ctx, p)
 	}
@@ -174,6 +183,11 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 }
 
 func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
+	if p.IntentType == TypeNMIPaymentMethodDelete || p.IntentType == TypeHyperSwitchMethodDelete {
+		if err := validatePaymentMethodDeleteAuthority(ctx, p); err != nil {
+			return gen.OpenrailsRailIntent{}, err
+		}
+	}
 	if p.IntentType == "" || p.IdempotencyKey == "" {
 		return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
 	}
