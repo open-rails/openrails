@@ -76,6 +76,13 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 		{name: "recurring foreign customer", recurring: true, mode: "foreign customer", wantError: provider.ErrBinding},
 		{name: "recurring readonly", recurring: true, mode: "readonly", wantError: provider.ErrReadOnly},
 		{name: "recurring wrong rail", recurring: true, request: func(r *charge.Request) { r.Instrument.Rail = "stripe" }, wantError: charge.ErrNotDispatched},
+		{name: "recurring entry rejects unscheduled initial", recurring: true, request: func(r *charge.Request) { r.Context = charge.InitialOneTime() }, wantError: charge.ErrNotDispatched},
+		{name: "recurring entry rejects unscheduled reuse", recurring: true, request: func(r *charge.Request) { r.Context = charge.OneTimeReuse("unscheduled") }, wantError: charge.ErrNotDispatched},
+		{name: "recurring entry rejects merchant", recurring: true, request: func(r *charge.Request) { r.Context = charge.RecurringMIT("recurring") }, wantError: charge.ErrNotDispatched},
+		{name: "recurring entry rejects missing anchor", recurring: true, request: func(r *charge.Request) { r.Context = charge.RecurringReuse("") }, wantError: charge.ErrNotDispatched},
+		{name: "recurring entry rejects padded anchor", recurring: true, request: func(r *charge.Request) { r.Context = charge.RecurringReuse(" padded ") }, wantError: charge.ErrNotDispatched},
+		{name: "recurring entry rejects first-use anchor", recurring: true, request: func(r *charge.Request) { r.Context.PriorRef = "contradiction" }, wantError: charge.ErrNotDispatched},
+		{name: "invoice entry rejects recurring initial", request: func(r *charge.Request) { r.Context = charge.InitialRecurring() }, wantError: charge.ErrNotDispatched},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var posts atomic.Int32
@@ -135,7 +142,7 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 				require.Equal(t, req.OrderRef, body["orderid"])
 				require.Equal(t, req.Currency, body["currency"])
 				require.Equal(t, string(req.Context.Initiator), body["initiated_by"])
-				if tc.recurring {
+				if req.Context.Agreement == charge.AgreementRecurring {
 					require.Equal(t, "recurring", body["billing_method"])
 				} else {
 					require.Empty(t, body["billing_method"], "invoice anchor is never recurring")
@@ -180,11 +187,13 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 			} else {
 				result, err = charger.Charge(t.Context(), req)
 			}
+			require.Equal(t, tc.wantPosts, posts.Load(), "no lost-response retry or preflight bypass")
 			if tc.recurring && tc.declined {
 				require.NotNil(t, refusal)
 				require.Equal(t, 200, refusal.ResponseCode)
 				require.NotEmpty(t, refusal.LocalizationID)
 				require.Contains(t, refusal.RawResponse, "response_code=200")
+				require.Contains(t, refusal.RawResponse, "response=2")
 				require.NotContains(t, fmt.Sprintf("%+v", refusal), gatewayKey)
 			} else {
 				require.Nil(t, refusal, "uncertainty or preflight failure cannot become provider decline custody")
@@ -205,7 +214,6 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 					require.Empty(t, result.CapturedRef)
 				}
 			}
-			require.Equal(t, tc.wantPosts, posts.Load(), "no lost-response retry or preflight bypass")
 		})
 	}
 	for _, mutate := range []func(*charge.Request){
@@ -222,20 +230,4 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 		_, err := saleForm(request, gatewayKey)
 		require.Error(t, err)
 	}
-	for _, posture := range []charge.Context{
-		charge.InitialOneTime(), charge.OneTimeReuse("unscheduled"), charge.RecurringMIT("recurring"),
-		charge.RecurringReuse(""), charge.RecurringReuse(" padded "),
-		{Agreement: charge.AgreementRecurring, Initiator: charge.InitiatorCustomer, FirstUse: true, PriorRef: "contradiction"},
-	} {
-		request := base
-		request.Context = posture
-		result, refusal, err := (*Charger)(nil).ChargeInitialRecurring(t.Context(), request)
-		require.ErrorIs(t, err, charge.ErrNotDispatched)
-		require.Empty(t, result)
-		require.Nil(t, refusal)
-	}
-	request := base
-	request.Context = charge.InitialRecurring()
-	_, err := (*Charger)(nil).Charge(t.Context(), request)
-	require.ErrorIs(t, err, charge.ErrNotDispatched, "existing invoice entry does not admit recurring charges")
 }
