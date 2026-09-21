@@ -218,7 +218,9 @@ SET status = 'failed_retryable',
     last_failure_reason = sqlc.arg(reason),
     claimed_until = NULL,
     updated_at = now()
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
+  AND NOT (intent_type = 'invoice_collection' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (intent_type = 'nmi_sale' AND coalesce(result_evidence, '{}'::jsonb) ? 'sale_submitted');
 
 -- Ambiguous outcome (or a verify that stayed inconclusive): park for the
 -- verifier, scheduled at next_attempt_at.
@@ -265,6 +267,7 @@ SET status = 'pending',
     claimed_until = NULL,
     updated_at = now()
 WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'in_flight'
+  AND NOT (intent_type = 'invoice_collection' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
   -- A stale no-send result must not undo another executor's payment fence.
   AND (intent_type <> 'nmi_sale' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'sale_submitted'))
   AND (intent_type <> 'nmi_subscription_create' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'enrollment_submitted'));
@@ -304,6 +307,8 @@ SET status = 'expired',
     claimed_until = NULL,
     updated_at = now()
 WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
+  AND NOT (pi.intent_type = 'invoice_collection' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
   AND pi.expires_at IS NOT NULL
   AND pi.expires_at <= sqlc.arg(now)::timestamptz
   AND NOT (
@@ -496,8 +501,11 @@ WHERE id = sqlc.arg(id)::uuid
   AND psp_id = sqlc.arg(psp_id)::uuid
   AND intent_type = sqlc.arg(intent_type)::text
   AND payload = sqlc.arg(payload)::jsonb
-  AND ((sqlc.arg(evidence_key)::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale', 'nmi_subscription_create'))
-       OR (sqlc.arg(evidence_key)::text = 'qualified_enrollment' AND intent_type IN ('nmi_upgrade','nmi_subscription_create')))
+  AND ((sqlc.arg(evidence_key)::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale','nmi_subscription_create'))
+       OR (sqlc.arg(evidence_key)::text = 'qualified_enrollment' AND intent_type IN ('nmi_upgrade','nmi_subscription_create'))
+       OR (sqlc.arg(evidence_key)::text = 'qualified_invoice_nonexecution' AND intent_type = 'invoice_collection'
+           AND COALESCE(result_evidence->>'submitted_at', '') = sqlc.arg(receipt)::jsonb->>'submitted_at'
+           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')))
   AND status IN ('in_flight', 'unknown_needs_verify')
   AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? sqlc.arg(evidence_key)::text)
        OR result_evidence->sqlc.arg(evidence_key)::text = sqlc.arg(receipt)::jsonb);

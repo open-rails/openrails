@@ -39,6 +39,17 @@ FOR SHARE;
 -- name: ListPaymentMethodsByIDs :many
 SELECT * FROM openrails.payment_methods WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]);
 
+-- name: GetCollectionCustodianAccountsForShare :one
+-- Existing obligations retain the saved card's explicit custody/account, even
+-- after an archive or a new default custodian. Do not re-route to p.custodian_id.
+SELECT sqlc.embed(p), sqlc.embed(c)
+FROM openrails.psps p
+JOIN openrails.custodians c ON c.merchant_id = p.merchant_id
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND p.id = sqlc.arg(psp_id)::uuid
+  AND c.id = sqlc.arg(custodian_id)::uuid
+FOR SHARE OF p, c;
+
 -- name: DeletePaymentMethod :execrows
 DELETE FROM openrails.payment_methods WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 

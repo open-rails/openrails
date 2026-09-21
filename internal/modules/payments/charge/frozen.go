@@ -28,6 +28,10 @@ type FrozenInstrument struct {
 // instrument its operation froze. Raised before any provider traffic.
 var ErrInstrumentChanged = errors.New("payment method no longer matches the operation's frozen instrument")
 
+// ErrNotDispatched proves this call refused before attempting a provider write.
+// It says nothing about any earlier call or durable submission marker.
+var ErrNotDispatched = errors.New("charge refused before provider dispatch")
+
 // FreezeInstrument freezes a saved method's instrument.
 func FreezeInstrument(method gen.OpenrailsPaymentMethod) FrozenInstrument {
 	return FrozenInstrument{

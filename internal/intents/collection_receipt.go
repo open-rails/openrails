@@ -368,7 +368,7 @@ func LoadCollectionCandidate(in gen.OpenrailsRailIntent) (CollectionCandidate, b
 }
 
 func refuseCustodyKeys(evidence map[string]any) error {
-	for _, key := range []string{qualifiedReceiptKey, qualifiedEnrollmentKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, "account_requalifications"} {
+	for _, key := range []string{qualifiedInvoiceNonexecutionKey, qualifiedReceiptKey, qualifiedEnrollmentKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, "account_requalifications"} {
 		if _, ok := evidence[key]; ok {
 			return fmt.Errorf("%s is reserved for immutable provider evidence custody", key)
 		}

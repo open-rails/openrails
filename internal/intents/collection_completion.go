@@ -13,6 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
+var errInvoiceNonexecutionUnproven = errors.New("fenced invoice has no qualified nonexecution proof")
+
 // CompleteInvoiceCollection is called at the end of the domain transaction,
 // after its payer/invoice/attempt locks. It is deliberately collection-specific:
 // a successful state requires retained, validated provider receipt custody.
@@ -59,6 +61,17 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.OpenrailsRa
 	if err != nil {
 		return fmt.Errorf("invalid retained collection receipt: %w", err)
 	}
+	var nonexecution InvoiceNonexecutionProof
+	var hasNonexecution bool
+	if current.IntentType == "invoice_collection" {
+		nonexecution, hasNonexecution, err = LoadInvoiceNonexecution(current)
+		if err != nil {
+			return err
+		}
+		if found && hasNonexecution {
+			return errors.New("qualified payment contradicts qualified nonexecution")
+		}
+	}
 	status := StatusFailedTerminal
 	evidence := map[string]any{}
 	reason := outcome.Reason
@@ -78,6 +91,24 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.OpenrailsRa
 	} else {
 		if found {
 			return errors.New("qualified collected payment cannot become nonexecution or refusal")
+		}
+		if current.IntentType == "invoice_collection" && outcome.Evidence["not_executed"] == true {
+			var canonical map[string]json.RawMessage
+			if len(current.ResultEvidence) > 0 {
+				if err := json.Unmarshal(current.ResultEvidence, &canonical); err != nil {
+					return err
+				}
+			}
+			_, fenced := canonical["submitted_at"]
+			if fenced && !hasNonexecution {
+				return errInvoiceNonexecutionUnproven
+			}
+			if hasNonexecution {
+				code, reason := nonexecution.Refusal()
+				if outcome.Evidence["not_executed_code"] != code || outcome.Reason != reason {
+					return errors.New("invoice nonexecution contradicts sealed proof")
+				}
+			}
 		}
 		for key, value := range outcome.Evidence {
 			evidence[key] = value

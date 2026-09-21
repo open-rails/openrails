@@ -125,7 +125,7 @@ func newCaptureFixture(t *testing.T) *captureFixture {
 			require.Equal(t, "false", r.URL.Query().Get("force_sync"))
 			token := strings.TrimPrefix(r.URL.Path, "/v2/payment-methods/")
 			for _, s := range g.sessions {
-				if s.Token == token && s.Ready {
+				if (s.Token == token || "method-"+s.ID == token) && s.Ready {
 					if hook := g.afterMethodRead; hook != nil {
 						g.mu.Unlock()
 						hook()

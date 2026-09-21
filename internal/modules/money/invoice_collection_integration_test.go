@@ -490,15 +490,17 @@ func TestInvoiceCollection_OperatorReleaseRefusedPastTheSubmissionFence(t *testi
 	require.NoError(t, err)
 	op := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
 	require.Equal(t, intents.StatusPending, op.Status)
-	// An executor that died between the fence and the send leaves a pending
-	// operation that DID possibly submit.
+	// A fenced pending row must remain protected even when its earlier
+	// executor disappeared before recording the final outcome.
 	_, err = e.pool.Exec(e.ctx, `UPDATE billing.rail_intents SET result_evidence = jsonb_build_object('submitted_at', $2::text) WHERE id = $1`, op.ID, time.Now().UTC().Format(time.RFC3339Nano))
 	require.NoError(t, err)
 
 	_, err = runner.Resolve(e.ctx, op.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "looks unsent"})
 	require.ErrorIs(t, err, intents.ErrResolutionRejected)
 	after := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
-	require.Equal(t, intents.StatusPending, after.Status, "a rejected release parks the operation back untouched")
+	require.Equal(t, intents.StatusInFlight, after.Status, "a rejected stale release cannot reset a fenced claim")
+	require.NotEmpty(t, intents.EvidenceString(after, "submitted_at"))
+	require.Greater(t, after.Attempts, op.Attempts)
 	require.Equal(t, op.ID, *e.invoiceRow(t).CollectionIntentID)
 	require.Equal(t, []string{"attempted"}, e.attemptStatuses(t))
 }
