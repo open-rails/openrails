@@ -20,7 +20,7 @@ func seedOwnedReprice(t *testing.T) (rebillFixture, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	fx := seedPastDueSubscription(t)
 	target := uuid.New()
-	_, err := fx.db.Pool().Exec(fx.handlerCtx(), `INSERT INTO openrails.prices(id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew,key) VALUES($1,$2,$3,8000000,'USD',720,true,$4)`, target, fx.merchantID, fx.payload.Renewal.ProductID, "owned-"+target.String())
+	_, err := fx.db.Pool().Exec(fx.handlerCtx(), `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew,key) VALUES($1,$2,$3,8000000,'USD',720,true,$4)`, target, fx.merchantID, fx.payload.Renewal.ProductID, "owned-"+target.String())
 	require.NoError(t, err)
 	change, err := subscriptions.NewRepriceRepo(fx.db).CreateSubscriptionReprice(fx.handlerCtx(), fx.subID, fx.payload.Renewal.PriceID, target, time.Now().Add(-time.Hour), nil, false)
 	require.NoError(t, err)
@@ -41,7 +41,7 @@ func TestPreparedRepriceRemainsOwnedAfterLostResponseAndDecline(t *testing.T) {
 				// The HTTP callback reads on a different pooled connection, so a write
 				// still hidden in an uncommitted preparation transaction cannot pass.
 				var raw []byte
-				err := fx.db.Pool().QueryRow(ctx, `SELECT result_evidence FROM openrails.rail_intents WHERE id=$1`, accepted.ID).Scan(&raw)
+				err := fx.db.Pool().QueryRow(ctx, `SELECT result_evidence FROM billing.rail_intents WHERE id=$1`, accepted.ID).Scan(&raw)
 				if assert.NoError(t, err) {
 					observed := accepted
 					observed.ResultEvidence = raw
@@ -76,7 +76,7 @@ func TestPreparedRepriceRemainsOwnedAfterLostResponseAndDecline(t *testing.T) {
 				// A previously blocked accepted quote must not become replaceable merely
 				// because the charge declined. This is a restored/imported state fixture;
 				// the live Block path above already refuses this transition.
-				_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.subscription_reprices SET status='blocked',blocked_reason='rail_push_failed: restored pending quote' WHERE id=$1`, change)
+				_, err = fx.db.Pool().Exec(ctx, `UPDATE billing.subscription_reprices SET status='blocked',blocked_reason='rail_push_failed: restored pending quote' WHERE id=$1`, change)
 				require.NoError(t, err)
 				require.ErrorIs(t, repo.Unblock(ctx, change), subscriptions.ErrRebillTermsCommitted)
 				return
@@ -102,7 +102,7 @@ func TestNeverPreparedTerminalRebillReleasesReprice(t *testing.T) {
 	accepted, err := h.EnqueueScheduled(ctx, fx.subID)
 	require.NoError(t, err)
 	require.ErrorIs(t, subscriptions.NewRepriceRepo(fx.db).Cancel(ctx, change), subscriptions.ErrRebillTermsCommitted, "absence of evidence does not release unresolved work")
-	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.payment_methods SET rail_method_ref='replacement' WHERE id=$1`, fx.payload.PaymentMethodID)
+	_, err = fx.db.Pool().Exec(ctx, `UPDATE billing.payment_methods SET rail_method_ref='replacement' WHERE id=$1`, fx.payload.PaymentMethodID)
 	require.NoError(t, err)
 	row, err := fx.rebillRunner(client, fullModeConfig()).ExecuteByID(ctx, accepted.ID)
 	require.NoError(t, err)
@@ -173,7 +173,7 @@ func TestHistoricalScheduledTargetDoesNotOwnANewerQuote(t *testing.T) {
 	fx := seedPastDueSubscriptionAt(t, uuid.New(), clock.Now())
 	ctx := fx.handlerCtx()
 	target := uuid.New()
-	_, err := fx.db.Pool().Exec(ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew,key) VALUES($1,$2,$3,8000000,'USD',720,true,$4)`, target, fx.merchantID, fx.payload.Renewal.ProductID, "reused-"+target.String())
+	_, err := fx.db.Pool().Exec(ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew,key) VALUES($1,$2,$3,8000000,'USD',720,true,$4)`, target, fx.merchantID, fx.payload.Renewal.ProductID, "reused-"+target.String())
 	require.NoError(t, err)
 	repo := subscriptions.NewSubscriptionRepo(fx.db)
 	_, err = repo.SchedulePriceChange(ctx, fx.subID, fx.payload.Renewal.PriceID, target)
@@ -215,6 +215,6 @@ func TestRebillAdmissionRefusesAnAcceptedNMIUpgrade(t *testing.T) {
 	_, err = NewManualRebillHandler(fx.db, fullModeConfig(), fakeNMIResolver{client: client}, nil).EnqueueScheduled(ctx, fx.subID)
 	require.ErrorIs(t, err, subscriptions.ErrRebillTermsCommitted)
 	var count int
-	require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1 AND intent_type='manual_rebill'`, fx.subID).Scan(&count))
+	require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1 AND intent_type='manual_rebill'`, fx.subID).Scan(&count))
 	require.Zero(t, count)
 }
