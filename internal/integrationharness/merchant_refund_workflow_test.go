@@ -84,9 +84,10 @@ func TestMerchantRefundAuthorityAndReplayWorkflow(t *testing.T) {
 		return openrails.PaymentID(id)
 	}
 	paid := payment("nmi")
-	refund := func(id openrails.PaymentID, key, token string) (int, []byte) {
+	const validRefund = `{"amount":"4000000"}`
+	refund := func(id openrails.PaymentID, key, token, body string) (int, []byte) {
 		t.Helper()
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, surface.BaseURL+"/v1/merchant/payments/"+id.String()+"/refunds", bytes.NewBufferString(`{"amount":"4000000"}`))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, surface.BaseURL+"/v1/merchant/payments/"+id.String()+"/refunds", bytes.NewBufferString(body))
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Idempotency-Key", key)
@@ -108,13 +109,18 @@ func TestMerchantRefundAuthorityAndReplayWorkflow(t *testing.T) {
 		token string
 		want  int
 	}{{"", 401}, {readOnly, 403}, {viewer.Secret, 403}, {foreign.APIKey, 404}} {
-		status, raw := refund(paid, uuid.NewString(), row.token)
+		status, raw := refund(paid, uuid.NewString(), row.token, validRefund)
 		require.Equal(t, row.want, status, string(raw))
 		require.Zero(t, calls.Load())
 	}
+	for _, body := range []string{`{}`, `{"amount":"0"}`, `{"amount":"5000"}`} {
+		status, raw := refund(paid, uuid.NewString(), owned.APIKey, body)
+		require.Equal(t, http.StatusBadRequest, status, string(raw))
+		require.Zero(t, calls.Load(), "invalid native amounts never round into a provider refund")
+	}
 	key := uuid.NewString()
 	for i, k := range []string{key, key, uuid.NewString()} {
-		status, raw := refund(paid, k, owned.APIKey)
+		status, raw := refund(paid, k, owned.APIKey, validRefund)
 		require.Equal(t, http.StatusCreated, status, string(raw))
 		require.EqualValues(t, []int{1, 1, 2}[i], calls.Load())
 	}
@@ -126,7 +132,7 @@ func TestMerchantRefundAuthorityAndReplayWorkflow(t *testing.T) {
 	var succeeded int
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.rail_intents WHERE payment_id=$1 AND intent_type='nmi_refund' AND status='succeeded'`, paid.UUID()).Scan(&succeeded))
 	require.Equal(t, 2, succeeded)
-	status, raw = refund(paid, uuid.NewString(), owned.APIKey)
+	status, raw = refund(paid, uuid.NewString(), owned.APIKey, validRefund)
 	require.Equal(t, 400, status, string(raw))
 	require.EqualValues(t, 2, calls.Load(), "over-refund refuses before another provider call")
 
@@ -142,7 +148,7 @@ func TestMerchantRefundAuthorityAndReplayWorkflow(t *testing.T) {
 			}
 		}
 		id := payment("ccbill")
-		status, raw := refund(id, uuid.NewString(), owned.APIKey)
+		status, raw := refund(id, uuid.NewString(), owned.APIKey, validRefund)
 		require.Equal(t, 400, status, string(raw))
 		require.Contains(t, string(raw), "automatic CCBill refunds are unavailable")
 		var operations, refunds int
