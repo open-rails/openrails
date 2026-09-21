@@ -85,6 +85,9 @@ type EnqueueParams struct {
 // Enqueue records the intent (idempotent) and returns the canonical row for
 // its idempotency key.
 func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
+	if p.IntentType == TypeNMIPaymentMethodUpdate {
+		return s.enqueueNMIMethodUpdate(ctx, p)
+	}
 	if p.IntentType == TypeNMIPaymentMethodDelete {
 		return s.enqueueNMIMethodDelete(ctx, p)
 	}

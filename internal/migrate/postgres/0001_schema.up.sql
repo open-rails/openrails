@@ -2224,6 +2224,11 @@ CREATE INDEX idx_rail_intents_created ON openrails.rail_intents USING btree (cre
 
 CREATE INDEX idx_rail_intents_custodian ON openrails.rail_intents USING btree (custodian_id) WHERE (custodian_id IS NOT NULL);
 
+-- Exact handle lookup serves both pending exclusion and permanent erasure history.
+CREATE INDEX idx_rail_intents_custodian_method_delete ON openrails.rail_intents
+    (merchant_id, custodian_id, (payload->'instrument'->>'rail_method_ref'))
+    WHERE intent_type='hyperswitch_method_delete';
+
 CREATE INDEX idx_rail_intents_destructive_actor_window ON openrails.rail_intents USING btree (actor, created_at, intent_type) WHERE (origin = ANY (ARRAY['user'::text, 'admin'::text]));
 
 CREATE INDEX idx_rail_intents_destructive_run ON openrails.rail_intents USING btree (destructive_run_id) WHERE (destructive_run_id IS NOT NULL);

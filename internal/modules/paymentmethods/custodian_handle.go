@@ -34,16 +34,20 @@ func LockCustodianHandles(ctx context.Context, q *gen.Queries, merchant uuid.UUI
 }
 
 // RequireCustodianHandleAvailable runs under its handle lock. An accepted
-// deletion remains authoritative even if the local method disappeared.
+// deletion and its completed physical tombstone remain authoritative after
+// the local row disappears. A completed alias-only detach does not erase it.
 func RequireCustodianHandleAvailable(ctx context.Context, q *gen.Queries, merchant uuid.UUID, h CustodianHandle) error {
 	if h.Custodian == uuid.Nil || h.Method == "" {
 		return nil
 	}
-	deleting, err := q.CustodianMethodDeletionPending(ctx, gen.CustodianMethodDeletionPendingParams{MerchantID: merchant, CustodianID: h.Custodian, MethodRef: h.Method})
+	state, err := q.CustodianMethodDeletionState(ctx, gen.CustodianMethodDeletionStateParams{MerchantID: merchant, CustodianID: h.Custodian, MethodRef: h.Method})
 	if err != nil {
 		return err
 	}
-	if deleting {
+	if state.Erased {
+		return ErrPaymentMethodDeleteUnsafe
+	}
+	if state.Pending {
 		return ErrPaymentMethodDeleteProcessing
 	}
 	return nil

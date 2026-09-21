@@ -22,6 +22,7 @@ import (
 	embedauth "github.com/open-rails/openrails/embed/authkit"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
@@ -38,13 +39,21 @@ import (
 // Ordinary deployment coverage uses loopback custody and PSP boundaries. The
 // explicit browser qualification separately proves real vendor interpolation.
 func TestHyperSwitchInvoiceClientWorkflow(t *testing.T) {
+	t.Run("pending", func(t *testing.T) { testHyperSwitchInvoiceDeletionWorkflow(t, false) })
+	t.Run("completed", func(t *testing.T) { testHyperSwitchInvoiceDeletionWorkflow(t, true) })
+}
+func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) {
 	ctx := t.Context()
 	h := New(t, ctx)
 	g := newCaptureFixture(t)
 	original := g.server.Config.Handler
 	var mu sync.Mutex
 	forms := map[string]map[string]string{}
-	blockReceipt, lostDelete := true, true
+	blockReceipt, lostDelete := true, !deleteCompleted
+	expectedStatus, expectedAliases, expectedDeletes := http.StatusAccepted, 1, 2
+	if deleteCompleted {
+		expectedStatus, expectedAliases, expectedDeletes = http.StatusNoContent, 0, 1
+	}
 	deletes := 0
 	nativeVault := "native-vault-" + uuid.NewString()
 	nativeDeleted := false
@@ -107,7 +116,9 @@ func TestHyperSwitchInvoiceClientWorkflow(t *testing.T) {
 			require.Equal(t, "invoice-key", r.Header.Get("Authorization"))
 			_, _ = fmt.Fprint(w, `{"id":"invoice_receipt","object":"transaction","response":"1","amount":"5.00","currency":"USD","actions":[{"id":"invoice_sale","type":"sale","amount":"5.00","success":true,"response":"1"}]}`)
 		default:
+			mu.Unlock()
 			original.ServeHTTP(w, r)
+			mu.Lock()
 		}
 	})
 	var delegated billingauth.DelegatedAuthenticator
@@ -248,7 +259,64 @@ func TestHyperSwitchInvoiceClientWorkflow(t *testing.T) {
 		require.Equal(t, "stored", form["stored_credential_indicator"])
 	}
 	mu.Unlock()
-	require.Equal(t, http.StatusAccepted, deleteMethod(token), "lost native response keeps a durable pending delete")
+	// A second PSP capture is already reading the same vendor card when
+	// deletion wins admission. Its later attachment must join the handle fence.
+	aliasPSP := uuid.New()
+	_, err = h.sharedPool().Exec(ctx, `INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,custodian_id) VALUES($1,$2,'nmi','test',$3,$4)`, aliasPSP, owned.MerchantID.UUID(), "capture-alias-"+aliasPSP.String(), custodian)
+	require.NoError(t, err)
+	aliasSetup, err := client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{Mode: "payment_method", IdempotencyKey: uuid.NewString(), Customer: openrails.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: *user.Email, Username: "invoice"}, Payment: openrails.CheckoutPayment{PSPID: aliasPSP}})
+	require.NoError(t, err)
+	var sharedHandle string
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT rail_method_ref FROM billing.payment_methods WHERE id=$1`, complete.PaymentMethodID.UUID()).Scan(&sharedHandle))
+	aliasToken := g.complete(aliasSetup.Capture.SessionID)
+	entered, release := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	g.mu.Lock()
+	g.sessions[aliasSetup.Capture.SessionID].MethodID = sharedHandle
+	g.afterMethodRead = func() { close(entered); <-release }
+	g.mu.Unlock()
+	finished := make(chan error, 1)
+	go func() {
+		_, err := client.ConfirmCheckoutSession(ctx, aliasSetup.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: customer, Payment: openrails.ConfirmPayment{Capture: &openrails.CustodianCaptureReference{CustodianID: custodian, SessionID: aliasSetup.Capture.SessionID, Token: aliasToken}}})
+		finished <- err
+	}()
+	select {
+	case <-entered:
+	case err := <-finished:
+		t.Fatalf("capture ended before provider-read barrier: %v", err)
+	}
+	require.Equal(t, expectedStatus, deleteMethod(token), "DELETE reports its actual durable result")
+	release <- struct{}{}
+	require.ErrorIs(t, <-finished, openrails.ErrConflict, "capture already in provider read cannot attach behind accepted deletion")
+	g.mu.Lock()
+	g.afterMethodRead = nil
+	g.mu.Unlock()
+	var aliasCount int
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND custodian_id=$2 AND rail_method_ref=$3`, owned.MerchantID.UUID(), custodian, sharedHandle).Scan(&aliasCount))
+	require.Equal(t, expectedAliases, aliasCount)
+	require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(ctx, owned.MerchantID), func(c context.Context) error {
+		_, err := rt.DB.Gen(c).ExpireCheckoutSessions(c, gen.ExpireCheckoutSessionsParams{MerchantID: owned.MerchantID.UUID(), Now: time.Now().Add(time.Hour), RowLimit: 100})
+		return err
+	}))
+
+	var blockedInvoice uuid.UUID
+	require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(ctx, owned.MerchantID), func(c context.Context) error {
+		payer := identity.CustomerID(customer.UUID())
+		if _, err := rt.MoneyService.AccrueOwed(c, payer, "USD", "delete-first", uuid.NewString(), 2_000_000); err != nil {
+			return err
+		}
+		invoice, err := rt.MoneyService.FinalizeInvoice(c, payer, "USD", time.Now().Add(-time.Second), time.Now().Add(time.Hour))
+		if err == nil {
+			blockedInvoice = invoice.ID
+		}
+		return err
+	}))
+	_, err = payerClient.PayInvoiceNow(ctx, openrails.PayInvoiceNowRequest{InvoiceID: blockedInvoice, PaymentMethodID: *complete.PaymentMethodID, IdempotencyKey: uuid.NewString()})
+	require.Error(t, err, "accepted deletion prevents a new invoice charge")
+	mu.Lock()
+	require.Len(t, forms, 1, "delete-first ordering sends no new money POST")
+	mu.Unlock()
+
 	var deletion uuid.UUID
 	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT id FROM billing.rail_intents WHERE merchant_id=$1 AND intent_type='hyperswitch_method_delete' AND payload->>'payment_method_id'=$2`, owned.MerchantID.UUID(), complete.PaymentMethodID.UUID().String()).Scan(&deletion))
 	mu.Lock()
@@ -279,7 +347,7 @@ func TestHyperSwitchInvoiceClientWorkflow(t *testing.T) {
 	require.True(t, replay.Replayed)
 	mu.Lock()
 	require.Len(t, forms, 1)
-	require.Equal(t, 2, deletes)
+	require.Equal(t, expectedDeletes, deletes)
 	mu.Unlock()
 	// Native NMI uses the same authenticated self-service policy at defaults.
 	nativePSP, nativeMethod := uuid.New(), uuid.New()
@@ -389,7 +457,7 @@ func TestHyperSwitchInvoiceClientWorkflow(t *testing.T) {
 		var corrupt bytes.Buffer
 		require.Error(t, merchantarchive.Export(ctx, target, owned.MerchantID, &corrupt), "archive must refuse a resurrected deleted method")
 		mu.Lock()
-		require.Equal(t, 2, deletes)
+		require.Equal(t, expectedDeletes, deletes)
 		require.Equal(t, 1, nativeDeletes)
 		require.Len(t, forms, 1)
 		mu.Unlock()

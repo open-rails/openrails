@@ -75,28 +75,34 @@ func (q *Queries) CountCustodianMethodAliases(ctx context.Context, arg CountCust
 	return i, err
 }
 
-const custodianMethodDeletionPending = `-- name: CustodianMethodDeletionPending :one
-SELECT EXISTS (
-    SELECT 1 FROM openrails.rail_intents
-    WHERE merchant_id = $1::uuid
-      AND custodian_id = $2::uuid
-      AND intent_type = 'hyperswitch_method_delete'
-      AND status NOT IN ('succeeded', 'failed_terminal', 'superseded', 'expired')
-      AND payload->'instrument'->>'rail_method_ref' = $3::text
-) AS pending
+const custodianMethodDeletionState = `-- name: CustodianMethodDeletionState :one
+SELECT COALESCE(bool_or(status NOT IN ('succeeded','failed_terminal','superseded','expired')),false)::boolean AS pending,
+       COALESCE(bool_or(status='succeeded' AND payload->>'detach_only' IS DISTINCT FROM 'true'),false)::boolean AS erased
+FROM openrails.rail_intents
+WHERE merchant_id=$1::uuid
+  AND custodian_id=$2::uuid
+  AND intent_type='hyperswitch_method_delete'
+  AND payload->'instrument'->>'rail_method_ref'=$3::text
 `
 
-type CustodianMethodDeletionPendingParams struct {
+type CustodianMethodDeletionStateParams struct {
 	MerchantID  uuid.UUID
 	CustodianID uuid.UUID
 	MethodRef   string
 }
 
-func (q *Queries) CustodianMethodDeletionPending(ctx context.Context, arg CustodianMethodDeletionPendingParams) (bool, error) {
-	row := q.db.QueryRow(ctx, custodianMethodDeletionPending, arg.MerchantID, arg.CustodianID, arg.MethodRef)
-	var pending bool
-	err := row.Scan(&pending)
-	return pending, err
+type CustodianMethodDeletionStateRow struct {
+	Pending bool
+	Erased  bool
+}
+
+// The vendor never reuses a physically erased permanent method ID. Its
+// retained decision blocks a stale pre-delete capture read even after commit.
+func (q *Queries) CustodianMethodDeletionState(ctx context.Context, arg CustodianMethodDeletionStateParams) (CustodianMethodDeletionStateRow, error) {
+	row := q.db.QueryRow(ctx, custodianMethodDeletionState, arg.MerchantID, arg.CustodianID, arg.MethodRef)
+	var i CustodianMethodDeletionStateRow
+	err := row.Scan(&i.Pending, &i.Erased)
+	return i, err
 }
 
 const deleteFencedPaymentMethod = `-- name: DeleteFencedPaymentMethod :execrows

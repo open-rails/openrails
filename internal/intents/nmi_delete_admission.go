@@ -28,7 +28,7 @@ func (s *Store) enqueueNMIMethodDelete(ctx context.Context, p EnqueueParams) (ge
 		return row, err
 	}
 	customer, err := uuid.Parse(terms.UserID)
-	if err != nil || customer == uuid.Nil || terms.PaymentMethodID == uuid.Nil || p.IdempotencyKey != NMIPaymentMethodDeleteIdempotencyKey(terms.PaymentMethodID) || p.CustodianID != uuid.Nil || p.SubscriptionID != nil || p.PaymentID != nil || p.PriceID != nil || p.ExpiresAt != nil {
+	if err != nil || customer == uuid.Nil || p.Provider != "nmi" || terms.PaymentMethodID == uuid.Nil || p.IdempotencyKey != NMIPaymentMethodDeleteIdempotencyKey(terms.PaymentMethodID) || p.CustodianID != uuid.Nil || p.SubscriptionID != nil || p.PaymentID != nil || p.PriceID != nil || p.ExpiresAt != nil {
 		return row, paymentmethods.ErrPaymentMethodDeleteUnsafe
 	}
 	if err := validatePaymentMethodDeleteAuthority(ctx, p); err != nil {

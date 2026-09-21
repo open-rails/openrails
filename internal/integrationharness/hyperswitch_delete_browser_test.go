@@ -106,7 +106,7 @@ func TestHyperSwitchActualBrowserDeletion(t *testing.T) {
 	require.Equal(t, "http://127.0.0.1:33144", vendor.APIBaseURL)
 	require.Equal(t, "http://127.0.0.1:33146/HyperLoader.js", vendor.SDKURL)
 	const project = "openrails-297-delete-20260921"
-	output, err := exec.Command("docker", "inspect", project+"-router-1", "--format", "{{json .Config.Labels}}").Output()
+	output, err := exec.CommandContext(t.Context(), "docker", "inspect", project+"-router-1", "--format", "{{json .Config.Labels}}").Output()
 	require.NoError(t, err)
 	var labels map[string]string
 	require.NoError(t, json.Unmarshal(output, &labels))

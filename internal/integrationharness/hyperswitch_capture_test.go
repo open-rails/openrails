@@ -33,6 +33,7 @@ import (
 // The pinned HyperSwitch SDK/vault browser proof is a separate required gate.
 type captureFixtureSession struct {
 	ID, Customer, Secret, Token string
+	MethodID                    string
 	Expiry                      time.Time
 	Ready                       bool
 }
@@ -125,13 +126,17 @@ func newCaptureFixture(t *testing.T) *captureFixture {
 			require.Equal(t, "false", r.URL.Query().Get("force_sync"))
 			token := strings.TrimPrefix(r.URL.Path, "/v2/payment-methods/")
 			for _, s := range g.sessions {
-				if (s.Token == token || "method-"+s.ID == token) && s.Ready {
+				methodID := s.MethodID
+				if methodID == "" {
+					methodID = "method-" + s.ID
+				}
+				if (s.Token == token || methodID == token) && s.Ready {
 					if hook := g.afterMethodRead; hook != nil {
 						g.mu.Unlock()
 						hook()
 						g.mu.Lock()
 					}
-					write(map[string]any{"id": "method-" + s.ID, "merchant_id": g.account, "customer_id": s.Customer, "storage_type": "persistent", "payment_method_data": map[string]any{"card": map[string]string{"last4_digits": "4242", "expiry_month": "12", "expiry_year": "2030", "card_network": "Visa"}}})
+					write(map[string]any{"id": methodID, "merchant_id": g.account, "customer_id": s.Customer, "storage_type": "persistent", "payment_method_data": map[string]any{"card": map[string]string{"last4_digits": "4242", "expiry_month": "12", "expiry_year": "2030", "card_network": "Visa"}}})
 					return
 				}
 			}

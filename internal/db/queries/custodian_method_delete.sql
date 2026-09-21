@@ -10,15 +10,16 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND custodian_id = sqlc.arg(custodian_id)::uuid
   AND rail_method_ref = sqlc.arg(method_ref)::text;
 
--- name: CustodianMethodDeletionPending :one
-SELECT EXISTS (
-    SELECT 1 FROM openrails.rail_intents
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-      AND custodian_id = sqlc.arg(custodian_id)::uuid
-      AND intent_type = 'hyperswitch_method_delete'
-      AND status NOT IN ('succeeded', 'failed_terminal', 'superseded', 'expired')
-      AND payload->'instrument'->>'rail_method_ref' = sqlc.arg(method_ref)::text
-) AS pending;
+-- name: CustodianMethodDeletionState :one
+-- The vendor never reuses a physically erased permanent method ID. Its
+-- retained decision blocks a stale pre-delete capture read even after commit.
+SELECT COALESCE(bool_or(status NOT IN ('succeeded','failed_terminal','superseded','expired')),false)::boolean AS pending,
+       COALESCE(bool_or(status='succeeded' AND payload->>'detach_only' IS DISTINCT FROM 'true'),false)::boolean AS erased
+FROM openrails.rail_intents
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid
+  AND custodian_id=sqlc.arg(custodian_id)::uuid
+  AND intent_type='hyperswitch_method_delete'
+  AND payload->'instrument'->>'rail_method_ref'=sqlc.arg(method_ref)::text;
 
 -- name: FencePaymentMethodDeletion :execrows
 UPDATE openrails.payment_methods

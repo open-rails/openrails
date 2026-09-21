@@ -39,7 +39,7 @@ func DeletedMethod(in gen.OpenrailsRailIntent) (uuid.UUID, uuid.UUID, error) {
 			return uuid.Nil, uuid.Nil, err
 		}
 		customer, err := uuid.Parse(p.UserID)
-		if err != nil || customer == uuid.Nil || in.PspID == nil || *in.PspID == uuid.Nil || in.CustodianID != nil || in.IdempotencyKey != NMIPaymentMethodDeleteIdempotencyKey(p.PaymentMethodID) {
+		if err != nil || in.Rail != "nmi" || customer == uuid.Nil || in.PspID == nil || *in.PspID == uuid.Nil || in.CustodianID != nil || in.IdempotencyKey != NMIPaymentMethodDeleteIdempotencyKey(p.PaymentMethodID) {
 			return uuid.Nil, uuid.Nil, invalid
 		}
 		var receipt struct {

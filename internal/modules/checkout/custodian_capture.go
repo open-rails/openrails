@@ -389,6 +389,9 @@ func (s *CheckoutSessionService) confirmPaymentMethodSetup(ctx context.Context, 
 			return err
 		}
 		if err := paymentmethods.RequireCustodianHandleAvailable(c, queries, owner.UUID(), handle); err != nil {
+			if errors.Is(err, paymentmethods.ErrPaymentMethodDeleteProcessing) || errors.Is(err, paymentmethods.ErrPaymentMethodDeleteUnsafe) {
+				return ErrCheckoutSessionConflict
+			}
 			return err
 		}
 		row, err := queries.GetPaymentMethodSetupSessionForUpdate(c, gen.GetPaymentMethodSetupSessionForUpdateParams{ID: session.ID, MerchantID: owner.UUID()})

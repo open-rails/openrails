@@ -573,6 +573,9 @@ func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *
 	if pm.Custodian != models.CustodianPSP {
 		return nil, ErrPaymentMethodCustodianUnsupported
 	}
+	if strings.HasPrefix(pm.ParkReason, "delete:") {
+		return nil, ErrPaymentMethodDeleteProcessing
+	}
 	rail := strings.ToLower(string(pm.Rail))
 	if rail == "" {
 		return nil, errors.New("payment method rail is required")
