@@ -1,6 +1,5 @@
 Owner: /root/astra_engine_cancel
-Purpose: OpenRails #297 engine-owned cancel/resume lifecycle and public qualification
-Branch: feat/297-engine-cancellation-20260921
-Base: d8af9e9f304a94029609e8ad96cd3fcecfe78d44 (origin/master)
-Dependency: #578 d8e88c770 (corrected policy view and wire fixtures)
-Integrated master: 58aa2922d45b460d9e85f084150813e4de2281df (#577)
+Purpose: OpenRails #297 engine recurring due admission, submission and receipt completion; activation held
+Branch: feat/297-engine-recurring-worker-20260921
+Base: 58aa2922d45b460d9e85f084150813e4de2281df (fetched origin/master)
+Dependencies: #579 263c965102e46045a2183ed9a6b7a66f0debd59a (includes #578 d0e653c2b); #580 02782e98c66b63a26789d1d265d1ba49efbc0c52
