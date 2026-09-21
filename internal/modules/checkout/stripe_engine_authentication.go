@@ -14,9 +14,10 @@ import (
 )
 
 type StripeEngineAuthentication struct {
-	Operation       openrails.PaymentOperation `json:"operation"`
-	PaymentIntentID string                     `json:"payment_intent_id,omitempty"`
-	ClientSecret    string                     `json:"client_secret,omitempty"`
+	Operation               openrails.PaymentOperation `json:"operation"`
+	PaymentIntentID         string                     `json:"payment_intent_id,omitempty"`
+	ClientSecret            string                     `json:"client_secret,omitempty"`
+	ProviderPaymentMethodID string                     `json:"provider_payment_method_id,omitempty"`
 }
 
 func (s *CheckoutService) ownedStripeEngineOperation(ctx context.Context, id uuid.UUID, principal billingauth.DelegatedPrincipal) (gen.OpenrailsRailIntent, error) {
@@ -85,6 +86,7 @@ func (s *CheckoutService) StripePaymentAuthentication(ctx context.Context, id uu
 	}
 	out.PaymentIntentID = reference
 	out.ClientSecret = secret
+	out.ProviderPaymentMethodID = params.Instrument.RailMethodRef
 	return out, nil
 }
 

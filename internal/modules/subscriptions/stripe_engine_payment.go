@@ -314,8 +314,11 @@ func (s *StripeService) engineReceipt(ctx context.Context, p StripeEnginePayment
 		Status         string          `json:"status"`
 		Paid           bool            `json:"paid"`
 		Captured       bool            `json:"captured"`
+		Refunded       bool            `json:"refunded"`
+		Disputed       bool            `json:"disputed"`
+		AmountRefunded int64           `json:"amount_refunded"`
 	}
-	if json.Unmarshal(body, &ch) != nil || ch.ID != ref || ch.Amount != int64(p.AmountMinor) || ch.AmountCaptured != int64(p.AmountMinor) || !strings.EqualFold(ch.Currency, p.Currency) || rawID(ch.Customer) != p.Instrument.RailCustomerRef || ch.PaymentMethod != p.Instrument.RailMethodRef || rawID(ch.PaymentIntent) != pi.ID || ch.Status != "succeeded" || !ch.Paid || !ch.Captured {
+	if json.Unmarshal(body, &ch) != nil || ch.ID != ref || ch.Amount != int64(p.AmountMinor) || ch.AmountCaptured != int64(p.AmountMinor) || !strings.EqualFold(ch.Currency, p.Currency) || rawID(ch.Customer) != p.Instrument.RailCustomerRef || ch.PaymentMethod != p.Instrument.RailMethodRef || rawID(ch.PaymentIntent) != pi.ID || ch.Status != "succeeded" || !ch.Paid || !ch.Captured || ch.Refunded || ch.Disputed || ch.AmountRefunded != 0 {
 		return StripeEngineReceipt{}, errors.New("Stripe engine captured charge does not match accepted payment")
 	}
 	return StripeEngineReceipt{pi.ID, ref, p.Instrument.RailCustomerRef, p.Instrument.RailMethodRef, p.AmountMinor, p.Currency, p.MerchantID, p.PSPID, p.CustomerID, p.OperationID, p.Initial}, nil
