@@ -41,6 +41,13 @@ func TestNativeEngineRecurringCollectionOwnsOnlyNewAgreement(t *testing.T) {
 			}
 			_, err = e.svc.AdmitDueSubscriptionCollection(e.ctx, legacy, now)
 			require.ErrorContains(t, err, "engine-owned")
+			lifecycle := subscriptions.NewSubscriptionLifecycleService(e.db, nil, nil, nil, nil, nil, clock)
+			if mode == "paid" {
+				_, err = e.pool.Exec(e.ctx, `UPDATE billing.subscriptions SET payment_method_id=NULL WHERE id=$1`, sub)
+				require.NoError(t, err)
+				require.NoError(t, lifecycle.UpdateEnginePaymentMethod(e.ctx, sub, e.payer.UUID(), e.method))
+				require.Error(t, lifecycle.UpdateEnginePaymentMethod(e.ctx, legacy, e.payer.UUID(), e.method), "engine binding cannot mutate a legacy agreement")
+			}
 			e.svc.EngineAdmissionHold = true
 			_, err = e.svc.AdmitDueSubscriptionCollection(e.ctx, sub, now)
 			require.ErrorContains(t, err, "admission is held")
@@ -51,6 +58,7 @@ func TestNativeEngineRecurringCollectionOwnsOnlyNewAgreement(t *testing.T) {
 			same, err := e.svc.AdmitDueSubscriptionCollection(e.ctx, sub, now)
 			require.NoError(t, err)
 			require.Equal(t, op.ID, same.ID)
+			require.ErrorIs(t, lifecycle.UpdateEnginePaymentMethod(e.ctx, sub, e.payer.UUID(), e.method), subscriptions.ErrRebillTermsCommitted)
 			op, claimed, err := intents.NewStore(e.db).ClaimByID(e.ctx, op.ID, now, now.Add(time.Minute))
 			require.NoError(t, err)
 			require.True(t, claimed)
