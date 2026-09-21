@@ -257,7 +257,7 @@ func seedCutoverHTTP(t *testing.T, h *Harness, s *Surface, g *cutoverGateway, mo
 		ID, PSP uuid.UUID
 		Vault   string
 	}{{p.OldMethod, source, oldVault}, {p.NewMethod, target, newVault}} {
-		exec(`INSERT INTO billing.payment_methods(id,merchant_id,customer_id,rail,psp_id,rail_customer_ref,rail_method_ref,initial_transaction_id,custodian,rebill_driver) VALUES($1,$2,$3,'nmi',$4,$5,'only-card','','psp','provider')`, pm.ID, mid, p.Customer, pm.PSP, pm.Vault)
+		exec(`INSERT INTO billing.payment_methods(id,merchant_id,customer_id,rail,psp_id,rail_customer_ref,rail_method_ref,initial_transaction_id,custodian) VALUES($1,$2,$3,'nmi',$4,$5,'only-card','','psp')`, pm.ID, mid, p.Customer, pm.PSP, pm.Vault)
 	}
 	exec(`INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,status,started_at,current_period_starts_at,current_period_ends_at,rail,rail_subscription_id,psp_id,payment_method_id) VALUES($1,$2,$3,$4,$5,'active',$6,$6,$7,'nmi',$8,$9,$10)`, p.Sub, mid, p.Customer, product, p.Price, p.Start, p.Anchor, providerSub, source, p.OldMethod)
 	plan := nmi.V5Plan{Object: "plan", ID: planID, PlanAmount: "10.00", PlanPayments: "0", DayFrequency: "30", MonthFrequency: "0"}

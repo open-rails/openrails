@@ -178,7 +178,6 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 					ExpiryDate:           nilIfEmpty(pm.ExpiryDate),
 					CreatedAt:            created,
 					UpdatedAt:            created,
-					RebillDriver:         "",
 				}); err != nil {
 					return fmt.Errorf("create payment method %s/%s: %w", pm.Rail, pm.RailCustomerRef, err)
 				}

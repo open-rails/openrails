@@ -48,14 +48,14 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 		}
 	}
 	rows, err := r.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
-		ID:                   m.ID,
-		MerchantID:           tid.UUID(),
-		CustomerID:           m.CustomerID,
-		Rail:                 string(m.Rail),
-		PspID:                pspID,
-		RailCustomerRef:      m.RailCustomerRef,
-		RailMethodRef:        m.RailMethodRef,
-		RebillDriver:         m.RebillDriver, // "" -> DB default 'provider'
+		ID:              m.ID,
+		MerchantID:      tid.UUID(),
+		CustomerID:      m.CustomerID,
+		Rail:            string(m.Rail),
+		PspID:           pspID,
+		RailCustomerRef: m.RailCustomerRef,
+		RailMethodRef:   m.RailMethodRef,
+
 		InitialTransactionID: m.InitialTransactionID,
 		LastFour:             m.LastFour,
 		CardType:             m.CardType,

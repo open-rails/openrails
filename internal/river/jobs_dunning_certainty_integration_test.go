@@ -111,7 +111,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 			RailCustomerRef: customerRef, RailMethodRef: methodRef,
 			// RebillDriver=openrails: WE drive the rebill, so this is emphatically
 			// not the #635 vault-less provider-auto-billed shape.
-			RebillDriver:         "openrails",
+
 			InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
 		})
 		require.NoError(t, err)
@@ -122,7 +122,8 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 		periodStart := periodEnd.Add(-time.Duration(cycleHours) * time.Hour)
 		nextRetry := now.Add(-time.Minute)
 		_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-			ID: subID, MerchantID: merchantID, CustomerID: customerID, ProductID: productID, PriceID: &priceID,
+			CollectionPolicy: string(models.CollectionPolicyProviderDunning),
+			ID:               subID, MerchantID: merchantID, CustomerID: customerID, ProductID: productID, PriceID: &priceID,
 			Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
 			PspID:              pspID,
 			RailSubscriptionID: providerSubID, PaymentMethodID: &pmID,

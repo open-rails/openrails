@@ -38,7 +38,7 @@ func TestPartialSubscriptionCommandsPreserveNewlyAcceptedBillingTerms(t *testing
 				_, err = fx.db.Pool().Exec(ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew,key) VALUES($1,$2,$3,$5,'USD',720,true,$4)`, id, fx.merchantID, fx.payload.Renewal.ProductID, "partial-"+id.String(), int64(8000000+index*1000000))
 				require.NoError(t, err)
 			}
-			_, err = fx.db.Pool().Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,rail,psp_id,rail_customer_ref,rail_method_ref,initial_transaction_id,stored_credential_recurring_ref,rebill_driver) SELECT $1,merchant_id,customer_id,rail,psp_id,rail_customer_ref,'new-billing-profile',initial_transaction_id,stored_credential_recurring_ref,rebill_driver FROM billing.payment_methods WHERE id=$2`, method, fx.payload.PaymentMethodID)
+			_, err = fx.db.Pool().Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,rail,psp_id,rail_customer_ref,rail_method_ref,initial_transaction_id,stored_credential_recurring_ref) SELECT $1,merchant_id,customer_id,rail,psp_id,rail_customer_ref,'new-billing-profile',initial_transaction_id,stored_credential_recurring_ref FROM billing.payment_methods WHERE id=$2`, method, fx.payload.PaymentMethodID)
 			require.NoError(t, err)
 			tx, err := fx.db.Pool().Begin(ctx)
 			require.NoError(t, err)

@@ -610,12 +610,12 @@ func (h *CustodianSaleIntentHandler) ensureInstrument(ctx context.Context, merch
 		CustomerID:    customerID,
 		Rail:          models.RailNMI,
 		RailMethodRef: token.ID,
-		RebillDriver:  models.RebillDriverOpenRails,
-		Custodian:     nmiproxy.Custodian,
-		Fingerprint:   token.Fingerprint,
-		ChargeVia:     nmiproxy.ViaPANProxy,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+
+		Custodian:   nmiproxy.Custodian,
+		Fingerprint: token.Fingerprint,
+		ChargeVia:   nmiproxy.ViaPANProxy,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	if token.Card != nil {
 		method.LastFour = stringPtrIfSet(token.Card.Last4)

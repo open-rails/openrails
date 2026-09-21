@@ -278,6 +278,9 @@ func (w *DunningWorker) processSubscription(
 	priceSvc *catalog.PriceService,
 	materialize bool,
 ) (dunningOutcome, error) {
+	if sub.CollectionPolicy == models.CollectionPolicyEngine {
+		return dunningOutcomeFailed, nil
+	}
 	ctx = db.WithPSPID(ctx, sub.PspID)
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
 
@@ -291,7 +294,7 @@ func (w *DunningWorker) processSubscription(
 
 	periodEnd := sub.CurrentPeriodEndsAt.UTC()
 
-	providerAutoBilled := subscriptionProviderAutoBilled(railName, sub.PaymentMethod)
+	providerAutoBilled := subscriptionProviderAutoBilled(railName, sub)
 
 	// Dunning staleness window (#344, #359): charges are only attempted within
 	// the window DERIVED from the price's billing cycle (last retry offset +
@@ -437,8 +440,8 @@ func (w *DunningWorker) parkStaleSubscription(
 // subscriptionProviderAutoBilled reports whether the provider bills this
 // subscription on its own side, so OpenRails must not manual-rebill or terminate
 // it (#635). Registry-backed (#669); see rails.Descriptor.AutoBilled.
-func subscriptionProviderAutoBilled(rail string, pm *models.PaymentMethod) bool {
-	return rails.AutoBilled(models.Rail(rail), pm)
+func subscriptionProviderAutoBilled(rail string, sub *models.Subscription) bool {
+	return rails.AutoBilled(models.Rail(rail), sub)
 }
 
 func resolveSubscriptionRail(sub *models.Subscription) string {

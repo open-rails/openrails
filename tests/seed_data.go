@@ -576,6 +576,7 @@ func (suite *TestContainerSuite) CreateTestSubscription(userID string, priceID u
 	periodEnd := now.Add(30 * 24 * time.Hour)
 
 	sub := &models.Subscription{
+		CollectionPolicy:      models.CollectionPolicyProviderDunning,
 		ID:                    uuid.New(),
 		CustomerID:            tenantSubjectID,
 		ProductID:             price.ProductID,
@@ -597,6 +598,7 @@ func (suite *TestContainerSuite) CreateTestSubscription(userID string, priceID u
 
 // CreateTestSubscriptionWithOptions creates a subscription with custom options
 type SubscriptionOptions struct {
+	CollectionPolicy    models.CollectionPolicy
 	UserID              string
 	PriceID             uuid.UUID
 	Status              models.SubscriptionStatus
@@ -641,6 +643,7 @@ func (suite *TestContainerSuite) CreateTestSubscriptionWithOptions(opts Subscrip
 	}
 
 	sub := &models.Subscription{
+		CollectionPolicy:      opts.CollectionPolicy,
 		ID:                    uuid.New(),
 		CustomerID:            tenantSubjectID,
 		ProductID:             price.ProductID,
@@ -691,7 +694,7 @@ func (suite *TestContainerSuite) CreateTestPaymentMethod(userID string) *models.
 		RailMethodRef:   "billing-" + uuid.New().String()[:8],
 		// #682: legacy-shaped fixture (billing id present) — the explicit mode
 		// mirrors migration 058's backfill so dunning routes to manual rebill.
-		RebillDriver:         models.RebillDriverOpenRails,
+
 		InitialTransactionID: "txn-" + uuid.New().String()[:8],
 		LastFour:             strPtr("4242"),
 		CardType:             strPtr("Visa"),
@@ -738,21 +741,13 @@ func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts Payment
 		opts.InitialTransactionID = "txn-" + uuid.New().String()[:8]
 	}
 
-	// #682: mirror migration 058's backfill rule for fixtures — an NMI method
-	// seeded WITH a billing id is the legacy-imported shape whose rebills
-	// OpenRails drives; everything else defaults to provider-billed.
-	rebillDriver := models.RebillDriverProvider
-	if opts.Rail == models.RailNMI && opts.BillingID != "" {
-		rebillDriver = models.RebillDriverOpenRails
-	}
-
 	pm := &models.PaymentMethod{
-		ID:                   uuid.New(),
-		CustomerID:           tenantSubjectID,
-		Rail:                 opts.Rail,
-		RailCustomerRef:      opts.VaultID,
-		RailMethodRef:        opts.BillingID,
-		RebillDriver:         rebillDriver,
+		ID:              uuid.New(),
+		CustomerID:      tenantSubjectID,
+		Rail:            opts.Rail,
+		RailCustomerRef: opts.VaultID,
+		RailMethodRef:   opts.BillingID,
+
 		InitialTransactionID: opts.InitialTransactionID,
 		LastFour:             strPtrOrNil(opts.LastFour),
 		CardType:             strPtrOrNil(opts.CardType),

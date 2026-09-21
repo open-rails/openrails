@@ -683,3 +683,19 @@ SELECT * FROM openrails.rail_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='nmi_sale'
   AND (sqlc.narg(after_id)::uuid IS NULL OR id>sqlc.narg(after_id)::uuid)
 ORDER BY id LIMIT sqlc.arg(page_size)::int;
+
+-- name: GetUnresolvedSubscriptionCollection :one
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND subscription_id = sqlc.arg(subscription_id)::uuid
+  AND intent_type = 'subscription_collection'
+  AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+ORDER BY created_at, id LIMIT 1;
+
+-- name: GetLatestSubscriptionCollectionForPeriod :one
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND subscription_id = sqlc.arg(subscription_id)::uuid
+  AND intent_type = 'subscription_collection'
+  AND (payload->>'previous_period_end')::timestamptz = sqlc.arg(previous_period_end)::timestamptz
+ORDER BY (payload->>'attempt')::integer DESC, id DESC LIMIT 1;

@@ -487,7 +487,6 @@ func TestCustodyMigration_PerRowOutcomes(t *testing.T) {
 	require.Equal(t, createdToken, created.RailMethodRef)
 	require.Equal(t, createdVault, created.RailCustomerRef)
 	require.Equal(t, newCustomer, created.CustomerID)
-	require.Equal(t, models.RebillDriverOpenRails, created.RebillDriver)
 }
 
 // TestCustodyMigration_DeclarationErrorsRefuseTheWholeRun: a declaration that

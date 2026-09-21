@@ -9,7 +9,7 @@ INSERT INTO openrails.subscriptions (
     rail_subscription_id, user_email, payment_method_id, last_retry_at,
     retry_attempts, next_retry_at, grace_ends_at, cancel_feedback,
     cancel_type, cancelled_at, deletion_scheduled_at, gateway_response,
-    created_at, updated_at, psp_id
+    created_at, updated_at, psp_id, collection_policy
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, sqlc.narg(scheduled_price_id),
     sqlc.narg(entitlements_spec_snapshot),
@@ -23,7 +23,8 @@ INSERT INTO openrails.subscriptions (
     sqlc.narg(deletion_scheduled_at), sqlc.narg(gateway_response),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(psp_id)::uuid
+    sqlc.arg(psp_id)::uuid,
+    COALESCE(NULLIF(sqlc.arg(collection_policy)::text, ''), 'provider')
 );
 
 -- name: UpdateSubscriptionAt :execrows
@@ -314,6 +315,7 @@ SELECT merchant_id FROM openrails.due_dunning_merchant_ids(
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.rail = ANY(sqlc.arg(rails)::text[])
   AND sub.status = 'past_due'
+  AND sub.collection_policy <> 'engine'
   AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz
   AND sub.deleted_at IS NULL
 ORDER BY sub.next_retry_at, sub.id

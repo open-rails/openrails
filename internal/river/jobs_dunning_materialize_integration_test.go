@@ -65,7 +65,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 		ID: paymentMethodID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, Rail: string(models.RailNMI),
 		PspID:           pspID,
 		RailCustomerRef: "vault_" + uuid.New().String(), RailMethodRef: billingID,
-		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills
+
 		InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
@@ -76,7 +76,8 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
 	nextRetry := now.Add(-time.Minute)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
+		CollectionPolicy: string(models.CollectionPolicyProviderDunning),
+		ID:               subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
 		PspID:              pspID,
 		RailSubscriptionID: "sub_mat_" + uuid.New().String(), PaymentMethodID: &paymentMethodID,
@@ -227,7 +228,8 @@ func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
 	nextRetry := now.Add(-time.Minute)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
-		ID: subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
+		CollectionPolicy: string(models.CollectionPolicyProviderDunning),
+		ID:               subID, MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: tenantSubjectID, ProductID: productID, PriceID: &priceID,
 		Status: string(models.StatusPastDue), Rail: string(models.RailNMI),
 		PspID:                 pspID,
 		RailSubscriptionID:    "sub_wexp_" + uuid.New().String(),
