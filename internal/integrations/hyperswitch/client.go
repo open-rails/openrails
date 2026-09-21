@@ -275,7 +275,7 @@ func (m Method) validMaskedCard() bool {
 	}
 	month, _ := strconv.Atoi(card.Month)
 	year, _ := strconv.Atoi(card.Year)
-	return month >= 1 && month <= 12 && year >= 2000 && safeIdentifier(card.Brand)
+	return month >= 1 && month <= 12 && year >= 2000 && (card.Brand == "" || (len(card.Brand) <= 50 && safeIdentifier(card.Brand)))
 }
 func (m Method) MaskedExpiry() string {
 	month, _ := strconv.Atoi(m.Data.Card.Month)

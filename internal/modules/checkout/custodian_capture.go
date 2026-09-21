@@ -424,7 +424,11 @@ func (s *CheckoutSessionService) confirmPaymentMethodSetup(ctx context.Context, 
 			return ErrCheckoutSessionConflict
 		}
 		expiry := method.MaskedExpiry()
-		attached, err := queries.AttachCapturedPaymentMethod(c, gen.AttachCapturedPaymentMethodParams{ID: uuid.New(), MerchantID: owner.UUID(), CustomerID: locked.CustomerID, PspID: locked.PspID, CustodianID: new(canonical.CustodianID), VendorCustomerID: canonical.VendorCustomerID, VendorMethodID: method.ID, LastFour: new(method.Data.Card.Last4), CardType: new(method.Data.Card.Brand), ExpiryDate: new(expiry), Now: s.now().UTC()})
+		var brand *string
+		if method.Data.Card.Brand != "" {
+			brand = &method.Data.Card.Brand
+		}
+		attached, err := queries.AttachCapturedPaymentMethod(c, gen.AttachCapturedPaymentMethodParams{ID: uuid.New(), MerchantID: owner.UUID(), CustomerID: locked.CustomerID, PspID: locked.PspID, CustodianID: new(canonical.CustodianID), VendorCustomerID: canonical.VendorCustomerID, VendorMethodID: method.ID, LastFour: new(method.Data.Card.Last4), CardType: brand, ExpiryDate: new(expiry), Now: s.now().UTC()})
 		if err != nil {
 			return err
 		}
