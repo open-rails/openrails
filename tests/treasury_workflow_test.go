@@ -50,17 +50,22 @@ type hostInvokerBinding struct {
 	invoker string
 }
 
-func newTreasuryWorkflow(t *testing.T) treasuryWorkflow {
+func newTreasuryWorkflow(t *testing.T, sandbox ...*config.ProviderSandboxConfig) treasuryWorkflow {
+	var providerSandbox *config.ProviderSandboxConfig
+	if len(sandbox) > 0 {
+		providerSandbox = sandbox[0]
+	}
 	t.Helper()
 	h := integrationharness.New(t, context.Background())
 	surface := h.StartStandalone("USD", integrationharness.WithConfig(func(cfg *config.Config) {
 		cfg.MerchantSource = config.MerchantSourceAPI
 		cfg.SecretBackend = config.SecretBackendDB
 		cfg.ProviderWriteMode = config.ProviderWriteModeFull
+		cfg.ProviderSandbox = providerSandbox
 	}))
 	owned := surface.ProvisionOwnedMerchant("treasury-" + uuid.NewString()[:8])
 	host, err := embed.New(t.Context(), embed.Options{
-		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
+		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, ProviderSandbox: providerSandbox, DB: &config.DBConfig{URL: h.DSN}},
 		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)
@@ -283,7 +288,9 @@ func checkTreasuryAdminGrant(t *testing.T, f treasuryWorkflow) {
 	require.NotEmpty(t, first["id"])
 	require.Equal(t, "5000", first["amount"])
 	require.Equal(t, false, first["replayed"])
-	require.Equal(t, expires.Format(time.RFC3339Nano), first["expires_at"])
+	observedExpiry, err := time.Parse(time.RFC3339Nano, first["expires_at"].(string))
+	require.NoError(t, err)
+	require.True(t, expires.Equal(observedExpiry), "wire expiry preserves the exact requested instant")
 	status, raw = requestWorkflowJSON(t, http.MethodPost, path, admin, body)
 	require.Equal(t, http.StatusOK, status, string(raw))
 	again := workflowObject(t, raw)
