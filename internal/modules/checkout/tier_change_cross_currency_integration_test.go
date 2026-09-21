@@ -46,9 +46,9 @@ func TestTierChangeRefusesCrossCurrencyUpgrade(t *testing.T) {
 	tierGroup := "fx-tier-" + sfx
 	seed := func(key string, rank int, amount int64, currency string) (uuid.UUID, uuid.UUID) {
 		prod, price := uuid.New(), uuid.New()
-		exec(`INSERT INTO openrails.products (id,key,display_name,tier_group,tier_rank,entitlements_spec,merchant_id)
+		exec(`INSERT INTO billing.products (id,key,display_name,tier_group,tier_rank,entitlements_spec,merchant_id)
 		      VALUES ($1,$2,$2,$3,$4,'{}'::jsonb,$5)`, prod, "fx-"+key+"-"+sfx, tierGroup, rank, merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id)
+		exec(`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id)
 		      VALUES ($1,$2,$3,$4,720,true,$5)`, price, prod, amount, currency, merchantID)
 		return prod, price
 	}
@@ -60,18 +60,18 @@ func TestTierChangeRefusesCrossCurrencyUpgrade(t *testing.T) {
 	// Subscriber sits 2 days into a 30-day cycle on the EUR plan.
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "nmi")
 	subID := uuid.New()
-	exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,psp_id,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
+	exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,psp_id,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at)
 	      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$8,$8,$9)`,
 		subID, merchantID, cust, basicProd, basicPrice, pspID, "fx-sub-"+sfx,
 		now.Add(-2*24*time.Hour), now.Add(28*24*time.Hour))
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, subID)
 		for _, p := range []uuid.UUID{basicPrice, proPrice} {
-			_, _ = pool.Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, p)
+			_, _ = pool.Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, p)
 		}
 		for _, p := range []uuid.UUID{basicProd, proProd} {
-			_, _ = pool.Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, p)
+			_, _ = pool.Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, p)
 		}
 	})
 
@@ -89,7 +89,7 @@ func TestTierChangeRefusesCrossCurrencyUpgrade(t *testing.T) {
 	require.ErrorIs(t, err, subscriptions.ErrRepriceCrossCurrency)
 
 	// USD -> EUR (would overcharge): flip the subscription onto the USD plan.
-	exec(`UPDATE openrails.subscriptions SET product_id=$2, price_id=$3 WHERE id=$1`, subID, proProd, proPrice)
+	exec(`UPDATE billing.subscriptions SET product_id=$2, price_id=$3 WHERE id=$1`, subID, proProd, proPrice)
 	req = &TierChangeRequest{PriceID: openrails.PriceID(basicPrice).String(), SubscriptionID: subID, IdempotencyKey: "fx-down-" + subID.String()}
 	_, err = svc.TierChange(ctx, req, user)
 	require.ErrorIs(t, err, subscriptions.ErrRepriceCrossCurrency)

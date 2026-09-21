@@ -61,22 +61,22 @@ func TestConvergeEnforceRollback_AccessReturnsByRecomputationNotRestoration(t *t
 			_, e := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, e)
 		}
-		exec(`INSERT INTO openrails.psps (id, merchant_id, rail, account_id, archived) VALUES ($1,$2,'nmi',$3,false)`,
+		exec(`INSERT INTO billing.psps (id, merchant_id, rail, account_id, archived) VALUES ($1,$2,'nmi',$3,false)`,
 			pspID, merchantID, "acct-rc-"+suffix)
 		for i := range subs {
 			cust := dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 			prod, price := uuid.New(), uuid.New()
 			subs[i], railSubs[i] = uuid.New(), fmt.Sprintf("rs-rc-%s-%d", suffix, i)
-			exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id)
+			exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id)
 			      VALUES ($1,$2,$2,jsonb_build_object('premium',null),$3)`, prod, fmt.Sprintf("rc-%s-%d", suffix, i), merchantID)
-			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id)
+			exec(`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id)
 			      VALUES ($1,$2,5000000,'USD',720,true,$3)`, price, prod, merchantID)
-			exec(`INSERT INTO openrails.subscriptions
+			exec(`INSERT INTO billing.subscriptions
 			        (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,psp_id,
 			         started_at,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot)
 			      VALUES ($1,$2,$3,$4,$5,'active','nmi',$6,$7,$8,$8,$9,jsonb_build_object('premium',null))`,
 				subs[i], merchantID, cust, prod, price, railSubs[i], pspID, now.Add(-30*24*time.Hour), now.Add(30*24*time.Hour))
-			exec(`INSERT INTO openrails.entitlements (merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type)
+			exec(`INSERT INTO billing.entitlements (merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type)
 			      VALUES ($1,$2,'premium',$3,$4,$5,'subscription')`,
 				merchantID, cust, now.Add(-30*24*time.Hour), now.Add(30*24*time.Hour), subs[i])
 		}
@@ -86,24 +86,24 @@ func TestConvergeEnforceRollback_AccessReturnsByRecomputationNotRestoration(t *t
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for _, s := range subs {
 				for _, sql := range []string{
-					`DELETE FROM openrails.rail_intents WHERE subscription_id=$1`,
-					`DELETE FROM openrails.entitlements WHERE source_id=$1`,
-					`DELETE FROM openrails.grants WHERE source_id=$1::text`,
-					`DELETE FROM openrails.subscription_status_transitions WHERE subscription_id=$1`,
-					`DELETE FROM openrails.destructive_run_before_images WHERE row_id=$1`,
-					`DELETE FROM openrails.subscriptions WHERE id=$1`,
+					`DELETE FROM billing.rail_intents WHERE subscription_id=$1`,
+					`DELETE FROM billing.entitlements WHERE source_id=$1`,
+					`DELETE FROM billing.grants WHERE source_id=$1::text`,
+					`DELETE FROM billing.subscription_status_transitions WHERE subscription_id=$1`,
+					`DELETE FROM billing.destructive_run_before_images WHERE row_id=$1`,
+					`DELETE FROM billing.subscriptions WHERE id=$1`,
 				} {
 					_, _ = appDB.Qx(ctx).Exec(ctx, sql, s)
 				}
 			}
 			_, _ = appDB.Qx(ctx).Exec(ctx,
-				`DELETE FROM openrails.destructive_run_before_images WHERE destructive_run_id IN (SELECT id FROM openrails.maintenance_runs WHERE psp_id=$1)`, pspID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.maintenance_runs WHERE psp_id=$1`, pspID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE product_id IN (SELECT id FROM openrails.products WHERE key LIKE 'rc-'||$1||'-%')`, suffix)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE key LIKE 'rc-'||$1||'-%'`, suffix)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.psps WHERE id=$1`, pspID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id=$1`, merchantID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_state WHERE merchant_id=$1`, merchantID)
+				`DELETE FROM billing.destructive_run_before_images WHERE destructive_run_id IN (SELECT id FROM billing.maintenance_runs WHERE psp_id=$1)`, pspID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.maintenance_runs WHERE psp_id=$1`, pspID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE product_id IN (SELECT id FROM billing.products WHERE key LIKE 'rc-'||$1||'-%')`, suffix)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE key LIKE 'rc-'||$1||'-%'`, suffix)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.psps WHERE id=$1`, pspID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.merchant_destructive_policy WHERE merchant_id=$1`, merchantID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_state WHERE merchant_id=$1`, merchantID)
 			return nil
 		})
 	})
@@ -112,7 +112,7 @@ func TestConvergeEnforceRollback_AccessReturnsByRecomputationNotRestoration(t *t
 		var n int
 		require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			return appDB.Qx(ctx).QueryRow(ctx,
-				`SELECT count(*) FROM openrails.entitlements
+				`SELECT count(*) FROM billing.entitlements
 				  WHERE source_id=$1 AND revoked_at IS NULL AND deleted_at IS NULL
 				    AND start_at <= now() AND (end_at IS NULL OR end_at > now())`, sub).Scan(&n)
 		}))
@@ -121,7 +121,7 @@ func TestConvergeEnforceRollback_AccessReturnsByRecomputationNotRestoration(t *t
 	grantCount := func() int {
 		var n int
 		require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			return appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.grants WHERE merchant_id=$1`, merchantID).Scan(&n)
+			return appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.grants WHERE merchant_id=$1`, merchantID).Scan(&n)
 		}))
 		return n
 	}
@@ -190,7 +190,7 @@ func TestConvergeEnforceRollback_AccessReturnsByRecomputationNotRestoration(t *t
 
 	var status string
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		return appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id=$1`, subs[0]).Scan(&status)
+		return appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM billing.subscriptions WHERE id=$1`, subs[0]).Scan(&status)
 	}))
 	require.Equal(t, "active", status, "the subscription is restored from its before-image")
 
@@ -198,7 +198,7 @@ func TestConvergeEnforceRollback_AccessReturnsByRecomputationNotRestoration(t *t
 	var replayed int
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		return appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.destructive_run_before_images
+			`SELECT count(*) FROM billing.destructive_run_before_images
 			  WHERE destructive_run_id=$1 AND table_name='entitlements' AND restored_at IS NOT NULL`, runID).Scan(&replayed)
 	}))
 	require.Zero(t, replayed, "an entitlement before-image must never be replayed")
@@ -213,7 +213,7 @@ func TestConvergeEnforceRollback_AccessReturnsByRecomputationNotRestoration(t *t
 	var derivedFromGrant int
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		return appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements
+			`SELECT count(*) FROM billing.entitlements
 			  WHERE source_id=$1 AND deleted_at IS NULL AND revoked_at IS NULL AND grant_id IS NOT NULL`, subs[0]).Scan(&derivedFromGrant)
 	}))
 	require.Equal(t, 1, derivedFromGrant,

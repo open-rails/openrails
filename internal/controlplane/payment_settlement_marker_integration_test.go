@@ -45,10 +45,10 @@ func TestPaymentSettlementFeedRequiresDeclaredMoneyMovement(t *testing.T) {
 		_, err := super.Exec(ctx, sql, args...)
 		require.NoError(t, err, sql)
 	}
-	exec(`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, mID, "psmark-"+suffix)
-	exec(`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`, custID, mID)
-	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'PS marker', $3)`, prodID, "psmark-p-"+suffix, mID)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, auto_renew) VALUES ($1, $2, 7000000, 'USD', $3, false)`, priceID, prodID, mID)
+	exec(`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, mID, "psmark-"+suffix)
+	exec(`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`, custID, mID)
+	exec(`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'PS marker', $3)`, prodID, "psmark-p-"+suffix, mID)
+	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id, auto_renew) VALUES ($1, $2, 7000000, 'USD', $3, false)`, priceID, prodID, mID)
 	pspID := dbtest.EnsureTestPSP(ctx, t, super, mID, "nmi")
 
 	// Everything runs as openrails_app under the merchant GUC — the same
@@ -66,7 +66,7 @@ func TestPaymentSettlementFeedRequiresDeclaredMoneyMovement(t *testing.T) {
 	insertPayment := func(payID uuid.UUID, txnID, status, movement string, amount int64) {
 		t.Helper()
 		inMerchantTx(func(tx gen.DBTX) {
-			_, err := tx.Exec(ctx, `INSERT INTO openrails.payments
+			_, err := tx.Exec(ctx, `INSERT INTO billing.payments
 				(id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, money_movement, psp_id)
 				VALUES ($1, $2, $3, $4, 'nmi', $5, $6, $6, 'USD', $7, $8, $9)`,
 				payID, mID, custID, priceID, txnID, amount, status, movement, pspID)
@@ -77,7 +77,7 @@ func TestPaymentSettlementFeedRequiresDeclaredMoneyMovement(t *testing.T) {
 		t.Helper()
 		var n int
 		require.NoError(t, super.QueryRow(ctx,
-			`SELECT count(*) FROM openrails.host_outbox WHERE payment_id = $1`, payID).Scan(&n))
+			`SELECT count(*) FROM billing.host_outbox WHERE payment_id = $1`, payID).Scan(&n))
 		return n
 	}
 
@@ -99,7 +99,7 @@ func TestPaymentSettlementFeedRequiresDeclaredMoneyMovement(t *testing.T) {
 	anchor := uuid.New()
 	insertPayment(anchor, "nmi_sub_attempt:"+suffix, "pending", "none", 7_000_000)
 	inMerchantTx(func(tx gen.DBTX) {
-		n, err := gen.New(tx).CompleteProviderAttemptInPlace(ctx, gen.CompleteProviderAttemptInPlaceParams{ID: anchor})
+		n, err := dbtest.Queries(tx).CompleteProviderAttemptInPlace(ctx, gen.CompleteProviderAttemptInPlaceParams{ID: anchor})
 		require.NoError(t, err)
 		require.EqualValues(t, 1, n)
 	})
@@ -111,7 +111,7 @@ func TestPaymentSettlementFeedRequiresDeclaredMoneyMovement(t *testing.T) {
 	insertPayment(attempt, "custodian_sale_attempt:"+suffix, "pending", "none", 7_000_000)
 	require.Zero(t, published(attempt))
 	inMerchantTx(func(tx gen.DBTX) {
-		n, err := gen.New(tx).CompleteProviderAttempt(ctx, gen.CompleteProviderAttemptParams{
+		n, err := dbtest.Queries(tx).CompleteProviderAttempt(ctx, gen.CompleteProviderAttemptParams{
 			ID: attempt, TransactionID: "rail-txn-settled-" + suffix,
 		})
 		require.NoError(t, err)
@@ -133,7 +133,7 @@ func TestPaymentSettlementFeedRequiresDeclaredMoneyMovement(t *testing.T) {
 	defer badTx.Rollback(ctx) //nolint:errcheck
 	_, err = badTx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, mID.String())
 	require.NoError(t, err)
-	_, err = badTx.Exec(ctx, `INSERT INTO openrails.payments
+	_, err = badTx.Exec(ctx, `INSERT INTO billing.payments
 		(id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, money_movement, psp_id)
 		VALUES ($1, $2, $3, $4, 'nmi', $5, 100, 100, 'USD', 'completed', 'maybe', $6)`,
 		uuid.New(), mID, custID, priceID, "bogus-"+suffix, pspID)

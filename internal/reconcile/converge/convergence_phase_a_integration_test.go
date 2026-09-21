@@ -26,7 +26,7 @@ func TestConvergenceFindings_PhaseA_Taxonomy(t *testing.T) {
 	runID := uuid.New()
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, err := appDB.Qx(ctx).Exec(ctx, `
-			INSERT INTO openrails.maintenance_runs (id, merchant_id, kind, mode, rails, status)
+			INSERT INTO billing.maintenance_runs (id, merchant_id, kind, mode, rails, status)
 			VALUES ($1, $2, 'reconciliation', 'advisory', '{self}', 'completed')`, runID, merchantID)
 		return err
 	}))
@@ -44,7 +44,7 @@ func TestConvergenceFindings_PhaseA_Taxonomy(t *testing.T) {
 		for _, tc := range cases {
 			var returnedType, returnedStatus string
 			err := appDB.Qx(ctx).QueryRow(ctx, `
-				INSERT INTO openrails.reconciliation_findings (
+				INSERT INTO billing.reconciliation_findings (
 					merchant_id, finding_type, subject_key, severity, status,
 					evidence, resolved_at, resolution, first_seen_run, last_seen_run
 				) VALUES (
@@ -74,7 +74,7 @@ func TestConvergenceFindings_PhaseA_Taxonomy(t *testing.T) {
 	for _, bad := range []string{"bogus", "PS-2"} {
 		bad := bad
 		require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			q := gen.New(appDB.Qx(ctx))
+			q := dbtest.Queries(appDB.Qx(ctx))
 			_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 				MerchantID: merchantID, FindingType: bad,
 				SubjectKey: bad + ":" + suffix, Severity: "high", Status: "reconcile_required", RunID: &runID,
@@ -87,7 +87,7 @@ func TestConvergenceFindings_PhaseA_Taxonomy(t *testing.T) {
 	for _, bad := range []string{"open", "held", "admin_pending", "admin_required", "resolved", "dismissed", "indeterminate"} {
 		bad := bad
 		require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			q := gen.New(appDB.Qx(ctx))
+			q := dbtest.Queries(appDB.Qx(ctx))
 			_, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 				MerchantID: merchantID, FindingType: "derive.grant.excess",
 				SubjectKey: "bad-status:" + bad + ":" + suffix, Severity: "high", Status: bad, RunID: &runID,
@@ -108,10 +108,10 @@ func TestConvergenceState_ConfirmedAbsenceGate(t *testing.T) {
 	baseCtx := merchant.WithID(ctx, dbtest.TestMerchantID)
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		q := gen.New(appDB.Qx(ctx))
+		q := dbtest.Queries(appDB.Qx(ctx))
 		t.Cleanup(func() {
 			_, _ = appDB.Qx(context.Background()).Exec(context.Background(),
-				`DELETE FROM openrails.reconciliation_state WHERE merchant_id=$1`, merchantID)
+				`DELETE FROM billing.reconciliation_state WHERE merchant_id=$1`, merchantID)
 		})
 
 		// Default: a domain with no row reads NOT reconciled → the gate holds EXCESS.
@@ -153,7 +153,7 @@ func TestConvergenceState_ConfirmedAbsenceGate(t *testing.T) {
 
 		var stateCount int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.reconciliation_state WHERE merchant_id=$1`, merchantID,
+			`SELECT count(*) FROM billing.reconciliation_state WHERE merchant_id=$1`, merchantID,
 		).Scan(&stateCount))
 		require.Equal(t, 1, stateCount)
 		return nil

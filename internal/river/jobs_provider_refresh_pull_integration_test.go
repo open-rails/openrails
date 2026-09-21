@@ -135,7 +135,7 @@ func seedPullMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 	ctx := context.Background()
 	id := merchant.ID(uuid.New())
 	_, err := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()).Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		id.UUID(), slug)
 	require.NoError(t, err)
 	// #836/#835: destructive convergence ships OFF and unarmed. These tests
@@ -144,17 +144,17 @@ func seedPullMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 	dbtest.ArmDestructiveActions(ctx, t, id.UUID())
 	t.Cleanup(func() {
 		for _, stmt := range []string{
-			`DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id = $1`,
-			`DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1`,
-			`DELETE FROM openrails.maintenance_runs WHERE merchant_id = $1`,
-			`DELETE FROM openrails.rail_refresh_watermarks WHERE merchant_id = $1`,
-			`DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id = $1`,
-			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
-			`DELETE FROM openrails.subscriptions WHERE merchant_id = $1`,
-			`DELETE FROM openrails.prices WHERE merchant_id = $1`,
-			`DELETE FROM openrails.products WHERE merchant_id = $1`,
-			`DELETE FROM openrails.customers WHERE merchant_id = $1`,
-			`DELETE FROM openrails.merchants WHERE id = $1`,
+			`DELETE FROM billing.merchant_destructive_policy WHERE merchant_id = $1`,
+			`DELETE FROM billing.reconciliation_findings WHERE merchant_id = $1`,
+			`DELETE FROM billing.maintenance_runs WHERE merchant_id = $1`,
+			`DELETE FROM billing.rail_refresh_watermarks WHERE merchant_id = $1`,
+			`DELETE FROM billing.merchant_destructive_policy WHERE merchant_id = $1`,
+			`DELETE FROM billing.psps WHERE merchant_id = $1`,
+			`DELETE FROM billing.subscriptions WHERE merchant_id = $1`,
+			`DELETE FROM billing.prices WHERE merchant_id = $1`,
+			`DELETE FROM billing.products WHERE merchant_id = $1`,
+			`DELETE FROM billing.customers WHERE merchant_id = $1`,
+			`DELETE FROM billing.merchants WHERE id = $1`,
 		} {
 			// Same reason as loadPullWatermark: these rows are `id`'s, so the
 			// cleanup handle must be pinned to `id` or the DELETEs match
@@ -178,12 +178,12 @@ func seedLocalCCBillSub(t *testing.T, dbi *db.DB, mid merchant.ID, pspID uuid.UU
 			_, err := dbi.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`, cust, mid.UUID())
-		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1, $2, $2, '{}'::jsonb, $3)`,
+		exec(`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`, cust, mid.UUID())
+		exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1, $2, $2, '{}'::jsonb, $3)`,
 			prod, "pull-cc-"+railSubID, mid.UUID())
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 5000000, 'USD', $3)`,
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 5000000, 'USD', $3)`,
 			price, prod, mid.UUID())
-		exec(`INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, started_at, current_period_starts_at, current_period_ends_at, entitlements_spec_snapshot, psp_id)
+		exec(`INSERT INTO billing.subscriptions (id, merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, started_at, current_period_starts_at, current_period_ends_at, entitlements_spec_snapshot, psp_id)
 		      VALUES ($1, $2, $3, $4, $5, 'active', 'ccbill', $6, $7, $7, $8, '{}'::jsonb, $9)`,
 			uuid.New(), mid.UUID(), cust, prod, price, railSubID, periodEnd.Add(-30*24*time.Hour), periodEnd, pspID)
 		return nil
@@ -250,7 +250,7 @@ func loadPullWatermark(t *testing.T, dbi *db.DB, mid merchant.ID, provider strin
 	// on a handle pinned to its OWN merchant or RLS filters the row away and the
 	// helper reports "no watermark" for a watermark that exists.
 	err := dbtest.SharedMerchantPool(t, mid.UUID()).QueryRow(context.Background(), `
-		SELECT watermark_at FROM openrails.rail_refresh_watermarks
+		SELECT watermark_at FROM billing.rail_refresh_watermarks
 		 WHERE merchant_id = $1 AND rail = $2 AND event_domain = 'events'`,
 		mid.UUID(), provider).Scan(&watermark)
 	if errors.Is(err, pgx.ErrNoRows) {

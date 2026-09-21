@@ -155,7 +155,7 @@ func TestPlanMigration_NMINativeBoundaryPush(t *testing.T) {
 	f, gateway, subID, railSubID := nmiNativeFixture(t, "10.00", "7")
 	ctx := dbtest.WithTestMerchant(context.Background())
 	var periodEndBefore time.Time
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT current_period_ends_at FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&periodEndBefore))
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT current_period_ends_at FROM billing.subscriptions WHERE id = $1`, subID).Scan(&periodEndBefore))
 
 	res, err := f.pm.Migrate(ctx, PlanMigrationRequest{SourcePriceID: f.lowPriceID, TargetPriceID: f.targetPriceID})
 	require.NoError(t, err)
@@ -178,15 +178,15 @@ func TestPlanMigration_NMINativeBoundaryPush(t *testing.T) {
 	require.Equal(t, f.targetPriceID, priceID)
 	require.Equal(t, f.targetProductID, productID)
 	var specs string
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT entitlements_spec_snapshot::text FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&specs))
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT entitlements_spec_snapshot::text FROM billing.subscriptions WHERE id = $1`, subID).Scan(&specs))
 	require.Contains(t, specs, "plan_b_access")
 
 	// Money invariants: no charge, rebill date unchanged.
 	var payments int
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE subscription_id = $1`, subID).Scan(&payments))
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id = $1`, subID).Scan(&payments))
 	require.Zero(t, payments, "an NMI migration must never charge off-cycle")
 	var periodEndAfter time.Time
-	require.NoError(t, f.pool.QueryRow(ctx, `SELECT current_period_ends_at FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&periodEndAfter))
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT current_period_ends_at FROM billing.subscriptions WHERE id = $1`, subID).Scan(&periodEndAfter))
 	require.True(t, periodEndBefore.Equal(periodEndAfter), "the rebill date must never move")
 
 	// Ledger: the row is applied.
@@ -219,7 +219,7 @@ func TestPlanMigration_NMINativeFarFutureBlocksHonestly(t *testing.T) {
 	require.Equal(t, f.lowPriceID, priceID, "blocked row leaves the sub untouched")
 
 	// The sub renews into its final pre-effective period: re-run succeeds.
-	_, err = f.pool.Exec(ctx, `UPDATE openrails.subscriptions SET current_period_ends_at = $1 WHERE id = $2`,
+	_, err = f.pool.Exec(ctx, `UPDATE billing.subscriptions SET current_period_ends_at = $1 WHERE id = $2`,
 		f.clock.Now().Add(60*24*time.Hour), subID)
 	require.NoError(t, err)
 	res2, err := f.pm.Migrate(ctx, PlanMigrationRequest{
@@ -323,7 +323,7 @@ func TestPlanMigration_NMINativeIntervalMismatchBlocks(t *testing.T) {
 	// Annual target on the target product (8760h vs the source's 720h).
 	annualTargetID := uuid.New()
 	_, err := f.pool.Exec(ctx, `
-		INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
+		INSERT INTO billing.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
 		VALUES ($1,$2,$3,90000000,'USD',8760,true,false,$4,$5,$5)`,
 		annualTargetID, f.targetProductID, f.merchantID, "planmig-annual-"+uuid.NewString()[:8], f.clock.Now())
 	require.NoError(t, err)
@@ -348,7 +348,7 @@ func TestPlanMigration_NMINativeSubCentAmountBlocks(t *testing.T) {
 
 	subCentID := uuid.New()
 	_, err := f.pool.Exec(ctx, `
-		INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
+		INSERT INTO billing.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
 		VALUES ($1,$2,$3,9000001,'USD',720,true,false,$4,$5,$5)`,
 		subCentID, f.targetProductID, f.merchantID, "planmig-subcent-"+uuid.NewString()[:8], f.clock.Now())
 	require.NoError(t, err)

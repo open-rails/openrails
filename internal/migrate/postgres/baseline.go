@@ -24,10 +24,9 @@ func Baseline() (string, error) {
 // table yields its CREATE and everything grouped with it (comments,
 // constraints, indexes, triggers, RLS, policy, grants).
 //
-// It exists so a harness that stands up a PARTIAL schema — one that cannot
-// apply the whole baseline because it never created the sibling `profiles`
-// schema, or because its fixtures predate the real table shapes — still
-// replays the REAL definition of the objects it depends on. A hand-copied
+// It lets a harness with a partial schema replay the real definitions it
+// depends on even when its deliberately minimal tables cannot take the full
+// baseline. A hand-copied
 // SECURITY DEFINER body is exactly the divergence #824 hid behind.
 func BaselineObjects(names ...string) (string, error) {
 	sql, err := Baseline()

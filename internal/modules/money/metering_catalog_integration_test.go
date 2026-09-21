@@ -25,14 +25,14 @@ func TestUsageMeterCatalogLifecycle(t *testing.T) {
 	eventType := "or805.usage." + uuid.NewString()[:8]
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE merchant_id = $1 AND event_type = $2", merchantID, eventType)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meterKey)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meterKey)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE merchant_id = $1 AND event_type = $2", merchantID, eventType)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meterKey)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meterKey)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	_, err := pool.Exec(ctx, `
-INSERT INTO openrails.products (id, key, display_name, merchant_id)
+INSERT INTO billing.products (id, key, display_name, merchant_id)
 VALUES ($1, $2, 'Usage product', $3)`, productID, "or805-product-"+uuid.NewString()[:8], merchantID)
 	require.NoError(t, err)
 
@@ -92,7 +92,7 @@ VALUES ($1, $2, 'Usage product', $3)`, productID, "or805-product-"+uuid.NewStrin
 	}
 	var ordinalBefore int
 	require.NoError(t, pool.QueryRow(ctx, `
-SELECT ordinal FROM openrails.catalog_rate_cards
+SELECT ordinal FROM billing.catalog_rate_cards
 WHERE merchant_id = $1 AND meter_key = $2 AND customer_id IS NULL`, merchantID, meterKey).Scan(&ordinalBefore))
 	require.NoError(t, svc.SetUsageRateCard(ctx, money.UsageRateCardInput{
 		ProductID: &productID,
@@ -103,7 +103,7 @@ WHERE merchant_id = $1 AND meter_key = $2 AND customer_id IS NULL`, merchantID, 
 	}))
 	var ordinalAfter int
 	require.NoError(t, pool.QueryRow(ctx, `
-SELECT ordinal FROM openrails.catalog_rate_cards
+SELECT ordinal FROM billing.catalog_rate_cards
 WHERE merchant_id = $1 AND meter_key = $2 AND customer_id IS NULL`, merchantID, meterKey).Scan(&ordinalAfter))
 	assert.Equal(t, ordinalBefore, ordinalAfter, "idempotent puts must not move product ordering")
 
@@ -213,21 +213,21 @@ func TestUsageMeterCatalogScopesProductsAndSharedPayers(t *testing.T) {
 	adminPool := dbtest.SharedSuperuserPGXPool(t)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meterKey)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meterKey)
-		_, _ = adminPool.Exec(ctx, "DELETE FROM openrails.customers WHERE merchant_id = $1", foreignMerchantID)
-		_, _ = adminPool.Exec(ctx, "DELETE FROM openrails.products WHERE merchant_id = $1", foreignMerchantID)
-		_, _ = adminPool.Exec(ctx, "DELETE FROM openrails.merchants WHERE id = $1", foreignMerchantID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meterKey)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meterKey)
+		_, _ = adminPool.Exec(ctx, "DELETE FROM billing.customers WHERE merchant_id = $1", foreignMerchantID)
+		_, _ = adminPool.Exec(ctx, "DELETE FROM billing.products WHERE merchant_id = $1", foreignMerchantID)
+		_, _ = adminPool.Exec(ctx, "DELETE FROM billing.merchants WHERE id = $1", foreignMerchantID)
 	})
 
-	_, err := adminPool.Exec(ctx, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, foreignMerchantID, foreignSlug)
+	_, err := adminPool.Exec(ctx, `INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, foreignMerchantID, foreignSlug)
 	require.NoError(t, err)
 	_, err = adminPool.Exec(ctx, `
-INSERT INTO openrails.products (id, key, display_name, merchant_id)
+INSERT INTO billing.products (id, key, display_name, merchant_id)
 VALUES ($1, 'foreign-product', 'Foreign', $2)`, foreignProductID, foreignMerchantID)
 	require.NoError(t, err)
 	_, err = adminPool.Exec(ctx, `
-INSERT INTO openrails.customers (id, merchant_id)
+INSERT INTO billing.customers (id, merchant_id)
 VALUES ($1, $2)`, foreignCustomerID, foreignMerchantID)
 	require.NoError(t, err)
 
@@ -250,10 +250,10 @@ VALUES ($1, $2)`, foreignCustomerID, foreignMerchantID)
 
 	localProductID := uuid.New()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", localProductID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", localProductID)
 	})
 	_, err = pool.Exec(ctx, `
-INSERT INTO openrails.products (id, key, display_name, merchant_id)
+INSERT INTO billing.products (id, key, display_name, merchant_id)
 VALUES ($1, $2, 'Local', $3)`, localProductID, "or805-local-"+uuid.NewString()[:8], merchantID)
 	require.NoError(t, err)
 	require.NoError(t, svc.SetUsageRateCard(ctx, money.UsageRateCardInput{
@@ -269,7 +269,7 @@ VALUES ($1, $2, 'Local', $3)`, localProductID, "or805-local-"+uuid.NewString()[:
 		Price:    price,
 	}))
 	var foreignOverrides int
-	require.NoError(t, adminPool.QueryRow(ctx, "SELECT count(*) FROM openrails.catalog_rate_cards WHERE merchant_id=$1 AND customer_id=$2", foreignMerchantID, foreignCustomerID).Scan(&foreignOverrides))
+	require.NoError(t, adminPool.QueryRow(ctx, "SELECT count(*) FROM billing.catalog_rate_cards WHERE merchant_id=$1 AND customer_id=$2", foreignMerchantID, foreignCustomerID).Scan(&foreignOverrides))
 	require.Zero(t, foreignOverrides)
 
 	mismatched := price
@@ -293,12 +293,12 @@ func TestUsageMeterCatalogPreservesRateCardContracts(t *testing.T) {
 	meterKey := "or805-contract-" + uuid.NewString()[:8]
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meterKey)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meterKey)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meterKey)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meterKey)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 	_, err := pool.Exec(ctx, `
-INSERT INTO openrails.products (id, key, display_name, merchant_id)
+INSERT INTO billing.products (id, key, display_name, merchant_id)
 VALUES ($1, $2, 'Contract product', $3)`, productID, "or805-contract-product-"+uuid.NewString()[:8], merchantID)
 	require.NoError(t, err)
 	require.NoError(t, svc.EnsureUsageMeter(ctx, money.UsageMeterSpec{
@@ -342,12 +342,12 @@ func TestUsageMeterCatalogValidatesAllowanceSourceContract(t *testing.T) {
 	targetMeter := "or805-target-" + uuid.NewString()[:8]
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = ANY($2::text[])", merchantID, []string{sourceMeter, targetMeter})
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = ANY($2::text[])", merchantID, []string{sourceMeter, targetMeter})
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = ANY($1::uuid[])", []uuid.UUID{sourceProductID, targetProductID})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = ANY($2::text[])", merchantID, []string{sourceMeter, targetMeter})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = ANY($2::text[])", merchantID, []string{sourceMeter, targetMeter})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = ANY($1::uuid[])", []uuid.UUID{sourceProductID, targetProductID})
 	})
 	_, err := pool.Exec(ctx, `
-INSERT INTO openrails.products (id, key, display_name, merchant_id)
+INSERT INTO billing.products (id, key, display_name, merchant_id)
 VALUES ($1, $3, 'Allowance source', $5),
        ($2, $4, 'Allowance target', $5)`,
 		sourceProductID,

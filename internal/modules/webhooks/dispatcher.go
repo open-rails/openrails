@@ -67,7 +67,7 @@ type WebhookDispatcher struct {
 	SubscriptionService          *subscriptions.SubscriptionService
 	PaymentService               *payments.PaymentService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
-	ProfileRepo                  *identity.ProfileRepo
+	ProfileRepo                  identity.UsernameResolver
 	DeduplicationService         *DeduplicationService
 	RailCustomerService          *payments.RailCustomerService
 	// RailConfigs resolves per-merchant armed rail credentials at dispatch

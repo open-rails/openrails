@@ -16,7 +16,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
-	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
+	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 )
 
 func TestBaselineAppliesWithoutProfilesSchema(t *testing.T) {
@@ -55,7 +55,7 @@ func TestBaselineAppliesWithoutProfilesSchema(t *testing.T) {
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	require.NoError(t, err)
 	err = migratekit.NewPostgres(targetDB, config.MigratekitApp).
-		WithSchema(config.DefaultSchema).
+		WithSchema(config.CanonicalSchema).
 		ApplyMigrations(ctx, migrations)
 	require.NoError(t, err)
 }

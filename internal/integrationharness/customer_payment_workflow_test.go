@@ -116,7 +116,7 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			f := h.SeedPastDueInvoiceForCustomer(app.HostGraph(rt).Runtime, owned.MerchantID, customer, currency, amount)
 			// This method was saved without an approved unscheduled agreement. A
 			// customer-present payment must establish one before future MIT.
-			_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref='' WHERE id=$1`, f.Method)
+			_, err = h.sharedPool().Exec(ctx, `UPDATE billing.payment_methods SET stored_credential_unscheduled_ref='' WHERE id=$1`, f.Method)
 			require.NoError(t, err)
 			newClient := func(credential string) *openrails.Client {
 				opts := []openrails.ClientOption{openrails.WithMerchantID(f.Merchant), openrails.WithTokenProvider(func(context.Context) (string, error) { return credential, nil })}
@@ -239,7 +239,7 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			require.Equal(t, "stored", form.Get("stored_credential_indicator"))
 			require.Empty(t, form.Get("initial_transaction_id"))
 			var anchor string
-			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT stored_credential_unscheduled_ref FROM openrails.payment_methods WHERE id=$1`, f.Method).Scan(&anchor))
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT stored_credential_unscheduled_ref FROM billing.payment_methods WHERE id=$1`, f.Method).Scan(&anchor))
 			require.Equal(t, gateway.Sales()[len(gateway.Sales())-1].TransactionID, anchor)
 			replay, err := client.PayInvoiceNow(ctx, request)
 			require.NoError(t, err)
@@ -302,13 +302,13 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			periodEnd := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
 			psp := h.ArmLoopbackNMI(runtime, f.Merchant)
 			billing, railSub := "billing-"+f.Method.String(), "subscription-"+subscription.String()
-			_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.payment_methods SET rail_method_ref=$2,rebill_driver='openrails',stored_credential_recurring_ref='approved-recurring' WHERE id=$1`, f.Method, billing)
+			_, err = h.sharedPool().Exec(ctx, `UPDATE billing.payment_methods SET rail_method_ref=$2,rebill_driver='openrails',stored_credential_recurring_ref='approved-recurring' WHERE id=$1`, f.Method, billing)
 			require.NoError(t, err)
-			_, err = h.sharedPool().Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name,entitlements_spec) VALUES($1,$2,$3,'Recovery','{"paid":null}')`, product, f.Merchant.UUID(), product.String())
+			_, err = h.sharedPool().Exec(ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name,entitlements_spec) VALUES($1,$2,$3,'Recovery','{"paid":null}')`, product, f.Merchant.UUID(), product.String())
 			require.NoError(t, err)
-			_, err = h.sharedPool().Exec(ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,9990000,'USD',720,true)`, price, f.Merchant.UUID(), product, price.String())
+			_, err = h.sharedPool().Exec(ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,9990000,'USD',720,true)`, price, f.Merchant.UUID(), product, price.String())
 			require.NoError(t, err)
-			_, err = h.sharedPool().Exec(ctx, `INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,rail_subscription_id,payment_method_id,status,started_at,current_period_starts_at,current_period_ends_at,next_retry_at,retry_attempts,entitlements_spec_snapshot) VALUES($1,$2,$3,$4,$5,$6,'nmi',$7,$8,'past_due',$9,$9,$10,$11,1,'{"paid":null}')`, subscription, f.Merchant.UUID(), customer, product, price, psp, railSub, f.Method, periodEnd.Add(-30*24*time.Hour), periodEnd, time.Now().Add(48*time.Hour))
+			_, err = h.sharedPool().Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,rail_subscription_id,payment_method_id,status,started_at,current_period_starts_at,current_period_ends_at,next_retry_at,retry_attempts,entitlements_spec_snapshot) VALUES($1,$2,$3,$4,$5,$6,'nmi',$7,$8,'past_due',$9,$9,$10,$11,1,'{"paid":null}')`, subscription, f.Merchant.UUID(), customer, product, price, psp, railSub, f.Method, periodEnd.Add(-30*24*time.Hour), periodEnd, time.Now().Add(48*time.Hour))
 			require.NoError(t, err)
 			mu.Lock()
 			obligations[railSub] = recurringObligation{f.Vault, billing, "9.99", "USD", periodEnd.Add(30 * 24 * time.Hour).Format("2006-01-02")}

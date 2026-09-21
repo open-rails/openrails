@@ -126,7 +126,7 @@ func activePriceAmounts(t *testing.T, pool *pgxpool.Pool, ctx context.Context, i
 	t.Helper()
 	var out []int64
 	inMerchantScope(t, pool, ctx, id, func(tx pgx.Tx) {
-		rows, err := tx.Query(ctx, `SELECT amount FROM openrails.prices WHERE merchant_id = $1 AND NOT archived ORDER BY amount`, id.UUID())
+		rows, err := tx.Query(ctx, `SELECT amount FROM billing.prices WHERE merchant_id = $1 AND NOT archived ORDER BY amount`, id.UUID())
 		require.NoError(t, err)
 		defer rows.Close()
 		for rows.Next() {
@@ -147,7 +147,7 @@ func merchantSecretRowCount(t *testing.T, pool *pgxpool.Pool, ctx context.Contex
 	t.Helper()
 	var n int
 	inMerchantScope(t, pool, ctx, id, func(tx pgx.Tx) {
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.merchant_secrets WHERE merchant_id = $1`, id.UUID()).Scan(&n))
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.merchant_secrets WHERE merchant_id = $1`, id.UUID()).Scan(&n))
 	})
 	return n
 }
@@ -239,12 +239,12 @@ func TestManifestMode_Loop(t *testing.T) {
 	rt1, id := bootManifestRuntime(t, ctx, dsn, slug, server.URL, manifestRaw, manifestModeCatalogYAML(slug, 5_000_000), overlay(keyV1))
 	t.Cleanup(func() {
 		for _, stmt := range []string{
-			`DELETE FROM openrails.entitlements WHERE merchant_id = $1`,
-			`DELETE FROM openrails.prices WHERE merchant_id = $1`,
-			`DELETE FROM openrails.products WHERE merchant_id = $1`,
-			`DELETE FROM openrails.merchant_configurations WHERE merchant_id = $1`,
-			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
-			`DELETE FROM openrails.merchants WHERE id = $1`,
+			`DELETE FROM billing.entitlements WHERE merchant_id = $1`,
+			`DELETE FROM billing.prices WHERE merchant_id = $1`,
+			`DELETE FROM billing.products WHERE merchant_id = $1`,
+			`DELETE FROM billing.merchant_configurations WHERE merchant_id = $1`,
+			`DELETE FROM billing.psps WHERE merchant_id = $1`,
+			`DELETE FROM billing.merchants WHERE id = $1`,
 		} {
 			_, _ = pool.Exec(context.Background(), stmt, id.UUID())
 		}
@@ -266,7 +266,7 @@ func TestManifestMode_Loop(t *testing.T) {
 	require.Equal(t, []int64{5_000_000}, activePriceAmounts(t, pool, ctx, id))
 
 	// MODE 1 invariant: nothing was written to the persistent secret store.
-	require.Zero(t, merchantSecretRowCount(t, pool, ctx, id), "manifest mode must never write openrails.merchant_secrets")
+	require.Zero(t, merchantSecretRowCount(t, pool, ctx, id), "manifest mode must never write billing.merchant_secrets")
 
 	// A charge executes through the production per-merchant resolver with the
 	// file-provided key.
@@ -417,9 +417,9 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 	require.NotNil(t, app.HostGraph(rt).Runtime.Merchants)
 	t.Cleanup(func() {
 		for _, stmt := range []string{
-			`DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1`,
-			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
-			`DELETE FROM openrails.merchants WHERE id = $1`,
+			`DELETE FROM billing.merchant_secrets WHERE merchant_id = $1`,
+			`DELETE FROM billing.psps WHERE merchant_id = $1`,
+			`DELETE FROM billing.merchants WHERE id = $1`,
 		} {
 			_, _ = appDB.Pool().Exec(context.Background(), stmt, id.UUID())
 		}
@@ -478,8 +478,8 @@ func TestManifestMode_MissingSecretFailsClosed(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		for _, stmt := range []string{
-			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
-			`DELETE FROM openrails.merchants WHERE id = $1`,
+			`DELETE FROM billing.psps WHERE merchant_id = $1`,
+			`DELETE FROM billing.merchants WHERE id = $1`,
 		} {
 			_, _ = appDB.Pool().Exec(context.Background(), stmt, id.UUID())
 		}
@@ -520,7 +520,7 @@ func TestManifestMode_ReadSideBindKeepsWorking(t *testing.T) {
 	id, err := writer.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = appDB.Pool().Exec(context.Background(), `DELETE FROM openrails.merchants WHERE id = $1`, id.UUID())
+		_, _ = appDB.Pool().Exec(context.Background(), `DELETE FROM billing.merchants WHERE id = $1`, id.UUID())
 	})
 
 	// Reader host (host-two shape): empty MerchantConfig — pure bind.
@@ -555,8 +555,8 @@ func bootManifestRuntimeWithRailAccounts(t *testing.T, ctx context.Context, dsn,
 	require.False(t, id.IsZero())
 	t.Cleanup(func() {
 		for _, stmt := range []string{
-			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
-			`DELETE FROM openrails.merchants WHERE id = $1`,
+			`DELETE FROM billing.psps WHERE merchant_id = $1`,
+			`DELETE FROM billing.merchants WHERE id = $1`,
 		} {
 			_, _ = appDB.Pool().Exec(context.Background(), stmt, id.UUID())
 		}

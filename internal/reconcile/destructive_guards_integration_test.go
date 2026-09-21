@@ -56,16 +56,16 @@ func seedGuardCohortForPSP(t *testing.T, appDB *db.DB, baseCtx context.Context, 
 			prod, price, sub := uuid.New(), uuid.New(), uuid.New()
 			rs := fmt.Sprintf("rs-guard-%s-%d", c.suffix, i)
 			key := fmt.Sprintf("guard-%s-%d", c.suffix, i)
-			exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id)
+			exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id)
 			      VALUES ($1,$2,$2,jsonb_build_object('premium',null),$3)`, prod, key, merchantID)
-			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id)
+			exec(`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id)
 			      VALUES ($1,$2,5000000,'USD',720,true,$3)`, price, prod, merchantID)
-			exec(`INSERT INTO openrails.subscriptions
+			exec(`INSERT INTO billing.subscriptions
 			        (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,
 			         started_at,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot,psp_id)
 			      VALUES ($1,$2,$3,$4,$5,$6,'nmi',$7,$8,$8,$9,jsonb_build_object('premium',null),$10)`,
 				sub, merchantID, cust, prod, price, status, rs, start, periodEnd, psp.ID)
-			exec(`INSERT INTO openrails.entitlements (merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type)
+			exec(`INSERT INTO billing.entitlements (merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type)
 			      VALUES ($1,$2,'premium',$3,$4,$5,'subscription')`,
 				merchantID, cust, start, periodEnd.Add(720*time.Hour), sub)
 			c.subs = append(c.subs, sub)
@@ -77,14 +77,14 @@ func seedGuardCohortForPSP(t *testing.T, appDB *db.DB, baseCtx context.Context, 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for _, sub := range c.subs {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.rail_intents WHERE subscription_id=$1`, sub)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE source_id=$1`, sub)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE subscription_id=$1`, sub)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, sub)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.rail_intents WHERE subscription_id=$1`, sub)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE source_id=$1`, sub)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE subscription_id=$1`, sub)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, sub)
 			}
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE product_id IN (SELECT id FROM openrails.products WHERE key LIKE 'guard-'||$1||'-%')`, c.suffix)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE key LIKE 'guard-'||$1||'-%'`, c.suffix)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE finding_type=$1`, string(FindingCancellationCapped))
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE product_id IN (SELECT id FROM billing.products WHERE key LIKE 'guard-'||$1||'-%')`, c.suffix)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE key LIKE 'guard-'||$1||'-%'`, c.suffix)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE finding_type=$1`, string(FindingCancellationCapped))
 			return nil
 		})
 	})
@@ -97,9 +97,9 @@ func guardCounts(t *testing.T, appDB *db.DB, baseCtx context.Context, c guardCoh
 	t.Helper()
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.subscriptions WHERE id = ANY($1) AND status = 'cancelled'`, c.subs).Scan(&cancelled))
+			`SELECT count(*) FROM billing.subscriptions WHERE id = ANY($1) AND status = 'cancelled'`, c.subs).Scan(&cancelled))
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements WHERE source_id = ANY($1) AND revoked_at IS NULL`, c.subs).Scan(&liveEntitlements))
+			`SELECT count(*) FROM billing.entitlements WHERE source_id = ANY($1) AND revoked_at IS NULL`, c.subs).Scan(&liveEntitlements))
 		return nil
 	}))
 	return cancelled, liveEntitlements
@@ -110,7 +110,7 @@ func guardFindings(t *testing.T, appDB *db.DB, baseCtx context.Context, findingT
 	var out []string
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		rows, err := appDB.Qx(ctx).Query(ctx,
-			`SELECT subject_key FROM openrails.reconciliation_findings
+			`SELECT subject_key FROM billing.reconciliation_findings
 			  WHERE merchant_id=$1 AND finding_type=$2 AND status='requires_review'`,
 			dbtest.TestMerchantID.UUID(), string(findingType))
 		require.NoError(t, err)
@@ -272,7 +272,7 @@ func TestUnknownCohort_StaleRosterDatesNeverCancel(t *testing.T) {
 			var intents int
 			require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 				return appDB.Qx(ctx).QueryRow(ctx,
-					`SELECT count(*) FROM openrails.rail_intents WHERE subscription_id = ANY($1)`, cohort.subs).Scan(&intents)
+					`SELECT count(*) FROM billing.rail_intents WHERE subscription_id = ANY($1)`, cohort.subs).Scan(&intents)
 			}))
 			require.Zero(t, intents, "a stale date must never queue the irreversible NMI delete")
 		})

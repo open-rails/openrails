@@ -280,7 +280,7 @@ func TestDeletePaymentMethod(t *testing.T) {
 		})
 		var methodPSPID uuid.UUID
 		require.NoError(t, suite.MerchantPool().QueryRow(context.Background(),
-			`SELECT psp_id FROM openrails.payment_methods WHERE id = $1`, pm.ID,
+			`SELECT psp_id FROM billing.payment_methods WHERE id = $1`, pm.ID,
 		).Scan(&methodPSPID))
 
 		w := httptest.NewRecorder()
@@ -302,7 +302,7 @@ func TestDeletePaymentMethod(t *testing.T) {
 		var intentPSPID uuid.UUID
 		err := suite.MerchantPool().QueryRow(context.Background(), `
 			SELECT status, psp_id
-			FROM openrails.rail_intents
+			FROM billing.rail_intents
 			WHERE intent_type = $1 AND idempotency_key = $2`,
 			intents.TypeNMIPaymentMethodDelete,
 			intents.NMIPaymentMethodDeleteIdempotencyKey(pm.ID),

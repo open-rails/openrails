@@ -13,10 +13,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for the migration bootstrap
-	authpgmigrations "github.com/open-rails/authkit/migrations/postgres"
+	authkitembedded "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/config"
-	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
+	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -55,17 +55,22 @@ func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Contex
 	require.NoError(t, sqlDB.PingContext(ctx))
 
 	_, err = sqlDB.ExecContext(ctx, `
-		CREATE SCHEMA IF NOT EXISTS openrails;
+		CREATE SCHEMA IF NOT EXISTS billing;
 		CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 		CREATE EXTENSION IF NOT EXISTS btree_gist;
 	`)
 	require.NoError(t, err)
 
-	authMigrations, err := migratekit.LoadFromFS(authpgmigrations.FS)
+	profilesPool, err := pgxpool.New(ctx, superDSN)
 	require.NoError(t, err)
-	require.NoError(t, migratekit.NewPostgres(sqlDB, "authkit").WithSchema("profiles").ApplyMigrations(ctx, authMigrations))
+	t.Cleanup(profilesPool.Close)
+	require.NoError(t, authkitembedded.ApplyMigrations(ctx, profilesPool, "profiles"))
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	require.NoError(t, err)
+	for i := range migrations {
+		migrations[i].Content, err = postgresmigrations.RewriteSchema(migrations[i].Content, config.DefaultSchema)
+		require.NoError(t, err)
+	}
 	m := migratekit.NewPostgres(sqlDB, config.MigratekitApp).WithSchema(config.DefaultSchema)
 	require.NoError(t, m.ApplyMigrations(ctx, migrations))
 
@@ -102,20 +107,20 @@ func seedTenantsAndEntitlements(t *testing.T, ctx context.Context, superDSN stri
 
 	for _, id := range []merchant.ID{tA, tB} {
 		_, err = pool.Exec(ctx, `
-			INSERT INTO openrails.merchants (id, slug, status)
+			INSERT INTO billing.merchants (id, slug, status)
 			VALUES ($1::uuid, $2, 'active') ON CONFLICT (id) DO NOTHING
 		`, id.String(), "t-"+id.String()[:8])
 		require.NoError(t, err)
 		tenantSubjectID := uuid.New()
 		_, err = pool.Exec(ctx, `
-			INSERT INTO openrails.customers (id, merchant_id)
+			INSERT INTO billing.customers (id, merchant_id)
 			VALUES ($1::uuid, $2::uuid)
 			ON CONFLICT (merchant_id, id) DO NOTHING
 		`, tenantSubjectID.String(), id.String())
 		require.NoError(t, err)
 		// One entitlement row per merchant.
 		_, err = pool.Exec(ctx, `
-			INSERT INTO openrails.entitlements
+			INSERT INTO billing.entitlements
 				(merchant_id, customer_id, entitlement, start_at, source_id, source_type)
 			VALUES ($1::uuid, $2::uuid, 'premium', current_timestamp, gen_random_uuid(), 'admin')
 		`, id.String(), tenantSubjectID.String())
@@ -147,13 +152,13 @@ func TestRLS_AppRoleCannotSeeOtherTenantRows(t *testing.T) {
 	require.NoError(t, err)
 
 	var total int
-	require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements`).Scan(&total))
+	require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements`).Scan(&total))
 	require.Equal(t, 1, total, "RLS must restrict an un-predicated SELECT to the active merchant")
 
 	// Even explicitly asking for merchant B returns nothing under merchant A's GUC.
 	var leaked int
 	require.NoError(t, tx.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.entitlements WHERE merchant_id = $1::uuid`, tB.String(),
+		`SELECT count(*) FROM billing.entitlements WHERE merchant_id = $1::uuid`, tB.String(),
 	).Scan(&leaked))
 	require.Equal(t, 0, leaked, "RLS must deny reading another merchant's rows even with an explicit predicate")
 }
@@ -179,7 +184,7 @@ func TestRLS_GUCScopesCorrectly(t *testing.T) {
 			require.NoError(t, err)
 		}
 		var n int
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements`).Scan(&n))
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements`).Scan(&n))
 		return n
 	}
 
@@ -204,7 +209,7 @@ func TestMerchantTx_ScopesGUC(t *testing.T) {
 	ctxA := merchant.WithID(ctx, tA)
 	var n int
 	err = d.MerchantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements`).Scan(&n)
+		return tx.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements`).Scan(&n)
 	})
 	require.NoError(t, err)
 	require.Equal(t, 1, n, "MerchantTx must scope the query to the context merchant")
@@ -229,20 +234,20 @@ func seedMerchantBoundaryRows(t *testing.T, ctx context.Context, superDSN string
 	suffix := strings.ReplaceAll(merchantID.String()[:13], "-", "")
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.merchants (id, slug, status)
+		INSERT INTO billing.merchants (id, slug, status)
 		VALUES ($1::uuid, $2, 'active')
 		ON CONFLICT (id) DO NOTHING
 	`, merchantID.String(), "merchant-"+suffix)
 	require.NoError(t, err)
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.customers (id, merchant_id)
+		INSERT INTO billing.customers (id, merchant_id)
 		VALUES ($1::uuid, $2::uuid)
 	`, customerID.String(), merchantID.String())
 	require.NoError(t, err)
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.products (id, merchant_id, key, display_name)
+		INSERT INTO billing.products (id, merchant_id, key, display_name)
 		VALUES ($1::uuid, $2::uuid, $3, $3)
 	`, productID.String(), merchantID.String(), "prod-"+suffix)
 	require.NoError(t, err)
@@ -251,7 +256,7 @@ func seedMerchantBoundaryRows(t *testing.T, ctx context.Context, superDSN string
 	// this file is `package db`, so importing it back is a cycle); seed inline.
 	pspID := uuid.New()
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.psps (id, merchant_id, rail, environment, account_id, key)
+		INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id, key)
 		VALUES ($1::uuid, $2::uuid, 'nmi', 'live', $3, 'nmi')
 	`, pspID.String(), merchantID.String(), "boundary-nmi-"+suffix)
 	require.NoError(t, err)
@@ -264,14 +269,14 @@ func seedMerchantBoundaryRows(t *testing.T, ctx context.Context, superDSN string
 		{id: nextSubscriptionID, status: "unknown"},
 	} {
 		_, err = pool.Exec(ctx, `
-			INSERT INTO openrails.subscriptions (id, merchant_id, customer_id, product_id, status, rail, psp_id)
+			INSERT INTO billing.subscriptions (id, merchant_id, customer_id, product_id, status, rail, psp_id)
 			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, 'nmi', $6::uuid)
 		`, sub.id.String(), merchantID.String(), customerID.String(), productID.String(), sub.status, pspID.String())
 		require.NoError(t, err)
 	}
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.solana_subscriptions
+		INSERT INTO billing.solana_subscriptions
 			(id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda,
 			 plan_pda, merchant_address, mint, plan_created_at_fingerprint, next_pull_at)
 		VALUES
@@ -281,7 +286,7 @@ func seedMerchantBoundaryRows(t *testing.T, ctx context.Context, superDSN string
 	require.NoError(t, err)
 
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.merchant_configurations (merchant_id, config)
+		INSERT INTO billing.merchant_configurations (merchant_id, config)
 		VALUES ($1::uuid, '{"source":"seed"}'::jsonb)
 	`, merchantID.String())
 	require.NoError(t, err)
@@ -309,10 +314,10 @@ func TestRLS_AppRoleCannotCrossMerchantBoundariesForIssue504Tables(t *testing.T)
 	assertOneOwnZeroOther := func(table string) {
 		t.Helper()
 		var own int
-		require.NoError(t, tx.QueryRow(ctx, "SELECT count(*) FROM openrails."+table).Scan(&own))
+		require.NoError(t, tx.QueryRow(ctx, "SELECT count(*) FROM billing."+table).Scan(&own))
 		require.Equal(t, 1, own, "%s should expose only merchant A's row under merchant A GUC", table)
 		var other int
-		require.NoError(t, tx.QueryRow(ctx, "SELECT count(*) FROM openrails."+table+" WHERE merchant_id = $1::uuid", tB.String()).Scan(&other))
+		require.NoError(t, tx.QueryRow(ctx, "SELECT count(*) FROM billing."+table+" WHERE merchant_id = $1::uuid", tB.String()).Scan(&other))
 		require.Equal(t, 0, other, "%s should hide merchant B's row under merchant A GUC", table)
 	}
 
@@ -325,7 +330,7 @@ func TestRLS_AppRoleCannotCrossMerchantBoundariesForIssue504Tables(t *testing.T)
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO openrails.customers (id, merchant_id)
+		INSERT INTO billing.customers (id, merchant_id)
 		VALUES (gen_random_uuid(), $1::uuid)
 	`, tB.String())
 	require.Error(t, err, "customers must reject writes for another merchant")
@@ -338,7 +343,7 @@ func TestRLS_AppRoleCannotCrossMerchantBoundariesForIssue504Tables(t *testing.T)
 	require.NoError(t, err)
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO openrails.solana_subscriptions
+		INSERT INTO billing.solana_subscriptions
 			(id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda,
 			 plan_pda, merchant_address, mint, plan_created_at_fingerprint, next_pull_at)
 		VALUES
@@ -355,7 +360,7 @@ func TestRLS_AppRoleCannotCrossMerchantBoundariesForIssue504Tables(t *testing.T)
 	require.NoError(t, err)
 
 	tag, err := tx.Exec(ctx, `
-		UPDATE openrails.merchant_configurations
+		UPDATE billing.merchant_configurations
 		   SET config = '{"source":"cross"}'::jsonb
 		 WHERE merchant_id = $1::uuid
 	`, tB.String())

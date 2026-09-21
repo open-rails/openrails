@@ -42,7 +42,7 @@ func TestManualRebillCrashRerunConvergesWithoutDoubleCharge(t *testing.T) {
 	// period and repairs the lifecycle.
 	fake.charged.Store(true)
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.rebillRunner(client, fullModeConfig()).RunVerifyOnce(context.Background())
 	require.NoError(t, err)

@@ -82,55 +82,6 @@ func (q *Queries) GetUnboundMerchantBySlug(ctx context.Context, slug string) (Ge
 	return i, err
 }
 
-const getUserEmail = `-- name: GetUserEmail :one
-
-SELECT
-    COALESCE(username::text, '')::text AS username,
-    COALESCE(email::text, '')::text AS email,
-    email_verified,
-    (deleted_at IS NULL)::boolean AS is_active
-FROM profiles.users
-WHERE id = $1
-`
-
-type GetUserEmailRow struct {
-	Username      string
-	Email         string
-	EmailVerified bool
-	IsActive      bool
-}
-
-// Cross-schema read-only queries against authkit's profiles schema.
-// Compiled against internal/db/schema/profiles_shim.sql (see that file).
-// is_active is DERIVED as "not soft-deleted": authkit has no is_active
-// column (the previous bun query selected one and failed at runtime with
-// `column "is_active" does not exist`). deleted_at IS NULL is authkit's
-// active-user convention throughout its own queries.
-func (q *Queries) GetUserEmail(ctx context.Context, id uuid.UUID) (GetUserEmailRow, error) {
-	row := q.db.QueryRow(ctx, getUserEmail, id)
-	var i GetUserEmailRow
-	err := row.Scan(
-		&i.Username,
-		&i.Email,
-		&i.EmailVerified,
-		&i.IsActive,
-	)
-	return i, err
-}
-
-const getUserIDByUsername = `-- name: GetUserIDByUsername :one
-SELECT id
-FROM profiles.users
-WHERE username = $1 AND deleted_at IS NULL
-`
-
-func (q *Queries) GetUserIDByUsername(ctx context.Context, username *string) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, getUserIDByUsername, username)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
 const listMerchantBindingsByGroups = `-- name: ListMerchantBindingsByGroups :many
 SELECT id,status,coalesce(permission_group_id,'')::text AS group_id
 FROM openrails.merchants

@@ -52,7 +52,7 @@ var (
 		"internal/controlplane/",
 		"internal/http/",
 		"internal/requestauth/",
-		"migrations/postgres/",
+		"internal/migrate/postgres/",
 		"permissions/",
 		"pkg/api/",
 		"pkg/billingauth/",
@@ -176,7 +176,7 @@ func covered(name string) bool {
 	case ".go":
 		return !strings.HasSuffix(name, "_test.go")
 	case ".sql":
-		return strings.HasPrefix(name, "migrations/postgres/")
+		return strings.HasPrefix(name, "internal/migrate/postgres/")
 	case ".json":
 		return strings.HasPrefix(name, "testdata/wire/")
 	}

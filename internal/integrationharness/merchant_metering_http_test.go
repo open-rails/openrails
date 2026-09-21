@@ -128,7 +128,7 @@ func TestStandaloneMerchantMeteringRoutesHTTP(t *testing.T) {
 
 	customerID := uuid.New()
 	_, err := h.MerchantPool(dbtest.TestMerchantID.UUID()).Exec(ctx, `
-INSERT INTO openrails.customers (id, merchant_id)
+INSERT INTO billing.customers (id, merchant_id)
 VALUES ($1, $2)`, customerID, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 	overrideURL := surface.BaseURL + "/v1/merchant/customers/" + customerID.String() +
@@ -151,7 +151,7 @@ VALUES ($1, $2)`, customerID, dbtest.TestMerchantID.UUID())
 	requireAPIErrorCode(t, body, "rate_card_has_overrides")
 
 	_, err = h.MerchantPool(dbtest.TestMerchantID.UUID()).Exec(ctx, `
-INSERT INTO openrails.usage_events
+INSERT INTO billing.usage_events
     (merchant_id, customer_id, invoker_id, currency, resource, event_type,
      amount, source, source_id, pricing_authority, occurred_at)
 VALUES ($1, $2, 'metering-test', 'USD', 'api', 'api.request',

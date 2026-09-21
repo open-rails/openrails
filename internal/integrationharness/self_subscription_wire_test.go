@@ -94,17 +94,17 @@ func TestSelfSubscriptionWireParity(t *testing.T) {
 			suffix := uuid.NewString()[:8]
 			productID, priceID, scheduledPriceID := uuid.New(), uuid.New(), uuid.New()
 			methodID, activeID, cancelledID := uuid.New(), uuid.New(), uuid.New()
-			exec(`INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, mid, s.customer)
-			exec(`INSERT INTO openrails.products(id,merchant_id,key,display_name,entitlements_spec) VALUES($1,$2,$3,'Self Pro','{"premium":null}')`, productID, mid, "selfsub-"+suffix)
-			exec(`INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,9007199254740993,'USD',720,true),($5,$2,$3,$6,96000000,'USD',8760,true)`,
+			exec(`INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, mid, s.customer)
+			exec(`INSERT INTO billing.products(id,merchant_id,key,display_name,entitlements_spec) VALUES($1,$2,$3,'Self Pro','{"premium":null}')`, productID, mid, "selfsub-"+suffix)
+			exec(`INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,9007199254740993,'USD',720,true),($5,$2,$3,$6,96000000,'USD',8760,true)`,
 				priceID, mid, productID, "selfsub-m-"+suffix, scheduledPriceID, "selfsub-a-"+suffix)
-			exec(`INSERT INTO openrails.payment_methods(id,merchant_id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,last_four,card_type,expiry_date) VALUES($1,$2,$3,$4,'nmi',$5::text,$5::text,$5::text,'4242','visa','1230')`,
+			exec(`INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,last_four,card_type,expiry_date) VALUES($1,$2,$3,$4,'nmi',$5::text,$5::text,$5::text,'4242','visa','1230')`,
 				methodID, mid, s.customer, psp, "selfsub-"+methodID.String())
-			exec(`INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,scheduled_price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,started_at,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,$7,'nmi','active',$8,$9,$10,$10,$11)`,
+			exec(`INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,scheduled_price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,started_at,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,$7,'nmi','active',$8,$9,$10,$10,$11)`,
 				activeID, mid, s.customer, productID, priceID, scheduledPriceID, psp, "rail-"+activeID.String(), methodID, now.Add(-time.Hour), now.Add(720*time.Hour))
-			exec(`INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type) VALUES($1,$2,$3,$4,$5,$6,'stripe','cancelled',$7,$8,$8,$9,$10,'user')`,
+			exec(`INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type) VALUES($1,$2,$3,$4,$5,$6,'stripe','cancelled',$7,$8,$8,$9,$10,'user')`,
 				cancelledID, mid, s.customer, productID, priceID, stripePSP, "sub_"+cancelledID.String(), now.Add(-48*time.Hour), now.Add(600*time.Hour), now.Add(-time.Hour))
-			exec(`INSERT INTO openrails.entitlements(id,merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type) VALUES($1,$2,$3,'premium',$4,$5,$6,'subscription')`,
+			exec(`INSERT INTO billing.entitlements(id,merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type) VALUES($1,$2,$3,'premium',$4,$5,$6,'subscription')`,
 				uuid.New(), mid, s.customer, now.Add(-time.Hour), now.Add(720*time.Hour), activeID)
 
 			status, body := s.call(http.MethodGet, "/v1/me/subscriptions?status=all", nil)

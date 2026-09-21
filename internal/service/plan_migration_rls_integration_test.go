@@ -43,7 +43,7 @@ func TestPlanMigrationFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	require.NoError(t, err)
 	defer super.Close()
 	_, err = super.Pool().Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
+		`INSERT INTO billing.merchants (id, slug) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
 		merchantID, "merchant-pm-"+merchantID[:8])
 	require.NoError(t, err)
 

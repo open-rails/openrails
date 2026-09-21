@@ -91,7 +91,7 @@ func TestOr897_OutstandingCapPolicy_SeedAPIBusiness(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "open", invoice.Status)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.invoices WHERE customer_id = $1", payer.UUID())
 	})
 	charger := &declineCharger{}
 	collected, err := ms.ChargeOutstanding(ctx, collectionRunner(dbi, charger), 0)
@@ -191,8 +191,8 @@ func or897ArrearsPayer(t *testing.T, ctx context.Context, ms *money.MoneyService
 	payer := identity.CustomerIDFromString(uuid.NewString())
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, payer.UUID().String())
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.billing_policy_bindings WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.money_settings WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.billing_policy_bindings WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.money_settings WHERE customer_id = $1", payer.UUID())
 	})
 	arrears := money.BillingModeArrears
 	_, err := ms.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: &arrears})
@@ -204,7 +204,7 @@ func or897SeedPaymentMethod(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 	t.Helper()
 	pm := uuid.New()
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
-	_, err := gen.New(pool).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
+	_, err := dbtest.Queries(pool).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   pm,
 		MerchantID:           dbtest.TestMerchantID.UUID(),
 		CustomerID:           payer.UUID(),
@@ -216,7 +216,7 @@ func or897SeedPaymentMethod(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 	require.NoError(t, err)
 	dbtest.SeedNMIStoredCredentialRefs(ctx, t, pool, pm)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.payment_methods WHERE id = $1", pm)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM billing.payment_methods WHERE id = $1", pm)
 	})
 	return pm
 }

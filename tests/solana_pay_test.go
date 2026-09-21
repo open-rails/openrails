@@ -286,7 +286,7 @@ func TestSolanaPayTransferRequestNotAffected(t *testing.T) {
 func seedSolanaPayMerchantProfile(t *testing.T, suite *TestContainerSuite) {
 	t.Helper()
 	_, err := suite.Pool.Exec(suite.ctx, `
-		INSERT INTO openrails.merchant_configurations (merchant_id, config)
+		INSERT INTO billing.merchant_configurations (merchant_id, config)
 		VALUES ($1::uuid, $2::jsonb)
 		ON CONFLICT (merchant_id) DO UPDATE
 		SET config = EXCLUDED.config,

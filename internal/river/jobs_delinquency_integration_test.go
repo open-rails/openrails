@@ -43,13 +43,13 @@ func TestDelinquencyWorker_EvaluatesEveryMerchantWithDueWork(t *testing.T) {
 	for i, slug := range []string{"or878w-a-" + suffix, "or878w-b-" + suffix} {
 		mid, cust := uuid.New(), uuid.New()
 		_, err := super.Exec(ctx,
-			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, mid, slug)
+			`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, mid, slug)
 		require.NoError(t, err)
 		_, err = super.Exec(ctx,
-			`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`, cust, mid)
+			`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`, cust, mid)
 		require.NoError(t, err)
 		_, err = super.Exec(ctx, `
-			INSERT INTO openrails.invoices
+			INSERT INTO billing.invoices
 				(merchant_id, customer_id, currency, period_from, period_to,
 				 subtotal_amount, total_amount, amount_paid, amount_due, status, issued_at, due_at, finalized_at)
 			VALUES ($1, $2, 'USD', $3, $4, $5, $5, 0, $5, 'open', $4, $4, $4)`,
@@ -57,7 +57,7 @@ func TestDelinquencyWorker_EvaluatesEveryMerchantWithDueWork(t *testing.T) {
 		require.NoError(t, err)
 		// Grace 0 so the pass has a decision to make rather than a wait.
 		_, err = super.Exec(ctx, `
-			INSERT INTO openrails.merchant_configurations (merchant_id, config)
+			INSERT INTO billing.merchant_configurations (merchant_id, config)
 			VALUES ($1, '{"arrears_grace_days":0,"arrears_delinquency_floor":0}'::jsonb)`, mid)
 		require.NoError(t, err)
 		fixtures = append(fixtures, seeded{merchant: merchant.ID(mid), customer: cust})
@@ -65,13 +65,13 @@ func TestDelinquencyWorker_EvaluatesEveryMerchantWithDueWork(t *testing.T) {
 	t.Cleanup(func() {
 		bg := context.Background()
 		for _, f := range fixtures {
-			_, _ = super.Exec(bg, `DELETE FROM openrails.host_outbox WHERE merchant_id = $1`, f.merchant.UUID())
-			_, _ = super.Exec(bg, `DELETE FROM openrails.customer_delinquency WHERE merchant_id = $1`, f.merchant.UUID())
-			_, _ = super.Exec(bg, `DELETE FROM openrails.notifications WHERE customer_id = $1`, f.customer)
-			_, _ = super.Exec(bg, `DELETE FROM openrails.invoices WHERE merchant_id = $1`, f.merchant.UUID())
-			_, _ = super.Exec(bg, `DELETE FROM openrails.merchant_configurations WHERE merchant_id = $1`, f.merchant.UUID())
-			_, _ = super.Exec(bg, `DELETE FROM openrails.customers WHERE id = $1`, f.customer)
-			_, _ = super.Exec(bg, `DELETE FROM openrails.merchants WHERE id = $1`, f.merchant.UUID())
+			_, _ = super.Exec(bg, `DELETE FROM billing.host_outbox WHERE merchant_id = $1`, f.merchant.UUID())
+			_, _ = super.Exec(bg, `DELETE FROM billing.customer_delinquency WHERE merchant_id = $1`, f.merchant.UUID())
+			_, _ = super.Exec(bg, `DELETE FROM billing.notifications WHERE customer_id = $1`, f.customer)
+			_, _ = super.Exec(bg, `DELETE FROM billing.invoices WHERE merchant_id = $1`, f.merchant.UUID())
+			_, _ = super.Exec(bg, `DELETE FROM billing.merchant_configurations WHERE merchant_id = $1`, f.merchant.UUID())
+			_, _ = super.Exec(bg, `DELETE FROM billing.customers WHERE id = $1`, f.customer)
+			_, _ = super.Exec(bg, `DELETE FROM billing.merchants WHERE id = $1`, f.merchant.UUID())
 		}
 	})
 

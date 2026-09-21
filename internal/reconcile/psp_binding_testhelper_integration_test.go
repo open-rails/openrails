@@ -42,7 +42,7 @@ func seedTestPSPBindingFor(t *testing.T, appDB *db.DB, baseCtx context.Context, 
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.psps WHERE id=$1`, row.ID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.psps WHERE id=$1`, row.ID)
 			return nil
 		})
 	})

@@ -127,7 +127,7 @@ func TestBuild_ProdDBStoreWithKey_RoundTripsEncrypted(t *testing.T) {
 
 	var raw string
 	require.NoError(t, dbtest.SharedMerchantPool(t, mid.UUID()).QueryRow(ctx,
-		`SELECT value FROM openrails.merchant_secrets WHERE merchant_id=$1::uuid AND name=$2`,
+		`SELECT value FROM billing.merchant_secrets WHERE merchant_id=$1::uuid AND name=$2`,
 		mid.String(), "psps/stripe/live/acct_884_test/secret_key").Scan(&raw))
 	require.NotEqual(t, plaintext, raw, "DB row must hold ciphertext, not plaintext")
 	require.NotContains(t, raw, plaintext)
@@ -155,7 +155,7 @@ func TestBuild_DevDBStoreNoMasterKey_RefusesSolanaPrivateKey(t *testing.T) {
 
 	var stored int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.merchant_secrets WHERE merchant_id=$1::uuid AND name=$2`,
+		`SELECT count(*) FROM billing.merchant_secrets WHERE merchant_id=$1::uuid AND name=$2`,
 		mid.String(), name).Scan(&stored))
 	require.Zero(t, stored, "refused write must persist nothing")
 

@@ -131,11 +131,11 @@ func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 	// ReserveRefund's payment Create falls back to the ambient-context PSP
 	// (db.RequirePSPID) when the reservation row's own PspID field is unset.
 	ctx = db.WithPSPID(ctx, fx.pspID)
-	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+	exec(`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "refund-prod-"+suffix, tenantID)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 10000000, 'USD', $3)`,
+	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 10000000, 'USD', $3)`,
 		priceID, productID, tenantID)
-	exec(`INSERT INTO openrails.payments (id, price_id, rail, psp_id, transaction_id, amount, list_amount, currency, status, customer_id, merchant_id, money_movement)
+	exec(`INSERT INTO billing.payments (id, price_id, rail, psp_id, transaction_id, amount, list_amount, currency, status, customer_id, merchant_id, money_movement)
 	      VALUES ($1, $2, 'nmi', $3, $4, 10000000, 10000000, 'USD', 'completed', $5, $6, 'rail')`,
 		fx.paymentID, priceID, fx.pspID, fx.originalTxn, userID, tenantID)
 
@@ -148,10 +148,10 @@ func seedRefundablePayment(t *testing.T, amountCents int64) refundFixture {
 	fx.reservationID = reservation.ID
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE payment_id = $1", fx.paymentID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE id = $1 OR refunded_payment_id = $1", fx.paymentID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE payment_id = $1", fx.paymentID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE id = $1 OR refunded_payment_id = $1", fx.paymentID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 	return fx
 }
@@ -222,7 +222,7 @@ func TestNMIRefundSynchronousSuccess(t *testing.T) {
 	assert.NotContains(t, string(row.ResultEvidence), "txn_refund_1", "forensic evidence slimmed off the tombstone")
 	assert.EqualValues(t, 1, fake.refundCalls.Load())
 	var amount int64
-	require.NoError(t, fx.db.Pool().QueryRow(context.Background(), "SELECT amount FROM openrails.payments WHERE id=$1", fx.reservationID).Scan(&amount))
+	require.NoError(t, fx.db.Pool().QueryRow(context.Background(), "SELECT amount FROM billing.payments WHERE id=$1", fx.reservationID).Scan(&amount))
 	require.EqualValues(t, -5_000_000, amount, "the local USD refund is the same five dollars sent to NMI")
 
 	status, txn, metadata := fx.reservation(t)
@@ -254,7 +254,7 @@ func TestNMIRefundParksUnderReadonlyAndDrainsUnderFull(t *testing.T) {
 
 	// Mode lifts; the scheduled executor pass drains the queue.
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.refundRunner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 	require.NoError(t, err)
@@ -278,7 +278,7 @@ func TestNMIRefundLostResponseNeedsExactReceipt(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, StatusUnknownNeedsVerify, row.Status)
 			fake.refunded.Store(priorRefund)
-			_, err = fx.db.Pool().Exec(context.Background(), "UPDATE openrails.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
+			_, err = fx.db.Pool().Exec(context.Background(), "UPDATE billing.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
 			require.NoError(t, err)
 			_, err = runner.RunVerifyOnce(context.Background())
 			require.NoError(t, err)
@@ -302,7 +302,7 @@ func TestCCBillRefundReservationsAndReceiptsRemainUnresolved(t *testing.T) {
 			fx := seedRefundablePayment(t, 500)
 			ctx := dbtest.WithTestMerchant(context.Background())
 			fx.pspID = dbtest.EnsureTestPSP(ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "ccbill")
-			_, err := fx.db.Pool().Exec(ctx, `UPDATE openrails.payments SET rail='ccbill',psp_id=$3 WHERE id=$1 OR id=$2`, fx.paymentID, fx.reservationID, fx.pspID)
+			_, err := fx.db.Pool().Exec(ctx, `UPDATE billing.payments SET rail='ccbill',psp_id=$3 WHERE id=$1 OR id=$2`, fx.paymentID, fx.reservationID, fx.pspID)
 			require.NoError(t, err)
 			h := NewCCBillRefundHandler(fx.db, nil)
 			p := fx.payload(500)
@@ -319,11 +319,11 @@ func TestCCBillRefundReservationsAndReceiptsRemainUnresolved(t *testing.T) {
 			row, err := runner.EnqueueAndExecute(ctx, params)
 			require.NoError(t, err)
 			require.Equal(t, StatusUnknownNeedsVerify, row.Status)
-			_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.rail_intents SET status='pending',last_failure_reason=$3,next_attempt_at=now() WHERE merchant_id=$1 AND id=$2`, dbtest.TestMerchantID.UUID(), row.ID, "ccbill refund denied (-7): prior response")
+			_, err = fx.db.Pool().Exec(ctx, `UPDATE billing.rail_intents SET status='pending',last_failure_reason=$3,next_attempt_at=now() WHERE merchant_id=$1 AND id=$2`, dbtest.TestMerchantID.UUID(), row.ID, "ccbill refund denied (-7): prior response")
 			require.NoError(t, err)
 			_, err = runner.RunExecuteOnce(ctx)
 			require.NoError(t, err)
-			_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.rail_intents SET next_attempt_at=now() WHERE merchant_id=$1 AND id=$2`, dbtest.TestMerchantID.UUID(), row.ID)
+			_, err = fx.db.Pool().Exec(ctx, `UPDATE billing.rail_intents SET next_attempt_at=now() WHERE merchant_id=$1 AND id=$2`, dbtest.TestMerchantID.UUID(), row.ID)
 			require.NoError(t, err)
 			_, err = runner.RunVerifyOnce(ctx)
 			require.NoError(t, err)
@@ -513,7 +513,7 @@ func TestStripeRefundAmbiguousResolvedByVerifier(t *testing.T) {
 	stripe.created.Store(true)
 	stripe.gotMetadata.Store(RefundIdempotencyKey(fx.paymentID, "it-key"))
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.stripeRunner(cfg, stripe.srv.URL).RunVerifyOnce(context.Background())
 	require.NoError(t, err)

@@ -10,22 +10,20 @@ import (
 // default schema, relocation for a custom one, and that it only touches the
 // `openrails.` qualifier.
 func TestSchemaRewriter(t *testing.T) {
-	t.Run("default schema is identity", func(t *testing.T) {
-		r := newSchemaRewriter(config.DefaultSchema)
+	t.Run("canonical schema is identity", func(t *testing.T) {
+		r := newSchemaRewriter(config.CanonicalSchema)
 		if r.active {
-			t.Fatalf("rewriter for default schema must be inactive")
-		}
-		const sql = "SELECT * FROM openrails.merchants WHERE id = $1"
-		if got := r.apply(sql); got != sql {
-			t.Fatalf("identity rewrite changed SQL: %q", got)
+			t.Fatal("canonical schema must be inactive")
 		}
 	})
-
-	t.Run("empty schema is identity", func(t *testing.T) {
-		if newSchemaRewriter("").active {
-			t.Fatalf("empty schema must be inactive")
-		}
-	})
+	for _, schema := range []string{"", config.DefaultSchema} {
+		t.Run("default billing schema "+schema, func(t *testing.T) {
+			r := newSchemaRewriter(schema)
+			if got := r.apply("SELECT * FROM openrails.merchants"); got != "SELECT * FROM billing.merchants" {
+				t.Fatalf("got %q", got)
+			}
+		})
+	}
 
 	t.Run("custom schema relocates the qualifier", func(t *testing.T) {
 		r := newSchemaRewriter("shop")
@@ -52,7 +50,7 @@ func TestSchemaRewriter(t *testing.T) {
 	// schema() must report the configured schema so a *Pool built straight from a
 	// rewriter (DB.DataPool) reports its true schema, never a hardcoded default.
 	t.Run("schema accessor reports the configured schema", func(t *testing.T) {
-		cases := map[string]string{"shop": "shop", config.DefaultSchema: config.DefaultSchema, "": config.DefaultSchema}
+		cases := map[string]string{"shop": "shop", config.CanonicalSchema: config.CanonicalSchema, config.DefaultSchema: config.DefaultSchema, "": config.DefaultSchema}
 		for in, want := range cases {
 			if got := newSchemaRewriter(in).schema(); got != want {
 				t.Fatalf("newSchemaRewriter(%q).schema() = %q, want %q", in, got, want)

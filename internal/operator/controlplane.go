@@ -1,15 +1,6 @@
-// Package controlplane wires the OpenRails AuthKit control plane onto an app
-// graph (#284). The embedded CORE (pkg/embedded.New -> app.BootstrapWithOptions ->
-// internal/app) deliberately does NOT import internal/controlplane (and through
-// it AuthKit): embedded hosts are host-authenticated and opt in by importing
-// THIS package, which is what pulls the control plane (and AuthKit) onto a
-// host's graph. The STANDALONE binary, by contrast, always attaches the control
-// plane (#469): there is no verifier-only standalone mode, and an Attach
-// failure is fatal at boot.
-//
-// The control plane is held on app.App as `any` (App.ControlPlane); this package
-// builds the concrete *controlplane.ControlPlane, attaches it via
-// App.SetControlPlane, and recovers it with Get for the standalone gin server.
+// Package operator wires the standalone AuthKit control plane onto an app.
+// Standalone always attaches it; embedding hosts opt in through embed/controlplane.
+// Billing's directory adapters are explicitly wired here after construction.
 package operator
 
 import (
@@ -22,8 +13,10 @@ import (
 	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/authkit/ratelimit"
+	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/config"
+	billingauthkit "github.com/open-rails/openrails/embed/authkit"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 )
@@ -212,6 +205,12 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	if err := validateAttachOptions(opts); err != nil {
 		return err
 	}
+	if a.Runtime == nil {
+		return fmt.Errorf("control plane: runtime is required")
+	}
+	if a.Runtime.RiverClient != nil || a.Runtime.HasExternalRiverClient() {
+		return fmt.Errorf("control plane: attach before River initialization; a host-owned fleet must compose AuthKit workers before binding its client")
+	}
 
 	// The control plane needs a pgx pool over the database holding AuthKit's
 	// profiles.* schema. Reuse an injected pool when provided, else create one.
@@ -292,6 +291,19 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 		return fmt.Errorf("build control plane: %w", err)
 	}
 
+	if err := a.Runtime.AddRiverConfigurer(func(ctx context.Context, riverConfig *river.Config) error {
+		if err := cp.Core().RegisterRiver(riverConfig); err != nil {
+			return err
+		}
+		return cp.Core().Start(ctx) // host-owned: validates registration, starts nothing
+	}); err != nil {
+		cp.Close()
+		if ownedPool {
+			pool.Close()
+		}
+		return fmt.Errorf("control plane: register maintenance: %w", err)
+	}
+
 	if ownedPool {
 		a.SetControlPlane(cp, pool)
 	} else {
@@ -303,6 +315,15 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	// wiring orders: a merchants service armed LATER picks the seam up from
 	// the runtime (ArmMerchantsService); one armed EARLIER is wired here.
 	if a.Runtime != nil {
+		// The standalone control plane explicitly opts billing into AuthKit's
+		// public directory API. Preserve independently injected host adapters.
+		directory := billingauthkit.NewDirectory(cp.Core())
+		if a.Runtime.EmailService != nil {
+			a.Runtime.EmailService.SetDefaultUserDirectory(directory)
+		}
+		if a.Runtime.WebhookDispatcher != nil && a.Runtime.WebhookDispatcher.ProfileRepo == nil {
+			a.Runtime.WebhookDispatcher.ProfileRepo = directory
+		}
 		resolver := cp.MerchantGroupSlugResolver()
 		a.Runtime.MerchantGroupResolver = resolver
 		a.Runtime.MerchantGroupCanonicalResolver = cp.MerchantGroupIDResolver()

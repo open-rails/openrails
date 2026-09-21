@@ -20,7 +20,7 @@ func operatorLogCount(t *testing.T, fx refundFixture, id uuid.UUID) int {
 	t.Helper()
 	var n int
 	require.NoError(t, fx.db.Pool().QueryRow(context.Background(),
-		`SELECT count(*) FROM openrails.rail_mutation_logs WHERE rail_intent_id=$1 AND evidence ? 'operator_resolution'`, id).Scan(&n))
+		`SELECT count(*) FROM billing.rail_mutation_logs WHERE rail_intent_id=$1 AND evidence ? 'operator_resolution'`, id).Scan(&n))
 	return n
 }
 
@@ -34,7 +34,7 @@ func TestNMIRefundUncertainResponseCodeKeepsReservation(t *testing.T) {
 	row, err := runner.EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
 	require.NoError(t, err)
 	require.Equal(t, StatusUnknownNeedsVerify, row.Status)
-	_, err = fx.db.Pool().Exec(context.Background(), "UPDATE openrails.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
+	_, err = fx.db.Pool().Exec(context.Background(), "UPDATE billing.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
 	require.NoError(t, err)
 	_, err = runner.RunVerifyOnce(context.Background())
 	require.NoError(t, err)
@@ -123,10 +123,10 @@ func TestNMIRefundReceiptSurvivesLocalFailureAcrossRestart(t *testing.T) {
 	fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
 	ddl := dbtest.SharedSuperuserPGXPool(t)
 	constraint := "test_refund_receipt_" + fx.reservationID.String()[:8]
-	_, err := ddl.Exec(context.Background(), fmt.Sprintf(`ALTER TABLE openrails.payments ADD CONSTRAINT %s CHECK (id <> '%s'::uuid OR NOT (coalesce(metadata,'{}') ? 'provider_refund_id'))`, constraint, fx.reservationID))
+	_, err := ddl.Exec(context.Background(), fmt.Sprintf(`ALTER TABLE billing.payments ADD CONSTRAINT %s CHECK (id <> '%s'::uuid OR NOT (coalesce(metadata,'{}') ? 'provider_refund_id'))`, constraint, fx.reservationID))
 	require.NoError(t, err)
 	remove := func() {
-		_, err := ddl.Exec(context.Background(), `ALTER TABLE openrails.payments DROP CONSTRAINT IF EXISTS `+constraint)
+		_, err := ddl.Exec(context.Background(), `ALTER TABLE billing.payments DROP CONSTRAINT IF EXISTS `+constraint)
 		require.NoError(t, err)
 	}
 	t.Cleanup(remove)
@@ -138,7 +138,7 @@ func TestNMIRefundReceiptSurvivesLocalFailureAcrossRestart(t *testing.T) {
 	require.Equal(t, "pending", status)
 	remove()
 
-	_, err = fx.db.Pool().Exec(context.Background(), "UPDATE openrails.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
+	_, err = fx.db.Pool().Exec(context.Background(), "UPDATE billing.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.refundRunner(client, fullModeConfig()).RunVerifyOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
@@ -165,12 +165,12 @@ func TestStripeRefundLostResponseReplaysProviderIdempotencyKey(t *testing.T) {
 
 	stripe.createStatus.Store(0)
 	stripe.listHidden.Store(true)
-	_, err = fx.db.Pool().Exec(context.Background(), "UPDATE openrails.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
+	_, err = fx.db.Pool().Exec(context.Background(), "UPDATE billing.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.stripeRunner(cfg, stripe.srv.URL).RunVerifyOnce(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, StatusFailedRetryable, fx.intentByID(t, row.ID).Status)
-	_, err = fx.db.Pool().Exec(context.Background(), "UPDATE openrails.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
+	_, err = fx.db.Pool().Exec(context.Background(), "UPDATE billing.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.stripeRunner(cfg, stripe.srv.URL).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)

@@ -106,7 +106,7 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	dbi := dbtest.OpenAppDB(t, dsn)
 	var lastSuccess *time.Time
 	require.NoError(t, dbi.Qx(ctx).QueryRow(ctx,
-		`SELECT last_success_at FROM openrails.worker_state WHERE worker_kind = $1`,
+		`SELECT last_success_at FROM billing.worker_state WHERE worker_kind = $1`,
 		riverjobs.CleanupExpiredDataArgs{}.Kind()).Scan(&lastSuccess))
 	require.NotNil(t, lastSuccess, "health bookkeeping must be installed without host cooperation (#895)")
 
@@ -117,24 +117,16 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	require.NoError(t, report.Err())
 }
 
-// TestRiverRequired_ConstructionRefuses is the #895 headline: an embedded host
-// that never declares River ownership must NOT get a usable engine. Before this
-// change the same Options silently produced a working-looking engine whose
-// money-moving periodic jobs would never run.
-func TestRiverRequired_ConstructionRefuses(t *testing.T) {
+// An omitted River option constructs the managed default fleet.
+func TestRiverDefault_ConstructsManagedFleet(t *testing.T) {
 	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
-
-	_, err := embed.New(ctx, embed.Options{
-		Config: &config.Config{
-			Env:      "dev",
-			TestMode: config.CredentialPostureSandbox,
-			DB:       &config.DBConfig{URL: dsn},
-		},
-		// River deliberately omitted.
-
-	})
-	require.ErrorIs(t, err, embed.ErrRiverRequired)
+	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{
+		Env: "dev", TestMode: config.CredentialPostureSandbox,
+		DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
+	}})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, rt.Close(ctx)) })
+	require.False(t, rt.HasExternalRiverClient())
 }
 
 // TestRiverFromHost_NilClientRefuses closes the other half of the handoff: a

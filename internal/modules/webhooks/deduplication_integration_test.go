@@ -51,7 +51,7 @@ func (h *dedupHarness) eventID(t *testing.T, prefix string) string {
 	id := prefix + "-" + uuid.NewString()
 	t.Cleanup(func() {
 		_, _ = h.db.Pool().Exec(context.Background(),
-			"DELETE FROM openrails.webhook_events WHERE event_id = $1", id)
+			"DELETE FROM billing.webhook_events WHERE event_id = $1", id)
 	})
 	return id
 }

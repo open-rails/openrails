@@ -127,7 +127,7 @@ func checkPolicyWasteAndProfiles(t *testing.T, f treasuryWorkflow) {
 		amount   int64
 	}{{under.SourceID, 0}, {over.SourceID, 1_000_000}} {
 		var amount int64
-		require.NoError(t, pool.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0)::bigint FROM openrails.usage_events
+		require.NoError(t, pool.QueryRow(ctx, `SELECT COALESCE(SUM(amount),0)::bigint FROM billing.usage_events
 WHERE customer_id=$1 AND event_type='wasted_spend' AND source='waste' AND source_id=$2`, direct.UUID(), row.sourceID).Scan(&amount))
 		require.Equal(t, row.amount, amount, "usage records the chargeable portion of each waste report")
 	}

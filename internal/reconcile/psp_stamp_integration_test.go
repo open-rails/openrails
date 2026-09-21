@@ -44,12 +44,12 @@ func TestRepoCreateRequiresObservedPSPProvenance(t *testing.T) {
 		productID := uuid.New()
 		priceID := uuid.New()
 		_, err = appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
+			`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 			 VALUES ($1, $2, $2, $3, jsonb_build_object('premium', null), $4)`,
 			productID, "stamp-"+suffix, "stamp-"+suffix, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)
 		_, err = appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+			`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 			 VALUES ($1, $2, 999, 'USD', 720, true, $3)`,
 			priceID, productID, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)

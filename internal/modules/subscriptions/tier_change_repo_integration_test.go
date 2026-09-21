@@ -33,9 +33,9 @@ func TestReplaceForTierChangeCommitsBothSides(t *testing.T) {
 	oldSub.EndedAt = &now
 
 	t.Cleanup(func() {
-		_, _ = database.Pool().Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = ANY($1)", []uuid.UUID{oldID, newSub.ID})
-		_, _ = database.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = database.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = database.Pool().Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = ANY($1)", []uuid.UUID{oldID, newSub.ID})
+		_, _ = database.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = database.Pool().Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	require.NoError(t, repo.ReplaceForTierChange(ctx, oldSub, newSub, now))
@@ -69,9 +69,9 @@ func TestReplaceForTierChangeRollsBackOldSideWhenInsertFails(t *testing.T) {
 	oldSub.EndedAt = &now
 
 	t.Cleanup(func() {
-		_, _ = database.Pool().Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = ANY($1)", []uuid.UUID{oldID, newSub.ID})
-		_, _ = database.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = database.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = database.Pool().Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = ANY($1)", []uuid.UUID{oldID, newSub.ID})
+		_, _ = database.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = database.Pool().Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	require.Error(t, repo.ReplaceForTierChange(ctx, oldSub, newSub, now))
@@ -90,15 +90,15 @@ func TestApplyLocalCancellationPersistsTerminalState(t *testing.T) {
 	productID, priceID, subID := uuid.New(), uuid.New(), uuid.New()
 	insertCatalogAndSub(ctx, t, database, now, 30, productID, priceID, subID, uuid.NewString(), now, now.Add(30*24*time.Hour))
 	lastRetry, nextRetry, graceEnd := now.Add(-time.Hour), now.Add(time.Hour), now.Add(24*time.Hour)
-	_, err := database.Pool().Exec(ctx, `UPDATE openrails.subscriptions
+	_, err := database.Pool().Exec(ctx, `UPDATE billing.subscriptions
 		SET retry_attempts=2, last_retry_at=$2, next_retry_at=$3, grace_ends_at=$4
 		WHERE id=$1`, subID, lastRetry, nextRetry, graceEnd)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = database.Pool().Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = database.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = database.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = database.Pool().Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = database.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = database.Pool().Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	repo := NewSubscriptionRepo(database)

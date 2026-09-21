@@ -29,15 +29,16 @@ type merchantPgxConnKey struct{}
 // pooled connection never carries one merchant's GUC into another merchant's
 // request.
 //
-// Returns the original ctx + a no-op release when this DB is tx-scoped
-// (NewWithPgxTx) — the caller's tx carries the merchant GUC — or when a
-// connection is already pinned (nested call).
+// A tx-scoped DB (NewWithPgxTx) stamps the returned context as transaction-
+// bound and returns a no-op release; the caller's tx carries the merchant GUC.
+// An already compatible pinned connection returns the original ctx and no-op
+// release (nested call).
 func (d *DB) WithMerchantConn(ctx context.Context) (context.Context, func(), error) {
 	if d == nil || (d.pool == nil && d.pgtx == nil) {
 		return ctx, func() {}, fmt.Errorf("db: WithMerchantConn on nil DB")
 	}
 	if d.pgtx != nil {
-		return ctx, func() {}, nil
+		return transactionContext(ctx), func() {}, nil
 	}
 	if lc, err := d.merchantConn(ctx); err != nil {
 		return ctx, func() {}, err

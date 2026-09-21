@@ -76,7 +76,7 @@ func TestPSPSignerUsesVaultTransitEvidence(t *testing.T) {
 	merchantUUID := uuid.New()
 	tid := merchant.ID(merchantUUID)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		merchantUUID, "solana-signer-"+merchantUUID.String()[:8])
 	require.NoError(t, err)
 
@@ -121,7 +121,7 @@ func TestPSPSignerUsesConfiguredEnvironment(t *testing.T) {
 	merchantUUID := uuid.New()
 	tid := merchant.ID(merchantUUID)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		merchantUUID, "solana-signer-env-"+merchantUUID.String()[:8])
 	require.NoError(t, err)
 
@@ -162,7 +162,7 @@ func TestPSPSignerSignsForRecordedPublicKey(t *testing.T) {
 	merchantUUID := uuid.New()
 	tid := merchant.ID(merchantUUID)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		merchantUUID, "solana-signer-recorded-"+merchantUUID.String()[:8])
 	require.NoError(t, err)
 

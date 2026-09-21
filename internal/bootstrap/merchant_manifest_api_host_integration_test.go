@@ -22,7 +22,7 @@ func TestReconcileMerchantManifestAppliesAPIHost(t *testing.T) {
 
 	readHost := func() *string {
 		var apiHost *string
-		require.NoError(t, pool.QueryRow(ctx, `SELECT api_host FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&apiHost))
+		require.NoError(t, pool.QueryRow(ctx, `SELECT api_host FROM billing.merchants WHERE slug = 'host-three'`).Scan(&apiHost))
 		return apiHost
 	}
 

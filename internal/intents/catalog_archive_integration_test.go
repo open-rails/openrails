@@ -64,7 +64,7 @@ func (fx *archiveFixture) enqueueArchive(t *testing.T, objectID string, dueAt ti
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = fx.db.Pool().Exec(context.Background(),
-			"DELETE FROM openrails.rail_intents WHERE id = $1", row.ID)
+			"DELETE FROM billing.rail_intents WHERE id = $1", row.ID)
 	})
 	return row.ID
 }
@@ -82,7 +82,7 @@ func (fx *archiveFixture) intent(t *testing.T, id uuid.UUID) (status string, rea
 func (fx *archiveFixture) makeDue(t *testing.T, id uuid.UUID) {
 	t.Helper()
 	_, err := fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", id)
+		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", id)
 	require.NoError(t, err)
 }
 
@@ -144,7 +144,7 @@ func TestArchiveIntentSynchronousEnqueueAndExecute(t *testing.T) {
 	require.NoError(t, err, "a parked archive is not an error")
 	t.Cleanup(func() {
 		_, _ = fx.db.Pool().Exec(context.Background(),
-			"DELETE FROM openrails.rail_intents WHERE id = $1", row.ID)
+			"DELETE FROM billing.rail_intents WHERE id = $1", row.ID)
 	})
 	assert.Equal(t, StatusPending, row.Status)
 	require.NotNil(t, row.LastFailureReason)
@@ -175,17 +175,17 @@ func TestArchiveIntentRelevanceSupersedesWhenObjectJoinsCatalog(t *testing.T) {
 	productID := uuid.New()
 	priceID := uuid.New()
 	tenantID := dbtest.TestMerchantID.UUID()
-	_, err := fx.db.Pool().Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+	_, err := fx.db.Pool().Exec(ctx, `INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "join-prod-"+uuid.NewString()[:8], tenantID)
 	require.NoError(t, err)
-	_, err = fx.db.Pool().Exec(ctx, `INSERT INTO openrails.prices(id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES($1,$2,900,'USD',720,true,$3)`, priceID, productID, tenantID)
+	_, err = fx.db.Pool().Exec(ctx, `INSERT INTO billing.prices(id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES($1,$2,900,'USD',720,true,$3)`, priceID, productID, tenantID)
 	require.NoError(t, err)
 	pspID := dbtest.EnsureTestPSP(ctx, t, fx.db.Pool(), tenantID, "stripe")
 	require.NoError(t, catalog.NewPriceService(fx.db).UpdatePSPLinks(dbtest.WithTestMerchant(ctx), priceID, map[string]map[string]string{"stripe": {"rail": "stripe", "psp_id": pspID.String(), "price_id": objectID}}))
 
 	t.Cleanup(func() {
-		_, _ = fx.db.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = fx.db.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = fx.db.Pool().Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = fx.db.Pool().Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	_, err = fx.runnerWith(fullModeConfig()).RunExecuteOnce(ctx)

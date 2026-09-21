@@ -22,7 +22,7 @@ import (
 func TestWorkerStateConcurrentHealthAndCursorPreserveFields(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedPGXPool(t)
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	kind := newWorkerStateKind(t, pool, "state")
 	cursor := uuid.New()
 	period := int64(60)
@@ -48,7 +48,7 @@ func TestWorkerStateConcurrentHealthAndCursorPreserveFields(t *testing.T) {
 	}
 	// Reconstruct the reader as a restarted process would, then mutate the
 	// opposite half of the row and verify both owners retain their state.
-	restarted := gen.New(pool)
+	restarted := dbtest.Queries(pool)
 	failure := "failure after restart"
 	stored, err := restarted.GetSweepCursor(ctx, kind)
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func requireTimePtr(t *testing.T, want, got *time.Time, field string) {
 func TestWorkerStateHealthWritesAreMonotonicUnderOutOfOrderJobs(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedPGXPool(t)
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	base := time.Now().UTC().Truncate(time.Microsecond)
 	at := func(sec int) time.Time { return base.Add(time.Duration(sec) * time.Second) }
 	tp := func(sec int) *time.Time { v := at(sec); return &v }
@@ -247,7 +247,7 @@ func TestWorkerStateHealthWritesAreMonotonicUnderOutOfOrderJobs(t *testing.T) {
 func TestSweepCursorSaveIsCompareAndSwapOnTheVersionRead(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedPGXPool(t)
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	kind := newWorkerStateKind(t, pool, "cursor")
 	logger := log.WithField("test", t.Name())
 
@@ -362,14 +362,14 @@ func newWorkerStateKind(t *testing.T, pool *pgxpool.Pool, label string) string {
 	t.Helper()
 	kind := "test." + label + "." + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM openrails.worker_state WHERE worker_kind=$1`, kind)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM billing.worker_state WHERE worker_kind=$1`, kind)
 	})
 	return kind
 }
 
 func readWorkerState(t *testing.T, pool *pgxpool.Pool, kind string) gen.OpenrailsWorkerState {
 	t.Helper()
-	rows, err := gen.New(pool).ListWorkerHealth(context.Background())
+	rows, err := dbtest.Queries(pool).ListWorkerHealth(context.Background())
 	require.NoError(t, err)
 	for _, row := range rows {
 		if row.WorkerKind == kind {

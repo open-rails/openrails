@@ -98,15 +98,15 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 	ctxB := merchant.WithID(ctx, merchant.ID(mB))
 
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
-	exec(ctx, t, pool, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active'), ($3, $4, 'active') ON CONFLICT (id) DO NOTHING`,
+	exec(ctx, t, pool, `INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active'), ($3, $4, 'active') ON CONFLICT (id) DO NOTHING`,
 		mA, "metrics-a-"+suffix, mB, "metrics-b-"+suffix)
 	for _, cid := range c {
-		exec(ctx, t, pool, `INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, cid, mA)
+		exec(ctx, t, pool, `INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, cid, mA)
 	}
-	exec(ctx, t, pool, `INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, cB, mB)
-	exec(ctx, t, pool, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Metrics P1', $3) ON CONFLICT DO NOTHING`,
+	exec(ctx, t, pool, `INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, cB, mB)
+	exec(ctx, t, pool, `INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Metrics P1', $3) ON CONFLICT DO NOTHING`,
 		productA, "metrics-p1-"+suffix, mA)
-	exec(ctx, t, pool, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Metrics PB', $3) ON CONFLICT DO NOTHING`,
+	exec(ctx, t, pool, `INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Metrics PB', $3) ON CONFLICT DO NOTHING`,
 		productB, "metrics-pb-"+suffix, mB)
 	for _, p := range []struct {
 		id       uuid.UUID
@@ -122,15 +122,15 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 		{pricePW, 2_300_000, intp(168), true, productA, mA},
 		{priceB, 999_000_000, nil, false, productB, mB},
 	} {
-		exec(ctx, t, pool, `INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id, access_duration_hours, auto_renew)
+		exec(ctx, t, pool, `INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id, access_duration_hours, auto_renew)
 			VALUES ($1, $2, $3, 'USD', $4, $5, $6) ON CONFLICT DO NOTHING`,
 			p.id, p.product, p.amount, p.merchant, p.hours, p.renew)
 	}
-	exec(ctx, t, pool, `INSERT INTO openrails.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', 'acct-1') ON CONFLICT DO NOTHING`,
+	exec(ctx, t, pool, `INSERT INTO billing.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', 'acct-1') ON CONFLICT DO NOTHING`,
 		acctRA1, mA)
-	exec(ctx, t, pool, `INSERT INTO openrails.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'ccbill', 'acct-cc-1') ON CONFLICT DO NOTHING`,
+	exec(ctx, t, pool, `INSERT INTO billing.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'ccbill', 'acct-cc-1') ON CONFLICT DO NOTHING`,
 		acctCCA1, mA)
-	exec(ctx, t, pool, `INSERT INTO openrails.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', 'acct-b1') ON CONFLICT DO NOTHING`,
+	exec(ctx, t, pool, `INSERT INTO billing.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', 'acct-b1') ON CONFLICT DO NOTHING`,
 		acctRB1, mB)
 
 	// --- subscriptions (insert order matters only for readability) -------------
@@ -156,26 +156,26 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 		{id: subs[7], customer: c[8], price: pricePW, status: "active", started: d(t, 2026, 6, 10)},
 		{id: subs[8], customer: c[8], price: pricePM, status: "cancelled", started: d(t, 2025, 1, 1), ended: tp(d(t, 2025, 6, 1)), cancelled: tp(d(t, 2025, 5, 15)), cancelType: sp("user")},
 	} {
-		exec(ctx, t, pool, `INSERT INTO openrails.subscriptions
+		exec(ctx, t, pool, `INSERT INTO billing.subscriptions
 			(id, merchant_id, customer_id, product_id, price_id, rail, psp_id, status, started_at, ended_at, cancelled_at, cancel_type, current_period_ends_at)
-			VALUES ($1, $2, $3, $4, $5, 'nmi', $6, $7::openrails.subscription_status, $8, $9, $10, $11, $12)`,
+			VALUES ($1, $2, $3, $4, $5, 'nmi', $6, $7::billing.subscription_status, $8, $9, $10, $11, $12)`,
 			s.id, mA, s.customer, productA, s.price, acctRA1, s.status, s.started, s.ended, s.cancelled, s.cancelType, s.periodEnd)
 	}
 	// Recovery transitions (the trigger records them in the same tx):
 	// sub5 past_due->active; sub6 past_due->cancelled.
-	exec(ctx, t, pool, `UPDATE openrails.subscriptions SET status = 'active', current_period_ends_at = $2 WHERE id = $1`,
+	exec(ctx, t, pool, `UPDATE billing.subscriptions SET status = 'active', current_period_ends_at = $2 WHERE id = $1`,
 		subs[5], d(t, 2026, 7, 15))
-	exec(ctx, t, pool, `UPDATE openrails.subscriptions SET status = 'cancelled', cancelled_at = $2, ended_at = $2, cancel_type = 'failed_payment', next_retry_at = NULL, grace_ends_at = NULL WHERE id = $1`,
+	exec(ctx, t, pool, `UPDATE billing.subscriptions SET status = 'cancelled', cancelled_at = $2, ended_at = $2, cancel_type = 'failed_payment', next_retry_at = NULL, grace_ends_at = NULL WHERE id = $1`,
 		subs[6], d(t, 2026, 6, 22))
 
 	// --- payments ---------------------------------------------------------------
 	sale0, sale1, sale2, sale3 := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	fail1, fail2, refund1, cb1, saleB := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
-	payCols := `INSERT INTO openrails.payments
+	payCols := `INSERT INTO billing.payments
 		(id, merchant_id, customer_id, price_id, subscription_id, refunded_payment_id, rail, psp_id,
 		 transaction_id, amount, list_amount, currency, status, attempt_kind, failure_code, failure_reason, reversal_kind,
 		 card_brand, discount_code, purchased_at, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'USD',$12::openrails.payment_status,$13,$14,$15,$16,$17,$18,$19,$19)`
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'USD',$12::billing.payment_status,$13,$14,$15,$16,$17,$18,$19,$19)`
 	txp := "mtx-" + suffix + "-"
 	exec(ctx, t, pool, payCols, sale0, mA, c[1], pricePO, nil, nil, "nmi", acctRA1, txp+"s0", 7_000_000, 7_000_000, "completed", "initial", nil, nil, nil, "visa", nil, d(t, 2026, 5, 10))
 	exec(ctx, t, pool, payCols, sale1, mA, c[1], pricePM, subs[1], nil, "nmi", acctRA1, txp+"s1", 10_000_000, 10_000_000, "completed", "initial", nil, nil, nil, "visa", nil, d(t, 2026, 6, 2))
@@ -188,13 +188,13 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 	exec(ctx, t, pool, payCols, saleB, mB, cB, priceB, nil, nil, "nmi", acctRB1, txp+"sB", 999_000_000, 999_000_000, "completed", "initial", nil, nil, nil, nil, nil, d(t, 2026, 6, 5))
 
 	// --- credit lots (grants) + usage + ledger ------------------------------------
-	lot := `INSERT INTO openrails.grants (id, merchant_id, customer_id, kind, source_type, source_id, event, amount, currency, created_at, starts_at)
+	lot := `INSERT INTO billing.grants (id, merchant_id, customer_id, kind, source_type, source_id, event, amount, currency, created_at, starts_at)
 		VALUES ($1, $2, $3, 'credit', 'purchase', $4, 'grant', $5, 'USD', $6, $6)`
 	exec(ctx, t, pool, lot, uuid.New(), mA, c[1], txp+"lot1", 20_000_000, d(t, 2026, 6, 3))
 	exec(ctx, t, pool, lot, uuid.New(), mA, c[1], txp+"lot2", 10_000_000, d(t, 2026, 6, 15))
 	exec(ctx, t, pool, lot, uuid.New(), mA, c[2], txp+"lot3", 30_000_000, d(t, 2026, 5, 20))
 
-	ue := `INSERT INTO openrails.usage_events (id, merchant_id, customer_id, invoker_id, currency, resource, event_type, amount, source, source_id, pricing_authority, occurred_at)
+	ue := `INSERT INTO billing.usage_events (id, merchant_id, customer_id, invoker_id, currency, resource, event_type, amount, source, source_id, pricing_authority, occurred_at)
 		VALUES ($1, $2, $3, 'user:test', 'USD', $4, $5, $6, 'metrics-test', $7, 'host', $8)`
 	exec(ctx, t, pool, ue, uuid.New(), mA, c[1], "api", "gpt", 5_000_000, txp+"u1", d(t, 2026, 6, 5))
 	exec(ctx, t, pool, ue, uuid.New(), mA, c[1], "api", "gpt", 3_000_000, txp+"u2", d(t, 2026, 6, 18))
@@ -202,14 +202,14 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 	exec(ctx, t, pool, ue, uuid.New(), mA, c[2], "img", "flux", 14_000_000, txp+"u4", d(t, 2026, 6, 28))
 
 	clearing, cb1acct, cb2acct, rev, arrears := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
-	acct := `INSERT INTO openrails.ledger_accounts (id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits)
+	acct := `INSERT INTO billing.ledger_accounts (id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits)
 		VALUES ($1, $2, $3, $4, 'USD', $5)`
 	exec(ctx, t, pool, acct, clearing, mA, nil, "processor_clearing", false)
 	exec(ctx, t, pool, acct, cb1acct, mA, c[1], "customer_balance", true)
 	exec(ctx, t, pool, acct, cb2acct, mA, c[2], "customer_balance", true)
 	exec(ctx, t, pool, acct, rev, mA, nil, "platform_revenue", false)
 	exec(ctx, t, pool, acct, arrears, mA, nil, "arrears_liability", false)
-	tr := `INSERT INTO openrails.ledger_transfers (id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, customer_id, created_at, operation, source, source_id)
+	tr := `INSERT INTO billing.ledger_transfers (id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, customer_id, created_at, operation, source, source_id)
 		VALUES ($1, $2, $3, $4, $5, 'USD', $6, $7, $8, $6, 'metrics-fixture', $1::uuid::text)`
 	// deposits first so the customer-balance floor never trips.
 	exec(ctx, t, pool, tr, uuid.New(), mA, clearing, cb1acct, 20_000_000, "deposit", c[1], d(t, 2026, 6, 3))
@@ -223,7 +223,7 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 	exec(ctx, t, pool, tr, uuid.New(), mA, clearing, arrears, 1_000_000, "owed_payment", c[3], d(t, 2026, 6, 20))
 
 	// --- entitlements ----------------------------------------------------------------
-	ent := `INSERT INTO openrails.entitlements (id, merchant_id, customer_id, entitlement, start_at, end_at, source_id, source_type)
+	ent := `INSERT INTO billing.entitlements (id, merchant_id, customer_id, entitlement, start_at, end_at, source_id, source_type)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, 'admin')`
 	exec(ctx, t, pool, ent, uuid.New(), mA, c[1], "premium", d(t, 2026, 5, 1), nil, uuid.New())
 	e2end := d(t, 2026, 6, 15)
@@ -231,7 +231,7 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 	exec(ctx, t, pool, ent, uuid.New(), mA, c[3], "gold", d(t, 2026, 6, 1), nil, uuid.New())
 
 	// --- admission denial aggregates -----------------------------------------------
-	adh := `INSERT INTO openrails.admission_denials_hourly (merchant_id, customer_id, denial_reason, hour_at, denials)
+	adh := `INSERT INTO billing.admission_denials_hourly (merchant_id, customer_id, denial_reason, hour_at, denials)
 		VALUES ($1, $2, $3, $4, $5)`
 	exec(ctx, t, pool, adh, mA, c[1], "insufficient_credit", time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC), 5)
 	exec(ctx, t, pool, adh, mA, c[1], "budget_exceeded", time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC), 2)
@@ -239,20 +239,20 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 
 	t.Cleanup(func() {
 		for _, sql := range []string{
-			`DELETE FROM openrails.admission_denials_hourly WHERE merchant_id = ANY($1)`,
-			`DELETE FROM openrails.entitlements WHERE merchant_id = ANY($1)`,
-			`DELETE FROM openrails.ledger_transfers WHERE merchant_id = ANY($1)`,
-			`DELETE FROM openrails.ledger_accounts WHERE merchant_id = ANY($1)`,
-			`DELETE FROM openrails.usage_events WHERE merchant_id = ANY($1)`,
-			`DELETE FROM openrails.grants WHERE merchant_id = ANY($1)`,
-			`DELETE FROM openrails.payments WHERE merchant_id = ANY($1)`,
-			`DELETE FROM openrails.subscription_status_transitions WHERE merchant_id = ANY($1)`,
-			`DELETE FROM openrails.subscriptions WHERE merchant_id = ANY($1)`,
-			`DELETE FROM openrails.psps WHERE merchant_id = ANY($1)`,
-			`DELETE FROM openrails.prices WHERE merchant_id = ANY($1)`,
-			`DELETE FROM openrails.products WHERE merchant_id = ANY($1)`,
-			`DELETE FROM openrails.customers WHERE merchant_id = ANY($1)`,
-			`DELETE FROM openrails.merchants WHERE id = ANY($1)`,
+			`DELETE FROM billing.admission_denials_hourly WHERE merchant_id = ANY($1)`,
+			`DELETE FROM billing.entitlements WHERE merchant_id = ANY($1)`,
+			`DELETE FROM billing.ledger_transfers WHERE merchant_id = ANY($1)`,
+			`DELETE FROM billing.ledger_accounts WHERE merchant_id = ANY($1)`,
+			`DELETE FROM billing.usage_events WHERE merchant_id = ANY($1)`,
+			`DELETE FROM billing.grants WHERE merchant_id = ANY($1)`,
+			`DELETE FROM billing.payments WHERE merchant_id = ANY($1)`,
+			`DELETE FROM billing.subscription_status_transitions WHERE merchant_id = ANY($1)`,
+			`DELETE FROM billing.subscriptions WHERE merchant_id = ANY($1)`,
+			`DELETE FROM billing.psps WHERE merchant_id = ANY($1)`,
+			`DELETE FROM billing.prices WHERE merchant_id = ANY($1)`,
+			`DELETE FROM billing.products WHERE merchant_id = ANY($1)`,
+			`DELETE FROM billing.customers WHERE merchant_id = ANY($1)`,
+			`DELETE FROM billing.merchants WHERE id = ANY($1)`,
 		} {
 			_, _ = pool.Exec(context.Background(), sql, []uuid.UUID{mA, mB})
 		}
