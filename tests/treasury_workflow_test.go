@@ -50,17 +50,22 @@ type hostInvokerBinding struct {
 	invoker string
 }
 
-func newTreasuryWorkflow(t *testing.T) treasuryWorkflow {
+func newTreasuryWorkflow(t *testing.T, sandbox ...*config.ProviderSandboxConfig) treasuryWorkflow {
+	var providerSandbox *config.ProviderSandboxConfig
+	if len(sandbox) > 0 {
+		providerSandbox = sandbox[0]
+	}
 	t.Helper()
 	h := integrationharness.New(t, context.Background())
 	surface := h.StartStandalone("USD", integrationharness.WithConfig(func(cfg *config.Config) {
 		cfg.MerchantSource = config.MerchantSourceAPI
 		cfg.SecretBackend = config.SecretBackendDB
 		cfg.ProviderWriteMode = config.ProviderWriteModeFull
+		cfg.ProviderSandbox = providerSandbox
 	}))
 	owned := surface.ProvisionOwnedMerchant("treasury-" + uuid.NewString()[:8])
 	host, err := embed.New(t.Context(), embed.Options{
-		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
+		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, ProviderSandbox: providerSandbox, DB: &config.DBConfig{URL: h.DSN}},
 		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)

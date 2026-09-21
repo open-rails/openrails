@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -23,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	embcp "github.com/open-rails/openrails/internal/operator"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -40,7 +42,7 @@ func TestDeclineLifecyclePreservesCustomerInstruments(t *testing.T) {
 	surface := h.StartStandalone("USD", WithClock(clockwork.NewFakeClockAt(now)), WithConfig(func(c *config.Config) {
 		c.MerchantSource = config.MerchantSourceAPI
 		c.SecretBackend = config.SecretBackendDB
-		c.ProviderWriteMode = config.ProviderWriteModeFull
+		c.ProviderWriteMode = config.ProviderWriteModeLimited
 		c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: gateway.URL}
 	}))
 	owned := surface.ProvisionOwnedMerchant("decline-" + uuid.NewString()[:8])
@@ -169,4 +171,40 @@ func TestDeclineLifecyclePreservesCustomerInstruments(t *testing.T) {
 		}
 		inspect(t, s, "cancelled", models.NotificationPremiumEnded)
 	})
+	t.Run("user cancellation and worker resume", func(t *testing.T) {
+		s := seed(t, 0)
+		end := now.Add(20 * 24 * time.Hour)
+		_, err := pool.Exec(ctx, `UPDATE billing.subscriptions SET status='active',current_period_ends_at=$2,next_retry_at=NULL,retry_attempts=NULL WHERE id=$1`, s.subscription, end)
+		require.NoError(t, err)
+		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			return rt.UserSubscriptionService.CancelUserSubscription(ctx, s.customer.String(), "requested")
+		}))
+		var status, origin string
+		var scheduled, next time.Time
+		require.NoError(t, pool.QueryRow(ctx, `SELECT deletion_scheduled_at FROM billing.subscriptions WHERE id=$1`, s.subscription).Scan(&scheduled))
+		require.NoError(t, pool.QueryRow(ctx, `SELECT status,origin,next_attempt_at FROM billing.rail_intents WHERE subscription_id=$1 AND intent_type='nmi_delete_subscription'`, s.subscription).Scan(&status, &origin, &next))
+		require.Equal(t, intents.StatusPending, status)
+		require.Equal(t, string(intents.OriginUser), origin)
+		require.True(t, scheduled.Equal(next))
+		require.True(t, next.After(now))
+		require.True(t, next.Before(end))
+		worker := riverjobs.ResumeSubscriptionWorker{DB: rt.DB, Config: rt.Config, Clock: rt.Clock, EntitlementService: rt.EntitlementService, SubscriptionService: rt.SubscriptionService, SubscriptionLifecycleService: rt.SubscriptionLifecycleService}
+		job := &river.Job[riverjobs.ResumeSubscriptionArgs]{Args: riverjobs.ResumeSubscriptionArgs{MerchantID: owned.MerchantID.UUID(), UserID: s.customer.String(), SubscriptionID: s.subscription}}
+		require.NoError(t, worker.Work(t.Context(), job))
+		var deleted *time.Time
+		require.NoError(t, pool.QueryRow(ctx, `SELECT status,deletion_scheduled_at FROM billing.subscriptions WHERE id=$1`, s.subscription).Scan(&status, &deleted))
+		require.Equal(t, "active", status)
+		require.Nil(t, deleted)
+		require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM billing.rail_intents WHERE subscription_id=$1 AND intent_type='nmi_delete_subscription'`, s.subscription).Scan(&status))
+		require.Equal(t, intents.StatusSuperseded, status)
+		entitled, err := client.HasEntitlement(t.Context(), openrails.CustomerID(s.customer), "decline_access", now)
+		require.NoError(t, err)
+		require.True(t, entitled)
+		// Invisible requested work must fail, rather than reporting a completed job.
+		job.Args.SubscriptionID = uuid.New()
+		require.Error(t, worker.Work(t.Context(), job))
+		job.Args.MerchantID = uuid.Nil
+		require.Error(t, worker.Work(t.Context(), job))
+	})
+
 }
