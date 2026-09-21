@@ -11,6 +11,8 @@ import (
 )
 
 type CreateMembershipParams struct {
+	// Prepared is supplied by a qualified durable initial-enrollment operation.
+	Prepared              *InitialMembershipTerms
 	UserID                string
 	PriceID               uuid.UUID
 	Rail                  models.Rail
