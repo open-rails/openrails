@@ -433,3 +433,11 @@ SELECT EXISTS (
 SELECT merchant_id FROM openrails.lapsed_credit_lot_merchant_ids(
     sqlc.arg(as_of)::timestamptz,
     sqlc.arg(merchant_limit)::int);
+
+-- name: ListOriginalPurchaseGrants :many
+-- Original immutable events, including later-revoked sources. Accepted purchase
+-- replay validates the original windows without reopening revoked projections.
+SELECT * FROM openrails.grants
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND source_type='purchase'
+  AND source_id=sqlc.arg(payment_id)::uuid::text AND event='grant'
+ORDER BY id LIMIT sqlc.arg(row_limit)::int;

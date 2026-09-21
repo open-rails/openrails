@@ -412,10 +412,14 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 	var created *models.Entitlement
 
 	err := s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if err := LockEntitlementTimeline(ctx, tx, p.UserID, p.Entitlement); err != nil {
+
+		requestedCustomer, err := db.ResolveCustomerID(p.UserID)
+		if err != nil {
 			return err
 		}
-
+		if p.CustomerID != uuid.Nil && p.CustomerID != requestedCustomer {
+			return errors.New("entitlement customer contradicts user identity")
+		}
 		// Resolve the payable merchant subject for this entitlement when the caller
 		// did not supply one (#317), so every window carries customer_id
 		// alongside the legacy user_id. Self-service user UUIDs resolve to a
@@ -429,6 +433,9 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 			p.CustomerID = tsid
 		}
 
+		if err := LockEntitlementTimeline(ctx, tx, p.UserID, p.Entitlement); err != nil {
+			return err
+		}
 		// Replay is scoped to this source. Another source's finite or standing
 		// interval must never replace this purchase/subscription's grant facts.
 		previous, err := gen.New(tx).GetLatestEntitlementBySource(ctx, gen.GetLatestEntitlementBySourceParams{
@@ -657,24 +664,34 @@ func (s *EntitlementService) extendActiveBySubscription(ctx context.Context, sub
 			return nil
 		}
 
-		for _, row := range rows {
-			ent := models.EntitlementFromGen(row)
-			if ent.EndAt == nil || ent.EndAt.IsZero() {
+		for _, candidate := range rows {
+			if err := LockEntitlementTimeline(ctx, tx, candidate.CustomerID.String(), candidate.Entitlement); err != nil {
+				return err
+			}
+			mid, err := merchant.Require(ctx)
+			if err != nil {
+				return err
+			}
+			current, err := q.GetEntitlementByIDForUpdate(ctx, gen.GetEntitlementByIDForUpdateParams{MerchantID: mid.UUID(), ID: candidate.ID})
+			if errors.Is(err, pgx.ErrNoRows) {
 				continue
 			}
-			oldEnd := ent.EndAt.UTC()
-			newEnd := endAt.UTC()
+			if err != nil {
+				return err
+			}
+			if current.CustomerID != candidate.CustomerID || current.Entitlement != candidate.Entitlement || current.SourceID != subscriptionID || current.SourceType != string(models.EntitlementSourceSubscription) {
+				return errors.New("entitlement target changed during extension")
+			}
+			ent := models.EntitlementFromGen(current)
+			if ent.RevokedAt != nil || ent.EndAt == nil || ent.EndAt.IsZero() {
+				continue
+			}
+			oldEnd, newEnd := ent.EndAt.UTC(), endAt.UTC()
 			if !newEnd.After(oldEnd) {
 				continue
 			}
-
-			// Validate: do not produce end_at <= start_at
 			if !newEnd.After(ent.StartAt) {
-				return fmt.Errorf("cannot extend end_at to %v: entitlement start_at=%v would be >= end_at", newEnd, ent.StartAt)
-			}
-
-			if err := LockEntitlementTimeline(ctx, tx, ent.CustomerID.String(), ent.Entitlement); err != nil {
-				return err
+				return fmt.Errorf("cannot extend entitlement before its start")
 			}
 
 			// Shift following scheduled windows by the same extension.
@@ -872,6 +889,9 @@ func (s *EntitlementService) RevokeExistingEntitlement(ctx context.Context, p Re
 		}
 
 		if err := LockEntitlementTimeline(ctx, tx, userID, entitlement); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
 			return err
 		}
 
