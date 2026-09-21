@@ -61,6 +61,14 @@ value to `MigrationOptions.River` and `Options.River`; migrations never invoke
 host client construction. Set `MigrationOptions.Schema` to match `cfg.DB.SchemaName()` when
 using a custom billing schema.
 
+Billing, AuthKit, application tables and River may share `public` or another
+namespace. Each component must use its configured qualified tables and an
+explicit ownership inventory; a schema name does not imply exclusive ownership.
+OpenRails archives contain only billing-owned tables and never include live
+River jobs, AuthKit identities or host records. The destructive embedded reset
+command still targets only the default `billing` schema and refuses it when
+foreign relations are present. It is not a shared-schema reset mechanism.
+
 The engine validates the tracking key at boot and refuses to start if any
 OpenRails migration is missing or orphaned.
 

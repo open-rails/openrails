@@ -113,7 +113,10 @@ func TestSharedPublicManagedRuntimeExecutesBillingJobs(t *testing.T) {
 	admin := migrationConcurrencyAdmin(t)
 	pool := migrationConcurrencyPool(t, admin, 1)
 	require.NoError(t, embed.ApplyMigrations(t.Context(), pool, embed.MigrationOptions{Schema: "public"}))
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{Schema: "public"}}
+	dsnURL, err := url.Parse(pool.Config().ConnString())
+	require.NoError(t, err)
+	dsnURL.Path = "/" + pool.Config().ConnConfig.Database
+	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{Schema: "public", URL: dsnURL.String()}}
 	runtime, err := embed.New(t.Context(), embed.Options{Config: cfg, PGXPool: pool, River: embed.RiverManagedByOpenRails("public")})
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())
