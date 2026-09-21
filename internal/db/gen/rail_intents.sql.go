@@ -1821,6 +1821,66 @@ func (q *Queries) ListRetainedSalesForArchive(ctx context.Context, arg ListRetai
 	return items, nil
 }
 
+const listRetainedSubscriptionCollectionsForArchive = `-- name: ListRetainedSubscriptionCollectionsForArchive :many
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id=$1::uuid AND intent_type='subscription_collection'
+  AND ($2::uuid IS NULL OR id>$2::uuid)
+ORDER BY id LIMIT $3::int
+`
+
+type ListRetainedSubscriptionCollectionsForArchiveParams struct {
+	MerchantID uuid.UUID
+	AfterID    *uuid.UUID
+	PageSize   int32
+}
+
+func (q *Queries) ListRetainedSubscriptionCollectionsForArchive(ctx context.Context, arg ListRetainedSubscriptionCollectionsForArchiveParams) ([]OpenrailsRailIntent, error) {
+	rows, err := q.db.Query(ctx, listRetainedSubscriptionCollectionsForArchive, arg.MerchantID, arg.AfterID, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsRailIntent
+	for rows.Next() {
+		var i OpenrailsRailIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ClaimedUntil,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStuckRailIntents = `-- name: ListStuckRailIntents :many
 
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
