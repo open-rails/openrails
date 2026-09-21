@@ -2694,6 +2694,7 @@
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
       "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
       "strconv": "strconv",
+      "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time"
     },
