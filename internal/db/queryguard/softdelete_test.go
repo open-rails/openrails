@@ -43,6 +43,10 @@ var policedTables = map[string]string{
 // allow lists queries that legitimately see soft-deleted rows. Every entry is a
 // deliberate decision with a reason; adding one is the review point.
 var allow = map[string]string{
+	"GetInitialMembershipForUpdate":         "accepted membership completion must inspect tombstones to preserve later cancellation/deletion and avoid recreating the accepted ID; initial_terms_integration_test.go proves no resurrection",
+	"GetInitialMembershipForArchive":        "archive validates retained initial membership identity and grant history including later tombstones; never used as a live subscription lookup",
+	"ListObservedInitialMembershipPayments": "archive validates the original observed first-payment history, including retained payment tombstones; no collection or access mutation",
+
 	"CountInvalidCheckoutCaptureReferences": "archive integrity audit validates every retained capture binding, including tombstones; this is not a live-session read",
 	"HasSettledPayment":                     "historical positive rail-payment proof survives archival and event retention; a tombstone must not grant another first-payment trial",
 	"MerchantHasActivity":                   "retirement is only for never-used merchants; historical and soft-deleted payments/subscriptions must disqualify them",
