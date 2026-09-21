@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -35,7 +36,7 @@ func (h *InitialMembershipIntentHandler) executeStripeInitial(ctx context.Contex
 	if err != nil {
 		return intents.Parked(err.Error())
 	}
-	first, err := h.fenceInitialMembership(ctx, in, p)
+	proof, first, err := h.fenceInitialMembership(ctx, in, p)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
@@ -43,6 +44,9 @@ func (h *InitialMembershipIntentHandler) executeStripeInitial(ctx context.Contex
 		return h.Verify(ctx, in)
 	}
 	result, err := service.CreateEnginePayment(ctx, params)
+	if errors.Is(err, charge.ErrNotDispatched) {
+		return h.completeInitialNonexecution(ctx, in, proof)
+	}
 	if err != nil {
 		return intents.Ambiguous("Stripe initial payment requires exact payment recovery")
 	}

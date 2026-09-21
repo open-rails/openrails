@@ -516,7 +516,7 @@ WHERE id = sqlc.arg(id)::uuid
        OR (sqlc.arg(evidence_key)::text='qualified_initial_refusal' AND intent_type='initial_membership'
            AND NOT (coalesce(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','qualified_enrollment'])
            AND ((sqlc.arg(receipt)::jsonb->>'kind'='not_submitted' AND NOT (coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted'))
-             OR (sqlc.arg(receipt)::jsonb->>'kind' IN ('provider_declined','stripe_canceled') AND result_evidence->>'initial_submitted'='true')))
+             OR (sqlc.arg(receipt)::jsonb->>'kind' IN ('provider_declined','stripe_canceled','not_dispatched') AND result_evidence->>'initial_submitted'='true')))
        OR (sqlc.arg(evidence_key)::text='stripe_recurring_decline' AND intent_type='subscription_collection' AND rail='stripe'
            AND COALESCE(result_evidence->>'submitted_at','') <> ''
            AND sqlc.arg(receipt)::jsonb->>'failure_code'='canceled'
