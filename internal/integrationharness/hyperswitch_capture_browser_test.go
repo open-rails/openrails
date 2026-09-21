@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -28,10 +29,12 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -86,8 +89,8 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &vendor))
 	ctx := t.Context()
 	type observation struct {
-		Order, Transaction, Amount, Currency, Initiator, Indicator, Anchor string
-		CardMatched, Approved                                              bool
+		Order, Transaction, Amount, Currency, Initiator, Indicator, Anchor, BillingMethod string
+		CardMatched, Approved                                                             bool
 	}
 	observations := func() []observation {
 		response, err := http.Get(vendor.NMIReadBase + "/observations")
@@ -403,6 +406,117 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 					return nil
 				}))
 				require.Len(t, observations()[before:], 4, "restored terminal replay is local")
+			})
+			t.Run("actual recurring transport only", func(t *testing.T) {
+				// Transport qualification after actual browser capture; this is not
+				// recurring consent, subscription enrollment or lifecycle completion.
+				var method gen.OpenrailsPaymentMethod
+				require.NoError(t, rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {
+					var err error
+					method, err = rt.DB.Gen(c).GetPaymentMethodByID(c, gen.GetPaymentMethodByIDParams{MerchantID: owned.MerchantID.UUID(), ID: uuid.UUID(proof.Method)})
+					return err
+				}))
+				binding := charge.HyperSwitchBinding{AccountID: vendor.MerchantID, ProfileID: vendor.ProfileID, APIBaseURL: vendor.APIBaseURL}
+				var initial string
+				for _, phase := range []string{"initial", "reuse", "merchant", "lost", "declined"} {
+					baseline := len(observations())
+					outcome := "approved"
+					if phase == "lost" || phase == "declined" {
+						outcome = phase
+					}
+					body, _ := json.Marshal(map[string]string{"next": outcome})
+					control, err := http.Post(vendor.NMIReadBase+"/control", "application/json", bytes.NewReader(body))
+					require.NoError(t, err)
+					require.Equal(t, http.StatusNoContent, control.StatusCode)
+					_ = control.Body.Close()
+					posture := charge.InitialRecurring()
+					if phase == "reuse" {
+						posture = charge.RecurringReuse(initial)
+					} else if phase != "initial" {
+						posture = charge.RecurringMIT(initial)
+					}
+					request := charge.Request{Instrument: charge.Instrument{PaymentMethodID: method.ID, Rail: "nmi", CustomerRef: method.RailCustomerRef, MethodRef: method.RailMethodRef}, AmountMinor: 123, Currency: "USD", OrderRef: uuid.NewString(), Context: posture}
+					if phase == "merchant" {
+						request.Currency = "JPY"
+						request.AmountMinor = 100
+					}
+					var result charge.Result
+					var declined bool
+					err = rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {
+						charger, err := money.PrepareHyperSwitchCharge(c, rt.CollectionResolver, method, binding)
+						if err != nil {
+							return err
+						}
+						var refusal *nmi.CustomerVaultError
+						if phase == "initial" || phase == "reuse" {
+							result, refusal, err = charger.ChargeInitialRecurring(c, request)
+						} else {
+							result, refusal, err = charger.ChargeRecurringMIT(c, request)
+						}
+						declined = refusal != nil
+						if refusal != nil {
+							require.Equal(t, 200, refusal.ResponseCode)
+						}
+						return err
+					})
+					if phase == "lost" {
+						require.ErrorIs(t, err, hyperswitch.ErrUnknown)
+						require.False(t, errors.Is(err, charge.ErrNotDispatched))
+						require.False(t, declined)
+					} else {
+						require.NoError(t, err)
+					}
+					received := observations()[baseline:]
+					require.Len(t, received, 1, "actual vendor never retries a possibly submitted recurring charge")
+					row := received[0]
+					require.Equal(t, request.OrderRef, row.Order)
+					require.Equal(t, "recurring", row.BillingMethod)
+					require.True(t, row.CardMatched)
+					require.Equal(t, string(posture.Initiator), row.Initiator)
+					require.Equal(t, posture.PriorRef, row.Anchor)
+					amount := "1.23"
+					if phase == "merchant" {
+						amount = "100.00"
+					}
+					require.Equal(t, amount, row.Amount)
+					require.Equal(t, request.Currency, row.Currency)
+					if phase == "initial" {
+						require.Equal(t, "stored", row.Indicator)
+						require.Equal(t, row.Transaction, result.CapturedRef)
+						initial = row.Transaction
+					} else {
+						require.Equal(t, "used", row.Indicator)
+						require.Empty(t, result.CapturedRef)
+					}
+					if phase == "declined" {
+						require.True(t, declined)
+						require.True(t, result.Declined)
+						require.False(t, row.Approved)
+					} else {
+						require.True(t, row.Approved)
+						readReq, err := http.NewRequestWithContext(ctx, http.MethodGet, vendor.NMIReadBase+"/payments/"+row.Transaction, nil)
+						require.NoError(t, err)
+						readReq.Header.Set("Authorization", vendor.NMIKey)
+						readResp, err := http.DefaultClient.Do(readReq)
+						require.NoError(t, err)
+						require.Equal(t, http.StatusOK, readResp.StatusCode)
+						var receipt struct{ ID, Amount, Currency string }
+						require.NoError(t, json.NewDecoder(readResp.Body).Decode(&receipt))
+						_ = readResp.Body.Close()
+						require.Equal(t, row.Transaction, receipt.ID)
+						require.Equal(t, amount, receipt.Amount)
+						require.Equal(t, request.Currency, receipt.Currency)
+					}
+				}
+				calls, err := http.Get(vendor.NMIReadBase + "/schedule-calls")
+				require.NoError(t, err)
+				var count struct{ Count int }
+				require.NoError(t, json.NewDecoder(calls.Body).Decode(&count))
+				_ = calls.Body.Close()
+				require.Zero(t, count.Count, "HS never invokes native schedule operations")
+				var retained string
+				require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT stored_credential_recurring_ref FROM billing.payment_methods WHERE id=$1`, method.ID).Scan(&retained))
+				require.Empty(t, retained, "transport result alone cannot establish persisted recurring authority")
 			})
 		}
 	}
