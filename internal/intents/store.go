@@ -92,6 +92,9 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	if scope.UUID() != p.MerchantID {
 		return gen.OpenrailsRailIntent{}, errors.New("intent merchant does not match context")
 	}
+	if p.IntentType == subscriptions.TypeInitialMembership {
+		return s.enqueueInitialMembership(ctx, p)
+	}
 	if p.IntentType == TypeNMIPaymentMethodUpdate {
 		return s.enqueueNMIMethodUpdate(ctx, p)
 	}
@@ -593,6 +596,9 @@ func slimEvidence(evidence map[string]any) map[string]any {
 // RAW pgx (no sqlc): runs on Qx(ctx) so the schema rewriter (#471) and RLS
 // apply exactly as for the generated queries.
 func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[string]any) error {
+	if _, ok := keys["initial_submitted"]; ok {
+		return errors.New("initial submission fence is write-once")
+	}
 	if err := refuseCustodyKeys(keys); err != nil {
 		return err
 	}
@@ -626,6 +632,9 @@ func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[strin
 // sending another provider request).
 func (s *Store) RecordProgressIfAbsent(ctx context.Context, id uuid.UUID, key string, value any) (bool, error) {
 	key = strings.TrimSpace(key)
+	if key == "initial_submitted" && value != true {
+		return false, errors.New("initial submission fence must be true")
+	}
 	if err := refuseCustodyKeys(map[string]any{key: value}); err != nil {
 		return false, err
 	}
@@ -647,7 +656,8 @@ func (s *Store) RecordProgressIfAbsent(ctx context.Context, id uuid.UUID, key st
 		  WHERE id = $1
 		    AND merchant_id = $4
 		    AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
-		    AND NOT (coalesce(result_evidence, '{}'::jsonb) ? $2::text)`, id, key, b, mid.UUID())
+		    AND NOT (coalesce(result_evidence, '{}'::jsonb) ? $2::text)
+ AND ($2::text <> 'initial_submitted' OR NOT (coalesce(result_evidence,'{}'::jsonb) ? 'qualified_initial_refusal'))`, id, key, b, mid.UUID())
 	if err != nil {
 		return false, err
 	}

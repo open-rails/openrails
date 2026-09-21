@@ -346,7 +346,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		if r.CheckoutService.CustodianSaleService != nil {
 			registry.Register(checkout.NewCustodianSaleIntentHandler(r.CheckoutService.CustodianSaleService))
 		}
-		registry.Register(checkout.NewNMISubscriptionCreateIntentHandler(r.CheckoutService))
+		registry.Register(checkout.NewInitialMembershipIntentHandler(r.CheckoutService, r.CollectionResolver))
 		registry.Register(checkout.NewNMIUpgradeIntentHandler(r.CheckoutService))
 		registry.Register(checkout.NewStripeTierChangeIntentHandler(r.CheckoutService))
 	}

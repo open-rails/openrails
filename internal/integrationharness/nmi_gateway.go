@@ -43,14 +43,17 @@ type NMISale struct {
 // NMIEnrollment is one recurring enrollment (recurring=add_subscription) the
 // gateway recorded.
 type NMIEnrollment struct {
-	SubscriptionID string
-	OrderID        string
-	PONumber       string
-	FirstCharge    string
-	Vault          string
-	Plan           string
-	Amount         string
-	Deleted        bool
+	SaleType                  string
+	SaleAmount                string
+	StoredCredentialIndicator string
+	SubscriptionID            string
+	OrderID                   string
+	PONumber                  string
+	FirstCharge               string
+	Vault                     string
+	Plan                      string
+	Amount                    string
+	Deleted                   bool
 }
 
 // FakeNMIGateway is a loopback NMI: the classic Direct Post sale and
@@ -70,17 +73,26 @@ type FakeNMIGateway struct {
 	sales       []NMISale
 	attempts    int
 	enrollments []NMIEnrollment
+	plans       map[string]nmi.V5Plan
 }
 
 // NewFakeNMIGateway starts the gateway approving and visible. Point a runtime
 // at it with config.ProviderSandbox{NMIGatewayURL: g.URL}.
 func NewFakeNMIGateway(t testing.TB) *FakeNMIGateway {
 	t.Helper()
-	g := &FakeNMIGateway{mode: NMISaleApprove, visible: true}
+	g := &FakeNMIGateway{mode: NMISaleApprove, visible: true, plans: map[string]nmi.V5Plan{}}
 	g.server = httptest.NewServer(http.HandlerFunc(g.serve))
 	g.URL = g.server.URL
 	t.Cleanup(g.server.Close)
 	return g
+}
+
+// DeclarePlan keeps provider schedule facts independent of enrollment's optional
+// initial sale amount. A schedule-only command never creates a payment.
+func (g *FakeNMIGateway) DeclarePlan(plan nmi.V5Plan) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.plans[plan.ID] = plan
 }
 
 func (g *FakeNMIGateway) SetMode(mode NMISaleMode) {
@@ -187,7 +199,7 @@ func (g *FakeNMIGateway) serveSale(w http.ResponseWriter, r *http.Request) {
 func (g *FakeNMIGateway) serveEnrollment(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	enrollment := NMIEnrollment{
+	enrollment := NMIEnrollment{SaleType: r.Form.Get("type"), SaleAmount: r.Form.Get("amount"), StoredCredentialIndicator: r.Form.Get("stored_credential_indicator"),
 		SubscriptionID: "rsub-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12],
 		OrderID:        r.Form.Get("orderid"),
 		PONumber:       r.Form.Get("ponumber"),
@@ -196,8 +208,25 @@ func (g *FakeNMIGateway) serveEnrollment(w http.ResponseWriter, r *http.Request)
 		Plan:           r.Form.Get("plan_id"),
 		Amount:         r.Form.Get("amount"),
 	}
+	if plan, ok := g.plans[enrollment.Plan]; ok {
+		enrollment.Amount = plan.PlanAmount
+	}
+	transaction := ""
+	if r.Form.Get("type") == "sale" {
+		g.attempts++
+		if g.mode == NMISaleDecline {
+			fmt.Fprint(w, "response=2&responsetext=DECLINED&response_code=200")
+			return
+		}
+		transaction = "tx-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+		g.sales = append(g.sales, NMISale{OrderID: enrollment.OrderID, TransactionID: transaction, Vault: enrollment.Vault, Amount: r.Form.Get("amount"), Currency: strings.ToUpper(r.Form.Get("currency")), At: time.Now().UTC()})
+	}
 	g.enrollments = append(g.enrollments, enrollment)
-	fmt.Fprintf(w, "response=1&responsetext=SUCCESS&subscription_id=%s&response_code=100", enrollment.SubscriptionID)
+	if transaction != "" && g.mode == NMISaleUncertain {
+		fmt.Fprint(w, "response=3&responsetext=Communication+error&response_code=421")
+		return
+	}
+	fmt.Fprintf(w, "response=1&responsetext=SUCCESS&subscription_id=%s&transactionid=%s&response_code=100", enrollment.SubscriptionID, transaction)
 }
 
 // serveSubscription is the v5 subscription read (a live enrollment, else
@@ -221,10 +250,14 @@ func (g *FakeNMIGateway) serveSubscription(w http.ResponseWriter, method, id str
 			http.Error(w, "fixture enrollment has invalid first charge date", http.StatusInternalServerError)
 			return
 		}
+		plan := nmi.V5Plan{ID: enrollment.Plan, PlanAmount: enrollment.Amount, DayFrequency: "30", PlanPayments: "0"}
+		if declared, ok := g.plans[enrollment.Plan]; ok {
+			plan = declared
+		}
 		_ = json.NewEncoder(w).Encode(nmi.V5Subscription{
 			Object: "subscription", ID: enrollment.SubscriptionID, CustomerVaultID: enrollment.Vault,
 			DelayedCondition: "active", PausedSubscription: false, NextBillingDate: start.Format("2006-01-02"),
-			Plan: &nmi.V5Plan{ID: enrollment.Plan, PlanAmount: enrollment.Amount, DayFrequency: "30", PlanPayments: "0"},
+			Plan: &plan,
 		})
 		return
 	}

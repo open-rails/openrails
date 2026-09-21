@@ -12,6 +12,8 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -27,12 +29,45 @@ type enrollmentReceipt struct {
 	Facts   nmi.EnrollmentEvidence `json:"facts"`
 }
 
-func NMIEnrollmentOrder(in gen.OpenrailsRailIntent) string { return "upgs-" + in.ID.String() }
+func NMIEnrollmentOrder(in gen.OpenrailsRailIntent) string {
+	if in.IntentType == subscriptions.TypeInitialMembership {
+		p, err := subscriptions.DecodeInitialMembershipPayload(in)
+		if err != nil {
+			return ""
+		}
+		return payments.NMISaleOrderReference(in.ID, p.E2ERunID)
+	}
+	return "upgs-" + in.ID.String()
+}
+
+type enrollmentTerms struct {
+	Instrument                                             charge.FrozenInstrument
+	OldProviderSubscriptionID, PlanID, Currency, StartDate string
+	RecurringAmount                                        int64
+	PeriodStart, PeriodEnd                                 time.Time
+	PlanPayments                                           *int
+}
+
+func decodeEnrollmentTerms(in gen.OpenrailsRailIntent) (enrollmentTerms, error) {
+	if in.IntentType == subscriptions.TypeInitialMembership {
+		p, err := subscriptions.DecodeInitialMembershipPayload(in)
+		if err != nil {
+			return enrollmentTerms{}, err
+		}
+		if p.NativeSchedule == nil {
+			return enrollmentTerms{}, errors.New("engine membership has no native schedule")
+		}
+
+		return enrollmentTerms{Instrument: p.Instrument, PlanID: p.NativeSchedule.PlanID, Currency: p.Terms.Currency, StartDate: p.NativeSchedule.StartDate, RecurringAmount: p.Terms.RecurringAmount, PeriodStart: p.Terms.PeriodStart, PeriodEnd: p.Terms.PeriodStart.Add(time.Duration(p.NativeSchedule.DayFrequency) * 24 * time.Hour), PlanPayments: &p.NativeSchedule.PlanPayments}, nil
+	}
+	p, err := subscriptions.DecodeNMIUpgradePayload(in)
+	return enrollmentTerms{Instrument: p.Instrument, OldProviderSubscriptionID: p.OldProviderSubscriptionID, PlanID: p.PlanID, Currency: p.Currency, StartDate: p.StartDate, RecurringAmount: p.RecurringAmount, PeriodStart: p.PeriodStart, PeriodEnd: p.PeriodEnd}, err
+}
 
 func (r NMIEnrollmentReceipt) SubscriptionID() string { return r.data.Facts.Subscription.ID }
 
 func (r NMIEnrollmentReceipt) Validate(in gen.OpenrailsRailIntent) error {
-	p, err := subscriptions.DecodeNMIUpgradePayload(in)
+	p, err := decodeEnrollmentTerms(in)
 	if err != nil {
 		return err
 	}
@@ -42,6 +77,9 @@ func (r NMIEnrollmentReceipt) Validate(in gen.OpenrailsRailIntent) error {
 	}
 	f := r.data.Facts
 	sub := f.Subscription
+	if in.IntentType == subscriptions.TypeInitialMembership && (f.VaultBillingID == "" || (p.Instrument.RailMethodRef != "" && f.VaultBillingID != p.Instrument.RailMethodRef)) {
+		return errors.New("initial schedule does not prove its accepted sole vault billing entry")
+	}
 	if sub.ID == "" || sub.ID == p.OldProviderSubscriptionID || sub.CustomerVaultID != p.Instrument.RailCustomerRef || sub.Plan == nil || sub.Plan.ID != p.PlanID || sub.DelayedCondition != "active" || f.OrderReference != NMIEnrollmentOrder(in) || f.PONumber != NMIEnrollmentOrder(in) {
 		return errors.New("enrollment receipt does not identify the accepted successor")
 	}
@@ -66,7 +104,7 @@ func (r NMIEnrollmentReceipt) Validate(in gen.OpenrailsRailIntent) error {
 		return errors.New("successor schedule has another billing cadence")
 	}
 	payments, err := strconv.Atoi(strings.TrimSpace(sub.Plan.PlanPayments))
-	if err != nil || payments < 0 {
+	if err != nil || payments < 0 || (p.PlanPayments != nil && payments != *p.PlanPayments) {
 		return errors.New("successor schedule has no qualified installment count")
 	}
 	start, err := time.Parse("20060102", p.StartDate)
@@ -81,7 +119,7 @@ func ReadNMIEnrollmentReceipt(ctx context.Context, in gen.OpenrailsRailIntent, r
 	if err != nil {
 		return NMIEnrollmentReceipt{}, false, err
 	}
-	if _, err := subscriptions.DecodeNMIUpgradePayload(in); err != nil {
+	if _, err := decodeEnrollmentTerms(in); err != nil {
 		return NMIEnrollmentReceipt{}, false, err
 	}
 	client, err := resolveReceiptNMIClient(ctx, resolver, in)
@@ -91,6 +129,16 @@ func ReadNMIEnrollmentReceipt(ctx context.Context, in gen.OpenrailsRailIntent, r
 	facts, found, err := client.ReadEnrollmentEvidence(ctx, reference)
 	if err != nil || !found {
 		return NMIEnrollmentReceipt{}, false, err
+	}
+	if in.IntentType == subscriptions.TypeInitialMembership {
+		p, err := subscriptions.DecodeInitialMembershipPayload(in)
+		if err != nil {
+			return NMIEnrollmentReceipt{}, false, err
+		}
+		facts.VaultBillingID, err = client.ReadSingleCardVaultBilling(ctx, p.Instrument.RailCustomerRef, p.Instrument.RailMethodRef)
+		if err != nil {
+			return NMIEnrollmentReceipt{}, false, err
+		}
 	}
 	receipt := NMIEnrollmentReceipt{enrollmentReceipt{binding, facts}}
 	if err := receipt.Validate(in); err != nil {
@@ -116,6 +164,9 @@ func LoadNMIEnrollmentReceipt(in gen.OpenrailsRailIntent) (NMIEnrollmentReceipt,
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&receipt.data); err != nil {
 		return receipt, true, err
+	}
+	if _, refused := evidence[qualifiedInitialRefusalKey]; refused {
+		return receipt, true, errors.New("enrollment receipt contradicts retained initial refusal")
 	}
 	return receipt, true, receipt.Validate(in)
 }

@@ -88,6 +88,9 @@ func (s *NMIConvergeService) Converge(ctx context.Context, reference string) (uu
 	}
 
 	if sub.Status == models.StatusPending {
+		if handled, err := s.activateAcceptedInitialPayment(ctx, sub, now); handled {
+			return sub.CustomerID, err
+		}
 		return sub.CustomerID, s.activatePendingFromProbe(ctx, rail, sub, now)
 	}
 

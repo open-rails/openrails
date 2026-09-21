@@ -30,6 +30,9 @@ func TestTierChangeCrossRailKeyReuseDuringPreflightIsRefused(t *testing.T) {
 			require.NoError(t, err)
 			_, err = nmi.db.Qx(nmi.ctx).Exec(nmi.ctx, `UPDATE billing.prices SET amount=60000000 WHERE id=$1`, nmi.newPrice.ID)
 			require.NoError(t, err)
+			// The successor is schedule-only: its recurring price is an
+			// independently reported plan fact, not the proration sale amount.
+			nmi.gateway.recurringAmount.Store("60.00")
 			t.Cleanup(func() {
 				_, _ = nmi.db.Qx(nmi.ctx).Exec(nmi.ctx, `DELETE FROM billing.price_psp_bindings WHERE price_id=$1`, nmi.newPrice.ID)
 			})

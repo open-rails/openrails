@@ -2,14 +2,11 @@ package money
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
@@ -24,6 +21,31 @@ import (
 type hyperSwitchCollectionAdapter struct {
 	charger *hscharge.Charger
 	binding charge.HyperSwitchBinding
+}
+
+// PrepareHyperSwitchCharge reuses the existing scoped account/credential armer
+// without invoking invoice preparation or choosing an unscheduled agreement.
+// The caller rechecks method ownership against its frozen instrument and owns
+// the durable submission fence. This helper compares the retained HS binding.
+func PrepareHyperSwitchCharge(ctx context.Context, resolver CollectionAdapterResolver, method gen.OpenrailsPaymentMethod, accepted charge.HyperSwitchBinding) (*hscharge.Charger, error) {
+	if resolver == nil || method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil {
+		return nil, charge.ErrInstrumentChanged
+	}
+	if err := accepted.Validate(); err != nil {
+		return nil, err
+	}
+	adapter, armed, err := resolver.ResolveCollectionAdapter(ctx, method)
+	if err != nil {
+		return nil, err
+	}
+	hs, ok := adapter.(*hyperSwitchCollectionAdapter)
+	if !armed || !ok || hs == nil || hs.charger == nil {
+		return nil, errors.New("HyperSwitch charge is not armed")
+	}
+	if hs.binding != accepted {
+		return nil, charge.ErrInstrumentChanged
+	}
+	return hs.charger, nil
 }
 
 // SetHyperSwitchDeployment is runtime initialization, before serving or workers.
@@ -41,39 +63,10 @@ func (s *MoneyService) SetHyperSwitchDeployment(apiBaseURL string) error {
 }
 
 func collectionHyperSwitchBinding(ctx context.Context, q *gen.Queries, method gen.OpenrailsPaymentMethod, deployment string) (charge.HyperSwitchBinding, error) {
-	var empty charge.HyperSwitchBinding
-	if deployment == "" || method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil {
-		return empty, fmt.Errorf("%w: HyperSwitch custody is not configured", charge.ErrInstrumentChanged)
-	}
-	accounts, err := q.GetCollectionCustodianAccountsForShare(ctx, gen.GetCollectionCustodianAccountsForShareParams{MerchantID: method.MerchantID, PspID: method.PspID, CustodianID: *method.CustodianID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return empty, charge.ErrInstrumentChanged
-	}
-	if err != nil {
-		return empty, err
-	}
-	row := accounts.OpenrailsCustodian
-	if accounts.OpenrailsPsp.Rail != method.Rail || row.Kind != method.Custodian || row.Environment != accounts.OpenrailsPsp.Environment {
-		return empty, charge.ErrInstrumentChanged
-	}
-	return hyperSwitchBinding(row, deployment)
+	return charge.FreezeHyperSwitchBinding(ctx, q, method, deployment)
 }
-
 func hyperSwitchBinding(row gen.OpenrailsCustodian, deployment string) (charge.HyperSwitchBinding, error) {
-	var settings map[string]any
-	if json.Unmarshal(row.Settings, &settings) != nil {
-		return charge.HyperSwitchBinding{}, charge.ErrInstrumentChanged
-	}
-	parsed, err := custodians.ParseSettings(row.Kind, settings)
-	if err != nil {
-		return charge.HyperSwitchBinding{}, charge.ErrInstrumentChanged
-	}
-	canonical, err := charge.CanonicalHyperSwitchDeployment(deployment)
-	if err != nil {
-		return charge.HyperSwitchBinding{}, err
-	}
-	binding := charge.HyperSwitchBinding{AccountID: row.AccountID, ProfileID: parsed.ProfileID, APIBaseURL: canonical}
-	return binding, binding.Validate()
+	return charge.HyperSwitchBindingFromAccount(row, deployment)
 }
 
 func (a *hyperSwitchCollectionAdapter) Prepare(ctx context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (PreparedCharge, error) {

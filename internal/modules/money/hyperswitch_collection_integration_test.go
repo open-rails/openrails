@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +26,7 @@ import (
 // durable invoice runner, loopback custodian/NMI boundaries. The separately
 // selected browser/vendor qualification proves actual vault interpolation.
 func TestHyperSwitchInvoiceCollectionWorkflow(t *testing.T) {
-	for _, mode := range []string{"CIT then MIT", "archived stamped account", "lost response", "declined", "preflight missing", "preflight revoked after fence", "metadata unavailable after fence", "old marker unavailable", "park before first send", "profile changes before send", "deployment changes before resume", "secret rotates before resume"} {
+	for _, mode := range []string{"recurring arming", "CIT then MIT", "archived stamped account", "lost response", "declined", "preflight missing", "preflight revoked after fence", "metadata unavailable after fence", "old marker unavailable", "park before first send", "profile changes before send", "deployment changes before resume", "secret rotates before resume"} {
 		t.Run(mode, func(t *testing.T) {
 			e := newNMIReceiptEnv(t)
 			custodian, vendorAccount := uuid.New(), "vendor_"+uuid.NewString()
@@ -105,7 +106,11 @@ func TestHyperSwitchInvoiceCollectionWorkflow(t *testing.T) {
 				require.Equal(t, "payment_method_id", input.Kind)
 				require.Equal(t, "synthetic-key", input.Form["security_key"])
 				require.Equal(t, "{{$card_number}}", input.Form["ccnumber"])
-				require.Empty(t, input.Form["billing_method"])
+				if mode == "recurring arming" {
+					require.Equal(t, "recurring", input.Form["billing_method"])
+				} else {
+					require.Empty(t, input.Form["billing_method"])
+				}
 				mu.Lock()
 				forms = append(forms, input.Form)
 				n := len(forms)
@@ -130,6 +135,55 @@ func TestHyperSwitchInvoiceCollectionWorkflow(t *testing.T) {
 			t.Cleanup(server.Close)
 			e.plane.Config.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: server.URL}
 			require.NoError(t, e.svc.SetHyperSwitchDeployment(server.URL))
+			if mode == "recurring arming" {
+				_, err = e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET stored_credential_recurring_ref='original_recurring' WHERE id=$1`, e.method)
+				require.NoError(t, err)
+				method := e.methodRow(t)
+				require.Empty(t, method.StoredCredentialUnscheduledRef)
+				binding := charge.HyperSwitchBinding{AccountID: vendorAccount, ProfileID: "profile_A", APIBaseURL: server.URL}
+				for _, field := range []string{"account", "profile", "deployment"} {
+					changed := binding
+					switch field {
+					case "account":
+						changed.AccountID = "other"
+					case "profile":
+						changed.ProfileID = "other"
+					case "deployment":
+						changed.APIBaseURL = server.URL + "/other"
+					}
+					_, err := money.PrepareHyperSwitchCharge(e.ctx, e.plane, method, changed)
+					require.Error(t, err, field)
+				}
+				_, err = e.pool.Exec(e.ctx, `UPDATE billing.custodians SET credential_versions='{"api_key":2}' WHERE id=$1`, custodian)
+				require.NoError(t, err)
+				_, err = money.PrepareHyperSwitchCharge(e.ctx, e.plane, method, binding)
+				require.Error(t, err, "a credential below the stored floor cannot arm")
+				_, err = e.merchants.Secrets().Put(e.ctx, dbtest.TestMerchantID, secret, "rotated-custody-key")
+				require.NoError(t, err)
+				mu.Lock()
+				expectedKey = "rotated-custody-key"
+				mu.Unlock()
+				charger, err := money.PrepareHyperSwitchCharge(e.ctx, e.plane, method, binding)
+				require.NoError(t, err, "rotation may satisfy the floor without changing frozen binding")
+				mu.Lock()
+				require.Empty(t, forms)
+				require.Zero(t, preflights)
+				mu.Unlock()
+				result, refusal, err := charger.ChargeRecurringMIT(e.ctx, charge.Request{Instrument: charge.Instrument{PaymentMethodID: method.ID, Rail: "nmi", CustomerRef: method.RailCustomerRef, MethodRef: method.RailMethodRef}, AmountMinor: 5, Currency: "USD", OrderRef: uuid.NewString(), Context: charge.RecurringMIT(method.StoredCredentialRecurringRef)})
+				require.NoError(t, err)
+				require.Nil(t, refusal)
+				require.NotEmpty(t, result.TransactionID)
+				require.Empty(t, result.CapturedRef)
+				mu.Lock()
+				require.Len(t, forms, 1)
+				require.Equal(t, "0.05", forms[0]["amount"])
+				require.Equal(t, "merchant", forms[0]["initiated_by"])
+				require.Equal(t, "used", forms[0]["stored_credential_indicator"])
+				require.Equal(t, "original_recurring", forms[0]["initial_transaction_id"])
+				mu.Unlock()
+				require.Zero(t, e.settledPayments(t), "the transport helper does not settle an invoice or grant membership")
+				return
+			}
 			request := money.InvoiceCollectionRetryRequest{InvoiceID: e.invoice, PaymentMethodID: e.method, IdempotencyKey: "hs-invoice-" + uuid.NewString()}
 			result, err := e.svc.PayInvoiceNow(e.ctx, e.runner, e.payer, request)
 			require.NoError(t, err)

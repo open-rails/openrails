@@ -441,3 +441,18 @@ SELECT * FROM openrails.grants
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND source_type='purchase'
   AND source_id=sqlc.arg(payment_id)::uuid::text AND event='grant'
 ORDER BY id LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListInitialMembershipGrants :many
+-- Original source events before the accepted initial period ends; later renewal
+-- events and later revocations do not rewrite this initial history.
+SELECT * FROM openrails.grants
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND source_type='subscription'
+  AND source_id=sqlc.arg(subscription_id)::uuid::text AND event='grant'
+  AND starts_at < sqlc.arg(before)::timestamptz
+ORDER BY id LIMIT sqlc.arg(row_limit)::int;
+
+-- name: HasInitialMembershipGrant :one
+-- Refused or still-pending initial membership cannot own a grant at any instant.
+SELECT EXISTS(SELECT 1 FROM openrails.grants
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND source_type='subscription'
+  AND source_id=sqlc.arg(subscription_id)::uuid::text AND event='grant')::boolean;

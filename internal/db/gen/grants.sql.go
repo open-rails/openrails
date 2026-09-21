@@ -187,6 +187,25 @@ func (q *Queries) GrantCreditDeposited(ctx context.Context, arg GrantCreditDepos
 	return deposited, err
 }
 
+const hasInitialMembershipGrant = `-- name: HasInitialMembershipGrant :one
+SELECT EXISTS(SELECT 1 FROM openrails.grants
+WHERE merchant_id=$1::uuid AND source_type='subscription'
+  AND source_id=$2::uuid::text AND event='grant')::boolean
+`
+
+type HasInitialMembershipGrantParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// Refused or still-pending initial membership cannot own a grant at any instant.
+func (q *Queries) HasInitialMembershipGrant(ctx context.Context, arg HasInitialMembershipGrantParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasInitialMembershipGrant, arg.MerchantID, arg.SubscriptionID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const insertGrant = `-- name: InsertGrant :one
 
 INSERT INTO openrails.grants (
@@ -390,6 +409,66 @@ type ListGrantsByCustomerParams struct {
 // the full input to a customer-scoped re-derive.
 func (q *Queries) ListGrantsByCustomer(ctx context.Context, arg ListGrantsByCustomerParams) ([]OpenrailsGrant, error) {
 	rows, err := q.db.Query(ctx, listGrantsByCustomer, arg.MerchantID, arg.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsGrant
+	for rows.Next() {
+		var i OpenrailsGrant
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.ProductID,
+			&i.Kind,
+			&i.SourceType,
+			&i.SourceID,
+			&i.PaymentID,
+			&i.Event,
+			&i.SupersedesID,
+			&i.SpecSnapshot,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.Amount,
+			&i.Currency,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInitialMembershipGrants = `-- name: ListInitialMembershipGrants :many
+SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM openrails.grants
+WHERE merchant_id=$1::uuid AND source_type='subscription'
+  AND source_id=$2::uuid::text AND event='grant'
+  AND starts_at < $3::timestamptz
+ORDER BY id LIMIT $4::int
+`
+
+type ListInitialMembershipGrantsParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	Before         time.Time
+	RowLimit       int32
+}
+
+// Original source events before the accepted initial period ends; later renewal
+// events and later revocations do not rewrite this initial history.
+func (q *Queries) ListInitialMembershipGrants(ctx context.Context, arg ListInitialMembershipGrantsParams) ([]OpenrailsGrant, error) {
+	rows, err := q.db.Query(ctx, listInitialMembershipGrants,
+		arg.MerchantID,
+		arg.SubscriptionID,
+		arg.Before,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

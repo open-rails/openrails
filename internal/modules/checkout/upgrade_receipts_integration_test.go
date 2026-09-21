@@ -63,6 +63,7 @@ func (fx *upgradeAdoptFixture) restartAndVerify(t *testing.T) gen.OpenrailsRailI
 }
 func (fx *upgradeAdoptFixture) positiveProration() {
 	fx.newPrice.Amount = 60_000_000
+	fx.gateway.recurringAmount.Store("60.00")
 	fx.existingSub.Price.Amount = 0
 }
 
@@ -303,7 +304,7 @@ func requireSameWire(t *testing.T, want, got *TierChangeResponse) {
 	require.Equal(t, string(wantBody), string(gotBody))
 }
 
-func TestUpgradeWireAmountsUseFrozenMicros(t *testing.T) {
+func TestUpgradeUsesFrozenScheduleAndProrationAmounts(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
 	key := tierChangeIdempotencyKey(fx.req.IdempotencyKey)
 	// A sub-cent price has no exact USD rail amount: refused before any
@@ -319,13 +320,14 @@ func TestUpgradeWireAmountsUseFrozenMicros(t *testing.T) {
 	// 696 of 720 hours remain on the $50.00 predecessor: credit ceil($48.3333)
 	// = $48.34, so the legs differ and a swapped mapping cannot pass.
 	fx.newPrice.Amount = 60_120_000
+	fx.gateway.recurringAmount.Store("60.12")
 	_, err = fx.upgrade(t)
 	require.NoError(t, err)
 	var payload subscriptions.NMIUpgradePayload
 	require.NoError(t, json.Unmarshal(fx.operation(t).Payload, &payload))
 	require.EqualValues(t, 60_120_000, payload.RecurringAmount)
 	require.EqualValues(t, 11_780_000, payload.ProrationAmount)
-	require.Equal(t, "60.12", fx.gateway.recurringAmount.Load(), "60,120,000 USD micros enrolls a $60.12 recurring schedule")
+	require.Equal(t, "60.12", fx.gateway.recurringAmount.Load(), "the independent provider schedule must match the frozen recurring amount")
 	require.Equal(t, "11.78", fx.gateway.saleAmount.Load(), "11,780,000 USD micros submits an $11.78 proration sale")
 
 	fx.newPrice.Amount = 999_000_000
