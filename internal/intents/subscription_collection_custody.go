@@ -49,12 +49,12 @@ func ValidateSubscriptionCollectionTerminal(in gen.OpenrailsRailIntent) error {
 		return err
 	}
 	if declined {
-		if !result.Declined || result.ResponseCode != refusal.ResponseCode {
+		if !result.Declined || result.NotExecuted || result.ResponseCode != refusal.ResponseCode {
 			return errors.New("engine decline projection contradicts custody")
 		}
 		return nil
 	}
-	if !result.NotExecuted || result.Declined {
+	if !result.NotExecuted || result.Declined || !validCollectionNonexecutionCode(result.NotExecutedCode) {
 		return errors.New("engine nonexecution is unproven")
 	}
 	if EvidenceString(in, "submitted_at") != "" {

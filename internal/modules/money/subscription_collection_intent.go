@@ -104,7 +104,7 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 		return intents.Ambiguous("engine submission requires exact receipt recovery: " + err.Error())
 	}
 	if refusal != nil {
-		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, refusal.ResponseCode, refusal.TransactionID); err != nil {
+		if err := intents.NewStore(h.DB).RetainRecurringDecline(ctx, in, refusal.ResponseCode, result.TransactionID); err != nil {
 			return intents.Ambiguous("retain engine refusal: " + err.Error())
 		}
 		return h.Verify(ctx, in)

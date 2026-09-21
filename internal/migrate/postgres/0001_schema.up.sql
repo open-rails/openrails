@@ -241,7 +241,7 @@ COMMENT ON FUNCTION openrails.delinquency_work_merchant_ids(p_now timestamp with
 
 REVOKE ALL ON FUNCTION openrails.delinquency_work_merchant_ids(p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
 
-CREATE FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
+CREATE FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer, p_include_engine boolean DEFAULT false) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
@@ -250,19 +250,20 @@ BEGIN
     SELECT s.merchant_id
       FROM openrails.subscriptions s
      WHERE s.rail = ANY(p_rails)
-       AND s.status = 'past_due'
-       AND s.collection_policy <> 'engine'
-       AND s.next_retry_at IS NOT NULL AND s.next_retry_at <= p_now
+       AND ((s.collection_policy <> 'engine' AND s.status='past_due' AND s.next_retry_at IS NOT NULL AND s.next_retry_at <= p_now)
+            OR (p_include_engine AND s.collection_policy='engine' AND s.current_period_ends_at <= p_now
+                AND (s.status='active' OR (s.status='past_due' AND s.next_retry_at <= p_now))
+                AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=s.merchant_id AND i.subscription_id=s.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
        AND s.deleted_at IS NULL
      GROUP BY s.merchant_id
-     ORDER BY MIN(s.next_retry_at)
+     ORDER BY MIN(CASE WHEN s.collection_policy='engine' AND s.status='active' THEN s.current_period_ends_at ELSE s.next_retry_at END), s.merchant_id
      LIMIT p_limit;
 END;
 $$;
 
-COMMENT ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) IS 'Merchants with a due past_due subscription on the named rails — the fan-out list for DunningWorker. Ids only; the due rows, the charges and every lifecycle transition run per-merchant under RunInMerchantScope. Replaces a bare-context scan that returned an empty slice on every run, so scheduled dunning (retries, #839 staleness parking, #840 terminal handling) never fired at all (or#877 B5).';
+COMMENT ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer, p_include_engine boolean) IS 'Merchants with a due past_due subscription on the named rails — the fan-out list for DunningWorker. Ids only; the due rows, the charges and every lifecycle transition run per-merchant under RunInMerchantScope. Replaces a bare-context scan that returned an empty slice on every run, so scheduled dunning (retries, #839 staleness parking, #840 terminal handling) never fired at all (or#877 B5).';
 
-REVOKE ALL ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer, p_include_engine boolean) FROM PUBLIC;
 
 CREATE FUNCTION openrails.due_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER

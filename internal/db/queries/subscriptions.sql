@@ -301,7 +301,7 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = 
 SELECT merchant_id FROM openrails.due_dunning_merchant_ids(
     sqlc.arg(rails)::text[],
     sqlc.arg(now)::timestamptz,
-    sqlc.arg(merchant_limit)::int);
+    sqlc.arg(merchant_limit)::int, sqlc.arg(include_engine)::boolean);
 
 -- name: ListDueDunningSubscriptions :many
 -- Dunning: past_due NMI-backed subscriptions whose next retry is due. Runs
@@ -314,11 +314,12 @@ SELECT merchant_id FROM openrails.due_dunning_merchant_ids(
 -- claim lease means the next pass picks up where this one stopped.
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.rail = ANY(sqlc.arg(rails)::text[])
-  AND sub.status = 'past_due'
-  AND sub.collection_policy <> 'engine'
-  AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz
+  AND ((sub.collection_policy <> 'engine' AND sub.status='past_due' AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz)
+       OR (sqlc.arg(include_engine)::boolean AND sub.collection_policy='engine' AND sub.current_period_ends_at <= sqlc.arg(now)::timestamptz
+           AND (sub.status='active' OR (sub.status='past_due' AND sub.next_retry_at <= sqlc.arg(now)::timestamptz))
+           AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
   AND sub.deleted_at IS NULL
-ORDER BY sub.next_retry_at, sub.id
+ORDER BY CASE WHEN sub.collection_policy='engine' AND sub.status='active' THEN sub.current_period_ends_at ELSE sub.next_retry_at END, sub.id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: GetLatestResumableCancelledSubscription :one

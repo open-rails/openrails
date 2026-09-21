@@ -1209,13 +1209,14 @@ const listDueDunningMerchants = `-- name: ListDueDunningMerchants :many
 SELECT merchant_id FROM openrails.due_dunning_merchant_ids(
     $1::text[],
     $2::timestamptz,
-    $3::int)
+    $3::int, $4::boolean)
 `
 
 type ListDueDunningMerchantsParams struct {
 	Rails         []string
 	Now           time.Time
 	MerchantLimit int32
+	IncludeEngine bool
 }
 
 // CROSS-MERCHANT: merchants holding a due past_due subscription on the named
@@ -1225,7 +1226,12 @@ type ListDueDunningMerchantsParams struct {
 // scheduled dunning has never retried, parked or terminated anything. Ids only
 // — the due rows and every charge run per-merchant under RunInMerchantScope.
 func (q *Queries) ListDueDunningMerchants(ctx context.Context, arg ListDueDunningMerchantsParams) ([]*uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listDueDunningMerchants, arg.Rails, arg.Now, arg.MerchantLimit)
+	rows, err := q.db.Query(ctx, listDueDunningMerchants,
+		arg.Rails,
+		arg.Now,
+		arg.MerchantLimit,
+		arg.IncludeEngine,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1247,19 +1253,21 @@ func (q *Queries) ListDueDunningMerchants(ctx context.Context, arg ListDueDunnin
 const listDueDunningSubscriptions = `-- name: ListDueDunningSubscriptions :many
 SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.merchant_id = $1::uuid AND sub.rail = ANY($2::text[])
-  AND sub.status = 'past_due'
-  AND sub.collection_policy <> 'engine'
-  AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $3::timestamptz
+  AND ((sub.collection_policy <> 'engine' AND sub.status='past_due' AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $3::timestamptz)
+       OR ($4::boolean AND sub.collection_policy='engine' AND sub.current_period_ends_at <= $3::timestamptz
+           AND (sub.status='active' OR (sub.status='past_due' AND sub.next_retry_at <= $3::timestamptz))
+           AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
   AND sub.deleted_at IS NULL
-ORDER BY sub.next_retry_at, sub.id
-LIMIT $4::int
+ORDER BY CASE WHEN sub.collection_policy='engine' AND sub.status='active' THEN sub.current_period_ends_at ELSE sub.next_retry_at END, sub.id
+LIMIT $5::int
 `
 
 type ListDueDunningSubscriptionsParams struct {
-	MerchantID uuid.UUID
-	Rails      []string
-	Now        time.Time
-	RowLimit   int32
+	MerchantID    uuid.UUID
+	Rails         []string
+	Now           time.Time
+	IncludeEngine bool
+	RowLimit      int32
 }
 
 // Dunning: past_due NMI-backed subscriptions whose next retry is due. Runs
@@ -1275,6 +1283,7 @@ func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDu
 		arg.MerchantID,
 		arg.Rails,
 		arg.Now,
+		arg.IncludeEngine,
 		arg.RowLimit,
 	)
 	if err != nil {

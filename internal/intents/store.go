@@ -104,7 +104,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	if p.IntentType == "nmi_sale" {
 		return s.enqueueSale(ctx, p)
 	}
-	if p.IntentType != "nmi_upgrade" && p.IntentType != subscriptions.TypeManualRebill {
+	if p.IntentType != "nmi_upgrade" && p.IntentType != subscriptions.TypeManualRebill && p.IntentType != subscriptions.TypeSubscriptionCollection {
 		return s.enqueue(ctx, p)
 	}
 	if p.SubscriptionID == nil {
@@ -131,6 +131,18 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if p.IntentType == subscriptions.TypeSubscriptionCollection {
+			if sub.CollectionPolicy != "engine" {
+				return errors.New("engine operation requires engine scheduling ownership")
+			}
+			owner, err := d.Gen(ctx).GetUnresolvedSubscriptionCollection(ctx, gen.GetUnresolvedSubscriptionCollectionParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
+			if err == nil {
+				return fmt.Errorf("subscription already owned by accepted engine operation %s", owner.ID)
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
 		if p.IntentType == "nmi_upgrade" {
 			if err := subscriptions.RefuseOwnedRebillTerms(ctx, d, sub); err != nil {
 				return err
@@ -145,6 +157,15 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 			}
 		}
 		row, err = bound.enqueue(ctx, p)
+		if err == nil && p.IntentType == subscriptions.TypeSubscriptionCollection {
+			accepted, decodeErr := subscriptions.DecodeSubscriptionCollectionPayload(row)
+			if decodeErr != nil {
+				return decodeErr
+			}
+			if accepted.Renewal.CustomerID != sub.CustomerID || sub.PaymentMethodID == nil || accepted.PaymentMethodID != *sub.PaymentMethodID || accepted.Instrument.PSPID != sub.PspID {
+				return errors.New("engine admission contradicts locked subscription")
+			}
+		}
 		if err != nil || p.IntentType != subscriptions.TypeNMIUpgrade {
 			return err
 		}

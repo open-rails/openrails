@@ -17,9 +17,9 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// AdmitDueSubscriptionCollection is an unexposed prototype. No worker or public
-// enrollment calls it. Receipt-qualified retries and completion are deliberately
-// held until the shared accepted-membership writer and recurring CIT are ready.
+// AdmitDueSubscriptionCollection freezes one due engine obligation. Runtime
+// producer/handler registration and public enrollment remain disabled until
+// the complete recurring CIT-to-MIT workflow is qualified.
 func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subscriptionID uuid.UUID, admittedAt time.Time) (gen.OpenrailsRailIntent, error) {
 	var accepted gen.OpenrailsRailIntent
 	mid, err := merchant.Require(ctx)

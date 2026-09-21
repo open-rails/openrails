@@ -119,7 +119,7 @@ func TestDunningScan_DueQueryFilters(t *testing.T) {
 
 	got := map[uuid.UUID]bool{}
 	require.NoError(t, dbi.RunInMerchantConn(ctx, func(mctx context.Context) error {
-		rows, qerr := subscriptions.NewSubscriptionRepo(dbi).ListDueDunningSubscriptions(mctx, []string{string(models.RailNMI)}, time.Now().UTC())
+		rows, qerr := subscriptions.NewSubscriptionRepo(dbi).ListDueDunningSubscriptions(mctx, []string{string(models.RailNMI)}, time.Now().UTC(), false)
 		if qerr != nil {
 			return qerr
 		}
