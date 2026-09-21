@@ -1357,7 +1357,7 @@ func (q *Queries) ListDueDunningMerchants(ctx context.Context, arg ListDueDunnin
 const listDueDunningSubscriptions = `-- name: ListDueDunningSubscriptions :many
 SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, collection_policy FROM openrails.subscriptions sub
 WHERE sub.merchant_id = $1::uuid AND sub.rail = ANY($2::text[])
-  AND ((sub.collection_policy <> 'engine' AND sub.status='past_due' AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $3::timestamptz)
+  AND ((sub.collection_policy <> 'engine' AND sub.rail='nmi' AND sub.status='past_due' AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $3::timestamptz)
        OR ($4::boolean AND sub.collection_policy='engine' AND sub.current_period_ends_at <= $3::timestamptz
            AND (sub.status='active' OR (sub.status='past_due' AND sub.next_retry_at <= $3::timestamptz))
            AND EXISTS (SELECT 1 FROM openrails.payment_methods pm JOIN openrails.psps p ON p.id=pm.psp_id AND p.merchant_id=pm.merchant_id LEFT JOIN openrails.custodians c ON c.id=pm.custodian_id AND c.merchant_id=pm.merchant_id

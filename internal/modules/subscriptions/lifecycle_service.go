@@ -1210,21 +1210,21 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 			if err != nil {
 				return err
 			}
-			if method.CustodianID == nil || method.Custodian != models.CustodianHyperSwitch {
-				return fmt.Errorf("resume engine: payment method custody is unavailable")
-			}
-			handle := paymentmethods.CustodianHandle{Custodian: *method.CustodianID, Method: method.RailMethodRef}
-			if err := paymentmethods.LockCustodianHandles(ctx, q, subscription.MerchantID, handle); err != nil {
-				return err
-			}
-			if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, subscription.MerchantID, handle); err != nil {
-				return fmt.Errorf("resume engine: %w", err)
+			observedInstrument := charge.FreezeInstrument(method)
+			if method.CustodianID != nil {
+				handle := paymentmethods.CustodianHandle{Custodian: *method.CustodianID, Method: method.RailMethodRef}
+				if err := paymentmethods.LockCustodianHandles(ctx, q, subscription.MerchantID, handle); err != nil {
+					return err
+				}
+				if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, subscription.MerchantID, handle); err != nil {
+					return err
+				}
 			}
 			method, err = q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: subscription.MerchantID, ID: *subscription.PaymentMethodID})
 			if err != nil {
 				return err
 			}
-			if method.CustomerID != subscription.CustomerID || method.PspID != subscription.PspID || method.ParkReason != "" || method.StoredCredentialRecurringRef == "" || method.CustodianID == nil || *method.CustodianID != handle.Custodian || method.RailMethodRef != handle.Method {
+			if method.CustomerID != subscription.CustomerID || method.PspID != subscription.PspID || method.ParkReason != "" || method.StoredCredentialRecurringRef == "" || method.Rail != string(subscription.Rail) || method.RailCustomerRef == "" || method.RailMethodRef == "" || (method.Custodian != models.CustodianHyperSwitch && method.Custodian != models.CustodianPSP) || observedInstrument.Matches(method, charge.AgreementRecurring) != nil {
 				return fmt.Errorf("resume engine: payment method is unavailable")
 			}
 		}

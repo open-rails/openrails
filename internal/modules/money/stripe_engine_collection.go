@@ -89,11 +89,12 @@ func (h *SubscriptionCollectionHandler) verifyStripeEngine(ctx context.Context, 
 		}
 		return h.completePaid(ctx, in, p, receipt)
 	case subscriptions.StripeEngineAuthenticationRequired:
-		return intents.Ambiguous("Stripe engine payment requires customer authentication of the existing payment")
+		return intents.AmbiguousWithEvidence("Stripe engine payment requires customer authentication of the existing payment", map[string]any{"authentication_required": true, "stripe_payment_intent_id": result.PaymentIntentID})
 	case subscriptions.StripeEngineDeclined:
-		// A mutable PI may still be confirmed. Keep the accepted obligation owned
-		// until a read-backed terminal cancellation proves it cannot charge.
-		return intents.Ambiguous("Stripe engine refusal requires terminal payment verification")
+		if err := intents.NewStore(h.DB).RetainStripeRecurringDecline(ctx, in, service, result.PaymentIntentID); err != nil {
+			return intents.Ambiguous(err.Error())
+		}
+		return h.Verify(ctx, in)
 	default:
 		return intents.Ambiguous("Stripe engine payment is still processing")
 	}

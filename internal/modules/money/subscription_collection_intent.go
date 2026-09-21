@@ -223,6 +223,12 @@ func (h *SubscriptionCollectionHandler) completeEvidence(ctx context.Context, in
 	} else if found {
 		return h.completePaid(ctx, in, p, receipt), true
 	}
+	if code, reference, found, err := intents.LoadStripeRecurringDecline(in); err != nil {
+		return intents.Ambiguous(err.Error()), true
+	} else if found {
+		outcome := intents.TerminalWithEvidence("engine renewal declined", map[string]any{"declined": true, "failure_code": code, "stripe_payment_intent_id": reference})
+		return h.completeDecline(ctx, in, p, code, outcome), true
+	}
 	if code, reference, found, err := intents.LoadRecurringDecline(in); err != nil {
 		return intents.Ambiguous(err.Error()), true
 	} else if found {
@@ -288,8 +294,10 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 }
 func (h *SubscriptionCollectionHandler) completeDeclined(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, response int, reference string) intents.Outcome {
 	outcome := intents.TerminalWithEvidence("engine renewal declined", map[string]any{"declined": true, "response_code": response})
+	return h.completeDecline(ctx, in, p, strconv.Itoa(response), outcome)
+}
+func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, code string, outcome intents.Outcome) intents.Outcome {
 	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
-		code := strconv.Itoa(response)
 		reason := payments.NormalizeFailureReason(in.Rail, code)
 		kind := payments.AttemptRenewal
 		failed := &models.Payment{ID: uuid.NewSHA1(in.ID, []byte("decline")), CustomerID: p.Renewal.CustomerID, PriceID: p.Renewal.PriceID, SubscriptionID: &p.Renewal.SubscriptionID, Rail: models.Rail(in.Rail), PspID: &p.Instrument.PSPID, TransactionID: "engine_declined:" + in.ID.String(), Amount: p.Renewal.Amount, ListAmount: p.Renewal.Amount, Currency: p.Renewal.Currency, Status: payments.PaymentStatusFailedValue, FailureCode: &code, FailureReason: &reason, AttemptKind: &kind, MoneyMovement: models.MoneyMovementNone, EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(p.Renewal.Entitlements), PurchasedAt: h.now(), CreatedAt: h.now()}

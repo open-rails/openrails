@@ -61,7 +61,7 @@ BEGIN
     SELECT s.merchant_id
       FROM openrails.subscriptions s
      WHERE s.rail = ANY(p_rails)
-       AND ((s.collection_policy <> 'engine' AND s.status='past_due' AND s.next_retry_at IS NOT NULL AND s.next_retry_at <= p_now)
+       AND ((s.collection_policy <> 'engine' AND s.rail='nmi' AND s.status='past_due' AND s.next_retry_at IS NOT NULL AND s.next_retry_at <= p_now)
             OR (p_include_engine AND s.collection_policy='engine' AND s.current_period_ends_at <= p_now
                 AND (s.status='active' OR (s.status='past_due' AND s.next_retry_at <= p_now))
                 AND EXISTS (SELECT 1 FROM openrails.payment_methods pm JOIN openrails.psps p ON p.id=pm.psp_id AND p.merchant_id=pm.merchant_id LEFT JOIN openrails.custodians c ON c.id=pm.custodian_id AND c.merchant_id=pm.merchant_id
