@@ -2152,7 +2152,8 @@ WHERE id = $3::uuid
   AND psp_id = $5::uuid
   AND intent_type = $6::text
   AND payload = $7::jsonb
-  AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','subscription_collection','nmi_upgrade','nmi_sale'))
+  AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','subscription_collection','nmi_upgrade','nmi_sale')
+           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['rebill_decline','qualified_invoice_nonexecution']))
        OR ($1::text = 'qualified_enrollment' AND intent_type = 'nmi_upgrade')
        OR ($1::text = 'qualified_invoice_nonexecution' AND intent_type IN ('invoice_collection','subscription_collection')
            AND COALESCE(result_evidence->>'submitted_at', '') = $2::jsonb->>'submitted_at'

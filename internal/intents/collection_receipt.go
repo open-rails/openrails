@@ -227,7 +227,24 @@ func LoadCollectedReceipt(in gen.OpenrailsRailIntent) (CollectedReceipt, bool, e
 	if err := decoder.Decode(&r.data); err != nil {
 		return r, true, err
 	}
-	return r, true, r.Validate(in)
+	if err := r.Validate(in); err != nil {
+		return r, true, err
+	}
+	// A receipt is not usable custody when the same operation also claims
+	// definitive refusal/nonexecution, including legacy contradictory rows.
+	if _, exists := evidence[rebillDeclineKey]; exists {
+		return r, true, errors.New("collected receipt contradicts retained decline")
+	}
+	if _, exists := evidence[qualifiedCollectionNonexecutionKey]; exists {
+		return r, true, errors.New("collected receipt contradicts retained nonexecution")
+	}
+	if in.Status == StatusSucceeded && (in.IntentType == subscriptions.TypeManualRebill || in.IntentType == subscriptions.TypeSubscriptionCollection) {
+		var transaction string
+		if err := json.Unmarshal(evidence["transaction_id"], &transaction); err != nil || transaction != r.TransactionID() {
+			return r, true, errors.New("collected payment projection contradicts retained receipt")
+		}
+	}
+	return r, true, nil
 }
 
 // RetainCollectedReceipt commits custody before local effects. A transaction-

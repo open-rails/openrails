@@ -503,7 +503,8 @@ WHERE id = sqlc.arg(id)::uuid
   AND psp_id = sqlc.arg(psp_id)::uuid
   AND intent_type = sqlc.arg(intent_type)::text
   AND payload = sqlc.arg(payload)::jsonb
-  AND ((sqlc.arg(evidence_key)::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','subscription_collection','nmi_upgrade','nmi_sale'))
+  AND ((sqlc.arg(evidence_key)::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','subscription_collection','nmi_upgrade','nmi_sale')
+           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['rebill_decline','qualified_invoice_nonexecution']))
        OR (sqlc.arg(evidence_key)::text = 'qualified_enrollment' AND intent_type = 'nmi_upgrade')
        OR (sqlc.arg(evidence_key)::text = 'qualified_invoice_nonexecution' AND intent_type IN ('invoice_collection','subscription_collection')
            AND COALESCE(result_evidence->>'submitted_at', '') = sqlc.arg(receipt)::jsonb->>'submitted_at'
