@@ -4,12 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -65,13 +63,19 @@ func DecodeSubscriptionCollectionPayload(in gen.OpenrailsRailIntent) (Subscripti
 	if err := p.Instrument.Validate(); err != nil {
 		return p, err
 	}
-	if err := p.HyperSwitch.Validate(); err != nil {
+	var binding *charge.HyperSwitchBinding
+	if p.HyperSwitch != (charge.HyperSwitchBinding{}) {
+		binding = &p.HyperSwitch
+	}
+	if err := charge.ValidateEngineInstrument(in.Rail, p.Instrument, binding, true); err != nil {
 		return p, err
 	}
-	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeSubscriptionCollection || in.Rail != "nmi" || in.Origin != "system" || in.SubscriptionID == nil || *in.SubscriptionID != p.Renewal.SubscriptionID || in.PriceID == nil || *in.PriceID != p.Renewal.PriceID || in.PspID == nil || *in.PspID != p.Renewal.PSPID || p.Instrument.PSPID != p.Renewal.PSPID || in.CustodianID == nil || p.Instrument.CustodianID == nil || *in.CustodianID != *p.Instrument.CustodianID {
+	sameCustodian := (in.CustodianID == nil && p.Instrument.CustodianID == nil) ||
+		(in.CustodianID != nil && p.Instrument.CustodianID != nil && *in.CustodianID == *p.Instrument.CustodianID)
+	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeSubscriptionCollection || in.Origin != "system" || in.SubscriptionID == nil || *in.SubscriptionID != p.Renewal.SubscriptionID || in.PriceID == nil || *in.PriceID != p.Renewal.PriceID || in.PspID == nil || *in.PspID != p.Renewal.PSPID || p.Instrument.PSPID != p.Renewal.PSPID || !sameCustodian {
 		return p, errors.New("engine renewal operation contradicts accepted scope")
 	}
-	if p.Instrument.Custodian != models.CustodianHyperSwitch || strings.TrimSpace(p.Instrument.StoredCredentialRecurringRef) == "" || p.PaymentMethodID == uuid.Nil || p.Attempt < 0 || p.FailureCount < 0 || p.AcceptedAt.IsZero() || p.PreviousPeriodEnd.IsZero() || p.AcceptedAt.Before(p.PreviousPeriodEnd) {
+	if p.PaymentMethodID == uuid.Nil || p.Attempt < 0 || p.FailureCount < 0 || p.AcceptedAt.IsZero() || p.PreviousPeriodEnd.IsZero() || p.AcceptedAt.Before(p.PreviousPeriodEnd) {
 		return p, errors.New("engine renewal lacks recurring custody or admission identity")
 	}
 	cycle := p.Renewal.PeriodEnd.Sub(p.Renewal.PeriodStart)
