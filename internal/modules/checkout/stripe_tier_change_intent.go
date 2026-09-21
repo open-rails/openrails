@@ -226,13 +226,15 @@ func (r *stripeStepRun) save(name string, step *stripeTierChangeStep) error {
 	return r.store.RecordProgress(r.ctx, r.in.ID, map[string]any{name: step})
 }
 
+func (*StripeTierChangeIntentHandler) CommitsTerminalOutcome() bool { return true }
+
 func (h *StripeTierChangeIntentHandler) advance(ctx context.Context, in gen.OpenrailsRailIntent, send bool) intents.Outcome {
 	if h.Checkout == nil || h.Checkout.SubscriptionService == nil {
 		return intents.Parked("tier change service unavailable")
 	}
 	p, _, err := decodeStripeTierChange(in)
 	if err != nil {
-		return intents.Terminal(err.Error())
+		return commitTierRefusal(ctx, h.Checkout.SubscriptionService.Database(), in, intents.Terminal(err.Error()), h.Checkout.now())
 	}
 	store := intents.NewStore(h.Checkout.SubscriptionService.Database())
 	// Always reload progress: a preceding submission may have committed its
@@ -247,7 +249,7 @@ func (h *StripeTierChangeIntentHandler) advance(ctx context.Context, in gen.Open
 	}
 	run := &stripeStepRun{ctx: ctx, in: in, p: p, progress: &progress, store: store, stripe: h.stripe(), send: send}
 	if step := progress.refused(); step != nil {
-		return h.refusedOutcome(progress, step)
+		return h.refusedOutcome(ctx, in, progress, step)
 	}
 	if p.Action == "downgrade" {
 		return h.advanceDowngrade(run)
@@ -255,7 +257,7 @@ func (h *StripeTierChangeIntentHandler) advance(ctx context.Context, in gen.Open
 	return h.advanceUpgrade(run)
 }
 
-func (h *StripeTierChangeIntentHandler) refusedOutcome(progress stripeTierChangeProgress, step *stripeTierChangeStep) intents.Outcome {
+func (h *StripeTierChangeIntentHandler) refusedOutcome(ctx context.Context, in gen.OpenrailsRailIntent, progress stripeTierChangeProgress, step *stripeTierChangeStep) intents.Outcome {
 	reason := "stripe refused the tier change: " + step.Refusal
 	if step.Resolution != nil {
 		reason = "tier change closed by operator: " + step.Refusal
@@ -263,7 +265,7 @@ func (h *StripeTierChangeIntentHandler) refusedOutcome(progress stripeTierChange
 	if progress.Schedule != nil && progress.Schedule.Schedule != nil && step == progress.Phases {
 		reason += " (schedule " + progress.Schedule.Schedule.ID + " keeps the current price and releases at period end)"
 	}
-	return intents.TerminalWithEvidence(reason, progress.evidence())
+	return commitTierRefusal(ctx, h.Checkout.SubscriptionService.Database(), in, intents.TerminalWithEvidence(reason, progress.evidence()), h.Checkout.now())
 }
 
 // fence records the step's submission marker; false means another executor
@@ -289,7 +291,7 @@ func (h *StripeTierChangeIntentHandler) classify(r *stripeStepRun, name string, 
 		if serr := r.save(name, step); serr != nil {
 			return intents.Ambiguous("persist " + name + " refusal: " + serr.Error()), false
 		}
-		return h.refusedOutcome(*r.progress, step), false
+		return h.refusedOutcome(r.ctx, r.in, *r.progress, step), false
 	}
 	if err != nil {
 		return intents.Ambiguous(name + " outcome unknown: " + err.Error()), false
@@ -350,7 +352,7 @@ func (h *StripeTierChangeIntentHandler) advanceUpgrade(r *stripeStepRun) intents
 			return intents.Retryable("price change was not submitted; execute under provider write gates")
 		}
 		if err := h.requireFrozenSubscription(r.ctx, r.p); err != nil {
-			return intents.Terminal(err.Error())
+			return commitTierRefusal(r.ctx, h.Checkout.SubscriptionService.Database(), r.in, intents.Terminal(err.Error()), h.Checkout.now())
 		}
 		var outcome intents.Outcome
 		var ok bool
@@ -374,10 +376,11 @@ func (h *StripeTierChangeIntentHandler) advanceUpgrade(r *stripeStepRun) intents
 			return outcome
 		}
 	}
-	if err := h.finalizeUpgrade(r.ctx, r.p, *step.Subscription); err != nil {
+	outcome := intents.Succeeded(h.result(r.p, *r.progress))
+	if err := h.finalizeUpgrade(r.ctx, r.in, r.p, *step.Subscription, outcome); err != nil {
 		return intents.AmbiguousWithEvidence("price change receipt retained; local commit pending: "+err.Error(), r.progress.evidence())
 	}
-	return intents.Succeeded(h.result(r.p, *r.progress))
+	return outcome
 }
 
 func (h *StripeTierChangeIntentHandler) submitSchedule(r *stripeStepRun, step *stripeTierChangeStep) (intents.Outcome, bool) {
@@ -432,7 +435,7 @@ func (h *StripeTierChangeIntentHandler) advanceDowngrade(r *stripeStepRun) inten
 			return intents.Retryable("schedule was not submitted; execute under provider write gates")
 		}
 		if err := h.requireFrozenSubscription(r.ctx, r.p); err != nil {
-			return intents.Terminal(err.Error())
+			return commitTierRefusal(r.ctx, h.Checkout.SubscriptionService.Database(), r.in, intents.Terminal(err.Error()), h.Checkout.now())
 		}
 		var outcome intents.Outcome
 		var ok bool
@@ -479,10 +482,11 @@ func (h *StripeTierChangeIntentHandler) advanceDowngrade(r *stripeStepRun) inten
 			return outcome
 		}
 	}
-	if err := h.finalizeDowngrade(r.ctx, r.p); err != nil {
+	outcome := intents.Succeeded(h.result(r.p, *r.progress))
+	if err := h.finalizeDowngrade(r.ctx, r.in, r.p, outcome); err != nil {
 		return intents.AmbiguousWithEvidence("schedule receipt retained; local commit pending: "+err.Error(), r.progress.evidence())
 	}
-	return intents.Succeeded(h.result(r.p, *r.progress))
+	return outcome
 }
 
 // requireFrozenSubscription refuses the first submission when the local
@@ -504,7 +508,7 @@ func (h *StripeTierChangeIntentHandler) requireFrozenSubscription(ctx context.Co
 // have mirrored the same Stripe subscription first: a subscription already on
 // the target price is complete, and only a period older than the receipt's
 // is brought up to it.
-func (h *StripeTierChangeIntentHandler) finalizeUpgrade(ctx context.Context, p StripeTierChangePayload, receipt subscriptions.StripeSubscriptionState) error {
+func (h *StripeTierChangeIntentHandler) finalizeUpgrade(ctx context.Context, in gen.OpenrailsRailIntent, p StripeTierChangePayload, receipt subscriptions.StripeSubscriptionState, outcome intents.Outcome) error {
 	start, end, ok := receipt.Period()
 	if !ok {
 		return fmt.Errorf("price change receipt for %s carries no billing period", receipt.ID)
@@ -512,18 +516,27 @@ func (h *StripeTierChangeIntentHandler) finalizeUpgrade(ctx context.Context, p S
 	database := h.Checkout.SubscriptionService.Database()
 	now := h.Checkout.now().UTC()
 	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		repo := subscriptions.NewSubscriptionRepo(database.NewWithPgxTx(tx))
+		bound := database.NewWithPgxTx(tx)
+		repo := subscriptions.NewSubscriptionRepo(bound)
 		sub, err := repo.GetByIDForUpdate(ctx, p.SubscriptionID)
 		if err != nil {
 			return err
 		}
-		if sub.RailSubscriptionID != p.StripeSubscriptionID {
+		completion, err := prepareTierCompletion(ctx, bound, in, outcome, now)
+		if err != nil {
+			return err
+		}
+		if completion.committed {
+			return nil
+		}
+
+		if in.PspID == nil || sub.PspID != *in.PspID || sub.CustomerID.String() != p.UserID || sub.RailSubscriptionID != p.StripeSubscriptionID {
 			return fmt.Errorf("subscription %s no longer references stripe subscription %s", sub.ID, p.StripeSubscriptionID)
 		}
 		switch sub.PriceID {
 		case p.PriceID:
 			if sub.CurrentPeriodEndsAt != nil && !sub.CurrentPeriodEndsAt.Before(end) {
-				return nil
+				return completion.commit(ctx)
 			}
 		case p.OldPriceID:
 			sub.PriceID, sub.ProductID, sub.ScheduledPriceID = p.PriceID, p.ProductID, nil
@@ -531,22 +544,37 @@ func (h *StripeTierChangeIntentHandler) finalizeUpgrade(ctx context.Context, p S
 			return fmt.Errorf("subscription %s is on price %s, neither the frozen predecessor %s nor the target %s", sub.ID, sub.PriceID, p.OldPriceID, p.PriceID)
 		}
 		sub.CurrentPeriodStartsAt, sub.CurrentPeriodEndsAt = &start, &end
-		return repo.UpdateAt(ctx, sub, now)
+		if err := repo.UpdateAt(ctx, sub, now); err != nil {
+			return err
+		}
+		return completion.commit(ctx)
 	})
 }
 
-func (h *StripeTierChangeIntentHandler) finalizeDowngrade(ctx context.Context, p StripeTierChangePayload) error {
+func (h *StripeTierChangeIntentHandler) finalizeDowngrade(ctx context.Context, in gen.OpenrailsRailIntent, p StripeTierChangePayload, outcome intents.Outcome) error {
 	database := h.Checkout.SubscriptionService.Database()
 	now := h.Checkout.now().UTC()
 	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		repo := subscriptions.NewSubscriptionRepo(database.NewWithPgxTx(tx))
+		bound := database.NewWithPgxTx(tx)
+		repo := subscriptions.NewSubscriptionRepo(bound)
 		sub, err := repo.GetByIDForUpdate(ctx, p.SubscriptionID)
 		if err != nil {
 			return err
 		}
+		completion, err := prepareTierCompletion(ctx, bound, in, outcome, now)
+		if err != nil {
+			return err
+		}
+		if completion.committed {
+			return nil
+		}
+
+		if in.PspID == nil || sub.PspID != *in.PspID || sub.CustomerID.String() != p.UserID || sub.RailSubscriptionID != p.StripeSubscriptionID {
+			return errors.New("subscription no longer names accepted tier target")
+		}
 		if sub.ScheduledPriceID != nil {
 			if *sub.ScheduledPriceID == p.PriceID {
-				return nil
+				return completion.commit(ctx)
 			}
 			return fmt.Errorf("subscription %s already schedules price %s", sub.ID, *sub.ScheduledPriceID)
 		}
@@ -555,7 +583,10 @@ func (h *StripeTierChangeIntentHandler) finalizeDowngrade(ctx context.Context, p
 		}
 		scheduled := p.PriceID
 		sub.ScheduledPriceID = &scheduled
-		return repo.UpdateAt(ctx, sub, now)
+		if err := repo.UpdateAt(ctx, sub, now); err != nil {
+			return err
+		}
+		return completion.commit(ctx)
 	})
 }
 
@@ -684,7 +715,7 @@ func (h *StripeTierChangeIntentHandler) Resolve(ctx context.Context, in gen.Open
 }
 
 // ResolveUnsent releases an operation that never crossed a submission fence.
-func (h *StripeTierChangeIntentHandler) ResolveUnsent(_ context.Context, in gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+func (h *StripeTierChangeIntentHandler) ResolveUnsent(ctx context.Context, in gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
 	_, progress, err := decodeStripeTierChange(in)
 	if err != nil {
 		return intents.Outcome{}, err
@@ -692,7 +723,7 @@ func (h *StripeTierChangeIntentHandler) ResolveUnsent(_ context.Context, in gen.
 	if progress.Update != nil || progress.Schedule != nil || progress.Phases != nil {
 		return intents.Outcome{}, intents.RejectResolution("a submission fence exists; only the verifier or an exact receipt can close this operation")
 	}
-	return intents.Terminal("operator released the never-submitted tier change: " + resolution.Reason), nil
+	return commitTierRefusal(ctx, h.Checkout.SubscriptionService.Database(), in, intents.Terminal("operator released the never-submitted tier change: "+resolution.Reason), h.Checkout.now()), nil
 }
 
 // enqueueStripeTierChange records the frozen operation and runs it inline.
