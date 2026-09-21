@@ -4,7 +4,9 @@ OpenRails installs one baseline, `0001_schema.up.sql`. AuthKit and River retain
 independent schemas and migration ownership. Runtime billing defaults to
 `billing`; its source SQL remains authored in canonical `openrails` and is
 rewritten to the configured namespace. Managed River defaults to `public`,
-with only its named runtime tables and sequences granted to `openrails_app`. The owner has declared all pre-v1
+with only its named runtime tables and sequences granted directly to the host
+login when `MigrationOptions.RuntimePool` is provided. Initialization without
+that pool applies DDL only; libraries never create runtime roles. The owner has declared all pre-v1
 OpenRails data disposable: this release targets fresh databases, with no legacy
 upgrade or backfill path. Published tags remain immutable.
 
