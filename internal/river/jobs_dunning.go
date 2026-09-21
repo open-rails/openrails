@@ -174,6 +174,9 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	// bypass RLS), then scan and charge inside each merchant's own scope.
 	// Use w.now() instead of SQL NOW() to support time mocking in tests.
 	nmiRails := []string{string(models.RailNMI)}
+	if w.EngineCollections != nil {
+		nmiRails = append(nmiRails, string(models.RailStripe))
+	}
 	merchantIDs, err := w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
 		Rails: nmiRails, Now: w.now(), MerchantLimit: dunningMerchantBatch, IncludeEngine: w.EngineCollections != nil,
 	})
@@ -283,7 +286,7 @@ func (w *DunningWorker) processSubscription(
 	materialize bool,
 ) (dunningOutcome, error) {
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {
-		if w.EngineCollections == nil {
+		if w.EngineCollections == nil || (w.Config != nil && w.Config.EngineAdmissionHold) {
 			return dunningOutcomeFailed, nil
 		}
 		_, err := w.EngineCollections.AdmitDueSubscriptionCollection(ctx, sub.ID, w.now())

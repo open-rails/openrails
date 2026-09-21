@@ -57,6 +57,10 @@ func newFakeNMIReceiptGateway(t *testing.T) (*fakeNMIReceiptGateway, *httptest.S
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/customers/") {
+			fmt.Fprintf(w, `{"object":"customer","id":%q,"billing":[{"id":"engine-billing"}]}`, strings.TrimPrefix(r.URL.Path, "/customers/"))
+			return
+		}
 		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/payments/") {
 			txn, ok := f.payments[strings.TrimPrefix(r.URL.Path, "/payments/")]
 			if !ok {

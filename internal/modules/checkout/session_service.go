@@ -667,7 +667,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 
 	// A saved custodian card creates a priced agreement for a later verified
 	// customer action. Persist the quote with the row before returning it.
-	if mode == models.CheckoutSessionModeSubscription && rail == "nmi" && req.Payment.PaymentMethodID != "" {
+	if mode == models.CheckoutSessionModeSubscription && (rail == "nmi" || rail == "stripe") && req.Payment.PaymentMethodID != "" {
 		methodID, err := openrails.ParsePaymentMethodID(req.Payment.PaymentMethodID)
 		if err != nil {
 			return nil, ErrCheckoutSessionValidation
@@ -680,11 +680,17 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		if err != nil {
 			return nil, err
 		}
-		if method.Custodian == models.CustodianHyperSwitch {
+		if method.Custodian == models.CustodianHyperSwitch || (s.config != nil && s.config.NewSubscriptionCollectionPolicy == "engine") {
 			if err := quoteInitialMembership(ctx, session, price, product, method, now); err != nil {
 				return nil, err
 			}
 			session.Status = models.CheckoutSessionStatusRequiresAction
+		}
+	}
+
+	if mode == models.CheckoutSessionModeSubscription && s.config != nil && s.config.NewSubscriptionCollectionPolicy == "engine" {
+		if _, quoted := session.RailState[initialMembershipQuoteKey]; !quoted {
+			return nil, fmt.Errorf("%w: engine enrollment requires a supported saved NMI or Stripe method", ErrCheckoutSessionValidation)
 		}
 	}
 
@@ -811,7 +817,7 @@ const initialMembershipQuoteKey = "initial_membership_quote"
 
 func quoteInitialMembership(ctx context.Context, session *models.CheckoutSession, price *models.Price, product *models.Product, method gen.OpenrailsPaymentMethod, now time.Time) error {
 	mid, err := merchant.Require(ctx)
-	if err != nil || session == nil || price == nil || product == nil || session.ID == uuid.Nil || session.CustomerID == uuid.Nil || session.Mode != models.CheckoutSessionModeSubscription || session.Rail != models.RailNMI || session.PriceID == nil || *session.PriceID != price.ID || price.ProductID != product.ID || method.MerchantID != mid.UUID() || method.CustomerID != session.CustomerID || method.PspID != session.PspID || method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil || method.ParkReason != "" || method.Rail != "nmi" {
+	if err != nil || session == nil || price == nil || product == nil || session.ID == uuid.Nil || session.CustomerID == uuid.Nil || session.Mode != models.CheckoutSessionModeSubscription || (session.Rail != models.RailNMI && session.Rail != models.RailStripe) || session.PriceID == nil || *session.PriceID != price.ID || price.ProductID != product.ID || method.MerchantID != mid.UUID() || method.CustomerID != session.CustomerID || method.PspID != session.PspID || !((method.Custodian == models.CustodianHyperSwitch && method.CustodianID != nil && method.Rail == "nmi") || (method.Custodian == models.CustodianPSP && method.CustodianID == nil)) || method.RailCustomerRef == "" || method.RailMethodRef == "" || method.ParkReason != "" || method.Rail != string(session.Rail) {
 		return ErrCheckoutSessionConflict
 	}
 	if _, exists := session.RailState[initialMembershipQuoteKey]; exists {
@@ -867,7 +873,7 @@ func readInitialMembershipQuote(session *models.CheckoutSession) (subscriptions.
 	if err := terms.Validate(); err != nil {
 		return terms, err
 	}
-	if session.Mode != models.CheckoutSessionModeSubscription || session.Rail != models.RailNMI || terms.CollectionPolicy != models.CollectionPolicyEngine || terms.Pending || terms.Amount <= 0 || terms.Amount != terms.RecurringAmount || terms.CustomerID != session.CustomerID || terms.PSPID != session.PspID || session.PriceID == nil || terms.PriceID != *session.PriceID || session.Amount == nil || terms.Amount != *session.Amount || session.Currency == nil || terms.Currency != *session.Currency {
+	if session.Mode != models.CheckoutSessionModeSubscription || (session.Rail != models.RailNMI && session.Rail != models.RailStripe) || terms.CollectionPolicy != models.CollectionPolicyEngine || terms.Pending || terms.Amount <= 0 || terms.Amount != terms.RecurringAmount || terms.CustomerID != session.CustomerID || terms.PSPID != session.PspID || session.PriceID == nil || terms.PriceID != *session.PriceID || session.Amount == nil || terms.Amount != *session.Amount || session.Currency == nil || terms.Currency != *session.Currency {
 		return terms, ErrCheckoutSessionConflict
 	}
 	duration := terms.PeriodEnd.Sub(terms.PeriodStart)
@@ -1125,6 +1131,9 @@ func (s *CheckoutSessionService) validatePayment(ctx context.Context, rail strin
 	case rails.IsNMI(models.Rail(rail)):
 		return s.validateNMIInput(ctx, payment, user)
 	case rail == "stripe":
+		if s.config != nil && s.config.NewSubscriptionCollectionPolicy == "engine" && strings.TrimSpace(payment.PaymentMethodID) != "" {
+			return s.validateNMIInput(ctx, payment, user)
+		}
 		return s.validateStripeInput(payment)
 	case rail == "solana":
 		return s.validateSolanaInput(payment)

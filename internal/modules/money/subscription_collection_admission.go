@@ -46,8 +46,8 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 		if err != nil {
 			return err
 		}
-		if sub.CustomerID != observed.CustomerID || sub.CollectionPolicy != models.CollectionPolicyEngine || sub.Rail != models.RailNMI || sub.RailSubscriptionID != "" {
-			return errors.New("subscription is not an engine-owned NMI obligation")
+		if sub.CustomerID != observed.CustomerID || sub.CollectionPolicy != models.CollectionPolicyEngine || (sub.Rail != models.RailNMI && sub.Rail != models.RailStripe) || sub.RailSubscriptionID != "" {
+			return errors.New("subscription is not an engine-owned card obligation")
 		}
 		current, err := q.GetUnresolvedSubscriptionCollection(ctx, gen.GetUnresolvedSubscriptionCollectionParams{MerchantID: mid.UUID(), SubscriptionID: sub.ID})
 		if err == nil {
@@ -90,36 +90,47 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 		if err != nil {
 			return err
 		}
-		if observedMethod.CustodianID == nil {
-			return errors.New("engine method has no custodian")
-		}
-		handle := paymentmethods.CustodianHandle{Custodian: *observedMethod.CustodianID, Method: observedMethod.RailMethodRef}
-		if err := paymentmethods.LockCustodianHandles(ctx, q, mid.UUID(), handle); err != nil {
-			return err
-		}
-		if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, mid.UUID(), handle); err != nil {
-			return err
+		if observedMethod.CustodianID != nil {
+			handle := paymentmethods.CustodianHandle{Custodian: *observedMethod.CustodianID, Method: observedMethod.RailMethodRef}
+			if err := paymentmethods.LockCustodianHandles(ctx, q, mid.UUID(), handle); err != nil {
+				return err
+			}
+			if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, mid.UUID(), handle); err != nil {
+				return err
+			}
 		}
 		method, err := q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: mid.UUID(), ID: *sub.PaymentMethodID})
 		if err != nil {
 			return err
 		}
-		if method.CustodianID == nil || *method.CustodianID != handle.Custodian || method.RailMethodRef != handle.Method {
-			return errors.New("engine method custody changed during admission")
+		if err := charge.FreezeInstrument(observedMethod).Matches(method, charge.AgreementRecurring); err != nil {
+			return err
 		}
-		if method.CustomerID != sub.CustomerID || method.PspID != sub.PspID || method.Rail != "nmi" || method.Custodian != models.CustodianHyperSwitch || method.ParkReason != "" || method.StoredCredentialRecurringRef == "" {
+		if method.CustomerID != sub.CustomerID || method.PspID != sub.PspID || method.Rail != string(sub.Rail) || method.ParkReason != "" {
 			return errors.New("engine recurring method is not qualified for this obligation")
 		}
-		binding, err := collectionHyperSwitchBinding(ctx, q, method, s.hyperSwitchDeployment)
+		account, err := q.GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: method.PspID})
 		if err != nil {
 			return err
 		}
-		accounts, err := q.GetCollectionCustodianAccountsForShare(ctx, gen.GetCollectionCustodianAccountsForShareParams{MerchantID: mid.UUID(), PspID: method.PspID, CustodianID: *method.CustodianID})
+		if account.Archived {
+			return errors.New("archived account cannot admit a new engine renewal")
+		}
+		binding, err := engineCollectionBinding(ctx, q, method, s.hyperSwitchDeployment)
 		if err != nil {
 			return err
 		}
-		if accounts.OpenrailsPsp.Archived || accounts.OpenrailsCustodian.Archived {
-			return errors.New("archived accounts cannot admit a new engine renewal")
+		if method.CustodianID != nil {
+			custodian, err := q.GetCustodian(ctx, gen.GetCustodianParams{MerchantID: mid.UUID(), ID: *method.CustodianID})
+			if err != nil {
+				return err
+			}
+			if custodian.Archived {
+				return errors.New("archived custodian cannot admit a new engine renewal")
+			}
+		}
+		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method), engineHyperSwitchPointer(method.Custodian, binding), true); err != nil {
+			return err
 		}
 		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, admittedAt)
 		if err != nil {
@@ -139,7 +150,7 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 			failures = *sub.RetryAttempts
 		}
 		payload := subscriptions.SubscriptionCollectionPayload{Attempt: attempt, FailureCount: failures, Renewal: terms, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC(), AcceptedAt: admittedAt, PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method), HyperSwitch: binding, AmountMinor: minor, OrderReference: subscriptions.RebillOrderReference(key)}
-		accepted, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: "nmi", IntentType: subscriptions.TypeSubscriptionCollection, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: method.PspID, CustodianID: *method.CustodianID, Payload: payload, IdempotencyKey: key, NextAttemptAt: admittedAt, Origin: intents.OriginSystem, OriginReason: "accepted engine renewal"})
+		accepted, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, IntentType: subscriptions.TypeSubscriptionCollection, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: method.PspID, CustodianID: engineCustodianID(method.CustodianID), Payload: payload, IdempotencyKey: key, NextAttemptAt: admittedAt, Origin: intents.OriginSystem, OriginReason: "accepted engine renewal"})
 		if err != nil {
 			return err
 		}

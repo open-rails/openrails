@@ -128,7 +128,13 @@ func ReadNMICollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, r
 	if err != nil {
 		return CollectedReceipt{}, false, err
 	}
-	facts, found, err := client.ReadSaleEvidence(ctx, p.OrderReference, reference)
+	var facts nmi.SaleEvidence
+	var found bool
+	if engineCollectionOperation(in) && !p.Instrument.CustodianHeld() {
+		facts, found, err = client.ReadRecurringSaleEvidence(ctx, p.OrderReference, reference, p.Instrument.RailCustomerRef, p.Instrument.RailMethodRef)
+	} else {
+		facts, found, err = client.ReadSaleEvidence(ctx, p.OrderReference, reference)
+	}
 	if err != nil || !found {
 		return CollectedReceipt{}, found, err
 	}
@@ -201,6 +207,10 @@ func (r CollectedReceipt) Validate(in gen.OpenrailsRailIntent) error {
 			return errors.New("qualified collection receipt has wrong provider family")
 		}
 		facts := r.data.NMI
+		if engineCollectionOperation(in) && !p.Instrument.CustodianHeld() && (facts.VaultBillingID == "" || facts.VaultBillingID != p.Instrument.RailMethodRef) {
+			return fmt.Errorf("%w: sale does not match frozen billing entry", nmi.ErrReceiptMismatch)
+		}
+
 		if facts.TransactionID == "" || facts.OrderReference != p.OrderReference || !facts.Approved || facts.Amount != p.AmountMinor || !strings.EqualFold(facts.Currency, p.Currency) {
 			return fmt.Errorf("%w: sale does not match frozen operation", nmi.ErrReceiptMismatch)
 		}
@@ -255,6 +265,9 @@ func LoadCollectedReceipt(in gen.OpenrailsRailIntent) (CollectedReceipt, bool, e
 	// definitive refusal/nonexecution, including legacy contradictory rows.
 	if _, exists := evidence[qualifiedInitialRefusalKey]; exists {
 		return r, true, errors.New("collected receipt contradicts retained initial refusal")
+	}
+	if _, exists := evidence[stripeRecurringDeclineKey]; exists {
+		return r, true, errors.New("collected receipt contradicts retained Stripe refusal")
 	}
 	if _, exists := evidence[rebillDeclineKey]; exists {
 		return r, true, errors.New("collected receipt contradicts retained decline")
@@ -405,10 +418,21 @@ func LoadCollectionCandidate(in gen.OpenrailsRailIntent) (CollectionCandidate, b
 }
 
 func refuseCustodyKeys(evidence map[string]any) error {
-	for _, key := range []string{qualifiedInitialRefusalKey, qualifiedCollectionNonexecutionKey, qualifiedReceiptKey, qualifiedEnrollmentKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, "account_requalifications"} {
+	for _, key := range []string{qualifiedInitialRefusalKey, qualifiedCollectionNonexecutionKey, qualifiedReceiptKey, qualifiedEnrollmentKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, stripeRecurringDeclineKey, "account_requalifications"} {
 		if _, ok := evidence[key]; ok {
 			return fmt.Errorf("%s is reserved for immutable provider evidence custody", key)
 		}
 	}
 	return nil
+}
+
+func engineCollectionOperation(in gen.OpenrailsRailIntent) bool {
+	if in.IntentType == subscriptions.TypeSubscriptionCollection {
+		return true
+	}
+	if in.IntentType == subscriptions.TypeInitialMembership {
+		p, err := subscriptions.DecodeInitialMembershipPayload(in)
+		return err == nil && p.Terms.CollectionPolicy == "engine"
+	}
+	return false
 }

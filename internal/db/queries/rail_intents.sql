@@ -510,13 +510,17 @@ WHERE id = sqlc.arg(id)::uuid
   AND intent_type = sqlc.arg(intent_type)::text
   AND payload = sqlc.arg(payload)::jsonb
   AND ((sqlc.arg(evidence_key)::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale','initial_membership', 'subscription_collection')
-           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['rebill_decline','qualified_invoice_nonexecution','qualified_initial_refusal']))
+           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['rebill_decline','stripe_recurring_decline','qualified_invoice_nonexecution','qualified_initial_refusal']))
        OR (sqlc.arg(evidence_key)::text = 'qualified_enrollment' AND intent_type IN ('nmi_upgrade','initial_membership')
            AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_initial_refusal'))
        OR (sqlc.arg(evidence_key)::text='qualified_initial_refusal' AND intent_type='initial_membership'
            AND NOT (coalesce(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','qualified_enrollment'])
            AND ((sqlc.arg(receipt)::jsonb->>'kind'='not_submitted' AND NOT (coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted'))
-             OR (sqlc.arg(receipt)::jsonb->>'kind'='provider_declined' AND result_evidence->>'initial_submitted'='true')))
+             OR (sqlc.arg(receipt)::jsonb->>'kind' IN ('provider_declined','stripe_canceled') AND result_evidence->>'initial_submitted'='true')))
+       OR (sqlc.arg(evidence_key)::text='stripe_recurring_decline' AND intent_type='subscription_collection' AND rail='stripe'
+           AND COALESCE(result_evidence->>'submitted_at','') <> ''
+           AND sqlc.arg(receipt)::jsonb->>'failure_code'='canceled'
+           AND NOT (COALESCE(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','rebill_decline','qualified_invoice_nonexecution']))
        OR (sqlc.arg(evidence_key)::text = 'qualified_invoice_nonexecution' AND intent_type IN ('invoice_collection','subscription_collection')
            AND COALESCE(result_evidence->>'submitted_at', '') = sqlc.arg(receipt)::jsonb->>'submitted_at'
            AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')))
