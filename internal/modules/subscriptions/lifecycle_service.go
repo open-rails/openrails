@@ -14,10 +14,12 @@ import (
 	"github.com/open-rails/openrails/config"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
@@ -1042,18 +1044,54 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 		return nil, fmt.Errorf("resume membership: subscription id is required")
 	}
 
+	observed, err := NewSubscriptionRepo(s.DB).GetByID(ctx, params.SubscriptionID)
+	if err != nil {
+		return nil, fmt.Errorf("resume membership: load subscription: %w", err)
+	}
 	now := s.now().UTC()
 	var resumed *models.Subscription
-	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := db.NewWithPgxTx(tx)
+	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txdb := s.DB.NewWithPgxTx(tx)
+		if observed.CollectionPolicy == models.CollectionPolicyEngine {
+			if _, err := txdb.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: observed.MerchantID, ID: observed.CustomerID}); err != nil {
+				return err
+			}
+		}
 		subscription, err := NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, params.SubscriptionID)
 		if err != nil {
 			return fmt.Errorf("resume membership: load subscription: %w", err)
+		}
+		if subscription.CustomerID != observed.CustomerID || subscription.CollectionPolicy != observed.CollectionPolicy {
+			return errors.New("resume membership: accepted customer or collection ownership changed")
 		}
 		if !Resumable(subscription, now) {
 			return fmt.Errorf("resume membership: subscription %s is not resumable", subscription.ID)
 		}
 
+		if subscription.CollectionPolicy == models.CollectionPolicyEngine {
+			q := txdb.Gen(ctx)
+			method, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: subscription.MerchantID, ID: *subscription.PaymentMethodID})
+			if err != nil {
+				return err
+			}
+			if method.CustodianID == nil || method.Custodian != models.CustodianHyperSwitch {
+				return fmt.Errorf("resume engine: payment method custody is unavailable")
+			}
+			handle := paymentmethods.CustodianHandle{Custodian: *method.CustodianID, Method: method.RailMethodRef}
+			if err := paymentmethods.LockCustodianHandles(ctx, q, subscription.MerchantID, handle); err != nil {
+				return err
+			}
+			if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, subscription.MerchantID, handle); err != nil {
+				return fmt.Errorf("resume engine: %w", err)
+			}
+			method, err = q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: subscription.MerchantID, ID: *subscription.PaymentMethodID})
+			if err != nil {
+				return err
+			}
+			if method.CustomerID != subscription.CustomerID || method.PspID != subscription.PspID || method.ParkReason != "" || method.StoredCredentialRecurringRef == "" || method.CustodianID == nil || *method.CustodianID != handle.Custodian || method.RailMethodRef != handle.Method {
+				return fmt.Errorf("resume engine: payment method is unavailable")
+			}
+		}
 		subscription.Status = models.StatusActive
 		subscription.CancelledAt = nil
 		subscription.CancelType = nil

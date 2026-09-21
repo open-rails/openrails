@@ -5,8 +5,11 @@ package integrationharness
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,7 +20,10 @@ import (
 	"github.com/open-rails/openrails/config"
 	orauthkit "github.com/open-rails/openrails/embed/authkit"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -34,15 +40,65 @@ import (
 // HTTP authentication, durable River job and production lifecycle worker.
 func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	var receiptMu sync.Mutex
+	receiptOrder, receiptTxn := "", ""
+	var receiptReads atomic.Int64
+	var deleteCalls atomic.Int64
+	var heldMu sync.Mutex
+	heldMethod := ""
+	deleteEntered, deleteRelease := make(chan struct{}, 1), make(chan struct{})
+	var releaseOnce sync.Once
+	releaseDelete := func() { releaseOnce.Do(func() { close(deleteRelease) }) }
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "api-key=lifecycle-delete-key", r.Header.Get("Authorization"))
+		require.Equal(t, "synthetic-engine", r.Header.Get("x-profile-id"))
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/v2/proxy" {
+			fmt.Fprint(w, `{"contract":"openrails-nmi-form-v2","native_vault_delete_contract":"openrails-native-vault-delete-v1"}`)
+			return
+		}
+		require.Equal(t, http.MethodDelete, r.Method)
+		id := strings.TrimPrefix(r.URL.Path, "/v2/payment-methods/")
+		deleteCalls.Add(1)
+		heldMu.Lock()
+		hold := heldMethod == id
+		heldMu.Unlock()
+		if hold {
+			deleteEntered <- struct{}{}
+			<-deleteRelease
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": id})
+	}))
+	defer hs.Close()
+	defer releaseDelete()
 	var sends atomic.Int64
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receiptMu.Lock()
+		order, txn := receiptOrder, receiptTxn
+		receiptMu.Unlock()
+		if txn != "" && r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/payments/"+txn) {
+			receiptReads.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"object": "transaction", "id": txn, "amount": "9.99", "currency": "USD", "response": "1", "customer_vault_id": "", "actions": []map[string]any{{"id": txn + "-a", "type": "sale", "amount": "9.99", "success": true, "response": "1"}}})
+			return
+		}
+		require.NoError(t, r.ParseForm())
+		if order != "" && r.Form.Get("order_id") == order && r.Form.Get("type") != "sale" {
+			receiptReads.Add(1)
+			_, _ = fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, txn, order)
+			return
+		}
 		sends.Add(1)
 		http.Error(w, "unexpected provider request", 500)
 	}))
 	defer gateway.Close()
 	h := New(t, t.Context())
 	var host billingauth.DelegatedAuthenticator
-	surface := h.StartStandalone("USD", WithClock(clockwork.NewFakeClockAt(now)), WithConfig(func(c *config.Config) { c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: gateway.URL} }), func(c *standaloneConfig) {
+	surface := h.StartStandalone("USD", WithClock(clockwork.NewFakeClockAt(now)), WithConfig(func(c *config.Config) {
+		c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: gateway.URL}
+		c.ProviderWriteMode = config.ProviderWriteModeFull
+		c.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: hs.URL}
+	}), func(c *standaloneConfig) {
 		c.delegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
 			return host.AuthenticateDelegated(ctx, r)
 		})
@@ -62,7 +118,11 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 	pool := h.MerchantPool(owned.MerchantID.UUID())
 	ctx := merchant.WithID(t.Context(), owned.MerchantID)
 	custodian := uuid.New()
-	_, err = pool.Exec(ctx, `INSERT INTO billing.custodians(id,merchant_id,key,kind,environment,account_id,settings) VALUES($1,$2,$3,'hyperswitch','test',$3,'{"profile_id":"synthetic-engine","public_api_key":"synthetic"}')`, custodian, owned.MerchantID.UUID(), custodian.String())
+	_, err = pool.Exec(ctx, `INSERT INTO billing.custodians(id,merchant_id,key,kind,environment,account_id,settings,credential_versions) VALUES($1,$2,$3,'hyperswitch','test',$3,'{"profile_id":"synthetic-engine","public_api_key":"synthetic"}','{"api_key":1}')`, custodian, owned.MerchantID.UUID(), custodian.String())
+	require.NoError(t, err)
+	secret, err := merchants.CustodianSecretName("hyperswitch", "test", custodian.String(), "api_key")
+	require.NoError(t, err)
+	_, err = rt.Merchants.Secrets().Put(ctx, owned.MerchantID, secret, "lifecycle-delete-key")
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		cleanup := context.Background()
@@ -103,11 +163,11 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &args))
 		require.NoError(t, resumeWorker.Work(t.Context(), &river.Job[riverjobs.ResumeSubscriptionArgs]{Args: args}))
 	}
-	require.NoError(t, rt.MoneyService.SetHyperSwitchDeployment(gateway.URL))
-	for _, scenario := range []string{"engine", "engine_expired", "engine_chargeback", "engine_past_due_customer", "engine_past_due_merchant", "engine_maintenance", "provider"} {
+	for _, scenario := range []string{"engine", "engine_expired", "engine_chargeback", "engine_past_due_customer", "engine_past_due_merchant", "engine_maintenance", "engine_resume_then_delete", "engine_delete_then_resume", "engine_resolved_charge_delete", "provider"} {
 		t.Run(scenario, func(t *testing.T) {
 			maintenance := scenario == "engine_maintenance"
-			pastDue := scenario == "engine_past_due_customer" || scenario == "engine_past_due_merchant"
+			resolvedDelete := scenario == "engine_resolved_charge_delete"
+			pastDue := scenario == "engine_past_due_customer" || scenario == "engine_past_due_merchant" || resolvedDelete
 			policy := "engine"
 			if scenario == "provider" {
 				policy = "provider"
@@ -123,7 +183,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 				remote = "native-" + id.String()
 			}
 			method := uuid.New()
-			_, err := pool.Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,stored_credential_recurring_ref,initial_transaction_id) VALUES($1,$2,$3,$4,'nmi','hyperswitch',$5,$6,'synthetic-method','synthetic-recurring','synthetic-initial')`, method, owned.MerchantID.UUID(), user, psp, custodian, "customer-"+method.String())
+			_, err := pool.Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,stored_credential_recurring_ref,initial_transaction_id) VALUES($1,$2,$3,$4,'nmi','hyperswitch',$5,$6,$7,'synthetic-recurring','synthetic-initial')`, method, owned.MerchantID.UUID(), user, psp, custodian, "customer-"+method.String(), "method-"+method.String())
 			require.NoError(t, err)
 			_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,collection_policy,rail_subscription_id,status,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot,payment_method_id) VALUES($1,$2,$3,$4,$5,$6,'nmi',$7,$8,'active',$9,$10,'{"engine_access":null}',$11)`, id, owned.MerchantID.UUID(), user, product.ID.UUID(), price.ID.UUID(), psp, policy, remote, end.Add(-720*time.Hour), end, method)
 			require.NoError(t, err)
@@ -187,7 +247,66 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 			cancelled, err := customer.GetMySubscription(t.Context(), sid)
 			require.NoError(t, err)
 			require.Equal(t, policy, cancelled.CollectionPolicy)
-			require.Equal(t, scenario == "engine" || scenario == "provider", cancelled.Resumable)
+			require.Equal(t, scenario == "engine" || scenario == "provider" || scenario == "engine_resume_then_delete" || scenario == "engine_delete_then_resume", cancelled.Resumable)
+			if scenario == "engine_delete_then_resume" || resolvedDelete {
+				if resolvedDelete {
+					accepted, err := intents.NewStore(rt.DB).Get(ctx, operation)
+					require.NoError(t, err)
+					terms, err := subscriptions.DecodeSubscriptionCollectionPayload(accepted)
+					require.NoError(t, err)
+					_, err = pool.Exec(ctx, `UPDATE billing.rail_intents SET result_evidence=jsonb_build_object('submitted_at',$2::text) WHERE id=$1`, operation, now.Format(time.RFC3339Nano))
+					require.NoError(t, err)
+					receiptMu.Lock()
+					receiptOrder, receiptTxn = terms.OrderReference, "lifecycle_late_"+id.String()
+					receiptMu.Unlock()
+					outcome := money.NewSubscriptionCollectionHandler(rt.DB, rt.CollectionResolver, rt.Config, rt.Clock).Verify(ctx, accepted)
+					require.Equal(t, intents.OutcomeSucceeded, outcome.Class, outcome.Reason)
+					var paid int
+					require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND status='completed'`, id).Scan(&paid))
+					require.Equal(t, 1, paid)
+				}
+				if !resolvedDelete {
+					heldMu.Lock()
+					heldMethod = "method-" + method.String()
+					heldMu.Unlock()
+					t.Cleanup(releaseDelete)
+					done := make(chan error, 1)
+					go func() {
+						_, err := owner.DeletePaymentMethod(t.Context(), openrails.CustomerID(user), openrails.PaymentMethodID(method))
+						done <- err
+					}()
+					select {
+					case <-deleteEntered:
+					case err := <-done:
+						require.NoError(t, err)
+						t.Fatal("deletion did not reach the held vendor request")
+					}
+					status, raw = requestJSON(t, http.MethodPost, path+"/resume", token, nil)
+					require.Equal(t, 202, status, string(raw))
+					var resumeRaw []byte
+					require.NoError(t, pool.QueryRow(ctx, `SELECT args FROM public.river_job WHERE kind=$1 AND args->>'subscription_id'=$2 ORDER BY id DESC LIMIT 1`, riverjobs.KindSubscriptionResume, id.String()).Scan(&resumeRaw))
+					var resumeArgs riverjobs.ResumeSubscriptionArgs
+					require.NoError(t, json.Unmarshal(resumeRaw, &resumeArgs))
+					require.Error(t, resumeWorker.Work(t.Context(), &river.Job[riverjobs.ResumeSubscriptionArgs]{Args: resumeArgs}))
+					var state string
+					require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM billing.subscriptions WHERE id=$1`, id).Scan(&state))
+					require.Equal(t, "cancelled", state)
+					releaseDelete()
+					require.NoError(t, <-done)
+				} else {
+					_, err := owner.DeletePaymentMethod(t.Context(), openrails.CustomerID(user), openrails.PaymentMethodID(method))
+					require.NoError(t, err)
+				}
+				var methodID *uuid.UUID
+				require.NoError(t, pool.QueryRow(ctx, `SELECT payment_method_id FROM billing.subscriptions WHERE id=$1`, id).Scan(&methodID))
+				require.Nil(t, methodID)
+				observed, err := customer.GetMySubscription(t.Context(), sid)
+				require.NoError(t, err)
+				require.False(t, observed.Resumable)
+				status, raw = requestJSON(t, http.MethodPost, path+"/resume", token, nil)
+				require.Equal(t, 400, status, string(raw))
+				return
+			}
 			var state string
 			var marker *time.Time
 			var count int
@@ -241,6 +360,13 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 			access, err = owner.HasEntitlement(t.Context(), openrails.CustomerID(user), "engine_access", now)
 			require.NoError(t, err)
 			require.True(t, access)
+			if scenario == "engine_resume_then_delete" {
+				before := deleteCalls.Load()
+				_, err := owner.DeletePaymentMethod(t.Context(), openrails.CustomerID(user), openrails.PaymentMethodID(method))
+				require.Error(t, err)
+				require.Equal(t, before, deleteCalls.Load())
+				return
+			}
 			if policy == "engine" {
 				// Merchant revocation wins even over an already accepted customer resume.
 				require.NoError(t, owner.CancelSubscription(t.Context(), sid, openrails.CancelSubscriptionRequest{Reason: "revoked by merchant", RevokeAccess: true}))
@@ -260,6 +386,8 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 		})
 	}
 	require.Zero(t, sends.Load())
+	require.EqualValues(t, 2, deleteCalls.Load())
+	require.EqualValues(t, 2, receiptReads.Load())
 }
 
 // A native operational reader remains supplied so filtering, not missing

@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -85,9 +86,26 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 		if sub.PaymentMethodID == nil {
 			return errors.New("engine subscription has no saved method")
 		}
+		observedMethod, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: *sub.PaymentMethodID})
+		if err != nil {
+			return err
+		}
+		if observedMethod.CustodianID == nil {
+			return errors.New("engine method has no custodian")
+		}
+		handle := paymentmethods.CustodianHandle{Custodian: *observedMethod.CustodianID, Method: observedMethod.RailMethodRef}
+		if err := paymentmethods.LockCustodianHandles(ctx, q, mid.UUID(), handle); err != nil {
+			return err
+		}
+		if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, mid.UUID(), handle); err != nil {
+			return err
+		}
 		method, err := q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: mid.UUID(), ID: *sub.PaymentMethodID})
 		if err != nil {
 			return err
+		}
+		if method.CustodianID == nil || *method.CustodianID != handle.Custodian || method.RailMethodRef != handle.Method {
+			return errors.New("engine method custody changed during admission")
 		}
 		if method.CustomerID != sub.CustomerID || method.PspID != sub.PspID || method.Rail != "nmi" || method.Custodian != models.CustodianHyperSwitch || method.ParkReason != "" || method.StoredCredentialRecurringRef == "" {
 			return errors.New("engine recurring method is not qualified for this obligation")

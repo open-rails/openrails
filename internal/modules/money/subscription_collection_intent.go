@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -129,6 +130,13 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		q := d.Gen(ctx)
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: p.Renewal.CustomerID}); err != nil {
 			return err
+		}
+		handle := paymentmethods.CustodianHandle{Custodian: *p.Instrument.CustodianID, Method: p.Instrument.RailMethodRef}
+		if err := paymentmethods.LockCustodianHandles(ctx, q, in.MerchantID, handle); err != nil {
+			return err
+		}
+		if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, in.MerchantID, handle); err != nil {
+			return errors.Join(charge.ErrInstrumentChanged, err)
 		}
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, p.Renewal.SubscriptionID)
 		if err != nil {
