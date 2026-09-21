@@ -27,7 +27,6 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/operator"
@@ -364,7 +363,7 @@ func TestHyperSwitchInvoiceClientWorkflow(t *testing.T) {
 		require.NoError(t, merchantarchive.Export(ctx, rt.DB, owned.MerchantID, &artifact))
 		adminDSN, appDSN := dbtest.SharedRLSPostgres(t)
 		schema := "custody_delete_" + uuid.NewString()[:8]
-		require.NoError(t, migrate.RunPostgres(ctx, &config.Config{DB: &config.DBConfig{URL: adminDSN, Schema: schema}}))
+		dbtest.ApplyPostgresMigrations(t, adminDSN, appDSN, schema)
 		target, err := db.NewDB(ctx, &config.DBConfig{URL: appDSN, Schema: schema})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = target.Close() })
