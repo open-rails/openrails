@@ -44,7 +44,7 @@ func TestCustomSchemaKeepsBillingValuesAndRestoreFunctions(t *testing.T) {
 	_, err = conn.Exec(ctx, "INSERT INTO "+schema+".psps(id,merchant_id,rail,environment,account_id) VALUES($1,$2,'nmi','test',$3)", psp, mid, psp.String())
 	require.NoError(t, err)
 	method := uuid.New()
-	_, err = conn.Exec(ctx, "INSERT INTO "+schema+".payment_methods(id,merchant_id,customer_id,psp_id,rail,rail_customer_ref) VALUES($1,$2,$3,$4,'nmi','relocation-vault')", method, mid, cid, psp)
+	_, err = conn.Exec(ctx, "INSERT INTO "+schema+".payment_methods(id,merchant_id,customer_id,psp_id,rail,rail_customer_ref,initial_transaction_id) VALUES($1,$2,$3,$4,'nmi','relocation-vault','fixture')", method, mid, cid, psp)
 	require.NoError(t, err)
 	var product uuid.UUID
 	for _, policy := range []string{"provider", "provider_dunning", "engine"} {
