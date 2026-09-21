@@ -566,7 +566,7 @@ export const adminMutations = {
       }) =>
         publishCatalog(
           manifest,
-          planOnly ? { plan_only: true } : { insert: true, overwrite: true }
+          planOnly ? {} : { insert: true, overwrite: true }
         ),
       onSuccess: (_result, { planOnly }) => {
         if (!planOnly) {

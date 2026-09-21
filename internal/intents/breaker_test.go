@@ -1,6 +1,10 @@
 package intents
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+)
 
 // #679 breaker budget: max(floor, pct% of active subscriptions).
 func TestDestructiveBudget(t *testing.T) {
@@ -32,7 +36,7 @@ func TestIsDestructiveIntentType(t *testing.T) {
 	if !IsDestructiveIntentType(TypeNMIPaymentMethodDelete) {
 		t.Fatal("nmi_vault_delete must be destructive (#674 tail: stored card is irrecoverable)")
 	}
-	if IsDestructiveIntentType(TypeManualRebill) {
+	if IsDestructiveIntentType(subscriptions.TypeManualRebill) {
 		t.Fatal("manual_rebill must not be destructive (charges are not breaker-gated)")
 	}
 	types := DestructiveIntentTypes()

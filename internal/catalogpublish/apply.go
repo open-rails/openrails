@@ -1,4 +1,4 @@
-package catalog
+package catalogpublish
 
 import (
 	"context"
@@ -9,48 +9,16 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// ApplyResult summarizes what an Apply run did, including any per-provider
-// manual actions surfaced by CreatePrice (e.g. CCBill, an unconfigured Solana
-// plan) that the operator must complete out-of-band.
-type ApplyResult struct {
-	ProductsCreated  int                `json:"products_created"`
-	ProductsUpdated  int                `json:"products_updated"`
-	ProductsArchived int                `json:"products_archived"`
-	PricesCreated    int                `json:"prices_created"`
-	PricesActivated  int                `json:"prices_activated"`
-	PricesArchived   int                `json:"prices_archived"`
-	PricesRelinked   int                `json:"prices_relinked"`
-	PendingActions   []PendingActionFor `json:"pending_actions,omitempty"`
-}
-
-// ApplyOptions limits which mutation classes ApplyWithOptions executes. The
-// zero value intentionally applies nothing; use Apply for the historical full
-// convergence behavior.
-type ApplyOptions struct {
-	Insert    bool
-	Overwrite bool
-	Prune     bool
-}
-
-// PendingActionFor pairs a returned service.PendingAction with the price it
-// belongs to, so the apply output can tell the operator which price needs a
-// manual link.
-type PendingActionFor struct {
-	ProductKey string                       `json:"product_key"`
-	PriceLabel string                       `json:"price_label"`
-	Action     billingservice.PendingAction `json:"action"`
-}
-
-// Apply converges OpenRails onto the plan, driving the Applier. It is
+// apply converges OpenRails onto the plan, driving the applier. It is
 // idempotent: re-running a converged plan is a no-op. Manual provider actions
 // surfaced on price creation are collected into the result rather than failing.
-func Apply(ctx context.Context, applier Applier, plan *ApplyPlan) (*ApplyResult, error) {
-	return ApplyWithOptions(ctx, applier, plan, ApplyOptions{Insert: true, Overwrite: true, Prune: true})
+func apply(ctx context.Context, applier applier, plan *ApplyPlan) (*ApplyResult, error) {
+	return applyWithOptions(ctx, applier, plan, ApplyOptions{Insert: true, Overwrite: true, Prune: true})
 }
 
-// ApplyWithOptions converges only the requested mutation classes from a plan.
+// applyWithOptions converges only the requested mutation classes from a plan.
 // It is used by the operator CLI's --insert/--overwrite/--prune contract.
-func ApplyWithOptions(ctx context.Context, applier Applier, plan *ApplyPlan, opts ApplyOptions) (*ApplyResult, error) {
+func applyWithOptions(ctx context.Context, applier applier, plan *ApplyPlan, opts ApplyOptions) (*ApplyResult, error) {
 	res := &ApplyResult{}
 	for gi := range plan.Groups {
 		gp := &plan.Groups[gi]
@@ -78,19 +46,11 @@ func ApplyWithOptions(ctx context.Context, applier Applier, plan *ApplyPlan, opt
 			res.ProductsArchived++
 		}
 	}
-	if plan != nil && plan.Manifest != nil && (opts.Insert || opts.Overwrite || opts.Prune) {
-		if syncer, ok := applier.(interface {
-			SyncCatalogSidecars(context.Context, *Manifest) error
-		}); ok {
-			if err := syncer.SyncCatalogSidecars(ctx, plan.Manifest); err != nil {
-				return res, fmt.Errorf("sync catalog sidecars: %w", err)
-			}
-		}
-	}
+
 	return res, nil
 }
 
-func applyProduct(ctx context.Context, applier Applier, pp *ProductPlan, res *ApplyResult, opts ApplyOptions) (openrails.ProductID, error) {
+func applyProduct(ctx context.Context, applier applier, pp *ProductPlan, res *ApplyResult, opts ApplyOptions) (openrails.ProductID, error) {
 	switch pp.Action {
 	case ProductCreate:
 		if !opts.Insert {
@@ -117,7 +77,7 @@ func applyProduct(ctx context.Context, applier Applier, pp *ProductPlan, res *Ap
 	}
 }
 
-func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productID openrails.ProductID, res *ApplyResult, opts ApplyOptions) error {
+func applyPrices(ctx context.Context, applier applier, pp *ProductPlan, productID openrails.ProductID, res *ApplyResult, opts ApplyOptions) error {
 	for i := range pp.Prices {
 		plp := &pp.Prices[i]
 		switch plp.Action {
@@ -191,7 +151,7 @@ func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productI
 
 // Print writes a human summary of the apply result, including any pending
 // manual actions, to out.
-func (r *ApplyResult) Print(out io.Writer) {
+func PrintResult(r *ApplyResult, out io.Writer) {
 	fmt.Fprintf(out, "applied: products +%d ~%d -%d | prices +%d activated %d archived %d relinked %d\n",
 		r.ProductsCreated, r.ProductsUpdated, r.ProductsArchived,
 		r.PricesCreated, r.PricesActivated, r.PricesArchived, r.PricesRelinked)

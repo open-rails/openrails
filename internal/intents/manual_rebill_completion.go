@@ -32,7 +32,7 @@ type rebillDecline struct {
 // kind. Unsupported or contradictory evidence refuses export and restore;
 // callers cannot silently drop a retained field to make the record portable.
 func ValidateManualRebillTerminal(in gen.OpenrailsRailIntent) error {
-	if _, err := DecodeManualRebillPayload(in); err != nil {
+	if _, err := subscriptions.DecodeManualRebillPayload(in); err != nil {
 		return err
 	}
 	_, paid, err := LoadCollectedReceipt(in)
@@ -107,7 +107,7 @@ func loadRebillDecline(in gen.OpenrailsRailIntent) (rebillDecline, bool, error) 
 	if err != nil {
 		return fact, true, err
 	}
-	if in.IntentType != TypeManualRebill || fact.Binding != binding || (fact.ResponseCode <= 0 || nmi.UncertainResponseCode(fact.ResponseCode)) {
+	if in.IntentType != subscriptions.TypeManualRebill || fact.Binding != binding || (fact.ResponseCode <= 0 || nmi.UncertainResponseCode(fact.ResponseCode)) {
 		return fact, true, errors.New("rebill refusal is not bound to accepted terms")
 	}
 	return fact, true, nil
@@ -141,7 +141,7 @@ func (h *ManualRebillHandler) lifecycle(d *db.DB) *subscriptions.SubscriptionLif
 	lifecycle.SetDeferredDeleteScheduler(h.DeferDelete)
 	return lifecycle
 }
-func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, in gen.OpenrailsRailIntent, p ManualRebillPayload, receipt CollectedReceipt) Outcome {
+func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload, receipt CollectedReceipt) Outcome {
 	ctx = pinIntentAddress(ctx, in)
 	retained, err := NewStore(h.DB).RetainCollectedReceipt(ctx, in, receipt)
 	if err != nil {
@@ -180,7 +180,7 @@ func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, in gen.Openra
 	}
 	return outcome
 }
-func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.OpenrailsRailIntent, p ManualRebillPayload) Outcome {
+func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload) Outcome {
 	ctx = pinIntentAddress(ctx, in)
 	refusal, found, err := loadRebillDecline(in)
 	if err != nil || !found {
@@ -238,7 +238,7 @@ func (h *ManualRebillHandler) finalizeDecline(ctx context.Context, in gen.Openra
 	}
 	return outcome
 }
-func (h *ManualRebillHandler) finalizeNotExecuted(ctx context.Context, in gen.OpenrailsRailIntent, p ManualRebillPayload, reason string) Outcome {
+func (h *ManualRebillHandler) finalizeNotExecuted(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload, reason string) Outcome {
 	ctx = pinIntentAddress(ctx, in)
 	outcome := TerminalWithEvidence(reason, map[string]any{"declined": false, "not_executed": true})
 	ctx, cancel := LedgerWriteContext(ctx)

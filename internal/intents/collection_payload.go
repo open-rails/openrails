@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"strings"
 )
 
 // InvoiceCollectionPayload freezes the charge before submission. The amount
@@ -47,7 +48,7 @@ func DecodeInvoiceCollectionPayload(intent gen.OpenrailsRailIntent) (InvoiceColl
 	if p.Initiator != charge.InitiatorMerchant && p.Initiator != charge.InitiatorCustomer {
 		return p, errors.New("collection initiation is not established")
 	}
-	if p.Initiator == charge.InitiatorCustomer && (intent.Origin != string(OriginUser) || intent.Actor == nil || *intent.Actor != p.CustomerID.String() || p.Rail != "nmi" || p.Instrument.CustodianHeld() || !customerPaymentKeyValid("invoice_collection", p.CustomerID, intent.IdempotencyKey)) {
+	if p.Initiator == charge.InitiatorCustomer && (intent.Origin != string(OriginUser) || intent.Actor == nil || *intent.Actor != p.CustomerID.String() || p.Rail != "nmi" || p.Instrument.CustodianHeld() || !charge.CustomerPaymentKeyValid("invoice_collection", p.CustomerID, intent.IdempotencyKey)) {
 		return p, errors.New("customer collection has an unsupported authority or rail")
 	}
 	if err := p.Instrument.Validate(); err != nil {

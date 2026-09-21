@@ -5,11 +5,12 @@ package intents
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
 	"net/http"
 	"net/url"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/stretchr/testify/require"
 
@@ -90,7 +91,7 @@ CREATE TRIGGER %s BEFORE UPDATE ON billing.rail_intents FOR EACH ROW WHEN (NEW.i
 			_, err = admin.Exec(ctx, fmt.Sprintf(`DROP FUNCTION billing.%s() CASCADE`, name))
 			require.NoError(t, err)
 			if later {
-				p, err := DecodeManualRebillPayload(row)
+				p, err := subscriptions.DecodeManualRebillPayload(row)
 				require.NoError(t, err)
 				laterStart, laterEnd := p.Renewal.PeriodEnd, p.Renewal.PeriodEnd.Add(30*24*time.Hour)
 				// The later renewal has different current commercial terms;
@@ -290,7 +291,7 @@ func TestManualRebillConfirmedAfterDunningParkedUnknownRenewsOnce(t *testing.T) 
 
 	// A second verification of the same operation (its frozen payload, the
 	// same receipt) is idempotent end to end.
-	outcome := fx.rebillRunner(client, fullModeConfig()).Registry.Lookup(TypeManualRebill).Verify(fx.handlerCtx(), row)
+	outcome := fx.rebillRunner(client, fullModeConfig()).Registry.Lookup(subscriptions.TypeManualRebill).Verify(fx.handlerCtx(), row)
 	require.Equal(t, OutcomeSucceeded, outcome.Class)
 	require.Equal(t, 1, fx.paymentsFor(t, fake.txnID))
 	require.Equal(t, 1, fx.entitlementWindows(t))
@@ -333,7 +334,7 @@ func TestManualRebillConfirmedOnCancelledSubscriptionRecordsPaymentOnly(t *testi
 	require.NoError(t, fx.db.Pool().QueryRow(ctx, "SELECT metadata->>'refund_review' FROM billing.payments WHERE subscription_id = $1 AND transaction_id = $2", fx.subID, fake.txnID).Scan(&review))
 	require.NotEmpty(t, review)
 
-	outcome := fx.rebillRunner(client, fullModeConfig()).Registry.Lookup(TypeManualRebill).Verify(fx.handlerCtx(), row)
+	outcome := fx.rebillRunner(client, fullModeConfig()).Registry.Lookup(subscriptions.TypeManualRebill).Verify(fx.handlerCtx(), row)
 	require.Equal(t, OutcomeSucceeded, outcome.Class)
 	require.Equal(t, 1, fx.paymentsFor(t, fake.txnID))
 	require.Equal(t, "cancelled", string(fx.subscription(t).Status))

@@ -11,8 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/catalogpublish"
 	"github.com/open-rails/openrails/internal/merchants"
 	catalogmodule "github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -104,7 +106,6 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 		return err
 	}
 	defer cleanup()
-	applier := catalog.NewServiceApplier(svc)
 
 	for _, target := range targets {
 		catalogCtx, canonicalName, err := contextForCatalogPushTarget(ctx, rt.Merchants, target.Merchant)
@@ -113,38 +114,24 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 		}
 		target.Merchant = canonicalName
 		if err := rt.DB.RunInMerchantConn(catalogCtx, func(ctx context.Context) error {
-			plan, err := catalog.Plan(ctx, applier, target.Manifest)
+			response, err := catalogpublish.Publish(ctx, svc, openrails.CatalogPublishRequest{
+				Catalog: *target.Manifest, Insert: opts.Insert, Overwrite: opts.Overwrite, Prune: opts.Prune,
+			})
 			if err != nil {
-				return fmt.Errorf("plan %s: %w", target.Merchant, err)
+				return fmt.Errorf("publish %s: %w", target.Merchant, err)
 			}
 			if len(targets) > 1 {
 				fmt.Fprintf(out, "\n%s plan:\n", target.Merchant)
 			}
-			planOnly := opts.planOnly()
-			plan.Print(out, planOnly)
-
-			if planOnly {
-				if !plan.HasChanges() {
-					fmt.Fprintln(out, "\nno changes — catalog is up to date")
-				}
-				return reportCatalogExtras(ctx, svc, out, true, opts.Prune)
-			}
-			if !plan.HasChanges() {
+			catalogpublish.PrintPlan(response.Plan, out, opts.planOnly())
+			if !response.Plan.HasChanges() {
 				fmt.Fprintln(out, "\nno changes — catalog is up to date")
-				return reportCatalogExtras(ctx, svc, out, false, opts.Prune)
 			}
-
-			result, err := catalog.ApplyWithOptions(ctx, applier, plan, catalog.ApplyOptions{
-				Insert:    opts.Insert,
-				Overwrite: opts.Overwrite,
-				Prune:     opts.Prune,
-			})
-			if err != nil {
-				return fmt.Errorf("apply %s: %w", target.Merchant, err)
+			if response.Result != nil {
+				fmt.Fprintln(out)
+				catalogpublish.PrintResult(response.Result, out)
 			}
-			fmt.Fprintln(out)
-			result.Print(out)
-			return reportCatalogExtras(ctx, svc, out, false, opts.Prune)
+			return reportCatalogExtras(ctx, svc, out, opts.planOnly(), opts.Prune)
 		}); err != nil {
 			return err
 		}
