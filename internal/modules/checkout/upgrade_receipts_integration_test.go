@@ -11,6 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
+
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+
 	"github.com/open-rails/openrails"
 
 	"github.com/google/uuid"
@@ -93,6 +97,14 @@ func TestUpgradeReceiptsRestartAfterLocalRollback(t *testing.T) {
 	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT count(*) FROM billing.payments WHERE customer_id=$1`, old.CustomerID).Scan(&count))
 	require.Zero(t, count)
 	remove()
+	// A legacy progress writer cannot demote retained paid custody into an unpaid
+	// successor cancellation. Contradiction remains unresolved with no local effects.
+	bad := *journal.Proration
+	bad.Refusal = "contradictory later metadata"
+	require.NoError(t, intents.NewStore(fx.db).RecordProgress(fx.ctx, in.ID, map[string]any{"proration": &bad}))
+	require.Equal(t, intents.StatusUnknownNeedsVerify, fx.restartAndVerify(t).Status)
+	require.Zero(t, fx.count(t, `SELECT count(*) FROM billing.subscriptions WHERE price_id=$1`, fx.newPrice.ID))
+	require.NoError(t, intents.NewStore(fx.db).RecordProgress(fx.ctx, in.ID, map[string]any{"proration": journal.Proration}))
 	// Replay cannot consult mutable provider credentials or recalculate pricing.
 	fx.svc.ResolveNMIClientOverride = func(context.Context, string) (*nmi.NMIClient, error) {
 		return nil, errors.New("provider unavailable after receipt")
@@ -106,7 +118,7 @@ func TestUpgradeReceiptsRestartAfterLocalRollback(t *testing.T) {
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 	next, err := fx.svc.SubscriptionService.GetByID(fx.ctx, response.SubscriptionID.UUID())
 	require.NoError(t, err)
-	var payload NMIUpgradePayload
+	var payload subscriptions.NMIUpgradePayload
 	require.NoError(t, json.Unmarshal(result.Payload, &payload))
 	require.True(t, payload.PeriodEnd.Equal(*next.CurrentPeriodEndsAt), "recovered period preserves the frozen instant")
 	var amount int64
@@ -161,7 +173,7 @@ func TestUpgradeDefinitiveProrationRefusalQueuesSuccessorCancellation(t *testing
 	require.Equal(t, "insufficient_funds", refused.Code, "and its decline code")
 	in := fx.operation(t)
 	require.Equal(t, intents.StatusFailedTerminal, in.Status)
-	var p NMIUpgradePayload
+	var p subscriptions.NMIUpgradePayload
 	require.NoError(t, json.Unmarshal(in.Payload, &p))
 	next, err := fx.svc.SubscriptionService.GetByID(fx.ctx, p.NewSubscriptionID)
 	require.NoError(t, err)
@@ -208,7 +220,7 @@ func TestUpgradeSuccessorReceiptResumesOnlyUnsentProration(t *testing.T) {
 	require.Equal(t, "succeeded", response.Status)
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
-	var payload NMIUpgradePayload
+	var payload subscriptions.NMIUpgradePayload
 	require.NoError(t, json.Unmarshal(fx.operation(t).Payload, &payload))
 	require.EqualValues(t, 60_000_000, payload.ProrationAmount)
 }
@@ -226,7 +238,7 @@ func TestUpgradePublicReplayUsesFrozenReceiptAfterCatalogArchive(t *testing.T) {
 	replayed, err := fx.svc.TierChange(fx.ctx, request, fx.user)
 	require.NoError(t, err, "the cancelled predecessor and archived price cannot strand a committed receipt")
 	requireSameWire(t, first, replayed)
-	var payload NMIUpgradePayload
+	var payload subscriptions.NMIUpgradePayload
 	require.NoError(t, json.Unmarshal(fx.operation(t).Payload, &payload))
 	require.Equal(t, openrails.SubscriptionID(payload.NewSubscriptionID), *replayed.SubscriptionID, "a committed upgrade names its successor")
 	require.EqualValues(t, 60_000_000, replayed.AmountDueNow)
@@ -309,7 +321,7 @@ func TestUpgradeWireAmountsUseFrozenMicros(t *testing.T) {
 	fx.newPrice.Amount = 60_120_000
 	_, err = fx.upgrade(t)
 	require.NoError(t, err)
-	var payload NMIUpgradePayload
+	var payload subscriptions.NMIUpgradePayload
 	require.NoError(t, json.Unmarshal(fx.operation(t).Payload, &payload))
 	require.EqualValues(t, 60_120_000, payload.RecurringAmount)
 	require.EqualValues(t, 11_780_000, payload.ProrationAmount)
@@ -386,75 +398,80 @@ func TestUpgradeUnknownSuccessorResolvesOnlyFromExactReceipt(t *testing.T) {
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 }
 
-// A hidden proration sale converges from its exact transaction; provider-
-// confirmed non-execution instead takes the definitive-refusal path, and is
-// refused while the stable order reference shows a successful sale.
+// An exact transaction still needs operation correlation. Empty search or an
+// operator assertion cannot release an already-submitted non-idempotent sale.
 func TestUpgradeUnknownProrationResolution(t *testing.T) {
+	t.Run("unavailable account", func(t *testing.T) {
+		fx := newUpgradeAdoptFixture(t)
+		fx.positiveProration()
+		fx.gateway.saleMode.Store("ambiguousHidden")
+		fx.upgradeProcessing(t)
+		fx.svc.ResolveNMIClientOverride = func(context.Context, string) (*nmi.NMIClient, error) { return nil, nil }
+		_, err := fx.resolve(t, intents.Resolution{Step: "proration", ProviderReference: fx.gateway.saleTxn, Actor: "ops", Reason: "account unavailable"})
+		require.ErrorIs(t, err, intents.ErrResolutionRejected)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, fx.operation(t).Status)
+	})
 	t.Run("exact receipt", func(t *testing.T) {
 		fx := newUpgradeAdoptFixture(t)
 		fx.positiveProration()
 		fx.gateway.saleMode.Store("ambiguousHidden")
 		fx.upgradeProcessing(t)
 		require.Equal(t, intents.StatusUnknownNeedsVerify, fx.restartAndVerify(t).Status)
-		resolved, err := fx.resolve(t, intents.Resolution{Step: "proration", ProviderReference: fx.gateway.saleTxn, Actor: "ops", Reason: "NMI transaction detail"})
+		_, err := fx.resolve(t, intents.Resolution{Step: "proration", ProviderReference: fx.gateway.saleTxn, Actor: "ops", Reason: "unbound transaction"})
+		require.ErrorIs(t, err, intents.ErrResolutionRejected)
+		fx.gateway.saleVisible.Store(true)
+		resolved, err := fx.resolve(t, intents.Resolution{Step: "proration", ProviderReference: fx.gateway.saleTxn, Actor: "ops", Reason: "NMI transaction and order detail"})
 		require.NoError(t, err)
 		require.Equal(t, intents.StatusSucceeded, resolved.Status)
-		var p NMIUpgradePayload
+		var p subscriptions.NMIUpgradePayload
 		require.NoError(t, json.Unmarshal(resolved.Payload, &p))
 		require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND transaction_id=$2`, p.NewSubscriptionID, fx.gateway.saleTxn))
 		require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 		require.EqualValues(t, 1, fx.gateway.createCalls.Load())
 	})
-	t.Run("non-execution", func(t *testing.T) {
+	t.Run("empty search is not nonexecution", func(t *testing.T) {
 		fx := newUpgradeAdoptFixture(t)
 		fx.positiveProration()
 		fx.gateway.saleMode.Store("ambiguousHidden")
 		fx.upgradeProcessing(t)
-		fx.gateway.saleVisible.Store(true)
-		_, err := fx.resolve(t, intents.Resolution{Step: "proration", NotExecuted: true, Actor: "ops", Reason: "wrong"})
-		require.ErrorIs(t, err, intents.ErrResolutionRejected)
-		fx.gateway.saleVisible.Store(false)
-		fx.gateway.saleLanded.Store(false)
-		resolved, err := fx.resolve(t, intents.Resolution{Step: "proration", NotExecuted: true, Actor: "ops", Reason: "NMI confirmed no sale"})
-		require.NoError(t, err)
-		require.Equal(t, intents.StatusFailedTerminal, resolved.Status)
-		var p NMIUpgradePayload
-		require.NoError(t, json.Unmarshal(resolved.Payload, &p))
-		next, err := fx.svc.SubscriptionService.GetByID(fx.ctx, p.NewSubscriptionID)
-		require.NoError(t, err)
-		require.Equal(t, models.StatusCancelled, next.Status)
-		old, err := fx.svc.SubscriptionService.GetByID(fx.ctx, p.OldSubscriptionID)
-		require.NoError(t, err)
-		require.Equal(t, models.StatusActive, old.Status)
-		require.Equal(t, 0, fx.count(t, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1`, p.NewSubscriptionID))
-		_, err = fx.upgrade(t)
-		var refused *TierChangeError
-		require.ErrorAs(t, err, &refused)
-		require.Equal(t, http.StatusConflict, refused.HTTPStatus, "an operator-attested non-execution is a conflict")
-		require.Equal(t, openrails.CodeTierChangeRefused, refused.Code)
+		for _, visible := range []bool{true, false} {
+			fx.gateway.saleVisible.Store(visible)
+			_, err := fx.resolve(t, intents.Resolution{Step: "proration", NotExecuted: true, Actor: "ops", Reason: "operator assertion"})
+			require.ErrorIs(t, err, intents.ErrResolutionRejected)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, fx.operation(t).Status)
+		}
+		var p subscriptions.NMIUpgradePayload
+		require.NoError(t, json.Unmarshal(fx.operation(t).Payload, &p))
+		require.Zero(t, fx.count(t, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1`, p.NewSubscriptionID))
+		fx.upgradeProcessing(t)
 		require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+		require.EqualValues(t, 1, fx.gateway.createCalls.Load())
 	})
 }
 
-// Provider-confirmed non-execution of the successor terminates the operation
-// with the predecessor intact and releases the predecessor for a new request.
-func TestUpgradeSuccessorNonExecutionReleasesPredecessor(t *testing.T) {
-	fx := newUpgradeAdoptFixture(t)
-	fx.gateway.createMode.Store("ambiguousLost")
-	fx.upgradeProcessing(t)
-	resolved, err := fx.resolve(t, intents.Resolution{Step: "successor", NotExecuted: true, Actor: "ops", Reason: "NMI confirmed no subscription"})
-	require.NoError(t, err)
-	require.Equal(t, intents.StatusFailedTerminal, resolved.Status)
-	old, err := fx.svc.SubscriptionService.GetByID(fx.ctx, fx.existingSub.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.StatusActive, old.Status)
+// A lost response permits neither an absence-based release nor an unsupported
+// operator assertion. The gateway may already have a live recurring schedule.
+func TestUpgradeSuccessorNonExecutionCannotReleaseSubmittedEnrollment(t *testing.T) {
+	for _, mode := range []string{"ambiguousLanded", "ambiguousLost"} {
+		t.Run(mode, func(t *testing.T) {
+			fx := newUpgradeAdoptFixture(t)
+			fx.gateway.createMode.Store(mode)
+			fx.upgradeProcessing(t)
+			require.Equal(t, mode == "ambiguousLanded", fx.gateway.subExists.Load())
+			_, err := fx.resolve(t, intents.Resolution{Step: "successor", NotExecuted: true, Actor: "ops", Reason: "operator assertion"})
+			require.ErrorIs(t, err, intents.ErrResolutionRejected)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, fx.operation(t).Status)
+			old, err := fx.svc.SubscriptionService.GetByID(fx.ctx, fx.existingSub.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.StatusActive, old.Status)
 
-	fx.gateway.createMode.Store("approve")
-	fx.req.IdempotencyKey = uuid.NewString()
-	response, err := fx.upgrade(t)
-	require.NoError(t, err)
-	require.Equal(t, "succeeded", response.Status)
-	require.EqualValues(t, 2, fx.gateway.createCalls.Load(), "only a definitively unexecuted enrollment permits a new operation")
+			fx.gateway.createMode.Store("approve")
+			fx.req.IdempotencyKey = uuid.NewString()
+			_, err = fx.upgrade(t)
+			require.Error(t, err, "a new caller key cannot release the unresolved predecessor")
+			require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+		})
+	}
 }
 
 // An NMI upgrade needs the client's Idempotency-Key too: without one it is
@@ -482,10 +499,12 @@ func TestUpgradeRequiresIdempotencyKey(t *testing.T) {
 func TestUpgradeKeyReusedByAnotherRequestIsRefused(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
 	key := tierChangeIdempotencyKey(fx.req.IdempotencyKey)
-	other := NMIUpgradePayload{
+	other := subscriptions.NMIUpgradePayload{
 		RequestedPrice: openrails.PriceID(fx.newPrice.ID).String(), PSP: "nmi", UserID: uuid.NewString(),
 		OldSubscriptionID: uuid.New(), OldPriceID: uuid.New(), NewSubscriptionID: uuid.New(), NewPaymentID: uuid.New(),
-		PriceID: uuid.New(), ProductID: uuid.New(), PlanID: "plan-other", VaultID: "vault-other", Currency: "USD",
+		PriceID: uuid.New(), ProductID: uuid.New(), PlanID: "plan-other", Currency: "USD",
+		PaymentMethodID: uuid.New(), OldProviderSubscriptionID: "other-subscription", RecurringAmount: 5_000_000,
+		Instrument:  charge.FrozenInstrument{PSPID: fx.existingSub.PspID, Custodian: models.CustodianPSP, RailCustomerRef: "vault-other", RailMethodRef: "billing-other"},
 		PeriodStart: fx.svc.now().UTC(), PeriodEnd: fx.svc.now().UTC().Add(720 * time.Hour),
 	}
 	payload, err := json.Marshal(other)

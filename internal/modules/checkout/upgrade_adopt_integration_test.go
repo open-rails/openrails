@@ -39,6 +39,8 @@ type fakeNMIUpgradeGateway struct {
 	subID           string
 
 	saleAmount      atomic.Value
+	saleCurrency    atomic.Value
+	saleOrder       atomic.Value
 	recurringAmount atomic.Value
 	saleCalls       atomic.Int64
 	saleMode        atomic.Value
@@ -52,7 +54,7 @@ type fakeNMIUpgradeGateway struct {
 	subDeletes      atomic.Int64
 }
 
-func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string) (*fakeNMIUpgradeGateway, *nmi.NMIClient) {
+func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string, merchantID, pspID uuid.UUID) (*fakeNMIUpgradeGateway, *nmi.NMIClient) {
 	t.Helper()
 	f := &fakeNMIUpgradeGateway{
 		railCustomerRef: railCustomerRef, planID: planID,
@@ -62,6 +64,8 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string) (*fa
 	f.saleMode.Store("approve")
 	f.saleTxn = "upg-sale-" + uuid.NewString()
 	f.lastOrder.Store("")
+	f.saleOrder.Store("")
+	f.saleCurrency.Store("")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -113,6 +117,8 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string) (*fa
 			if r.Form.Get("type") == "sale" {
 				f.saleCalls.Add(1)
 				f.saleAmount.Store(r.Form.Get("amount"))
+				f.saleCurrency.Store(r.Form.Get("currency"))
+				f.saleOrder.Store(r.Form.Get("orderid"))
 				switch f.saleMode.Load().(string) {
 				case "decline":
 					fmt.Fprint(w, "response=2&responsetext=DECLINED&response_code=202")
@@ -126,8 +132,8 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string) (*fa
 				}
 				return
 			}
-			if f.saleVisible.Load() {
-				fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, f.saleTxn, r.Form.Get("order_id"))
+			if f.saleVisible.Load() && f.saleOrder.Load().(string) == r.Form.Get("order_id") {
+				fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, f.saleTxn, f.saleOrder.Load().(string))
 				return
 			}
 			fmt.Fprint(w, `<nm_response></nm_response>`)
@@ -135,7 +141,7 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string) (*fa
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := nmi.NewClient("nmi", &config.NMIProviderSettings{
+	client, err := nmi.NewAccountClient(merchantID, pspID, "nmi", &config.NMIProviderSettings{
 		SecurityKey: "test_security_key", WebhookSecret: "test_secret",
 	}, true)
 	require.NoError(t, err)
@@ -194,11 +200,10 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 
 	railCustomerRef := "vault-upg-" + sfx
 	planID := "plan-upg-" + sfx
-	gateway, client := newFakeNMIUpgradeGateway(t, railCustomerRef, planID)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
+	gateway, client := newFakeNMIUpgradeGateway(t, railCustomerRef, planID, dbtest.TestMerchantID.UUID(), pspID)
 
 	clock := clockwork.NewFakeClockAt(now)
-
-	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
 
 	// Stored payment method the upgrade charges against.
 	pm := &models.PaymentMethod{
