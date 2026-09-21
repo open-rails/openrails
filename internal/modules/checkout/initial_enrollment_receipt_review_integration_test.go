@@ -4,9 +4,8 @@ package checkout
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"net/url"
-	"sync/atomic"
+	"os"
 	"testing"
 	"time"
 
@@ -38,24 +37,28 @@ func initialEnrollmentMissingChargeCannotActivatePaidAccess(t *testing.T) {
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
 }
 
-// Run this bounded control alone: ProxyFromEnvironment caches its environment.
-// Refuse to boot a fixture unless every external provider URL is guarded.
+// The optional outer local runner installs its fail-closed proxy before process
+// startup. Every fixture also validates its own client URLs as loopback-only.
 func TestInitialEnrollmentAcceptedModes(t *testing.T) {
-	var blocked atomic.Int64
-	guard := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		blocked.Add(1)
-		t.Logf("blocked unexpected HTTP egress to %s", r.Host)
-		http.Error(w, "local enrollment control forbids external HTTP", http.StatusBadGateway)
-	}))
-	t.Cleanup(guard.Close)
-	t.Setenv("HTTPS_PROXY", guard.URL)
-	t.Setenv("HTTP_PROXY", guard.URL)
-	t.Setenv("NO_PROXY", "127.0.0.1,localhost,::1")
-	proxy, err := http.ProxyFromEnvironment(&http.Request{URL: &url.URL{Scheme: "https", Host: "secure.nmi.com"}})
-	require.NoError(t, err)
-	require.NotNil(t, proxy)
-	require.Equal(t, guard.URL, proxy.String(), "run this test alone before HTTP proxy configuration is cached")
-	t.Cleanup(func() { require.Zero(t, blocked.Load(), "unexpected external HTTP attempt was blocked") })
+	if guard := os.Getenv("OPENRAILS_LOCAL_HTTP_GUARD"); guard != "" {
+		proxy, err := http.ProxyFromEnvironment(&http.Request{URL: &url.URL{Scheme: "https", Host: "secure.nmi.com"}})
+		require.NoError(t, err)
+		require.NotNil(t, proxy)
+		require.Equal(t, guard, proxy.String())
+	}
+	t.Run("paid_now_exact_receipts", func(t *testing.T) {
+		fx := newSubIntentFixture(t)
+		result := fx.enqueueAndExecute(t)
+		require.Equal(t, intents.StatusSucceeded, result.Status, string(result.ResultEvidence))
+		var payments, active int
+		require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.payments WHERE id=$1 AND amount=$2 AND currency=$3 AND status='completed'`, fx.payload.Terms.PaymentID, fx.payload.AmountMicros, fx.payload.Currency).Scan(&payments))
+		require.Equal(t, 1, payments)
+		require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.subscriptions WHERE id=$1 AND status='active'`, fx.payload.LocalSubscriptionID).Scan(&active))
+		require.Equal(t, 1, active)
+		replay := fx.enqueueAndExecute(t)
+		require.Equal(t, intents.StatusSucceeded, replay.Status)
+		require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+	})
 	t.Run("paid_now_requires_charge", initialEnrollmentMissingChargeCannotActivatePaidAccess)
 	for _, mode := range []string{"covered_delay", "free_recurring"} {
 		t.Run(mode, func(t *testing.T) {
@@ -69,7 +72,15 @@ func TestInitialEnrollmentAcceptedModes(t *testing.T) {
 				require.NoError(t, err)
 			}
 			fx.gateway.txnID = ""
-			fx.enqueueAndExecute(t)
+			result := fx.enqueueAndExecute(t)
+			require.Equal(t, intents.StatusSucceeded, result.Status, string(result.ResultEvidence))
+			response, err := nmiSubscriptionResponseFromIntent(result)
+			require.NoError(t, err)
+			if mode == "covered_delay" {
+				require.Equal(t, "pending", response.Status)
+			} else {
+				require.Equal(t, "success", response.Status)
+			}
 			form, ok := fx.gateway.createForm.Load().(url.Values)
 			require.True(t, ok)
 			assert.Equal(t, "add_subscription", form.Get("recurring"))

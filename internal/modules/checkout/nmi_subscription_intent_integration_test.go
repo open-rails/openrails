@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -26,7 +28,9 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -58,6 +62,7 @@ type fakeNMISubGateway struct {
 	subID           string
 	txnID           string
 	charged         atomic.Bool
+	recurringAmount string
 }
 
 func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNMISubGateway, *nmi.NMIClient) {
@@ -68,15 +73,30 @@ func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNM
 		txnID: "txn-sub-" + uuid.NewString()[:8],
 	}
 	f.createMode.Store("approve")
+	f.recurringAmount = "9.99"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/customers/") {
+			fmt.Fprintf(w, `{"object":"customer","id":"%s","billing":[{"id":"billing-native","priority":1}]}`, f.railCustomerRef)
+			return
+		}
+		form, _ := f.createForm.Load().(url.Values)
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/payments/") {
+			if f.txnID == "" || !f.charged.Load() {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","amount":"%s","currency":"USD","customer_vault_id":"%s","actions":[{"id":"%s","type":"sale","success":true,"amount":"%s"}]}`, f.txnID, form.Get("amount"), f.railCustomerRef, f.txnID, form.Get("amount"))
+			return
+		}
+
 		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/subscriptions/") {
 			if !strings.HasSuffix(r.URL.Path, "/subscriptions/"+f.subID) || !f.subExists.Load() {
 				w.WriteHeader(http.StatusNotFound)
 				fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"not found"}`)
 				return
 			}
-			fmt.Fprintf(w, `{"object":"subscription","id":"%s","customer_vault_id":"%s","delayed_condition":"active","plan":{"id":"%s"}}`, f.subID, f.railCustomerRef, f.planID)
+			fmt.Fprintf(w, `{"object":"subscription","id":"%s","customer_vault_id":"%s","delayed_condition":"active","paused_subscription":"0","next_billing_date":"%s","plan":{"id":"%s","plan_amount":"%s","day_frequency":"30","plan_payments":"0"}}`, f.subID, f.railCustomerRef, form.Get("start_date")[:4]+"-"+form.Get("start_date")[4:6]+"-"+form.Get("start_date")[6:], f.planID, f.recurringAmount)
 			return
 		}
 		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/subscriptions") {
@@ -90,6 +110,11 @@ func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNM
 			return
 		}
 		_ = r.ParseForm()
+		if r.Form.Get("report_type") == "recurring" {
+			start := form.Get("start_date")
+			fmt.Fprintf(w, `<nm_response><subscription id="%s"><subscription_id>%s</subscription_id><plan><plan_id>%s</plan_id></plan><orderid>%s</orderid><ponumber>%s</ponumber><next_charge_date>%s</next_charge_date></subscription></nm_response>`, f.subID, f.subID, f.planID, form.Get("orderid"), form.Get("ponumber"), start[:4]+"-"+start[4:6]+"-"+start[6:])
+			return
+		}
 		if r.Form.Get("recurring") == "add_subscription" {
 			f.createCalls.Add(1)
 			f.createForm.Store(r.Form)
@@ -97,11 +122,11 @@ func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNM
 			case "ambiguous500":
 				// The create LANDED but the response was lost.
 				f.subExists.Store(true)
-				f.charged.Store(true)
+				f.charged.Store(r.Form.Get("type") == "sale" && f.txnID != "")
 				w.WriteHeader(http.StatusBadGateway)
 			default:
 				f.subExists.Store(true)
-				f.charged.Store(true)
+				f.charged.Store(r.Form.Get("type") == "sale" && f.txnID != "")
 				fmt.Fprintf(w, "response=1&responsetext=SUCCESS&subscription_id=%s&transactionid=%s&authcode=OK", f.subID, f.txnID)
 			}
 			return
@@ -116,13 +141,14 @@ func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNM
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
+	client, err := nmi.NewAccountClient(dbtest.TestMerchantID.UUID(), dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "mobius"), "mobius", &config.NMIProviderSettings{
 		SecurityKey: "test_security_key", WebhookSecret: "test_secret",
 	}, true)
 	require.NoError(t, err)
 	client.V5BaseURL = srv.URL
 	client.QueryURL = srv.URL
 	client.DirectPostURL = srv.URL
+	require.NoError(t, validateInitialFixtureDestinations(client))
 	return f, client
 }
 
@@ -211,6 +237,42 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailIntent {
 	t.Helper()
 	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
+	if fx.payload.Terms.SubscriptionID == uuid.Nil {
+		price, err := fx.svc.PriceService.GetByID(fx.ctx, fx.priceID)
+		require.NoError(t, err)
+		product, err := fx.svc.ProductService.GetByID(fx.ctx, price.ProductID)
+		require.NoError(t, err)
+		method := models.PaymentMethod{ID: uuid.New(), CustomerID: uuid.MustParse(fx.payload.UserID), PspID: pspID, Rail: "nmi", Custodian: "psp", RailCustomerRef: fx.payload.CustomerVaultID, RailMethodRef: "billing-native", RebillDriver: models.RebillDriverProvider}
+		require.NoError(t, paymentmethods.NewPaymentMethodRepo(fx.db).Create(db.WithPSPID(fx.ctx, pspID), &method))
+		fx.payload.PaymentMethodID = &method.ID
+		fx.payload.BillingID = method.RailMethodRef
+		fx.payload.Instrument = charge.FrozenInstrument{PSPID: pspID, Custodian: "psp", RailCustomerRef: method.RailCustomerRef, RailMethodRef: method.RailMethodRef}
+		now := fx.svc.now().UTC().Truncate(time.Microsecond)
+		start := now
+		if fx.payload.DelayedStart != nil {
+			start = fx.payload.DelayedStart.UTC()
+			fx.payload.AmountMicros = 0
+		}
+		end := start.Add(720 * time.Hour)
+		if fx.payload.StartDate == "" {
+			fx.payload.StartDate = end.Format("20060102")
+		}
+		payment := uuid.Nil
+		if fx.payload.AmountMicros > 0 {
+			payment = uuid.New()
+		}
+		benefits := models.CloneEntitlementsSpec(product.EntitlementsSpec)
+		if benefits == nil {
+			benefits = map[string]*int{}
+		}
+		fx.payload.Terms = subscriptions.InitialMembershipTerms{SubscriptionID: fx.payload.LocalSubscriptionID, PaymentID: payment, CustomerID: method.CustomerID, PSPID: pspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Amount: fx.payload.AmountMicros, RecurringAmount: price.Amount, Currency: price.Currency, AcceptedAt: now, PeriodStart: start, PeriodEnd: end, Pending: fx.payload.DelayedStart != nil, Entitlements: benefits}
+		fx.payload.DayFrequency = 30
+		fx.payload.RequestFingerprint = "fixture-" + fx.payload.CheckoutIdempotencyKey
+		if price.Amount == 0 {
+			fx.gateway.recurringAmount = "0.00"
+		}
+	}
+
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       string(models.RailNMI),
@@ -349,4 +411,22 @@ func TestNMISubscriptionIntent_ImmediateActivationIsOneMembership(t *testing.T) 
 	replay := fx.enqueueAndExecute(t)
 	require.Equal(t, intents.StatusSucceeded, replay.Status)
 	assertOneMembership()
+}
+
+// Check every configured NMI surface, including readback URLs, before a fixture
+// can run. This catches a missing override without attempting the real URL.
+func validateInitialFixtureDestinations(client *nmi.NMIClient) error {
+	for _, raw := range []string{client.DirectPostURL, client.QueryURL, client.V5BaseURL} {
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme != "http" || net.ParseIP(u.Hostname()) == nil || !net.ParseIP(u.Hostname()).IsLoopback() {
+			return fmt.Errorf("initial fixture refuses non-loopback NMI destination")
+		}
+	}
+	return nil
+}
+
+func TestInitialFixtureRejectsRealProviderDestination(t *testing.T) {
+	_, client := newFakeNMISubGateway(t, "vault", "plan")
+	client.QueryURL = "https://secure.nmi.com/api/query.php"
+	require.Error(t, validateInitialFixtureDestinations(client))
 }
