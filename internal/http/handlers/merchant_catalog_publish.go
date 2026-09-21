@@ -21,7 +21,7 @@ func MerchantPublishCatalog(r *httprequest.Request) {
 	}
 	response, err := catalogpublish.Publish(r.Request.Context(), svc, req)
 	if err != nil {
-		if errors.Is(err, service.ErrMeterInUse) || errors.Is(err, service.ErrRateCardHasOverrides) || errors.Is(err, service.ErrAllowanceSourceInUse) || errors.Is(err, service.ErrRateCardCurrencyMismatch) || errors.Is(err, service.ErrAllowanceSourceInvalid) {
+		if errors.Is(err, service.ErrMeterInUse) || errors.Is(err, service.ErrRateCardHasOverrides) || errors.Is(err, service.ErrAllowanceSourceInUse) || errors.Is(err, service.ErrRateCardCurrencyMismatch) || errors.Is(err, service.ErrAllowanceSourceInvalid) || errors.Is(err, service.ErrUsageRateCardInvalid) || errors.Is(err, service.ErrMeterRateCardConflict) {
 			writeMeteringError(r, err)
 		} else {
 			writeCatalogError(r, err)

@@ -190,6 +190,9 @@ func (s *Service) SyncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 // The first check rejects predictable failures; the second closes concurrent
 // usage/override races without holding database locks during provider requests.
 func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, current, next SyncCatalogSidecarsRequest) error {
+	if reflect.DeepEqual(current.Meters, next.Meters) && sameCatalogCards(current.RateCards, next.RateCards) {
+		return nil
+	}
 	currentMeters := make(map[string]CatalogMeterSpec)
 	nextMeters := make(map[string]CatalogMeterSpec)
 	for _, m := range current.Meters {
@@ -232,7 +235,7 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 			continue
 		}
 		if _, keep := nextCards[key]; !keep {
-			if err := money.CheckCatalogRateCardChange(ctx, tx, merchantID, key, nil); err != nil {
+			if err := money.CheckCatalogRateCardRemoval(ctx, tx, merchantID, key); err != nil {
 				return err
 			}
 		}
@@ -242,14 +245,19 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 		if key == "" {
 			continue
 		}
-		if old, ok := currentCards[key]; ok && sameCatalogCards([]CatalogRateCardSpec{old}, []CatalogRateCardSpec{c}) {
+		meter, exists := nextMeters[key]
+		if !exists {
+			return fmt.Errorf("rate card needs meter %q: %w", key, ErrMeterRateCardConflict)
+		}
+		if old, ok := currentCards[key]; ok && sameCatalogCards([]CatalogRateCardSpec{old}, []CatalogRateCardSpec{c}) && reflect.DeepEqual(currentMeters[key], meter) {
 			continue
 		}
 		var price pricing.RatePrice
 		if err := json.Unmarshal(c.Price, &price); err != nil {
 			return err
 		}
-		if err := money.CheckCatalogRateCardChange(ctx, tx, merchantID, key, &price); err != nil {
+		effective := pricing.Meter{Key: meter.Key, EventType: meter.EventType, ValueProperty: meter.ValueProperty, Aggregation: meter.Aggregation, Unit: meter.Unit, GroupBy: meter.GroupBy}
+		if err := money.CheckCatalogRateCardContracts(ctx, tx, merchantID, effective, c.Filter, price); err != nil {
 			return err
 		}
 	}

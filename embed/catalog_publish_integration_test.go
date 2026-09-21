@@ -123,12 +123,12 @@ func TestClientCatalogPublishingWorkflow(t *testing.T) {
 			// setter is internal; the publish and usage paths below are public.
 			customer, err := client.EnsureCustomer(t.Context(), openrails.CustomerID(uuid.New()))
 			require.NoError(t, err)
-			declaration.Meters = append(declaration.Meters, catalog.Meter{Key: "protected-override", Aggregation: catalog.AggCount}, catalog.Meter{Key: "protected-history", Aggregation: catalog.AggCount})
-			declaration.Products[0].RateCards = append(declaration.Products[0].RateCards, catalog.RateCard{Meter: "protected-override", Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 3}}})
+			declaration.Meters = append(declaration.Meters, catalog.Meter{Key: "protected-override", Aggregation: catalog.AggCount, GroupBy: map[string]string{"sku": "sku", "region": "region"}}, catalog.Meter{Key: "protected-history", Aggregation: catalog.AggCount})
+			declaration.Products[0].RateCards = append(declaration.Products[0].RateCards, catalog.RateCard{Meter: "protected-override", Filter: map[string][]string{"region": {"west"}}, Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 3}}})
 			publish(all)
 			pool := h.MerchantPool(d.mid.UUID())
 			overrideID := uuid.New()
-			_, err = pool.Exec(t.Context(), `INSERT INTO billing.catalog_rate_cards(id,merchant_id,customer_id,ordinal,meter_key,payment_term,price,allowance) VALUES($1,$2,$3,1,'protected-override','in_arrears','{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"2"}}'::jsonb,'{"included":20}'::jsonb)`, overrideID, d.mid.UUID(), customer.ID.UUID())
+			_, err = pool.Exec(t.Context(), `INSERT INTO billing.catalog_rate_cards(id,merchant_id,customer_id,ordinal,meter_key,payment_term,price,allowance) VALUES($1,$2,$3,1,'protected-override','in_arrears','{"model":"per_unit","currency":"USD","per_unit":{"matrix":{"dimension":"sku","cells":{"small":{"unit_amount":"2"}}}}}'::jsonb,'{"included":20}'::jsonb)`, overrideID, d.mid.UUID(), customer.ID.UUID())
 			require.NoError(t, err)
 			override := func() string {
 				t.Helper()
@@ -137,14 +137,32 @@ func TestClientCatalogPublishingWorkflow(t *testing.T) {
 				return value
 			}
 			originalOverride := override()
+			// Both definitions move together. Validation against the old default
+			// filter would incorrectly reject this coherent declaration.
+			for i := range declaration.Meters {
+				if declaration.Meters[i].Key == "protected-override" {
+					declaration.Meters[i].GroupBy = map[string]string{"sku": "sku", "zone": "zone"}
+				}
+			}
+			for i := range declaration.Products[0].RateCards {
+				if declaration.Products[0].RateCards[i].Meter == "protected-override" {
+					declaration.Products[0].RateCards[i].Filter = map[string][]string{"zone": {"west"}}
+				}
+			}
+			publish(all)
+			changed, err := client.GetUsageMeter(t.Context(), "protected-override")
+			require.NoError(t, err)
+			require.Equal(t, map[string]string{"sku": "sku", "zone": "zone"}, changed.GroupBy)
+			require.Equal(t, map[string][]string{"zone": {"west"}}, changed.DefaultRateCard.Filter)
+			require.Equal(t, originalOverride, override())
 			require.NoError(t, client.RecordUsage(t.Context(), openrails.UsageReport{CustomerID: customer.ID, Invoker: customer.ID.String(), Currency: "USD", EventType: "protected-history", Source: "catalog-prune", SourceID: uuid.NewString()}))
-			for _, scenario := range []string{"protected-override", "protected-history", "history-edit", "card-only-prune", "override-currency"} {
+			for _, scenario := range []string{"protected-override", "protected-history", "history-edit", "card-only-prune", "override-currency", "override-dimension"} {
 				t.Run(scenario, func(t *testing.T) {
 					key := scenario
 					if scenario == "history-edit" {
 						key = "protected-history"
 					}
-					if scenario == "card-only-prune" || scenario == "override-currency" {
+					if scenario == "card-only-prune" || scenario == "override-currency" || scenario == "override-dimension" {
 						key = "protected-override"
 					}
 					removeMeter := scenario == "protected-override" || scenario == "protected-history"
@@ -156,9 +174,15 @@ func TestClientCatalogPublishingWorkflow(t *testing.T) {
 					if scenario == "override-currency" {
 						wantCode = "rate_card_currency_mismatch"
 					}
+					if scenario == "override-dimension" {
+						wantCode = "meter_rate_card_conflict"
+					}
 					desired := declaration
 					desired.Meters = nil
 					for _, meter := range declaration.Meters {
+						if scenario == "override-dimension" && meter.Key == key {
+							meter.GroupBy = map[string]string{"zone": "zone"}
+						}
 						if scenario == "history-edit" && meter.Key == key {
 							meter.Unit = "must not reinterpret history"
 						}
@@ -176,6 +200,10 @@ func TestClientCatalogPublishingWorkflow(t *testing.T) {
 						if !removeCard || card.Meter != key {
 							desired.Products[0].RateCards = append(desired.Products[0].RateCards, card)
 						}
+					}
+					if scenario == "override-dimension" {
+						_, err := client.PublishCatalog(t.Context(), openrails.CatalogPublishRequest{Catalog: desired, Insert: true})
+						require.NoError(t, err, "Insert ignores the proposed meter/default overwrite")
 					}
 					_, err := client.PublishCatalog(t.Context(), openrails.CatalogPublishRequest{Catalog: desired, Overwrite: true, Prune: true})
 					var apiErr *openrails.StatusError
