@@ -136,6 +136,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 			runCancel(id)
 			cancelled, err := customer.GetMySubscription(t.Context(), sid)
 			require.NoError(t, err)
+			require.Equal(t, policy, cancelled.CollectionPolicy)
 			require.Equal(t, scenario == "engine" || scenario == "provider", cancelled.Resumable)
 			var state string
 			var marker *time.Time
