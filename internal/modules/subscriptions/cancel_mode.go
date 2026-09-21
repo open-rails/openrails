@@ -143,6 +143,11 @@ func Resumable(sub *models.Subscription, now time.Time) bool {
 	if sub == nil {
 		return false
 	}
+	// Engine resume only undoes an ordinary user cancellation. Terminal
+	// failures, merchant revocation and chargebacks require a new decision.
+	if sub.CollectionPolicy == models.CollectionPolicyEngine && (sub.CancelType == nil || *sub.CancelType != models.CancelTypeUser) {
+		return false
+	}
 	if CancelModeFor(sub, now) != CancelModeReversible {
 		return false
 	}

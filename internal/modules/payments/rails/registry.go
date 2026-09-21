@@ -291,6 +291,9 @@ func CancelModeFor(sub *models.Subscription, now time.Time) CancelMode {
 	if sub == nil {
 		return CancelModeDestructive
 	}
+	if sub.CollectionPolicy == models.CollectionPolicyEngine {
+		return CancelModeReversible
+	}
 	if d, ok := Lookup(sub.Rail); ok {
 		return d.CancelMode(sub, now)
 	}

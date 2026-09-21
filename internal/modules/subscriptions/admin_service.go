@@ -242,6 +242,11 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		return ErrSubscriptionNotActive
 	}
 
+	if subscription.CollectionPolicy == models.CollectionPolicyEngine {
+		lifecycle := NewSubscriptionLifecycleService(s.SubscriptionService.Database(), nil, nil, s.EntitlementService, s.NotificationService, nil, s.Clock())
+		return lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: revokeAccess})
+	}
+
 	now := s.now()
 
 	// enqueueRemoteIntent commits the rail's durable remote-mutation intent in
