@@ -359,7 +359,7 @@ func refuseContradictedNonExecution(ctx context.Context, client *nmi.NMIClient, 
 func saleResultEvidence(evidence map[string]any) map[string]any {
 	out := make(map[string]any, len(evidence))
 	for key, value := range evidence {
-		if key != "qualified_receipt" && key != "qualified_enrollment" && key != "account_requalifications" {
+		if key != "qualified_receipt" && key != "qualified_enrollment" && key != "qualified_initial_refusal" && key != "account_requalifications" {
 			out[key] = value
 		}
 	}

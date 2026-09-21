@@ -256,6 +256,9 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 }
 
 func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
+	if err := validateInitialEnrollmentReferences(ctx, tx, id); err != nil {
+		return err
+	}
 	if err := validateSaleReferences(ctx, tx, id); err != nil {
 		return err
 	}

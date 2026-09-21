@@ -1,6 +1,7 @@
 package checkout
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,9 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
-
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -19,305 +18,447 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// TypeNMISubscriptionCreate is the checkout NMI recurring create (#674): the
-// atomic first-charge + enroll (classic recurring=add_subscription) posted as
-// a durable write-ahead intent and executed inline. The NMI order id is
-// derived from the intent id; a timeout after NMI created the subscription no
-// longer orphans a live remote subscription — the verify leg re-finds it (by
-// order-id sale search + a vault+plan roster scan) and completes the local
-// registration.
-const TypeNMISubscriptionCreate = "nmi_subscription_create"
+const TypeNMISubscriptionCreate = subscriptions.TypeNMIInitialEnrollment
 
-// NMISubscriptionCreateIdempotencyKey addresses one logical checkout
-// subscription create by the client's checkout idempotency key.
-func NMISubscriptionCreateIdempotencyKey(checkoutIdempotencyKey string) string {
-	return TypeNMISubscriptionCreate + ":" + strings.TrimSpace(checkoutIdempotencyKey)
+type NMISubscriptionCreatePayload = subscriptions.NMIInitialEnrollmentPayload
+
+func NMISubscriptionCreateIdempotencyKey(key string) string {
+	return TypeNMISubscriptionCreate + ":" + strings.TrimSpace(key)
+}
+func decodeNMISubscriptionCreatePayload(in gen.OpenrailsRailIntent) (NMISubscriptionCreatePayload, error) {
+	return subscriptions.DecodeNMIInitialEnrollmentPayload(in)
 }
 
-// NMISubscriptionCreatePayload carries everything Execute and the async
-// verifier need to create the remote subscription AND register it locally
-// without the originating HTTP request.
-type NMISubscriptionCreatePayload struct {
-	// Provider is the RAIL ("nmi") — local row vocabulary.
-	Provider string `json:"provider"`
-	// PSP is the payment provider (account key, e.g. "mobius")
-	// this create charges through; "" resolves the rail's active account.
-	PSP             string `json:"psp,omitempty"`
-	PlanID          string `json:"plan_id"`
-	CustomerVaultID string `json:"customer_vault_id"`
-	// BillingID binds the subscription to ONE stored card in the vault (#682
-	// shared-vault support); "" uses the vault's priority-1 entry.
-	BillingID           string     `json:"billing_id,omitempty"`
-	AmountMicros        int64      `json:"amount_micros"`
-	Currency            string     `json:"currency"`
-	Email               string     `json:"email,omitempty"`
-	UserID              string     `json:"user_id"`
-	PriceID             uuid.UUID  `json:"price_id"`
-	LocalSubscriptionID uuid.UUID  `json:"local_subscription_id"`
-	PaymentMethodID     *uuid.UUID `json:"payment_method_id,omitempty"`
-	// StartDate (YYYYMMDD, "" = immediate) + DelayedStart mirror
-	// nmiSubscriptionStartDate's coverage-derived delayed start.
-	StartDate    string     `json:"start_date,omitempty"`
-	DelayedStart *time.Time `json:"delayed_start,omitempty"`
-	// StoredCredentialRef is the instrument's RECURRING-sequence
-	// stored-credential anchor at enqueue (#297). "" = this enrollment is the
-	// sequence's initial CIT (indicator=stored) and finalize captures the
-	// first-charge transaction id as the anchor (delayed starts produce no
-	// first charge — the anchor then back-fills from the first dunning MIT).
-	StoredCredentialRef string `json:"stored_credential_ref,omitempty"`
-	E2ERunID            string `json:"e2e_run_id,omitempty"`
-	// CheckoutIdempotencyKey lets finalize complete the request-level
-	// idempotency record so a client replay gets the cached response.
-	CheckoutIdempotencyKey string `json:"checkout_idempotency_key"`
-
-	FirstName string `json:"first_name,omitempty"`
-	LastName  string `json:"last_name,omitempty"`
-	Address1  string `json:"address1,omitempty"`
-	City      string `json:"city,omitempty"`
-	State     string `json:"state,omitempty"`
-	Zip       string `json:"zip,omitempty"`
-	Country   string `json:"country,omitempty"`
-}
-
-// Evidence keys the producer reads back off a succeeded intent.
-const (
-	nmiSubEvidenceSubscriptionID = "subscription_id"
-	nmiSubEvidenceStatus         = "status"
-	nmiSubEvidenceMessage        = "message"
-)
-
-// NMISubscriptionCreateIntentHandler executes checkout recurring creates with
-// money-mover semantics: attempts > 1 verify-at-provider first; transport
-// ambiguity parks as unknown_needs_verify; a create that landed at NMI but
-// failed local registration keeps resolving through the verifier until the
-// subscription is registered — never a live remote subscription with no local
-// row.
 type NMISubscriptionCreateIntentHandler struct {
 	Checkout *CheckoutService
 	Policy   intents.BackoffPolicy
 }
 
-func NewNMISubscriptionCreateIntentHandler(checkoutService *CheckoutService) *NMISubscriptionCreateIntentHandler {
-	return &NMISubscriptionCreateIntentHandler{Checkout: checkoutService, Policy: intents.DefaultBackoff}
+func NewNMISubscriptionCreateIntentHandler(s *CheckoutService) *NMISubscriptionCreateIntentHandler {
+	return &NMISubscriptionCreateIntentHandler{Checkout: s, Policy: intents.DefaultBackoff}
 }
-
 func (h *NMISubscriptionCreateIntentHandler) Type() string { return TypeNMISubscriptionCreate }
 func (h *NMISubscriptionCreateIntentHandler) Backoff(attempts int32) time.Duration {
 	return h.Policy.Delay(attempts)
 }
-
-// PrunePolicy keeps result_evidence: the producer reads
-// subscription_id/transaction_id/delayed_start off the durable row.
-func (h *NMISubscriptionCreateIntentHandler) PrunePolicy() (keepPayload, keepEvidence bool) {
-	return false, true
-}
-
-func decodeNMISubscriptionCreatePayload(intent gen.OpenrailsRailIntent) (NMISubscriptionCreatePayload, error) {
-	var p NMISubscriptionCreatePayload
-	if len(intent.Payload) == 0 {
-		return p, errors.New("nmi subscription create intent has no payload")
-	}
-	if err := json.Unmarshal(intent.Payload, &p); err != nil {
-		return p, fmt.Errorf("decode nmi subscription create payload: %w", err)
-	}
-	if p.PlanID == "" || p.CustomerVaultID == "" || p.UserID == "" ||
-		p.PriceID == uuid.Nil || p.LocalSubscriptionID == uuid.Nil {
-		return p, errors.New("nmi subscription create payload is incomplete")
-	}
-	return p, nil
-}
-
-// CheckRelevance: registration (finalize) is idempotent and a decline is
-// terminal, so the intent never goes stale on its own.
+func (h *NMISubscriptionCreateIntentHandler) PrunePolicy() (bool, bool)    { return true, true }
+func (h *NMISubscriptionCreateIntentHandler) CommitsTerminalOutcome() bool { return true }
 func (h *NMISubscriptionCreateIntentHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
-
-func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
-	if intent.Attempts > 1 {
-		return h.Verify(ctx, intent)
+func (h *NMISubscriptionCreateIntentHandler) database() *db.DB {
+	if h.Checkout == nil || h.Checkout.SubscriptionService == nil {
+		return nil
 	}
-	if h.Checkout == nil {
-		return intents.Parked("checkout service not wired")
-	}
-	p, err := decodeNMISubscriptionCreatePayload(intent)
+	return h.Checkout.SubscriptionService.Database()
+}
+func (h *NMISubscriptionCreateIntentHandler) client(ctx context.Context, in gen.OpenrailsRailIntent, p NMISubscriptionCreatePayload) (*nmi.NMIClient, error) {
+	client, err := h.Checkout.resolveNMIClient(db.WithPSPID(ctx, *in.PspID), p.PSP)
 	if err != nil {
-		return intents.Terminal(err.Error())
+		return nil, err
 	}
-	client, err := h.Checkout.resolveNMIClient(ctx, nmiIntentClientName(p.PSP, intent.Rail))
-	if err != nil {
-		return intents.Parked(fmt.Sprintf("nmi client not configured for provider %q: %v", nmiIntentClientName(p.PSP, intent.Rail), err))
+	owner, account := client.AccountIdentity()
+	if owner != in.MerchantID || account != *in.PspID {
+		return nil, errors.New("enrollment client differs from accepted account")
 	}
-	if client.ReadOnly {
-		return intents.Parked("nmi client is read-only (mode=readonly)")
-	}
-	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
-
-	// NMI charges whole cents; the payload carries micros. Error (never round)
-	// on a sub-cent remainder — same policy as the one-time sale path. Terminal,
-	// not parked: no retry can make an unrepresentable price representable, and
-	// nothing was sent, so the checkout fails clean instead of under-charging.
-	amountCents, err := moneyutil.NativeToRailMinorExact(p.Currency, p.AmountMicros)
-	if err != nil {
-		return intents.Terminal("subscription amount must be representable in whole cents: " + err.Error())
-	}
-
-	// #297: subscription enrollment is the cardholder-initiated RECURRING
-	// credential-on-file charge — the sequence's initial CIT when the
-	// instrument has no recurring anchor, a reuse when it does (a second
-	// subscription on an already-anchored card).
-	citContext := charge.InitialRecurring()
-	if p.StoredCredentialRef != "" {
-		citContext = charge.RecurringReuse(p.StoredCredentialRef)
-	}
-	resp, err := client.AddRecurringSubscription(ctx, nmi.RecurringPaymentData{
-		BillingID: p.BillingID,
-		CardUserData: nmi.CardUserData{
-			FirstName: p.FirstName,
-			LastName:  p.LastName,
-			Address1:  p.Address1,
-			City:      p.City,
-			State:     p.State,
-			Zip:       p.Zip,
-			Country:   p.Country,
-		},
-		PlanID:           p.PlanID,
-		CustomerVaultID:  p.CustomerVaultID,
-		Amount:           moneyutil.Cents(amountCents),
-		Currency:         p.Currency,
-		Email:            p.Email,
-		OrderID:          orderID,
-		PONumber:         orderID,
-		CustomerID:       p.UserID,
-		StartDate:        p.StartDate,
-		StoredCredential: nmidirect.StoredCredentialFor(citContext),
-	})
-	if err != nil {
-		if errors.Is(err, nmi.ErrProviderReadOnly) {
-			return intents.Parked("nmi provider writes blocked (mode=readonly)")
-		}
-		if nmi.RequiresVerification(err) {
-			// The subscription may exist at NMI; the verifier re-finds it.
-			return intents.Ambiguous("subscription create outcome unknown: " + err.Error())
-		}
-		var pmErr *nmi.CustomerVaultError
-		if errors.As(err, &pmErr) {
-			// #796: record the declined enrollment charge attempt (verbatim code).
-			if h.Checkout != nil && h.Checkout.PurchaseService != nil {
-				recordDeclinedAttempt(ctx, h.Checkout.PurchaseService.PaymentService, DeclinedAttempt{
-					UserID:                 p.UserID,
-					PriceID:                p.PriceID,
-					Rail:                   strings.ToLower(p.Provider),
-					SyntheticTransactionID: "nmi_sub_declined:" + intent.ID.String(),
-					AmountMicros:           p.AmountMicros,
-					Currency:               p.Currency,
-					FailureCode:            nmidirect.FailureCode(pmErr),
-					AttemptKind:            payments.AttemptInitial,
-					TokenType:              charge.TokenTypePSPToken,
-				})
-			}
-			return intents.TerminalWithEvidence(pmErr.Error(), map[string]any{
-				"declined":        true,
-				"response_code":   pmErr.ResponseCode,
-				"localization_id": pmErr.LocalizationID,
-			})
-		}
-		return intents.Terminal("subscription create request rejected: " + err.Error())
-	}
-	return h.finalize(ctx, intent.MerchantID, p, orderID, resp.SubscriptionID, resp.TransactionID, false)
+	return client, nil
 }
 
-// Verify resolves an ambiguous create via provider READS.
-func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
-	p, err := decodeNMISubscriptionCreatePayload(intent)
-	if err != nil {
-		return intents.Terminal(err.Error())
+func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+	if h.database() == nil || h.Checkout.Lifecycle == nil {
+		return intents.Parked("initial membership services unavailable")
 	}
-	if sub := intents.EvidenceString(intent, "provider_subscription_id"); sub != "" {
-		return h.finalize(ctx, intent.MerchantID, p, nmiSaleIntentOrderID(intent.ID, p.E2ERunID), sub, intents.EvidenceString(intent, "transaction_id"), true)
-	}
-	client, err := h.Checkout.resolveNMIClient(ctx, nmiIntentClientName(p.PSP, intent.Rail))
-	if err != nil {
-		return intents.Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", nmiIntentClientName(p.PSP, intent.Rail)))
-	}
-	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
-	return h.verifyAtProvider(ctx, intent.MerchantID, client, p, orderID)
-}
-
-// verifyAtProvider answers "did THIS create land at NMI?" via reads. The
-// roster exposes vault and plan, not the enrollment's order reference, so a
-// matching remote subscription is only a candidate for operator resolution.
-// The exception is exact local evidence: a row already registered with THIS
-// intent's order id (finalize crashed midway) is re-finalized. A missing or
-// merely similar match remains unknown and never authorizes a resend.
-func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Context, merchantID uuid.UUID, client *nmi.NMIClient, p NMISubscriptionCreatePayload, orderID string) intents.Outcome {
-	txnID, txnFound, err := client.FindSuccessfulSaleByOrderID(ctx, orderID)
-	if err != nil {
-		return intents.Ambiguous("pre-send verification read failed: " + err.Error())
-	}
-	roster, err := scanRemoteSubscriptions(ctx, h.Checkout.SubscriptionService, client, strings.ToLower(p.Provider), p.CustomerVaultID, p.PlanID, orderID)
+	current, err := intents.NewStore(h.database()).Get(ctx, in.ID)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
-	if len(roster.registered) == 1 {
-		return h.finalize(ctx, merchantID, p, orderID, roster.registered[0], txnID, true)
+	var progress map[string]any
+	if len(current.ResultEvidence) > 0 && json.Unmarshal(current.ResultEvidence, &progress) != nil {
+		return intents.Ambiguous("invalid enrollment progress")
 	}
-	evidence := map[string]any{}
-	if txnFound {
-		evidence[nmiSaleEvidenceTransactionID] = txnID
+	if value, present := progress["enrollment_submitted"]; present && value != true {
+		return intents.Ambiguous("invalid initial submission fence")
 	}
-	if len(roster.unregistered) > 0 {
-		evidence["candidate_subscription_ids"] = roster.unregistered
+	if _, refused, err := intents.LoadInitialEnrollmentRefusal(current); err != nil {
+		return intents.Ambiguous(err.Error())
+	} else if refused {
+		return h.Verify(ctx, current)
 	}
-	reason := "submitted enrollment has no exact provider receipt; no automatic resend"
-	if len(roster.unregistered) > 0 {
-		reason = fmt.Sprintf("%d unregistered remote subscriptions match vault and plan; resolve with the exact enrollment receipt", len(roster.unregistered))
+	if progress["enrollment_submitted"] == true || current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
+		return h.Verify(ctx, current)
 	}
-	return intents.AmbiguousWithEvidence(reason, evidence)
+	in = current
+	p, err := decodeNMISubscriptionCreatePayload(in)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	client, err := h.client(ctx, in, p)
+	if err != nil {
+		return intents.Parked(err.Error())
+	}
+	if client.ReadOnly {
+		return intents.Parked("native enrollment account is read-only")
+	}
+	if _, err = client.ReadSingleCardVaultBilling(ctx, p.CustomerVaultID, p.BillingID); err != nil {
+		return intents.Parked("enrollment instrument readback unavailable or unqualified")
+	}
+	submitted := false
+	err = h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := h.database().NewWithPgxTx(tx)
+		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: p.Terms.CustomerID}); err != nil {
+			return err
+		}
+		method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: in.MerchantID, ID: p.Terms.PaymentMethodID})
+		if err != nil {
+			return err
+		}
+		if method.CustomerID != p.Terms.CustomerID || method.ParkReason != "" {
+			return charge.ErrInstrumentChanged
+		}
+		if err = p.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
+			return err
+		}
+		submitted, err = intents.NewStore(d).RecordProgressIfAbsent(ctx, in.ID, "enrollment_submitted", true)
+		return err
+	})
+	if err != nil {
+		return intents.Ambiguous("enrollment could not retain its submission fence: " + err.Error())
+	}
+	if !submitted {
+		return h.Verify(ctx, in)
+	}
+	minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.AmountMicros)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	var credential *nmi.StoredCredential
+	if p.AmountMicros > 0 {
+		mode := charge.InitialRecurring()
+		if p.StoredCredentialRef != "" {
+			mode = charge.RecurringReuse(p.StoredCredentialRef)
+		}
+		credential = nmidirect.StoredCredentialFor(mode)
+	}
+	order := intents.NMIEnrollmentOrder(in)
+	response, callErr := client.AddRecurringSubscription(ctx, nmi.RecurringPaymentData{ScheduleOnly: p.AmountMicros == 0, PlanID: p.PlanID, CustomerVaultID: p.CustomerVaultID, BillingID: p.BillingID, Amount: minor, Currency: p.Currency, Email: p.Email, OrderID: order, PONumber: order, StartDate: p.StartDate, StoredCredential: credential, CardUserData: nmi.CardUserData{FirstName: p.FirstName, LastName: p.LastName, Address1: p.Address1, City: p.City, State: p.State, Zip: p.Zip, Country: p.Country}})
+	if callErr != nil {
+		if nmi.RequiresVerification(callErr) {
+			return intents.Ambiguous("native enrollment outcome requires exact provider verification")
+		}
+		var refusal *nmi.CustomerVaultError
+		if !errors.As(callErr, &refusal) {
+			return intents.Ambiguous("native enrollment rejection has no qualified refusal proof")
+		}
+		if err := intents.NewStore(h.database()).RetainInitialEnrollmentDecline(ctx, in, refusal); err != nil {
+			return intents.Ambiguous("native enrollment refusal could not be qualified: " + err.Error())
+		}
+		return h.Verify(ctx, in)
+	}
+	if response == nil {
+		return intents.Ambiguous("native enrollment returned no receipt candidates")
+	}
+	if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, map[string]any{"provider_subscription_id": response.SubscriptionID, "transaction_id": response.TransactionID}); err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	return h.Verify(ctx, in)
 }
 
-// Resolve accepts an exact enrollment receipt that the provider confirms is a
-// live subscription on the frozen vault and plan, or provider-confirmed
-// non-execution. It never re-sends the enrollment.
-func (h *NMISubscriptionCreateIntentHandler) Resolve(ctx context.Context, intent gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
-	p, err := decodeNMISubscriptionCreatePayload(intent)
-	if err != nil {
-		return intents.Outcome{}, err
+func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+	if h.database() == nil || h.Checkout.Lifecycle == nil {
+		return intents.Ambiguous("initial membership recovery unavailable")
 	}
+	current, err := intents.NewStore(h.database()).Get(ctx, in.ID)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	in = current
+	p, err := decodeNMISubscriptionCreatePayload(in)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	schedule, scheduled, err := intents.LoadNMIEnrollmentReceipt(in)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	_, paid, err := intents.LoadCollectedReceipt(in)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	if scheduled && (p.AmountMicros == 0 || paid) {
+		return h.complete(ctx, in, intents.Succeeded(nil))
+	}
+	var progress map[string]any
+	if len(in.ResultEvidence) > 0 && json.Unmarshal(in.ResultEvidence, &progress) != nil {
+		return intents.Ambiguous("invalid enrollment progress")
+	}
+	refusal, refused, err := intents.LoadInitialEnrollmentRefusal(in)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	if refused {
+		return h.complete(ctx, in, refusal.Outcome())
+	}
+	if value, present := progress["enrollment_submitted"]; present && value != true {
+		return intents.Ambiguous("invalid initial submission fence")
+	}
+	if progress["enrollment_submitted"] != true {
+		return h.Execute(ctx, in)
+	}
+	client, err := h.client(ctx, in, p)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	store := intents.NewStore(h.database())
+	var paymentErr error
+	if p.AmountMicros > 0 && !paid {
+		paymentErr = h.retainInitialPayment(ctx, in, client)
+	}
+	if !scheduled {
+		refs := []string{intents.EvidenceString(in, "provider_subscription_id")}
+		if refs[0] == "" {
+			roster, err := scanRemoteSubscriptions(db.WithPSPID(ctx, *in.PspID), h.Checkout.SubscriptionService, client, "nmi", p.CustomerVaultID, p.PlanID, intents.NMIEnrollmentOrder(in))
+			if err != nil {
+				return intents.Ambiguous(err.Error())
+			}
+			refs = append(roster.registered, roster.unregistered...)
+		}
+		matches := 0
+		for _, ref := range refs {
+			if ref == "" {
+				continue
+			}
+			candidate, found, err := intents.ReadNMIEnrollmentReceipt(ctx, in, upgradeReceiptResolver{client}, ref)
+			if err != nil || !found {
+				continue
+			}
+			matches++
+			schedule = candidate
+		}
+		if matches != 1 {
+			return intents.Ambiguous("native enrollment has no unique qualified schedule receipt")
+		}
+		schedule, err = store.RetainNMIEnrollmentReceipt(ctx, in, schedule)
+		if err != nil {
+			return intents.Ambiguous(err.Error())
+		}
+	}
+	if paymentErr != nil {
+		return intents.Ambiguous(paymentErr.Error())
+	}
+	return h.complete(ctx, in, intents.Succeeded(map[string]any{"provider_subscription_id": schedule.SubscriptionID()}))
+}
+
+func (h *NMISubscriptionCreateIntentHandler) retainInitialPayment(ctx context.Context, in gen.OpenrailsRailIntent, client *nmi.NMIClient) error {
+	var err error
+	ref := intents.EvidenceString(in, "transaction_id")
+	if ref == "" {
+		var found bool
+		ref, found, err = client.FindSuccessfulSaleByOrderID(ctx, intents.NMIEnrollmentOrder(in))
+		if err != nil || !found {
+			return errors.New("initial payment has no qualified transaction candidate")
+		}
+	}
+	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, upgradeReceiptResolver{client}, ref)
+	if err != nil || !found {
+		return errors.New("initial payment does not match accepted money and instrument")
+	}
+	if _, err = intents.NewStore(h.database()).RetainCollectedReceipt(ctx, in, receipt); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (h *NMISubscriptionCreateIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
 	if resolution.Step != "" {
-		return intents.Outcome{}, fmt.Errorf("%w: subscription create has no steps", intents.ErrResolutionInvalid)
+		return intents.Outcome{}, intents.RejectResolution("initial enrollment has no steps")
 	}
-	if sub := intents.EvidenceString(intent, "provider_subscription_id"); sub != "" {
-		return intents.Outcome{}, intents.RejectResolution("operation already holds enrollment receipt %s; its verifier completes registration", sub)
-	}
-	client, err := h.Checkout.resolveNMIClient(ctx, nmiIntentClientName(p.PSP, intent.Rail))
-	if err != nil {
-		return intents.Outcome{}, fmt.Errorf("resolve nmi client: %w", err)
+	if _, err := decodeNMISubscriptionCreatePayload(in); err != nil {
+		return intents.Outcome{}, err
 	}
 	if resolution.NotExecuted {
-		if txn := intents.EvidenceString(intent, nmiSaleEvidenceTransactionID); txn != "" {
-			return intents.Outcome{}, intents.RejectResolution("operation holds enrollment charge %s", txn)
-		}
-		if err := refuseContradictedNonExecution(ctx, client, nmiSaleIntentOrderID(intent.ID, p.E2ERunID)); err != nil {
+		current, err := intents.NewStore(h.database()).Get(ctx, in.ID)
+		if err != nil {
 			return intents.Outcome{}, err
 		}
-		return intents.TerminalWithEvidence("provider confirmed the enrollment was not executed", nil), nil
+		var progress map[string]any
+		if len(current.ResultEvidence) > 0 && json.Unmarshal(current.ResultEvidence, &progress) != nil {
+			return intents.Outcome{}, errors.New("invalid enrollment progress")
+		}
+		if progress["enrollment_submitted"] == true {
+			return intents.Outcome{}, intents.RejectResolution("submitted NMI enrollment has no positive nonexecution proof contract")
+		}
+		return h.complete(ctx, current, intents.TerminalWithEvidence("enrollment was never submitted", map[string]any{"not_executed": true})), nil
 	}
-	ref := resolution.ProviderReference
-	if err := client.ConfirmLiveSubscription(ctx, ref, p.CustomerVaultID, p.PlanID); err != nil {
-		return intents.Outcome{}, intents.RejectResolution("%v", err)
+	if strings.TrimSpace(resolution.ProviderReference) == "" {
+		return intents.Outcome{}, intents.RejectResolution("exact schedule reference required")
 	}
-	local, err := h.Checkout.SubscriptionService.GetByPSPSubscriptionID(ctx, strings.ToLower(p.Provider), ref)
-	switch {
-	case err == nil && local.ID != p.LocalSubscriptionID:
-		return intents.Outcome{}, intents.RejectResolution("subscription %s is already registered to local subscription %s", ref, local.ID)
-	case err != nil && !db.IsNotFound(err):
+	p, _ := decodeNMISubscriptionCreatePayload(in)
+	client, err := h.client(ctx, in, p)
+	if err != nil {
 		return intents.Outcome{}, err
 	}
-	return h.finalize(ctx, intent.MerchantID, p, nmiSaleIntentOrderID(intent.ID, p.E2ERunID), ref, intents.EvidenceString(intent, nmiSaleEvidenceTransactionID), true), nil
+	schedule, found, err := intents.ReadNMIEnrollmentReceipt(ctx, in, upgradeReceiptResolver{client}, resolution.ProviderReference)
+	if err != nil || !found {
+		return intents.Outcome{}, intents.RejectResolution("schedule does not prove accepted enrollment")
+	}
+	if _, err = intents.NewStore(h.database()).RetainNMIEnrollmentReceipt(ctx, in, schedule); err != nil {
+		return intents.Outcome{}, err
+	}
+	return h.Verify(ctx, in), nil
+}
+
+func (h *NMISubscriptionCreateIntentHandler) complete(ctx context.Context, in gen.OpenrailsRailIntent, outcome intents.Outcome) intents.Outcome {
+	p, err := decodeNMISubscriptionCreatePayload(in)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	ctx, cancel := intents.LedgerWriteContext(ctx)
+	defer cancel()
+	ctx = db.WithPSPID(ctx, *in.PspID)
+	err = h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := h.database().NewWithPgxTx(tx)
+		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: p.Terms.CustomerID}); err != nil {
+			return err
+		}
+		current, err := d.Gen(ctx).LockRailIntentForInitialEnrollmentCompletion(ctx, gen.LockRailIntentForInitialEnrollmentCompletionParams{MerchantID: in.MerchantID, ID: in.ID})
+		if err != nil {
+			return err
+		}
+		if current.PspID == nil || *current.PspID != *in.PspID || current.IdempotencyKey != in.IdempotencyKey || !bytes.Equal(current.Payload, in.Payload) {
+			return errors.New("initial completion differs from accepted operation")
+		}
+		schedule, scheduled, err := intents.LoadNMIEnrollmentReceipt(current)
+		if err != nil {
+			return err
+		}
+		receipt, paid, err := intents.LoadCollectedReceipt(current)
+		if err != nil {
+			return err
+		}
+		refusal, refused, err := intents.LoadInitialEnrollmentRefusal(current)
+		if err != nil {
+			return err
+		}
+		success := outcome.Class == intents.OutcomeSucceeded
+		if !success && !refused && outcome.Evidence["not_executed"] == true {
+			if err := intents.NewStore(d).RetainUnsubmittedInitialEnrollment(ctx, current); err != nil {
+				return err
+			}
+			current, err = intents.NewStore(d).Get(ctx, current.ID)
+			if err != nil {
+				return err
+			}
+			refusal, refused, err = intents.LoadInitialEnrollmentRefusal(current)
+			if err != nil {
+				return err
+			}
+		}
+		if success && refused || !success && !refused {
+			return errors.New("initial terminal decision has no matching qualified custody")
+		}
+		if !success {
+			outcome = refusal.Outcome()
+		}
+
+		if success && (!scheduled || (p.AmountMicros > 0) != paid) {
+			return errors.New("initial completion lacks exact required schedule/payment receipts")
+		}
+		if !success && (scheduled || paid) {
+			return errors.New("qualified provider effects cannot be refused")
+		}
+		var evidence map[string]any
+		if len(current.ResultEvidence) > 0 && json.Unmarshal(current.ResultEvidence, &evidence) != nil {
+			return errors.New("invalid initial completion evidence")
+		}
+		if evidence == nil {
+			evidence = map[string]any{}
+		}
+		// Generic diagnostic progress is not financial authority. Only the
+		// validated private refusal above may populate terminal refusal fields.
+		for _, key := range []string{"declined", "not_executed", "request_refused", "response_code", "localization_id"} {
+			delete(evidence, key)
+		}
+
+		status := intents.StatusFailedTerminal
+		if success {
+			status = intents.StatusSucceeded
+		}
+		if current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
+			if current.Status != status {
+				return errors.New("initial terminal replay conflicts")
+			}
+			outcome.Evidence = saleResultEvidence(evidence)
+			return nil
+		}
+		if success {
+			providerSub := schedule.SubscriptionID()
+			transaction := ""
+			if paid {
+				transaction = receipt.TransactionID()
+			}
+			metadata := map[string]any{"order_id": intents.NMIEnrollmentOrder(in), "provider_transaction_id": transaction}
+			if p.DelayedStart != nil {
+				metadata["delayed_start"] = p.DelayedStart.UTC().Format(time.RFC3339Nano)
+			}
+			var email *string
+			if p.Email != "" {
+				email = &p.Email
+			}
+			if _, _, err := h.Checkout.Lifecycle.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &p.Terms, UserID: p.UserID, PriceID: p.PriceID, Rail: "nmi", RailSubscriptionID: &providerSub, UserEmail: email, TransactionID: transaction, Amount: p.AmountMicros, AmountProvided: true, Currency: p.Currency, PurchasedAt: &p.Terms.AcceptedAt, PaymentMetadata: metadata}); err != nil {
+				return err
+			}
+			if paid {
+				if _, err := d.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: in.MerchantID, ID: p.Terms.PaymentMethodID, Agreement: "recurring", Ref: transaction}); err != nil {
+					return err
+				}
+			}
+			evidence["subscription_id"], evidence["provider_subscription_id"], evidence["transaction_id"], evidence["status"], evidence["message"] = p.Terms.SubscriptionID.String(), providerSub, transaction, "success", "Subscription created successfully"
+			if p.Terms.Pending {
+				evidence["status"] = "pending"
+				evidence["message"] = "Subscription scheduled for its accepted start date"
+			}
+			if p.DelayedStart != nil {
+				evidence["delayed_start"] = p.DelayedStart.UTC().Format(time.RFC3339Nano)
+			}
+		} else {
+			if outcome.Evidence["declined"] == true && p.AmountMicros > 0 {
+				code := fmt.Sprint(outcome.Evidence["response_code"])
+				reason := payments.NormalizeFailureReason("nmi", code)
+				kind, token := payments.AttemptInitial, charge.TokenTypePSPToken
+				if err := payments.NewPaymentService(d, h.Checkout.Clock()).Create(ctx, &models.Payment{ID: p.Terms.PaymentID, CustomerID: p.Terms.CustomerID, PriceID: p.PriceID, PspID: in.PspID, Rail: "nmi", TransactionID: "nmi_sub_declined:" + in.ID.String(), Amount: p.AmountMicros, ListAmount: p.Terms.RecurringAmount, Currency: p.Currency, Status: payments.PaymentStatusFailedValue, AttemptKind: &kind, TokenType: &token, FailureCode: &code, FailureReason: &reason, MoneyMovement: models.MoneyMovementNone, PurchasedAt: p.Terms.AcceptedAt, CreatedAt: p.Terms.AcceptedAt}); err != nil {
+					return err
+				}
+			}
+			for key, value := range outcome.Evidence {
+				evidence[key] = value
+			}
+		}
+		if record := intents.OperatorResolutionRecord(ctx); record != nil {
+			evidence["operator_resolution"] = record
+		}
+		raw, err := json.Marshal(evidence)
+		if err != nil {
+			return err
+		}
+		reason := outcome.Reason
+		n, err := d.Gen(ctx).CompleteInitialEnrollmentOutcome(ctx, gen.CompleteInitialEnrollmentOutcomeParams{MerchantID: in.MerchantID, ID: in.ID, Status: status, Evidence: raw, Reason: &reason, Now: h.Checkout.now().UTC()})
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return errors.New("initial terminal decision did not commit")
+		}
+		outcome.Evidence = saleResultEvidence(evidence)
+		return nil
+	})
+	if err != nil {
+		return intents.Ambiguous("initial receipts retained; local completion pending: " + err.Error())
+	}
+	return outcome
 }
 
 // railSubscriptionReader is the local-lookup surface the roster scan needs
@@ -400,83 +541,3 @@ func subscriptionMetadataString(raw json.RawMessage, key string) string {
 // standard registration path (idempotent: existing rows are activated /
 // answered, not duplicated) and completes the request-level idempotency
 // record so client replays get the cached response.
-func (h *NMISubscriptionCreateIntentHandler) finalize(ctx context.Context, merchantID uuid.UUID, p NMISubscriptionCreatePayload, orderID, providerSubscriptionID, transactionID string, verified bool) (outcome intents.Outcome) {
-	defer func() {
-		if outcome.Class == intents.OutcomeAmbiguous && providerSubscriptionID != "" {
-			outcome.Evidence = map[string]any{"provider_subscription_id": providerSubscriptionID, "transaction_id": transactionID}
-		}
-	}()
-	if strings.TrimSpace(providerSubscriptionID) == "" {
-		return intents.Ambiguous("remote subscription id unavailable; cannot register locally")
-	}
-
-	// #297: an initial recurring CIT anchors the instrument's recurring
-	// sequence with its first-charge transaction id. Delayed starts have no
-	// first charge (transactionID "") — the anchor then back-fills from the
-	// first successful dunning MIT instead. Best-effort, write-once.
-	if p.StoredCredentialRef == "" && strings.TrimSpace(transactionID) != "" {
-		h.captureStoredCredentialRef(ctx, merchantID, p, strings.TrimSpace(transactionID))
-	}
-	price, err := h.Checkout.PriceService.GetByID(ctx, p.PriceID)
-	if err != nil {
-		return intents.Ambiguous("load price for registration: " + err.Error())
-	}
-	product, err := h.Checkout.ProductService.GetByID(ctx, price.ProductID)
-	if err != nil {
-		return intents.Ambiguous("load product for registration: " + err.Error())
-	}
-	req := &CheckoutRequest{Email: p.Email}
-	if p.E2ERunID != "" {
-		req.Metadata = map[string]string{"e2e_run_id": p.E2ERunID}
-	}
-	user := &UserIdentity{ID: p.UserID}
-
-	resp, err := h.Checkout.completeNMISubscriptionRegistration(
-		ctx, req, user, price, product, strings.ToLower(p.Provider),
-		p.LocalSubscriptionID, providerSubscriptionID, transactionID,
-		p.DelayedStart, orderID, p.PaymentMethodID,
-		"nmi_subscription", p.CheckoutIdempotencyKey,
-	)
-	if err != nil {
-		// The remote subscription EXISTS; keep resolving through the verifier
-		// until registration lands — never a live remote sub with no local row.
-		return intents.Ambiguous("subscription created at provider, but local registration failed: " + err.Error())
-	}
-
-	evidence := map[string]any{
-		nmiSaleEvidenceTransactionID: transactionID,
-		nmiSubEvidenceStatus:         resp.Status,
-		nmiSubEvidenceMessage:        resp.Message,
-	}
-	if resp.SubscriptionID != nil {
-		evidence[nmiSubEvidenceSubscriptionID] = resp.SubscriptionID.String()
-	}
-	if resp.DelayedStart != nil {
-		evidence[nmiSaleEvidenceDelayedStart] = resp.DelayedStart.UTC().Format(time.RFC3339)
-	}
-	if verified {
-		evidence["verified_existing"] = true
-	}
-	return intents.Succeeded(evidence)
-}
-
-// captureStoredCredentialRef persists the recurring-sequence anchor for the
-// enrolled instrument (#297), keyed by the rail handles the payload carries.
-// Best-effort: a miss means the next successful recurring charge re-captures.
-func (h *NMISubscriptionCreateIntentHandler) captureStoredCredentialRef(ctx context.Context, merchantID uuid.UUID, p NMISubscriptionCreatePayload, transactionID string) {
-	if h.Checkout == nil || h.Checkout.RailPaymentMethodService == nil || h.Checkout.RailPaymentMethodService.DB == nil {
-		log.WithContext(ctx).Warn("nmi subscription finalize: no DB handle to persist stored-credential reference (#297)")
-		return
-	}
-	if _, err := h.Checkout.RailPaymentMethodService.DB.Gen(ctx).CaptureStoredCredentialRefByRailInstrument(ctx, gen.CaptureStoredCredentialRefByRailInstrumentParams{PspID: db.PSPIDFromContext(ctx),
-		MerchantID:      merchantID,
-		Rail:            strings.ToLower(strings.TrimSpace(p.Provider)),
-		RailCustomerRef: strings.TrimSpace(p.CustomerVaultID),
-		RailMethodRef:   strings.TrimSpace(p.BillingID),
-		Agreement:       string(charge.AgreementRecurring),
-		Ref:             transactionID,
-	}); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("customer_vault_id", p.CustomerVaultID).
-			Warn("nmi subscription finalize: failed to persist stored-credential reference (#297); next recurring charge re-captures")
-	}
-}

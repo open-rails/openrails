@@ -66,6 +66,13 @@ func decodeCollectedTerms(in gen.OpenrailsRailIntent) (collectedTerms, error) {
 	case "invoice_collection":
 		p, err := DecodeInvoiceCollectionPayload(in)
 		return collectedTerms{p.Rail, p.Currency, p.AmountMinor, p.Instrument, p.ProviderCustomerRef, in.ID.String()}, err
+	case subscriptions.TypeNMIInitialEnrollment:
+		p, err := subscriptions.DecodeNMIInitialEnrollmentPayload(in)
+		if err != nil {
+			return collectedTerms{}, err
+		}
+		minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.AmountMicros)
+		return collectedTerms{"nmi", p.Currency, minor, p.Instrument, "", payments.NMISaleOrderReference(in.ID, p.E2ERunID)}, err
 	case subscriptions.TypeNMIUpgrade:
 		p, err := subscriptions.DecodeNMIUpgradePayload(in)
 		if err != nil {
@@ -361,7 +368,7 @@ func LoadCollectionCandidate(in gen.OpenrailsRailIntent) (CollectionCandidate, b
 }
 
 func refuseCustodyKeys(evidence map[string]any) error {
-	for _, key := range []string{qualifiedInvoiceNonexecutionKey, qualifiedReceiptKey, qualifiedEnrollmentKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, "account_requalifications"} {
+	for _, key := range []string{qualifiedInitialRefusalKey, qualifiedInvoiceNonexecutionKey, qualifiedReceiptKey, qualifiedEnrollmentKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, "account_requalifications"} {
 		if _, ok := evidence[key]; ok {
 			return fmt.Errorf("%s is reserved for immutable provider evidence custody", key)
 		}

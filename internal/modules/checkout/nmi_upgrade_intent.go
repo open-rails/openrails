@@ -92,10 +92,6 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 	if err != nil {
 		return h.terminal(ctx, in, intents.Terminal("invalid upgrade payload: "+err.Error()))
 	}
-	recurring, err := moneyutil.NativeToRailMinorExact(p.Currency, p.RecurringAmount)
-	if err != nil {
-		return h.terminal(ctx, in, intents.Terminal(err.Error()))
-	}
 	proration, err := moneyutil.NativeToRailMinorExact(p.Currency, p.ProrationAmount)
 	if err != nil {
 		return h.terminal(ctx, in, intents.Terminal(err.Error()))
@@ -191,12 +187,8 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 		if !claimed {
 			return intents.Ambiguous("successor submission already owned; reconcile receipt")
 		}
-		credential := charge.InitialRecurring()
-		if p.Instrument.StoredCredentialRecurringRef != "" {
-			credential = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
-		}
 		order := intents.NMIEnrollmentOrder(in)
-		receipt, callErr := client.AddRecurringSubscription(ctx, nmi.RecurringPaymentData{CardUserData: p.Card, PlanID: p.PlanID, CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: moneyutil.Cents(recurring), Currency: p.Currency, Email: p.Email, CustomerID: p.UserID, OrderID: order, PONumber: order, StartDate: p.StartDate, StoredCredential: nmidirect.StoredCredentialFor(credential)})
+		receipt, callErr := client.AddRecurringSubscription(ctx, nmi.RecurringPaymentData{ScheduleOnly: true, CardUserData: p.Card, PlanID: p.PlanID, CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Currency: p.Currency, Email: p.Email, CustomerID: p.UserID, OrderID: order, PONumber: order, StartDate: p.StartDate})
 		if callErr != nil {
 			if nmi.RequiresVerification(callErr) {
 				return intents.Ambiguous("successor submission has no exact receipt: " + callErr.Error())

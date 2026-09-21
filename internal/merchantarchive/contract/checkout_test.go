@@ -9,7 +9,7 @@ func TestCheckoutIntentReceiptContracts(t *testing.T) {
 		valid                                bool
 	}{
 		{"pruned sale has no accepted terms", "nmi_sale", "succeeded", "null", `{"payment_id":"` + testMerchant + `","transaction_id":"sale-1"}`, false},
-		{"subscription", "nmi_subscription_create", "succeeded", "{}", `{"subscription_id":"` + testMerchant + `","transaction_id":"sale-1","status":"success","message":"Subscription created successfully"}`, true},
+		{"pruned subscription has no accepted terms", "nmi_subscription_create", "succeeded", "{}", `{"subscription_id":"` + testMerchant + `","transaction_id":"sale-1","status":"success","message":"Subscription created successfully"}`, false},
 		{"old boolean is not sale custody", "nmi_sale", "succeeded", "null", `{"payment_id":"` + testMerchant + `","transaction_id":"sale-1","verified_existing":true}`, false},
 		{"unknown result", "nmi_sale", "succeeded", "null", `{"payment_id":"` + testMerchant + `","raw_body":{}}`, false},
 		{"credential result", "nmi_subscription_create", "succeeded", "null", `{"security_key":"secret"}`, false},
