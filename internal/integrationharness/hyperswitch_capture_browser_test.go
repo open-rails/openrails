@@ -14,41 +14,105 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit/authhttp"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/embed"
 	embedauth "github.com/open-rails/openrails/embed/authkit"
+	"github.com/open-rails/openrails/internal/app"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/migrate"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
 // Selected explicitly against the pinned local vendor, never silently skipped.
 // Its card entry happens in the actual pinned vendor iframe, not this Go server.
-func TestHyperSwitchActualBrowserCapture(t *testing.T) {
+func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
+	type recovery struct {
+		DB              *config.DBConfig
+		Redis           *config.RedisConfig
+		HyperSwitch     *config.HyperSwitchConfig
+		ProviderSandbox *config.ProviderSandboxConfig
+		Encryption      *config.EncryptionConfig
+		MerchantID      merchant.ID
+		OperationID     uuid.UUID
+	}
+	if path := os.Getenv("OPENRAILS_HS_INVOICE_RECOVERY"); path != "" {
+		raw, err := os.ReadFile(path)
+		require.NoError(t, err)
+		var input recovery
+		require.NoError(t, json.Unmarshal(raw, &input))
+		restored, err := embed.New(t.Context(), embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: input.DB, Redis: input.Redis, HyperSwitch: input.HyperSwitch, ProviderSandbox: input.ProviderSandbox, Encryption: input.Encryption}, River: embed.RiverManagedByOpenRails()})
+		require.NoError(t, err)
+		defer restored.Close(context.Background())
+		runtime := app.HostGraph(restored).Runtime
+		require.NoError(t, runtime.DB.RunInMerchantConn(merchant.WithID(t.Context(), input.MerchantID), func(c context.Context) error {
+			operation, err := runtime.IntentRunner().VerifyByID(c, input.OperationID)
+			require.NoError(t, err)
+			require.Equal(t, intents.StatusSucceeded, operation.Status)
+			return err
+		}))
+		return
+	}
 	path := os.Getenv("OPENRAILS_HYPERSWITCH_FIXTURE")
 	require.NotEmpty(t, path, "selecting this qualification requires the owned local HyperSwitch fixture")
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err)
 	var vendor struct {
-		APIBaseURL   string `json:"api_base_url"`
-		SDKURL       string `json:"sdk_url"`
-		MerchantID   string `json:"merchant_id"`
-		ProfileID    string `json:"profile_id"`
-		PublicAPIKey string `json:"public_api_key"`
-		APIKey       string `json:"api_key"`
+		APIBaseURL          string `json:"api_base_url"`
+		SDKURL              string `json:"sdk_url"`
+		MerchantID          string `json:"merchant_id"`
+		ProfileID           string `json:"profile_id"`
+		PublicAPIKey        string `json:"public_api_key"`
+		APIKey              string `json:"api_key"`
+		NMIReadBase         string `json:"nmi_read_base_url"`
+		NMIProxyDestination string `json:"nmi_proxy_destination"`
+		NMIKey              string `json:"nmi_security_key"`
+		RouterContainer     string `json:"router_container"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &vendor))
 	ctx := t.Context()
+	type observation struct {
+		Order, Transaction, Amount, Currency, Initiator, Indicator, Anchor string
+		CardMatched, Approved                                              bool
+	}
+	observations := func() []observation {
+		response, err := http.Get(vendor.NMIReadBase + "/observations")
+		require.NoError(t, err)
+		defer response.Body.Close()
+		require.Equal(t, http.StatusOK, response.StatusCode)
+		var rows []observation
+		require.NoError(t, json.NewDecoder(response.Body).Decode(&rows))
+		return rows
+	}
+	var before int
+	before = len(observations())
+
 	h := New(t, ctx)
 	var delegated billingauth.DelegatedAuthenticator
 	surface := h.StartStandalone("USD", WithConfig(func(c *config.Config) {
 		c.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: vendor.APIBaseURL, SDKURL: vendor.SDKURL}
 		c.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
+		{
+			require.NotEmpty(t, vendor.NMIReadBase)
+			require.NotEmpty(t, vendor.NMIProxyDestination)
+			require.NotEmpty(t, vendor.NMIKey)
+			c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: vendor.NMIReadBase}
+		}
 	}), func(c *standaloneConfig) {
 		c.delegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
 			if delegated == nil {
@@ -80,10 +144,51 @@ func TestHyperSwitchActualBrowserCapture(t *testing.T) {
 	require.NoError(t, err)
 	_, err = surface.App().Runtime.Merchants.Secrets().Put(ctx, owned.MerchantID, name, vendor.APIKey)
 	require.NoError(t, err)
+	var invoiceID uuid.UUID
+	rt := surface.App().Runtime
+	ownerCtx := merchant.WithID(ctx, owned.MerchantID)
+	payer := identity.CustomerID(uuid.MustParse(user.ID))
+	{
+		// The same fake PSP is reached from two isolated network namespaces:
+		// the vendor's fixed internal write route and the host's read-only edge.
+		// This existing test endpoint seam does not add a production URL option.
+		rt.CollectionResolver.(*money.MerchantCollectionAdapterBuilder).Endpoints.NMIDirectPostURL = vendor.NMIProxyDestination
+		var account string
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT account_id FROM billing.psps WHERE id=$1`, psp).Scan(&account))
+		key, err := merchants.PSPSecretName("nmi", "test", account, "security_key")
+		require.NoError(t, err)
+		_, err = rt.Merchants.Secrets().Put(ctx, owned.MerchantID, key, vendor.NMIKey)
+		require.NoError(t, err)
+	}
 	sdkURL, err := url.Parse(vendor.SDKURL)
 	require.NoError(t, err)
 	sdkOrigin := sdkURL.Scheme + "://" + sdkURL.Host
 	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/invoice-fixture" {
+			// Called by the test driver only after Save card completed.
+			// Saving either volatile or persistent capture creates no money rows.
+			var financial int
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1)+(SELECT count(*) FROM billing.invoices WHERE merchant_id=$1)+(SELECT count(*) FROM billing.ledger_accounts WHERE merchant_id=$1)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1)`, owned.MerchantID.UUID()).Scan(&financial))
+			require.Zero(t, financial)
+			require.Len(t, observations(), before)
+
+			require.NoError(t, rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {
+				mode := money.BillingModeArrears
+				if _, err := rt.MoneyService.UpsertAccountSettings(c, payer, "USD", money.AccountSettingsInput{BillingMode: &mode}); err != nil {
+					return err
+				}
+				if _, err := rt.MoneyService.AccrueOwed(c, payer, "USD", "actual-vendor-invoice", uuid.NewString(), 5_000_000); err != nil {
+					return err
+				}
+				issued, err := rt.MoneyService.FinalizeInvoice(c, payer, "USD", time.Now().Add(-time.Hour), time.Now())
+				if err == nil {
+					invoiceID = issued.ID
+				}
+				return err
+			}))
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]string{"invoice_id": invoiceID.String()}))
+			return
+		}
 		w.Header().Set("Content-Type", "text/html")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self' "+sdkOrigin+"; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src "+surface.BaseURL+" "+vendor.APIBaseURL+"; frame-src "+sdkOrigin+"; base-uri 'none'; object-src 'none'; form-action 'none'")
@@ -96,8 +201,14 @@ func TestHyperSwitchActualBrowserCapture(t *testing.T) {
 	reader, err := hyperswitch.New(hyperswitch.Config{BaseURL: vendor.APIBaseURL, MerchantID: vendor.MerchantID, ProfileID: vendor.ProfileID, APIKey: hyperswitch.Secret(vendor.APIKey), ReadOnly: true})
 	require.NoError(t, err)
 	protected := []string{vendor.APIKey, "4111111111111111"}
-	for _, store := range []bool{false, true} {
-		input, _ := json.Marshal(map[string]string{"page": page.URL, "vendor_api": vendor.APIBaseURL, "vendor_sdk": vendor.SDKURL, "api": surface.BaseURL, "token": token, "psp_id": psp.String(), "email": "capture-browser@example.test", "name": "Capture Browser", "store": strconv.FormatBool(store)})
+	stores := []bool{false, true}
+	protected = append(protected, vendor.NMIKey)
+	for _, store := range stores {
+		browserParams := map[string]string{"page": page.URL, "vendor_api": vendor.APIBaseURL, "vendor_sdk": vendor.SDKURL, "api": surface.BaseURL, "token": token, "psp_id": psp.String(), "email": "capture-browser@example.test", "name": "Capture Browser", "store": strconv.FormatBool(store)}
+		if store {
+			browserParams["invoice_fixture"] = page.URL + "/invoice-fixture"
+		}
+		input, _ := json.Marshal(browserParams)
 		command := exec.CommandContext(ctx, "node", script)
 		secretProof := filepath.Join(t.TempDir(), "browser-secrets.json")
 		command.Env = append(os.Environ(), "OPENRAILS_BROWSER_FIXTURE="+string(input), "OPENRAILS_BROWSER_PRIVATE="+secretProof)
@@ -110,8 +221,11 @@ func TestHyperSwitchActualBrowserCapture(t *testing.T) {
 		require.NoError(t, json.Unmarshal(secrets, &values))
 		protected = append(protected, values...)
 		var proof struct {
-			VendorSession  string `json:"vendorSession"`
-			VendorCustomer string `json:"vendorCustomer"`
+			InvoiceKey     string                         `json:"invoiceKey"`
+			VendorSession  string                         `json:"vendorSession"`
+			VendorCustomer string                         `json:"vendorCustomer"`
+			Method         openrails.PaymentMethodID      `json:"method"`
+			InvoicePay     *openrails.InvoicePayNowResult `json:"invoicePay"`
 		}
 		require.NoError(t, json.Unmarshal(output, &proof))
 		session, err := reader.GetSession(ctx, proof.VendorSession, proof.VendorCustomer)
@@ -126,8 +240,177 @@ func TestHyperSwitchActualBrowserCapture(t *testing.T) {
 			require.Equal(t, "volatile", method.StorageType)
 		}
 		t.Logf("Explicit storage consent=%t; vendor readback storage_type=%s", store, method.StorageType)
+		if store {
+			require.NotNil(t, proof.InvoicePay)
+			require.Equal(t, "succeeded", proof.InvoicePay.Operation.Status)
+			require.Equal(t, "paid", proof.InvoicePay.Invoice.Status)
+			client, err := openrails.NewRemote(surface.BaseURL, openrails.WithMerchantID(owned.MerchantID), openrails.WithTokenProvider(func(context.Context) (string, error) { return token, nil }))
+			require.NoError(t, err)
+			read, err := client.GetMyInvoice(ctx, invoiceID)
+			require.NoError(t, err)
+			require.Equal(t, "paid", read.Status)
+			_, err = client.PayInvoiceNow(ctx, openrails.PayInvoiceNowRequest{InvoiceID: invoiceID, PaymentMethodID: openrails.PaymentMethodID(uuid.New()), IdempotencyKey: proof.InvoiceKey})
+			require.ErrorIs(t, err, openrails.ErrConflict, "changing the method under the accepted key refuses before a new send")
+			var anchor, recurring string
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT stored_credential_unscheduled_ref,stored_credential_recurring_ref FROM billing.payment_methods WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), uuid.UUID(proof.Method)).Scan(&anchor, &recurring))
+			require.NotEmpty(t, anchor)
+			require.Empty(t, recurring)
+			require.NoError(t, rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {
+				if err := rt.MoneyService.SetInvoiceCollectionPaymentMethod(c, payer, "JPY", uuid.UUID(proof.Method)); err != nil {
+					return err
+				}
+				if _, err := rt.MoneyService.AccrueOwed(c, payer, "JPY", "actual-vendor-mit", uuid.NewString(), 30_001); err != nil {
+					return err
+				}
+				if _, err := rt.MoneyService.FinalizeInvoice(c, payer, "JPY", time.Now().Add(-time.Minute), time.Now().Add(time.Hour)); err != nil {
+					return err
+				}
+				n, err := rt.MoneyService.ChargeOutstanding(c, rt.IntentRunner(), 0)
+				require.Equal(t, 1, n)
+				return err
+			}))
+			rows := observations()[before:]
+			require.Len(t, rows, 2)
+			require.Equal(t, "5.00", rows[0].Amount)
+			require.Equal(t, "USD", rows[0].Currency)
+			require.Equal(t, "customer", rows[0].Initiator)
+			require.Equal(t, "stored", rows[0].Indicator)
+			require.Empty(t, rows[0].Anchor)
+			require.Equal(t, anchor, rows[0].Transaction)
+			require.Equal(t, "4.00", rows[1].Amount)
+			require.Equal(t, "JPY", rows[1].Currency)
+			require.Equal(t, "merchant", rows[1].Initiator)
+			require.Equal(t, "used", rows[1].Indicator)
+			require.Equal(t, anchor, rows[1].Anchor)
+			for _, row := range rows {
+				require.True(t, row.CardMatched)
+				require.True(t, row.Approved)
+			}
+			for _, outcome := range []string{"lost", "declined"} {
+				t.Run(outcome, func(t *testing.T) {
+					baseline := len(observations())
+					response, err := http.Post(vendor.NMIReadBase+"/control", "application/json", bytes.NewBufferString(`{"Next":"`+outcome+`"}`))
+					require.NoError(t, err)
+					response.Body.Close()
+					require.Equal(t, http.StatusNoContent, response.StatusCode)
+					var next uuid.UUID
+					require.NoError(t, rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {
+						if _, err := rt.MoneyService.AccrueOwed(c, payer, "USD", "actual-vendor-"+outcome, uuid.NewString(), 5_000_000); err != nil {
+							return err
+						}
+						issued, err := rt.MoneyService.FinalizeInvoice(c, payer, "USD", time.Now().Add(-time.Second), time.Now().Add(time.Hour))
+						if err == nil {
+							next = issued.ID
+						}
+						return err
+					}))
+					request := openrails.PayInvoiceNowRequest{InvoiceID: next, PaymentMethodID: proof.Method, IdempotencyKey: uuid.NewString()}
+					result, err := client.PayInvoiceNow(ctx, request)
+					if outcome == "lost" {
+						require.NoError(t, err)
+						require.Equal(t, "unknown_needs_verify", result.Operation.Status)
+						// Re-exec the test binary: a new process and embedded runtime use
+						// only committed operation data and configured read credentials.
+						private := filepath.Join(t.TempDir(), "recovery.json")
+						input, err := json.Marshal(recovery{DB: rt.Config.DB, Redis: rt.Config.Redis, HyperSwitch: rt.Config.HyperSwitch, ProviderSandbox: rt.Config.ProviderSandbox, Encryption: rt.Config.Encryption, MerchantID: owned.MerchantID, OperationID: result.Operation.ID})
+						require.NoError(t, err)
+						require.NoError(t, os.WriteFile(private, input, 0600))
+						child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestHyperSwitchActualBrowserInvoice$", "-test.v")
+						child.Env = append(os.Environ(), "OPENRAILS_HS_INVOICE_RECOVERY="+private)
+						output, err := child.CombinedOutput()
+						require.NoError(t, err, "%s", output)
+
+					} else {
+						var refusal *openrails.StatusError
+						require.ErrorAs(t, err, &refusal)
+						require.Equal(t, http.StatusPaymentRequired, refusal.Status)
+						require.Equal(t, "card_declined", refusal.Code)
+					}
+					replay, err := client.PayInvoiceNow(ctx, request)
+					if outcome == "lost" {
+						require.NoError(t, err)
+						require.True(t, replay.Replayed)
+						require.Equal(t, result.Operation.ID, replay.Operation.ID)
+					} else {
+						var refusal *openrails.StatusError
+						require.ErrorAs(t, err, &refusal)
+						require.Equal(t, http.StatusPaymentRequired, refusal.Status)
+						require.Equal(t, "card_declined", refusal.Code)
+					}
+					received := observations()[baseline:]
+					require.Len(t, received, 1, "uncertainty and replay never resubmit")
+					require.Equal(t, anchor, received[0].Anchor)
+					require.Equal(t, "used", received[0].Indicator)
+					require.Equal(t, "customer", received[0].Initiator)
+					require.Equal(t, "5.00", received[0].Amount)
+					require.Equal(t, outcome != "declined", received[0].Approved)
+					var settled, transfers int
+					require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.invoice_payments WHERE invoice_id=$1 AND status='settled'`, next).Scan(&settled))
+					require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.ledger_transfers WHERE customer_id=$1 AND transfer_type='owed_payment'`, payer.UUID()).Scan(&transfers))
+					if outcome == "lost" {
+						require.Equal(t, 1, settled)
+						require.Equal(t, 3, transfers)
+					} else {
+						require.Zero(t, settled)
+						require.Equal(t, 3, transfers)
+					}
+				})
+			}
+			t.Run("terminal archive restore", func(t *testing.T) {
+				var archive bytes.Buffer
+				require.Error(t, merchantarchive.Export(ctx, rt.DB, owned.MerchantID, &archive), "unfinished volatile setup refuses export")
+				require.Empty(t, archive.Bytes())
+				require.NoError(t, rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {
+					_, err := rt.DB.Gen(c).ExpireCheckoutSessions(c, gen.ExpireCheckoutSessionsParams{MerchantID: owned.MerchantID.UUID(), Now: time.Now().Add(time.Hour), RowLimit: 100})
+					return err
+				}))
+				require.NoError(t, merchantarchive.Export(ctx, rt.DB, owned.MerchantID, &archive))
+				adminDSN, appDSN := dbtest.SharedRLSPostgres(t)
+				schema := "actual_hs_invoice_" + uuid.NewString()[:8]
+				require.NoError(t, migrate.RunPostgres(ctx, &config.Config{DB: &config.DBConfig{URL: adminDSN, Schema: schema}}))
+				target, err := db.NewDB(ctx, &config.DBConfig{URL: appDSN, Schema: schema})
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = target.Close() })
+				_, err = target.Qx(ctx).Exec(ctx, `INSERT INTO openrails.merchants(id,slug) VALUES($1,'actual-hs-invoice-destination')`, owned.MerchantID.UUID())
+				require.NoError(t, err)
+				_, err = merchantarchive.Restore(ctx, target, owned.MerchantID, bytes.NewReader(archive.Bytes()))
+				require.NoError(t, err)
+				require.NoError(t, target.RunInMerchantConn(ownerCtx, func(c context.Context) error {
+					restored := money.NewMoneyService(target)
+					invoice, err := restored.GetInvoiceByID(c, payer, invoiceID)
+					require.NoError(t, err)
+					require.Equal(t, "paid", invoice.Status)
+					require.Zero(t, invoice.AmountDue)
+					// No provider adapter exists in this restored runner.
+					operation, err := (&intents.Runner{Store: intents.NewStore(target)}).ExecuteByID(c, proof.InvoicePay.Operation.ID)
+					require.NoError(t, err)
+					require.Equal(t, intents.StatusSucceeded, operation.Status)
+					payload, err := intents.DecodeInvoiceCollectionPayload(operation)
+					require.NoError(t, err)
+					require.NotNil(t, payload.HyperSwitch)
+					require.Equal(t, vendor.MerchantID, payload.HyperSwitch.AccountID)
+					require.Equal(t, vendor.ProfileID, payload.HyperSwitch.ProfileID)
+					require.Equal(t, vendor.APIBaseURL, payload.HyperSwitch.APIBaseURL)
+					receipt, found, err := intents.LoadCollectedReceipt(operation)
+					require.NoError(t, err)
+					require.True(t, found)
+					require.NoError(t, receipt.Validate(operation))
+					var settled, transfers int
+					require.NoError(t, target.Qx(c).QueryRow(c, `SELECT count(*) FROM openrails.invoice_payments WHERE invoice_id=$1 AND status='settled'`, invoiceID).Scan(&settled))
+					require.NoError(t, target.Qx(c).QueryRow(c, `SELECT count(*) FROM openrails.ledger_transfers WHERE customer_id=$1 AND transfer_type='owed_payment'`, payer.UUID()).Scan(&transfers))
+					require.Equal(t, 1, settled)
+					require.Equal(t, 3, transfers)
+					return nil
+				}))
+				require.Len(t, observations()[before:], 4, "restored terminal replay is local")
+			})
+		}
 	}
-	routerLogs, err := exec.CommandContext(ctx, "docker", "logs", "openrails-297-nmi-form-20260920-router-1").CombinedOutput()
+	router := vendor.RouterContainer
+	if router == "" {
+		router = "openrails-297-nmi-form-20260920-router-1"
+	}
+	routerLogs, err := exec.CommandContext(ctx, "docker", "logs", router).CombinedOutput()
 	require.NoError(t, err)
 	for i, value := range protected {
 		require.NotEmpty(t, value)
@@ -137,6 +420,6 @@ func TestHyperSwitchActualBrowserCapture(t *testing.T) {
 	var methods, financial int
 	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, owned.MerchantID.UUID(), user.ID).Scan(&methods))
 	require.Equal(t, 1, methods)
-	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.ledger_accounts WHERE merchant_id=$1 AND customer_id=$2)`, owned.MerchantID.UUID(), user.ID).Scan(&financial))
-	require.Zero(t, financial)
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2)`, owned.MerchantID.UUID(), user.ID).Scan(&financial))
+	require.Zero(t, financial, "invoice collections do not create checkout payments or subscriptions")
 }

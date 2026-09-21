@@ -197,6 +197,7 @@ func TestHyperSwitchInvoiceCollectionWorkflow(t *testing.T) {
 			}
 			require.Len(t, forms, want)
 			if len(forms) > 0 {
+				require.Equal(t, "0.05", forms[0]["amount"], "50,000 USD native units reach NMI exactly")
 				require.Equal(t, "customer", forms[0]["initiated_by"])
 				require.Equal(t, "stored", forms[0]["stored_credential_indicator"])
 			}

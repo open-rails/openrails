@@ -1233,7 +1233,7 @@
       "type AccountUpdaterBatchPayload struct {\n\tBatchID uuid.UUID `json:\"batch_id\"`\n\n\tCustodianKind      string `json:\"custodian_kind\"`\n\tCustodianAccountID string `json:\"custodian_account_id\"`\n}",
       "type CCBillCancelPayload struct {\n\tUserID             string `json:\"user_id\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id,omitempty\"`\n}",
       "type CollectionCandidate struct {\n\tTransactionID     string `json:\"transaction_id\"`\n\tExternalInvoiceID string `json:\"external_invoice_id,omitempty\"`\n}",
-      "type InvoiceCollectionPayload struct {\n\tInitiator           charge.Initiator        `json:\"initiator\"`\n\tInvoiceID           uuid.UUID               `json:\"invoice_id\"`\n\tCustomerID          uuid.UUID               `json:\"customer_id\"`\n\tAttemptID           uuid.UUID               `json:\"attempt_id\"`\n\tPaymentMethodID     uuid.UUID               `json:\"payment_method_id\"`\n\tRail                string                  `json:\"rail\"`\n\tInstrument          charge.FrozenInstrument `json:\"instrument\"`\n\tCurrency            string                  `json:\"currency\"`\n\tAmount              int64                   `json:\"amount\"`\n\tAmountMinor         moneyutil.Cents         `json:\"amount_minor\"`\n\tProviderCustomerRef string                  `json:\"provider_customer_ref\"`\n\tDescription         string                  `json:\"description\"`\n}",
+      "type InvoiceCollectionPayload struct {\n\tInitiator           charge.Initiator           `json:\"initiator\"`\n\tInvoiceID           uuid.UUID                  `json:\"invoice_id\"`\n\tCustomerID          uuid.UUID                  `json:\"customer_id\"`\n\tAttemptID           uuid.UUID                  `json:\"attempt_id\"`\n\tPaymentMethodID     uuid.UUID                  `json:\"payment_method_id\"`\n\tRail                string                     `json:\"rail\"`\n\tInstrument          charge.FrozenInstrument    `json:\"instrument\"`\n\tHyperSwitch         *charge.HyperSwitchBinding `json:\"hyperswitch,omitempty\"`\n\tCurrency            string                     `json:\"currency\"`\n\tAmount              int64                      `json:\"amount\"`\n\tAmountMinor         moneyutil.Cents            `json:\"amount_minor\"`\n\tProviderCustomerRef string                     `json:\"provider_customer_ref\"`\n\tDescription         string                     `json:\"description\"`\n}",
       "type NMIDeletePayload struct {\n\tUserID             string `json:\"user_id\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n}",
       "type NMIPaymentMethodDeletePayload struct {\n\tUserID          string    `json:\"user_id\"`\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tRailCustomerRef string    `json:\"rail_customer_ref,omitempty\"`\n\tRailMethodRef   string    `json:\"rail_method_ref,omitempty\"`\n}",
       "type NMIPaymentMethodUpdatePayload struct {\n\tUserID          string    `json:\"user_id\"`\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tRailCustomerRef string    `json:\"rail_customer_ref\"`\n\tRailMethodRef   string    `json:\"rail_method_ref,omitempty\"`\n\tPaymentToken    string    `json:\"payment_token\"`\n\tNameOnCard      string    `json:\"name_on_card,omitempty\"`\n\tFirstName       string    `json:\"first_name,omitempty\"`\n\tLastName        string    `json:\"last_name,omitempty\"`\n\tAddress1        string    `json:\"address1,omitempty\"`\n\tCity            string    `json:\"city,omitempty\"`\n\tState           string    `json:\"state,omitempty\"`\n\tZip             string    `json:\"zip,omitempty\"`\n\tCountry         string    `json:\"country,omitempty\"`\n\tPhone           string    `json:\"phone,omitempty\"`\n\tEmail           string    `json:\"email,omitempty\"`\n\tCompany         string    `json:\"company,omitempty\"`\n\tAddress2        string    `json:\"address2,omitempty\"`\n\tTargetCard      nmiCard   `json:\"target_card\"`\n}",
@@ -1413,7 +1413,8 @@
       "type stripeSubscriptionPaymentJSON struct {\n\tID                      string          `json:\"id\"`\n\tDefaultPaymentMethodRaw json.RawMessage `json:\"default_payment_method\"`\n}"
     ],
     "internal/modules/payments/charge": [
-      "type FrozenInstrument struct {\n\tStoredCredentialRecurringRef   string     `json:\"stored_credential_recurring_ref\"`\n\tStoredCredentialUnscheduledRef string     `json:\"stored_credential_unscheduled_ref\"`\n\tPSPID                          uuid.UUID  `json:\"psp_id\"`\n\tCustodian                      string     `json:\"custodian\"`\n\tCustodianID                    *uuid.UUID `json:\"custodian_id,omitempty\"`\n\tRailCustomerRef                string     `json:\"rail_customer_ref\"`\n\tRailMethodRef                  string     `json:\"rail_method_ref\"`\n}"
+      "type FrozenInstrument struct {\n\tStoredCredentialRecurringRef   string     `json:\"stored_credential_recurring_ref\"`\n\tStoredCredentialUnscheduledRef string     `json:\"stored_credential_unscheduled_ref\"`\n\tPSPID                          uuid.UUID  `json:\"psp_id\"`\n\tCustodian                      string     `json:\"custodian\"`\n\tCustodianID                    *uuid.UUID `json:\"custodian_id,omitempty\"`\n\tRailCustomerRef                string     `json:\"rail_customer_ref\"`\n\tRailMethodRef                  string     `json:\"rail_method_ref\"`\n}",
+      "type HyperSwitchBinding struct {\n\tAccountID  string `json:\"account_id\"`\n\tProfileID  string `json:\"profile_id\"`\n\tAPIBaseURL string `json:\"api_base_url\"`\n}"
     ],
     "internal/modules/ratelimit": [
       "type Decision struct {\n\tAllowed     bool         `json:\"allowed\"`\n\tBlockedUnit string       `json:\"blocked_unit,omitempty\"`\n\tWindows     []WindowInfo `json:\"windows\"`\n}",
@@ -2718,6 +2719,7 @@
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "hex": "encoding/hex",
       "json": "encoding/json",
+      "models": "github.com/open-rails/openrails/internal/db/models",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
       "sha256": "crypto/sha256",
       "strings": "strings",
@@ -3629,6 +3631,11 @@
       "slices": "slices",
       "strings": "strings",
       "uuid": "github.com/google/uuid"
+    },
+    "internal/modules/payments/charge/hyperswitch.go": {
+      "errors": "errors",
+      "strings": "strings",
+      "url": "net/url"
     },
     "internal/modules/payments/stripe_card.go": {
       "clockwork": "github.com/jonboulle/clockwork",
