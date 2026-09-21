@@ -86,17 +86,17 @@ func (a *NMIArmer) ResolveScope(ctx context.Context, mid merchant.ID, rail strin
 		return merchants.PSPScope{}, false, nil
 	}
 	if stamped != nil {
-		row, err := a.DB.Gen(ctx).GetPSP(ctx, *stamped)
+		scope, found, err := svc.PSPScopeByID(ctx, mid, *stamped)
 		if err != nil {
 			return merchants.PSPScope{}, false, fmt.Errorf("load stamped PSP: %w", err)
 		}
-		if row.MerchantID != mid.UUID() {
-			return merchants.PSPScope{}, false, errors.New("stamped provider account belongs to another merchant")
+		if !found {
+			return merchants.PSPScope{}, false, errors.New("stamped provider account is unavailable for this merchant")
 		}
-		if !rails.SameRail(models.Rail(row.Rail), models.Rail(rail)) {
-			return merchants.PSPScope{}, false, fmt.Errorf("stamped PSP %s is on rail %s, not %s", row.ID, row.Rail, rail)
+		if !rails.SameRail(models.Rail(scope.Rail), models.Rail(rail)) {
+			return merchants.PSPScope{}, false, fmt.Errorf("stamped PSP %s is on rail %s, not %s", scope.ID, scope.Rail, rail)
 		}
-		return merchants.PSPScope{ID: row.ID, Rail: row.Rail, Environment: row.Environment, AccountID: row.AccountID, CustodianID: row.CustodianID}, true, nil
+		return scope, true, nil
 	}
 	return svc.PullPSPScope(ctx, mid, rail, a.Environment())
 }

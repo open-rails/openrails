@@ -40,7 +40,7 @@ func TestNew_EmbeddedBootRefusesBypassRLSRoleOutsideDev(t *testing.T) {
 	_, err = New(context.Background(), Options{Config: cfg, PGXPool: pool, River: RiverManagedByOpenRails()})
 	require.Error(t, err, "an embedded host connected as a BYPASSRLS role must refuse to boot")
 	require.ErrorContains(t, err, "bypasses RLS")
-	require.ErrorContains(t, err, "openrails_app")
+	require.ErrorContains(t, err, "host runtime login")
 }
 
 // TestNew_EmbeddedBootRefusesBypassRLSRoleInDev proves DEVELOPMENT is not

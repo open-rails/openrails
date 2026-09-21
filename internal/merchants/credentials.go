@@ -580,14 +580,14 @@ func (s *Service) newestPSPScope(ctx context.Context, id merchant.ID, rail, envi
 	var evidence []byte
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		return s.database.Qx(ctx).QueryRow(ctx, `
-				SELECT id, rail, environment, account_id, evidence
+				SELECT id, rail, environment, account_id, evidence, COALESCE(key,''), custodian_id
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
 				   AND rail = lower($2)
 				   AND environment = $3
 				 ORDER BY created_at DESC, id DESC
 				 LIMIT 1
-			`, id.String(), rail, environment).Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &evidence)
+			`, id.String(), rail, environment).Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &evidence, &scope.key, &scope.custodianID)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PSPScope{}, false, nil

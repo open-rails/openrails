@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
@@ -50,7 +49,7 @@ func TestBillingArchiveCLILocalHTTPAndBack(t *testing.T) {
 		database *db.DB
 	}
 	setup := func(schema string) deployment {
-		require.NoError(t, migrate.RunPostgres(t.Context(), &config.Config{DB: &config.DBConfig{URL: superDSN, Schema: schema}}))
+		dbtest.ApplyPostgresMigrations(t, superDSN, appDSN, schema)
 		cfg := &config.Config{DB: &config.DBConfig{URL: appDSN, Schema: schema}}
 		d, err := openCLIDB(t.Context(), cfg)
 		require.NoError(t, err)

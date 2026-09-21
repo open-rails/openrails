@@ -19,10 +19,10 @@ the authkit binary reads (ak#266/or#917); the old unprefixed names refuse boot.
 
 Postgres specifics worth knowing:
 
-- RLS is enforced for the unprivileged `openrails_app` role (`NOLOGIN NOBYPASSRLS`,
-  created by the baseline migration); every merchant-scoped table has a
+- RLS is enforced for the host application login (`NOSUPERUSER NOBYPASSRLS`);
+  every merchant-scoped table has a
   `merchant_isolation` policy keyed on the `app.merchant_id` GUC. Run MIGRATIONS
-  as a superuser and the SERVER as `openrails_app` — in EVERY environment,
+  as a privileged owner and the SERVER as the normal host login — in EVERY environment,
   local development included. The server refuses to boot on a role that
   bypasses RLS, because a privileged role does not just disable isolation, it
   hides bugs: an unscoped read of an RLS-forced table returns zero rows with no
@@ -37,7 +37,8 @@ Postgres specifics worth knowing:
   "development". Only the exact values `dev` and `development` enable
   development relaxations; every other non-empty label (including `staging`,
   `production`, or a misspelling) receives the strict posture.
-- Migrations: `openrails migrate up` applies AuthKit, River, and OpenRails
+- Migrations: `openrails migrate up --runtime-database-url "$APP_DATABASE_URL"`
+  provisions direct access for the host login and applies AuthKit, River, and OpenRails
   migrations (`internal/migrate/postgres/`, baseline `0001_schema.up.sql`, new ones
   start at `0002`). The server validates at boot and refuses to start behind.
 - Local zero-config stack: `task docker-up` (Postgres 18 + Redis + OpenRails on

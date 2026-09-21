@@ -42,23 +42,23 @@ func TestRewriteMigrationsSchema(t *testing.T) {
 	t.Run("custom schema relocates qualifiers and bare schema DDL", func(t *testing.T) {
 		in := mig("CREATE SCHEMA IF NOT EXISTS openrails;\n" +
 			"CREATE TABLE openrails.merchants (id uuid REFERENCES openrails.merchants);\n" +
-			"GRANT USAGE ON SCHEMA openrails TO openrails_app;\n" +
-			"ALTER DEFAULT PRIVILEGES IN SCHEMA openrails GRANT SELECT ON TABLES TO openrails_app;")
+			"GRANT USAGE ON SCHEMA openrails TO host_runtime;\n" +
+			"ALTER DEFAULT PRIVILEGES IN SCHEMA openrails GRANT SELECT ON TABLES TO host_runtime;")
 		out, err := rewriteMigrationsSchema(in, "shop")
 		if err != nil {
 			t.Fatal(err)
 		}
 		want := "CREATE SCHEMA IF NOT EXISTS shop;\n" +
 			"CREATE TABLE shop.merchants (id uuid REFERENCES shop.merchants);\n" +
-			"GRANT USAGE ON SCHEMA shop TO openrails_app;\n" +
-			"ALTER DEFAULT PRIVILEGES IN SCHEMA shop GRANT SELECT ON TABLES TO openrails_app;"
+			"GRANT USAGE ON SCHEMA shop TO host_runtime;\n" +
+			"ALTER DEFAULT PRIVILEGES IN SCHEMA shop GRANT SELECT ON TABLES TO host_runtime;"
 		if out[0].Content != want {
 			t.Fatalf("custom rewrite mismatch:\n got  %q\n want %q", out[0].Content, want)
 		}
 	})
 
-	t.Run("leaves the openrails_app role and prose untouched", func(t *testing.T) {
-		in := mig("-- OpenRails billing schema (billing-namespace prose)\nCREATE ROLE openrails_app NOLOGIN;")
+	t.Run("leaves the host_runtime role and prose untouched", func(t *testing.T) {
+		in := mig("-- OpenRails billing schema (billing-namespace prose)\nCREATE ROLE host_runtime NOLOGIN;")
 		out, err := rewriteMigrationsSchema(in, "shop")
 		if err != nil {
 			t.Fatal(err)

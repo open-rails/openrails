@@ -47,7 +47,7 @@ schema initialization; it does not import migratekit or OpenRails' migration
 files:
 
 ```go
-if err := embed.ApplyMigrations(ctx, migrationPool, embed.MigrationOptions{}); err != nil {
+if err := embed.ApplyMigrations(ctx, migrationPool, embed.MigrationOptions{RuntimePool: appPool}); err != nil {
     return fmt.Errorf("initialize OpenRails database: %w", err)
 }
 ```
@@ -106,23 +106,22 @@ role name in the error.
 
 What to do:
 
-1. Run migrations as your owner/admin role (DDL, `GRANT`s and role creation need
-   it). `openrails migrate` is the only job that runs privileged.
-2. Initialization creates `openrails_app` `NOLOGIN NOBYPASSRLS` and grants it
-   access to its configured billing tables and `SELECT` on `public.migrations`.
-   When OpenRails owns River, it migrates and grants only River's named runtime
-   tables and sequences in the selected schema. AuthKit access remains with the
-   host's identity adapter; OpenRails never grants `profiles` access. Attach a
-   login credential out of band
-   (`ALTER ROLE openrails_app WITH LOGIN PASSWORD '…'`) — that grants no
-   privilege and the role stays `NOBYPASSRLS`.
-3. Give OpenRails a pool on that role. Your own application tables are **not**
-   granted to `openrails_app`, so either open a **second pool** for OpenRails
-   (simplest, and the pools cost nothing at rest) or run your whole app on one
-   unprivileged role and grant it on your own schema too.
+1. Provision an admin/migration connection and one regular host application
+   login (`LOGIN NOSUPERUSER NOBYPASSRLS`). The host owns its credentials.
+2. Pass the admin pool and `MigrationOptions{RuntimePool: appPool}` to
+   `embed.ApplyMigrations`. OpenRails creates its schema and grants its exact
+   table, column, function and migration-ledger privileges directly to that
+   login. Managed River runtime objects are included; `RiverFromHost()` leaves
+   River ownership and access with the host. No library role or manual billing
+   grants are required. Without `RuntimePool`, initialization performs DDL only.
+3. Pass the same normal `appPool` to AuthKit, OpenRails, and the host River client.
+   AuthKit's initializer accepts its own `MigrationOptions.RuntimePool` and
+   provisions identity access independently. The host owns access to its own
+   application tables. Keep privileged migration connections out of the runtime.
 
-Any role of your own works as long as it holds the same grants and has neither
-`rolsuper` nor `rolbypassrls`. Verify with:
+For the standalone CLI, supply `--runtime-database-url` to `migrate up` or
+`migrate pg`; its ordinary DB configuration identifies the migration owner.
+Verify the runtime login with:
 
 ```sql
 SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user;
@@ -215,7 +214,7 @@ queues and schedules. Extend that config; replacing required entries is refused.
 ```go
 ownership := embed.RiverFromHost()
 // The host migrates and grants access to its River schema separately.
-if err := embed.ApplyMigrations(ctx, adminPool, embed.MigrationOptions{River: ownership}); err != nil {
+if err := embed.ApplyMigrations(ctx, adminPool, embed.MigrationOptions{River: ownership, RuntimePool: appPool}); err != nil {
     return err
 }
 rt, err := embed.New(ctx, embed.Options{Config: cfg, PGXPool: pool, River: ownership})
