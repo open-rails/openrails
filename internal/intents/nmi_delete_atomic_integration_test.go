@@ -129,3 +129,19 @@ func TestNMIVaultDeleteGenericCompletionCannotBypassRemoval(t *testing.T) {
 	require.Equal(t, StatusUnknownNeedsVerify, fx.intentStatus(t))
 	require.True(t, fx.localRowExists(t))
 }
+
+func TestNMIVaultAliasAdmissionRejectsNoncanonicalReferences(t *testing.T) {
+	fx := newVaultDeleteFixture(t)
+	for _, part := range []string{"vault", "billing"} {
+		alias := *fx.pm
+		alias.ID = uuid.New()
+		alias.RailMethodRef = "new-billing"
+		if part == "vault" {
+			alias.RailCustomerRef = " " + fx.pm.RailCustomerRef + " "
+		} else {
+			alias.RailMethodRef = " new-billing "
+		}
+		require.ErrorIs(t, paymentmethods.NewPaymentMethodRepo(fx.db).Create(fx.ctx, &alias), paymentmethods.ErrPaymentMethodDeleteUnsafe)
+	}
+	require.Zero(t, fx.gateway.vaultDeleteCalls.Load())
+}

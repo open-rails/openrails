@@ -2,6 +2,7 @@ package paymentmethods
 
 import (
 	"context"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -11,6 +12,9 @@ import (
 // locks. NMI refuses deletion of the final billing entry, so whole-vault
 // deletion must retain its accepted absence of sibling aliases across HTTP.
 func LockNativeVault(ctx context.Context, q *gen.Queries, merchant, psp uuid.UUID, vault string) error {
+	if vault != strings.TrimSpace(vault) {
+		return ErrPaymentMethodDeleteUnsafe
+	}
 	if vault == "" {
 		return nil
 	}
@@ -18,6 +22,9 @@ func LockNativeVault(ctx context.Context, q *gen.Queries, merchant, psp uuid.UUI
 }
 
 func RequireNativeVaultAvailable(ctx context.Context, q *gen.Queries, merchant, psp uuid.UUID, vault, method string) error {
+	if vault != strings.TrimSpace(vault) || method != strings.TrimSpace(method) {
+		return ErrPaymentMethodDeleteUnsafe
+	}
 	if vault == "" {
 		return nil
 	}
