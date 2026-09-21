@@ -97,7 +97,7 @@ type intentFixture struct {
 // state whose deferred delete the ledger owns.
 func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) intentFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
 
@@ -144,7 +144,7 @@ func seedCancelledNMISubscription(t *testing.T, deletionScheduledAt time.Time) i
 
 func (fx intentFixture) enqueueDelete(t *testing.T, origin Origin, dueAt time.Time) gen.OpenrailsRailIntent {
 	t.Helper()
-	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
+	row, err := fx.store.Enqueue(dbtest.WithTestMerchant(context.Background()), EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
 		PspID:          fx.pspID,
@@ -162,14 +162,14 @@ func (fx intentFixture) enqueueDelete(t *testing.T, origin Origin, dueAt time.Ti
 
 func (fx intentFixture) intent(t *testing.T, id uuid.UUID) gen.OpenrailsRailIntent {
 	t.Helper()
-	row, err := fx.db.Gen(context.Background()).GetRailIntent(context.Background(), id)
+	row, err := fx.db.Gen(dbtest.WithTestMerchant(context.Background())).GetRailIntent(dbtest.WithTestMerchant(context.Background()), gen.GetRailIntentParams{MerchantID: dbtest.TestMerchantID.UUID(), ID: id})
 	require.NoError(t, err)
 	return row
 }
 
 func (fx intentFixture) deletionMarker(t *testing.T) *time.Time {
 	t.Helper()
-	row, err := fx.db.Gen(context.Background()).GetSubscriptionByID(context.Background(), fx.subID)
+	row, err := fx.db.Gen(dbtest.WithTestMerchant(context.Background())).GetSubscriptionByID(dbtest.WithTestMerchant(context.Background()), gen.GetSubscriptionByIDParams{MerchantID: dbtest.TestMerchantID.UUID(), ID: fx.subID})
 	require.NoError(t, err)
 	return row.DeletionScheduledAt
 }
@@ -204,7 +204,7 @@ func TestExecutorDeletesPresentSubscription(t *testing.T) {
 	fake, client := newFakeNMI(t, fx.psid, true)
 	row := fx.enqueueDelete(t, OriginUser, time.Now().Add(-time.Minute))
 
-	stats, err := fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	stats, err := fx.runner(client, fullModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, stats.Claimed, 1)
 
@@ -220,7 +220,7 @@ func TestExecutorDeletesPresentSubscription(t *testing.T) {
 	assert.EqualValues(t, 1, fake.deleteCalls.Load())
 	assert.Nil(t, fx.deletionMarker(t), "success finalizes the read model (marker cleared)")
 
-	rows, err := fx.db.Pool().Query(context.Background(), `
+	rows, err := fx.db.Pool().Query(dbtest.WithTestMerchant(context.Background()), `
 		SELECT phase, attempt, evidence::text
 		FROM billing.rail_mutation_logs
 		WHERE rail_intent_id = $1
@@ -256,7 +256,7 @@ func TestExecutorVerifiedAbsentIsSuccess(t *testing.T) {
 	fake, client := newFakeNMI(t, fx.psid, false)
 	row := fx.enqueueDelete(t, OriginUser, time.Now().Add(-time.Minute))
 
-	_, err := fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	_, err := fx.runner(client, fullModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 
 	got := fx.intent(t, row.ID)
@@ -275,7 +275,7 @@ func TestAmbiguousOutcomeRoutesThroughVerifier(t *testing.T) {
 	fake.deleteStatus.Store(http.StatusBadGateway) // transport-level failure mid-write
 	row := fx.enqueueDelete(t, OriginUser, time.Now().Add(-time.Minute))
 
-	_, err := fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	_, err := fx.runner(client, fullModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 
 	got := fx.intent(t, row.ID)
@@ -287,11 +287,11 @@ func TestAmbiguousOutcomeRoutesThroughVerifier(t *testing.T) {
 	// The delete actually landed at NMI: the next read shows it gone. Make
 	// the intent due now and run the verifier.
 	fake.present.Store(false)
-	_, err = fx.db.Pool().Exec(context.Background(),
+	_, err = fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()),
 		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 
-	stats, err := fx.runner(client, fullModeConfig()).RunVerifyOnce(context.Background())
+	stats, err := fx.runner(client, fullModeConfig()).RunVerifyOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, stats.Claimed, 1)
 
@@ -310,14 +310,14 @@ func TestVerifierStillPresentReturnsToExecutor(t *testing.T) {
 	fake.deleteStatus.Store(http.StatusBadGateway)
 	row := fx.enqueueDelete(t, OriginUser, time.Now().Add(-time.Minute))
 
-	_, err := fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	_, err := fx.runner(client, fullModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 	require.Equal(t, StatusUnknownNeedsVerify, fx.intent(t, row.ID).Status)
 
-	_, err = fx.db.Pool().Exec(context.Background(),
+	_, err = fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()),
 		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
-	_, err = fx.runner(client, fullModeConfig()).RunVerifyOnce(context.Background())
+	_, err = fx.runner(client, fullModeConfig()).RunVerifyOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 
 	got := fx.intent(t, row.ID)
@@ -327,10 +327,10 @@ func TestVerifierStillPresentReturnsToExecutor(t *testing.T) {
 
 	// Gateway recovers; pull the backoff in and re-run the executor.
 	fake.deleteStatus.Store(0)
-	_, err = fx.db.Pool().Exec(context.Background(),
+	_, err = fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()),
 		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
-	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 	assert.Equal(t, StatusSucceeded, fx.intent(t, row.ID).Status)
 }
@@ -343,7 +343,7 @@ func TestLimitedModeOriginGating(t *testing.T) {
 		_, client := newFakeNMI(t, fx.psid, true)
 		row := fx.enqueueDelete(t, OriginUser, time.Now().Add(-time.Minute))
 
-		_, err := fx.runner(client, limitedModeConfig()).RunExecuteOnce(context.Background())
+		_, err := fx.runner(client, limitedModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 		require.NoError(t, err)
 		assert.Equal(t, StatusSucceeded, fx.intent(t, row.ID).Status)
 	})
@@ -353,7 +353,7 @@ func TestLimitedModeOriginGating(t *testing.T) {
 		fake, client := newFakeNMI(t, fx.psid, true)
 		row := fx.enqueueDelete(t, OriginSystem, time.Now().Add(-time.Minute))
 
-		_, err := fx.runner(client, limitedModeConfig()).RunExecuteOnce(context.Background())
+		_, err := fx.runner(client, limitedModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 		require.NoError(t, err)
 
 		got := fx.intent(t, row.ID)
@@ -363,10 +363,10 @@ func TestLimitedModeOriginGating(t *testing.T) {
 		assert.Zero(t, fake.deleteCalls.Load())
 
 		// Mode lifts to full -> drains.
-		_, err = fx.db.Pool().Exec(context.Background(),
+		_, err = fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()),
 			"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 		require.NoError(t, err)
-		_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+		_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 		require.NoError(t, err)
 		assert.Equal(t, StatusSucceeded, fx.intent(t, row.ID).Status)
 	})
@@ -376,7 +376,7 @@ func TestLimitedModeOriginGating(t *testing.T) {
 		fake, client := newFakeNMI(t, fx.psid, true)
 		row := fx.enqueueDelete(t, OriginUser, time.Now().Add(-time.Minute))
 
-		_, err := fx.runner(client, readonlyModeConfig()).RunExecuteOnce(context.Background())
+		_, err := fx.runner(client, readonlyModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 		require.NoError(t, err)
 
 		got := fx.intent(t, row.ID)
@@ -398,7 +398,7 @@ func TestResumeSupersedesAndRecancelRevives(t *testing.T) {
 	row := fx.enqueueDelete(t, OriginUser, time.Now().Add(2*time.Hour))
 
 	// Resume: supersede by subject (what CancelNMIDelete / the resume worker do).
-	n, err := fx.store.SupersedeBySubject(context.Background(), TypeNMIDeleteSubscription, fx.subID, "resumed")
+	n, err := fx.store.SupersedeBySubject(dbtest.WithTestMerchant(context.Background()), TypeNMIDeleteSubscription, fx.subID, "resumed")
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, n)
 	got := fx.intent(t, row.ID)
@@ -411,7 +411,7 @@ func TestResumeSupersedesAndRecancelRevives(t *testing.T) {
 	assert.Equal(t, StatusPending, revived.Status)
 	assert.EqualValues(t, 0, revived.Attempts, "revive resets attempt state")
 
-	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 	assert.Equal(t, StatusSucceeded, fx.intent(t, row.ID).Status)
 	assert.EqualValues(t, 1, fake.deleteCalls.Load())
@@ -426,13 +426,13 @@ func TestExecutorRelevanceSupersedesResumedSubscription(t *testing.T) {
 	row := fx.enqueueDelete(t, OriginUser, time.Now().Add(-time.Minute))
 
 	// Simulate the resume that missed its advisory supersede.
-	_, err := fx.db.Pool().Exec(context.Background(),
+	_, err := fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()),
 		`UPDATE billing.subscriptions
 		 SET status = 'active', cancelled_at = NULL, cancel_type = NULL, deletion_scheduled_at = NULL
 		 WHERE id = $1`, fx.subID)
 	require.NoError(t, err)
 
-	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 
 	got := fx.intent(t, row.ID)
@@ -454,7 +454,7 @@ func TestIdempotentEnqueue(t *testing.T) {
 	assert.WithinDuration(t, laterDue, second.NextAttemptAt, time.Second, "pending re-enqueue refreshes the schedule")
 
 	var count int
-	require.NoError(t, fx.db.Pool().QueryRow(context.Background(),
+	require.NoError(t, fx.db.Pool().QueryRow(dbtest.WithTestMerchant(context.Background()),
 		"SELECT count(*) FROM billing.rail_intents WHERE subscription_id = $1", fx.subID).Scan(&count))
 	assert.Equal(t, 1, count)
 }
@@ -466,7 +466,7 @@ func TestSucceededIntentIsNeverRevived(t *testing.T) {
 	fake, client := newFakeNMI(t, fx.psid, true)
 	row := fx.enqueueDelete(t, OriginUser, time.Now().Add(-time.Minute))
 
-	_, err := fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	_, err := fx.runner(client, fullModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 	require.Equal(t, StatusSucceeded, fx.intent(t, row.ID).Status)
 
@@ -474,7 +474,7 @@ func TestSucceededIntentIsNeverRevived(t *testing.T) {
 	assert.Equal(t, row.ID, again.ID)
 	assert.Equal(t, StatusSucceeded, again.Status, "succeeded is immutable to enqueues")
 
-	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, fake.deleteCalls.Load(), "no second delete")
 }
@@ -513,7 +513,7 @@ func (h *pruneTestHandler) Backoff(int32) time.Duration { return time.Minute }
 // the dedupe survived the prune.
 func TestSucceededIntentIsPrunedToSlimTombstone(t *testing.T) {
 	fx := seedCancelledNMISubscription(t, time.Now().Add(-time.Minute))
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	var calls atomic.Int64
 
 	runner := &Runner{
@@ -616,7 +616,7 @@ func TestSucceededIntentIsPrunedToSlimTombstone(t *testing.T) {
 // column values.
 func readRaw(t *testing.T, fx intentFixture, id uuid.UUID) (status string, payload, evidence *string) {
 	t.Helper()
-	err := fx.db.Pool().QueryRow(context.Background(),
+	err := fx.db.Pool().QueryRow(dbtest.WithTestMerchant(context.Background()),
 		`SELECT status, payload::text, result_evidence::text
 		   FROM billing.rail_intents WHERE id = $1`, id).Scan(&status, &payload, &evidence)
 	require.NoError(t, err)
@@ -645,7 +645,7 @@ func TestRelevanceWindowExpiry(t *testing.T) {
 	fake, client := newFakeNMI(t, fx.psid, true)
 
 	expired := time.Now().Add(-time.Hour).UTC()
-	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
+	row, err := fx.store.Enqueue(dbtest.WithTestMerchant(context.Background()), EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
 		PspID:          fx.pspID,
@@ -658,7 +658,7 @@ func TestRelevanceWindowExpiry(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 
 	got := fx.intent(t, row.ID)
@@ -676,13 +676,13 @@ func TestClaimLeaseReclaim(t *testing.T) {
 	row := fx.enqueueDelete(t, OriginUser, time.Now().Add(-time.Minute))
 
 	// Simulate a crashed executor: claimed long ago, lease elapsed.
-	_, err := fx.db.Pool().Exec(context.Background(),
+	_, err := fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()),
 		`UPDATE billing.rail_intents
 		 SET status = 'in_flight', claimed_until = now() - interval '1 minute', attempts = 1
 		 WHERE id = $1`, row.ID)
 	require.NoError(t, err)
 
-	stats, err := fx.runner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	stats, err := fx.runner(client, fullModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, stats.Claimed, 1)
 	assert.Equal(t, StatusSucceeded, fx.intent(t, row.ID).Status)
@@ -710,7 +710,7 @@ func TestClaimLeaseHeartbeat_SlowHandlerIsNotTakenOver(t *testing.T) {
 
 	firstDone := make(chan Stats, 1)
 	go func() {
-		stats, err := first.RunExecuteOnce(context.Background())
+		stats, err := first.RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 		require.NoError(t, err)
 		firstDone <- stats
 	}()
@@ -740,7 +740,7 @@ func TestClaimLeaseHeartbeat_SlowHandlerIsNotTakenOver(t *testing.T) {
 	require.True(t, held.ClaimedUntil.After(*claimedAtStart), "claimed_until was renewed: %s -> %s", claimedAtStart, held.ClaimedUntil)
 	require.True(t, held.ClaimedUntil.After(clock.Now()), "the renewed lease is live")
 
-	stats, err := second.RunExecuteOnce(context.Background())
+	stats, err := second.RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 	assert.Zero(t, stats.Claimed, "a live executor's intent is not handed to a second one")
 	assert.EqualValues(t, 1, fake.deleteCalls.Load(), "the provider saw exactly one delete")

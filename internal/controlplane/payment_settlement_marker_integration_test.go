@@ -99,7 +99,7 @@ func TestPaymentSettlementFeedRequiresDeclaredMoneyMovement(t *testing.T) {
 	anchor := uuid.New()
 	insertPayment(anchor, "nmi_sub_attempt:"+suffix, "pending", "none", 7_000_000)
 	inMerchantTx(func(tx gen.DBTX) {
-		n, err := dbtest.Queries(tx).CompleteProviderAttemptInPlace(ctx, gen.CompleteProviderAttemptInPlaceParams{ID: anchor})
+		n, err := dbtest.Queries(tx).CompleteProviderAttemptInPlace(ctx, gen.CompleteProviderAttemptInPlaceParams{ID: anchor, MerchantID: mID})
 		require.NoError(t, err)
 		require.EqualValues(t, 1, n)
 	})
@@ -112,7 +112,8 @@ func TestPaymentSettlementFeedRequiresDeclaredMoneyMovement(t *testing.T) {
 	require.Zero(t, published(attempt))
 	inMerchantTx(func(tx gen.DBTX) {
 		n, err := dbtest.Queries(tx).CompleteProviderAttempt(ctx, gen.CompleteProviderAttemptParams{
-			ID: attempt, TransactionID: "rail-txn-settled-" + suffix,
+			MerchantID: mID,
+			ID:         attempt, TransactionID: "rail-txn-settled-" + suffix,
 		})
 		require.NoError(t, err)
 		require.EqualValues(t, 1, n)

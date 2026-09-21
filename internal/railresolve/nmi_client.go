@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -86,7 +87,7 @@ func (a *NMIArmer) ResolveScope(ctx context.Context, mid merchant.ID, rail strin
 		return merchants.PSPScope{}, false, nil
 	}
 	if stamped != nil {
-		row, err := a.DB.Gen(ctx).GetPSP(ctx, *stamped)
+		row, err := a.DB.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{ID: *stamped, MerchantID: mid.UUID()})
 		if err != nil {
 			return merchants.PSPScope{}, false, fmt.Errorf("load stamped PSP: %w", err)
 		}

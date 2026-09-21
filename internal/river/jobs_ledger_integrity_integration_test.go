@@ -62,9 +62,19 @@ func TestLedgerIntegrityWorker_RaisesAFindingOnInducedDrift(t *testing.T) {
 	// The drift: a one-sided counter rewrite — a restore, a COPY, a migration
 	// with triggers disabled. Silent by construction: no error, no event, and
 	// every balance read on this account is wrong from here on.
-	_, err = superuserPool(t).Exec(ctx,
-		`UPDATE billing.ledger_accounts SET credits_posted = credits_posted + 777 WHERE id = $1`, custAcc)
-	require.NoError(t, err)
+	rewriteCounter := func(delta int64) {
+		tx, err := superuserPool(t).Begin(ctx)
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		_, err = tx.Exec(ctx, `ALTER TABLE billing.ledger_accounts DISABLE TRIGGER guard_ledger_account_facts`)
+		require.NoError(t, err)
+		_, err = tx.Exec(ctx, `UPDATE billing.ledger_accounts SET credits_posted = credits_posted + $1 WHERE id = $2`, delta, custAcc)
+		require.NoError(t, err)
+		_, err = tx.Exec(ctx, `ALTER TABLE billing.ledger_accounts ENABLE TRIGGER guard_ledger_account_facts`)
+		require.NoError(t, err)
+		require.NoError(t, tx.Commit(ctx))
+	}
+	rewriteCounter(777)
 
 	require.NoError(t, worker.Work(ctx, nil))
 
@@ -81,9 +91,7 @@ func TestLedgerIntegrityWorker_RaisesAFindingOnInducedDrift(t *testing.T) {
 	require.Equal(t, "critical", cons.severity)
 
 	// Repaired: the audit is precise, not permanently red.
-	_, err = superuserPool(t).Exec(ctx,
-		`UPDATE billing.ledger_accounts SET credits_posted = credits_posted - 777 WHERE id = $1`, custAcc)
-	require.NoError(t, err)
+	rewriteCounter(-777)
 	require.NoError(t, worker.Work(ctx, nil))
 	require.Equal(t, "fixed", findingStatus(t, ctx, merchantPool, merchantID, FindingLedgerCounterDrift, custAcc.String()).status)
 	require.Equal(t, "fixed", findingStatus(t, ctx, merchantPool, merchantID, FindingLedgerConservation, strings.ToLower(currency)).status)

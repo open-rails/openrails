@@ -93,10 +93,7 @@ type Config struct {
 	// as "development": a container shipped without ENV would otherwise boot
 	// with PLAINTEXT merchant secrets (NMI security_key, Stripe sk_, CCBill
 	// DataLink passwords, webhook signing secrets) after a single warning —
-	// silently, and in exactly the deployment least likely to be watching. (The
-	// DB role must enforce RLS in every environment; that one is not on this
-	// switch.) Load() refuses an
-	// empty ENV, and IsDev() reads empty as NOT development so any path that
+	// silently. Load() refuses an empty ENV, and IsDev() reads empty as NOT development so any path that
 	// bypasses Load still fails closed. Env: ENV.
 	Env  string       `koanf:"env,omitempty"`
 	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 3053)
@@ -1881,17 +1878,12 @@ func (cfg *Config) IsProviderReadOnly() bool {
 // IsDev returns true if the environment is development.
 //
 // SEC-18: an EMPTY Env is NOT development. It used to be, which made every
-// dev-only relaxation (plaintext merchant secrets, an RLS-bypassing DB role)
+// dev-only relaxation (plaintext merchant secrets)
 // the default for any deployment that simply forgot to set ENV. Unset is now
 // the strict posture; Load() refuses it outright.
 func (cfg *Config) IsDev() bool {
 	return cfg != nil && (cfg.Env == "dev" || cfg.Env == "development")
 }
-
-// RLS enforcement is deliberately NOT a config knob (or#782). Every
-// environment, development included, must connect as an RLS-enforcing role;
-// db.EnforceRLSPosture takes no environment argument, so there is nothing here
-// to point back at a superuser.
 
 // RequiresSecretEncryption reports whether startup must fail if the DB-backed
 // merchant secret store would persist secrets PLAINTEXT (no ENCRYPTION_MASTER_KEY).
@@ -1943,7 +1935,7 @@ func validateDatabase(cfg *DBConfig) error {
 // local, zero-config working set. Load() uses it as its base but CLEARS Env
 // first (SEC-18): the deployment environment is the one knob whose default
 // cannot be safe, because "development" is the permissive posture (plaintext
-// merchant secrets, an RLS-bypassing DB role is tolerated). A deployment
+// merchant secrets). A deployment
 // declares ENV or does not boot.
 func GetDefaultBillingConfig() *Config {
 	return &Config{
@@ -1955,10 +1947,7 @@ func GetDefaultBillingConfig() *Config {
 			Host:     "localhost",
 			Port:     "5434",
 			Database: "openrails_db",
-			// The unprivileged NOBYPASSRLS role, matching docker-compose
-			// (or#782). The default must NOT be the superuser: boot refuses a
-			// BYPASSRLS role in every environment, and a superuser default
-			// would only teach developers to reach for one.
+			// Application login used by the local Docker setup.
 			Username: "app",
 			Password: "app_password",
 			SSLMode:  "disable",
@@ -2369,7 +2358,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return nil, fmt.Errorf("cors_origins config was removed (#519/#765): browser CORS is a fixed engine policy (checkout/self-service = public *, everything else = none) — bearer JWTs are the security boundary, not a configurable origin allowlist; delete the cors_origins yaml key and CORS_ORIGINS env var")
 	}
 	if retiredDBRequireRLS {
-		return nil, fmt.Errorf("db.require_rls config was removed: RLS enforcement is derived from env — development may bypass RLS, every other env requires an RLS-enforcing DB role; delete the db.require_rls yaml key and DB_REQUIRE_RLS env var")
+		return nil, fmt.Errorf("db.require_rls config was removed: merchant isolation uses explicit scoped queries, not PostgreSQL RLS; delete the db.require_rls yaml key and DB_REQUIRE_RLS env var")
 	}
 	if retiredAuthIssuers {
 		return nil, fmt.Errorf("auth.issuers / auth.expected_audience config was removed (#521/#527): declare each merchant's host-app trust under merchants[].remote_application in the merchant config manifest; delete the keys and AUTH_ISSUERS / AUTH_EXPECTED_AUDIENCE env vars")
@@ -2409,12 +2398,10 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	// SEC-18: ENV is REQUIRED and has no default. Every other knob can fail
 	// closed on its own; this one decides WHICH way the others fail, so it must
 	// be declared, not inferred. Silently reading unset as "development" meant a
-	// container deployed without ENV kept merchant secrets in PLAINTEXT. (The
-	// DB role is no longer on this switch — or#782 made RLS enforcement
-	// unconditional.)
+	// container deployed without ENV kept merchant secrets in PLAINTEXT.
 	cfg.Env = strings.TrimSpace(cfg.Env)
 	if cfg.Env == "" {
-		return nil, fmt.Errorf("ENV is required (SEC-18): set env (env ENV) to development for a local/dev deployment, or to production/staging/<name> — there is no default, because the permissive posture (plaintext merchant secrets) is the development one. The DB role is NOT one of those relaxations: a BYPASSRLS role is refused in every environment")
+		return nil, fmt.Errorf("ENV is required (SEC-18): set env (env ENV) to development for a local/dev deployment, or to production/staging/<name> — there is no default, because the permissive posture (plaintext merchant secrets) is the development one")
 	}
 
 	// Sandbox-by-default in development (#355/#745): when test_mode is not

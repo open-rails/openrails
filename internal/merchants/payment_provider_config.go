@@ -432,6 +432,7 @@ func (s *Service) upsertPSP(ctx context.Context, id merchant.ID, rail, environme
 	// not rotate must survive.
 	var existingEvidenceRaw []byte
 	existing, err := queries.GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{
+		MerchantID:  id.UUID(),
 		Rail:        nRail,
 		Environment: &nEnv,
 		AccountID:   nAccount,

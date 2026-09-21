@@ -33,8 +33,26 @@ import (
 // authorization/handler/service paths. Knowing another merchant's UUID must
 // not become authority to read or change that merchant's records.
 func TestMerchantScopeWithoutRLS(t *testing.T) {
+	for _, owner := range []bool{false, true} {
+		name := "normal_login"
+		if owner {
+			name = "database_owner"
+		}
+		t.Run(name, func(t *testing.T) { scopeWithoutRLSJourney(t, owner) })
+	}
+}
+
+func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 	ctx := t.Context()
 	admin, pool, dsn := scopeWithoutRLSDatabase(t)
+	if owner {
+		pool = admin
+		ownerURL, err := url.Parse(dsn)
+		require.NoError(t, err)
+		credentials := admin.Config().ConnConfig
+		ownerURL.User = url.UserPassword(credentials.User, credentials.Password)
+		dsn = ownerURL.String()
+	}
 	newRuntime := func() *embed.Runtime {
 		rt, err := embed.New(ctx, embed.Options{
 			Config: &config.Config{
@@ -65,7 +83,7 @@ func TestMerchantScopeWithoutRLS(t *testing.T) {
 	require.Zero(t, remaining, "no scratch billing table may provide an RLS safety net")
 	var visible int
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.products`).Scan(&visible))
-	require.Equal(t, 2, visible, "normal login must really see both merchants without a SQL predicate")
+	require.Equal(t, 2, visible, "runtime login must really see both merchants without a SQL predicate")
 
 	t.Run("authorized_A_cannot_read_B_known_product_or_price_ID", func(t *testing.T) {
 		_, err := a.client.GetProduct(ctx, b.product.ID)

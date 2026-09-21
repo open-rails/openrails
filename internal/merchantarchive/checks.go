@@ -76,13 +76,15 @@ var omittedColumns = map[string]string{
 
 func checkSchema(ctx context.Context, tx pgx.Tx) error {
 	known := map[string]bool{}
+	archived := map[string]bool{}
 	for _, p := range contract.Profiles {
 		known[p.Name] = true
+		archived[p.Name] = true
 	}
 	for t := range excludedTables {
 		known[t] = true
 	}
-	rows, err := tx.Query(ctx, `SELECT c.relname,c.relrowsecurity AND c.relforcerowsecurity,a.attname IS NOT NULL FROM pg_class c LEFT JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped
+	rows, err := tx.Query(ctx, `SELECT c.relname,a.attname IS NOT NULL FROM pg_class c LEFT JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped
 		WHERE c.relnamespace=(SELECT relnamespace FROM pg_class WHERE oid='openrails.merchants'::regclass) AND c.relkind IN ('r','p') ORDER BY c.relname`)
 	if err != nil {
 		return err
@@ -90,14 +92,14 @@ func checkSchema(ctx context.Context, tx pgx.Tx) error {
 	found := map[string]bool{}
 	for rows.Next() {
 		var name string
-		var secured, scoped bool
-		if err := rows.Scan(&name, &secured, &scoped); err != nil {
+		var scoped bool
+		if err := rows.Scan(&name, &scoped); err != nil {
 			rows.Close()
 			return err
 		}
-		if scoped && !secured {
+		if archived[name] && !scoped {
 			rows.Close()
-			return &Error{Code: "unsupported_state", Table: name, Err: fmt.Errorf("merchant RLS is not enforced")}
+			return &Error{Code: "unsupported_state", Table: name, Err: fmt.Errorf("archive table lacks explicit merchant_id")}
 		}
 		if !known[name] {
 			rows.Close()

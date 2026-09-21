@@ -13,17 +13,16 @@ do not yet enforce.
 | | meaning |
 |---|---|
 | **S** | structurally impossible — the type system, a role privilege, or a chokepoint makes the violation unrepresentable |
-| **DB** | Postgres-enforced — CHECK, trigger, unique index, RLS policy |
+| **DB** | Postgres-enforced — CHECK, trigger, unique index, foreign key |
 | **APP** | enforced at a single application chokepoint or validation function |
 | **T** | a repo test fails |
 | **C** | convention only — nothing fails |
 
-**How this register is verified.** Every DB-facing check runs as the unprivileged
-`openrails_app` role with RLS enforcing — `internal/invariantaudit` (build tag `integration`)
-asserts `NOT rolsuper AND NOT rolbypassrls` before it asserts anything else. This is not a
-detail: a GUC-less read of a policied table returns **zero rows and no error**, so a check run
-as superuser passes for a guard that can never fire in production. Three of the six SQL checks
-in this file's own audit bundle were exactly that shape (§Audit bundle).
+**How this register is verified.** Tenant SQL and public API tests run with RLS
+absent, using both owner and ordinary runtime connections. Financial tests exercise
+constraints, transaction semantics and immutable-record triggers. The historical
+audit notes below retain the earlier RLS failure analysis; they do not describe the
+current authorization mechanism. Current work is tracked in #1021.
 
 **History.** Migration numbers in FIXED notes are history; the fresh baseline
 `internal/migrate/postgres/0001_schema.up.sql` carries every constraint.
@@ -49,9 +48,9 @@ millicents. Cents and decimal major units exist only at rail boundaries.
 | MONEY-5 | The single internal→rail converter is `moneyutil.NativeToRailMinor` (ceil) / `NativeToRailMinorExact` (errors on a sub-minor remainder); both error on an unregistered currency. Callers cannot guess a scale — there is no currency-blind converter left to call. | `internal/shared/moneyutil/currency.go` | **S** — the alternatives are deleted, not deprecated | `grep -rn "MicrosToCents" --include=*.go` → no hits; `go test ./internal/shared/moneyutil` |
 | MONEY-6 | Decimal strings parse via exact rational (`big.Rat`), half-away-from-zero, with an int64-overflow error. | `moneyutil.go:28-41,112-141` | APP | rounding is pinned by `internal/modules/webhooks/nmi_test.go:156-183`; the overflow branch has no test. The register's old grep tested none of the three properties |
 | MONEY-7 | Every provider money boundary ships a **wire-pinning test**: known micros in ⇒ exact integer on the wire. | `internal/shared/moneyutil/wire_pinning_registry_test.go` (AST registry) + the pinning tests it names | **T** for *accounted-for*, **weak-T** for *pinned* | `go test ./internal/shared/moneyutil -run TestEveryMoneyBoundaryIsPinnedOrDeferred`. or#865 replaced `grep -rln "wire pinning"` (no expected value — it listed what WAS pinned and stayed silent about what was not). A money boundary is now defined mechanically (a file calling `NativeToRailMinor`/`NativeToRailMinorExact`/`centsJSONAmount`) and every one must be registered as pinned **or** explicitly deferred with a reason; a new one fails CI, and a registry entry that stops being a boundary also fails. Honest limit: the guard checks that the question was ASKED, not that each pinning test is good, and 11 boundaries are currently *deferred*, not pinned. Solana Pay's live formatter is outside the converter definition — §10 GAP-15 |
-| MONEY-8 | `ledger_transfers.amount > 0`; `allow_debit_negative_up_to >= 0`. | `ledger_transfers_amount_positive`, `ledger_transfers_debit_floor_nonnegative` | **DB** | `SELECT count(*) FROM openrails.ledger_transfers WHERE amount<=0;` → 0 |
+| MONEY-8 | `ledger_transfers.amount > 0`; `allow_debit_negative_up_to >= 0`. | `ledger_transfers_amount_positive`, `ledger_transfers_debit_floor_nonnegative` | **DB** | `SELECT count(*) FROM billing.ledger_transfers WHERE amount<=0;` → 0 |
 | MONEY-9 | `payments.amount` deliberately has **no** non-negative CHECK — refunds are negative rows — and a test forbids adding one. | `internal/migrate/postgres/amount_checks_test.go` (`assertNoPaymentsAmountCheck`) | **T** | `go test ./internal/migrate/postgres -run TestAmountValueChecks`. or#865: previously matched two literal constraint names in the baseline only, so the same CHECK added in a **later migration** or under Postgres' **generated** name passed silently — the two ways it would actually break. Now every migration file is scanned and the match is on the predicate as well as the name, anchored so `invoice_payments_amount_positive_chk` (a different table, legitimately positive-only) is not a false positive. Both holes proven to fail. Still static text, not a live `pg_constraint` query |
-| MONEY-10 | Amount CHECKs hold across prices, grants, invoices, invoice items/payments, usage events, credit limits, rating watermarks. | `0001_schema.up.sql` (the `*_amount_*` CHECKs) | **DB** | `SELECT conname FROM pg_constraint WHERE contype='c' AND connamespace='openrails'::regnamespace;` |
+| MONEY-10 | Amount CHECKs hold across prices, grants, invoices, invoice items/payments, usage events, credit limits, rating watermarks. | `0001_schema.up.sql` (the `*_amount_*` CHECKs) | **DB** | `SELECT conname FROM pg_constraint WHERE contype='c' AND connamespace='billing'::regnamespace;` |
 
 ## 2. Currency
 
@@ -66,30 +65,31 @@ substitute a default currency because one was not supplied.
 | CUR-4 | FX is not merely forbidden but absent — the `fx_liquidity` account type has no non-declaration call site. | `ledger_accounts_type_check`; `money/ledger/ledger.go:39` | **C** | `grep -rn "FXLiquidity" --include=*.go \| grep -v _test` → the declaration only, zero call sites. True by habit, not structure: `ledger.FXLiquidity` is an ordinary exported const and passing it to `ensureAccount` compiles |
 | CUR-5 | Currency **membership** comes from a Go registry with per-currency internal and rail decimals; the DB does not encode membership (it would need a migration per currency). | `internal/modules/money/currency.go:11-13,26-30` | APP | `money.ValidateCurrency` |
 | CUR-5b | Currency **shape and case** are Postgres-enforced on all 16 currency columns: upper-case `[A-Z0-9]{3,12}`. | constraint `<table>_currency_shape` | **DB** + **T** | `SELECT count(*) FROM pg_constraint WHERE conname LIKE '%_currency_shape';` → 16; `go test ./internal/migrate/postgres -run TestCurrencyColumnsCarryShapeCheck` |
-| CUR-6 | **UPPER case is the canonical internal form.** Established at the two INSERT chokepoints (`paymentInsertParams` behind both payment inserts; `PriceService.Create` behind every price insert) and at each provider INGESTION boundary, with the CUR-5b CHECK as the backstop that catches anything reaching the DB by another route. Lowercase survives ONLY where a rail wire demands it, at three sites that say so: Stripe's catalog and invoice APIs, and the FX endpoint. | `moneyutil.NormalizeCurrency` (ONE definition, in the leaf so the repo chokepoints can reach it); `payments/payment_repo.go`, `catalog/price.go`; ingestion `webhooks/ccbill.go` `requireCCBillCurrency`, `reconcile/unknown_orchestration.go`; wire exceptions `catalog/stripe_catalog.go`, `subscriptions/stripe_invoice_collection.go`, `fx/exchange_api.go` `fetchRate` | APP (chokepoint) + **DB** | `SELECT DISTINCT currency FROM openrails.payments;` → all upper |
+| CUR-6 | **UPPER case is the canonical internal form.** Established at the two INSERT chokepoints (`paymentInsertParams` behind both payment inserts; `PriceService.Create` behind every price insert) and at each provider INGESTION boundary, with the CUR-5b CHECK as the backstop that catches anything reaching the DB by another route. Lowercase survives ONLY where a rail wire demands it, at three sites that say so: Stripe's catalog and invoice APIs, and the FX endpoint. | `moneyutil.NormalizeCurrency` (ONE definition, in the leaf so the repo chokepoints can reach it); `payments/payment_repo.go`, `catalog/price.go`; ingestion `webhooks/ccbill.go` `requireCCBillCurrency`, `reconcile/unknown_orchestration.go`; wire exceptions `catalog/stripe_catalog.go`, `subscriptions/stripe_invoice_collection.go`, `fx/exchange_api.go` `fetchRate` | APP (chokepoint) + **DB** | `SELECT DISTINCT currency FROM billing.payments;` → all upper |
 | CUR-7 | Billing surfaces require a registered currency. | `RequireBillingCurrency`, `internal/modules/money/currency.go` | APP | `grep -rn "RequireBillingCurrency"` |
 | CUR-8 | Service entry points require a REGISTERED currency — `"XYZ"` no longer passes. It is still a helper an entry point can forget to call, so total enforcement lives where it cannot be bypassed: every off-session charge is registry-validated at `ScopedCharger.Prepare`, and every internal→rail conversion refuses an unregistered currency by construction. | `internal/service/currency.go`; `money/collection.go`; `moneyutil.NativeToRailMinor*` | APP at the entry point, **S** at the charge/convert boundary | `go test ./internal/service -run TestRequireCurrencyConsultsTheRegistry`; `go test ./internal/modules/money -run RefusesUnestablishedCurrency` |
 | CUR-9 | **A missing provider currency is never fabricated, defaulted, or silently borrowed.** A decline carries no currency of its own; where the subscription's billing currency is genuinely the one the attempt was denominated in, the backfill may INHERIT it — and the row records `currency_provenance` so an inference is never mistaken for an observation. No path substitutes a default before a charge. | `internal/reconcile/unknown_orchestration.go` (inherit + provenance); `money/{collection,nmi_collection,custodian_proxy_collection,stripe_collection}.go` (refuse); `handlers/admin_users.go` (no query-param default) | APP + **T** | `go test ./internal/modules/money -run RefusesUnestablishedCurrency` — §10 GAP-16 |
 
 ## 3. Tenant isolation
 
-One merchant per controlling org. Isolation is enforced twice: Postgres RLS, and the rule
-that a merchant id is derived from the authenticated principal, never from request data.
+Authorization resolves a merchant before persistence. Tenant SQL uses explicit
+merchant predicates and composite references; missing scope cannot select a global
+operation. OpenRails does not install RLS policies or rely on login flags.
 
-| # | Invariant | Enforced at | Str | Audit |
-|---|---|---|---|---|
-| TEN-1 | Every merchant-owned table has `ENABLE` **and** `FORCE ROW LEVEL SECURITY` plus a `merchant_isolation` policy with both `USING` and `WITH CHECK`. | `0001_schema.up.sql`, per table | **DB** + **T** | `go test -tags integration ./internal/invariantaudit -run TestTEN1` — verified 2026-07-28 as `openrails_app`: zero tables ENABLEd without FORCE, zero policies missing a clause, zero `merchant_id`-bearing tables without RLS |
-| TEN-2 | Unset GUC ⇒ policy is NULL ⇒ **zero rows, and no error**. RLS fails closed — and fails *silently*, which is why §10 GAP-17's class exists. | policy text; `db_pgx.go:18-28` | **DB** + **T** | `go test -tags integration ./internal/invariantaudit -run TestTEN2` — asserts the emptiness, the absence of an error, and that a GUC-bearing tx sees the row |
-| TEN-3 | Exactly **three** tables are RLS-exempt by design, each documented in-schema: `merchants`, `worker_state`, `destructive_action_switch` (or#836 — the kill switch must be readable before any merchant is resolved). | the `RLS-exempt by design:` table COMMENTs in `0001_schema.up.sql`; the `destructive_action_switch` table COMMENT | **DB** + **T** | `TestTEN1_AllTablesUnderRLSExceptDocumentedExemptions` pins the set in both directions |
-| TEN-4 | `merchant_id` is `uuid NOT NULL` everywhere and must never be defaulted, back-filled, or derived from the GUC. | `merchant_aware_schema_test.go:100-120` | **T** | `go test ./internal/migrate/postgres` |
-| TEN-5 | The merchant id comes from resolved context; `merchant.Require` errors rather than defaulting. There is no default merchant and the schema seeds none. | `pkg/merchant/merchant.go:50-54,103-112`; `merchant_aware_schema_test.go:86-98` | APP + T | `grep -rn 'json:"merchant_id' --include=*.go internal pkg \| grep -v /gen/` → no API request struct |
-| TEN-6 | `MerchantTx` pins the GUC **transaction-locally** so it cannot leak onto a pooled connection; a zero merchant id is rejected. | `internal/db/db_pgx.go:144-177` | APP | `grep -rn "set_config" internal/db` |
-| TEN-7 | On release-reset failure the request connection is **closed**, not returned to the pool. | `db_pgx.go:225-243` | APP | — |
-| TEN-8 | Boot refuses, in EVERY environment (development included, or#782), if the Postgres role bypasses RLS. Migrations are the only job that runs privileged, and they never build the runtime. | `internal/db/rls.go`; `build_runtime.go:176` | APP | boot as superuser at any `env` → must fail; `go test ./internal/db -run TestRLSPostureError` |
-| TEN-9 | The host runtime login is `LOGIN NOSUPERUSER NOBYPASSRLS`; libraries never create roles or memberships. | `internal/db/rls.go`; `MigrationOptions.RuntimePool` | **DB** + **T** | `SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname=current_user;` |
-| TEN-10 | **There is no privileged pool.** One pool, one role — dropping the GUC does not bypass a policy, it fails it. A genuine cross-merchant read goes through a `SECURITY DEFINER` reader (`assert_cross_merchant_reader()` and the `*_merchant_ids` work queues) that ASSERTS its definer bypasses RLS and RAISES if not; everything else runs per-merchant under `MerchantTx`/`RunInMerchantConn`. `DB.GenGlobal()` names the not-merchant-pinned connection, **not** a privilege. | `db_pgx.go:66-86`; `assert_cross_merchant_reader()` | APP | `grep -rn "GenGlobal()\|gen.New(.*\.pool)" --include=*.go` — every hit must resolve to a definer reader or an exempt table. §10 GAP-17 lists the ones that still do not |
-| TEN-11 | Unauthenticated webhook surfaces resolve the merchant, then verify the signature with *that merchant's* secret. Each deployment shape has exactly ONE resolution rule (or#893): standalone from the declared PSP catalog (payload/`:account_id`), embedded from its pinned merchant's route slug, hosted from the `Host` header. An unresolvable Host/slug/account is a hard 404. | `internal/http/handlers/webhook.go` | APP | — |
-| TEN-12 | Core schema may not FK into AuthKit's schema and may not create River tables. | `portability_guard_test.go:27-56` | **T** | `go test ./internal/migrate/postgres -run TestPortabilityInvariant` |
+| # | Invariant | Enforced at | Audit |
+|---|---|---|---|
+| TEN-1 | All tenant tables have a non-null merchant coordinate; the fresh schema has no RLS policies/flags. | migration schema guards | `TestTEN1_ExplicitScopeSchemaWithoutRLS` |
+| TEN-2 | Foreign or missing merchant scope cannot read or modify a tenant resource, including with the owning connection. | scoped SQL plus service authority checks | `TestTEN2_QueryScopeIndependentOfDatabaseRole`, `TestMerchantScopeWithoutRLS` |
+| TEN-3 | `merchants`, `worker_state`, and `destructive_action_switch` are deliberate global objects. | schema classification | `TestTEN1_ExplicitScopeSchemaWithoutRLS` |
+| TEN-4 | Merchant columns have no implicit/default tenant; cross-resource foreign keys preserve merchant identity. | schema guards and composite FKs | `go test ./internal/migrate/postgres` |
+| TEN-5 | Tenant services require verified scope; a request body or fetched row cannot mint authority. | `merchant.Require`, route Gate, scoped repositories | public Client/HTTP adversarial tests |
+| TEN-6 | Session merchant state remains transaction-local or bound to a released request connection for explicit GUC predicates and stored functions. It does not filter arbitrary SQL. | `MerchantTx`, `WithMerchantConn` | connection lifecycle tests |
+| TEN-7 | A connection whose merchant-state reset fails is closed rather than reused. | `lazyMerchantPgxConn.release` | connection lifecycle tests |
+| TEN-8 | Initialization and runtime can share one owning application pool; tenant correctness is independent of superuser/BYPASSRLS flags. | runtime construction and SQL scope | owner and normal-login journeys |
+| TEN-9 | Libraries create no database accounts or permission-group roles. A separate runtime login may receive optional direct grants. | migration API `RuntimePool` | provisioning/owner integration tests |
+| TEN-10 | Platform directory and worker-discovery scans are explicit; tenant work runs under each authorized merchant's scope. | `GenDirectory`, worker fan-out | destructive ceiling and worker integration tests |
+| TEN-11 | Webhooks resolve the merchant and verify the signature with that merchant's secret before applying evidence. | webhook handlers | signed webhook and provider-collision tests |
+| TEN-12 | Core schema has no foreign keys to AuthKit and does not own host River tables. | portability guards | `TestPortabilityInvariant` |
 
 ## 4. Ledger integrity
 
@@ -99,7 +99,7 @@ that a merchant id is derived from the authenticated principal, never from reque
 | LED-2 | A missing debit or credit account raises — never a silent no-op. | `:147-149` | **DB** | — |
 | LED-3 | **Insufficient-funds floor**: debiting below `-allow_debit_negative_up_to` raises `ledger_insufficient_funds`. | trigger `:155-159`; flag set in `ledger.go:69-72` | **DB** | `SELECT … WHERE account_type='customer_balance' AND NOT debits_must_not_exceed_credits;` → 0 |
 | LED-4 | Symmetric ceiling for `credits_must_not_exceed_debits` accounts. | `:160-162` | **DB** | — |
-| LED-5 | Transfers and accounts are **append-only**: the initializer grants the host login `SELECT,INSERT` only; counters move solely through the `SECURITY DEFINER` trigger. | `:1652,:1723`; trigger `:122-123` | **S** + **T** | `TestLED5_LedgerIsAppendOnlyByPrivilege`. Verified live 2026-07-28: as `openrails_app`, UPDATE/DELETE on either table is `permission denied` |
+| LED-5 | Ledger records are append-only under ordinary DML even for an owner; account counters change through transfer triggers. Optional runtime grants remain narrow. Owner DDL can deliberately alter these guards. | immutable ledger triggers; runtime access template | **DB** + **T** | `TestOwningLoginInitializesWithoutRLSAndPreservesFinancialFacts`, `TestLED5_OptionalRuntimeGrantsKeepLedgerAppendOnly` |
 | LED-6 | Debit ≠ credit account. | `:1674` | **DB** (via the trigger, not the CHECK) | the BEFORE trigger runs first and rejects the self-transfer as "account not found", so `ledger_transfers_distinct_accounts` never fires. Still rejected — just not by the constraint the row cites | — |
 | LED-7 | A credit lot's deposit / expire / revoke each happen at most once. | `idx_ledger_transfers_lot_once`, `:1707` | **DB** | — |
 | LED-8 | ~~An owed accrual is once per …~~ **Superseded by LED-14**, which covers every transfer type rather than this one. | `idx_ledger_transfers_operation_once` replaced `idx_ledger_transfers_owed_accrual_once` | **DB** | — |
@@ -155,8 +155,8 @@ reads as protection.
 
 | # | Guard | Enforced at |
 |---|---|---|
-| FC-1 | RLS on unset GUC → zero rows. | policy text |
-| FC-2 | Boot refuses a BYPASSRLS role — every environment, dev included. | `internal/db/rls.go` |
+| FC-1 | Missing merchant context is rejected by tenant services; zero merchant parameters do not select all tenants. | `merchant.Require`; scoped SQL |
+| FC-2 | RLS is absent in isolation qualification, so policies cannot hide missing predicates. | owner/normal-login adversarial tests |
 | FC-3 | Boot refuses the DB secret store without `ENCRYPTION_MASTER_KEY` outside dev. | `merchantsecrets/store.go:297-308` |
 | FC-4 | Even in dev, Solana private keys may not be stored unencrypted. | `store.go:227-233` |
 | FC-5 | `secret_backend=vault` without a working Vault, or without KV read capability, refuses. Where secrets live is DECLARED: `merchant_source=api` refuses an undeclared `secret_backend`, and `vault.enabled` (which may be Transit signing alone) never selects the KV store (or#893). | `merchantsecrets/store.go`; `config.validateSecretBackend` / `config.validateMerchantSource` |
@@ -247,7 +247,11 @@ and a `psp_id IS NOT NULL OR rail IN ('manual','admin')` CHECK on payments and i
 the two tables that also record off-rail money. The count is now an INVARIANT the undo asserts
 and refuses on, not a report.
 
-## 10. Known gaps — rules we hold but do not enforce
+## 10. Historical gap register
+
+These entries retain earlier audit evidence and dates. RLS-specific failure modes
+and role requirements were superseded by #1021; use the current tracker for
+remaining release gates. Other historical rows are not re-qualified by that change.
 
 Every one of these is a rule the codebase intends. Rows are retained after closure as a
 log, so read the **Tracked** column before trusting the Gap column: only rows without a
@@ -282,65 +286,51 @@ GAP-14 are open only in their named residuals; GAP-16 is closed.
 
 ### Audit bundle
 
-Run these as the normal host login, not as a superuser — and read the next paragraph first.
-
-> **Three of these queries cannot fail as written.** GAP-8 (conservation), GAP-2/6 (currency
-> codes) and GAP-5 (duplicate transactions) all read merchant-owned, RLS-policied tables. As
-> The host login with no `app.merchant_id` they return **zero rows whatever the data is** —
-> measured 2026-07-28 against a seeded database: the app role saw 0 ledger accounts where the
-> superuser saw 4. Run as a superuser they are honest but do not reproduce production; run as
-> the app role they are green by construction. Either way they were not checking anything.
-> They are marked below and must be run either per-merchant under a GUC, or through
-> `openrails ledger-audit` (which takes a merchant), or from a `SECURITY DEFINER` reader. The
-> remaining three (TEN-1/3, GAP-10, GAP-9) read `pg_catalog` or the policy-free `merchants`
-> directory and are sound on any role.
->
-> The executable form of this bundle is `go test -tags integration ./internal/invariantaudit`,
-> which asserts `NOT rolsuper AND NOT rolbypassrls` before it asserts anything else.
+Run these from an explicitly authorized operator connection. These are intentional
+fleet-wide diagnostic scans; ordinary tenant requests must use the scoped APIs.
+With RLS absent, the diagnostics no longer silently return empty results because
+of a missing session merchant. `internal/invariantaudit` exercises the relevant
+query and schema contracts on real PostgreSQL.
 
 Read-only checks that should pass at any time:
 
 ```sql
--- TEN-1/TEN-3: tables without RLS (expect exactly merchants, worker_state, destructive_action_switch)
+-- TEN-1: any remaining RLS flags (expect no rows)
 SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
- WHERE n.nspname='openrails' AND c.relkind='r' AND NOT c.relrowsecurity;
+ WHERE n.nspname='billing' AND c.relkind='r' AND (c.relrowsecurity OR c.relforcerowsecurity);
 
 -- ID-11 (was GAP-10): unique indexes not scoped by merchant.
 -- Expect ONLY surrogate-id *_pkey rows plus the named exceptions in
--- internal/migrate/postgres/unique_scope_exemptions.go. NOT RLS-blind — pg_indexes is catalog.
-SELECT indexdef FROM pg_indexes WHERE schemaname='openrails'
+-- internal/migrate/postgres/unique_scope_exemptions.go.
+SELECT indexdef FROM pg_indexes WHERE schemaname='billing'
    AND indexdef LIKE '%UNIQUE%' AND indexdef NOT LIKE '%merchant_id%';
 
 -- CUR-5b: every currency column carries the shape CHECK (expect 16).
 SELECT count(*) FROM pg_constraint
  WHERE contype='c' AND conname LIKE '%\_currency\_shape' ESCAPE '\'
-   AND connamespace='openrails'::regnamespace;
+   AND connamespace='billing'::regnamespace;
 
 -- GAP-8: ledger conservation per (merchant, currency)
--- ⚠ RLS-BLIND as the host login: returns nothing regardless of state. Run per
---   merchant under app.merchant_id, or via `openrails ledger-audit <merchant>`.
-SELECT merchant_id, currency, sum(credits_posted - debits_posted) FROM openrails.ledger_accounts
+SELECT merchant_id, currency, sum(credits_posted - debits_posted) FROM billing.ledger_accounts
  GROUP BY 1,2 HAVING sum(credits_posted - debits_posted) <> 0;
 
 -- GAP-2/GAP-6: lowercase currency codes. Now impossible to insert (CUR-5b), so
 -- this is a post-migration audit of legacy rows rather than a live guard.
--- ⚠ RLS-BLIND as the host login (see above).
-SELECT DISTINCT currency FROM openrails.payments;
+SELECT DISTINCT currency FROM billing.payments;
 
 -- GAP-5: duplicate provider transactions
--- ⚠ RLS-BLIND as the host login (see above).
-SELECT merchant_id, rail, transaction_id, count(*) FROM openrails.payments
+SELECT merchant_id, rail, transaction_id, count(*) FROM billing.payments
  GROUP BY 1,2,3 HAVING count(*) > 1;
 
 -- GAP-9: merchants sharing a permission group
-SELECT permission_group_id, count(*) FROM openrails.merchants
+SELECT permission_group_id, count(*) FROM billing.merchants
  WHERE permission_group_id IS NOT NULL GROUP BY 1 HAVING count(*) > 1;
 ```
 
 Test gates:
 
 ```
-go test -tags integration ./internal/invariantaudit                   # TEN-1/2/3/9, LED-2/3/5/6/7, MONEY-8, CUR-1/3, GAP-7/9/10 — as openrails_app
+go test -tags integration ./internal/invariantaudit                   # scoped tenant queries, schema and financial invariants
 go test ./internal/migrate/postgres                                         # TEN-4, TEN-12, MONEY-9, ID-11, CUR-5b
 go test ./internal/intents  -run TestProviderWrite                    # IDEM-7 (both halves: surface + call sites)
 go test ./internal/shared/moneyutil -run TestNoFloatsInMoneyPackages  # MONEY-3

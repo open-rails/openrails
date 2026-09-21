@@ -265,14 +265,14 @@ func (fx rebillFixture) rebillRunner(client *nmi.NMIClient, cfg *config.Config) 
 
 func (fx rebillFixture) subscription(t *testing.T) gen.OpenrailsSubscription {
 	t.Helper()
-	row, err := fx.db.Gen(context.Background()).GetSubscriptionByID(context.Background(), fx.subID)
+	row, err := fx.db.Gen(fx.handlerCtx()).GetSubscriptionByID(fx.handlerCtx(), gen.GetSubscriptionByIDParams{MerchantID: merchant.ID(fx.merchantID).UUID(), ID: fx.subID})
 	require.NoError(t, err)
 	return row
 }
 
 func (fx rebillFixture) intentByID(t *testing.T, id uuid.UUID) gen.OpenrailsRailIntent {
 	t.Helper()
-	row, err := fx.db.Gen(context.Background()).GetRailIntent(context.Background(), id)
+	row, err := fx.db.Gen(fx.handlerCtx()).GetRailIntent(fx.handlerCtx(), gen.GetRailIntentParams{MerchantID: merchant.ID(fx.merchantID).UUID(), ID: id})
 	require.NoError(t, err)
 	return row
 }
@@ -284,7 +284,7 @@ func TestManualRebillSynchronousSuccessRenewsLifecycle(t *testing.T) {
 	fx := seedPastDueSubscription(t)
 	fake, client := newFakeNMIRebillGateway(t, fx)
 
-	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(fx.handlerCtx(), fx.enqueueParams(1))
 	require.NoError(t, err)
 	assert.Equal(t, StatusSucceeded, row.Status)
 	assert.Contains(t, string(row.ResultEvidence), fake.txnID)
@@ -296,7 +296,7 @@ func TestManualRebillSynchronousSuccessRenewsLifecycle(t *testing.T) {
 	assert.True(t, sub.CurrentPeriodEndsAt.After(fx.periodEnd), "period advanced")
 
 	var paymentCount int
-	require.NoError(t, fx.db.Pool().QueryRow(context.Background(),
+	require.NoError(t, fx.db.Pool().QueryRow(fx.handlerCtx(),
 		"SELECT count(*) FROM billing.payments WHERE subscription_id = $1 AND transaction_id = $2",
 		fx.subID, fake.txnID).Scan(&paymentCount))
 	assert.Equal(t, 1, paymentCount, "renewal persisted the charge")
@@ -309,7 +309,7 @@ func TestManualRebillSystemOriginParksUnderLimitedThenDrains(t *testing.T) {
 	fx := seedPastDueSubscription(t)
 	fake, client := newFakeNMIRebillGateway(t, fx)
 
-	row, err := fx.rebillRunner(client, limitedModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+	row, err := fx.rebillRunner(client, limitedModeConfig()).EnqueueAndExecute(fx.handlerCtx(), fx.enqueueParams(1))
 	require.NoError(t, err)
 	assert.Equal(t, StatusPending, row.Status)
 	require.NotNil(t, row.LastFailureReason)
@@ -317,10 +317,10 @@ func TestManualRebillSystemOriginParksUnderLimitedThenDrains(t *testing.T) {
 	assert.Zero(t, fake.saleCalls.Load(), "nothing charged under limited")
 	assert.Equal(t, "past_due", string(fx.subscription(t).Status))
 
-	_, err = fx.db.Pool().Exec(context.Background(),
+	_, err = fx.db.Pool().Exec(fx.handlerCtx(),
 		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
-	_, err = fx.rebillRunner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	_, err = fx.rebillRunner(client, fullModeConfig()).RunExecuteOnce(fx.handlerCtx())
 	require.NoError(t, err)
 
 	assert.Equal(t, StatusSucceeded, fx.intentByID(t, row.ID).Status)
@@ -337,30 +337,30 @@ func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 	fake, client := newFakeNMIRebillGateway(t, fx)
 	fake.saleStatus.Store(http.StatusBadGateway) // outcome lost mid-flight
 
-	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(fx.handlerCtx(), fx.enqueueParams(1))
 	require.NoError(t, err)
 	require.Equal(t, StatusUnknownNeedsVerify, row.Status, "a possibly-sent charge must verify, never blind-retry")
 	assert.Equal(t, "past_due", string(fx.subscription(t).Status), "no lifecycle change while unresolved")
 
 	// A successful empty search is inconclusive and cannot re-arm execution.
 	fake.charged.Store(false)
-	_, err = fx.db.Pool().Exec(context.Background(), "UPDATE billing.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
+	_, err = fx.db.Pool().Exec(fx.handlerCtx(), "UPDATE billing.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
 	require.NoError(t, err)
-	_, err = fx.rebillRunner(client, fullModeConfig()).RunVerifyOnce(context.Background())
+	_, err = fx.rebillRunner(client, fullModeConfig()).RunVerifyOnce(fx.handlerCtx())
 	require.NoError(t, err)
 	require.Equal(t, StatusUnknownNeedsVerify, fx.intentByID(t, row.ID).Status)
 	resumed := row
 	resumed.Attempts = 2
-	outcome := fx.rebillRunner(client, fullModeConfig()).Registry.Lookup(subscriptions.TypeManualRebill).Execute(context.Background(), resumed)
+	outcome := fx.rebillRunner(client, fullModeConfig()).Registry.Lookup(subscriptions.TypeManualRebill).Execute(fx.handlerCtx(), resumed)
 	require.Equal(t, OutcomeAmbiguous, outcome.Class)
 	require.EqualValues(t, 1, fake.saleCalls.Load())
 
 	// The charge actually landed at NMI.
 	fake.charged.Store(true)
-	_, err = fx.db.Pool().Exec(context.Background(),
+	_, err = fx.db.Pool().Exec(fx.handlerCtx(),
 		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
-	_, err = fx.rebillRunner(client, fullModeConfig()).RunVerifyOnce(context.Background())
+	_, err = fx.rebillRunner(client, fullModeConfig()).RunVerifyOnce(fx.handlerCtx())
 	require.NoError(t, err)
 
 	got := fx.intentByID(t, row.ID)
@@ -384,7 +384,7 @@ func TestManualRebillDeclineIsTerminalWithEvidence(t *testing.T) {
 	fake, client := newFakeNMIRebillGateway(t, fx)
 	fake.saleBody.Store("response=2&responsetext=Insufficient funds&response_code=202")
 
-	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(fx.handlerCtx(), fx.enqueueParams(1))
 	require.NoError(t, err)
 	assert.Equal(t, StatusFailedTerminal, row.Status)
 	assert.Contains(t, string(row.ResultEvidence), `"response_code": 202`)
@@ -400,19 +400,19 @@ func TestManualRebillRecoveredSubscriptionSupersedes(t *testing.T) {
 	fx := seedPastDueSubscription(t)
 	fake, client := newFakeNMIRebillGateway(t, fx)
 
-	row, err := fx.rebillRunner(client, limitedModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+	row, err := fx.rebillRunner(client, limitedModeConfig()).EnqueueAndExecute(fx.handlerCtx(), fx.enqueueParams(1))
 	require.NoError(t, err)
 	require.Equal(t, StatusPending, row.Status)
 
 	// The subscription recovers while the intent waits for full mode.
-	_, err = fx.db.Pool().Exec(context.Background(),
+	_, err = fx.db.Pool().Exec(fx.handlerCtx(),
 		"UPDATE billing.subscriptions SET status = 'active', next_retry_at = NULL WHERE id = $1", fx.subID)
 	require.NoError(t, err)
 
-	_, err = fx.db.Pool().Exec(context.Background(),
+	_, err = fx.db.Pool().Exec(fx.handlerCtx(),
 		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
-	_, err = fx.rebillRunner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	_, err = fx.rebillRunner(client, fullModeConfig()).RunExecuteOnce(fx.handlerCtx())
 	require.NoError(t, err)
 
 	got := fx.intentByID(t, row.ID)
@@ -428,7 +428,7 @@ func TestManualRebillPaidPeriodSupersedes(t *testing.T) {
 	fx := seedPastDueSubscription(t)
 	fake, client := newFakeNMIRebillGateway(t, fx)
 
-	_, err := fx.db.Pool().Exec(context.Background(), `
+	_, err := fx.db.Pool().Exec(fx.handlerCtx(), `
 		INSERT INTO billing.payments
 			(id, merchant_id, customer_id, price_id, subscription_id, rail, psp_id,
 			 transaction_id, amount, list_amount, currency, status, money_movement, purchased_at)
@@ -438,7 +438,7 @@ func TestManualRebillPaidPeriodSupersedes(t *testing.T) {
 		WHERE id = $4`, uuid.New(), "txn-renewal-"+uuid.NewString()[:8], fx.periodEnd, fx.subID)
 	require.NoError(t, err)
 
-	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(fx.handlerCtx(), fx.enqueueParams(1))
 	require.NoError(t, err)
 	assert.Equal(t, StatusFailedTerminal, row.Status)
 	assert.Contains(t, string(row.ResultEvidence), `"not_executed": true`)
@@ -457,13 +457,13 @@ func TestManualRebillWindowExpiryNeverFires(t *testing.T) {
 	expired := time.Now().Add(-time.Hour).UTC()
 	params.ExpiresAt = &expired
 
-	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), params)
+	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(fx.handlerCtx(), params)
 	require.NoError(t, err)
 	// The synchronous claim refuses expired intents; the executor sweep
 	// expires the row.
 	require.NotEqual(t, StatusSucceeded, row.Status)
 
-	_, err = fx.rebillRunner(client, fullModeConfig()).RunExecuteOnce(context.Background())
+	_, err = fx.rebillRunner(client, fullModeConfig()).RunExecuteOnce(fx.handlerCtx())
 	require.NoError(t, err)
 
 	got := fx.intentByID(t, row.ID)

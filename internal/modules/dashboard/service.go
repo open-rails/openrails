@@ -73,10 +73,15 @@ func (s *Service) AskConfigured() bool { return s.NLConfigured() && s.askEnabled
 // Get returns the merchant's saved dashboard, or the seeded default template
 // when none exists (usage widgets only if the merchant has usage activity).
 func (s *Service) Get(ctx context.Context) (*Dashboard, error) {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
 	q := s.db.Gen(ctx)
-	row, err := q.GetDashboardConfig(ctx)
+	row, err := q.GetDashboardConfig(ctx, queryMerchant.UUID())
 	if errors.Is(err, pgx.ErrNoRows) {
-		hasUsage, err := q.HasUsageActivity(ctx)
+		hasUsage, err := q.HasUsageActivity(ctx, queryMerchant.UUID())
 		if err != nil {
 			return nil, fmt.Errorf("dashboard: usage-activity probe: %w", err)
 		}

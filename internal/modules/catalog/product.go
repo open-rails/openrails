@@ -1,6 +1,8 @@
 package catalog
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"errors"
 	"fmt"
@@ -57,6 +59,14 @@ func productsFromGen(rows []gen.OpenrailsProduct) ([]*models.Product, error) {
 }
 
 func (s *ProductService) Create(ctx context.Context, product *models.Product) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	if product.MerchantID != uuid.Nil && product.MerchantID != mid.UUID() {
+		return fmt.Errorf("product merchant does not match the authorized merchant")
+	}
+	product.MerchantID = mid.UUID()
 	entSpec, err := models.ToJSONB(product.EntitlementsSpec)
 	if err != nil {
 		return err
@@ -92,7 +102,12 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product) er
 }
 
 func (s *ProductService) GetByID(ctx context.Context, id uuid.UUID) (*models.Product, error) {
-	row, err := s.db.Gen(ctx).GetProductByID(ctx, id)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
+	row, err := s.db.Gen(ctx).GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: queryMerchant.UUID(), ID: id})
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +115,12 @@ func (s *ProductService) GetByID(ctx context.Context, id uuid.UUID) (*models.Pro
 }
 
 func (s *ProductService) GetActive(ctx context.Context) ([]*models.Product, error) {
-	rows, err := s.db.Gen(ctx).ListActiveProducts(ctx)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
+	rows, err := s.db.Gen(ctx).ListActiveProducts(ctx, queryMerchant.UUID())
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +128,12 @@ func (s *ProductService) GetActive(ctx context.Context) ([]*models.Product, erro
 }
 
 func (s *ProductService) GetAll(ctx context.Context) ([]*models.Product, error) {
-	rows, err := s.db.Gen(ctx).ListAllProducts(ctx)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
+	rows, err := s.db.Gen(ctx).ListAllProducts(ctx, queryMerchant.UUID())
 	if err != nil {
 		return nil, err
 	}
@@ -133,13 +158,18 @@ func (s *ProductService) GetAllPaginated(ctx context.Context, limit, offset int)
 
 // GetPaginated applies identical filters to the count and page before slicing.
 func (s *ProductService) GetPaginated(ctx context.Context, filter ProductFilter, limit, offset int) ([]*models.Product, int64, error) {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, 0, queryScopeErr
+	}
+
 	q := s.db.Gen(ctx)
 	tierGroup := strings.TrimSpace(filter.TierGroup)
-	total, err := q.CountProductsFiltered(ctx, gen.CountProductsFilteredParams{Archived: filter.Archived, TierGroup: tierGroup})
+	total, err := q.CountProductsFiltered(ctx, gen.CountProductsFilteredParams{MerchantID: queryMerchant.UUID(), Archived: filter.Archived, TierGroup: tierGroup})
 	if err != nil {
 		return nil, 0, err
 	}
-	rows, err := q.ListProductsFiltered(ctx, gen.ListProductsFilteredParams{Archived: filter.Archived, TierGroup: tierGroup, PageLimit: productPageInt32(limit), PageOffset: productPageInt32(offset)})
+	rows, err := q.ListProductsFiltered(ctx, gen.ListProductsFilteredParams{MerchantID: queryMerchant.UUID(), Archived: filter.Archived, TierGroup: tierGroup, PageLimit: productPageInt32(limit), PageOffset: productPageInt32(offset)})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -160,7 +190,12 @@ func (s *ProductService) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (s *ProductService) GetByKey(ctx context.Context, key string) (*models.Product, error) {
-	row, err := s.db.Gen(ctx).GetProductByKey(ctx, key)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
+	row, err := s.db.Gen(ctx).GetProductByKey(ctx, gen.GetProductByKeyParams{MerchantID: queryMerchant.UUID(), Key: key})
 	if err != nil {
 		return nil, err
 	}
@@ -212,6 +247,11 @@ type ProductDefinitionUpdateParams struct {
 // distinguish omission from clearing nullable definitions; nil scalar pointers
 // leave their columns unchanged. A description of "" clears it.
 func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, params ProductDefinitionUpdateParams) (*models.Product, error) {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
 	entSpec, err := models.ToJSONB(params.EntitlementsSpec)
 	if err != nil {
 		return nil, err
@@ -224,7 +264,7 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 		}
 		rank = &value
 	}
-	row, err := s.db.Gen(ctx).PatchProduct(ctx, gen.PatchProductParams{
+	row, err := s.db.Gen(ctx).PatchProduct(ctx, gen.PatchProductParams{MerchantID: queryMerchant.UUID(),
 		ID: id, DisplayName: params.DisplayName,
 		Description: params.Description, SetDescription: params.Description != nil,
 		EntitlementsSpec: entSpec, SetEntitlements: params.SetEntitlements,

@@ -206,7 +206,7 @@ func collectionIntents(t *testing.T, pool *pgxpool.Pool, ctx context.Context, in
 	rows.Close()
 	out := make([]gen.OpenrailsRailIntent, 0, len(ids))
 	for _, id := range ids {
-		row, err := dbtest.Queries(pool).GetRailIntent(ctx, id)
+		row, err := dbtest.Queries(pool).GetRailIntent(ctx, gen.GetRailIntentParams{MerchantID: dbtest.TestMerchantID.UUID(), ID: id})
 		require.NoError(t, err)
 		out = append(out, row)
 	}
@@ -255,7 +255,7 @@ func latestBlockExpiry(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pa
 // charge states the instrument it was armed against.
 func frozenInstrumentOf(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pm uuid.UUID) charge.FrozenInstrument {
 	t.Helper()
-	row, err := dbtest.Queries(pool).GetPaymentMethodByID(ctx, pm)
+	row, err := dbtest.Queries(pool).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: dbtest.TestMerchantID.UUID(), ID: pm})
 	require.NoError(t, err)
 	return charge.FreezeInstrument(row)
 }

@@ -137,7 +137,7 @@ func (s *Service) CustodianScopeByID(ctx context.Context, id merchant.ID, custod
 	var row gen.OpenrailsCustodian
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		row, err = gen.New(tx).GetCustodian(ctx, custodianID)
+		row, err = gen.New(tx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: id.UUID(), ID: custodianID})
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
