@@ -93,7 +93,7 @@ var pendingNumericMoney = map[string]string{
 	"internal/modules/admission/spendgate/policy.go:Window.Limit limit":                                                                              notHTTPInternalRow,
 	"internal/modules/catalog/stripe_catalog.go:StripePrice.UnitAmount unit_amount":                                                                  notHTTPProviderWire,
 	"internal/modules/checkout/custodian_sale.go:CustodianSalePayload.AmountMicros amount_micros":                                                    notHTTPIntentPayload,
-	"internal/modules/checkout/initial_membership_intent.go:InitialMembershipPayload.AmountMicros amount_micros":                                   notHTTPIntentPayload,
+	"internal/modules/checkout/initial_membership_intent.go:InitialMembershipPayload.AmountMicros amount_micros":                                     notHTTPIntentPayload,
 	"internal/modules/checkout/stripe_tier_change_intent.go:StripeTierChangePayload.RecurringAmount recurring_amount":                                notHTTPIntentPayload,
 	"internal/modules/checkout/stripe_tier_change_intent.go:StripeTierChangePayload.AmountDueNow amount_due_now":                                     notHTTPIntentPayload,
 	"internal/modules/delinquency/service.go:Snapshot.OverdueAmount overdue_amount":                                                                  notHTTPInternalRow,

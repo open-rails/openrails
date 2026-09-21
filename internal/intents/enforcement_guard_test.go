@@ -117,7 +117,7 @@ var nameAmbiguousWrites = map[string]string{
 var allowedWriteCallers = map[string]string{
 	// --- the sanctioned executors: intent handlers -----------------------
 	"internal/modules/checkout/nmi_sale_intent.go:Execute":            "nmi_sale intent handler",
-	"internal/modules/checkout/initial_membership_intent.go:Execute":    "initial_membership intent handler",
+	"internal/modules/checkout/initial_membership_intent.go:Execute":  "initial_membership intent handler",
 	"internal/modules/checkout/nmi_upgrade_intent.go:advance":         "durable per-step upgrade handler",
 	"internal/intents/manual_rebill.go:Execute":                       "manual_rebill intent handler",
 	"internal/intents/refund.go:Execute":                              "nmi_refund intent handler",
