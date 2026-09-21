@@ -124,15 +124,21 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 		defer cancel()
 		return store.RecordProgress(wctx, in.ID, map[string]any{key: step})
 	}
+	receipt, receiptFound, err := intents.LoadCollectedReceipt(current)
+	if err != nil {
+		return intents.Ambiguous("invalid retained upgrade payment: " + err.Error())
+	}
+	if receiptFound && progress.refused() != nil {
+		return intents.Ambiguous("retained paid proration contradicts mutable refusal metadata")
+	}
+	if receiptFound && (progress.Successor == nil || progress.Successor.Enrollment == nil || progress.Successor.Enrollment.SubscriptionID == "" || progress.Proration == nil) {
+		return intents.Ambiguous("retained paid proration has incomplete predecessor step evidence")
+	}
 	if progress.Successor != nil && progress.Successor.Refusal != "" {
 		return intents.TerminalWithEvidence(progress.Successor.Refusal, evidence())
 	}
 	if progress.Proration != nil && progress.Proration.Refusal != "" {
 		return h.refusedProration(ctx, in, p, progress, evidence())
-	}
-	receipt, receiptFound, err := intents.LoadCollectedReceipt(current)
-	if err != nil {
-		return intents.Ambiguous("invalid retained upgrade payment: " + err.Error())
 	}
 	var client *nmi.NMIClient
 	needsClient := progress.Successor == nil || (progress.Successor.Enrollment != nil && p.ProrationAmount > 0 && !receiptFound)
@@ -315,6 +321,9 @@ func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsR
 	client, err := h.Checkout.resolveNMIClient(db.WithPSPID(ctx, *in.PspID), nmiIntentClientName(p.PSP, in.Rail))
 	if err != nil {
 		return intents.Outcome{}, fmt.Errorf("resolve nmi client: %w", err)
+	}
+	if client == nil {
+		return intents.Outcome{}, intents.RejectResolution("provider account reader is unavailable")
 	}
 	owner, account := client.AccountIdentity()
 	if owner != in.MerchantID || account != *in.PspID {

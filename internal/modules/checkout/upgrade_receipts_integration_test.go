@@ -97,6 +97,14 @@ func TestUpgradeReceiptsRestartAfterLocalRollback(t *testing.T) {
 	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT count(*) FROM openrails.payments WHERE customer_id=$1`, old.CustomerID).Scan(&count))
 	require.Zero(t, count)
 	remove()
+	// A legacy progress writer cannot demote retained paid custody into an unpaid
+	// successor cancellation. Contradiction remains unresolved with no local effects.
+	bad := *journal.Proration
+	bad.Refusal = "contradictory later metadata"
+	require.NoError(t, intents.NewStore(fx.db).RecordProgress(fx.ctx, in.ID, map[string]any{"proration": &bad}))
+	require.Equal(t, intents.StatusUnknownNeedsVerify, fx.restartAndVerify(t).Status)
+	require.Zero(t, fx.count(t, `SELECT count(*) FROM openrails.subscriptions WHERE price_id=$1`, fx.newPrice.ID))
+	require.NoError(t, intents.NewStore(fx.db).RecordProgress(fx.ctx, in.ID, map[string]any{"proration": journal.Proration}))
 	// Replay cannot consult mutable provider credentials or recalculate pricing.
 	fx.svc.ResolveNMIClientOverride = func(context.Context, string) (*nmi.NMIClient, error) {
 		return nil, errors.New("provider unavailable after receipt")
@@ -393,6 +401,16 @@ func TestUpgradeUnknownSuccessorResolvesOnlyFromExactReceipt(t *testing.T) {
 // An exact transaction still needs operation correlation. Empty search or an
 // operator assertion cannot release an already-submitted non-idempotent sale.
 func TestUpgradeUnknownProrationResolution(t *testing.T) {
+	t.Run("unavailable account", func(t *testing.T) {
+		fx := newUpgradeAdoptFixture(t)
+		fx.positiveProration()
+		fx.gateway.saleMode.Store("ambiguousHidden")
+		fx.upgradeProcessing(t)
+		fx.svc.ResolveNMIClientOverride = func(context.Context, string) (*nmi.NMIClient, error) { return nil, nil }
+		_, err := fx.resolve(t, intents.Resolution{Step: "proration", ProviderReference: fx.gateway.saleTxn, Actor: "ops", Reason: "account unavailable"})
+		require.ErrorIs(t, err, intents.ErrResolutionRejected)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, fx.operation(t).Status)
+	})
 	t.Run("exact receipt", func(t *testing.T) {
 		fx := newUpgradeAdoptFixture(t)
 		fx.positiveProration()
