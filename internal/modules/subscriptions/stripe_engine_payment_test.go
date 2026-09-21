@@ -328,3 +328,34 @@ func TestStripeEngineReversalRetainsOriginalCapture(t *testing.T) {
 		})
 	}
 }
+
+func TestStripeEngineCustomerRetryKeepsRecurringAgreement(t *testing.T) {
+	s, p := engineFixture()
+	p.Initial = false
+	p.CustomerInitiated = true
+	p.Instrument.StoredCredentialRecurringRef = "pi_original"
+	installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+		if r.Method == "POST" {
+			b, _ := io.ReadAll(r.Body)
+			v, _ := url.ParseQuery(string(b))
+			if v.Get("off_session") != "false" || v.Has("setup_future_usage") || v.Get("metadata[openrails_customer_retry]") != "true" || v.Get("metadata[openrails_agreement]") != "pi_original" {
+				t.Fatalf("retry changed recurring agreement or initiation: %s", b)
+			}
+		}
+		if r.URL.Path == "/v1/charges/ch_fixture" {
+			return engineResponse(200, engineCharge(p)), nil
+		}
+		return engineResponse(200, enginePI(p)), nil
+	})
+	r, err := s.CreateEnginePayment(context.Background(), p)
+	if err != nil || r.State != StripeEngineSucceeded || r.Receipt == nil {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if err := r.Receipt.Matches(p); err != nil {
+		t.Fatal(err)
+	}
+	p.CustomerInitiated = false
+	if err := r.Receipt.Matches(p); err == nil {
+		t.Fatal("customer retry receipt accepted for a merchant instruction")
+	}
+}

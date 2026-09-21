@@ -24,6 +24,8 @@ import (
 // Initial requires customer-present recurring consent. Later payments require the
 // previously qualified initial PaymentIntent in the instrument's recurring anchor.
 type StripeEnginePaymentParams struct {
+	CustomerInitiated bool // explicit customer retry of an existing recurring agreement
+
 	MerchantID, PSPID, CustomerID, OperationID uuid.UUID
 	Instrument                                 charge.FrozenInstrument
 	AmountMinor                                moneyutil.Cents
@@ -42,6 +44,7 @@ const (
 
 // No client secret is persisted in results, receipts, logs or ledger evidence.
 type StripeEnginePaymentResult struct {
+	DeclineCode     string                   `json:"decline_code,omitempty"`
 	State           StripeEnginePaymentState `json:"state"`
 	PaymentIntentID string                   `json:"payment_intent_id"`
 	FailureCode     string                   `json:"failure_code,omitempty"`
@@ -49,6 +52,7 @@ type StripeEnginePaymentResult struct {
 }
 
 type StripeEngineReceipt struct {
+	CustomerInitiated   bool            `json:"customer_initiated,omitempty"`
 	RefundedAmountMinor moneyutil.Cents `json:"refunded_amount_minor,string,omitempty"`
 	Refunded            bool            `json:"refunded,omitempty"`
 	Disputed            bool            `json:"disputed,omitempty"`
@@ -66,6 +70,9 @@ type StripeEngineReceipt struct {
 }
 
 func (p StripeEnginePaymentParams) validate() error {
+	if p.Initial && p.CustomerInitiated {
+		return errors.New("initial enrollment cannot be a customer retry")
+	}
 	if p.MerchantID == uuid.Nil || p.PSPID == uuid.Nil || p.CustomerID == uuid.Nil || p.OperationID == uuid.Nil || p.Instrument.PSPID != p.PSPID || p.Instrument.Custodian != models.CustodianPSP || p.Instrument.CustodianID != nil || !stripeEngineID(p.Instrument.RailCustomerRef, "cus_") || !stripeEngineID(p.Instrument.RailMethodRef, "pm_") || p.AmountMinor <= 0 || p.AmountMinor > 99999999 {
 		return errors.New("incomplete Stripe engine operation binding")
 	}
@@ -100,7 +107,11 @@ func (s *StripeService) engineScoped(p StripeEnginePaymentParams) (*StripeServic
 	return &scoped, nil
 }
 func (p StripeEnginePaymentParams) metadata() map[string]string {
-	return map[string]string{"openrails_engine_operation": p.OperationID.String(), "openrails_merchant": p.MerchantID.String(), "openrails_psp": p.PSPID.String(), "openrails_customer": p.CustomerID.String(), "openrails_initial": strconv.FormatBool(p.Initial), "openrails_agreement": p.Instrument.StoredCredentialRecurringRef}
+	values := map[string]string{"openrails_engine_operation": p.OperationID.String(), "openrails_merchant": p.MerchantID.String(), "openrails_psp": p.PSPID.String(), "openrails_customer": p.CustomerID.String(), "openrails_initial": strconv.FormatBool(p.Initial), "openrails_agreement": p.Instrument.StoredCredentialRecurringRef}
+	if p.CustomerInitiated {
+		values["openrails_customer_retry"] = "true"
+	}
+	return values
 }
 
 // CreateEnginePayment is called only by the unique durable submission-fence
@@ -111,7 +122,7 @@ func (s *StripeService) CreateEnginePayment(ctx context.Context, p StripeEngineP
 	if err != nil {
 		return StripeEnginePaymentResult{}, fmt.Errorf("%w: %v", charge.ErrNotDispatched, err)
 	}
-	v := url.Values{"amount": {strconv.FormatInt(int64(p.AmountMinor), 10)}, "currency": {strings.ToLower(p.Currency)}, "customer": {p.Instrument.RailCustomerRef}, "payment_method": {p.Instrument.RailMethodRef}, "payment_method_types[]": {"card"}, "confirm": {"true"}, "capture_method": {"automatic"}, "confirmation_method": {"automatic"}, "off_session": {strconv.FormatBool(!p.Initial)}}
+	v := url.Values{"amount": {strconv.FormatInt(int64(p.AmountMinor), 10)}, "currency": {strings.ToLower(p.Currency)}, "customer": {p.Instrument.RailCustomerRef}, "payment_method": {p.Instrument.RailMethodRef}, "payment_method_types[]": {"card"}, "confirm": {"true"}, "capture_method": {"automatic"}, "confirmation_method": {"automatic"}, "off_session": {strconv.FormatBool(!p.Initial && !p.CustomerInitiated)}}
 	if p.Initial {
 		v.Set("setup_future_usage", "off_session")
 	}
@@ -284,6 +295,12 @@ func (s *StripeService) engineResult(ctx context.Context, p StripeEnginePaymentP
 	case "canceled":
 		r.State = StripeEngineDeclined
 		r.FailureCode = "canceled"
+		if pi.LastPaymentError != nil {
+			r.DeclineCode = pi.LastPaymentError.DeclineCode
+			if r.DeclineCode == "" {
+				r.DeclineCode = pi.LastPaymentError.Code
+			}
+		}
 	case "succeeded":
 		if pi.AmountReceived != int64(p.AmountMinor) {
 			return r, errors.New("Stripe received amount differs from accepted amount")
@@ -324,7 +341,7 @@ func (s *StripeService) engineReceipt(ctx context.Context, p StripeEnginePayment
 	if json.Unmarshal(body, &ch) != nil || ch.ID != ref || ch.Amount != int64(p.AmountMinor) || ch.AmountCaptured != int64(p.AmountMinor) || !strings.EqualFold(ch.Currency, p.Currency) || rawID(ch.Customer) != p.Instrument.RailCustomerRef || ch.PaymentMethod != p.Instrument.RailMethodRef || rawID(ch.PaymentIntent) != pi.ID || ch.Status != "succeeded" || !ch.Paid || !ch.Captured || ch.AmountRefunded < 0 || ch.AmountRefunded > ch.Amount || (ch.Refunded && ch.AmountRefunded != ch.Amount) {
 		return StripeEngineReceipt{}, errors.New("Stripe engine captured charge does not match accepted payment")
 	}
-	return StripeEngineReceipt{PaymentIntentID: pi.ID, ChargeID: ref, CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef, AmountMinor: p.AmountMinor, Currency: p.Currency, MerchantID: p.MerchantID, PSPID: p.PSPID, CustomerID: p.CustomerID, OperationID: p.OperationID, Initial: p.Initial, RefundedAmountMinor: moneyutil.Cents(ch.AmountRefunded), Refunded: ch.Refunded, Disputed: ch.Disputed}, nil
+	return StripeEngineReceipt{PaymentIntentID: pi.ID, ChargeID: ref, CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef, AmountMinor: p.AmountMinor, Currency: p.Currency, MerchantID: p.MerchantID, PSPID: p.PSPID, CustomerID: p.CustomerID, OperationID: p.OperationID, Initial: p.Initial, CustomerInitiated: p.CustomerInitiated, RefundedAmountMinor: moneyutil.Cents(ch.AmountRefunded), Refunded: ch.Refunded, Disputed: ch.Disputed}, nil
 }
 func (r StripeEngineReceipt) Matches(p StripeEnginePaymentParams) error {
 	if err := p.validate(); err != nil {
@@ -333,7 +350,7 @@ func (r StripeEngineReceipt) Matches(p StripeEnginePaymentParams) error {
 	if r.RefundedAmountMinor < 0 || r.RefundedAmountMinor > r.AmountMinor || (r.Refunded && r.RefundedAmountMinor != r.AmountMinor) {
 		return errors.New("Stripe charge reversal facts are inconsistent")
 	}
-	if !stripeEngineID(r.PaymentIntentID, "pi_") || !stripeEngineID(r.ChargeID, "ch_") || r.CustomerRef != p.Instrument.RailCustomerRef || r.MethodRef != p.Instrument.RailMethodRef || r.AmountMinor != p.AmountMinor || r.Currency != p.Currency || r.MerchantID != p.MerchantID || r.PSPID != p.PSPID || r.CustomerID != p.CustomerID || r.OperationID != p.OperationID || r.Initial != p.Initial {
+	if !stripeEngineID(r.PaymentIntentID, "pi_") || !stripeEngineID(r.ChargeID, "ch_") || r.CustomerRef != p.Instrument.RailCustomerRef || r.MethodRef != p.Instrument.RailMethodRef || r.AmountMinor != p.AmountMinor || r.Currency != p.Currency || r.MerchantID != p.MerchantID || r.PSPID != p.PSPID || r.CustomerID != p.CustomerID || r.OperationID != p.OperationID || r.Initial != p.Initial || r.CustomerInitiated != p.CustomerInitiated {
 		return errors.New("Stripe engine receipt differs from accepted operation")
 	}
 	return nil
@@ -402,6 +419,9 @@ func (s *StripeService) FinalizeEngineDecline(ctx context.Context, p StripeEngin
 	}
 	if !found || canceled.State != StripeEngineDeclined || canceled.FailureCode != "canceled" {
 		return canceled, errors.New("Stripe engine decline remains executable")
+	}
+	if canceled.DeclineCode == "" {
+		canceled.DeclineCode = result.FailureCode
 	}
 	return canceled, nil
 }

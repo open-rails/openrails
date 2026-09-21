@@ -14,6 +14,7 @@ import (
 const stripeRecurringDeclineKey = "stripe_recurring_decline"
 
 type stripeRecurringDecline struct {
+	DeclineCode     string         `json:"decline_code,omitempty"`
 	Binding         receiptBinding `json:"binding"`
 	FailureCode     string         `json:"failure_code"`
 	PaymentIntentID string         `json:"payment_intent_id"`
@@ -51,7 +52,11 @@ func LoadStripeRecurringDecline(in gen.OpenrailsRailIntent) (string, string, boo
 			return "", "", true, errors.New("Stripe recurring refusal contradicts retained provider custody")
 		}
 	}
-	return fact.FailureCode, fact.PaymentIntentID, true, nil
+	code := fact.DeclineCode
+	if code == "" {
+		code = fact.FailureCode
+	}
+	return code, fact.PaymentIntentID, true, nil
 }
 func (s *Store) RetainStripeRecurringDecline(ctx context.Context, in gen.OpenrailsRailIntent, service *subscriptions.StripeService, reference string) error {
 	if in.IntentType != subscriptions.TypeSubscriptionCollection {
@@ -75,7 +80,7 @@ func (s *Store) RetainStripeRecurringDecline(ctx context.Context, in gen.Openrai
 	if err != nil {
 		return err
 	}
-	fact := stripeRecurringDecline{binding, result.FailureCode, result.PaymentIntentID}
+	fact := stripeRecurringDecline{Binding: binding, FailureCode: result.FailureCode, PaymentIntentID: result.PaymentIntentID, DeclineCode: result.DeclineCode}
 	current, err := s.retainQualifiedEvidence(ctx, in, stripeRecurringDeclineKey, fact)
 	if err != nil {
 		return err
