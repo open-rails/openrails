@@ -29,15 +29,16 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/testfixture"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
 
-// Engine rows are explicit internal fixtures: public engine enrollment and a
-// collection executor are not enabled. Customer requests use the actual Client,
-// HTTP authentication, durable River job and production lifecycle worker.
+// The lifecycle matrix uses explicit internal prior agreements; cases admitting
+// a charge build their paid predecessor through the real initial workflow.
+// Cancellation/resume uses actual Client/HTTP authentication and River workers.
 func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
 	var receiptMu sync.Mutex
@@ -197,12 +198,19 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 				remote = "native-" + id.String()
 			}
 			method := uuid.New()
-			_, err := pool.Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,stored_credential_recurring_ref,initial_transaction_id) VALUES($1,$2,$3,$4,'nmi','hyperswitch',$5,$6,$7,'synthetic-recurring','synthetic-initial')`, method, owned.MerchantID.UUID(), user, psp, custodian, "customer-"+method.String(), "method-"+method.String())
+			_, err := pool.Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,stored_credential_recurring_ref,initial_transaction_id,charge_via) VALUES($1,$2,$3,$4,'nmi','hyperswitch',$5,$6,$7,'synthetic-recurring','synthetic-initial','pan_proxy')`, method, owned.MerchantID.UUID(), user, psp, custodian, "customer-"+method.String(), "method-"+method.String())
 			require.NoError(t, err)
-			_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,collection_policy,rail_subscription_id,status,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot,payment_method_id) VALUES($1,$2,$3,$4,$5,$6,'nmi',$7,$8,'active',$9,$10,'{"engine_access":null}',$11)`, id, owned.MerchantID.UUID(), user, product.ID.UUID(), price.ID.UUID(), psp, policy, remote, end.Add(-720*time.Hour), end, method)
-			require.NoError(t, err)
-			_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: user.String(), Entitlement: "engine_access", Indefinite: true, SourceType: models.EntitlementSourceSubscription, SourceID: id})
-			require.NoError(t, err)
+			if pastDue || maintenance {
+				require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(c context.Context) error {
+					testfixture.EngineMembership(t, c, rt.DB, subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: id, PaymentID: uuid.New(), CustomerID: user, PSPID: psp, ProductID: product.ID.UUID(), PriceID: price.ID.UUID(), PaymentMethodID: method, ProductName: "Lifecycle", Amount: 9_990_000, RecurringAmount: 9_990_000, Currency: "USD", AcceptedAt: end.Add(-720 * time.Hour), PeriodStart: end.Add(-720 * time.Hour), PeriodEnd: end, Entitlements: map[string]*int{"engine_access": nil}})
+					return nil
+				}))
+			} else {
+				_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,collection_policy,rail_subscription_id,status,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot,payment_method_id) VALUES($1,$2,$3,$4,$5,$6,'nmi',$7,$8,'active',$9,$10,'{"engine_access":null}',$11)`, id, owned.MerchantID.UUID(), user, product.ID.UUID(), price.ID.UUID(), psp, policy, remote, end.Add(-720*time.Hour), end, method)
+				require.NoError(t, err)
+				_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: user.String(), Entitlement: "engine_access", Indefinite: true, SourceType: models.EntitlementSourceSubscription, SourceID: id})
+				require.NoError(t, err)
+			}
 			var operation uuid.UUID
 			var payload []byte
 			if pastDue || maintenance {
@@ -211,7 +219,8 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 				accepted, err := rt.MoneyService.AdmitDueSubscriptionCollection(ctx, id, now)
 				require.NoError(t, err)
 				operation, payload = accepted.ID, accepted.Payload
-				// No executor exists: uncertainty is explicitly synthetic.
+				// This cancellation control deliberately models an uncertain accepted
+				// attempt; real lost-reply execution is qualified separately.
 				_, err = pool.Exec(ctx, `UPDATE billing.rail_intents SET status='unknown_needs_verify',result_evidence='{"submission":"synthetic uncertainty"}' WHERE id=$1`, operation)
 				require.NoError(t, err)
 			}
@@ -276,7 +285,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 					outcome := money.NewSubscriptionCollectionHandler(rt.DB, rt.CollectionResolver, rt.Config, rt.Clock).Verify(ctx, accepted)
 					require.Equal(t, intents.OutcomeSucceeded, outcome.Class, outcome.Reason)
 					var paid int
-					require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND status='completed'`, id).Scan(&paid))
+					require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND attempt_kind='renewal' AND status='completed'`, id).Scan(&paid))
 					require.Equal(t, 1, paid)
 				}
 				if !resolvedDelete {
