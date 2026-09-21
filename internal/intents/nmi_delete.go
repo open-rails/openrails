@@ -32,7 +32,7 @@ var errNMIDeleteTargetChanged = errors.New("NMI delete target binding changed; h
 // must still match before any new provider request; there is no current-row fallback.
 type NMIDeletePayload struct {
 	UserID             string `json:"user_id"`
-	RailSubscriptionID string `json:"rail_subscription_id,omitempty"`
+	RailSubscriptionID string `json:"rail_subscription_id"`
 }
 
 // NMIDeleteIdempotencyKey names one exact provider target. Re-canceling that
@@ -140,14 +140,6 @@ func (h *NMIDeleteHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 		return Parked("subscription is no longer awaiting this deletion")
 	}
 	psid := strings.TrimSpace(sub.RailSubscriptionID)
-	if psid == "" {
-		// Nothing exists remotely to delete; finalize locally.
-		if err := h.finalize(ctx, intent); err != nil {
-			return Ambiguous("no rail subscription id, but local finalize failed: " + err.Error())
-		}
-		return Succeeded(map[string]any{"no_rail_subscription_id": true})
-	}
-
 	// Verify-then-execute: absent = success.
 	present, err := h.subscriptionPresent(ctx, client, psid)
 	if err != nil {
@@ -199,12 +191,6 @@ func (h *NMIDeleteHandler) Verify(ctx context.Context, intent gen.OpenrailsRailI
 		return Ambiguous(fmt.Sprintf("nmi rail not armed for provider %q; cannot verify", intent.Rail))
 	}
 	psid := strings.TrimSpace(sub.RailSubscriptionID)
-	if psid == "" {
-		if err := h.finalize(ctx, intent); err != nil {
-			return Ambiguous("no rail subscription id, but local finalize failed: " + err.Error())
-		}
-		return Succeeded(map[string]any{"no_rail_subscription_id": true})
-	}
 	present, err := h.subscriptionPresent(ctx, client, psid)
 	if err != nil {
 		return Ambiguous("provider read failed: " + err.Error())
