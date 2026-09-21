@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/authkit/ratelimit"
-	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/config"
 	billingauthkit "github.com/open-rails/openrails/embed/authkit"
@@ -291,12 +290,7 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 		return fmt.Errorf("build control plane: %w", err)
 	}
 
-	if err := a.Runtime.AddRiverConfigurer(func(ctx context.Context, riverConfig *river.Config) error {
-		if err := cp.Core().RegisterRiver(riverConfig); err != nil {
-			return err
-		}
-		return cp.Core().Start(ctx) // host-owned: validates registration, starts nothing
-	}); err != nil {
+	if err := a.Runtime.AddRiverContribution(cp.Core().RiverJobs()); err != nil {
 		cp.Close()
 		if ownedPool {
 			pool.Close()
