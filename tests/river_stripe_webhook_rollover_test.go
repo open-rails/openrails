@@ -10,6 +10,7 @@ package tests
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,11 +18,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -53,7 +56,7 @@ func newFakeStripeWebhookAPI(t *testing.T) *fakeStripeWebhookAPI {
 		for _, e := range f.endpoints {
 			data = append(data, e)
 		}
-		writeJSON(w, map[string]any{"object": "list", "data": data, "has_more": false})
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": data, "has_more": false})
 	})
 	mux.HandleFunc("POST /v1/webhook_endpoints", func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
@@ -74,7 +77,7 @@ func newFakeStripeWebhookAPI(t *testing.T) *fakeStripeWebhookAPI {
 		for k, v := range ep {
 			out[k] = v
 		}
-		writeJSON(w, out)
+		_ = json.NewEncoder(w).Encode(out)
 	})
 	mux.HandleFunc("POST /v1/webhook_endpoints/{id}", func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
@@ -99,7 +102,7 @@ func newFakeStripeWebhookAPI(t *testing.T) *fakeStripeWebhookAPI {
 		if u := r.PostForm.Get("url"); u != "" {
 			ep["url"] = u
 		}
-		writeJSON(w, ep)
+		_ = json.NewEncoder(w).Encode(ep)
 	})
 	mux.HandleFunc("DELETE /v1/webhook_endpoints/{id}", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -107,7 +110,7 @@ func newFakeStripeWebhookAPI(t *testing.T) *fakeStripeWebhookAPI {
 		id := r.PathValue("id")
 		delete(f.endpoints, id)
 		f.deletes = append(f.deletes, id)
-		writeJSON(w, map[string]any{"id": id, "deleted": true})
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "deleted": true})
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("fake stripe: unexpected request %s %s", r.Method, r.URL.Path)
@@ -116,8 +119,7 @@ func newFakeStripeWebhookAPI(t *testing.T) *fakeStripeWebhookAPI {
 
 	f.server = httptest.NewServer(mux)
 	t.Cleanup(f.server.Close)
-	stripeapi.SetBaseTransport(hostRewriteTransport{target: f.server.URL})
-	t.Cleanup(func() { stripeapi.SetBaseTransport(nil) })
+	t.Cleanup(stripeapi.InstallBaseTransport(stripeapi.HostRewriteTransport(f.server.URL)))
 	return f
 }
 
@@ -136,30 +138,36 @@ func (f *fakeStripeWebhookAPI) snapshot() (creates int, deletes []string, live m
 // switch even after the overlap window has expired.
 func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 	fake := newFakeStripeWebhookAPI(t)
-	suite := setupTestSuite(t)
-	suite.Config.APIURL = "https://api.openrails-e2e.example.com"
-
-	ctx := suite.MerchantCtx()
-	env := config.ExpectedProviderEnvironment(suite.Config.IsTestMode())
-	const accountID = "acct_rollover_856"
-	suite.seedPSPWithEvidence(ctx, "stripe", env, accountID, "")
-	// The suite's merchant is SHARED with every other test in this package:
-	// leave no psps row behind for the next one to reconcile.
-	t.Cleanup(func() { dropPSP(t, suite, accountID) })
-
-	secretsStore := suite.App.Runtime.Merchants.Secrets()
-	keyName, err := merchants.PSPSecretName("stripe", env, accountID, "secret_key")
-	require.NoError(t, err)
-	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, keyName, "sk_test_856")
-	require.NoError(t, err)
+	h := integrationharness.New(t, t.Context())
+	surface := h.StartStandalone("USD", integrationharness.WithConfig(func(cfg *config.Config) {
+		cfg.APIURL = "https://api.openrails-e2e.example.com"
+		cfg.MerchantSource = config.MerchantSourceAPI
+		cfg.SecretBackend = config.SecretBackendDB
+	}))
+	owned := surface.ProvisionOwnedMerchant("rollover-" + uuid.NewString()[:8])
+	rt := surface.App().Runtime
+	ctx := merchant.WithID(t.Context(), owned.MerchantID)
+	env := config.ExpectedProviderEnvironment(rt.Config.IsTestMode())
+	accountID := "acct_rollover_" + uuid.NewString()
+	integrationharness.SeedPSPs(ctx, t, rt, owned.MerchantID, config.PSPSet{"stripe": {Rail: "stripe", AccountID: accountID, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_856", WebhookSigningSecret: "whsec_on_the_old_endpoint"}}})
+	pool := h.MerchantPool(owned.MerchantID.UUID())
+	t.Cleanup(func() {
+		_, err := pool.Exec(context.Background(), `UPDATE billing.psps SET archived=true WHERE merchant_id=$1 AND account_id=$2`, owned.MerchantID.UUID(), accountID)
+		require.NoError(t, err)
+	})
+	gate := destructive.New(rt.DB)
+	var previousSwitch bool
+	require.NoError(t, pool.QueryRow(ctx, `SELECT enabled FROM billing.destructive_action_switch`).Scan(&previousSwitch))
+	require.NoError(t, gate.SetSwitch(ctx, false, "rollover-test", "hold retirement"))
+	t.Cleanup(func() {
+		require.NoError(t, gate.SetSwitch(context.Background(), previousSwitch, "rollover-test", "restore fixture state"))
+	})
+	secretsStore := rt.Merchants.Secrets()
 	webhookName, err := merchants.PSPSecretName("stripe", env, accountID, "webhook_signing_secret")
-	require.NoError(t, err)
-	_, err = suite.App.Runtime.Merchants.PutCredential(ctx, dbtest.TestMerchantID, webhookName, "whsec_on_the_old_endpoint")
 	require.NoError(t, err)
 	previousName, err := merchants.PSPSecretName("stripe", env, accountID, "webhook_signing_secret_previous")
 	require.NoError(t, err)
-
-	wantURL := "https://api.openrails-e2e.example.com/v1/merchants/" + dbtest.TestMerchantSlug + "/webhooks/stripe/" + accountID
+	wantURL := "https://api.openrails-e2e.example.com/v1/merchants/" + owned.MerchantSlug + "/webhooks/stripe/" + accountID
 	fake.endpoints["we_old"] = map[string]any{
 		"id": "we_old", "object": "webhook_endpoint", "status": "enabled",
 		"url": wantURL, "api_version": "2020-01-01", "created": int64(1),
@@ -169,7 +177,7 @@ func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 
 	now := time.Now().UTC()
 	worker := riverjobs.StripeWebhookReconcileWorker{
-		DB: suite.App.Runtime.DB, Config: suite.Config, Merchants: suite.App.Runtime.Merchants,
+		DB: rt.DB, Config: rt.Config, Merchants: rt.Merchants,
 		Now:           func() time.Time { return now },
 		RetireOverlap: time.Hour,
 	}
@@ -186,15 +194,15 @@ func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 
 	// The new secret is primary and the outgoing one is retained, so deliveries
 	// already queued on the superseded endpoint still verify: no gap.
-	cur, err := secretsStore.Get(ctx, dbtest.TestMerchantID, webhookName)
+	cur, err := secretsStore.Get(ctx, owned.MerchantID, webhookName)
 	require.NoError(t, err)
 	require.NotEqual(t, "whsec_on_the_old_endpoint", cur.Value)
-	prev, err := secretsStore.Get(ctx, dbtest.TestMerchantID, previousName)
+	prev, err := secretsStore.Get(ctx, owned.MerchantID, previousName)
 	require.NoError(t, err)
 	require.Equal(t, "whsec_on_the_old_endpoint", prev.Value)
 
 	// The rollover raised an operator finding rather than self-deleting.
-	require.Contains(t, openWebhookFinding(t, suite, accountID), "STILL ENABLED")
+	require.Contains(t, openWebhookFinding(t, rt.DB, owned.MerchantID, accountID), "STILL ENABLED")
 
 	// PASS 2 — past the overlap, kill switch still OFF (the fail-closed default):
 	// the destructive half stays halted.
@@ -204,11 +212,11 @@ func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 	require.Equal(t, 1, creates, "no second rollover — the pass is idempotent")
 	require.Empty(t, deletes, "kill switch OFF halts every delete in this worker")
 	require.Contains(t, live, "we_old")
-	require.Contains(t, openWebhookFinding(t, suite, accountID), "kill switch is off")
+	require.Contains(t, openWebhookFinding(t, rt.DB, owned.MerchantID, accountID), "kill switch is off")
 
 	// PASS 3 — operator arms the switch: the superseded endpoint retires, its
 	// secret is dropped, and the finding closes.
-	require.NoError(t, destructive.New(suite.App.Runtime.DB).SetSwitch(
+	require.NoError(t, destructive.New(rt.DB).SetSwitch(
 		context.Background(), true, "or856-test", "arm for retirement"))
 	require.NoError(t, worker.Work(context.Background(), job))
 	creates, deletes, live = fake.snapshot()
@@ -216,25 +224,25 @@ func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 	require.Equal(t, []string{"we_old"}, deletes, "only the already-replaced endpoint is removed")
 	require.NotContains(t, live, "we_old")
 	require.Len(t, live, 1, "the successor is still there — never left unreachable")
-	_, err = secretsStore.Get(ctx, dbtest.TestMerchantID, previousName)
+	_, err = secretsStore.Get(ctx, owned.MerchantID, previousName)
 	require.ErrorIs(t, err, merchants.ErrSecretNotFound)
-	require.Empty(t, openWebhookFinding(t, suite, accountID), "the finding auto-resolves")
+	require.Empty(t, openWebhookFinding(t, rt.DB, owned.MerchantID, accountID), "the finding auto-resolves")
 }
 
 // openWebhookFinding returns the recommended action of the open managed-endpoint
 // finding for this account, or "" when there is none.
-func openWebhookFinding(t *testing.T, suite *TestContainerSuite, accountID string) string {
+func openWebhookFinding(t *testing.T, database *db.DB, mid merchant.ID, accountID string) string {
 	t.Helper()
 	var action string
-	err := suite.App.Runtime.DB.RunInMerchantConn(
-		merchant.WithID(context.Background(), dbtest.TestMerchantID),
+	err := database.RunInMerchantConn(
+		merchant.WithID(context.Background(), mid),
 		func(ctx context.Context) error {
-			row := suite.App.Runtime.DB.Qx(ctx).QueryRow(ctx, `
+			row := database.Qx(ctx).QueryRow(ctx, `
 				SELECT COALESCE(recommended_action, '')
 				  FROM billing.reconciliation_findings
 				 WHERE merchant_id = $1::uuid AND finding_type = $2 AND subject_key = $3
 				   AND status IN ('reconcile_required', 'requires_review')
-			`, dbtest.TestMerchantID.String(), riverjobs.FindingStripeWebhookEndpoint, "stripe:"+accountID)
+			`, mid.String(), riverjobs.FindingStripeWebhookEndpoint, "stripe:"+accountID)
 			if err := row.Scan(&action); err != nil {
 				action = ""
 			}
@@ -242,12 +250,4 @@ func openWebhookFinding(t *testing.T, suite *TestContainerSuite, accountID strin
 		})
 	require.NoError(t, err)
 	return action
-}
-
-// dropPSP removes a psps row seeded by this test from the shared suite merchant.
-func dropPSP(t *testing.T, suite *TestContainerSuite, accountID string) {
-	t.Helper()
-	_, err := suite.Pool.Exec(context.Background(),
-		`DELETE FROM billing.psps WHERE account_id = $1`, accountID)
-	require.NoError(t, err)
 }
