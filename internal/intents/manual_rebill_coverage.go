@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -13,7 +15,7 @@ import (
 // Accepted operation intervals govern their payments regardless of when local
 // recovery wrote PurchasedAt. Unattributed provider observations retain only the
 // existing conservative timestamp refusal, not a claim of exact coverage.
-func rebillPaymentAlreadyObserved(ctx context.Context, d *db.DB, merchantID uuid.UUID, target ManualRebillPayload) (bool, error) {
+func rebillPaymentAlreadyObserved(ctx context.Context, d *db.DB, merchantID uuid.UUID, target subscriptions.ManualRebillPayload) (bool, error) {
 	rows, err := d.Gen(ctx).ListCompletedManualRebillPaymentCoverage(ctx, gen.ListCompletedManualRebillPaymentCoverageParams{MerchantID: merchantID, SubscriptionID: target.Renewal.SubscriptionID, PspID: target.Instrument.PSPID})
 	if err != nil {
 		return false, err
@@ -32,9 +34,9 @@ func rebillPaymentAlreadyObserved(ctx context.Context, d *db.DB, merchantID uuid
 	return d.Gen(ctx).HasUnattributedPaymentAfterRebillBoundary(ctx, gen.HasUnattributedPaymentAfterRebillBoundaryParams{MerchantID: merchantID, SubscriptionID: target.Renewal.SubscriptionID, PspID: target.Instrument.PSPID, PeriodStart: target.Renewal.PeriodStart})
 }
 
-func acceptedRebillPaymentOverlaps(row gen.ListCompletedManualRebillPaymentCoverageRow, target ManualRebillPayload) (bool, error) {
+func acceptedRebillPaymentOverlaps(row gen.ListCompletedManualRebillPaymentCoverageRow, target subscriptions.ManualRebillPayload) (bool, error) {
 	in := row.OpenrailsRailIntent
-	accepted, err := DecodeManualRebillPayload(in)
+	accepted, err := subscriptions.DecodeManualRebillPayload(in)
 	if err != nil {
 		return false, err
 	}

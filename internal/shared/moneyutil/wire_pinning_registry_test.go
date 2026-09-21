@@ -42,9 +42,9 @@ var converters = []string{
 // pinnedBoundaries: file -> the wire-pinning test that covers it (known micros
 // in ⇒ exact integer on the wire).
 var pinnedBoundaries = map[string]string{
-	"internal/intents/manual_rebill_admission.go":   "internal/intents/manual_rebill_finalize_integration_test.go",
-	"internal/intents/manual_rebill_payload.go":     "internal/intents/manual_rebill_finalize_integration_test.go",
-	"internal/intents/manual_rebill_preparation.go": "internal/intents/manual_rebill_finalize_integration_test.go",
+	"internal/intents/manual_rebill_admission.go":    "internal/intents/manual_rebill_finalize_integration_test.go",
+	"internal/modules/subscriptions/rebill_terms.go": "internal/intents/manual_rebill_finalize_integration_test.go",
+	"internal/intents/manual_rebill_preparation.go":  "internal/intents/manual_rebill_finalize_integration_test.go",
 
 	"internal/modules/subscriptions/renewal_terms.go":      "internal/modules/subscriptions/renewal_terms_integration_test.go",
 	"internal/modules/subscriptions/plan_migration_nmi.go": "internal/modules/subscriptions/plan_migration_nmi_integration_test.go",

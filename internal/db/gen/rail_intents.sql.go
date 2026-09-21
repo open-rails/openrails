@@ -1231,6 +1231,81 @@ func (q *Queries) ListRailIntents(ctx context.Context, arg ListRailIntentsParams
 	return items, nil
 }
 
+const listRebillTermOwners = `-- name: ListRebillTermOwners :many
+SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.claimed_until, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id
+FROM openrails.rail_intents i
+JOIN openrails.subscriptions s ON s.id=i.subscription_id AND s.merchant_id=i.merchant_id
+WHERE i.merchant_id=$1::uuid
+  AND i.subscription_id=$2::uuid
+  AND s.deleted_at IS NULL
+  AND i.intent_type='manual_rebill'
+  AND (
+    i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
+    OR EXISTS (
+      SELECT 1 FROM openrails.subscription_reprices r
+      WHERE r.merchant_id=i.merchant_id AND r.subscription_id=i.subscription_id
+        AND r.status IN ('scheduled','blocked')
+        AND r.id::text=i.payload->'renewal'->>'reprice_id'
+    )
+    OR s.scheduled_price_id::text=i.payload->'renewal'->>'scheduled_price_id'
+  )
+`
+
+type ListRebillTermOwnersParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// A pending quote remains owned after a charge decline: provider preparation
+// may already have changed its recurring amount. Applied/canceled historical
+// quotes do not lock future price changes. Call under the subscription lock.
+func (q *Queries) ListRebillTermOwners(ctx context.Context, arg ListRebillTermOwnersParams) ([]OpenrailsRailIntent, error) {
+	rows, err := q.db.Query(ctx, listRebillTermOwners, arg.MerchantID, arg.SubscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsRailIntent
+	for rows.Next() {
+		var i OpenrailsRailIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ClaimedUntil,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStuckRailIntents = `-- name: ListStuckRailIntents :many
 
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents

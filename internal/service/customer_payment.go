@@ -231,7 +231,7 @@ func customerPaymentRefusal(row gen.OpenrailsRailIntent) error {
 		return err
 	}
 	switch row.IntentType {
-	case intents.TypeManualRebill:
+	case subscriptions.TypeManualRebill:
 		if err := intents.ValidateManualRebillTerminal(row); err != nil {
 			return err
 		}

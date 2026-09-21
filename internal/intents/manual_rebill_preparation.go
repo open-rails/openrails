@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
@@ -27,7 +29,7 @@ type rebillPreparation struct {
 	Plan            nmi.V5Plan     `json:"plan"`
 }
 
-func snapshotRebillPreparation(in gen.OpenrailsRailIntent, p ManualRebillPayload, remote nmi.V5Subscription) (rebillPreparation, error) {
+func snapshotRebillPreparation(in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload, remote nmi.V5Subscription) (rebillPreparation, error) {
 	var out rebillPreparation
 	if remote.ID != p.RailSubscriptionID || remote.CustomerVaultID != p.Instrument.RailCustomerRef || remote.Plan == nil || strings.TrimSpace(remote.NextBillingDate) == "" || strings.TrimSpace(remote.Plan.ID) == "" {
 		return out, errors.New("provider subscription does not match the accepted recurring obligation")
@@ -88,7 +90,7 @@ func loadRebillPreparation(in gen.OpenrailsRailIntent) (rebillPreparation, bool,
 	if facts.Binding != binding {
 		return facts, true, errors.New("provider preparation belongs to another accepted operation")
 	}
-	p, err := DecodeManualRebillPayload(in)
+	p, err := subscriptions.DecodeManualRebillPayload(in)
 	if err != nil {
 		return facts, true, err
 	}
@@ -98,7 +100,7 @@ func loadRebillPreparation(in gen.OpenrailsRailIntent) (rebillPreparation, bool,
 	return facts, true, nil
 }
 
-func (h *ManualRebillHandler) prepareProvider(ctx context.Context, in gen.OpenrailsRailIntent, p ManualRebillPayload, client *nmi.NMIClient) error {
+func (h *ManualRebillHandler) prepareProvider(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.ManualRebillPayload, client *nmi.NMIClient) error {
 	accountMerchant, accountPSP := client.AccountIdentity()
 	if accountMerchant != in.MerchantID || accountPSP != *in.PspID {
 		return errors.New("rebill client is armed for another provider account")

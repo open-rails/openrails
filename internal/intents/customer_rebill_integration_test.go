@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -58,7 +60,7 @@ func TestCustomerRebillSharesOwnershipAndReplaysAcceptedBody(t *testing.T) {
 			same, err := h.EnqueueScheduled(ctx, fx.subID)
 			require.NoError(t, err)
 			require.Equal(t, a.id, same.ID)
-			terms, err := DecodeManualRebillPayload(same)
+			terms, err := subscriptions.DecodeManualRebillPayload(same)
 			require.NoError(t, err)
 			require.Equal(t, charge.InitiatorCustomer, terms.Initiator)
 			_, _, err = h.EnqueueCustomer(ctx, fx.subID, payer, uuid.NewString(), nil)
