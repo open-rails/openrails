@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -35,6 +36,10 @@ func TestNMITierChangeReplayAcrossDeployments(t *testing.T) {
 
 		// Success, then the stored result.
 		fixture := h.SeedNMITierSubscription(d.runtime(), d.merchant)
+		gateway.DeclarePlan(nmi.V5Plan{ID: fixture.ProPlan, PlanAmount: dollars(fixture.ProAmount), DayFrequency: "30", PlanPayments: "0"})
+		var recurringBefore string
+		require.NoError(t, h.Pool().QueryRow(ctx, `SELECT pm.stored_credential_recurring_ref FROM billing.payment_methods pm JOIN billing.subscriptions s ON s.payment_method_id=pm.id WHERE s.id=$1`, fixture.SubscriptionID).Scan(&recurringBefore))
+		require.NotEmpty(t, recurringBefore)
 		request := openrails.ChangeTierRequest{PriceID: fixture.ProPrice}
 		key := "tier-" + uuid.NewString()[:8]
 		sales, enrollments := gateway.SaleCount(), len(gateway.Enrollments())
@@ -49,6 +54,9 @@ func TestNMITierChangeReplayAcrossDeployments(t *testing.T) {
 		enrollment := gateway.Enrollments()[enrollments]
 		require.Equal(t, fixture.ProPlan, enrollment.Plan)
 		require.Equal(t, fixture.Vault, enrollment.Vault)
+		require.Empty(t, enrollment.SaleType)
+		require.Empty(t, enrollment.SaleAmount)
+		require.Empty(t, enrollment.StoredCredentialIndicator)
 		require.Equal(t, sales+1, gateway.SaleCount())
 		require.Equal(t, dollars(first.AmountDueNow), gateway.Sales()[sales].Amount, "the proration charged is the frozen amount")
 		successor := first.SubscriptionID.UUID()
@@ -56,6 +64,9 @@ func TestNMITierChangeReplayAcrossDeployments(t *testing.T) {
 		require.Equal(t, "active", h.LocalSubscriptionStatus(successor))
 		require.Equal(t, fixture.ProPrice, h.LocalSubscriptionPrice(successor))
 		require.Equal(t, "cancelled", h.LocalSubscriptionStatus(fixture.SubscriptionID))
+		var recurringAfter string
+		require.NoError(t, h.Pool().QueryRow(ctx, `SELECT pm.stored_credential_recurring_ref FROM billing.payment_methods pm JOIN billing.subscriptions s ON s.payment_method_id=pm.id WHERE s.id=$1`, successor).Scan(&recurringAfter))
+		require.Equal(t, recurringBefore, recurringAfter, "schedule-only successor preserves the established recurring agreement")
 		again, err := client.ChangeTier(ctx, fixture.Subscription, key, request)
 		require.NoError(t, err)
 		require.Equal(t, first, again, "the same key answers the stored result")
@@ -65,6 +76,7 @@ func TestNMITierChangeReplayAcrossDeployments(t *testing.T) {
 
 		// A tier change without the client's key never mutates.
 		unkeyed := h.SeedNMITierSubscription(d.runtime(), d.merchant)
+		gateway.DeclarePlan(nmi.V5Plan{ID: unkeyed.ProPlan, PlanAmount: dollars(unkeyed.ProAmount), DayFrequency: "30", PlanPayments: "0"})
 		_, err = client.ChangeTier(ctx, unkeyed.Subscription, "", openrails.ChangeTierRequest{PriceID: unkeyed.ProPrice})
 		requireRefusal(t, err, openrails.ErrInvalid, openrails.CodeTierChangeIdempotencyKeyRequired)
 		require.Equal(t, 0, h.TierChangeOperations(unkeyed.SubscriptionID))
@@ -72,6 +84,9 @@ func TestNMITierChangeReplayAcrossDeployments(t *testing.T) {
 
 		// Lost proration response: accepted, owned, converged once after a restart.
 		lost := h.SeedNMITierSubscription(d.runtime(), d.merchant)
+		gateway.DeclarePlan(nmi.V5Plan{ID: lost.ProPlan, PlanAmount: dollars(lost.ProAmount), DayFrequency: "30", PlanPayments: "0"})
+		_, err = h.Pool().Exec(ctx, `UPDATE billing.payment_methods SET stored_credential_recurring_ref='',stored_credential_unscheduled_ref='' WHERE id=(SELECT payment_method_id FROM billing.subscriptions WHERE id=$1)`, lost.SubscriptionID)
+		require.NoError(t, err)
 		lostRequest := openrails.ChangeTierRequest{PriceID: lost.ProPrice}
 		lostKey := "lost-" + uuid.NewString()[:8]
 		sales, enrollments = gateway.SaleCount(), len(gateway.Enrollments())
@@ -112,6 +127,10 @@ func TestNMITierChangeReplayAcrossDeployments(t *testing.T) {
 		require.Equal(t, pending.OperationID, done.OperationID)
 		require.Equal(t, pending.AmountDueNow, done.AmountDueNow)
 		require.Equal(t, gateway.Sales()[sales].TransactionID, done.Payment.TransactionID)
+		var recurring, unscheduled string
+		require.NoError(t, h.Pool().QueryRow(ctx, `SELECT pm.stored_credential_recurring_ref,pm.stored_credential_unscheduled_ref FROM billing.payment_methods pm JOIN billing.subscriptions s ON s.payment_method_id=pm.id WHERE s.id=$1`, done.SubscriptionID.UUID()).Scan(&recurring, &unscheduled))
+		require.Empty(t, recurring, "neither schedule creation nor unscheduled proration establishes recurring consent")
+		require.Equal(t, done.Payment.TransactionID, unscheduled, "only qualified customer proration establishes its unscheduled agreement")
 		require.Equal(t, "cancelled", h.LocalSubscriptionStatus(lost.SubscriptionID))
 		require.Equal(t, lost.ProPrice, h.LocalSubscriptionPrice(done.SubscriptionID.UUID()))
 		require.Equal(t, sales+1, gateway.SaleCount())
@@ -120,6 +139,7 @@ func TestNMITierChangeReplayAcrossDeployments(t *testing.T) {
 
 		// A definitive decline is coded, replays as itself and is never resent.
 		declined := h.SeedNMITierSubscription(d.runtime(), d.merchant)
+		gateway.DeclarePlan(nmi.V5Plan{ID: declined.ProPlan, PlanAmount: dollars(declined.ProAmount), DayFrequency: "30", PlanPayments: "0"})
 		declinedRequest := openrails.ChangeTierRequest{PriceID: declined.ProPrice}
 		declinedKey := "decl-" + uuid.NewString()[:8]
 		sales, attempts := gateway.SaleCount(), gateway.SaleAttempts()
