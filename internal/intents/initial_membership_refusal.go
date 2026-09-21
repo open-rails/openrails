@@ -17,10 +17,12 @@ const qualifiedInitialRefusalKey = "qualified_initial_refusal"
 
 type InitialMembershipRefusal struct{ data initialMembershipRefusal }
 type initialMembershipRefusal struct {
-	Binding        receiptBinding `json:"binding"`
-	Kind           string         `json:"kind"`
-	ResponseCode   int            `json:"response_code"`
-	LocalizationID string         `json:"localization_id"`
+	Binding               receiptBinding `json:"binding"`
+	Kind                  string         `json:"kind"`
+	ResponseCode          int            `json:"response_code"`
+	LocalizationID        string         `json:"localization_id"`
+	StripePaymentIntentID string         `json:"stripe_payment_intent_id,omitempty"`
+	StripeFailureCode     string         `json:"stripe_failure_code,omitempty"`
 }
 
 func (r InitialMembershipRefusal) Validate(in gen.OpenrailsRailIntent) error {
@@ -42,7 +44,14 @@ func (r InitialMembershipRefusal) Validate(in gen.OpenrailsRailIntent) error {
 		return errors.New("initial refusal contradicts retained schedule")
 	}
 	switch r.data.Kind {
+	case "stripe_canceled":
+		if in.Rail != "stripe" || string(evidence["initial_submitted"]) != "true" || r.data.StripePaymentIntentID == "" || r.data.StripeFailureCode != "canceled" || r.data.ResponseCode != 0 {
+			return errors.New("Stripe initial refusal lacks canceled payment proof")
+		}
 	case "provider_declined":
+		if in.Rail != "nmi" {
+			return errors.New("native refusal belongs to another rail")
+		}
 		if string(evidence["initial_submitted"]) != "true" || r.data.ResponseCode < 200 || r.data.ResponseCode >= 300 {
 			return errors.New("initial decline has no exact submitted provider refusal")
 		}
@@ -57,6 +66,9 @@ func (r InitialMembershipRefusal) Validate(in gen.OpenrailsRailIntent) error {
 }
 
 func (r InitialMembershipRefusal) Outcome() Outcome {
+	if r.data.Kind == "stripe_canceled" {
+		return TerminalWithEvidence("Stripe enrollment declined", map[string]any{"declined": true, "failure_code": r.data.StripeFailureCode, "stripe_payment_intent_id": r.data.StripePaymentIntentID})
+	}
 	if r.data.Kind == "provider_declined" {
 		return TerminalWithEvidence("native enrollment declined", map[string]any{"declined": true, "response_code": r.data.ResponseCode, "localization_id": r.data.LocalizationID})
 	}
@@ -134,5 +146,39 @@ func (s *Store) RetainUnsubmittedInitialMembership(ctx context.Context, in gen.O
 		return err
 	}
 	_, err = s.retainQualifiedEvidence(ctx, in, qualifiedInitialRefusalKey, fact.data)
+	return err
+}
+
+// RetainInitialStripeDecline reads/cancels the exact accepted PI before sealing
+// terminal refusal. A recoverable PI with a client secret cannot release the
+// enrollment duplicate fence until Stripe confirms it can no longer be paid.
+func (s *Store) RetainInitialStripeDecline(ctx context.Context, in gen.OpenrailsRailIntent, service *subscriptions.StripeService, reference string) error {
+	if in.IntentType != subscriptions.TypeInitialMembership {
+		return errors.New("not initial Stripe enrollment")
+	}
+	params, err := StripeEngineParams(in)
+	if err != nil {
+		return err
+	}
+	result, err := service.FinalizeEngineDecline(ctx, params, reference)
+	if err != nil {
+		return err
+	}
+	if result.State != subscriptions.StripeEngineDeclined || result.FailureCode != "canceled" {
+		return errors.New("Stripe decline is still executable")
+	}
+	binding, err := collectionBinding(in)
+	if err != nil {
+		return err
+	}
+	current, err := s.Get(ctx, in.ID)
+	if err != nil {
+		return err
+	}
+	fact := InitialMembershipRefusal{data: initialMembershipRefusal{Binding: binding, Kind: "stripe_canceled", StripePaymentIntentID: result.PaymentIntentID, StripeFailureCode: result.FailureCode}}
+	if err := fact.Validate(current); err != nil {
+		return err
+	}
+	_, err = s.retainQualifiedEvidence(ctx, current, qualifiedInitialRefusalKey, fact.data)
 	return err
 }

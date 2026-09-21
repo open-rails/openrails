@@ -363,3 +363,36 @@ func (s *StripeService) EngineAuthenticationSecret(ctx context.Context, p Stripe
 	}
 	return pi.ClientSecret, nil
 }
+
+// FinalizeEngineDecline closes the SAME failed PI before permitting a new
+// obligation/attempt. A previously issued client secret must not remain capable
+// of paying after local terminal refusal. Authentication-required and uncertain
+// states are never canceled automatically. A lost cancel response is recovered
+// by reading this PI; no financial create or confirm is performed here.
+func (s *StripeService) FinalizeEngineDecline(ctx context.Context, p StripeEnginePaymentParams, reference string) (StripeEnginePaymentResult, error) {
+	scoped, err := s.engineScoped(p)
+	if err != nil {
+		return StripeEnginePaymentResult{}, err
+	}
+	result, found, err := scoped.ReadEnginePayment(ctx, p, reference)
+	if err != nil {
+		return result, err
+	}
+	if !found || result.State != StripeEngineDeclined {
+		return result, errors.New("Stripe engine payment has no definitive decline")
+	}
+	if result.FailureCode == "canceled" {
+		return result, nil
+	}
+	if _, err := scoped.stripePostForm(ctx, "/v1/payment_intents/"+url.PathEscape(result.PaymentIntentID)+"/cancel", url.Values{}, "engine:"+p.OperationID.String()+":cancel"); err != nil {
+		return StripeEnginePaymentResult{}, errors.New("Stripe engine cancellation requires same-payment readback")
+	}
+	canceled, found, err := scoped.ReadEnginePayment(ctx, p, result.PaymentIntentID)
+	if err != nil {
+		return canceled, err
+	}
+	if !found || canceled.State != StripeEngineDeclined || canceled.FailureCode != "canceled" {
+		return canceled, errors.New("Stripe engine decline remains executable")
+	}
+	return canceled, nil
+}

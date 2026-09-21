@@ -88,10 +88,7 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 		if err := terms.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
 			return err
 		}
-		if terms.Terms.CollectionPolicy == models.CollectionPolicyEngine {
-			if terms.HyperSwitch == nil {
-				return errors.New("engine membership requires accepted custody binding")
-			}
+		if terms.Terms.CollectionPolicy == models.CollectionPolicyEngine && terms.HyperSwitch != nil {
 			binding, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, terms.HyperSwitch.APIBaseURL)
 			if err != nil {
 				return err

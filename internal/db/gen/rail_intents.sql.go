@@ -2464,13 +2464,17 @@ WHERE id = $3::uuid
   AND intent_type = $6::text
   AND payload = $7::jsonb
   AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale','initial_membership', 'subscription_collection')
-           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['rebill_decline','qualified_invoice_nonexecution','qualified_initial_refusal']))
+           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['rebill_decline','stripe_recurring_decline','qualified_invoice_nonexecution','qualified_initial_refusal']))
        OR ($1::text = 'qualified_enrollment' AND intent_type IN ('nmi_upgrade','initial_membership')
            AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_initial_refusal'))
        OR ($1::text='qualified_initial_refusal' AND intent_type='initial_membership'
            AND NOT (coalesce(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','qualified_enrollment'])
            AND (($2::jsonb->>'kind'='not_submitted' AND NOT (coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted'))
-             OR ($2::jsonb->>'kind'='provider_declined' AND result_evidence->>'initial_submitted'='true')))
+             OR ($2::jsonb->>'kind' IN ('provider_declined','stripe_canceled') AND result_evidence->>'initial_submitted'='true')))
+       OR ($1::text='stripe_recurring_decline' AND intent_type='subscription_collection' AND rail='stripe'
+           AND COALESCE(result_evidence->>'submitted_at','') <> ''
+           AND $2::jsonb->>'failure_code'='canceled'
+           AND NOT (COALESCE(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','rebill_decline','qualified_invoice_nonexecution']))
        OR ($1::text = 'qualified_invoice_nonexecution' AND intent_type IN ('invoice_collection','subscription_collection')
            AND COALESCE(result_evidence->>'submitted_at', '') = $2::jsonb->>'submitted_at'
            AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')))
