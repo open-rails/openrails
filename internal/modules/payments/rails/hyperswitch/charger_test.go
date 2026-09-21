@@ -75,6 +75,7 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 		{name: "recurring missing preflight", recurring: true, mode: "missing", wantError: provider.ErrUnavailable},
 		{name: "recurring foreign customer", recurring: true, mode: "foreign customer", wantError: provider.ErrBinding},
 		{name: "recurring readonly", recurring: true, mode: "readonly", wantError: provider.ErrReadOnly},
+		{name: "recurring wrong rail", recurring: true, request: func(r *charge.Request) { r.Instrument.Rail = "stripe" }, wantError: charge.ErrNotDispatched},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var posts atomic.Int32

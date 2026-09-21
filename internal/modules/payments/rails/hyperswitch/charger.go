@@ -37,7 +37,7 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 // refusal is the original sanitized provider rejection, not proof synthesized
 // from Result.Declined. Neither approval nor refusal completes an operation here.
 func (c *Charger) ChargeInitialRecurring(ctx context.Context, req charge.Request) (charge.Result, *nmi.CustomerVaultError, error) {
-	if !recurringCustomerContext(req.Context) {
+	if req.Instrument.Rail != "nmi" || !recurringCustomerContext(req.Context) {
 		return charge.Result{}, nil, errors.Join(charge.ErrNotDispatched, errors.New("HyperSwitch recurring enrollment requires initial or anchored customer initiation"))
 	}
 	return c.charge(ctx, req)
