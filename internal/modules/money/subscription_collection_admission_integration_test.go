@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/require"
@@ -71,11 +73,32 @@ func TestEngineCollectionAdmissionPrototype(t *testing.T) {
 			require.Equal(t, "qualified-recurring", accepted.Instrument.StoredCredentialRecurringRef)
 			// Custody/period drift cannot replace the unresolved owner or admit another
 			// payment. The later execution/completion stage must handle relevance.
-			_, err = e.pool.Exec(e.ctx, `UPDATE billing.subscriptions SET status='cancelled',cancelled_at=$2,cancel_type='user' WHERE id=$1`, sub, now)
+			// Synthetic uncertainty qualifies preservation only: the engine has no
+			// charge executor yet and this fixture never contacts a provider.
+			_, err = e.pool.Exec(e.ctx, `UPDATE billing.rail_intents SET status='unknown_needs_verify',result_evidence='{"submission":"synthetic uncertainty"}' WHERE id=$1`, later.ID)
 			require.NoError(t, err)
+			lifecycle := subscriptions.NewSubscriptionLifecycleService(e.db, nil, nil, nil, nil, nil, clockwork.NewFakeClockAt(now))
+			require.NoError(t, lifecycle.CancelMembership(e.ctx, &subscriptions.CancelMembershipParams{SubscriptionID: &sub, CancelType: models.CancelTypeUser}))
 			replay, err := e.svc.AdmitDueSubscriptionCollection(e.ctx, sub, now.Add(120*24*time.Hour))
 			require.NoError(t, err)
 			require.Equal(t, ids[0], replay.ID)
+			require.Equal(t, "unknown_needs_verify", replay.Status)
+			require.JSONEq(t, `{"submission":"synthetic uncertainty"}`, string(replay.ResultEvidence))
+			require.JSONEq(t, string(later.Payload), string(replay.Payload))
+			// With no unresolved owner, cancellation forbids a NEW operation.
+			untouched := uuid.New()
+			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,collection_policy,rail_subscription_id,payment_method_id,status,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type) SELECT $2,merchant_id,customer_id,product_id,price_id,psp_id,rail,collection_policy,rail_subscription_id,payment_method_id,'cancelled',current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type FROM billing.subscriptions WHERE id=$1`, sub, untouched)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_, _ = e.pool.Exec(context.WithoutCancel(e.ctx), `DELETE FROM billing.subscriptions WHERE id=$1`, untouched)
+			})
+			_, err = e.svc.AdmitDueSubscriptionCollection(e.ctx, untouched, now.Add(120*24*time.Hour))
+			require.ErrorContains(t, err, "not due")
+			var operations, payments int
+			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id IN ($1,$2)`, sub, untouched).Scan(&operations))
+			require.Equal(t, 1, operations)
+			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id IN ($1,$2)`, sub, untouched).Scan(&payments))
+			require.Zero(t, payments)
 			e.gateway.mu.Lock()
 			sends := e.gateway.sends
 			e.gateway.mu.Unlock()

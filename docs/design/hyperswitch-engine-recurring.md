@@ -8,6 +8,12 @@ The first engine scope is positive fixed-price NMI settlement using qualified Hy
 
 One accepted renewal freezes its payer, account, card, recurring agreement, price, benefits and period. After a whole missed period, admit one new period from the recovery admission timestamp, with no backlog collection. Preserve the prior subscription period end separately in the accepted payload to retain the stale-state guard. Uncertain recovery retains the same accepted period and never resubmits or moves the period to verification time. This policy does not forgive or mutate existing past debt.
 
+## Cancellation and resume
+
+Engine cancellation uses the existing local subscription lifecycle and exact subscription ID. It bounds paid access and stops new due admission without scheduling a provider deletion. An already accepted or uncertain renewal stays on the existing operation ledger for recovery; cancellation does not manufacture a payment or discard the operation. Only ordinary user cancellation can be resumed, and only while the current paid period remains valid. Merchant revocation, chargeback and expiry cannot be undone by a queued customer action.
+
+This behavior is qualified through internal engine fixtures, authenticated customer HTTP requests, the public merchant Client and existing River workers. Public engine enrollment and delayed engine settlement remain disabled and unqualified.
+
 ## Native recovery reachability gap
 
 Fresh native NMI vault creation previously stamped the card-level provider mode. Billing import also defaulted to provider. Production writes of the old OpenRails mode belonged to custodian remap/import and the Basis Theory instrument creator, whose non-PSP methods are refused by verified-customer manual retry. Qualified native Pay-now and automatic dunning controls therefore do not establish that normal fresh native checkout can reach those paths. The prototype preserves provider as the native default; it does not silently turn on retries.

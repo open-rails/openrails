@@ -1292,6 +1292,12 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		return result, nil
 	}
 
+	// A replayed engine user cancel cannot soften a later merchant or system
+	// cancellation. The locked current row is the lifecycle authority.
+	if subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCancelled && params.CancelType == models.CancelTypeUser {
+		return result, nil
+	}
+
 	// Cancellation policy (caller-owned): an immediate revoke truncates the
 	// paid period to now; a period-end cancel keeps paid access until the term
 	// ends and only forfeits the pre-appended #368 grace window. The terminal
