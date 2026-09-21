@@ -35,7 +35,7 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 		out.Operation = &openrails.PaymentOperation{ID: current.ID, Status: current.Status}
 		out.BlockedReason = "payment_in_progress"
 		if intents.EvidenceString(current, "stripe_payment_intent_id") != "" {
-			out.BlockedReason = "payment_authentication_or_verification_required"
+			out.BlockedReason = "authentication_required"
 		}
 		return out, nil
 	}

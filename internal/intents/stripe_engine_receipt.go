@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -48,7 +49,7 @@ func StripeEngineParams(in gen.OpenrailsRailIntent) (subscriptions.StripeEngineP
 		if err != nil {
 			return params, err
 		}
-		params.CustomerInitiated = in.Origin == string(OriginUser)
+		params.CustomerInitiated = p.Initiator == charge.InitiatorCustomer
 		params.CustomerID = p.Renewal.CustomerID
 		params.Instrument = p.Instrument
 		params.AmountMinor = p.AmountMinor

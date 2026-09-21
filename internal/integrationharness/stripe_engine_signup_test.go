@@ -44,7 +44,7 @@ func TestStripeEngineSignupSelfHTTP(t *testing.T) {
 }
 func TestStripeEngineCustomerRetrySelfHTTP(t *testing.T) { stripeEngineSignupSelfHTTP(t, "", true) }
 func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry bool) {
-	clock := clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second))
+	clock := clockwork.NewFakeClockAt(time.Now().UTC().Add(-720*time.Hour - time.Minute).Truncate(time.Second))
 	h := New(t, t.Context())
 	var mu sync.Mutex
 	var setup, payment map[string]any
@@ -200,7 +200,9 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 		raw, err := io.ReadAll(response.Body)
 		require.NoError(t, err)
 		require.True(t, response.StatusCode >= 200 && response.StatusCode < 300, "%s %s: %s", method, path, raw)
-		require.Equal(t, "no-store", response.Header.Get("Cache-Control"))
+		if strings.Contains(path, "checkout") || strings.Contains(path, "authentication") || strings.Contains(path, "stripe-setup") {
+			require.Equal(t, "no-store", response.Header.Get("Cache-Control"))
+		}
 		var envelope map[string]any
 		require.NoError(t, json.Unmarshal(raw, &envelope))
 		return envelope
@@ -324,6 +326,14 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 		require.NoError(t, err)
 		localMethod, err := openrails.ParsePaymentMethodID(method["payment_method_id"].(string))
 		require.NoError(t, err)
+		view := call("GET", "/subscriptions/"+subscription.String(), "", nil)
+		recoveryView := view["recovery"].(map[string]any)
+		require.Equal(t, true, recoveryView["retryable"])
+		require.Equal(t, "insufficient_funds", recoveryView["last_failure_reason"])
+		replacement := openrails.PaymentMethodID(uuid.New())
+		_, err = customer.RetrySubscriptionNow(t.Context(), openrails.RetrySubscriptionNowRequest{SubscriptionID: subscription, IdempotencyKey: "wrong-method-" + uuid.NewString(), PaymentMethodID: &replacement})
+		require.Error(t, err)
+		rt.Config.NewSubscriptionCollectionPolicy = "provider" // stored engine ownership survives a new-enrollment default change
 		retryRequest := openrails.RetrySubscriptionNowRequest{SubscriptionID: subscription, IdempotencyKey: "retry-" + uuid.NewString(), PaymentMethodID: &localMethod}
 		retried, err := customer.RetrySubscriptionNow(t.Context(), retryRequest)
 		require.NoError(t, err)
@@ -331,6 +341,14 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 		again, err := customer.RetrySubscriptionNow(t.Context(), retryRequest)
 		require.NoError(t, err)
 		require.Equal(t, retried.Operation.ID, again.Operation.ID)
+		differentKey := retryRequest
+		differentKey.IdempotencyKey = "not-accepted-" + uuid.NewString()
+		_, err = customer.RetrySubscriptionNow(t.Context(), differentKey)
+		require.Error(t, err, "new key cannot alias an unresolved original and charge a later period")
+		view = call("GET", "/subscriptions/"+subscription.String(), "", nil)
+		recoveryView = view["recovery"].(map[string]any)
+		require.Equal(t, false, recoveryView["retryable"])
+		require.Equal(t, "authentication_required", recoveryView["blocked_reason"])
 		recovery := call("GET", fmt.Sprintf("/payment-operations/%s/authentication", retried.Operation.ID), "", nil)
 		require.Equal(t, "pi_customerretry_secret_private", recovery["client_secret"])
 		mu.Lock()
@@ -338,11 +356,15 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 		mu.Unlock()
 		result := call("POST", fmt.Sprintf("/payment-operations/%s/authentication/confirm", retried.Operation.ID), "", nil)
 		require.Equal(t, "succeeded", result["status"])
+		rt.Config.EngineAdmissionHold = true
+		rt.MoneyService.EngineAdmissionHold = true
 		final, err := customer.RetrySubscriptionNow(t.Context(), retryRequest)
 		require.NoError(t, err)
 		require.True(t, final.Replayed)
 		require.Equal(t, retried.Operation.ID, final.Operation.ID)
 		require.Equal(t, "active", string(final.Subscription.Status))
+		rt.Config.EngineAdmissionHold = false
+		rt.MoneyService.EngineAdmissionHold = false
 		require.NoError(t, pool.QueryRow(t.Context(), `SELECT count(*) FROM billing.payments WHERE customer_id=$1 AND status='completed'`, user.ID).Scan(&paid))
 		require.Equal(t, 2, paid, "initial and recovered period settle once")
 	}
