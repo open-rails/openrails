@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -29,7 +30,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/productaccess"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -52,7 +53,7 @@ type fakeNMISaleGateway struct {
 	txnID       string
 }
 
-func newFakeNMISaleGateway(t *testing.T) (*fakeNMISaleGateway, *nmi.NMIClient) {
+func newFakeNMISaleGateway(t *testing.T, pspID uuid.UUID) (*fakeNMISaleGateway, *nmi.NMIClient) {
 	t.Helper()
 	f := &fakeNMISaleGateway{txnID: "txn-sale-" + uuid.NewString()[:8]}
 	f.saleMode.Store("approve")
@@ -138,7 +139,7 @@ func newFakeNMISaleGateway(t *testing.T) (*fakeNMISaleGateway, *nmi.NMIClient) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
+	client, err := nmi.NewAccountClient(dbtest.TestMerchantID.UUID(), pspID, "mobius", &config.NMIProviderSettings{
 		SecurityKey: "test_security_key", WebhookSecret: "test_secret",
 	}, true)
 	require.NoError(t, err)
@@ -157,26 +158,12 @@ type saleIntentFixture struct {
 	runner     *intents.Runner
 	gateway    *fakeNMISaleGateway
 	purchase   *CheckoutPurchaseService
-	payload    NMISalePayload
+	payload    payments.NMISalePayload
 	userID     string
 	customerID uuid.UUID
 	productID  uuid.UUID
 	priceID    uuid.UUID
 	ctx        context.Context
-}
-
-type failOnceProductAccess struct {
-	delegate productAccessGranter
-	err      error
-}
-
-func (f *failOnceProductAccess) GrantProductAccess(ctx context.Context, params productaccess.GrantParams) (*models.ProductAccessGrant, bool, error) {
-	if f.err != nil {
-		err := f.err
-		f.err = nil
-		return nil, false, err
-	}
-	return f.delegate.GrantProductAccess(ctx, params)
 }
 
 func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
@@ -207,7 +194,12 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
-	gateway, client := newFakeNMISaleGateway(t)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "mobius")
+	gateway, client := newFakeNMISaleGateway(t, pspID)
+	method := gen.OpenrailsPaymentMethod{ID: uuid.New(), MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: customerID, PspID: pspID, Rail: "nmi", Custodian: "psp", RailCustomerRef: "vault-" + uuid.NewString()[:8]}
+	_, err := pool.Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'')`, method.ID, method.MerchantID, method.CustomerID, method.PspID, method.Rail, method.Custodian, method.RailCustomerRef, method.RailMethodRef)
+	require.NoError(t, err)
+	gateway.vault.Store(method.RailCustomerRef)
 	clock := clockwork.NewRealClock()
 	purchaseService := NewCheckoutPurchaseService(
 		catalog.NewPriceService(dbi),
@@ -233,15 +225,15 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 	}
 	return &saleIntentFixture{
 		db: dbi, runner: runner, gateway: gateway, purchase: purchaseService,
-		payload: NMISalePayload{
-			Provider:        string(models.RailNMI),
-			PSP:             "mobius",
-			CustomerVaultID: "vault-" + uuid.NewString()[:8],
-			AmountMicros:    5_000_000,
-			Currency:        "USD",
-			Description:     "Purchase: Sale Intent Test",
-			UserID:          userID,
-			PriceID:         priceID,
+		payload: payments.NMISalePayload{RequestFingerprint: strings.Repeat("a", 64), PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method), PaymentID: uuid.New(), ProductID: productID, ListAmount: 5_000_000, AcceptedAt: now, Entitlements: map[string]*int{}, EntitlementStart: now, OwnershipStart: now, Eligibility: "allowed",
+			Provider: string(models.RailNMI),
+			PSP:      "mobius",
+
+			Amount:      5_000_000,
+			Currency:    "USD",
+			Description: "Purchase: Sale Intent Test",
+			UserID:      userID,
+			PriceID:     priceID,
 		},
 		userID: userID, customerID: customerID, productID: productID, priceID: priceID, ctx: ctx,
 	}
@@ -253,7 +245,7 @@ func (fx *saleIntentFixture) enqueueAndExecute(t *testing.T, key string) gen.Ope
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       string(models.RailNMI),
-		IntentType:     TypeNMISale,
+		IntentType:     payments.TypeNMISale,
 		PriceID:        &fx.priceID,
 		PspID:          pspID,
 		Payload:        fx.payload,
@@ -289,6 +281,9 @@ func TestNMISaleIntent_WriteThroughHappyPathAndReplay(t *testing.T) {
 	require.Equal(t, intents.StatusSucceeded, intent.Status)
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 	require.Equal(t, 1, fx.paymentCount(t))
+	form := fx.gateway.saleForm.Load().(url.Values)
+	require.Equal(t, "5.00", form.Get("amount"))
+	require.Equal(t, "USD", form.Get("currency"))
 	// #674: the NMI order id is derived from the intent id.
 	require.Equal(t, intent.ID.String(), fx.gateway.lastOrder.Load().(string))
 	// Evidence carries the producer-facing pointers (kept by PrunePolicy).
@@ -306,24 +301,29 @@ func TestNMISaleIntent_WriteThroughHappyPathAndReplay(t *testing.T) {
 
 func TestNMISaleIntent_ProductAccessFailureRetriesWithoutRecharging(t *testing.T) {
 	fx := newSaleIntentFixture(t)
-	injected := errors.New("injected product access failure")
-	fx.purchase.SetProductAccessService(&failOnceProductAccess{
-		delegate: productaccess.NewService(fx.db),
-		err:      injected,
-	})
+	ddl := dbtest.SharedSuperuserPGXPool(t)
+	constraint := "reject_sale_ownership_" + uuid.NewString()[:8]
+	_, err := ddl.Exec(fx.ctx, fmt.Sprintf(`ALTER TABLE billing.grants ADD CONSTRAINT %s CHECK(customer_id<>'%s'::uuid OR kind<>'ownership')`, constraint, fx.customerID))
+	require.NoError(t, err)
+	remove := func() {
+		_, err := ddl.Exec(context.Background(), "ALTER TABLE billing.grants DROP CONSTRAINT IF EXISTS "+constraint)
+		require.NoError(t, err)
+	}
+	t.Cleanup(remove)
 	key := "sale-access-retry-" + uuid.NewString()[:8]
 	intent := fx.enqueueAndExecute(t, key)
 	require.Equal(t, intents.StatusUnknownNeedsVerify, intent.Status, "an incomplete ownership effect must not complete the sale intent")
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
-	require.Equal(t, 1, fx.paymentCount(t))
+	require.Zero(t, fx.paymentCount(t), "payment and ownership roll back together")
 	var accessGrants int
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
 		`SELECT count(*) FROM billing.grants WHERE customer_id=$1 AND product_id=$2 AND kind='ownership' AND event='grant'`,
 		fx.customerID, fx.productID).Scan(&accessGrants))
 	require.Zero(t, accessGrants)
 
+	remove()
 	fx.advanceClock(2 * time.Minute)
-	_, err := fx.runner.RunVerifyOnce(fx.ctx)
+	_, err = fx.runner.RunVerifyOnce(fx.ctx)
 	require.NoError(t, err)
 	final, err := intents.NewStore(fx.db).Get(fx.ctx, intent.ID)
 	require.NoError(t, err)
@@ -397,40 +397,14 @@ func TestNMISaleIntent_AmbiguousTimeoutVerifiedCharged(t *testing.T) {
 // fails after a SUCCESSFUL charge). The intent goes to verification instead of
 // "declined"; once the world is repaired the verifier registers the purchase
 // off the original charge. Never charged-but-unrecorded.
-func TestNMISaleIntent_ChargedButRegistrationFails_VerifierRepairs(t *testing.T) {
+func TestNMISaleIntent_ContradictoryPriceRefusesBeforeCharge(t *testing.T) {
 	fx := newSaleIntentFixture(t)
-	pool := fx.db.Pool()
-
-	// Sabotage finalize: point the payload at a price id that does not exist
-	// yet (the "local write failed after charge" window).
-	realPriceID := fx.payload.PriceID
-	missingPriceID := uuid.New()
-	fx.payload.PriceID = missingPriceID
-	intent := fx.enqueueAndExecute(t, "sale-key-"+uuid.NewString()[:8])
-	require.Equal(t, intents.StatusUnknownNeedsVerify, intent.Status, "charged + failed local record must verify, never fail")
-	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
-
-	// Repair the world: create the missing price (same product family).
-	var productID uuid.UUID
-	require.NoError(t, pool.QueryRow(fx.ctx, "SELECT product_id FROM billing.prices WHERE id = $1", realPriceID).Scan(&productID))
-	// A different amount dodges the (product, amount, window) uniqueness; an
-	// explicit #774 key dodges the auto-default "<product-key>-onetime"
-	// collision with the product's other active price.
-	_, err := pool.Exec(fx.ctx, `INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id, key)
-		VALUES ($1, $2, 6000000, 'USD', $3, $4)`, missingPriceID, productID, dbtest.TestMerchantID.UUID(), "sale-repair-"+missingPriceID.String())
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(fx.ctx, "DELETE FROM billing.prices WHERE id = $1", missingPriceID)
-	})
-
-	fx.advanceClock(2 * time.Minute)
-	_, err = fx.runner.RunVerifyOnce(fx.ctx)
-	require.NoError(t, err)
-	final, err := intents.NewStore(fx.db).Get(fx.ctx, intent.ID)
-	require.NoError(t, err)
-	require.Equal(t, intents.StatusSucceeded, final.Status)
-	require.EqualValues(t, 1, fx.gateway.saleCalls.Load(), "repair never re-charges")
-	require.Equal(t, 1, fx.paymentCount(t))
+	fx.payload.PriceID = uuid.New()
+	psp := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
+	_, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", PspID: psp, IntentType: payments.TypeNMISale, PriceID: &fx.priceID, Payload: fx.payload, IdempotencyKey: NMISaleIdempotencyKey(uuid.NewString()), Origin: intents.OriginUser})
+	require.Error(t, err)
+	require.Zero(t, fx.gateway.saleCalls.Load())
+	require.Zero(t, fx.paymentCount(t))
 }
 
 // A timeout response after acceptance plus delayed Query visibility never
@@ -466,7 +440,7 @@ func TestNMISaleIntent_DelayedReceiptNeverResubmits(t *testing.T) {
 	// Even direct reclaim of the resumed handler is verification-only.
 	resumed := replay
 	resumed.Attempts = 2
-	outcome := fx.runner.Registry.Lookup(TypeNMISale).Execute(fx.ctx, resumed)
+	outcome := fx.runner.Registry.Lookup(payments.TypeNMISale).Execute(fx.ctx, resumed)
 	require.Equal(t, intents.OutcomeAmbiguous, outcome.Class)
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 	fx.gateway.hidden.Store(false)
@@ -485,7 +459,7 @@ func TestNMISaleIntent_DelayedReceiptNeverResubmits(t *testing.T) {
 
 func TestNMISaleIntent_ProvenPreSendParkCanResume(t *testing.T) {
 	fx := newSaleIntentFixture(t)
-	handler := fx.runner.Registry.Lookup(TypeNMISale).(*NMISaleIntentHandler)
+	handler := fx.runner.Registry.Lookup(payments.TypeNMISale).(*NMISaleIntentHandler)
 	resolve := handler.Sale.ResolveNMIClient
 	handler.Sale.ResolveNMIClient = func(context.Context, string) (*nmi.NMIClient, error) {
 		return nil, errors.New("temporarily unavailable before any request")
@@ -523,7 +497,7 @@ func TestNMISaleIntent_ExpiredClaimReconcilesButUnsentQueueExpires(t *testing.T)
 	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.rail_intents SET status='pending' WHERE id=$1`, row.ID)
 	require.NoError(t, err)
 	changed := fx.payload
-	changed.AmountMicros += 1_000_000
+	changed.Amount += 1_000_000
 	existing, err := intents.NewStore(fx.db).Enqueue(fx.ctx, intents.EnqueueParams{MerchantID: row.MerchantID, Provider: row.Rail, IntentType: row.IntentType, PspID: *row.PspID, PriceID: row.PriceID, Payload: changed, IdempotencyKey: row.IdempotencyKey, NextAttemptAt: time.Now(), Origin: intents.OriginUser})
 	require.NoError(t, err)
 	require.JSONEq(t, string(row.Payload), string(existing.Payload))
@@ -544,7 +518,8 @@ func TestNMISaleIntent_ExpiredClaimReconcilesButUnsentQueueExpires(t *testing.T)
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 
 	// A queued operation with a proven pre-send park still expires normally.
-	handler := fx.runner.Registry.Lookup(TypeNMISale).(*NMISaleIntentHandler)
+	fx = newSaleIntentFixture(t)
+	handler := fx.runner.Registry.Lookup(payments.TypeNMISale).(*NMISaleIntentHandler)
 	handler.Sale.ResolveNMIClient = func(context.Context, string) (*nmi.NMIClient, error) { return nil, errors.New("not armed") }
 	queued := fx.enqueueAndExecute(t, "sale-queued-"+uuid.NewString()[:8])
 	require.Zero(t, queued.Attempts)
@@ -568,7 +543,7 @@ func TestNMISaleIntent_DeadlineAfterAcceptanceReconcilesClaim(t *testing.T) {
 	key := NMISaleIdempotencyKey("deadline-" + uuid.NewString())
 	deadline, cancel := context.WithTimeout(fx.ctx, time.Second)
 	defer cancel()
-	_, err := fx.runner.EnqueueAndExecute(deadline, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", IntentType: TypeNMISale, PriceID: &fx.priceID, PspID: pspID, Payload: fx.payload, IdempotencyKey: key, NextAttemptAt: time.Now(), Origin: intents.OriginUser})
+	_, err := fx.runner.EnqueueAndExecute(deadline, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", IntentType: payments.TypeNMISale, PriceID: &fx.priceID, PspID: pspID, Payload: fx.payload, IdempotencyKey: key, NextAttemptAt: time.Now(), Origin: intents.OriginUser})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 	require.True(t, fx.gateway.charged.Load())

@@ -22,23 +22,12 @@ import (
 
 // seedSaleInstrument stores a payment_methods row matching the fixture's NMI
 // rail and Mobius PSP, with the given unscheduled anchor ("" = new).
-func (fx *saleIntentFixture) seedSaleInstrument(t *testing.T, unscheduledRef string) uuid.UUID {
+func (fx *saleIntentFixture) seedSaleInstrument(t *testing.T, anchor string) uuid.UUID {
 	t.Helper()
-	pool := fx.db.Pool()
-	customerID := dbtest.EnsureCustomerIDPgx(fx.ctx, t, pool, fx.userID)
-	pspID := dbtest.EnsureTestPSP(fx.ctx, t, pool, dbtest.TestMerchantID.UUID(), "mobius")
-	pmID := uuid.New()
-	_, err := pool.Exec(fx.ctx,
-		`INSERT INTO billing.payment_methods
-		   (id, merchant_id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
-		    initial_transaction_id, stored_credential_unscheduled_ref)
-		 VALUES ($1, $2, $3, 'nmi', $4, $5, '', '', $6)`,
-		pmID, dbtest.TestMerchantID.UUID(), customerID, pspID, fx.payload.CustomerVaultID, unscheduledRef)
+	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.payment_methods SET stored_credential_unscheduled_ref=$2 WHERE id=$1`, fx.payload.PaymentMethodID, anchor)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(fx.ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pmID)
-	})
-	return pmID
+	fx.payload.Instrument.StoredCredentialUnscheduledRef = anchor
+	return fx.payload.PaymentMethodID
 }
 
 func (fx *saleIntentFixture) unscheduledRef(t *testing.T, pmID uuid.UUID) string {
@@ -70,7 +59,7 @@ func TestNMISaleIntent_InitialCITAnchorsInstrument(t *testing.T) {
 func TestNMISaleIntent_AnchoredInstrumentSendsUsedWithReference(t *testing.T) {
 	fx := newSaleIntentFixture(t)
 	pmID := fx.seedSaleInstrument(t, "anchor-297-uns")
-	fx.payload.StoredCredentialRef = "anchor-297-uns"
+	fx.payload.Instrument.StoredCredentialUnscheduledRef = "anchor-297-uns"
 
 	intent := fx.enqueueAndExecute(t, "sale-297-"+uuid.NewString()[:8])
 	require.Equal(t, intents.StatusSucceeded, intent.Status)

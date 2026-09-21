@@ -69,6 +69,8 @@ type GrantParams struct {
 	// subscription id as text). Re-granting the same SourceID is a no-op.
 	SourceID  string
 	PaymentID *uuid.UUID
+	// StartsAt defaults to the observed grant time; accepted purchases retain their window.
+	StartsAt *time.Time
 	// EndsAt nil => indefinite / durable ownership.
 	EndsAt *time.Time
 }
@@ -106,6 +108,10 @@ func (s *Service) GrantProductAccess(ctx context.Context, params GrantParams) (*
 			e := params.EndsAt.UTC()
 			endsAt = &e
 		}
+		start := now
+		if params.StartsAt != nil {
+			start = params.StartsAt.UTC()
+		}
 		grant := &models.ProductAccessGrant{
 			CustomerID: identity.CustomerIDFromString(params.UserID).UUID(),
 			ProductID:  params.ProductID,
@@ -113,7 +119,7 @@ func (s *Service) GrantProductAccess(ctx context.Context, params GrantParams) (*
 			SourceID:   params.SourceID,
 			PaymentID:  params.PaymentID,
 			Status:     models.ProductAccessStatusActive,
-			StartsAt:   now,
+			StartsAt:   start,
 			EndsAt:     endsAt,
 			CreatedAt:  now,
 			UpdatedAt:  now,
