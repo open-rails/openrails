@@ -703,6 +703,7 @@ SET status = 'expired',
     updated_at = now()
 WHERE (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
   AND NOT (pi.intent_type = 'invoice_collection' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
   AND pi.expires_at IS NOT NULL
   AND pi.expires_at <= $1::timestamptz
   AND NOT (
@@ -1703,6 +1704,7 @@ SET status = 'failed_retryable',
     updated_at = now()
 WHERE id = $3 AND status IN ('in_flight', 'unknown_needs_verify')
   AND NOT (intent_type = 'invoice_collection' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (intent_type = 'nmi_sale' AND coalesce(result_evidence, '{}'::jsonb) ? 'sale_submitted')
 `
 
 type MarkRailIntentFailedRetryableParams struct {

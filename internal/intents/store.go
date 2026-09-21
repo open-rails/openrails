@@ -590,9 +590,16 @@ func (s *Store) RecordProgressIfAbsent(ctx context.Context, id uuid.UUID, key st
 }
 
 func (s *Store) MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {
-	return one(s.db.Gen(ctx).MarkRailIntentFailedRetryable(ctx, gen.MarkRailIntentFailedRetryableParams{
+	rows, err := s.db.Gen(ctx).MarkRailIntentFailedRetryable(ctx, gen.MarkRailIntentFailedRetryableParams{
 		ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
-	}))
+	})
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return errors.New("intent retry transition did not commit")
+	}
+	return nil
 }
 
 func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, evidence map[string]any) error {

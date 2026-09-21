@@ -219,7 +219,8 @@ SET status = 'failed_retryable',
     claimed_until = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
-  AND NOT (intent_type = 'invoice_collection' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at');
+  AND NOT (intent_type = 'invoice_collection' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (intent_type = 'nmi_sale' AND coalesce(result_evidence, '{}'::jsonb) ? 'sale_submitted');
 
 -- Ambiguous outcome (or a verify that stayed inconclusive): park for the
 -- verifier, scheduled at next_attempt_at.
@@ -306,6 +307,7 @@ SET status = 'expired',
     updated_at = now()
 WHERE (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
   AND NOT (pi.intent_type = 'invoice_collection' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
   AND pi.expires_at IS NOT NULL
   AND pi.expires_at <= sqlc.arg(now)::timestamptz
   AND NOT (

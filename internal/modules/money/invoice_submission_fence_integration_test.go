@@ -177,7 +177,7 @@ func TestInvoiceSubmissionFenceRecovery(t *testing.T) {
 			case "retry fenced unknown":
 				fence()
 				require.NoError(t, store.MarkUnknown(e.ctx, stale.ID, time.Now(), "possibly submitted", nil))
-				require.NoError(t, store.MarkFailedRetryable(e.ctx, stale.ID, time.Now(), "stale verifier saw no marker"))
+				require.Error(t, store.MarkFailedRetryable(e.ctx, stale.ID, time.Now(), "stale verifier saw no marker"))
 			case "expire fenced pending":
 				fence()
 				_, err := e.pool.Exec(e.ctx, `UPDATE billing.rail_intents SET status='pending',attempts=0,claimed_until=NULL,expires_at=now()-interval '1 second' WHERE id=$1`, stale.ID)
