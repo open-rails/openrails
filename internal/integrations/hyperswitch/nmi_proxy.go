@@ -3,6 +3,7 @@ package hyperswitch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -12,18 +13,21 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
+// ErrNotDispatched is emitted only before entering the proxy POST call.
+var ErrNotDispatched = errors.New("hyperswitch proxy was not dispatched")
+
 // ProxyNMI sends one permanent, merchant-owned payment method through the
 // operator's exact qualified route. Form values are secret wrapped so neither
 // the PSP key nor a future confidential field enters debug output.
 func (c *Client) ProxyNMI(ctx context.Context, destination, methodID string, form map[string]Secret) (*nmi.SaleResponse, error) {
 	if c == nil || !safeIdentifier(methodID) || len(form) == 0 {
-		return nil, ErrBinding
+		return nil, errors.Join(ErrNotDispatched, ErrBinding)
 	}
 	if c.readOnly {
-		return nil, ErrReadOnly
+		return nil, errors.Join(ErrNotDispatched, ErrReadOnly)
 	}
 	if err := c.CheckProxyContract(ctx, destination); err != nil {
-		return nil, err
+		return nil, errors.Join(ErrNotDispatched, err)
 	}
 	request := struct {
 		Body        map[string]Secret `json:"request_body"`

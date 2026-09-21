@@ -2,6 +2,7 @@ package hyperswitch
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -148,6 +149,7 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 			result, err := charger.Charge(t.Context(), req)
 			if tc.wantError != nil {
 				require.ErrorIs(t, err, tc.wantError)
+				require.Equal(t, tc.wantPosts == 0, errors.Is(err, charge.ErrNotDispatched), "only errors before POST prove nonexecution")
 				require.Empty(t, result)
 			} else {
 				require.NoError(t, err)

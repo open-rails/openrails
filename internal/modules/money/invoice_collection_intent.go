@@ -144,6 +144,11 @@ func (h *InvoiceCollectionHandler) Execute(ctx context.Context, intent gen.Openr
 		// An existing marker never reaches this path or authorizes nonexecution.
 		return h.finalizeNotExecuted(ctx, intent, p, "instrument_changed", err.Error())
 	}
+	if errors.Is(err, charge.ErrNotDispatched) {
+		// This fresh owner alone knows its call never entered a provider POST.
+		// Resumed operations branch to Verify before reaching Submit above.
+		return h.finalizeNotExecuted(ctx, intent, p, "not_dispatched", charge.ErrNotDispatched.Error())
+	}
 	return h.classify(ctx, intent, p, res, err)
 }
 

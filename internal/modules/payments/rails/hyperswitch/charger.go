@@ -25,23 +25,26 @@ var _ charge.Charger = (*Charger)(nil)
 
 func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result, error) {
 	if c == nil || c.Client == nil || c.SecurityKey == "" || c.Destination == "" {
-		return charge.Result{}, errors.New("HyperSwitch NMI charge transport is not configured")
+		return charge.Result{}, errors.Join(charge.ErrNotDispatched, errors.New("HyperSwitch NMI charge transport is not configured"))
 	}
 	form, err := saleForm(req, c.SecurityKey)
 	if err != nil {
-		return charge.Result{}, err
+		return charge.Result{}, errors.Join(charge.ErrNotDispatched, err)
 	}
 	// The permanent method must still belong to this exact vendor customer
 	// and merchant. Capture completion alone is not continuing charge authority.
 	method, err := c.Client.GetMethod(ctx, req.Instrument.MethodRef, req.Instrument.CustomerRef)
 	if err != nil {
-		return charge.Result{}, err
+		return charge.Result{}, errors.Join(charge.ErrNotDispatched, err)
 	}
 	if method.ID != req.Instrument.MethodRef {
-		return charge.Result{}, provider.ErrBinding
+		return charge.Result{}, errors.Join(charge.ErrNotDispatched, provider.ErrBinding)
 	}
 	response, err := c.Client.ProxyNMI(ctx, c.Destination, req.Instrument.MethodRef, form)
 	if err != nil {
+		if errors.Is(err, provider.ErrNotDispatched) {
+			return charge.Result{}, errors.Join(charge.ErrNotDispatched, err)
+		}
 		var refusal *nmi.CustomerVaultError
 		if !errors.As(err, &refusal) {
 			return charge.Result{}, err

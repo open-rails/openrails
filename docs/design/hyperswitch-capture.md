@@ -74,3 +74,9 @@ CIT/MIT agreement continuity, lost reply and a new-process verifier without
 resubmission, decline, and terminal archive restore without a provider adapter.
 This replaces the former capture-only manual selector; no external-vendor CI job
 or live financial qualification is implied.
+
+A fresh submission owner may finish a typed pre-dispatch refusal as not executed:
+local validation, masked-method readback, or contract preflight failed before
+entering the proxy POST. This permits a new payment key after repair. Existing
+submission markers and every uncertain error after POST entry remain verify-only;
+a proxy HTTP error never proves that the PSP did not execute.

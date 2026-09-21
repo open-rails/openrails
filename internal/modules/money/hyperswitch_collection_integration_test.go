@@ -25,7 +25,7 @@ import (
 // durable invoice runner, loopback custodian/NMI boundaries. The separately
 // selected browser/vendor qualification proves actual vault interpolation.
 func TestHyperSwitchInvoiceCollectionWorkflow(t *testing.T) {
-	for _, mode := range []string{"CIT then MIT", "archived stamped account", "lost response", "declined", "preflight missing", "preflight revoked after fence", "park before first send", "profile changes before send", "deployment changes before resume", "secret rotates before resume"} {
+	for _, mode := range []string{"CIT then MIT", "archived stamped account", "lost response", "declined", "preflight missing", "preflight revoked after fence", "metadata unavailable after fence", "old marker unavailable", "park before first send", "profile changes before send", "deployment changes before resume", "secret rotates before resume"} {
 		t.Run(mode, func(t *testing.T) {
 			e := newNMIReceiptEnv(t)
 			custodian, vendorAccount := uuid.New(), "vendor_"+uuid.NewString()
@@ -53,17 +53,23 @@ func TestHyperSwitchInvoiceCollectionWorkflow(t *testing.T) {
 			var mu sync.Mutex
 			expectedKey := "custody-key"
 			resumed := false
+			repaired := false
 			var forms []map[string]string
 			preflights := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				mu.Lock()
 				key := expectedKey
 				isResume := resumed
+				isRepaired := repaired
 				mu.Unlock()
 				require.Equal(t, "api-key="+key, r.Header.Get("Authorization"))
 				require.Equal(t, "profile_A", r.Header.Get("x-profile-id"))
 				w.Header().Set("Content-Type", "application/json")
 				if r.URL.Path == "/v2/payment-methods/method_A" {
+					if mode == "metadata unavailable after fence" && !isRepaired {
+						w.WriteHeader(503)
+						return
+					}
 					require.Equal(t, "false", r.URL.Query().Get("fetch_raw_detail"))
 					_, _ = fmt.Fprintf(w, `{"id":"method_A","merchant_id":%q,"customer_id":"customer_A","storage_type":"persistent","payment_method_data":{"card":{"last4_digits":"1111","expiry_month":"12","expiry_year":"2030"}}}`, vendorAccount)
 					return
@@ -74,7 +80,7 @@ func TestHyperSwitchInvoiceCollectionWorkflow(t *testing.T) {
 					preflights++
 					count := preflights
 					mu.Unlock()
-					if mode == "preflight missing" || (mode == "preflight revoked after fence" && count > 1) || (strings.HasSuffix(mode, "before resume") && !isResume) {
+					if mode == "preflight missing" || (mode == "preflight revoked after fence" && count > 1 && !isRepaired) || (strings.HasSuffix(mode, "before resume") && !isResume) {
 						w.WriteHeader(404)
 						return
 					}
@@ -110,8 +116,10 @@ func TestHyperSwitchInvoiceCollectionWorkflow(t *testing.T) {
 					return
 				}
 				e.gateway.orderSale(input.Form["orderid"], transaction)
-				e.gateway.payment(transaction, "", input.Form["amount"], input.Form["currency"])
-				if mode == "lost response" {
+				if mode != "old marker unavailable" {
+					e.gateway.payment(transaction, "", input.Form["amount"], input.Form["currency"])
+				}
+				if mode == "lost response" || mode == "old marker unavailable" {
 					conn, _, err := w.(http.Hijacker).Hijack()
 					require.NoError(t, err)
 					_ = conn.Close()
@@ -152,10 +160,36 @@ func TestHyperSwitchInvoiceCollectionWorkflow(t *testing.T) {
 			case "preflight missing":
 				require.Equal(t, intents.StatusPending, result.Operation.Status)
 				require.Empty(t, intents.EvidenceString(result.Operation, "submitted_at"))
-			case "preflight revoked after fence":
+			case "preflight revoked after fence", "metadata unavailable after fence":
+				require.Equal(t, intents.StatusFailedTerminal, result.Operation.Status)
+				require.Nil(t, e.invoiceRow(t).CollectionIntentID)
+				require.NotEqual(t, "paid", e.invoiceRow(t).Status)
+				require.Empty(t, e.methodRow(t).StoredCredentialUnscheduledRef)
+				var settlements int
+				require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.invoice_payments WHERE invoice_id=$1 AND status='settled'`, e.invoice).Scan(&settlements))
+				require.Zero(t, settlements)
+				require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.ledger_transfers WHERE customer_id=$1 AND transfer_type='owed_payment'`, e.payer.UUID()).Scan(&settlements))
+				require.Zero(t, settlements)
+				mu.Lock()
+				require.Empty(t, forms)
+				repaired = true
+				mu.Unlock()
+				request.IdempotencyKey = "repaired-" + uuid.NewString()
+				retry, err := e.svc.PayInvoiceNow(e.ctx, e.runner, e.payer, request)
+				require.NoError(t, err)
+				require.Equal(t, intents.StatusSucceeded, retry.Operation.Status)
+				require.NotEqual(t, result.Operation.ID, retry.Operation.ID)
+				require.Equal(t, "paid", e.invoiceRow(t).Status)
+				require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.ledger_transfers WHERE customer_id=$1 AND transfer_type='owed_payment'`, e.payer.UUID()).Scan(&settlements))
+				require.Equal(t, 1, settlements)
+			case "old marker unavailable":
 				require.Equal(t, intents.StatusUnknownNeedsVerify, result.Operation.Status)
 				require.NotEmpty(t, intents.EvidenceString(result.Operation, "submitted_at"))
 				require.Equal(t, intents.StatusUnknownNeedsVerify, e.verify(t))
+				resumed, err := e.runner.ExecuteByID(e.ctx, e.op)
+				require.NoError(t, err)
+				require.Equal(t, intents.StatusUnknownNeedsVerify, resumed.Status)
+				require.NotNil(t, e.invoiceRow(t).CollectionIntentID)
 			case "park before first send", "profile changes before send", "deployment changes before resume":
 				require.Equal(t, intents.StatusFailedTerminal, result.Operation.Status)
 				require.Nil(t, e.invoiceRow(t).CollectionIntentID)
@@ -189,7 +223,7 @@ func TestHyperSwitchInvoiceCollectionWorkflow(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			want := 1
-			if strings.HasPrefix(mode, "preflight") || mode == "park before first send" || mode == "profile changes before send" || mode == "deployment changes before resume" {
+			if mode == "preflight missing" || mode == "park before first send" || mode == "profile changes before send" || mode == "deployment changes before resume" {
 				want = 0
 			}
 			if mode == "CIT then MIT" {
