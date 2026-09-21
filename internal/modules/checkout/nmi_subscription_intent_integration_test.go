@@ -119,6 +119,8 @@ func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNM
 			f.createCalls.Add(1)
 			f.createForm.Store(r.Form)
 			switch f.createMode.Load().(string) {
+			case "decline":
+				fmt.Fprint(w, "response=2&response_code=200&responsetext=DECLINED")
 			case "ambiguous500":
 				// The create LANDED but the response was lost.
 				f.subExists.Store(true)

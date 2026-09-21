@@ -763,6 +763,7 @@ SET status = 'expired',
 WHERE pi.merchant_id = $1::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
   AND NOT (pi.intent_type = 'invoice_collection' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
   AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
+  AND NOT (pi.intent_type='nmi_subscription_create' AND coalesce(pi.result_evidence,'{}'::jsonb) ? 'enrollment_submitted')
   AND pi.expires_at IS NOT NULL
   AND pi.expires_at <= $2::timestamptz
   AND NOT (
@@ -1868,6 +1869,7 @@ SET status = 'failed_retryable',
 WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
   AND NOT (intent_type = 'invoice_collection' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
   AND NOT (intent_type = 'nmi_sale' AND coalesce(result_evidence, '{}'::jsonb) ? 'sale_submitted')
+  AND NOT (intent_type = 'nmi_subscription_create' AND coalesce(result_evidence, '{}'::jsonb) ? 'enrollment_submitted')
 `
 
 type MarkRailIntentFailedRetryableParams struct {
@@ -1984,6 +1986,7 @@ SET status = 'superseded',
     claimed_until = NULL,
     updated_at = now()
 WHERE rail_intents.merchant_id = $2::uuid AND id = $3 AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
+  AND NOT (intent_type='nmi_subscription_create' AND coalesce(result_evidence,'{}'::jsonb) ? 'enrollment_submitted')
 `
 
 type MarkRailIntentSupersededParams struct {
@@ -2003,7 +2006,8 @@ func (q *Queries) MarkRailIntentSuperseded(ctx context.Context, arg MarkRailInte
 const markRailIntentUnknown = `-- name: MarkRailIntentUnknown :execrows
 UPDATE openrails.rail_intents
 SET status = 'unknown_needs_verify',
-    result_evidence = COALESCE(result_evidence, '{}'::jsonb) || COALESCE($1::jsonb, '{}'::jsonb),
+    result_evidence = COALESCE(result_evidence, '{}'::jsonb) || COALESCE($1::jsonb, '{}'::jsonb)
+      || CASE WHEN result_evidence ? 'enrollment_submitted' THEN jsonb_build_object('enrollment_submitted',result_evidence->'enrollment_submitted') ELSE '{}'::jsonb END,
     next_attempt_at = $2::timestamptz,
     last_failure_reason = $3,
     claimed_until = NULL,
@@ -2183,6 +2187,10 @@ WHERE id = $3::uuid
   AND payload = $7::jsonb
   AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale','nmi_subscription_create'))
        OR ($1::text = 'qualified_enrollment' AND intent_type IN ('nmi_upgrade','nmi_subscription_create'))
+       OR ($1::text='qualified_initial_refusal' AND intent_type='nmi_subscription_create'
+           AND NOT (coalesce(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','qualified_enrollment'])
+           AND (($2::jsonb->>'kind'='not_submitted' AND NOT (coalesce(result_evidence,'{}'::jsonb) ? 'enrollment_submitted'))
+             OR ($2::jsonb->>'kind'='provider_declined' AND result_evidence->>'enrollment_submitted'='true')))
        OR ($1::text = 'qualified_invoice_nonexecution' AND intent_type = 'invoice_collection'
            AND COALESCE(result_evidence->>'submitted_at', '') = $2::jsonb->>'submitted_at'
            AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')))
@@ -2322,6 +2330,7 @@ SET status = 'superseded',
 WHERE rail_intents.merchant_id = $2::uuid AND intent_type = $3
   AND subscription_id = $4
   AND (status = 'failed_retryable' OR (status = 'pending' AND attempts = 0))
+  AND NOT (intent_type='nmi_subscription_create' AND coalesce(result_evidence,'{}'::jsonb) ? 'enrollment_submitted')
 `
 
 type SupersedeRailIntentsBySubjectParams struct {

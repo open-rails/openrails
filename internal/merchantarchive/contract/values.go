@@ -198,7 +198,7 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "rail_intents" {
 		typ := value(p, values, "intent_type")
 		payload := value(p, values, "payload")
-		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection" && *typ != "nmi_sale" && *typ != "manual_rebill" && *typ != "nmi_provider_cutover")) {
+		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection" && *typ != "nmi_sale" && *typ != "nmi_subscription_create" && *typ != "manual_rebill" && *typ != "nmi_provider_cutover")) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
 		if typ != nil && (*typ == "nmi_refund" || *typ == "stripe_refund" || *typ == "ccbill_refund") {
@@ -227,7 +227,7 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 		return ""
 	}
 	typ := field("intent_type")
-	if typ != "invoice_collection" && typ != subscriptions.TypeManualRebill && typ != payments.TypeNMISale {
+	if typ != "invoice_collection" && typ != subscriptions.TypeManualRebill && typ != payments.TypeNMISale && typ != subscriptions.TypeNMIInitialEnrollment {
 		return false, nil
 	}
 	id, _ := uuid.Parse(field("id"))
@@ -245,6 +245,9 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 			}
 			*target = &parsed
 		}
+	}
+	if typ == subscriptions.TypeNMIInitialEnrollment {
+		return false, intents.ValidateInitialEnrollmentTerminal(row)
 	}
 	if typ == payments.TypeNMISale {
 		return false, intents.ValidateNMISaleTerminal(row)

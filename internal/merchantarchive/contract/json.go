@@ -241,8 +241,18 @@ var jsonRules = map[string]jsonRule{
 		"qualified_receipt": collectedReceiptJSON, "sale_submitted": booleanValue, "transaction_id": textValue, "payment_id": uuidValue, "delayed_start": textValue,
 		"declined": booleanValue, "not_executed": booleanValue, "request_refused": booleanValue, "response_code": integerValue, "localization_id": textValue, "operator_resolution": operatorResolutionJSON,
 	})),
-	"rail_intents.nmi_subscription_create.payload": nullable(emptyObject),
+	"rail_intents.nmi_subscription_create.payload": object(map[string]jsonRule{
+		"terms":               object(map[string]jsonRule{"subscription_id": uuidValue, "payment_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "product_id": uuidValue, "price_id": uuidValue, "payment_method_id": uuidValue, "product_name": textValue, "amount": moneyStringValue, "recurring_amount": moneyStringValue, "currency": textValue, "accepted_at": textValue, "period_start": textValue, "period_end": textValue, "pending": booleanValue, "entitlements": dictionary(nullable(integerValue))}),
+		"instrument":          object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue}),
+		"request_fingerprint": sha256Value, "day_frequency": integerValue, "plan_payments": integerValue, "provider": textValue, "psp": textValue, "plan_id": textValue, "customer_vault_id": textValue, "billing_id": textValue, "amount_micros": integerValue, "currency": textValue, "email": textValue, "user_id": uuidValue, "price_id": uuidValue, "local_subscription_id": uuidValue, "payment_method_id": nullable(uuidValue), "start_date": textValue, "delayed_start": textValue, "stored_credential_ref": textValue, "e2e_run_id": textValue, "checkout_idempotency_key": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue,
+	}),
 	"rail_intents.nmi_subscription_create.result_evidence": nullable(object(map[string]jsonRule{
+		"qualified_initial_refusal": object(map[string]jsonRule{"binding": receiptBindingJSON, "kind": textValue, "response_code": integerValue, "localization_id": textValue}),
+		"qualified_receipt":         collectedReceiptJSON, "enrollment_submitted": booleanValue, "not_executed": booleanValue, "request_refused": booleanValue, "operator_resolution": operatorResolutionJSON,
+		"qualified_enrollment": object(map[string]jsonRule{"binding": receiptBindingJSON, "facts": object(map[string]jsonRule{
+			"vault_billing_id": textValue, "order_reference": textValue, "po_number": textValue, "next_charge_date": textValue,
+			"subscription": object(map[string]jsonRule{"object": textValue, "id": textValue, "start_date": textValue, "next_billing_date": textValue, "amount": textValue, "customer_vault_id": textValue, "delayed_condition": textValue, "paused_subscription": nullable(func(v any) bool { return textValue(v) || booleanValue(v) || integerValue(v) }), "plan": object(map[string]jsonRule{"object": textValue, "id": textValue, "plan_name": textValue, "plan_amount": textValue, "plan_payments": textValue, "day_frequency": textValue, "month_frequency": textValue, "day_of_month": textValue})}),
+		})}),
 		"transaction_id": textValue, "subscription_id": uuidValue, "status": textValue, "message": textValue, "delayed_start": textValue, "verified_existing": booleanValue,
 		"declined": booleanValue, "response_code": integerValue, "localization_id": textValue, "provider_subscription_id": textValue,
 	})),

@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -79,6 +80,14 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, in gen
 	if len(current.ResultEvidence) > 0 && json.Unmarshal(current.ResultEvidence, &progress) != nil {
 		return intents.Ambiguous("invalid enrollment progress")
 	}
+	if value, present := progress["enrollment_submitted"]; present && value != true {
+		return intents.Ambiguous("invalid initial submission fence")
+	}
+	if _, refused, err := intents.LoadInitialEnrollmentRefusal(current); err != nil {
+		return intents.Ambiguous(err.Error())
+	} else if refused {
+		return h.Verify(ctx, current)
+	}
 	if progress["enrollment_submitted"] == true || current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
 		return h.Verify(ctx, current)
 	}
@@ -95,7 +104,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, in gen
 		return intents.Parked("native enrollment account is read-only")
 	}
 	if _, err = client.ReadSingleCardVaultBilling(ctx, p.CustomerVaultID, p.BillingID); err != nil {
-		return h.complete(ctx, in, intents.TerminalWithEvidence("enrollment instrument is not qualified", map[string]any{"not_executed": true}))
+		return intents.Parked("enrollment instrument readback unavailable or unqualified")
 	}
 	submitted := false
 	err = h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -141,14 +150,13 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, in gen
 			return intents.Ambiguous("native enrollment outcome requires exact provider verification")
 		}
 		var refusal *nmi.CustomerVaultError
-		evidence := map[string]any{"request_refused": true}
-		if errors.As(callErr, &refusal) {
-			evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID}
+		if !errors.As(callErr, &refusal) {
+			return intents.Ambiguous("native enrollment rejection has no qualified refusal proof")
 		}
-		if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, evidence); err != nil {
-			return intents.Ambiguous(err.Error())
+		if err := intents.NewStore(h.database()).RetainInitialEnrollmentDecline(ctx, in, refusal); err != nil {
+			return intents.Ambiguous("native enrollment refusal could not be qualified: " + err.Error())
 		}
-		return h.complete(ctx, in, intents.TerminalWithEvidence("native enrollment refused", evidence))
+		return h.Verify(ctx, in)
 	}
 	if response == nil {
 		return intents.Ambiguous("native enrollment returned no receipt candidates")
@@ -187,8 +195,15 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, in gen.
 	if len(in.ResultEvidence) > 0 && json.Unmarshal(in.ResultEvidence, &progress) != nil {
 		return intents.Ambiguous("invalid enrollment progress")
 	}
-	if progress["declined"] == true || progress["not_executed"] == true || progress["request_refused"] == true {
-		return h.complete(ctx, in, intents.TerminalWithEvidence("native enrollment refused", progress))
+	refusal, refused, err := intents.LoadInitialEnrollmentRefusal(in)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	if refused {
+		return h.complete(ctx, in, refusal.Outcome())
+	}
+	if value, present := progress["enrollment_submitted"]; present && value != true {
+		return intents.Ambiguous("invalid initial submission fence")
 	}
 	if progress["enrollment_submitted"] != true {
 		return h.Execute(ctx, in)
@@ -324,7 +339,31 @@ func (h *NMISubscriptionCreateIntentHandler) complete(ctx context.Context, in ge
 		if err != nil {
 			return err
 		}
+		refusal, refused, err := intents.LoadInitialEnrollmentRefusal(current)
+		if err != nil {
+			return err
+		}
 		success := outcome.Class == intents.OutcomeSucceeded
+		if !success && !refused && outcome.Evidence["not_executed"] == true {
+			if err := intents.NewStore(d).RetainUnsubmittedInitialEnrollment(ctx, current); err != nil {
+				return err
+			}
+			current, err = intents.NewStore(d).Get(ctx, current.ID)
+			if err != nil {
+				return err
+			}
+			refusal, refused, err = intents.LoadInitialEnrollmentRefusal(current)
+			if err != nil {
+				return err
+			}
+		}
+		if success && refused || !success && !refused {
+			return errors.New("initial terminal decision has no matching qualified custody")
+		}
+		if !success {
+			outcome = refusal.Outcome()
+		}
+
 		if success && (!scheduled || (p.AmountMicros > 0) != paid) {
 			return errors.New("initial completion lacks exact required schedule/payment receipts")
 		}
@@ -338,12 +377,12 @@ func (h *NMISubscriptionCreateIntentHandler) complete(ctx context.Context, in ge
 		if evidence == nil {
 			evidence = map[string]any{}
 		}
-		if success && (evidence["declined"] == true || evidence["not_executed"] == true || evidence["request_refused"] == true) {
-			return errors.New("initial receipts contradict refusal facts")
+		// Generic diagnostic progress is not financial authority. Only the
+		// validated private refusal above may populate terminal refusal fields.
+		for _, key := range []string{"declined", "not_executed", "request_refused", "response_code", "localization_id"} {
+			delete(evidence, key)
 		}
-		if !success && outcome.Evidence["not_executed"] == true && evidence["enrollment_submitted"] == true {
-			return errors.New("submitted enrollment cannot become unsent nonexecution")
-		}
+
 		status := intents.StatusFailedTerminal
 		if success {
 			status = intents.StatusSucceeded
@@ -386,6 +425,14 @@ func (h *NMISubscriptionCreateIntentHandler) complete(ctx context.Context, in ge
 				evidence["delayed_start"] = p.DelayedStart.UTC().Format(time.RFC3339Nano)
 			}
 		} else {
+			if outcome.Evidence["declined"] == true && p.AmountMicros > 0 {
+				code := fmt.Sprint(outcome.Evidence["response_code"])
+				reason := payments.NormalizeFailureReason("nmi", code)
+				kind, token := payments.AttemptInitial, charge.TokenTypePSPToken
+				if err := payments.NewPaymentService(d, h.Checkout.Clock()).Create(ctx, &models.Payment{ID: p.Terms.PaymentID, CustomerID: p.Terms.CustomerID, PriceID: p.PriceID, PspID: in.PspID, Rail: "nmi", TransactionID: "nmi_sub_declined:" + in.ID.String(), Amount: p.AmountMicros, ListAmount: p.Terms.RecurringAmount, Currency: p.Currency, Status: payments.PaymentStatusFailedValue, AttemptKind: &kind, TokenType: &token, FailureCode: &code, FailureReason: &reason, MoneyMovement: models.MoneyMovementNone, PurchasedAt: p.Terms.AcceptedAt, CreatedAt: p.Terms.AcceptedAt}); err != nil {
+					return err
+				}
+			}
 			for key, value := range outcome.Evidence {
 				evidence[key] = value
 			}

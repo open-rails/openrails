@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"math"
 	"strings"
 	"time"
 )
@@ -78,6 +79,9 @@ func DecodeNMIInitialEnrollmentPayload(in gen.OpenrailsRailIntent) (NMIInitialEn
 	}
 	if p.UserID != p.Terms.CustomerID.String() || p.PriceID != p.Terms.PriceID || p.LocalSubscriptionID != p.Terms.SubscriptionID || p.PaymentMethodID == nil || *p.PaymentMethodID != p.Terms.PaymentMethodID || p.AmountMicros != p.Terms.Amount || p.Currency != p.Terms.Currency || p.CustomerVaultID != p.Instrument.RailCustomerRef || p.BillingID != p.Instrument.RailMethodRef || p.StoredCredentialRef != p.Instrument.StoredCredentialRecurringRef {
 		return p, errors.New("initial enrollment addressing contradicts accepted membership")
+	}
+	if int64(p.DayFrequency) > math.MaxInt64/int64(24*time.Hour) || p.Terms.PeriodEnd.Sub(p.Terms.PeriodStart) != time.Duration(p.DayFrequency)*24*time.Hour || (!p.Terms.Pending && p.AmountMicros != p.Terms.RecurringAmount) {
+		return p, errors.New("initial membership period or amount contradicts accepted recurring schedule")
 	}
 	start, err := time.Parse("20060102", p.StartDate)
 	if err != nil || !start.After(p.Terms.AcceptedAt) {
