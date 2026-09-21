@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -113,6 +114,21 @@ func TestInitialEnrollmentAcceptedModes(t *testing.T) {
 }
 
 func TestInitialEnrollmentRefusesRawProgressAuthority(t *testing.T) {
+	t.Run("decline_cannot_rebind_another_envelope", func(t *testing.T) {
+		fx := newSubIntentFixture(t)
+		fx.gateway.txnID = ""
+		fx.gateway.createMode.Store("ambiguous500")
+		in := fx.enqueueAndExecute(t)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(in.Payload, &payload))
+		payload["email"] = "different@example.invalid"
+		raw, err := json.Marshal(payload)
+		require.NoError(t, err)
+		in.Payload = raw
+		err = intents.NewStore(fx.db).RetainInitialEnrollmentDecline(fx.ctx, in, &nmi.CustomerVaultError{ResponseCode: 200, RawResponse: "response=2&response_code=200"})
+		require.Error(t, err, "provider refusal cannot be rebound to different accepted terms")
+	})
+
 	for _, flag := range []string{"declined", "request_refused"} {
 		t.Run(flag, func(t *testing.T) {
 			fx := newSubIntentFixture(t)

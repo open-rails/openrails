@@ -99,6 +99,10 @@ func (s *Store) RetainInitialEnrollmentDecline(ctx context.Context, in gen.Openr
 	if err != nil || fields.Get("response") != "2" || code != rejection.ResponseCode {
 		return errors.New("initial rejection is not a qualified provider decline")
 	}
+	expected, err := collectionBinding(in)
+	if err != nil {
+		return err
+	}
 	current, err := s.Get(ctx, in.ID)
 	if err != nil {
 		return err
@@ -106,6 +110,9 @@ func (s *Store) RetainInitialEnrollmentDecline(ctx context.Context, in gen.Openr
 	binding, err := collectionBinding(current)
 	if err != nil {
 		return err
+	}
+	if binding != expected {
+		return errors.New("initial decline envelope differs from canonical accepted operation")
 	}
 	fact := InitialEnrollmentRefusal{initialEnrollmentRefusal{Binding: binding, Kind: "provider_declined", ResponseCode: code, LocalizationID: rejection.LocalizationID}}
 	if err := fact.Validate(current); err != nil {
