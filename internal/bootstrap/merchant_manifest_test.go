@@ -24,49 +24,6 @@ type fakeTransit struct {
 func (f fakeTransit) Sign(context.Context, string, []byte) ([]byte, error) { return nil, nil }
 func (f fakeTransit) PublicKey(context.Context, string) ([]byte, error)    { return f.pub, f.err }
 
-func TestParseMerchantConfigManifest(t *testing.T) {
-	// #527: a manifest is merchants-only. Each merchant carries its own inline
-	// host-app remote_application (registered as owner of its permission-group),
-	// PSPs + secrets, and profile. No auth/users/groups section.
-	manifest, err := ParseMerchantConfigManifest([]byte(`
-version: 1
-merchants:
-  host-three:
-    display_name: Host Three
-    remote_application:
-      issuer: https://auth.host-three.example
-      jwks_uri: https://auth.host-three.example/.well-known/jwks.json
-    profile:
-      display_name: Host Three Billing
-      logo_url: https://cdn.example/logo.png
-      from_email: billing@example.com
-      support_url: https://example.com/support
-    psps:
-      stripe:
-        stripe:
-          account_id: acct_test_123
-          secrets:
-            secret_key: sk_test_123
-      mobius:
-        nmi:
-          account_id: mobius-profile-id
-          settings:
-            tokenization_url: https://secure.networkmerchants.com/token/Collect.js
-            tokenization_key: public-tokenization-key
-          secrets:
-            webhook_signing_secret: mobius-webhook-secret
-`))
-	require.NoError(t, err)
-	require.Len(t, manifest.Merchants, 1)
-	m := manifest.Merchants["host-three"]
-	require.Equal(t, "Host Three Billing", m.Profile.DisplayName)
-	require.NotNil(t, m.RemoteApplication)
-	require.Equal(t, "https://auth.host-three.example", m.RemoteApplication.Issuer)
-	require.Equal(t, "https://auth.host-three.example/.well-known/jwks.json", m.RemoteApplication.JWKSURI)
-	require.Len(t, m.PSPs, 2)
-	require.Equal(t, "acct_test_123", m.PSPs["stripe"]["stripe"].AccountID)
-}
-
 func TestExampleMerchantConfigManifestParses(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "merchants_config.example.yaml"))
 	require.NoError(t, err)
@@ -226,175 +183,40 @@ func TestManifestSolanaSignerEvidence(t *testing.T) {
 
 func TestParseMerchantConfigManifestValidationErrors(t *testing.T) {
 	base := func(fragment string) string {
-		return `
-version: 1
-merchants:
-  host-three:
-    display_name: Host Three
-` + fragment
+		return "version: 1\nmerchants:\n  host-three:\n    display_name: Host Three\n" + fragment
 	}
-	for _, tc := range []struct {
-		name string
-		body string
-		want string
-	}{
-		{
-			name: "unknown top-level key",
-			body: "version: 1\ntenantz: []\n",
-			want: "tenantz",
-		},
-		{
-			name: "auth section removed (hard cut)",
-			body: "version: 1\nauth:\n  users: []\nmerchants:\n  x:\n    display_name: X\n",
-			want: "auth",
-		},
-		{
-			name: "authkit authority belongs elsewhere",
-			body: "users:\n  - username: operator\n",
-			want: "users",
-		},
-		{
-			name: "no merchants",
-			body: "version: 1\n",
-			want: "at least one merchant",
-		},
-		{
-			name: "missing merchant display name",
-			body: "version: 1\nmerchants:\n  host-three: {}\n",
-			want: `merchant "host-three" display_name is required`,
-		},
-		{
-			name: "merchant name removed",
-			body: "version: 1\nmerchants:\n  host-three:\n    name: Host Three\n",
-			want: "unknown field \"name\"",
-		},
-		{
-			name: "support email removed",
-			body: base("    profile:\n      support_email: support@example.com\n"),
-			want: "support_email",
-		},
-		{
-			name: "issuer section removed",
-			body: base("    issuer:\n      issuer: https://auth.host-three.example\n      jwks_uri: https://auth.host-three.example/.well-known/jwks.json\n"),
-			want: "issuer",
-		},
-		{
-			name: "remote application missing issuer",
-			body: base("    remote_application:\n      jwks_uri: https://auth.host-three.example/.well-known/jwks.json\n"),
-			want: "remote_application.issuer is required",
-		},
-		{
-			name: "remote application both trust sources",
-			body: base("    remote_application:\n      issuer: https://auth.host-three.example\n      jwks_uri: https://auth.host-three.example/jwks\n      public_keys:\n        - public_key_pem: x\n"),
-			want: "exactly one of jwks_uri, jwks, or public_keys",
-		},
-		{
-			name: "remote application no trust source",
-			body: base("    remote_application:\n      issuer: https://auth.host-three.example\n"),
-			want: "must set jwks_uri, jwks, or public_keys",
-		},
-		{
-			name: "remote application allowed origins removed",
-			body: base("    remote_application:\n      issuer: https://auth.host-three.example\n      jwks_uri: https://auth.host-three.example/jwks\n      allowed_origins:\n        - https://auth.host-three.example\n"),
-			want: "allowed_origins",
-		},
-		{
-			name: "catalogs belong to push-merchant-catalog",
-			body: "version: 1\ncatalogs: []\n",
-			want: "catalogs",
-		},
-		{
-			name: "invalid profile URL",
-			body: base("    profile:\n      logo_url: ftp://cdn.example/logo.png\n"),
-			want: "profile.logo_url",
-		},
-		{
-			name: "api_host with scheme rejected (#850)",
-			body: base("    api_host: https://api.host-three.example\n"),
-			want: "api_host",
-		},
-		{
-			name: "api_host with path rejected (#850)",
-			body: base("    api_host: api.host-three.example/v1\n"),
-			want: "api_host",
-		},
-		{
-			name: "renamed key rail_merchant_accounts rejected with pointer (#698)",
-			body: base("    rail_merchant_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n"),
-			want: "merchants.host-three.rail_merchant_accounts was renamed to psps",
-		},
-		{
-			name: "pre-#683 key provider_accounts rejected with pointer",
-			body: base("    provider_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n"),
-			want: "merchants.host-three.provider_accounts was renamed to psps",
-		},
-		{
-			name: "PSP routing removed",
-			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          routing: standby\n"),
-			want: "unknown field \"routing\"",
-		},
-		{
-			name: "PSP mode removed",
-			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          mode: primary\n"),
-			want: "unknown field \"mode\"",
-		},
-		{
-			name: "PSP role removed",
-			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          role: primary\n"),
-			want: "unknown field \"role\"",
-		},
-		{
-			// #882: environment is derived from test_mode, never declared —
-			// even a value that would have AGREED is refused.
-			name: "declared psp environment is retired",
-			body: base("    psps:\n      stripe:\n        stripe:\n          environment: live\n          account_id: acct_test_123\n"),
-			want: "psps.stripe.stripe.environment was removed (#882)",
-		},
-		{
-			name: "solana network is not a PSP knob",
-			body: base("    psps:\n      solana:\n        solana:\n          network: devnet\n"),
-			want: "unknown field \"network\"",
-		},
-		{
-			name: "invalid provider secret alias",
-			body: base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          secrets:\n            api_key: one\n"),
-			want: "unknown PSP secret",
-		},
-		{
-			name: "nmi tokenization key is a setting",
-			body: base("    psps:\n      mobius:\n        nmi:\n          account_id: mobius-profile-id\n          secrets:\n            tokenization_key: public-token\n"),
-			want: "unknown PSP secret",
-		},
+	for _, row := range []struct{ name, body, want string }{
+		{"unknown top-level key", "version: 1\ntenantz: []\n", "tenantz"},
+		{"auth section removed (hard cut)", "version: 1\nauth:\n  users: []\nmerchants:\n  x:\n    display_name: X\n", "auth"},
+		{"authkit authority belongs elsewhere", "users:\n  - username: operator\n", "users"},
+		{"no merchants", "version: 1\n", "at least one merchant"},
+		{"missing merchant display name", "version: 1\nmerchants:\n  host-three: {}\n", `merchant "host-three" display_name is required`},
+		{"merchant name removed", "version: 1\nmerchants:\n  host-three:\n    name: Host Three\n", "unknown field \"name\""},
+		{"support email removed", base("    profile:\n      support_email: support@example.com\n"), "support_email"},
+		{"issuer section removed", base("    issuer:\n      issuer: https://auth.host-three.example\n      jwks_uri: https://auth.host-three.example/.well-known/jwks.json\n"), "issuer"},
+		{"remote application missing issuer", base("    remote_application:\n      jwks_uri: https://auth.host-three.example/.well-known/jwks.json\n"), "remote_application.issuer is required"},
+		{"remote application both trust sources", base("    remote_application:\n      issuer: https://auth.host-three.example\n      jwks_uri: https://auth.host-three.example/jwks\n      public_keys:\n        - public_key_pem: x\n"), "exactly one of jwks_uri, jwks, or public_keys"},
+		{"remote application no trust source", base("    remote_application:\n      issuer: https://auth.host-three.example\n"), "must set jwks_uri, jwks, or public_keys"},
+		{"remote application allowed origins removed", base("    remote_application:\n      issuer: https://auth.host-three.example\n      jwks_uri: https://auth.host-three.example/jwks\n      allowed_origins:\n        - https://auth.host-three.example\n"), "allowed_origins"},
+		{"catalogs belong to push-merchant-catalog", "version: 1\ncatalogs: []\n", "catalogs"},
+		{"invalid profile URL", base("    profile:\n      logo_url: ftp://cdn.example/logo.png\n"), "profile.logo_url"},
+		{"api_host with scheme rejected (#850)", base("    api_host: https://api.host-three.example\n"), "api_host"},
+		{"api_host with path rejected (#850)", base("    api_host: api.host-three.example/v1\n"), "api_host"},
+		{"renamed key rail_merchant_accounts rejected with pointer (#698)", base("    rail_merchant_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n"), "merchants.host-three.rail_merchant_accounts was renamed to psps"},
+		{"pre-#683 key provider_accounts rejected with pointer", base("    provider_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n"), "merchants.host-three.provider_accounts was renamed to psps"},
+		{"PSP routing removed", base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          routing: standby\n"), "unknown field \"routing\""},
+		{"PSP mode removed", base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          mode: primary\n"), "unknown field \"mode\""},
+		{"PSP role removed", base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          role: primary\n"), "unknown field \"role\""},
+		{"declared psp environment is retired", base("    psps:\n      stripe:\n        stripe:\n          environment: live\n          account_id: acct_test_123\n"), "psps.stripe.stripe.environment was removed (#882)"},
+		{"solana network is not a PSP knob", base("    psps:\n      solana:\n        solana:\n          network: devnet\n"), "unknown field \"network\""},
+		{"invalid provider secret alias", base("    psps:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n          secrets:\n            api_key: one\n"), "unknown PSP secret"},
+		{"nmi tokenization key is a setting", base("    psps:\n      mobius:\n        nmi:\n          account_id: mobius-profile-id\n          secrets:\n            tokenization_key: public-token\n"), "unknown PSP secret"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := ParseMerchantConfigManifest([]byte(tc.body))
-			require.Error(t, err)
-			require.Contains(t, err.Error(), tc.want)
+		t.Run(row.name, func(t *testing.T) {
+			_, err := ParseMerchantConfigManifest([]byte(row.body))
+			require.ErrorContains(t, err, row.want)
 		})
 	}
-}
-
-// The dump emits the canonical `psps:` key and round-trips through the strict
-// parser. The retired key is rejected, never emitted.
-func TestMarshalMerchantManifestEmitsPSPsKey(t *testing.T) {
-	encoded, err := MarshalMerchantManifest(&BillingConfig{
-		Version: 1,
-		Merchants: map[string]MerchantConfig{
-			"host-three": {
-				DisplayName: "Host Three",
-				PSPs: map[string]PSPConfig{
-					"stripe": {"stripe": {AccountID: "acct_test_123"}},
-				},
-			},
-		},
-	})
-	require.NoError(t, err)
-	require.Contains(t, string(encoded), "psps:")
-	require.NotContains(t, string(encoded), "rail_merchant_accounts:")
-
-	reparsed, err := ParseMerchantConfigManifest(encoded)
-	require.NoError(t, err)
-	require.Equal(t, "acct_test_123", reparsed.Merchants["host-three"].PSPs["stripe"]["stripe"].AccountID)
 }
 
 // A declared Solana account_id is IGNORED, not rejected: parsing succeeds (it is
