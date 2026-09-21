@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -83,13 +82,16 @@ func TestStripeSandboxRuntimeTransportLifetime(t *testing.T) {
 
 	// A failed host River bind occurs after the provider graph is constructed.
 	failed := options(sandbox.URL)
-	failed.River = RiverFromHost(func(context.Context, *RiverFleet) (*river.Client[pgx.Tx], error) {
-		return nil, errors.New("deliberate host bind failure")
+	failed.River = RiverFromHost()
+	failedRuntime, err := New(t.Context(), failed)
+	require.NoError(t, err)
+	_, err = failedRuntime.BindRiver(t.Context(), pool, func(context.Context, *river.Config) error {
+		return errors.New("deliberate host bind failure")
 	})
-	_, err = New(t.Context(), failed)
 	require.ErrorContains(t, err, "deliberate host bind failure")
+	require.NoError(t, failedRuntime.Close(context.Background()), "failed startup explicitly closes its runtime")
 	read()
-	require.EqualValues(t, 2, defaultRequests.Load(), "failed construction releases its sandbox lease")
+	require.EqualValues(t, 2, defaultRequests.Load(), "failed startup cleanup releases its sandbox lease")
 	require.EqualValues(t, 1, sandboxRequests.Load())
 
 	// Closing owners out of order must neither clear the surviving runtime nor

@@ -89,12 +89,7 @@ func TestApplyMigrationsFreshOwnershipAndSchemas(t *testing.T) {
 				require.NoError(t, err)
 				_, err = migrator.Migrate(ctx, rivermigrate.DirectionUp, nil)
 				require.NoError(t, err)
-				opts.River = RiverFromHost(func(_ context.Context, fleet *RiverFleet) (*river.Client[pgx.Tx], error) {
-					binderCalled = true
-					client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{Schema: tc.jobs, Workers: fleet.Workers, Queues: map[string]river.QueueConfig{fleet.QueueBilling: {MaxWorkers: 1}}})
-					hostClient = client
-					return client, err
-				})
+				opts.River = RiverFromHost()
 			}
 			require.NoError(t, ApplyMigrations(ctx, pool, opts))
 			require.NoError(t, ApplyMigrations(ctx, pool, opts), "repeated initialization is idempotent")
@@ -150,6 +145,16 @@ func TestApplyMigrationsFreshOwnershipAndSchemas(t *testing.T) {
 			rt, err := New(ctx, Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: runtimeDSN, Schema: runtimeSchema}}, PGXPool: runtimePool, River: opts.River})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
+			require.False(t, binderCalled, "New must leave composition open")
+			if tc.host {
+				hostClient, err = rt.BindRiver(ctx, pool, func(_ context.Context, cfg *river.Config) error {
+					binderCalled = true
+					cfg.Schema = tc.jobs
+					cfg.Queues[QueueBilling] = river.QueueConfig{MaxWorkers: 1}
+					return nil
+				})
+				require.NoError(t, err)
+			}
 			require.Equal(t, tc.host, rt.HasExternalRiverClient())
 			require.Equal(t, tc.billing, rt.app.Runtime.DB.DataPool().Schema())
 			// A nested service reconstructing DB from a library transaction must

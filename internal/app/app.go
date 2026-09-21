@@ -63,6 +63,7 @@ func (a *App) SetControlPlane(cp any, ownedPool *pgxpool.Pool) {
 // hosts supply their database as a pgx pool (PGXPool); the bun-era *sql.DB
 // override was removed with the ORM (#334).
 type BootstrapOptions struct {
+	HostRiver   bool
 	RiverSchema string
 	PGXPool     *pgxpool.Pool
 	Redis       *redis.Client
@@ -114,7 +115,8 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 	}
 
 	runtime, err := buildRuntimeWithOverrides(ctx, cfg, &runtimeOverrides{
-		DB: dbOverride,
+		HostRiver: opts != nil && opts.HostRiver,
+		DB:        dbOverride,
 		RiverSchema: func() string {
 			if opts != nil {
 				return opts.RiverSchema
