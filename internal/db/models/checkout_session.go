@@ -1,6 +1,8 @@
 package models
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -9,8 +11,9 @@ import (
 type CheckoutSessionMode string
 
 const (
-	CheckoutSessionModeOneOff       CheckoutSessionMode = "one_off"
-	CheckoutSessionModeSubscription CheckoutSessionMode = "subscription"
+	CheckoutSessionModeOneOff        CheckoutSessionMode = "one_off"
+	CheckoutSessionModePaymentMethod CheckoutSessionMode = "payment_method"
+	CheckoutSessionModeSubscription  CheckoutSessionMode = "subscription"
 	// CheckoutSessionModeSolanaCancel and CheckoutSessionModeSolanaTierChange
 	// extend the Solana Pay transaction-request machinery to the recurring
 	// subscription lifecycle (#272+). A cancel session carries the target
@@ -41,14 +44,14 @@ type CheckoutSession struct {
 	// The ID is the host subject UUID within MerchantID; customers stores issuer metadata.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 
-	PriceID uuid.UUID           `json:"price_id"`
+	PriceID *uuid.UUID          `json:"price_id"`
 	Mode    CheckoutSessionMode `json:"mode"`
 
 	Rail   Rail                  `json:"rail"`
 	Status CheckoutSessionStatus `json:"status"`
 
-	Amount   int64  `json:"amount"`
-	Currency string `json:"currency"`
+	Amount   *int64  `json:"amount"`
+	Currency *string `json:"currency"`
 
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	Reference *string    `json:"reference,omitempty"`
@@ -149,4 +152,22 @@ type CheckoutRoutingReason struct {
 type CheckoutRoutingSkip struct {
 	Selector string `json:"selector"`
 	Reason   string `json:"reason"`
+}
+
+// ValidateTerms keeps setup sessions free of monetary terms while preserving
+// the required price/amount/currency contract of every priced/lifecycle mode.
+func (s *CheckoutSession) ValidateTerms() error {
+	if s == nil {
+		return fmt.Errorf("checkout session is required")
+	}
+	if s.Mode == CheckoutSessionModePaymentMethod {
+		if s.PriceID != nil || s.Amount != nil || s.Currency != nil || s.PaymentID != nil || s.SubscriptionID != nil || s.Rail != RailNMI {
+			return fmt.Errorf("payment-method setup cannot carry monetary terms")
+		}
+		return nil
+	}
+	if s.PriceID == nil || *s.PriceID == uuid.Nil || s.Amount == nil || s.Currency == nil || strings.TrimSpace(*s.Currency) == "" {
+		return fmt.Errorf("priced checkout session requires price, amount and currency")
+	}
+	return nil
 }

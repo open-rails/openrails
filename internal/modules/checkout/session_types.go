@@ -4,6 +4,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 )
 
@@ -19,6 +20,7 @@ var (
 )
 
 type CheckoutSessionPaymentRequest struct {
+	PSPID           uuid.UUID
 	Rail            string
 	PaymentMethodID string
 	PaymentToken    string
@@ -64,6 +66,7 @@ type CheckoutSessionCreateRequest struct {
 }
 
 type CheckoutSessionConfirmPayment struct {
+	Capture   *openrails.CustodianCaptureReference
 	Rail      string
 	Signature string
 	Wallet    string
@@ -80,20 +83,22 @@ type CheckoutSessionNextAction = openrails.CheckoutSessionNextAction
 type CheckoutSessionPaymentResponse = openrails.CheckoutSessionPaymentResponse
 
 type CheckoutSessionResponse struct {
-	Object         string                         `json:"object"`
-	ID             openrails.CheckoutSessionID    `json:"id"`
-	Status         string                         `json:"status"`
-	Mode           string                         `json:"mode"`
-	PriceID        openrails.PriceID              `json:"price_id"`
-	Amount         int64                          `json:"amount,string"`
-	Currency       string                         `json:"currency"`
-	URL            string                         `json:"url,omitempty"`
-	Payment        CheckoutSessionPaymentResponse `json:"payment"`
-	PaymentID      *openrails.PaymentID           `json:"payment_id,omitempty"`
-	SubscriptionID *openrails.SubscriptionID      `json:"subscription_id,omitempty"`
-	ExpiresAt      *time.Time                     `json:"expires_at,omitempty"`
-	CreatedAt      time.Time                      `json:"created_at"`
-	NextAction     *CheckoutSessionNextAction     `json:"next_action,omitempty"`
-	Message        string                         `json:"message,omitempty"`
-	Metadata       map[string]string              `json:"metadata,omitempty"`
+	Capture         *openrails.CustodianCaptureAction `json:"capture,omitempty"`
+	PaymentMethodID *openrails.PaymentMethodID        `json:"payment_method_id,omitempty"`
+	Object          string                            `json:"object"`
+	ID              openrails.CheckoutSessionID       `json:"id"`
+	Status          string                            `json:"status"`
+	Mode            string                            `json:"mode"`
+	PriceID         *openrails.PriceID                `json:"price_id"`
+	Amount          *int64                            `json:"amount,string"`
+	Currency        *string                           `json:"currency"`
+	URL             string                            `json:"url,omitempty"`
+	Payment         CheckoutSessionPaymentResponse    `json:"payment"`
+	PaymentID       *openrails.PaymentID              `json:"payment_id,omitempty"`
+	SubscriptionID  *openrails.SubscriptionID         `json:"subscription_id,omitempty"`
+	ExpiresAt       *time.Time                        `json:"expires_at,omitempty"`
+	CreatedAt       time.Time                         `json:"created_at"`
+	NextAction      *CheckoutSessionNextAction        `json:"next_action,omitempty"`
+	Message         string                            `json:"message,omitempty"`
+	Metadata        map[string]string                 `json:"metadata,omitempty"`
 }

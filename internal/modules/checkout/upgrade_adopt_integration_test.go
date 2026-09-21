@@ -42,6 +42,9 @@ type fakeNMIUpgradeGateway struct {
 	saleCurrency    atomic.Value
 	saleOrder       atomic.Value
 	recurringAmount atomic.Value
+	nextChargeDate  atomic.Value
+	reportedOrder   atomic.Value
+	planPayments    atomic.Value
 	saleCalls       atomic.Int64
 	saleMode        atomic.Value
 	saleVisible     atomic.Bool
@@ -66,6 +69,9 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string, merc
 	f.lastOrder.Store("")
 	f.saleOrder.Store("")
 	f.saleCurrency.Store("")
+	f.nextChargeDate.Store("")
+	f.reportedOrder.Store("")
+	f.planPayments.Store("0")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -75,7 +81,7 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string, merc
 				fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"not found"}`)
 				return
 			}
-			fmt.Fprintf(w, `{"object":"subscription","id":"%s","customer_vault_id":"%s","delayed_condition":"active","plan":{"id":"%s"}}`, f.subID, f.railCustomerRef, f.planID)
+			fmt.Fprintf(w, `{"object":"subscription","id":"%s","customer_vault_id":"%s","delayed_condition":"active","paused_subscription":"0","next_billing_date":"%s","plan":{"id":"%s","plan_amount":"%s","day_frequency":"30","plan_payments":"%s"}}`, f.subID, f.railCustomerRef, f.nextChargeDate.Load(), f.planID, f.recurringAmount.Load(), f.planPayments.Load())
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/payments/"):
 			amount, _ := f.saleAmount.Load().(string)
 			if !strings.HasSuffix(r.URL.Path, "/payments/"+f.saleTxn) || !f.saleLanded.Load() {
@@ -100,6 +106,9 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string, merc
 				f.createCalls.Add(1)
 				f.recurringAmount.Store(r.Form.Get("amount"))
 				f.lastOrder.Store(r.Form.Get("orderid"))
+				start, err := time.Parse("20060102", r.Form.Get("start_date"))
+				require.NoError(t, err)
+				f.nextChargeDate.Store(start.Format("2006-01-02"))
 				switch f.createMode.Load().(string) {
 				case "ambiguousLanded":
 					// The create LANDED but the response was lost.
@@ -110,7 +119,7 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string, merc
 					w.WriteHeader(http.StatusBadGateway)
 				default:
 					f.subExists.Store(true)
-					fmt.Fprintf(w, "response=1&responsetext=SUCCESS&subscription_id=%s&authcode=OK", f.subID)
+					fmt.Fprintf(w, "response=1&responsetext=SUCCESS&subscription_id=%s&transactionid=%s&authcode=OK", f.subID, f.subID)
 				}
 				return
 			}
@@ -130,6 +139,18 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string, merc
 					f.saleVisible.Store(true)
 					fmt.Fprintf(w, "response=1&responsetext=SUCCESS&transactionid=%s&authcode=OK", f.saleTxn)
 				}
+				return
+			}
+			if r.Form.Get("report_type") == "recurring" {
+				if r.Form.Get("subscription_id") != f.subID || !f.subExists.Load() {
+					fmt.Fprint(w, `<nm_response/>`)
+					return
+				}
+				order := f.lastOrder.Load().(string)
+				if changed := f.reportedOrder.Load().(string); changed != "" {
+					order = changed
+				}
+				fmt.Fprintf(w, `<nm_response><subscription id="%s"><subscription_id>%s</subscription_id><plan><plan_id>%s</plan_id></plan><orderid>%s</orderid><ponumber>%s</ponumber><next_charge_date>%s</next_charge_date></subscription></nm_response>`, f.subID, f.subID, f.planID, order, order, f.nextChargeDate.Load())
 				return
 			}
 			if f.saleVisible.Load() && f.saleOrder.Load().(string) == r.Form.Get("order_id") {

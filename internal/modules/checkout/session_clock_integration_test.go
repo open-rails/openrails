@@ -23,10 +23,10 @@ func TestFindOpenCheckoutUsesBusinessClockForExpiry(t *testing.T) {
 	clock := clockwork.NewFakeClockAt(now)
 	repo := NewCheckoutSessionRepo(fx.db)
 	session := &models.CheckoutSession{
-		ID: uuid.New(), CustomerID: uuid.MustParse(fx.userID), PriceID: fx.priceID,
+		ID: uuid.New(), CustomerID: uuid.MustParse(fx.userID), PriceID: new(fx.priceID),
 		PspID: dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius"),
 		Mode:  models.CheckoutSessionModeOneOff, Rail: models.RailNMI,
-		Status: models.CheckoutSessionStatusCreated, Amount: 100, Currency: "USD",
+		Status: models.CheckoutSessionStatusCreated, Amount: new(int64(100)), Currency: new("USD"),
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: &expiry,
 	}
 	require.NoError(t, repo.Create(fx.ctx, session))
@@ -68,9 +68,9 @@ func TestConfirmSolanaLifecycleSessionPersistsAndPinsSessionPSP(t *testing.T) {
 	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "solana")
 	subscriptionID := uuid.New()
 	session := &models.CheckoutSession{
-		ID: uuid.New(), CustomerID: uuid.MustParse(fx.userID), PriceID: fx.priceID, PspID: pspID,
+		ID: uuid.New(), CustomerID: uuid.MustParse(fx.userID), PriceID: new(fx.priceID), PspID: pspID,
 		Mode: models.CheckoutSessionModeSolanaCancel, Rail: models.RailSolana,
-		Status: models.CheckoutSessionStatusRequiresAction, Amount: 100, Currency: "USD",
+		Status: models.CheckoutSessionStatusRequiresAction, Amount: new(int64(100)), Currency: new("USD"),
 		RailState: map[string]any{"subscription_id": subscriptionID.String()},
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: &expiry,
 	}

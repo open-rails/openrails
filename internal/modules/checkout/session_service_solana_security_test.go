@@ -46,9 +46,9 @@ func TestInitializeSolanaSession_TransactionRequestRequiresPersistedQuote(t *tes
 	session := &models.CheckoutSession{
 		ID:         uuid.New(),
 		CustomerID: identity.CustomerIDFromString("user_123").UUID(),
-		PriceID:    uuid.New(),
-		Amount:     1000,
-		Currency:   "EUR",
+		PriceID:    new(uuid.New()),
+		Amount:     new(int64(1000)),
+		Currency:   new("EUR"),
 	}
 	payment := &CheckoutSessionPaymentRequest{
 		TokenSymbol: "USDC",
@@ -73,9 +73,9 @@ func TestInitializeSolanaSession_TransactionRequestRejectsZeroTokenAmount(t *tes
 	session := &models.CheckoutSession{
 		ID:         uuid.New(),
 		CustomerID: identity.CustomerIDFromString("user_123").UUID(),
-		PriceID:    uuid.New(),
-		Amount:     0,
-		Currency:   "USD",
+		PriceID:    new(uuid.New()),
+		Amount:     new(int64(0)),
+		Currency:   new("USD"),
 	}
 	payment := &CheckoutSessionPaymentRequest{
 		TokenSymbol: "USDC",
@@ -102,9 +102,9 @@ func TestConfirmSolanaSession_RequiresTokenAmount(t *testing.T) {
 	session := &models.CheckoutSession{
 		ID:         uuid.New(),
 		CustomerID: identity.CustomerIDFromString("user_123").UUID(),
-		PriceID:    uuid.New(),
-		Amount:     1000,
-		Currency:   "USD",
+		PriceID:    new(uuid.New()),
+		Amount:     new(int64(1000)),
+		Currency:   new("USD"),
 		Reference:  &ref,
 		RailState: map[string]any{
 			"token_symbol": "USDC",
@@ -138,9 +138,9 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 		session := &models.CheckoutSession{
 			ID:         uuid.New(),
 			CustomerID: identity.CustomerIDFromString("user_123").UUID(),
-			PriceID:    uuid.New(),
-			Amount:     1000,
-			Currency:   "USD",
+			PriceID:    new(uuid.New()),
+			Amount:     new(int64(1000)),
+			Currency:   new("USD"),
 			Reference:  &ref,
 			RailState: map[string]any{
 				"token_symbol": "USDC",
@@ -162,9 +162,9 @@ func TestConfirmSolanaSession_RequiresRecipientAndReference(t *testing.T) {
 		session := &models.CheckoutSession{
 			ID:         uuid.New(),
 			CustomerID: identity.CustomerIDFromString("user_123").UUID(),
-			PriceID:    uuid.New(),
-			Amount:     1000,
-			Currency:   "USD",
+			PriceID:    new(uuid.New()),
+			Amount:     new(int64(1000)),
+			Currency:   new("USD"),
 			RailState: map[string]any{
 				"token_symbol": "USDC",
 				"token_mint":   devnetUSDCMint,
@@ -288,9 +288,9 @@ func TestSolanaBuildRequestFromSessionUsesPersistedQuote(t *testing.T) {
 	session := &models.CheckoutSession{
 		ID:         uuid.New(),
 		CustomerID: tenantSubjectID,
-		PriceID:    priceID,
-		Amount:     10000,
-		Currency:   "USD",
+		PriceID:    new(priceID),
+		Amount:     new(int64(10000)),
+		Currency:   new("USD"),
 		Reference:  &ref,
 		RailState: map[string]any{
 			"token_symbol": "USDC",

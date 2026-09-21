@@ -93,6 +93,19 @@ func (m *MockNMIServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.Form.Get("report_type") == "recurring" {
+		m.rebillMu.Lock()
+		defer m.rebillMu.Unlock()
+		w.Header().Set("Content-Type", "application/xml")
+		fmt.Fprint(w, "<nm_response>")
+		if schedule := m.rebillObligations[r.Form.Get("subscription_id")]; schedule != nil && schedule["order_id"] != nil {
+			plan := schedule["plan"].(map[string]any)
+			fmt.Fprintf(w, `<subscription id="%s"><subscription_id>%s</subscription_id><plan><plan_id>%s</plan_id></plan><orderid>%s</orderid><ponumber>%s</ponumber><next_charge_date>%s</next_charge_date></subscription>`, schedule["id"], schedule["id"], plan["id"], schedule["order_id"], schedule["order_id"], schedule["next_billing_date"])
+		}
+		fmt.Fprint(w, "</nm_response>")
+		return
+	}
+
 	// Determine what type of request this is
 	customerVault := r.Form.Get("customer_vault")
 	recurring := r.Form.Get("recurring")
@@ -143,6 +156,18 @@ func (m *MockNMIServer) handleRequest(w http.ResponseWriter, r *http.Request) {
 		response = fmt.Sprintf("response=1&responsetext=SUCCESS&transactionid=%s&authcode=123456&type=sale", txnID)
 	}
 
+	if recurring == "add_subscription" {
+		values, _ := url.ParseQuery(response)
+		start, dateErr := time.Parse("20060102", r.Form.Get("start_date"))
+		if id := values.Get("subscription_id"); values.Get("response") == "1" && id != "" && dateErr == nil {
+			m.rebillMu.Lock()
+			if m.rebillObligations == nil {
+				m.rebillObligations = map[string]map[string]any{}
+			}
+			m.rebillObligations[id] = map[string]any{"id": id, "customer_vault_id": r.Form.Get("customer_vault_id"), "delayed_condition": "active", "paused_subscription": false, "next_billing_date": start.Format("2006-01-02"), "order_id": r.Form.Get("orderid"), "plan": map[string]any{"id": r.Form.Get("plan_id"), "plan_amount": r.Form.Get("amount"), "day_frequency": "30", "plan_payments": "0"}}
+			m.rebillMu.Unlock()
+		}
+	}
 	if recurring == "rebill_subscription" {
 		values, _ := url.ParseQuery(response)
 		if values.Get("response") == "1" {

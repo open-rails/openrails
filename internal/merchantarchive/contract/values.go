@@ -1,9 +1,11 @@
 package contract
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -149,6 +151,43 @@ func ValidateValues(p Profile, values []*string) error {
 			}
 		}
 	}
+	if p.Name == "checkout_sessions" {
+		field := func(name string) string {
+			if v := value(p, values, name); v != nil {
+				return *v
+			}
+			return ""
+		}
+		var state struct {
+			Capture json.RawMessage `json:"capture"`
+		}
+		if raw := value(p, values, "rail_state"); raw != nil && json.Unmarshal([]byte(*raw), &state) != nil {
+			return fmt.Errorf("invalid checkout state")
+		}
+		if field("mode") == string(models.CheckoutSessionModePaymentMethod) {
+			for _, name := range []string{"price_id", "amount", "currency", "payment_id", "subscription_id", "reference", "transaction_id"} {
+				if value(p, values, name) != nil {
+					return fmt.Errorf("capture setup contains monetary/provider payment terms")
+				}
+			}
+			if field("rail") != "nmi" {
+				return fmt.Errorf("unsupported capture rail")
+			}
+			expiry, err := time.Parse("2006-01-02 15:04:05.999999-07", field("expires_at"))
+			if err != nil {
+				return fmt.Errorf("invalid capture expiry")
+			}
+			owner, _ := uuid.Parse(field("merchant_id"))
+			customer, _ := uuid.Parse(field("customer_id"))
+			psp, _ := uuid.Parse(field("psp_id"))
+			if _, err = models.DecodeCheckoutCapture(state.Capture, owner, customer, psp, models.CheckoutSessionStatus(field("status")), &expiry); err != nil {
+				return fmt.Errorf("invalid terminal capture binding: %w", err)
+			}
+		} else if len(state.Capture) != 0 {
+			return fmt.Errorf("capture binding on priced checkout")
+		}
+	}
+
 	if p.Name == "webhook_events" && value(p, values, "completed_at") == nil {
 		return fmt.Errorf("unfinished webhook event")
 	}

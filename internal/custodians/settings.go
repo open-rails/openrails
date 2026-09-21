@@ -13,6 +13,8 @@ import (
 type Settings struct {
 	// PublicAPIKey is the checkout-page key (public by nature, not a secret).
 	PublicAPIKey string
+	// ProfileID selects the one merchant-owned HyperSwitch business profile.
+	ProfileID string
 	// NetworkTokens arms network-token provisioning at instrument creation.
 	NetworkTokens bool
 	// AccountUpdater arms the batch account-updater cycle (or#795).
@@ -75,6 +77,8 @@ func ParseSettings(kind string, settings map[string]any) (Settings, error) {
 			switch slot.Name {
 			case SettingPublicAPIKey:
 				out.PublicAPIKey = v
+			case SettingProfileID:
+				out.ProfileID = v
 			}
 		case ValueBool:
 			v, err := asBool(d.Kind, slot.Name, raw)

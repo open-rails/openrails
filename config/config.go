@@ -263,6 +263,8 @@ type Config struct {
 	// writes it. Honored only under test_mode=sandbox and only for a literal
 	// loopback destination; anything else refuses to load.
 	ProviderSandbox *ProviderSandboxConfig `koanf:"provider_sandbox,omitempty"`
+	// HyperSwitch is a trusted host-owned deployment, never tenant-controlled.
+	HyperSwitch *HyperSwitchConfig `koanf:"hyperswitch,omitempty"`
 }
 
 // ProviderSandboxConfig names loopback provider gateways for sandbox runs.
@@ -857,6 +859,8 @@ type CustodianConfig struct {
 	APIKey string
 	// PublicAPIKey is checkout-page config (not a secret).
 	PublicAPIKey string
+	// ProfileID is the merchant-owned HyperSwitch business profile.
+	ProfileID string
 	// NetworkTokens arms NT provisioning on instrument creation (never
 	// load-bearing; charge routing stays pan_proxy on NMI gateways).
 	NetworkTokens bool
@@ -1384,6 +1388,9 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("encryption config validation failed: %w", err)
 	}
 
+	if err := validateHyperSwitch(cfg); err != nil {
+		return err
+	}
 	if err := validateProviderSandbox(cfg); err != nil {
 		return err
 	}

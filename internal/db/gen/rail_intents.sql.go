@@ -1662,10 +1662,12 @@ UPDATE openrails.rail_intents
 SET status = 'failed_terminal',
     last_failure_reason = $1,
     result_evidence = CASE
-        WHEN result_evidence ?| ARRAY['qualified_receipt', 'account_requalifications']
+        WHEN result_evidence ?| ARRAY['qualified_receipt', 'qualified_enrollment', 'account_requalifications']
         THEN COALESCE($2::jsonb, '{}'::jsonb)
           || CASE WHEN result_evidence ? 'qualified_receipt'
                   THEN jsonb_build_object('qualified_receipt', result_evidence->'qualified_receipt') ELSE '{}'::jsonb END
+          || CASE WHEN result_evidence ? 'qualified_enrollment'
+                  THEN jsonb_build_object('qualified_enrollment', result_evidence->'qualified_enrollment') ELSE '{}'::jsonb END
           || CASE WHEN result_evidence ? 'account_requalifications'
                   THEN jsonb_build_object('account_requalifications', result_evidence->'account_requalifications') ELSE '{}'::jsonb END
         ELSE $2::jsonb
@@ -1696,10 +1698,12 @@ UPDATE openrails.rail_intents
 SET status = 'succeeded',
     executed_at = $1::timestamptz,
     result_evidence = CASE
-        WHEN result_evidence ?| ARRAY['qualified_receipt', 'account_requalifications']
+        WHEN result_evidence ?| ARRAY['qualified_receipt', 'qualified_enrollment', 'account_requalifications']
         THEN COALESCE($2::jsonb, '{}'::jsonb)
           || CASE WHEN result_evidence ? 'qualified_receipt'
                   THEN jsonb_build_object('qualified_receipt', result_evidence->'qualified_receipt') ELSE '{}'::jsonb END
+          || CASE WHEN result_evidence ? 'qualified_enrollment'
+                  THEN jsonb_build_object('qualified_enrollment', result_evidence->'qualified_enrollment') ELSE '{}'::jsonb END
           || CASE WHEN result_evidence ? 'account_requalifications'
                   THEN jsonb_build_object('account_requalifications', result_evidence->'account_requalifications') ELSE '{}'::jsonb END
         ELSE $2::jsonb
@@ -1858,47 +1862,6 @@ func (q *Queries) RenewRailIntentClaim(ctx context.Context, arg RenewRailIntentC
 	return result.RowsAffected(), nil
 }
 
-const retainRailIntentCollectedReceipt = `-- name: RetainRailIntentCollectedReceipt :execrows
-UPDATE openrails.rail_intents
-SET result_evidence = COALESCE(result_evidence, '{}'::jsonb)
-        || jsonb_build_object('qualified_receipt', $1::jsonb),
-    updated_at = now()
-WHERE id = $2::uuid
-  AND merchant_id = $3::uuid
-  AND psp_id = $4::uuid
-  AND intent_type = $5::text
-  AND payload = $6::jsonb
-  AND status IN ('in_flight', 'unknown_needs_verify')
-  AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')
-       OR result_evidence->'qualified_receipt' = $1::jsonb)
-`
-
-type RetainRailIntentCollectedReceiptParams struct {
-	Receipt    []byte
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
-	IntentType string
-	Payload    []byte
-}
-
-// Custody binds immutable provider facts to the accepted operation. A repeated
-// identical receipt succeeds; a conflicting receipt or terminal row never changes.
-func (q *Queries) RetainRailIntentCollectedReceipt(ctx context.Context, arg RetainRailIntentCollectedReceiptParams) (int64, error) {
-	result, err := q.db.Exec(ctx, retainRailIntentCollectedReceipt,
-		arg.Receipt,
-		arg.ID,
-		arg.MerchantID,
-		arg.PspID,
-		arg.IntentType,
-		arg.Payload,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const retainRailIntentCollectionCandidate = `-- name: RetainRailIntentCollectionCandidate :execrows
 UPDATE openrails.rail_intents
 SET result_evidence = COALESCE(result_evidence, '{}'::jsonb)
@@ -1927,6 +1890,51 @@ type RetainRailIntentCollectionCandidateParams struct {
 func (q *Queries) RetainRailIntentCollectionCandidate(ctx context.Context, arg RetainRailIntentCollectionCandidateParams) (int64, error) {
 	result, err := q.db.Exec(ctx, retainRailIntentCollectionCandidate,
 		arg.Candidate,
+		arg.ID,
+		arg.MerchantID,
+		arg.PspID,
+		arg.IntentType,
+		arg.Payload,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const retainRailIntentQualifiedEvidence = `-- name: RetainRailIntentQualifiedEvidence :execrows
+UPDATE openrails.rail_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb)
+        || jsonb_build_object($1::text, $2::jsonb),
+    updated_at = now()
+WHERE id = $3::uuid
+  AND merchant_id = $4::uuid
+  AND psp_id = $5::uuid
+  AND intent_type = $6::text
+  AND payload = $7::jsonb
+  AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade'))
+       OR ($1::text = 'qualified_enrollment' AND intent_type = 'nmi_upgrade'))
+  AND status IN ('in_flight', 'unknown_needs_verify')
+  AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? $1::text)
+       OR result_evidence->$1::text = $2::jsonb)
+`
+
+type RetainRailIntentQualifiedEvidenceParams struct {
+	EvidenceKey string
+	Receipt     []byte
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	PspID       uuid.UUID
+	IntentType  string
+	Payload     []byte
+}
+
+// Custody binds immutable provider facts to the accepted operation. A repeated
+// identical receipt succeeds; a conflicting receipt or terminal row never changes.
+func (q *Queries) RetainRailIntentQualifiedEvidence(ctx context.Context, arg RetainRailIntentQualifiedEvidenceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retainRailIntentQualifiedEvidence,
+		arg.EvidenceKey,
+		arg.Receipt,
 		arg.ID,
 		arg.MerchantID,
 		arg.PspID,

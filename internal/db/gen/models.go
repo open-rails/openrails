@@ -226,12 +226,12 @@ type OpenrailsCatalogRateCard struct {
 
 type OpenrailsCheckoutSession struct {
 	ID             uuid.UUID
-	PriceID        uuid.UUID
+	PriceID        *uuid.UUID
 	Mode           string
 	Rail           string
 	Status         string
-	Amount         int64
-	Currency       string
+	Amount         *int64
+	Currency       *string
 	ExpiresAt      *time.Time
 	Reference      *string
 	TransactionID  *string
@@ -260,7 +260,7 @@ type OpenrailsCustodian struct {
 	MerchantID uuid.UUID
 	// The custodian's manifest key (merchants.<slug>.custodians.<key>) — the name a PSP entry references.
 	Key string
-	// The custodian VENDOR: basis_theory today. Same vocabulary as payment_methods.custodian, minus 'psp' (which is the absence of a third-party custodian, not an account).
+	// The custodian VENDOR: basis_theory or hyperswitch. Same vocabulary as payment_methods.custodian, minus 'psp' (which is the absence of a third-party custodian, not an account).
 	Kind        string
 	Environment string
 	// The custodian-native tenant identity (Basis Theory: the tenant id). Operator-declared — there is no runtime whoami (#592).
@@ -869,7 +869,7 @@ type OpenrailsPaymentMethod struct {
 	StoredCredentialRecurringRef string
 	// Rail-scoped stored-credential replay reference for the UNSCHEDULED card-network agreement (NMI: gateway transactionid of the initial unscheduled CIT, replayed as initial_transaction_id on unscheduled MITs). Empty = not captured yet.
 	StoredCredentialUnscheduledRef string
-	// or#880 who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory = neutral third-party vault (#795). Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.
+	// or#880 who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory or hyperswitch = neutral third-party vault. Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.
 	Custodian   string
 	CustodianID *uuid.UUID
 	// Custodian-issued stable fingerprint of the underlying PAN (Basis Theory's default fingerprint expression), for dedup/lookup. '' = the custodian issues none.

@@ -158,7 +158,10 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 		return r, fmt.Errorf("read checkout: %w", err)
 	}
 	r.CheckoutReplayed = replayed.ID == session.ID && read.ID == session.ID
-	r.CheckoutAmount = read.Amount
+	if read.Amount == nil {
+		return r, fmt.Errorf("priced checkout returned no amount")
+	}
+	r.CheckoutAmount = *read.Amount
 
 	if err := client.CancelSubscription(ctx, in.SubscriptionID, openrails.CancelSubscriptionRequest{Reason: "customer request"}); err != nil {
 		return r, fmt.Errorf("cancel subscription: %w", err)

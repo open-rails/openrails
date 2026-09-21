@@ -261,6 +261,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	}
 
 	pm := &models.PaymentMethod{
+		Custodian:  models.CustodianPSP,
 		ID:         uuidutil.NewV7(),
 		CustomerID: identity.CustomerIDFromString(userID).UUID(),
 		Rail:       models.Rail(rail),
@@ -564,6 +565,9 @@ func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *
 	if req == nil {
 		return nil, errors.New("payment method update is required")
 	}
+	if pm.Custodian != models.CustodianPSP {
+		return nil, ErrPaymentMethodCustodianUnsupported
+	}
 	rail := strings.ToLower(string(pm.Rail))
 	if rail == "" {
 		return nil, errors.New("payment method rail is required")
@@ -645,10 +649,11 @@ func normalizeReplacementExpiry(value string) string {
 // intent ledger completes it out-of-band; a retried request maps onto the SAME
 // intent. Never a lost delete.
 var (
-	ErrPaymentMethodDeleteProcessing    = errors.New("payment method deletion is processing; it will complete automatically")
-	ErrPaymentMethodInUse               = errors.New("payment method is used by a live subscription")
-	ErrPaymentMethodDeleteUnsafe        = errors.New("payment method cannot be deleted safely")
-	ErrPaymentMethodProviderUnavailable = errors.New("payment method provider is unavailable")
+	ErrPaymentMethodDeleteProcessing     = errors.New("payment method deletion is processing; it will complete automatically")
+	ErrPaymentMethodInUse                = errors.New("payment method is used by a live subscription")
+	ErrPaymentMethodDeleteUnsafe         = errors.New("payment method cannot be deleted safely")
+	ErrPaymentMethodProviderUnavailable  = errors.New("payment method provider is unavailable")
+	ErrPaymentMethodCustodianUnsupported = errors.New("this custodian-held payment method operation is not supported")
 )
 
 // PaymentMethodDeleteFailedError means the durable delete reached a terminal
@@ -735,6 +740,10 @@ func (s *RailPaymentMethodService) CleanupPaymentMethodBestEffort(ctx context.Co
 func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context, pm *models.PaymentMethod) (shared bool, client *nmi.NMIClient, err error) {
 	if pm == nil {
 		return false, nil, errors.New("payment method is required")
+	}
+
+	if pm.Custodian != models.CustodianPSP {
+		return false, nil, ErrPaymentMethodCustodianUnsupported
 	}
 
 	rail := strings.ToLower(string(pm.Rail))
@@ -848,6 +857,10 @@ func (s *RailPaymentMethodService) deletePaymentMethodDirect(ctx context.Context
 // payment method's rail + declared PSP — the surface the
 // nmi_vault_delete intent handler executes through.
 func (s *RailPaymentMethodService) ResolveClientForPaymentMethod(ctx context.Context, pm *models.PaymentMethod) (*nmi.NMIClient, error) {
+	if pm == nil || pm.Custodian != models.CustodianPSP {
+		return nil, ErrPaymentMethodCustodianUnsupported
+	}
+
 	rail := strings.ToLower(string(pm.Rail))
 	if rail == "" {
 		return nil, errors.New("payment method rail is required")

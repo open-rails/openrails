@@ -1,6 +1,9 @@
 package openrails
 
-import "time"
+import (
+	"github.com/google/uuid"
+	"time"
+)
 
 type CheckoutRailOption struct {
 	Selector string `json:"selector"`
@@ -65,7 +68,7 @@ type CreateCheckoutSessionRequest struct {
 	Customer       CheckoutCustomerIdentity `json:"customer"`
 	SubscriptionID SubscriptionID           `json:"subscription_id,omitzero"`
 	NewPriceID     PriceID                  `json:"new_price_id,omitzero"`
-	PriceID        PriceID                  `json:"price_id"`
+	PriceID        PriceID                  `json:"price_id,omitzero"`
 	Mode           string                   `json:"mode"` // "one_off" or "subscription" (optional, inferred from price)
 	Payment        CheckoutPayment          `json:"payment"`
 	Metadata       map[string]string        `json:"metadata"`
@@ -75,6 +78,7 @@ type CreateCheckoutSessionRequest struct {
 }
 
 type CheckoutPayment struct {
+	PSPID           uuid.UUID       `json:"psp_id,omitzero"`
 	Rail            string          `json:"rail"`                       // "nmi", "ccbill", "solana", "stripe"
 	PaymentMethodID PaymentMethodID `json:"payment_method_id,omitzero"` // For returning customers with saved payment methods
 	PaymentToken    string          `json:"payment_token"`              // For new card tokenization (NMI Collect.js)
@@ -107,21 +111,23 @@ type CheckoutPayment struct {
 // currency units (micros for fiat), encoded as a decimal string over HTTP;
 // timestamps are RFC3339 instants.
 type CheckoutSession struct {
-	ID             CheckoutSessionID `json:"id"`
-	Status         string            `json:"status"` // "created", "requires_action", "succeeded", "failed", "expired", "canceled"
-	Mode           string            `json:"mode"`   // "subscription", "one_off"
-	PriceID        PriceID           `json:"price_id"`
-	Amount         int64             `json:"amount,string"`
-	Currency       string            `json:"currency"`
-	PaymentStatus  string            `json:"payment_status"` // "unpaid", "paid", "no_payment_required"
-	ClientSecret   *string           `json:"client_secret"`
-	URL            *string           `json:"url"` // Redirect URL for CCBill/Stripe
-	SubscriptionID *SubscriptionID   `json:"subscription_id"`
-	PaymentID      *PaymentID        `json:"payment_id"`
-	ExpiresAt      *time.Time        `json:"expires_at,omitempty"`
-	CreatedAt      time.Time         `json:"created_at"`
-	Metadata       map[string]string `json:"metadata"`
-	RailData       map[string]any    `json:"rail_data"` // Rail-specific response data
+	Capture         *CustodianCaptureAction `json:"capture,omitempty"`
+	PaymentMethodID *PaymentMethodID        `json:"payment_method_id,omitempty"`
+	ID              CheckoutSessionID       `json:"id"`
+	Status          string                  `json:"status"` // "created", "requires_action", "succeeded", "failed", "expired", "canceled"
+	Mode            string                  `json:"mode"`   // "subscription", "one_off"
+	PriceID         *PriceID                `json:"price_id"`
+	Amount          *int64                  `json:"amount,string"`
+	Currency        *string                 `json:"currency"`
+	PaymentStatus   string                  `json:"payment_status"` // "unpaid", "paid", "no_payment_required"
+	ClientSecret    *string                 `json:"client_secret"`
+	URL             *string                 `json:"url"` // Redirect URL for CCBill/Stripe
+	SubscriptionID  *SubscriptionID         `json:"subscription_id"`
+	PaymentID       *PaymentID              `json:"payment_id"`
+	ExpiresAt       *time.Time              `json:"expires_at,omitempty"`
+	CreatedAt       time.Time               `json:"created_at"`
+	Metadata        map[string]string       `json:"metadata"`
+	RailData        map[string]any          `json:"rail_data"` // Rail-specific response data
 }
 
 type ConfirmCheckoutSessionRequest struct {
@@ -130,9 +136,10 @@ type ConfirmCheckoutSessionRequest struct {
 }
 
 type ConfirmPayment struct {
-	Rail      string `json:"rail"`      // Must match session rail
-	Signature string `json:"signature"` // Solana transaction signature
-	Wallet    string `json:"wallet"`    // Solana wallet that signed
+	Capture   *CustodianCaptureReference `json:"capture,omitempty"`
+	Rail      string                     `json:"rail"`      // Must match session rail
+	Signature string                     `json:"signature"` // Solana transaction signature
+	Wallet    string                     `json:"wallet"`    // Solana wallet that signed
 }
 
 type EffectiveTier struct {
@@ -143,3 +150,31 @@ type EffectiveTier struct {
 	ProductID   ProductID `json:"product_id"`
 	ProductKey  string    `json:"product_key"`
 }
+
+// CustodianCaptureReference is a vendor session token, not a card or payment
+// authority. It is accepted only by the exact owned setup session that issued it.
+type CustodianCaptureReference struct {
+	CustodianID uuid.UUID `json:"custodian_id"`
+	SessionID   string    `json:"session_id"`
+	Token       string    `json:"token"`
+}
+
+func (CustodianCaptureReference) String() string   { return "[private custodian capture reference]" }
+func (CustodianCaptureReference) GoString() string { return "[private custodian capture reference]" }
+
+// CustodianCaptureAction initializes vendor-owned browser fields. Its scoped
+// authorization is private, short lived, and never a shared cache/log value.
+type CustodianCaptureAction struct {
+	Kind             string    `json:"kind"`
+	CustodianID      uuid.UUID `json:"custodian_id"`
+	SessionID        string    `json:"session_id"`
+	CustomerID       string    `json:"customer_id"`
+	APIBaseURL       string    `json:"api_base_url"`
+	SDKURL           string    `json:"sdk_url"`
+	PublicAPIKey     string    `json:"public_api_key"`
+	SDKAuthorization string    `json:"sdk_authorization"`
+	ExpiresAt        time.Time `json:"expires_at"`
+}
+
+func (CustodianCaptureAction) String() string   { return "[private custodian capture action]" }
+func (CustodianCaptureAction) GoString() string { return "[private custodian capture action]" }
