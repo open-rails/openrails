@@ -81,6 +81,14 @@ entering the proxy POST. This permits a new payment key after repair. Existing
 submission markers and every uncertain error after POST entry remain verify-only;
 a proxy HTTP error never proves that the PSP did not execute.
 
+A lost claim before the submission fence resumes execution; claim count is not
+proof of submission. Executors reload canonical progress, and parking, expiry and
+nonexecution completion check stored fence state. A fresh pre-dispatch refusal
+uses a private owner capability and the existing sealed-evidence writer, bound
+to the accepted payload and fence. Generic progress fields cannot create that
+proof. It survives a failed local commit; terminal completion retains the usual
+invoice result. A later verifier may finish that result without another charge.
+
 ### Customer-requested stored-card deletion
 
 The existing authenticated payment-method DELETE supports native NMI and qualified HyperSwitch native custody. The operation freezes the owned method and rejects live subscription use or unresolved operations. Acceptance parks the method with its durable operation ID, so a subsequent charge cannot start. HyperSwitch serializes all local aliases of a vendor handle with capture/import/remap: an unused alias detaches locally, and only the final reference requests physical erasure. Pending detach decisions participate in that same exclusion.
