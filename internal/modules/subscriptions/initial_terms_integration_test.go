@@ -17,14 +17,14 @@ import (
 )
 
 func TestAcceptedInitialMembershipUsesFrozenTermsAtomically(t *testing.T) {
-	for _, mode := range []string{"paid", "free", "pending"} {
+	for _, mode := range []string{"paid", "free", "pending", "engine"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newFailopenFixture(t, 720, true)
 			ctx := f.ctx()
 			now := time.Now().UTC().Truncate(time.Microsecond)
-			terms := InitialMembershipTerms{SubscriptionID: uuid.New(), PaymentID: uuid.New(), CustomerID: uuid.MustParse(f.userID), PSPID: f.pspID, ProductID: f.productID, PriceID: f.priceID, PaymentMethodID: uuid.New(), ProductName: "accepted product", Amount: 9_990_000, RecurringAmount: 9_990_000, Currency: "USD", AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(720 * time.Hour), Entitlements: map[string]*int{f.ent: nil}}
+			terms := InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyProvider, SubscriptionID: uuid.New(), PaymentID: uuid.New(), CustomerID: uuid.MustParse(f.userID), PSPID: f.pspID, ProductID: f.productID, PriceID: f.priceID, PaymentMethodID: uuid.New(), ProductName: "accepted product", Amount: 9_990_000, RecurringAmount: 9_990_000, Currency: "USD", AcceptedAt: now, PeriodStart: now, PeriodEnd: now.Add(720 * time.Hour), Entitlements: map[string]*int{f.ent: nil}}
 			transaction := "initial-" + uuid.NewString()
-			if mode != "paid" {
+			if mode != "paid" && mode != "engine" {
 				terms.Amount = 0
 				terms.PaymentID = uuid.Nil
 				transaction = ""
@@ -37,12 +37,16 @@ func TestAcceptedInitialMembershipUsesFrozenTermsAtomically(t *testing.T) {
 				terms.PeriodStart = now.Add(72 * time.Hour)
 				terms.PeriodEnd = terms.PeriodStart.Add(720 * time.Hour)
 			}
-			require.NoError(t, paymentmethods.NewPaymentMethodRepo(f.dbi).Create(ctx, &models.PaymentMethod{ID: terms.PaymentMethodID, CustomerID: terms.CustomerID, Rail: models.RailNMI, PspID: f.pspID, Custodian: "psp", RailCustomerRef: "vault-" + uuid.NewString(), RebillDriver: "provider"}))
+			require.NoError(t, paymentmethods.NewPaymentMethodRepo(f.dbi).Create(ctx, &models.PaymentMethod{ID: terms.PaymentMethodID, CustomerID: terms.CustomerID, Rail: models.RailNMI, PspID: f.pspID, Custodian: "psp", RailCustomerRef: "vault-" + uuid.NewString()}))
 			_, err := f.pool.Exec(ctx, `UPDATE billing.products SET entitlements_spec='{"changed":null}', archived=true WHERE id=$1`, f.productID)
 			require.NoError(t, err)
 			_, err = f.pool.Exec(ctx, `UPDATE billing.prices SET amount=25000000, access_duration_hours=24, archived=true WHERE id=$1`, f.priceID)
 			require.NoError(t, err)
 			providerSub := "accepted-" + uuid.NewString()
+			if mode == "engine" {
+				terms.CollectionPolicy = models.CollectionPolicyEngine
+				providerSub = ""
+			}
 			params := &CreateMembershipParams{Prepared: &terms, UserID: f.userID, PriceID: f.priceID, Rail: models.RailNMI, RailSubscriptionID: &providerSub, TransactionID: transaction, PurchasedAt: &now}
 			rollback := errors.New("caller terminal decision could not commit")
 			apply := func(abort bool) error {
@@ -52,6 +56,7 @@ func TestAcceptedInitialMembershipUsesFrozenTermsAtomically(t *testing.T) {
 						return err
 					}
 					require.Equal(t, terms.SubscriptionID, sub.ID)
+					require.Equal(t, terms.CollectionPolicy, sub.CollectionPolicy)
 					require.Equal(t, terms.Entitlements, sub.EntitlementsSpecSnapshot)
 					if mode == "pending" {
 						require.Equal(t, models.StatusPending, sub.Status)
@@ -76,7 +81,7 @@ func TestAcceptedInitialMembershipUsesFrozenTermsAtomically(t *testing.T) {
 			}
 			require.NoError(t, apply(false))
 			require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1`, terms.SubscriptionID).Scan(&count))
-			if mode == "paid" {
+			if mode == "paid" || mode == "engine" {
 				require.Equal(t, 1, count)
 				var id uuid.UUID
 				var amount int64

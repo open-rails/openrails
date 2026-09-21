@@ -244,7 +244,7 @@ func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailInt
 		require.NoError(t, err)
 		product, err := fx.svc.ProductService.GetByID(fx.ctx, price.ProductID)
 		require.NoError(t, err)
-		method := models.PaymentMethod{ID: uuid.New(), CustomerID: uuid.MustParse(fx.payload.UserID), PspID: pspID, Rail: "nmi", Custodian: "psp", RailCustomerRef: fx.payload.CustomerVaultID, RailMethodRef: "billing-native", RebillDriver: models.RebillDriverProvider}
+		method := models.PaymentMethod{ID: uuid.New(), CustomerID: uuid.MustParse(fx.payload.UserID), PspID: pspID, Rail: "nmi", Custodian: "psp", RailCustomerRef: fx.payload.CustomerVaultID, RailMethodRef: "billing-native"}
 		require.NoError(t, paymentmethods.NewPaymentMethodRepo(fx.db).Create(db.WithPSPID(fx.ctx, pspID), &method))
 		fx.payload.PaymentMethodID = &method.ID
 		fx.payload.BillingID = method.RailMethodRef
@@ -267,7 +267,7 @@ func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailInt
 		if benefits == nil {
 			benefits = map[string]*int{}
 		}
-		fx.payload.Terms = subscriptions.InitialMembershipTerms{SubscriptionID: fx.payload.LocalSubscriptionID, PaymentID: payment, CustomerID: method.CustomerID, PSPID: pspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Amount: fx.payload.AmountMicros, RecurringAmount: price.Amount, Currency: price.Currency, AcceptedAt: now, PeriodStart: start, PeriodEnd: end, Pending: fx.payload.DelayedStart != nil, Entitlements: benefits}
+		fx.payload.Terms = subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyProvider, SubscriptionID: fx.payload.LocalSubscriptionID, PaymentID: payment, CustomerID: method.CustomerID, PSPID: pspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Amount: fx.payload.AmountMicros, RecurringAmount: price.Amount, Currency: price.Currency, AcceptedAt: now, PeriodStart: start, PeriodEnd: end, Pending: fx.payload.DelayedStart != nil, Entitlements: benefits}
 		fx.payload.DayFrequency = 30
 		fx.payload.RequestFingerprint = "fixture-" + fx.payload.CheckoutIdempotencyKey
 		if price.Amount == 0 {

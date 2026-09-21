@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"math"
 	"strings"
@@ -74,7 +75,7 @@ func DecodeNMIInitialEnrollmentPayload(in gen.OpenrailsRailIntent) (NMIInitialEn
 	if err := p.Instrument.Validate(); err != nil {
 		return p, err
 	}
-	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMIInitialEnrollment || in.Rail != "nmi" || in.PspID == nil || in.CustodianID != nil || *in.PspID != p.Instrument.PSPID || p.Instrument.PSPID != p.Terms.PSPID || p.Instrument.CustodianHeld() || p.Instrument.RailCustomerRef == "" || in.PriceID == nil || *in.PriceID != p.Terms.PriceID || p.Provider != "nmi" || strings.TrimSpace(p.PSP) == "" || strings.TrimSpace(p.PlanID) == "" || p.RequestFingerprint == "" || p.CheckoutIdempotencyKey == "" || p.DayFrequency <= 0 || p.PlanPayments < 0 {
+	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine || in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeNMIInitialEnrollment || in.Rail != "nmi" || in.PspID == nil || in.CustodianID != nil || *in.PspID != p.Instrument.PSPID || p.Instrument.PSPID != p.Terms.PSPID || p.Instrument.CustodianHeld() || p.Instrument.RailCustomerRef == "" || in.PriceID == nil || *in.PriceID != p.Terms.PriceID || p.Provider != "nmi" || strings.TrimSpace(p.PSP) == "" || strings.TrimSpace(p.PlanID) == "" || p.RequestFingerprint == "" || p.CheckoutIdempotencyKey == "" || p.DayFrequency <= 0 || p.PlanPayments < 0 {
 		return p, errors.New("initial enrollment operation contradicts its accepted scope")
 	}
 	if p.UserID != p.Terms.CustomerID.String() || p.PriceID != p.Terms.PriceID || p.LocalSubscriptionID != p.Terms.SubscriptionID || p.PaymentMethodID == nil || *p.PaymentMethodID != p.Terms.PaymentMethodID || p.AmountMicros != p.Terms.Amount || p.Currency != p.Terms.Currency || p.CustomerVaultID != p.Instrument.RailCustomerRef || p.BillingID != p.Instrument.RailMethodRef || p.StoredCredentialRef != p.Instrument.StoredCredentialRecurringRef {

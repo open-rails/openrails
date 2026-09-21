@@ -222,7 +222,7 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 		if err := terms.Validate(); err != nil {
 			return nil, nil, err
 		}
-		if (terms.Amount > 0 && s.PaymentService == nil) || params.UserID != terms.CustomerID.String() || params.PriceID != terms.PriceID || db.PSPIDFromContext(ctx) != terms.PSPID || (terms.Amount > 0) != (strings.TrimSpace(params.TransactionID) != "") || params.RailSubscriptionID == nil || strings.TrimSpace(*params.RailSubscriptionID) == "" {
+		if (terms.Amount > 0 && s.PaymentService == nil) || params.UserID != terms.CustomerID.String() || params.PriceID != terms.PriceID || db.PSPIDFromContext(ctx) != terms.PSPID || (terms.Amount > 0) != (strings.TrimSpace(params.TransactionID) != "") || (terms.CollectionPolicy != models.CollectionPolicyEngine && (params.RailSubscriptionID == nil || strings.TrimSpace(*params.RailSubscriptionID) == "")) || (terms.CollectionPolicy == models.CollectionPolicyEngine && params.RailSubscriptionID != nil && strings.TrimSpace(*params.RailSubscriptionID) != "") {
 			return nil, nil, errors.New("membership completion contradicts accepted terms")
 		}
 		copy := *params
@@ -481,6 +481,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 		if terms := params.Prepared; terms != nil {
 			subscription.ID, subscription.PspID = terms.SubscriptionID, terms.PSPID
+			subscription.CollectionPolicy = terms.CollectionPolicy
 			subscription.PaymentMethodID = &terms.PaymentMethodID
 			metadata, err := json.Marshal(params.PaymentMetadata)
 			if err != nil {

@@ -163,7 +163,7 @@ func (s *CheckoutService) admitInitialEnrollment(ctx context.Context, req *Check
 		if amount > 0 {
 			paymentID = uuidutil.NewV7()
 		}
-		terms := subscriptions.InitialMembershipTerms{SubscriptionID: uuidutil.NewV7(), PaymentID: paymentID, CustomerID: customer, PSPID: saved.PspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: saved.ID, ProductName: product.DisplayName, Amount: amount, RecurringAmount: price.Amount, Currency: price.Currency, AcceptedAt: now, PeriodStart: start, PeriodEnd: end, Pending: delayed != nil, Entitlements: benefits}
+		terms := subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyProvider, SubscriptionID: uuidutil.NewV7(), PaymentID: paymentID, CustomerID: customer, PSPID: saved.PspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: saved.ID, ProductName: product.DisplayName, Amount: amount, RecurringAmount: price.Amount, Currency: price.Currency, AcceptedAt: now, PeriodStart: start, PeriodEnd: end, Pending: delayed != nil, Entitlements: benefits}
 		email := req.Email
 		if s.Config != nil && s.Config.IsTestMode() {
 			email = ""
