@@ -1264,7 +1264,7 @@
       "type collectedReceipt struct {\n\tVersion int                                    `json:\"version\"`\n\tFamily  string                                 `json:\"family\"`\n\tBinding receiptBinding                         `json:\"binding\"`\n\tNMI     *nmi.SaleEvidence                      `json:\"nmi,omitempty\"`\n\tStripe  *subscriptions.StripeCollectionReceipt `json:\"stripe,omitempty\"`\n}",
       "type cutoverAccountRequalification struct {\n\tRole                  string                       `json:\"role\"`\n\tQualification         providerqualification.Record `json:\"qualification\"`\n\tOriginalFingerprint   string                       `json:\"original_fingerprint\"`\n\tPreviousFingerprint   string                       `json:\"previous_fingerprint\"`\n\tCredentialFingerprint string                       `json:\"credential_fingerprint\"`\n\tCredentialVersion     int                          `json:\"credential_version\"`\n\tActor                 string                       `json:\"actor\"`\n\tReason                string                       `json:\"reason\"`\n\tRecordedAt            time.Time                    `json:\"recorded_at\"`\n}",
       "type enrollmentReceipt struct {\n\tBinding receiptBinding         `json:\"binding\"`\n\tFacts   nmi.EnrollmentEvidence `json:\"facts\"`\n}",
-      "type initialEnrollmentRefusal struct {\n\tBinding        receiptBinding `json:\"binding\"`\n\tKind           string         `json:\"kind\"`\n\tResponseCode   int            `json:\"response_code\"`\n\tLocalizationID string         `json:\"localization_id\"`\n}",
+      "type initialMembershipRefusal struct {\n\tBinding        receiptBinding `json:\"binding\"`\n\tKind           string         `json:\"kind\"`\n\tResponseCode   int            `json:\"response_code\"`\n\tLocalizationID string         `json:\"localization_id\"`\n}",
       "type invoiceNonexecution struct {\n\tBinding     receiptBinding `json:\"binding\"`\n\tSubmittedAt string         `json:\"submitted_at\"`\n\tCode        string         `json:\"code\"`\n\tReason      string         `json:\"reason\"`\n}",
       "type nmiCard struct {\n\tLastFour   string `json:\"last_four\"`\n\tCardType   string `json:\"card_type\"`\n\tExpiryDate string `json:\"expiry_date\"`\n}",
       "type nmiCutoverDecision struct {\n\tAction        string         `json:\"action\"`\n\tAuthorization map[string]any `json:\"authorization,omitempty\"`\n}",
@@ -1451,9 +1451,10 @@
     ],
     "internal/modules/subscriptions": [
       "type AdminSubscriptionResponse struct {\n\t*models.Subscription\n\n\tPrice    *models.Price     `json:\"price,omitempty\"`\n\tPayments []*models.Payment `json:\"payments,omitempty\"`\n}",
+      "type InitialMembershipPayload struct {\n\tTerms                  InitialMembershipTerms     `json:\"terms\"`\n\tInstrument             charge.FrozenInstrument    `json:\"instrument\"`\n\tRequestFingerprint     string                     `json:\"request_fingerprint\"`\n\tCheckoutIdempotencyKey string                     `json:\"checkout_idempotency_key\"`\n\tNativeSchedule         *NMIInitialScheduleTerms   `json:\"native_schedule,omitempty\"`\n\tHyperSwitch            *charge.HyperSwitchBinding `json:\"hyperswitch,omitempty\"`\n\tPSP                    string                     `json:\"psp\"`\n\tEmail                  string                     `json:\"email,omitempty\"`\n\tE2ERunID               string                     `json:\"e2e_run_id,omitempty\"`\n}",
       "type InitialMembershipTerms struct {\n\tCollectionPolicy models.CollectionPolicy `json:\"collection_policy\"`\n\tSubscriptionID   uuid.UUID               `json:\"subscription_id\"`\n\tPaymentID        uuid.UUID               `json:\"payment_id\"`\n\tCustomerID       uuid.UUID               `json:\"customer_id\"`\n\tPSPID            uuid.UUID               `json:\"psp_id\"`\n\tProductID        uuid.UUID               `json:\"product_id\"`\n\tPriceID          uuid.UUID               `json:\"price_id\"`\n\tPaymentMethodID  uuid.UUID               `json:\"payment_method_id\"`\n\tProductName      string                  `json:\"product_name\"`\n\tAmount           int64                   `json:\"amount,string\"`\n\tRecurringAmount  int64                   `json:\"recurring_amount,string\"`\n\tCurrency         string                  `json:\"currency\"`\n\tAcceptedAt       time.Time               `json:\"accepted_at\"`\n\tPeriodStart      time.Time               `json:\"period_start\"`\n\tPeriodEnd        time.Time               `json:\"period_end\"`\n\tPending          bool                    `json:\"pending\"`\n\tEntitlements     map[string]*int         `json:\"entitlements\"`\n}",
       "type ManualRebillPayload struct {\n\tInitiator                charge.Initiator        `json:\"initiator\"`\n\tRequestedPaymentMethodID *uuid.UUID              `json:\"requested_payment_method_id,omitempty\"`\n\tRenewal                  RenewalTerms            `json:\"renewal\"`\n\tPaymentMethodID          uuid.UUID               `json:\"payment_method_id\"`\n\tInstrument               charge.FrozenInstrument `json:\"instrument\"`\n\tRail                     string                  `json:\"rail\"`\n\tRailSubscriptionID       string                  `json:\"rail_subscription_id\"`\n\tOrderReference           string                  `json:\"order_reference\"`\n\tAttempt                  int                     `json:\"attempt\"`\n\tFailureCount             int                     `json:\"failure_count\"`\n\tAmountMinor              moneyutil.Cents         `json:\"amount_minor,string\"`\n}",
-      "type NMIInitialEnrollmentPayload struct {\n\tTerms              InitialMembershipTerms  `json:\"terms\"`\n\tInstrument         charge.FrozenInstrument `json:\"instrument\"`\n\tRequestFingerprint string                  `json:\"request_fingerprint\"`\n\tDayFrequency       int                     `json:\"day_frequency\"`\n\tPlanPayments       int                     `json:\"plan_payments\"`\n\n\tProvider string `json:\"provider\"`\n\n\tPSP             string `json:\"psp,omitempty\"`\n\tPlanID          string `json:\"plan_id\"`\n\tCustomerVaultID string `json:\"customer_vault_id\"`\n\n\tBillingID           string     `json:\"billing_id,omitempty\"`\n\tAmountMicros        int64      `json:\"amount_micros\"`\n\tCurrency            string     `json:\"currency\"`\n\tEmail               string     `json:\"email,omitempty\"`\n\tUserID              string     `json:\"user_id\"`\n\tPriceID             uuid.UUID  `json:\"price_id\"`\n\tLocalSubscriptionID uuid.UUID  `json:\"local_subscription_id\"`\n\tPaymentMethodID     *uuid.UUID `json:\"payment_method_id,omitempty\"`\n\n\tStartDate    string     `json:\"start_date,omitempty\"`\n\tDelayedStart *time.Time `json:\"delayed_start,omitempty\"`\n\n\tStoredCredentialRef string `json:\"stored_credential_ref,omitempty\"`\n\tE2ERunID            string `json:\"e2e_run_id,omitempty\"`\n\n\tCheckoutIdempotencyKey string `json:\"checkout_idempotency_key\"`\n\n\tFirstName string `json:\"first_name,omitempty\"`\n\tLastName  string `json:\"last_name,omitempty\"`\n\tAddress1  string `json:\"address1,omitempty\"`\n\tCity      string `json:\"city,omitempty\"`\n\tState     string `json:\"state,omitempty\"`\n\tZip       string `json:\"zip,omitempty\"`\n\tCountry   string `json:\"country,omitempty\"`\n}",
+      "type NMIInitialScheduleTerms struct {\n\tPlanID       string           `json:\"plan_id\"`\n\tStartDate    string           `json:\"start_date\"`\n\tDayFrequency int              `json:\"day_frequency\"`\n\tPlanPayments int              `json:\"plan_payments\"`\n\tCard         nmi.CardUserData `json:\"card\"`\n}",
       "type NMIUpgradePayload struct {\n\tInstrument                charge.FrozenInstrument `json:\"instrument\"`\n\tRequestedPrice            string                  `json:\"requested_price\"`\n\tPSP                       string                  `json:\"psp\"`\n\tUserID                    string                  `json:\"user_id\"`\n\tEmail                     string                  `json:\"email\"`\n\tOldSubscriptionID         uuid.UUID               `json:\"old_subscription_id\"`\n\tOldPriceID                uuid.UUID               `json:\"old_price_id\"`\n\tOldProviderSubscriptionID string                  `json:\"old_provider_subscription_id\"`\n\tNewSubscriptionID         uuid.UUID               `json:\"new_subscription_id\"`\n\tNewPaymentID              uuid.UUID               `json:\"new_payment_id\"`\n\tPriceID                   uuid.UUID               `json:\"price_id\"`\n\tProductID                 uuid.UUID               `json:\"product_id\"`\n\tProductName               string                  `json:\"product_name\"`\n\tPlanID                    string                  `json:\"plan_id\"`\n\tPaymentMethodID           uuid.UUID               `json:\"payment_method_id\"`\n\tRecurringAmount           int64                   `json:\"recurring_amount,string\"`\n\tProrationAmount           int64                   `json:\"proration_amount,string\"`\n\tCurrency                  string                  `json:\"currency\"`\n\tPeriodStart               time.Time               `json:\"period_start\"`\n\tPeriodEnd                 time.Time               `json:\"period_end\"`\n\tStartDate                 string                  `json:\"start_date\"`\n\tEntitlements              map[string]*int         `json:\"entitlements\"`\n\tCard                      nmi.CardUserData        `json:\"card\"`\n}",
       "type PlanMigrationRedriveResult struct {\n\tExamined int `json:\"examined\"`\n\n\tRedriven int `json:\"redriven\"`\n\n\tConverged int `json:\"converged\"`\n\n\tDeferred int `json:\"deferred\"`\n\n\tSkipped int `json:\"skipped\"`\n\n\tFailed int `json:\"failed\"`\n}",
       "type ProviderAccountCutoverPlan struct {\n\tDisposition ProviderAccountCutoverDisposition `json:\"disposition\"`\n\tExecutable  bool                              `json:\"executable\"`\n\tCode        ProviderAccountCutoverCode        `json:\"code\"`\n\tReason      string                            `json:\"reason\"`\n\tSteps       []string                          `json:\"steps,omitempty\"`\n}",
@@ -2808,7 +2809,7 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
-    "internal/intents/initial_enrollment_refusal.go": {
+    "internal/intents/initial_membership_refusal.go": {
       "bytes": "bytes",
       "context": "context",
       "errors": "errors",
@@ -3633,9 +3634,16 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/modules/payments/charge/hyperswitch.go": {
+      "context": "context",
+      "custodians": "github.com/open-rails/openrails/internal/custodians",
       "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "models": "github.com/open-rails/openrails/internal/db/models",
       "strings": "strings",
-      "url": "net/url"
+      "url": "net/url",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/payments/sale_terms.go": {
       "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
@@ -3768,21 +3776,25 @@
       "time": "time",
       "uuid": "github.com/google/uuid"
     },
-    "internal/modules/subscriptions/initial_terms.go": {
+    "internal/modules/subscriptions/initial_membership.go": {
+      "bytes": "bytes",
+      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
       "errors": "errors",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "hex": "encoding/hex",
+      "io": "io",
+      "json": "encoding/json",
+      "math": "math",
       "models": "github.com/open-rails/openrails/internal/db/models",
-      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
       "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid"
     },
-    "internal/modules/subscriptions/nmi_initial_terms.go": {
-      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
+    "internal/modules/subscriptions/initial_terms.go": {
       "errors": "errors",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "json": "encoding/json",
-      "math": "math",
       "models": "github.com/open-rails/openrails/internal/db/models",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
       "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid"
@@ -4929,6 +4941,7 @@
     "internal/migrate/postgres/schema.go": "a399bef4859e1c1f8c1f952d279d8b70718d7aa7e8a1ce116cea49c9d5f6b090",
     "internal/migrate/postgres/schema_tokens.go": "db02b2faeecf3343919ebf74de33c7e72e918a00737d054e86dedb15ed5a8e6d",
     "internal/migrate/postgres/unique_scope_exemptions.go": "50f144594711a439c71aa95954b102a9ea0b423488a3e850dd6853fccf91ccd8",
+    "internal/modules/checkout/initial_membership_confirmation.go": "c2debc87c207881407748c491e3065bb960d1763b52045a4d5a9f8d927082eb2",
     "internal/modules/checkout/session_service.go": "8f03e3cf21a2f447b3dafc4a5d561e7ef3520095a65c90c7eb38e720223d883d",
     "internal/operator/profile.go": "084d6f735001ff56c70898a2abc5d967b438b24b99c7e5afe8a7d7fef70ea369",
     "internal/requestauth/cache.go": "275b8a83d62c567041a6a3ed307dc4fce74c54f5c061b0cd96a91d08e401bd83",

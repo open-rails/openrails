@@ -194,14 +194,14 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 	}
 	operationKey := checkout.NMISaleIdempotencyKey("checkout_session:" + firstRequest.IdempotencyKey)
 	if recurring {
-		operationKey = checkout.NMISubscriptionCreateIdempotencyKey("checkout_session:" + firstRequest.IdempotencyKey)
+		operationKey = checkout.InitialMembershipIdempotencyKey("checkout_session:" + firstRequest.IdempotencyKey)
 	}
 	operation, err := intents.NewStore(source).GetByIdempotencyKey(ctx, operationKey)
 	require.NoError(t, err)
 	require.Equal(t, intents.StatusSucceeded, operation.Status)
 	require.NotEmpty(t, operation.ResultEvidence, "ordinary durable checkout must retain replay receipt")
 	if recurring {
-		require.NoError(t, intents.ValidateInitialEnrollmentTerminal(operation))
+		require.NoError(t, intents.ValidateInitialMembershipTerminal(operation))
 		require.NotEmpty(t, operation.Payload, "accepted enrollment terms and both receipts remain in custody")
 	} else {
 		require.NoError(t, intents.ValidateNMISaleTerminal(operation))
@@ -430,7 +430,7 @@ func newPurchaseArchiveCheckout(d *db.DB, s purchaseArchiveServices, clock clock
 	c.ProviderSecrets = provider
 	c.ResolveNMIClientOverride = func(context.Context, string) (*nmi.NMIClient, error) { return client, nil }
 	c.SetSubscriptionLifecycleService(s.lifecycle)
-	runner := &intents.Runner{Store: intents.NewStore(d), Registry: intents.NewRegistry(checkout.NewNMISaleIntentHandler(c.NMISaleService), checkout.NewNMISubscriptionCreateIntentHandler(c)), Config: cfg}
+	runner := &intents.Runner{Store: intents.NewStore(d), Registry: intents.NewRegistry(checkout.NewNMISaleIntentHandler(c.NMISaleService), checkout.NewInitialMembershipIntentHandler(c)), Config: cfg}
 	c.Intents, c.NMISaleService.Intents = runner, runner
 	return c
 }

@@ -15,16 +15,16 @@ import (
 
 const qualifiedInitialRefusalKey = "qualified_initial_refusal"
 
-type InitialEnrollmentRefusal struct{ data initialEnrollmentRefusal }
-type initialEnrollmentRefusal struct {
+type InitialMembershipRefusal struct{ data initialMembershipRefusal }
+type initialMembershipRefusal struct {
 	Binding        receiptBinding `json:"binding"`
 	Kind           string         `json:"kind"`
 	ResponseCode   int            `json:"response_code"`
 	LocalizationID string         `json:"localization_id"`
 }
 
-func (r InitialEnrollmentRefusal) Validate(in gen.OpenrailsRailIntent) error {
-	if _, err := subscriptions.DecodeNMIInitialEnrollmentPayload(in); err != nil {
+func (r InitialMembershipRefusal) Validate(in gen.OpenrailsRailIntent) error {
+	if _, err := subscriptions.DecodeInitialMembershipPayload(in); err != nil {
 		return err
 	}
 	binding, err := collectionBinding(in)
@@ -43,11 +43,11 @@ func (r InitialEnrollmentRefusal) Validate(in gen.OpenrailsRailIntent) error {
 	}
 	switch r.data.Kind {
 	case "provider_declined":
-		if string(evidence["enrollment_submitted"]) != "true" || r.data.ResponseCode < 200 || r.data.ResponseCode >= 300 {
+		if string(evidence["initial_submitted"]) != "true" || r.data.ResponseCode < 200 || r.data.ResponseCode >= 300 {
 			return errors.New("initial decline has no exact submitted provider refusal")
 		}
 	case "not_submitted":
-		if _, present := evidence["enrollment_submitted"]; present || r.data.ResponseCode != 0 || r.data.LocalizationID != "" {
+		if _, present := evidence["initial_submitted"]; present || r.data.ResponseCode != 0 || r.data.LocalizationID != "" {
 			return errors.New("initial unsent closure contradicts submission")
 		}
 	default:
@@ -56,26 +56,26 @@ func (r InitialEnrollmentRefusal) Validate(in gen.OpenrailsRailIntent) error {
 	return nil
 }
 
-func (r InitialEnrollmentRefusal) Outcome() Outcome {
+func (r InitialMembershipRefusal) Outcome() Outcome {
 	if r.data.Kind == "provider_declined" {
 		return TerminalWithEvidence("native enrollment declined", map[string]any{"declined": true, "response_code": r.data.ResponseCode, "localization_id": r.data.LocalizationID})
 	}
 	return TerminalWithEvidence("native enrollment was never submitted", map[string]any{"not_executed": true})
 }
 
-func LoadInitialEnrollmentRefusal(in gen.OpenrailsRailIntent) (InitialEnrollmentRefusal, bool, error) {
+func LoadInitialMembershipRefusal(in gen.OpenrailsRailIntent) (InitialMembershipRefusal, bool, error) {
 	var evidence map[string]json.RawMessage
 	if len(in.ResultEvidence) == 0 {
-		return InitialEnrollmentRefusal{}, false, nil
+		return InitialMembershipRefusal{}, false, nil
 	}
 	if err := json.Unmarshal(in.ResultEvidence, &evidence); err != nil {
-		return InitialEnrollmentRefusal{}, false, err
+		return InitialMembershipRefusal{}, false, err
 	}
 	raw, found := evidence[qualifiedInitialRefusalKey]
 	if !found {
-		return InitialEnrollmentRefusal{}, false, nil
+		return InitialMembershipRefusal{}, false, nil
 	}
-	var out InitialEnrollmentRefusal
+	var out InitialMembershipRefusal
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&out.data); err != nil {
@@ -84,10 +84,10 @@ func LoadInitialEnrollmentRefusal(in gen.OpenrailsRailIntent) (InitialEnrollment
 	return out, true, out.Validate(in)
 }
 
-// RetainInitialEnrollmentDecline is called only with the account-bound native
+// RetainInitialMembershipDecline is called only with the account-bound native
 // submission's structured rejection. Generic progress cannot create this key.
 // response=3 errors are not promoted to proof of no provider-side effects.
-func (s *Store) RetainInitialEnrollmentDecline(ctx context.Context, in gen.OpenrailsRailIntent, rejection *nmi.CustomerVaultError) error {
+func (s *Store) RetainInitialMembershipDecline(ctx context.Context, in gen.OpenrailsRailIntent, rejection *nmi.CustomerVaultError) error {
 	if rejection == nil {
 		return errors.New("initial decline requires a provider rejection")
 	}
@@ -114,7 +114,7 @@ func (s *Store) RetainInitialEnrollmentDecline(ctx context.Context, in gen.Openr
 	if binding != expected {
 		return errors.New("initial decline envelope differs from canonical accepted operation")
 	}
-	fact := InitialEnrollmentRefusal{initialEnrollmentRefusal{Binding: binding, Kind: "provider_declined", ResponseCode: code, LocalizationID: rejection.LocalizationID}}
+	fact := InitialMembershipRefusal{initialMembershipRefusal{Binding: binding, Kind: "provider_declined", ResponseCode: code, LocalizationID: rejection.LocalizationID}}
 	if err := fact.Validate(current); err != nil {
 		return err
 	}
@@ -122,14 +122,14 @@ func (s *Store) RetainInitialEnrollmentDecline(ctx context.Context, in gen.Openr
 	return err
 }
 
-// RetainUnsubmittedInitialEnrollment runs under the canonical completion lock;
+// RetainUnsubmittedInitialMembership runs under the canonical completion lock;
 // SQL also checks the fence so a concurrent submission cannot turn into absence.
-func (s *Store) RetainUnsubmittedInitialEnrollment(ctx context.Context, in gen.OpenrailsRailIntent) error {
+func (s *Store) RetainUnsubmittedInitialMembership(ctx context.Context, in gen.OpenrailsRailIntent) error {
 	binding, err := collectionBinding(in)
 	if err != nil {
 		return err
 	}
-	fact := InitialEnrollmentRefusal{initialEnrollmentRefusal{Binding: binding, Kind: "not_submitted"}}
+	fact := InitialMembershipRefusal{initialMembershipRefusal{Binding: binding, Kind: "not_submitted"}}
 	if err := fact.Validate(in); err != nil {
 		return err
 	}

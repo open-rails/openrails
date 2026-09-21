@@ -37,10 +37,10 @@ func validateInitialEnrollmentReferences(ctx context.Context, tx pgx.Tx, mid mer
 }
 
 func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op gen.OpenrailsRailIntent) error {
-	if err := intents.ValidateInitialEnrollmentTerminal(op); err != nil {
+	if err := intents.ValidateInitialMembershipTerminal(op); err != nil {
 		return err
 	}
-	p, err := subscriptions.DecodeNMIInitialEnrollmentPayload(op)
+	p, err := subscriptions.DecodeInitialMembershipPayload(op)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 		if err != nil {
 			return err
 		}
-		if payment.CustomerID != p.Terms.CustomerID || payment.PspID == nil || *payment.PspID != p.Terms.PSPID || payment.PriceID != p.PriceID || payment.Rail != op.Rail || payment.Amount != p.AmountMicros || payment.Currency != p.Currency || payment.Status != "failed" || payment.MoneyMovement != "none" || payment.TransactionID != "nmi_sub_declined:"+op.ID.String() {
+		if payment.CustomerID != p.Terms.CustomerID || payment.PspID == nil || *payment.PspID != p.Terms.PSPID || payment.PriceID != p.Terms.PriceID || payment.Rail != op.Rail || payment.Amount != p.Terms.Amount || payment.Currency != p.Terms.Currency || payment.Status != "failed" || payment.MoneyMovement != "none" || payment.TransactionID != "nmi_sub_declined:"+op.ID.String() {
 			return errors.New("initial decline points to another failed attempt")
 		}
 		return nil
@@ -91,14 +91,14 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 	if err := p.Terms.ValidateSubscriptionIdentity(sub, models.Rail(op.Rail), evidence.ProviderSubscriptionID); err != nil {
 		return err
 	}
-	price, err := q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: op.MerchantID, ID: p.PriceID})
+	price, err := q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: op.MerchantID, ID: p.Terms.PriceID})
 	if err != nil {
 		return err
 	}
 	if price.ProductID != p.Terms.ProductID {
 		return errors.New("initial accepted price belongs to another product")
 	}
-	if p.AmountMicros > 0 {
+	if p.Terms.Amount > 0 {
 		row, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: p.Terms.PaymentID})
 		if err != nil {
 			return err

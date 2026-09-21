@@ -315,7 +315,7 @@ SET status=$1::text, result_evidence=$2::jsonb,
     last_failure_reason=$3::text, executed_at=$4::timestamptz,
     claimed_until=NULL, updated_at=$4::timestamptz
 WHERE id=$5::uuid AND merchant_id=$6::uuid
-  AND intent_type='nmi_subscription_create' AND status IN ('in_flight','unknown_needs_verify')
+  AND intent_type='initial_membership' AND status IN ('in_flight','unknown_needs_verify')
 `
 
 type CompleteInitialEnrollmentOutcomeParams struct {
@@ -617,35 +617,35 @@ INSERT INTO openrails.rail_intents (
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'nmi_subscription_create') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN 'pending'
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN 'pending'
         ELSE openrails.rail_intents.status
     END,
     next_attempt_at = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'nmi_subscription_create') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.next_attempt_at
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.next_attempt_at
         ELSE openrails.rail_intents.next_attempt_at
     END,
     payload = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'nmi_subscription_create') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.payload
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.payload
         ELSE openrails.rail_intents.payload
     END,
     psp_id = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'nmi_subscription_create') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.psp_id
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.psp_id
         ELSE openrails.rail_intents.psp_id
     END,
     origin = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'nmi_subscription_create') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin
         ELSE openrails.rail_intents.origin
     END,
     origin_reason = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'nmi_subscription_create') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin_reason
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin_reason
         ELSE openrails.rail_intents.origin_reason
     END,
     actor = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'nmi_subscription_create') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.actor
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.actor
         ELSE openrails.rail_intents.actor
     END,
     expires_at = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'nmi_subscription_create') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.expires_at
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale', 'initial_membership') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.expires_at
         ELSE openrails.rail_intents.expires_at
     END,
     attempts = CASE
@@ -763,7 +763,7 @@ SET status = 'expired',
 WHERE pi.merchant_id = $1::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
   AND NOT (pi.intent_type = 'invoice_collection' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
   AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
-  AND NOT (pi.intent_type='nmi_subscription_create' AND coalesce(pi.result_evidence,'{}'::jsonb) ? 'enrollment_submitted')
+  AND NOT (pi.intent_type='initial_membership' AND coalesce(pi.result_evidence,'{}'::jsonb) ? 'initial_submitted')
   AND pi.expires_at IS NOT NULL
   AND pi.expires_at <= $2::timestamptz
   AND NOT (
@@ -1087,8 +1087,8 @@ func (q *Queries) GetReconciliationFindingByIdentity(ctx context.Context, arg Ge
 
 const getUnresolvedInitialEnrollmentForCustomerProduct = `-- name: GetUnresolvedInitialEnrollmentForCustomerProduct :one
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
-WHERE merchant_id=$1::uuid AND intent_type='nmi_subscription_create'
-  AND payload->>'user_id'=$2::text
+WHERE merchant_id=$1::uuid AND intent_type='initial_membership'
+  AND payload->'terms'->>'customer_id'=$2::text
   AND payload->'terms'->>'product_id'=$3::text
   AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
 ORDER BY created_at LIMIT 1
@@ -1492,7 +1492,7 @@ func (q *Queries) ListDueVerifyRailIntentMerchants(ctx context.Context, arg List
 
 const listInitialEnrollmentsForMembership = `-- name: ListInitialEnrollmentsForMembership :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
-WHERE merchant_id=$1::uuid AND intent_type='nmi_subscription_create'
+WHERE merchant_id=$1::uuid AND intent_type='initial_membership'
   AND payload->'terms'->>'subscription_id'=$2::uuid::text
 ORDER BY id LIMIT 2
 `
@@ -1702,7 +1702,7 @@ func (q *Queries) ListRebillTermOwners(ctx context.Context, arg ListRebillTermOw
 
 const listRetainedInitialEnrollmentsForArchive = `-- name: ListRetainedInitialEnrollmentsForArchive :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
-WHERE merchant_id=$1::uuid AND intent_type='nmi_subscription_create'
+WHERE merchant_id=$1::uuid AND intent_type='initial_membership'
   AND ($2::uuid IS NULL OR id>$2::uuid)
 ORDER BY id LIMIT $3::int
 `
@@ -1940,7 +1940,7 @@ func (q *Queries) LockRailIntentForCollectionCompletion(ctx context.Context, arg
 
 const lockRailIntentForInitialEnrollmentCompletion = `-- name: LockRailIntentForInitialEnrollmentCompletion :one
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
-WHERE id=$1::uuid AND merchant_id=$2::uuid AND intent_type='nmi_subscription_create'
+WHERE id=$1::uuid AND merchant_id=$2::uuid AND intent_type='initial_membership'
 FOR UPDATE
 `
 
@@ -2085,7 +2085,7 @@ SET status = 'failed_retryable',
 WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
   AND NOT (intent_type = 'invoice_collection' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
   AND NOT (intent_type = 'nmi_sale' AND coalesce(result_evidence, '{}'::jsonb) ? 'sale_submitted')
-  AND NOT (intent_type = 'nmi_subscription_create' AND coalesce(result_evidence, '{}'::jsonb) ? 'enrollment_submitted')
+  AND NOT (intent_type = 'initial_membership' AND coalesce(result_evidence, '{}'::jsonb) ? 'initial_submitted')
 `
 
 type MarkRailIntentFailedRetryableParams struct {
@@ -2126,7 +2126,7 @@ SET status = 'failed_terminal',
     claimed_until = NULL,
     updated_at = now()
 WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('invoice_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','nmi_subscription_create','nmi_vault_delete','hyperswitch_method_delete')
+  AND intent_type NOT IN ('invoice_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete')
 `
 
 type MarkRailIntentFailedTerminalParams struct {
@@ -2169,7 +2169,7 @@ SET status = 'succeeded',
     claimed_until = NULL,
     updated_at = now()
 WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('invoice_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','nmi_subscription_create','nmi_vault_delete','hyperswitch_method_delete')
+  AND intent_type NOT IN ('invoice_collection','manual_rebill','nmi_upgrade','stripe_tier_change','nmi_sale','initial_membership','nmi_vault_delete','hyperswitch_method_delete')
 `
 
 type MarkRailIntentSucceededParams struct {
@@ -2202,7 +2202,7 @@ SET status = 'superseded',
     claimed_until = NULL,
     updated_at = now()
 WHERE rail_intents.merchant_id = $2::uuid AND id = $3 AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')
-  AND NOT (intent_type='nmi_subscription_create' AND coalesce(result_evidence,'{}'::jsonb) ? 'enrollment_submitted')
+  AND NOT (intent_type='initial_membership' AND coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted')
 `
 
 type MarkRailIntentSupersededParams struct {
@@ -2223,7 +2223,7 @@ const markRailIntentUnknown = `-- name: MarkRailIntentUnknown :execrows
 UPDATE openrails.rail_intents
 SET status = 'unknown_needs_verify',
     result_evidence = COALESCE(result_evidence, '{}'::jsonb) || COALESCE($1::jsonb, '{}'::jsonb)
-      || CASE WHEN result_evidence ? 'enrollment_submitted' THEN jsonb_build_object('enrollment_submitted',result_evidence->'enrollment_submitted') ELSE '{}'::jsonb END,
+      || CASE WHEN result_evidence ? 'initial_submitted' THEN jsonb_build_object('initial_submitted',result_evidence->'initial_submitted') ELSE '{}'::jsonb END,
     next_attempt_at = $2::timestamptz,
     last_failure_reason = $3,
     claimed_until = NULL,
@@ -2267,7 +2267,7 @@ WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status = 'in_flight'
   AND NOT (intent_type = 'invoice_collection' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
   -- A stale no-send result must not undo another executor's payment fence.
   AND (intent_type <> 'nmi_sale' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'sale_submitted'))
-  AND (intent_type <> 'nmi_subscription_create' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'enrollment_submitted'))
+  AND (intent_type <> 'initial_membership' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'initial_submitted'))
 `
 
 type ParkRailIntentParams struct {
@@ -2401,12 +2401,12 @@ WHERE id = $3::uuid
   AND psp_id = $5::uuid
   AND intent_type = $6::text
   AND payload = $7::jsonb
-  AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale','nmi_subscription_create'))
-       OR ($1::text = 'qualified_enrollment' AND intent_type IN ('nmi_upgrade','nmi_subscription_create'))
-       OR ($1::text='qualified_initial_refusal' AND intent_type='nmi_subscription_create'
+  AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale','initial_membership'))
+       OR ($1::text = 'qualified_enrollment' AND intent_type IN ('nmi_upgrade','initial_membership'))
+       OR ($1::text='qualified_initial_refusal' AND intent_type='initial_membership'
            AND NOT (coalesce(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','qualified_enrollment'])
-           AND (($2::jsonb->>'kind'='not_submitted' AND NOT (coalesce(result_evidence,'{}'::jsonb) ? 'enrollment_submitted'))
-             OR ($2::jsonb->>'kind'='provider_declined' AND result_evidence->>'enrollment_submitted'='true')))
+           AND (($2::jsonb->>'kind'='not_submitted' AND NOT (coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted'))
+             OR ($2::jsonb->>'kind'='provider_declined' AND result_evidence->>'initial_submitted'='true')))
        OR ($1::text = 'qualified_invoice_nonexecution' AND intent_type = 'invoice_collection'
            AND COALESCE(result_evidence->>'submitted_at', '') = $2::jsonb->>'submitted_at'
            AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')))
@@ -2546,7 +2546,7 @@ SET status = 'superseded',
 WHERE rail_intents.merchant_id = $2::uuid AND intent_type = $3
   AND subscription_id = $4
   AND (status = 'failed_retryable' OR (status = 'pending' AND attempts = 0))
-  AND NOT (intent_type='nmi_subscription_create' AND coalesce(result_evidence,'{}'::jsonb) ? 'enrollment_submitted')
+  AND NOT (intent_type='initial_membership' AND coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted')
 `
 
 type SupersedeRailIntentsBySubjectParams struct {

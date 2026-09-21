@@ -80,7 +80,7 @@ func TestNMISaleIntent_AnchoredInstrumentSendsUsedWithReference(t *testing.T) {
 func (fx *subIntentFixture) seedSubInstrument(t *testing.T, recurringRef string) uuid.UUID {
 	t.Helper()
 	pool := fx.db.Pool()
-	customerID := dbtest.EnsureCustomerIDPgx(fx.ctx, t, pool, fx.payload.UserID)
+	customerID := dbtest.EnsureCustomerIDPgx(fx.ctx, t, pool, fx.payload.Terms.CustomerID.String())
 	pspID := dbtest.EnsureTestPSP(fx.ctx, t, pool, dbtest.TestMerchantID.UUID(), "mobius")
 	pmID := uuid.New()
 	_, err := pool.Exec(fx.ctx,
@@ -88,11 +88,12 @@ func (fx *subIntentFixture) seedSubInstrument(t *testing.T, recurringRef string)
 		   (id, merchant_id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
 		    initial_transaction_id, stored_credential_recurring_ref)
 		 VALUES ($1, $2, $3, 'nmi', $4, $5, '', '', $6)`,
-		pmID, dbtest.TestMerchantID.UUID(), customerID, pspID, fx.payload.CustomerVaultID, recurringRef)
+		pmID, dbtest.TestMerchantID.UUID(), customerID, pspID, fx.payload.Instrument.RailCustomerRef, recurringRef)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(fx.ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pmID)
 	})
+	fx.payload.Terms.PaymentMethodID = pmID
 	return pmID
 }
 
@@ -122,7 +123,7 @@ func TestNMISubscriptionIntent_AnchoredInstrumentSendsUsedWithReference(t *testi
 	fx := newSubIntentFixture(t)
 	fx.svc.RailPaymentMethodService = &paymentmethods.RailPaymentMethodService{DB: fx.db}
 	fx.seedSubInstrument(t, "anchor-297-sub")
-	fx.payload.StoredCredentialRef = "anchor-297-sub"
+	fx.payload.Instrument.StoredCredentialRecurringRef = "anchor-297-sub"
 
 	intent := fx.enqueueAndExecute(t)
 	require.Equal(t, intents.StatusSucceeded, intent.Status)

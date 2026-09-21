@@ -66,6 +66,7 @@ type fakeNMISubGateway struct {
 	observedAmount  string
 	observedAt      time.Time
 	beforeResponse  func() error
+	reportedOrder   string
 }
 
 func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNMISubGateway, *nmi.NMIClient) {
@@ -119,7 +120,11 @@ func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNM
 		_ = r.ParseForm()
 		if r.Form.Get("report_type") == "recurring" {
 			start := form.Get("start_date")
-			fmt.Fprintf(w, `<nm_response><subscription id="%s"><subscription_id>%s</subscription_id><plan><plan_id>%s</plan_id></plan><orderid>%s</orderid><ponumber>%s</ponumber><next_charge_date>%s</next_charge_date></subscription></nm_response>`, f.subID, f.subID, f.planID, form.Get("orderid"), form.Get("ponumber"), start[:4]+"-"+start[4:6]+"-"+start[6:])
+			order := form.Get("orderid")
+			if f.reportedOrder != "" {
+				order = f.reportedOrder
+			}
+			fmt.Fprintf(w, `<nm_response><subscription id="%s"><subscription_id>%s</subscription_id><plan><plan_id>%s</plan_id></plan><orderid>%s</orderid><ponumber>%s</ponumber><next_charge_date>%s</next_charge_date></subscription></nm_response>`, f.subID, f.subID, f.planID, order, order, start[:4]+"-"+start[4:6]+"-"+start[6:])
 			return
 		}
 		if r.Form.Get("recurring") == "add_subscription" {
@@ -172,13 +177,14 @@ func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNM
 }
 
 type subIntentFixture struct {
-	db      *db.DB
-	runner  *intents.Runner
-	gateway *fakeNMISubGateway
-	svc     *CheckoutService
-	payload NMISubscriptionCreatePayload
-	priceID uuid.UUID
-	ctx     context.Context
+	prepared bool
+	db       *db.DB
+	runner   *intents.Runner
+	gateway  *fakeNMISubGateway
+	svc      *CheckoutService
+	payload  InitialMembershipPayload
+	priceID  uuid.UUID
+	ctx      context.Context
 }
 
 func newSubIntentFixture(t *testing.T) *subIntentFixture {
@@ -201,7 +207,7 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 		CreatedAt: now, UpdatedAt: now,
 	})
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE intent_type = 'nmi_subscription_create' AND price_id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE intent_type = 'initial_membership' AND price_id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM billing.notifications WHERE customer_id = $1", customerID)
@@ -229,26 +235,13 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),
-		Registry: intents.NewRegistry(NewNMISubscriptionCreateIntentHandler(svc)),
+		Registry: intents.NewRegistry(NewInitialMembershipIntentHandler(svc)),
 		// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
 		Config: fullModeConfig(),
 	}
 	return &subIntentFixture{
 		db: dbi, runner: runner, gateway: gateway, svc: svc,
-		payload: NMISubscriptionCreatePayload{
-			Provider:               string(models.RailNMI),
-			PSP:                    "mobius",
-			PlanID:                 planID,
-			CustomerVaultID:        railCustomerRef,
-			AmountMicros:           9_990_000,
-			Currency:               "USD",
-			UserID:                 userID,
-			PriceID:                priceID,
-			LocalSubscriptionID:    uuid.New(),
-			CheckoutIdempotencyKey: "sub-key-" + uuid.NewString()[:8],
-			FirstName:              "T", LastName: "User", Address1: "N/A",
-			City: "N/A", State: "N/A", Zip: "00000", Country: "US",
-		},
+		payload: InitialMembershipPayload{PSP: "mobius", CheckoutIdempotencyKey: "sub-key-" + uuid.NewString()[:8], Terms: subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyProvider, SubscriptionID: uuid.New(), CustomerID: uuid.MustParse(userID), PriceID: priceID, Amount: 9_990_000, Currency: "USD"}, Instrument: charge.FrozenInstrument{RailCustomerRef: railCustomerRef}, NativeSchedule: &subscriptions.NMIInitialScheduleTerms{PlanID: planID, Card: nmi.CardUserData{FirstName: "T", LastName: "User", Address1: "N/A", City: "N/A", State: "N/A", Zip: "00000", Country: "US"}}},
 		priceID: priceID, ctx: ctx,
 	}
 }
@@ -256,37 +249,44 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailIntent {
 	t.Helper()
 	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
-	if fx.payload.Terms.SubscriptionID == uuid.Nil {
+	if !fx.prepared {
 		price, err := fx.svc.PriceService.GetByID(fx.ctx, fx.priceID)
 		require.NoError(t, err)
 		product, err := fx.svc.ProductService.GetByID(fx.ctx, price.ProductID)
 		require.NoError(t, err)
-		method := models.PaymentMethod{ID: uuid.New(), CustomerID: uuid.MustParse(fx.payload.UserID), PspID: pspID, Rail: "nmi", Custodian: "psp", RailCustomerRef: fx.payload.CustomerVaultID, RailMethodRef: "billing-native"}
-		require.NoError(t, paymentmethods.NewPaymentMethodRepo(fx.db).Create(db.WithPSPID(fx.ctx, pspID), &method))
-		fx.payload.PaymentMethodID = &method.ID
-		fx.payload.BillingID = method.RailMethodRef
-		fx.payload.Instrument = charge.FrozenInstrument{PSPID: pspID, Custodian: "psp", RailCustomerRef: method.RailCustomerRef, RailMethodRef: method.RailMethodRef}
+		method := models.PaymentMethod{ID: fx.payload.Terms.PaymentMethodID, CustomerID: fx.payload.Terms.CustomerID, PspID: pspID, Rail: "nmi", Custodian: "psp", RailCustomerRef: fx.payload.Instrument.RailCustomerRef, RailMethodRef: "billing-native"}
+		if method.ID == uuid.Nil {
+			method.ID = uuid.New()
+			require.NoError(t, paymentmethods.NewPaymentMethodRepo(fx.db).Create(db.WithPSPID(fx.ctx, pspID), &method))
+		} else {
+			existing, err := paymentmethods.NewPaymentMethodRepo(fx.db).GetByID(db.WithPSPID(fx.ctx, pspID), method.ID)
+			require.NoError(t, err)
+			method = *existing
+		}
+		fx.payload.Terms.PaymentMethodID = method.ID
+		fx.payload.Instrument = charge.FrozenInstrument{PSPID: pspID, Custodian: "psp", RailCustomerRef: method.RailCustomerRef, RailMethodRef: method.RailMethodRef, StoredCredentialRecurringRef: method.StoredCredentialRecurringRef, StoredCredentialUnscheduledRef: method.StoredCredentialUnscheduledRef}
 		now := fx.svc.now().UTC().Truncate(time.Microsecond)
 		start := now
-		if fx.payload.DelayedStart != nil {
-			start = fx.payload.DelayedStart.UTC()
-			fx.payload.AmountMicros = 0
+		if fx.payload.Terms.Pending {
+			start = fx.payload.Terms.PeriodStart.UTC()
+			fx.payload.Terms.Amount = 0
 		}
 		end := start.Add(720 * time.Hour)
-		if fx.payload.StartDate == "" {
-			fx.payload.StartDate = end.Format("20060102")
+		if fx.payload.NativeSchedule.StartDate == "" {
+			fx.payload.NativeSchedule.StartDate = end.Format("20060102")
 		}
 		payment := uuid.Nil
-		if fx.payload.AmountMicros > 0 {
+		if fx.payload.Terms.Amount > 0 {
 			payment = uuid.New()
 		}
 		benefits := models.CloneEntitlementsSpec(product.EntitlementsSpec)
 		if benefits == nil {
 			benefits = map[string]*int{}
 		}
-		fx.payload.Terms = subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyProvider, SubscriptionID: fx.payload.LocalSubscriptionID, PaymentID: payment, CustomerID: method.CustomerID, PSPID: pspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Amount: fx.payload.AmountMicros, RecurringAmount: price.Amount, Currency: price.Currency, AcceptedAt: now, PeriodStart: start, PeriodEnd: end, Pending: fx.payload.DelayedStart != nil, Entitlements: benefits}
-		fx.payload.DayFrequency = 30
-		fx.payload.RequestFingerprint = "fixture-" + fx.payload.CheckoutIdempotencyKey
+		fx.payload.Terms = subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyProvider, SubscriptionID: fx.payload.Terms.SubscriptionID, PaymentID: payment, CustomerID: method.CustomerID, PSPID: pspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Amount: fx.payload.Terms.Amount, RecurringAmount: price.Amount, Currency: price.Currency, AcceptedAt: now, PeriodStart: start, PeriodEnd: end, Pending: fx.payload.Terms.Pending, Entitlements: benefits}
+		fx.payload.NativeSchedule.DayFrequency = 30
+		fx.payload.RequestFingerprint = strings.Repeat("a", 64)
+		fx.prepared = true
 		if price.Amount == 0 {
 			fx.gateway.recurringAmount = "0.00"
 		}
@@ -295,11 +295,11 @@ func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailInt
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       string(models.RailNMI),
-		IntentType:     TypeNMISubscriptionCreate,
+		IntentType:     TypeInitialMembership,
 		PriceID:        &fx.priceID,
 		PspID:          pspID,
 		Payload:        fx.payload,
-		IdempotencyKey: NMISubscriptionCreateIdempotencyKey(fx.payload.CheckoutIdempotencyKey),
+		IdempotencyKey: InitialMembershipIdempotencyKey(fx.payload.CheckoutIdempotencyKey),
 		NextAttemptAt:  time.Now().UTC(),
 		Origin:         intents.OriginUser,
 		OriginReason:   "test subscription create",
@@ -344,6 +344,7 @@ func TestNMISubscriptionIntent_HappyPathAndReplay(t *testing.T) {
 func TestNMISubscriptionIntent_OrphanedRemoteCreateNeedsExactReceipt(t *testing.T) {
 	fx := newSubIntentFixture(t)
 	fx.gateway.createMode.Store("ambiguous500")
+	fx.gateway.reportedOrder = "another-enrollment"
 
 	intent := fx.enqueueAndExecute(t)
 	require.Equal(t, intents.StatusUnknownNeedsVerify, intent.Status, "lost response is never a decline")
@@ -361,13 +362,14 @@ func TestNMISubscriptionIntent_OrphanedRemoteCreateNeedsExactReceipt(t *testing.
 	require.False(t, ok)
 	resumed := pending
 	resumed.Attempts = 2
-	outcome := fx.runner.Registry.Lookup(TypeNMISubscriptionCreate).Execute(fx.ctx, resumed)
+	outcome := fx.runner.Registry.Lookup(TypeInitialMembership).Execute(fx.ctx, resumed)
 	require.Equal(t, intents.OutcomeAmbiguous, outcome.Class)
 
 	_, err = fx.runner.Resolve(fx.ctx, intent.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "wrong"})
 	require.ErrorIs(t, err, intents.ErrResolutionRejected, "the enrollment charge contradicts non-execution")
 	_, err = fx.runner.Resolve(fx.ctx, intent.ID, intents.Resolution{ProviderReference: "rsub-missing", Actor: "ops", Reason: "wrong"})
 	require.ErrorIs(t, err, intents.ErrResolutionRejected)
+	fx.gateway.reportedOrder = ""
 	resolved, err := fx.runner.Resolve(fx.ctx, intent.ID, intents.Resolution{ProviderReference: fx.gateway.subID, Actor: "ops@example.test", Reason: "NMI subscription detail shows order"})
 	require.NoError(t, err)
 	require.Equal(t, intents.StatusSucceeded, resolved.Status)
@@ -396,7 +398,7 @@ func TestNMISubscriptionIntent_ImmediateActivationIsOneMembership(t *testing.T) 
 	require.Equal(t, intents.StatusSucceeded, intent.Status)
 	sub, ok := fx.localSub(t)
 	require.True(t, ok)
-	require.Equal(t, fx.payload.LocalSubscriptionID, sub.ID)
+	require.Equal(t, fx.payload.Terms.SubscriptionID, sub.ID)
 	require.Equal(t, models.StatusActive, sub.Status)
 	require.NotNil(t, sub.CurrentPeriodStartsAt)
 	require.NotNil(t, sub.CurrentPeriodEndsAt)
@@ -423,7 +425,7 @@ func TestNMISubscriptionIntent_ImmediateActivationIsOneMembership(t *testing.T) 
 			require.NoError(t, rows.Scan(&s))
 			transitions = append(transitions, s)
 		}
-		require.Equal(t, []string{"pending", "active"}, transitions)
+		require.Equal(t, []string{"active"}, transitions)
 	}
 	assertOneMembership()
 

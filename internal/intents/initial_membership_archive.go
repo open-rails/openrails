@@ -9,10 +9,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// ValidateInitialEnrollmentTerminal revalidates retained immutable custody. A
+// ValidateInitialMembershipTerminal revalidates retained immutable custody. A
 // future schedule and a free initial phase never stand in for collected money.
-func ValidateInitialEnrollmentTerminal(in gen.OpenrailsRailIntent) error {
-	p, err := subscriptions.DecodeNMIInitialEnrollmentPayload(in)
+func ValidateInitialMembershipTerminal(in gen.OpenrailsRailIntent) error {
+	p, err := subscriptions.DecodeInitialMembershipPayload(in)
 	if err != nil {
 		return err
 	}
@@ -30,7 +30,7 @@ func ValidateInitialEnrollmentTerminal(in gen.OpenrailsRailIntent) error {
 		TransactionID          string    `json:"transaction_id"`
 		Status                 string    `json:"status"`
 		DelayedStart           string    `json:"delayed_start"`
-		Submitted              bool      `json:"enrollment_submitted"`
+		Submitted              bool      `json:"initial_submitted"`
 		Declined               bool      `json:"declined"`
 		NotExecuted            bool      `json:"not_executed"`
 		RequestRefused         bool      `json:"request_refused"`
@@ -40,21 +40,21 @@ func ValidateInitialEnrollmentTerminal(in gen.OpenrailsRailIntent) error {
 	}
 	switch in.Status {
 	case StatusSucceeded:
-		if !scheduled || !evidence.Submitted || evidence.SubscriptionID != p.Terms.SubscriptionID || evidence.ProviderSubscriptionID != schedule.SubscriptionID() || evidence.Declined || evidence.NotExecuted || evidence.RequestRefused || (p.AmountMicros > 0) != paid {
+		if !scheduled || !evidence.Submitted || evidence.SubscriptionID != p.Terms.SubscriptionID || evidence.ProviderSubscriptionID != schedule.SubscriptionID() || evidence.Declined || evidence.NotExecuted || evidence.RequestRefused || (p.Terms.Amount > 0) != paid {
 			return errors.New("initial terminal result contradicts accepted schedule and payment custody")
 		}
 		if paid && evidence.TransactionID != receipt.TransactionID() || !paid && evidence.TransactionID != "" {
 			return errors.New("initial terminal result has another payment")
 		}
 		if p.Terms.Pending {
-			if evidence.Status != "pending" || evidence.DelayedStart != p.DelayedStart.UTC().Format("2006-01-02T15:04:05.999999999Z07:00") {
+			if evidence.Status != "pending" || evidence.DelayedStart != p.DelayedStart().UTC().Format("2006-01-02T15:04:05.999999999Z07:00") {
 				return errors.New("initial delayed result contradicts accepted schedule")
 			}
 		} else if evidence.Status != "success" || evidence.DelayedStart != "" {
 			return errors.New("initial immediate result has another phase")
 		}
 	case StatusFailedTerminal:
-		_, refused, err := LoadInitialEnrollmentRefusal(in)
+		_, refused, err := LoadInitialMembershipRefusal(in)
 		if err != nil {
 			return err
 		}
