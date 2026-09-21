@@ -168,7 +168,7 @@ defer rt.Close(ctx)
 | `PGXPool` | `*pgxpool.Pool` | Host-supplied pool (pgx/v5). |
 | `Redis` | `*redis.Client` | Optional (rate limits, admission holds). |
 | `Cache` | `cache.Cache` | Optional cache override. |
-| `River` | `embed.RiverOwnership` | Defaults to managed River in `public`. `RiverManagedByOpenRails("jobs")` selects another schema; `RiverFromHost(bind)` gives the host ownership. |
+| `River` | `embed.RiverOwnership` | Defaults to managed River in `public`. `RiverManagedByOpenRails("jobs")` selects another schema; `RiverFromHost()` declares host ownership; call `BindRiver` after composing components. |
 | `RunWorkers` | `bool` | Runs the River background workers (renewals, dunning, credit/hold expiry, reconciliation) on a Runtime-owned goroutine, detached from the ctx you pass to `New` — `Close` stops them. Leave false to drive `rt.RunWorkers(ctx)` yourself. |
 | `ConsoleAssets` | `fs.FS` | Host-built admin console SPA (see §6). |
 | `StripeTransport` | `http.RoundTripper` | Test seam under the Stripe API choke point; refused with a live posture. |
@@ -199,43 +199,67 @@ Keep `RunWorkers: false` through component attachment, then supervise
 `RunWorkers` blocks until shutdown; propagate its error through that supervisor.
 The control plane adds AuthKit maintenance to the same River registry before
 client construction, and attaching it after River initialization is refused.
-Billing-only hosts with no optional components to attach may use
-`RunWorkers: true` directly. Hosts owning a shared River fleet compose their own
-AuthKit workers in the binder before `river.NewClient` instead of attaching a
-control plane to an already-bound client.
+Billing-only hosts using managed River with no optional components to attach may
+use `RunWorkers: true` directly. Host-owned River refuses constructor auto-start:
+attach the control plane or construct your AuthKit client before binding.
 
 `cp` carries the operator mechanisms (`ProvisionMerchant`, directory reads,
 provider configuration, fleet aggregates, retirement, `UserAuthenticator`,
 `JWKSHandler`). Hosts that bring their own AuthKit never import it.
 
-**Host-owned River**: a host that runs its own [River](https://riverqueue.com)
-client declares `RiverFromHost`. OpenRails registers its workers on the shared
-registry before your client is built and adds its periodic jobs to the client you
-return; you start and stop that client:
+**Host-owned River**: declare ownership during migrations and construction, then
+compose every component before creating the one shared client. `BindRiver`
+provides a complete config with billing and attached control-plane workers,
+queues and schedules. Extend that config; replacing required entries is refused.
 
 ```go
-var jobs *river.Client[pgx.Tx]
-rt, err := embed.New(ctx, embed.Options{
-    Config: cfg, PGXPool: pool,
-    River: embed.RiverFromHost(func(ctx context.Context, fleet *embed.RiverFleet) (*river.Client[pgx.Tx], error) {
-        river.AddWorker(fleet.Workers, &MyAppWorker{})
-        jobs, err = river.NewClient(riverpgxv5.New(pool), &river.Config{
-            Workers: fleet.Workers,
-            Schema:  fleet.Schema, // never the billing schema
-            Queues: map[string]river.QueueConfig{
-                river.QueueDefault: {MaxWorkers: 10},
-                fleet.QueueBilling: {MaxWorkers: 5}, // required or billing jobs never drain
-            },
-        })
-        return jobs, err // unstarted
-    }),
-}})
-if err != nil { log.Fatal(err) }
-if err := jobs.Start(ctx); err != nil { log.Fatal(err) }
+ownership := embed.RiverFromHost()
+// The host migrates and grants access to its River schema separately.
+if err := embed.ApplyMigrations(ctx, adminPool, embed.MigrationOptions{River: ownership}); err != nil {
+    return err
+}
+rt, err := embed.New(ctx, embed.Options{Config: cfg, PGXPool: pool, River: ownership})
+if err != nil { return err }
+defer rt.Close(context.WithoutCancel(ctx))
+
+// Attach a control plane here, or construct your own AuthKit client.
+// An attached control plane contributes its AuthKit maintenance automatically.
+jobs, err := rt.BindRiver(ctx, func(ctx context.Context, jobsCfg *river.Config) (*river.Client[pgx.Tx], error) {
+    river.AddWorker(jobsCfg.Workers, &MyAppWorker{})
+    jobsCfg.Queues[river.QueueDefault] = river.QueueConfig{MaxWorkers: 10}
+    jobsCfg.Schema = "host_jobs" // host-migrated namespace, never the billing schema
+    // For host-owned AuthKit: auth.RegisterRiver(jobsCfg), then auth.Start(ctx).
+    return river.NewClient(riverpgxv5.New(pool), jobsCfg) // return unstarted
+})
+if err != nil {
+    if jobs != nil { _ = jobs.StopAndCancel(context.WithoutCancel(ctx)) }
+    return err
+}
+defer jobs.StopAndCancel(context.WithoutCancel(ctx))
+// Finish product bootstrap before starting consumers.
+if err := jobs.Start(ctx); err != nil { return err }
+
+loopsCtx, cancelLoops := context.WithCancel(ctx)
+loopsDone := make(chan error, 1)
+go func() { loopsDone <- rt.RunWorkers(loopsCtx) }()
+// Supervise this result alongside HTTP. On shutdown:
+cancelLoops()
+if err := <-loopsDone; err != nil && !errors.Is(err, context.Canceled) { return err }
+// Deferred cleanup stops the host client before closing the billing runtime.
+// Close host AuthKit and the pool only after these consumers have joined.
 ```
 
-`RunWorkers` is a no-op for a host-owned client. `rt.CheckJobProgress(ctx)` gives
-the live fleet verdict for a health endpoint.
+`RunWorkers` runs core non-River loops, including the Solana Pay poller, and
+blocks until cancellation; it never starts or stops the host's River client.
+Always cancel and join it before stopping River and closing dependent runtimes,
+identity clients and pools. `rt.CheckJobProgress(ctx)` gives the live fleet
+verdict. Before binding, readiness and worker startup refuse explicitly.
+
+Binding is one startup attempt. Double binding, late component attachment,
+closed runtimes, and already-started clients refuse. After a failed binding,
+close and recreate the runtime; any client returned with the error remains the
+host's responsibility. Managed River's `New → Attach → RunWorkers` order is
+unchanged.
 
 **Inserting an engine job.** OpenRails registers its own periodic jobs on the
 client you return. The one job a host inserts itself is the invoice sweep:

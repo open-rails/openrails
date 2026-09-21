@@ -208,7 +208,7 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	if a.Runtime == nil {
 		return fmt.Errorf("control plane: runtime is required")
 	}
-	if a.Runtime.RiverClient != nil || a.Runtime.HasExternalRiverClient() {
+	if err := a.Runtime.CheckRiverConfigurable(); err != nil {
 		return fmt.Errorf("control plane: attach before River initialization; a host-owned fleet must compose AuthKit workers before binding its client")
 	}
 

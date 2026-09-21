@@ -28,20 +28,18 @@ func TestRuntimeOwnsReadinessAndRiverChecks(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
-	var jobs *river.Client[pgx.Tx]
 	rt, err := embed.New(ctx, embed.Options{
 		Config:  &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}},
 		PGXPool: pool,
-		River: embed.RiverFromHost(func(_ context.Context, fleet *embed.RiverFleet) (*river.Client[pgx.Tx], error) {
-			jobs, err = river.NewClient(riverpgxv5.New(pool), &river.Config{
-				Workers: fleet.Workers, Schema: fleet.Schema,
-				Queues: map[string]river.QueueConfig{fleet.QueueBilling: {MaxWorkers: 1}},
-			})
-			return jobs, err
-		}),
+		River:   embed.RiverFromHost(),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	_, err = rt.BindRiver(ctx, func(_ context.Context, cfg *river.Config) (*river.Client[pgx.Tx], error) {
+		cfg.Queues[embed.QueueBilling] = river.QueueConfig{MaxWorkers: 1}
+		return river.NewClient(riverpgxv5.New(pool), cfg)
+	})
+	require.NoError(t, err)
 	require.True(t, rt.HasExternalRiverClient())
 	require.NoError(t, rt.Ready(ctx))
 	_, err = rt.CheckJobProgress(ctx)

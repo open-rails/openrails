@@ -93,6 +93,11 @@ func TestNewRejectsUnsetPostureBeforeTouchingTheDatabase(t *testing.T) {
 func TestNewDefaultsRiverOwnership(t *testing.T) {
 	_, err := New(context.Background(), Options{Config: &config.Config{}})
 	require.ErrorContains(t, err, "config.Env is required")
-	_, err = New(context.Background(), Options{Config: &config.Config{}, River: RiverFromHost(nil)})
-	require.ErrorContains(t, err, "non-nil binder")
+	_, err = New(context.Background(), Options{Config: &config.Config{}, River: RiverFromHost()})
+	require.ErrorContains(t, err, "config.Env is required")
+}
+
+func TestHostRiverRejectsAutomaticStartupBeforeBinding(t *testing.T) {
+	_, err := New(context.Background(), Options{Config: &config.Config{}, River: RiverFromHost(), RunWorkers: true})
+	require.ErrorContains(t, err, "managed-only")
 }
