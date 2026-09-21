@@ -2008,6 +2008,12 @@ CREATE INDEX idx_rail_intents_psp ON openrails.rail_intents USING btree (psp_id)
 
 CREATE INDEX idx_rail_intents_subscription ON openrails.rail_intents USING btree (subscription_id) WHERE (subscription_id IS NOT NULL);
 
+-- Initial membership identity is frozen in terms, including failed attempts
+-- with no subscription row. Paid agreement lookup must not scan the whole book.
+CREATE INDEX idx_rail_intents_initial_membership_history ON openrails.rail_intents
+    (merchant_id, ((payload->'terms')->>'subscription_id'))
+    WHERE intent_type='initial_membership' AND status='succeeded';
+
 CREATE UNIQUE INDEX uq_rail_intents_merchant_idempotency_key ON openrails.rail_intents USING btree (merchant_id, idempotency_key);
 
 ALTER TABLE ONLY openrails.rail_intents
