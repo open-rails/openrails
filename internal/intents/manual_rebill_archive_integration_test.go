@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchantarchive"
-	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 	"strings"
@@ -47,7 +46,7 @@ func TestManualRebillArchivePreservesAcceptedTermsAndTerminalCustody(t *testing.
 			require.NoError(t, merchantarchive.Export(t.Context(), source, mid, &archive))
 			adminDSN, appDSN := dbtest.SharedRLSPostgres(t)
 			schema := "rebill_archive_" + outcome
-			require.NoError(t, migrate.RunPostgres(t.Context(), &config.Config{DB: &config.DBConfig{URL: adminDSN, Schema: schema}}))
+			dbtest.ApplyPostgresMigrations(t, adminDSN, appDSN, schema)
 			target, err := db.NewDB(t.Context(), &config.DBConfig{URL: appDSN, Schema: schema})
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = target.Close() })

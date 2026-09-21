@@ -24,7 +24,7 @@ import (
 // so a transaction that has set this GUC sees ONLY its own merchant's rows, and a
 // transaction that forgot to set it sees NOTHING (fail-closed). For RLS to
 // actually enforce, the application must connect as a non-superuser,
-// non-BYPASSRLS role (openrails_app, created by 001_schema.up.sql).
+// non-BYPASSRLS host runtime login.
 const MerchantGUC = "app.merchant_id"
 
 // Qx returns the queryable handle that sqlc-generated queries
