@@ -3,10 +3,12 @@
 package integrationharness
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,17 +72,21 @@ func TestHyperSwitchActualBrowserCapture(t *testing.T) {
 	psp := dbtest.EnsureTestPSP(ctx, t, h.sharedPool(), owned.MerchantID.UUID(), "nmi")
 	custodian := uuid.New()
 	settings, _ := json.Marshal(map[string]string{"public_api_key": vendor.PublicAPIKey, "profile_id": vendor.ProfileID})
-	_, err = h.sharedPool().Exec(ctx, `INSERT INTO openrails.custodians(id,merchant_id,key,kind,environment,account_id,settings,credential_versions) VALUES($1,$2,$3,'hyperswitch','test',$4,$5,'{"api_key":1}')`, custodian, owned.MerchantID.UUID(), custodian.String(), vendor.MerchantID, settings)
+	_, err = h.sharedPool().Exec(ctx, `INSERT INTO billing.custodians(id,merchant_id,key,kind,environment,account_id,settings,credential_versions) VALUES($1,$2,$3,'hyperswitch','test',$4,$5,'{"api_key":1}')`, custodian, owned.MerchantID.UUID(), custodian.String(), vendor.MerchantID, settings)
 	require.NoError(t, err)
-	_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.psps SET custodian_id=$1 WHERE merchant_id=$2 AND id=$3`, custodian, owned.MerchantID.UUID(), psp)
+	_, err = h.sharedPool().Exec(ctx, `UPDATE billing.psps SET custodian_id=$1 WHERE merchant_id=$2 AND id=$3`, custodian, owned.MerchantID.UUID(), psp)
 	require.NoError(t, err)
 	name, err := merchants.CustodianSecretName("hyperswitch", "test", vendor.MerchantID, "api_key")
 	require.NoError(t, err)
 	_, err = surface.App().Runtime.Merchants.Secrets().Put(ctx, owned.MerchantID, name, vendor.APIKey)
 	require.NoError(t, err)
+	sdkURL, err := url.Parse(vendor.SDKURL)
+	require.NoError(t, err)
+	sdkOrigin := sdkURL.Scheme + "://" + sdkURL.Host
 	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self' "+sdkOrigin+"; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src "+surface.BaseURL+" "+vendor.APIBaseURL+"; frame-src "+sdkOrigin+"; base-uri 'none'; object-src 'none'; form-action 'none'")
 		_, _ = w.Write([]byte(`<!doctype html><html><body><h1>Local vendor capture qualification</h1><div id="number"></div><div id="expiry"></div><div id="cvc"></div><button id="save">Save card</button></body></html>`))
 	}))
 	t.Cleanup(page.Close)
@@ -89,13 +95,20 @@ func TestHyperSwitchActualBrowserCapture(t *testing.T) {
 	require.NoError(t, err)
 	reader, err := hyperswitch.New(hyperswitch.Config{BaseURL: vendor.APIBaseURL, MerchantID: vendor.MerchantID, ProfileID: vendor.ProfileID, APIKey: hyperswitch.Secret(vendor.APIKey), ReadOnly: true})
 	require.NoError(t, err)
+	protected := []string{vendor.APIKey, "4111111111111111"}
 	for _, store := range []bool{false, true} {
 		input, _ := json.Marshal(map[string]string{"page": page.URL, "vendor_api": vendor.APIBaseURL, "vendor_sdk": vendor.SDKURL, "api": surface.BaseURL, "token": token, "psp_id": psp.String(), "email": "capture-browser@example.test", "name": "Capture Browser", "store": strconv.FormatBool(store)})
 		command := exec.CommandContext(ctx, "node", script)
-		command.Env = append(os.Environ(), "OPENRAILS_BROWSER_FIXTURE="+string(input))
+		secretProof := filepath.Join(t.TempDir(), "browser-secrets.json")
+		command.Env = append(os.Environ(), "OPENRAILS_BROWSER_FIXTURE="+string(input), "OPENRAILS_BROWSER_PRIVATE="+secretProof)
 		output, err := command.CombinedOutput()
 		t.Log(string(output))
 		require.NoError(t, err)
+		secrets, err := os.ReadFile(secretProof)
+		require.NoError(t, err)
+		var values []string
+		require.NoError(t, json.Unmarshal(secrets, &values))
+		protected = append(protected, values...)
 		var proof struct {
 			VendorSession  string `json:"vendorSession"`
 			VendorCustomer string `json:"vendorCustomer"`
@@ -114,9 +127,16 @@ func TestHyperSwitchActualBrowserCapture(t *testing.T) {
 		}
 		t.Logf("Explicit storage consent=%t; vendor readback storage_type=%s", store, method.StorageType)
 	}
+	routerLogs, err := exec.CommandContext(ctx, "docker", "logs", "openrails-297-nmi-form-20260920-router-1").CombinedOutput()
+	require.NoError(t, err)
+	for i, value := range protected {
+		require.NotEmpty(t, value)
+		require.False(t, bytes.Contains(routerLogs, []byte(value)), "protected capture value %d appeared in vendor logs", i)
+	}
+	t.Log("Vendor INFO logs contain neither synthetic PAN, merchant API key, SDK authorizations nor native session token")
 	var methods, financial int
-	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM openrails.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, owned.MerchantID.UUID(), user.ID).Scan(&methods))
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, owned.MerchantID.UUID(), user.ID).Scan(&methods))
 	require.Equal(t, 1, methods)
-	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM openrails.payments WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM openrails.subscriptions WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM openrails.ledger_accounts WHERE merchant_id=$1 AND customer_id=$2)`, owned.MerchantID.UUID(), user.ID).Scan(&financial))
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.ledger_accounts WHERE merchant_id=$1 AND customer_id=$2)`, owned.MerchantID.UUID(), user.ID).Scan(&financial))
 	require.Zero(t, financial)
 }

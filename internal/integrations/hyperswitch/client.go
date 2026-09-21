@@ -300,7 +300,7 @@ func (c *Client) readProxyContract(ctx context.Context) (proxyContract, error) {
 	if err := c.call(ctx, http.MethodGet, "/v2/proxy", nil, &contract); err != nil {
 		return contract, ErrUnavailable
 	}
-	if contract.Contract != "openrails-nmi-form-v1" || !contract.Strict || contract.MaxResponseBytes != 65536 || len(contract.Routes) == 0 {
+	if contract.Contract != "openrails-nmi-form-v2" || !contract.Strict || contract.MaxResponseBytes != 65536 || len(contract.Routes) == 0 {
 		return contract, ErrUnavailable
 	}
 	for _, route := range contract.Routes {

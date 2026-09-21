@@ -100,7 +100,7 @@ func TestCaptureClientBindsTokenOnlyWorkflow(t *testing.T) {
 
 func TestProxyPreflightRefusesUnsupportedDeploymentWithoutDispatch(t *testing.T) {
 	const destination = "https://secure.nmi.com/api/transact.php"
-	good := `{"contract":"openrails-nmi-form-v1","strict":true,"max_response_bytes":65536,"routes":[{"destination_url":"https://secure.nmi.com/api/transact.php","method":"POST","response_profile":"nmi_classic"}]}`
+	good := `{"contract":"openrails-nmi-form-v2","strict":true,"max_response_bytes":65536,"routes":[{"destination_url":"https://secure.nmi.com/api/transact.php","method":"POST","response_profile":"nmi_classic"}]}`
 	cases := []struct {
 		name, body string
 		status     int
@@ -109,7 +109,8 @@ func TestProxyPreflightRefusesUnsupportedDeploymentWithoutDispatch(t *testing.T)
 		{"qualified", good, 200, true},
 		{"stock health", "health is good", 200, false},
 		{"missing endpoint", "", 404, false},
-		{"wrong contract", strings.Replace(good, "openrails-nmi-form-v1", "unqualified", 1), 200, false},
+		{"wrong contract", strings.Replace(good, "openrails-nmi-form-v2", "unqualified", 1), 200, false},
+		{"superseded v1 exposes SDK authority", strings.Replace(good, "openrails-nmi-form-v2", "openrails-nmi-form-v1", 1), 200, false},
 		{"disabled policy", strings.Replace(good, `"strict":true`, `"strict":false`, 1), 200, false},
 		{"unbounded", strings.Replace(good, "65536", "0", 1), 200, false},
 		{"different destination", strings.Replace(good, "secure.nmi.com", "other.example", 1), 200, false},

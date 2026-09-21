@@ -65,7 +65,7 @@ func newCaptureFixture(t *testing.T) *captureFixture {
 			case "stock":
 				write(map[string]any{"status": "ok"})
 			default:
-				write(map[string]any{"contract": "openrails-nmi-form-v1", "strict": g.preflight != "disabled", "max_response_bytes": 65536, "routes": []any{map[string]string{"destination_url": "https://secure.nmi.com/api/transact.php", "method": "POST", "response_profile": "nmi_classic"}}})
+				write(map[string]any{"contract": "openrails-nmi-form-v2", "strict": g.preflight != "disabled", "max_response_bytes": 65536, "routes": []any{map[string]string{"destination_url": "https://secure.nmi.com/api/transact.php", "method": "POST", "response_profile": "nmi_classic"}}})
 			}
 		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v2/customers/reference/"):
 			ref := strings.TrimPrefix(r.URL.Path, "/v2/customers/reference/")
@@ -180,9 +180,9 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 	remote := surface.Client(openrails.WithAPIKey(owned.APIKey))
 	mid, custodian := owned.MerchantID, uuid.New()
 	psp := dbtest.EnsureTestPSP(ctx, t, h.sharedPool(), mid.UUID(), "nmi")
-	_, err := h.sharedPool().Exec(ctx, `INSERT INTO openrails.custodians(id,merchant_id,key,kind,environment,account_id,settings,credential_versions) VALUES($1,$2,$3,'hyperswitch','test',$4,'{"public_api_key":"capture-public","profile_id":"capture-profile"}','{"api_key":1}')`, custodian, mid.UUID(), "capture-"+custodian.String(), g.account)
+	_, err := h.sharedPool().Exec(ctx, `INSERT INTO billing.custodians(id,merchant_id,key,kind,environment,account_id,settings,credential_versions) VALUES($1,$2,$3,'hyperswitch','test',$4,'{"public_api_key":"capture-public","profile_id":"capture-profile"}','{"api_key":1}')`, custodian, mid.UUID(), "capture-"+custodian.String(), g.account)
 	require.NoError(t, err)
-	_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.psps SET custodian_id=$1 WHERE merchant_id=$2 AND id=$3`, custodian, mid.UUID(), psp)
+	_, err = h.sharedPool().Exec(ctx, `UPDATE billing.psps SET custodian_id=$1 WHERE merchant_id=$2 AND id=$3`, custodian, mid.UUID(), psp)
 	require.NoError(t, err)
 	name, err := merchants.CustodianSecretName("hyperswitch", "test", g.account, "api_key")
 	require.NoError(t, err)
@@ -218,7 +218,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			_, err = surface.Client().GetCheckoutSession(ctx, req.Customer.ID, created.ID)
 			require.Error(t, err, "another merchant must not read the action")
 			var state string
-			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT rail_state::text FROM openrails.checkout_sessions WHERE merchant_id=$1 AND id=$2`, mid.UUID(), created.ID.UUID()).Scan(&state))
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT rail_state::text FROM billing.checkout_sessions WHERE merchant_id=$1 AND id=$2`, mid.UUID(), created.ID.UUID()).Scan(&state))
 			require.NotContains(t, state, created.Capture.SDKAuthorization)
 			require.Contains(t, state, "secret_ciphertext")
 			before := g.count()
@@ -260,13 +260,13 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			require.NoError(t, err)
 			require.Nil(t, replay.Capture)
 			require.Equal(t, completed.PaymentMethodID, replay.PaymentMethodID)
-			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT rail_state::text FROM openrails.checkout_sessions WHERE merchant_id=$1 AND id=$2`, mid.UUID(), created.ID.UUID()).Scan(&state))
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT rail_state::text FROM billing.checkout_sessions WHERE merchant_id=$1 AND id=$2`, mid.UUID(), created.ID.UUID()).Scan(&state))
 			require.NotContains(t, state, "secret_ciphertext")
 			require.NotContains(t, state, confirm.Payment.Capture.Token)
 			var methods, financial int
-			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM openrails.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID.UUID()).Scan(&methods))
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID.UUID()).Scan(&methods))
 			require.Equal(t, 1, methods)
-			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM openrails.payments WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM openrails.subscriptions WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM openrails.ledger_accounts WHERE merchant_id=$1 AND customer_id=$2)`, mid.UUID(), req.Customer.ID.UUID()).Scan(&financial))
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.ledger_accounts WHERE merchant_id=$1 AND customer_id=$2)`, mid.UUID(), req.Customer.ID.UUID()).Scan(&financial))
 			require.Zero(t, financial)
 			beforeDelete := g.count()
 			_, err = client.DeletePaymentMethod(ctx, req.Customer.ID, *completed.PaymentMethodID)
@@ -283,7 +283,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, completed.PaymentMethodID, historical.PaymentMethodID)
 			require.Nil(t, historical.Capture)
-			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM openrails.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID.UUID()).Scan(&methods))
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID.UUID()).Scan(&methods))
 			require.Zero(t, methods, "terminal replay must not recreate a removed method")
 		})
 	}
@@ -410,26 +410,26 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 					t.Fatalf("confirm did not reach metadata: %v", err)
 				}
 				t.Cleanup(func() {
-					_, err := h.sharedPool().Exec(context.WithoutCancel(ctx), `UPDATE openrails.psps SET archived=false,custodian_id=$1 WHERE merchant_id=$2 AND id=$3`, custodian, mid.UUID(), psp)
+					_, err := h.sharedPool().Exec(context.WithoutCancel(ctx), `UPDATE billing.psps SET archived=false,custodian_id=$1 WHERE merchant_id=$2 AND id=$3`, custodian, mid.UUID(), psp)
 					require.NoError(t, err)
-					_, err = h.sharedPool().Exec(context.WithoutCancel(ctx), `UPDATE openrails.custodians SET archived=false,settings=jsonb_set(settings,'{profile_id}','"capture-profile"') WHERE merchant_id=$1 AND id=$2`, mid.UUID(), custodian)
+					_, err = h.sharedPool().Exec(context.WithoutCancel(ctx), `UPDATE billing.custodians SET archived=false,settings=jsonb_set(settings,'{profile_id}','"capture-profile"') WHERE merchant_id=$1 AND id=$2`, mid.UUID(), custodian)
 					require.NoError(t, err)
 				})
 				switch change {
 				case "psp archive":
-					_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.psps SET archived=true WHERE merchant_id=$1 AND id=$2`, mid.UUID(), psp)
+					_, err = h.sharedPool().Exec(ctx, `UPDATE billing.psps SET archived=true WHERE merchant_id=$1 AND id=$2`, mid.UUID(), psp)
 				case "custodian archive":
-					_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.custodians SET archived=true WHERE merchant_id=$1 AND id=$2`, mid.UUID(), custodian)
+					_, err = h.sharedPool().Exec(ctx, `UPDATE billing.custodians SET archived=true WHERE merchant_id=$1 AND id=$2`, mid.UUID(), custodian)
 				case "retarget":
-					_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.psps SET custodian_id=NULL WHERE merchant_id=$1 AND id=$2`, mid.UUID(), psp)
+					_, err = h.sharedPool().Exec(ctx, `UPDATE billing.psps SET custodian_id=NULL WHERE merchant_id=$1 AND id=$2`, mid.UUID(), psp)
 				case "profile":
-					_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.custodians SET settings=jsonb_set(settings,'{profile_id}','"different-profile"') WHERE merchant_id=$1 AND id=$2`, mid.UUID(), custodian)
+					_, err = h.sharedPool().Exec(ctx, `UPDATE billing.custodians SET settings=jsonb_set(settings,'{profile_id}','"different-profile"') WHERE merchant_id=$1 AND id=$2`, mid.UUID(), custodian)
 				}
 				require.NoError(t, err)
 				unblock()
 				require.Error(t, <-finished)
 				var methods int
-				require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM openrails.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID.UUID()).Scan(&methods))
+				require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID.UUID()).Scan(&methods))
 				require.Zero(t, methods)
 			})
 		}
@@ -475,14 +475,14 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		b, err := remote.CreateCheckoutSession(ctx, two)
 		require.NoError(t, err)
 		before := g.count()
-		_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.checkout_sessions b SET rail_state=jsonb_set(b.rail_state,'{capture,secret_ciphertext}',a.rail_state#>'{capture,secret_ciphertext}') FROM openrails.checkout_sessions a WHERE a.merchant_id=$1 AND b.merchant_id=$1 AND a.id=$2 AND b.id=$3`, mid.UUID(), a.ID.UUID(), b.ID.UUID())
+		_, err = h.sharedPool().Exec(ctx, `UPDATE billing.checkout_sessions b SET rail_state=jsonb_set(b.rail_state,'{capture,secret_ciphertext}',a.rail_state#>'{capture,secret_ciphertext}') FROM billing.checkout_sessions a WHERE a.merchant_id=$1 AND b.merchant_id=$1 AND a.id=$2 AND b.id=$3`, mid.UUID(), a.ID.UUID(), b.ID.UUID())
 		require.NoError(t, err)
 		_, err = remote.GetCheckoutSession(ctx, two.Customer.ID, b.ID)
 		require.Error(t, err)
 		_, err = remote.CreateCheckoutSession(ctx, two)
 		require.Error(t, err)
 		require.Equal(t, before, g.count())
-		_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.checkout_sessions SET rail_state=jsonb_set(rail_state,'{capture,secret_ciphertext}','"corrupt"') WHERE merchant_id=$1 AND id=$2`, mid.UUID(), b.ID.UUID())
+		_, err = h.sharedPool().Exec(ctx, `UPDATE billing.checkout_sessions SET rail_state=jsonb_set(rail_state,'{capture,secret_ciphertext}','"corrupt"') WHERE merchant_id=$1 AND id=$2`, mid.UUID(), b.ID.UUID())
 		require.NoError(t, err)
 		_, err = remote.GetCheckoutSession(ctx, two.Customer.ID, b.ID)
 		require.Error(t, err)
@@ -506,7 +506,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		require.Nil(t, replay.Capture)
 		require.Equal(t, before, g.count())
 		var secret bool
-		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (rail_state->'capture')?'secret_ciphertext' FROM openrails.checkout_sessions WHERE merchant_id=$1 AND id=$2`, mid.UUID(), session.ID.UUID()).Scan(&secret))
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (rail_state->'capture')?'secret_ciphertext' FROM billing.checkout_sessions WHERE merchant_id=$1 AND id=$2`, mid.UUID(), session.ID.UUID()).Scan(&secret))
 		require.False(t, secret)
 	})
 	t.Run("active secret refuses archive; terminal bindings restore", func(t *testing.T) {

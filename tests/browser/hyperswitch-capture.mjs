@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const config = JSON.parse(process.env.OPENRAILS_BROWSER_FIXTURE);
@@ -6,6 +7,14 @@ const pan = '4111111111111111'; // synthetic card, only entered in vendor fields
 const browser = await chromium.launch({ headless: true });
 try {
   const context = await browser.newContext();
+  await context.addInitScript(() => {
+    window.captureCSP = [];
+    document.addEventListener('securitypolicyviolation', event => {
+      let blocked = event.blockedURI;
+      try { const url=new URL(blocked); blocked=url.origin+url.pathname; } catch {}
+      window.captureCSP.push({blocked,directive:event.effectiveDirective});
+    });
+  });
   const allowed = new Set([config.page, config.api, config.vendor_api, config.vendor_sdk].map(value => new URL(value).origin));
   const blocked = [];
   await context.route('**/*', route => {
@@ -40,8 +49,9 @@ try {
     const setup = await request('POST', '/v1/me/checkout', { mode: 'payment_method', payment: { psp_id: config.psp_id, email: config.email, name_on_card: config.name } });
     const action = setup.capture;
     if (!action) throw Error('Core returned no capture action');
+    window.captureSecretValues = [action.sdk_authorization,config.token];
     await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = action.sdk_url; script.onload = resolve; script.onerror = reject; document.head.append(script); });
-    const hyper = window.Hyper(action.public_api_key);
+    const hyper = window.Hyper(action.public_api_key, { isPreloadEnabled:false });
     const session = hyper.initPaymentMethodSession({ sdkAuthorization: action.sdk_authorization, locale: "en", storePaymentMethod: config.store === "true" });
     const form = session.createCardForm();
     for (const [type, selector] of [['cardNumber','#number'],['cardExpiry','#expiry'],['cardCvc','#cvc']]) form.create(type, {}).mount(selector);
@@ -81,7 +91,10 @@ try {
   assert.equal(result.proof.secretCleared, true);
   } else assert.equal(result.proof.status, "refused_without_storage_consent");
   assert.deepEqual(failures, []);
-  assert.deepEqual(blocked.filter(value => ["document","script","xhr","fetch"].includes(value.type)), []);
-  console.log(JSON.stringify({ vendorBrowserCapture: 'pass', vendorSession:result.proof.vendorSession, vendorCustomer:result.proof.vendorCustomer, persistent:config.store==='true', corePANRequests: 0, coreRequests, terminalReplay:config.store==='true', secretCleared:config.store==='true' }));
+  assert.deepEqual(blocked, [], "real CSP must stop every unused external resource before network dispatch");
+  if (process.env.OPENRAILS_BROWSER_PRIVATE) writeFileSync(process.env.OPENRAILS_BROWSER_PRIVATE, JSON.stringify(await page.evaluate(() => window.captureSecretValues)), {mode:0o600});
+  const cspBlocked = [];
+  for (const frame of page.frames()) cspBlocked.push(...await frame.evaluate(() => window.captureCSP ?? []));
+  console.log(JSON.stringify({ cspBlocked, externalHTTPRequests:0, vendorBrowserCapture: 'pass', vendorSession:result.proof.vendorSession, vendorCustomer:result.proof.vendorCustomer, persistent:config.store==='true', corePANRequests: 0, coreRequests, terminalReplay:config.store==='true', secretCleared:config.store==='true' }));
   await context.close();
 } finally { await browser.close(); }
