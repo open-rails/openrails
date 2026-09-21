@@ -184,14 +184,14 @@ func seedPastDueSubscriptionAt(t *testing.T, merchantID uuid.UUID, now time.Time
 	      VALUES ($1, $2, 9990000, 'USD', 720, true, $3)`, priceID, productID, tenantID)
 	exec(`INSERT INTO billing.payment_methods
 	        (id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
-	         initial_transaction_id, stored_credential_recurring_ref, merchant_id, rebill_driver)
-	      VALUES ($1, $2, 'nmi', $3, $4, $5, $6, $7, $8, 'openrails')`,
+	         initial_transaction_id, stored_credential_recurring_ref, merchant_id)
+	      VALUES ($1, $2, 'nmi', $3, $4, $5, $6, $7, $8)`,
 		paymentMethodID, userID, fx.pspID, "vault-"+suffix, "bill-"+suffix,
 		"txn-init-"+suffix, "txn-recurring-init-"+suffix, tenantID)
 	exec(`INSERT INTO billing.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id, payment_method_id,
-	         current_period_starts_at, current_period_ends_at, started_at, next_retry_at, retry_attempts, customer_id, merchant_id, psp_id, entitlements_spec_snapshot)
-	      VALUES ($1, $2, $3, 'past_due', 'nmi', $4, $5, $6, $7, $6, $8, 1, $9, $10, $11, '{"premium":null}')`,
+	         current_period_starts_at, current_period_ends_at, started_at, next_retry_at, retry_attempts, customer_id, merchant_id, psp_id, entitlements_spec_snapshot, collection_policy)
+	      VALUES ($1, $2, $3, 'past_due', 'nmi', $4, $5, $6, $7, $6, $8, 1, $9, $10, $11, '{"premium":null}', 'provider_dunning')`,
 		fx.subID, priceID, productID, "psid-"+suffix, paymentMethodID,
 		fx.periodEnd.Add(-30*24*time.Hour), fx.periodEnd, now.Add(-30*time.Second), userID, tenantID, fx.pspID)
 

@@ -73,8 +73,8 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		{models.RailSolana, false, false, true, true, 0, false, false, false, false, false, CancelModeDestructive},
 	}
 	// #682: the rebill-driver mode is EXPLICIT now — a method ref alone no longer
-	// flips NMI to our-rebill; RebillDriver does.
-	withMethod := &models.PaymentMethod{RailMethodRef: "vault-123", RebillDriver: models.RebillDriverOpenRails}
+	// flips NMI to our-rebill; subscription collection policy does.
+	withMethod := &models.Subscription{CollectionPolicy: models.CollectionPolicyProviderDunning}
 	for _, c := range cases {
 		d, ok := Lookup(c.rail)
 		if !ok {

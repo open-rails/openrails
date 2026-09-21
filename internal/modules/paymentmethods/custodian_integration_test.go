@@ -45,13 +45,13 @@ func TestCustodianIsAlwaysStated(t *testing.T) {
 	}
 	create := func(custodian string) uuid.UUID {
 		pm := &models.PaymentMethod{
-			ID:                   uuid.New(),
-			CustomerID:           customerID,
-			Rail:                 models.RailNMI,
-			PspID:                pspID,
-			RailCustomerRef:      "vault-" + uuid.NewString()[:8],
-			RailMethodRef:        "bill-" + uuid.NewString()[:8],
-			RebillDriver:         models.RebillDriverProvider,
+			ID:              uuid.New(),
+			CustomerID:      customerID,
+			Rail:            models.RailNMI,
+			PspID:           pspID,
+			RailCustomerRef: "vault-" + uuid.NewString()[:8],
+			RailMethodRef:   "bill-" + uuid.NewString()[:8],
+
 			InitialTransactionID: "txn-" + uuid.NewString()[:8],
 			Custodian:            custodian,
 			CreatedAt:            time.Now().UTC(),

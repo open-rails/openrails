@@ -204,7 +204,6 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, "vault_123", pm.RailCustomerRef)
 	require.Equal(t, "billing_456", pm.RailMethodRef, "billing id recorded verbatim (#682)")
-	require.Equal(t, models.RebillDriverProvider, pm.RebillDriver, "native vaults stay provider-billed regardless of billing id")
 	require.Len(t, pms.created, 1)
 
 	got := <-seen

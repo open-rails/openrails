@@ -714,3 +714,18 @@ SET status=sqlc.arg(status)::text, result_evidence=sqlc.arg(evidence)::jsonb,
     claimed_until=NULL, updated_at=sqlc.arg(now)::timestamptz
 WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid
   AND intent_type='nmi_subscription_create' AND status IN ('in_flight','unknown_needs_verify');
+-- name: GetUnresolvedSubscriptionCollection :one
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND subscription_id = sqlc.arg(subscription_id)::uuid
+  AND intent_type = 'subscription_collection'
+  AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+ORDER BY created_at, id LIMIT 1;
+
+-- name: GetLatestSubscriptionCollectionForPeriod :one
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND subscription_id = sqlc.arg(subscription_id)::uuid
+  AND intent_type = 'subscription_collection'
+  AND (payload->>'previous_period_end')::timestamptz = sqlc.arg(previous_period_end)::timestamptz
+ORDER BY (payload->>'attempt')::integer DESC, id DESC LIMIT 1;
