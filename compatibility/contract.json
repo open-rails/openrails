@@ -4921,7 +4921,7 @@
     "internal/http/server.go": "8c37de35c4cf2d8091ff0d7eb7b8eab18ebf4688ec9c48e795bac783e3cdaef7",
     "internal/intents/rate_ceiling.go": "2f14ccb694839b19af499b5346cb052d3296a9346590d15f7f1ed5e4271da962",
     "internal/migrate/postgres/0001_schema.up.sql": "9c79167a4e678b9fcdfb146c4e8d5d8963cc1b4985f5a0cdda950ce3645055f3",
-    "internal/migrate/postgres/0002_creator_catalogs.up.sql": "c1725b9b5ac73ba45ec763ed7ce54c18368cf76c41a5f7af81ff0e3556ee09db",
+    "internal/migrate/postgres/0002_creator_catalogs.up.sql": "61f8be37cc1e247fdbe49b8327584a392b99256434c5ec1e8cb5bd5ae0f3253f",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
     "internal/migrate/postgres/schema.go": "a399bef4859e1c1f8c1f952d279d8b70718d7aa7e8a1ce116cea49c9d5f6b090",
