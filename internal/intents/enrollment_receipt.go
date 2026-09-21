@@ -79,8 +79,8 @@ func ReadNMIEnrollmentReceipt(ctx context.Context, in gen.OpenrailsRailIntent, r
 	if _, err := subscriptions.DecodeNMIUpgradePayload(in); err != nil {
 		return NMIEnrollmentReceipt{}, false, err
 	}
-	client, ok, err := resolveIntentNMIClient(ctx, resolver, in)
-	if err != nil || !ok {
+	client, err := resolveReceiptNMIClient(ctx, resolver, in)
+	if err != nil {
 		return NMIEnrollmentReceipt{}, false, err
 	}
 	facts, found, err := client.ReadEnrollmentEvidence(ctx, reference)

@@ -104,16 +104,9 @@ func ReadNMICollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, r
 	if p.Rail == "stripe" {
 		return CollectedReceipt{}, false, errors.New("Stripe operation cannot accept an NMI receipt")
 	}
-	client, ok, err := resolveIntentNMIClient(ctx, resolver, in)
+	client, err := resolveReceiptNMIClient(ctx, resolver, in)
 	if err != nil {
 		return CollectedReceipt{}, false, err
-	}
-	if !ok || client == nil {
-		return CollectedReceipt{}, false, errors.New("accepted provider account cannot be armed")
-	}
-	accountMerchant, accountPSP := client.AccountIdentity()
-	if accountMerchant != in.MerchantID || accountPSP != *in.PspID {
-		return CollectedReceipt{}, false, errors.New("NMI reader is armed for another provider account")
 	}
 	facts, found, err := client.ReadSaleEvidence(ctx, p.OrderReference, reference)
 	if err != nil || !found {
