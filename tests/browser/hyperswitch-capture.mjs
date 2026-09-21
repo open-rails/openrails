@@ -31,7 +31,9 @@ try {
       if(quote.id!==repeated.id||quote.status!=='requires_action'||quote.subscription_id||quote.payment_id||!quote.membership_quote)throw Error('Quote is not an unaccepted stable agreement');
       window.membershipQuote=quote;
       const terms=document.createElement('p');
-      terms.textContent=`${quote.membership_quote.product_name}: ${quote.amount} ${quote.currency} every ${quote.membership_quote.cycle_hours} hours`;
+      const micros=BigInt(quote.amount);
+      const displayed=`${micros/1000000n}.${(micros%1000000n).toString().padStart(6,'0').replace(/0+$/,'').padEnd(2,'0')}`;
+      terms.textContent=`${quote.membership_quote.product_name}: ${displayed} ${quote.currency} every ${quote.membership_quote.cycle_hours} hours`;
       document.body.append(terms);
       const button=document.createElement('button');button.textContent='Subscribe';document.body.append(button);
       button.onclick=async()=>{
@@ -43,6 +45,7 @@ try {
     assert.equal(quote.amount,'9990000');
     assert.equal(quote.currency,'USD');
     assert.equal(quote.membership_quote.cycle_hours,720);
+    assert.equal(await page.getByText('Browser membership: 9.99 USD every 720 hours',{exact:true}).isVisible(),true);
     const checkpoint=await fetch(config.checkpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({price_id:config.price_id,session_id:quote.id})});
     assert.equal(checkpoint.status,200);
     const before=await checkpoint.json();
