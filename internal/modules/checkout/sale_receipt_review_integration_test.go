@@ -5,6 +5,7 @@ package checkout
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ func TestReviewSaleRequiresExactPaymentReceipt(t *testing.T) {
 	for _, candidateOnly := range []bool{false, true} {
 		t.Run(fmt.Sprint(candidateOnly), func(t *testing.T) {
 			fx := newSaleIntentFixture(t)
-			fx.payload.AmountMicros = 10_000_000 // Actual fixture transaction read is only5USD.
+			fx.payload.Amount = 10_000_000 // Actual fixture transaction read is only5USD.
 			fx.gateway.saleMode.Store("ambiguous500")
 			row := fx.enqueueAndExecute(t, uuid.NewString())
 			require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
@@ -32,7 +33,7 @@ func TestReviewSaleRequiresExactPaymentReceipt(t *testing.T) {
 				row, err = intents.NewStore(fx.db).Get(fx.ctx, row.ID)
 				require.NoError(t, err)
 			}
-			out := fx.runner.Registry.Lookup(TypeNMISale).Verify(db.WithPSPID(fx.ctx, *row.PspID), row)
+			out := fx.runner.Registry.Lookup(payments.TypeNMISale).Verify(db.WithPSPID(fx.ctx, *row.PspID), row)
 			require.Equal(t, intents.OutcomeAmbiguous, out.Class, "candidate/order alone cannot settle frozen10USD when provider onlyreports5USD")
 			require.Zero(t, fx.paymentCount(t))
 			require.EqualValues(t, 1, fx.gateway.saleCalls.Load())

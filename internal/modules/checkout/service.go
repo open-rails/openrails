@@ -150,12 +150,7 @@ func NewCheckoutService(
 		Config:                   cfg,
 		Rails:                    railSet,
 	}
-	service.NMISaleService = NewCheckoutNMISaleService(
-		service.PurchaseService,
-		service.PaymentMethodResolver,
-		railPMService,
-		idempotencyService,
-	)
+	service.NMISaleService = NewCheckoutNMISaleService(service.PurchaseService, service.PaymentMethodResolver, railPMService)
 	// The scoped resolver is the ONLY NMI client source (#788); armed for
 	// real once SetMerchantSecretStore wires the merchant secret store.
 	service.NMISaleService.ResolveNMIClient = service.resolveNMIClient

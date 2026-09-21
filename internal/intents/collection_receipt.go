@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -54,6 +55,14 @@ type collectedTerms struct {
 
 func decodeCollectedTerms(in gen.OpenrailsRailIntent) (collectedTerms, error) {
 	switch in.IntentType {
+	case payments.TypeNMISale:
+		p, err := payments.DecodeNMISalePayload(in)
+		if err != nil {
+			return collectedTerms{}, err
+		}
+		minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.Amount)
+		return collectedTerms{"nmi", p.Currency, minor, p.Instrument, "", payments.NMISaleOrderReference(in.ID, p.E2ERunID)}, err
+
 	case "invoice_collection":
 		p, err := DecodeInvoiceCollectionPayload(in)
 		return collectedTerms{p.Rail, p.Currency, p.AmountMinor, p.Instrument, p.ProviderCustomerRef, in.ID.String()}, err
