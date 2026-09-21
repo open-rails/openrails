@@ -254,11 +254,9 @@ func TestVaultCleanupCannotRunBeforeDatabaseCommit(t *testing.T) {
 	require.ErrorIs(t, f.service.RetrySecretCleanup(ctx, f.id, uuid.New()), merchants.ErrSecretCleanupPending)
 	inventory, err := f.service.TakePurgeInventory(ctx, f.id)
 	require.NoError(t, err)
-	// Delete the matching inventory before applying: the transaction must fail
-	// without a committed cleanup run, and must leave Vault untouched.
-	admin := dbtest.SharedSuperuserPGXPool(t)
-	_, err = admin.Exec(ctx, `DELETE FROM billing.maintenance_runs WHERE merchant_id=$1 AND kind='purge_inventory'`, f.id.UUID())
-	require.NoError(t, err)
+	// An absent inventory receipt must prevent commit and leave Vault untouched.
+	// Inventory history itself is immutable, including for the table owner.
+	inventory.ID = uuid.NewString()
 	err = f.service.Delete(ctx, f.id, merchants.DeleteOptions{ConfirmPhrase: merchants.PurgeConfirmPhrase(f.slug), ExpectRows: &inventory.TotalRows, InventoryID: inventory.ID})
 	var stale *merchants.ErrPurgeInventoryStale
 	require.ErrorAs(t, err, &stale)

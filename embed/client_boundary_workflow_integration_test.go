@@ -101,17 +101,12 @@ func clientBoundaryErrors(t *testing.T, ctx context.Context, h *integrationharne
 		_, err := h.Pool().Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	// These PSP rows belong to this deployment; remove the fixture references
-	// and accounts together when its boundary checks finish.
+	// These PSPs are unique to this deployment. Archive them after the checks;
+	// subscription transition history is immutable, even to a fixture owner.
+	// The process-owned scratch database is dropped by dbtest after the suite.
 	t.Cleanup(func() {
-		for _, sql := range []string{
-			`DELETE FROM billing.subscriptions WHERE merchant_id=$1 AND psp_id IN ($2,$3)`,
-			`DELETE FROM billing.payment_methods WHERE merchant_id=$1 AND psp_id IN ($2,$3)`,
-			`DELETE FROM billing.psps WHERE merchant_id=$1 AND id IN ($2,$3)`,
-		} {
-			_, err := h.Pool().Exec(context.Background(), sql, mid, nmi, stripe)
-			require.NoError(t, err)
-		}
+		_, err := h.Pool().Exec(context.Background(), `UPDATE billing.psps SET archived=true, updated_at=now() WHERE merchant_id=$1 AND id IN ($2,$3)`, mid, nmi, stripe)
+		require.NoError(t, err)
 	})
 	exec(`INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, mid, customer)
 	exec(`INSERT INTO billing.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Parity plan')`, product, mid, product.String())

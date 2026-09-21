@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/migrate"
 )
 
 // Non-uniform seed shape: one "fat" customer (and one fat subscription) carry
@@ -54,7 +55,7 @@ type perfSeed struct {
 // lookups are O(1) and need no gate.
 func TestQueryPerformance(t *testing.T) {
 	ctx := context.Background()
-	pool := dbtest.SharedSuperuserPGXPool(t)
+	pool := isolatedPerfPool(t)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
 	scale := queryPerfScale(t)
@@ -82,7 +83,7 @@ func TestQueryPerformance(t *testing.T) {
 			// Index-ordered via idx_subscriptions_customer_active_created (migration 042).
 			Name: "active_subscription_by_customer", MaxExecutionMS: 75, MaxSharedReadBlocks: 64,
 			SQL:           gen.QueryText["GetActiveSubscriptionByCustomerAt"],
-			Args:          []any{seed.FatCustomerID, now},
+			Args:          []any{seed.FatCustomerID, merchantID, now},
 			ForbidSeqScan: []string{"subscriptions"}, ForbidSort: true,
 		},
 		{
@@ -128,7 +129,7 @@ func TestQueryPerformance(t *testing.T) {
 			// the planner correctly declined it).
 			Name: "latest_charge_by_subscription", MaxExecutionMS: 75, MaxSharedReadBlocks: 64,
 			SQL:           gen.QueryText["GetLatestChargeBySubscriptionID"],
-			Args:          []any{seed.FatSubID},
+			Args:          []any{seed.FatSubID, merchantID},
 			ForbidSeqScan: []string{"payments"},
 		},
 	}
@@ -262,10 +263,8 @@ func stripQueryHeader(sql string) string {
 func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchantID uuid.UUID, scale int, now time.Time) perfSeed {
 	t.Helper()
 
-	// Clean slate. CASCADE from customers+products wipes every customer-scoped
-	// child (subscriptions, payments, grants, entitlements, ledger/usage, ...).
-	_, err := pool.Exec(ctx, "TRUNCATE billing.customers, billing.products RESTART IDENTITY CASCADE")
-	require.NoError(t, err)
+	// This test owns a fresh database; no immutable ledger needs truncating.
+	var err error
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "ccbill")
 
@@ -457,4 +456,31 @@ func perfPmUUID(i int) uuid.UUID       { return perfUUID("90000000", i) }
 
 func perfUUID(prefix string, i int) uuid.UUID {
 	return uuid.MustParse(fmt.Sprintf("%s-0000-4000-8000-%012d", prefix, i))
+}
+
+// Performance data owns a database so repeated runs and immutable tables do not
+// depend on destructive cleanup or contaminating another test's planner stats.
+func isolatedPerfPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	ctx := t.Context()
+	cfg, err := pgxpool.ParseConfig(dbtest.SharedSuperuserDSN(t))
+	require.NoError(t, err)
+	cfg.ConnConfig.Database = "postgres"
+	admin, err := pgxpool.NewWithConfig(ctx, cfg)
+	require.NoError(t, err)
+	t.Cleanup(admin.Close)
+	name := "query_perf_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	_, err = admin.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := admin.Exec(context.Background(), "DROP DATABASE "+pgx.Identifier{name}.Sanitize()+" WITH (FORCE)")
+		require.NoError(t, err)
+	})
+	cfg = cfg.Copy()
+	cfg.ConnConfig.Database = name
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	require.NoError(t, migrate.ApplyPostgresMigrations(ctx, pool, migrate.Options{}))
+	return pool
 }
