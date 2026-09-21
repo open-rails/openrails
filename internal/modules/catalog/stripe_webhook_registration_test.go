@@ -45,7 +45,7 @@ func TestReconcileManagedStripeWebhookStoresPSPSecret(t *testing.T) {
 
 	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
 		// Mint+persist is mode-2 (api) behavior; manifest mode refuses (#723).
-		Config:              &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantSource: config.MerchantSourceAPI},
+		Config:              &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantConfigSource: config.MerchantConfigSourceAPI},
 		SecretStore:         store,
 		MerchantID:          merchantID,
 		MerchantSlug:        "acme",
@@ -74,7 +74,7 @@ func TestReconcileManagedStripeWebhookWithoutStoreDestinationFails(t *testing.T)
 
 	_, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
 		// Mint is mode-2 (api) behavior; manifest mode refuses (#723).
-		Config:        &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantSource: config.MerchantSourceAPI},
+		Config:        &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantConfigSource: config.MerchantConfigSourceAPI},
 		SecretKey:     "sk_test_123",
 		EnabledEvents: []string{"invoice.paid"},
 		StripeBaseURL: svc.BaseURL,
@@ -97,7 +97,7 @@ func TestReconcileManagedStripeWebhookManifestModeRefusesMint(t *testing.T) {
 	_, err = store.Put(ctx, merchantID, secretKeyName, "sk_test_123")
 	require.NoError(t, err)
 
-	// Empty MerchantSource = manifest (the default).
+	// Empty MerchantConfigSource = manifest (the default).
 	_, err = ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
 		Config:              &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
 		SecretStore:         store,
@@ -110,7 +110,7 @@ func TestReconcileManagedStripeWebhookManifestModeRefusesMint(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "webhook_signing_secret")
-	require.Contains(t, err.Error(), "merchant_source=manifest")
+	require.Contains(t, err.Error(), "merchant_config_source=manifest")
 	require.Zero(t, fake.creates, "no endpoint minted")
 	require.Zero(t, fake.deletes, "nothing deleted")
 }
@@ -192,7 +192,7 @@ func TestReconcileManagedStripeWebhookRepairsDriftedSecretName(t *testing.T) {
 
 	// The row now reads environment=live: the derived name misses.
 	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
-		Config:              &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantSource: config.MerchantSourceAPI},
+		Config:              &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantConfigSource: config.MerchantConfigSourceAPI},
 		SecretStore:         store,
 		MerchantID:          merchantID,
 		MerchantSlug:        "acme",
@@ -225,7 +225,7 @@ func TestReconcileManagedStripeWebhookVersionBumpIsGapless(t *testing.T) {
 	store := merchants.NewMemorySecretStore()
 	merchantID := merchant.ID(uuid.New())
 	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
-	cfg := &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantSource: config.MerchantSourceAPI}
+	cfg := &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantConfigSource: config.MerchantConfigSourceAPI}
 
 	keyName, err := merchants.PSPSecretName("stripe", "live", "acct_123", "secret_key")
 	require.NoError(t, err)

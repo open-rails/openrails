@@ -1,12 +1,30 @@
-# Engine-owned subscription collection prototype
+# Engine-owned subscription collection
 
-This draft prepares explicit subscription collection policy and locked renewal admission. It does not register a renewal worker or enable HyperSwitch subscription enrollment. Those capabilities require the accepted initial-membership writer from #576, qualified recurring customer consent/payment, and the full browser-to-worker renewal proof.
+The core uses the existing Dunning producer and provider-intent executor/verifier. Runtime registration and HyperSwitch subscription enrollment remain disabled until the accepted initial-membership writer and full browser CIT-to-worker MIT workflow are qualified. Customer RetryNow integration (#809) remains a later step; this kind accepts system-origin recurring obligations only.
 
 The fresh-database cut replaces payment-method rebill_driver with one immutable subscription collection_policy: provider, provider_dunning, or engine. Native provider scheduling remains available. Custody remapping does not change collection ownership, and this stage does not migrate provider subscriptions to engine ownership.
 
 The first engine scope is positive fixed-price NMI settlement using qualified HyperSwitch permanent cards. Free, trial and zero-price initial engine enrollment are unsupported. Engine subscriptions have no fabricated provider subscription identifier. The existing ledger, receipts, retry state, immutable grant effects and River fleet remain authoritative.
 
 One accepted renewal freezes its payer, account, card, recurring agreement, price, benefits and period. After a whole missed period, admit one new period from the recovery admission timestamp, with no backlog collection. Preserve the prior subscription period end separately in the accepted payload to retain the stale-state guard. Uncertain recovery retains the same accepted period and never resubmits or moves the period to verification time. This policy does not forgive or mutate existing past debt.
+
+## Execution and recovery
+
+Admission freezes the current catalog terms under the customer/subscription lock and checks the saved recurring instrument and custodian deletion fence. The existing bounded merchant work list excludes ineligible instruments and obligations already owned by an unresolved operation. Native obligations never enter engine collection.
+
+The handler uses the same concrete HyperSwitch transport as initial recurring payment, with the original positive recurring anchor. A write-ahead submission fence permits at most one POST. A lost reply or a fence surviving process loss can only seek the exact NMI order/transaction receipt; an empty search cannot prove nonexecution. Fresh typed pre-dispatch failure and definitive provider decline have retained, operation-bound custody. Only a qualified terminal refusal permits another attempt ordinal.
+
+The shared renewal writer compares the current subscription against the accepted **previous period end**, independently of the purchased recovery period start. Native renewals retain their original period-start and remote-binding checks. Payment, renewal/access projection, host outbox and intent completion commit together. A failed local commit recovers from the retained receipt without another provider call. Verification never moves an accepted period to a later date, and replay creates no duplicate grant. Existing standing-access policy is unchanged.
+
+Enqueue, generic terminal transitions, expiry, supersession, parking and pruning cannot discard or revive an engine payment obligation. Terminal archive validation retains its accepted payload, exact receipt or positive refusal, and submission evidence. Archived account recovery stays on the captured account; new admissions exclude archived accounts.
+
+## Cancellation and resume
+
+Engine cancellation uses the existing local subscription lifecycle and exact subscription ID. It bounds paid access and stops new due admission without scheduling a provider deletion. An already accepted or uncertain renewal stays on the existing operation ledger for recovery; cancellation does not manufacture a payment or discard the operation. Only ordinary user cancellation can be resumed, and only while the current paid period remains valid and the saved method remains available. Resume takes the customer, subscription, custodian-handle and method locks before reopening access; an accepted deletion blocks it. Cancelled history may retain a null method after completed deletion and is then not resumable. Merchant revocation, chargeback and expiry cannot be undone by a queued customer action.
+
+This behavior is qualified through internal engine fixtures, authenticated customer HTTP requests, the public merchant Client and existing River workers. Public engine enrollment and runtime activation remain disabled and unqualified. The core receipt-completion path is covered by internal fixtures; it does not establish browser enrollment qualification.
+
+Native LIFE cadence repair reads the explicit collection policy. It leaves engine active, past-due and unknown state to accepted-operation recovery, while preserving shared terminal-charge certainty checks. Engine rows are excluded from native unknown-cohort bulk probes and native retry-schedule repair. Cancellation and an unknown lifecycle never remove an already accepted unresolved operation.
 
 ## Native recovery reachability gap
 

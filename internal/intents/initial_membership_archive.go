@@ -40,6 +40,8 @@ func ValidateInitialMembershipTerminal(in gen.OpenrailsRailIntent) error {
 		RequestRefused         bool      `json:"request_refused"`
 		ResponseCode           int       `json:"response_code"`
 		LocalizationID         string    `json:"localization_id"`
+		StripePaymentIntentID  string    `json:"stripe_payment_intent_id"`
+		StripeFailureCode      string    `json:"failure_code"`
 	}
 	if err := json.Unmarshal(in.ResultEvidence, &evidence); err != nil {
 		return err
@@ -63,8 +65,9 @@ func ValidateInitialMembershipTerminal(in gen.OpenrailsRailIntent) error {
 		if !refused {
 			return errors.New("initial terminal refusal has no bound custody")
 		}
-		declined := refusal.data.Kind == "provider_declined"
-		if scheduled || paid || evidence.RequestRefused || evidence.Declined != declined || evidence.NotExecuted == declined || evidence.Submitted != declined || evidence.ResponseCode != refusal.data.ResponseCode || evidence.LocalizationID != refusal.data.LocalizationID || evidence.SubscriptionID != uuid.Nil || evidence.ProviderSubscriptionID != "" || evidence.TransactionID != "" {
+		expectedStripeFailure, _ := refusal.Outcome().Evidence["failure_code"].(string)
+		declined := refusal.data.Kind == "provider_declined" || refusal.data.Kind == "stripe_canceled"
+		if evidence.StripePaymentIntentID != refusal.data.StripePaymentIntentID || evidence.StripeFailureCode != expectedStripeFailure || scheduled || paid || evidence.RequestRefused || evidence.Declined != declined || evidence.NotExecuted == declined || evidence.Submitted != (declined || refusal.data.Kind == "not_dispatched") || evidence.ResponseCode != refusal.data.ResponseCode || evidence.LocalizationID != refusal.data.LocalizationID || evidence.SubscriptionID != uuid.Nil || evidence.ProviderSubscriptionID != "" || evidence.TransactionID != "" {
 			return errors.New("initial refusal contradicts provider custody or its submission fence")
 		}
 	default:

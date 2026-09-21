@@ -17,10 +17,13 @@ const qualifiedInitialRefusalKey = "qualified_initial_refusal"
 
 type InitialMembershipRefusal struct{ data initialMembershipRefusal }
 type initialMembershipRefusal struct {
-	Binding        receiptBinding `json:"binding"`
-	Kind           string         `json:"kind"`
-	ResponseCode   int            `json:"response_code"`
-	LocalizationID string         `json:"localization_id"`
+	Binding               receiptBinding `json:"binding"`
+	Kind                  string         `json:"kind"`
+	ResponseCode          int            `json:"response_code"`
+	LocalizationID        string         `json:"localization_id"`
+	StripePaymentIntentID string         `json:"stripe_payment_intent_id,omitempty"`
+	StripeFailureCode     string         `json:"stripe_failure_code,omitempty"`
+	StripeDeclineCode     string         `json:"stripe_decline_code,omitempty"`
 }
 
 func (r InitialMembershipRefusal) Validate(in gen.OpenrailsRailIntent) error {
@@ -42,9 +45,20 @@ func (r InitialMembershipRefusal) Validate(in gen.OpenrailsRailIntent) error {
 		return errors.New("initial refusal contradicts retained schedule")
 	}
 	switch r.data.Kind {
+	case "stripe_canceled":
+		if in.Rail != "stripe" || string(evidence["initial_submitted"]) != "true" || r.data.StripePaymentIntentID == "" || r.data.StripeFailureCode != "canceled" || r.data.ResponseCode != 0 {
+			return errors.New("Stripe initial refusal lacks canceled payment proof")
+		}
 	case "provider_declined":
+		if in.Rail != "nmi" {
+			return errors.New("native refusal belongs to another rail")
+		}
 		if string(evidence["initial_submitted"]) != "true" || r.data.ResponseCode < 200 || r.data.ResponseCode >= 300 {
 			return errors.New("initial decline has no exact submitted provider refusal")
+		}
+	case "not_dispatched":
+		if string(evidence["initial_submitted"]) != "true" || r.data.ResponseCode != 0 || r.data.LocalizationID != "" {
+			return errors.New("initial nonexecution has no fresh submitted fence")
 		}
 	case "not_submitted":
 		if _, present := evidence["initial_submitted"]; present || r.data.ResponseCode != 0 || r.data.LocalizationID != "" {
@@ -57,6 +71,16 @@ func (r InitialMembershipRefusal) Validate(in gen.OpenrailsRailIntent) error {
 }
 
 func (r InitialMembershipRefusal) Outcome() Outcome {
+	if r.data.Kind == "not_dispatched" {
+		return TerminalWithEvidence("initial payment was refused before provider dispatch", map[string]any{"not_executed": true})
+	}
+	if r.data.Kind == "stripe_canceled" {
+		code := r.data.StripeDeclineCode
+		if code == "" {
+			code = r.data.StripeFailureCode
+		}
+		return TerminalWithEvidence("Stripe enrollment declined", map[string]any{"declined": true, "failure_code": code, "stripe_payment_intent_id": r.data.StripePaymentIntentID})
+	}
 	if r.data.Kind == "provider_declined" {
 		return TerminalWithEvidence("native enrollment declined", map[string]any{"declined": true, "response_code": r.data.ResponseCode, "localization_id": r.data.LocalizationID})
 	}
@@ -131,6 +155,78 @@ func (s *Store) RetainUnsubmittedInitialMembership(ctx context.Context, in gen.O
 	}
 	fact := InitialMembershipRefusal{initialMembershipRefusal{Binding: binding, Kind: "not_submitted"}}
 	if err := fact.Validate(in); err != nil {
+		return err
+	}
+	_, err = s.retainQualifiedEvidence(ctx, in, qualifiedInitialRefusalKey, fact.data)
+	return err
+}
+
+// RetainInitialStripeDecline reads/cancels the exact accepted PI before sealing
+// terminal refusal. A recoverable PI with a client secret cannot release the
+// enrollment duplicate fence until Stripe confirms it can no longer be paid.
+func (s *Store) RetainInitialStripeDecline(ctx context.Context, in gen.OpenrailsRailIntent, service *subscriptions.StripeService, reference string) error {
+	if in.IntentType != subscriptions.TypeInitialMembership {
+		return errors.New("not initial Stripe enrollment")
+	}
+	params, err := StripeEngineParams(in)
+	if err != nil {
+		return err
+	}
+	result, err := service.FinalizeEngineDecline(ctx, params, reference)
+	if err != nil {
+		return err
+	}
+	if result.State != subscriptions.StripeEngineDeclined || result.FailureCode != "canceled" {
+		return errors.New("Stripe decline is still executable")
+	}
+	binding, err := collectionBinding(in)
+	if err != nil {
+		return err
+	}
+	current, err := s.Get(ctx, in.ID)
+	if err != nil {
+		return err
+	}
+	fact := InitialMembershipRefusal{data: initialMembershipRefusal{Binding: binding, Kind: "stripe_canceled", StripePaymentIntentID: result.PaymentIntentID, StripeFailureCode: result.FailureCode, StripeDeclineCode: result.DeclineCode}}
+	if err := fact.Validate(current); err != nil {
+		return err
+	}
+	_, err = s.retainQualifiedEvidence(ctx, current, qualifiedInitialRefusalKey, fact.data)
+	return err
+}
+
+// InitialMembershipNonexecutionProof exists only in the unique fresh sender's
+// stack. Reloading an operation never recreates authority to declare nonexecution.
+type InitialMembershipNonexecutionProof struct{ binding receiptBinding }
+
+func (s *Store) BeginInitialMembershipPayment(ctx context.Context, in gen.OpenrailsRailIntent) (InitialMembershipNonexecutionProof, bool, error) {
+	if in.IntentType != subscriptions.TypeInitialMembership {
+		return InitialMembershipNonexecutionProof{}, false, errors.New("not an initial membership")
+	}
+	binding, err := collectionBinding(in)
+	if err != nil {
+		return InitialMembershipNonexecutionProof{}, false, err
+	}
+	first, err := s.RecordProgressIfAbsent(ctx, in.ID, "initial_submitted", true)
+	if err != nil || !first {
+		return InitialMembershipNonexecutionProof{}, first, err
+	}
+	return InitialMembershipNonexecutionProof{binding}, true, nil
+}
+func (s *Store) RetainInitialMembershipNonexecution(ctx context.Context, in gen.OpenrailsRailIntent, proof InitialMembershipNonexecutionProof) error {
+	binding, err := collectionBinding(in)
+	if err != nil {
+		return err
+	}
+	if proof.binding != binding {
+		return errors.New("initial nonexecution requires the unique fresh sender")
+	}
+	current, err := s.Get(ctx, in.ID)
+	if err != nil {
+		return err
+	}
+	fact := InitialMembershipRefusal{data: initialMembershipRefusal{Binding: binding, Kind: "not_dispatched"}}
+	if err := fact.Validate(current); err != nil {
 		return err
 	}
 	_, err = s.retainQualifiedEvidence(ctx, in, qualifiedInitialRefusalKey, fact.data)

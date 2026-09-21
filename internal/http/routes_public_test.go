@@ -68,10 +68,10 @@ func TestStandaloneRootBannerIsExact(t *testing.T) {
 }
 
 func TestStandaloneCapabilitiesCredentialAuthority(t *testing.T) {
-	for _, source := range []string{config.MerchantSourceManifest, config.MerchantSourceAPI} {
+	for _, source := range []string{config.MerchantConfigSourceManifest, config.MerchantConfigSourceAPI} {
 		for _, writable := range []bool{false, true} {
 			srv := &Server{runtime: &app.Runtime{
-				Config:            &config.Config{MerchantSource: source},
+				Config:            &config.Config{MerchantConfigSource: source},
 				RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable},
 			}}
 			mux := http.NewServeMux()
@@ -81,7 +81,7 @@ func TestStandaloneCapabilitiesCredentialAuthority(t *testing.T) {
 			require.Equal(t, http.StatusOK, w.Code)
 			var caps embedhttp.Capabilities
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &caps))
-			want := source == config.MerchantSourceAPI && writable
+			want := source == config.MerchantConfigSourceAPI && writable
 			require.Equal(t, want, caps.Routes["secret_write"], "source=%s writable=%v", source, writable)
 		}
 	}

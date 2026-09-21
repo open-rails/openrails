@@ -161,15 +161,15 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	raw, err := os.ReadFile(path) // #nosec G304 -- path is a boot-time CLI/config value, not request input
 	if os.IsNotExist(err) {
 		if explicit {
-			return fmt.Errorf("merchant manifest %s: %w (merchant_source=manifest declared this file as truth, #723)", path, err)
+			return fmt.Errorf("merchant manifest %s: %w (merchant_config_source=manifest declared this file as truth, #723)", path, err)
 		}
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("read merchant manifest %s: %w", path, err)
 	}
-	if !cfg.IsManifestMerchantSource() {
-		return fmt.Errorf("merchant_source=api refuses the merchant manifest at %s: merchant truth lives in the API/store, not a boot file (two truths, #723); delete the file or run merchant_source=manifest", path)
+	if !cfg.IsManifestMerchantConfigSource() {
+		return fmt.Errorf("merchant_config_source=api refuses the merchant manifest at %s: merchant truth lives in the API/store, not a boot file (two truths, #723); delete the file or run merchant_config_source=manifest", path)
 	}
 	overlays, err := bootstrap.ReadMerchantManifestOverlays(cfg.MerchantManifestOverlays)
 	if err != nil {
@@ -181,7 +181,7 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	}
 	rt := application.Runtime
 	if rt == nil || rt.ManifestSecrets == nil {
-		return fmt.Errorf("merchant_source=manifest requires the runtime manifest secret plane (#723)")
+		return fmt.Errorf("merchant_config_source=manifest requires the runtime manifest secret plane (#723)")
 	}
 	if err := bootstrap.ReconcileMerchantManifestData(ctx, cfg, embcp.Get(application), manifest, bootstrap.MerchantManifestReconcileOptions{
 		Insert:            true,
@@ -192,6 +192,6 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	}); err != nil {
 		return fmt.Errorf("merchant manifest %s: %w", path, err)
 	}
-	log.WithField("file", path).Info("merchant_source=manifest: boot manifest converged; credentials held in memory (#723)")
+	log.WithField("file", path).Info("merchant_config_source=manifest: boot manifest converged; credentials held in memory (#723)")
 	return nil
 }

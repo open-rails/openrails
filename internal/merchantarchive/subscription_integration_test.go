@@ -131,3 +131,44 @@ func TestRestorePreservesEndedHistoricalSubscriptionTier(t *testing.T) {
 	require.NoError(t, Export(t.Context(), target, id, &restored))
 	require.Equal(t, artifact.String(), restored.String())
 }
+
+func TestSubscriptionCollectionPoliciesSurviveRestore(t *testing.T) {
+	source, target := archiveDB(t, "openrails"), archiveDB(t, "archive_mixed_policy")
+	mid := merchant.ID(uuid.New())
+	provision(t, source, mid)
+	provision(t, target, mid)
+	seedBook(t, source, mid)
+	ctx := merchant.WithID(t.Context(), mid)
+	require.NoError(t, source.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		for _, cohort := range []struct{ rail, policy, binding string }{{"nmi", "provider_dunning", "legacy-schedule"}, {"nmi", "engine", ""}, {"stripe", "engine", ""}} {
+			product, psp := uuid.New(), uuid.New()
+			_, err := tx.Exec(ctx, `INSERT INTO openrails.products(merchant_id,id,key,display_name) VALUES($1,$2,$2::uuid::text,'Mixed policy')`, mid.UUID(), product)
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(ctx, `INSERT INTO openrails.psps(merchant_id,id,rail,account_id,environment) VALUES($1,$2,$3,$2::uuid::text,'test')`, mid.UUID(), psp, cohort.rail)
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(ctx, `INSERT INTO openrails.subscriptions(merchant_id,customer_id,psp_id,product_id,rail,collection_policy,rail_subscription_id,status) SELECT $1,customer_id,$2,$3,$4,$5,$6,'pending' FROM openrails.subscriptions WHERE merchant_id=$1 LIMIT 1`, mid.UUID(), psp, product, cohort.rail, cohort.policy, cohort.binding)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	var artifact bytes.Buffer
+	require.NoError(t, Export(t.Context(), source, mid, &artifact))
+	_, err := Restore(t.Context(), target, mid, bytes.NewReader(artifact.Bytes()))
+	require.NoError(t, err)
+	var restored bytes.Buffer
+	require.NoError(t, Export(t.Context(), target, mid, &restored))
+	require.Equal(t, artifact.String(), restored.String())
+	// The provider cohort's real schedule cannot be relabeled engine during import.
+	invalid := "engine"
+	other := archiveDB(t, "archive_bad_policy")
+	provision(t, other, mid)
+	_, err = Restore(t.Context(), other, mid, bytes.NewReader(alteredArchive(t, artifact.Bytes(), "subscriptions", "collection_policy", &invalid)))
+	require.Error(t, err)
+	assertEmptyBook(t, other, mid)
+}

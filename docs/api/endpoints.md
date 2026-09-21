@@ -402,7 +402,7 @@ use the merchant-owned default catalog.
 Reads need `merchant:catalog:read`; writes need `merchant:catalog:update`. In
 `catalog_source=manifest` deployments every catalog WRITE answers `405` with
 code `manifest_driven` — update and apply the catalog manifest instead. Empty
-`catalog_source` follows `merchant_source`. Host-owned credential mode omits provider credential mutation routes while
+`catalog_source` follows `merchant_config_source`. Host-owned credential mode omits provider credential mutation routes while
 keeping reads available. API-owned catalogs remain independently writable.
 These source modes apply to the runtime; mixed source modes per merchant are
 not supported. Catalog reads stay live.

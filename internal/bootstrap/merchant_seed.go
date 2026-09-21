@@ -19,14 +19,14 @@ import (
 //     never re-asserted. The mutation flags are refused with --seed — after
 //     seeding, the APIs own merchant config.
 func ResolvePushMerchantConfigOptions(cfg *config.Config, seed, insert, overwrite, prune bool) (MerchantManifestReconcileOptions, error) {
-	if cfg.IsManifestMerchantSource() {
+	if cfg.IsManifestMerchantConfigSource() {
 		if seed {
-			return MerchantManifestReconcileOptions{}, fmt.Errorf("--seed is the merchant_source=api importer gate (#851); manifest mode (#723) is already manifest-is-truth — use --insert/--overwrite/--prune")
+			return MerchantManifestReconcileOptions{}, fmt.Errorf("--seed is the merchant_config_source=api importer gate (#851); manifest mode (#723) is already manifest-is-truth — use --insert/--overwrite/--prune")
 		}
 		return MerchantManifestReconcileOptions{Insert: insert, Overwrite: overwrite, Prune: prune}, nil
 	}
 	if !seed {
-		return MerchantManifestReconcileOptions{}, fmt.Errorf("merchant_source=api: push-merchant-config runs only as a seed-once importer — pass --seed to bootstrap merchants/PSPs/secrets into the persistent stores; afterward the HTTP APIs own merchant config (two truths, #723/#851)")
+		return MerchantManifestReconcileOptions{}, fmt.Errorf("merchant_config_source=api: push-merchant-config runs only as a seed-once importer — pass --seed to bootstrap merchants/PSPs/secrets into the persistent stores; afterward the HTTP APIs own merchant config (two truths, #723/#851)")
 	}
 	if insert || overwrite || prune {
 		return MerchantManifestReconcileOptions{}, fmt.Errorf("--seed does not combine with --insert/--overwrite/--prune: seeding is create-only and never re-asserts the manifest over API-owned state (#851)")

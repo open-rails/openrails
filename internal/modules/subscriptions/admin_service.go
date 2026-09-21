@@ -238,6 +238,11 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		return err
 	}
 
+	if subscription.CollectionPolicy == models.CollectionPolicyEngine {
+		lifecycle := NewSubscriptionLifecycleService(s.SubscriptionService.Database(), nil, nil, s.EntitlementService, s.NotificationService, nil, s.Clock())
+		return lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &subscription.ID, CancelType: models.CancelTypeMerchant, CancelFeedback: &reason, RevokeAccess: revokeAccess})
+	}
+
 	if subscription.Status != models.StatusActive {
 		return ErrSubscriptionNotActive
 	}

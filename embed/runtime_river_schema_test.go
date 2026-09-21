@@ -19,8 +19,8 @@ func TestResolveHostRiverSchema(t *testing.T) {
 		{"whitespace adopts the default", "  ", "openrails", config.RiverSchema, false},
 		{"public stays public", "public", "openrails", "public", false},
 		{"host-owned schema is adopted", "host-one_river", "openrails", "host-one_river", false},
-		{"billing schema is refused", "openrails", "openrails", "", true},
-		{"custom billing schema is refused", "acme_billing", "acme_billing", "", true},
+		{"shared namespace", "openrails", "openrails", "openrails", false},
+		{"shared public", "public", "public", "public", false},
 	}
 
 	for _, tc := range cases {

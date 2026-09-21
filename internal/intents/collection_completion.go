@@ -32,6 +32,13 @@ func (s *Store) CompleteManualRebill(ctx context.Context, in gen.OpenrailsRailIn
 	return s.completeCollectedPayment(ctx, in, outcome, now)
 }
 
+func (s *Store) CompleteSubscriptionCollection(ctx context.Context, in gen.OpenrailsRailIntent, outcome Outcome, now time.Time) error {
+	if in.IntentType != subscriptions.TypeSubscriptionCollection {
+		return errors.New("subscription completion received another operation kind")
+	}
+	return s.completeCollectedPayment(ctx, in, outcome, now)
+}
+
 func (s *Store) completeCollectedPayment(ctx context.Context, in gen.OpenrailsRailIntent, outcome Outcome, now time.Time) error {
 	if s == nil || s.db == nil || s.db.Pool() != nil {
 		return errors.New("collection completion requires a transaction-bound database")
@@ -61,10 +68,10 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.OpenrailsRa
 	if err != nil {
 		return fmt.Errorf("invalid retained collection receipt: %w", err)
 	}
-	var nonexecution InvoiceNonexecutionProof
+	var nonexecution CollectionNonexecutionProof
 	var hasNonexecution bool
-	if current.IntentType == "invoice_collection" {
-		nonexecution, hasNonexecution, err = LoadInvoiceNonexecution(current)
+	if current.IntentType == "invoice_collection" || current.IntentType == subscriptions.TypeSubscriptionCollection {
+		nonexecution, hasNonexecution, err = LoadCollectionNonexecution(current)
 		if err != nil {
 			return err
 		}
@@ -92,7 +99,7 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.OpenrailsRa
 		if found {
 			return errors.New("qualified collected payment cannot become nonexecution or refusal")
 		}
-		if current.IntentType == "invoice_collection" && outcome.Evidence["not_executed"] == true {
+		if (current.IntentType == "invoice_collection" || current.IntentType == subscriptions.TypeSubscriptionCollection) && outcome.Evidence["not_executed"] == true {
 			var canonical map[string]json.RawMessage
 			if len(current.ResultEvidence) > 0 {
 				if err := json.Unmarshal(current.ResultEvidence, &canonical); err != nil {
@@ -122,8 +129,8 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.OpenrailsRa
 			return err
 		}
 	}
-	if current.IntentType == subscriptions.TypeManualRebill {
-		for _, key := range []string{rebillPreparationKey, rebillDeclineKey} {
+	if current.IntentType == subscriptions.TypeManualRebill || current.IntentType == subscriptions.TypeSubscriptionCollection {
+		for _, key := range []string{rebillPreparationKey, rebillDeclineKey, stripeRecurringDeclineKey} {
 			if value, ok := existing[key]; ok {
 				evidence[key] = value
 			}
@@ -133,12 +140,27 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.OpenrailsRa
 			if err != nil {
 				return err
 			}
-			if found {
+			stripeCode, stripePI, stripeFound, err := LoadStripeRecurringDecline(current)
+			if err != nil {
+				return err
+			}
+			if stripeFound {
+				if outcome.Evidence["declined"] != true || outcome.Evidence["failure_code"] != stripeCode || outcome.Evidence["stripe_payment_intent_id"] != stripePI {
+					return errors.New("Stripe terminal result contradicts canceled payment custody")
+				}
+			} else if found {
 				if outcome.Evidence["declined"] != true || outcome.Evidence["response_code"] != refusal.ResponseCode {
 					return errors.New("rebill terminal result contradicts retained refusal")
 				}
-			} else if EvidenceString(current, rebillSubmittedAt) != "" || outcome.Evidence["not_executed"] != true {
+			} else if (EvidenceString(current, rebillSubmittedAt) != "" && !hasNonexecution) || outcome.Evidence["not_executed"] != true {
 				return errors.New("submitted rebill cannot be released without a definitive refusal")
+			}
+		}
+	}
+	if current.IntentType == subscriptions.TypeSubscriptionCollection {
+		for _, key := range []string{"submitted_at", qualifiedCollectionNonexecutionKey, collectionCandidateKey} {
+			if value, ok := existing[key]; ok {
+				evidence[key] = value
 			}
 		}
 	}

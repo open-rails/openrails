@@ -51,12 +51,12 @@ const (
 
 // Principal is the common bearer-auth result used by route permission gates.
 type Principal struct {
-	CredentialClass billingauth.CredentialClass
-	MerchantID      merchant.ID
-	MerchantSlug    string
-	MerchantSource  string
-	CredentialType  CredentialType
-	Subject         string
+	CredentialClass      billingauth.CredentialClass
+	MerchantID           merchant.ID
+	MerchantSlug         string
+	MerchantConfigSource string
+	CredentialType       CredentialType
+	Subject              string
 	// Invoker is the host-owned spend principal this credential acts as under
 	// Subject's account (or#930). Non-empty = INVOKER-SCOPED: it spends the
 	// payer's money without being the payer.
@@ -217,13 +217,13 @@ func principalFromDelegated(resolved *controlplane.ResolvedDelegated, typ Creden
 		return nil
 	}
 	return &Principal{
-		MerchantID:      resolved.MerchantID,
-		MerchantSlug:    resolved.MerchantSlug,
-		MerchantSource:  "delegated_issuer",
-		CredentialType:  typ,
-		CredentialClass: class,
-		Subject:         strings.TrimSpace(resolved.DelegatedSubject),
-		Invoker:         strings.TrimSpace(resolved.Invoker),
+		MerchantID:           resolved.MerchantID,
+		MerchantSlug:         resolved.MerchantSlug,
+		MerchantConfigSource: "delegated_issuer",
+		CredentialType:       typ,
+		CredentialClass:      class,
+		Subject:              strings.TrimSpace(resolved.DelegatedSubject),
+		Invoker:              strings.TrimSpace(resolved.Invoker),
 		can: func(_ context.Context, perm string) bool {
 			// #564: resolved.Permissions is already claim ∩ signer authority.
 			return resolved.HasPermission(perm)

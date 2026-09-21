@@ -212,9 +212,14 @@ func ccbillFailureReason(rawCode string) string {
 // gateways). "" = not a stamped card rail.
 func DefaultTokenType(rail, custodian string) string {
 	switch strings.ToLower(strings.TrimSpace(rail)) {
+	case "stripe":
+		if custodian == models.CustodianPSP {
+			return charge.TokenTypePSPToken
+		}
+		return ""
 	case "nmi":
 		switch strings.TrimSpace(custodian) {
-		case models.CustodianBasisTheory:
+		case models.CustodianBasisTheory, models.CustodianHyperSwitch:
 			return charge.TokenTypePANViaProxy
 		case models.CustodianPSP:
 			return charge.TokenTypePSPToken

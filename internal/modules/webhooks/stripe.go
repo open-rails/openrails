@@ -1095,6 +1095,12 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 	if err != nil {
 		return fmt.Errorf("load stripe subscription for won dispute recovery: %w", err)
 	}
+	// Returning disputed funds restores accounting, not permission to restart an
+	// engine-owned agreement. It has no native Stripe schedule to reactivate and
+	// terminal customer/merchant/chargeback decisions must remain preserved.
+	if sub.CollectionPolicy == models.CollectionPolicyEngine {
+		return nil
+	}
 	if sub.Status != models.StatusCancelled {
 		return nil
 	}

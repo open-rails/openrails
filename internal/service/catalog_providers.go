@@ -421,6 +421,11 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 			}
 			continue
 		}
+		// New engine card prices are local terms. Explicit historical links above
+		// remain supported for provider-owned cohorts sharing the catalog.
+		if reqCycle != nil && s.rt != nil && s.rt.Config != nil && s.rt.Config.NewSubscriptionCollectionPolicy == "engine" && (t.rail == "stripe" || t.rail == "nmi") {
+			continue
+		}
 		// Otherwise dispatch AutoCreate to mint (or find-or-attach) the object.
 		// Blocked outright when the operating mode disables provider writes —
 		// the find-half of find-or-create is not worth a special case here; the

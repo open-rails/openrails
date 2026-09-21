@@ -10,8 +10,8 @@ import (
 
 // #851: push-merchant-config flag doctrine per merchant-source mode.
 func TestResolvePushMerchantConfigOptions(t *testing.T) {
-	manifestCfg := &config.Config{MerchantSource: config.MerchantSourceManifest}
-	apiCfg := &config.Config{MerchantSource: config.MerchantSourceAPI}
+	manifestCfg := &config.Config{MerchantConfigSource: config.MerchantConfigSourceManifest}
+	apiCfg := &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI}
 
 	t.Run("manifest mode passes mutation flags through", func(t *testing.T) {
 		opts, err := ResolvePushMerchantConfigOptions(manifestCfg, false, true, true, true)
@@ -21,7 +21,7 @@ func TestResolvePushMerchantConfigOptions(t *testing.T) {
 
 	t.Run("manifest mode refuses --seed", func(t *testing.T) {
 		_, err := ResolvePushMerchantConfigOptions(manifestCfg, true, false, false, false)
-		require.ErrorContains(t, err, "--seed is the merchant_source=api importer gate")
+		require.ErrorContains(t, err, "--seed is the merchant_config_source=api importer gate")
 	})
 
 	t.Run("api mode refuses without --seed", func(t *testing.T) {

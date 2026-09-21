@@ -11,6 +11,18 @@ import (
 	"github.com/open-rails/openrails/internal/cardguard"
 )
 
+var initialMembershipTermsJSON = object(map[string]jsonRule{"collection_policy": textValue, "subscription_id": uuidValue, "payment_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "product_id": uuidValue, "price_id": uuidValue, "payment_method_id": uuidValue, "product_name": textValue, "amount": moneyStringValue, "recurring_amount": moneyStringValue, "currency": textValue, "accepted_at": textValue, "period_start": textValue, "period_end": textValue, "pending": booleanValue, "entitlements": dictionary(nullable(integerValue))})
+
+var acceptedRenewalJSON = object(map[string]jsonRule{
+	"psp_id": uuidValue, "subscription_id": uuidValue, "customer_id": uuidValue,
+	"from_price_id": uuidValue, "from_product_id": uuidValue, "price_id": uuidValue, "product_id": uuidValue,
+	"product_name": textValue, "amount": moneyStringValue, "currency": textValue,
+	"period_start": textValue, "period_end": textValue,
+	"entitlements": nullable(dictionary(nullable(integerValue))), "previous_entitlements": nullable(dictionary(nullable(integerValue))),
+	"reprice_id": uuidValue, "scheduled_price_id": uuidValue,
+})
+var frozenInstrumentJSON = object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue})
+
 type jsonRule func(any) bool
 
 func textValue(v any) bool { s, ok := v.(string); return ok && safeText(s) }
@@ -127,9 +139,10 @@ var rateJSON = object(map[string]jsonRule{
 })
 
 var collectedReceiptJSON = object(map[string]jsonRule{
-	"version": integerValue, "family": textValue,
+	"stripe_engine": object(map[string]jsonRule{"customer_initiated": booleanValue, "refunded_amount_minor": moneyStringValue, "refunded": booleanValue, "disputed": booleanValue, "payment_intent_id": textValue, "charge_id": textValue, "customer_ref": textValue, "method_ref": textValue, "amount_minor": moneyStringValue, "currency": textValue, "merchant_id": uuidValue, "psp_id": uuidValue, "customer_id": uuidValue, "operation_id": uuidValue, "initial": booleanValue}),
+	"version":       integerValue, "family": textValue,
 	"binding": object(map[string]jsonRule{"operation_id": uuidValue, "merchant_id": uuidValue, "psp_id": uuidValue, "kind": textValue, "payload_sha256": sha256Value}),
-	"nmi":     object(map[string]jsonRule{"transaction_id": textValue, "order_reference": textValue, "customer_vault_id": textValue, "amount": moneyStringValue, "currency": textValue, "approved": booleanValue}),
+	"nmi":     object(map[string]jsonRule{"transaction_id": textValue, "order_reference": textValue, "customer_vault_id": textValue, "vault_billing_id": textValue, "amount": moneyStringValue, "currency": textValue, "approved": booleanValue}),
 	"stripe":  object(map[string]jsonRule{"invoice_id": textValue, "status": textValue, "customer_id": textValue, "payment_method_id": textValue, "amount_paid": moneyStringValue, "currency": textValue, "charge_id": textValue, "payment_intent_id": textValue, "collection_key": textValue, "charged_amount": moneyStringValue, "charge_currency": textValue, "charge_customer_id": textValue, "charge_paid": booleanValue, "charge_captured": booleanValue, "charge_status": textValue, "charge_invoice_id": textValue, "charge_payment_intent_id": textValue}),
 })
 
@@ -205,19 +218,29 @@ var jsonRules = map[string]jsonRule{
 		"not_executed_code": textValue, "submitted_at": textValue, "provider_contradiction": textValue, "verified_existing": booleanValue,
 		"operator_resolution": operatorResolutionJSON,
 	})),
+	"rail_intents.subscription_collection.payload": object(map[string]jsonRule{
+		"initiator": textValue, "requested_payment_method_id": uuidValue,
+		"renewal": acceptedRenewalJSON, "previous_period_end": textValue, "accepted_at": textValue,
+		"payment_method_id": uuidValue, "instrument": frozenInstrumentJSON,
+		"hyperswitch": object(map[string]jsonRule{"account_id": textValue, "profile_id": textValue, "api_base_url": textValue}),
+		"attempt":     integerValue, "failure_count": integerValue, "amount_minor": moneyStringValue, "order_reference": uuidValue,
+	}),
+	"rail_intents.subscription_collection.result_evidence": nullable(object(map[string]jsonRule{
+		"stripe_recurring_decline": object(map[string]jsonRule{"decline_code": textValue, "binding": receiptBindingJSON, "failure_code": textValue, "payment_intent_id": textValue}),
+		"failure_code":             textValue, "stripe_payment_intent_id": textValue, "authentication_required": booleanValue,
+		"qualified_receipt": collectedReceiptJSON, "transaction_id": textValue, "rail": textValue, "verified_existing": booleanValue,
+		"submitted_at": textValue, "declined": booleanValue, "response_code": integerValue, "not_executed": booleanValue, "not_executed_code": textValue,
+		"operator_resolution":            operatorResolutionJSON,
+		"collection_candidate":           object(map[string]jsonRule{"binding": receiptBindingJSON, "transaction_id": textValue, "external_invoice_id": textValue}),
+		"rebill_decline":                 object(map[string]jsonRule{"binding": receiptBindingJSON, "response_code": integerValue, "provider_reference": textValue}),
+		"qualified_invoice_nonexecution": object(map[string]jsonRule{"binding": receiptBindingJSON, "submitted_at": textValue, "code": textValue, "reason": textValue}),
+	})),
 	"rail_intents.manual_rebill.payload": object(map[string]jsonRule{
 		"initiator": textValue, "requested_payment_method_id": uuidValue,
-		"renewal": object(map[string]jsonRule{
-			"psp_id": uuidValue, "subscription_id": uuidValue, "customer_id": uuidValue,
-			"from_price_id": uuidValue, "from_product_id": uuidValue, "price_id": uuidValue, "product_id": uuidValue,
-			"product_name": textValue, "amount": moneyStringValue, "currency": textValue,
-			"period_start": textValue, "period_end": textValue,
-			"entitlements": nullable(dictionary(nullable(integerValue))), "previous_entitlements": nullable(dictionary(nullable(integerValue))),
-			"reprice_id": uuidValue, "scheduled_price_id": uuidValue,
-		}),
+		"renewal":           acceptedRenewalJSON,
 		"payment_method_id": uuidValue, "rail": textValue, "rail_subscription_id": textValue, "order_reference": uuidValue,
 		"attempt": integerValue, "failure_count": integerValue, "amount_minor": moneyStringValue,
-		"instrument": object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue}),
+		"instrument": frozenInstrumentJSON,
 	}),
 	"rail_intents.manual_rebill.result_evidence": nullable(object(map[string]jsonRule{
 		"qualified_receipt": collectedReceiptJSON, "transaction_id": textValue, "rail": textValue, "verified_existing": booleanValue,
@@ -242,21 +265,22 @@ var jsonRules = map[string]jsonRule{
 	"rail_intents.nmi_sale.payload": object(map[string]jsonRule{
 		"request_fingerprint": sha256Value, "provider": textValue, "psp": textValue, "amount": moneyStringValue, "currency": textValue, "description": textValue, "user_id": uuidValue, "price_id": uuidValue, "e2e_run_id": textValue,
 		"payment_method_id": uuidValue, "payment_id": uuidValue, "product_id": uuidValue, "list_amount": moneyStringValue, "accepted_at": textValue, "entitlements": dictionary(nullable(integerValue)), "access_duration_hours": nullable(integerValue), "entitlement_start": textValue, "ownership_start": textValue, "ownership_end": nullable(textValue), "eligibility": textValue,
-		"instrument": object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue}),
+		"instrument": frozenInstrumentJSON,
 	}),
 	"rail_intents.nmi_sale.result_evidence": nullable(object(map[string]jsonRule{
 		"qualified_receipt": collectedReceiptJSON, "sale_submitted": booleanValue, "transaction_id": textValue, "payment_id": uuidValue, "delayed_start": textValue,
 		"declined": booleanValue, "not_executed": booleanValue, "request_refused": booleanValue, "response_code": integerValue, "localization_id": textValue, "operator_resolution": operatorResolutionJSON,
 	})),
 	"rail_intents.initial_membership.payload": object(map[string]jsonRule{
-		"terms":               object(map[string]jsonRule{"collection_policy": textValue, "subscription_id": uuidValue, "payment_id": uuidValue, "customer_id": uuidValue, "psp_id": uuidValue, "product_id": uuidValue, "price_id": uuidValue, "payment_method_id": uuidValue, "product_name": textValue, "amount": moneyStringValue, "recurring_amount": moneyStringValue, "currency": textValue, "accepted_at": textValue, "period_start": textValue, "period_end": textValue, "pending": booleanValue, "entitlements": dictionary(nullable(integerValue))}),
+		"terms":               initialMembershipTermsJSON,
 		"instrument":          object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue}),
 		"native_schedule":     object(map[string]jsonRule{"plan_id": textValue, "start_date": textValue, "day_frequency": integerValue, "plan_payments": integerValue, "card": object(map[string]jsonRule{"FirstName": textValue, "LastName": textValue, "Address1": textValue, "City": textValue, "State": textValue, "Zip": textValue, "Country": textValue})}),
 		"hyperswitch":         object(map[string]jsonRule{"account_id": textValue, "profile_id": textValue, "api_base_url": textValue}),
 		"request_fingerprint": sha256Value, "checkout_idempotency_key": textValue, "psp": textValue, "email": textValue, "e2e_run_id": textValue,
 	}),
 	"rail_intents.initial_membership.result_evidence": nullable(object(map[string]jsonRule{
-		"qualified_initial_refusal": object(map[string]jsonRule{"binding": receiptBindingJSON, "kind": textValue, "response_code": integerValue, "localization_id": textValue}),
+		"stripe_payment_intent_id": textValue, "authentication_required": booleanValue,
+		"qualified_initial_refusal": object(map[string]jsonRule{"binding": receiptBindingJSON, "kind": textValue, "response_code": integerValue, "localization_id": textValue, "stripe_payment_intent_id": textValue, "stripe_failure_code": textValue, "stripe_decline_code": textValue}),
 		"qualified_receipt":         collectedReceiptJSON, "initial_submitted": booleanValue, "not_executed": booleanValue, "request_refused": booleanValue, "operator_resolution": operatorResolutionJSON,
 		"qualified_enrollment": object(map[string]jsonRule{"binding": receiptBindingJSON, "facts": object(map[string]jsonRule{
 			"vault_billing_id": textValue, "order_reference": textValue, "po_number": textValue, "next_charge_date": textValue,
@@ -294,12 +318,21 @@ var jsonRules = map[string]jsonRule{
 	"catalog_rate_cards.price":         rateJSON,
 	"invoices.line_items":              invoiceLineJSON, "invoices.money_movements": dictionary(integerValue), "invoices.tax": emptyObject, "invoices.billing_contacts": contactsJSON,
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
-	"invoker_spend_limits.windows":       array(budgetWindow),
-	"grants.spec_snapshot":               nullable(object(map[string]jsonRule{"entitlements": array(textValue), "deposit": object(map[string]jsonRule{"source": textValue, "invoker": textValue})})),
-	"usage_events.dimensions":            dictionary(integerValue),
-	"checkout_sessions.metadata":         nullable(emptyObject),
-	"checkout_sessions.rail_fields":      nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
-	"checkout_sessions.rail_state":       nullable(object(map[string]jsonRule{"capture": captureJSON, "_openrails_request_fingerprint": textValue, "subscription_id": textValue, "message": textValue, "failure_reason": textValue, "failure_code": textValue})),
+	"invoker_spend_limits.windows":  array(budgetWindow),
+	"grants.spec_snapshot":          nullable(object(map[string]jsonRule{"entitlements": array(textValue), "deposit": object(map[string]jsonRule{"source": textValue, "invoker": textValue})})),
+	"usage_events.dimensions":       dictionary(integerValue),
+	"checkout_sessions.metadata":    nullable(emptyObject),
+	"checkout_sessions.rail_fields": nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
+	"checkout_sessions.rail_state": nullable(object(map[string]jsonRule{"initial_membership_quote": func(v any) bool {
+		raw, ok := v.(string)
+		if !ok {
+			return false
+		}
+		var decoded any
+		d := json.NewDecoder(strings.NewReader(raw))
+		d.UseNumber()
+		return d.Decode(&decoded) == nil && d.Decode(new(any)) == io.EOF && initialMembershipTermsJSON(decoded)
+	}, "kind": textValue, "customer_ref": textValue, "consent": textValue, "payment_method_id": uuidValue, "capture": captureJSON, "_openrails_request_fingerprint": textValue, "subscription_id": textValue, "message": textValue, "failure_reason": textValue, "failure_code": textValue})),
 	"checkout_sessions.routing_reason":   nullable(object(map[string]jsonRule{"policy": textValue, "rule": integerValue, "selected": textValue, "rail": textValue, "fallbacks": array(textValue), "skipped": array(object(map[string]jsonRule{"selector": textValue, "reason": textValue}))})),
 	"host_outbox.data":                   object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_since": textValue, "overdue_amount": integerValue, "overdue_invoices": integerValue, "entered_at": textValue, "evaluated_at": textValue}),
 	"rail_intents.payload":               nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),

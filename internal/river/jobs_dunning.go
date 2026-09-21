@@ -84,6 +84,9 @@ type DunningWorker struct {
 	// driving lifecycle off the returned status. nil builds a Runner over the
 	// worker's own dependencies.
 	Intents *intents.Runner
+	// EngineCollections admits stored engine obligations; the existing
+	// provider-intent fleet performs the accepted charge and receipt recovery.
+	EngineCollections *money.MoneyService
 }
 
 // intentRunner returns the configured Runner or self-assembles one (direct
@@ -153,7 +156,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		}
 	}
 
-	if w.NMIResolver == nil {
+	if w.NMIResolver == nil && w.EngineCollections == nil {
 		log.WithContext(ctx).Warn("NMI client resolver not configured; skipping dunning run")
 		return nil
 	}
@@ -170,8 +173,11 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	// bypass RLS), then scan and charge inside each merchant's own scope.
 	// Use w.now() instead of SQL NOW() to support time mocking in tests.
 	nmiRails := []string{string(models.RailNMI)}
+	if w.EngineCollections != nil {
+		nmiRails = append(nmiRails, string(models.RailStripe))
+	}
 	merchantIDs, err := w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
-		Rails: nmiRails, Now: w.now(), MerchantLimit: dunningMerchantBatch,
+		Rails: nmiRails, Now: w.now(), MerchantLimit: dunningMerchantBatch, IncludeEngine: w.EngineCollections != nil,
 	})
 	if err != nil {
 		return fmt.Errorf("query merchants with due subscriptions: %w", err)
@@ -206,7 +212,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		// The pin AND the proof it took: every read and write below runs under
 		// this merchant's app.merchant_id, exactly as a request would.
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "dunning pass", func(mctx context.Context) error {
-			dueSubscriptions, err := subscriptions.NewSubscriptionRepo(w.DB).ListDueDunningSubscriptions(mctx, nmiRails, w.now())
+			dueSubscriptions, err := subscriptions.NewSubscriptionRepo(w.DB).ListDueDunningSubscriptions(mctx, nmiRails, w.now(), w.EngineCollections != nil)
 			if err != nil {
 				return fmt.Errorf("query due subscriptions: %w", err)
 			}
@@ -279,7 +285,11 @@ func (w *DunningWorker) processSubscription(
 	materialize bool,
 ) (dunningOutcome, error) {
 	if sub.CollectionPolicy == models.CollectionPolicyEngine {
-		return dunningOutcomeFailed, nil
+		if w.EngineCollections == nil || (w.Config != nil && w.Config.EngineAdmissionHold) {
+			return dunningOutcomeFailed, nil
+		}
+		_, err := w.EngineCollections.AdmitDueSubscriptionCollection(ctx, sub.ID, w.now())
+		return dunningOutcomeMaterialized, err
 	}
 	ctx = db.WithPSPID(ctx, sub.PspID)
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)

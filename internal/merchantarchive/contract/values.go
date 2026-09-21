@@ -20,6 +20,18 @@ func ValidateValues(p Profile, values []*string) error {
 	if len(values) != len(p.Columns) {
 		return fmt.Errorf("invalid row width for %s", p.Name)
 	}
+	if p.Name == "subscriptions" {
+		policy, rail, binding := value(p, values, "collection_policy"), value(p, values, "rail"), value(p, values, "rail_subscription_id")
+		if policy == nil || !models.CollectionPolicy(*policy).Valid() || rail == nil || binding == nil {
+			return fmt.Errorf("subscription lacks a valid collection policy or binding")
+		}
+		if *policy == "provider_dunning" && *rail != "nmi" {
+			return fmt.Errorf("provider dunning requires NMI")
+		}
+		if *policy == "engine" && !((*rail == "nmi" || *rail == "stripe") && *binding == "" || *rail == "solana") {
+			return fmt.Errorf("engine collection has contradictory schedule binding")
+		}
+	}
 	// Canonical collection operations carry typed engine-encoded keys.
 	// Validate the accepted payer/authority/payload and retained custody before
 	// treating that one coordinate as an identity rather than arbitrary text.
@@ -120,7 +132,7 @@ func ValidateValues(p Profile, values []*string) error {
 		case "jsonb":
 			field := p.Name + "." + c.Name
 			if p.Name == "rail_intents" && (c.Name == "payload" || c.Name == "result_evidence") {
-				if typ := value(p, values, "intent_type"); typ != nil && (*typ == intents.TypeNMIPaymentMethodDelete || *typ == intents.TypeHyperSwitchMethodDelete || *typ == "nmi_sale" || *typ == "initial_membership" || *typ == "invoice_collection" || *typ == "manual_rebill" || *typ == "nmi_provider_cutover") {
+				if typ := value(p, values, "intent_type"); typ != nil && (*typ == intents.TypeNMIPaymentMethodDelete || *typ == intents.TypeHyperSwitchMethodDelete || *typ == "nmi_sale" || *typ == "initial_membership" || *typ == "invoice_collection" || *typ == "manual_rebill" || *typ == subscriptions.TypeSubscriptionCollection || *typ == "nmi_provider_cutover") {
 					field = p.Name + "." + *typ + "." + c.Name
 				}
 			}
@@ -169,12 +181,38 @@ func ValidateValues(p Profile, values []*string) error {
 			return ""
 		}
 		var state struct {
-			Capture json.RawMessage `json:"capture"`
+			Capture         json.RawMessage `json:"capture"`
+			Kind            string          `json:"kind"`
+			CustomerRef     string          `json:"customer_ref"`
+			Consent         string          `json:"consent"`
+			PaymentMethodID string          `json:"payment_method_id"`
+			Quote           string          `json:"initial_membership_quote"`
 		}
 		if raw := value(p, values, "rail_state"); raw != nil && json.Unmarshal([]byte(*raw), &state) != nil {
 			return fmt.Errorf("invalid checkout state")
 		}
-		if field("mode") == string(models.CheckoutSessionModePaymentMethod) {
+		if state.Quote != "" {
+			var quote subscriptions.InitialMembershipTerms
+			if json.Unmarshal([]byte(state.Quote), &quote) != nil || quote.Validate() != nil || quote.CollectionPolicy != models.CollectionPolicyEngine || quote.CustomerID.String() != field("customer_id") || quote.PSPID.String() != field("psp_id") || quote.PriceID.String() != field("price_id") || strconv.FormatInt(quote.Amount, 10) != field("amount") || quote.Currency != field("currency") || field("mode") != "subscription" || (field("rail") != "nmi" && field("rail") != "stripe") {
+				return fmt.Errorf("invalid retained engine checkout quote")
+			}
+		}
+		if field("mode") == string(models.CheckoutSessionModePaymentMethod) && field("rail") == "stripe" {
+			for _, name := range []string{"price_id", "amount", "currency", "payment_id", "subscription_id", "transaction_id"} {
+				if value(p, values, name) != nil {
+					return fmt.Errorf("Stripe setup contains monetary terms")
+				}
+			}
+			if len(state.Capture) != 0 || state.Quote != "" || state.Kind != "stripe_engine_setup" || state.Consent != "save_for_agreed_off_session_payments_v1" || !strings.HasPrefix(state.CustomerRef, "cus_") {
+				return fmt.Errorf("invalid Stripe setup binding")
+			}
+			if field("reference") != "" && !strings.HasPrefix(field("reference"), "seti_") {
+				return fmt.Errorf("invalid Stripe setup identity")
+			}
+			if field("status") == "succeeded" && (field("reference") == "" || !uuidPattern.MatchString(state.PaymentMethodID)) {
+				return fmt.Errorf("completed Stripe setup lacks retained method")
+			}
+		} else if field("mode") == string(models.CheckoutSessionModePaymentMethod) {
 			for _, name := range []string{"price_id", "amount", "currency", "payment_id", "subscription_id", "reference", "transaction_id"} {
 				if value(p, values, name) != nil {
 					return fmt.Errorf("capture setup contains monetary/provider payment terms")
@@ -207,7 +245,7 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "rail_intents" {
 		typ := value(p, values, "intent_type")
 		payload := value(p, values, "payload")
-		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != intents.TypeNMIPaymentMethodDelete && *typ != intents.TypeHyperSwitchMethodDelete && *typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection" && *typ != "nmi_sale" && *typ != "initial_membership" && *typ != "manual_rebill" && *typ != "nmi_provider_cutover")) {
+		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != intents.TypeNMIPaymentMethodDelete && *typ != intents.TypeHyperSwitchMethodDelete && *typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection" && *typ != "nmi_sale" && *typ != "initial_membership" && *typ != "manual_rebill" && *typ != subscriptions.TypeSubscriptionCollection && *typ != "nmi_provider_cutover")) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
 		if typ != nil && (*typ == "nmi_refund" || *typ == "stripe_refund" || *typ == "ccbill_refund") {
@@ -236,7 +274,7 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 		return ""
 	}
 	typ := field("intent_type")
-	if typ != intents.TypeNMIPaymentMethodDelete && typ != intents.TypeHyperSwitchMethodDelete && typ != "invoice_collection" && typ != subscriptions.TypeManualRebill && typ != payments.TypeNMISale && typ != subscriptions.TypeInitialMembership {
+	if typ != intents.TypeNMIPaymentMethodDelete && typ != intents.TypeHyperSwitchMethodDelete && typ != "invoice_collection" && typ != subscriptions.TypeManualRebill && typ != subscriptions.TypeSubscriptionCollection && typ != payments.TypeNMISale && typ != subscriptions.TypeInitialMembership {
 		return false, nil
 	}
 	id, _ := uuid.Parse(field("id"))
@@ -263,6 +301,9 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 	}
 	if typ == payments.TypeNMISale {
 		return false, intents.ValidateNMISaleTerminal(row)
+	}
+	if typ == subscriptions.TypeSubscriptionCollection {
+		return true, intents.ValidateSubscriptionCollectionTerminal(row)
 	}
 	if typ == subscriptions.TypeManualRebill {
 		if err := intents.ValidateManualRebillTerminal(row); err != nil {

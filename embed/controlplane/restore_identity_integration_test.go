@@ -20,7 +20,7 @@ import (
 func TestControlPlaneProvisionsRestoreIdentityUnderDestinationAuthority(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.Config{
-		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI,
+		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
 		SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
 		Auth: &config.AuthConfig{Issuer: "https://restore.openrails.test", KeysPath: t.TempDir()},
 	}

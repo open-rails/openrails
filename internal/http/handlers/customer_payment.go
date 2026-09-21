@@ -79,6 +79,7 @@ func PayMyInvoiceNow(r *httprequest.Request) {
 	r.JSON(status, result)
 }
 func RetryMySubscriptionNow(r *httprequest.Request) {
+	r.SetHeader("Cache-Control", "no-store")
 	payer, ok := customerActionPayer(r)
 	if !ok {
 		return

@@ -200,7 +200,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// DB rows as projections (insert+overwrite+prune), secrets seeded into the
 	// in-memory plane. Same semantics as serverboot.NewServer: the conventional
 	// file is optional, an explicit --merchant-manifest path must exist, and
-	// merchant_source=api refuses a present manifest.
+	// merchant_config_source=api refuses a present manifest.
 	manifestPath, err := cmd.Flags().GetString("merchant-manifest")
 	if err != nil {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)

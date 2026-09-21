@@ -173,6 +173,9 @@ func (c *NMIClient) ConfirmRefund(ctx context.Context, originalTransactionID, re
 // The order search and exact transaction must identify the same successful sale.
 // No card data or arbitrary provider response is retained.
 type SaleEvidence struct {
+	// VaultBillingID is the sole billing entry from an authenticated vault read.
+	// It is not a field echoed by the transaction response.
+	VaultBillingID  string          `json:"vault_billing_id,omitempty"`
 	TransactionID   string          `json:"transaction_id"`
 	OrderReference  string          `json:"order_reference"`
 	CustomerVaultID string          `json:"customer_vault_id"`

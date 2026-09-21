@@ -161,7 +161,7 @@ func (s *CheckoutSession) ValidateTerms() error {
 		return fmt.Errorf("checkout session is required")
 	}
 	if s.Mode == CheckoutSessionModePaymentMethod {
-		if s.PriceID != nil || s.Amount != nil || s.Currency != nil || s.PaymentID != nil || s.SubscriptionID != nil || s.Rail != RailNMI {
+		if s.PriceID != nil || s.Amount != nil || s.Currency != nil || s.PaymentID != nil || s.SubscriptionID != nil || (s.Rail != RailNMI && s.Rail != RailStripe) {
 			return fmt.Errorf("payment-method setup cannot carry monetary terms")
 		}
 		return nil

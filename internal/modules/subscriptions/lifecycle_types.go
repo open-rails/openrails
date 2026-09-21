@@ -11,6 +11,13 @@ import (
 )
 
 type CreateMembershipParams struct {
+	// InitialPaymentReversal records a captured initial engine payment whose
+	// refund/dispute already exists at first readback. It creates accounting and
+	// a canceled agreement without granting access or announcing activation.
+	InitialPaymentReversal string
+
+	// PaymentCustodian is the frozen credential custody of the accepted payment.
+	PaymentCustodian string
 	// Prepared is supplied by a qualified durable initial-enrollment operation.
 	Prepared              *InitialMembershipTerms
 	UserID                string
@@ -31,6 +38,13 @@ type CreateMembershipParams struct {
 }
 
 type RenewMembershipParams struct {
+	// PreviousPeriodEnd is the accepted engine obligation boundary. A recovery
+	// purchase may start later; native renewals leave this nil and retain their
+	// existing PeriodStart fence.
+	PreviousPeriodEnd *time.Time
+	// PaymentCustodian stamps the credential form actually used by an accepted
+	// engine charge; empty preserves the native provider default.
+	PaymentCustodian string
 	// Prepared is supplied only by an accepted durable recurring-charge operation.
 	// Observed provider renewals use the ordinary catalog-convergence path.
 	Prepared              *RenewalTerms

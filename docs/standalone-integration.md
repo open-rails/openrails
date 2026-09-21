@@ -79,7 +79,7 @@ openrails run-server --config /etc/openrails/config.yaml \
   every environment — credential validation, not the env string, keeps it
   honest.
 - Non-default database credentials, and an `https` `auth.issuer`.
-- **Merchant-secret storage** (mode 2 / `merchant_source: api` only): a secret
+- **Merchant-secret storage** (mode 2 / `merchant_config_source: api` only): a secret
   backend is required outside development — either Vault
   (`secret_backend: vault`) or the DB store with `ENCRYPTION_MASTER_KEY`
   (base64, 32-byte AES-256) for envelope encryption. Host provider credentials
@@ -90,7 +90,7 @@ openrails run-server --config /etc/openrails/config.yaml \
 
 ### Two merchant-source modes
 
-`merchant_source` in config.yaml selects where merchant truth lives:
+`merchant_config_source` in config.yaml selects where merchant truth lives:
 
 | | MODE 1 — `manifest` (default) | MODE 2 — `api` |
 |---|---|---|
@@ -101,7 +101,7 @@ openrails run-server --config /etc/openrails/config.yaml \
 | Pick when | one/few merchants you operate yourself; secrets rendered by Vault Agent/k8s | merchants managed at runtime, SaaS-style |
 
 `catalog_source` independently selects `manifest` or `api`; empty follows
-`merchant_source`. Thus host-owned credentials can accompany an API-owned
+`merchant_config_source`. Thus host-owned credentials can accompany an API-owned
 catalog, and managed credentials can accompany a manifest-owned catalog.
 Catalog manifest mode rejects API writes with 405 `manifest_driven`; API mode
 rejects mutating catalog pushes but allows plan-only comparisons. This does not

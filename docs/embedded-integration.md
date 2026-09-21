@@ -61,6 +61,14 @@ value to `MigrationOptions.River` and `Options.River`; migrations never invoke
 host client construction. Set `MigrationOptions.Schema` to match `cfg.DB.SchemaName()` when
 using a custom billing schema.
 
+Billing, AuthKit, application tables and River may share `public` or another
+namespace. Each component must use its configured qualified tables and an
+explicit ownership inventory; a schema name does not imply exclusive ownership.
+OpenRails archives contain only billing-owned tables and never include live
+River jobs, AuthKit identities or host records. The destructive embedded reset
+command still targets only the default `billing` schema and refuses it when
+foreign relations are present. It is not a shared-schema reset mechanism.
+
 The engine validates the tracking key at boot and refuses to start if any
 OpenRails migration is missing or orphaned.
 
@@ -82,8 +90,8 @@ to boot unless you declare posture explicitly (#745):
 | `Env` | yes | `"development"` / `"staging"` / `"production"`. Empty errors; development-only secret-storage relaxations must be explicit. |
 | `TestMode` | yes | `config.CredentialPostureSandbox` or `config.CredentialPostureLive`. The zero value is UNSET and rejected — it can never silently mean "live". |
 | `ProviderWriteMode` | recommended | `config.ProviderWriteModeFull` etc.; unset fail-closes to readonly. |
-| `MerchantSource` | defaults to `config.MerchantSourceManifest` | Mode 1 (manifest-is-truth, secrets in memory, reboot to change) vs `MerchantSourceAPI` (mode 2: provision via HTTP APIs + persistent secret store). |
-| `CatalogSource` | empty follows `MerchantSource` | `CatalogSourceManifest` uses `PushCatalog`; `CatalogSourceAPI` permits authorized product, price and metering APIs independently of provider credentials. |
+| `MerchantConfigSource` | defaults to `config.MerchantConfigSourceManifest` | Mode 1 (manifest-is-truth, secrets in memory, reboot to change) vs `MerchantConfigSourceAPI` (mode 2: provision via HTTP APIs + persistent secret store). |
+| `CatalogSource` | empty follows `MerchantConfigSource` | `CatalogSourceManifest` uses `PushCatalog`; `CatalogSourceAPI` permits authorized product, price and metering APIs independently of provider credentials. |
 | `DB` | yes | Schema defaults to `billing`. The injected pool can be the same owning connection used for initialization. |
 
 #### Database ownership and optional separate runtime credentials
@@ -294,7 +302,7 @@ mid, err := rt.UpsertMerchantConfig(ctx, "myapp", embed.MerchantConfig{
 
 Semantics by mode:
 
-- **Mode 1 (`merchant_source=manifest`, the default)**: this call IS the manifest —
+- **Mode 1 (`merchant_config_source=manifest`, the default)**: this call IS the manifest —
   it steamrolls the DB projections and seeds secrets into the runtime's **in-memory**
   plane (never a persistent store) on every run, then arms checkout/vault/webhooks
   immediately. Change credentials = change the config + reboot. Provider PUT,
@@ -302,7 +310,7 @@ Semantics by mode:
   runs remain available. The advertised `secret_write` capability is false,
   including with explicit provider route selections. This does not disable
   separately configured managed alert-webhook URL updates.
-- **Mode 2 (`merchant_source=api`)**: a manifest-shaped upsert (PSPs, profile,
+- **Mode 2 (`merchant_config_source=api`)**: a manifest-shaped upsert (PSPs, profile,
   invoice, remote-application trust) refuses loudly — two truths. Only a bare
   identity bind (slug + top-level `DisplayName`) is legal; arm providers through
   `embed/controlplane` (`cp.UpsertPaymentProviderConfig`) or
@@ -316,19 +324,19 @@ manifest plus the host's mounted YAML secret overlays, so committed files hold
 placeholders and the host supplies real secrets from its own config tree).
 
 **Catalog authoring**: `CatalogSource` selects `manifest` or `api`; when omitted
-it follows `MerchantSource`, preserving existing behavior. Manifest catalogs use
+it follows `MerchantConfigSource`, preserving existing behavior. Manifest catalogs use
 `rt.PushCatalog`; catalog API writes return 405 `manifest_driven`. API catalogs
 use the Client (`CreateProduct`, `CreatePrice`, `SetPriceKey`, ...); mutating
 manifest pushes are refused, while plan-only comparisons remain available.
 
 For dynamic products with host-owned Stripe credentials, construct the runtime
-with `MerchantSource: config.MerchantSourceManifest` and
+with `MerchantConfigSource: config.MerchantConfigSourceManifest` and
 `CatalogSource: config.CatalogSourceAPI`, then pass the host's account and secrets
 through `UpsertMerchantConfig` as above. OpenRails keeps provider credentials in
 memory and refuses provider-configuration API writes. The host rotates credentials
 by updating its configuration and constructing a new runtime. Existing API catalog
 rows survive restart. Do not bootstrap host credentials through a provider PUT:
-that operation selects managed persistence when `MerchantSource` is `api`.
+that operation selects managed persistence when `MerchantConfigSource` is `api`.
 
 Host-supplied provider credentials alone need no encryption master key. Optional
 DB-backed alert-webhook URLs and HyperSwitch SDK capture authorization still
