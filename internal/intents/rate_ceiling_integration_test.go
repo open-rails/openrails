@@ -14,7 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/pkg/billingauth"
+	merchantpkg "github.com/open-rails/openrails/pkg/merchant"
 )
 
 // destructiveType is a stable destructive intent type for seeding (the ceiling
@@ -327,22 +331,21 @@ func TestRateCeiling_EnqueueChokepointRefusesSixth(t *testing.T) {
 	// DELETE could not even reach another merchant's rows, which is precisely
 	// the fleet-scale failure or#887 removed rather than papered over.
 	gated := NewStoreGated(dbi, NewRateCeiling(dbi))
-	actor := "cust-" + uuid.NewString()
+	ctx = merchantpkg.WithID(ctx, merchantpkg.ID(merchant))
+	payer := dbtest.EnsureCustomerIDPgxFor(ctx, t, pool, merchant, uuid.NewString())
+	actor := payer.String()
+	ctx = billingauth.SetUserContext(ctx, billingauth.UserContext{UserID: actor})
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, merchant, "mobius")
-
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.customers WHERE merchant_id=$1 AND id=$2`, merchant, payer)
+	})
+	var lastMethod uuid.UUID
 	enqueue := func(i int) error {
-		subID := uuid.New()
-		_, err := gated.Enqueue(ctx, EnqueueParams{
-			MerchantID:     merchant,
-			Provider:       "mobius",
-			PspID:          pspID,
-			IntentType:     ceilingTestType,
-			SubscriptionID: &subID,
-			IdempotencyKey: fmt.Sprintf("%s:%s:%d", ceilingTestType, actor, i),
-			NextAttemptAt:  time.Now().UTC(),
-			Origin:         OriginUser,
-			Actor:          actor,
-		})
+		pm := &models.PaymentMethod{ID: uuid.New(), CustomerID: payer, PspID: pspID, Rail: models.RailNMI, Custodian: models.CustodianPSP, RailCustomerRef: fmt.Sprintf("ceiling-%s-%d", actor, i)}
+		require.NoError(t, paymentmethods.NewPaymentMethodRepo(dbi).Create(ctx, pm))
+		lastMethod = pm.ID
+		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM billing.payment_methods WHERE id=$1`, pm.ID) })
+		_, err := gated.Enqueue(ctx, EnqueueParams{MerchantID: merchant, Provider: "nmi", PspID: pspID, IntentType: ceilingTestType, IdempotencyKey: NMIPaymentMethodDeleteIdempotencyKey(pm.ID), NextAttemptAt: time.Now().UTC(), Origin: OriginUser, Actor: actor, Payload: NMIPaymentMethodDeletePayload{UserID: actor, PaymentMethodID: pm.ID, RailCustomerRef: pm.RailCustomerRef}})
 		return err
 	}
 
@@ -358,4 +361,7 @@ func TestRateCeiling_EnqueueChokepointRefusesSixth(t *testing.T) {
 		`SELECT count(*) FROM billing.rail_intents WHERE merchant_id = $1 AND actor = $2`,
 		merchant, actor).Scan(&rows))
 	assert.Equal(t, 5, rows, "exactly 5 rows created; the refused 6th wrote nothing")
+	var park string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT park_reason FROM billing.payment_methods WHERE id=$1`, lastMethod).Scan(&park))
+	require.Empty(t, park, "rate refusal rolls back the delete fence")
 }

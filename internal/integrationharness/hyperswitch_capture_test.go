@@ -290,12 +290,6 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			require.Equal(t, 1, methods)
 			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.ledger_accounts WHERE merchant_id=$1 AND customer_id=$2)`, mid.UUID(), req.Customer.ID.UUID()).Scan(&financial))
 			require.Zero(t, financial)
-			beforeDelete := g.count()
-			_, err = client.DeletePaymentMethod(ctx, req.Customer.ID, *completed.PaymentMethodID)
-			var refusal *openrails.StatusError
-			require.ErrorAs(t, err, &refusal)
-			require.Equal(t, "payment_method_delete_unsupported", refusal.Code)
-			require.Equal(t, beforeDelete, g.count())
 			// The local history can outlive a method, e.g. after a qualified
 			// custodian removal/retirement. This is not a live vendor delete.
 			require.NoError(t, surface.App().Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(scoped context.Context) error {
