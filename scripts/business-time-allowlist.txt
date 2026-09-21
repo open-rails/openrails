@@ -9,7 +9,6 @@ internal/http/handlers/webhook_basistheory.go|ReceivedAt:     time.Now(),|infras
 internal/intents/basistheory_account_updater.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
 internal/intents/ccbill_cancel.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue eligibility for an immediately due provider operation uses physical time|1
 internal/intents/nmi_delete.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
-internal/intents/nmi_payment_method_delete.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue eligibility for an immediately due provider operation uses physical time|1
 internal/intents/nmi_payment_method_update.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
 internal/intents/nmi_payment_method_update.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue eligibility for an immediately due provider operation uses physical time|1
 internal/intents/nmi_payment_source_update.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1

@@ -1,4 +1,4 @@
--- parent: 1 sha256:9c79167a4e678b9fcdfb146c4e8d5d8963cc1b4985f5a0cdda950ce3645055f3
+-- parent: 1 sha256:fa28bccb58dddc4123075c3e5d34b61ca4acbe1fe4f78b919fb2cca623e8f136
 SET LOCAL lock_timeout = '10s';
 SET LOCAL statement_timeout = '300s';
 

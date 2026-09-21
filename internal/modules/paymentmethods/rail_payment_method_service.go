@@ -579,6 +579,9 @@ func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *
 	if pm.Custodian != models.CustodianPSP {
 		return nil, ErrPaymentMethodCustodianUnsupported
 	}
+	if strings.HasPrefix(pm.ParkReason, "delete:") {
+		return nil, ErrPaymentMethodDeleteProcessing
+	}
 	rail := strings.ToLower(string(pm.Rail))
 	if rail == "" {
 		return nil, errors.New("payment method rail is required")
@@ -706,8 +709,10 @@ type PaymentMethodDeleteExecutor interface {
 // is accepted can never lose the delete (the verifier resolves "vault gone at
 // provider ⇒ done" and finalizes the local removal).
 func (s *RailPaymentMethodService) DeletePaymentMethod(ctx context.Context, pm *models.PaymentMethod) error {
-	if _, _, err := s.deletePaymentMethodGuards(ctx, pm); err != nil {
-		return err
+	if pm == nil || pm.Custodian != models.CustodianHyperSwitch {
+		if _, _, err := s.deletePaymentMethodGuards(ctx, pm); err != nil {
+			return err
+		}
 	}
 	if s.DeleteIntents == nil {
 		return errors.New("vault delete intent executor not wired")
