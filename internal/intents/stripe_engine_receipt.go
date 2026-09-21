@@ -3,7 +3,7 @@ package intents
 import (
 	"context"
 	"errors"
- "github.com/google/uuid"
+	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -12,7 +12,7 @@ import (
 )
 
 type StripeEngineServiceResolver interface {
- ResolveStripeEngineService(context.Context,uuid.UUID,*uuid.UUID)(*subscriptions.StripeService,bool,error)
+	ResolveStripeEngineService(context.Context, uuid.UUID, *uuid.UUID) (*subscriptions.StripeService, bool, error)
 }
 
 // StripeEngineParams derives all provider inputs from the accepted operation.
