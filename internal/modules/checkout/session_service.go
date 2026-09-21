@@ -944,9 +944,15 @@ func (s *CheckoutSessionService) initialMembershipSessionResponse(ctx context.Co
 			return nil, true, err
 		}
 		projection.Status = models.CheckoutSessionStatusFailed
-	default:
+	case intents.StatusExpired:
+		projection.Status = models.CheckoutSessionStatusExpired
+	case intents.StatusSuperseded:
+		projection.Status = models.CheckoutSessionStatusCanceled
+	case intents.StatusPending, intents.StatusInFlight, intents.StatusFailedRetryable, intents.StatusUnknownNeedsVerify:
 		// This response-only state is not a second persisted operation status.
 		projection.Status = models.CheckoutSessionStatus("processing")
+	default:
+		return nil, true, fmt.Errorf("unrecognized initial membership operation status %q", operation.Status)
 	}
 	response := s.sessionToResponse(&projection)
 	response.Operation = &openrails.PaymentOperation{ID: operation.ID, Status: operation.Status}
