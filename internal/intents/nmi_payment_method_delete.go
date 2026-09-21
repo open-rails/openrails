@@ -267,6 +267,10 @@ func (h *NMIPaymentMethodDeleteHandler) Verify(ctx context.Context, intent gen.O
 // falls back to a synthetic method built from the immutable payload refs so
 // the remote delete can still be finished.
 func (h *NMIPaymentMethodDeleteHandler) loadPaymentMethod(ctx context.Context, intent gen.OpenrailsRailIntent, p NMIPaymentMethodDeletePayload) (*models.PaymentMethod, error) {
+	scope, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil || scope.UUID() != intent.MerchantID || intent.IntentType != TypeNMIPaymentMethodDelete {
+		return nil, paymentmethods.ErrPaymentMethodDeleteUnsafe
+	}
 	var pm *models.PaymentMethod
 	customer, err := uuid.Parse(p.UserID)
 	if err != nil {

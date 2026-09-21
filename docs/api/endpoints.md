@@ -383,9 +383,11 @@ Full request and state-transition details are in
 ### Catalog (`/v1/merchant/catalog`)
 
 Reads need `merchant:catalog:read`; writes need `merchant:catalog:update`. In
-`merchant_source=manifest` deployments (mode 1, YAML-is-truth) every catalog and
-payment-provider WRITE answers `405` with code `manifest_driven` — edit the
-manifest and reboot instead. Reads stay live.
+`catalog_source=manifest` deployments every catalog WRITE answers `405` with
+code `manifest_driven` — update and apply the catalog manifest instead. Empty
+`catalog_source` follows `merchant_source`. Provider configuration retains its
+own `merchant_source` guard, so host credentials can accompany API-owned catalogs.
+Reads stay live.
 
 | Method | Path | Purpose |
 |---|---|---|

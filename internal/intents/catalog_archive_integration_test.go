@@ -3,6 +3,8 @@
 package intents
 
 import (
+	"github.com/open-rails/openrails/internal/db/gen"
+
 	"context"
 	"testing"
 	"time"
@@ -31,7 +33,7 @@ func newArchiveFixture(t *testing.T) *archiveFixture {
 	// The archive intents reference TestMerchant (rail_intents +
 	// rail_mutation_logs FK into openrails.merchants), so the merchant
 	// row must exist.
-	dbtest.EnsureTestMerchant(context.Background(), t, dbi.Pool())
+	dbtest.EnsureTestMerchant(dbtest.WithTestMerchant(context.Background()), t, dbi.Pool())
 	return &archiveFixture{db: dbi, store: NewStore(dbi), api: newFakeStripeCatalogAPI()}
 }
 
@@ -50,10 +52,10 @@ func (fx *archiveFixture) runnerWith(cfg ModeView) *Runner {
 
 func (fx *archiveFixture) enqueueArchive(t *testing.T, objectID string, dueAt time.Time) uuid.UUID {
 	t.Helper()
-	row, err := fx.store.Enqueue(context.Background(), EnqueueParams{
+	row, err := fx.store.Enqueue(dbtest.WithTestMerchant(context.Background()), EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "stripe",
-		PspID:          dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "stripe"),
+		PspID:          dbtest.EnsureTestPSP(dbtest.WithTestMerchant(context.Background()), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "stripe"),
 		IntentType:     TypeStripeArchivePrice,
 		Payload:        StripeArchivePayload{ObjectID: objectID, MarkerKey: "retired.usd.900.30"},
 		IdempotencyKey: StripeArchiveIdempotencyKey(TypeStripeArchivePrice, objectID),
@@ -63,7 +65,7 @@ func (fx *archiveFixture) enqueueArchive(t *testing.T, objectID string, dueAt ti
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = fx.db.Pool().Exec(context.Background(),
+		_, _ = fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()),
 			"DELETE FROM billing.rail_intents WHERE id = $1", row.ID)
 	})
 	return row.ID
@@ -71,7 +73,7 @@ func (fx *archiveFixture) enqueueArchive(t *testing.T, objectID string, dueAt ti
 
 func (fx *archiveFixture) intent(t *testing.T, id uuid.UUID) (status string, reason string) {
 	t.Helper()
-	row, err := fx.db.Gen(context.Background()).GetRailIntent(context.Background(), id)
+	row, err := fx.db.Gen(dbtest.WithTestMerchant(context.Background())).GetRailIntent(dbtest.WithTestMerchant(context.Background()), gen.GetRailIntentParams{MerchantID: dbtest.TestMerchantID.UUID(), ID: id})
 	require.NoError(t, err)
 	if row.LastFailureReason != nil {
 		reason = *row.LastFailureReason
@@ -81,7 +83,7 @@ func (fx *archiveFixture) intent(t *testing.T, id uuid.UUID) (status string, rea
 
 func (fx *archiveFixture) makeDue(t *testing.T, id uuid.UUID) {
 	t.Helper()
-	_, err := fx.db.Pool().Exec(context.Background(),
+	_, err := fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()),
 		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", id)
 	require.NoError(t, err)
 }
@@ -98,7 +100,7 @@ func TestArchiveIntentParksUnderReadonlyDrainsUnderFull(t *testing.T) {
 	id := fx.enqueueArchive(t, objectID, time.Now().Add(-time.Minute))
 
 	// readonly: parks, no provider traffic.
-	_, err := fx.runnerWith(readonlyModeConfig()).RunExecuteOnce(context.Background())
+	_, err := fx.runnerWith(readonlyModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 	status, reason := fx.intent(t, id)
 	assert.Equal(t, StatusPending, status, "readonly parks (durable), never fails")
@@ -108,7 +110,7 @@ func TestArchiveIntentParksUnderReadonlyDrainsUnderFull(t *testing.T) {
 	// limited: admin-origin archives EXECUTE (reactive completion of an
 	// explicit human request) — but make it due first.
 	fx.makeDue(t, id)
-	_, err = fx.runnerWith(limitedModeConfig()).RunExecuteOnce(context.Background())
+	_, err = fx.runnerWith(limitedModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 	status, _ = fx.intent(t, id)
 	assert.Equal(t, StatusSucceeded, status, "admin-origin archive executes under limited")
@@ -133,17 +135,17 @@ func TestArchiveIntentSynchronousEnqueueAndExecute(t *testing.T) {
 	params := EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "stripe",
-		PspID:          dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "stripe"),
+		PspID:          dbtest.EnsureTestPSP(dbtest.WithTestMerchant(context.Background()), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "stripe"),
 		IntentType:     TypeStripeArchivePrice,
 		Payload:        StripeArchivePayload{ObjectID: objectID, MarkerKey: "retired.usd.900.30"},
 		IdempotencyKey: StripeArchiveIdempotencyKey(TypeStripeArchivePrice, objectID),
 		NextAttemptAt:  time.Now().Add(-time.Minute),
 		Origin:         OriginAdmin,
 	}
-	row, err := fx.runnerWith(readonlyModeConfig()).EnqueueAndExecute(context.Background(), params)
+	row, err := fx.runnerWith(readonlyModeConfig()).EnqueueAndExecute(dbtest.WithTestMerchant(context.Background()), params)
 	require.NoError(t, err, "a parked archive is not an error")
 	t.Cleanup(func() {
-		_, _ = fx.db.Pool().Exec(context.Background(),
+		_, _ = fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()),
 			"DELETE FROM billing.rail_intents WHERE id = $1", row.ID)
 	})
 	assert.Equal(t, StatusPending, row.Status)
@@ -153,7 +155,7 @@ func TestArchiveIntentSynchronousEnqueueAndExecute(t *testing.T) {
 
 	// The durable row drains when the scheduled executor runs under full.
 	fx.makeDue(t, row.ID)
-	_, err = fx.runnerWith(fullModeConfig()).RunExecuteOnce(context.Background())
+	_, err = fx.runnerWith(fullModeConfig()).RunExecuteOnce(dbtest.WithTestMerchant(context.Background()))
 	require.NoError(t, err)
 	status, _ := fx.intent(t, row.ID)
 	assert.Equal(t, StatusSucceeded, status)
@@ -166,7 +168,7 @@ func TestArchiveIntentSynchronousEnqueueAndExecute(t *testing.T) {
 // uses) supersedes the intent instead of archiving a now-wanted object.
 func TestArchiveIntentRelevanceSupersedesWhenObjectJoinsCatalog(t *testing.T) {
 	fx := newArchiveFixture(t)
-	ctx := context.Background()
+	ctx := dbtest.WithTestMerchant(context.Background())
 	objectID := "price_join_" + uuid.NewString()[:8]
 	fx.api.prices[objectID] = &catalog.StripePrice{ID: objectID, Active: true}
 	id := fx.enqueueArchive(t, objectID, time.Now().Add(-time.Minute))

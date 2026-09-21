@@ -60,7 +60,7 @@ INSERT INTO openrails.payments (
 ON CONFLICT DO NOTHING;
 
 -- name: GetPaymentByID :one
-SELECT * FROM openrails.payments WHERE id = $1
+SELECT * FROM openrails.payments WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
 -- name: GetPaymentWithPriceProduct :one
@@ -68,12 +68,12 @@ SELECT sqlc.embed(purch), sqlc.embed(p), sqlc.embed(prod)
 FROM openrails.payments purch
 JOIN openrails.prices p ON p.id = purch.price_id
 JOIN openrails.products prod ON prod.id = p.product_id
-WHERE purch.id = $1
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.id = $1
   AND purch.deleted_at IS NULL;
 
 -- name: ListRefundsForPayment :many
 SELECT * FROM openrails.payments
-WHERE refunded_payment_id = $1
+WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND refunded_payment_id = $1
   AND deleted_at IS NULL
 ORDER BY created_at DESC;
 
@@ -93,23 +93,23 @@ WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
   AND purch.deleted_at IS NULL;
 
 -- name: DeletePayment :execrows
-DELETE FROM openrails.payments WHERE id = $1
+DELETE FROM openrails.payments WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
 -- name: ListRefundRowsForTotal :many
 SELECT amount, status FROM openrails.payments
-WHERE refunded_payment_id = $1
+WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND refunded_payment_id = $1
   AND deleted_at IS NULL;
 
 -- name: LinkRefundedPayment :execrows
 UPDATE openrails.payments
 SET refunded_payment_id = $2
-WHERE id = $1 AND refunded_payment_id IS NULL
+WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1 AND refunded_payment_id IS NULL
   AND deleted_at IS NULL;
 
 -- name: GetRefundByAdminIdempotencyKey :one
 SELECT * FROM openrails.payments purch
-WHERE purch.refunded_payment_id = $1
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.refunded_payment_id = $1
   AND purch.metadata ->> 'admin_refund_idempotency_key' = sqlc.arg(idem_key)::text
   AND purch.deleted_at IS NULL
 LIMIT 1;
@@ -129,7 +129,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- name: CompleteRefundReservation :execrows
 UPDATE openrails.payments
 SET transaction_id = $2, status = 'completed', metadata = $3, money_movement = 'rail'
-WHERE id = $1
+WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND refunded_payment_id IS NOT NULL
   AND amount < 0
   AND status = 'pending'
@@ -148,7 +148,7 @@ LIMIT 1;
 -- name: CompleteProviderAttempt :execrows
 UPDATE openrails.payments
 SET transaction_id = $2, status = 'completed', metadata = $3, money_movement = 'rail'
-WHERE id = $1
+WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND amount > 0
   AND status = 'pending'
   AND deleted_at IS NULL;
@@ -163,7 +163,7 @@ WHERE id = $1
 -- name: CompleteProviderAttemptInPlace :execrows
 UPDATE openrails.payments
 SET metadata = $2, status = 'completed', money_movement = 'none'
-WHERE id = $1
+WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND amount > 0
   AND status = 'pending'
   AND deleted_at IS NULL;
@@ -197,7 +197,7 @@ SELECT EXISTS (
 
 -- name: GetLatestChargeBySubscriptionID :one
 SELECT * FROM openrails.payments purch
-WHERE purch.subscription_id = $1
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.subscription_id = $1
   AND purch.amount > 0
   AND COALESCE(purch.status::text, 'completed') = 'completed'
   AND purch.deleted_at IS NULL
@@ -205,12 +205,12 @@ ORDER BY purch.purchased_at DESC
 LIMIT 1;
 
 -- name: MarkPaymentFailed :exec
-UPDATE openrails.payments SET status = 'failed' WHERE id = $1
+UPDATE openrails.payments SET status = 'failed' WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
 -- name: CountPaymentsFiltered :one
 SELECT count(*) FROM openrails.payments purch
-WHERE COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
   AND (sqlc.narg(customer_id)::uuid IS NULL OR purch.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(price_id)::uuid IS NULL OR purch.price_id = sqlc.narg(price_id)::uuid)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR purch.subscription_id = sqlc.narg(subscription_id)::uuid)
@@ -228,7 +228,7 @@ WHERE COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
 -- Sorting is static SQL over a validated (sort_by, sort_desc) pair via the
 -- CASE pattern — no identifier interpolation (#334 escape-hatch rule).
 SELECT * FROM openrails.payments purch
-WHERE COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
   AND (sqlc.narg(customer_id)::uuid IS NULL OR purch.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(price_id)::uuid IS NULL OR purch.price_id = sqlc.narg(price_id)::uuid)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR purch.subscription_id = sqlc.narg(subscription_id)::uuid)

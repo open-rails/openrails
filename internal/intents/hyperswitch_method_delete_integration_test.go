@@ -143,7 +143,7 @@ func TestHyperSwitchDeletionRetainsExactTargetThroughUncertainty(t *testing.T) {
 			out := f.run(t, f.pm)
 			if mode != "success" {
 				require.False(t, out.Done)
-				method, err := f.db.Gen(f.ctx).GetPaymentMethodByID(f.ctx, f.pm.ID)
+				method, err := f.db.Gen(f.ctx).GetPaymentMethodByID(f.ctx, gen.GetPaymentMethodByIDParams{MerchantID: dbtest.TestMerchantID.UUID(), ID: f.pm.ID})
 				require.NoError(t, err)
 				row := f.operation(t)
 				require.Equal(t, "delete:"+row.ID.String(), method.ParkReason)
@@ -199,7 +199,7 @@ func TestHyperSwitchDeletionRefusesForeignAliasesAndPinnedOperations(t *testing.
 			_, err := (&PaymentMethodDeleteThrough{Runner: f.runner}).ExecutePaymentMethodDelete(f.ctx, f.pm)
 			require.Error(t, err)
 			require.Zero(t, f.calls.Load())
-			method, err := f.db.Gen(f.ctx).GetPaymentMethodByID(f.ctx, f.pm.ID)
+			method, err := f.db.Gen(f.ctx).GetPaymentMethodByID(f.ctx, gen.GetPaymentMethodByIDParams{MerchantID: dbtest.TestMerchantID.UUID(), ID: f.pm.ID})
 			require.NoError(t, err)
 			require.Empty(t, method.ParkReason)
 		})

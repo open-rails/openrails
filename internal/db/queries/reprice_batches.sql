@@ -39,4 +39,4 @@ LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 UPDATE openrails.reprice_batches SET
     subscriptions_scheduled = sqlc.arg(subscriptions_scheduled)::int,
     subscriptions_blocked = sqlc.arg(subscriptions_blocked)::int
-WHERE id = sqlc.arg(id);
+WHERE reprice_batches.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id);

@@ -149,9 +149,14 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 
 	state := &LocalState{}
 
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	subs, err := q.ReconcileListSubscriptionsByRails(ctx, gen.ReconcileListSubscriptionsByRailsParams{
-		Rails: names,
-		PspID: pspID,
+		MerchantID: scopeMerchantID.UUID(),
+		Rails:      names,
+		PspID:      pspID,
 	})
 	if err != nil {
 		return nil, err
@@ -198,7 +203,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 		state.Subscriptions = append(state.Subscriptions, s)
 	}
 
-	prices, err := q.ReconcileListPricesWithPSPLinks(ctx, pspID)
+	prices, err := q.ReconcileListPricesWithPSPLinks(ctx, gen.ReconcileListPricesWithPSPLinksParams{MerchantID: scopeMerchantID.UUID(), PspID: pspID})
 	if err != nil {
 		return nil, err
 	}
@@ -230,8 +235,9 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 	}
 
 	pms, err := q.ReconcileListPaymentMethodsByRails(ctx, gen.ReconcileListPaymentMethodsByRailsParams{
-		Rails: names,
-		PspID: pspID,
+		MerchantID: scopeMerchantID.UUID(),
+		Rails:      names,
+		PspID:      pspID,
 	})
 	if err != nil {
 		return nil, err
@@ -262,7 +268,12 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 	if len(transactionIDs) == 0 {
 		return nil, nil
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	rows, err := l.DB.Gen(ctx).ReconcileListPaymentsByTransactionIDs(ctx, gen.ReconcileListPaymentsByTransactionIDsParams{
+		MerchantID:     scopeMerchantID.UUID(),
 		Rails:          localRailNames(provider),
 		PspID:          pspID,
 		TransactionIds: transactionIDs,
@@ -293,7 +304,11 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 // the phase-1 design).
 func SolanaSubscriptionSourceFromDB(d *db.DB) SolanaSubscriptionSource {
 	return func(ctx context.Context) ([]SolanaSubscriptionRef, error) {
-		rows, err := d.Gen(ctx).ReconcileListSolanaSubscriptionRefs(ctx)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
+		rows, err := d.Gen(ctx).ReconcileListSolanaSubscriptionRefs(ctx, scopeMerchantID.UUID())
 		if err != nil {
 			return nil, err
 		}
@@ -316,7 +331,11 @@ func SolanaSubscriptionSourceFromDB(d *db.DB) SolanaSubscriptionSource {
 func SolanaPlanSourceFromDB(d *db.DB) SolanaPlanSource {
 	return func(ctx context.Context) ([]string, error) {
 		set := map[string]struct{}{}
-		refs, err := d.Gen(ctx).ReconcileListSolanaSubscriptionRefs(ctx)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
+		refs, err := d.Gen(ctx).ReconcileListSolanaSubscriptionRefs(ctx, scopeMerchantID.UUID())
 		if err != nil {
 			return nil, err
 		}
@@ -360,8 +379,13 @@ func SolanaPlanSourceFromDB(d *db.DB) SolanaPlanSource {
 // discovery de-dup set both need every locally-known ref).
 func SolanaDueSubscriptionSourceFromDB(d *db.DB) SolanaDueSubscriptionSource {
 	return func(ctx context.Context, before time.Time) (map[string]struct{}, error) {
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
 		rows, err := d.Gen(ctx).ListDueSolanaSubscriptions(ctx, gen.ListDueSolanaSubscriptionsParams{
-			Now: before.UTC(),
+			MerchantID: scopeMerchantID.UUID(),
+			Now:        before.UTC(),
 		})
 		if err != nil {
 			return nil, err
@@ -380,7 +404,11 @@ func SolanaDueSubscriptionSourceFromDB(d *db.DB) SolanaDueSubscriptionSource {
 // record; backend errors surface so the run retries instead of parking noise.
 func SolanaLocalRecordResolverFromDB(d *db.DB) SolanaLocalRecordResolver {
 	return func(ctx context.Context, localID uuid.UUID) (*SolanaLocalRecord, error) {
-		row, err := d.Gen(ctx).GetCheckoutSessionByID(ctx, localID)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
+		row, err := d.Gen(ctx).GetCheckoutSessionByID(ctx, gen.GetCheckoutSessionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: localID})
 		if err == nil {
 			session, err := models.CheckoutSessionFromGen(row)
 			if err != nil {
@@ -407,7 +435,7 @@ func SolanaLocalRecordResolverFromDB(d *db.DB) SolanaLocalRecordResolver {
 		if !db.IsNotFound(err) {
 			return nil, err
 		}
-		intent, err := d.Gen(ctx).GetRailIntent(ctx, localID)
+		intent, err := d.Gen(ctx).GetRailIntent(ctx, gen.GetRailIntentParams{MerchantID: scopeMerchantID.UUID(), ID: localID})
 		if err == nil {
 			rec := &SolanaLocalRecord{Kind: SolanaLocalKindPullIntent, Rail: intent.Rail}
 			var payload struct {

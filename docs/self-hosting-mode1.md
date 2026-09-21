@@ -1,13 +1,15 @@
 # Self-hosting MODE 1: manifest-is-truth (`merchant_source: manifest`)
 
-MODE 1 is the default OpenRails deployment shape: the YAML you supply at boot
-**is** the source of truth, held in memory for the life of the process.
-OpenRails writes nothing back — there is no merchant-secret store, no seed-once
-dance, no store-vs-file divergence.
+MODE 1 is the default authority for merchant and provider configuration. The
+host supplies the configuration and credentials at boot; provider credentials
+stay in memory for the life of the runtime. Changing them means updating the
+host configuration and restarting. OpenRails persists provider metadata for
+references, but does not copy these credentials into its managed secret store.
 
-**Change anything = edit the file(s) + reboot.** This is rarely-changing
-CONFIG, not data. The opposite posture — API-driven merchants with a Vault/DB
-secret store — is MODE 2 (`merchant_source: api`). Comparison table:
+Catalog authority defaults to the same mode. Set `catalog_source: api` when
+products and prices should change dynamically while provider credentials remain
+host-owned. The opposite credential posture — API-driven merchant configuration
+with a Vault/DB secret store — is MODE 2 (`merchant_source: api`). Comparison table:
 [standalone-integration.md](standalone-integration.md#two-merchant-source-modes).
 Deployment shape does not imply mode: embedded and standalone can run either.
 
@@ -15,7 +17,7 @@ Deployment shape does not imply mode: embedded and standalone can run either.
 
 | File | Owns | Loaded by |
 |---|---|---|
-| `config.yaml` | process/infrastructure config (env, DB, Redis, `provider_write_mode`, `test_mode`, `merchant_source`) | `config.Load` (standalone) / built programmatically (embedded hosts) |
+| `config.yaml` | process/infrastructure config (env, DB, Redis, `provider_write_mode`, `test_mode`, `merchant_source`, `catalog_source`) | `config.Load` (standalone) / built programmatically (embedded hosts) |
 | merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server --merchant-manifest <path>`) | merchant identity, profile, invoice policy, **PSPs** — rail accounts + secrets (`merchants.<slug>.psps.<key>.<rail>`) | standalone server boot, every boot; embedded hosts pass the same shape to `UpsertMerchantConfig` |
 | catalog manifest (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails push-merchant-catalog` (or the embedded push API) |
 
@@ -76,16 +78,22 @@ manifest outright: two truths.
 
 ## What is rejected in mode 1
 
-- Every catalog and payment-provider **mutation** API — product/price
-  create/update/activate/deactivate, `POST /catalog/publish`,
+- Payment-provider **mutation** APIs —
   `PUT/DELETE /v1/merchant/payment-providers/:provider`, and their embedded
-  `/billing/v1` twins — answers **405** with machine code `manifest_driven`:
-  edit the YAML and reboot. Reads stay available, and the routes stay mounted
-  so callers get the pointed error, never a bare 404.
+  `/billing/v1` twins — answer **405** with machine code `manifest_driven`:
+  update host configuration and restart. Reads stay available, and the routes
+  stay mounted so callers get the pointed error, never a bare 404.
+- Catalog APIs also return 405 by default. Set `catalog_source: api` to permit
+  authorized dynamic product/price/metering edits while keeping provider
+  credentials host-owned. `catalog_source: manifest` uses the catalog push
+  command and refuses catalog API writes, including `POST /catalog/publish`.
 - `openrails dump-merchant-config` errors: there is no store to dump — the
   YAML you already hold is the export.
-- `ENCRYPTION_MASTER_KEY` / `secret_backend` posture is irrelevant: no
-  persistent secret store is ever constructed.
+- Provider credentials need no `ENCRYPTION_MASTER_KEY`. Optional managed
+  alert-webhook URLs use `secret_backend` and require encryption when stored in
+  the DB; HyperSwitch SDK capture authorization also requires DB encryption.
+  Without that protection, those features refuse secret persistence while
+  host-owned Stripe credentials and ordinary catalog operations remain usable.
 
 ## Rotation walkthrough
 
@@ -97,8 +105,10 @@ manifest outright: two truths.
 ## Mode 2 in one line
 
 `merchant_source: api`: no manifests at boot (a present manifest file refuses
-boot: two truths), merchants/catalog mutate over the HTTP APIs, secrets live in Vault
-KV or the DEK-encrypted DB store, and a secret backend is REQUIRED outside
-development. Initial bootstrap is `openrails push-merchant-config --seed` — a
+boot: two truths), merchant/provider configuration mutates over the HTTP APIs,
+and secrets live in the explicitly selected Vault KV or DB store. DB encryption
+is required outside development. Catalog APIs are enabled by default; an
+explicit `catalog_source: manifest` instead gives catalog authority to a separate
+catalog manifest. Initial bootstrap is `openrails push-merchant-config --seed` — a
 one-time, create-only import of a manifest file into those stores (the command
 refuses without `--seed`; the stores are the truth afterward).

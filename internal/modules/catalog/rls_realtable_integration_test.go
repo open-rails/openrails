@@ -15,12 +15,9 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// This test proves end-to-end #227 RLS enforcement on a REAL openrails.* table
-// through a REAL repo: it runs the actual migrations (so 001_schema.up.sql applies
-// its policies + provisions the host test login), connects as openrails_app, and drives
-// ProductRepo.GetAll — a no-filter read — to show it returns ONLY the pinned
-// merchant's rows. This is the request-path chain (middleware pins conn -> repo
-// uses db.Q(ctx) -> Postgres RLS) exercised on production code.
+// This test exercises the production product repository with two merchants.
+// Its explicit predicates must isolate both normal and owner connections, and
+// missing merchant authority must fail before a query can expose any rows.
 //
 // Requires OPENRAILS_TEST_DB_DSN (a SUPER/admin DSN). Run against a --network host
 // Postgres when testcontainers is flaky:
@@ -29,11 +26,10 @@ import (
 //	OPENRAILS_TEST_DB_DSN=postgresql://test:test@127.0.0.1:5599/openrails?sslmode=disable \
 //	  go test -tags integration -run TestRLSRealTable ./internal/modules/catalog/
 
-func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
+func TestProductRepoMerchantIsolation(t *testing.T) {
 	ctx := context.Background()
 
-	// Shared, fully-migrated DB (incl. 050: RLS + FORCE + openrails_app) with the
-	// app role's login already enabled. super bypasses RLS; app enforces it.
+	// Shared, fully migrated test storage with privileged and normal logins.
 	superDSN, appDSN := dbtest.SharedRLSPostgres(t)
 
 	// Idempotently seed two tenants' products as super (super bypasses RLS, so it
@@ -62,41 +58,38 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 		require.NoError(t, e, stmt)
 	}
 
-	// Connect as the unprivileged openrails_app role (RLS ENFORCES).
+	// Connect as the normal runtime login.
 	app, err := db.NewDB(t.Context(), &config.DBConfig{URL: appDSN})
 	require.NoError(t, err)
 	defer app.Close()
-	posture, err := app.CheckRLSPosture(ctx)
-	require.NoError(t, err)
-	require.True(t, posture.Enforcing, "must connect as an RLS-enforcing role")
+	for _, database := range []*db.DB{app, super} {
+		repo := NewProductService(database)
 
-	repo := NewProductService(app)
+		// (1) Missing authority fails closed, independently of the database role.
+		bare, err := repo.GetAll(ctx)
+		require.Error(t, err)
+		require.Empty(t, bare)
 
-	// (1) Without a pinned merchant connection: fail-closed (GetAll sees nothing).
-	bare, err := repo.GetAll(ctx)
-	require.NoError(t, err)
-	require.Len(t, bare, 0, "no pinned merchant conn => RLS fail-closed, repo sees nothing")
+		// (2) Selected merchant A sees only its row through explicit predicates.
+		ctxA := merchant.WithID(ctx, mustTID(tenantA))
+		connA, releaseA, err := database.WithMerchantConn(ctxA)
+		require.NoError(t, err)
+		gotA, err := repo.GetAll(connA)
+		require.NoError(t, err)
+		require.Len(t, gotA, 1, "merchant A sees exactly its own product")
+		require.Equal(t, keyA, gotA[0].Key)
+		releaseA()
 
-	// (2) Pinned to merchant A: the real repo's no-filter GetAll returns ONLY
-	// merchant A's product — Postgres enforced it, not a WHERE clause in the repo.
-	ctxA := merchant.WithID(ctx, mustTID(tenantA))
-	connA, releaseA, err := app.WithMerchantConn(ctxA)
-	require.NoError(t, err)
-	gotA, err := repo.GetAll(connA)
-	require.NoError(t, err)
-	require.Len(t, gotA, 1, "merchant A sees exactly its own product")
-	require.Equal(t, keyA, gotA[0].Key)
-	releaseA()
-
-	// (3) Pinned to merchant B: sees only merchant B's product. No cross-merchant bleed.
-	ctxB := merchant.WithID(ctx, mustTID(tenantB))
-	connB, releaseB, err := app.WithMerchantConn(ctxB)
-	require.NoError(t, err)
-	gotB, err := repo.GetAll(connB)
-	require.NoError(t, err)
-	require.Len(t, gotB, 1)
-	require.Equal(t, keyB, gotB[0].Key)
-	releaseB()
+		// (3) Pinned to merchant B: sees only merchant B's product. No cross-merchant bleed.
+		ctxB := merchant.WithID(ctx, mustTID(tenantB))
+		connB, releaseB, err := database.WithMerchantConn(ctxB)
+		require.NoError(t, err)
+		gotB, err := repo.GetAll(connB)
+		require.NoError(t, err)
+		require.Len(t, gotB, 1)
+		require.Equal(t, keyB, gotB[0].Key)
+		releaseB()
+	}
 }
 
 func mustTID(s string) merchant.ID {

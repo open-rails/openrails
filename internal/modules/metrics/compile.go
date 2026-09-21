@@ -260,6 +260,7 @@ LEFT JOIN LATERAL (
     FROM openrails.ledger_accounts la
     JOIN openrails.ledger_transfers lt
       ON (lt.credit_account_id = la.id OR lt.debit_account_id = la.id)
+     AND lt.merchant_id = la.merchant_id
      AND lt.created_at < edge.bucket
     WHERE la.merchant_id = $1 AND la.account_type = 'customer_balance' AND la.customer_id IS NOT NULL
     GROUP BY la.customer_id, la.currency

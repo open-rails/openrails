@@ -3,7 +3,6 @@
 package intents
 
 import (
-	"context"
 	"net/http"
 	"testing"
 
@@ -22,7 +21,7 @@ func TestManualRebillCrashRerunConvergesWithoutDoubleCharge(t *testing.T) {
 	fake, client := newFakeNMIRebillGateway(t, fx)
 	fake.saleStatus.Store(http.StatusBadGateway) // outcome lost mid-flight (crash window)
 
-	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(fx.handlerCtx(), fx.enqueueParams(1))
 	require.NoError(t, err)
 	require.Equal(t, StatusUnknownNeedsVerify, row.Status)
 	require.EqualValues(t, 1, fake.saleCalls.Load())
@@ -31,7 +30,7 @@ func TestManualRebillCrashRerunConvergesWithoutDoubleCharge(t *testing.T) {
 	// the gateway is healthy again: the idempotency-key conflict returns the
 	// durable in-doubt row UNTOUCHED — no blind re-charge.
 	fake.saleStatus.Store(0)
-	rerun, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+	rerun, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(fx.handlerCtx(), fx.enqueueParams(1))
 	require.NoError(t, err)
 	assert.Equal(t, row.ID, rerun.ID)
 	assert.Equal(t, StatusUnknownNeedsVerify, rerun.Status, "an in-doubt attempt must verify, never re-execute")
@@ -41,10 +40,10 @@ func TestManualRebillCrashRerunConvergesWithoutDoubleCharge(t *testing.T) {
 	// The charge actually landed; the verifier's provider read converges the
 	// period and repairs the lifecycle.
 	fake.charged.Store(true)
-	_, err = fx.db.Pool().Exec(context.Background(),
+	_, err = fx.db.Pool().Exec(fx.handlerCtx(),
 		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
-	_, err = fx.rebillRunner(client, fullModeConfig()).RunVerifyOnce(context.Background())
+	_, err = fx.rebillRunner(client, fullModeConfig()).RunVerifyOnce(fx.handlerCtx())
 	require.NoError(t, err)
 
 	assert.Equal(t, StatusSucceeded, fx.intentByID(t, row.ID).Status)

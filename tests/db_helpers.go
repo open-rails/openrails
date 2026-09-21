@@ -83,6 +83,9 @@ func (suite *TestContainerSuite) InsertPrice(ctx context.Context, p *models.Pric
 // pass through untouched.
 func (suite *TestContainerSuite) PinPSP(ctx context.Context, rail string) context.Context {
 	suite.t.Helper()
+	if _, err := merchant.Require(ctx); err != nil {
+		ctx = dbtest.WithTestMerchant(ctx)
+	}
 	if rail == "" || models.IsOffRailChannel(rail) {
 		return ctx
 	}
@@ -186,6 +189,9 @@ func (suite *TestContainerSuite) lotRemaining(ctx context.Context, merchantID, l
 // GetPaymentByID loads a payment by id (fails the test when missing).
 func (suite *TestContainerSuite) GetPaymentByID(ctx context.Context, id uuid.UUID) *models.Payment {
 	suite.t.Helper()
+	if _, err := merchant.Require(ctx); err != nil {
+		ctx = dbtest.WithTestMerchant(ctx)
+	}
 	p, err := payments.NewPaymentRepo(suite.FixtureDB()).GetByID(ctx, id)
 	require.NoError(suite.t, err, "Failed to get payment %s", id)
 	return p
@@ -203,6 +209,9 @@ func (suite *TestContainerSuite) GetPaymentByTransaction(ctx context.Context, ra
 // GetPaymentMethod loads a payment method by id (fails the test when missing).
 func (suite *TestContainerSuite) GetPaymentMethod(ctx context.Context, id uuid.UUID) *models.PaymentMethod {
 	suite.t.Helper()
+	if _, err := merchant.Require(ctx); err != nil {
+		ctx = dbtest.WithTestMerchant(ctx)
+	}
 	pm, err := paymentmethods.NewPaymentMethodRepo(suite.FixtureDB()).GetByID(ctx, id)
 	require.NoError(suite.t, err, "Failed to get payment method %s", id)
 	return pm

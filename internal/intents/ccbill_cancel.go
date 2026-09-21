@@ -1,6 +1,8 @@
 package intents
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"errors"
 	"fmt"
@@ -244,7 +246,11 @@ func (s *CCBillCancelScheduler) ScheduleCCBillCancel(ctx context.Context, userID
 	if s == nil || s.db == nil {
 		return fmt.Errorf("intent ledger unavailable for ccbill cancel scheduling")
 	}
-	sub, err := s.db.Gen(ctx).GetSubscriptionByID(ctx, subscriptionID)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
+	sub, err := s.db.Gen(ctx).GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: subscriptionID})
 	if err != nil {
 		return fmt.Errorf("load subscription for ccbill cancel intent: %w", err)
 	}

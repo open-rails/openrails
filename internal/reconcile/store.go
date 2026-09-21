@@ -203,7 +203,11 @@ func (s *PGStore) UpsertFinding(ctx context.Context, runID uuid.UUID, f Finding)
 
 func (s *PGStore) ListActionableFindingsByProvider(ctx context.Context, provider Provider) ([]FindingRecord, error) {
 	providerStr := string(provider)
-	rows, err := s.DB.Gen(ctx).ListActionableReconciliationFindingsByProvider(ctx, &providerStr)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	rows, err := s.DB.Gen(ctx).ListActionableReconciliationFindingsByProvider(ctx, gen.ListActionableReconciliationFindingsByProviderParams{MerchantID: scopeMerchantID.UUID(), Evidence: &providerStr})
 	if err != nil {
 		return nil, err
 	}
@@ -250,12 +254,21 @@ func (s *PGStore) AutoResolveVanished(ctx context.Context, provider Provider, ru
 }
 
 func (s *PGStore) MarkFindingVanished(ctx context.Context, id uuid.UUID) error {
-	_, err := s.DB.Gen(ctx).MarkReconciliationFindingVanished(ctx, id)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
+	_, err := s.DB.Gen(ctx).MarkReconciliationFindingVanished(ctx, gen.MarkReconciliationFindingVanishedParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 	return err
 }
 
 func (s *PGStore) MarkFindingAutoFixed(ctx context.Context, id uuid.UUID, resolutionEvidence map[string]any) error {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
 	_, err := s.DB.Gen(ctx).MarkReconciliationFindingAutoFixed(ctx, gen.MarkReconciliationFindingAutoFixedParams{
+		MerchantID:         scopeMerchantID.UUID(),
 		ID:                 id,
 		ResolutionEvidence: marshalEvidence(resolutionEvidence),
 	})
@@ -263,8 +276,13 @@ func (s *PGStore) MarkFindingAutoFixed(ctx context.Context, id uuid.UUID, resolu
 }
 
 func (s *PGStore) MarkFindingNotified(ctx context.Context, id uuid.UUID, at time.Time, severity Severity) error {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
 	_, err := s.DB.Gen(ctx).MarkReconciliationFindingNotified(ctx, gen.MarkReconciliationFindingNotifiedParams{
-		ID: id, NotifiedAt: at, Severity: string(severity),
+		MerchantID: scopeMerchantID.UUID(),
+		ID:         id, NotifiedAt: at, Severity: string(severity),
 	})
 	return err
 }
@@ -328,7 +346,12 @@ func (s *PGStore) ListFindings(ctx context.Context, filter FindingFilter) ([]Fin
 	if filter.Limit <= 0 {
 		filter.Limit = 100
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	params := gen.ListReconciliationFindingsParams{
+		MerchantID:      scopeMerchantID.UUID(),
 		OnlyReviewQueue: filter.OnlyAdminQueue,
 		PageLimit:       int64(filter.Limit),
 		PageOffset:      int64(filter.Offset),
@@ -360,7 +383,11 @@ func (s *PGStore) AckFinding(ctx context.Context, id uuid.UUID, notes string) (b
 	if notes != "" {
 		notesPtr = &notes
 	}
-	n, err := s.DB.Gen(ctx).AckReconciliationFinding(ctx, gen.AckReconciliationFindingParams{ID: id, OperatorNotes: notesPtr})
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return false, scopeErr
+	}
+	n, err := s.DB.Gen(ctx).AckReconciliationFinding(ctx, gen.AckReconciliationFindingParams{MerchantID: scopeMerchantID.UUID(), ID: id, OperatorNotes: notesPtr})
 	return n > 0, err
 }
 
@@ -371,7 +398,11 @@ func (s *PGStore) DismissFinding(ctx context.Context, id uuid.UUID, notes string
 	if notes != "" {
 		notesPtr = &notes
 	}
-	n, err := s.DB.Gen(ctx).DismissReconciliationFinding(ctx, gen.DismissReconciliationFindingParams{ID: id, OperatorNotes: notesPtr})
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return false, scopeErr
+	}
+	n, err := s.DB.Gen(ctx).DismissReconciliationFinding(ctx, gen.DismissReconciliationFindingParams{MerchantID: scopeMerchantID.UUID(), ID: id, OperatorNotes: notesPtr})
 	return n > 0, err
 }
 

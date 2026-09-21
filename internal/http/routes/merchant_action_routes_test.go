@@ -343,6 +343,36 @@ func TestCatalogMeterWritesUseManifestModeGuard(t *testing.T) {
 	require.Equal(t, controlplane.PermMerchantCatalogRead, checker.perm)
 }
 
+func TestCatalogAuthorityDoesNotChangeProviderAuthority(t *testing.T) {
+	for _, merchantSource := range []string{config.MerchantSourceManifest, config.MerchantSourceAPI} {
+		for _, catalogSource := range []string{config.CatalogSourceManifest, config.CatalogSourceAPI} {
+			t.Run(merchantSource+"/"+catalogSource, func(t *testing.T) {
+				mux := http.NewServeMux()
+				checker := &merchantActionChecker{}
+				rt := &app.Runtime{Config: &config.Config{MerchantSource: merchantSource, CatalogSource: catalogSource}}
+				opts := Options{Gate: NewGate(GateOptions{Authenticator: merchantActionAuth{}, AdminPermissionChecker: checker})}
+				RegisterCatalogRoutes(router.NewMux(mux, "/catalog", nil), rt, opts)
+				RegisterPaymentProviderRoutes(router.NewMux(mux, "/providers", nil), rt, opts)
+				for _, request := range []struct{ path, source, permission string }{
+					{"/catalog/meters/storage", catalogSource, policy.PermMerchantCatalogUpdate},
+					{"/providers/stripe", merchantSource, controlplane.PermMerchantPaymentProvidersUpdate},
+				} {
+					checker.perm = ""
+					rec := httptest.NewRecorder()
+					mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, request.path, strings.NewReader(`{}`)))
+					if request.source == "manifest" {
+						require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+						require.Empty(t, checker.perm)
+					} else {
+						require.Equal(t, http.StatusForbidden, rec.Code, "API authority still requires authorization")
+						require.Equal(t, request.permission, checker.perm)
+					}
+				}
+			})
+		}
+	}
+}
+
 // The lifecycle archives stay mounted when the secret backend is read-only
 // (they never write a secret), while the credential-writing PUT is hidden;
 // both archives still carry the manifest-mode guard.

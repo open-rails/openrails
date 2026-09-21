@@ -84,6 +84,11 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 // relation for the supplied payment methods (bun-era
 // Relation("Subscriptions").Relation("Subscriptions.Product")).
 func (r *PaymentMethodRepo) attachPaymentMethodSubscriptions(ctx context.Context, methods []*models.PaymentMethod) error {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return queryScopeErr
+	}
+
 	if len(methods) == 0 {
 		return nil
 	}
@@ -92,7 +97,7 @@ func (r *PaymentMethodRepo) attachPaymentMethodSubscriptions(ctx context.Context
 		ids = append(ids, m.ID)
 	}
 	q := r.db.Gen(ctx)
-	subRows, err := q.ListSubscriptionsByPaymentMethodIDs(ctx, ids)
+	subRows, err := q.ListSubscriptionsByPaymentMethodIDs(ctx, gen.ListSubscriptionsByPaymentMethodIDsParams{MerchantID: queryMerchant.UUID(), PaymentMethodIds: ids})
 	if err != nil {
 		return err
 	}
@@ -111,7 +116,7 @@ func (r *PaymentMethodRepo) attachPaymentMethodSubscriptions(ctx context.Context
 	}
 	products := map[uuid.UUID]*models.Product{}
 	if len(productIDs) > 0 {
-		rows, err := q.ListProductsByIDs(ctx, productIDs)
+		rows, err := q.ListProductsByIDs(ctx, gen.ListProductsByIDsParams{MerchantID: queryMerchant.UUID(), Ids: productIDs})
 		if err != nil {
 			return err
 		}
@@ -138,7 +143,12 @@ func (r *PaymentMethodRepo) attachPaymentMethodSubscriptions(ctx context.Context
 }
 
 func (r *PaymentMethodRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.PaymentMethod, error) {
-	row, err := r.db.Gen(ctx).GetPaymentMethodByID(ctx, id)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
+	row, err := r.db.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: queryMerchant.UUID(), ID: id})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("payment method %s: %w", id, ErrPaymentMethodNotFound)
@@ -156,7 +166,12 @@ func (r *PaymentMethodRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.
 }
 
 func (r *PaymentMethodRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	rows, err := r.db.Gen(ctx).DeletePaymentMethod(ctx, id)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return queryScopeErr
+	}
+
+	rows, err := r.db.Gen(ctx).DeletePaymentMethod(ctx, gen.DeletePaymentMethodParams{MerchantID: queryMerchant.UUID(), ID: id})
 	if err != nil {
 		return err
 	}
@@ -270,11 +285,16 @@ func (r *PaymentMethodRepo) GetByRailMethodRefForPSP(ctx context.Context, rail s
 }
 
 func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMethod) error {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return queryScopeErr
+	}
+
 	meta, err := models.ToJSONB(method.Metadata)
 	if err != nil {
 		return err
 	}
-	rows, err := r.db.Gen(ctx).UpdatePaymentMethod(ctx, gen.UpdatePaymentMethodParams{
+	rows, err := r.db.Gen(ctx).UpdatePaymentMethod(ctx, gen.UpdatePaymentMethodParams{MerchantID: queryMerchant.UUID(),
 		ID:                   method.ID,
 		CustomerID:           method.CustomerID,
 		Rail:                 string(method.Rail),
@@ -298,7 +318,11 @@ func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMe
 
 // GetAllNMIBacked returns all payment methods for NMI-backed rails
 func (r *PaymentMethodRepo) GetAllNMIBacked(ctx context.Context) ([]*models.PaymentMethod, error) {
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByRails(ctx, []string{string(models.RailNMI)})
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByRails(ctx, gen.ListPaymentMethodsByRailsParams{MerchantID: mid.UUID(), Rails: []string{string(models.RailNMI)}})
 	if err != nil {
 		return nil, err
 	}
@@ -307,11 +331,16 @@ func (r *PaymentMethodRepo) GetAllNMIBacked(ctx context.Context) ([]*models.Paym
 
 // GetNMIBackedByUserID returns all payment methods for NMI-backed rails for a user
 func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
 	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByCustomerRails(ctx, gen.ListPaymentMethodsByCustomerRailsParams{
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByCustomerRails(ctx, gen.ListPaymentMethodsByCustomerRailsParams{MerchantID: queryMerchant.UUID(),
 		CustomerID: tsid,
 		Rails:      []string{string(models.RailNMI)},
 	})
@@ -322,11 +351,16 @@ func (r *PaymentMethodRepo) GetNMIBackedByUserID(ctx context.Context, userID str
 }
 
 func (r *PaymentMethodRepo) ExistsForUser(ctx context.Context, id uuid.UUID, userID string) (bool, error) {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return false, queryScopeErr
+	}
+
 	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return false, err
 	}
-	count, err := r.db.Gen(ctx).CountPaymentMethodForUser(ctx, gen.CountPaymentMethodForUserParams{
+	count, err := r.db.Gen(ctx).CountPaymentMethodForUser(ctx, gen.CountPaymentMethodForUserParams{MerchantID: queryMerchant.UUID(),
 		ID:         id,
 		CustomerID: tsid,
 	})
@@ -341,7 +375,12 @@ func (r *PaymentMethodRepo) WithTx(txdb *db.DB) *PaymentMethodRepo {
 }
 
 func (r *PaymentMethodRepo) GetByRail(ctx context.Context, rail models.Rail) ([]*models.PaymentMethod, error) {
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByRail(ctx, string(rail))
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByRail(ctx, gen.ListPaymentMethodsByRailParams{MerchantID: queryMerchant.UUID(), Rail: string(rail)})
 	if err != nil {
 		return nil, err
 	}
@@ -360,11 +399,16 @@ func (r *PaymentMethodRepo) RequireByID(ctx context.Context, id uuid.UUID) (*mod
 // payment-method id, derived via the subscription link (#589). Methods with no
 // charge history are simply absent from the map.
 func (r *PaymentMethodRepo) LatestChargeByMethodIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]models.PaymentMethodCharge, error) {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
 	out := make(map[uuid.UUID]models.PaymentMethodCharge, len(ids))
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := r.db.Gen(ctx).ListLatestChargeByPaymentMethodIDs(ctx, ids)
+	rows, err := r.db.Gen(ctx).ListLatestChargeByPaymentMethodIDs(ctx, gen.ListLatestChargeByPaymentMethodIDsParams{MerchantID: queryMerchant.UUID(), Ids: ids})
 	if err != nil {
 		return nil, err
 	}

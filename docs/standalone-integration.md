@@ -82,8 +82,9 @@ openrails run-server --config /etc/openrails/config.yaml \
 - **Merchant-secret storage** (mode 2 / `merchant_source: api` only): a secret
   backend is required outside development — either Vault
   (`secret_backend: vault`) or the DB store with `ENCRYPTION_MASTER_KEY`
-  (base64, 32-byte AES-256) for envelope encryption. Mode 1 persists no secrets,
-  so this gate does not apply there.
+  (base64, 32-byte AES-256) for envelope encryption. Host provider credentials
+  stay in memory. Optional managed alert-webhook URLs and HyperSwitch SDK
+  capture authorization have their own encryption requirements.
 - Behind a load balancer, set `trusted_proxies` to its CIDR range or
   `X-Forwarded-For` is ignored and rate limiting keys on the LB's address.
 
@@ -95,9 +96,16 @@ openrails run-server --config /etc/openrails/config.yaml \
 |---|---|---|
 | Source of truth | YAML mounted at boot, held in memory | DB + Vault, mutated over HTTP APIs |
 | Change a merchant/credential | edit file(s) + reboot | call the API |
-| Secrets at rest | never persisted (in-memory) | Vault KV or DEK-encrypted DB (required outside dev) |
+| Provider credentials at rest | never persisted (in-memory) | Vault KV or DEK-encrypted DB (required outside dev) |
 | Merchant/PSP mutation APIs | 405 `manifest_driven` (reads work) | full surface |
 | Pick when | one/few merchants you operate yourself; secrets rendered by Vault Agent/k8s | merchants managed at runtime, SaaS-style |
+
+`catalog_source` independently selects `manifest` or `api`; empty follows
+`merchant_source`. Thus host-owned credentials can accompany an API-owned
+catalog, and managed credentials can accompany a manifest-owned catalog.
+Catalog manifest mode rejects API writes with 405 `manifest_driven`; API mode
+rejects mutating catalog pushes but allows plan-only comparisons. This does not
+change provider permissions, sandbox/live posture, or `provider_write_mode`.
 
 Full MODE 1 walkthrough (file layout, YAML secret overlays via
 `merchant_manifest_overlays`, rotation): [self-hosting-mode1.md](self-hosting-mode1.md).

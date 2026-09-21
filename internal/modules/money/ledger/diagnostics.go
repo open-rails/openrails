@@ -29,9 +29,8 @@ import (
 // corruption breaks conservation, which is the far cheaper check to run often
 // (O(accounts), no scan of the transfer log).
 //
-// Both run over whatever the supplied handle can see: on a merchant-scoped
-// (RLS) connection that is one merchant; on a privileged connection, pass
-// uuid.Nil to sweep the fleet.
+// Both require an explicitly selected merchant regardless of database role.
+// Platform fleet checks enumerate authorized merchants and call once per ID.
 
 // ConservationBreach is one (merchant, currency) ledger whose account balances
 // do not sum to zero.
@@ -75,8 +74,7 @@ type IntegrityReport struct {
 // OK reports whether the ledger is intact.
 func (r IntegrityReport) OK() bool { return len(r.Conservation) == 0 && len(r.Counters) == 0 }
 
-// CheckIntegrity runs both diagnostics. merchant uuid.Nil means "everything the
-// handle can see".
+// CheckIntegrity runs both diagnostics for one explicitly selected merchant.
 func CheckIntegrity(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (IntegrityReport, error) {
 	var r IntegrityReport
 	var err error
@@ -92,7 +90,10 @@ func CheckIntegrity(ctx context.Context, q gen.DBTX, merchant uuid.UUID) (Integr
 // CheckConservation returns every (merchant, currency) ledger whose balances do
 // not sum to zero. An empty slice is the healthy answer.
 func CheckConservation(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]ConservationBreach, error) {
-	rows, err := gen.New(q).ListLedgerConservationBreaches(ctx, merchantFilter(merchant))
+	if merchant == uuid.Nil {
+		return nil, fmt.Errorf("ledger: merchant is required")
+	}
+	rows, err := gen.New(q).ListLedgerConservationBreaches(ctx, merchant)
 	if err != nil {
 		return nil, fmt.Errorf("ledger: conservation check: %w", err)
 	}
@@ -113,7 +114,10 @@ func CheckConservation(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]C
 // and returns the accounts whose stored projection disagrees. An empty slice is
 // the healthy answer.
 func CheckCounterDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]CounterDrift, error) {
-	rows, err := gen.New(q).ListLedgerCounterDrifts(ctx, merchantFilter(merchant))
+	if merchant == uuid.Nil {
+		return nil, fmt.Errorf("ledger: merchant is required")
+	}
+	rows, err := gen.New(q).ListLedgerCounterDrifts(ctx, merchant)
 	if err != nil {
 		return nil, fmt.Errorf("ledger: counter drift check: %w", err)
 	}
@@ -133,13 +137,4 @@ func CheckCounterDrift(ctx context.Context, q gen.DBTX, merchant uuid.UUID) ([]C
 		})
 	}
 	return out, nil
-}
-
-// merchantFilter maps the nil UUID onto a SQL NULL ("no merchant predicate").
-func merchantFilter(merchant uuid.UUID) *uuid.UUID {
-	if merchant == uuid.Nil {
-		return nil
-	}
-	m := merchant
-	return &m
 }

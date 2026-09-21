@@ -154,7 +154,7 @@ func (s *MoneyService) SetInvoiceCollectionPaymentMethod(ctx context.Context, pa
 	now := s.now()
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		method, err := q.GetPaymentMethodByID(ctx, paymentMethodID)
+		method, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: tid.UUID(), ID: paymentMethodID})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrCollectionPaymentMethodInvalid
@@ -418,7 +418,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 			if !opts.manual {
 				return nil
 			}
-			live, err := q.GetRailIntent(ctx, *invoice.CollectionIntentID)
+			live, err := q.GetRailIntent(ctx, gen.GetRailIntentParams{MerchantID: tid.UUID(), ID: *invoice.CollectionIntentID})
 			if err == nil && live.Status == intents.StatusUnknownNeedsVerify {
 				return ErrInvoiceRetryOutcomeUnknown
 			}

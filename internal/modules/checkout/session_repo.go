@@ -101,7 +101,12 @@ func (r *CheckoutSessionRepo) Create(ctx context.Context, session *models.Checko
 }
 
 func (r *CheckoutSessionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.CheckoutSession, error) {
-	row, err := r.db.Gen(ctx).GetCheckoutSessionByID(ctx, id)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
+	row, err := r.db.Gen(ctx).GetCheckoutSessionByID(ctx, gen.GetCheckoutSessionByIDParams{MerchantID: queryMerchant.UUID(), ID: id})
 	if err != nil {
 		return nil, err
 	}
@@ -109,6 +114,11 @@ func (r *CheckoutSessionRepo) GetByID(ctx context.Context, id uuid.UUID) (*model
 }
 
 func (r *CheckoutSessionRepo) Update(ctx context.Context, session *models.CheckoutSession) error {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return queryScopeErr
+	}
+
 	if err := session.ValidateTerms(); err != nil {
 		return err
 	}
@@ -121,7 +131,7 @@ func (r *CheckoutSessionRepo) Update(ctx context.Context, session *models.Checko
 	if err != nil {
 		return err
 	}
-	rows, err := r.db.Gen(ctx).UpdateCheckoutSession(ctx, gen.UpdateCheckoutSessionParams{
+	rows, err := r.db.Gen(ctx).UpdateCheckoutSession(ctx, gen.UpdateCheckoutSessionParams{MerchantID: queryMerchant.UUID(),
 		ID:             session.ID,
 		CustomerID:     session.CustomerID,
 		PriceID:        session.PriceID,
@@ -151,6 +161,11 @@ func (r *CheckoutSessionRepo) Update(ctx context.Context, session *models.Checko
 }
 
 func (r *CheckoutSessionRepo) BindSolanaTransactionRequest(ctx context.Context, session *models.CheckoutSession, payer string, now time.Time) error {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return queryScopeErr
+	}
+
 	if session == nil {
 		return errors.New("checkout session is nil")
 	}
@@ -173,7 +188,7 @@ func (r *CheckoutSessionRepo) BindSolanaTransactionRequest(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	rows, err := r.db.Gen(ctx).BindSolanaCheckoutSession(ctx, gen.BindSolanaCheckoutSessionParams{
+	rows, err := r.db.Gen(ctx).BindSolanaCheckoutSession(ctx, gen.BindSolanaCheckoutSessionParams{MerchantID: queryMerchant.UUID(),
 		ID:        session.ID,
 		Reference: &ref,
 		RailState: state,
@@ -190,8 +205,13 @@ func (r *CheckoutSessionRepo) BindSolanaTransactionRequest(ctx context.Context, 
 }
 
 func (r *CheckoutSessionRepo) GetByReference(ctx context.Context, reference string) (*models.CheckoutSession, error) {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
 	ref := strings.TrimSpace(reference)
-	row, err := r.db.Gen(ctx).GetCheckoutSessionByReference(ctx, &ref)
+	row, err := r.db.Gen(ctx).GetCheckoutSessionByReference(ctx, gen.GetCheckoutSessionByReferenceParams{MerchantID: queryMerchant.UUID(), Reference: &ref})
 	if err != nil {
 		return nil, err
 	}
@@ -199,11 +219,16 @@ func (r *CheckoutSessionRepo) GetByReference(ctx context.Context, reference stri
 }
 
 func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail, now time.Time) (*models.CheckoutSession, error) {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
 	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).GetLatestOpenCheckoutSession(ctx, gen.GetLatestOpenCheckoutSessionParams{
+	row, err := r.db.Gen(ctx).GetLatestOpenCheckoutSession(ctx, gen.GetLatestOpenCheckoutSessionParams{MerchantID: queryMerchant.UUID(),
 		CustomerID: tsid,
 		PriceID:    &priceID,
 		Rail:       string(rail),

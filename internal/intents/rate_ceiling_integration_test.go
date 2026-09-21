@@ -324,6 +324,7 @@ func TestRateCeiling_EnqueueChokepointRefusesSixth(t *testing.T) {
 	merchant := seedCeilingMerchant(t, bootstrap)
 	dbi := dbtest.OpenMerchantDB(t, merchant)
 	pool := dbi.Pool()
+	ctx = merchantpkg.WithID(ctx, merchantpkg.ID(merchant))
 
 	// No window scrubbing: the ceiling counts THIS merchant's rows and the
 	// merchant is freshly seeded, so no sibling test can inflate it. It needed

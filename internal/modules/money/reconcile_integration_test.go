@@ -6,15 +6,16 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/google/uuid"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
 func TestReconcile_Clean(t *testing.T) {
-	svc, pool, payer, _, ctx := moneyInEnv(t)
-	resetMoneyLedger(t, pool, ctx)
+	svc, payer, ctx := isolatedReconcileEnv(t)
 	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 	rep, err := svc.Reconcile(ctx)
@@ -23,8 +24,7 @@ func TestReconcile_Clean(t *testing.T) {
 }
 
 func TestReconcile_IgnoresLegacyPostgresHoldRows(t *testing.T) {
-	svc, pool, payer, _, ctx := moneyInEnv(t)
-	resetMoneyLedger(t, pool, ctx)
+	svc, payer, ctx := isolatedReconcileEnv(t)
 	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000, Source: "seed"})
 	require.NoError(t, err)
 
@@ -41,29 +41,15 @@ func TestReconcile_IgnoresLegacyPostgresHoldRows(t *testing.T) {
 // DERIVED from money_blocks + durable windows, while request holds are Redis TTL
 // state (#505), so there is no cache or Postgres request-hold state to reconcile.
 
-func resetMoneyLedger(t *testing.T, _ *pgxpool.Pool, ctx context.Context) {
+// Reconciliation owns a fresh merchant ledger; it never erases another test's
+// immutable observations, authorizations, grants or transfers.
+func isolatedReconcileEnv(t *testing.T) (*money.MoneyService, identity.CustomerID, context.Context) {
 	t.Helper()
-	// The ledger is append-only BY DESIGN: openrails_app holds SELECT,INSERT and
-	// nothing else on ledger_transfers/ledger_accounts (0001_schema). Wiping them
-	// is a fixture privilege no production role has, so the reset asks for the
-	// owner rather than the grant being widened to let a test DELETE.
-	pool := dbtest.SharedSuperuserPGXPool(t)
-	// FK-safe order: invoice_payments/usage_events reference ledger_transfers,
-	// and operation_authorizations reference ledger_accounts. Delete those
-	// dependents first; transfers before accounts; grants after (self-FK ok in
-	// one statement).
-	for _, table := range []string{
-		"billing.invoice_payments",
-		"billing.usage_events",
-		"billing.provider_billing_observations",
-		"billing.provider_billing_qualifications",
-		"billing.operation_authorizations",
-		"billing.ledger_transfers",
-		"billing.grants",
-		"billing.ledger_accounts",
-		"billing.money_settings",
-	} {
-		_, err := pool.Exec(ctx, "DELETE FROM "+table)
-		require.NoError(t, err, "reset %s", table)
-	}
+	mid := merchant.ID(uuid.New())
+	database := dbtest.OpenMerchantDB(t, mid.UUID())
+	ctx := merchant.WithID(t.Context(), mid)
+	_, err := database.Qx(ctx).Exec(ctx, "INSERT INTO billing.merchants(id,slug) VALUES($1,$2)", mid.UUID(), "reconcile-"+mid.String())
+	require.NoError(t, err)
+	payer := identity.CustomerIDFromString(uuid.NewString())
+	return money.NewMoneyService(database), payer, ctx
 }

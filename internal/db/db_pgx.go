@@ -15,28 +15,21 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// MerchantGUC is the Postgres run-time configuration parameter (GUC) that carries
-// the active merchant id for Row Level Security. Migration 050 enables RLS on every
-// merchant-owned table with a policy of the form
-//
-//	merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid
-//
-// so a transaction that has set this GUC sees ONLY its own merchant's rows, and a
-// transaction that forgot to set it sees NOTHING (fail-closed). For RLS to
-// actually enforce, the application must connect as a non-superuser,
-// non-BYPASSRLS host runtime login.
+// MerchantGUC carries the merchant selected by the application for stored
+// functions and queries that explicitly call current_merchant_id(). It does not
+// filter arbitrary SQL. Merchant isolation is enforced by scoped predicates and
+// composite relationships, independently of the PostgreSQL login's privileges.
 const MerchantGUC = "app.merchant_id"
 
 // Qx returns the queryable handle that sqlc-generated queries
-// (and the rare annotated raw-pgx escape hatch) MUST run on so the
-// migration-050 RLS policies constrain them (issue #227).
+// (and annotated raw-pgx operations) use to preserve transaction and session scope.
 //
 // Resolution order:
 //  1. an open pgx transaction this DB is scoped to (NewWithPgxTx),
 //  2. the request's pinned merchant-scoped connection (WithMerchantConn) — it
-//     carries the app.merchant_id GUC, so RLS fail-closed semantics apply,
-//  3. the base pool (control-plane access to GLOBAL non-RLS tables, or
-//     single-merchant/self-hosted before the connection middleware runs).
+//     carries the app.merchant_id GUC for explicit predicates and stored functions,
+//  3. the base pool. Choosing a handle never authorizes a merchant operation;
+//     callers must supply their verified merchant scope to tenant queries.
 
 func (d *DB) Qx(ctx context.Context) gen.DBTX {
 	if d == nil {
@@ -68,26 +61,11 @@ func (d *DB) Gen(ctx context.Context) *gen.Queries {
 // GenDirectory returns a sqlc query catalog bound to the BASE pool, deliberately
 // IGNORING any merchant-pinned connection in the context.
 //
-// It grants NO extra privilege, and its name says so. It was called GenGlobal
-// and read as "the cross-merchant accessor"; there is no such thing. There is
-// ONE pool and ONE role — dropping the app.merchant_id GUC does not escape RLS,
-// it FAILS it. Under the production openrails_app role a base-pool read of any
-// policy-bearing table (everything except merchants,
-// worker_state and destructive_action_switch) matches `merchant_id = NULL` and
-// returns ZERO ROWS AND NO ERROR. That false belief is what made the #732
-// destructive-rate ceiling, both armed-merchant scans, the #816 re-driver and
-// the whole provider-intent plane inert in production (#824/or#860/or#861/
-// or#862/or#868).
-//
-// So exactly two things may run on this handle:
-//  1. reads of the four POLICY-FREE tables above, and
-//  2. the SECURITY DEFINER directory / scan / work-queue functions of migrations
-//     0016, 0021 and 0022 — which RAISE when their definer cannot bypass RLS,
-//     so a mis-owned schema fails loudly instead of silently answering nothing.
-//
-// Anything else that spans merchants is a per-merchant walk: enumerate ids from
-// the policy-free merchants directory (or a 0022 work queue), then do the work
-// inside each merchant's own scope via RunInMerchantConn/MerchantTx.
+// It grants no additional privilege. This entrypoint is reserved for explicit
+// platform directory, coordination and worker-discovery operations. A missing
+// tenant context must never silently select it as a fallback. Workers enumerate
+// authorized merchant IDs here, then perform tenant work within each merchant's
+// scope using RunInMerchantConn/MerchantTx and scoped SQL parameters.
 //
 // Returns an erroring catalog when this DB has no pool (a tx-scoped wrapper).
 func (d *DB) GenDirectory() *gen.Queries {
@@ -145,7 +123,7 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 // RunInTx runs fn inside a pgx transaction (no merchant GUC — for control-plane
 // and privileged background work that uses explicit merchant_id predicates).
 // Begins on the pinned merchant connection
-// when one is in flight, so request-path transactions stay RLS-scoped via the
+// when one is in flight, so request-path transactions retain the
 // connection's session GUC.
 func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx) error) error {
 	tx, err := d.pgxBegin(ctx)
@@ -159,7 +137,7 @@ func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx
 	return tx.Commit(ctx)
 }
 
-// MerchantTx runs fn inside a pgx transaction with the RLS merchant GUC pinned
+// MerchantTx runs fn inside a pgx transaction with the merchant GUC pinned
 // from the context via set_config(..., is_local=true). Request-path
 // merchant-owned writes go through this (or run on a connection pinned by
 // WithMerchantConn).
@@ -306,8 +284,7 @@ func (l *lazyMerchantPgxConn) release() {
 		return
 	}
 	// Background context so release works even after request cancellation.
-	// Self-healing (get() re-sets the GUC before any use; RLS fails closed
-	// without it), but never return a connection that may still carry a
+	// get() re-sets the GUC before use, but never return a connection that may carry a
 	// merchant GUC to the pool: on reset failure, warn and close it so the
 	// pool destroys it instead of reusing it (#668).
 	if _, err := l.conn.Exec(context.Background(),

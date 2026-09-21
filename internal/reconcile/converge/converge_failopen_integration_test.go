@@ -3,6 +3,8 @@
 package converge
 
 import (
+	"github.com/open-rails/openrails/internal/db/gen"
+
 	"context"
 	"testing"
 	"time"
@@ -106,7 +108,11 @@ func TestConverge_FailOpen_StandingWindowSurvivesParking(t *testing.T) {
 	newEnd := time.Now().UTC().Add(20 * 24 * time.Hour).Truncate(time.Second)
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		lc := subscriptions.NewSubscriptionLifecycleService(appDB, nil, nil, nil, nil, nil)
-		row, err := appDB.Gen(ctx).GetSubscriptionByID(ctx, sub)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return scopeErr
+		}
+		row, err := appDB.Gen(ctx).GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: scopeMerchantID.UUID(), ID: sub})
 		require.NoError(t, err)
 		m, err := models.SubscriptionFromGen(row)
 		require.NoError(t, err)

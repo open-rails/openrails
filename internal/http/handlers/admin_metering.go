@@ -275,11 +275,11 @@ func adminUsageMeterPageDTO(
 }
 
 func adminCatalogOwnership(r *httprequest.Request) (string, bool) {
-	source := config.MerchantSourceManifest
+	source := config.CatalogSourceManifest
 	if r.State != nil && r.State.Config != nil {
-		source = r.State.Config.MerchantSourceMode()
+		source = r.State.Config.CatalogSourceMode()
 	}
-	return source, source == config.MerchantSourceAPI
+	return source, source == config.CatalogSourceAPI
 }
 
 func writeMeteringValidationError(r *httprequest.Request, code string, err error) {

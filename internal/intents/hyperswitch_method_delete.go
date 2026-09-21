@@ -125,7 +125,7 @@ func (h *HyperSwitchMethodDeleteHandler) Execute(ctx context.Context, in gen.Ope
 		}
 		return Succeeded(deletionEvidence(p))
 	}
-	row, err := h.DB.Gen(ctx).GetCustodian(ctx, *current.CustodianID)
+	row, err := h.DB.Gen(ctx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: current.MerchantID, ID: *current.CustodianID})
 	if err != nil || row.MerchantID != current.MerchantID || row.Environment != p.Environment {
 		return Parked("accepted custodian account is unavailable")
 	}

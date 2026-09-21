@@ -41,8 +41,9 @@ func (p *fakeProber) ProbeSubscription(ctx context.Context, subj ProbeSubject) (
 // subs `unknown` (RailErrors), proving the backoff hand-off.
 func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 	appDB := startReconcilePostgres(t)
-	merchantID := dbtest.TestMerchantID.UUID()
-	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	mid := newReconcileMerchant(t, appDB)
+	merchantID := mid.UUID()
+	baseCtx := merchant.WithID(context.Background(), mid)
 	lc := subscriptions.NewSubscriptionLifecycleService(appDB, nil, nil, nil, nil, nil, clockwork.NewRealClock())
 	now := time.Now().UTC().Truncate(time.Second) // second precision: adopted ends round-trip through timestamptz
 	periodEnd := now.Add(-5 * 24 * time.Hour)     // lapsed 5d ago (within dunning window)
@@ -70,7 +71,7 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 		}
 		// Distinct customer + product + price per sub (uq_subscriptions_customer_product_lifecycle).
 		mk := func(id uuid.UUID, rail, railSub string) uuid.UUID {
-			cust := dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+			cust := dbtest.EnsureCustomerIDPgxFor(ctx, t, appDB.Qx(ctx), merchantID, uuid.NewString())
 			prod, price := uuid.New(), uuid.New()
 			prices[id] = price
 			exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "ur-"+railSub, merchantID)
@@ -151,7 +152,7 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 	var res UnknownReconcileResult
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var err error
-		res, err = ReconcileUnknownCohort(ctx, appDB, lc, fetchers, probers, dbtest.TestMerchantID, now, UnknownReconcileOptions{})
+		res, err = ReconcileUnknownCohort(ctx, appDB, lc, fetchers, probers, mid, now, UnknownReconcileOptions{})
 		return err
 	}))
 
@@ -220,7 +221,7 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 	// Exactly-once: a second pass finds no unknown rows for the resolved subs —
 	// no duplicate payments, statuses stable (ported #367 charged-repair rerun).
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res2, err := ReconcileUnknownCohort(ctx, appDB, lc, fetchers, probers, dbtest.TestMerchantID, now, UnknownReconcileOptions{})
+		res2, err := ReconcileUnknownCohort(ctx, appDB, lc, fetchers, probers, mid, now, UnknownReconcileOptions{})
 		require.NoError(t, err)
 		require.Zero(t, res2.Renewed+res2.Adopted+res2.PastDue+res2.Cancelled)
 		var n int

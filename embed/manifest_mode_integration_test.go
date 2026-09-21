@@ -372,7 +372,7 @@ func TestManifestMode_MutationRoutesRejected405(t *testing.T) {
 		}
 		require.NoError(t, json.Unmarshal([]byte(body), &envelope), body)
 		require.Equal(t, "manifest_driven", envelope.Error.Code)
-		require.Contains(t, envelope.Error.Message, "reboot")
+		require.Contains(t, envelope.Error.Message, "host-declared")
 	}
 
 	// Provider-config writes.

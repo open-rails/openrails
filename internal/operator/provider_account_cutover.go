@@ -105,7 +105,7 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 	report := ProviderAccountCutoverReport{SubscriptionID: q.SubscriptionID}
 	err := a.Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
 		dbq := a.Runtime.DB.Gen(ctx)
-		sub, err := dbq.GetSubscriptionByID(ctx, q.SubscriptionID.UUID())
+		sub, err := dbq.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{ID: q.SubscriptionID.UUID(), MerchantID: merchantID.UUID()})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("subscription %s: %w", q.SubscriptionID, openrails.ErrNotFound)
@@ -120,7 +120,7 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 		}
 		if q.ReplacementPaymentMethodID != nil {
 			r := &subscriptions.ProviderAccountCutoverReplacement{}
-			pm, err := dbq.GetPaymentMethodByID(ctx, q.ReplacementPaymentMethodID.UUID())
+			pm, err := dbq.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{ID: q.ReplacementPaymentMethodID.UUID(), MerchantID: merchantID.UUID()})
 			switch {
 			case err == nil:
 				r.Found = true
@@ -160,7 +160,7 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 }
 
 func pspRow(ctx context.Context, q *gen.Queries, merchantID merchant.ID, id uuid.UUID) (gen.OpenrailsPsp, error) {
-	psp, err := q.GetPSP(ctx, id)
+	psp, err := q.GetPSP(ctx, gen.GetPSPParams{ID: id, MerchantID: merchantID.UUID()})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return gen.OpenrailsPsp{}, fmt.Errorf("psp %s: %w", id, openrails.ErrNotFound)

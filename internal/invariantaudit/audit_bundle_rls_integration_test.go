@@ -14,22 +14,21 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
 func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
-// exemptTables are the tables deliberately NOT under RLS (TEN-3, plus the
-// or#836 kill switch which must be readable before any merchant is resolved).
-var exemptTables = map[string]string{
+// globalTables are deliberate deployment-wide objects without merchant_id.
+var globalTables = map[string]string{
 	"merchants":                 "global merchant directory — the thing merchant_id points at",
 	"worker_state":              "deployment-wide worker liveness and capped-sweep resume points",
 	"destructive_action_switch": "or#836 kill switch — must be readable with no merchant context",
 }
 
-// pools opens a super pool (seeding) and an app-role pool (assertions), and
-// PROVES the app pool is the production role: not superuser, not BYPASSRLS.
-// Every DB-facing assertion below runs on appPool.
+// pools supplies owner and separately provisioned normal-login connections.
+// Tenant correctness must be identical for both.
 func pools(t *testing.T) (ctx context.Context, super, app *pgxpool.Pool) {
 	t.Helper()
 	ctx = context.Background()
@@ -43,202 +42,91 @@ func pools(t *testing.T) (ctx context.Context, super, app *pgxpool.Pool) {
 	require.NoError(t, err)
 	t.Cleanup(app.Close)
 
-	var isSuper, bypass bool
-	require.NoError(t, app.QueryRow(ctx,
-		`SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`).
-		Scan(&isSuper, &bypass))
-	require.False(t, isSuper, "audit harness must NOT run as superuser — that is what hid or#824")
-	require.False(t, bypass, "audit harness must NOT run as a BYPASSRLS role (TEN-9)")
 	return ctx, super, app
 }
 
-// TEN-1 / TEN-3: every table in the app schema has RLS enabled, except the
-// documented exempt set — and the exempt set is exactly what we expect, in both
-// directions (a new unpoliced table fails here; so does removing an exemption
-// without updating the register).
-func TestTEN1_AllTablesUnderRLSExceptDocumentedExemptions(t *testing.T) {
+// TEN-1 / TEN-3: every non-global table has a merchant column; no RLS
+// policy or flag may conceal a missing application predicate in these tests.
+func TestTEN1_ExplicitScopeSchemaWithoutRLS(t *testing.T) {
 	ctx, _, app := pools(t)
-
 	rows, err := app.Query(ctx, `
-		SELECT c.relname FROM pg_class c
-		  JOIN pg_namespace n ON n.oid = c.relnamespace
-		 WHERE n.nspname = 'billing' AND c.relkind = 'r' AND NOT c.relrowsecurity
-		 ORDER BY 1`)
+        SELECT c.relname, c.relrowsecurity OR c.relforcerowsecurity,
+            EXISTS(SELECT 1 FROM pg_policy p WHERE p.polrelid=c.oid),
+            EXISTS(SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped)
+        FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname='billing' AND c.relkind='r' ORDER BY c.relname`)
 	require.NoError(t, err)
 	defer rows.Close()
-
-	var unpoliced []string
+	count := 0
+	globals := map[string]string{}
 	for rows.Next() {
 		var name string
-		require.NoError(t, rows.Scan(&name))
-		unpoliced = append(unpoliced, name)
+		var flags, policies, merchantColumn bool
+		require.NoError(t, rows.Scan(&name, &flags, &policies, &merchantColumn))
+		require.False(t, flags, name)
+		require.False(t, policies, name)
+		if reason, global := globalTables[name]; global {
+			globals[name] = reason
+		} else {
+			require.True(t, merchantColumn, name)
+		}
+		count++
 	}
 	require.NoError(t, rows.Err())
-
-	for _, name := range unpoliced {
-		_, ok := exemptTables[name]
-		require.Truef(t, ok,
-			"table billing.%s has NO row level security and is not a documented TEN-3 exemption. "+
-				"Either add ENABLE+FORCE RLS with a merchant_isolation policy, or document the exemption "+
-				"in docs/invariants.md TEN-3 and add it to exemptTables here.", name)
-	}
-	require.Len(t, unpoliced, len(exemptTables),
-		"the TEN-3 exempt set drifted: got %v, register says %v", unpoliced, keys(exemptTables))
+	require.Greater(t, count, len(globalTables), "schema assertion must not be vacuous")
+	require.Equal(t, globalTables, globals)
 }
 
-// TEN-1 (second half): ENABLE alone is not enough. A table owner escapes its own
-// policies unless FORCE is set, and a policy without WITH CHECK lets a merchant
-// WRITE rows it cannot read. Both are silent failures, so assert both.
-func TestTEN1_PoliciedTablesForceRLSAndCheckWrites(t *testing.T) {
-	ctx, _, app := pools(t)
-
-	rows, err := app.Query(ctx, `
-		SELECT c.relname, c.relforcerowsecurity,
-		       (SELECT count(*) FROM pg_policy p
-		         WHERE p.polrelid = c.oid AND p.polname = 'merchant_isolation') AS pol,
-		       (SELECT count(*) FROM pg_policy p
-		         WHERE p.polrelid = c.oid AND p.polname = 'merchant_isolation'
-		           AND p.polqual IS NOT NULL AND p.polwithcheck IS NOT NULL) AS both_clauses
-		  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-		 WHERE n.nspname = 'billing' AND c.relkind = 'r' AND c.relrowsecurity
-		 ORDER BY 1`)
-	require.NoError(t, err)
-	defer rows.Close()
-
-	var noForce, noPolicy, halfPolicy []string
-	for rows.Next() {
-		var name string
-		var force bool
-		var pol, both int
-		require.NoError(t, rows.Scan(&name, &force, &pol, &both))
-		if !force {
-			noForce = append(noForce, name)
-		}
-		switch {
-		case pol == 0:
-			noPolicy = append(noPolicy, name)
-		case both == 0:
-			halfPolicy = append(halfPolicy, name)
-		}
-	}
-	require.NoError(t, rows.Err())
-
-	require.Empty(t, noForce, "RLS enabled but not FORCEd — the table owner escapes its own isolation (TEN-1)")
-	require.Empty(t, noPolicy, "RLS enabled with no merchant_isolation policy (TEN-1)")
-	require.Empty(t, halfPolicy, "merchant_isolation policy missing USING or WITH CHECK — writes go unchecked (TEN-1)")
-}
-
-// TEN-2 / FC-1: no GUC ⇒ zero rows, no error. This is the fail-closed guarantee
-// AND the trap: it is exactly why or#860's rate ceiling counts 0 forever. Pin
-// both halves — the isolation, and the silence.
-func TestTEN2_UnsetGUCYieldsZeroRowsAndNoError(t *testing.T) {
-	ctx, super, app := pools(t)
-
-	merchantID := uuid.New()
-	slug := "inv-ten2-" + uuid.NewString()[:8]
-	_, err := super.Exec(ctx,
-		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, merchantID, slug)
-	require.NoError(t, err)
-	_, err = super.Exec(ctx,
-		`INSERT INTO billing.customers (merchant_id, id) VALUES ($1, $2)`, merchantID, uuid.NewString())
-	require.NoError(t, err)
-
-	// No GUC on this connection.
-	var n int64
-	require.NoError(t, app.QueryRow(ctx,
-		`SELECT count(*) FROM billing.customers WHERE merchant_id = $1`, merchantID).Scan(&n),
-		"a GUC-less read must NOT error — it silently returns nothing, which is the whole hazard")
-	require.EqualValues(t, 0, n,
-		"TEN-2: unset app.merchant_id must yield zero rows")
-
-	// Superuser sees the row that the app role cannot: proves the seed is real
-	// and the emptiness above is RLS, not a missing fixture.
-	require.NoError(t, super.QueryRow(ctx,
-		`SELECT count(*) FROM billing.customers WHERE merchant_id = $1`, merchantID).Scan(&n))
-	require.EqualValues(t, 1, n)
-
-	// With the GUC set transaction-locally, the same read answers.
-	tx, err := app.Begin(ctx)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback(ctx) }()
-	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1::text, true)`, merchantID.String())
-	require.NoError(t, err)
-	require.NoError(t, tx.QueryRow(ctx,
-		`SELECT count(*) FROM billing.customers WHERE merchant_id = $1`, merchantID).Scan(&n))
-	require.EqualValues(t, 1, n, "GUC-scoped read must see the merchant's own row")
-}
-
-// TEN-2, cross-merchant: a GUC pinned to merchant A must not see merchant B,
-// on read OR on write (WITH CHECK).
-func TestTEN2_CrossMerchantReadAndWriteBlocked(t *testing.T) {
-	ctx, super, app := pools(t)
-
-	a, b := uuid.New(), uuid.New()
-	for id, slug := range map[uuid.UUID]string{a: "inv-a-" + uuid.NewString()[:8], b: "inv-b-" + uuid.NewString()[:8]} {
-		_, err := super.Exec(ctx,
-			`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, id, slug)
+// TEN-2: actual tenant SQL rejects foreign and missing scope even on the owner
+// connection. A GUC is not a substitute for the query's explicit parameter.
+func TestTEN2_QueryScopeIndependentOfDatabaseRole(t *testing.T) {
+	ctx, owner, normal := pools(t)
+	a, b, productID := uuid.New(), uuid.New(), uuid.New()
+	for _, id := range []uuid.UUID{a, b} {
+		_, err := owner.Exec(ctx, `INSERT INTO billing.merchants(id,slug) VALUES($1,$2)`, id, "scope-"+id.String())
 		require.NoError(t, err)
 	}
-	_, err := super.Exec(ctx,
-		`INSERT INTO billing.customers (merchant_id, id) VALUES ($1, $2)`, b, uuid.NewString())
+	_, err := owner.Exec(ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name) VALUES($1,$2,'private-product','Original')`, productID, b)
 	require.NoError(t, err)
-
-	tx, err := app.Begin(ctx)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback(ctx) }()
-	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1::text, true)`, a.String())
-	require.NoError(t, err)
-
-	var n int64
-	require.NoError(t, tx.QueryRow(ctx,
-		`SELECT count(*) FROM billing.customers WHERE merchant_id = $1`, b).Scan(&n))
-	require.EqualValues(t, 0, n, "merchant A read merchant B's customers")
-
-	_, err = tx.Exec(ctx,
-		`INSERT INTO billing.customers (merchant_id, id) VALUES ($1, $2)`, b, uuid.NewString())
-	require.Error(t, err, "WITH CHECK must reject writing a row into another merchant's scope")
+	for name, pool := range map[string]*pgxpool.Pool{"owner": owner, "normal": normal} {
+		t.Run(name, func(t *testing.T) {
+			q := dbtest.Queries(pool)
+			for _, scope := range []uuid.UUID{uuid.Nil, a} {
+				_, err := q.GetProductByID(ctx, gen.GetProductByIDParams{ID: productID, MerchantID: scope})
+				require.ErrorIs(t, err, pgx.ErrNoRows)
+				title := "Forged"
+				_, err = q.PatchProduct(ctx, gen.PatchProductParams{ID: productID, MerchantID: scope, DisplayName: &title})
+				require.ErrorIs(t, err, pgx.ErrNoRows)
+			}
+			own, err := q.GetProductByID(ctx, gen.GetProductByIDParams{ID: productID, MerchantID: b})
+			require.NoError(t, err)
+			require.Equal(t, "Original", own.DisplayName)
+		})
+	}
 }
 
-// TEN-9: the role the whole register depends on.
-func TestTEN9_AppRoleIsNotSuperAndNotBypassRLS(t *testing.T) {
+// LED-5: normal runtime grants stay narrow. Owner-compatible DML guards are
+// exercised separately by TestOwningLoginInitializesWithoutRLSAndPreservesFinancialFacts.
+func TestLED5_OptionalRuntimeGrantsKeepLedgerAppendOnly(t *testing.T) {
 	ctx, _, app := pools(t)
-	var isSuper, bypass, canLogin bool
-	require.NoError(t, app.QueryRow(ctx,
-		`SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = current_user`).
-		Scan(&isSuper, &bypass, &canLogin))
-	require.False(t, isSuper)
-	require.False(t, bypass)
-	require.True(t, canLogin)
-}
-
-// LED-5: the ledger is append-only by ROLE PRIVILEGE, not by convention. If the
-// app role ever gains UPDATE or DELETE on either ledger table, the "S" grade in
-// the register is a lie.
-func TestLED5_LedgerIsAppendOnlyByPrivilege(t *testing.T) {
-	ctx, _, app := pools(t)
-
 	for _, table := range []string{"ledger_transfers", "ledger_accounts"} {
-		rows, err := app.Query(ctx, `
-			SELECT privilege_type FROM information_schema.table_privileges
-			 WHERE grantee = 'openrails_app' AND table_schema = 'billing' AND table_name = $1
-			 ORDER BY 1`, table)
+		rows, err := app.Query(ctx, `SELECT privilege_type FROM information_schema.table_privileges
+            WHERE grantee=current_user AND table_schema='billing' AND table_name=$1 ORDER BY 1`, table)
 		require.NoError(t, err)
-		var privs []string
+		var privileges []string
 		for rows.Next() {
-			var p string
-			require.NoError(t, rows.Scan(&p))
-			privs = append(privs, p)
+			var privilege string
+			require.NoError(t, rows.Scan(&privilege))
+			privileges = append(privileges, privilege)
 		}
 		rows.Close()
 		require.NoError(t, rows.Err())
-		require.ElementsMatch(t, []string{"INSERT", "SELECT"}, privs,
-			"LED-5: %s must grant SELECT,INSERT only — got %v", table, privs)
+		require.ElementsMatch(t, []string{"INSERT", "SELECT"}, privileges)
 	}
 }
 
 // ledgerFixture seeds a merchant plus two same-currency accounts and returns a
-// GUC-pinned tx on the APP role. Everything the ledger tests assert therefore
-// runs through the same policy path production uses.
+// merchant-pinned transaction using a normal runtime login.
 func ledgerFixture(t *testing.T, ctx context.Context, super, app *pgxpool.Pool, currency string, floorOnDebit bool) (tx pgx.Tx, debit, credit, merchantID uuid.UUID) {
 	t.Helper()
 	merchantID = uuid.New()
@@ -559,12 +447,4 @@ func TestGAP9_PermissionGroupIsUniquePerMerchant(t *testing.T) {
 		require.ErrorAs(t, err, &violation, "GAP-9: a group cannot acquire another billing identity (old owner deleted=%v)", deleted)
 		require.Equal(t, "23505", violation.Code, "group ownership must remain unique after deletion")
 	}
-}
-
-func keys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
 }

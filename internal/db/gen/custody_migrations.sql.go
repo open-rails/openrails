@@ -15,7 +15,7 @@ import (
 const countInFlightChargeIntentsForPaymentMethod = `-- name: CountInFlightChargeIntentsForPaymentMethod :one
 SELECT count(*)::bigint FROM openrails.rail_intents ri
 JOIN openrails.subscriptions s ON s.id = ri.subscription_id
-WHERE ri.merchant_id = $1::uuid
+WHERE s.merchant_id = $1::uuid AND ri.merchant_id = $1::uuid
   AND s.payment_method_id = $2::uuid
   AND s.deleted_at IS NULL
   AND ri.status = ANY (ARRAY['in_flight'::text, 'unknown_needs_verify'::text])

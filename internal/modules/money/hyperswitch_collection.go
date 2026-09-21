@@ -95,7 +95,7 @@ func (b *MerchantCollectionAdapterBuilder) hyperSwitchAdapter(ctx context.Contex
 	if b.Config == nil || b.Config.HyperSwitch == nil || scope.CustodianID == nil || b.Config.IsProviderReadOnly() {
 		return nil, fmt.Errorf("HyperSwitch invoice collection is not armed")
 	}
-	custodian, err := b.DB.Gen(ctx).GetCustodian(ctx, *scope.CustodianID)
+	custodian, err := b.DB.Gen(ctx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: mid.UUID(), ID: *scope.CustodianID})
 	if err != nil {
 		return nil, err
 	}

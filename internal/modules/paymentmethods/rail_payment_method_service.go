@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -304,6 +305,11 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 }
 
 func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provider string, pspID ...*uuid.UUID) (*nmi.NMIClient, *uuid.UUID, error) {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, nil, queryScopeErr
+	}
+
 	provider = strings.TrimSpace(strings.ToLower(provider))
 	if provider == "" {
 		return nil, nil, errors.New("rail is required")
@@ -313,7 +319,7 @@ func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provide
 		if s == nil || s.DB == nil {
 			return nil, nil, errors.New("PSP lookup unavailable")
 		}
-		row, err := s.DB.Gen(ctx).GetPSP(ctx, *pspID[0])
+		row, err := s.DB.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: queryMerchant.UUID(), ID: *pspID[0]})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -803,7 +809,11 @@ func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context
 func (s *RailPaymentMethodService) countLiveSubscriptionsUsingPaymentMethod(ctx context.Context, pm *models.PaymentMethod) (int, error) {
 	var subs []*models.Subscription
 	if s.DB != nil {
-		rows, err := s.DB.Gen(ctx).ListSubscriptionsByPaymentMethodIDs(ctx, []uuid.UUID{pm.ID})
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return 0, err
+		}
+		rows, err := s.DB.Gen(ctx).ListSubscriptionsByPaymentMethodIDs(ctx, gen.ListSubscriptionsByPaymentMethodIDsParams{MerchantID: mid.UUID(), PaymentMethodIds: []uuid.UUID{pm.ID}})
 		if err != nil {
 			return 0, err
 		}

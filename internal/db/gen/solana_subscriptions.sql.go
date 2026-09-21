@@ -18,7 +18,7 @@ UPDATE openrails.solana_subscriptions SET
     last_signature = $3,
     next_pull_at = $4,
     updated_at = $5
-WHERE id = $1
+WHERE solana_subscriptions.merchant_id = $6::uuid AND id = $1
 `
 
 type AdvanceSolanaSubscriptionAfterPullParams struct {
@@ -27,6 +27,7 @@ type AdvanceSolanaSubscriptionAfterPullParams struct {
 	LastSignature         *string
 	NextPullAt            time.Time
 	UpdatedAt             time.Time
+	MerchantID            uuid.UUID
 }
 
 func (q *Queries) AdvanceSolanaSubscriptionAfterPull(ctx context.Context, arg AdvanceSolanaSubscriptionAfterPullParams) error {
@@ -36,16 +37,22 @@ func (q *Queries) AdvanceSolanaSubscriptionAfterPull(ctx context.Context, arg Ad
 		arg.LastSignature,
 		arg.NextPullAt,
 		arg.UpdatedAt,
+		arg.MerchantID,
 	)
 	return err
 }
 
 const getSolanaSubscriptionByPDA = `-- name: GetSolanaSubscriptionByPDA :one
-SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions WHERE subscription_pda = $1
+SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions WHERE solana_subscriptions.merchant_id = $2::uuid AND subscription_pda = $1
 `
 
-func (q *Queries) GetSolanaSubscriptionByPDA(ctx context.Context, subscriptionPda string) (OpenrailsSolanaSubscription, error) {
-	row := q.db.QueryRow(ctx, getSolanaSubscriptionByPDA, subscriptionPda)
+type GetSolanaSubscriptionByPDAParams struct {
+	SubscriptionPda string
+	MerchantID      uuid.UUID
+}
+
+func (q *Queries) GetSolanaSubscriptionByPDA(ctx context.Context, arg GetSolanaSubscriptionByPDAParams) (OpenrailsSolanaSubscription, error) {
+	row := q.db.QueryRow(ctx, getSolanaSubscriptionByPDA, arg.SubscriptionPda, arg.MerchantID)
 	var i OpenrailsSolanaSubscription
 	err := row.Scan(
 		&i.ID,
@@ -69,11 +76,16 @@ func (q *Queries) GetSolanaSubscriptionByPDA(ctx context.Context, subscriptionPd
 }
 
 const getSolanaSubscriptionBySubscriptionID = `-- name: GetSolanaSubscriptionBySubscriptionID :one
-SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions WHERE subscription_id = $1
+SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions WHERE solana_subscriptions.merchant_id = $2::uuid AND subscription_id = $1
 `
 
-func (q *Queries) GetSolanaSubscriptionBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (OpenrailsSolanaSubscription, error) {
-	row := q.db.QueryRow(ctx, getSolanaSubscriptionBySubscriptionID, subscriptionID)
+type GetSolanaSubscriptionBySubscriptionIDParams struct {
+	SubscriptionID uuid.UUID
+	MerchantID     uuid.UUID
+}
+
+func (q *Queries) GetSolanaSubscriptionBySubscriptionID(ctx context.Context, arg GetSolanaSubscriptionBySubscriptionIDParams) (OpenrailsSolanaSubscription, error) {
+	row := q.db.QueryRow(ctx, getSolanaSubscriptionBySubscriptionID, arg.SubscriptionID, arg.MerchantID)
 	var i OpenrailsSolanaSubscription
 	err := row.Scan(
 		&i.ID,
@@ -99,7 +111,7 @@ func (q *Queries) GetSolanaSubscriptionBySubscriptionID(ctx context.Context, sub
 const listActiveSolanaMerchantWallets = `-- name: ListActiveSolanaMerchantWallets :many
 SELECT DISTINCT merchant_id, merchant_address
 FROM openrails.solana_subscriptions
-WHERE status = 'active'
+WHERE solana_subscriptions.merchant_id = $1::uuid AND status = 'active'
 `
 
 type ListActiveSolanaMerchantWalletsRow struct {
@@ -107,8 +119,8 @@ type ListActiveSolanaMerchantWalletsRow struct {
 	MerchantAddress string
 }
 
-func (q *Queries) ListActiveSolanaMerchantWallets(ctx context.Context) ([]ListActiveSolanaMerchantWalletsRow, error) {
-	rows, err := q.db.Query(ctx, listActiveSolanaMerchantWallets)
+func (q *Queries) ListActiveSolanaMerchantWallets(ctx context.Context, merchantID uuid.UUID) ([]ListActiveSolanaMerchantWalletsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveSolanaMerchantWallets, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -129,15 +141,20 @@ func (q *Queries) ListActiveSolanaMerchantWallets(ctx context.Context) ([]ListAc
 
 const listActiveSolanaSubscriptionsWithSignature = `-- name: ListActiveSolanaSubscriptionsWithSignature :many
 SELECT id, merchant_id, subscription_id, subscriber_wallet, authority_pda, subscription_pda, plan_pda, merchant_address, mint, plan_created_at_fingerprint, last_pulled_period_start, last_signature, next_pull_at, status, created_at, updated_at FROM openrails.solana_subscriptions
-WHERE status = 'active'
+WHERE solana_subscriptions.merchant_id = $1::uuid AND status = 'active'
   AND last_signature IS NOT NULL
   AND last_signature <> ''
 ORDER BY updated_at ASC
-LIMIT NULLIF($1::int, 0)
+LIMIT NULLIF($2::int, 0)
 `
 
-func (q *Queries) ListActiveSolanaSubscriptionsWithSignature(ctx context.Context, pageLimit int32) ([]OpenrailsSolanaSubscription, error) {
-	rows, err := q.db.Query(ctx, listActiveSolanaSubscriptionsWithSignature, pageLimit)
+type ListActiveSolanaSubscriptionsWithSignatureParams struct {
+	MerchantID uuid.UUID
+	PageLimit  int32
+}
+
+func (q *Queries) ListActiveSolanaSubscriptionsWithSignature(ctx context.Context, arg ListActiveSolanaSubscriptionsWithSignatureParams) ([]OpenrailsSolanaSubscription, error) {
+	rows, err := q.db.Query(ctx, listActiveSolanaSubscriptionsWithSignature, arg.MerchantID, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -177,16 +194,17 @@ const listDueSolanaSubscriptions = `-- name: ListDueSolanaSubscriptions :many
 SELECT s.id, s.merchant_id, s.subscription_id, s.subscriber_wallet, s.authority_pda, s.subscription_pda, s.plan_pda, s.merchant_address, s.mint, s.plan_created_at_fingerprint, s.last_pulled_period_start, s.last_signature, s.next_pull_at, s.status, s.created_at, s.updated_at, sub.psp_id
 FROM openrails.solana_subscriptions s
 JOIN openrails.subscriptions sub ON sub.id = s.subscription_id
-WHERE s.status = 'active' AND s.next_pull_at <= $1::timestamptz
+WHERE s.merchant_id = $1::uuid AND sub.merchant_id = $1::uuid AND s.status = 'active' AND s.next_pull_at <= $2::timestamptz
   AND sub.deleted_at IS NULL
   AND sub.status <> 'cancelled'
 ORDER BY s.merchant_id ASC, s.next_pull_at ASC
-LIMIT NULLIF($2::int, 0)
+LIMIT NULLIF($3::int, 0)
 `
 
 type ListDueSolanaSubscriptionsParams struct {
-	Now       time.Time
-	PageLimit int32
+	MerchantID uuid.UUID
+	Now        time.Time
+	PageLimit  int32
 }
 
 type ListDueSolanaSubscriptionsRow struct {
@@ -200,7 +218,7 @@ type ListDueSolanaSubscriptionsRow struct {
 // LIVE read, so it carries the or#858 predicate. The parent terminal guard is
 // defence in depth if a failed/legacy cascade ever leaves its mirror active.
 func (q *Queries) ListDueSolanaSubscriptions(ctx context.Context, arg ListDueSolanaSubscriptionsParams) ([]ListDueSolanaSubscriptionsRow, error) {
-	rows, err := q.db.Query(ctx, listDueSolanaSubscriptions, arg.Now, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listDueSolanaSubscriptions, arg.MerchantID, arg.Now, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -241,17 +259,23 @@ const setSolanaSubscriptionNextPullAt = `-- name: SetSolanaSubscriptionNextPullA
 UPDATE openrails.solana_subscriptions SET
     next_pull_at = $2,
     updated_at = $3
-WHERE id = $1
+WHERE solana_subscriptions.merchant_id = $4::uuid AND id = $1
 `
 
 type SetSolanaSubscriptionNextPullAtParams struct {
 	ID         uuid.UUID
 	NextPullAt time.Time
 	UpdatedAt  time.Time
+	MerchantID uuid.UUID
 }
 
 func (q *Queries) SetSolanaSubscriptionNextPullAt(ctx context.Context, arg SetSolanaSubscriptionNextPullAtParams) error {
-	_, err := q.db.Exec(ctx, setSolanaSubscriptionNextPullAt, arg.ID, arg.NextPullAt, arg.UpdatedAt)
+	_, err := q.db.Exec(ctx, setSolanaSubscriptionNextPullAt,
+		arg.ID,
+		arg.NextPullAt,
+		arg.UpdatedAt,
+		arg.MerchantID,
+	)
 	return err
 }
 
@@ -259,17 +283,23 @@ const setSolanaSubscriptionStatus = `-- name: SetSolanaSubscriptionStatus :exec
 UPDATE openrails.solana_subscriptions SET
     status = $2,
     updated_at = $3
-WHERE id = $1
+WHERE solana_subscriptions.merchant_id = $4::uuid AND id = $1
 `
 
 type SetSolanaSubscriptionStatusParams struct {
-	ID        uuid.UUID
-	Status    string
-	UpdatedAt time.Time
+	ID         uuid.UUID
+	Status     string
+	UpdatedAt  time.Time
+	MerchantID uuid.UUID
 }
 
 func (q *Queries) SetSolanaSubscriptionStatus(ctx context.Context, arg SetSolanaSubscriptionStatusParams) error {
-	_, err := q.db.Exec(ctx, setSolanaSubscriptionStatus, arg.ID, arg.Status, arg.UpdatedAt)
+	_, err := q.db.Exec(ctx, setSolanaSubscriptionStatus,
+		arg.ID,
+		arg.Status,
+		arg.UpdatedAt,
+		arg.MerchantID,
+	)
 	return err
 }
 
@@ -293,6 +323,7 @@ ON CONFLICT (subscription_pda) DO UPDATE SET
     status = EXCLUDED.status,
     plan_created_at_fingerprint = EXCLUDED.plan_created_at_fingerprint,
     updated_at = EXCLUDED.updated_at
+WHERE openrails.solana_subscriptions.merchant_id = EXCLUDED.merchant_id
 `
 
 type UpsertSolanaSubscriptionParams struct {

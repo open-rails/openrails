@@ -18,7 +18,7 @@ INSERT INTO openrails.checkout_sessions (
 );
 
 -- name: GetCheckoutSessionByID :one
-SELECT * FROM openrails.checkout_sessions WHERE id = $1
+SELECT * FROM openrails.checkout_sessions WHERE checkout_sessions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
 -- name: UpdateCheckoutSession :execrows
@@ -40,7 +40,7 @@ UPDATE openrails.checkout_sessions SET
     rail_state = sqlc.narg(rail_state),
     psp_id = sqlc.arg(psp_id)::uuid,
     updated_at = sqlc.arg(updated_at)
-WHERE id = $1
+WHERE checkout_sessions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
 -- name: BindSolanaCheckoutSession :execrows
@@ -48,7 +48,7 @@ UPDATE openrails.checkout_sessions SET
     reference = sqlc.arg(reference),
     rail_state = sqlc.arg(rail_state),
     updated_at = sqlc.arg(updated_at)
-WHERE id = $1
+WHERE checkout_sessions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND rail = 'solana'
   AND status = 'requires_action'
   AND (reference IS NULL OR reference = sqlc.arg(reference))
@@ -57,13 +57,13 @@ WHERE id = $1
 
 -- name: GetCheckoutSessionByReference :one
 SELECT * FROM openrails.checkout_sessions cs
-WHERE cs.reference = $1
+WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.reference = $1
   AND cs.deleted_at IS NULL
 LIMIT 1;
 
 -- name: GetLatestOpenCheckoutSession :one
 SELECT * FROM openrails.checkout_sessions cs
-WHERE cs.customer_id = $1
+WHERE cs.merchant_id = sqlc.arg(merchant_id)::uuid AND cs.customer_id = $1
   AND cs.price_id = $2
   AND cs.rail = $3
   AND cs.status IN ('created', 'requires_action')

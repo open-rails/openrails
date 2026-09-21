@@ -17,10 +17,9 @@ type merchantPgxConnKey struct{}
 // connection: it puts a LAZY pinned connection in the context carrying the
 // `app.merchant_id` session GUC (set on first use — see lazyMerchantPgxConn).
 // Every subsequent Qx(ctx)/Gen(ctx) on the returned context resolves to that
-// connection, so all merchant-owned queries in the request are restricted to
-// the request's merchant by the migration-050 RLS policies (fail-closed: a
-// query on a connection without the GUC sees NO rows under the openrails_app
-// role; issue #227).
+// connection. The session value supports explicit current_merchant_id()
+// predicates and stored functions; it does not filter arbitrary SQL. Tenant
+// queries must still carry their verified merchant predicates.
 //
 // It pins a CONNECTION, not a transaction: no BEGIN, no locks held across
 // slow work (e.g. a Stripe/NMI call between queries) — the connection simply
@@ -106,8 +105,8 @@ func isDetachedWrite(ctx context.Context) bool {
 // RunInMerchantConn pins a merchant connection for the duration of fn. It is the
 // worker/background analogue of the request middleware: a River job (which has
 // no HTTP request to pin a connection) wraps its merchant-owned work in
-// RunInMerchantConn so its reads + writes run RLS-scoped under the openrails_app
-// role, exactly like a request.
+// RunInMerchantConn so its scoped reads and writes retain the selected merchant's
+// session state, exactly like a request.
 func (d *DB) RunInMerchantConn(ctx context.Context, fn func(ctx context.Context) error) error {
 	ctx, release, err := d.WithMerchantConn(ctx)
 	if err != nil {

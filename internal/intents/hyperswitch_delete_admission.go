@@ -14,7 +14,7 @@ import (
 )
 
 func deletionMethodUnused(ctx context.Context, q *gen.Queries, mid, id uuid.UUID, accepted int64) error {
-	subscriptions, err := q.ListSubscriptionsByPaymentMethodIDs(ctx, []uuid.UUID{id})
+	subscriptions, err := q.ListSubscriptionsByPaymentMethodIDs(ctx, gen.ListSubscriptionsByPaymentMethodIDsParams{MerchantID: mid, PaymentMethodIds: []uuid.UUID{id}})
 	if err != nil {
 		return err
 	}

@@ -47,32 +47,13 @@ import (
 //
 // merchant B: one 999M payment 6/05 — must never appear under A.
 
-var (
-	mA = uuid.New()
-	mB = uuid.New()
+type seedIDs struct {
+	product, price, payer, merchantB, payerB uuid.UUID
+	nmiAccount, ccbillAccount                string
+}
+type seedIDsKey struct{}
 
-	c = func() map[int]uuid.UUID {
-		out := map[int]uuid.UUID{}
-		for i := 1; i <= 8; i++ {
-			out[i] = uuid.New()
-		}
-		return out
-	}()
-	cB = uuid.New()
-
-	productA = uuid.New()
-	productB = uuid.New()
-	pricePM  = uuid.New() // monthly 10M / 720h
-	pricePA  = uuid.New() // annual 96M / 8760h
-	pricePO  = uuid.New() // one-time 5M
-	pricePW  = uuid.New() // weekly 2.3M / 168h
-	priceB   = uuid.New()
-	acctRA1  = uuid.New() // mA/nmi
-	acctCCA1 = uuid.New() // mA/ccbill
-	acctRB1  = uuid.New() // mB/nmi
-
-	subs = map[int]uuid.UUID{1: uuid.New(), 2: uuid.New(), 3: uuid.New(), 4: uuid.New(), 5: uuid.New(), 6: uuid.New(), 7: uuid.New(), 8: uuid.New()}
-)
+func seededIDs(ctx context.Context) seedIDs { return ctx.Value(seedIDsKey{}).(seedIDs) }
 
 func d(t *testing.T, y int, m time.Month, day int) time.Time {
 	t.Helper()
@@ -87,6 +68,33 @@ func exec(ctx context.Context, t *testing.T, pool *pgxpool.Pool, sql string, arg
 
 func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, context.Context) {
 	t.Helper()
+	var (
+		mA = uuid.New()
+		mB = uuid.New()
+
+		c = func() map[int]uuid.UUID {
+			out := map[int]uuid.UUID{}
+			for i := 1; i <= 8; i++ {
+				out[i] = uuid.New()
+			}
+			return out
+		}()
+		cB = uuid.New()
+
+		productA = uuid.New()
+		productB = uuid.New()
+		pricePM  = uuid.New() // monthly 10M / 720h
+		pricePA  = uuid.New() // annual 96M / 8760h
+		pricePO  = uuid.New() // one-time 5M
+		pricePW  = uuid.New() // weekly 2.3M / 168h
+		priceB   = uuid.New()
+		acctRA1  = uuid.New() // mA/nmi
+		acctCCA1 = uuid.New() // mA/ccbill
+		acctRB1  = uuid.New() // mB/nmi
+
+		subs = map[int]uuid.UUID{1: uuid.New(), 2: uuid.New(), 3: uuid.New(), 4: uuid.New(), 5: uuid.New(), 6: uuid.New(), 7: uuid.New(), 8: uuid.New()}
+	)
+
 	ctx := context.Background()
 	// The metrics corpus deliberately spans TWO merchants (mA/mB) so isolation is
 	// assertable, so the FIXTURE writes need privilege. The service under test
@@ -96,8 +104,11 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 	svc := metrics.NewService(dbi)
 	ctxA := merchant.WithID(ctx, merchant.ID(mA))
 	ctxB := merchant.WithID(ctx, merchant.ID(mB))
-
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+	ids := seedIDs{product: productA, price: pricePM, payer: c[2], merchantB: mB, payerB: cB, nmiAccount: "acct-1-" + suffix, ccbillAccount: "acct-cc-1-" + suffix}
+	ctxA = context.WithValue(ctxA, seedIDsKey{}, ids)
+	ctxB = context.WithValue(ctxB, seedIDsKey{}, ids)
+
 	exec(ctx, t, pool, `INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active'), ($3, $4, 'active') ON CONFLICT (id) DO NOTHING`,
 		mA, "metrics-a-"+suffix, mB, "metrics-b-"+suffix)
 	for _, cid := range c {
@@ -126,12 +137,12 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 			VALUES ($1, $2, $3, 'USD', $4, $5, $6) ON CONFLICT DO NOTHING`,
 			p.id, p.product, p.amount, p.merchant, p.hours, p.renew)
 	}
-	exec(ctx, t, pool, `INSERT INTO billing.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', 'acct-1') ON CONFLICT DO NOTHING`,
-		acctRA1, mA)
-	exec(ctx, t, pool, `INSERT INTO billing.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'ccbill', 'acct-cc-1') ON CONFLICT DO NOTHING`,
-		acctCCA1, mA)
-	exec(ctx, t, pool, `INSERT INTO billing.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', 'acct-b1') ON CONFLICT DO NOTHING`,
-		acctRB1, mB)
+	exec(ctx, t, pool, `INSERT INTO billing.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', $3) ON CONFLICT DO NOTHING`,
+		acctRA1, mA, "acct-1-"+suffix)
+	exec(ctx, t, pool, `INSERT INTO billing.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'ccbill', $3) ON CONFLICT DO NOTHING`,
+		acctCCA1, mA, "acct-cc-1-"+suffix)
+	exec(ctx, t, pool, `INSERT INTO billing.psps (id, merchant_id, rail, account_id) VALUES ($1, $2, 'nmi', $3) ON CONFLICT DO NOTHING`,
+		acctRB1, mB, "acct-b1-"+suffix)
 
 	// --- subscriptions (insert order matters only for readability) -------------
 	type subRow struct {
@@ -237,26 +248,9 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 	exec(ctx, t, pool, adh, mA, c[1], "budget_exceeded", time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC), 2)
 	exec(ctx, t, pool, adh, mA, c[2], "insufficient_credit", time.Date(2026, 6, 11, 8, 0, 0, 0, time.UTC), 3)
 
-	t.Cleanup(func() {
-		for _, sql := range []string{
-			`DELETE FROM billing.admission_denials_hourly WHERE merchant_id = ANY($1)`,
-			`DELETE FROM billing.entitlements WHERE merchant_id = ANY($1)`,
-			`DELETE FROM billing.ledger_transfers WHERE merchant_id = ANY($1)`,
-			`DELETE FROM billing.ledger_accounts WHERE merchant_id = ANY($1)`,
-			`DELETE FROM billing.usage_events WHERE merchant_id = ANY($1)`,
-			`DELETE FROM billing.grants WHERE merchant_id = ANY($1)`,
-			`DELETE FROM billing.payments WHERE merchant_id = ANY($1)`,
-			`DELETE FROM billing.subscription_status_transitions WHERE merchant_id = ANY($1)`,
-			`DELETE FROM billing.subscriptions WHERE merchant_id = ANY($1)`,
-			`DELETE FROM billing.psps WHERE merchant_id = ANY($1)`,
-			`DELETE FROM billing.prices WHERE merchant_id = ANY($1)`,
-			`DELETE FROM billing.products WHERE merchant_id = ANY($1)`,
-			`DELETE FROM billing.customers WHERE merchant_id = ANY($1)`,
-			`DELETE FROM billing.merchants WHERE id = ANY($1)`,
-		} {
-			_, _ = pool.Exec(context.Background(), sql, []uuid.UUID{mA, mB})
-		}
-	})
+	// Fresh merchant and entity IDs isolate each seed. The owned package DB is
+	// dropped by the harness; immutable financial history is never DELETE-cleaned.
+
 	return pool, svc, ctxA, ctxB
 }
 
@@ -379,12 +373,12 @@ func TestMetrics_PaymentsDimensions(t *testing.T) {
 	require.Len(t, golden.Rows, 1)
 
 	byAcct := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"payment_count", "chargeback_rate"}, By: []string{"rail_account"}, Range: juneQ}))
-	require.Equal(t, int64(2), cell(t, byAcct, map[string]string{"rail_account": "acct-1"}, "payment_count"))
-	require.InDelta(t, 0.5, cell(t, byAcct, map[string]string{"rail_account": "acct-1"}, "chargeback_rate").(float64), 1e-9)
+	require.Equal(t, int64(2), cell(t, byAcct, map[string]string{"rail_account": seededIDs(ctxA).nmiAccount}, "payment_count"))
+	require.InDelta(t, 0.5, cell(t, byAcct, map[string]string{"rail_account": seededIDs(ctxA).nmiAccount}, "chargeback_rate").(float64), 1e-9)
 	// or#893: psp_id is required on every real-rail payment now, so the
 	// COALESCE-to-'unknown' fallback is unreachable here — every June payment
 	// carries a real PSP.
-	require.Equal(t, int64(1), cell(t, byAcct, map[string]string{"rail_account": "acct-cc-1"}, "payment_count"))
+	require.Equal(t, int64(1), cell(t, byAcct, map[string]string{"rail_account": seededIDs(ctxA).ccbillAccount}, "payment_count"))
 
 	byDiscount := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue"}, By: []string{"discount_code"}, Range: juneQ}))
 	require.Equal(t, metrics.MoneyCell(5_000_000), cell(t, byDiscount, map[string]string{"discount_code": "PROMO"}, "gross_revenue"))
@@ -395,11 +389,11 @@ func TestMetrics_PaymentsDimensions(t *testing.T) {
 	// Catalog ids are spelled as the catalog spells them (prod_/price_), and a
 	// filter takes exactly that spelling: the bare UUID is not an id.
 	byProduct := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue"}, By: []string{"product_id", "price_id"}, Range: juneQ}))
-	product, price := openrails.ProductID(productA).String(), openrails.PriceID(pricePM).String()
+	product, price := openrails.ProductID(seededIDs(ctxA).product).String(), openrails.PriceID(seededIDs(ctxA).price).String()
 	require.Equal(t, metrics.MoneyCell(20_000_000), cell(t, byProduct, map[string]string{"product_id": product, "price_id": price}, "gross_revenue"))
 	filtered := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue"}, Range: juneQ, Filters: map[string][]string{"price_id": {price}}}))
 	require.Equal(t, metrics.MoneyCell(20_000_000), cell(t, filtered, map[string]string{}, "gross_revenue"))
-	_, ve := metrics.Validate(usd(&metrics.Query{Measures: []string{"gross_revenue"}, Range: juneQ, Filters: map[string][]string{"price_id": {pricePM.String()}}}))
+	_, ve := metrics.Validate(usd(&metrics.Query{Measures: []string{"gross_revenue"}, Range: juneQ, Filters: map[string][]string{"price_id": {seededIDs(ctxA).price.String()}}}))
 	require.NotNil(t, ve)
 	require.Equal(t, "invalid_filter_value", ve.Errors[0].Code)
 }
@@ -529,7 +523,7 @@ func TestMetrics_UsageCreditsFlow(t *testing.T) {
 		Limit: intp(1),
 	}))
 	require.Len(t, top.Rows, 1)
-	require.Equal(t, c[2].String(), top.Rows[0][colIdx(t, top, "payer")])
+	require.Equal(t, seededIDs(ctxA).payer.String(), top.Rows[0][colIdx(t, top, "payer")])
 	require.Equal(t, metrics.MoneyCell(16_000_000), top.Rows[0][colIdx(t, top, "usage_revenue")])
 
 	bySku := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"usage_revenue"}, By: []string{"sku", "rate_card"}, Range: juneQ}))

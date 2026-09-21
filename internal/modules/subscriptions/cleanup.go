@@ -1,6 +1,8 @@
 package subscriptions
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"fmt"
 	"strings"
@@ -36,7 +38,12 @@ func RemoveCancelledSubscriptionsForActivation(ctx context.Context, dbb *db.DB, 
 		return 0, err
 	}
 
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return 0, scopeErr
+	}
 	rows, err := dbb.Gen(ctx).MarkCancelledSubscriptionsSuperseded(ctx, gen.MarkCancelledSubscriptionsSupersededParams{
+		MerchantID:   scopeMerchantID.UUID(),
 		CustomerID:   tsid,
 		ProductID:    productID,
 		SupersededBy: supersededBy,
