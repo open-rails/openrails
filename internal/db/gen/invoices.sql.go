@@ -799,8 +799,17 @@ FROM openrails.invoice_payments a
 JOIN openrails.rail_intents i ON i.merchant_id = a.merchant_id
     AND i.idempotency_key = a.idempotency_key AND i.intent_type = 'invoice_collection'
 LEFT JOIN openrails.ledger_transfers l ON l.merchant_id = a.merchant_id AND l.id = a.ledger_transfer_id
-WHERE a.merchant_id = $1 AND a.idempotency_key LIKE 'invoice_collection:%'
+WHERE a.merchant_id = $1::uuid AND a.idempotency_key LIKE 'invoice_collection:%'
+  AND ($2::uuid IS NULL OR a.id > $2::uuid)
+ORDER BY a.id
+LIMIT $3::int
 `
+
+type ListEncodedInvoiceAttemptsForArchiveParams struct {
+	MerchantID uuid.UUID
+	AfterID    *uuid.UUID
+	PageSize   int32
+}
 
 type ListEncodedInvoiceAttemptsForArchiveRow struct {
 	OpenrailsInvoicePayment OpenrailsInvoicePayment
@@ -811,8 +820,8 @@ type ListEncodedInvoiceAttemptsForArchiveRow struct {
 
 // The archive validates both copies of the generated payer-scoped coordinate
 // against the canonical collection operation before exporting or restoring it.
-func (q *Queries) ListEncodedInvoiceAttemptsForArchive(ctx context.Context, merchantID uuid.UUID) ([]ListEncodedInvoiceAttemptsForArchiveRow, error) {
-	rows, err := q.db.Query(ctx, listEncodedInvoiceAttemptsForArchive, merchantID)
+func (q *Queries) ListEncodedInvoiceAttemptsForArchive(ctx context.Context, arg ListEncodedInvoiceAttemptsForArchiveParams) ([]ListEncodedInvoiceAttemptsForArchiveRow, error) {
+	rows, err := q.db.Query(ctx, listEncodedInvoiceAttemptsForArchive, arg.MerchantID, arg.AfterID, arg.PageSize)
 	if err != nil {
 		return nil, err
 	}
