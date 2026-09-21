@@ -113,6 +113,8 @@ func TestNativeEngineRecurringCollectionOwnsOnlyNewAgreement(t *testing.T) {
 			}
 			if mode != "paid" {
 				require.Equal(t, intents.OutcomeAmbiguous, outcome.Class, outcome.Reason)
+				_, _, err = e.svc.AdmitCustomerSubscriptionCollection(e.ctx, sub, e.payer.UUID(), "not-accepted-while-uncertain", nil)
+				require.ErrorIs(t, err, intents.ErrRebillInProgress)
 				e.plane.Config.EngineAdmissionHold = true
 				outcome = handler.Verify(e.ctx, op)
 				require.Equal(t, intents.OutcomeAmbiguous, outcome.Class)
