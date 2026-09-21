@@ -6,6 +6,64 @@ const config = JSON.parse(process.env.OPENRAILS_BROWSER_FIXTURE);
 const pan = '4111111111111111'; // synthetic card, only entered in vendor fields
 const browser = await chromium.launch({ headless: true });
 try {
+  if (config.phase === 'membership') {
+    const context = await browser.newContext();
+    const allowed = new Set([config.page,config.api].map(value=>new URL(value).origin));
+    const blocked=[];
+    await context.route('**/*',route=>{
+      const url=new URL(route.request().url());
+      if (!allowed.has(url.origin)) {blocked.push(url.origin);return route.abort();}
+      return route.continue();
+    });
+    const page=await context.newPage();
+    await page.goto(config.page);
+    await page.evaluate(async config=>{
+      const request=async(method,path,body,key)=>{
+        const response=await fetch(config.api+path,{method,headers:{Authorization:`Bearer ${config.token}`,'Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{})},body:body===undefined?undefined:JSON.stringify(body)});
+        const value=await response.json();
+        if(!response.ok)throw Error(`Membership ${response.status}: ${JSON.stringify(value)}`);
+        return value;
+      };
+      const key=crypto.randomUUID();
+      const input={mode:'subscription',price_id:config.price_id,payment:{rail:'nmi',psp_id:config.psp_id,payment_method_id:config.method}};
+      const quote=await request('POST','/v1/me/checkout',input,key);
+      const repeated=await request('POST','/v1/me/checkout',input,key);
+      if(quote.id!==repeated.id||quote.status!=='requires_action'||quote.subscription_id||quote.payment_id||!quote.membership_quote)throw Error('Quote is not an unaccepted stable agreement');
+      window.membershipQuote=quote;
+      const terms=document.createElement('p');
+      terms.textContent=`${quote.membership_quote.product_name}: ${quote.amount} ${quote.currency} every ${quote.membership_quote.cycle_hours} hours`;
+      document.body.append(terms);
+      const button=document.createElement('button');button.textContent='Subscribe';document.body.append(button);
+      button.onclick=async()=>{
+        try { window.membershipResult=await request('POST',`/v1/me/checkout/${quote.id}/confirm`,{payment:{rail:'nmi'}});window.membershipClicks=(window.membershipClicks??0)+1; }
+        catch(error){window.membershipFailure=error.message;}
+      };
+    },config);
+    const quote=await page.evaluate(()=>window.membershipQuote);
+    assert.equal(quote.amount,'9990000');
+    assert.equal(quote.currency,'USD');
+    assert.equal(quote.membership_quote.cycle_hours,720);
+    const checkpoint=await fetch(config.checkpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({price_id:config.price_id,session_id:quote.id})});
+    assert.equal(checkpoint.status,200);
+    const before=await checkpoint.json();
+    assert.equal(before.financial,0);
+    assert.equal(before.provider_calls,Number(config.before_provider_calls));
+    await page.getByRole('button',{name:'Subscribe',exact:true}).click();
+    await page.waitForFunction(()=>window.membershipResult||window.membershipFailure);
+    const first=await page.evaluate(()=>({result:window.membershipResult,failure:window.membershipFailure}));
+    assert.equal(first.failure,undefined);
+    assert.equal(first.result.status,'succeeded');
+    assert.match(first.result.subscription_id,/^sub_/);
+    assert.match(first.result.payment_id,/^pay_/);
+    await page.getByRole('button',{name:'Subscribe',exact:true}).click();
+    await page.waitForFunction(()=>window.membershipClicks===2||window.membershipFailure);
+    const replay=await page.evaluate(()=>window.membershipResult);
+    assert.equal(replay.subscription_id,first.result.subscription_id);
+    assert.equal(replay.payment_id,first.result.payment_id);
+    assert.deepEqual(blocked,[]);
+    console.log(JSON.stringify({membership:first.result,quote,externalHTTPRequests:0}));
+    await context.close();
+  } else {
   const context = await browser.newContext();
   await context.addInitScript(() => {
     window.captureCSP = [];
@@ -128,4 +186,5 @@ try {
   for (const frame of page.frames()) cspBlocked.push(...await frame.evaluate(() => window.captureCSP ?? []));
   console.log(JSON.stringify({ cspBlocked, externalHTTPRequests:0, vendorBrowserCapture: 'pass', vendorSession:result.proof.vendorSession, vendorCustomer:result.proof.vendorCustomer, method:result.proof.method, invoicePay, invoiceKey:await page.evaluate(()=>window.invoiceKey), persistent:config.store==='true', corePANRequests: 0, coreRequests, terminalReplay:config.store==='true', secretCleared:config.store==='true' }));
   await context.close();
+  }
 } finally { await browser.close(); }
