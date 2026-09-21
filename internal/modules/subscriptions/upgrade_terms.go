@@ -68,6 +68,10 @@ func DecodeNMIUpgradePayload(in gen.OpenrailsRailIntent) (NMIUpgradePayload, err
 	if p.Instrument.CustodianHeld() || p.Instrument.RailCustomerRef == "" {
 		return p, errors.New("provider upgrade requires its accepted PSP-held instrument")
 	}
+	start, err := time.Parse("20060102", p.StartDate)
+	if err != nil || start.Format("20060102") != p.PeriodEnd.UTC().Format("20060102") {
+		return p, errors.New("successor first charge must follow the accepted initial period")
+	}
 	if _, err := moneyutil.NativeToRailMinorExact(p.Currency, p.RecurringAmount); err != nil {
 		return p, err
 	}

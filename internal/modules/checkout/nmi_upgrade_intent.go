@@ -129,6 +129,19 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 	if err != nil {
 		return intents.Ambiguous("invalid retained upgrade payment: " + err.Error())
 	}
+	enrollment, enrollmentFound, err := intents.LoadNMIEnrollmentReceipt(current)
+	if err != nil {
+		return intents.Ambiguous("invalid retained successor: " + err.Error())
+	}
+	if enrollmentFound {
+		if progress.Successor == nil || progress.Successor.Refusal != "" {
+			return intents.Ambiguous("retained enrollment contradicts its submission progress")
+		}
+		progress.Successor.Enrollment = &nmi.AddSubscriptionResponse{SubscriptionID: enrollment.SubscriptionID()}
+	}
+	if (receiptFound || progress.Proration != nil) && !enrollmentFound {
+		return intents.Ambiguous("proration has no qualified predecessor enrollment")
+	}
 	if receiptFound && progress.refused() != nil {
 		return intents.Ambiguous("retained paid proration contradicts mutable refusal metadata")
 	}
@@ -139,10 +152,10 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 		return h.terminal(ctx, in, intents.TerminalWithEvidence(progress.Successor.Refusal, evidence()))
 	}
 	if progress.Proration != nil && progress.Proration.Refusal != "" {
-		return h.refusedProration(ctx, in, p, progress, evidence())
+		return h.refusedProration(ctx, in, p, progress, evidence(), enrollment)
 	}
 	var client *nmi.NMIClient
-	needsClient := progress.Successor == nil || (progress.Successor.Enrollment != nil && p.ProrationAmount > 0 && !receiptFound)
+	needsClient := !enrollmentFound || (p.ProrationAmount > 0 && !receiptFound)
 	if needsClient {
 		client, err = h.Checkout.resolveNMIClient(db.WithPSPID(ctx, *in.PspID), nmiIntentClientName(p.PSP, in.Rail))
 		if err != nil {
@@ -182,7 +195,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 		if p.Instrument.StoredCredentialRecurringRef != "" {
 			credential = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
 		}
-		order := "upgs-" + shortHash(in.IdempotencyKey)
+		order := intents.NMIEnrollmentOrder(in)
 		receipt, callErr := client.AddRecurringSubscription(ctx, nmi.RecurringPaymentData{CardUserData: p.Card, PlanID: p.PlanID, CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: moneyutil.Cents(recurring), Currency: p.Currency, Email: p.Email, CustomerID: p.UserID, OrderID: order, PONumber: order, StartDate: p.StartDate, StoredCredential: nmidirect.StoredCredentialFor(credential)})
 		if callErr != nil {
 			if nmi.RequiresVerification(callErr) {
@@ -206,6 +219,20 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 		// The NMI roster exposes vault/plan, not the immutable upgrade order.
 		// A unique matching roster row is not proof that THIS request created it.
 		return intents.Ambiguous("successor submission needs an exact account-scoped provider receipt; roster similarity cannot authorize adoption or resend")
+	}
+	if !enrollmentFound {
+		enrollment, enrollmentFound, err = intents.ReadNMIEnrollmentReceipt(ctx, in, upgradeReceiptResolver{client}, progress.Successor.Enrollment.SubscriptionID)
+		if err != nil || !enrollmentFound {
+			return intents.Ambiguous("successor schedule does not qualify for the accepted upgrade")
+		}
+		enrollment, err = store.RetainNMIEnrollmentReceipt(ctx, in, enrollment)
+		if err != nil {
+			return intents.Ambiguous("retain successor enrollment: " + err.Error())
+		}
+	}
+	progress.Successor.Enrollment = &nmi.AddSubscriptionResponse{SubscriptionID: enrollment.SubscriptionID()}
+	if err = save("successor", progress.Successor); err != nil {
+		return intents.Ambiguous("persist qualified successor reference: " + err.Error())
 	}
 	if p.ProrationAmount > 0 {
 		order := in.ID.String()
@@ -237,7 +264,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 				if err = save("proration", progress.Proration); err != nil {
 					return intents.AmbiguousWithEvidence("persist proration refusal: "+err.Error(), evidence())
 				}
-				return h.refusedProration(ctx, in, p, progress, evidence())
+				return h.refusedProration(ctx, in, p, progress, evidence(), enrollment)
 			}
 			if receipt == nil || receipt.TransactionID == "" {
 				return intents.Ambiguous("proration response omitted transaction identity")
@@ -278,7 +305,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 		out["transaction_id"] = progress.Proration.Sale.TransactionID
 	}
 	outcome := intents.Succeeded(out)
-	if err = h.finalize(ctx, in, p, progress, receipt, outcome); err != nil {
+	if err = h.finalize(ctx, in, p, progress, receipt, enrollment, outcome); err != nil {
 		return intents.Ambiguous("upgrade receipts retained; local commit pending: " + err.Error())
 	}
 	return outcome
@@ -317,7 +344,7 @@ func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsR
 	if step == nil {
 		return intents.Outcome{}, intents.RejectResolution("%s step was never submitted", resolution.Step)
 	}
-	if step.Refusal != "" || step.Enrollment != nil {
+	if step.Refusal != "" {
 		return intents.Outcome{}, intents.RejectResolution("%s step already has an outcome", resolution.Step)
 	}
 	if resolution.NotExecuted {
@@ -337,17 +364,22 @@ func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsR
 	ref := resolution.ProviderReference
 	switch {
 	case resolution.Step == "successor":
-		if err := client.ConfirmLiveSubscription(ctx, ref, p.Instrument.RailCustomerRef, p.PlanID); err != nil {
-			return intents.Outcome{}, intents.RejectResolution("%v", err)
+		enrollment, found, err := intents.ReadNMIEnrollmentReceipt(ctx, in, upgradeReceiptResolver{client}, ref)
+		if err != nil || !found {
+			return intents.Outcome{}, intents.RejectResolution("exact successor schedule is unavailable or contradicts accepted terms")
 		}
-		local, err := h.Checkout.SubscriptionService.GetByPSPSubscriptionID(ctx, in.Rail, ref)
+
+		local, err := h.Checkout.SubscriptionService.GetByPSPSubscriptionID(db.WithPSPID(ctx, *in.PspID), in.Rail, ref)
 		switch {
 		case err == nil && local.ID != p.NewSubscriptionID:
 			return intents.Outcome{}, intents.RejectResolution("subscription %s is already registered to local subscription %s", ref, local.ID)
 		case err != nil && !db.IsNotFound(err):
 			return intents.Outcome{}, err
 		}
-		step.Enrollment = &nmi.AddSubscriptionResponse{SubscriptionID: ref}
+		if _, err := intents.NewStore(h.Checkout.SubscriptionService.Database()).RetainNMIEnrollmentReceipt(ctx, in, enrollment); err != nil {
+			return intents.Outcome{}, err
+		}
+		step.Enrollment = &nmi.AddSubscriptionResponse{SubscriptionID: enrollment.SubscriptionID()}
 	default:
 		receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, upgradeReceiptResolver{client}, ref)
 		if err != nil || !found {
@@ -369,7 +401,10 @@ func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsR
 // A definitive proration refusal leaves an unpaid successor schedule. Retain
 // its exact receipt and queue the existing verify-then-delete operation; never
 // resend the declined charge or abandon a live schedule through direct cleanup.
-func (h *NMIUpgradeIntentHandler) refusedProration(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, progress nmiUpgradeProgress, evidence map[string]any) intents.Outcome {
+func (h *NMIUpgradeIntentHandler) refusedProration(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, progress nmiUpgradeProgress, evidence map[string]any, enrollment intents.NMIEnrollmentReceipt) intents.Outcome {
+	if err := enrollment.Validate(in); err != nil {
+		return intents.Ambiguous(err.Error())
+	}
 	database := h.Checkout.SubscriptionService.Database()
 	customer, err := customerIDFromUser(p.UserID)
 	if err != nil {
@@ -411,7 +446,10 @@ func (h *NMIUpgradeIntentHandler) refusedProration(ctx context.Context, in gen.O
 	return outcome
 }
 
-func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, progress nmiUpgradeProgress, receipt intents.CollectedReceipt, outcome intents.Outcome) error {
+func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, progress nmiUpgradeProgress, receipt intents.CollectedReceipt, enrollment intents.NMIEnrollmentReceipt, outcome intents.Outcome) error {
+	if err := enrollment.Validate(in); err != nil {
+		return err
+	}
 	database := h.Checkout.SubscriptionService.Database()
 	customer, err := customerIDFromUser(p.UserID)
 	if err != nil {
@@ -445,16 +483,11 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.Openrails
 		if err := h.Checkout.Lifecycle.CompleteUpgradeTx(ctx, txDB, models.Subscription{ID: p.OldSubscriptionID, PriceID: p.OldPriceID, RailSubscriptionID: p.OldProviderSubscriptionID}, next, payment); err != nil {
 			return err
 		}
-		for agreement, ref := range map[string]string{"recurring": progress.Successor.Enrollment.TransactionID, "unscheduled": func() string {
-			if payment != nil {
-				return payment.TransactionID
-			}
-			return ""
-		}()} {
-			if ref != "" {
-				if _, err := txDB.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, Agreement: agreement, Ref: ref}); err != nil {
-					return err
-				}
+		// A delayed enrollment may return its schedule ID as transactionid. It
+		// is not a qualifying CIT and must not become a recurring agreement.
+		if payment != nil {
+			if _, err := txDB.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, Agreement: "unscheduled", Ref: payment.TransactionID}); err != nil {
+				return err
 			}
 		}
 		_, err = intents.NewStore(txDB).Enqueue(ctx, intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: *in.PspID, SubscriptionID: &p.OldSubscriptionID, IntentType: intents.TypeNMIDeleteSubscription, Payload: intents.NMIDeletePayload{UserID: p.UserID, RailSubscriptionID: p.OldProviderSubscriptionID}, IdempotencyKey: intents.NMIDeleteIdempotencyKey(p.OldSubscriptionID, *in.PspID, p.OldProviderSubscriptionID), NextAttemptAt: p.PeriodStart, Origin: intents.OriginUser, OriginReason: "cancel predecessor after durable tier upgrade"})

@@ -25,6 +25,7 @@ type MigrationOptions struct {
 // ApplyMigrations initializes OpenRails-owned database objects using a privileged
 // pool. Hosts never import migration files or construct a River migrator. With
 // RiverFromHost, River migration and access policy remain entirely host-owned.
+// RiverFromHost(nil) is sufficient here; only New needs the live client binder.
 // AuthKit is initialized separately through its own embedded migration API.
 func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, opts MigrationOptions) error {
 	if pool == nil {

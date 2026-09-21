@@ -31,6 +31,18 @@ func TestCustodianIsAlwaysStated(t *testing.T) {
 
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	repo := NewPaymentMethodRepo(database)
+	custodianIDFor := func(kind string) *uuid.UUID {
+		if kind == models.CustodianPSP || kind == "" {
+			return nil
+		}
+		id := uuid.New()
+		_, err := pool.Exec(ctx, `INSERT INTO billing.custodians(id,merchant_id,key,kind,environment,account_id) VALUES($1,$2,$3,$4,'test',$3)`, id, dbtest.TestMerchantID.UUID(), id.String(), kind)
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM billing.custodians WHERE merchant_id=$1 AND id=$2`, dbtest.TestMerchantID.UUID(), id)
+		})
+		return &id
+	}
 	create := func(custodian string) uuid.UUID {
 		pm := &models.PaymentMethod{
 			ID:                   uuid.New(),
@@ -45,10 +57,7 @@ func TestCustodianIsAlwaysStated(t *testing.T) {
 			CreatedAt:            time.Now().UTC(),
 			UpdatedAt:            time.Now().UTC(),
 		}
-		if custodian == models.CustodianBasisTheory {
-			id := dbtest.EnsureTestCustodian(ctx, t, pool, dbtest.TestMerchantID.UUID())
-			pm.CustodianID = &id
-		}
+		pm.CustodianID = custodianIDFor(custodian)
 		require.NoError(t, repo.Create(ctx, pm))
 		t.Cleanup(func() { _ = repo.Delete(ctx, pm.ID) })
 		return pm.ID
@@ -80,13 +89,8 @@ func TestCustodianIsAlwaysStated(t *testing.T) {
 
 	// The constraint, not convention, is what makes an unstated custodian
 	// impossible: a direct INSERT with '' is refused.
-	rawInsert := func(custodian string) error {
+	rawInsert := func(custodian string, custodianID *uuid.UUID) error {
 		id := uuid.New()
-		var custodianID *uuid.UUID
-		if custodian == models.CustodianBasisTheory {
-			cid := dbtest.EnsureTestCustodian(ctx, t, pool, dbtest.TestMerchantID.UUID())
-			custodianID = &cid
-		}
 		_, err := pool.Exec(ctx,
 			`INSERT INTO billing.payment_methods
 			   (id, merchant_id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref, initial_transaction_id, custodian, custodian_id)
@@ -98,11 +102,13 @@ func TestCustodianIsAlwaysStated(t *testing.T) {
 		}
 		return err
 	}
-	require.ErrorContains(t, rawInsert(""), "payment_methods_custodian_check")
+	require.ErrorContains(t, rawInsert("", nil), "payment_methods_custodian_check")
 	// The vocabulary is closed too — a custodian we do not implement cannot
 	// arrive silently on a money path (adding one is a migration).
-	require.ErrorContains(t, rawInsert("hyperswitch"), "payment_methods_custodian_check")
+	require.ErrorContains(t, rawInsert("unimplemented_custodian", nil), "payment_methods_custodian_check")
+	require.ErrorContains(t, rawInsert(models.CustodianHyperSwitch, custodianIDFor(models.CustodianBasisTheory)), "payment_methods_custodian_fk")
+	require.ErrorContains(t, rawInsert(models.CustodianBasisTheory, custodianIDFor(models.CustodianHyperSwitch)), "payment_methods_custodian_fk")
 	for _, ok := range models.Custodians() {
-		require.NoError(t, rawInsert(ok), "declared custodian %q must be accepted", ok)
+		require.NoError(t, rawInsert(ok, custodianIDFor(ok)), "declared custodian %q must be accepted", ok)
 	}
 }

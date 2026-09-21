@@ -408,8 +408,11 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	if session.Rail != models.RailSolana {
+	if session.Rail != models.RailSolana || session.Mode == models.CheckoutSessionModePaymentMethod {
 		return nil, nil
+	}
+	if session.PriceID == nil || session.Amount == nil || session.Currency == nil {
+		return nil, fmt.Errorf("Solana checkout has no monetary terms")
 	}
 	switch session.Status {
 	case models.CheckoutSessionStatusRequiresAction, models.CheckoutSessionStatusExpired, models.CheckoutSessionStatusCreated:
@@ -429,8 +432,8 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 			UserID:    session.CustomerID.String(),
 			PriceID:   session.PriceID.String(),
 			SessionID: session.ID.String(),
-			Amount:    session.Amount,
-			Currency:  session.Currency,
+			Amount:    *session.Amount,
+			Currency:  *session.Currency,
 			CreatedAt: session.CreatedAt,
 			Lifecycle: true,
 		}
@@ -447,8 +450,8 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 			UserID:    session.CustomerID.String(),
 			PriceID:   session.PriceID.String(),
 			SessionID: session.ID.String(),
-			Amount:    session.Amount,
-			Currency:  session.Currency,
+			Amount:    *session.Amount,
+			Currency:  *session.Currency,
 			CreatedAt: session.CreatedAt,
 			Subscribe: true,
 		}
@@ -469,8 +472,8 @@ func (p *SolanaPayPoller) pendingPaymentFromCheckoutSession(ctx context.Context,
 		UserID:      session.CustomerID.String(),
 		PriceID:     session.PriceID.String(),
 		SessionID:   session.ID.String(),
-		Amount:      session.Amount,
-		Currency:    session.Currency,
+		Amount:      *session.Amount,
+		Currency:    *session.Currency,
 		Token:       token,
 		TokenMint:   tokenMint,
 		TokenAmount: tokenAmount,

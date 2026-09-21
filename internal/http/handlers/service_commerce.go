@@ -25,6 +25,7 @@ func commerceCustomer(r *httprequest.Request, customerID openrails.CustomerID) (
 }
 
 func ServiceCreateCheckoutSession(r *httprequest.Request) {
+	r.SetHeader("Cache-Control", "no-store")
 	var input openrails.CreateCheckoutSessionRequest
 	if !r.BindJSON(&input) {
 		return
@@ -34,8 +35,8 @@ func ServiceCreateCheckoutSession(r *httprequest.Request) {
 		return
 	}
 	input.Customer.ID = openrails.CustomerID(payer)
-	input.IdempotencyKey = strings.TrimSpace(r.Header("Idempotency-Key"))
-	if input.IdempotencyKey == "" {
+	input.IdempotencyKey = r.Header("Idempotency-Key")
+	if strings.TrimSpace(input.IdempotencyKey) == "" {
 		r.ErrorJSON(http.StatusBadRequest, "Idempotency-Key required")
 		return
 	}
@@ -53,6 +54,7 @@ func ServiceCreateCheckoutSession(r *httprequest.Request) {
 }
 
 func ServiceGetCheckoutSession(r *httprequest.Request) {
+	r.SetHeader("Cache-Control", "no-store")
 	payer, ok := commerceCustomer(r, customerIDParam(r.Query("customer_id")))
 	if !ok {
 		return
@@ -77,6 +79,7 @@ func ServiceGetCheckoutSession(r *httprequest.Request) {
 }
 
 func ServiceConfirmCheckoutSession(r *httprequest.Request) {
+	r.SetHeader("Cache-Control", "no-store")
 	var input openrails.ConfirmCheckoutSessionRequest
 	if !r.BindJSON(&input) {
 		return

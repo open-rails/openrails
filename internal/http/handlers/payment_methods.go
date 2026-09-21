@@ -382,6 +382,9 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 	if err != nil {
 		fields := log.Fields{"payment_method_id": methodID, "user_id": user.ID, "rail": pm.Rail}
 		switch {
+		case errors.Is(err, paymentmethods.ErrPaymentMethodCustodianUnsupported):
+			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "payment_method_update_unsupported", err.Error()).WithMetadata(map[string]any{"custodian": pm.Custodian}))
+			return
 		case errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail):
 			r.ErrorJSON(http.StatusBadRequest, err.Error())
 			return
@@ -577,6 +580,8 @@ func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentM
 		log.WithError(err).WithFields(fields).Warn("Payment method deletion refused because it cannot be scoped safely")
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, api.CodeResourceConflict,
 			"Payment method cannot be deleted safely; contact support"))
+	case errors.Is(err, paymentmethods.ErrPaymentMethodCustodianUnsupported):
+		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, codePaymentMethodDeleteUnsupported, err.Error()).WithMetadata(map[string]any{"custodian": pm.Custodian}))
 	case errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail):
 		log.WithError(err).WithFields(fields).Info("Payment method deletion is managed by the payment rail")
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, codePaymentMethodDeleteUnsupported, err.Error()).

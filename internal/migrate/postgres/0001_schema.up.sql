@@ -1394,7 +1394,7 @@ CREATE TABLE openrails.custodians (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT custodians_environment_check CHECK ((environment = ANY (ARRAY['live'::text, 'test'::text]))),
-    CONSTRAINT custodians_kind_check CHECK ((kind = ANY (ARRAY['basis_theory'::text]))),
+    CONSTRAINT custodians_kind_check CHECK ((kind = ANY (ARRAY['basis_theory'::text, 'hyperswitch'::text]))),
     CONSTRAINT custodians_nonempty CHECK (((btrim(key) <> ''::text) AND (btrim(account_id) <> ''::text)))
 );
 
@@ -1404,7 +1404,7 @@ COMMENT ON TABLE openrails.custodians IS 'or#880: merchant custodian registry. A
 
 COMMENT ON COLUMN openrails.custodians.key IS 'The custodian''s manifest key (merchants.<slug>.custodians.<key>) — the name a PSP entry references.';
 
-COMMENT ON COLUMN openrails.custodians.kind IS 'The custodian VENDOR: basis_theory today. Same vocabulary as payment_methods.custodian, minus ''psp'' (which is the absence of a third-party custodian, not an account).';
+COMMENT ON COLUMN openrails.custodians.kind IS 'The custodian VENDOR: basis_theory or hyperswitch. Same vocabulary as payment_methods.custodian, minus ''psp'' (which is the absence of a third-party custodian, not an account).';
 
 COMMENT ON COLUMN openrails.custodians.account_id IS 'The custodian-native tenant identity (Basis Theory: the tenant id). Operator-declared — there is no runtime whoami (#592).';
 
@@ -1419,6 +1419,9 @@ ALTER TABLE ONLY openrails.custodians
 
 ALTER TABLE ONLY openrails.custodians
     ADD CONSTRAINT uq_custodians_id_merchant UNIQUE (id, merchant_id);
+
+ALTER TABLE ONLY openrails.custodians
+    ADD CONSTRAINT uq_custodians_merchant_id_kind UNIQUE (merchant_id, id, kind);
 
 CREATE INDEX idx_custodians_merchant ON openrails.custodians USING btree (merchant_id);
 
@@ -3005,7 +3008,7 @@ CREATE TABLE openrails.payment_methods (
     parked_at timestamp with time zone,
     account_updater_checked_at timestamp with time zone,
     CONSTRAINT payment_methods_charge_via_check CHECK ((charge_via = ANY (ARRAY['pan_proxy'::text, 'network_token'::text]))),
-    CONSTRAINT payment_methods_custodian_check CHECK ((custodian = ANY (ARRAY['psp'::text, 'basis_theory'::text]))),
+    CONSTRAINT payment_methods_custodian_check CHECK ((custodian = ANY (ARRAY['psp'::text, 'basis_theory'::text, 'hyperswitch'::text]))),
     CONSTRAINT payment_methods_rebill_driver_check CHECK ((rebill_driver = ANY (ARRAY['provider'::text, 'openrails'::text])))
 );
 
@@ -3025,7 +3028,7 @@ COMMENT ON COLUMN openrails.payment_methods.stored_credential_recurring_ref IS '
 
 COMMENT ON COLUMN openrails.payment_methods.stored_credential_unscheduled_ref IS 'Rail-scoped stored-credential replay reference for the UNSCHEDULED card-network agreement (NMI: gateway transactionid of the initial unscheduled CIT, replayed as initial_transaction_id on unscheduled MITs). Empty = not captured yet.';
 
-COMMENT ON COLUMN openrails.payment_methods.custodian IS 'or#880 who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory = neutral third-party vault (#795). Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.';
+COMMENT ON COLUMN openrails.payment_methods.custodian IS 'or#880 who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory or hyperswitch = neutral third-party vault. Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.';
 
 COMMENT ON COLUMN openrails.payment_methods.fingerprint IS 'Custodian-issued stable fingerprint of the underlying PAN (Basis Theory''s default fingerprint expression), for dedup/lookup. '''' = the custodian issues none.';
 
@@ -3079,7 +3082,7 @@ ALTER TABLE ONLY openrails.payment_methods
     ADD CONSTRAINT payment_methods_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.payment_methods
-    ADD CONSTRAINT payment_methods_custodian_fk FOREIGN KEY (custodian_id, merchant_id) REFERENCES openrails.custodians(id, merchant_id);
+    ADD CONSTRAINT payment_methods_custodian_fk FOREIGN KEY (merchant_id, custodian_id, custodian) REFERENCES openrails.custodians(merchant_id, id, kind);
 
 ALTER TABLE ONLY openrails.payment_methods
     ADD CONSTRAINT payment_methods_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id);
@@ -3702,12 +3705,12 @@ ALTER TABLE ONLY openrails.host_outbox
 
 CREATE TABLE openrails.checkout_sessions (
     id uuid DEFAULT uuidv7() NOT NULL,
-    price_id uuid NOT NULL,
+    price_id uuid,
     mode text NOT NULL,
     rail text NOT NULL,
     status text NOT NULL,
-    amount bigint NOT NULL,
-    currency text NOT NULL,
+    amount bigint,
+    currency text,
     expires_at timestamp with time zone,
     reference text,
     transaction_id text,
@@ -3726,7 +3729,11 @@ CREATE TABLE openrails.checkout_sessions (
     destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
     routing_reason jsonb,
     CONSTRAINT checkout_sessions_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
-    CONSTRAINT checkout_sessions_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text, 'solana_cancel'::text, 'solana_tier_change'::text])))
+    CONSTRAINT checkout_sessions_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text, 'solana_cancel'::text, 'solana_tier_change'::text, 'payment_method'::text]))),
+    CONSTRAINT checkout_sessions_monetary_terms CHECK (
+      (mode = 'payment_method' AND price_id IS NULL AND amount IS NULL AND currency IS NULL AND payment_id IS NULL AND subscription_id IS NULL)
+      OR (mode <> 'payment_method' AND price_id IS NOT NULL AND amount IS NOT NULL AND currency IS NOT NULL)
+    )
 );
 
 ALTER TABLE ONLY openrails.checkout_sessions FORCE ROW LEVEL SECURITY;

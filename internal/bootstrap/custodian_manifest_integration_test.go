@@ -250,12 +250,12 @@ func TestReconcileMerchantManifestRefusesUnknownCustodianKind(t *testing.T) {
 	manifest := custodyManifest(t)
 	mt := manifest.Merchants["host-three"]
 	mt.Custodians = map[string]CustodianConfig{
-		"hs": {"hyperswitch": {AccountID: "tnt_hs", Secrets: map[string]string{"api_key": "k"}}},
+		"unknown": {"unimplemented_custodian": {AccountID: "unsupported-account", Secrets: map[string]string{"api_key": "k"}}},
 	}
 	manifest.Merchants["host-three"] = mt
 
 	err := ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "hyperswitch")
+	require.Contains(t, err.Error(), "unimplemented_custodian")
 	require.Contains(t, err.Error(), models.CustodianBasisTheory)
 }

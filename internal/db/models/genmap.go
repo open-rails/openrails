@@ -302,6 +302,9 @@ func CheckoutSessionFromGen(c gen.OpenrailsCheckoutSession) (*CheckoutSession, e
 		CreatedAt:      c.CreatedAt,
 		UpdatedAt:      c.UpdatedAt,
 	}
+	if err := m.ValidateTerms(); err != nil {
+		return nil, err
+	}
 	if err := FromJSONB(c.Metadata, &m.Metadata, "checkout_sessions.metadata"); err != nil {
 		return nil, err
 	}
