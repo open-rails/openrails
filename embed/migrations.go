@@ -16,10 +16,14 @@ var migrationSchemaName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
 // MigrationOptions selects the billing namespace and River ownership. Use the
 // same Schema and River values in the runtime configuration and Options.River.
-// The zero value creates billing tables in billing and manages River in public.
+// The zero value creates billing tables in billing and manages River in public,
+// without provisioning access for a runtime login.
 type MigrationOptions struct {
 	Schema string
 	River  RiverOwnership
+	// RuntimePool identifies the host login to receive direct runtime access.
+	// Omit it to apply schema migrations only. The host owns its credentials.
+	RuntimePool *pgxpool.Pool
 }
 
 // ApplyMigrations initializes OpenRails-owned database objects using a privileged
@@ -39,7 +43,7 @@ func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, opts MigrationOpti
 	if err != nil {
 		return err
 	}
-	return migrate.ApplyPostgresMigrations(ctx, pool, migrate.Options{Schema: schema, RiverSchema: riverSchema, HostRiver: opts.River.host})
+	return migrate.ApplyPostgresMigrations(ctx, pool, migrate.Options{Schema: schema, RiverSchema: riverSchema, HostRiver: opts.River.host, RuntimePool: opts.RuntimePool})
 }
 
 func validateMigrationSchema(schema string) (string, error) {

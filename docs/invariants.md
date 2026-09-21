@@ -86,7 +86,7 @@ that a merchant id is derived from the authenticated principal, never from reque
 | TEN-6 | `MerchantTx` pins the GUC **transaction-locally** so it cannot leak onto a pooled connection; a zero merchant id is rejected. | `internal/db/db_pgx.go:144-177` | APP | `grep -rn "set_config" internal/db` |
 | TEN-7 | On release-reset failure the request connection is **closed**, not returned to the pool. | `db_pgx.go:225-243` | APP | — |
 | TEN-8 | Boot refuses, in EVERY environment (development included, or#782), if the Postgres role bypasses RLS. Migrations are the only job that runs privileged, and they never build the runtime. | `internal/db/rls.go`; `build_runtime.go:176` | APP | boot as superuser at any `env` → must fail; `go test ./internal/db -run TestRLSPostureError` |
-| TEN-9 | The app role is `NOLOGIN NOBYPASSRLS`. | `0001_schema.up.sql` (`CREATE ROLE openrails_app`) | **DB** | `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname='openrails_app';` |
+| TEN-9 | The host runtime login is `LOGIN NOSUPERUSER NOBYPASSRLS`; libraries never create roles or memberships. | `internal/db/rls.go`; `MigrationOptions.RuntimePool` | **DB** + **T** | `SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname=current_user;` |
 | TEN-10 | **There is no privileged pool.** One pool, one role — dropping the GUC does not bypass a policy, it fails it. A genuine cross-merchant read goes through a `SECURITY DEFINER` reader (`assert_cross_merchant_reader()` and the `*_merchant_ids` work queues) that ASSERTS its definer bypasses RLS and RAISES if not; everything else runs per-merchant under `MerchantTx`/`RunInMerchantConn`. `DB.GenGlobal()` names the not-merchant-pinned connection, **not** a privilege. | `db_pgx.go:66-86`; `assert_cross_merchant_reader()` | APP | `grep -rn "GenGlobal()\|gen.New(.*\.pool)" --include=*.go` — every hit must resolve to a definer reader or an exempt table. §10 GAP-17 lists the ones that still do not |
 | TEN-11 | Unauthenticated webhook surfaces resolve the merchant, then verify the signature with *that merchant's* secret. Each deployment shape has exactly ONE resolution rule (or#893): standalone from the declared PSP catalog (payload/`:account_id`), embedded from its pinned merchant's route slug, hosted from the `Host` header. An unresolvable Host/slug/account is a hard 404. | `internal/http/handlers/webhook.go` | APP | — |
 | TEN-12 | Core schema may not FK into AuthKit's schema and may not create River tables. | `portability_guard_test.go:27-56` | **T** | `go test ./internal/migrate/postgres -run TestPortabilityInvariant` |
@@ -99,7 +99,7 @@ that a merchant id is derived from the authenticated principal, never from reque
 | LED-2 | A missing debit or credit account raises — never a silent no-op. | `:147-149` | **DB** | — |
 | LED-3 | **Insufficient-funds floor**: debiting below `-allow_debit_negative_up_to` raises `ledger_insufficient_funds`. | trigger `:155-159`; flag set in `ledger.go:69-72` | **DB** | `SELECT … WHERE account_type='customer_balance' AND NOT debits_must_not_exceed_credits;` → 0 |
 | LED-4 | Symmetric ceiling for `credits_must_not_exceed_debits` accounts. | `:160-162` | **DB** | — |
-| LED-5 | Transfers and accounts are **append-only**: the app role holds `SELECT,INSERT` only; counters move solely through the `SECURITY DEFINER` trigger. | `:1652,:1723`; trigger `:122-123` | **S** + **T** | `TestLED5_LedgerIsAppendOnlyByPrivilege`. Verified live 2026-07-28: as `openrails_app`, UPDATE/DELETE on either table is `permission denied` |
+| LED-5 | Transfers and accounts are **append-only**: the initializer grants the host login `SELECT,INSERT` only; counters move solely through the `SECURITY DEFINER` trigger. | `:1652,:1723`; trigger `:122-123` | **S** + **T** | `TestLED5_LedgerIsAppendOnlyByPrivilege`. Verified live 2026-07-28: as `openrails_app`, UPDATE/DELETE on either table is `permission denied` |
 | LED-6 | Debit ≠ credit account. | `:1674` | **DB** (via the trigger, not the CHECK) | the BEFORE trigger runs first and rejects the self-transfer as "account not found", so `ledger_transfers_distinct_accounts` never fires. Still rejected — just not by the constraint the row cites | — |
 | LED-7 | A credit lot's deposit / expire / revoke each happen at most once. | `idx_ledger_transfers_lot_once`, `:1707` | **DB** | — |
 | LED-8 | ~~An owed accrual is once per …~~ **Superseded by LED-14**, which covers every transfer type rather than this one. | `idx_ledger_transfers_operation_once` replaced `idx_ledger_transfers_owed_accrual_once` | **DB** | — |
@@ -283,11 +283,11 @@ GAP-14 are open only in their named residuals; GAP-16 is closed.
 
 ### Audit bundle
 
-Run these as `openrails_app`, not as a superuser — and read the next paragraph first.
+Run these as the normal host login, not as a superuser — and read the next paragraph first.
 
 > **Three of these queries cannot fail as written.** GAP-8 (conservation), GAP-2/6 (currency
 > codes) and GAP-5 (duplicate transactions) all read merchant-owned, RLS-policied tables. As
-> `openrails_app` with no `app.merchant_id` they return **zero rows whatever the data is** —
+> The host login with no `app.merchant_id` they return **zero rows whatever the data is** —
 > measured 2026-07-28 against a seeded database: the app role saw 0 ledger accounts where the
 > superuser saw 4. Run as a superuser they are honest but do not reproduce production; run as
 > the app role they are green by construction. Either way they were not checking anything.
@@ -318,18 +318,18 @@ SELECT count(*) FROM pg_constraint
    AND connamespace='openrails'::regnamespace;
 
 -- GAP-8: ledger conservation per (merchant, currency)
--- ⚠ RLS-BLIND as openrails_app: returns nothing regardless of state. Run per
+-- ⚠ RLS-BLIND as the host login: returns nothing regardless of state. Run per
 --   merchant under app.merchant_id, or via `openrails ledger-audit <merchant>`.
 SELECT merchant_id, currency, sum(credits_posted - debits_posted) FROM openrails.ledger_accounts
  GROUP BY 1,2 HAVING sum(credits_posted - debits_posted) <> 0;
 
 -- GAP-2/GAP-6: lowercase currency codes. Now impossible to insert (CUR-5b), so
 -- this is a post-migration audit of legacy rows rather than a live guard.
--- ⚠ RLS-BLIND as openrails_app (see above).
+-- ⚠ RLS-BLIND as the host login (see above).
 SELECT DISTINCT currency FROM openrails.payments;
 
 -- GAP-5: duplicate provider transactions
--- ⚠ RLS-BLIND as openrails_app (see above).
+-- ⚠ RLS-BLIND as the host login (see above).
 SELECT merchant_id, rail, transaction_id, count(*) FROM openrails.payments
  GROUP BY 1,2,3 HAVING count(*) > 1;
 

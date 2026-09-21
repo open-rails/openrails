@@ -16,6 +16,6 @@ func TestRLSPostureError(t *testing.T) {
 	err := rlsPostureError(RLSPosture{CurrentUser: "postgres", Enforcing: false})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "postgres")
-	require.Contains(t, err.Error(), "openrails_app")
+	require.Contains(t, err.Error(), "host runtime login")
 	require.Contains(t, err.Error(), "development")
 }

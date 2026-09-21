@@ -1991,8 +1991,8 @@ func GetDefaultBillingConfig() *Config {
 			// (or#782). The default must NOT be the superuser: boot refuses a
 			// BYPASSRLS role in every environment, and a superuser default
 			// would only teach developers to reach for one.
-			Username: "openrails_app",
-			Password: "openrails_app_password",
+			Username: "app",
+			Password: "app_password",
 			SSLMode:  "disable",
 			Schema:   DefaultSchema,
 		},

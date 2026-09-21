@@ -257,7 +257,7 @@ type MerchantSecretReader interface {
 // backend instead of answering from cache.
 //
 // Only the caching wrapper needs to implement this; ReadSecretRef degrades to
-// a plain Get for uncached stores, which are already never stale.
+// a plain Get for uncached stores, then verifies the returned version too.
 type VersionedSecretReader interface {
 	GetAtLeastVersion(ctx context.Context, merchantID merchant.ID, name string, minVersion int) (Secret, error)
 }
@@ -270,17 +270,30 @@ type SecretRef struct {
 	MinVersion int
 }
 
-// ReadSecretRef reads ref through reader, honouring the version floor when the
-// reader can. Every provider-credential read goes through here so the cutover
-// rule lives in exactly one place.
+// ReadSecretRef enforces the recorded version floor for every backend. A
+// version-aware cache may refresh first, but a lagging backend is unavailable,
+// never permission to present a retired credential.
 func ReadSecretRef(ctx context.Context, reader MerchantSecretReader, id merchant.ID, ref SecretRef) (Secret, error) {
 	if reader == nil {
 		return Secret{}, errors.New("merchants: no secret store configured")
 	}
-	if versioned, ok := reader.(VersionedSecretReader); ok && ref.MinVersion > 0 {
-		return versioned.GetAtLeastVersion(ctx, id, ref.Name, ref.MinVersion)
+	if ref.MinVersion < 0 {
+		return Secret{}, fmt.Errorf("%w: invalid credential version floor", ErrSecretBackendUnavailable)
 	}
-	return reader.Get(ctx, id, ref.Name)
+	var secret Secret
+	var err error
+	if versioned, ok := reader.(VersionedSecretReader); ok && ref.MinVersion > 0 {
+		secret, err = versioned.GetAtLeastVersion(ctx, id, ref.Name, ref.MinVersion)
+	} else {
+		secret, err = reader.Get(ctx, id, ref.Name)
+	}
+	if err != nil {
+		return Secret{}, err
+	}
+	if secret.Version < ref.MinVersion {
+		return Secret{}, fmt.Errorf("%w: credential version %d is below required version %d", ErrSecretBackendUnavailable, secret.Version, ref.MinVersion)
+	}
+	return secret, nil
 }
 
 // PSPSecretResolver resolves the canonical secret name for the

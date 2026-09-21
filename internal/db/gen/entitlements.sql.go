@@ -279,6 +279,44 @@ func (q *Queries) GetEntitlementByID(ctx context.Context, id uuid.UUID) (Openrai
 	return i, err
 }
 
+const getEntitlementByIDForUpdate = `-- name: GetEntitlementByIDForUpdate :one
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM openrails.entitlements ent
+WHERE ent.merchant_id=$1::uuid AND ent.id=$2::uuid
+  AND ent.deleted_at IS NULL
+FOR UPDATE
+`
+
+type GetEntitlementByIDForUpdateParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// Customer and timeline locks must precede this row lock.
+func (q *Queries) GetEntitlementByIDForUpdate(ctx context.Context, arg GetEntitlementByIDForUpdateParams) (OpenrailsEntitlement, error) {
+	row := q.db.QueryRow(ctx, getEntitlementByIDForUpdate, arg.MerchantID, arg.ID)
+	var i OpenrailsEntitlement
+	err := row.Scan(
+		&i.ID,
+		&i.Entitlement,
+		&i.StartAt,
+		&i.EndAt,
+		&i.SourceID,
+		&i.SourceType,
+		&i.RevokedAt,
+		&i.RevokeReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.Period,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.GrantID,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+	)
+	return i, err
+}
+
 const getLatestEntitlementBySource = `-- name: GetLatestEntitlementBySource :one
 SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id, destructive_run_class FROM openrails.entitlements
 WHERE merchant_id = $1::uuid
@@ -808,7 +846,6 @@ WHERE ent.source_type = 'subscription'
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
   AND ent.end_at IS NOT NULL AND ent.end_at < $2::timestamptz
-FOR UPDATE
 `
 
 type ListExtendableSubscriptionEntitlementsParams struct {

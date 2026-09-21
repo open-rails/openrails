@@ -204,11 +204,11 @@ func TestTEN9_AppRoleIsNotSuperAndNotBypassRLS(t *testing.T) {
 	ctx, _, app := pools(t)
 	var isSuper, bypass, canLogin bool
 	require.NoError(t, app.QueryRow(ctx,
-		`SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = 'openrails_app'`).
+		`SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = current_user`).
 		Scan(&isSuper, &bypass, &canLogin))
 	require.False(t, isSuper)
 	require.False(t, bypass)
-	_ = canLogin // tests grant LOGIN; production wires credentials out of band.
+	require.True(t, canLogin)
 }
 
 // LED-5: the ledger is append-only by ROLE PRIVILEGE, not by convention. If the

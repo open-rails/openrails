@@ -140,55 +140,11 @@ func (s *Subscription) ActivateWithPrice(price *Price) error {
 	return nil
 }
 
-func (s *Subscription) ResetCurrentPeriods() error {
-	now := time.Now()
-	if s.CurrentPeriodEndsAt == nil || s.CurrentPeriodEndsAt.IsZero() {
-		return fmt.Errorf("invalid subscription period end date")
-	}
-
-	if s.CurrentPeriodEndsAt.Equal(now) || s.CurrentPeriodEndsAt.Before(now) {
-		emptyTime := time.Time{}
-		s.CurrentPeriodStartsAt = &emptyTime
-		s.CurrentPeriodEndsAt = &emptyTime
-		// The period has already expired, so the subscription ends now.
-		// The chk_ended_not_before_cancelled constraint requires
-		// ended_at >= cancelled_at; using the true wall-clock instant
-		// (rather than fudging it backwards) keeps that ordering correct
-		// by construction: Cancel() captures its cancelled_at timestamp
-		// before invoking this method, so cancelled_at <= ended_at always.
-		s.EndedAt = &now
-	}
-
-	return nil
-}
-
 func (s *Subscription) ClearRetrySchedule() {
 	s.LastRetryAt = nil
 	s.RetryAttempts = nil
 	s.NextRetryAt = nil
 	s.GraceEndsAt = nil
-}
-
-func (s *Subscription) Cancel(reason string, cancelType *CancelType) error {
-	// Capture cancelled_at BEFORE ResetCurrentPeriods sets ended_at. Reset
-	// reads its own (>= now) wall-clock instant for ended_at, so this ordering
-	// guarantees cancelled_at <= ended_at, satisfying the
-	// chk_ended_not_before_cancelled constraint (ended_at >= cancelled_at)
-	// without any artificial time fudging.
-	now := time.Now()
-	if err := s.ResetCurrentPeriods(); err != nil {
-		return err
-	}
-
-	s.CancelledAt = &now
-	s.CancelType = cancelType
-	s.ClearRetrySchedule()
-	if reason != "" {
-		s.CancelFeedback = &reason
-	}
-
-	s.Status = StatusCancelled
-	return nil
 }
 
 // Validate checks activation preconditions. amountCents is integer minor units

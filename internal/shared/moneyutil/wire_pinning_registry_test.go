@@ -42,6 +42,8 @@ var converters = []string{
 // pinnedBoundaries: file -> the wire-pinning test that covers it (known micros
 // in ⇒ exact integer on the wire).
 var pinnedBoundaries = map[string]string{
+	"internal/modules/payments/sale_terms.go":         "internal/modules/checkout/nmi_sale_intent_integration_test.go",
+	"internal/modules/checkout/nmi_sale_intent.go":    "internal/modules/checkout/nmi_sale_intent_integration_test.go",
 	"internal/intents/collection_receipt.go":          "internal/modules/checkout/upgrade_payment_receipts_integration_test.go",
 	"internal/intents/enrollment_receipt.go":          "internal/modules/checkout/upgrade_payment_receipts_integration_test.go",
 	"internal/modules/subscriptions/upgrade_terms.go": "internal/modules/checkout/upgrade_payment_receipts_integration_test.go",
@@ -73,7 +75,6 @@ var pinnedBoundaries = map[string]string{
 var deferredBoundaries = map[string]string{
 	"internal/integrations/nmi/probe.go":                   "the $0.01 test-mode probe: a fixed literal amount, not a customer amount",
 	"internal/modules/checkout/service.go":                 "upgrade proration + checkout sale — amounts reach the wire via nmi/payments.go, which IS pinned; the arithmetic above it is covered by unit tests, not a wire pin",
-	"internal/modules/checkout/nmi_sale_intent.go":         "same: converts, then hands off to the pinned nmi client",
 	"internal/modules/checkout/nmi_subscription_intent.go": "same",
 	"internal/modules/checkout/custodian_sale.go":          "same",
 	"internal/modules/subscriptions/plan_migration.go":     "or#815 plan migration: successor amount reaches NMI through the pinned client",

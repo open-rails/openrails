@@ -11,8 +11,7 @@ import (
 // as actually ENFORCES the migration-050 Row Level Security policies.
 //
 // RLS only constrains a connection that is NEITHER a superuser NOR a BYPASSRLS
-// role. The migration enables + FORCEs RLS and creates the unprivileged
-// `openrails_app` role, but enforcement is a property of the CONNECTED role: if
+// role. The migration enables + FORCEs RLS, but enforcement is a property of the CONNECTED role: if
 // the app connects as a superuser (or any BYPASSRLS role), every policy is
 // skipped and merchant isolation silently degrades to whatever explicit
 // `WHERE merchant_id = ...` predicates each query happens to carry. This type makes
@@ -89,7 +88,7 @@ func rlsPostureError(posture RLSPosture) error {
 	}
 	return fmt.Errorf(
 		"db: role %q bypasses RLS (superuser/BYPASSRLS), so every merchant_isolation policy is skipped; "+
-			"connect as the unprivileged openrails_app role (created by 0001_schema.up.sql) — this is required in "+
+			"connect as the host runtime login (NOSUPERUSER NOBYPASSRLS) — this is required in "+
 			"EVERY environment including development, and migrations are the only job that runs privileged",
 		posture.CurrentUser,
 	)

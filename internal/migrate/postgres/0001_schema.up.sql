@@ -13,38 +13,13 @@ SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
 
--- Roles are CLUSTER-wide while migratekit's advisory lock is per-DATABASE, so two
--- databases migrating concurrently on one cluster (every parallel integration run,
--- and any two services sharing a cluster) both pass a check-then-act guard and one
--- loses. Let the CREATE race and swallow the duplicate instead.
---
--- BOTH SQLSTATEs are required: a plain sequential duplicate raises duplicate_object
--- (42710), but the loser of a genuine race gets a raw unique_violation (23505) off
--- pg_authid_rolname_index before the friendly check runs.
-DO $$
-BEGIN
-    CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS;
-EXCEPTION WHEN duplicate_object OR unique_violation THEN
-    NULL;
-END $$;
-
 -- btree_gist backs the EXCLUDE constraints on uuid+tstzrange
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 
 CREATE SCHEMA IF NOT EXISTS openrails;
-GRANT USAGE ON SCHEMA openrails TO openrails_app;
 
--- River migration and targeted runtime grants are handled by the migration
--- entrypoint only when OpenRails owns River. AuthKit grants remain AuthKit-owned.
-GRANT USAGE ON SCHEMA public TO openrails_app;
-
--- The migratekit ledger table (public.migrations) predates this migration on
--- every deployment (created at the bootstrap step, before AuthKit/River/
--- OpenRails migrations run). The runtime reads it once at boot to confirm
--- migrations are applied (internal/app/build_runtime.go validateDatabase) —
--- read-only, no write path needs it.
-GRANT SELECT ON TABLE public.migrations TO openrails_app;
+-- Runtime access is provisioned separately for the host-supplied login.
 
 -- ---------------------------------------------------------------------------
 -- Types
@@ -95,7 +70,6 @@ $$;
 COMMENT ON FUNCTION openrails.account_updater_open_batch_merchant_ids(p_limit integer) IS 'or#795: merchants with an account-updater batch the custodian still owes results for — the ingest fan-out. Ids only; the poll, the download and the fold all run per-merchant under RunInMerchantScope.';
 
 REVOKE ALL ON FUNCTION openrails.account_updater_open_batch_merchant_ids(p_limit integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.account_updater_open_batch_merchant_ids(p_limit integer) TO openrails_app;
 
 CREATE FUNCTION openrails.account_updater_work_merchant_ids(p_custodian text, p_environment text, p_now timestamp with time zone, p_default_lookahead_days integer, p_after uuid, p_limit integer) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -154,7 +128,6 @@ $_$;
 COMMENT ON FUNCTION openrails.account_updater_work_merchant_ids(p_custodian text, p_environment text, p_now timestamp with time zone, p_default_lookahead_days integer, p_after uuid, p_limit integer) IS 'or#795: merchants whose ARMED custodian holds an instrument that backs a subscription renewing inside the custodian''s lookahead window and has not been refreshed since the last cycle — the fan-out list for AccountUpdaterWorker. Starts at the custodian registry, so a merchant that never signed up for the add-on costs one index probe and never reaches its payment methods. Ids only, after a cursor, capped.';
 
 REVOKE ALL ON FUNCTION openrails.account_updater_work_merchant_ids(p_custodian text, p_environment text, p_now timestamp with time zone, p_default_lookahead_days integer, p_after uuid, p_limit integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.account_updater_work_merchant_ids(p_custodian text, p_environment text, p_now timestamp with time zone, p_default_lookahead_days integer, p_after uuid, p_limit integer) TO openrails_app;
 
 CREATE FUNCTION openrails.assert_cross_merchant_reader() RETURNS void
     LANGUAGE plpgsql STABLE
@@ -174,7 +147,6 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION openrails.assert_cross_merchant_reader() FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.assert_cross_merchant_reader() TO openrails_app;
 
 CREATE FUNCTION openrails.count_destructive_intents_by_actor_since(p_actor text, p_intent_types text[], p_since timestamp with time zone) RETURNS bigint
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -197,7 +169,6 @@ $$;
 COMMENT ON FUNCTION openrails.count_destructive_intents_by_actor_since(p_actor text, p_intent_types text[], p_since timestamp with time zone) IS 'Per-actor, cross-merchant count of destructive intents in the rolling window — the #732 ceiling''s more specific leg. One compromised credential operating across merchants is exactly the shape this must see.';
 
 REVOKE ALL ON FUNCTION openrails.count_destructive_intents_by_actor_since(p_actor text, p_intent_types text[], p_since timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.count_destructive_intents_by_actor_since(p_actor text, p_intent_types text[], p_since timestamp with time zone) TO openrails_app;
 
 CREATE FUNCTION openrails.count_destructive_intents_for_merchant_since(p_merchant uuid, p_origins text[], p_intent_types text[], p_since timestamp with time zone) RETURNS bigint
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -220,7 +191,6 @@ $$;
 COMMENT ON FUNCTION openrails.count_destructive_intents_for_merchant_since(p_merchant uuid, p_origins text[], p_intent_types text[], p_since timestamp with time zone) IS 'ONE merchant''s destructive intents in a rolling window, for a caller-supplied origin set — both legs of the #732 ceiling: the anti-theft wall (user/admin, or#887) and the automation wall (system, or#842). Definer, not a base-pool read: the gate holds the root pool and carries no app.merchant_id, where a GUC-less count would return 0 and fail open.';
 
 REVOKE ALL ON FUNCTION openrails.count_destructive_intents_for_merchant_since(p_merchant uuid, p_origins text[], p_intent_types text[], p_since timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.count_destructive_intents_for_merchant_since(p_merchant uuid, p_origins text[], p_intent_types text[], p_since timestamp with time zone) TO openrails_app;
 
 
 CREATE FUNCTION openrails.current_merchant_id() RETURNS uuid
@@ -233,7 +203,6 @@ $$;
 COMMENT ON FUNCTION openrails.current_merchant_id() IS 'The request''s merchant from the app.merchant_id GUC, or NULL when unset. Same expression the merchant_isolation RLS policies use, so a query carrying `merchant_id = openrails.current_merchant_id()` enforces the SAME scope in the application layer — defence in depth for by-id admin surfaces whose only other control is a role that might bypass RLS (SEC-18).';
 
 REVOKE ALL ON FUNCTION openrails.current_merchant_id() FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.current_merchant_id() TO openrails_app;
 
 CREATE FUNCTION openrails.custodian_owner_by_identity(p_kind text, p_environment text, p_account_id text) RETURNS TABLE(id uuid, merchant_id uuid, key text, kind text, environment text, account_id text)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -254,7 +223,6 @@ $$;
 COMMENT ON FUNCTION openrails.custodian_owner_by_identity(p_kind text, p_environment text, p_account_id text) IS 'or#880: cross-merchant custodian ownership lookup by the GLOBAL (kind, environment, account_id) natural key — the custody sibling of psp_owner_by_identity, for inbound custodian webhooks (Basis Theory) that carry a tenant id and no merchant context. A custodian may back several PSPs, so this deliberately resolves the CUSTODIAN, never "the" PSP.';
 
 REVOKE ALL ON FUNCTION openrails.custodian_owner_by_identity(p_kind text, p_environment text, p_account_id text) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.custodian_owner_by_identity(p_kind text, p_environment text, p_account_id text) TO openrails_app;
 
 CREATE FUNCTION openrails.customer_merchant_ids_for_subject(p_subject uuid) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -272,7 +240,6 @@ $$;
 COMMENT ON FUNCTION openrails.customer_merchant_ids_for_subject(p_subject uuid) IS 'Merchants where an AuthKit subject holds a customer record, across every merchant scope. For the hosted portal''s "your merchants" list, which runs before any merchant is chosen.';
 
 REVOKE ALL ON FUNCTION openrails.customer_merchant_ids_for_subject(p_subject uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.customer_merchant_ids_for_subject(p_subject uuid) TO openrails_app;
 
 CREATE FUNCTION openrails.delinquency_work_merchant_ids(p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -301,7 +268,6 @@ $$;
 COMMENT ON FUNCTION openrails.delinquency_work_merchant_ids(p_now timestamp with time zone, p_limit integer) IS 'or#878: merchants with arrears delinquency work — an overdue open receivable (the enter leg) or a payer already parked non-current (the exit leg). The fan-out list for DelinquencyWorker. Ids only; states, transitions and signals are computed per-merchant under RunInMerchantScope.';
 
 REVOKE ALL ON FUNCTION openrails.delinquency_work_merchant_ids(p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.delinquency_work_merchant_ids(p_now timestamp with time zone, p_limit integer) TO openrails_app;
 
 CREATE FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -325,7 +291,6 @@ $$;
 COMMENT ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) IS 'Merchants with a due past_due subscription on the named rails — the fan-out list for DunningWorker. Ids only; the due rows, the charges and every lifecycle transition run per-merchant under RunInMerchantScope. Replaces a bare-context scan that returned an empty slice on every run, so scheduled dunning (retries, #839 staleness parking, #840 terminal handling) never fired at all (or#877 B5).';
 
 REVOKE ALL ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) TO openrails_app;
 
 CREATE FUNCTION openrails.due_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -358,7 +323,6 @@ $$;
 COMMENT ON FUNCTION openrails.due_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) IS 'Merchants with provider-intent executor work due — the fan-out list for ProviderIntentExecuteWorker. Ids only; the claim, the gates and the execution all run per-merchant under RunInMerchantConn. Replaces a bare-context ClaimDue that claimed zero intents, disarming the #836 kill switch and the #679 volume breaker with it (or#862).';
 
 REVOKE ALL ON FUNCTION openrails.due_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.due_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) TO openrails_app;
 
 CREATE FUNCTION openrails.due_verify_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -379,7 +343,6 @@ $$;
 COMMENT ON FUNCTION openrails.due_verify_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) IS 'Merchants with ambiguous intents due for provider-read verification — the fan-out list for ProviderIntentVerifyWorker. Ids only (or#862).';
 
 REVOKE ALL ON FUNCTION openrails.due_verify_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.due_verify_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) TO openrails_app;
 
 CREATE FUNCTION openrails.billing_restore_active(p_merchant uuid) RETURNS boolean
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -394,7 +357,6 @@ BEGIN
 END;
 $$;
 REVOKE ALL ON FUNCTION openrails.billing_restore_active(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION openrails.billing_restore_active(uuid) TO openrails_app;
 
 CREATE FUNCTION openrails.enqueue_payment_settlement_event() RETURNS trigger
     LANGUAGE plpgsql
@@ -445,7 +407,6 @@ $$;
 COMMENT ON FUNCTION openrails.fleet_merchant_funnel(p_exclude uuid, p_since timestamp with time zone) IS 'Fleet funnel counters (provisioned / armed / ever-earned / earning-now). Four scalars, no rows (or#861).';
 
 REVOKE ALL ON FUNCTION openrails.fleet_merchant_funnel(p_exclude uuid, p_since timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.fleet_merchant_funnel(p_exclude uuid, p_since timestamp with time zone) TO openrails_app;
 
 CREATE FUNCTION openrails.fleet_mrr_by_currency(p_exclude uuid) RETURNS TABLE(currency text, subscriptions bigint, monthly_amount bigint)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -467,7 +428,6 @@ $$;
 COMMENT ON FUNCTION openrails.fleet_mrr_by_currency(p_exclude uuid) IS 'Fleet MRR per currency, normalised to a 720-hour month from each price''s access window (or#861).';
 
 REVOKE ALL ON FUNCTION openrails.fleet_mrr_by_currency(p_exclude uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.fleet_mrr_by_currency(p_exclude uuid) TO openrails_app;
 
 CREATE FUNCTION openrails.fleet_rail_health(p_exclude uuid, p_since timestamp with time zone) RETURNS TABLE(rail text, succeeded bigint, failed bigint, chargebacks bigint)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -490,7 +450,6 @@ $$;
 COMMENT ON FUNCTION openrails.fleet_rail_health(p_exclude uuid, p_since timestamp with time zone) IS 'Per-rail fleet approval/decline/chargeback counters in the window (or#861).';
 
 REVOKE ALL ON FUNCTION openrails.fleet_rail_health(p_exclude uuid, p_since timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.fleet_rail_health(p_exclude uuid, p_since timestamp with time zone) TO openrails_app;
 
 CREATE FUNCTION openrails.fleet_revenue_by_currency(p_exclude uuid, p_since timestamp with time zone) RETURNS TABLE(currency text, payments bigint, settled_amount bigint)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -510,7 +469,6 @@ $$;
 COMMENT ON FUNCTION openrails.fleet_revenue_by_currency(p_exclude uuid, p_since timestamp with time zone) IS 'Settled fleet sale volume per currency in the window. Sale rows only — reversal mirror rows share status=completed and must never count (or#861).';
 
 REVOKE ALL ON FUNCTION openrails.fleet_revenue_by_currency(p_exclude uuid, p_since timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.fleet_revenue_by_currency(p_exclude uuid, p_since timestamp with time zone) TO openrails_app;
 
 CREATE FUNCTION openrails.fleet_weekly_active_merchants(p_exclude uuid, p_since timestamp with time zone) RETURNS TABLE(week_start timestamp with time zone, merchants bigint)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -531,7 +489,6 @@ $$;
 COMMENT ON FUNCTION openrails.fleet_weekly_active_merchants(p_exclude uuid, p_since timestamp with time zone) IS 'Weekly count of DISTINCT merchants with a settled sale — a count per ISO week, never the merchant list (or#861).';
 
 REVOKE ALL ON FUNCTION openrails.fleet_weekly_active_merchants(p_exclude uuid, p_since timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.fleet_weekly_active_merchants(p_exclude uuid, p_since timestamp with time zone) TO openrails_app;
 
 CREATE FUNCTION openrails.fleet_weekly_cancelled_subscriptions(p_exclude uuid, p_since timestamp with time zone) RETURNS TABLE(week_start timestamp with time zone, cancellations bigint)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -552,7 +509,6 @@ $$;
 COMMENT ON FUNCTION openrails.fleet_weekly_cancelled_subscriptions(p_exclude uuid, p_since timestamp with time zone) IS 'Weekly fleet subscription cancellations — the churn proxy on the fleet trend chart (or#861).';
 
 REVOKE ALL ON FUNCTION openrails.fleet_weekly_cancelled_subscriptions(p_exclude uuid, p_since timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.fleet_weekly_cancelled_subscriptions(p_exclude uuid, p_since timestamp with time zone) TO openrails_app;
 
 CREATE FUNCTION openrails.fleet_weekly_volume(p_exclude uuid, p_since timestamp with time zone) RETURNS TABLE(week_start timestamp with time zone, currency text, payments bigint, settled_amount bigint)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -573,7 +529,6 @@ $$;
 COMMENT ON FUNCTION openrails.fleet_weekly_volume(p_exclude uuid, p_since timestamp with time zone) IS 'Weekly settled fleet sale volume per currency. Sale rows only (or#861).';
 
 REVOKE ALL ON FUNCTION openrails.fleet_weekly_volume(p_exclude uuid, p_since timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.fleet_weekly_volume(p_exclude uuid, p_since timestamp with time zone) TO openrails_app;
 
 CREATE FUNCTION openrails.guard_merchant_group_binding() RETURNS trigger
     LANGUAGE plpgsql
@@ -635,7 +590,6 @@ $$;
 COMMENT ON FUNCTION openrails.lapsed_credit_lot_merchant_ids(p_as_of timestamp with time zone, p_limit integer) IS 'Merchants holding at least one past-expiry, non-superseded credit lot — the fan-out list for CreditExpiryWorker. Ids only; the per-customer work list and the ledger claw-back run per-merchant. Replaces a base-pool enumeration that returned nothing, so no credit lot has ever been expired (or#868 B1).';
 
 REVOKE ALL ON FUNCTION openrails.lapsed_credit_lot_merchant_ids(p_as_of timestamp with time zone, p_limit integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.lapsed_credit_lot_merchant_ids(p_as_of timestamp with time zone, p_limit integer) TO openrails_app;
 
 CREATE FUNCTION openrails.ledger_transfers_apply_counters() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
@@ -710,7 +664,6 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION openrails.pending_merchant_secret_cleanups(p_after uuid, p_limit integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.pending_merchant_secret_cleanups(p_after uuid, p_limit integer) TO openrails_app;
 
 CREATE FUNCTION openrails.prices_default_key() RETURNS trigger
     LANGUAGE plpgsql
@@ -763,7 +716,6 @@ $$;
 COMMENT ON FUNCTION openrails.psp_owner_by_identity(p_rail text, p_environment text, p_account_id text) IS 'Cross-merchant PSP ownership lookup by the GLOBAL (rail, environment, account_id) natural key. The one sanctioned way to answer "which merchant owns this provider account" before a merchant context exists (inbound webhooks, the global-uniqueness preflight). Returns the routing tuple only — no credentials, no listing.';
 
 REVOKE ALL ON FUNCTION openrails.psp_owner_by_identity(p_rail text, p_environment text, p_account_id text) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.psp_owner_by_identity(p_rail text, p_environment text, p_account_id text) TO openrails_app;
 
 CREATE FUNCTION openrails.psp_rail_merchant_ids(p_rails text[], p_limit integer, p_after uuid) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -787,7 +739,6 @@ $$;
 COMMENT ON FUNCTION openrails.psp_rail_merchant_ids(p_rails text[], p_limit integer, p_after uuid) IS 'Ordered page of merchants after p_after, armed on at least one of the named rails (live PSP, undeleted merchant) — the fan-out list for StripeWebhookReconcileWorker and the alert-only catalog pull. Ids only; the PSP rows are read per-merchant under RunInMerchantScope. Replaces a merchants JOIN psps on the base pool, where the psps side is RLS-FORCED and always matched nothing — so the managed Stripe endpoint was never registered or version-bumped (or#877 B6).';
 
 REVOKE ALL ON FUNCTION openrails.psp_rail_merchant_ids(p_rails text[], p_limit integer, p_after uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.psp_rail_merchant_ids(p_rails text[], p_limit integer, p_after uuid) TO openrails_app;
 
 CREATE FUNCTION openrails.redrivable_plan_change_merchant_ids(p_limit integer) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -808,7 +759,6 @@ $$;
 COMMENT ON FUNCTION openrails.redrivable_plan_change_merchant_ids(p_limit integer) IS '#816: merchants holding a rail-push-blocked plan_change reprice. Ids only — unlike the armed scans the re-driver needs whole rows, and a definer must not vend those, so the rows are read per-merchant under RunInMerchantConn (or#861).';
 
 REVOKE ALL ON FUNCTION openrails.redrivable_plan_change_merchant_ids(p_limit integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.redrivable_plan_change_merchant_ids(p_limit integer) TO openrails_app;
 
 CREATE FUNCTION openrails.retention_work_merchant_ids(p_now timestamp with time zone, p_notification_cutoff timestamp with time zone, p_notification_seen_cutoff timestamp with time zone, p_webhook_cutoff timestamp with time zone, p_settlement_cutoff timestamp with time zone, p_lifecycle_cutoff timestamp with time zone, p_after uuid, p_limit integer) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -862,7 +812,6 @@ $$;
 COMMENT ON FUNCTION openrails.retention_work_merchant_ids(p_now timestamp with time zone, p_notification_cutoff timestamp with time zone, p_notification_seen_cutoff timestamp with time zone, p_webhook_cutoff timestamp with time zone, p_settlement_cutoff timestamp with time zone, p_lifecycle_cutoff timestamp with time zone, p_after uuid, p_limit integer) IS 'or#837: merchants with retention work — an expirable checkout session past its TTL, a notification/webhook-dedup row past its window, or an ACKED settlement/host-lifecycle event past its prune age. The fan-out list for CleanupExpiredDataWorker, replacing a full walk of every active merchant every hour. Ids only, after a cursor, capped; the deletes run per-merchant under RunInMerchantScope in bounded batches.';
 
 REVOKE ALL ON FUNCTION openrails.retention_work_merchant_ids(p_now timestamp with time zone, p_notification_cutoff timestamp with time zone, p_notification_seen_cutoff timestamp with time zone, p_webhook_cutoff timestamp with time zone, p_settlement_cutoff timestamp with time zone, p_lifecycle_cutoff timestamp with time zone, p_after uuid, p_limit integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.retention_work_merchant_ids(p_now timestamp with time zone, p_notification_cutoff timestamp with time zone, p_notification_seen_cutoff timestamp with time zone, p_webhook_cutoff timestamp with time zone, p_settlement_cutoff timestamp with time zone, p_lifecycle_cutoff timestamp with time zone, p_after uuid, p_limit integer) TO openrails_app;
 
 CREATE FUNCTION openrails.subscriptions_record_status_transition() RETURNS trigger
     LANGUAGE plpgsql
@@ -937,7 +886,6 @@ ALTER TABLE ONLY openrails.destructive_action_switch
 
 CREATE UNIQUE INDEX uq_destructive_action_switch_singleton ON openrails.destructive_action_switch USING btree (singleton);
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.destructive_action_switch TO openrails_app;
 
 INSERT INTO openrails.destructive_action_switch (enabled, reason)
 VALUES (false, 'default safe (#836): arm deliberately once the first pull''s findings have been reviewed');
@@ -982,7 +930,6 @@ CREATE TRIGGER guard_merchant_restore BEFORE UPDATE ON openrails.merchants FOR E
 
 CREATE TRIGGER immutable_merchant_group_binding BEFORE UPDATE OF permission_group_id ON openrails.merchants FOR EACH ROW EXECUTE FUNCTION openrails.guard_merchant_group_binding();
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchants TO openrails_app;
 
 CREATE TABLE openrails.metered_rating_watermarks (
     merchant_id uuid NOT NULL,
@@ -1016,7 +963,6 @@ CREATE POLICY merchant_isolation ON openrails.metered_rating_watermarks USING ((
 
 ALTER TABLE openrails.metered_rating_watermarks ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.metered_rating_watermarks TO openrails_app;
 
 CREATE TABLE openrails.products (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1065,7 +1011,6 @@ CREATE POLICY merchant_isolation ON openrails.products USING ((merchant_id = (NU
 
 ALTER TABLE openrails.products ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.products TO openrails_app;
 
 CREATE TABLE openrails.maintenance_runs (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1139,8 +1084,6 @@ CREATE INDEX maintenance_runs_pending_secret_cleanup_idx ON openrails.maintenanc
 ALTER TABLE openrails.maintenance_runs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY merchant_isolation ON openrails.maintenance_runs
     USING (merchant_id = openrails.current_merchant_id()) WITH CHECK (merchant_id = openrails.current_merchant_id());
-GRANT SELECT,INSERT ON TABLE openrails.maintenance_runs TO openrails_app;
-GRANT UPDATE(finished_at,status,summary,error,affected,reversed_at,reversed_by,note) ON TABLE openrails.maintenance_runs TO openrails_app;
 
 CREATE TABLE openrails.reconciliation_state (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1167,7 +1110,6 @@ CREATE POLICY merchant_isolation ON openrails.reconciliation_state USING ((merch
 
 ALTER TABLE openrails.reconciliation_state ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.reconciliation_state TO openrails_app;
 
 CREATE TABLE openrails.webhook_events (
     merchant_id uuid NOT NULL,
@@ -1197,7 +1139,6 @@ CREATE POLICY merchant_isolation ON openrails.webhook_events USING ((merchant_id
 
 ALTER TABLE openrails.webhook_events ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE ON TABLE openrails.webhook_events TO openrails_app;
 
 CREATE TABLE openrails.webhook_health (
     merchant_id uuid NOT NULL,
@@ -1225,7 +1166,6 @@ CREATE POLICY merchant_isolation ON openrails.webhook_health USING ((merchant_id
 
 ALTER TABLE openrails.webhook_health ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.webhook_health TO openrails_app;
 
 CREATE TABLE openrails.webhook_health_daily (
     merchant_id uuid NOT NULL,
@@ -1250,7 +1190,6 @@ CREATE POLICY merchant_isolation ON openrails.webhook_health_daily USING ((merch
 
 ALTER TABLE openrails.webhook_health_daily ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.webhook_health_daily TO openrails_app;
 
 CREATE TABLE openrails.worker_state (
     worker_kind text NOT NULL,
@@ -1281,7 +1220,6 @@ COMMENT ON COLUMN openrails.worker_state.last_alerted_at IS 'When the health che
 ALTER TABLE ONLY openrails.worker_state
     ADD CONSTRAINT worker_state_pkey PRIMARY KEY (worker_kind);
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.worker_state TO openrails_app;
 
 
 CREATE TABLE openrails.admission_denials_hourly (
@@ -1311,7 +1249,6 @@ ALTER TABLE openrails.admission_denials_hourly ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.admission_denials_hourly USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,UPDATE ON TABLE openrails.admission_denials_hourly TO openrails_app;
 
 CREATE TABLE openrails.billing_policies (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1341,7 +1278,6 @@ ALTER TABLE openrails.billing_policies ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.billing_policies USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.billing_policies TO openrails_app;
 
 CREATE TABLE openrails.catalog_meters (
     merchant_id uuid NOT NULL,
@@ -1379,7 +1315,6 @@ ALTER TABLE openrails.catalog_meters ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.catalog_meters USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.catalog_meters TO openrails_app;
 
 CREATE TABLE openrails.custodians (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1436,7 +1371,6 @@ ALTER TABLE openrails.custodians ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.custodians USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.custodians TO openrails_app;
 
 CREATE TABLE openrails.customers (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1466,7 +1400,6 @@ ALTER TABLE openrails.customers ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.customers USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.customers TO openrails_app;
 
 CREATE TABLE openrails.dashboard_configs (
     merchant_id uuid NOT NULL,
@@ -1491,7 +1424,6 @@ ALTER TABLE openrails.dashboard_configs ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.dashboard_configs USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.dashboard_configs TO openrails_app;
 
 CREATE TABLE openrails.host_outbox (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1539,7 +1471,6 @@ ALTER TABLE openrails.host_outbox ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.host_outbox USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.host_outbox TO openrails_app;
 
 CREATE UNIQUE INDEX uq_host_outbox_payment ON openrails.host_outbox (merchant_id, payment_id) WHERE payment_id IS NOT NULL;
 
@@ -1639,7 +1570,6 @@ ALTER TABLE openrails.invoices ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.invoices USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.invoices TO openrails_app;
 
 CREATE TABLE openrails.invoker_spend_limits (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1678,7 +1608,6 @@ ALTER TABLE openrails.invoker_spend_limits ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.invoker_spend_limits USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.invoker_spend_limits TO openrails_app;
 
 CREATE TABLE openrails.ledger_accounts (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1736,7 +1665,6 @@ ALTER TABLE openrails.ledger_accounts ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.ledger_accounts USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT ON TABLE openrails.ledger_accounts TO openrails_app;
 
 CREATE TABLE openrails.ledger_transfers (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1821,7 +1749,6 @@ ALTER TABLE openrails.ledger_transfers ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.ledger_transfers USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT ON TABLE openrails.ledger_transfers TO openrails_app;
 
 CREATE TABLE openrails.merchant_configurations (
     merchant_id uuid NOT NULL,
@@ -1846,7 +1773,6 @@ ALTER TABLE openrails.merchant_configurations ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.merchant_configurations USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_configurations TO openrails_app;
 
 CREATE TABLE openrails.merchant_deks (
     merchant_id uuid NOT NULL,
@@ -1871,7 +1797,6 @@ ALTER TABLE openrails.merchant_deks ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.merchant_deks USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_deks TO openrails_app;
 
 CREATE TABLE openrails.merchant_destructive_policy (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1902,7 +1827,6 @@ ALTER TABLE openrails.merchant_destructive_policy ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.merchant_destructive_policy USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_destructive_policy TO openrails_app;
 
 
 CREATE TABLE openrails.merchant_secrets (
@@ -1928,7 +1852,6 @@ CREATE POLICY merchant_isolation ON openrails.merchant_secrets USING ((merchant_
 
 ALTER TABLE openrails.merchant_secrets ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_secrets TO openrails_app;
 
 CREATE TABLE openrails.merchant_webhooks (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1959,7 +1882,6 @@ CREATE POLICY merchant_isolation ON openrails.merchant_webhooks USING ((merchant
 
 ALTER TABLE openrails.merchant_webhooks ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_webhooks TO openrails_app;
 
 CREATE TABLE openrails.notifications (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2014,7 +1936,6 @@ CREATE POLICY merchant_isolation ON openrails.notifications USING ((merchant_id 
 
 ALTER TABLE openrails.notifications ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.notifications TO openrails_app;
 
 CREATE TABLE openrails.prices (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2091,7 +2012,6 @@ CREATE POLICY merchant_isolation ON openrails.prices USING ((merchant_id = (NULL
 
 ALTER TABLE openrails.prices ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.prices TO openrails_app;
 
 CREATE TABLE openrails.price_key_movements (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2123,7 +2043,6 @@ CREATE POLICY merchant_isolation ON openrails.price_key_movements USING ((mercha
 
 ALTER TABLE openrails.price_key_movements ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.price_key_movements TO openrails_app;
 
 CREATE TABLE openrails.psps (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2187,7 +2106,6 @@ CREATE POLICY merchant_isolation ON openrails.psps USING ((merchant_id = (NULLIF
 
 ALTER TABLE openrails.psps ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.psps TO openrails_app;
 
 CREATE TABLE openrails.rail_customer_accounts (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2232,7 +2150,6 @@ CREATE POLICY merchant_isolation ON openrails.rail_customer_accounts USING ((mer
 
 ALTER TABLE openrails.rail_customer_accounts ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.rail_customer_accounts TO openrails_app;
 
 CREATE TABLE openrails.rail_intents (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2339,7 +2256,6 @@ CREATE POLICY merchant_isolation ON openrails.rail_intents USING ((merchant_id =
 
 ALTER TABLE openrails.rail_intents ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.rail_intents TO openrails_app;
 
 CREATE TABLE openrails.rail_mutation_logs (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2400,7 +2316,6 @@ CREATE POLICY merchant_isolation ON openrails.rail_mutation_logs USING ((merchan
 
 ALTER TABLE openrails.rail_mutation_logs ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE ON TABLE openrails.rail_mutation_logs TO openrails_app;
 
 CREATE TABLE openrails.rail_refresh_watermarks (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -2445,7 +2360,6 @@ CREATE POLICY merchant_isolation ON openrails.rail_refresh_watermarks USING ((me
 
 ALTER TABLE openrails.rail_refresh_watermarks ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.rail_refresh_watermarks TO openrails_app;
 
 CREATE TABLE openrails.reconciliation_findings (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2544,7 +2458,6 @@ CREATE POLICY merchant_isolation ON openrails.reconciliation_findings USING ((me
 
 ALTER TABLE openrails.reconciliation_findings ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.reconciliation_findings TO openrails_app;
 
 -- Read-only projection of the standing findings owner; no second lifecycle.
 CREATE VIEW openrails.catalog_drift_events WITH (security_invoker=true) AS
@@ -2552,7 +2465,6 @@ SELECT id,psp_id,rail,substr(finding_type,9)::text AS kind,openrails_resource_ty
        external_resource_id,field,openrails_value,external_value,
        created_at AS detected_at,resolved_at,merchant_id
 FROM openrails.reconciliation_findings WHERE finding_type LIKE 'catalog.%';
-GRANT SELECT ON openrails.catalog_drift_events TO openrails_app;
 
 CREATE TABLE openrails.reprice_batches (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2603,7 +2515,6 @@ CREATE POLICY merchant_isolation ON openrails.reprice_batches USING ((merchant_i
 
 ALTER TABLE openrails.reprice_batches ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.reprice_batches TO openrails_app;
 
 
 CREATE TABLE openrails.usage_events (
@@ -2668,7 +2579,6 @@ CREATE POLICY merchant_isolation ON openrails.usage_events USING ((merchant_id =
 
 ALTER TABLE openrails.usage_events ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.usage_events TO openrails_app;
 
 CREATE TABLE openrails.account_updater_batches (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2715,7 +2625,6 @@ ALTER TABLE openrails.account_updater_batches ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.account_updater_batches USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.account_updater_batches TO openrails_app;
 
 CREATE TABLE openrails.billing_policy_bindings (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2758,7 +2667,6 @@ ALTER TABLE openrails.billing_policy_bindings ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.billing_policy_bindings USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.billing_policy_bindings TO openrails_app;
 
 CREATE TABLE openrails.catalog_rate_cards (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -2809,7 +2717,6 @@ ALTER TABLE openrails.catalog_rate_cards ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.catalog_rate_cards USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.catalog_rate_cards TO openrails_app;
 
 CREATE TABLE openrails.customer_delinquency (
     merchant_id uuid NOT NULL,
@@ -2853,7 +2760,6 @@ ALTER TABLE openrails.customer_delinquency ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.customer_delinquency USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.customer_delinquency TO openrails_app;
 
 CREATE TABLE openrails.customer_invoice_profiles (
     merchant_id uuid NOT NULL,
@@ -2887,7 +2793,6 @@ ALTER TABLE openrails.customer_invoice_profiles ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.customer_invoice_profiles USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.customer_invoice_profiles TO openrails_app;
 
 CREATE TABLE openrails.destructive_run_before_images (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2927,9 +2832,7 @@ ALTER TABLE openrails.destructive_run_before_images ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.destructive_run_before_images USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT ON TABLE openrails.destructive_run_before_images TO openrails_app;
 
-GRANT UPDATE(restored_at) ON TABLE openrails.destructive_run_before_images TO openrails_app;
 
 CREATE TABLE openrails.invoice_items (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2976,7 +2879,6 @@ ALTER TABLE openrails.invoice_items ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.invoice_items USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.invoice_items TO openrails_app;
 
 CREATE TABLE openrails.payment_methods (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3091,7 +2993,6 @@ CREATE POLICY merchant_isolation ON openrails.payment_methods USING ((merchant_i
 
 ALTER TABLE openrails.payment_methods ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payment_methods TO openrails_app;
 
 CREATE TABLE openrails.custody_migrations (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3149,7 +3050,6 @@ ALTER TABLE openrails.custody_migrations ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.custody_migrations USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.custody_migrations TO openrails_app;
 
 CREATE TABLE openrails.subscriptions (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3299,7 +3199,6 @@ CREATE POLICY merchant_isolation ON openrails.subscriptions USING ((merchant_id 
 
 ALTER TABLE openrails.subscriptions ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.subscriptions TO openrails_app;
 
 CREATE TABLE openrails.invoice_payments (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3369,7 +3268,6 @@ ALTER TABLE openrails.invoice_payments ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.invoice_payments USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.invoice_payments TO openrails_app;
 
 CREATE TABLE openrails.money_settings (
     merchant_id uuid NOT NULL,
@@ -3413,7 +3311,6 @@ CREATE POLICY merchant_isolation ON openrails.money_settings USING ((merchant_id
 
 ALTER TABLE openrails.money_settings ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_settings TO openrails_app;
 
 CREATE TABLE openrails.solana_subscriptions (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3458,7 +3355,6 @@ CREATE POLICY merchant_isolation ON openrails.solana_subscriptions USING ((merch
 
 ALTER TABLE openrails.solana_subscriptions ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.solana_subscriptions TO openrails_app;
 
 CREATE TABLE openrails.subscription_reprices (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3526,7 +3422,6 @@ CREATE POLICY merchant_isolation ON openrails.subscription_reprices USING ((merc
 
 ALTER TABLE openrails.subscription_reprices ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.subscription_reprices TO openrails_app;
 
 CREATE TABLE openrails.subscription_status_transitions (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3562,7 +3457,6 @@ CREATE POLICY merchant_isolation ON openrails.subscription_status_transitions US
 
 ALTER TABLE openrails.subscription_status_transitions ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT ON TABLE openrails.subscription_status_transitions TO openrails_app;
 
 CREATE TABLE openrails.payments (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3698,7 +3592,6 @@ CREATE POLICY merchant_isolation ON openrails.payments USING ((merchant_id = (NU
 
 ALTER TABLE openrails.payments ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payments TO openrails_app;
 
 ALTER TABLE ONLY openrails.host_outbox
     ADD CONSTRAINT host_outbox_payment_fk FOREIGN KEY (merchant_id, payment_id) REFERENCES openrails.payments(merchant_id, id) ON DELETE CASCADE;
@@ -3792,7 +3685,6 @@ ALTER TABLE openrails.checkout_sessions ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.checkout_sessions USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.checkout_sessions TO openrails_app;
 
 CREATE TABLE openrails.grants (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3887,7 +3779,6 @@ ALTER TABLE openrails.grants ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.grants USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT ON TABLE openrails.grants TO openrails_app;
 
 CREATE TABLE openrails.entitlements (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3962,7 +3853,6 @@ ALTER TABLE openrails.entitlements ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY merchant_isolation ON openrails.entitlements USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.entitlements TO openrails_app;
 
 
 CREATE TABLE openrails.operation_authorizations (
@@ -4037,23 +3927,14 @@ CREATE POLICY merchant_isolation ON openrails.operation_authorizations USING ((m
 
 ALTER TABLE openrails.operation_authorizations ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT ON TABLE openrails.operation_authorizations TO openrails_app;
 
-GRANT UPDATE(state) ON TABLE openrails.operation_authorizations TO openrails_app;
 
-GRANT UPDATE(terminal_reference) ON TABLE openrails.operation_authorizations TO openrails_app;
 
-GRANT UPDATE(released_at) ON TABLE openrails.operation_authorizations TO openrails_app;
 
-GRANT UPDATE(settled_at) ON TABLE openrails.operation_authorizations TO openrails_app;
 
-GRANT UPDATE(settlement_provider_cost_usd_micros) ON TABLE openrails.operation_authorizations TO openrails_app;
 
-GRANT UPDATE(settlement_rated_usd_micros) ON TABLE openrails.operation_authorizations TO openrails_app;
 
-GRANT UPDATE(settlement_body_bytes) ON TABLE openrails.operation_authorizations TO openrails_app;
 
-GRANT UPDATE(settlement_body_digest) ON TABLE openrails.operation_authorizations TO openrails_app;
 
 CREATE TABLE openrails.provider_billing_qualifications (
     merchant_id uuid NOT NULL,
@@ -4100,21 +3981,13 @@ CREATE POLICY merchant_isolation ON openrails.provider_billing_qualifications US
 
 ALTER TABLE openrails.provider_billing_qualifications ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT ON TABLE openrails.provider_billing_qualifications TO openrails_app;
 
-GRANT UPDATE(state) ON TABLE openrails.provider_billing_qualifications TO openrails_app;
 
-GRANT UPDATE(reason) ON TABLE openrails.provider_billing_qualifications TO openrails_app;
 
-GRANT UPDATE(baseline_observation_id) ON TABLE openrails.provider_billing_qualifications TO openrails_app;
 
-GRANT UPDATE(qualified_observation_id) ON TABLE openrails.provider_billing_qualifications TO openrails_app;
 
-GRANT UPDATE(qualified_provider_cost_usd_micros) ON TABLE openrails.provider_billing_qualifications TO openrails_app;
 
-GRANT UPDATE(qualified_at) ON TABLE openrails.provider_billing_qualifications TO openrails_app;
 
-GRANT UPDATE(updated_at) ON TABLE openrails.provider_billing_qualifications TO openrails_app;
 
 CREATE TABLE openrails.provider_billing_observations (
     merchant_id uuid NOT NULL,
@@ -4157,7 +4030,6 @@ CREATE POLICY merchant_isolation ON openrails.provider_billing_observations USIN
 
 ALTER TABLE openrails.provider_billing_observations ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT ON TABLE openrails.provider_billing_observations TO openrails_app;
 
 -- ---------------------------------------------------------------------------
 -- VIEW objects
@@ -4236,7 +4108,6 @@ CREATE VIEW openrails.freeloader_episodes WITH (security_invoker='true') AS
 
 COMMENT ON VIEW openrails.freeloader_episodes IS '#690 episode analytics: spans of entitlement access NOT covered by payment (subscription paid-through snapshot, completed one_off payment, or a live matching grant). Open episodes (window still granting) end at now(). Causes label sanctioned unpaid access (sanctioned_dunning, awaiting_verification) vs failure (unsanctioned). Approximations: paid-through is the current-period snapshot (renewals overwrite it, healed historical lapses are invisible); coverage is contiguous-from-the-left (uncovered TAIL only); cause reads the sub''s CURRENT state; refund time falls back to the purchase time when no refund row links.';
 
-GRANT SELECT ON TABLE openrails.freeloader_episodes TO openrails_app;
 
 CREATE VIEW openrails.orphaned_episodes WITH (security_invoker='true') AS
  WITH cov AS (
@@ -4290,7 +4161,6 @@ CREATE VIEW openrails.orphaned_episodes WITH (security_invoker='true') AS
 
 COMMENT ON VIEW openrails.orphaned_episodes IS '#690 episode analytics, the mirror of freeloader_episodes: spans where payment coverage existed (subscription paid-through snapshot, or a completed one_off payment with a finite access window for an entitlement-promising product) but no entitlement window covered the time. Open episodes (paid-through still in the future) end at now(). Same approximations: paid-through is the current-period snapshot; window coverage is contiguous-from-the-left (uncovered TAIL only — a wrongly-early revocation shows as the tail from revoked_at to paid-through).';
 
-GRANT SELECT ON TABLE openrails.orphaned_episodes TO openrails_app;
 
 -- Admission operation reservations (issue989)
 CREATE TABLE openrails.admission_operations (
@@ -4331,8 +4201,6 @@ ALTER TABLE openrails.admission_operations FORCE ROW LEVEL SECURITY;
 CREATE POLICY merchant_isolation ON openrails.admission_operations
     USING (merchant_id = NULLIF(current_setting('app.merchant_id', true), '')::uuid)
     WITH CHECK (merchant_id = NULLIF(current_setting('app.merchant_id', true), '')::uuid);
-GRANT SELECT, INSERT ON openrails.admission_operations TO openrails_app;
-GRANT UPDATE (expires_at, state, capture_terms, captured_amount, captured_at, released_at) ON openrails.admission_operations TO openrails_app;
 
 -- One derived financial hold total, shared by every spend and authorization path.
 CREATE FUNCTION openrails.financial_held_amount(merchant uuid, payer uuid, unit text, as_of timestamptz)
@@ -4348,7 +4216,6 @@ RETURNS bigint LANGUAGE sql STABLE SECURITY INVOKER AS $$
     )::bigint;
 $$;
 REVOKE ALL ON FUNCTION openrails.financial_held_amount(uuid, uuid, text, timestamptz) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION openrails.financial_held_amount(uuid, uuid, text, timestamptz) TO openrails_app;
 
 -- #993: account identity owns provider price objects. Labels live only on psps.
 CREATE TABLE openrails.price_psp_bindings (
@@ -4378,7 +4245,6 @@ ALTER TABLE openrails.price_psp_bindings FORCE ROW LEVEL SECURITY;
 CREATE POLICY merchant_isolation ON openrails.price_psp_bindings
     USING (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid)
     WITH CHECK (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid);
-GRANT SELECT, INSERT, UPDATE, DELETE ON openrails.price_psp_bindings TO openrails_app;
 
 ALTER TABLE ONLY openrails.invoices
     ADD CONSTRAINT invoices_collection_intent_fk FOREIGN KEY (merchant_id, collection_intent_id) REFERENCES openrails.rail_intents(merchant_id, id) ON DELETE RESTRICT;
@@ -4434,7 +4300,6 @@ BEGIN
 END;
 $$;
 REVOKE ALL ON FUNCTION openrails.begin_billing_restore(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION openrails.begin_billing_restore(uuid) TO openrails_app;
 
 CREATE FUNCTION openrails.check_billing_restore_ledger(p_merchant uuid) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
@@ -4457,7 +4322,6 @@ BEGIN
 END;
 $$;
 REVOKE ALL ON FUNCTION openrails.check_billing_restore_ledger(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION openrails.check_billing_restore_ledger(uuid) TO openrails_app;
 
 CREATE FUNCTION openrails.finish_billing_restore(p_merchant uuid,p_digest text,p_rows bigint) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
@@ -4471,7 +4335,6 @@ BEGIN
 END;
 $$;
 REVOKE ALL ON FUNCTION openrails.finish_billing_restore(uuid,text,bigint) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION openrails.finish_billing_restore(uuid,text,bigint) TO openrails_app;
 
 CREATE FUNCTION openrails.require_finished_billing_restore() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$

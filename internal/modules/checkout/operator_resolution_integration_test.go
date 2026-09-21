@@ -46,7 +46,8 @@ func TestNMISaleUnknownResolvesFromExactReceipt(t *testing.T) {
 	require.ErrorIs(t, err, intents.ErrResolutionRejected)
 	require.Equal(t, 0, fx.paymentCount(t))
 
-	fx.gateway.vault.Store(fx.payload.CustomerVaultID)
+	fx.gateway.vault.Store(fx.payload.Instrument.RailCustomerRef)
+	fx.gateway.hidden.Store(false)
 	resolved, err := fx.runner.Resolve(fx.ctx, intent.ID, intents.Resolution{ProviderReference: fx.gateway.txnID, Actor: "ops@example.test", Reason: "NMI ticket 7"})
 	require.NoError(t, err)
 	require.Equal(t, intents.StatusSucceeded, resolved.Status)
@@ -61,9 +62,8 @@ func TestNMISaleUnknownResolvesFromExactReceipt(t *testing.T) {
 	require.Equal(t, 1, fx.paymentCount(t))
 }
 
-// Non-execution is refused while the exact order search shows a successful
-// sale, and otherwise terminates the operation without any local charge.
-func TestNMISaleNonExecutionRequiresUncontradictedOrder(t *testing.T) {
+// Post-submission absence never proves nonexecution, even to an operator.
+func TestNMISaleNonExecutionCannotReleaseOnSearchAbsence(t *testing.T) {
 	fx := newSaleIntentFixture(t)
 	fx.gateway.saleMode.Store("ambiguous500")
 	key := "sale-absent-" + uuid.NewString()[:8]
@@ -74,12 +74,11 @@ func TestNMISaleNonExecutionRequiresUncontradictedOrder(t *testing.T) {
 	require.ErrorIs(t, err, intents.ErrResolutionRejected)
 	require.Equal(t, 0, fx.paymentCount(t))
 
-	fx.gateway.charged.Store(false) // provider confirms the request never landed
-	resolved, err := fx.runner.Resolve(fx.ctx, intent.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "NMI ticket 8"})
-	require.NoError(t, err)
-	require.Equal(t, intents.StatusFailedTerminal, resolved.Status)
+	fx.gateway.charged.Store(false) // the provider now hides the landed charge
+	_, err = fx.runner.Resolve(fx.ctx, intent.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "NMI ticket 8"})
+	require.ErrorIs(t, err, intents.ErrResolutionRejected)
 	replay := fx.enqueueAndExecute(t, key)
-	require.Equal(t, intents.StatusFailedTerminal, replay.Status)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, replay.Status)
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 	require.Equal(t, 0, fx.paymentCount(t))
 }
