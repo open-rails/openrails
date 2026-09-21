@@ -14,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -51,13 +50,13 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 		return rt, pool
 	}
-	t.Run("nil binder and closed runtime", func(t *testing.T) {
-		rt, _ := newRuntime(t)
-		_, err := rt.BindRiver(t.Context(), nil)
-		require.ErrorContains(t, err, "binder is required")
+	t.Run("nil pool and closed runtime", func(t *testing.T) {
+		rt, pool := newRuntime(t)
+		_, err := rt.BindRiver(t.Context(), nil, nil)
+		require.ErrorContains(t, err, "pool is required")
 		require.NoError(t, rt.Close(t.Context()))
 		called := false
-		_, err = rt.BindRiver(t.Context(), func(context.Context, *river.Config) (*river.Client[pgx.Tx], error) { called = true; return nil, nil })
+		_, err = rt.BindRiver(t.Context(), pool, func(context.Context, *river.Config) error { called = true; return nil })
 		require.ErrorContains(t, err, "closed")
 		require.False(t, called)
 		require.Error(t, rt.Ready(t.Context()))
@@ -66,13 +65,13 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 	t.Run("double binding never repeats construction", func(t *testing.T) {
 		rt, pool := newRuntime(t)
 		calls := 0
-		bind := func(_ context.Context, cfg *river.Config) (*river.Client[pgx.Tx], error) {
+		bind := func(_ context.Context, cfg *river.Config) error {
 			calls++
-			return river.NewClient(riverpgxv5.New(pool), cfg)
+			return nil
 		}
-		_, err := rt.BindRiver(t.Context(), bind)
+		_, err := rt.BindRiver(t.Context(), pool, bind)
 		require.NoError(t, err)
-		_, err = rt.BindRiver(t.Context(), bind)
+		_, err = rt.BindRiver(t.Context(), pool, bind)
 		require.ErrorContains(t, err, "already bound")
 		require.Equal(t, 1, calls)
 	})
@@ -81,18 +80,18 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 		entered, release := make(chan struct{}), make(chan struct{})
 		done := make(chan error, 1)
 		go func() {
-			_, err := rt.BindRiver(t.Context(), func(_ context.Context, cfg *river.Config) (*river.Client[pgx.Tx], error) {
+			_, err := rt.BindRiver(t.Context(), pool, func(_ context.Context, cfg *river.Config) error {
 				close(entered)
 				<-release
-				return river.NewClient(riverpgxv5.New(pool), cfg)
+				return nil
 			})
 			done <- err
 		}()
 		<-entered
 		secondCalled := false
-		_, err := rt.BindRiver(t.Context(), func(context.Context, *river.Config) (*river.Client[pgx.Tx], error) {
+		_, err := rt.BindRiver(t.Context(), pool, func(context.Context, *river.Config) error {
 			secondCalled = true
-			return nil, nil
+			return nil
 		})
 		close(release)
 		require.ErrorContains(t, err, "already bound")
@@ -100,14 +99,14 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 		require.NoError(t, <-done)
 	})
 	t.Run("failed registration is fatal setup", func(t *testing.T) {
-		rt, _ := newRuntime(t)
+		rt, pool := newRuntime(t)
 		cause := errors.New("host construction refused")
-		_, err := rt.BindRiver(t.Context(), func(context.Context, *river.Config) (*river.Client[pgx.Tx], error) { return nil, cause })
+		_, err := rt.BindRiver(t.Context(), pool, func(context.Context, *river.Config) error { return cause })
 		require.ErrorIs(t, err, cause)
 		require.ErrorContains(t, rt.Ready(t.Context()), "not bound")
-		_, err = rt.BindRiver(t.Context(), func(context.Context, *river.Config) (*river.Client[pgx.Tx], error) {
+		_, err = rt.BindRiver(t.Context(), pool, func(context.Context, *river.Config) error {
 			t.Fatal("partial registration must not retry")
-			return nil, nil
+			return nil
 		})
 		require.ErrorContains(t, err, "already bound")
 	})
@@ -126,36 +125,23 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 	} {
 		t.Run(entry.name, func(t *testing.T) {
 			rt, pool := newRuntime(t)
-			returned, err := rt.BindRiver(t.Context(), func(_ context.Context, cfg *river.Config) (*river.Client[pgx.Tx], error) {
+			returned, err := rt.BindRiver(t.Context(), pool, func(_ context.Context, cfg *river.Config) error {
 				entry.mutate(cfg)
-				return river.NewClient(riverpgxv5.New(pool), cfg)
+				return nil
 			})
 			require.ErrorContains(t, err, entry.want)
-			require.NotNil(t, returned, "a host-created client stays visible for caller cleanup")
-			require.Nil(t, returned.Stopped(), "the runtime never starts the rejected client")
+			require.Nil(t, returned, "invalid configuration is refused before client construction")
 			require.False(t, rt.HasExternalRiverClient())
 		})
 	}
-	t.Run("started client stays owned by host", func(t *testing.T) {
+	t.Run("default configuration constructs an unstarted host client", func(t *testing.T) {
 		rt, pool := newRuntime(t)
-		client, err := rt.BindRiver(t.Context(), func(ctx context.Context, cfg *river.Config) (*river.Client[pgx.Tx], error) {
-			client, err := river.NewClient(riverpgxv5.New(pool), cfg)
-			if err != nil {
-				return nil, err
-			}
-			return client, client.Start(ctx)
-		})
-		require.ErrorContains(t, err, "unstarted")
+		client, err := rt.BindRiver(t.Context(), pool, nil)
+		require.NoError(t, err)
 		require.NotNil(t, client)
-		t.Cleanup(func() { require.NoError(t, client.Stop(context.Background())) })
-		select {
-		case <-client.Stopped():
-			t.Fatal("binding stopped a client the host started")
-		default:
-		}
-		require.False(t, rt.HasExternalRiverClient())
-		require.NoError(t, client.Stop(t.Context()))
+		require.Nil(t, client.Stopped(), "construction cannot return a separately started client")
 		require.NoError(t, rt.Close(t.Context()))
+		require.NoError(t, pool.Ping(t.Context()), "the supplied pool remains host-owned")
 	})
 }
 

@@ -16,7 +16,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
-	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -94,14 +93,14 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 		_, err = pool.Exec(ctx, `INSERT INTO profiles.refresh_sessions(id,user_id,issuer,current_token_hash,expires_at) VALUES($1,$2::uuid,$3,$4,$5)`, row.id, user.ID, "https://river-compose.test", hash[:], row.expires)
 		require.NoError(t, err)
 	}
-	client, err = rt.BindRiver(ctx, func(ctx context.Context, cfg *river.Config) (*river.Client[pgx.Tx], error) {
+	client, err = rt.BindRiver(ctx, pool, func(ctx context.Context, cfg *river.Config) error {
 		require.NotNil(t, cfg.Workers)
 		cfg.Schema = schema
 		sawBillingWorkers = true
 		require.NoError(t, river.AddWorkerSafely(cfg.Workers, &noopWorker{}))
 		cfg.Queues[river.QueueDefault] = river.QueueConfig{MaxWorkers: 2}
 		cfg.Queues[embed.QueueBilling] = river.QueueConfig{MaxWorkers: 2}
-		return river.NewClient(riverpgxv5.New(pool), cfg)
+		return nil
 	})
 	require.NoError(t, err)
 	require.NoError(t, cp.Core().Start(ctx), "attached AuthKit maintenance was registered during binding")
@@ -195,13 +194,12 @@ func TestRiverDefault_ConstructsManagedFleet(t *testing.T) {
 	require.False(t, rt.HasExternalRiverClient())
 }
 
-// TestRiverFromHost_NilClientRefuses closes the other half of the handoff: a
-// host may not declare ownership and then hand back nothing.
-func TestRiverFromHost_NilClientRefuses(t *testing.T) {
+// A host must supply the pool it owns before any fleet can be constructed.
+func TestRiverFromHost_MissingPoolRefuses(t *testing.T) {
 	ctx := t.Context()
 	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}}, River: embed.RiverFromHost()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	_, err = rt.BindRiver(ctx, func(context.Context, *river.Config) (*river.Client[pgx.Tx], error) { return nil, nil })
-	require.ErrorContains(t, err, "nil client")
+	_, err = rt.BindRiver(ctx, nil, nil)
+	require.ErrorContains(t, err, "pool is required")
 }

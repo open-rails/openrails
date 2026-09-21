@@ -58,7 +58,7 @@ used by `RiverManagedByOpenRails`, in the order OpenRails requires. A
 `RiverFromHost` integration is the explicit low-level exception: the host owns
 that River client's schema and migration lifecycle. Pass the same `RiverOwnership`
 value to `MigrationOptions.River` and `Options.River`; migrations never invoke
-the binder. Set `MigrationOptions.Schema` to match `cfg.DB.SchemaName()` when
+host client construction. Set `MigrationOptions.Schema` to match `cfg.DB.SchemaName()` when
 using a custom billing schema.
 
 The engine validates the tracking key at boot and refuses to start if any
@@ -169,7 +169,7 @@ defer rt.Close(ctx)
 | `Redis` | `*redis.Client` | Optional (rate limits, admission holds). |
 | `Cache` | `cache.Cache` | Optional cache override. |
 | `River` | `embed.RiverOwnership` | Defaults to managed River in `public`. `RiverManagedByOpenRails("jobs")` selects another schema; `RiverFromHost()` declares host ownership; call `BindRiver` after composing components. |
-| `RunWorkers` | `bool` | Runs the River background workers (renewals, dunning, credit/hold expiry, reconciliation) on a Runtime-owned goroutine, detached from the ctx you pass to `New` — `Close` stops them. Leave false to drive `rt.RunWorkers(ctx)` yourself. |
+| `RunWorkers` | `bool` | Managed-only. Runs the River background workers (renewals, dunning, credit/hold expiry, reconciliation) on a Runtime-owned goroutine, detached from the ctx you pass to `New` — `Close` stops them. Leave false to drive `rt.RunWorkers(ctx)` yourself. |
 | `ConsoleAssets` | `fs.FS` | Host-built admin console SPA (see §6). |
 | `StripeTransport` | `http.RoundTripper` | Test seam under the Stripe API choke point; refused with a live posture. |
 
@@ -224,18 +224,16 @@ defer rt.Close(context.WithoutCancel(ctx))
 
 // Attach a control plane here, or construct your own AuthKit client.
 // An attached control plane contributes its AuthKit maintenance automatically.
-jobs, err := rt.BindRiver(ctx, func(ctx context.Context, jobsCfg *river.Config) (*river.Client[pgx.Tx], error) {
+jobs, err := rt.BindRiver(ctx, pool, func(ctx context.Context, jobsCfg *river.Config) error {
     river.AddWorker(jobsCfg.Workers, &MyAppWorker{})
     jobsCfg.Queues[river.QueueDefault] = river.QueueConfig{MaxWorkers: 10}
     jobsCfg.Schema = "host_jobs" // host-migrated namespace, never the billing schema
-    // For host-owned AuthKit: auth.RegisterRiver(jobsCfg), then auth.Start(ctx).
-    return river.NewClient(riverpgxv5.New(pool), jobsCfg) // return unstarted
+    // With host-owned AuthKit, call auth.RegisterRiver(jobsCfg) and return its error here.
+    return nil // OpenRails validates this config, then constructs the client
 })
-if err != nil {
-    if jobs != nil { _ = jobs.StopAndCancel(context.WithoutCancel(ctx)) }
-    return err
-}
+if err != nil { return err }
 defer jobs.StopAndCancel(context.WithoutCancel(ctx))
+// With host-owned AuthKit, check auth.Start(ctx) now.
 // Finish product bootstrap before starting consumers.
 if err := jobs.Start(ctx); err != nil { return err }
 
@@ -256,9 +254,9 @@ identity clients and pools. `rt.CheckJobProgress(ctx)` gives the live fleet
 verdict. Before binding, readiness and worker startup refuse explicitly.
 
 Binding is one startup attempt. Double binding, late component attachment,
-closed runtimes, and already-started clients refuse. After a failed binding,
-close and recreate the runtime; any client returned with the error remains the
-host's responsibility. Managed River's `New → Attach → RunWorkers` order is
+and closed runtimes refuse. Hosts cannot substitute an unrelated or already-started
+client: construction happens after configuration validation. After a failed
+binding, close and recreate the runtime. Managed River's `New → Attach → RunWorkers` order is
 unchanged.
 
 **Inserting an engine job.** OpenRails registers its own periodic jobs on the
