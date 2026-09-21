@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -226,7 +227,7 @@ func TestRestoreSerializesConcurrentReceipts(t *testing.T) {
 	require.Equal(t, first.result.Digest, second.result.Digest)
 }
 
-func TestArchiveUnknownColumnsAndTablesRefuse(t *testing.T) {
+func TestArchiveRejectsOwnedColumnDriftAndIgnoresHostTables(t *testing.T) {
 	d := archiveDB(t, "archive_schema_policy")
 	id := merchant.ID(uuid.New())
 	provision(t, d, id)
@@ -243,9 +244,13 @@ func TestArchiveUnknownColumnsAndTablesRefuse(t *testing.T) {
 			_, err := admin.Exec(t.Context(), tc.add)
 			require.NoError(t, err)
 			err = Export(t.Context(), d, id, io.Discard)
-			var ae *Error
-			require.ErrorAs(t, err, &ae)
-			require.Equal(t, "unsupported_state", ae.Code)
+			if strings.HasPrefix(tc.add, "CREATE TABLE") {
+				require.NoError(t, err, "an undeclared co-located host table is not OpenRails ownership")
+			} else {
+				var ae *Error
+				require.ErrorAs(t, err, &ae)
+				require.Equal(t, "unsupported_state", ae.Code)
+			}
 			_, err = admin.Exec(t.Context(), tc.remove)
 			require.NoError(t, err)
 		})
