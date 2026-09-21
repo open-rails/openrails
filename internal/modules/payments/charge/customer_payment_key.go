@@ -1,4 +1,4 @@
-package intents
+package charge
 
 import (
 	"crypto/sha256"
@@ -15,7 +15,7 @@ func CustomerPaymentKey(kind string, payer uuid.UUID, key string) string {
 	digest := sha256.Sum256([]byte(key))
 	return fmt.Sprintf("%s:customer:%s:%x", kind, payer, digest)
 }
-func customerPaymentKeyValid(kind string, payer uuid.UUID, key string) bool {
+func CustomerPaymentKeyValid(kind string, payer uuid.UUID, key string) bool {
 	prefix := fmt.Sprintf("%s:customer:%s:", kind, payer)
 	if !strings.HasPrefix(key, prefix) {
 		return false

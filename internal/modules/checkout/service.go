@@ -1657,20 +1657,13 @@ func (s *CheckoutService) processDowngrade(
 		return nil, err
 	}
 
-	// Check if there's already a scheduled downgrade
-	if existingSub.ScheduledPriceID != nil {
-		return &CheckoutResponse{
-			Status:  "blocked",
-			Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
-		}, nil
-	}
-
-	// Schedule the downgrade for end of current period
-	// The actual price switch happens in the renewal webhook handler
-	existingSub.ScheduledPriceID = &newPrice.ID
-
-	if err := s.SubscriptionService.Update(ctx, existingSub); err != nil {
-		return nil, fmt.Errorf("failed to schedule downgrade: %w", err)
+	// A short subscription transaction serializes the change with accepted
+	// recurring recovery. It must not overwrite a prepared quote or a newer
+	// subscription snapshot from checkout's earlier preflight.
+	var err error
+	existingSub, err = subscriptions.NewSubscriptionRepo(s.SubscriptionService.Database()).SchedulePriceChange(ctx, existingSub.ID, existingSub.PriceID, newPrice.ID)
+	if err != nil {
+		return nil, err
 	}
 
 	effectiveDate := "the end of your current billing period"

@@ -2,7 +2,10 @@ package subscriptions
 
 import (
 	"context"
+	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
@@ -77,20 +80,30 @@ func (r *RepriceRepo) createReprice(ctx context.Context, subscriptionID, fromPri
 	if err != nil {
 		return nil, err
 	}
-	row, err := r.db.Gen(ctx).CreateSubscriptionReprice(ctx, gen.CreateSubscriptionRepriceParams{
-		MerchantID:              tid.UUID(),
-		SubscriptionID:          subscriptionID,
-		FromPriceID:             fromPriceID,
-		ToPriceID:               toPriceID,
-		EffectiveAt:             effectiveAt,
-		RepriceBatchID:          batchID,
-		AcknowledgedShortNotice: acknowledgedShortNotice,
-		Kind:                    string(kind),
+	var out *models.SubscriptionReprice
+	err = r.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := r.db.NewWithPgxTx(tx)
+		sub, err := NewSubscriptionRepo(d).GetByIDForUpdate(ctx, subscriptionID)
+		if err != nil {
+			return err
+		}
+		if err := RefuseOwnedRebillTerms(ctx, d, sub); err != nil {
+			return err
+		}
+		if sub.PriceID != fromPriceID {
+			return fmt.Errorf("%w: subscription price changed before scheduling", ErrRepriceNotScheduled)
+		}
+		row, err := d.Gen(ctx).CreateSubscriptionReprice(ctx, gen.CreateSubscriptionRepriceParams{
+			MerchantID: tid.UUID(), SubscriptionID: subscriptionID, FromPriceID: fromPriceID, ToPriceID: toPriceID,
+			EffectiveAt: effectiveAt, RepriceBatchID: batchID, AcknowledgedShortNotice: acknowledgedShortNotice, Kind: string(kind),
+		})
+		if err != nil {
+			return err
+		}
+		out = models.SubscriptionRepriceFromGen(row)
+		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	return models.SubscriptionRepriceFromGen(row), nil
+	return out, err
 }
 
 // CreateBlockedReprice (#813) records a plan-migration cohort member the
@@ -120,8 +133,10 @@ func (r *RepriceRepo) CreateBlockedReprice(ctx context.Context, subscriptionID, 
 // BlockScheduledReprice (#813) transitions a scheduled row to blocked (rail
 // push failed after creation). Idempotent via the status predicate.
 func (r *RepriceRepo) BlockScheduledReprice(ctx context.Context, id uuid.UUID, reason string) error {
-	_, err := r.db.Gen(ctx).BlockSubscriptionReprice(ctx, gen.BlockSubscriptionRepriceParams{ID: id, BlockedReason: reason})
-	return err
+	return r.mutatePending(ctx, id, func(ctx context.Context, d *db.DB) error {
+		_, err := d.Gen(ctx).BlockSubscriptionReprice(ctx, gen.BlockSubscriptionRepriceParams{ID: id, BlockedReason: reason})
+		return err
+	})
 }
 
 // CreatePlanMigrationBatch (#813) records a plan-migration operation's header.
@@ -229,14 +244,16 @@ func (r *RepriceRepo) ListRedrivableBlockedPlanChanges(ctx context.Context, batc
 // scheduled row meanwhile) surfaces as the driver error for the caller to
 // treat as a skip.
 func (r *RepriceRepo) Unblock(ctx context.Context, id uuid.UUID) error {
-	rows, err := r.db.Gen(ctx).UnblockSubscriptionReprice(ctx, id)
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
-		return ErrRepriceNotScheduled
-	}
-	return nil
+	return r.mutatePending(ctx, id, func(ctx context.Context, d *db.DB) error {
+		rows, err := d.Gen(ctx).UnblockSubscriptionReprice(ctx, id)
+		if err != nil {
+			return err
+		}
+		if rows < 1 {
+			return ErrRepriceNotScheduled
+		}
+		return nil
+	})
 }
 
 // CountBatchRows (#816) recomputes a plan-migration batch header's
@@ -309,32 +326,79 @@ func (r *RepriceRepo) List(ctx context.Context, filter SubscriptionRepriceFilter
 // row is not (or is no longer) in status=scheduled — the cancel-before-
 // effective contract.
 func (r *RepriceRepo) Cancel(ctx context.Context, id uuid.UUID) error {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	rows, err := r.db.Gen(ctx).CancelSubscriptionReprice(ctx, gen.CancelSubscriptionRepriceParams{MerchantID: tid.UUID(), ID: id})
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
+	return r.mutatePending(ctx, id, func(ctx context.Context, d *db.DB) error {
+		tid, err := merchant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		rows, err := d.Gen(ctx).CancelSubscriptionReprice(ctx, gen.CancelSubscriptionRepriceParams{MerchantID: tid.UUID(), ID: id})
+		if err != nil {
+			return err
+		}
+		if rows < 1 {
+			return ErrRepriceNotScheduled
+		}
+		return nil
+	})
+}
+
+// Look up the immutable subscription address without a row lock, then acquire
+// the same subscription-first lock order used by renewal admission/completion.
+// The reprice is reloaded after locking; its pre-lock status grants no authority.
+func (r *RepriceRepo) mutatePending(ctx context.Context, id uuid.UUID, mutate func(context.Context, *db.DB) error) error {
+	change, err := r.GetByID(ctx, id)
+	if db.IsNotFound(err) {
 		return ErrRepriceNotScheduled
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	return r.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := r.db.NewWithPgxTx(tx)
+		sub, err := NewSubscriptionRepo(d).GetByIDForUpdate(ctx, change.SubscriptionID)
+		if err != nil {
+			return err
+		}
+		current, err := NewRepriceRepo(d).GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if current.Status == models.RepriceStatusScheduled || current.Status == models.RepriceStatusBlocked {
+			if err := RefuseOwnedRebillTerms(ctx, d, sub); err != nil {
+				return err
+			}
+		}
+		return mutate(ctx, d)
+	})
 }
 
 // Apply marks a scheduled reprice as applied. Returns ErrRepriceNotScheduled
 // if it was already applied/canceled by a concurrent caller — the renewal
 // boundary pickup is safe to retry.
 func (r *RepriceRepo) Apply(ctx context.Context, id uuid.UUID) error {
-	rows, err := r.db.Gen(ctx).ApplySubscriptionReprice(ctx, id)
+	change, err := r.GetByID(ctx, id)
+	if db.IsNotFound(err) {
+		return ErrRepriceNotScheduled
+	}
 	if err != nil {
 		return err
 	}
-	if rows < 1 {
-		return ErrRepriceNotScheduled
-	}
-	return nil
+	return r.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := r.db.NewWithPgxTx(tx)
+		if _, err := NewSubscriptionRepo(d).GetByIDForUpdate(ctx, change.SubscriptionID); err != nil {
+			return err
+		}
+		// Applying the accepted quote is completion, not revocation; it deliberately
+		// does not reject the operation that owns these exact pending terms.
+		rows, err := d.Gen(ctx).ApplySubscriptionReprice(ctx, id)
+		if err != nil {
+			return err
+		}
+		if rows < 1 {
+			return ErrRepriceNotScheduled
+		}
+		return nil
+	})
 }
 
 // ListBatchesByPriceKey lists a key's bulk reprice operations, most recent

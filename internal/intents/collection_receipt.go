@@ -64,8 +64,8 @@ func decodeCollectedTerms(in gen.OpenrailsRailIntent) (collectedTerms, error) {
 		}
 		minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.ProrationAmount)
 		return collectedTerms{"nmi", p.Currency, minor, p.Instrument, "", in.ID.String()}, err
-	case TypeManualRebill:
-		p, err := DecodeManualRebillPayload(in)
+	case subscriptions.TypeManualRebill:
+		p, err := subscriptions.DecodeManualRebillPayload(in)
 		return collectedTerms{p.Rail, p.Renewal.Currency, p.AmountMinor, p.Instrument, "", p.OrderReference}, err
 	default:
 		return collectedTerms{}, errors.New("operation kind has no collected-receipt contract")

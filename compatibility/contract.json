@@ -1508,7 +1508,6 @@
       "type CCBillCancelPayload struct {\n\tUserID             string `json:\"user_id\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id,omitempty\"`\n}",
       "type CollectionCandidate struct {\n\tTransactionID     string `json:\"transaction_id\"`\n\tExternalInvoiceID string `json:\"external_invoice_id,omitempty\"`\n}",
       "type InvoiceCollectionPayload struct {\n\tInitiator           charge.Initiator        `json:\"initiator\"`\n\tInvoiceID           uuid.UUID               `json:\"invoice_id\"`\n\tCustomerID          uuid.UUID               `json:\"customer_id\"`\n\tAttemptID           uuid.UUID               `json:\"attempt_id\"`\n\tPaymentMethodID     uuid.UUID               `json:\"payment_method_id\"`\n\tRail                string                  `json:\"rail\"`\n\tInstrument          charge.FrozenInstrument `json:\"instrument\"`\n\tCurrency            string                  `json:\"currency\"`\n\tAmount              int64                   `json:\"amount\"`\n\tAmountMinor         moneyutil.Cents         `json:\"amount_minor\"`\n\tProviderCustomerRef string                  `json:\"provider_customer_ref\"`\n\tDescription         string                  `json:\"description\"`\n}",
-      "type ManualRebillPayload struct {\n\tInitiator                charge.Initiator           `json:\"initiator\"`\n\tRequestedPaymentMethodID *uuid.UUID                 `json:\"requested_payment_method_id,omitempty\"`\n\tRenewal                  subscriptions.RenewalTerms `json:\"renewal\"`\n\tPaymentMethodID          uuid.UUID                  `json:\"payment_method_id\"`\n\tInstrument               charge.FrozenInstrument    `json:\"instrument\"`\n\tRail                     string                     `json:\"rail\"`\n\tRailSubscriptionID       string                     `json:\"rail_subscription_id\"`\n\tOrderReference           string                     `json:\"order_reference\"`\n\tAttempt                  int                        `json:\"attempt\"`\n\tFailureCount             int                        `json:\"failure_count\"`\n\tAmountMinor              moneyutil.Cents            `json:\"amount_minor,string\"`\n}",
       "type NMIDeletePayload struct {\n\tUserID             string `json:\"user_id\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id,omitempty\"`\n}",
       "type NMIPaymentMethodDeletePayload struct {\n\tUserID          string    `json:\"user_id\"`\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tRailCustomerRef string    `json:\"rail_customer_ref,omitempty\"`\n\tRailMethodRef   string    `json:\"rail_method_ref,omitempty\"`\n}",
       "type NMIPaymentMethodUpdatePayload struct {\n\tUserID          string    `json:\"user_id\"`\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tRailCustomerRef string    `json:\"rail_customer_ref\"`\n\tRailMethodRef   string    `json:\"rail_method_ref,omitempty\"`\n\tPaymentToken    string    `json:\"payment_token\"`\n\tNameOnCard      string    `json:\"name_on_card,omitempty\"`\n\tFirstName       string    `json:\"first_name,omitempty\"`\n\tLastName        string    `json:\"last_name,omitempty\"`\n\tAddress1        string    `json:\"address1,omitempty\"`\n\tCity            string    `json:\"city,omitempty\"`\n\tState           string    `json:\"state,omitempty\"`\n\tZip             string    `json:\"zip,omitempty\"`\n\tCountry         string    `json:\"country,omitempty\"`\n\tPhone           string    `json:\"phone,omitempty\"`\n\tEmail           string    `json:\"email,omitempty\"`\n\tCompany         string    `json:\"company,omitempty\"`\n\tAddress2        string    `json:\"address2,omitempty\"`\n\tTargetCard      nmiCard   `json:\"target_card\"`\n}",
@@ -1704,6 +1703,7 @@
     ],
     "internal/modules/subscriptions": [
       "type AdminSubscriptionResponse struct {\n\t*models.Subscription\n\n\tPrice    *models.Price     `json:\"price,omitempty\"`\n\tPayments []*models.Payment `json:\"payments,omitempty\"`\n}",
+      "type ManualRebillPayload struct {\n\tInitiator                charge.Initiator        `json:\"initiator\"`\n\tRequestedPaymentMethodID *uuid.UUID              `json:\"requested_payment_method_id,omitempty\"`\n\tRenewal                  RenewalTerms            `json:\"renewal\"`\n\tPaymentMethodID          uuid.UUID               `json:\"payment_method_id\"`\n\tInstrument               charge.FrozenInstrument `json:\"instrument\"`\n\tRail                     string                  `json:\"rail\"`\n\tRailSubscriptionID       string                  `json:\"rail_subscription_id\"`\n\tOrderReference           string                  `json:\"order_reference\"`\n\tAttempt                  int                     `json:\"attempt\"`\n\tFailureCount             int                     `json:\"failure_count\"`\n\tAmountMinor              moneyutil.Cents         `json:\"amount_minor,string\"`\n}",
       "type NMIUpgradePayload struct {\n\tInstrument                charge.FrozenInstrument `json:\"instrument\"`\n\tRequestedPrice            string                  `json:\"requested_price\"`\n\tPSP                       string                  `json:\"psp\"`\n\tUserID                    string                  `json:\"user_id\"`\n\tEmail                     string                  `json:\"email\"`\n\tOldSubscriptionID         uuid.UUID               `json:\"old_subscription_id\"`\n\tOldPriceID                uuid.UUID               `json:\"old_price_id\"`\n\tOldProviderSubscriptionID string                  `json:\"old_provider_subscription_id\"`\n\tNewSubscriptionID         uuid.UUID               `json:\"new_subscription_id\"`\n\tNewPaymentID              uuid.UUID               `json:\"new_payment_id\"`\n\tPriceID                   uuid.UUID               `json:\"price_id\"`\n\tProductID                 uuid.UUID               `json:\"product_id\"`\n\tProductName               string                  `json:\"product_name\"`\n\tPlanID                    string                  `json:\"plan_id\"`\n\tPaymentMethodID           uuid.UUID               `json:\"payment_method_id\"`\n\tRecurringAmount           int64                   `json:\"recurring_amount\"`\n\tProrationAmount           int64                   `json:\"proration_amount\"`\n\tCurrency                  string                  `json:\"currency\"`\n\tPeriodStart               time.Time               `json:\"period_start\"`\n\tPeriodEnd                 time.Time               `json:\"period_end\"`\n\tStartDate                 string                  `json:\"start_date\"`\n\tEntitlements              map[string]*int         `json:\"entitlements\"`\n\tCard                      nmi.CardUserData        `json:\"card\"`\n}",
       "type PlanMigrationRedriveResult struct {\n\tExamined int `json:\"examined\"`\n\n\tRedriven int `json:\"redriven\"`\n\n\tConverged int `json:\"converged\"`\n\n\tDeferred int `json:\"deferred\"`\n\n\tSkipped int `json:\"skipped\"`\n\n\tFailed int `json:\"failed\"`\n}",
       "type ProviderAccountCutoverPlan struct {\n\tDisposition ProviderAccountCutoverDisposition `json:\"disposition\"`\n\tExecutable  bool                              `json:\"executable\"`\n\tCode        ProviderAccountCutoverCode        `json:\"code\"`\n\tReason      string                            `json:\"reason\"`\n\tSteps       []string                          `json:\"steps,omitempty\"`\n}",
@@ -2990,18 +2990,6 @@
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
     },
-    "internal/intents/manual_rebill_payload.go": {
-      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "json": "encoding/json",
-      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
-      "strings": "strings",
-      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
-      "time": "time",
-      "uuid": "github.com/google/uuid"
-    },
     "internal/intents/manual_rebill_preparation.go": {
       "context": "context",
       "errors": "errors",
@@ -3012,6 +3000,7 @@
       "reflect": "reflect",
       "strconv": "strconv",
       "strings": "strings",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time"
     },
     "internal/intents/nmi_delete.go": {
@@ -4052,6 +4041,17 @@
       "fmt": "fmt",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
+      "uuid": "github.com/google/uuid"
+    },
+    "internal/modules/subscriptions/rebill_terms.go": {
+      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "strings": "strings",
+      "time": "time",
       "uuid": "github.com/google/uuid"
     },
     "internal/modules/subscriptions/renewal_terms.go": {

@@ -45,7 +45,7 @@ var pinnedBoundaries = map[string]string{
 	"internal/intents/collection_receipt.go":          "internal/modules/checkout/upgrade_payment_receipts_integration_test.go",
 	"internal/modules/subscriptions/upgrade_terms.go": "internal/modules/checkout/upgrade_payment_receipts_integration_test.go",
 	"internal/intents/manual_rebill_admission.go":     "internal/intents/manual_rebill_finalize_integration_test.go",
-	"internal/intents/manual_rebill_payload.go":       "internal/intents/manual_rebill_finalize_integration_test.go",
+	"internal/modules/subscriptions/rebill_terms.go":  "internal/intents/manual_rebill_finalize_integration_test.go",
 	"internal/intents/manual_rebill_preparation.go":   "internal/intents/manual_rebill_finalize_integration_test.go",
 
 	"internal/modules/subscriptions/renewal_terms.go":      "internal/modules/subscriptions/renewal_terms_integration_test.go",

@@ -16,6 +16,10 @@ import (
 // violates a constraint is refused, never silently coerced. Each carries its
 // HTTP status and wire code (#983): constraints are 422, scheduling state 409.
 var (
+	// ErrRebillTermsCommitted prevents a price mutation from revoking an accepted
+	// renewal whose provider preparation or money submission may have occurred.
+	ErrRebillTermsCommitted = apperr.New(http.StatusConflict, "rebill_terms_committed", "accepted recurring payment owns the pending price terms")
+
 	// ErrRepriceCrossProduct: to_price must belong to the SAME product as the
 	// subscription's current price. Cross-product moves are plan changes (a
 	// different feature set) — out of scope for v1 (#778).
