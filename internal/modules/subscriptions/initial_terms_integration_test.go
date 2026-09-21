@@ -133,12 +133,17 @@ func TestAcceptedInitialMembershipUsesFrozenTermsAtomically(t *testing.T) {
 				}))
 			} else {
 				require.NoError(t, f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &terms.SubscriptionID, CancelType: models.CancelTypeUser, RevokeAccess: true}))
+				_, err := f.pool.Exec(ctx, `UPDATE billing.subscriptions SET deleted_at=now() WHERE id=$1`, terms.SubscriptionID)
+				require.NoError(t, err)
 				require.NoError(t, f.dbi.MerchantTx(ctx, func(txctx context.Context, tx pgx.Tx) error {
 					sub, notices, err := f.lifecycle.CreateMembershipTx(txctx, db.NewWithPgxTx(tx), params)
 					if err != nil {
 						return err
 					}
 					require.Equal(t, models.StatusCancelled, sub.Status)
+					var tombstoned bool
+					require.NoError(t, tx.QueryRow(txctx, `SELECT deleted_at IS NOT NULL FROM billing.subscriptions WHERE id=$1`, sub.ID).Scan(&tombstoned))
+					require.True(t, tombstoned, "accepted replay must preserve historical tombstone")
 					require.Empty(t, notices)
 					return nil
 				}))
