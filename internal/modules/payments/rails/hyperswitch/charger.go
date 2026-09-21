@@ -43,9 +43,23 @@ func (c *Charger) ChargeInitialRecurring(ctx context.Context, req charge.Request
 	return c.charge(ctx, req)
 }
 
+// ChargeRecurringMIT is the concrete transport leg for an accepted renewal.
+// The caller owns durable submission, receipt custody and period completion.
+func (c *Charger) ChargeRecurringMIT(ctx context.Context, req charge.Request) (charge.Result, *nmi.CustomerVaultError, error) {
+	if req.Instrument.Rail != "nmi" || !recurringMerchantContext(req.Context) {
+		return charge.Result{}, nil, errors.Join(charge.ErrNotDispatched, errors.New("HyperSwitch recurring renewal requires anchored merchant initiation"))
+	}
+	return c.charge(ctx, req)
+}
+
 func recurringCustomerContext(c charge.Context) bool {
 	return c.Agreement == charge.AgreementRecurring && c.Initiator == charge.InitiatorCustomer &&
 		((c.FirstUse && c.PriorRef == "") || (!c.FirstUse && strings.TrimSpace(c.PriorRef) != "" && strings.TrimSpace(c.PriorRef) == c.PriorRef))
+}
+
+func recurringMerchantContext(c charge.Context) bool {
+	return c.Agreement == charge.AgreementRecurring && c.Initiator == charge.InitiatorMerchant && !c.FirstUse &&
+		strings.TrimSpace(c.PriorRef) != "" && strings.TrimSpace(c.PriorRef) == c.PriorRef
 }
 
 func (c *Charger) charge(ctx context.Context, req charge.Request) (charge.Result, *nmi.CustomerVaultError, error) {
@@ -93,8 +107,8 @@ func saleForm(req charge.Request, key provider.Secret) (map[string]provider.Secr
 		return nil, errors.New("HyperSwitch charge requires a positive amount and exact operation reference")
 	}
 	// Unscheduled invoices and explicitly accepted recurring customer enrollment
-	// share the same proxy transport. Recurring merchant renewals remain gated.
-	if !recurringCustomerContext(req.Context) && (req.Context.Agreement != charge.AgreementUnscheduled ||
+	// share the same proxy transport with explicitly selected recurring renewals.
+	if !recurringCustomerContext(req.Context) && !recurringMerchantContext(req.Context) && (req.Context.Agreement != charge.AgreementUnscheduled ||
 		(req.Context.Initiator != charge.InitiatorCustomer && req.Context.Initiator != charge.InitiatorMerchant) ||
 		(req.Context.FirstUse && req.Context.Initiator != charge.InitiatorCustomer)) {
 		return nil, errors.New("HyperSwitch charge requires an established unscheduled initiation")

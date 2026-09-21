@@ -23,6 +23,31 @@ type hyperSwitchCollectionAdapter struct {
 	binding charge.HyperSwitchBinding
 }
 
+// PrepareHyperSwitchCharge reuses the existing scoped account/credential armer
+// without invoking invoice preparation or choosing an unscheduled agreement.
+// The caller rechecks method ownership against its frozen instrument and owns
+// the durable submission fence. This helper compares the retained HS binding.
+func PrepareHyperSwitchCharge(ctx context.Context, resolver CollectionAdapterResolver, method gen.OpenrailsPaymentMethod, accepted charge.HyperSwitchBinding) (*hscharge.Charger, error) {
+	if resolver == nil || method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil {
+		return nil, charge.ErrInstrumentChanged
+	}
+	if err := accepted.Validate(); err != nil {
+		return nil, err
+	}
+	adapter, armed, err := resolver.ResolveCollectionAdapter(ctx, method)
+	if err != nil {
+		return nil, err
+	}
+	hs, ok := adapter.(*hyperSwitchCollectionAdapter)
+	if !armed || !ok || hs == nil || hs.charger == nil {
+		return nil, errors.New("HyperSwitch charge is not armed")
+	}
+	if hs.binding != accepted {
+		return nil, charge.ErrInstrumentChanged
+	}
+	return hs.charger, nil
+}
+
 // SetHyperSwitchDeployment is runtime initialization, before serving or workers.
 // The operator URL cannot come from merchant settings or change on a service.
 func (s *MoneyService) SetHyperSwitchDeployment(apiBaseURL string) error {

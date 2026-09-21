@@ -58,7 +58,7 @@ func newCustodyDeleteFixture(t *testing.T) *custodyDeleteFixture {
 	customer := dbtest.EnsureCustomerIDPgx(f.ctx, t, pool, uuid.NewString())
 	_, err := pool.Exec(f.ctx, `INSERT INTO billing.custodians(id,merchant_id,key,kind,environment,account_id,settings,credential_versions) VALUES($1,$2,$3,'hyperswitch','test',$3,'{"profile_id":"profile_A","public_api_key":"public_A"}','{"api_key":1}')`, f.custodian, dbtest.TestMerchantID.UUID(), "delete_"+f.custodian.String())
 	require.NoError(t, err)
-	f.pm = &models.PaymentMethod{ID: uuid.New(), CustomerID: customer, Rail: models.RailNMI, PspID: psp, Custodian: models.CustodianHyperSwitch, CustodianID: &f.custodian, RailCustomerRef: "customer_A", RailMethodRef: "method_A", ChargeVia: "pan_proxy", RebillDriver: models.RebillDriverOpenRails}
+	f.pm = &models.PaymentMethod{ID: uuid.New(), CustomerID: customer, Rail: models.RailNMI, PspID: psp, Custodian: models.CustodianHyperSwitch, CustodianID: &f.custodian, RailCustomerRef: "customer_A", RailMethodRef: "method_A", ChargeVia: "pan_proxy"}
 	require.NoError(t, paymentmethods.NewPaymentMethodRepo(f.db).Create(f.ctx, f.pm))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "api-key=delete-key", r.Header.Get("Authorization"))
