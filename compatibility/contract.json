@@ -1244,6 +1244,7 @@
       "type collectedReceipt struct {\n\tVersion int                                    `json:\"version\"`\n\tFamily  string                                 `json:\"family\"`\n\tBinding receiptBinding                         `json:\"binding\"`\n\tNMI     *nmi.SaleEvidence                      `json:\"nmi,omitempty\"`\n\tStripe  *subscriptions.StripeCollectionReceipt `json:\"stripe,omitempty\"`\n}",
       "type cutoverAccountRequalification struct {\n\tRole                  string                       `json:\"role\"`\n\tQualification         providerqualification.Record `json:\"qualification\"`\n\tOriginalFingerprint   string                       `json:\"original_fingerprint\"`\n\tPreviousFingerprint   string                       `json:\"previous_fingerprint\"`\n\tCredentialFingerprint string                       `json:\"credential_fingerprint\"`\n\tCredentialVersion     int                          `json:\"credential_version\"`\n\tActor                 string                       `json:\"actor\"`\n\tReason                string                       `json:\"reason\"`\n\tRecordedAt            time.Time                    `json:\"recorded_at\"`\n}",
       "type enrollmentReceipt struct {\n\tBinding receiptBinding         `json:\"binding\"`\n\tFacts   nmi.EnrollmentEvidence `json:\"facts\"`\n}",
+      "type invoiceNonexecution struct {\n\tBinding     receiptBinding `json:\"binding\"`\n\tSubmittedAt string         `json:\"submitted_at\"`\n\tCode        string         `json:\"code\"`\n\tReason      string         `json:\"reason\"`\n}",
       "type nmiCard struct {\n\tLastFour   string `json:\"last_four\"`\n\tCardType   string `json:\"card_type\"`\n\tExpiryDate string `json:\"expiry_date\"`\n}",
       "type nmiCutoverDecision struct {\n\tAction        string         `json:\"action\"`\n\tAuthorization map[string]any `json:\"authorization,omitempty\"`\n}",
       "type nmiCutoverPayload struct {\n\tSourceQualification         providerqualification.BoundRecord `json:\"source_qualification\"`\n\tTargetQualification         providerqualification.BoundRecord `json:\"target_qualification\"`\n\tRequest                     nmiCutoverRequest                 `json:\"request\"`\n\tCustomerID                  uuid.UUID                         `json:\"customer_id\"`\n\tSubscriptionID              uuid.UUID                         `json:\"subscription_id\"`\n\tSourceSubscriptionID        string                            `json:\"source_subscription_id\"`\n\tSourcePaymentMethodID       uuid.UUID                         `json:\"source_payment_method_id\"`\n\tSourceInstrument            charge.FrozenInstrument           `json:\"source_instrument\"`\n\tPriceID                     uuid.UUID                         `json:\"price_id\"`\n\tPlanID                      string                            `json:\"plan_id\"`\n\tTargetInstrument            charge.FrozenInstrument           `json:\"target_instrument\"`\n\tCurrency                    string                            `json:\"currency\"`\n\tAmount                      int64                             `json:\"amount\"`\n\tCycleHours                  int32                             `json:\"cycle_hours\"`\n\tPeriodStart                 time.Time                         `json:\"period_start\"`\n\tPeriodEnd                   time.Time                         `json:\"period_end\"`\n\tAnchor                      time.Time                         `json:\"anchor\"`\n\tSourceCredentialFingerprint string                            `json:\"source_credential_fingerprint\"`\n\tTargetCredentialFingerprint string                            `json:\"target_credential_fingerprint\"`\n}",
@@ -2754,6 +2755,14 @@
       "strconv": "strconv",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "time": "time"
+    },
+    "internal/intents/invoice_submission.go": {
+      "bytes": "bytes",
+      "context": "context",
+      "errors": "errors",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
       "time": "time"
     },
     "internal/intents/manual_rebill_completion.go": {

@@ -80,3 +80,11 @@ local validation, masked-method readback, or contract preflight failed before
 entering the proxy POST. This permits a new payment key after repair. Existing
 submission markers and every uncertain error after POST entry remain verify-only;
 a proxy HTTP error never proves that the PSP did not execute.
+
+A lost claim before the submission fence resumes execution; claim count is not
+proof of submission. Executors reload canonical progress, and parking, expiry and
+nonexecution completion check stored fence state. A fresh pre-dispatch refusal
+uses a private owner capability and the existing sealed-evidence writer, bound
+to the accepted payload and fence. Generic progress fields cannot create that
+proof. It survives a failed local commit; terminal completion retains the usual
+invoice result. A later verifier may finish that result without another charge.
