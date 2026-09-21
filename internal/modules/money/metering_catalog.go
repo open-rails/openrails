@@ -26,7 +26,7 @@ const (
 
 var (
 	ErrUsageMeterNotFound       = errors.New("usage meter not found")
-	ErrMeterInUse               = errors.New("usage meter has recorded activity")
+	ErrMeterInUse               = errors.New("usage meter is in use")
 	ErrDefaultRateCardNotFound  = errors.New("default usage rate card not found")
 	ErrDefaultRateCardRequired  = errors.New("default usage rate card required")
 	ErrRateCardHasOverrides     = errors.New("usage rate card has payer overrides")

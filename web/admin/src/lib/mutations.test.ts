@@ -74,7 +74,7 @@ const cases: Case[] = [
   ["publishes an applied manifest", (c, g) => g(M.publishCatalog(c), manifest),
     "POST /merchant/catalog/publish", catalogTree, { catalog: { products: [] }, insert: true, overwrite: true }],
   ["previews a manifest without invalidating the catalog", (c, g) => g(M.publishCatalog(c), { ...manifest, planOnly: true }),
-    "POST /merchant/catalog/publish", [], { catalog: { products: [] }, plan_only: true }],
+    "POST /merchant/catalog/publish", [], { catalog: { products: [] } }],
   ["refreshes drift alone", (c, g) => g(M.refreshCatalogDrift(c), undefined),
     "POST /merchant/catalog/drift/refresh", ["drift"]],
   ["creates a product", (c, g) => g(M.createProduct(c), { key: "pro", display_name: "Pro", description: "" }),

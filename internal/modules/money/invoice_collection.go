@@ -6,9 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -296,7 +297,7 @@ func (s *MoneyService) retryInvoiceCollection(ctx context.Context, runner *inten
 	key := invoiceRetryOperationKey(request.InvoiceID, request.IdempotencyKey)
 	origin, reason := intents.OriginAdmin, "manual invoice collection retry"
 	if initiator == charge.InitiatorCustomer {
-		key = intents.CustomerPaymentKey(TypeInvoiceCollection, payer.UUID(), request.IdempotencyKey)
+		key = charge.CustomerPaymentKey(TypeInvoiceCollection, payer.UUID(), request.IdempotencyKey)
 		origin, reason = intents.OriginUser, "verified customer invoice payment"
 	}
 	pm := request.PaymentMethodID

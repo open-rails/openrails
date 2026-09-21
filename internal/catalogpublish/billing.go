@@ -1,33 +1,13 @@
-package catalog
+package catalogpublish
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// ServiceApplier adapts an in-process *service.Service to the Applier
-// interface. The facade method set already matches the interface one-to-one, so
-// the *service.Service satisfies Applier directly — this constructor exists to
-// make the in-process wiring explicit and to give a single place to evolve the
-// adapter if the facade signatures ever diverge.
-//
-// NewServiceApplier returns the service as an Applier. A compile-time assertion
-// below guarantees *service.Service implements every method.
-func NewServiceApplier(svc *billingservice.Service) Applier {
-	return serviceApplier{Service: svc}
-}
-
-type serviceApplier struct {
-	*billingservice.Service
-}
-
-func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) error {
-	if a.Service == nil || m == nil {
-		return nil
-	}
+func catalogBilling(m *Manifest) (billingservice.SyncCatalogSidecarsRequest, error) {
 	req := billingservice.SyncCatalogSidecarsRequest{}
 	for _, meter := range m.Meters {
 		req.Meters = append(req.Meters, billingservice.CatalogMeterSpec{
@@ -44,13 +24,13 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 			for i, rc := range product.RateCards {
 				priceJSON, err := json.Marshal(rc.Price)
 				if err != nil {
-					return fmt.Errorf("product %q rate_card #%d price: %w", product.Key, i+1, err)
+					return req, fmt.Errorf("product %q rate_card #%d price: %w", product.Key, i+1, err)
 				}
 				var allowanceJSON json.RawMessage
 				if rc.Allowance != nil {
 					allowanceJSON, err = json.Marshal(rc.Allowance)
 					if err != nil {
-						return fmt.Errorf("product %q rate_card #%d allowance: %w", product.Key, i+1, err)
+						return req, fmt.Errorf("product %q rate_card #%d allowance: %w", product.Key, i+1, err)
 					}
 				}
 				req.RateCards = append(req.RateCards, billingservice.CatalogRateCardSpec{
@@ -66,7 +46,7 @@ func (a serviceApplier) SyncCatalogSidecars(ctx context.Context, m *Manifest) er
 
 		}
 	}
-	return a.Service.SyncCatalogSidecars(ctx, req)
+	return req, nil
 }
 
-var _ Applier = serviceApplier{}
+var _ applier = (*billingservice.Service)(nil)
