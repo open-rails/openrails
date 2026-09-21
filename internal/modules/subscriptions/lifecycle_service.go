@@ -1292,6 +1292,12 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		return result, nil
 	}
 
+	// Merchant cancellation admits active or collecting engine obligations under
+	// the same row lock as the mutation. A later terminal state stays terminal.
+	if subscription.CollectionPolicy == models.CollectionPolicyEngine && params.CancelType == models.CancelTypeMerchant && subscription.Status != models.StatusActive && subscription.Status != models.StatusPastDue {
+		return nil, ErrSubscriptionNotActive
+	}
+
 	// A replayed engine user cancel cannot soften a later merchant or system
 	// cancellation. The locked current row is the lifecycle authority.
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCancelled && params.CancelType == models.CancelTypeUser {

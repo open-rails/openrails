@@ -77,6 +77,12 @@ func TestEngineCollectionAdmissionPrototype(t *testing.T) {
 			// charge executor yet and this fixture never contacts a provider.
 			_, err = e.pool.Exec(e.ctx, `UPDATE billing.rail_intents SET status='unknown_needs_verify',result_evidence='{"submission":"synthetic uncertainty"}' WHERE id=$1`, later.ID)
 			require.NoError(t, err)
+			_, err = e.pool.Exec(e.ctx, `UPDATE billing.subscriptions SET status='unknown' WHERE id=$1`, sub)
+			require.NoError(t, err)
+			unknown, err := e.svc.AdmitDueSubscriptionCollection(e.ctx, sub, now.Add(time.Hour))
+			require.NoError(t, err)
+			require.Equal(t, later.ID, unknown.ID)
+			require.JSONEq(t, string(later.Payload), string(unknown.Payload))
 			lifecycle := subscriptions.NewSubscriptionLifecycleService(e.db, nil, nil, nil, nil, nil, clockwork.NewFakeClockAt(now))
 			require.NoError(t, lifecycle.CancelMembership(e.ctx, &subscriptions.CancelMembershipParams{SubscriptionID: &sub, CancelType: models.CancelTypeUser}))
 			replay, err := e.svc.AdmitDueSubscriptionCollection(e.ctx, sub, now.Add(120*24*time.Hour))

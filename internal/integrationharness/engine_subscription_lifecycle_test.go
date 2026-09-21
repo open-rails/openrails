@@ -101,8 +101,10 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &args))
 		require.NoError(t, resumeWorker.Work(t.Context(), &river.Job[riverjobs.ResumeSubscriptionArgs]{Args: args}))
 	}
-	for _, scenario := range []string{"engine", "engine_expired", "engine_chargeback", "provider"} {
+	require.NoError(t, rt.MoneyService.SetHyperSwitchDeployment(gateway.URL))
+	for _, scenario := range []string{"engine", "engine_expired", "engine_chargeback", "engine_past_due_customer", "engine_past_due_merchant", "provider"} {
 		t.Run(scenario, func(t *testing.T) {
+			pastDue := scenario == "engine_past_due_customer" || scenario == "engine_past_due_merchant"
 			policy := "engine"
 			if scenario == "provider" {
 				policy = "provider"
@@ -110,7 +112,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 			customer, user, token := newCustomer()
 			id := uuid.New()
 			end := now.Add(20 * 24 * time.Hour)
-			if scenario == "engine_expired" {
+			if scenario == "engine_expired" || pastDue {
 				end = now.Add(-time.Hour)
 			}
 			remote := ""
@@ -124,12 +126,27 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 			require.NoError(t, err)
 			_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: user.String(), Entitlement: "engine_access", Indefinite: true, SourceType: models.EntitlementSourceSubscription, SourceID: id})
 			require.NoError(t, err)
+			var operation uuid.UUID
+			var payload []byte
+			if pastDue {
+				_, err = pool.Exec(ctx, `UPDATE billing.subscriptions SET status='past_due',next_retry_at=$2,retry_attempts=1 WHERE id=$1`, id, now)
+				require.NoError(t, err)
+				accepted, err := rt.MoneyService.AdmitDueSubscriptionCollection(ctx, id, now)
+				require.NoError(t, err)
+				operation, payload = accepted.ID, accepted.Payload
+				// No executor exists: uncertainty is explicitly synthetic.
+				_, err = pool.Exec(ctx, `UPDATE billing.rail_intents SET status='unknown_needs_verify',result_evidence='{"submission":"synthetic uncertainty"}' WHERE id=$1`, operation)
+				require.NoError(t, err)
+			}
 			sid := openrails.SubscriptionID(id)
 			path := surface.BaseURL + "/v1/me/subscriptions/" + sid.String()
 			status, raw := requestJSON(t, http.MethodPost, path+"/cancel", foreignToken, map[string]any{"feedback": "not my subscription"})
 			require.Equal(t, 404, status, string(raw))
 			status, raw = requestJSON(t, http.MethodPost, path+"/cancel", token, map[string]any{"feedback": "taking a break"})
 			require.Equal(t, 202, status, string(raw))
+			if scenario == "engine_past_due_merchant" {
+				require.NoError(t, owner.CancelSubscription(t.Context(), sid, openrails.CancelSubscriptionRequest{Reason: "stop declined renewals"}))
+			}
 			if scenario == "engine_chargeback" {
 				require.NoError(t, rt.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{SubscriptionID: &id, CancelType: models.CancelTypeChargeback, RevokeAccess: true}))
 			}
@@ -151,10 +168,24 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 				require.NotNil(t, marker)
 				require.Equal(t, 1, count)
 			}
+			if pastDue {
+				var next, grace *time.Time
+				require.NoError(t, pool.QueryRow(ctx, `SELECT next_retry_at,grace_ends_at FROM billing.subscriptions WHERE id=$1`, id).Scan(&next, &grace))
+				require.Nil(t, next)
+				require.Nil(t, grace)
+				replay, err := rt.MoneyService.AdmitDueSubscriptionCollection(ctx, id, now.Add(24*time.Hour))
+				require.NoError(t, err)
+				require.Equal(t, operation, replay.ID)
+				require.Equal(t, "unknown_needs_verify", replay.Status)
+				require.JSONEq(t, string(payload), string(replay.Payload))
+				require.JSONEq(t, `{"submission":"synthetic uncertainty"}`, string(replay.ResultEvidence))
+				require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1`, id).Scan(&count))
+				require.Equal(t, 1, count)
+			}
 			access, err := owner.HasEntitlement(t.Context(), openrails.CustomerID(user), "engine_access", end)
 			require.NoError(t, err)
 			require.False(t, access)
-			if scenario == "engine_expired" || scenario == "engine_chargeback" {
+			if scenario == "engine_expired" || scenario == "engine_chargeback" || pastDue {
 				status, raw = requestJSON(t, http.MethodPost, path+"/resume", token, nil)
 				require.Equal(t, 400, status, string(raw))
 				_, err = rt.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{SubscriptionID: id})
