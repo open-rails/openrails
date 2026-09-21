@@ -385,3 +385,31 @@ func TestInitialMembershipDeletionAdmissionOrdering(t *testing.T) {
 		})
 	}
 }
+
+func TestInitialMembershipUnsubmittedProviderEffectsCannotAuthorizeSale(t *testing.T) {
+	fx := newSubIntentFixture(t)
+	fx.prepare(t)
+	in, err := fx.runner.Store.Enqueue(fx.ctx, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", PspID: fx.payload.Terms.PSPID, IntentType: TypeInitialMembership, PriceID: &fx.priceID, Payload: fx.payload, IdempotencyKey: InitialMembershipIdempotencyKey(fx.payload.CheckoutIdempotencyKey), NextAttemptAt: fx.payload.Terms.AcceptedAt, Origin: intents.OriginUser})
+	require.NoError(t, err)
+	order := intents.NMIEnrollmentOrder(in)
+	fx.gateway.createForm.Store(url.Values{"orderid": {order}, "ponumber": {order}, "amount": {"9.99"}, "currency": {"USD"}, "start_date": {fx.payload.NativeSchedule.StartDate}})
+	fx.gateway.subExists.Store(true)
+	fx.gateway.charged.Store(true)
+	handler := NewInitialMembershipIntentHandler(fx.svc)
+	_, err = handler.Resolve(fx.ctx, in, intents.Resolution{ProviderReference: fx.gateway.subID})
+	require.ErrorContains(t, err, "receipt custody refused")
+	require.Zero(t, fx.gateway.createCalls.Load(), "a schedule observed before submission cannot authorize a new sale")
+	client, err := fx.svc.resolveNMIClient(fx.ctx, "mobius")
+	require.NoError(t, err)
+	receipt, found, err := intents.ReadNMICollectionReceipt(fx.ctx, in, upgradeReceiptResolver{client}, fx.gateway.txnID)
+	require.NoError(t, err)
+	require.True(t, found)
+	_, err = intents.NewStore(fx.db).RetainCollectedReceipt(fx.ctx, in, receipt)
+	require.ErrorContains(t, err, "receipt custody refused")
+	var memberships, payments int
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.subscriptions WHERE customer_id=$1`, fx.payload.Terms.CustomerID).Scan(&memberships))
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.payments WHERE customer_id=$1`, fx.payload.Terms.CustomerID).Scan(&payments))
+	require.Zero(t, memberships)
+	require.Zero(t, payments)
+	require.Zero(t, fx.gateway.createCalls.Load())
+}
