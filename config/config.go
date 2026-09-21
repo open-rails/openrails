@@ -2294,6 +2294,12 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		}
 	}
 
+	// Merchant configuration authority is broader than provider secrets. Retired
+	// spellings must fail even if a new spelling is also supplied.
+	if _, present := os.LookupEnv("MERCHANT_SOURCE"); k.Exists("merchant_source") || present {
+		return nil, fmt.Errorf("merchant_source / MERCHANT_SOURCE was renamed: use merchant_config_source / MERCHANT_CONFIG_SOURCE (manifest|api)")
+	}
+
 	if databaseOnly {
 		dbConfig := cfg.DB
 		if err := k.UnmarshalWithConf("db", dbConfig, koanf.UnmarshalConf{
@@ -2312,12 +2318,6 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 			return nil, err
 		}
 		return databaseConfig, nil
-	}
-
-	// Merchant configuration authority is broader than provider secrets. Retired
-	// spellings must fail even if a new spelling is also supplied.
-	if _, present := os.LookupEnv("MERCHANT_SOURCE"); k.Exists("merchant_source") || present {
-		return nil, fmt.Errorf("merchant_source / MERCHANT_SOURCE was renamed: use merchant_config_source / MERCHANT_CONFIG_SOURCE (manifest|api)")
 	}
 
 	// HARD CUT (#469): the AuthKit control plane is always on in standalone

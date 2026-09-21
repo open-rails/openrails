@@ -32,6 +32,8 @@ func TestMerchantConfigSourceHardCut(t *testing.T) {
 			t.Setenv("MERCHANT_CONFIG_SOURCE", "manifest")
 			_, err := Load("")
 			require.ErrorContains(t, err, "use merchant_config_source / MERCHANT_CONFIG_SOURCE")
+			_, err = LoadDatabase("")
+			require.ErrorContains(t, err, "use merchant_config_source / MERCHANT_CONFIG_SOURCE")
 		})
 	}
 	for _, suffix := range []string{"", "merchant_config_source: manifest\n"} {
