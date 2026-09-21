@@ -146,3 +146,37 @@ func TestInitialRecurringChargeUsesItsCurrencyScale(t *testing.T) {
 		})
 	}
 }
+
+func TestScheduleOnlyEnrollmentDoesNotSubmitSale(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		require.NoError(t, r.ParseForm())
+		for _, key := range []string{"type", "amount", "billing_method", "initiated_by", "stored_credential_indicator", "initial_transaction_id"} {
+			require.NotContains(t, r.Form, key)
+		}
+		require.Equal(t, "add_subscription", r.Form.Get("recurring"))
+		require.Equal(t, "accepted-plan", r.Form.Get("plan_id"))
+		require.Equal(t, "accepted-vault", r.Form.Get("customer_vault_id"))
+		require.Equal(t, "accepted-billing", r.Form.Get("billing_id"))
+		require.Equal(t, "20261021", r.Form.Get("start_date"))
+		require.Equal(t, "accepted-order", r.Form.Get("orderid"))
+		require.Equal(t, r.Form.Get("orderid"), r.Form.Get("ponumber"))
+		fmt.Fprint(w, "response=1&responsetext=SUCCESS&subscription_id=schedule-only")
+	}))
+	defer server.Close()
+	client := newTestClient(t, server.URL)
+	data := RecurringPaymentData{ScheduleOnly: true, PlanID: "accepted-plan", CustomerVaultID: "accepted-vault", BillingID: "accepted-billing", Currency: "USD", StartDate: "20261021", OrderID: "accepted-order", PONumber: "accepted-order"}
+	response, err := client.AddRecurringSubscription(t.Context(), data)
+	require.NoError(t, err)
+	require.Equal(t, "schedule-only", response.SubscriptionID)
+	require.Empty(t, response.TransactionID)
+	data.Amount = 1
+	_, err = client.AddRecurringSubscription(t.Context(), data)
+	require.Error(t, err)
+	data.Amount = 0
+	data.StoredCredential = testInitialRecurringCredential()
+	_, err = client.AddRecurringSubscription(t.Context(), data)
+	require.Error(t, err)
+	require.Equal(t, 1, calls, "contradictory no-charge commands must fail before provider I/O")
+}

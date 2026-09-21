@@ -45,7 +45,7 @@ const countUnresolvedOperationsNamingPaymentMethod = `-- name: CountUnresolvedOp
 SELECT count(*)::bigint FROM openrails.rail_intents ri
 WHERE ri.merchant_id = $1::uuid
   AND ri.status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text])
-  AND (ri.payload->>'payment_method_id' = $2::uuid::text
+  AND ((CASE WHEN ri.intent_type='initial_membership' THEN ri.payload->'terms'->>'payment_method_id' ELSE ri.payload->>'payment_method_id' END) = $2::uuid::text
        OR (ri.intent_type = 'nmi_payment_source_update'
            AND $2::uuid::text IN (ri.payload->>'new_payment_method_id', ri.payload->>'old_payment_method_id')))
 `

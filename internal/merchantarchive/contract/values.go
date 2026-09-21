@@ -120,7 +120,7 @@ func ValidateValues(p Profile, values []*string) error {
 		case "jsonb":
 			field := p.Name + "." + c.Name
 			if p.Name == "rail_intents" && (c.Name == "payload" || c.Name == "result_evidence") {
-				if typ := value(p, values, "intent_type"); typ != nil && (*typ == intents.TypeNMIPaymentMethodDelete || *typ == intents.TypeHyperSwitchMethodDelete || *typ == "nmi_sale" || *typ == "nmi_subscription_create" || *typ == "invoice_collection" || *typ == "manual_rebill" || *typ == subscriptions.TypeSubscriptionCollection || *typ == "nmi_provider_cutover") {
+				if typ := value(p, values, "intent_type"); typ != nil && (*typ == intents.TypeNMIPaymentMethodDelete || *typ == intents.TypeHyperSwitchMethodDelete || *typ == "nmi_sale" || *typ == "initial_membership" || *typ == "invoice_collection" || *typ == "manual_rebill" || *typ == subscriptions.TypeSubscriptionCollection || *typ == "nmi_provider_cutover") {
 					field = p.Name + "." + *typ + "." + c.Name
 				}
 			}
@@ -207,7 +207,7 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "rail_intents" {
 		typ := value(p, values, "intent_type")
 		payload := value(p, values, "payload")
-		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != intents.TypeNMIPaymentMethodDelete && *typ != intents.TypeHyperSwitchMethodDelete && *typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection" && *typ != "nmi_sale" && *typ != "manual_rebill" && *typ != subscriptions.TypeSubscriptionCollection && *typ != "nmi_provider_cutover")) {
+		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != intents.TypeNMIPaymentMethodDelete && *typ != intents.TypeHyperSwitchMethodDelete && *typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection" && *typ != "nmi_sale" && *typ != "initial_membership" && *typ != "manual_rebill" && *typ != subscriptions.TypeSubscriptionCollection && *typ != "nmi_provider_cutover")) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
 		if typ != nil && (*typ == "nmi_refund" || *typ == "stripe_refund" || *typ == "ccbill_refund") {
@@ -236,7 +236,7 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 		return ""
 	}
 	typ := field("intent_type")
-	if typ != intents.TypeNMIPaymentMethodDelete && typ != intents.TypeHyperSwitchMethodDelete && typ != "invoice_collection" && typ != subscriptions.TypeManualRebill && typ != subscriptions.TypeSubscriptionCollection && typ != payments.TypeNMISale {
+	if typ != intents.TypeNMIPaymentMethodDelete && typ != intents.TypeHyperSwitchMethodDelete && typ != "invoice_collection" && typ != subscriptions.TypeManualRebill && typ != subscriptions.TypeSubscriptionCollection && typ != payments.TypeNMISale && typ != subscriptions.TypeInitialMembership {
 		return false, nil
 	}
 	id, _ := uuid.Parse(field("id"))
@@ -253,6 +253,9 @@ func validateRetainedPayment(p Profile, values []*string) (bool, error) {
 			}
 			*target = &parsed
 		}
+	}
+	if typ == subscriptions.TypeInitialMembership {
+		return false, intents.ValidateInitialMembershipTerminal(row)
 	}
 	if typ == intents.TypeHyperSwitchMethodDelete || typ == intents.TypeNMIPaymentMethodDelete {
 		_, _, err := intents.DeletedMethod(row)
