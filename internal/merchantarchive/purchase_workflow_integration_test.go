@@ -121,12 +121,35 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 	_, err = source.Qx(ctx).Exec(ctx, `INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,plan_id) VALUES($1,$2,$3,'writer-plan')`, id.UUID(), price, psp)
 	require.NoError(t, err)
 	var gatewayCalls atomic.Int64
+	var cutoverArmed, sourceCanceled atomic.Bool
+	var sourceDeletes atomic.Int64
 	var readMu sync.Mutex
 	var acceptedForm url.Values
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+		if phase == "cutover" && cutoverArmed.Load() {
+			plan := nmi.V5Plan{Object: "plan", ID: "writer-plan", PlanAmount: "2.50", DayFrequency: "2", PlanPayments: "0"}
+			if r.Method == http.MethodGet && r.URL.Path == "/plans/writer-plan" {
+				require.NoError(t, json.NewEncoder(w).Encode(plan))
+				return
+			}
+			if r.Method == http.MethodGet && r.URL.Path == "/subscriptions/"+providerSubscription {
+				status := "active"
+				if sourceCanceled.Load() {
+					status = "inactive"
+				}
+				require.NoError(t, json.NewEncoder(w).Encode(nmi.V5Subscription{Object: "subscription", ID: providerSubscription, CustomerVaultID: "archive-vault", DelayedCondition: status, PausedSubscription: false, Amount: "2.50", NextBillingDate: end.UTC().Format(time.RFC3339), Plan: &plan}))
+				return
+			}
+			if r.Method == http.MethodDelete && r.URL.Path == "/subscriptions/"+providerSubscription {
+				sourceCanceled.Store(true)
+				sourceDeletes.Add(1)
+				fmt.Fprint(w, `{}`)
+				return
+			}
 		}
 		if recurring && r.Method == http.MethodGet && r.URL.Path == "/customers/archive-vault" {
 			fmt.Fprint(w, `{"object":"customer","id":"archive-vault","billing":[{"id":"archive-card","priority":1}]}`)
@@ -201,7 +224,7 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 		return &checkout.CheckoutSessionCreateRequest{PriceID: openrails.PriceID(price).String(), Payment: checkout.CheckoutSessionPaymentRequest{Rail: "writer-account", PaymentMethodID: openrails.PaymentMethodID(methodID).String()}, IdempotencyKey: clientKey}
 	}
 	user := &checkout.UserIdentity{ID: customer.String()}
-	if phase != "" {
+	if phase != "" && phase != "cutover" {
 		result, checkoutErr := checkoutService.Checkout(ctx, &checkout.CheckoutRequest{PriceID: openrails.PriceID(price).String(), Rail: "writer-account", PaymentMethodID: openrails.PaymentMethodID(methodID).String(), IdempotencyKey: clientKey}, user)
 		if phase == "refused" {
 			require.Error(t, checkoutErr)
@@ -356,6 +379,16 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 	require.NoError(t, err)
 	require.Equal(t, first, sourceReplay, "source and destination use the same session replay path")
 	require.EqualValues(t, 1, gatewayCalls.Load())
+	if phase == "cutover" {
+		cutoverArmed.Store(true)
+		qualifiedInitialArchiveCutover(t, ctx, source, id, customer, price, subscriptionID, psp, client, clock, end)
+		require.True(t, sourceCanceled.Load())
+		require.EqualValues(t, 1, sourceDeletes.Load())
+		before = readPurchaseArchiveState(t, ctx, source, services, id, customer, product, rail, transaction, now)
+		require.Equal(t, &psp, before.payment.PspID, "original paid receipt remains on its original account")
+		require.NotEqual(t, psp, before.subscription.PspID)
+		require.EqualValues(t, 1, gatewayCalls.Load(), "provider cutover must not add a sale")
+	}
 	release()
 
 	var artifact bytes.Buffer
