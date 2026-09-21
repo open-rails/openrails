@@ -84,9 +84,9 @@ type DunningWorker struct {
 	// driving lifecycle off the returned status. nil builds a Runner over the
 	// worker's own dependencies.
 	Intents *intents.Runner
-	// EngineCollections is deliberately absent from runtime registration until
-	// browser enrollment through recurring MIT is qualified. It only admits
-	// obligations; the existing provider-intent fleet performs the charge.
+	// EngineCollections admits engine obligations; the existing registered
+	// provider-intent fleet performs the charge and receipt recovery. Native
+	// provider schedules stay on their existing path.
 	EngineCollections *money.MoneyService
 }
 
