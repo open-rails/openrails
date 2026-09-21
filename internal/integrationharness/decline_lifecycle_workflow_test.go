@@ -3,6 +3,7 @@
 package integrationharness
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -52,6 +53,18 @@ func TestDeclineLifecyclePreservesCustomerInstruments(t *testing.T) {
 	rt := surface.App().Runtime
 	SeedPSPs(t.Context(), t, rt, owned.MerchantID, config.PSPSet{"nmi": {Rail: "nmi", AccountID: "decline-" + uuid.NewString(), NMI: &config.NMIRailConfig{SecurityKey: "synthetic", WebhookSigningSecret: "synthetic"}}})
 	pool := h.MerchantPool(owned.MerchantID.UUID())
+	t.Cleanup(func() {
+		// Keep later fleet tests from executing this completed fixture's
+		// deliberately queued provider work against their endpoint config.
+		for _, statement := range []string{
+			"DELETE FROM billing.rail_intents WHERE merchant_id=$1",
+			"UPDATE billing.subscriptions SET deleted_at=now() WHERE merchant_id=$1",
+			"UPDATE billing.psps SET archived=true WHERE merchant_id=$1",
+		} {
+			_, err := pool.Exec(context.Background(), statement, owned.MerchantID.UUID())
+			require.NoError(t, err)
+		}
+	})
 	psp := dbtest.EnsureTestPSP(t.Context(), t, pool, owned.MerchantID.UUID(), "nmi")
 	ctx := db.WithPSPID(merchant.WithID(t.Context(), owned.MerchantID), psp)
 	type subject struct{ customer, subscription, method uuid.UUID }
