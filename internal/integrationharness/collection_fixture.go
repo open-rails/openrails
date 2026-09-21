@@ -162,7 +162,7 @@ func (h *Harness) ResolveOperationWith(sandbox config.ProviderSandboxConfig, mid
 	if h.Redis != nil {
 		redisAddr = h.Redis.Options().Addr
 	}
-	cfg := "env: dev\nmerchant_source: api\nsecret_backend: db\ntest_mode: sandbox\nprovider_write_mode: full\ndb:\n  url: " + h.DSN + "\nredis:\n  addr: " + redisAddr + "\n" + providerSandboxYAML(sandbox)
+	cfg := "env: dev\nmerchant_config_source: api\nsecret_backend: db\ntest_mode: sandbox\nprovider_write_mode: full\ndb:\n  url: " + h.DSN + "\nredis:\n  addr: " + redisAddr + "\n" + providerSandboxYAML(sandbox)
 	require.NoError(h.t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o600))
 	args := []string{"intents", "resolve", "--config", filepath.Join(dir, "config.yaml"), "--merchant", "id:" + mid.String(), "--intent", id.String(), "--actor", "ops@example.test", "--reason", "gateway portal"}
 	if step != "" {

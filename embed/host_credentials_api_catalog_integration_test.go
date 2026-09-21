@@ -106,7 +106,7 @@ func TestManagedCredentialsWithManifestCatalog(t *testing.T) {
 	cfg.Env = "production"
 	cfg.TestMode = config.CredentialPostureSandbox
 	cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly
-	cfg.MerchantSource, cfg.CatalogSource = config.MerchantSourceAPI, config.CatalogSourceManifest
+	cfg.MerchantConfigSource, cfg.CatalogSource = config.MerchantConfigSourceAPI, config.CatalogSourceManifest
 	cfg.SecretBackend = config.SecretBackendDB
 	cfg.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 	slug := "managed-manifest-" + uuid.NewString()

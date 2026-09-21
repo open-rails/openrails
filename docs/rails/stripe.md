@@ -59,10 +59,10 @@ open/close). Registration is skipped when the configured `api_url` is not a publ
 
 Signing-secret handling depends on the merchant source:
 
-- **API/DB mode** (`merchant_source: api`): when OpenRails creates the endpoint,
+- **API/DB mode** (`merchant_config_source: api`): when OpenRails creates the endpoint,
   Stripe mints the signing secret and OpenRails stores it in the merchant secret
   store. Fully hands-off.
-- **Manifest mode** (`merchant_source: manifest`): a freshly minted secret would
+- **Manifest mode** (`merchant_config_source: manifest`): a freshly minted secret would
   live only in process memory and be lost on reboot, so OpenRails refuses to create
   the endpoint. Register it once in the Stripe Dashboard (same URL, same events) and
   declare its `whsec_…` as `secrets.webhook_signing_secret`; reconcile then manages

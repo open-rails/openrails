@@ -314,7 +314,7 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 func TestCatalogMeterWritesUseManifestModeGuard(t *testing.T) {
 	mux := http.NewServeMux()
 	checker := &merchantActionChecker{}
-	rt := &app.Runtime{Config: &config.Config{MerchantSource: config.MerchantSourceManifest}}
+	rt := &app.Runtime{Config: &config.Config{MerchantConfigSource: config.MerchantConfigSourceManifest}}
 	opts := Options{
 		Gate: NewGate(GateOptions{
 			Authenticator:          merchantActionAuth{},
@@ -344,12 +344,12 @@ func TestCatalogMeterWritesUseManifestModeGuard(t *testing.T) {
 }
 
 func TestCatalogAuthorityDoesNotChangeProviderAuthority(t *testing.T) {
-	for _, merchantSource := range []string{config.MerchantSourceManifest, config.MerchantSourceAPI} {
+	for _, merchantSource := range []string{config.MerchantConfigSourceManifest, config.MerchantConfigSourceAPI} {
 		for _, catalogSource := range []string{config.CatalogSourceManifest, config.CatalogSourceAPI} {
 			t.Run(merchantSource+"/"+catalogSource, func(t *testing.T) {
 				mux := http.NewServeMux()
 				checker := &merchantActionChecker{}
-				rt := &app.Runtime{Config: &config.Config{MerchantSource: merchantSource, CatalogSource: catalogSource}}
+				rt := &app.Runtime{Config: &config.Config{MerchantConfigSource: merchantSource, CatalogSource: catalogSource}}
 				opts := Options{Gate: NewGate(GateOptions{Authenticator: merchantActionAuth{}, AdminPermissionChecker: checker})}
 				RegisterCatalogRoutes(router.NewMux(mux, "/catalog", nil), rt, opts)
 				RegisterPaymentProviderRoutes(router.NewMux(mux, "/providers", nil), rt, opts)
@@ -400,7 +400,7 @@ func TestPaymentProviderArchivesMountWithoutSecretWrite(t *testing.T) {
 	}
 
 	manifest := http.NewServeMux()
-	rt := &app.Runtime{Config: &config.Config{MerchantSource: config.MerchantSourceManifest}}
+	rt := &app.Runtime{Config: &config.Config{MerchantConfigSource: config.MerchantConfigSourceManifest}}
 	RegisterPaymentProviderRoutes(router.NewMux(manifest, "/billing/v1/merchant/payment-providers", nil), rt, Options{Gate: gate})
 	checker.perm = ""
 	rec = httptest.NewRecorder()
@@ -533,14 +533,14 @@ func TestServiceRoutesDelegatedAdmitGatedByPermission(t *testing.T) {
 // Record actual ServeMux registrations: a generic 405 alone cannot distinguish
 // an absent mutation route from a mounted handler rejecting the request.
 func TestProviderMutationRouteInventory(t *testing.T) {
-	for _, source := range []string{config.MerchantSourceManifest, config.MerchantSourceAPI} {
+	for _, source := range []string{config.MerchantConfigSourceManifest, config.MerchantConfigSourceAPI} {
 		for _, secretWrite := range []bool{false, true} {
 			name := source + "/read-only"
 			if secretWrite {
 				name = source + "/writable"
 			}
 			t.Run(name, func(t *testing.T) {
-				rt := &app.Runtime{Config: &config.Config{MerchantSource: source, CatalogSource: config.CatalogSourceAPI}}
+				rt := &app.Runtime{Config: &config.Config{MerchantConfigSource: source, CatalogSource: config.CatalogSourceAPI}}
 				providerRoutes := routesurface.AllProviderRoutes()
 				providerRoutes.SecretWrite = secretWrite
 				opts := Options{ProviderRoutes: &providerRoutes}
@@ -553,13 +553,13 @@ func TestProviderMutationRouteInventory(t *testing.T) {
 				for _, route := range []string{"GET /providers", "GET /providers/{provider}", "POST /providers/routing/dry-run", "POST /catalog/products", "PUT /catalog/meters/{key}", "POST /merchant/webhooks", "PUT /merchant/webhooks/{id}/url", "DELETE /merchant/webhooks/{id}"} {
 					require.Contains(t, inventory, route)
 				}
-				if source == config.MerchantSourceAPI && secretWrite {
+				if source == config.MerchantConfigSourceAPI && secretWrite {
 					require.Contains(t, inventory, "PUT /providers/{provider}")
 				} else {
 					require.NotContains(t, inventory, "PUT /providers/{provider}")
 				}
 				for _, route := range []string{"DELETE /providers/{provider}", "POST /providers/{provider}/accounts/{psp_id}/archive"} {
-					if source == config.MerchantSourceAPI {
+					if source == config.MerchantConfigSourceAPI {
 						require.Contains(t, inventory, route)
 					} else {
 						require.NotContains(t, inventory, route)
@@ -574,7 +574,7 @@ func TestProviderRuntimeCapabilityLimitsRouteRegistration(t *testing.T) {
 	for _, writable := range []bool{false, true} {
 		for _, explicit := range []bool{false, true} {
 			rt := &app.Runtime{
-				Config:            &config.Config{MerchantSource: config.MerchantSourceAPI},
+				Config:            &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI},
 				RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable},
 			}
 			opts := Options{}

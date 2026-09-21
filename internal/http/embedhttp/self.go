@@ -96,7 +96,7 @@ func ProviderRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRo
 		}
 	}
 	if rt != nil {
-		if rt.Config.IsManifestMerchantSource() {
+		if rt.Config.IsManifestMerchantConfigSource() {
 			r.SecretWrite = false
 		}
 		if caps := rt.RouteCapabilities; caps != nil {

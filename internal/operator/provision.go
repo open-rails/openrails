@@ -70,8 +70,8 @@ type ProvisionMerchantResult struct {
 // with the group's id. Safe to re-run.
 //
 // This is the engine mechanism behind a hosted wrapper's "registration is
-// provisioning" flow (openrails-saas #2/#3): it works in both merchant_source
-// modes but exists for merchant_source=api, where merchants are created over
+// provisioning" flow (openrails-saas #2/#3): it works in both merchant_config_source
+// modes but exists for merchant_config_source=api, where merchants are created over
 // code paths instead of a manifest. Calling it without an attached control
 // plane is a wiring error (call Attach/AttachWithOptions first).
 func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantRequest) (*ProvisionMerchantResult, error) {

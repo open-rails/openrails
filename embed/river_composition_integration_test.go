@@ -48,7 +48,7 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 		pool, err := pgxpool.New(t.Context(), dsn)
 		require.NoError(t, err)
 		t.Cleanup(pool.Close)
-		rt, err := embed.New(t.Context(), embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}}, River: embed.RiverFromHost()})
+		rt, err := embed.New(t.Context(), embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}}, River: embed.RiverFromHost()})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 		return rt, pool
@@ -154,7 +154,7 @@ func TestManagedRiverStillComposesControlPlaneBeforeRunWorkers(t *testing.T) {
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}, Auth: &config.AuthConfig{Issuer: "https://managed-compose.test", KeysPath: t.TempDir()}}, River: embed.RiverManagedByOpenRails(schema)})
+	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}, Auth: &config.AuthConfig{Issuer: "https://managed-compose.test", KeysPath: t.TempDir()}}, River: embed.RiverManagedByOpenRails(schema)})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{})

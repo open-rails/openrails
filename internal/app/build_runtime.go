@@ -327,7 +327,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// MODE 1 (#723): the in-memory credential plane exists from boot; manifest
 	// provisioning seeds it and every store consumer reads it. No persistent
 	// merchant-secret store is ever constructed in this mode.
-	if cfg.IsManifestMerchantSource() {
+	if cfg.IsManifestMerchantConfigSource() {
 		runtime.ManifestSecrets = merchants.NewManifestSecretStore()
 	}
 

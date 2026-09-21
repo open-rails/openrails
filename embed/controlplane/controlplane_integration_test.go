@@ -69,7 +69,7 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := &config.Config{
-		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI,
+		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
 		SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn},
 		Auth: &config.AuthConfig{Issuer: "https://handle.openrails.test", KeysPath: t.TempDir()},
 	}

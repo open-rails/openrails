@@ -146,7 +146,7 @@ type Runtime struct {
 	MerchantGroupCanonicalResolver merchants.GroupIDResolver
 	MerchantGroupSearchResolver    merchants.GroupSearchResolver
 	// ManifestSecrets is the MODE-1 in-memory credential plane (#723), set iff
-	// merchant_source=manifest. Boot provisioning seeds it (Seeder()); runtime
+	// merchant_config_source=manifest. Boot provisioning seeds it (Seeder()); runtime
 	// consumers read it through Merchants like any other store. The DB/Vault
 	// store is never constructed in this mode.
 	ManifestSecrets *merchants.ManifestSecretStore

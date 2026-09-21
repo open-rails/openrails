@@ -37,7 +37,7 @@ func TestCreatorCatalogAuthority(t *testing.T) {
 		rt, err := embed.New(ctx, embed.Options{
 			Config: &config.Config{
 				Env: "development", TestMode: config.CredentialPostureSandbox,
-				MerchantSource: config.MerchantSourceManifest, CatalogSource: config.CatalogSourceAPI,
+				MerchantConfigSource: config.MerchantConfigSourceManifest, CatalogSource: config.CatalogSourceAPI,
 				ProviderWriteMode: config.ProviderWriteModeReadOnly,
 				DB:                &config.DBConfig{URL: ownerURL.String()},
 			},

@@ -1,4 +1,4 @@
-# Self-hosting MODE 1: manifest-is-truth (`merchant_source: manifest`)
+# Self-hosting MODE 1: manifest-is-truth (`merchant_config_source: manifest`)
 
 MODE 1 is the default authority for merchant and provider configuration. The
 host supplies the configuration and credentials at boot; provider credentials
@@ -9,7 +9,7 @@ references, but does not copy these credentials into its managed secret store.
 Catalog authority defaults to the same mode. Set `catalog_source: api` when
 products and prices should change dynamically while provider credentials remain
 host-owned. The opposite credential posture — API-driven merchant configuration
-with a Vault/DB secret store — is MODE 2 (`merchant_source: api`). Comparison table:
+with a Vault/DB secret store — is MODE 2 (`merchant_config_source: api`). Comparison table:
 [standalone-integration.md](standalone-integration.md#two-merchant-source-modes).
 Deployment shape does not imply mode: embedded and standalone can run either.
 
@@ -17,7 +17,7 @@ Deployment shape does not imply mode: embedded and standalone can run either.
 
 | File | Owns | Loaded by |
 |---|---|---|
-| `config.yaml` | process/infrastructure config (env, DB, Redis, `provider_write_mode`, `test_mode`, `merchant_source`, `catalog_source`) | `config.Load` (standalone) / built programmatically (embedded hosts) |
+| `config.yaml` | process/infrastructure config (env, DB, Redis, `provider_write_mode`, `test_mode`, `merchant_config_source`, `catalog_source`) | `config.Load` (standalone) / built programmatically (embedded hosts) |
 | merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server --merchant-manifest <path>`) | merchant identity, profile, invoice policy, **PSPs** — rail accounts + secrets (`merchants.<slug>.psps.<key>.<rail>`) | standalone server boot, every boot; embedded hosts pass the same shape to `UpsertMerchantConfig` |
 | catalog manifest (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails push-merchant-catalog` (or the embedded push API) |
 
@@ -57,7 +57,7 @@ the manifest does not declare, refuses boot rather than being dropped.
 
 The conventional file is optional: absent, the server boots control-plane-only
 (bind merchants later). An explicit `--merchant-manifest` path must exist —
-boot refuses otherwise. `merchant_source: api` (MODE 2) refuses a present
+boot refuses otherwise. `merchant_config_source: api` (MODE 2) refuses a present
 manifest outright: two truths.
 
 1. The manifest and its overlays parse strictly. Unknown fields and retired
@@ -105,7 +105,7 @@ manifest outright: two truths.
 
 ## Mode 2 in one line
 
-`merchant_source: api`: no manifests at boot (a present manifest file refuses
+`merchant_config_source: api`: no manifests at boot (a present manifest file refuses
 boot: two truths), merchant/provider configuration mutates over the HTTP APIs,
 and secrets live in the explicitly selected Vault KV or DB store. DB encryption
 is required outside development. Catalog APIs are enabled by default; an

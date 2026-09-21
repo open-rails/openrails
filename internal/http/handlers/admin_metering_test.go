@@ -80,19 +80,19 @@ func TestAdminUsageMeterDTOOwnership(t *testing.T) {
 	manifest := httprequest.NewHTTP(
 		httptest.NewRecorder(),
 		httptest.NewRequest(http.MethodGet, "/", nil),
-		&app.Runtime{Config: &config.Config{MerchantSource: config.MerchantSourceManifest}},
+		&app.Runtime{Config: &config.Config{MerchantConfigSource: config.MerchantConfigSourceManifest}},
 	)
 	manifestDTO := adminUsageMeterDTO(manifest, meter)
-	require.Equal(t, config.MerchantSourceManifest, manifestDTO.ConfigurationSource)
+	require.Equal(t, config.MerchantConfigSourceManifest, manifestDTO.ConfigurationSource)
 	require.False(t, manifestDTO.WritesAllowed)
 
 	apiDriven := httprequest.NewHTTP(
 		httptest.NewRecorder(),
 		httptest.NewRequest(http.MethodGet, "/", nil),
-		&app.Runtime{Config: &config.Config{MerchantSource: config.MerchantSourceAPI}},
+		&app.Runtime{Config: &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI}},
 	)
 	apiDTO := adminUsageMeterDTO(apiDriven, meter)
-	require.Equal(t, config.MerchantSourceAPI, apiDTO.ConfigurationSource)
+	require.Equal(t, config.MerchantConfigSourceAPI, apiDTO.ConfigurationSource)
 	require.True(t, apiDTO.WritesAllowed)
 }
 
@@ -105,23 +105,23 @@ func TestAdminUsageMeterPageDTOOwnershipWithoutItems(t *testing.T) {
 	}{
 		{
 			name:          "api catalog stays writable",
-			source:        config.MerchantSourceAPI,
+			source:        config.MerchantConfigSourceAPI,
 			writesAllowed: true,
 		},
 		{
 			name:          "manifest catalog stays read-only",
-			source:        config.MerchantSourceManifest,
+			source:        config.MerchantConfigSourceManifest,
 			writesAllowed: false,
 		},
 		{
 			name:           "host credentials permit an API catalog",
-			merchantSource: config.MerchantSourceManifest,
+			merchantSource: config.MerchantConfigSourceManifest,
 			source:         config.CatalogSourceAPI,
 			writesAllowed:  true,
 		},
 		{
 			name:           "managed credentials do not make a manifest catalog writable",
-			merchantSource: config.MerchantSourceAPI,
+			merchantSource: config.MerchantConfigSourceAPI,
 			source:         config.CatalogSourceManifest,
 			writesAllowed:  false,
 		},
@@ -131,7 +131,7 @@ func TestAdminUsageMeterPageDTOOwnershipWithoutItems(t *testing.T) {
 			r := httprequest.NewHTTP(
 				httptest.NewRecorder(),
 				httptest.NewRequest(http.MethodGet, "/", nil),
-				&app.Runtime{Config: &config.Config{MerchantSource: test.merchantSource, CatalogSource: test.source}},
+				&app.Runtime{Config: &config.Config{MerchantConfigSource: test.merchantSource, CatalogSource: test.source}},
 			)
 			page := adminUsageMeterPageDTO(
 				r,

@@ -43,7 +43,7 @@ to concrete code (enum, table, or manifest key).
 
 | Term | Meaning |
 |---|---|
-| MODE 1 / MODE 2 (`merchant_source`) | Who owns merchant config. `manifest` (MODE 1): YAML-is-truth in memory, operator = merchant, reboot to change. `api` (MODE 2): no YAML — Vault + DB via API, for true multi-tenant SaaS. Orthogonal to embedded vs standalone. |
+| MODE 1 / MODE 2 (`merchant_config_source`) | Who owns merchant config. `manifest` (MODE 1): YAML-is-truth in memory, operator = merchant, reboot to change. `api` (MODE 2): no YAML — Vault + DB via API, for true multi-tenant SaaS. Orthogonal to embedded vs standalone. |
 | Deployment shape | Only how the process/routes are hosted: **embedded** (a Go host runs `embed.Runtime` and mounts `/billing/v1/*`), **standalone** (`openrails run-server` serves `/v1/*`), **OpenRails-SaaS** (one hosted standalone engine, MODE 2, one merchant binding per tenant client). Any shape runs either MODE; application code uses the same `*openrails.Client` in all three. |
 | `provider_write_mode` | How much OpenRails may do against providers: `full` (normal) / `limited` (no system-initiated writes) / `readonly` (no writes). Unset defaults to `readonly` — fail closed; non-dev boot requires an explicit value. |
 | `test_mode` | Credential posture: `sandbox` or `live`, two explicit states. Sandbox attaches credential guarantees (live Stripe keys refuse boot, NMI accounts probed, CCBill sandbox URL, Solana devnet). Independent of environment — production can legitimately run sandbox rails. |
