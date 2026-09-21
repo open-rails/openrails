@@ -29,8 +29,11 @@ func compositionRiverSchema(t *testing.T) string {
 	pool, err := pgxpool.New(t.Context(), dbtest.SharedSuperuserDSN(t))
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
+	runtime, err := pgxpool.New(t.Context(), dbtest.SharedPostgresDSN(t))
+	require.NoError(t, err)
+	defer runtime.Close()
 	schema := "composition_" + uuid.NewString()[:8]
-	require.NoError(t, embed.ApplyMigrations(t.Context(), pool, embed.MigrationOptions{River: embed.RiverManagedByOpenRails(schema)}))
+	require.NoError(t, embed.ApplyMigrations(t.Context(), pool, embed.MigrationOptions{River: embed.RiverManagedByOpenRails(schema), RuntimePool: runtime}))
 	t.Cleanup(func() {
 		_, err := pool.Exec(context.Background(), "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
 		require.NoError(t, err)

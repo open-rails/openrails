@@ -24,7 +24,6 @@ internal/modules/alerting/service.go|clock = clockwork.NewRealClock()|business_t
 internal/modules/catalog/stripe_webhooks.go|now = time.Now()|business_time_boundary|Provider rollover default only when explicit Now is unset|2
 internal/modules/checkout/custodian_sale.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue scheduling and provider retry backoff use physical time|1
 internal/modules/checkout/custodian_sale.go|now := time.Now().UTC()|db_audit_timestamp|New saved payment method creation and update audit timestamp|1
-internal/modules/checkout/nmi_sale_service.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue scheduling and provider retry backoff use physical time|1
 internal/modules/checkout/purchase_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/checkout/service.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue scheduling and provider retry backoff use physical time|1
 internal/modules/checkout/service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1

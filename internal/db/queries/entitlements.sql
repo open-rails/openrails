@@ -166,8 +166,7 @@ WHERE ent.source_type = 'subscription'
   AND ent.source_id = $1
   AND ent.revoked_at IS NULL
   AND ent.deleted_at IS NULL
-  AND ent.end_at IS NOT NULL AND ent.end_at < sqlc.arg(end_at)::timestamptz
-FOR UPDATE;
+  AND ent.end_at IS NOT NULL AND ent.end_at < sqlc.arg(end_at)::timestamptz;
 
 -- name: UpdateEntitlementEndAtIfMatch :exec
 UPDATE openrails.entitlements ent SET
@@ -414,3 +413,10 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND deleted_at IS NULL
 ORDER BY (revoked_at IS NULL) DESC, end_at DESC NULLS FIRST, start_at ASC, id ASC
 LIMIT 1;
+
+-- name: GetEntitlementByIDForUpdate :one
+-- Customer and timeline locks must precede this row lock.
+SELECT * FROM openrails.entitlements ent
+WHERE ent.merchant_id=sqlc.arg(merchant_id)::uuid AND ent.id=sqlc.arg(id)::uuid
+  AND ent.deleted_at IS NULL
+FOR UPDATE;

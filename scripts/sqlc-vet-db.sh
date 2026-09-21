@@ -79,4 +79,12 @@ done
 go run github.com/open-rails/migratekit/cmd/migratekit apply \
     -dsn "$VET_URL" -app openrails -schema openrails -dir internal/migrate/postgres 1>&2
 
+# The audit harness is a host: create its test login independently of migrations.
+psql_command "$VET_URL" -v ON_ERROR_STOP=1 -q -c "DO \$\$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='openrails_app') THEN
+        CREATE ROLE openrails_app LOGIN NOSUPERUSER NOBYPASSRLS;
+    END IF;
+END \$\$;" 1>&2
+psql_file "$VET_URL" internal/migrate/runtime_access.sql -v runtime_user=openrails_app 1>&2
+
 printf '%s\n' "$VET_URL"

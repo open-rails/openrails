@@ -323,6 +323,39 @@ func (q *Queries) CompleteRailIntentCollection(ctx context.Context, arg Complete
 	return result.RowsAffected(), nil
 }
 
+const completeSaleOutcome = `-- name: CompleteSaleOutcome :execrows
+UPDATE openrails.rail_intents
+SET status=$1::text, result_evidence=$2::jsonb,
+    last_failure_reason=$3::text, executed_at=$4::timestamptz,
+    claimed_until=NULL, updated_at=$4::timestamptz
+WHERE id=$5::uuid AND merchant_id=$6::uuid
+  AND intent_type='nmi_sale' AND status IN ('in_flight','unknown_needs_verify')
+`
+
+type CompleteSaleOutcomeParams struct {
+	Status     string
+	Evidence   []byte
+	Reason     *string
+	Now        time.Time
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) CompleteSaleOutcome(ctx context.Context, arg CompleteSaleOutcomeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeSaleOutcome,
+		arg.Status,
+		arg.Evidence,
+		arg.Reason,
+		arg.Now,
+		arg.ID,
+		arg.MerchantID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const completeTierChangeOutcome = `-- name: CompleteTierChangeOutcome :execrows
 UPDATE openrails.rail_intents
 SET status=$1::text,
@@ -525,35 +558,35 @@ INSERT INTO openrails.rail_intents (
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN 'pending'
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN 'pending'
         ELSE openrails.rail_intents.status
     END,
     next_attempt_at = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.next_attempt_at
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.next_attempt_at
         ELSE openrails.rail_intents.next_attempt_at
     END,
     payload = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.payload
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.payload
         ELSE openrails.rail_intents.payload
     END,
     psp_id = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.psp_id
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.psp_id
         ELSE openrails.rail_intents.psp_id
     END,
     origin = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin
         ELSE openrails.rail_intents.origin
     END,
     origin_reason = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin_reason
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin_reason
         ELSE openrails.rail_intents.origin_reason
     END,
     actor = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.actor
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.actor
         ELSE openrails.rail_intents.actor
     END,
     expires_at = CASE
-        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.expires_at
+        WHEN openrails.rail_intents.intent_type NOT IN ('nmi_upgrade', 'stripe_tier_change', 'invoice_collection', 'manual_rebill', 'nmi_sale') AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.expires_at
         ELSE openrails.rail_intents.expires_at
     END,
     attempts = CASE
@@ -987,6 +1020,55 @@ func (q *Queries) GetUnresolvedManualRebill(ctx context.Context, arg GetUnresolv
 	return i, err
 }
 
+const getUnresolvedSaleForCustomerProduct = `-- name: GetUnresolvedSaleForCustomerProduct :one
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id=$1::uuid AND intent_type='nmi_sale'
+  AND payload->>'user_id'=$2::text
+  AND payload->>'product_id'=$3::text
+  AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
+ORDER BY created_at LIMIT 1
+`
+
+type GetUnresolvedSaleForCustomerProductParams struct {
+	MerchantID uuid.UUID
+	CustomerID string
+	ProductID  string
+}
+
+func (q *Queries) GetUnresolvedSaleForCustomerProduct(ctx context.Context, arg GetUnresolvedSaleForCustomerProductParams) (OpenrailsRailIntent, error) {
+	row := q.db.QueryRow(ctx, getUnresolvedSaleForCustomerProduct, arg.MerchantID, arg.CustomerID, arg.ProductID)
+	var i OpenrailsRailIntent
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.IntentType,
+		&i.SubscriptionID,
+		&i.PaymentID,
+		&i.PriceID,
+		&i.Payload,
+		&i.IdempotencyKey,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ClaimedUntil,
+		&i.Origin,
+		&i.OriginReason,
+		&i.Actor,
+		&i.LastFailureReason,
+		&i.ExpiresAt,
+		&i.ResultEvidence,
+		&i.CreatedAt,
+		&i.ExecutedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.CustodianID,
+	)
+	return i, err
+}
+
 const hasUnattributedPaymentAfterRebillBoundary = `-- name: HasUnattributedPaymentAfterRebillBoundary :one
 SELECT EXISTS (
  SELECT 1 FROM openrails.payments p
@@ -1343,6 +1425,66 @@ func (q *Queries) ListRebillTermOwners(ctx context.Context, arg ListRebillTermOw
 	return items, nil
 }
 
+const listRetainedSalesForArchive = `-- name: ListRetainedSalesForArchive :many
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id=$1::uuid AND intent_type='nmi_sale'
+  AND ($2::uuid IS NULL OR id>$2::uuid)
+ORDER BY id LIMIT $3::int
+`
+
+type ListRetainedSalesForArchiveParams struct {
+	MerchantID uuid.UUID
+	AfterID    *uuid.UUID
+	PageSize   int32
+}
+
+func (q *Queries) ListRetainedSalesForArchive(ctx context.Context, arg ListRetainedSalesForArchiveParams) ([]OpenrailsRailIntent, error) {
+	rows, err := q.db.Query(ctx, listRetainedSalesForArchive, arg.MerchantID, arg.AfterID, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsRailIntent
+	for rows.Next() {
+		var i OpenrailsRailIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ClaimedUntil,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStuckRailIntents = `-- name: ListStuckRailIntents :many
 
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
@@ -1428,6 +1570,51 @@ type LockRailIntentForCollectionCompletionParams struct {
 // invoice-before-operation order.
 func (q *Queries) LockRailIntentForCollectionCompletion(ctx context.Context, arg LockRailIntentForCollectionCompletionParams) (OpenrailsRailIntent, error) {
 	row := q.db.QueryRow(ctx, lockRailIntentForCollectionCompletion, arg.ID, arg.MerchantID)
+	var i OpenrailsRailIntent
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.IntentType,
+		&i.SubscriptionID,
+		&i.PaymentID,
+		&i.PriceID,
+		&i.Payload,
+		&i.IdempotencyKey,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ClaimedUntil,
+		&i.Origin,
+		&i.OriginReason,
+		&i.Actor,
+		&i.LastFailureReason,
+		&i.ExpiresAt,
+		&i.ResultEvidence,
+		&i.CreatedAt,
+		&i.ExecutedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.CustodianID,
+	)
+	return i, err
+}
+
+const lockRailIntentForSaleCompletion = `-- name: LockRailIntentForSaleCompletion :one
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE id=$1::uuid AND merchant_id=$2::uuid AND intent_type='nmi_sale'
+FOR UPDATE
+`
+
+type LockRailIntentForSaleCompletionParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) LockRailIntentForSaleCompletion(ctx context.Context, arg LockRailIntentForSaleCompletionParams) (OpenrailsRailIntent, error) {
+	row := q.db.QueryRow(ctx, lockRailIntentForSaleCompletion, arg.ID, arg.MerchantID)
 	var i OpenrailsRailIntent
 	err := row.Scan(
 		&i.ID,
@@ -1550,7 +1737,7 @@ SET status = 'failed_terminal',
     claimed_until = NULL,
     updated_at = now()
 WHERE id = $3 AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('invoice_collection', 'manual_rebill', 'nmi_upgrade', 'stripe_tier_change')
+  AND intent_type NOT IN ('invoice_collection', 'manual_rebill', 'nmi_upgrade', 'stripe_tier_change', 'nmi_sale')
 `
 
 type MarkRailIntentFailedTerminalParams struct {
@@ -1587,7 +1774,7 @@ SET status = 'succeeded',
     claimed_until = NULL,
     updated_at = now()
 WHERE id = $3 AND status IN ('in_flight', 'unknown_needs_verify')
-  AND intent_type NOT IN ('invoice_collection', 'manual_rebill', 'nmi_upgrade', 'stripe_tier_change')
+  AND intent_type NOT IN ('invoice_collection', 'manual_rebill', 'nmi_upgrade', 'stripe_tier_change', 'nmi_sale')
 `
 
 type MarkRailIntentSucceededParams struct {
@@ -1672,6 +1859,8 @@ SET status = 'pending',
     updated_at = now()
 WHERE id = $3 AND status = 'in_flight'
   AND NOT (intent_type = 'invoice_collection' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
+  -- A stale no-send result must not undo another executor's payment fence.
+  AND (intent_type <> 'nmi_sale' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'sale_submitted'))
 `
 
 type ParkRailIntentParams struct {
@@ -1788,7 +1977,7 @@ WHERE id = $3::uuid
   AND psp_id = $5::uuid
   AND intent_type = $6::text
   AND payload = $7::jsonb
-  AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade'))
+  AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale'))
        OR ($1::text = 'qualified_enrollment' AND intent_type = 'nmi_upgrade')
        OR ($1::text = 'qualified_invoice_nonexecution' AND intent_type = 'invoice_collection'
            AND COALESCE(result_evidence->>'submitted_at', '') = $2::jsonb->>'submitted_at'

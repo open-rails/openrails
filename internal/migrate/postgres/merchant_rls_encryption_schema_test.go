@@ -5,11 +5,14 @@ import (
 	"testing"
 )
 
-func TestConsolidatedSchemaEnablesRLSAndAppRole(t *testing.T) {
+func TestConsolidatedSchemaEnablesRLSWithoutManagingRoles(t *testing.T) {
 	c := loadSchema001(t)
+	for _, forbidden := range []string{"CREATE ROLE", "ALTER ROLE", "TO openrails_app"} {
+		if strings.Contains(c, forbidden) {
+			t.Errorf("baseline must not manage runtime roles: %s", forbidden)
+		}
+	}
 	for _, want := range []string{
-		"CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS",
-		"GRANT USAGE ON SCHEMA openrails TO openrails_app",
 		"ENABLE ROW LEVEL SECURITY",
 		"FORCE ROW LEVEL SECURITY",
 		"CREATE POLICY merchant_isolation",

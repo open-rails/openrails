@@ -577,7 +577,7 @@
       "type JobProgress = riverjobs.ProgressReport",
       "type MerchantConfig = boot.MerchantConfig",
       "type MerchantProfileConfig = boot.MerchantProfileConfig",
-      "type MigrationOptions struct {\n\tSchema string\n\tRiver  RiverOwnership\n}",
+      "type MigrationOptions struct {\n\tSchema string\n\tRiver  RiverOwnership\n\n\tRuntimePool *pgxpool.Pool\n}",
       "type MountOptions struct {\n\tRouteSets []RouteSet\n\n\tAuthenticator billingauth.Authenticator\n\n\tGate billingauth.Gate\n\n\tDelegatedAuthenticator billingauth.DelegatedAuthenticator\n\n\tMountPrefix string\n\n\tProviderRoutes *ProviderRoutes\n}",
       "type Options struct {\n\tDelegatedAuthenticator billingauth.DelegatedAuthenticator\n\n\tConfig *config.Config\n\n\tPGXPool *pgxpool.Pool\n\tRedis   *redis.Client\n\tCache   cache.Cache\n\n\tRiver RiverOwnership\n\n\tRunWorkers bool\n\n\tConsoleAssets fs.FS\n\n\tStripeTransport http.RoundTripper\n\n\tUserDirectory    openrails.UserDirectory\n\tUsernameResolver openrails.UsernameResolver\n}",
       "type PSPConfig = boot.PSPConfig",
@@ -1310,7 +1310,6 @@
       "type CheckoutResponse struct {\n\tStatus string `json:\"status\"`\n\tAction string `json:\"action,omitempty\"`\n\n\tCode           string     `json:\"code,omitempty\"`\n\tMessage        string     `json:\"message,omitempty\"`\n\tSubscriptionID *uuid.UUID `json:\"subscription_id,omitempty\"`\n\tPaymentID      *uuid.UUID `json:\"payment_id,omitempty\"`\n\tTransactionID  string     `json:\"transaction_id,omitempty\"`\n\tRedirectURL    string     `json:\"redirect_url,omitempty\"`\n\tDelayedStart   *time.Time `json:\"delayed_start,omitempty\"`\n}",
       "type CheckoutSessionResponse struct {\n\tCapture         *openrails.CustodianCaptureAction `json:\"capture,omitempty\"`\n\tPaymentMethodID *openrails.PaymentMethodID        `json:\"payment_method_id,omitempty\"`\n\tObject          string                            `json:\"object\"`\n\tID              openrails.CheckoutSessionID       `json:\"id\"`\n\tStatus          string                            `json:\"status\"`\n\tMode            string                            `json:\"mode\"`\n\tPriceID         *openrails.PriceID                `json:\"price_id\"`\n\tAmount          *int64                            `json:\"amount,string\"`\n\tCurrency        *string                           `json:\"currency\"`\n\tURL             string                            `json:\"url,omitempty\"`\n\tPayment         CheckoutSessionPaymentResponse    `json:\"payment\"`\n\tPaymentID       *openrails.PaymentID              `json:\"payment_id,omitempty\"`\n\tSubscriptionID  *openrails.SubscriptionID         `json:\"subscription_id,omitempty\"`\n\tExpiresAt       *time.Time                        `json:\"expires_at,omitempty\"`\n\tCreatedAt       time.Time                         `json:\"created_at\"`\n\tNextAction      *CheckoutSessionNextAction        `json:\"next_action,omitempty\"`\n\tMessage         string                            `json:\"message,omitempty\"`\n\tMetadata        map[string]string                 `json:\"metadata,omitempty\"`\n}",
       "type CustodianSalePayload struct {\n\tTokenIntentID string    `json:\"bt_token_intent_id\"`\n\tAmountMicros  int64     `json:\"amount_micros\"`\n\tCurrency      string    `json:\"currency\"`\n\tDescription   string    `json:\"description\"`\n\tUserID        string    `json:\"user_id\"`\n\tPriceID       uuid.UUID `json:\"price_id\"`\n\tE2ERunID      string    `json:\"e2e_run_id,omitempty\"`\n}",
-      "type NMISalePayload struct {\n\tProvider string `json:\"provider\"`\n\n\tPSP             string `json:\"psp,omitempty\"`\n\tCustomerVaultID string `json:\"customer_vault_id\"`\n\n\tBillingID    string    `json:\"billing_id,omitempty\"`\n\tAmountMicros int64     `json:\"amount_micros\"`\n\tCurrency     string    `json:\"currency\"`\n\tDescription  string    `json:\"description\"`\n\tUserID       string    `json:\"user_id\"`\n\tPriceID      uuid.UUID `json:\"price_id\"`\n\n\tStoredCredentialRef string `json:\"stored_credential_ref,omitempty\"`\n\tE2ERunID            string `json:\"e2e_run_id,omitempty\"`\n}",
       "type NMISubscriptionCreatePayload struct {\n\tProvider string `json:\"provider\"`\n\n\tPSP             string `json:\"psp,omitempty\"`\n\tPlanID          string `json:\"plan_id\"`\n\tCustomerVaultID string `json:\"customer_vault_id\"`\n\n\tBillingID           string     `json:\"billing_id,omitempty\"`\n\tAmountMicros        int64      `json:\"amount_micros\"`\n\tCurrency            string     `json:\"currency\"`\n\tEmail               string     `json:\"email,omitempty\"`\n\tUserID              string     `json:\"user_id\"`\n\tPriceID             uuid.UUID  `json:\"price_id\"`\n\tLocalSubscriptionID uuid.UUID  `json:\"local_subscription_id\"`\n\tPaymentMethodID     *uuid.UUID `json:\"payment_method_id,omitempty\"`\n\n\tStartDate    string     `json:\"start_date,omitempty\"`\n\tDelayedStart *time.Time `json:\"delayed_start,omitempty\"`\n\n\tStoredCredentialRef string `json:\"stored_credential_ref,omitempty\"`\n\tE2ERunID            string `json:\"e2e_run_id,omitempty\"`\n\n\tCheckoutIdempotencyKey string `json:\"checkout_idempotency_key\"`\n\n\tFirstName string `json:\"first_name,omitempty\"`\n\tLastName  string `json:\"last_name,omitempty\"`\n\tAddress1  string `json:\"address1,omitempty\"`\n\tCity      string `json:\"city,omitempty\"`\n\tState     string `json:\"state,omitempty\"`\n\tZip       string `json:\"zip,omitempty\"`\n\tCountry   string `json:\"country,omitempty\"`\n}",
       "type RoutingCandidate struct {\n\tSelector string    `json:\"selector\"`\n\tRail     string    `json:\"rail,omitempty\"`\n\tPSPID    uuid.UUID `json:\"-\"`\n\n\tSkip string `json:\"skip,omitempty\"`\n}",
       "type StripeTierChangePayload struct {\n\tRequestedPrice       string    `json:\"requested_price\"`\n\tUserID               string    `json:\"user_id\"`\n\tSubscriptionID       uuid.UUID `json:\"subscription_id\"`\n\tStripeSubscriptionID string    `json:\"stripe_subscription_id\"`\n\tStripeItemID         string    `json:\"stripe_item_id\"`\n\tAction               string    `json:\"action\"`\n\tOldPriceID           uuid.UUID `json:\"old_price_id\"`\n\tOldStripePriceID     string    `json:\"old_stripe_price_id\"`\n\tPriceID              uuid.UUID `json:\"price_id\"`\n\tProductID            uuid.UUID `json:\"product_id\"`\n\tProductName          string    `json:\"product_name\"`\n\tStripePriceID        string    `json:\"stripe_price_id\"`\n\tCurrency             string    `json:\"currency\"`\n\tRecurringAmount      int64     `json:\"recurring_amount\"`\n\n\tAmountDueNow       int64  `json:\"amount_due_now\"`\n\tProrationBehavior  string `json:\"proration_behavior\"`\n\tBillingCycleAnchor string `json:\"billing_cycle_anchor,omitempty\"`\n\n\tPaymentBehavior string `json:\"payment_behavior,omitempty\"`\n\n\tPeriodStart      time.Time `json:\"period_start\"`\n\tPeriodEnd        time.Time `json:\"period_end\"`\n\tBillingCycleDays *int      `json:\"billing_cycle_days,omitempty\"`\n}",
@@ -1410,6 +1409,7 @@
       "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n}"
     ],
     "internal/modules/payments": [
+      "type NMISalePayload struct {\n\tRequestFingerprint  string                  `json:\"request_fingerprint\"`\n\tProvider            string                  `json:\"provider\"`\n\tPSP                 string                  `json:\"psp\"`\n\tAmount              int64                   `json:\"amount,string\"`\n\tCurrency            string                  `json:\"currency\"`\n\tDescription         string                  `json:\"description\"`\n\tUserID              string                  `json:\"user_id\"`\n\tPriceID             uuid.UUID               `json:\"price_id\"`\n\tE2ERunID            string                  `json:\"e2e_run_id,omitempty\"`\n\tPaymentMethodID     uuid.UUID               `json:\"payment_method_id\"`\n\tInstrument          charge.FrozenInstrument `json:\"instrument\"`\n\tPaymentID           uuid.UUID               `json:\"payment_id\"`\n\tProductID           uuid.UUID               `json:\"product_id\"`\n\tListAmount          int64                   `json:\"list_amount,string\"`\n\tAcceptedAt          time.Time               `json:\"accepted_at\"`\n\tEntitlements        map[string]*int         `json:\"entitlements\"`\n\tAccessDurationHours *int                    `json:\"access_duration_hours\"`\n\tEntitlementStart    time.Time               `json:\"entitlement_start\"`\n\tOwnershipStart      time.Time               `json:\"ownership_start\"`\n\tOwnershipEnd        *time.Time              `json:\"ownership_end\"`\n\tEligibility         string                  `json:\"eligibility\"`\n}",
       "type StripeCardDetails struct {\n\tBrand    string `json:\"brand\"`\n\tLast4    string `json:\"last4\"`\n\tExpMonth int    `json:\"exp_month\"`\n\tExpYear  int    `json:\"exp_year\"`\n}",
       "type stripeSubscriptionPaymentJSON struct {\n\tID                      string          `json:\"id\"`\n\tDefaultPaymentMethodRaw json.RawMessage `json:\"default_payment_method\"`\n}"
     ],
@@ -2738,6 +2738,7 @@
       "json": "encoding/json",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
       "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
+      "payments": "github.com/open-rails/openrails/internal/modules/payments",
       "sha256": "crypto/sha256",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
@@ -3156,8 +3157,7 @@
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil"
     },
-    "internal/modules/checkout/nmi_sale_intent.go": {
-      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
+    "internal/modules/checkout/nmi_sale_service.go": {
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
@@ -3165,30 +3165,14 @@
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "intents": "github.com/open-rails/openrails/internal/intents",
       "json": "encoding/json",
-      "log": "github.com/sirupsen/logrus",
-      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
-      "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
-      "nmidirect": "github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect",
-      "payments": "github.com/open-rails/openrails/internal/modules/payments",
-      "strings": "strings",
-      "time": "time",
-      "uuid": "github.com/google/uuid"
-    },
-    "internal/modules/checkout/nmi_sale_service.go": {
-      "context": "context",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "intents": "github.com/open-rails/openrails/internal/intents",
-      "json": "encoding/json",
-      "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
       "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
-      "strings": "strings",
+      "payments": "github.com/open-rails/openrails/internal/modules/payments",
       "time": "time",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/checkout/nmi_subscription_intent.go": {
       "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
@@ -3645,6 +3629,19 @@
       "errors": "errors",
       "strings": "strings",
       "url": "net/url"
+    },
+    "internal/modules/payments/sale_terms.go": {
+      "charge": "github.com/open-rails/openrails/internal/modules/payments/charge",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "hex": "encoding/hex",
+      "json": "encoding/json",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "sha256": "crypto/sha256",
+      "strings": "strings",
+      "time": "time",
+      "uuid": "github.com/google/uuid"
     },
     "internal/modules/payments/stripe_card.go": {
       "clockwork": "github.com/jonboulle/clockwork",
@@ -4876,7 +4873,7 @@
     "internal/http/routesurface/provider_routes.go": "6a49245b179c577ea3d0d997234eb7314c19827b152931efd581625d54aab909",
     "internal/http/server.go": "8c37de35c4cf2d8091ff0d7eb7b8eab18ebf4688ec9c48e795bac783e3cdaef7",
     "internal/intents/rate_ceiling.go": "2f14ccb694839b19af499b5346cb052d3296a9346590d15f7f1ed5e4271da962",
-    "internal/migrate/postgres/0001_schema.up.sql": "ae7d14f10b0693c9f5cccdf189d43531f4e272fca024634962a349a3c675efbc",
+    "internal/migrate/postgres/0001_schema.up.sql": "2d0d5cdf9b32f5d7782410cab95fb30d5da39549fee8860129d911785a41c401",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
     "internal/migrate/postgres/schema.go": "a399bef4859e1c1f8c1f952d279d8b70718d7aa7e8a1ce116cea49c9d5f6b090",

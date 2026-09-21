@@ -21,12 +21,12 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/providerqualification"
@@ -267,7 +267,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 				var artifact bytes.Buffer
 				require.NoError(t, merchantarchive.Export(ctx, rt.DB, owner.MerchantID, &artifact))
 				schema := "cutover_archive_" + uuid.NewString()[:8]
-				require.NoError(t, migrate.RunPostgres(ctx, &config.Config{DB: &config.DBConfig{URL: h.SuperDSN, Schema: schema}}))
+				dbtest.ApplyPostgresMigrations(t, h.SuperDSN, h.DSN, schema)
 				target, err := db.NewDB(ctx, &config.DBConfig{URL: h.DSN, Schema: schema})
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, target.Close()) })

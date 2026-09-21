@@ -36,7 +36,7 @@ Two roles, and the split is not cosmetic:
 | Role | Used by | Why |
 |---|---|---|
 | `admin` (superuser) | `openrails migrate up`, the compose bootstrap SQL, `scripts/sqlc-vet-db.sh` | DDL, `GRANT`s, role creation |
-| `openrails_app` (unprivileged, `NOBYPASSRLS`) | **the server, the workers, the CLI — everything else** | the role production runs as |
+| `app` (unprivileged, `NOBYPASSRLS`) | **the server, the workers, the CLI — everything else** | the development host login; production chooses its own name |
 
 The server refuses to boot as a superuser or any `BYPASSRLS` role, in every
 environment including development. That is deliberate and there is no dev
@@ -44,15 +44,15 @@ opt-out. Under a privileged role, a query against an RLS-forced table that
 forgets its merchant scope still returns rows, so the bug looks fine locally
 and runs inert in production — an unscoped read has its policy predicate
 degenerate to `merchant_id = NULL`, returns **zero rows with no error**, and
-the caller logs success. Running dev as `openrails_app` makes that fail on your
+the caller logs success. Running dev as `app` makes that fail on your
 laptop instead. If a query of yours starts returning nothing after this, it is
 missing a `MerchantTx`/`RunInMerchantConn` scope — fix the scope, do not reach
 for the superuser.
 
-`0001_schema.up.sql` creates `openrails_app` `NOLOGIN` (real deployments attach
-the login credential out of band); the `openrails-app-role` one-shot compose
-service attaches a throwaway dev password after migrations run. It grants no
-privilege — the role stays `NOBYPASSRLS`.
+The `openrails-app-login` one-shot Compose service creates the host's regular
+LOGIN before migrations. The migration command receives its connection through
+`--runtime-database-url`; AuthKit and OpenRails then grant their own runtime
+access directly. The libraries create no database roles or memberships.
 
 ## sqlc workflow
 

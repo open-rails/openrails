@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
-	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +26,7 @@ func archiveDB(t *testing.T, schema string) *db.DB {
 	t.Helper()
 	super, app := dbtest.SharedRLSPostgres(t)
 	if schema != config.DefaultSchema {
-		require.NoError(t, migrate.RunPostgres(t.Context(), &config.Config{DB: &config.DBConfig{URL: super, Schema: schema}}))
+		dbtest.ApplyPostgresMigrations(t, super, app, schema)
 	}
 	d, err := db.NewDB(t.Context(), &config.DBConfig{URL: app, Schema: schema})
 	require.NoError(t, err)

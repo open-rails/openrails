@@ -4,11 +4,13 @@ package embed_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -37,6 +39,7 @@ func newFakeNMICheckoutGateway(t *testing.T) *fakeNMICheckoutGateway {
 	t.Helper()
 	f := &fakeNMICheckoutGateway{}
 	f.saleResponseCode.Store("100")
+	var receipts, orders sync.Map
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/customers") {
 			n := f.vaults.Add(1)
@@ -44,15 +47,40 @@ func newFakeNMICheckoutGateway(t *testing.T) *fakeNMICheckoutGateway {
 			fmt.Fprintf(w, `{"object":"customer","id":"vault_%d","billing":[{"id":"bill_%d","priority":1}]}`, n, n)
 			return
 		}
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/payments/") {
+			id := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+			receipt, found := receipts.Load(id)
+			if !found {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(receipt)
+			return
+		}
 		_ = r.ParseForm()
 		if r.Form.Get("type") == "sale" {
 			code := f.saleResponseCode.Load().(string)
 			if code == "100" {
-				fmt.Fprintf(w, "response=1&responsetext=SUCCESS&authcode=OK&transactionid=txn_%s&response_code=100", uuid.NewString()[:8])
+				id := "txn_" + uuid.NewString()[:8]
+				orders.Store(r.Form.Get("orderid"), id)
+				receipts.Store(id, map[string]any{
+					"object": "transaction", "id": id, "response": "1",
+					"amount": r.Form.Get("amount"), "currency": r.Form.Get("currency"),
+					"customer_vault_id": r.Form.Get("customer_vault_id"),
+					"actions":           []map[string]any{{"id": id, "type": "sale", "success": true, "amount": r.Form.Get("amount")}},
+				})
+				fmt.Fprintf(w, "response=1&responsetext=SUCCESS&authcode=OK&transactionid=%s&response_code=100", id)
 				return
 			}
 			fmt.Fprintf(w, "response=2&responsetext=DECLINED&response_code=%s", code)
 			return
+		}
+		if order := r.Form.Get("order_id"); order != "" {
+			if id, found := orders.Load(order); found {
+				fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, id, order)
+				return
+			}
 		}
 		fmt.Fprint(w, `<nm_response></nm_response>`)
 	}))

@@ -27,8 +27,8 @@ db:
   database: openrails_db
   # Unprivileged, NOBYPASSRLS. Boot refuses a superuser/BYPASSRLS role in EVERY
   # environment; the privileged role is for `openrails migrate up` only.
-  username: openrails_app
-  password: openrails_app_password
+  username: app
+  password: app_password
   sslmode: disable
   schema: billing # defaults to 'billing' if not specified
 

@@ -240,10 +240,12 @@ each. That is the only shape that actually reduces lock time here.
 
 ### Library schema initialization and standalone identity access
 
-`internal/migrate/migrator.go` issues schema DDL and explicit grants for the
-pinned River runtime tables and sequences only when OpenRails owns River.
-The selected schema is quoted as an identifier; these initialization operations
-are outside sqlc's runtime query catalog. `internal/standalonedb/authkit.go`
-initializes AuthKit through its API and grants the standalone billing role the
-identity data access owned by that application. Embedded billing never installs
-AuthKit grants or initializes a host-owned River fleet.
+`internal/migrate/migrator.go` issues schema DDL and coordinates the billing and
+managed River migrations. `internal/migrate/runtime_access.go` validates the
+supplied runtime connection, takes the shared provisioning lock, and grants the
+exact billing privileges plus named managed River tables and sequences to that
+login. Configured schemas and the runtime role are identifiers; this dynamic
+initialization SQL is outside sqlc's runtime query catalog. The standalone
+AuthKit initializer delegates identity migration and access to AuthKit's API
+and contains no raw SQL. Embedded billing never installs AuthKit grants or
+initializes a host-owned River fleet.
