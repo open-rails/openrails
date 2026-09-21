@@ -168,7 +168,7 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
 
 - **Backends**: `secret_backend: db` (envelope-encrypted in Postgres under
   `ENCRYPTION_MASTER_KEY`) or `secret_backend: vault` (KV-v2). REQUIRED under
-  `merchant_source: api`. Declared, never auto-detected, never inferred from
+  `merchant_config_source: api`. Declared, never auto-detected, never inferred from
   `vault.enabled`, never silently falls back. Vault setup + minimal
   policies: [vault.md](vault.md); per-merchant secret ops, canonical names,
   and the DB→Vault migration runbook:

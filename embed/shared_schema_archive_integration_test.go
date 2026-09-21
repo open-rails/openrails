@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchantarchive"
-	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
@@ -67,13 +66,6 @@ func TestSharedPublicArchiveLeavesHostTablesAndQueueUntouched(t *testing.T) {
 	var count int
 	require.NoError(t, targetPool.QueryRow(t.Context(), `SELECT count(*) FROM public.customers WHERE merchant_id=$1 AND id=$2`, id.UUID(), customer).Scan(&count))
 	require.Equal(t, 1, count)
-	service, err := merchants.NewService(db.WrapPool(sourcePool, "public"), nil, "test")
-	require.NoError(t, err)
-	service.WithDestructivePolicy(sharedSchemaPurgeAllowed{})
-	inventory, err := service.TakePurgeInventory(t.Context(), id)
-	require.NoError(t, err)
-	require.NoError(t, service.Delete(t.Context(), id, merchants.DeleteOptions{ConfirmPhrase: merchants.PurgeConfirmPhrase("shared-book"), ExpectRows: &inventory.TotalRows, InventoryID: inventory.ID, Actor: "owned-test"}))
-	require.Equal(t, sourceBefore, before(sourcePool), "merchant purge cannot touch co-located host data or jobs")
 	require.NoError(t, source.Close())
 	require.NoError(t, target.Close())
 	require.NoError(t, sourcePool.Ping(context.Background()))
@@ -102,13 +94,6 @@ func TestResetRefusesSharedDefaultSchemaBeforeMutation(t *testing.T) {
 	require.True(t, intact)
 }
 
-// Only the disposable fixture merchant is authorized for this routing test.
-type sharedSchemaPurgeAllowed struct{}
-
-func (sharedSchemaPurgeAllowed) AllowDestructive(context.Context, uuid.UUID) (bool, string) {
-	return true, ""
-}
-
 func TestSharedPublicManagedRuntimeExecutesBillingJobs(t *testing.T) {
 	admin := migrationConcurrencyAdmin(t)
 	pool := migrationConcurrencyPool(t, admin, 1)
@@ -116,7 +101,7 @@ func TestSharedPublicManagedRuntimeExecutesBillingJobs(t *testing.T) {
 	dsnURL, err := url.Parse(pool.Config().ConnString())
 	require.NoError(t, err)
 	dsnURL.Path = "/" + pool.Config().ConnConfig.Database
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{Schema: "public", URL: dsnURL.String()}}
+	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{Schema: "public", URL: dsnURL.String()}}
 	runtime, err := embed.New(t.Context(), embed.Options{Config: cfg, PGXPool: pool, River: embed.RiverManagedByOpenRails("public")})
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())

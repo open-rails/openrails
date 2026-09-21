@@ -10,7 +10,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// CatalogSource selects catalog authority independently of MerchantSource.
+// CatalogSource selects catalog authority independently of MerchantConfigSource.
 // Manifest catalogs use PushCatalog; API catalogs use the Client's mutations.
 
 // PushCatalogOptions declares one catalog push. Exactly one of File or

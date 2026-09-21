@@ -177,9 +177,9 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 	// memory and be lost on reboot — the endpoint would then be found WITHOUT a
 	// known secret (webhooks unverifiable). Any registration path that needs a
 	// mint is refused; a manifest-declared webhook_signing_secret keeps working.
-	manifestMode := p.Config != nil && p.Config.IsManifestMerchantSource()
+	manifestMode := p.Config != nil && p.Config.IsManifestMerchantConfigSource()
 	if manifestMode && !haveSecret {
-		return ManagedStripeWebhookResult{}, fmt.Errorf("merchant_source=manifest refuses managed stripe webhook registration without a declared webhook_signing_secret (a Stripe-minted secret cannot survive reboot, #723): declare secrets.webhook_signing_secret in the manifest and register the endpoint %s out-of-band, or run merchant_source=api", webhookURL)
+		return ManagedStripeWebhookResult{}, fmt.Errorf("merchant_config_source=manifest refuses managed stripe webhook registration without a declared webhook_signing_secret (a Stripe-minted secret cannot survive reboot, #723): declare secrets.webhook_signing_secret in the manifest and register the endpoint %s out-of-band, or run merchant_config_source=api", webhookURL)
 	}
 
 	rails := railresolve.FixedSet{"stripe": &config.PSPConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
@@ -193,7 +193,7 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 		RetireOverlap: p.RetireOverlap,
 	})
 	if errors.Is(err, ErrWebhookCreateForbidden) {
-		return ManagedStripeWebhookResult{}, fmt.Errorf("merchant_source=manifest refuses to (re)create the managed stripe webhook endpoint %s (the Stripe-minted signing secret cannot survive reboot, #723): register it out-of-band and declare its webhook_signing_secret in the manifest, or run merchant_source=api: %w", webhookURL, err)
+		return ManagedStripeWebhookResult{}, fmt.Errorf("merchant_config_source=manifest refuses to (re)create the managed stripe webhook endpoint %s (the Stripe-minted signing secret cannot survive reboot, #723): register it out-of-band and declare its webhook_signing_secret in the manifest, or run merchant_config_source=api: %w", webhookURL, err)
 	}
 	if errors.Is(err, ErrWebhookEndpointBudgetExhausted) {
 		return ManagedStripeWebhookResult{

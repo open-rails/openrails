@@ -184,14 +184,14 @@ type Config struct {
 	// SecretBackend declares WHERE merchant secrets physically live: "db" (the
 	// DEK-encrypted Postgres store / values-injected) or "vault" (Vault KV-v2).
 	// It is declared intent, never auto-detected and never auto-fallback — the data
-	// lives in exactly one place (#661). REQUIRED in merchant_source=api mode
+	// lives in exactly one place (#661). REQUIRED in merchant_config_source=api mode
 	// (or#893 deleted the vault.enabled derivation). Env: SECRET_BACKEND. Only
-	// Provider credentials use this backend only in merchant_source=api mode.
+	// Provider credentials use this backend only in merchant_config_source=api mode.
 	// Manifest providers stay in memory; optional managed alert-webhook URLs
 	// can independently use this backend and require encryption when stored in DB.
 	SecretBackend string `koanf:"secret_backend,omitempty"`
 
-	// MerchantSource selects authority for merchant configuration and provider
+	// MerchantConfigSource selects authority for merchant configuration and provider
 	// credentials. CatalogSource independently selects catalog authority.
 	//   - "manifest" (DEFAULT, empty = manifest): MODE 1. The boot YAML (merchant
 	//     manifest + the host's structured secret overlays) IS
@@ -202,10 +202,10 @@ type Config struct {
 	//     two truths); merchant configuration/secrets live in the DB + secret backend
 	//     and mutate over the HTTP APIs.
 	// Deployment shape does NOT imply mode — embedded and standalone can run
-	// either. Env: MERCHANT_SOURCE. Unknown values refuse to load.
-	MerchantSource string `koanf:"merchant_source,omitempty"`
+	// either. Env: MERCHANT_CONFIG_SOURCE. Unknown values refuse to load.
+	MerchantConfigSource string `koanf:"merchant_config_source,omitempty"`
 	// CatalogSource selects "manifest" or "api" for product, price and metering
-	// definitions. Empty follows MerchantSource. Use "api" with manifest-owned
+	// definitions. Empty follows MerchantConfigSource. Use "api" with manifest-owned
 	// merchant configuration to allow dynamic catalogs with host-supplied,
 	// read-only provider credentials. Env: CATALOG_SOURCE.
 	CatalogSource string `koanf:"catalog_source,omitempty"`
@@ -402,8 +402,8 @@ const (
 
 // Merchant-source modes (#723/#724).
 const (
-	MerchantSourceManifest = "manifest"
-	MerchantSourceAPI      = "api"
+	MerchantConfigSourceManifest = "manifest"
+	MerchantConfigSourceAPI      = "api"
 )
 
 const (
@@ -419,34 +419,34 @@ func (cfg *Config) CatalogSourceMode() string {
 			return source
 		}
 	}
-	return cfg.MerchantSourceMode()
+	return cfg.MerchantConfigSourceMode()
 }
 
 func (cfg *Config) IsManifestCatalogSource() bool {
 	return cfg.CatalogSourceMode() == CatalogSourceManifest
 }
 
-// MerchantSourceMode returns the normalized merchant-source mode: "manifest"
+// MerchantConfigSourceMode returns the normalized merchant-source mode: "manifest"
 // (MODE 1, the default) or "api" (MODE 2). Unknown values are rejected by
 // Validate; this accessor treats only an explicit "api" as mode 2.
-func (cfg *Config) MerchantSourceMode() string {
-	if cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.MerchantSource), MerchantSourceAPI) {
-		return MerchantSourceAPI
+func (cfg *Config) MerchantConfigSourceMode() string {
+	if cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.MerchantConfigSource), MerchantConfigSourceAPI) {
+		return MerchantConfigSourceAPI
 	}
-	return MerchantSourceManifest
+	return MerchantConfigSourceManifest
 }
 
-// IsManifestMerchantSource reports MODE 1 (#723): manifest-is-truth, secrets
+// IsManifestMerchantConfigSource reports MODE 1 (#723): manifest-is-truth, secrets
 // in memory, provider-configuration mutation HTTP routes omitted.
-func (cfg *Config) IsManifestMerchantSource() bool {
-	return cfg.MerchantSourceMode() == MerchantSourceManifest
+func (cfg *Config) IsManifestMerchantConfigSource() bool {
+	return cfg.MerchantConfigSourceMode() == MerchantConfigSourceManifest
 }
 
 // SecretStoreBackend returns where merchant secrets live: "vault" or "db".
 // ONLY the declared secret_backend is consulted — or#893 deleted the
 // vault.enabled inference, so enabling Vault for Transit signing can no longer
-// silently move the secret store. merchant_source=api requires the declaration
-// (validateMerchantSource). Manifest mode uses this backend only for optional
+// silently move the secret store. merchant_config_source=api requires the declaration
+// (validateMerchantConfigSource). Manifest mode uses this backend only for optional
 // managed alert-webhook URLs, never for provider credentials.
 func (cfg *Config) SecretStoreBackend() string {
 	if cfg == nil {
@@ -1432,8 +1432,8 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("secret_backend config validation failed: %w", err)
 	}
 
-	if err := validateMerchantSource(cfg, isDev); err != nil {
-		return fmt.Errorf("merchant_source config validation failed: %w", err)
+	if err := validateMerchantConfigSource(cfg, isDev); err != nil {
+		return fmt.Errorf("merchant_config_source config validation failed: %w", err)
 	}
 
 	if err := validateSourceCIDRs(cfg.TrustedProxies); err != nil {
@@ -1473,9 +1473,9 @@ func validateSourceCIDRs(cidrs []string) error {
 	return nil
 }
 
-// validateMerchantSource enforces the #723 boot matrix rows that are pure
+// validateMerchantConfigSource enforces the #723 boot matrix rows that are pure
 // config posture:
-//   - unknown merchant_source/catalog_source values refuse to load (a typo must never
+//   - unknown merchant_config_source/catalog_source values refuse to load (a typo must never
 //     silently pick a truth model);
 //   - api mode outside development requires a merchant-secret backend (Vault,
 //     or ENCRYPTION_MASTER_KEY for the DB store) — extends the #667 posture
@@ -1484,18 +1484,18 @@ func validateSourceCIDRs(cidrs []string) error {
 // The manifest-mode rows (manifest file expected but unresolvable; api mode
 // with a merchants.yaml on disk) are enforced where manifests load: serverboot
 // (standalone) and embed.UpsertMerchantConfig (embedded).
-func validateMerchantSource(cfg *Config, isDev bool) error {
+func validateMerchantConfigSource(cfg *Config, isDev bool) error {
 	switch strings.ToLower(strings.TrimSpace(cfg.CatalogSource)) {
 	case "", CatalogSourceManifest, CatalogSourceAPI:
 	default:
-		return fmt.Errorf("catalog_source must be %q or %q (empty follows merchant_source)", CatalogSourceManifest, CatalogSourceAPI)
+		return fmt.Errorf("catalog_source must be %q or %q (empty follows merchant_config_source)", CatalogSourceManifest, CatalogSourceAPI)
 	}
-	switch strings.ToLower(strings.TrimSpace(cfg.MerchantSource)) {
-	case "", MerchantSourceManifest, MerchantSourceAPI:
+	switch strings.ToLower(strings.TrimSpace(cfg.MerchantConfigSource)) {
+	case "", MerchantConfigSourceManifest, MerchantConfigSourceAPI:
 	default:
-		return fmt.Errorf("merchant_source must be %q or %q (empty defaults to %q)", MerchantSourceManifest, MerchantSourceAPI, MerchantSourceManifest)
+		return fmt.Errorf("merchant_config_source must be %q or %q (empty defaults to %q)", MerchantConfigSourceManifest, MerchantConfigSourceAPI, MerchantConfigSourceManifest)
 	}
-	if cfg.MerchantSourceMode() != MerchantSourceAPI {
+	if cfg.MerchantConfigSourceMode() != MerchantConfigSourceAPI {
 		return nil
 	}
 	// or#893: WHERE merchant secrets live is declared intent, never inferred.
@@ -1504,12 +1504,12 @@ func validateMerchantSource(cfg *Config, isDev bool) error {
 	switch strings.ToLower(strings.TrimSpace(cfg.SecretBackend)) {
 	case SecretBackendDB:
 		if !isDev && (cfg.Encryption == nil || strings.TrimSpace(cfg.Encryption.MasterKey) == "") {
-			return fmt.Errorf("merchant_source=api with secret_backend=db requires ENCRYPTION_MASTER_KEY outside development (#667/#723): the DB store would hold merchant credentials in plaintext")
+			return fmt.Errorf("merchant_config_source=api with secret_backend=db requires ENCRYPTION_MASTER_KEY outside development (#667/#723): the DB store would hold merchant credentials in plaintext")
 		}
 	case SecretBackendVault:
 		// validateSecretBackend already requires vault.enabled for this backend.
 	default:
-		return fmt.Errorf("merchant_source=api requires an explicit secret_backend (%q or %q): where merchant secrets live is declared intent, never derived from vault.enabled (#661/#893)", SecretBackendDB, SecretBackendVault)
+		return fmt.Errorf("merchant_config_source=api requires an explicit secret_backend (%q or %q): where merchant secrets live is declared intent, never derived from vault.enabled (#661/#893)", SecretBackendDB, SecretBackendVault)
 	}
 	return nil
 }
@@ -2292,6 +2292,12 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		if err := k.Load(confmap.Provider(options.overrides, "."), nil); err != nil {
 			return nil, fmt.Errorf("loading flag overrides: %w", err)
 		}
+	}
+
+	// Merchant configuration authority is broader than provider secrets. Retired
+	// spellings must fail even if a new spelling is also supplied.
+	if _, present := os.LookupEnv("MERCHANT_SOURCE"); k.Exists("merchant_source") || present {
+		return nil, fmt.Errorf("merchant_source / MERCHANT_SOURCE was renamed: use merchant_config_source / MERCHANT_CONFIG_SOURCE (manifest|api)")
 	}
 
 	if databaseOnly {

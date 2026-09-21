@@ -32,7 +32,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
 	rt, err := embed.New(ctx, embed.Options{
-		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}},
+		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}},
 		River:  embed.RiverFromHost(),
 	})
 	require.NoError(t, err)

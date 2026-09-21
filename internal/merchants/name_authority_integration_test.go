@@ -77,7 +77,7 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 		require.Equal(t, first.ID, selected.ID)
 		require.Equal(t, newName, selected.Slug)
 	}
-	cfg := &config.Config{DB: &config.DBConfig{Schema: config.DefaultSchema}, MerchantSource: "manifest"}
+	cfg := &config.Config{DB: &config.DBConfig{Schema: config.DefaultSchema}, MerchantConfigSource: "manifest"}
 	catalogFor := func(name, display string) []byte {
 		return []byte("version: 1\ncatalogs:\n  - merchant: " + name + "\n    products:\n      - key: owner_product\n        display_name: " + display + "\n")
 	}

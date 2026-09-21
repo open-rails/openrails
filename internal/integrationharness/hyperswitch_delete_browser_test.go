@@ -70,7 +70,7 @@ func TestHyperSwitchActualBrowserDeletion(t *testing.T) {
 		require.NoError(t, err)
 		var input recovery
 		require.NoError(t, json.Unmarshal(raw, &input))
-		local, err := embed.New(t.Context(), embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: input.DB, Redis: input.Redis, HyperSwitch: input.HyperSwitch, Encryption: input.Encryption}, River: embed.RiverManagedByOpenRails()})
+		local, err := embed.New(t.Context(), embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: input.DB, Redis: input.Redis, HyperSwitch: input.HyperSwitch, Encryption: input.Encryption}, River: embed.RiverManagedByOpenRails()})
 		require.NoError(t, err)
 		defer local.Close(context.Background())
 		rt := app.HostGraph(local).Runtime

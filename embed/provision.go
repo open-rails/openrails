@@ -94,14 +94,14 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 	}
 	var secretBackend *merchantsecrets.Store
 	switch {
-	case conf.IsManifestMerchantSource():
+	case conf.IsManifestMerchantConfigSource():
 		// MODE 1 (#723): this call IS the manifest. Identity/config/account rows
 		// reconcile as DB projections; secrets seed the runtime's in-memory plane
 		// (never a persistent store). An empty MerchantConfig stays a legal
 		// read-side bind (host-two). ProvisionMerchant forces Insert+Overwrite+
 		// Prune so a re-run (host reboot) steamrolls stale in-memory values.
 		if a.Runtime == nil || a.Runtime.ManifestSecrets == nil {
-			return merchant.ID{}, fmt.Errorf("openrails embed: merchant_source=manifest requires the runtime manifest secret plane (#723)")
+			return merchant.ID{}, fmt.Errorf("openrails embed: merchant_config_source=manifest requires the runtime manifest secret plane (#723)")
 		}
 		req.SecretStore = a.Runtime.ManifestSecrets.Seeder()
 		backend, err := merchantsecrets.BuildManifest(ctx, conf, a.Runtime.ManifestSecrets, database.DataPool())
@@ -121,7 +121,7 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 		// MODE 2 (#724): merchant truth arrives via the HTTP APIs; a manifest-shaped
 		// upsert is a second truth and refuses loudly. A bare bind (empty config or
 		// display name only) stays legal — it declares no truth.
-		return merchant.ID{}, fmt.Errorf("openrails embed: merchant_source=api refuses manifest-declared merchant config (two truths, #723/#724); configure providers via PUT /v1/merchant/payment-providers, or run merchant_source=manifest")
+		return merchant.ID{}, fmt.Errorf("openrails embed: merchant_config_source=api refuses manifest-declared merchant config (two truths, #723/#724); configure providers via PUT /v1/merchant/payment-providers, or run merchant_config_source=manifest")
 	}
 
 	tn, err := boot.ProvisionMerchant(ctx, req)
@@ -134,7 +134,7 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 	// MODE 1: arm the runtime consumers (checkout/vault/webhooks/pulls) over the
 	// freshly seeded in-memory plane right away — no standalone server or worker
 	// registration ever needs to run first.
-	if conf.IsManifestMerchantSource() && a.Runtime.Merchants == nil {
+	if conf.IsManifestMerchantConfigSource() && a.Runtime.Merchants == nil {
 		svc, err := merchants.NewService(database.DataPool(), secretBackend.Secrets, config.ExpectedProviderEnvironment(conf.IsTestMode()))
 		if err != nil {
 			return merchant.ID{}, fmt.Errorf("openrails embed: build merchants service: %w", err)
@@ -142,7 +142,7 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 		a.Runtime.ArmMerchantsService(svc, secretBackend.Secrets)
 		a.Runtime.MerchantSecretPing = secretBackend.Ping
 	}
-	if conf.IsManifestMerchantSource() {
+	if conf.IsManifestMerchantConfigSource() {
 		a.Runtime.ArmSolanaRecurringServices(secretBackend.Secrets, secretBackend.SolanaTransit)
 	}
 	return tn.ID, nil

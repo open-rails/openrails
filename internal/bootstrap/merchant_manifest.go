@@ -825,8 +825,8 @@ func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *c
 		}
 		return opts.SecretStore, transitStore.SolanaTransit, nil
 	}
-	if cfg.IsManifestMerchantSource() {
-		log.Info("merchant bootstrap: merchant_source=manifest — DB projections reconcile; secrets validate in memory only and are NOT persisted (#723: the server loads them from its boot manifest)")
+	if cfg.IsManifestMerchantConfigSource() {
+		log.Info("merchant bootstrap: merchant_config_source=manifest — DB projections reconcile; secrets validate in memory only and are NOT persisted (#723: the server loads them from its boot manifest)")
 		transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("merchant bootstrap: %w", err)
@@ -847,7 +847,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 	// and the in-memory secret plane on every apply. Seed-once/plan tiers are
 	// mode-2 (api) semantics; forcing here keeps every mode-1 caller (embedded
 	// UpsertMerchantConfig, standalone boot, CLI) converging identically.
-	if req.Config.IsManifestMerchantSource() {
+	if req.Config.IsManifestMerchantConfigSource() {
 		req.Options.Insert = true
 		req.Options.Overwrite = true
 		// Prune needs a store to list; a storeless call (read-side bind with no
