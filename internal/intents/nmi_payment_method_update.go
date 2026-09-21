@@ -233,6 +233,9 @@ func (h *NMIPaymentMethodUpdateHandler) dependencies(ctx context.Context, intent
 		strings.TrimSpace(pm.RailMethodRef) != strings.TrimSpace(payload.RailMethodRef) {
 		return nil, nil, Terminal("payment method identity changed while card replacement was pending"), false
 	}
+	if strings.HasPrefix(pm.ParkReason, "delete:") {
+		return nil, nil, Parked("payment method deletion is pending"), false
+	}
 	if h.Rails == nil {
 		return nil, nil, Parked("rail client resolver not wired"), false
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
@@ -25,6 +26,40 @@ func NewPaymentMethodRepo(d *db.DB) *PaymentMethodRepo { return &PaymentMethodRe
 // module (#688) — same message, same errors.Is matching.
 
 func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod) error {
+	if (m.Custodian != "" && m.Custodian != models.CustodianPSP) || !strings.EqualFold(strings.TrimSpace(string(m.Rail)), "nmi") {
+		return r.create(ctx, m)
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	psp := m.PspID
+	if psp == uuid.Nil {
+		psp, err = db.RequirePSPID(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	return r.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := r.db.NewWithPgxTx(tx)
+		q := d.Gen(ctx)
+		if err := db.EnsureCustomerRow(ctx, d.Qx(ctx), mid.UUID(), m.CustomerID); err != nil {
+			return err
+		}
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: m.CustomerID}); err != nil {
+			return err
+		}
+		if err := LockNativeVault(ctx, q, mid.UUID(), psp, m.RailCustomerRef); err != nil {
+			return err
+		}
+		if err := RequireNativeVaultAvailable(ctx, q, mid.UUID(), psp, m.RailCustomerRef, m.RailMethodRef); err != nil {
+			return err
+		}
+		return NewPaymentMethodRepo(d).create(ctx, m)
+	})
+}
+
+func (r *PaymentMethodRepo) create(ctx context.Context, m *models.PaymentMethod) error {
 	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, m.CustomerID); err != nil {
 		return err
 	}

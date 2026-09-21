@@ -33,6 +33,7 @@ import (
 // The pinned HyperSwitch SDK/vault browser proof is a separate required gate.
 type captureFixtureSession struct {
 	ID, Customer, Secret, Token string
+	MethodID                    string
 	Expiry                      time.Time
 	Ready                       bool
 }
@@ -67,7 +68,7 @@ func newCaptureFixture(t *testing.T) *captureFixture {
 			case "stock":
 				write(map[string]any{"status": "ok"})
 			default:
-				write(map[string]any{"contract": "openrails-nmi-form-v2", "strict": g.preflight != "disabled", "max_response_bytes": 65536, "routes": []any{map[string]string{"destination_url": "https://secure.nmi.com/api/transact.php", "method": "POST", "response_profile": "nmi_classic"}}})
+				write(map[string]any{"contract": "openrails-nmi-form-v2", "native_vault_delete_contract": "openrails-native-vault-delete-v1", "strict": g.preflight != "disabled", "max_response_bytes": 65536, "routes": []any{map[string]string{"destination_url": "https://secure.nmi.com/api/transact.php", "method": "POST", "response_profile": "nmi_classic"}}})
 			}
 		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v2/customers/reference/"):
 			ref := strings.TrimPrefix(r.URL.Path, "/v2/customers/reference/")
@@ -125,13 +126,17 @@ func newCaptureFixture(t *testing.T) *captureFixture {
 			require.Equal(t, "false", r.URL.Query().Get("force_sync"))
 			token := strings.TrimPrefix(r.URL.Path, "/v2/payment-methods/")
 			for _, s := range g.sessions {
-				if (s.Token == token || "method-"+s.ID == token) && s.Ready {
+				methodID := s.MethodID
+				if methodID == "" {
+					methodID = "method-" + s.ID
+				}
+				if (s.Token == token || methodID == token) && s.Ready {
 					if hook := g.afterMethodRead; hook != nil {
 						g.mu.Unlock()
 						hook()
 						g.mu.Lock()
 					}
-					write(map[string]any{"id": "method-" + s.ID, "merchant_id": g.account, "customer_id": s.Customer, "storage_type": "persistent", "payment_method_data": map[string]any{"card": map[string]string{"last4_digits": "4242", "expiry_month": "12", "expiry_year": "2030", "card_network": "Visa"}}})
+					write(map[string]any{"id": methodID, "merchant_id": g.account, "customer_id": s.Customer, "storage_type": "persistent", "payment_method_data": map[string]any{"card": map[string]string{"last4_digits": "4242", "expiry_month": "12", "expiry_year": "2030", "card_network": "Visa"}}})
 					return
 				}
 			}
@@ -285,12 +290,6 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			require.Equal(t, 1, methods)
 			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.ledger_accounts WHERE merchant_id=$1 AND customer_id=$2)`, mid.UUID(), req.Customer.ID.UUID()).Scan(&financial))
 			require.Zero(t, financial)
-			beforeDelete := g.count()
-			_, err = client.DeletePaymentMethod(ctx, req.Customer.ID, *completed.PaymentMethodID)
-			var refusal *openrails.StatusError
-			require.ErrorAs(t, err, &refusal)
-			require.Equal(t, "payment_method_delete_unsupported", refusal.Code)
-			require.Equal(t, beforeDelete, g.count())
 			// The local history can outlive a method, e.g. after a qualified
 			// custodian removal/retirement. This is not a live vendor delete.
 			require.NoError(t, surface.App().Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(scoped context.Context) error {

@@ -504,18 +504,23 @@ func TestDeleteVaultRequiresIntentExecutor(t *testing.T) {
 	require.Contains(t, err.Error(), "not wired")
 }
 
-func TestCustodianMethodsNeverReachNMIUpdateOrDelete(t *testing.T) {
+func TestCustodianMethodsNeverReachNativeNMI(t *testing.T) {
 	ctx := merchant.WithID(t.Context(), dbtest.TestMerchantID)
 	for _, kind := range []string{models.CustodianBasisTheory, models.CustodianHyperSwitch, ""} {
 		exec := &fakeVaultDeleteExecutor{out: PaymentMethodDeleteOutcome{Done: true}}
 		svc, pm := deleteVaultTestService(exec)
 		pm.Custodian = kind
-		require.ErrorIs(t, svc.DeletePaymentMethod(ctx, pm), ErrPaymentMethodCustodianUnsupported)
+		if kind == models.CustodianHyperSwitch {
+			require.NoError(t, svc.DeletePaymentMethod(ctx, pm))
+			require.Equal(t, 1, exec.called, "HyperSwitch deletion dispatches through the durable executor")
+		} else {
+			require.ErrorIs(t, svc.DeletePaymentMethod(ctx, pm), ErrPaymentMethodCustodianUnsupported)
+			require.Zero(t, exec.called)
+		}
 		require.ErrorIs(t, svc.CleanupPaymentMethodBestEffort(ctx, pm), ErrPaymentMethodCustodianUnsupported)
 		_, err := svc.ResolveClientForPaymentMethod(ctx, pm)
 		require.ErrorIs(t, err, ErrPaymentMethodCustodianUnsupported)
 		_, err = svc.UpdatePaymentMethod(ctx, pm, &UpdatePaymentMethodRequest{})
 		require.ErrorIs(t, err, ErrPaymentMethodCustodianUnsupported)
-		require.Zero(t, exec.called)
 	}
 }

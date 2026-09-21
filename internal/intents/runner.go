@@ -212,10 +212,10 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 		return
 	}
 
-	// #836 kill switch: an operator can halt every destructive provider write
-	// on every node with one UPDATE. Parks (never fails) so the intent resumes
-	// the moment the switch is flipped back.
-	if r.Destructive != nil && IsDestructiveIntentType(intent.IntentType) {
+	// The maintenance kill switch gates convergence/operator destruction. A
+	// canonical authenticated payer delete is their own stored-card decision;
+	// it still passes provider mode and the destructive rate/volume ceilings.
+	if r.Destructive != nil && IsDestructiveIntentType(intent.IntentType) && !isSelfServicePaymentMethodDelete(intent) {
 		if allowed, reason := r.Destructive.AllowDestructive(ctx, intent.MerchantID); !allowed {
 			r.park(ctx, logEntry, stats, intent.ID, now, reason)
 			return
