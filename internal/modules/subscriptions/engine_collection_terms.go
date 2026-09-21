@@ -27,6 +27,7 @@ type SubscriptionCollectionPayload struct {
 	Instrument        charge.FrozenInstrument   `json:"instrument"`
 	HyperSwitch       charge.HyperSwitchBinding `json:"hyperswitch"`
 	Attempt           int                       `json:"attempt"`
+	FailureCount      int                       `json:"failure_count"`
 	AmountMinor       moneyutil.Cents           `json:"amount_minor,string"`
 	OrderReference    string                    `json:"order_reference"`
 }
@@ -70,7 +71,7 @@ func DecodeSubscriptionCollectionPayload(in gen.OpenrailsRailIntent) (Subscripti
 	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeSubscriptionCollection || in.Rail != "nmi" || in.Origin != "system" || in.SubscriptionID == nil || *in.SubscriptionID != p.Renewal.SubscriptionID || in.PriceID == nil || *in.PriceID != p.Renewal.PriceID || in.PspID == nil || *in.PspID != p.Renewal.PSPID || p.Instrument.PSPID != p.Renewal.PSPID || in.CustodianID == nil || p.Instrument.CustodianID == nil || *in.CustodianID != *p.Instrument.CustodianID {
 		return p, errors.New("engine renewal operation contradicts accepted scope")
 	}
-	if p.Instrument.Custodian != models.CustodianHyperSwitch || strings.TrimSpace(p.Instrument.StoredCredentialRecurringRef) == "" || p.PaymentMethodID == uuid.Nil || p.Attempt < 0 || p.AcceptedAt.IsZero() || p.PreviousPeriodEnd.IsZero() || p.AcceptedAt.Before(p.PreviousPeriodEnd) {
+	if p.Instrument.Custodian != models.CustodianHyperSwitch || strings.TrimSpace(p.Instrument.StoredCredentialRecurringRef) == "" || p.PaymentMethodID == uuid.Nil || p.Attempt < 0 || p.FailureCount < 0 || p.AcceptedAt.IsZero() || p.PreviousPeriodEnd.IsZero() || p.AcceptedAt.Before(p.PreviousPeriodEnd) {
 		return p, errors.New("engine renewal lacks recurring custody or admission identity")
 	}
 	cycle := p.Renewal.PeriodEnd.Sub(p.Renewal.PeriodStart)

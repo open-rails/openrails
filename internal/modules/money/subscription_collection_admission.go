@@ -3,6 +3,7 @@ package money
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -61,13 +62,24 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 		if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.After(admittedAt) || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) || (sub.Status == models.StatusPastDue && (sub.NextRetryAt == nil || sub.NextRetryAt.After(admittedAt))) {
 			return errors.New("engine subscription is not due")
 		}
-		// The prototype cannot infer definite nonexecution from a generic terminal
-		// status. Typed recurring decline completion will authorize later attempts.
-		_, err = q.GetLatestSubscriptionCollectionForPeriod(ctx, gen.GetLatestSubscriptionCollectionForPeriodParams{MerchantID: mid.UUID(), SubscriptionID: sub.ID, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC()})
+		attempt := 0
+		previous, err := q.GetLatestSubscriptionCollectionForPeriod(ctx, gen.GetLatestSubscriptionCollectionForPeriodParams{MerchantID: mid.UUID(), SubscriptionID: sub.ID, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC()})
 		if err == nil {
-			return errors.New("engine retry requires qualified terminal completion")
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
+			if previous.Status != intents.StatusFailedTerminal {
+				return errors.New("previous engine obligation has not been released")
+			}
+			if err := intents.ValidateSubscriptionCollectionTerminal(previous); err != nil {
+				return err
+			}
+			old, err := subscriptions.DecodeSubscriptionCollectionPayload(previous)
+			if err != nil {
+				return err
+			}
+			if old.Attempt >= math.MaxInt32 {
+				return errors.New("engine attempt ordinal exceeds ledger integer range")
+			}
+			attempt = old.Attempt + 1
+		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		if sub.PaymentMethodID == nil {
@@ -103,8 +115,12 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 		if err != nil {
 			return err
 		}
-		key := subscriptions.SubscriptionCollectionKey(sub.ID, *sub.CurrentPeriodEndsAt, 0)
-		payload := subscriptions.SubscriptionCollectionPayload{Renewal: terms, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC(), AcceptedAt: admittedAt, PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method), HyperSwitch: binding, AmountMinor: minor, OrderReference: subscriptions.RebillOrderReference(key)}
+		key := subscriptions.SubscriptionCollectionKey(sub.ID, *sub.CurrentPeriodEndsAt, attempt)
+		failures := 0
+		if sub.RetryAttempts != nil {
+			failures = *sub.RetryAttempts
+		}
+		payload := subscriptions.SubscriptionCollectionPayload{Attempt: attempt, FailureCount: failures, Renewal: terms, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC(), AcceptedAt: admittedAt, PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method), HyperSwitch: binding, AmountMinor: minor, OrderReference: subscriptions.RebillOrderReference(key)}
 		accepted, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: "nmi", IntentType: subscriptions.TypeSubscriptionCollection, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: method.PspID, CustodianID: *method.CustodianID, Payload: payload, IdempotencyKey: key, NextAttemptAt: admittedAt, Origin: intents.OriginSystem, OriginReason: "accepted engine renewal"})
 		if err != nil {
 			return err

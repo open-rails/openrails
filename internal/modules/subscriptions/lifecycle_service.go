@@ -637,7 +637,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 	}
 	return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		db := db.NewWithPgxTx(tx)
-		subscription, err := NewSubscriptionRepo(db).GetByPSPSubscriptionIDForUpdate(ctx, string(params.Rail), params.RailSubscriptionID)
+		subscription, err := lockedRenewalSubscription(ctx, db, params)
 		if err != nil {
 			return fmt.Errorf("subscription not found: %w", err)
 		}
@@ -665,10 +665,14 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 			}
 		}
 
-		var metadata map[string]any
+		metadata := map[string]any{}
+		for key, value := range params.PaymentMetadata {
+			metadata[key] = value
+		}
 		_, terminal := TerminalCancelReason(subscription)
+		terminal = terminal || (subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCancelled)
 		if terminal {
-			metadata = map[string]any{"refund_review": "confirmed charge on a cancelled subscription"}
+			metadata["refund_review"] = "confirmed charge on a cancelled subscription"
 		}
 		now := s.now().UTC()
 		payment := &models.Payment{
@@ -680,7 +684,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 			AttemptKind:              func() *string { k := payments.AttemptRenewal; return &k }(),
 			MoneyMovement:            models.MoneyMovementRail, PurchasedAt: now, CreatedAt: now,
 		}
-		if tt := payments.DefaultTokenType(string(params.Rail), models.CustodianPSP); tt != "" {
+		if tt := payments.DefaultTokenType(string(params.Rail), renewalPaymentCustodian(params)); tt != "" {
 			payment.TokenType = &tt
 		}
 		created, err := payments.NewPaymentService(db, s.Clock()).CreateIfNotExists(ctx, payment)
@@ -729,11 +733,10 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
 		paymentService := payments.NewPaymentService(db, s.Clock())
 
 		// Lock before checking terminal state or preparing a full-row update.
-		subscription, err := subService.subscriptionRepo.GetByPSPSubscriptionIDForUpdate(ctx, string(params.Rail), params.RailSubscriptionID)
+		subscription, err := lockedRenewalSubscription(ctx, db, params)
 		if err != nil {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"rail":                 params.Rail,
@@ -776,7 +779,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("load accepted renewal payment: %w", err)
 			}
-			preserveLifecycle, err = applyRenewalTerms(ctx, db, subscription, *terms)
+			preserveLifecycle, err = applyRenewalTerms(ctx, db, subscription, *terms, params.PreviousPeriodEnd)
 			if err != nil {
 				return err
 			}
@@ -926,7 +929,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				PurchasedAt:              purchasedAt,
 				CreatedAt:                now,
 			}
-			if tt := payments.DefaultTokenType(string(params.Rail), models.CustodianPSP); tt != "" {
+			if tt := payments.DefaultTokenType(string(params.Rail), renewalPaymentCustodian(params)); tt != "" {
 				payment.TokenType = &tt
 			}
 			created, err := paymentService.CreateIfNotExists(ctx, payment)

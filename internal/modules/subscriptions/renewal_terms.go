@@ -107,15 +107,24 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 	return terms, terms.Validate()
 }
 
-func applyRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription, terms RenewalTerms) (bool, error) {
+func applyRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription, terms RenewalTerms, previousPeriodEnd *time.Time) (bool, error) {
 	if err := terms.Validate(); err != nil {
 		return false, err
 	}
 	if sub.ID != terms.SubscriptionID || sub.CustomerID != terms.CustomerID || sub.PspID != terms.PSPID || sub.CurrentPeriodEndsAt == nil {
 		return false, errors.New("subscription no longer matches the accepted renewal")
 	}
+	previous := terms.PeriodStart
+	if previousPeriodEnd != nil {
+		if sub.CollectionPolicy != models.CollectionPolicyEngine || previousPeriodEnd.IsZero() || previousPeriodEnd.After(terms.PeriodStart) {
+			return false, errors.New("accepted previous boundary is not an engine renewal")
+		}
+		previous = previousPeriodEnd.UTC()
+	} else if sub.CollectionPolicy == models.CollectionPolicyEngine {
+		return false, errors.New("engine renewal requires its accepted previous boundary")
+	}
 	alreadyAdvanced := sub.CurrentPeriodEndsAt.Equal(terms.PeriodEnd) && sub.PriceID == terms.PriceID && sub.ProductID == terms.ProductID
-	if !alreadyAdvanced && (!sub.CurrentPeriodEndsAt.Equal(terms.PeriodStart) || sub.PriceID != terms.FromPriceID || sub.ProductID != terms.FromProductID) {
+	if !alreadyAdvanced && (!sub.CurrentPeriodEndsAt.Equal(previous) || sub.PriceID != terms.FromPriceID || sub.ProductID != terms.FromProductID) {
 		return false, errors.New("subscription period no longer matches the accepted renewal")
 	}
 
@@ -143,4 +152,38 @@ func applyRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription, 
 	sub.PriceID, sub.ProductID = terms.PriceID, terms.ProductID
 	sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(terms.Entitlements)
 	return alreadyAdvanced, nil
+}
+
+// Prepared renewals name the local obligation. Native calls must still match
+// their immutable remote binding; an engine call must carry its prior boundary.
+func lockedRenewalSubscription(ctx context.Context, d *db.DB, params *RenewMembershipParams) (*models.Subscription, error) {
+	repo := NewSubscriptionRepo(d)
+	if params.Prepared == nil {
+		if params.PreviousPeriodEnd != nil {
+			return nil, errors.New("previous boundary requires accepted renewal terms")
+		}
+		return repo.GetByPSPSubscriptionIDForUpdate(ctx, string(params.Rail), params.RailSubscriptionID)
+	}
+	sub, err := repo.GetByIDForUpdate(ctx, params.Prepared.SubscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	if sub.Rail != params.Rail || sub.PspID != params.Prepared.PSPID || sub.RailSubscriptionID != params.RailSubscriptionID {
+		return nil, errors.New("accepted renewal provider binding changed")
+	}
+	if sub.CollectionPolicy == models.CollectionPolicyEngine {
+		if params.PreviousPeriodEnd == nil || params.PaymentCustodian != models.CustodianHyperSwitch || sub.RailSubscriptionID != "" {
+			return nil, errors.New("engine renewal lacks accepted boundary or custody")
+		}
+	} else if params.PreviousPeriodEnd != nil || params.PaymentCustodian != "" {
+		return nil, errors.New("native renewal cannot change its accepted boundary or custody")
+	}
+	return sub, nil
+}
+
+func renewalPaymentCustodian(params *RenewMembershipParams) string {
+	if params.PaymentCustodian != "" {
+		return params.PaymentCustodian
+	}
+	return models.CustodianPSP
 }

@@ -86,7 +86,7 @@ func TestInvoiceSubmissionFenceRecovery(t *testing.T) {
 		require.Empty(t, outcome.Evidence)
 		current, err := store.Get(e.ctx, claimed.ID)
 		require.NoError(t, err)
-		_, found, err := intents.LoadInvoiceNonexecution(current)
+		_, found, err := intents.LoadCollectionNonexecution(current)
 		require.NoError(t, err)
 		require.True(t, found)
 		require.NotNil(t, e.invoiceRow(t).CollectionIntentID)
@@ -115,10 +115,10 @@ func TestInvoiceSubmissionFenceRecovery(t *testing.T) {
 		claimed, ok, err := store.ClaimByID(e.ctx, pending.ID, time.Now(), time.Now().Add(time.Minute))
 		require.NoError(t, err)
 		require.True(t, ok)
-		proof, first, err := store.BeginInvoiceCollection(e.ctx, claimed, time.Now())
+		proof, first, err := store.BeginCollectedPayment(e.ctx, claimed, time.Now())
 		require.NoError(t, err)
 		require.True(t, first)
-		require.NoError(t, store.RetainInvoiceNonexecution(e.ctx, claimed, proof, "not_dispatched", "known before POST"))
+		require.NoError(t, store.RetainCollectionNonexecution(e.ctx, claimed, proof, "not_dispatched", "known before POST"))
 		// Inject conflicting positive provider facts, rather than an untrusted
 		// outcome boolean. Neither qualified fact may silently win this conflict.
 		e.gateway.orderSale(claimed.ID.String(), "contradicted-paid")
