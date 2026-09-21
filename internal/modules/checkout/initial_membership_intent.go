@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -137,7 +138,7 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Ope
 	} else if _, err = client.ReadSingleCardVaultBilling(ctx, p.Instrument.RailCustomerRef, p.Instrument.RailMethodRef); err != nil {
 		return intents.Parked("enrollment instrument readback unavailable or unqualified")
 	}
-	submitted, err := h.fenceInitialMembership(ctx, in, p)
+	proof, submitted, err := h.fenceInitialMembership(ctx, in, p)
 	if err != nil {
 		return intents.Ambiguous("enrollment could not retain its submission fence: " + err.Error())
 	}
@@ -154,6 +155,9 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Ope
 			mode = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
 		}
 		result, refusal, err := proxy.ChargeInitialRecurring(ctx, charge.Request{Instrument: charge.Instrument{Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef}, AmountMinor: minor, Currency: p.Terms.Currency, OrderRef: intents.NMIEnrollmentOrder(in), Context: mode})
+		if errors.Is(err, charge.ErrNotDispatched) {
+			return h.completeInitialNonexecution(ctx, in, proof)
+		}
 		if err != nil {
 			return intents.Ambiguous("initial membership charge requires provider verification")
 		}
@@ -177,6 +181,9 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Ope
 			mode = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
 		}
 		result, refusal, err := nmidirect.New(client).ChargeInitialRecurring(ctx, charge.Request{Instrument: charge.Instrument{Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef}, AmountMinor: minor, Currency: p.Terms.Currency, OrderRef: intents.NMIEnrollmentOrder(in), Context: mode})
+		if errors.Is(err, charge.ErrNotDispatched) {
+			return h.completeInitialNonexecution(ctx, in, proof)
+		}
 		if err != nil {
 			return intents.Ambiguous("initial native charge requires verification")
 		}
@@ -484,7 +491,8 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 				return errors.New("initial terminal replay conflicts")
 			}
 			outcome.Evidence = saleResultEvidence(evidence)
-			return nil
+			return h.projectInitialMembershipSession(ctx, d, current, p, success)
+
 		}
 		if success {
 			providerSub := schedule.SubscriptionID()
@@ -541,6 +549,9 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 		}
 		if record := intents.OperatorResolutionRecord(ctx); record != nil {
 			evidence["operator_resolution"] = record
+		}
+		if err := h.projectInitialMembershipSession(ctx, d, current, p, success); err != nil {
+			return err
 		}
 		raw, err := json.Marshal(evidence)
 		if err != nil {
@@ -644,9 +655,10 @@ func subscriptionMetadataString(raw json.RawMessage, key string) string {
 // answered, not duplicated) and completes the request-level idempotency
 // record so client replays get the cached response.
 
-func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Context, in gen.OpenrailsRailIntent, p InitialMembershipPayload) (bool, error) {
+func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Context, in gen.OpenrailsRailIntent, p InitialMembershipPayload) (intents.InitialMembershipNonexecutionProof, bool, error) {
+	var proof intents.InitialMembershipNonexecutionProof
 	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine && h.Checkout.Config != nil && h.Checkout.Config.EngineAdmissionHold {
-		return false, errors.New("engine payment admission is held")
+		return proof, false, errors.New("engine payment admission is held")
 	}
 	submitted := false
 	err := h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -673,8 +685,50 @@ func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Cont
 				return charge.ErrInstrumentChanged
 			}
 		}
-		submitted, err = intents.NewStore(d).RecordProgressIfAbsent(ctx, in.ID, "initial_submitted", true)
+		proof, submitted, err = intents.NewStore(d).BeginInitialMembershipPayment(ctx, in)
 		return err
 	})
-	return submitted, err
+	return proof, submitted, err
+}
+
+func (h *InitialMembershipIntentHandler) projectInitialMembershipSession(ctx context.Context, d *db.DB, in gen.OpenrailsRailIntent, p InitialMembershipPayload, success bool) error {
+	if !strings.HasPrefix(p.CheckoutIdempotencyKey, "checkout_session:") {
+		return nil
+	}
+	id, err := uuid.Parse(strings.TrimPrefix(p.CheckoutIdempotencyKey, "checkout_session:"))
+	if err != nil || id == uuid.Nil {
+		return errors.New("accepted membership has invalid session identity")
+	}
+	params := gen.CompleteInitialMembershipSessionParams{ID: id, MerchantID: in.MerchantID, CustomerID: p.Terms.CustomerID, PriceID: p.Terms.PriceID, PspID: p.Terms.PSPID, Rail: in.Rail, Status: "failed", Now: h.Checkout.now().UTC()}
+	if success {
+		params.Status = "succeeded"
+		params.SubscriptionID = &p.Terms.SubscriptionID
+		if p.Terms.Amount > 0 {
+			receipt, paid, err := intents.LoadCollectedReceipt(in)
+			if err != nil {
+				return err
+			}
+			if !paid {
+				return errors.New("initial checkout projection has no paid receipt")
+			}
+			params.PaymentID = &p.Terms.PaymentID
+			transaction := receipt.TransactionID()
+			params.TransactionID = &transaction
+		}
+	}
+	rows, err := d.Gen(ctx).CompleteInitialMembershipSession(ctx, params)
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return errors.New("initial checkout projection differs from accepted session")
+	}
+	return nil
+}
+
+func (h *InitialMembershipIntentHandler) completeInitialNonexecution(ctx context.Context, in gen.OpenrailsRailIntent, proof intents.InitialMembershipNonexecutionProof) intents.Outcome {
+	if err := intents.NewStore(h.database()).RetainInitialMembershipNonexecution(ctx, in, proof); err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	return h.Verify(ctx, in)
 }

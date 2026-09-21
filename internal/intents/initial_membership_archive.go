@@ -66,7 +66,7 @@ func ValidateInitialMembershipTerminal(in gen.OpenrailsRailIntent) error {
 			return errors.New("initial terminal refusal has no bound custody")
 		}
 		declined := refusal.data.Kind == "provider_declined" || refusal.data.Kind == "stripe_canceled"
-		if evidence.StripePaymentIntentID != refusal.data.StripePaymentIntentID || evidence.StripeFailureCode != refusal.data.StripeFailureCode || scheduled || paid || evidence.RequestRefused || evidence.Declined != declined || evidence.NotExecuted == declined || evidence.Submitted != declined || evidence.ResponseCode != refusal.data.ResponseCode || evidence.LocalizationID != refusal.data.LocalizationID || evidence.SubscriptionID != uuid.Nil || evidence.ProviderSubscriptionID != "" || evidence.TransactionID != "" {
+		if evidence.StripePaymentIntentID != refusal.data.StripePaymentIntentID || evidence.StripeFailureCode != refusal.data.StripeFailureCode || scheduled || paid || evidence.RequestRefused || evidence.Declined != declined || evidence.NotExecuted == declined || evidence.Submitted != (declined || refusal.data.Kind == "not_dispatched") || evidence.ResponseCode != refusal.data.ResponseCode || evidence.LocalizationID != refusal.data.LocalizationID || evidence.SubscriptionID != uuid.Nil || evidence.ProviderSubscriptionID != "" || evidence.TransactionID != "" {
 			return errors.New("initial refusal contradicts provider custody or its submission fence")
 		}
 	default:

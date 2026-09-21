@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -127,9 +128,21 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		if price.ProductID != accepted.ProductID {
 			return errors.New("quoted initial membership has another catalog identity")
 		}
-		psp, err := d.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: accepted.PSPID})
+		psp, err := d.Gen(ctx).GetPSPForCutoverWrite(ctx, gen.GetPSPForCutoverWriteParams{MerchantID: mid.UUID(), ID: accepted.PSPID})
 		if err != nil {
 			return err
+		}
+		if psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(s.Config.IsTestMode()) {
+			return errors.New("new membership provider account is no longer available")
+		}
+		if method.CustodianID != nil {
+			custodian, err := d.Gen(ctx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: mid.UUID(), ID: *method.CustodianID})
+			if err != nil {
+				return err
+			}
+			if custodian.Archived {
+				return errors.New("new membership custodian is archived")
+			}
 		}
 		label := psp.ID.String()
 		if psp.Key != nil && strings.TrimSpace(*psp.Key) != "" {

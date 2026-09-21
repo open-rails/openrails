@@ -2470,7 +2470,7 @@ WHERE id = $3::uuid
        OR ($1::text='qualified_initial_refusal' AND intent_type='initial_membership'
            AND NOT (coalesce(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','qualified_enrollment'])
            AND (($2::jsonb->>'kind'='not_submitted' AND NOT (coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted'))
-             OR ($2::jsonb->>'kind' IN ('provider_declined','stripe_canceled') AND result_evidence->>'initial_submitted'='true')))
+             OR ($2::jsonb->>'kind' IN ('provider_declined','stripe_canceled','not_dispatched') AND result_evidence->>'initial_submitted'='true')))
        OR ($1::text='stripe_recurring_decline' AND intent_type='subscription_collection' AND rail='stripe'
            AND COALESCE(result_evidence->>'submitted_at','') <> ''
            AND $2::jsonb->>'failure_code'='canceled'

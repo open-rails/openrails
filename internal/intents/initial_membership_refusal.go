@@ -55,6 +55,10 @@ func (r InitialMembershipRefusal) Validate(in gen.OpenrailsRailIntent) error {
 		if string(evidence["initial_submitted"]) != "true" || r.data.ResponseCode < 200 || r.data.ResponseCode >= 300 {
 			return errors.New("initial decline has no exact submitted provider refusal")
 		}
+	case "not_dispatched":
+		if string(evidence["initial_submitted"]) != "true" || r.data.ResponseCode != 0 || r.data.LocalizationID != "" {
+			return errors.New("initial nonexecution has no fresh submitted fence")
+		}
 	case "not_submitted":
 		if _, present := evidence["initial_submitted"]; present || r.data.ResponseCode != 0 || r.data.LocalizationID != "" {
 			return errors.New("initial unsent closure contradicts submission")
@@ -66,6 +70,9 @@ func (r InitialMembershipRefusal) Validate(in gen.OpenrailsRailIntent) error {
 }
 
 func (r InitialMembershipRefusal) Outcome() Outcome {
+	if r.data.Kind == "not_dispatched" {
+		return TerminalWithEvidence("initial payment was refused before provider dispatch", map[string]any{"not_executed": true})
+	}
 	if r.data.Kind == "stripe_canceled" {
 		return TerminalWithEvidence("Stripe enrollment declined", map[string]any{"declined": true, "failure_code": r.data.StripeFailureCode, "stripe_payment_intent_id": r.data.StripePaymentIntentID})
 	}
@@ -180,5 +187,43 @@ func (s *Store) RetainInitialStripeDecline(ctx context.Context, in gen.Openrails
 		return err
 	}
 	_, err = s.retainQualifiedEvidence(ctx, current, qualifiedInitialRefusalKey, fact.data)
+	return err
+}
+
+// InitialMembershipNonexecutionProof exists only in the unique fresh sender's
+// stack. Reloading an operation never recreates authority to declare nonexecution.
+type InitialMembershipNonexecutionProof struct{ binding receiptBinding }
+
+func (s *Store) BeginInitialMembershipPayment(ctx context.Context, in gen.OpenrailsRailIntent) (InitialMembershipNonexecutionProof, bool, error) {
+	if in.IntentType != subscriptions.TypeInitialMembership {
+		return InitialMembershipNonexecutionProof{}, false, errors.New("not an initial membership")
+	}
+	binding, err := collectionBinding(in)
+	if err != nil {
+		return InitialMembershipNonexecutionProof{}, false, err
+	}
+	first, err := s.RecordProgressIfAbsent(ctx, in.ID, "initial_submitted", true)
+	if err != nil || !first {
+		return InitialMembershipNonexecutionProof{}, first, err
+	}
+	return InitialMembershipNonexecutionProof{binding}, true, nil
+}
+func (s *Store) RetainInitialMembershipNonexecution(ctx context.Context, in gen.OpenrailsRailIntent, proof InitialMembershipNonexecutionProof) error {
+	binding, err := collectionBinding(in)
+	if err != nil {
+		return err
+	}
+	if proof.binding != binding {
+		return errors.New("initial nonexecution requires the unique fresh sender")
+	}
+	current, err := s.Get(ctx, in.ID)
+	if err != nil {
+		return err
+	}
+	fact := InitialMembershipRefusal{data: initialMembershipRefusal{Binding: binding, Kind: "not_dispatched"}}
+	if err := fact.Validate(current); err != nil {
+		return err
+	}
+	_, err = s.retainQualifiedEvidence(ctx, in, qualifiedInitialRefusalKey, fact.data)
 	return err
 }

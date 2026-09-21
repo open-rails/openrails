@@ -170,6 +170,11 @@ func TestStripeEngineSignupSelfHTTP(t *testing.T) {
 	require.Equal(t, "succeeded", result["status"])
 	completed := call("GET", fmt.Sprintf("/checkout/%s", quote["id"]), "", nil)
 	require.Equal(t, "succeeded", completed["status"])
+	sessionID, err := openrails.ParseCheckoutSessionID(quote["id"].(string))
+	require.NoError(t, err)
+	var persisted string
+	require.NoError(t, pool.QueryRow(t.Context(), `SELECT status FROM billing.checkout_sessions WHERE id=$1`, sessionID.UUID()).Scan(&persisted))
+	require.Equal(t, "succeeded", persisted, "terminal operation and checkout projection commit together")
 	require.NoError(t, pool.QueryRow(t.Context(), `SELECT count(*) FROM billing.payments WHERE customer_id=$1 AND status='completed'`, user.ID).Scan(&paid))
 	require.Equal(t, 1, paid)
 	var policy, external string

@@ -50,7 +50,7 @@ func initialStripeResponse(v any) *http.Response {
 }
 
 func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
-	for _, mode := range []string{"paid", "lost response", "authentication", "declined", "wrong method", "setup"} {
+	for _, mode := range []string{"paid", "lost response", "authentication", "declined", "wrong method", "setup", "not dispatched"} {
 		t.Run(mode, func(t *testing.T) {
 			fx := newSubIntentFixture(t)
 			fx.prepare(t)
@@ -67,7 +67,13 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 			fx.svc.Config = cfg
 			fx.runner.Config = cfg
 			fx.svc.Intents = fx.runner
-			service := subscriptions.NewAccountStripeService(cfg, mid.UUID(), terms.PSPID, "acct_initial", "sk_test_initial")
+			serviceConfig := cfg
+			if mode == "not dispatched" {
+				copy := *cfg
+				copy.ProviderWriteMode = config.ProviderWriteModeReadOnly
+				serviceConfig = &copy
+			}
+			service := subscriptions.NewAccountStripeService(serviceConfig, mid.UUID(), terms.PSPID, "acct_initial", "sk_test_initial")
 			resolver := initialStripeResolver{service}
 			fx.runner.Registry = intents.NewRegistry(NewInitialMembershipIntentHandler(fx.svc, resolver))
 			var mu sync.Mutex
@@ -221,7 +227,11 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 				op, err = intents.NewStore(fx.db).Get(fx.ctx, op.ID)
 				require.NoError(t, err)
 			}
-			if mode == "wrong method" {
+			if mode == "not dispatched" {
+				require.Equal(t, intents.StatusFailedTerminal, op.Status)
+				require.NoError(t, intents.ValidateInitialMembershipTerminal(op))
+				require.Error(t, intents.NewStore(fx.db).RetainInitialMembershipNonexecution(fx.ctx, op, intents.InitialMembershipNonexecutionProof{}))
+			} else if mode == "wrong method" {
 				require.Equal(t, intents.StatusUnknownNeedsVerify, op.Status)
 			} else if mode == "declined" {
 				require.Equal(t, intents.StatusFailedTerminal, op.Status)
@@ -240,13 +250,17 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 			}
 			var successCount int
 			require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.payments WHERE customer_id=$1 AND status='completed'`, terms.CustomerID).Scan(&successCount))
-			if mode == "declined" || mode == "wrong method" {
+			if mode == "declined" || mode == "wrong method" || mode == "not dispatched" {
 				require.Zero(t, successCount)
 			} else {
 				require.Equal(t, 1, successCount)
 			}
 			_, _ = fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal)
-			require.Equal(t, 1, posts, "replayed original operation must never create another PI")
+			if mode == "not dispatched" {
+				require.Zero(t, posts)
+			} else {
+				require.Equal(t, 1, posts, "replayed original operation must never create another PI")
+			}
 		})
 	}
 }
