@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
 // NMISaleMode scripts how the loopback gateway answers a classic sale.
@@ -44,6 +45,8 @@ type NMISale struct {
 type NMIEnrollment struct {
 	SubscriptionID string
 	OrderID        string
+	PONumber       string
+	FirstCharge    string
 	Vault          string
 	Plan           string
 	Amount         string
@@ -150,6 +153,8 @@ func (g *FakeNMIGateway) serve(w http.ResponseWriter, r *http.Request) {
 		g.serveSale(w, r)
 	case r.Form.Get("report_type") == "transaction":
 		g.serveSearch(w, r.Form.Get("order_id"))
+	case r.Form.Get("report_type") == "recurring":
+		g.serveEnrollmentReport(w, r.Form.Get("subscription_id"))
 	default:
 		http.Error(w, "unsupported fake NMI request", http.StatusNotImplemented)
 	}
@@ -185,6 +190,8 @@ func (g *FakeNMIGateway) serveEnrollment(w http.ResponseWriter, r *http.Request)
 	enrollment := NMIEnrollment{
 		SubscriptionID: "rsub-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12],
 		OrderID:        r.Form.Get("orderid"),
+		PONumber:       r.Form.Get("ponumber"),
+		FirstCharge:    r.Form.Get("start_date"),
 		Vault:          r.Form.Get("customer_vault_id"),
 		Plan:           r.Form.Get("plan_id"),
 		Amount:         r.Form.Get("amount"),
@@ -209,14 +216,36 @@ func (g *FakeNMIGateway) serveSubscription(w http.ResponseWriter, method, id str
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"object": "subscription", "id": enrollment.SubscriptionID, "customer_vault_id": enrollment.Vault,
-			"delayed_condition": "active", "plan": map[string]any{"id": enrollment.Plan},
+		start, err := time.Parse("20060102", enrollment.FirstCharge)
+		if err != nil {
+			http.Error(w, "fixture enrollment has invalid first charge date", http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(nmi.V5Subscription{
+			Object: "subscription", ID: enrollment.SubscriptionID, CustomerVaultID: enrollment.Vault,
+			DelayedCondition: "active", PausedSubscription: false, NextBillingDate: start.Format("2006-01-02"),
+			Plan: &nmi.V5Plan{ID: enrollment.Plan, PlanAmount: enrollment.Amount, DayFrequency: "30", PlanPayments: "0"},
 		})
 		return
 	}
 	w.WriteHeader(http.StatusNotFound)
 	_, _ = fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"subscription not found"}`)
+}
+
+func (g *FakeNMIGateway) serveEnrollmentReport(w http.ResponseWriter, id string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	w.Header().Set("Content-Type", "application/xml")
+	fmt.Fprint(w, "<nm_response>")
+	for _, enrollment := range g.enrollments {
+		if enrollment.SubscriptionID == id && !enrollment.Deleted {
+			start, err := time.Parse("20060102", enrollment.FirstCharge)
+			if err == nil {
+				fmt.Fprintf(w, `<subscription id="%s"><subscription_id>%s</subscription_id><plan><plan_id>%s</plan_id></plan><orderid>%s</orderid><ponumber>%s</ponumber><next_charge_date>%s</next_charge_date></subscription>`, id, id, enrollment.Plan, enrollment.OrderID, enrollment.PONumber, start.Format("2006-01-02"))
+			}
+		}
+	}
+	fmt.Fprint(w, "</nm_response>")
 }
 
 func (g *FakeNMIGateway) serveSearch(w http.ResponseWriter, orderID string) {

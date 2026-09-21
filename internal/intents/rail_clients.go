@@ -34,6 +34,26 @@ func resolveIntentNMIClient(ctx context.Context, r NMIClientResolver, intent gen
 	return r.ResolveNMIClient(ctx, intent.MerchantID, intent.PspID)
 }
 
+// Sealed receipt constructors verify the returned client's identity themselves;
+// a resolver's ok flag is not account provenance or proof of a non-nil client.
+func resolveReceiptNMIClient(ctx context.Context, r NMIClientResolver, intent gen.OpenrailsRailIntent) (*nmi.NMIClient, error) {
+	if intent.MerchantID == uuid.Nil || intent.PspID == nil || *intent.PspID == uuid.Nil {
+		return nil, errors.New("receipt requires its accepted provider account")
+	}
+	client, ok, err := resolveIntentNMIClient(ctx, r, intent)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || client == nil {
+		return nil, errors.New("accepted provider account cannot be armed")
+	}
+	owner, account := client.AccountIdentity()
+	if owner != intent.MerchantID || account != *intent.PspID {
+		return nil, errors.New("NMI reader is armed for another provider account")
+	}
+	return client, nil
+}
+
 // ccbillDataLinkForMerchant arms the ctx merchant's CCBill DataLink client
 // from the armed rail state (#788 Layer C). Fail closed: an unarmed rail or
 // missing datalink credentials error (the caller parks/retries).

@@ -71,3 +71,87 @@ func TestAcceptedUpgradePinsInstrumentAgainstLaterCustodyRemap(t *testing.T) {
 	require.Zero(t, fx.gateway.createCalls.Load())
 	require.Zero(t, fx.gateway.saleCalls.Load())
 }
+
+func TestUpgradeRequiresItsOwnSuccessorSchedule(t *testing.T) {
+	for _, mode := range []string{"approve", "ambiguousLanded"} {
+		t.Run(mode, func(t *testing.T) {
+			fx := newUpgradeAdoptFixture(t)
+			fx.positiveProration()
+			fx.gateway.createMode.Store(mode)
+			fx.gateway.reportedOrder.Store("another-operation")
+			fx.upgradeProcessing(t)
+			require.Zero(t, fx.gateway.saleCalls.Load(), "a live schedule on the same vault/plan is not this operation's successor")
+			_, err := fx.resolve(t, intents.Resolution{Step: "successor", ProviderReference: fx.gateway.subID, Actor: "operator", Reason: "candidate exact id"})
+			require.ErrorIs(t, err, intents.ErrResolutionRejected)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, fx.operation(t).Status)
+
+			fx.gateway.reportedOrder.Store("")
+			_, err = fx.resolve(t, intents.Resolution{Step: "successor", ProviderReference: fx.gateway.subID, Actor: "operator", Reason: "corrected correlated report"})
+			require.NoError(t, err)
+			accepted := fx.operation(t)
+			enrollment, found, err := intents.LoadNMIEnrollmentReceipt(accepted)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, fx.gateway.subID, enrollment.SubscriptionID())
+			require.Equal(t, intents.NMIEnrollmentOrder(accepted), fx.gateway.lastOrder.Load())
+			store := intents.NewStore(fx.db)
+			require.Error(t, store.RecordProgress(fx.ctx, accepted.ID, map[string]any{"qualified_enrollment": nil}))
+			_, err = fx.upgrade(t)
+			require.NoError(t, err)
+			require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+			require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+			require.NoError(t, store.PruneSucceeded(fx.ctx, accepted.ID, nil, false, false))
+			_, found, err = intents.LoadNMIEnrollmentReceipt(fx.operation(t))
+			require.NoError(t, err)
+			require.True(t, found, "generic tombstone pruning cannot erase qualified enrollment custody")
+		})
+	}
+}
+
+func TestFreeUpgradeScheduleDoesNotCreatePaymentAgreement(t *testing.T) {
+	fx := newUpgradeAdoptFixture(t)
+	fx.gateway.planPayments.Store("12") // finite valid provider plans remain supported
+	var before, after string
+	query := `SELECT coalesce(stored_credential_recurring_ref,'') FROM billing.payment_methods WHERE id=$1`
+	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, query, *fx.existingSub.PaymentMethodID).Scan(&before))
+	_, err := fx.upgrade(t)
+	require.NoError(t, err)
+	require.Zero(t, fx.gateway.saleCalls.Load())
+	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, query, *fx.existingSub.PaymentMethodID).Scan(&after))
+	require.Equal(t, before, after, "a delayed enrollment's transactionid is its schedule id, not a paid CIT")
+	_, found, err := intents.LoadCollectedReceipt(fx.operation(t))
+	require.NoError(t, err)
+	require.False(t, found)
+	_, found, err = intents.LoadNMIEnrollmentReceipt(fx.operation(t))
+	require.NoError(t, err)
+	require.True(t, found)
+}
+
+func TestSuccessorReceiptRefusesChangedCommercialTerms(t *testing.T) {
+	for _, field := range []string{"amount", "date", "vault", "count missing", "count negative", "count malformed"} {
+		t.Run(field, func(t *testing.T) {
+			fx := newUpgradeAdoptFixture(t)
+			fx.positiveProration()
+			fx.gateway.createMode.Store("ambiguousLanded")
+			fx.upgradeProcessing(t)
+			switch field {
+			case "amount":
+				fx.gateway.recurringAmount.Store("0.01")
+			case "date":
+				fx.gateway.nextChargeDate.Store("2030-01-01")
+			case "vault":
+				fx.gateway.railCustomerRef = "another-card"
+			case "count missing":
+				fx.gateway.planPayments.Store("")
+			case "count negative":
+				fx.gateway.planPayments.Store("-1")
+			case "count malformed":
+				fx.gateway.planPayments.Store("unknown")
+			}
+			_, err := fx.resolve(t, intents.Resolution{Step: "successor", ProviderReference: fx.gateway.subID, Actor: "operator", Reason: "candidate with changed terms"})
+			require.ErrorIs(t, err, intents.ErrResolutionRejected)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, fx.operation(t).Status)
+			require.Zero(t, fx.gateway.saleCalls.Load())
+		})
+	}
+}

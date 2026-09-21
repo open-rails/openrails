@@ -104,16 +104,9 @@ func ReadNMICollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, r
 	if p.Rail == "stripe" {
 		return CollectedReceipt{}, false, errors.New("Stripe operation cannot accept an NMI receipt")
 	}
-	client, ok, err := resolveIntentNMIClient(ctx, resolver, in)
+	client, err := resolveReceiptNMIClient(ctx, resolver, in)
 	if err != nil {
 		return CollectedReceipt{}, false, err
-	}
-	if !ok || client == nil {
-		return CollectedReceipt{}, false, errors.New("accepted provider account cannot be armed")
-	}
-	accountMerchant, accountPSP := client.AccountIdentity()
-	if accountMerchant != in.MerchantID || accountPSP != *in.PspID {
-		return CollectedReceipt{}, false, errors.New("NMI reader is armed for another provider account")
 	}
 	facts, found, err := client.ReadSaleEvidence(ctx, p.OrderReference, reference)
 	if err != nil || !found {
@@ -232,60 +225,11 @@ func (s *Store) RetainCollectedReceipt(ctx context.Context, in gen.OpenrailsRail
 	if err := receipt.Validate(in); err != nil {
 		return CollectedReceipt{}, err
 	}
-	if s == nil || s.db == nil || s.db.Pool() == nil {
-		return CollectedReceipt{}, errors.New("receipt custody requires the base database, outside a transaction")
-	}
-	raw, err := json.Marshal(receipt.data)
+	current, err := s.retainQualifiedEvidence(ctx, in, qualifiedReceiptKey, receipt.data)
 	if err != nil {
 		return CollectedReceipt{}, err
 	}
-	ctx, cancel := LedgerWriteContext(ctx)
-	defer cancel()
-	current, err := s.Get(ctx, in.ID)
-	if err != nil {
-		return CollectedReceipt{}, err
-	}
-	if current.Status == StatusSucceeded {
-		retained, found, err := LoadCollectedReceipt(current)
-		if err != nil {
-			return CollectedReceipt{}, err
-		}
-		if !found {
-			return CollectedReceipt{}, errors.New("terminal operation has no qualified receipt")
-		}
-		prior, _ := json.Marshal(retained.data)
-		if !bytes.Equal(prior, raw) {
-			return CollectedReceipt{}, errors.New("terminal operation has a conflicting receipt")
-		}
-		return retained, retained.Validate(in)
-	}
-
-	result, err := s.db.Gen(ctx).RetainRailIntentCollectedReceipt(ctx, gen.RetainRailIntentCollectedReceiptParams{ID: in.ID, MerchantID: in.MerchantID, PspID: *in.PspID, IntentType: in.IntentType, Payload: in.Payload, Receipt: raw})
-	if err != nil {
-		return CollectedReceipt{}, err
-	}
-	if result != 1 {
-		terminal, err := s.Get(ctx, in.ID)
-		if err != nil {
-			return CollectedReceipt{}, err
-		}
-		if terminal.Status == StatusSucceeded {
-			same, found, err := LoadCollectedReceipt(terminal)
-			if err != nil {
-				return CollectedReceipt{}, err
-			}
-			sameRaw, _ := json.Marshal(same.data)
-			if found && bytes.Equal(sameRaw, raw) {
-				return same, same.Validate(in)
-			}
-		}
-		return CollectedReceipt{}, errors.New("receipt custody refused stale, terminal, changed or conflicting operation")
-	}
-	persisted, err := s.Get(ctx, in.ID)
-	if err != nil {
-		return CollectedReceipt{}, err
-	}
-	loaded, found, err := LoadCollectedReceipt(persisted)
+	loaded, found, err := LoadCollectedReceipt(current)
 	if err != nil {
 		return CollectedReceipt{}, err
 	}
@@ -293,6 +237,61 @@ func (s *Store) RetainCollectedReceipt(ctx context.Context, in gen.OpenrailsRail
 		return CollectedReceipt{}, errors.New("receipt custody disappeared before settlement")
 	}
 	return loaded, loaded.Validate(in)
+}
+
+// retainQualifiedEvidence is the single durable writer for sealed payment and
+// enrollment receipts. Only their typed entry points call it, after validation.
+// It never shares the domain transaction and never overwrites a different proof.
+func (s *Store) retainQualifiedEvidence(ctx context.Context, in gen.OpenrailsRailIntent, key string, proof any) (gen.OpenrailsRailIntent, error) {
+	var empty gen.OpenrailsRailIntent
+	if s == nil || s.db == nil || s.db.Pool() == nil {
+		return empty, errors.New("receipt custody requires the base database, outside a transaction")
+	}
+	raw, err := json.Marshal(proof)
+	if err != nil {
+		return empty, err
+	}
+	ctx, cancel := LedgerWriteContext(ctx)
+	defer cancel()
+	result, err := s.db.Gen(ctx).RetainRailIntentQualifiedEvidence(ctx, gen.RetainRailIntentQualifiedEvidenceParams{ID: in.ID, MerchantID: in.MerchantID, PspID: *in.PspID, IntentType: in.IntentType, Payload: in.Payload, EvidenceKey: key, Receipt: raw})
+	if err != nil {
+		return empty, err
+	}
+	current, err := s.Get(ctx, in.ID)
+	if err != nil {
+		return empty, err
+	}
+	if result != 1 && current.Status != StatusSucceeded {
+		return empty, errors.New("receipt custody refused stale, terminal, changed or conflicting operation")
+	}
+	var evidence map[string]json.RawMessage
+	if err := json.Unmarshal(current.ResultEvidence, &evidence); err != nil {
+		return empty, err
+	}
+	// PostgreSQL JSONB changes whitespace/key ordering. Compare canonical JSON
+	// with UseNumber so a large integer cannot round during the custody check.
+	want, err := canonicalReceiptJSON(raw)
+	if err != nil {
+		return empty, err
+	}
+	have, err := canonicalReceiptJSON(evidence[key])
+	if err != nil || !bytes.Equal(want, have) {
+		return empty, errors.New("retained receipt differs from the qualified proof")
+	}
+	return current, nil
+}
+
+func canonicalReceiptJSON(raw []byte) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return nil, errors.New("receipt JSON has trailing data")
+	}
+	return json.Marshal(value)
 }
 
 const collectionCandidateKey = "collection_candidate"
@@ -353,7 +352,7 @@ func LoadCollectionCandidate(in gen.OpenrailsRailIntent) (CollectionCandidate, b
 }
 
 func refuseCustodyKeys(evidence map[string]any) error {
-	for _, key := range []string{qualifiedReceiptKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, "account_requalifications"} {
+	for _, key := range []string{qualifiedReceiptKey, qualifiedEnrollmentKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, "account_requalifications"} {
 		if _, ok := evidence[key]; ok {
 			return fmt.Errorf("%s is reserved for immutable provider evidence custody", key)
 		}

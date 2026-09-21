@@ -15,13 +15,11 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 )
 
-// The first two gateway responses in this fixture are successor creation and
-// proration. PutIdleConn runs after the response body is consumed, so cancellation
-// occurs with those bytes in hand without replacing the account-bound transport.
-func cancelAfterProviderReceipt(ctx context.Context, n int64, cancel context.CancelFunc) context.Context {
-	var responses atomic.Int64
+// Cancel after the selected mutation response is consumed, independently of
+// how many provider reads are needed to qualify earlier steps.
+func cancelAfterProviderReceipt(ctx context.Context, submitted *atomic.Int64, cancel context.CancelFunc) context.Context {
 	return httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{PutIdleConn: func(err error) {
-		if err == nil && responses.Add(1) == n {
+		if err == nil && submitted.Load() > 0 {
 			cancel()
 		}
 	}})
@@ -49,7 +47,11 @@ func TestUpgradeReceiptsSurviveCanceledRequestOnPinnedConnection(t *testing.T) {
 			defer release()
 			ctx, cancel := context.WithCancel(pinned)
 			defer cancel()
-			ctx = cancelAfterProviderReceipt(ctx, tc.cancelAfter, cancel)
+			submitted := &fx.gateway.createCalls
+			if tc.cancelAfter == 2 {
+				submitted = &fx.gateway.saleCalls
+			}
+			ctx = cancelAfterProviderReceipt(ctx, submitted, cancel)
 			svc := newUpgradeCheckoutService(app, fx.svc.Clock(), fake)
 
 			_, err = svc.processUpgrade(ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, fx.target)

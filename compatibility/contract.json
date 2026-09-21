@@ -1204,6 +1204,7 @@
     "internal/integrations/nmi": [
       "func (c *V5Cursor) UnmarshalJSON(raw []byte) error {\n\ttrimmed := strings.TrimSpace(string(raw))\n\tif trimmed == \"null\" || trimmed == `\"\"` {\n\t\t*c = \"\"\n\t\treturn nil\n\t}\n\tvar s string\n\tif err := json.Unmarshal(raw, \u0026s); err == nil {\n\t\t*c = V5Cursor(s)\n\t\treturn nil\n\t}\n\tvar n json.Number\n\tif err := json.Unmarshal(raw, \u0026n); err != nil {\n\t\treturn fmt.Errorf(\"unrecognized cursor %s\", trimmed)\n\t}\n\t*c = V5Cursor(n.String())\n\treturn nil\n}",
       "type CustomerPage struct {\n\tCustomers  []V5Customer `json:\"customers\"`\n\tNextCursor V5Cursor     `json:\"next_cursor\"`\n\tHasMore    bool         `json:\"has_more\"`\n}",
+      "type EnrollmentEvidence struct {\n\tSubscription   V5Subscription `json:\"subscription\"`\n\tOrderReference string         `json:\"order_reference\"`\n\tPONumber       string         `json:\"po_number\"`\n\tNextChargeDate string         `json:\"next_charge_date\"`\n}",
       "type PlanPage struct {\n\tPlans      []V5Plan `json:\"plans\"`\n\tNextCursor V5Cursor `json:\"next_cursor\"`\n\tHasMore    bool     `json:\"has_more\"`\n}",
       "type SaleEvidence struct {\n\tTransactionID   string          `json:\"transaction_id\"`\n\tOrderReference  string          `json:\"order_reference\"`\n\tCustomerVaultID string          `json:\"customer_vault_id\"`\n\tAmount          moneyutil.Cents `json:\"amount,string\"`\n\tCurrency        string          `json:\"currency\"`\n\tApproved        bool            `json:\"approved\"`\n}",
       "type SubscriptionPage struct {\n\tSubscriptions []V5Subscription `json:\"subscriptions\"`\n\tNextCursor    V5Cursor         `json:\"next_cursor\"`\n\tHasMore       bool             `json:\"has_more\"`\n}",
@@ -1242,6 +1243,7 @@
       "type StripeArchivePayload struct {\n\tObjectID  string `json:\"object_id\"`\n\tMarkerKey string `json:\"marker_key\"`\n\tLabel     string `json:\"label,omitempty\"`\n}",
       "type collectedReceipt struct {\n\tVersion int                                    `json:\"version\"`\n\tFamily  string                                 `json:\"family\"`\n\tBinding receiptBinding                         `json:\"binding\"`\n\tNMI     *nmi.SaleEvidence                      `json:\"nmi,omitempty\"`\n\tStripe  *subscriptions.StripeCollectionReceipt `json:\"stripe,omitempty\"`\n}",
       "type cutoverAccountRequalification struct {\n\tRole                  string                       `json:\"role\"`\n\tQualification         providerqualification.Record `json:\"qualification\"`\n\tOriginalFingerprint   string                       `json:\"original_fingerprint\"`\n\tPreviousFingerprint   string                       `json:\"previous_fingerprint\"`\n\tCredentialFingerprint string                       `json:\"credential_fingerprint\"`\n\tCredentialVersion     int                          `json:\"credential_version\"`\n\tActor                 string                       `json:\"actor\"`\n\tReason                string                       `json:\"reason\"`\n\tRecordedAt            time.Time                    `json:\"recorded_at\"`\n}",
+      "type enrollmentReceipt struct {\n\tBinding receiptBinding         `json:\"binding\"`\n\tFacts   nmi.EnrollmentEvidence `json:\"facts\"`\n}",
       "type nmiCard struct {\n\tLastFour   string `json:\"last_four\"`\n\tCardType   string `json:\"card_type\"`\n\tExpiryDate string `json:\"expiry_date\"`\n}",
       "type nmiCutoverDecision struct {\n\tAction        string         `json:\"action\"`\n\tAuthorization map[string]any `json:\"authorization,omitempty\"`\n}",
       "type nmiCutoverPayload struct {\n\tSourceQualification         providerqualification.BoundRecord `json:\"source_qualification\"`\n\tTargetQualification         providerqualification.BoundRecord `json:\"target_qualification\"`\n\tRequest                     nmiCutoverRequest                 `json:\"request\"`\n\tCustomerID                  uuid.UUID                         `json:\"customer_id\"`\n\tSubscriptionID              uuid.UUID                         `json:\"subscription_id\"`\n\tSourceSubscriptionID        string                            `json:\"source_subscription_id\"`\n\tSourcePaymentMethodID       uuid.UUID                         `json:\"source_payment_method_id\"`\n\tSourceInstrument            charge.FrozenInstrument           `json:\"source_instrument\"`\n\tPriceID                     uuid.UUID                         `json:\"price_id\"`\n\tPlanID                      string                            `json:\"plan_id\"`\n\tTargetInstrument            charge.FrozenInstrument           `json:\"target_instrument\"`\n\tCurrency                    string                            `json:\"currency\"`\n\tAmount                      int64                             `json:\"amount\"`\n\tCycleHours                  int32                             `json:\"cycle_hours\"`\n\tPeriodStart                 time.Time                         `json:\"period_start\"`\n\tPeriodEnd                   time.Time                         `json:\"period_end\"`\n\tAnchor                      time.Time                         `json:\"anchor\"`\n\tSourceCredentialFingerprint string                            `json:\"source_credential_fingerprint\"`\n\tTargetCredentialFingerprint string                            `json:\"target_credential_fingerprint\"`\n}",
@@ -2615,6 +2617,13 @@
       "time": "time",
       "url": "net/url"
     },
+    "internal/integrations/nmi/enrollment_receipt.go": {
+      "context": "context",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "strings": "strings",
+      "url": "net/url",
+      "xml": "encoding/xml"
+    },
     "internal/integrations/nmi/receipts.go": {
       "big": "math/big",
       "context": "context",
@@ -2730,6 +2739,20 @@
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "uuid": "github.com/google/uuid"
+    },
+    "internal/intents/enrollment_receipt.go": {
+      "bytes": "bytes",
+      "context": "context",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
+      "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
+      "strconv": "strconv",
+      "strings": "strings",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "time": "time"
     },
     "internal/intents/manual_rebill_completion.go": {
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
