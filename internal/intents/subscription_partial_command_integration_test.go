@@ -27,7 +27,7 @@ func TestPartialSubscriptionCommandsPreserveNewlyAcceptedBillingTerms(t *testing
 		t.Run(command, func(t *testing.T) {
 			fx := seedPastDueSubscriptionForMerchant(t, uuid.New())
 			ctx := fx.handlerCtx()
-			_, err := fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET status='active',deletion_scheduled_at=now() WHERE id=$1`, fx.subID)
+			_, err := fx.db.Pool().Exec(ctx, `UPDATE billing.subscriptions SET status='active',deletion_scheduled_at=now() WHERE id=$1`, fx.subID)
 			require.NoError(t, err)
 			prices := catalog.NewPriceService(fx.db)
 			products := catalog.NewProductService(fx.db)
@@ -35,10 +35,10 @@ func TestPartialSubscriptionCommandsPreserveNewlyAcceptedBillingTerms(t *testing
 			admin.SetDeferredDeleteScheduler(NewNMIDeleteScheduler(fx.db, nil, OriginAdmin, "admin cancellation"))
 			target, currentPrice, method := uuid.New(), uuid.New(), uuid.New()
 			for index, id := range []uuid.UUID{target, currentPrice} {
-				_, err = fx.db.Pool().Exec(ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew,key) VALUES($1,$2,$3,$5,'USD',720,true,$4)`, id, fx.merchantID, fx.payload.Renewal.ProductID, "partial-"+id.String(), int64(8000000+index*1000000))
+				_, err = fx.db.Pool().Exec(ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew,key) VALUES($1,$2,$3,$5,'USD',720,true,$4)`, id, fx.merchantID, fx.payload.Renewal.ProductID, "partial-"+id.String(), int64(8000000+index*1000000))
 				require.NoError(t, err)
 			}
-			_, err = fx.db.Pool().Exec(ctx, `INSERT INTO openrails.payment_methods(id,merchant_id,customer_id,rail,psp_id,rail_customer_ref,rail_method_ref,initial_transaction_id,stored_credential_recurring_ref,rebill_driver) SELECT $1,merchant_id,customer_id,rail,psp_id,rail_customer_ref,'new-billing-profile',initial_transaction_id,stored_credential_recurring_ref,rebill_driver FROM openrails.payment_methods WHERE id=$2`, method, fx.payload.PaymentMethodID)
+			_, err = fx.db.Pool().Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,rail,psp_id,rail_customer_ref,rail_method_ref,initial_transaction_id,stored_credential_recurring_ref,rebill_driver) SELECT $1,merchant_id,customer_id,rail,psp_id,rail_customer_ref,'new-billing-profile',initial_transaction_id,stored_credential_recurring_ref,rebill_driver FROM billing.payment_methods WHERE id=$2`, method, fx.payload.PaymentMethodID)
 			require.NoError(t, err)
 			tx, err := fx.db.Pool().Begin(ctx)
 			require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestPartialSubscriptionCommandsPreserveNewlyAcceptedBillingTerms(t *testing
 			}, 10*time.Second, 10*time.Millisecond)
 			end := fx.periodEnd.Add(-time.Hour)
 			start := end.Add(-30 * 24 * time.Hour)
-			_, err = tx.Exec(ctx, `UPDATE openrails.subscriptions SET status='past_due',price_id=$2,scheduled_price_id=$3,payment_method_id=$4,current_period_starts_at=$5,current_period_ends_at=$6,gateway_response='{"provider_update":"retained"}' WHERE id=$1`, fx.subID, currentPrice, target, method, start, end)
+			_, err = tx.Exec(ctx, `UPDATE billing.subscriptions SET status='past_due',price_id=$2,scheduled_price_id=$3,payment_method_id=$4,current_period_starts_at=$5,current_period_ends_at=$6,gateway_response='{"provider_update":"retained"}' WHERE id=$1`, fx.subID, currentPrice, target, method, start, end)
 			require.NoError(t, err)
 			accepted, err := NewManualRebillHandler(d, fullModeConfig(), nil, nil).EnqueueScheduled(ctx, fx.subID)
 			require.NoError(t, err)
@@ -134,14 +134,14 @@ func TestAdminExtensionAndCancellationKeepFreshBillingFields(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, extended.CurrentPeriodEndsAt.Equal(before.CurrentPeriodEndsAt.Add(24*time.Hour)))
 	var entitlementEnd *time.Time
-	require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT end_at FROM openrails.entitlements WHERE source_id=$1 AND revoked_at IS NULL LIMIT 1`, fx.subID).Scan(&entitlementEnd))
+	require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT end_at FROM billing.entitlements WHERE source_id=$1 AND revoked_at IS NULL LIMIT 1`, fx.subID).Scan(&entitlementEnd))
 	require.Nil(t, entitlementEnd, "active auto-renewing access remains continuous when the paid period extends")
 	target := uuid.New()
-	_, err = fx.db.Pool().Exec(ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew,key) VALUES($1,$2,$3,8000000,'USD',720,true,$4)`, target, fx.merchantID, fx.payload.Renewal.ProductID, "cancel-quote-"+target.String())
+	_, err = fx.db.Pool().Exec(ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew,key) VALUES($1,$2,$3,8000000,'USD',720,true,$4)`, target, fx.merchantID, fx.payload.Renewal.ProductID, "cancel-quote-"+target.String())
 	require.NoError(t, err)
 	// The pending quote is deliberately preserved by a lifecycle cancellation;
 	// cancellation owns status/retry fields and a separate durable provider delete.
-	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET scheduled_price_id=$2 WHERE id=$1`, fx.subID, target)
+	_, err = fx.db.Pool().Exec(ctx, `UPDATE billing.subscriptions SET scheduled_price_id=$2 WHERE id=$1`, fx.subID, target)
 	require.NoError(t, err)
 	require.NoError(t, admin.CancelSubscription(ctx, fx.subID, "requested", false))
 	cancelled, err := subscriptions.NewSubscriptionRepo(fx.db).GetByID(ctx, fx.subID)
@@ -153,7 +153,7 @@ func TestAdminExtensionAndCancellationKeepFreshBillingFields(t *testing.T) {
 	require.True(t, cancelled.CurrentPeriodEndsAt.Equal(*extended.CurrentPeriodEndsAt))
 	require.NotNil(t, cancelled.DeletionScheduledAt)
 	var deletes int
-	require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1 AND intent_type='nmi_delete_subscription' AND origin='admin'`, fx.subID).Scan(&deletes))
+	require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1 AND intent_type='nmi_delete_subscription' AND origin='admin'`, fx.subID).Scan(&deletes))
 	require.Equal(t, 1, deletes)
 }
 
@@ -176,7 +176,7 @@ func TestDeleteCompletionOnlyClearsItsAcceptedProviderTarget(t *testing.T) {
 		{"same accepted target", fx.pspID, fx.payload.RailSubscriptionID, true},
 	} {
 		t.Run(target.name, func(t *testing.T) {
-			_, err := fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET psp_id=$2,rail_subscription_id=$3,deletion_scheduled_at=now() WHERE id=$1`, fx.subID, target.psp, target.reference)
+			_, err := fx.db.Pool().Exec(ctx, `UPDATE billing.subscriptions SET psp_id=$2,rail_subscription_id=$3,deletion_scheduled_at=now() WHERE id=$1`, fx.subID, target.psp, target.reference)
 			require.NoError(t, err)
 			for range 2 {
 				require.NoError(t, h.finalize(ctx, completed))
@@ -190,7 +190,7 @@ func TestDeleteCompletionOnlyClearsItsAcceptedProviderTarget(t *testing.T) {
 			}
 		})
 	}
-	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET deletion_scheduled_at=now() WHERE id=$1`, fx.subID)
+	_, err = fx.db.Pool().Exec(ctx, `UPDATE billing.subscriptions SET deletion_scheduled_at=now() WHERE id=$1`, fx.subID)
 	require.NoError(t, err)
 	completed.Payload = []byte(`{}`)
 	require.Error(t, h.finalize(ctx, completed))
@@ -213,7 +213,7 @@ func TestDeleteProducerSeparatesCompletedProviderTargets(t *testing.T) {
 	require.EqualValues(t, 1, a.deleteCalls.Load())
 	other := dbtest.EnsureTestPSP(ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "replacement-mobius-"+uuid.NewString())
 	reference := fx.psid // Independent accounts may reuse the identical provider id.
-	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET psp_id=$2,rail_subscription_id=$3,deletion_scheduled_at=now() WHERE id=$1`, fx.subID, other, reference)
+	_, err = fx.db.Pool().Exec(ctx, `UPDATE billing.subscriptions SET psp_id=$2,rail_subscription_id=$3,deletion_scheduled_at=now() WHERE id=$1`, fx.subID, other, reference)
 	require.NoError(t, err)
 	require.NoError(t, scheduler.ScheduleNMIDelete(ctx, fx.userID.String(), fx.subID, time.Now()))
 	second, err := fx.store.GetByIdempotencyKey(ctx, NMIDeleteIdempotencyKey(fx.subID, other, reference))
@@ -242,7 +242,7 @@ func TestOldDeleteCannotTargetOrUndoAReplacementBinding(t *testing.T) {
 	first, err := fx.store.GetByIdempotencyKey(ctx, NMIDeleteIdempotencyKey(fx.subID, fx.pspID, fx.psid))
 	require.NoError(t, err)
 	reference := "replacement-" + uuid.NewString()
-	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET rail_subscription_id=$2 WHERE id=$1`, fx.subID, reference)
+	_, err = fx.db.Pool().Exec(ctx, `UPDATE billing.subscriptions SET rail_subscription_id=$2 WHERE id=$1`, fx.subID, reference)
 	require.NoError(t, err)
 	gateway, client := newFakeNMI(t, reference, true)
 	h := NewNMIDeleteHandler(fx.db, fullModeConfig(), fakeNMIResolver{client: client}, nil)

@@ -43,6 +43,7 @@ SET deletion_scheduled_at=NULL, updated_at=$1::timestamptz
 WHERE merchant_id=$2::uuid AND id=$3::uuid
   AND psp_id=$4::uuid
   AND rail_subscription_id=$5::text
+  AND deleted_at IS NULL
   AND deletion_scheduled_at IS NOT NULL
 `
 
