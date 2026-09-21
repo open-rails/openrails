@@ -11,7 +11,7 @@ import (
 
 // Charger arms an off-session (merchant-initiated) charge of a saved payment
 // method in two phases: Prepare does every local check and credential
-// resolution without touching the provider; Submit is the one provider
+// resolution and read-only qualification; Submit is the one provider
 // submission. The invoice_collection intent fences between the two, so a
 // Prepare failure never consumes an attempt and every Submit error is a
 // possible submission. Implemented by ScopedCharger; faked in tests.
@@ -47,7 +47,8 @@ type ChargeRequest struct {
 	Description         string
 	// Instrument is the method as the operation froze it; the charge is
 	// refused before submission if the method no longer matches.
-	Instrument charge.FrozenInstrument
+	Instrument  charge.FrozenInstrument
+	HyperSwitch *charge.HyperSwitchBinding
 	// Initiator is frozen by the verified command admission, never decoded from a public request.
 	Initiator charge.Initiator
 }

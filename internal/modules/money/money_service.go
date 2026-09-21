@@ -76,8 +76,9 @@ func derefInt(v *int64) int64 {
 var ErrInsufficientCredits = openrails.ErrInsufficientCredits
 
 type MoneyService struct {
-	db    *db.DB
-	clock clockwork.Clock
+	hyperSwitchDeployment string
+	db                    *db.DB
+	clock                 clockwork.Clock
 }
 
 func NewMoneyService(database *db.DB, clocks ...clockwork.Clock) *MoneyService {

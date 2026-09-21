@@ -260,6 +260,62 @@ func (q *Queries) DeletePaymentMethod(ctx context.Context, id uuid.UUID) (int64,
 	return result.RowsAffected(), nil
 }
 
+const getCollectionCustodianAccountsForShare = `-- name: GetCollectionCustodianAccountsForShare :one
+SELECT p.id, p.merchant_id, p.rail, p.environment, p.account_id, p.key, p.evidence, p.first_seen_at, p.last_verified_at, p.replaced_at, p.created_at, p.updated_at, p.archived, p.custodian_id, c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at
+FROM openrails.psps p
+JOIN openrails.custodians c ON c.merchant_id = p.merchant_id
+WHERE p.merchant_id = $1::uuid
+  AND p.id = $2::uuid
+  AND c.id = $3::uuid
+FOR SHARE OF p, c
+`
+
+type GetCollectionCustodianAccountsForShareParams struct {
+	MerchantID  uuid.UUID
+	PspID       uuid.UUID
+	CustodianID uuid.UUID
+}
+
+type GetCollectionCustodianAccountsForShareRow struct {
+	OpenrailsPsp       OpenrailsPsp
+	OpenrailsCustodian OpenrailsCustodian
+}
+
+// Existing obligations retain the saved card's explicit custody/account, even
+// after an archive or a new default custodian. Do not re-route to p.custodian_id.
+func (q *Queries) GetCollectionCustodianAccountsForShare(ctx context.Context, arg GetCollectionCustodianAccountsForShareParams) (GetCollectionCustodianAccountsForShareRow, error) {
+	row := q.db.QueryRow(ctx, getCollectionCustodianAccountsForShare, arg.MerchantID, arg.PspID, arg.CustodianID)
+	var i GetCollectionCustodianAccountsForShareRow
+	err := row.Scan(
+		&i.OpenrailsPsp.ID,
+		&i.OpenrailsPsp.MerchantID,
+		&i.OpenrailsPsp.Rail,
+		&i.OpenrailsPsp.Environment,
+		&i.OpenrailsPsp.AccountID,
+		&i.OpenrailsPsp.Key,
+		&i.OpenrailsPsp.Evidence,
+		&i.OpenrailsPsp.FirstSeenAt,
+		&i.OpenrailsPsp.LastVerifiedAt,
+		&i.OpenrailsPsp.ReplacedAt,
+		&i.OpenrailsPsp.CreatedAt,
+		&i.OpenrailsPsp.UpdatedAt,
+		&i.OpenrailsPsp.Archived,
+		&i.OpenrailsPsp.CustodianID,
+		&i.OpenrailsCustodian.ID,
+		&i.OpenrailsCustodian.MerchantID,
+		&i.OpenrailsCustodian.Key,
+		&i.OpenrailsCustodian.Kind,
+		&i.OpenrailsCustodian.Environment,
+		&i.OpenrailsCustodian.AccountID,
+		&i.OpenrailsCustodian.Settings,
+		&i.OpenrailsCustodian.CredentialVersions,
+		&i.OpenrailsCustodian.Archived,
+		&i.OpenrailsCustodian.CreatedAt,
+		&i.OpenrailsCustodian.UpdatedAt,
+	)
+	return i, err
+}
+
 const getPaymentMethodByFingerprint = `-- name: GetPaymentMethodByFingerprint :one
 SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods pm
 WHERE pm.merchant_id = $1

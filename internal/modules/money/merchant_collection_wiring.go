@@ -138,6 +138,9 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 		// INSTRUMENT decides this, not the rail.
 		scope.CustodianID = method.CustodianID
 		adapter, err = b.custodianProxyAdapter(ctx, svc, mid, scope)
+	case method.Custodian == models.CustodianHyperSwitch:
+		scope.CustodianID = method.CustodianID
+		adapter, err = b.hyperSwitchAdapter(ctx, svc, mid, scope)
 	case method.Custodian != models.CustodianPSP:
 		return nil, false, fmt.Errorf("custodian %s has no qualified invoice collection transport", method.Custodian)
 	default:

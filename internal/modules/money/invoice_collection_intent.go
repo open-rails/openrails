@@ -138,6 +138,12 @@ func (h *InvoiceCollectionHandler) Execute(ctx context.Context, intent gen.Openr
 		return h.Verify(ctx, intent)
 	}
 	res, err := prepared.Submit(ctx)
+	if errors.Is(err, charge.ErrInstrumentChanged) {
+		// Only this executor owns the freshly inserted fence, and the scoped
+		// charger raises this refusal before entering its provider callback.
+		// An existing marker never reaches this path or authorizes nonexecution.
+		return h.finalizeNotExecuted(ctx, intent, p, "instrument_changed", err.Error())
+	}
 	return h.classify(ctx, intent, p, res, err)
 }
 
@@ -154,6 +160,7 @@ func (h *InvoiceCollectionHandler) chargeRequest(intent gen.OpenrailsRailIntent,
 		IdempotencyKey:      intent.ID.String(),
 		Description:         p.Description,
 		Instrument:          p.Instrument,
+		HyperSwitch:         p.HyperSwitch,
 		Initiator:           p.Initiator,
 		ProviderCustomerRef: p.ProviderCustomerRef,
 	}
@@ -487,6 +494,9 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 	var invoice *models.Invoice
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: intent.MerchantID, ID: p.CustomerID}); err != nil {
+			return err
+		}
 		complete := func() error {
 			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteInvoiceCollection(ctx, intent, intents.TerminalWithEvidence("collection refused: "+failureCode, evidence), now)
 		}
@@ -563,6 +573,9 @@ func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, inte
 	now := h.now()
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: intent.MerchantID, ID: p.CustomerID}); err != nil {
+			return err
+		}
 		complete := func() error {
 			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteInvoiceCollection(ctx, intent, intents.TerminalWithEvidence(reason, evidence), now)
 		}

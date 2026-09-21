@@ -187,7 +187,8 @@ var jsonRules = map[string]jsonRule{
 		"initiator":  textValue,
 		"invoice_id": uuidValue, "customer_id": uuidValue, "attempt_id": uuidValue, "payment_method_id": uuidValue,
 		"rail": textValue, "currency": textValue, "amount": integerValue, "amount_minor": integerValue, "description": textValue, "provider_customer_ref": textValue,
-		"instrument": object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue}),
+		"hyperswitch": object(map[string]jsonRule{"account_id": textValue, "profile_id": textValue, "api_base_url": textValue}),
+		"instrument":  object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "stored_credential_recurring_ref": textValue, "stored_credential_unscheduled_ref": textValue}),
 	}),
 	"rail_intents.invoice_collection.result_evidence": nullable(object(map[string]jsonRule{
 		"qualified_receipt": collectedReceiptJSON,

@@ -2,10 +2,12 @@ package money
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -17,8 +19,8 @@ import (
 )
 
 // CollectionAdapter arms a rail-specific saved-method charge. Prepare performs
-// only local validation and request building; the returned PreparedCharge's
-// Submit is the provider submission.
+// validation and request building, with at most read-only qualification.
+// The returned PreparedCharge's Submit is the provider submission.
 type CollectionAdapter interface {
 	Prepare(ctx context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (PreparedCharge, error)
 }
@@ -53,7 +55,7 @@ func (c *ScopedCharger) SetAdapterResolver(r CollectionAdapterResolver) {
 }
 
 // Prepare is the ONE dispatch point for every off-session collection charge.
-// Nothing here reaches the provider.
+// Nothing here sends a provider mutation.
 func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (PreparedCharge, error) {
 	if c == nil || c.db == nil {
 		return nil, fmt.Errorf("scoped charger not initialized")
@@ -93,6 +95,9 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	if method.CustomerID != req.Payer.UUID() {
 		return nil, fmt.Errorf("payment method belongs to another customer")
 	}
+	if strings.TrimSpace(method.ParkReason) != "" {
+		return nil, fmt.Errorf("%w: payment method is parked", charge.ErrInstrumentChanged)
+	}
 	if err := req.Instrument.Validate(); err != nil {
 		return nil, err
 	}
@@ -131,6 +136,13 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 		return nil, err
 	}
 	return PreparedChargeFunc(func(ctx context.Context) (ChargeResult, error) {
+		// Admission freezes under the same customer/method order as deletion.
+		// Recheck immediately before first send; after this transaction the
+		// unresolved accepted intent pins the method against supported removal
+		// and custody remap. No provider request runs while these locks are held.
+		if err := c.checkInstrumentForSubmit(ctx, req, rail); err != nil {
+			return ChargeResult{}, err
+		}
 		res, err := inner.Submit(ctx)
 		if err != nil {
 			return ChargeResult{}, err
@@ -140,6 +152,41 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 		}
 		return res, nil
 	}), nil
+}
+
+func (c *ScopedCharger) checkInstrumentForSubmit(ctx context.Context, req ChargeRequest, rail string) error {
+	return c.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: req.MerchantID, ID: req.Payer.UUID()}); err != nil {
+			return err
+		}
+		method, err := q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: req.MerchantID, ID: req.PaymentMethodID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return charge.ErrInstrumentChanged
+		}
+		if err != nil {
+			return err
+		}
+		if method.CustomerID != req.Payer.UUID() || method.ParkReason != "" || normalizeRail(method.Rail) != rail {
+			return charge.ErrInstrumentChanged
+		}
+		if err := req.Instrument.Matches(method, charge.AgreementUnscheduled); err != nil {
+			return err
+		}
+		if method.Custodian == models.CustodianHyperSwitch {
+			if req.HyperSwitch == nil {
+				return charge.ErrInstrumentChanged
+			}
+			binding, err := collectionHyperSwitchBinding(ctx, q, method, req.HyperSwitch.APIBaseURL)
+			if err != nil {
+				return err
+			}
+			if binding != *req.HyperSwitch {
+				return charge.ErrInstrumentChanged
+			}
+		}
+		return nil
+	})
 }
 
 func normalizeRail(rail string) string {
