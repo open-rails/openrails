@@ -185,7 +185,7 @@ func TestUpgradeDefinitiveProrationRefusalQueuesSuccessorCancellation(t *testing
 	_, again := fx.upgrade(t)
 	require.Equal(t, declined, again, "the refusal replays as itself")
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
-	deletion, err := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, intents.NMIDeleteIdempotencyKey(p.NewSubscriptionID))
+	deletion, err := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, intents.NMIDeleteIdempotencyKey(p.NewSubscriptionID, *in.PspID, next.RailSubscriptionID))
 	require.NoError(t, err)
 	require.Equal(t, intents.StatusPending, deletion.Status)
 	require.NotEqual(t, uuid.Nil, deletion.ID)

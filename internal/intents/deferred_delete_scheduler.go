@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -81,7 +82,7 @@ func (s *NMIDeleteScheduler) ScheduleNMIDelete(ctx context.Context, userID strin
 			UserID:             userID,
 			RailSubscriptionID: sub.RailSubscriptionID,
 		},
-		IdempotencyKey: NMIDeleteIdempotencyKey(subscriptionID),
+		IdempotencyKey: NMIDeleteIdempotencyKey(subscriptionID, sub.PspID, sub.RailSubscriptionID),
 		NextAttemptAt:  runAt.UTC(),
 		Origin:         s.origin,
 		OriginReason:   s.reason,
@@ -97,7 +98,14 @@ func (s *NMIDeleteScheduler) CancelNMIDelete(ctx context.Context, userID string,
 	if s == nil || s.db == nil {
 		return nil
 	}
-	_, err := s.store.SupersedeBySubject(ctx, TypeNMIDeleteSubscription, subscriptionID,
-		"cancellation undone (resume) for user "+userID)
-	return err
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := s.db.NewWithPgxTx(tx)
+		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, subscriptionID)
+		if err != nil {
+			return err
+		}
+		reason := "cancellation undone (resume) for user " + userID
+		_, err = d.Gen(ctx).SupersedePendingNMIDelete(ctx, gen.SupersedePendingNMIDeleteParams{MerchantID: sub.MerchantID, IdempotencyKey: NMIDeleteIdempotencyKey(subscriptionID, sub.PspID, sub.RailSubscriptionID), Reason: &reason})
+		return err
+	})
 }

@@ -388,7 +388,7 @@ func (h *NMIUpgradeIntentHandler) refusedProration(ctx context.Context, in gen.O
 		} else if err != nil {
 			return err
 		}
-		_, err := intents.NewStore(txDB).Enqueue(ctx, intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: *in.PspID, SubscriptionID: &p.NewSubscriptionID, IntentType: intents.TypeNMIDeleteSubscription, Payload: intents.NMIDeletePayload{UserID: p.UserID, RailSubscriptionID: progress.Successor.Enrollment.SubscriptionID}, IdempotencyKey: intents.NMIDeleteIdempotencyKey(p.NewSubscriptionID), NextAttemptAt: p.PeriodStart, Origin: intents.OriginUser, OriginReason: "cancel unpaid upgrade successor after definitive proration refusal"})
+		_, err := intents.NewStore(txDB).Enqueue(ctx, intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: *in.PspID, SubscriptionID: &p.NewSubscriptionID, IntentType: intents.TypeNMIDeleteSubscription, Payload: intents.NMIDeletePayload{UserID: p.UserID, RailSubscriptionID: progress.Successor.Enrollment.SubscriptionID}, IdempotencyKey: intents.NMIDeleteIdempotencyKey(p.NewSubscriptionID, *in.PspID, progress.Successor.Enrollment.SubscriptionID), NextAttemptAt: p.PeriodStart, Origin: intents.OriginUser, OriginReason: "cancel unpaid upgrade successor after definitive proration refusal"})
 		return err
 	})
 	if err != nil {
@@ -432,7 +432,7 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.Openrails
 				}
 			}
 		}
-		_, err := intents.NewStore(txDB).Enqueue(ctx, intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: *in.PspID, SubscriptionID: &p.OldSubscriptionID, IntentType: intents.TypeNMIDeleteSubscription, Payload: intents.NMIDeletePayload{UserID: p.UserID, RailSubscriptionID: p.OldProviderSubscriptionID}, IdempotencyKey: intents.NMIDeleteIdempotencyKey(p.OldSubscriptionID), NextAttemptAt: p.PeriodStart, Origin: intents.OriginUser, OriginReason: "cancel predecessor after durable tier upgrade"})
+		_, err := intents.NewStore(txDB).Enqueue(ctx, intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: *in.PspID, SubscriptionID: &p.OldSubscriptionID, IntentType: intents.TypeNMIDeleteSubscription, Payload: intents.NMIDeletePayload{UserID: p.UserID, RailSubscriptionID: p.OldProviderSubscriptionID}, IdempotencyKey: intents.NMIDeleteIdempotencyKey(p.OldSubscriptionID, *in.PspID, p.OldProviderSubscriptionID), NextAttemptAt: p.PeriodStart, Origin: intents.OriginUser, OriginReason: "cancel predecessor after durable tier upgrade"})
 		return err
 	})
 }
