@@ -40,7 +40,10 @@ func TestRiverOwnershipDefaultsAndValidation(t *testing.T) {
 	schema, err := RiverManagedByOpenRails("jobs").managedSchema("billing")
 	require.NoError(t, err)
 	require.Equal(t, "jobs", schema)
-	for _, ownership := range []RiverOwnership{RiverManagedByOpenRails("billing"), RiverManagedByOpenRails("bad;sql"), RiverManagedByOpenRails("one", "two"), RiverFromHost(nil)} {
+	schema, err = RiverFromHost(nil).managedSchema("billing")
+	require.NoError(t, err)
+	require.Empty(t, schema)
+	for _, ownership := range []RiverOwnership{RiverManagedByOpenRails("billing"), RiverManagedByOpenRails("bad;sql"), RiverManagedByOpenRails("one", "two")} {
 		_, err := ownership.managedSchema("billing")
 		require.Error(t, err)
 	}

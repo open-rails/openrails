@@ -104,6 +104,9 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
 	}
+	if opts.River.host && opts.River.bind == nil {
+		return nil, fmt.Errorf("embedded billing: RiverFromHost requires a non-nil binder")
+	}
 	riverSchema, err := opts.River.managedSchema(opts.Config.DB.SchemaName())
 	if err != nil {
 		return nil, err
