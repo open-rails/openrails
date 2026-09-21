@@ -318,6 +318,9 @@ func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsR
 	if step.Refusal != "" || step.Enrollment != nil {
 		return intents.Outcome{}, intents.RejectResolution("%s step already has an outcome", resolution.Step)
 	}
+	if resolution.NotExecuted {
+		return intents.Outcome{}, intents.RejectResolution("submitted NMI %s has no authoritative nonexecution proof", resolution.Step)
+	}
 	client, err := h.Checkout.resolveNMIClient(db.WithPSPID(ctx, *in.PspID), nmiIntentClientName(p.PSP, in.Rail))
 	if err != nil {
 		return intents.Outcome{}, fmt.Errorf("resolve nmi client: %w", err)
@@ -331,8 +334,6 @@ func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsR
 	}
 	ref := resolution.ProviderReference
 	switch {
-	case resolution.Step == "successor" && resolution.NotExecuted:
-		step.Refusal = "provider confirmed the successor enrollment was not executed"
 	case resolution.Step == "successor":
 		if err := client.ConfirmLiveSubscription(ctx, ref, p.Instrument.RailCustomerRef, p.PlanID); err != nil {
 			return intents.Outcome{}, intents.RejectResolution("%v", err)
@@ -345,8 +346,6 @@ func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsR
 			return intents.Outcome{}, err
 		}
 		step.Enrollment = &nmi.AddSubscriptionResponse{SubscriptionID: ref}
-	case resolution.NotExecuted:
-		return intents.Outcome{}, intents.RejectResolution("submitted NMI proration has no authoritative nonexecution proof")
 	default:
 		receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, upgradeReceiptResolver{client}, ref)
 		if err != nil || !found {

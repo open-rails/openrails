@@ -449,25 +449,29 @@ func TestUpgradeUnknownProrationResolution(t *testing.T) {
 	})
 }
 
-// Provider-confirmed non-execution of the successor terminates the operation
-// with the predecessor intact and releases the predecessor for a new request.
-func TestUpgradeSuccessorNonExecutionReleasesPredecessor(t *testing.T) {
-	fx := newUpgradeAdoptFixture(t)
-	fx.gateway.createMode.Store("ambiguousLost")
-	fx.upgradeProcessing(t)
-	resolved, err := fx.resolve(t, intents.Resolution{Step: "successor", NotExecuted: true, Actor: "ops", Reason: "NMI confirmed no subscription"})
-	require.NoError(t, err)
-	require.Equal(t, intents.StatusFailedTerminal, resolved.Status)
-	old, err := fx.svc.SubscriptionService.GetByID(fx.ctx, fx.existingSub.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.StatusActive, old.Status)
+// A lost response permits neither an absence-based release nor an unsupported
+// operator assertion. The gateway may already have a live recurring schedule.
+func TestUpgradeSuccessorNonExecutionCannotReleaseSubmittedEnrollment(t *testing.T) {
+	for _, mode := range []string{"ambiguousLanded", "ambiguousLost"} {
+		t.Run(mode, func(t *testing.T) {
+			fx := newUpgradeAdoptFixture(t)
+			fx.gateway.createMode.Store(mode)
+			fx.upgradeProcessing(t)
+			require.Equal(t, mode == "ambiguousLanded", fx.gateway.subExists.Load())
+			_, err := fx.resolve(t, intents.Resolution{Step: "successor", NotExecuted: true, Actor: "ops", Reason: "operator assertion"})
+			require.ErrorIs(t, err, intents.ErrResolutionRejected)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, fx.operation(t).Status)
+			old, err := fx.svc.SubscriptionService.GetByID(fx.ctx, fx.existingSub.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.StatusActive, old.Status)
 
-	fx.gateway.createMode.Store("approve")
-	fx.req.IdempotencyKey = uuid.NewString()
-	response, err := fx.upgrade(t)
-	require.NoError(t, err)
-	require.Equal(t, "succeeded", response.Status)
-	require.EqualValues(t, 2, fx.gateway.createCalls.Load(), "only a definitively unexecuted enrollment permits a new operation")
+			fx.gateway.createMode.Store("approve")
+			fx.req.IdempotencyKey = uuid.NewString()
+			_, err = fx.upgrade(t)
+			require.Error(t, err, "a new caller key cannot release the unresolved predecessor")
+			require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+		})
+	}
 }
 
 // An NMI upgrade needs the client's Idempotency-Key too: without one it is
