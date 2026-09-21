@@ -2742,7 +2742,7 @@ CREATE TABLE openrails.subscriptions (
     destructive_run_id uuid,
     destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
     CONSTRAINT subscriptions_collection_policy_check CHECK (collection_policy IN ('provider', 'provider_dunning', 'engine')),
-    CONSTRAINT subscriptions_engine_binding_check CHECK (collection_policy <> 'engine' OR (rail = 'nmi' AND rail_subscription_id = '' AND payment_method_id IS NOT NULL)),
+    CONSTRAINT subscriptions_engine_binding_check CHECK (collection_policy <> 'engine' OR (rail = 'nmi' AND rail_subscription_id = '' AND (payment_method_id IS NOT NULL OR status = 'cancelled'))),
     CONSTRAINT subscriptions_dunning_rail_check CHECK (collection_policy <> 'provider_dunning' OR rail = 'nmi'),
     CONSTRAINT chk_cancelled_has_timestamp CHECK (((status <> 'cancelled'::openrails.subscription_status) OR (cancelled_at IS NOT NULL))),
     CONSTRAINT chk_cancelled_has_type CHECK (((status <> 'cancelled'::openrails.subscription_status) OR (cancel_type IS NOT NULL))),
