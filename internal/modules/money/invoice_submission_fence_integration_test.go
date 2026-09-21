@@ -93,6 +93,7 @@ func TestInvoiceSubmissionFenceRecovery(t *testing.T) {
 		require.Empty(t, intents.EvidenceString(current, "not_executed"))
 		_, err = admin.Exec(e.ctx, "DROP FUNCTION billing."+trigger+"() CASCADE")
 		require.NoError(t, err)
+		require.NoError(t, store.RetainCollectionCandidate(e.ctx, claimed, intents.CollectionCandidate{TransactionID: "unpaid-candidate"}))
 		restarted := money.NewInvoiceCollectionHandler(e.db, nil, nil, fullModeConfig(), nil)
 		outcome = restarted.Verify(e.ctx, claimed)
 		require.Equal(t, intents.OutcomeTerminal, outcome.Class)
@@ -102,6 +103,45 @@ func TestInvoiceSubmissionFenceRecovery(t *testing.T) {
 		require.Nil(t, e.invoiceRow(t).CollectionIntentID)
 		require.Equal(t, 1, prepares)
 		require.Empty(t, e.gateway.sentOrderIDs())
+		require.Zero(t, e.owedPaymentTransfers(t))
+	})
+
+	t.Run("conflicting qualified facts refuse completion", func(t *testing.T) {
+		e := newNMIReceiptEnv(t)
+		_, err := e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, nil, e.plane), 0)
+		require.NoError(t, err)
+		pending := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+		store := intents.NewStore(e.db)
+		claimed, ok, err := store.ClaimByID(e.ctx, pending.ID, time.Now(), time.Now().Add(time.Minute))
+		require.NoError(t, err)
+		require.True(t, ok)
+		proof, first, err := store.BeginInvoiceCollection(e.ctx, claimed, time.Now())
+		require.NoError(t, err)
+		require.True(t, first)
+		require.NoError(t, store.RetainInvoiceNonexecution(e.ctx, claimed, proof, "not_dispatched", "known before POST"))
+		// Inject conflicting positive provider facts, rather than an untrusted
+		// outcome boolean. Neither qualified fact may silently win this conflict.
+		e.gateway.orderSale(claimed.ID.String(), "contradicted-paid")
+		e.gateway.payment("contradicted-paid", e.vault, "0.05", e.currency)
+		receipt, found, err := e.plane.ReadCollectionReceipt(e.ctx, claimed, "contradicted-paid")
+		require.NoError(t, err)
+		require.True(t, found)
+		_, err = store.RetainCollectedReceipt(e.ctx, claimed, receipt)
+		require.NoError(t, err)
+		handler := money.NewInvoiceCollectionHandler(e.db, nil, nil, fullModeConfig(), nil)
+		require.Equal(t, intents.OutcomeAmbiguous, handler.Verify(e.ctx, claimed).Class)
+		current, err := store.Get(e.ctx, claimed.ID)
+		require.NoError(t, err)
+		err = e.db.MerchantTx(e.ctx, func(c context.Context, tx pgx.Tx) error {
+			_, err := tx.Exec(c, `UPDATE billing.invoices SET collection_intent_id=NULL WHERE id=$1`, e.invoice)
+			if err != nil {
+				return err
+			}
+			return intents.NewStore(e.db.NewWithPgxTx(tx)).CompleteInvoiceCollection(c, current, intents.Succeeded(nil), time.Now())
+		})
+		require.ErrorContains(t, err, "contradicts qualified nonexecution")
+		require.NotNil(t, e.invoiceRow(t).CollectionIntentID)
+		require.Zero(t, e.settledPayments(t))
 		require.Zero(t, e.owedPaymentTransfers(t))
 	})
 

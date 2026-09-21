@@ -61,6 +61,17 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.OpenrailsRa
 	if err != nil {
 		return fmt.Errorf("invalid retained collection receipt: %w", err)
 	}
+	var nonexecution InvoiceNonexecutionProof
+	var hasNonexecution bool
+	if current.IntentType == "invoice_collection" {
+		nonexecution, hasNonexecution, err = LoadInvoiceNonexecution(current)
+		if err != nil {
+			return err
+		}
+		if found && hasNonexecution {
+			return errors.New("qualified payment contradicts qualified nonexecution")
+		}
+	}
 	status := StatusFailedTerminal
 	evidence := map[string]any{}
 	reason := outcome.Reason
@@ -89,15 +100,11 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.OpenrailsRa
 				}
 			}
 			_, fenced := canonical["submitted_at"]
-			sealed, found, err := LoadInvoiceNonexecution(current)
-			if err != nil {
-				return err
-			}
-			if fenced && !found {
+			if fenced && !hasNonexecution {
 				return errInvoiceNonexecutionUnproven
 			}
-			if found {
-				code, reason := sealed.Refusal()
+			if hasNonexecution {
+				code, reason := nonexecution.Refusal()
 				if outcome.Evidence["not_executed_code"] != code || outcome.Reason != reason {
 					return errors.New("invoice nonexecution contradicts sealed proof")
 				}

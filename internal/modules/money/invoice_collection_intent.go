@@ -351,10 +351,23 @@ func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, int
 	if rail == "" {
 		rail = p.Rail
 	}
-	if receipt, found, err := intents.LoadCollectedReceipt(intent); err != nil {
+	nonexecution, hasNonexecution, err := intents.LoadInvoiceNonexecution(intent)
+	if err != nil {
+		return intents.Ambiguous("stored nonexecution rejected: " + err.Error()), true
+	}
+	receipt, hasReceipt, err := intents.LoadCollectedReceipt(intent)
+	if err != nil {
 		return intents.Ambiguous("stored receipt rejected: " + err.Error()), true
-	} else if found {
+	}
+	if hasReceipt && hasNonexecution {
+		return intents.Ambiguous("qualified payment contradicts qualified nonexecution"), true
+	}
+	if hasReceipt {
 		return h.finalizeSettle(ctx, intent, receipt), true
+	}
+	if hasNonexecution {
+		code, reason := nonexecution.Refusal()
+		return h.finalizeNotExecuted(ctx, intent, p, code, reason), true
 	}
 	if candidate, found, err := intents.LoadCollectionCandidate(intent); err != nil {
 		return intents.Ambiguous(err.Error()), true
@@ -365,12 +378,7 @@ func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, int
 		}
 		return h.qualifyAndSettle(ctx, intent, reference), true
 	}
-	if proof, found, err := intents.LoadInvoiceNonexecution(intent); err != nil {
-		return intents.Ambiguous("stored nonexecution rejected: " + err.Error()), true
-	} else if found {
-		code, reason := proof.Refusal()
-		return h.finalizeNotExecuted(ctx, intent, p, code, reason), true
-	}
+
 	if intent.Status == intents.StatusFailedTerminal && intents.EvidenceString(intent, collectionEvidenceNotExecuted) != "" {
 		code := intents.EvidenceString(intent, collectionEvidenceFailureCodeNotExecuted)
 		return h.finalizeNotExecuted(ctx, intent, p, code, intents.EvidenceString(intent, collectionEvidenceFailureMsg)), true
