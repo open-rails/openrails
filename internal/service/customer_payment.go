@@ -159,7 +159,7 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 			return nil, err
 		}
 		if err == nil && latest.Status == intents.StatusFailedTerminal {
-			accepted, err := intents.DecodeManualRebillPayload(latest)
+			accepted, err := subscriptions.DecodeManualRebillPayload(latest)
 			if err != nil {
 				return nil, err
 			}
