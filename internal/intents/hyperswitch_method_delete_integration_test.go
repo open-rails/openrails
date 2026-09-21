@@ -253,3 +253,29 @@ func TestStoredCardDeleteMaintenanceExceptionRequiresVerifiedPayer(t *testing.T)
 		})
 	}
 }
+
+func TestStoredCardDeleteCanonicalizesVerifiedPayer(t *testing.T) {
+	t.Run("hyperswitch", func(t *testing.T) {
+		f := newCustodyDeleteFixture(t)
+		user := billingauth.UserContext{UserID: " " + f.pm.CustomerID.String() + " "}
+		require.NoError(t, user.ValidateSubject())
+		f.ctx = billingauth.SetUserContext(f.ctx, user)
+		f.runner.Destructive = destructive.New(f.db)
+		require.True(t, f.run(t, f.pm).Done)
+		operation := f.operation(t)
+		require.Equal(t, string(OriginUser), operation.Origin)
+		require.Equal(t, f.pm.CustomerID.String(), *operation.Actor)
+	})
+	t.Run("native", func(t *testing.T) {
+		f := newVaultDeleteFixture(t)
+		user := billingauth.UserContext{UserID: " " + f.pm.CustomerID.String() + " "}
+		require.NoError(t, user.ValidateSubject())
+		f.ctx = billingauth.SetUserContext(f.ctx, user)
+		f.runner.Destructive = destructive.New(f.db)
+		require.True(t, f.executeThrough(t).Done)
+		operation, err := NewStore(f.db).GetByIdempotencyKey(f.ctx, NMIPaymentMethodDeleteIdempotencyKey(f.pm.ID))
+		require.NoError(t, err)
+		require.Equal(t, string(OriginUser), operation.Origin)
+		require.Equal(t, f.pm.CustomerID.String(), *operation.Actor)
+	})
+}

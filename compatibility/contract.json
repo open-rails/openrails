@@ -4904,7 +4904,7 @@
     "internal/http/routes_self.go": "f87be5d91c28b31e405b2244f20cf14b03866f2834de36b35b0f519e6ea6b73a",
     "internal/http/routesurface/provider_routes.go": "6a49245b179c577ea3d0d997234eb7314c19827b152931efd581625d54aab909",
     "internal/http/server.go": "8c37de35c4cf2d8091ff0d7eb7b8eab18ebf4688ec9c48e795bac783e3cdaef7",
-    "internal/intents/payment_method_delete_authority.go": "d1e3737b3a517ed114fd8b920e8fa8d18e687d4be4a7548c7344f7796f8eb54a",
+    "internal/intents/payment_method_delete_authority.go": "edc67d168ceae15e148a920c5bacf5f3cfcb10c82f549265f61f8e9ff4855e7b",
     "internal/intents/rate_ceiling.go": "2f14ccb694839b19af499b5346cb052d3296a9346590d15f7f1ed5e4271da962",
     "internal/migrate/postgres/0001_schema.up.sql": "ab467cc7da47b6b84f43780e8b3f0ab8a6fde30522e8c2026fef3bb1752381e1",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",

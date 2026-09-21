@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -12,7 +13,7 @@ import (
 
 func paymentMethodDeleteAuthority(ctx context.Context, payer uuid.UUID) (Origin, string) {
 	if user, ok := billingauth.FromContext(ctx); ok {
-		actor, err := uuid.Parse(user.UserID)
+		actor, err := uuid.Parse(strings.TrimSpace(user.UserID))
 		if err == nil && actor == payer && payer != uuid.Nil {
 			return OriginUser, actor.String()
 		}
