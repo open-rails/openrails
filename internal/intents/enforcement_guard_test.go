@@ -78,6 +78,8 @@ var providerWriteSurface = map[string]string{
 	"ReadSingleCardVaultBilling":   "read",
 	"ConfirmRefund":                "read",
 	"ReadSaleEvidence":             "read",
+	"PrepareRecurringSale":         "read",
+	"ReadRecurringSaleEvidence":    "read",
 	"AccountIdentity":              "read",
 	"FindSuccessfulSaleByOrderID":  "read",
 	"GetPayment":                   "read",
@@ -149,7 +151,8 @@ var allowedWriteCallers = map[string]string{
 	"internal/modules/solana/recurring/plan_service.go:SubmitForMerchantAddressWithPresubmit": "same Submitter, merchant-fee-payer variant",
 
 	// --- the charge seam --------------------------------------------------
-	"internal/modules/payments/rails/nmidirect/charger.go:Charge": "#297 charge-seam implementation: the ONE seam wire call, reached only via the money CollectionAdapter choke (arrears/invoice worker attempt-count keys, #672/#673)",
+	"internal/modules/payments/rails/nmidirect/recurring.go:chargeRecurring": "#1027 accepted engine initial/renewal intent owns the one durable submission fence before this direct sale",
+	"internal/modules/payments/rails/nmidirect/charger.go:Charge":            "#297 charge-seam implementation: the ONE seam wire call, reached only via the money CollectionAdapter choke (arrears/invoice worker attempt-count keys, #672/#673)",
 
 	// --- inside the client's own probe ------------------------------------
 	"internal/integrations/nmi/probe.go:voidProbe": "the client probing ITSELF: voids the $0.01 auth ProbeTestMode just made; never touches a customer",

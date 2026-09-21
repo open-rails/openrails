@@ -267,6 +267,13 @@ type Config struct {
 	ProviderSandbox *ProviderSandboxConfig `koanf:"provider_sandbox,omitempty"`
 	// HyperSwitch is a trusted host-owned deployment, never tenant-controlled.
 	HyperSwitch *HyperSwitchConfig `koanf:"hyperswitch,omitempty"`
+
+	// NewSubscriptionCollectionPolicy is consulted only when accepting a new
+	// agreement. Empty/provider preserves enrollment during staged rollout;
+	// engine requires a supported saved-method confirmation flow.
+	NewSubscriptionCollectionPolicy string `koanf:"new_subscription_collection_policy"`
+	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
+	EngineAdmissionHold bool `koanf:"engine_admission_hold"`
 }
 
 // ProviderSandboxConfig names loopback provider gateways for sandbox runs.
@@ -1412,6 +1419,9 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("encryption config validation failed: %w", err)
 	}
 
+	if cfg.NewSubscriptionCollectionPolicy != "" && cfg.NewSubscriptionCollectionPolicy != "provider" && cfg.NewSubscriptionCollectionPolicy != "engine" {
+		return fmt.Errorf("new_subscription_collection_policy must be provider or engine")
+	}
 	if err := validateHyperSwitch(cfg); err != nil {
 		return err
 	}

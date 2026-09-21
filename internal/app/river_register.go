@@ -52,7 +52,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// dunning worker's synchronous rebill path and (via Runtime.IntentRunner)
 	// the admin refund producer — per-type semantics can never diverge.
 	intentRegistry := r.buildIntentRegistry(clock)
-	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
+	if err := addTrackedWorker(r, workers, &riverjobs.DunningWorker{DB: r.DB, Config: r.Config, Clock: clock, NMIResolver: r.CollectionResolver, EngineCollections: r.MoneyService, IdempotencyService: r.IdempotencyService, DeferDelete: r.DeferredDeletes, Intents: r.intentRunner(intentRegistry, clock)}); err != nil {
 		return fmt.Errorf("add dunning worker: %w", err)
 	}
 	// Provider Refresh (#574/#719): the 4h periodic kind is a SCHEDULER that
@@ -329,6 +329,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		// Invoice collection rides the ledger like every other money mover; the
 		// charger and reconciliation reads are the #725 store-armed plane.
 		money.NewInvoiceCollectionHandler(r.DB, r.MoneyCharger, r.CollectionResolver, r.Config, clock),
+		money.NewSubscriptionCollectionHandler(r.DB, r.CollectionResolver, r.Config, clock),
 		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.RailConfigs, clock),
 		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.RailConfigs, clock),
 		intents.NewSolanaSunsetPlanHandler(r.DB, r.SolanaPlanService, r.SolanaRPCResolver.ChainReader(), clock),

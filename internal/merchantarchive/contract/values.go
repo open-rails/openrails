@@ -20,6 +20,18 @@ func ValidateValues(p Profile, values []*string) error {
 	if len(values) != len(p.Columns) {
 		return fmt.Errorf("invalid row width for %s", p.Name)
 	}
+	if p.Name == "subscriptions" {
+		policy, rail, binding := value(p, values, "collection_policy"), value(p, values, "rail"), value(p, values, "rail_subscription_id")
+		if policy == nil || !models.CollectionPolicy(*policy).Valid() || rail == nil || binding == nil {
+			return fmt.Errorf("subscription lacks a valid collection policy or binding")
+		}
+		if *policy == "provider_dunning" && *rail != "nmi" {
+			return fmt.Errorf("provider dunning requires NMI")
+		}
+		if *policy == "engine" && !((*rail == "nmi" || *rail == "stripe") && *binding == "" || *rail == "solana") {
+			return fmt.Errorf("engine collection has contradictory schedule binding")
+		}
+	}
 	// Canonical collection operations carry typed engine-encoded keys.
 	// Validate the accepted payer/authority/payload and retained custody before
 	// treating that one coordinate as an identity rather than arbitrary text.

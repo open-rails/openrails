@@ -265,7 +265,7 @@ func TestInitialMembershipQuoteAndVerifiedPayerPreparation(t *testing.T) {
 	expiry := now.Add(time.Hour)
 	amount, currency := price.Amount, price.Currency
 	session := models.CheckoutSession{ID: uuid.New(), CustomerID: customer, PspID: psp, PriceID: &price.ID, Mode: models.CheckoutSessionModeSubscription, Rail: models.RailNMI, Status: models.CheckoutSessionStatusRequiresAction, Amount: &amount, Currency: &currency, ExpiresAt: &expiry}
-	method := gen.OpenrailsPaymentMethod{ID: uuid.New(), MerchantID: mid, CustomerID: customer, PspID: psp, Rail: "nmi", Custodian: models.CustodianHyperSwitch, CustodianID: &custodian}
+	method := gen.OpenrailsPaymentMethod{ID: uuid.New(), MerchantID: mid, CustomerID: customer, PspID: psp, Rail: "nmi", Custodian: models.CustodianHyperSwitch, CustodianID: &custodian, RailCustomerRef: "customer", RailMethodRef: "method"}
 	require.NoError(t, quoteInitialMembership(ctx, &session, &price, &product, method, now))
 	// The generic RailState JSON roundtrip must not round a quoted integer cap.
 	encoded, err := json.Marshal(session)

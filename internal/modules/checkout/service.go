@@ -399,6 +399,9 @@ func (s *CheckoutService) processSubscription(
 	if err != nil {
 		return nil, err
 	}
+	if s.Config != nil && s.Config.NewSubscriptionCollectionPolicy == "engine" {
+		return nil, errors.New("new engine subscriptions require a saved-method checkout session and explicit agreement confirmation")
+	}
 	price = priceForCheckoutTarget(price, target)
 	switch {
 	case target.Rail == "ccbill":

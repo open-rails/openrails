@@ -729,8 +729,8 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		if params.Prepared != nil {
 			payment.ID = params.Prepared.PaymentID
 			token := charge.TokenTypePSPToken
-			if params.Prepared.CollectionPolicy == models.CollectionPolicyEngine {
-				token = charge.TokenTypePANViaProxy
+			if params.PaymentCustodian != "" {
+				token = payments.DefaultTokenType(string(params.Rail), params.PaymentCustodian)
 			}
 			payment.TokenType = &token
 		}
