@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
-	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -189,7 +190,7 @@ func customerPaymentRefusal(row gen.OpenrailsRailIntent) error {
 		return err
 	}
 	switch row.IntentType {
-	case intents.TypeManualRebill:
+	case subscriptions.TypeManualRebill:
 		if err := intents.ValidateManualRebillTerminal(row); err != nil {
 			return err
 		}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -81,6 +82,57 @@ type EnqueueParams struct {
 // Enqueue records the intent (idempotent) and returns the canonical row for
 // its idempotency key.
 func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
+	if p.IntentType != "nmi_upgrade" && p.IntentType != subscriptions.TypeManualRebill {
+		return s.enqueue(ctx, p)
+	}
+	if p.SubscriptionID == nil {
+		return gen.OpenrailsRailIntent{}, errors.New("recurring operation requires a subscription")
+	}
+	if scope, ok := merchant.FromContext(ctx); ok && scope.UUID() != p.MerchantID {
+		return gen.OpenrailsRailIntent{}, errors.New("recurring operation merchant does not match context")
+	}
+	ctx = merchant.WithID(ctx, merchant.ID(p.MerchantID))
+	var row gen.OpenrailsRailIntent
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := s.db.NewWithPgxTx(tx)
+		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, *p.SubscriptionID)
+		if err != nil {
+			return err
+		}
+		if sub.MerchantID != p.MerchantID {
+			return errors.New("recurring operation merchant does not match subscription")
+		}
+		bound := s.withTxDB(d)
+		// Existing keys still return their original operation; the caller's owned
+		// payload validation decides whether it is the same accepted request.
+		prior, err := bound.GetByIdempotencyKey(ctx, p.IdempotencyKey)
+		if err == nil {
+			row = prior
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if p.IntentType == "nmi_upgrade" {
+			if err := subscriptions.RefuseOwnedRebillTerms(ctx, d, sub); err != nil {
+				return err
+			}
+		} else {
+			_, err := d.Gen(ctx).GetLiveTierChangeRailIntent(ctx, gen.GetLiveTierChangeRailIntentParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
+			if err == nil {
+				return subscriptions.ErrRebillTermsCommitted
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+		row, err = bound.enqueue(ctx, p)
+		return err
+	})
+	return row, err
+}
+
+func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRailIntent, error) {
 	if p.IntentType == "" || p.IdempotencyKey == "" {
 		return gen.OpenrailsRailIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
 	}

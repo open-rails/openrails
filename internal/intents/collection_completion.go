@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
@@ -22,7 +24,7 @@ func (s *Store) CompleteInvoiceCollection(ctx context.Context, in gen.OpenrailsR
 }
 
 func (s *Store) CompleteManualRebill(ctx context.Context, in gen.OpenrailsRailIntent, outcome Outcome, now time.Time) error {
-	if in.IntentType != TypeManualRebill {
+	if in.IntentType != subscriptions.TypeManualRebill {
 		return errors.New("rebill completion received another operation kind")
 	}
 	return s.completeCollectedPayment(ctx, in, outcome, now)
@@ -89,7 +91,7 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.OpenrailsRa
 			return err
 		}
 	}
-	if current.IntentType == TypeManualRebill {
+	if current.IntentType == subscriptions.TypeManualRebill {
 		for _, key := range []string{rebillPreparationKey, rebillDeclineKey} {
 			if value, ok := existing[key]; ok {
 				evidence[key] = value
