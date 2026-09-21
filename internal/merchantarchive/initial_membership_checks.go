@@ -109,7 +109,16 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 		return err
 	}
 	if err := p.Terms.ValidateSubscriptionIdentity(sub, models.Rail(op.Rail), evidence.ProviderSubscriptionID); err != nil {
-		return err
+		if sub.ID != p.Terms.SubscriptionID || sub.CustomerID != p.Terms.CustomerID || sub.CollectionPolicy != p.Terms.CollectionPolicy || sub.Rail != models.Rail(op.Rail) || p.NativeSchedule == nil {
+			return err
+		}
+		transitions, err := q.ListCompletedProviderCutoversForSubscription(ctx, gen.ListCompletedProviderCutoversForSubscriptionParams{MerchantID: op.MerchantID, SubscriptionID: sub.ID})
+		if err != nil {
+			return err
+		}
+		if err := intents.ValidateProviderCutoverLineage(op.MerchantID, sub.ID, sub.CustomerID, p.Terms.PSPID, evidence.ProviderSubscriptionID, sub.PspID, sub.RailSubscriptionID, transitions); err != nil {
+			return err
+		}
 	}
 	price, err := q.GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: op.MerchantID, ID: p.Terms.PriceID})
 	if err != nil {
@@ -131,9 +140,51 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 			return err
 		}
 	}
-	before := p.Terms.PeriodEnd
-	if p.Terms.Pending {
-		before = p.Terms.PeriodStart
+	historyTerms := p.Terms
+	if p.Terms.Pending && sub.Status != models.StatusPending {
+		anyGrant, err := q.HasInitialMembershipGrant(ctx, gen.HasInitialMembershipGrantParams{MerchantID: op.MerchantID, SubscriptionID: sub.ID})
+		if err != nil {
+			return err
+		}
+		observed, err := q.ListObservedInitialMembershipPayments(ctx, gen.ListObservedInitialMembershipPaymentsParams{MerchantID: op.MerchantID, SubscriptionID: sub.ID, OrderReference: intents.NMIEnrollmentOrder(op)})
+		if err != nil {
+			return err
+		}
+		if len(observed) > 1 {
+			return errors.New("delayed initial membership has ambiguous first-payment history")
+		}
+		if p.Terms.RecurringAmount > 0 {
+			if len(observed) == 0 {
+				if anyGrant || sub.Status == models.StatusActive {
+					return errors.New("delayed membership activated without its first payment")
+				}
+			} else {
+				payment, err := models.PaymentFromGen(observed[0])
+				if err != nil {
+					return err
+				}
+				historyTerms.Pending = false
+				historyTerms.Amount = historyTerms.RecurringAmount
+				historyTerms.PaymentID = payment.ID
+				if payment.TransactionID == "" || payment.PurchasedAt.Before(p.Terms.PeriodStart) {
+					return errors.New("first scheduled payment precedes its accepted start")
+				}
+				if err := subscriptions.ValidateInitialMembershipPayment(historyTerms, payment, models.Rail(op.Rail), payment.TransactionID); err != nil {
+					return err
+				}
+			}
+		} else {
+			if len(observed) != 0 {
+				return errors.New("free initial phase carries an unexpected payment")
+			}
+			if anyGrant || sub.Status == models.StatusActive {
+				historyTerms.Pending = false
+			}
+		}
+	}
+	before := historyTerms.PeriodEnd
+	if historyTerms.Pending {
+		before = historyTerms.PeriodStart
 	}
 	limit, err := safecast.Convert[int32](len(p.Terms.Entitlements) + 2)
 	if err != nil {
@@ -143,5 +194,5 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 	if err != nil {
 		return err
 	}
-	return subscriptions.ValidateInitialMembershipHistory(op.MerchantID, p.Terms, history)
+	return subscriptions.ValidateInitialMembershipHistory(op.MerchantID, historyTerms, history)
 }

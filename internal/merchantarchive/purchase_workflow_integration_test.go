@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
@@ -84,6 +85,9 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 	customer, product, price, psp := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	account := uuid.NewString()
 	now := time.Now().UTC().Truncate(time.Second)
+	if phase == "activated" {
+		now = now.Add(-7 * 24 * time.Hour)
+	}
 	clock := clockwork.NewFakeClockAt(now)
 	ctx, release, err := source.WithMerchantConn(merchant.WithID(t.Context(), id))
 	require.NoError(t, err)
@@ -102,7 +106,7 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 		require.NoError(t, err)
 	}
 	services := newPurchaseArchiveServices(source, clock)
-	if phase == "pending" {
+	if phase == "pending" || phase == "activated" {
 		before, until := now, now.Add(72*time.Hour)
 		for _, name := range []string{"archive_access", "archive_download"} {
 			_, err := services.entitlements.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: customer.String(), Entitlement: name, NotBefore: &before, EndAt: &until, SourceType: models.EntitlementSourceAdmin, SourceID: uuid.New()})
@@ -163,7 +167,7 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 			return
 		}
 		expectedAmount := "2.50"
-		if phase == "pending" {
+		if phase == "pending" || phase == "activated" {
 			expectedAmount = ""
 		}
 		if r.Form.Get("amount") != expectedAmount || r.Form.Get("customer_vault_id") != "archive-vault" {
@@ -180,7 +184,7 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 		acceptedForm = r.Form
 		readMu.Unlock()
 		replyTransaction := transaction
-		if phase == "pending" {
+		if phase == "pending" || phase == "activated" {
 			replyTransaction = ""
 		}
 		fmt.Fprintf(w, "response=1&responsetext=SUCCESS&transactionid=%s&subscription_id=%s&response_code=100", replyTransaction, providerSubscription)
@@ -209,7 +213,7 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 		require.NoError(t, err)
 		payload, err := subscriptions.DecodeInitialMembershipPayload(operation)
 		require.NoError(t, err)
-		if phase == "pending" {
+		if phase == "pending" || phase == "activated" {
 			require.True(t, payload.Terms.Pending)
 		} else {
 			require.Equal(t, intents.StatusFailedTerminal, operation.Status)
@@ -217,6 +221,42 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 		var clean bytes.Buffer
 		err = Export(ctx, source, id, &clean)
 		require.NoError(t, err, "baseline archive before corruption must be supported")
+		if phase == "refused" {
+			for _, mutation := range []struct{ column, value string }{{"list_amount", "2500001"}, {"attempt_kind", "renewal"}, {"failure_code", "201"}, {"failure_reason", "insufficient_funds"}, {"purchased_at", now.Add(time.Hour).Format(time.RFC3339Nano)}, {"created_at", now.Add(time.Hour).Format(time.RFC3339Nano)}} {
+				t.Run("failed_attempt_"+mutation.column, func(t *testing.T) {
+					_, err := Restore(ctx, target, id, bytes.NewReader(alteredArchive(t, clean.Bytes(), "payments", mutation.column, &mutation.value)))
+					require.Error(t, err, "failed payment must match sealed refusal and accepted attempt")
+					assertEmptyBook(t, target, id)
+				})
+			}
+		}
+
+		if phase == "activated" {
+			clock.Advance(payload.Terms.PeriodStart.Add(time.Hour).Sub(clock.Now()))
+			observed := payload.Terms
+			observed.Pending = false
+			observed.Amount = observed.RecurringAmount
+			observed.PaymentID = uuid.New()
+			transaction := "observed-first-" + uuid.NewString()
+			purchased := clock.Now()
+			err := source.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				_, _, err := services.lifecycle.CreateMembershipTx(ctx, source.NewWithPgxTx(tx), &subscriptions.CreateMembershipParams{Prepared: &observed, UserID: customer.String(), PriceID: price, Rail: models.RailNMI, RailSubscriptionID: &providerSubscription, TransactionID: transaction, PurchasedAt: &purchased, PaymentMetadata: map[string]any{"order_id": intents.NMIEnrollmentOrder(operation), "provider_transaction_id": transaction}})
+				return err
+			})
+			require.NoError(t, err)
+			_, err = source.Qx(ctx).Exec(ctx, `UPDATE openrails.host_outbox SET delivered_at=$2 WHERE merchant_id=$1`, id.UUID(), clock.Now())
+			require.NoError(t, err)
+			var activated bytes.Buffer
+			require.NoError(t, Export(ctx, source, id, &activated), "first observed payment preserves original no-charge enrollment")
+			for _, mutation := range []struct{ column, value string }{{"amount", "2500001"}, {"list_amount", "2500001"}, {"status", "failed"}} {
+				_, err := Restore(ctx, target, id, bytes.NewReader(alteredArchive(t, activated.Bytes(), "payments", mutation.column, &mutation.value)))
+				require.Error(t, err, "first observed payment cannot contradict frozen terms")
+				assertEmptyBook(t, target, id)
+			}
+			_, err = Restore(ctx, target, id, bytes.NewReader(activated.Bytes()))
+			require.NoError(t, err)
+			return
+		}
 		probeAt := payload.Terms.PeriodEnd.Add(-time.Hour)
 		entitledBefore, err := services.entitlements.IsCustomerEntitled(ctx, customer, "archive_access", probeAt)
 		require.NoError(t, err)
@@ -532,4 +572,8 @@ func TestInitialMembershipRefusalArchiveRejectsOrphanGrant(t *testing.T) {
 }
 func TestInitialMembershipPendingArchiveRejectsStartGrant(t *testing.T) {
 	testPurchaseWorkflowArchive(t, true, "pending")
+}
+
+func TestInitialMembershipObservedPaymentArchive(t *testing.T) {
+	testPurchaseWorkflowArchive(t, true, "activated")
 }
