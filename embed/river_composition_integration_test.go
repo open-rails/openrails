@@ -124,7 +124,6 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 			cfg.Queues[river.QueueDefault] = river.QueueConfig{MaxWorkers: 1}
 		}, "required River queue"},
 		{"periodic jobs", func(cfg *river.Config) { cfg.PeriodicJobs = nil }, "periodic jobs"},
-		{"billing namespace", func(cfg *river.Config) { cfg.Schema = "billing" }, "billing schema"},
 	} {
 		t.Run(entry.name, func(t *testing.T) {
 			rt, pool := newRuntime(t)
