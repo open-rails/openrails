@@ -264,7 +264,9 @@ SET status = 'pending',
     last_failure_reason = sqlc.arg(reason),
     claimed_until = NULL,
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status = 'in_flight';
+WHERE id = sqlc.arg(id) AND status = 'in_flight'
+  -- A stale no-send result must not undo another executor's payment fence.
+  AND (intent_type <> 'nmi_sale' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'sale_submitted'));
 
 -- name: MarkRailIntentSuperseded :execrows
 UPDATE openrails.rail_intents
@@ -493,7 +495,7 @@ WHERE id = sqlc.arg(id)::uuid
   AND psp_id = sqlc.arg(psp_id)::uuid
   AND intent_type = sqlc.arg(intent_type)::text
   AND payload = sqlc.arg(payload)::jsonb
-  AND ((sqlc.arg(evidence_key)::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade'))
+  AND ((sqlc.arg(evidence_key)::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale'))
        OR (sqlc.arg(evidence_key)::text = 'qualified_enrollment' AND intent_type = 'nmi_upgrade'))
   AND status IN ('in_flight', 'unknown_needs_verify')
   AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? sqlc.arg(evidence_key)::text)
@@ -666,3 +668,9 @@ SET status=sqlc.arg(status)::text, result_evidence=sqlc.arg(evidence)::jsonb,
     claimed_until=NULL, updated_at=sqlc.arg(now)::timestamptz
 WHERE id=sqlc.arg(id)::uuid AND merchant_id=sqlc.arg(merchant_id)::uuid
   AND intent_type='nmi_sale' AND status IN ('in_flight','unknown_needs_verify');
+
+-- name: ListRetainedSalesForArchive :many
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='nmi_sale'
+  AND (sqlc.narg(after_id)::uuid IS NULL OR id>sqlc.narg(after_id)::uuid)
+ORDER BY id LIMIT sqlc.arg(page_size)::int;

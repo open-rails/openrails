@@ -1424,6 +1424,66 @@ func (q *Queries) ListRebillTermOwners(ctx context.Context, arg ListRebillTermOw
 	return items, nil
 }
 
+const listRetainedSalesForArchive = `-- name: ListRetainedSalesForArchive :many
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id=$1::uuid AND intent_type='nmi_sale'
+  AND ($2::uuid IS NULL OR id>$2::uuid)
+ORDER BY id LIMIT $3::int
+`
+
+type ListRetainedSalesForArchiveParams struct {
+	MerchantID uuid.UUID
+	AfterID    *uuid.UUID
+	PageSize   int32
+}
+
+func (q *Queries) ListRetainedSalesForArchive(ctx context.Context, arg ListRetainedSalesForArchiveParams) ([]OpenrailsRailIntent, error) {
+	rows, err := q.db.Query(ctx, listRetainedSalesForArchive, arg.MerchantID, arg.AfterID, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsRailIntent
+	for rows.Next() {
+		var i OpenrailsRailIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ClaimedUntil,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStuckRailIntents = `-- name: ListStuckRailIntents :many
 
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
@@ -1796,6 +1856,8 @@ SET status = 'pending',
     claimed_until = NULL,
     updated_at = now()
 WHERE id = $3 AND status = 'in_flight'
+  -- A stale no-send result must not undo another executor's payment fence.
+  AND (intent_type <> 'nmi_sale' OR NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'sale_submitted'))
 `
 
 type ParkRailIntentParams struct {
@@ -1912,7 +1974,7 @@ WHERE id = $3::uuid
   AND psp_id = $5::uuid
   AND intent_type = $6::text
   AND payload = $7::jsonb
-  AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade'))
+  AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale'))
        OR ($1::text = 'qualified_enrollment' AND intent_type = 'nmi_upgrade'))
   AND status IN ('in_flight', 'unknown_needs_verify')
   AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? $1::text)

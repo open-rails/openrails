@@ -58,12 +58,23 @@ func (h *NMISaleIntentHandler) database() *db.DB {
 }
 
 func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
-	if in.Attempts > 1 {
-		return h.Verify(ctx, in)
-	}
 	if h.database() == nil || h.Sale.PurchaseService == nil {
 		return intents.Parked("checkout sale service not wired")
 	}
+	current, err := intents.NewStore(h.database()).Get(ctx, in.ID)
+	if err != nil {
+		return intents.Ambiguous("cannot load accepted sale: " + err.Error())
+	}
+	var progress map[string]any
+	if len(current.ResultEvidence) > 0 {
+		if err := json.Unmarshal(current.ResultEvidence, &progress); err != nil {
+			return intents.Ambiguous("invalid canonical sale progress")
+		}
+	}
+	if progress["sale_submitted"] == true || current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
+		return h.Verify(ctx, current)
+	}
+	in = current
 	p, err := payments.DecodeNMISalePayload(in)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -113,7 +124,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRail
 			return intents.Ambiguous("sale outcome requires provider verification")
 		}
 		var refusal *nmi.CustomerVaultError
-		evidence := map[string]any{"not_executed": true}
+		evidence := map[string]any{"request_refused": true}
 		reason := "provider refused the sale request"
 		if errors.As(callErr, &refusal) {
 			evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID}
@@ -131,6 +142,9 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRail
 }
 
 func (h *NMISaleIntentHandler) Verify(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+	if h.database() == nil || h.Sale.PurchaseService == nil {
+		return intents.Ambiguous("sale recovery service is unavailable")
+	}
 	current, err := intents.NewStore(h.database()).Get(ctx, in.ID)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -146,12 +160,17 @@ func (h *NMISaleIntentHandler) Verify(ctx context.Context, in gen.OpenrailsRailI
 	if len(current.ResultEvidence) > 0 && json.Unmarshal(current.ResultEvidence, &evidence) != nil {
 		return intents.Ambiguous("invalid sale progress")
 	}
-	if evidence["declined"] == true || evidence["not_executed"] == true {
+	if evidence["declined"] == true || evidence["not_executed"] == true || evidence["request_refused"] == true {
 		return h.complete(ctx, current, nil, intents.TerminalWithEvidence("sale refused", evidence))
 	}
 	p, err := payments.DecodeNMISalePayload(current)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
+	}
+	if evidence["sale_submitted"] != true {
+		// A crashed claim is not a submitted payment. Re-enter the executor
+		// through its write gates; verification itself never sends money.
+		return intents.Retryable("accepted sale has not been submitted")
 	}
 	client, err := h.Sale.nmiClient(db.WithPSPID(ctx, *current.PspID), nmiIntentClientName(p.PSP, current.Rail))
 	if err != nil || client == nil {
@@ -173,6 +192,9 @@ func (h *NMISaleIntentHandler) collect(ctx context.Context, in gen.OpenrailsRail
 }
 
 func (h *NMISaleIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+	if h.database() == nil || h.Sale.PurchaseService == nil {
+		return intents.Outcome{}, intents.RejectResolution("sale recovery service is unavailable")
+	}
 	if resolution.Step != "" {
 		return intents.Outcome{}, intents.RejectResolution("sale has no steps")
 	}
@@ -243,6 +265,12 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.OpenrailsRai
 		}
 		if evidence == nil {
 			evidence = map[string]any{}
+		}
+		if paid && (evidence["declined"] == true || evidence["not_executed"] == true || evidence["request_refused"] == true) {
+			return errors.New("qualified sale payment contradicts refusal metadata")
+		}
+		if !success && outcome.Evidence["not_executed"] == true && evidence["sale_submitted"] == true {
+			return errors.New("submitted sale cannot become pre-send nonexecution")
 		}
 		if current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
 			if current.Status != status {

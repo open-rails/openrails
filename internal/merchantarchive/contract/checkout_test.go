@@ -8,9 +8,9 @@ func TestCheckoutIntentReceiptContracts(t *testing.T) {
 		name, typ, status, payload, evidence string
 		valid                                bool
 	}{
-		{"sale", "nmi_sale", "succeeded", "null", `{"payment_id":"` + testMerchant + `","transaction_id":"sale-1"}`, true},
+		{"pruned sale has no accepted terms", "nmi_sale", "succeeded", "null", `{"payment_id":"` + testMerchant + `","transaction_id":"sale-1"}`, false},
 		{"subscription", "nmi_subscription_create", "succeeded", "{}", `{"subscription_id":"` + testMerchant + `","transaction_id":"sale-1","status":"success","message":"Subscription created successfully"}`, true},
-		{"verified sale", "nmi_sale", "succeeded", "null", `{"payment_id":"` + testMerchant + `","transaction_id":"sale-1","verified_existing":true}`, true},
+		{"old boolean is not sale custody", "nmi_sale", "succeeded", "null", `{"payment_id":"` + testMerchant + `","transaction_id":"sale-1","verified_existing":true}`, false},
 		{"unknown result", "nmi_sale", "succeeded", "null", `{"payment_id":"` + testMerchant + `","raw_body":{}}`, false},
 		{"credential result", "nmi_subscription_create", "succeeded", "null", `{"security_key":"secret"}`, false},
 		{"credential in known field", "nmi_sale", "succeeded", "null", `{"transaction_id":"sk_live_secret"}`, false},

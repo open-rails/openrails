@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Timeline helpers (#334, relocated from internal/db/repo in #688): the
@@ -40,7 +41,21 @@ func LockEntitlementTimeline(ctx context.Context, qx gen.DBTX, userID, entitleme
 	if userID == "" || entitlement == "" {
 		return fmt.Errorf("userID and entitlement are required for entitlement timeline lock")
 	}
-	return gen.New(qx).AcquireEntitlementTimelineLock(ctx, entitlementTimelineLockKey(userID, entitlement))
+	id, err := db.ResolveCustomerID(userID)
+	if err != nil {
+		return err
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	// Every grant path takes the customer decision mutex before its timeline.
+	// Existing-customer lookup only: revocation never creates a payer.
+	q := gen.New(qx)
+	if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: id}); err != nil {
+		return err
+	}
+	return q.AcquireEntitlementTimelineLock(ctx, entitlementTimelineLockKey(userID, entitlement))
 }
 
 func ShiftEntitlementTimeline(

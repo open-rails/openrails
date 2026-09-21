@@ -231,3 +231,14 @@ func TestEntitlementRepo_CustomerQueries(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, finite.ID, latest.ID)
 }
+
+func TestRevokeAbsentCustomerDoesNotCreateBillingIdentity(t *testing.T) {
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	ctx := dbtest.WithTestMerchant(context.Background())
+	user := uuid.NewString()
+	svc := NewEntitlementService(dbi)
+	require.NoError(t, svc.RevokeExistingEntitlement(ctx, RevokeExistingEntitlementParams{UserID: user, Entitlement: "absent_customer_feature"}))
+	var count int
+	require.NoError(t, dbi.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.customers WHERE merchant_id=$1 AND id=$2`, dbtest.TestMerchantID.UUID(), user).Scan(&count))
+	require.Zero(t, count)
+}

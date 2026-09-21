@@ -12,9 +12,12 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
@@ -22,11 +25,8 @@ import (
 )
 
 func TestIndependentSaleWebhookFirstKeepsAcceptedAccessWindow(t *testing.T) {
-	for _, contradictory := range []bool{false, true} {
-		name := "matching_original_window"
-		if contradictory {
-			name = "contradictory_original_window"
-		}
+	for _, name := range []string{"matching_original_window", "contradictory_original_window", "revoked_original_window"} {
+		contradictory := name == "contradictory_original_window"
 		t.Run(name, func(t *testing.T) {
 			fx := newSaleIntentFixture(t)
 			now := time.Now().UTC().Truncate(time.Second)
@@ -59,6 +59,17 @@ func TestIndependentSaleWebhookFirstKeepsAcceptedAccessWindow(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.NotEqual(t, uuid.Nil, observed.PaymentID)
+			if name == "revoked_original_window" {
+				original, err := fx.db.Gen(ctx).ListOriginalPurchaseGrants(ctx, gen.ListOriginalPurchaseGrantsParams{MerchantID: dbtest.TestMerchantID.UUID(), PaymentID: observed.PaymentID, RowLimit: 3})
+				require.NoError(t, err)
+				require.Len(t, original, 2)
+				ledger := grants.New(fx.db.Gen(ctx), dbtest.TestMerchantID.UUID())
+				for _, grant := range original {
+					_, err := ledger.Revoke(ctx, grant.ID, "deliberate removal before receipt recovery")
+					require.NoError(t, err)
+					require.NoError(t, ledger.MaterializeGrant(ctx, grant))
+				}
+			}
 			outcome := fx.runner.Registry.Lookup(payments.TypeNMISale).Verify(ctx, row)
 			if contradictory {
 				require.Equal(t, intents.OutcomeAmbiguous, outcome.Class)
@@ -80,6 +91,13 @@ func TestIndependentSaleWebhookFirstKeepsAcceptedAccessWindow(t *testing.T) {
 			var events int
 			require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.host_outbox WHERE payment_id=$1`, observed.PaymentID).Scan(&events))
 			require.Equal(t, 1, events)
+			if name == "revoked_original_window" {
+				var active int
+				require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.entitlements WHERE customer_id=$1 AND deleted_at IS NULL AND revoked_at IS NULL`, fx.customerID).Scan(&active))
+				require.Zero(t, active, "completion respects a later revocation of the exact original grant")
+				require.NoError(t, fx.db.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.grants WHERE customer_id=$1 AND event='grant'`, fx.customerID).Scan(&active))
+				require.Equal(t, 2, active, "recovery does not create replacement grants")
+			}
 
 		})
 	}

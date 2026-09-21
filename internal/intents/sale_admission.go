@@ -32,11 +32,16 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.Openrails
 			return row, err
 		}
 	}
-	terms, err := payments.DecodeNMISalePayload(gen.OpenrailsRailIntent{ID: uuid.New(), MerchantID: p.MerchantID, IntentType: p.IntentType, Rail: p.Provider, PspID: &target, PriceID: p.PriceID, Payload: raw})
-	if err != nil {
+	// Read only the requested lock coordinates here. Full canonical validation
+	// runs against the real inserted/existing row before this transaction commits.
+	var terms payments.NMISalePayload
+	if err := json.Unmarshal(raw, &terms); err != nil {
 		return row, err
 	}
-	customer, _ := uuid.Parse(terms.UserID)
+	customer, err := uuid.Parse(terms.UserID)
+	if err != nil || customer == uuid.Nil || p.PriceID == nil || *p.PriceID != terms.PriceID || terms.Instrument.PSPID != target {
+		return row, errors.New("sale admission coordinates contradict requested purchase")
+	}
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.db.NewWithPgxTx(tx)
 		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: p.MerchantID, ID: customer}); err != nil {

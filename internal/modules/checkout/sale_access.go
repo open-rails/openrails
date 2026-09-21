@@ -2,7 +2,6 @@ package checkout
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sort"
 	"time"
@@ -13,15 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
-
-type acceptedAccessWindow struct {
-	start time.Time
-	end   *time.Time
-}
-
-func sameAccessEnd(a, b *time.Time) bool {
-	return a == nil && b == nil || a != nil && b != nil && a.Equal(*b)
-}
 
 // applyAcceptedPurchaseAccess uses the same grant ledger as ordinary purchases,
 // with exact accepted intervals and validation of original source windows.
@@ -43,19 +33,10 @@ func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Contex
 	if coverage != nil && coverage.EndDate != nil {
 		start = *coverage.EndDate
 	}
-	names := make([]string, 0, len(spec))
-	wanted := map[string]acceptedAccessWindow{}
-	for name, hours := range spec {
+	wanted, ownershipWindow := grants.PurchaseWindows(spec, duration, accepted, start)
+	names := make([]string, 0, len(wanted))
+	for name := range wanted {
 		names = append(names, name)
-		var end *time.Time
-		if duration != nil && *duration > 0 {
-			v := start.Add(time.Duration(*duration) * time.Hour)
-			end = &v
-		} else if duration == nil && hours != nil && *hours > 0 {
-			v := start.Add(time.Duration(*hours) * time.Hour)
-			end = &v
-		}
-		wanted[name] = acceptedAccessWindow{start, end}
 	}
 	sort.Strings(names)
 	for _, name := range names {
@@ -68,48 +49,18 @@ func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Contex
 	if err != nil {
 		return err
 	}
-	var ownership *gen.OpenrailsGrant
-	existing := map[string]gen.OpenrailsGrant{}
-	var ownershipEnd *time.Time
-	if duration != nil && *duration > 0 {
-		v := accepted.Add(time.Duration(*duration) * time.Hour)
-		ownershipEnd = &v
-	}
-	for _, g := range original {
-		if g.CustomerID != customer || g.PaymentID != nil && *g.PaymentID != payment || g.ProductID != nil && *g.ProductID != product {
-			return errors.New("original grant belongs to another accepted purchase")
-		}
-		switch g.Kind {
-		case string(grants.Ownership):
-			if ownership != nil || g.ProductID == nil || !g.StartsAt.Equal(accepted) || !sameAccessEnd(g.EndsAt, ownershipEnd) {
-				return errors.New("original ownership window contradicts accepted purchase")
-			}
-			copied := g
-			ownership = &copied
-		case string(grants.Entitlement):
-			var encoded grants.Spec
-			if err := json.Unmarshal(g.SpecSnapshot, &encoded); err != nil || len(encoded.Entitlements) == 0 || encoded.Deposit != nil {
-				return errors.New("original entitlement spec contradicts accepted purchase")
-			}
-			for _, name := range encoded.Entitlements {
-				window, ok := wanted[name]
-				if _, duplicate := existing[name]; !ok || duplicate || !g.StartsAt.Equal(window.start) || !sameAccessEnd(g.EndsAt, window.end) {
-					return errors.New("original entitlement window contradicts accepted purchase")
-				}
-				existing[name] = g
-			}
-		default:
-			return errors.New("purchase has an unsupported original grant")
-		}
+	history, err := grants.ValidatePurchaseHistory(mid.UUID(), customer, product, payment, wanted, ownershipWindow, original)
+	if err != nil {
+		return err
 	}
 	ledger := grants.New(q, mid.UUID())
 	ledger.SetClock(s.now)
 	materialized := map[uuid.UUID]bool{}
 	for _, name := range names {
-		g, found := existing[name]
+		g, found := history.Entitlements[name]
 		if !found {
 			window := wanted[name]
-			g, err = ledger.Grant(ctx, grants.GrantInput{Customer: customer, Kind: grants.Entitlement, Source: grants.Purchase, SourceID: payment.String(), Payment: &payment, Spec: &grants.Spec{Entitlements: []string{name}}, StartsAt: window.start, EndsAt: window.end})
+			g, err = ledger.Grant(ctx, grants.GrantInput{Customer: customer, Kind: grants.Entitlement, Source: grants.Purchase, SourceID: payment.String(), Payment: &payment, Spec: &grants.Spec{Entitlements: []string{name}}, StartsAt: window.Start, EndsAt: window.End})
 			if err != nil {
 				return err
 			}
@@ -121,8 +72,8 @@ func (s *CheckoutPurchaseService) applyAcceptedPurchaseAccess(ctx context.Contex
 			materialized[g.ID] = true
 		}
 	}
-	if ownership == nil {
-		_, err = ledger.Grant(ctx, grants.GrantInput{Customer: customer, Product: &product, Kind: grants.Ownership, Source: grants.Purchase, SourceID: payment.String(), Payment: &payment, StartsAt: accepted, EndsAt: ownershipEnd})
+	if history.Ownership == nil {
+		_, err = ledger.Grant(ctx, grants.GrantInput{Customer: customer, Product: &product, Kind: grants.Ownership, Source: grants.Purchase, SourceID: payment.String(), Payment: &payment, StartsAt: accepted, EndsAt: ownershipWindow.End})
 	}
 	return err
 }
