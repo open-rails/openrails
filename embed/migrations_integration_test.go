@@ -147,11 +147,11 @@ func TestApplyMigrationsFreshOwnershipAndSchemas(t *testing.T) {
 			t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 			require.False(t, binderCalled, "New must leave composition open")
 			if tc.host {
-				hostClient, err = rt.BindRiver(ctx, func(_ context.Context, cfg *river.Config) (*river.Client[pgx.Tx], error) {
+				hostClient, err = rt.BindRiver(ctx, pool, func(_ context.Context, cfg *river.Config) error {
 					binderCalled = true
 					cfg.Schema = tc.jobs
 					cfg.Queues[QueueBilling] = river.QueueConfig{MaxWorkers: 1}
-					return river.NewClient(riverpgxv5.New(pool), cfg)
+					return nil
 				})
 				require.NoError(t, err)
 			}

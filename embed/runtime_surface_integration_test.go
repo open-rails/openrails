@@ -8,10 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -35,9 +33,9 @@ func TestRuntimeOwnsReadinessAndRiverChecks(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	_, err = rt.BindRiver(ctx, func(_ context.Context, cfg *river.Config) (*river.Client[pgx.Tx], error) {
+	_, err = rt.BindRiver(ctx, pool, func(_ context.Context, cfg *river.Config) error {
 		cfg.Queues[embed.QueueBilling] = river.QueueConfig{MaxWorkers: 1}
-		return river.NewClient(riverpgxv5.New(pool), cfg)
+		return nil
 	})
 	require.NoError(t, err)
 	require.True(t, rt.HasExternalRiverClient())

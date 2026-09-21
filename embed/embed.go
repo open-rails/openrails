@@ -48,7 +48,7 @@ type Options struct {
 	// OpenRails-managed client in public. RiverFromHost transfers ownership
 	// to the host; RiverManagedByOpenRails optionally selects another schema.
 	River RiverOwnership
-	// RunWorkers starts the River workers on a goroutine owned by the Runtime
+	// RunWorkers is managed-only. It starts workers on a goroutine owned by the Runtime
 	// (stopped by Close), detached from the ctx passed to New. Leave false to
 	// drive Runtime.RunWorkers yourself.
 	RunWorkers bool

@@ -510,7 +510,7 @@ func (r *Runtime) GetBillingPeriodicJobs(ctx context.Context) ([]*river.Periodic
 }
 
 // BindHostRiverClient adopts a constructed client after the one composition
-// attempt. The host owns Start/Stop and any client returned with a bind error.
+// attempt. The host owns Start/Stop; construction has not started any workers.
 func (r *Runtime) BindHostRiverClient(ctx context.Context, client *river.Client[pgx.Tx], schema string) error {
 	r.riverCompositionMu.Lock()
 	defer r.riverCompositionMu.Unlock()

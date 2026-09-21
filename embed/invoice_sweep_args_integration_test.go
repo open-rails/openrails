@@ -8,10 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
-	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -39,9 +37,9 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	jobs, err := rt.BindRiver(ctx, func(_ context.Context, cfg *river.Config) (*river.Client[pgx.Tx], error) {
+	jobs, err := rt.BindRiver(ctx, pool, func(_ context.Context, cfg *river.Config) error {
 		cfg.Queues[embed.QueueBilling] = river.QueueConfig{MaxWorkers: 1}
-		return river.NewClient(riverpgxv5.New(pool), cfg)
+		return nil
 	})
 	require.NoError(t, err)
 	require.NoError(t, jobs.Start(ctx))

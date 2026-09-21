@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -86,8 +85,8 @@ func TestStripeSandboxRuntimeTransportLifetime(t *testing.T) {
 	failed.River = RiverFromHost()
 	failedRuntime, err := New(t.Context(), failed)
 	require.NoError(t, err)
-	_, err = failedRuntime.BindRiver(t.Context(), func(context.Context, *river.Config) (*river.Client[pgx.Tx], error) {
-		return nil, errors.New("deliberate host bind failure")
+	_, err = failedRuntime.BindRiver(t.Context(), pool, func(context.Context, *river.Config) error {
+		return errors.New("deliberate host bind failure")
 	})
 	require.ErrorContains(t, err, "deliberate host bind failure")
 	require.NoError(t, failedRuntime.Close(context.Background()), "failed startup explicitly closes its runtime")
