@@ -227,6 +227,6 @@ func testUpgradeTerms(fx rebillFixture, target uuid.UUID) subscriptions.NMIUpgra
 		OldProviderSubscriptionID: fx.payload.RailSubscriptionID, NewSubscriptionID: uuid.New(), NewPaymentID: uuid.New(),
 		PriceID: target, ProductID: fx.payload.Renewal.ProductID, PlanID: "admission-only", PaymentMethodID: fx.payload.PaymentMethodID,
 		Instrument: fx.payload.Instrument, RecurringAmount: fx.payload.Renewal.Amount, Currency: fx.payload.Renewal.Currency,
-		PeriodStart: fx.payload.Renewal.PeriodStart, PeriodEnd: fx.payload.Renewal.PeriodEnd,
+		PeriodStart: fx.payload.Renewal.PeriodStart, PeriodEnd: fx.payload.Renewal.PeriodEnd, StartDate: fx.payload.Renewal.PeriodEnd.UTC().Format("20060102"),
 	}
 }

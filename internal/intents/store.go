@@ -459,7 +459,7 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 		_, err := qx.Exec(ctx,
 			`UPDATE openrails.rail_intents
 			    SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, updated_at = now()
-			  WHERE id = $1 AND merchant_id = $2 AND status = 'succeeded' AND intent_type <> 'nmi_provider_cutover'`, id, mid.UUID())
+			  WHERE id = $1 AND merchant_id = $2 AND status = 'succeeded' AND intent_type <> 'nmi_provider_cutover' AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, mid.UUID())
 		return err
 	}
 	var ev []byte
@@ -474,13 +474,13 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 		_, err := qx.Exec(ctx,
 			`UPDATE openrails.rail_intents
 			    SET result_evidence = CASE WHEN result_evidence ? 'qualified_receipt' THEN coalesce($2::jsonb,'{}'::jsonb) || jsonb_build_object('qualified_receipt',result_evidence->'qualified_receipt') ELSE $2::jsonb END, updated_at = now()
-			  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded' AND intent_type <> 'nmi_provider_cutover'`, id, ev, mid.UUID())
+			  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded' AND intent_type <> 'nmi_provider_cutover' AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, ev, mid.UUID())
 		return err
 	}
 	_, err = qx.Exec(ctx,
 		`UPDATE openrails.rail_intents
 		    SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, result_evidence = CASE WHEN result_evidence ? 'qualified_receipt' THEN coalesce($2::jsonb,'{}'::jsonb) || jsonb_build_object('qualified_receipt',result_evidence->'qualified_receipt') ELSE $2::jsonb END, updated_at = now()
-		  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded' AND intent_type <> 'nmi_provider_cutover'`, id, ev, mid.UUID())
+		  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded' AND intent_type <> 'nmi_provider_cutover' AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, ev, mid.UUID())
 	return err
 }
 
@@ -494,7 +494,7 @@ func (s *Store) PruneTerminalPayload(ctx context.Context, id uuid.UUID) error {
 	_, err = s.db.Qx(ctx).Exec(ctx,
 		`UPDATE openrails.rail_intents
 		    SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, updated_at = now()
-		  WHERE id = $1 AND merchant_id = $2 AND status = 'failed_terminal' AND intent_type <> 'nmi_provider_cutover'`, id, mid.UUID())
+		  WHERE id = $1 AND merchant_id = $2 AND status = 'failed_terminal' AND intent_type <> 'nmi_provider_cutover' AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, mid.UUID())
 	return err
 }
 

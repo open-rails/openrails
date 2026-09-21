@@ -195,10 +195,12 @@ UPDATE openrails.rail_intents
 SET status = 'succeeded',
     executed_at = sqlc.arg(now)::timestamptz,
     result_evidence = CASE
-        WHEN result_evidence ?| ARRAY['qualified_receipt', 'account_requalifications']
+        WHEN result_evidence ?| ARRAY['qualified_receipt', 'qualified_enrollment', 'account_requalifications']
         THEN COALESCE(sqlc.narg(result_evidence)::jsonb, '{}'::jsonb)
           || CASE WHEN result_evidence ? 'qualified_receipt'
                   THEN jsonb_build_object('qualified_receipt', result_evidence->'qualified_receipt') ELSE '{}'::jsonb END
+          || CASE WHEN result_evidence ? 'qualified_enrollment'
+                  THEN jsonb_build_object('qualified_enrollment', result_evidence->'qualified_enrollment') ELSE '{}'::jsonb END
           || CASE WHEN result_evidence ? 'account_requalifications'
                   THEN jsonb_build_object('account_requalifications', result_evidence->'account_requalifications') ELSE '{}'::jsonb END
         ELSE sqlc.narg(result_evidence)::jsonb
@@ -235,10 +237,12 @@ UPDATE openrails.rail_intents
 SET status = 'failed_terminal',
     last_failure_reason = sqlc.arg(reason),
     result_evidence = CASE
-        WHEN result_evidence ?| ARRAY['qualified_receipt', 'account_requalifications']
+        WHEN result_evidence ?| ARRAY['qualified_receipt', 'qualified_enrollment', 'account_requalifications']
         THEN COALESCE(sqlc.narg(result_evidence)::jsonb, '{}'::jsonb)
           || CASE WHEN result_evidence ? 'qualified_receipt'
                   THEN jsonb_build_object('qualified_receipt', result_evidence->'qualified_receipt') ELSE '{}'::jsonb END
+          || CASE WHEN result_evidence ? 'qualified_enrollment'
+                  THEN jsonb_build_object('qualified_enrollment', result_evidence->'qualified_enrollment') ELSE '{}'::jsonb END
           || CASE WHEN result_evidence ? 'account_requalifications'
                   THEN jsonb_build_object('account_requalifications', result_evidence->'account_requalifications') ELSE '{}'::jsonb END
         ELSE sqlc.narg(result_evidence)::jsonb
@@ -477,21 +481,22 @@ WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND intent_type IN ('invoice_collection', 'manual_rebill')
   AND status IN ('in_flight', 'unknown_needs_verify');
 
--- name: RetainRailIntentCollectedReceipt :execrows
+-- name: RetainRailIntentQualifiedEvidence :execrows
 -- Custody binds immutable provider facts to the accepted operation. A repeated
 -- identical receipt succeeds; a conflicting receipt or terminal row never changes.
 UPDATE openrails.rail_intents
 SET result_evidence = COALESCE(result_evidence, '{}'::jsonb)
-        || jsonb_build_object('qualified_receipt', sqlc.arg(receipt)::jsonb),
+        || jsonb_build_object(sqlc.arg(evidence_key)::text, sqlc.arg(receipt)::jsonb),
     updated_at = now()
 WHERE id = sqlc.arg(id)::uuid
   AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND psp_id = sqlc.arg(psp_id)::uuid
   AND intent_type = sqlc.arg(intent_type)::text
   AND payload = sqlc.arg(payload)::jsonb
+  AND sqlc.arg(evidence_key)::text IN ('qualified_receipt','qualified_enrollment')
   AND status IN ('in_flight', 'unknown_needs_verify')
-  AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')
-       OR result_evidence->'qualified_receipt' = sqlc.arg(receipt)::jsonb);
+  AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? sqlc.arg(evidence_key)::text)
+       OR result_evidence->sqlc.arg(evidence_key)::text = sqlc.arg(receipt)::jsonb);
 
 -- name: RetainRailIntentCollectionCandidate :execrows
 -- A possible provider reference is a candidate only; it never proves payment.
