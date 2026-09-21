@@ -110,6 +110,7 @@ func TestUpgradeRequiresItsOwnSuccessorSchedule(t *testing.T) {
 
 func TestFreeUpgradeScheduleDoesNotCreatePaymentAgreement(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
+	fx.gateway.planPayments.Store("12") // finite valid provider plans remain supported
 	var before, after string
 	query := `SELECT coalesce(stored_credential_recurring_ref,'') FROM billing.payment_methods WHERE id=$1`
 	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, query, *fx.existingSub.PaymentMethodID).Scan(&before))
@@ -127,7 +128,7 @@ func TestFreeUpgradeScheduleDoesNotCreatePaymentAgreement(t *testing.T) {
 }
 
 func TestSuccessorReceiptRefusesChangedCommercialTerms(t *testing.T) {
-	for _, field := range []string{"amount", "date", "vault"} {
+	for _, field := range []string{"amount", "date", "vault", "count missing", "count negative", "count malformed"} {
 		t.Run(field, func(t *testing.T) {
 			fx := newUpgradeAdoptFixture(t)
 			fx.positiveProration()
@@ -140,6 +141,12 @@ func TestSuccessorReceiptRefusesChangedCommercialTerms(t *testing.T) {
 				fx.gateway.nextChargeDate.Store("2030-01-01")
 			case "vault":
 				fx.gateway.railCustomerRef = "another-card"
+			case "count missing":
+				fx.gateway.planPayments.Store("")
+			case "count negative":
+				fx.gateway.planPayments.Store("-1")
+			case "count malformed":
+				fx.gateway.planPayments.Store("unknown")
 			}
 			_, err := fx.resolve(t, intents.Resolution{Step: "successor", ProviderReference: fx.gateway.subID, Actor: "operator", Reason: "candidate with changed terms"})
 			require.ErrorIs(t, err, intents.ErrResolutionRejected)

@@ -44,6 +44,7 @@ type fakeNMIUpgradeGateway struct {
 	recurringAmount atomic.Value
 	nextChargeDate  atomic.Value
 	reportedOrder   atomic.Value
+	planPayments    atomic.Value
 	saleCalls       atomic.Int64
 	saleMode        atomic.Value
 	saleVisible     atomic.Bool
@@ -70,6 +71,7 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string, merc
 	f.saleCurrency.Store("")
 	f.nextChargeDate.Store("")
 	f.reportedOrder.Store("")
+	f.planPayments.Store("0")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -79,7 +81,7 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string, merc
 				fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"not found"}`)
 				return
 			}
-			fmt.Fprintf(w, `{"object":"subscription","id":"%s","customer_vault_id":"%s","delayed_condition":"active","paused_subscription":"0","next_billing_date":"%s","plan":{"id":"%s","plan_amount":"%s","day_frequency":"30","plan_payments":"0"}}`, f.subID, f.railCustomerRef, f.nextChargeDate.Load(), f.planID, f.recurringAmount.Load())
+			fmt.Fprintf(w, `{"object":"subscription","id":"%s","customer_vault_id":"%s","delayed_condition":"active","paused_subscription":"0","next_billing_date":"%s","plan":{"id":"%s","plan_amount":"%s","day_frequency":"30","plan_payments":"%s"}}`, f.subID, f.railCustomerRef, f.nextChargeDate.Load(), f.planID, f.recurringAmount.Load(), f.planPayments.Load())
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/payments/"):
 			amount, _ := f.saleAmount.Load().(string)
 			if !strings.HasSuffix(r.URL.Path, "/payments/"+f.saleTxn) || !f.saleLanded.Load() {

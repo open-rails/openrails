@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -63,6 +64,10 @@ func (r NMIEnrollmentReceipt) Validate(in gen.OpenrailsRailIntent) error {
 	days, err := strconv.Atoi(sub.Plan.DayFrequency)
 	if err != nil || period <= 0 || period%(24*time.Hour) != 0 || days != int(period/(24*time.Hour)) || (sub.Plan.MonthFrequency != "" && sub.Plan.MonthFrequency != "0") {
 		return errors.New("successor schedule has another billing cadence")
+	}
+	payments, err := strconv.Atoi(strings.TrimSpace(sub.Plan.PlanPayments))
+	if err != nil || payments < 0 {
+		return errors.New("successor schedule has no qualified installment count")
 	}
 	start, err := time.Parse("20060102", p.StartDate)
 	if err != nil || f.NextChargeDate != start.Format("2006-01-02") || sub.NextBillingDate != f.NextChargeDate {
