@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/dbtest"
+
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
@@ -57,7 +57,9 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 			terms.CollectionPolicy = models.CollectionPolicyEngine
 			mid, err := merchant.Require(fx.ctx)
 			require.NoError(t, err)
-			terms.PSPID = dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), mid.UUID(), "stripe")
+			terms.PSPID = uuid.New()
+			_, err = fx.db.Pool().Exec(fx.ctx, `INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,key) VALUES($1,$2,'stripe','test',$3,$3)`, terms.PSPID, mid.UUID(), "stripe-"+uuid.NewString())
+			require.NoError(t, err)
 			_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.payment_methods SET rail='stripe',psp_id=$2,rail_customer_ref='cus_initial',rail_method_ref='pm_initial' WHERE id=$1`, terms.PaymentMethodID, terms.PSPID)
 			require.NoError(t, err)
 			cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull}

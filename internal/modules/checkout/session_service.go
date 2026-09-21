@@ -680,7 +680,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		if err != nil {
 			return nil, err
 		}
-		if method.Custodian == models.CustodianHyperSwitch || (s.config != nil && s.config.NewSubscriptionCollectionPolicy == "engine") {
+		if s.config != nil && s.config.NewSubscriptionCollectionPolicy == "engine" {
 			if err := quoteInitialMembership(ctx, session, price, product, method, now); err != nil {
 				return nil, err
 			}
