@@ -50,9 +50,11 @@ func initialStripeResponse(v any) *http.Response {
 }
 
 func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
-	for _, mode := range []string{"paid", "lost response", "authentication", "declined", "wrong method", "setup", "not dispatched"} {
+	for _, mode := range []string{"paid", "lost response", "authentication", "declined", "wrong method", "setup", "not dispatched", "refunded", "disputed"} {
 		t.Run(mode, func(t *testing.T) {
 			fx := newSubIntentFixture(t)
+			_, seedErr := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{"stripe_engine_access":null}' WHERE id=(SELECT product_id FROM billing.prices WHERE id=$1)`, fx.priceID)
+			require.NoError(t, seedErr)
 			fx.prepare(t)
 			terms := fx.payload.Terms
 			terms.CollectionPolicy = models.CollectionPolicyEngine
@@ -129,7 +131,7 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 						pi["status"] = "requires_payment_method"
 						pi["last_payment_error"] = map[string]any{"code": "card_declined", "decline_code": "insufficient_funds"}
 					}
-					if mode == "lost response" {
+					if mode == "lost response" || mode == "refunded" || mode == "disputed" {
 						return nil, errors.New("simulated lost accepted response")
 					}
 					return initialStripeResponse(pi), nil
@@ -151,7 +153,15 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 					if mode == "wrong method" {
 						method = "pm_other"
 					}
-					return initialStripeResponse(map[string]any{"id": "ch_initial", "amount": 999, "amount_captured": 999, "currency": "usd", "customer": customer, "payment_method": method, "payment_intent": "pi_initial", "paid": true, "captured": true, "status": "succeeded"}), nil
+					ch := map[string]any{"id": "ch_initial", "amount": 999, "amount_captured": 999, "currency": "usd", "customer": customer, "payment_method": method, "payment_intent": "pi_initial", "paid": true, "captured": true, "status": "succeeded"}
+					if mode == "refunded" {
+						ch["refunded"] = true
+						ch["amount_refunded"] = 999
+					}
+					if mode == "disputed" {
+						ch["disputed"] = true
+					}
+					return initialStripeResponse(ch), nil
 				default:
 					t.Errorf("unexpected Stripe route %s %s", r.Method, r.URL.Path)
 					return nil, errors.New("unexpected Stripe route")
@@ -199,7 +209,7 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 			_, confirmErr := fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal)
 			op, err := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, InitialMembershipIdempotencyKey(key))
 			require.NoError(t, err)
-			if mode == "lost response" {
+			if mode == "lost response" || mode == "refunded" || mode == "disputed" {
 				cfg.EngineAdmissionHold = true // reconciliation survives an admission hold
 				require.ErrorIs(t, confirmErr, ErrCheckoutProcessing)
 				op, err = fx.runner.VerifyByID(fx.ctx, op.ID)
@@ -247,6 +257,18 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, models.CollectionPolicyEngine, sub.CollectionPolicy)
 				require.Empty(t, sub.RailSubscriptionID)
+				if mode == "refunded" || mode == "disputed" {
+					require.Equal(t, models.StatusCancelled, sub.Status)
+					var grants, notices int
+					require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.grants WHERE source_id=$1 AND event='grant'`, sub.ID.String()).Scan(&grants))
+					require.Zero(t, grants)
+					require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.notifications WHERE customer_id=$1`, sub.CustomerID).Scan(&notices))
+					require.Zero(t, notices)
+					receipt, paid, err := intents.LoadCollectedReceipt(op)
+					require.NoError(t, err)
+					require.True(t, paid)
+					require.NotEmpty(t, receipt.ReversalKind())
+				}
 			}
 			var successCount int
 			require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.payments WHERE customer_id=$1 AND status='completed'`, terms.CustomerID).Scan(&successCount))

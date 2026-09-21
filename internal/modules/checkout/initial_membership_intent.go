@@ -501,6 +501,9 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 				transaction = receipt.TransactionID()
 			}
 			metadata := map[string]any{"order_id": intents.NMIEnrollmentOrder(in), "provider_transaction_id": transaction}
+			if reversal := receipt.ReversalKind(); reversal != "" {
+				metadata["initial_payment_reversal"] = reversal
+			}
 			if p.DelayedStart() != nil {
 				metadata["delayed_start"] = p.DelayedStart().UTC().Format(time.RFC3339Nano)
 			}
@@ -508,7 +511,7 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 			if p.Email != "" {
 				email = &p.Email
 			}
-			if _, _, err := h.Checkout.Lifecycle.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &p.Terms, PaymentCustodian: p.Instrument.Custodian, UserID: p.Terms.CustomerID.String(), PriceID: p.Terms.PriceID, Rail: models.Rail(in.Rail), RailSubscriptionID: &providerSub, UserEmail: email, TransactionID: transaction, Amount: p.Terms.Amount, AmountProvided: true, Currency: p.Terms.Currency, PurchasedAt: &p.Terms.AcceptedAt, PaymentMetadata: metadata}); err != nil {
+			if _, _, err := h.Checkout.Lifecycle.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &p.Terms, PaymentCustodian: p.Instrument.Custodian, InitialPaymentReversal: receipt.ReversalKind(), UserID: p.Terms.CustomerID.String(), PriceID: p.Terms.PriceID, Rail: models.Rail(in.Rail), RailSubscriptionID: &providerSub, UserEmail: email, TransactionID: transaction, Amount: p.Terms.Amount, AmountProvided: true, Currency: p.Terms.Currency, PurchasedAt: &p.Terms.AcceptedAt, PaymentMetadata: metadata}); err != nil {
 				return err
 			}
 			if paid {
@@ -521,6 +524,9 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 				}
 			}
 			evidence["subscription_id"], evidence["provider_subscription_id"], evidence["transaction_id"], evidence["status"], evidence["message"] = p.Terms.SubscriptionID.String(), providerSub, transaction, "success", "Subscription created successfully"
+			if receipt.ReversalKind() != "" {
+				evidence["message"] = "Payment recorded; enrollment canceled after provider reversal"
+			}
 			if p.Terms.Pending {
 				evidence["status"] = "pending"
 				evidence["message"] = "Subscription scheduled for its accepted start date"
