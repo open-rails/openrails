@@ -59,8 +59,9 @@ Stripe for the owned resource and never stored in checkout state or payment evid
 Setup rows are `checkout_sessions.mode=payment_method`, rail `stripe`. The only
 stored binding is customer/account/session plus the original SetupIntent reference;
 completion attaches the exact successful setup's card under a customer/session lock.
-The first paid engine membership captures its PaymentIntent ID as the recurring
-anchor. Finite/trial/unsupported terms remain refused by shared engine qualification.
+A verified successful SetupIntent captures its ID as the recurring-use anchor;
+a first paid membership captures its PaymentIntent ID when no qualified setup
+anchor already exists. Both anchors remain bound to the exact account/customer/card. Finite/trial/unsupported terms remain refused by shared engine qualification.
 
 ## Verification
 

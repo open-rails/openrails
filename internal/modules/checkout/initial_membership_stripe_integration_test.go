@@ -252,7 +252,11 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 				require.NoError(t, intents.ValidateInitialMembershipTerminal(op))
 				method, err := fx.db.Gen(fx.ctx).GetPaymentMethodByID(fx.ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: terms.PaymentMethodID})
 				require.NoError(t, err)
-				require.Equal(t, "pi_initial", method.StoredCredentialRecurringRef)
+				if mode == "setup" {
+					require.Equal(t, "seti_setup", method.StoredCredentialRecurringRef)
+				} else {
+					require.Equal(t, "pi_initial", method.StoredCredentialRecurringRef)
+				}
 				sub, err := fx.svc.SubscriptionService.GetByID(fx.ctx, terms.SubscriptionID)
 				require.NoError(t, err)
 				require.Equal(t, models.CollectionPolicyEngine, sub.CollectionPolicy)

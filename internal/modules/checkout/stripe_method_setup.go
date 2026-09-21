@@ -275,6 +275,11 @@ func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.
 		} else {
 			return err
 		}
+		// Only this exact account/customer-bound succeeded SetupIntent may establish
+		// a new Stripe card's recurring-use anchor. Saving an unverified token never does.
+		if _, err := q.CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: p.MerchantID, ID: methodID, Agreement: "recurring", Ref: setup.ID}); err != nil {
+			return err
+		}
 		rows, err := q.CompleteStripeMethodSetup(ctx, gen.CompleteStripeMethodSetupParams{MerchantID: p.MerchantID, ID: id, Reference: &setup.ID, PaymentMethodID: methodID, Now: s.now().UTC()})
 		if err != nil {
 			return err

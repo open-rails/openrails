@@ -79,7 +79,7 @@ func (p StripeEnginePaymentParams) validate() error {
 	if err := moneyutil.ValidateCurrency(p.Currency); err != nil {
 		return err
 	}
-	if !p.Initial && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "pi_") {
+	if !p.Initial && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "pi_") && !stripeEngineID(p.Instrument.StoredCredentialRecurringRef, "seti_") {
 		return errors.New("Stripe engine payment lacks a qualified recurring agreement")
 	}
 	return nil
