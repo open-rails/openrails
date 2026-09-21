@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -150,6 +151,17 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			pmPSP, err := psps.resolve(pm.PSP, pm.Rail, fmt.Sprintf("payment method %s/%s", pm.Rail, pm.RailCustomerRef))
 			if err != nil {
 				return err
+			}
+			if strings.EqualFold(strings.TrimSpace(pm.Rail), "nmi") {
+				if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: merchantID.UUID(), ID: pm.Customer.UUID()}); err != nil {
+					return err
+				}
+				if err := paymentmethods.LockNativeVault(ctx, q, merchantID.UUID(), pmPSP, pm.RailCustomerRef); err != nil {
+					return err
+				}
+				if err := paymentmethods.RequireNativeVaultAvailable(ctx, q, merchantID.UUID(), pmPSP, pm.RailCustomerRef, pm.RailMethodRef); err != nil {
+					return err
+				}
 			}
 			var id, owner uuid.UUID
 			var existingRail string

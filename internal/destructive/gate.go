@@ -61,7 +61,7 @@ func (g *Gate) Check(ctx context.Context, merchantID uuid.UUID) Verdict {
 	switch {
 	case !row.SwitchEnabled:
 		return Verdict{
-			Reason:               "instance kill switch is OFF (openrails.destructive_action_switch.enabled = false): no local cancellation, entitlement revocation or provider delete will execute on any node",
+			Reason:               "instance kill switch is OFF (openrails.destructive_action_switch.enabled = false): no maintenance cancellation, entitlement revocation or operator/system provider delete will execute on any node",
 			FirstPullCompletedAt: row.FirstPullCompletedAt,
 		}
 	case !row.MerchantEnabled:
