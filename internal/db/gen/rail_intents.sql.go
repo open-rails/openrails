@@ -1702,7 +1702,8 @@ WHERE id = $3::uuid
   AND psp_id = $5::uuid
   AND intent_type = $6::text
   AND payload = $7::jsonb
-  AND $1::text IN ('qualified_receipt','qualified_enrollment')
+  AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade'))
+       OR ($1::text = 'qualified_enrollment' AND intent_type = 'nmi_upgrade'))
   AND status IN ('in_flight', 'unknown_needs_verify')
   AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? $1::text)
        OR result_evidence->$1::text = $2::jsonb)

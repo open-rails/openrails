@@ -493,7 +493,8 @@ WHERE id = sqlc.arg(id)::uuid
   AND psp_id = sqlc.arg(psp_id)::uuid
   AND intent_type = sqlc.arg(intent_type)::text
   AND payload = sqlc.arg(payload)::jsonb
-  AND sqlc.arg(evidence_key)::text IN ('qualified_receipt','qualified_enrollment')
+  AND ((sqlc.arg(evidence_key)::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade'))
+       OR (sqlc.arg(evidence_key)::text = 'qualified_enrollment' AND intent_type = 'nmi_upgrade'))
   AND status IN ('in_flight', 'unknown_needs_verify')
   AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? sqlc.arg(evidence_key)::text)
        OR result_evidence->sqlc.arg(evidence_key)::text = sqlc.arg(receipt)::jsonb);
