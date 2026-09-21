@@ -189,24 +189,29 @@ type Config struct {
 	// It is declared intent, never auto-detected and never auto-fallback — the data
 	// lives in exactly one place (#661). REQUIRED in merchant_source=api mode
 	// (or#893 deleted the vault.enabled derivation). Env: SECRET_BACKEND. Only
-	// consulted in merchant_source=api mode — MODE 1 (#723) holds secrets in
-	// memory and never constructs a persistent secret store.
+	// Provider credentials use this backend only in merchant_source=api mode.
+	// Manifest providers stay in memory; optional managed alert-webhook URLs
+	// can independently use this backend and require encryption when stored in DB.
 	SecretBackend string `koanf:"secret_backend,omitempty"`
 
-	// MerchantSource is the two-mode doctrine switch (#723/#724): where merchant
-	// config + catalog truth lives. ONE knob for both — deliberately no separate
-	// catalog_source.
+	// MerchantSource selects authority for merchant configuration and provider
+	// credentials. CatalogSource independently selects catalog authority.
 	//   - "manifest" (DEFAULT, empty = manifest): MODE 1. The boot YAML (merchant
-	//     manifest + catalog + the host's structured secret overlays) IS
-	//     the truth, held in memory. No merchant-secret store is constructed;
-	//     catalog/provider-config mutation APIs are rejected (405); change =
+	//     manifest + the host's structured secret overlays) IS
+	//     the truth, held in memory. Provider-config mutation APIs are rejected
+	//     (405); change =
 	//     edit the YAML + reboot. DB rows are boot-converged projections for FKs.
 	//   - "api": MODE 2. No manifests at boot (their presence refuses boot —
-	//     two truths); merchants/catalog/secrets live in the DB + secret backend
+	//     two truths); merchant configuration/secrets live in the DB + secret backend
 	//     and mutate over the HTTP APIs.
 	// Deployment shape does NOT imply mode — embedded and standalone can run
 	// either. Env: MERCHANT_SOURCE. Unknown values refuse to load.
 	MerchantSource string `koanf:"merchant_source,omitempty"`
+	// CatalogSource selects "manifest" or "api" for product, price and metering
+	// definitions. Empty follows MerchantSource. Use "api" with manifest-owned
+	// merchant configuration to allow dynamic catalogs with host-supplied,
+	// read-only provider credentials. Env: CATALOG_SOURCE.
+	CatalogSource string `koanf:"catalog_source,omitempty"`
 	// MerchantManifestOverlays are YAML files in the manifest's own shape
 	// (secrets rendered by Vault Agent / a k8s Secret volume) merged over the
 	// MODE-1 boot manifest in order, later wins. Env: MERCHANT_MANIFEST_OVERLAYS
@@ -397,6 +402,26 @@ const (
 	MerchantSourceAPI      = "api"
 )
 
+const (
+	CatalogSourceManifest = "manifest"
+	CatalogSourceAPI      = "api"
+)
+
+// CatalogSourceMode returns catalog authority, defaulting to merchant authority.
+// Validate rejects unknown values before the configuration is used.
+func (cfg *Config) CatalogSourceMode() string {
+	if cfg != nil {
+		if source := strings.ToLower(strings.TrimSpace(cfg.CatalogSource)); source != "" {
+			return source
+		}
+	}
+	return cfg.MerchantSourceMode()
+}
+
+func (cfg *Config) IsManifestCatalogSource() bool {
+	return cfg.CatalogSourceMode() == CatalogSourceManifest
+}
+
 // MerchantSourceMode returns the normalized merchant-source mode: "manifest"
 // (MODE 1, the default) or "api" (MODE 2). Unknown values are rejected by
 // Validate; this accessor treats only an explicit "api" as mode 2.
@@ -408,7 +433,7 @@ func (cfg *Config) MerchantSourceMode() string {
 }
 
 // IsManifestMerchantSource reports MODE 1 (#723): manifest-is-truth, secrets
-// in memory, mutation APIs rejected.
+// in memory, provider-configuration mutation APIs rejected.
 func (cfg *Config) IsManifestMerchantSource() bool {
 	return cfg.MerchantSourceMode() == MerchantSourceManifest
 }
@@ -417,8 +442,8 @@ func (cfg *Config) IsManifestMerchantSource() bool {
 // ONLY the declared secret_backend is consulted — or#893 deleted the
 // vault.enabled inference, so enabling Vault for Transit signing can no longer
 // silently move the secret store. merchant_source=api requires the declaration
-// (validateMerchantSource); MODE 1 never constructs a store, so the "db" here is
-// an inert default, not a fallback.
+// (validateMerchantSource). Manifest mode uses this backend only for optional
+// managed alert-webhook URLs, never for provider credentials.
 func (cfg *Config) SecretStoreBackend() string {
 	if cfg == nil {
 		return SecretBackendDB
@@ -437,8 +462,10 @@ func (cfg *Config) SecretStoreBackend() string {
 // Self-hosted / dev: supply MasterKey (base64 of 32 raw bytes) via config or the
 // ENCRYPTION_MASTER_KEY env var. PRODUCTION: the master key should come from a
 // KMS (the wrapped DEKs in openrails.merchant_deks stay in the DB; the master key
-// that unwraps them never does). When MasterKey is empty, encryption is disabled
-// and values are stored in plaintext (back-compat with pre-#227 deployments).
+// that unwraps them never does). An empty key disables this encryptor. Managed
+// DB provider credentials then require development posture, while sensitive
+// optional features such as stored webhook URLs and SDK capture tokens refuse
+// persistence. Host-owned provider credentials remain in memory.
 type EncryptionConfig struct {
 	// MasterKey is the base64-encoded 32-byte AES-256 master key that wraps
 	// per-merchant DEKs. Empty disables at-rest encryption.
@@ -1441,7 +1468,7 @@ func validateSourceCIDRs(cidrs []string) error {
 
 // validateMerchantSource enforces the #723 boot matrix rows that are pure
 // config posture:
-//   - unknown merchant_source values refuse to load (a typo must never
+//   - unknown merchant_source/catalog_source values refuse to load (a typo must never
 //     silently pick a truth model);
 //   - api mode outside development requires a merchant-secret backend (Vault,
 //     or ENCRYPTION_MASTER_KEY for the DB store) — extends the #667 posture
@@ -1451,6 +1478,11 @@ func validateSourceCIDRs(cidrs []string) error {
 // with a merchants.yaml on disk) are enforced where manifests load: serverboot
 // (standalone) and embed.UpsertMerchantConfig (embedded).
 func validateMerchantSource(cfg *Config, isDev bool) error {
+	switch strings.ToLower(strings.TrimSpace(cfg.CatalogSource)) {
+	case "", CatalogSourceManifest, CatalogSourceAPI:
+	default:
+		return fmt.Errorf("catalog_source must be %q or %q (empty follows merchant_source)", CatalogSourceManifest, CatalogSourceAPI)
+	}
 	switch strings.ToLower(strings.TrimSpace(cfg.MerchantSource)) {
 	case "", MerchantSourceManifest, MerchantSourceAPI:
 	default:
@@ -1511,11 +1543,11 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 }
 
 // validateEncryption fails fast on a malformed at-rest encryption master key.
-// An empty key is a legitimate state (encryption disabled) but is surfaced as a
-// warning so the plaintext-storage downgrade is never silent (#227).
+// An empty key is legitimate for host-owned provider credentials or Vault.
+// The managed DB store enforces and reports its actual encryption posture;
+// syntax validation cannot infer that any secret will be persisted.
 func validateEncryption(cfg *EncryptionConfig) error {
 	if cfg == nil || strings.TrimSpace(cfg.MasterKey) == "" {
-		log.Warn("encryption.master_key not set; per-merchant secrets are stored WITHOUT at-rest encryption")
 		return nil
 	}
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(cfg.MasterKey))

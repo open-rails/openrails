@@ -10,9 +10,8 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Manifest hosts (merchant_source=manifest) author their catalog with
-// PushCatalog; the Client's catalog writes are refused for them. API hosts
-// author through the Client.
+// CatalogSource selects catalog authority independently of MerchantSource.
+// Manifest catalogs use PushCatalog; API catalogs use the Client's mutations.
 
 // PushCatalogOptions declares one catalog push. Exactly one of File or
 // Manifest names the catalog YAML. Insert, Overwrite and Prune are the
@@ -28,7 +27,7 @@ type PushCatalogOptions struct {
 
 // PushCatalog converges the declared catalog (products, prices by explicit
 // key, meters, tier groups) into the runtime's merchant, using its armed PSPs
-// and signers. A mutating push runs the full converge for manifest merchants.
+// and signers. A mutating push runs the full converge for manifest catalogs.
 func (r *Runtime) PushCatalog(ctx context.Context, opts PushCatalogOptions) error {
 	if err := r.initialized(); err != nil {
 		return err

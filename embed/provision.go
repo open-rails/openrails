@@ -120,7 +120,7 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 		// MODE 2 (#724): merchant truth arrives via the HTTP APIs; a manifest-shaped
 		// upsert is a second truth and refuses loudly. A bare bind (empty config or
 		// display name only) stays legal — it declares no truth.
-		return merchant.ID{}, fmt.Errorf("openrails embed: merchant_source=api refuses manifest-declared merchant config (two truths, #723/#724); provision via PUT /v1/merchant/payment-providers and the catalog APIs, or run merchant_source=manifest")
+		return merchant.ID{}, fmt.Errorf("openrails embed: merchant_source=api refuses manifest-declared merchant config (two truths, #723/#724); configure providers via PUT /v1/merchant/payment-providers, or run merchant_source=manifest")
 	}
 
 	tn, err := boot.ProvisionMerchant(ctx, req)
