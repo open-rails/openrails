@@ -33,8 +33,8 @@ type NMIUpgradePayload struct {
 	ProductName               string                  `json:"product_name"`
 	PlanID                    string                  `json:"plan_id"`
 	PaymentMethodID           uuid.UUID               `json:"payment_method_id"`
-	RecurringAmount           int64                   `json:"recurring_amount"`
-	ProrationAmount           int64                   `json:"proration_amount"`
+	RecurringAmount           int64                   `json:"recurring_amount,string"`
+	ProrationAmount           int64                   `json:"proration_amount,string"`
 	Currency                  string                  `json:"currency"`
 	PeriodStart               time.Time               `json:"period_start"`
 	PeriodEnd                 time.Time               `json:"period_end"`
