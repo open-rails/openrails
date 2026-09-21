@@ -729,9 +729,19 @@ func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtim
 	// captured as a provider name.
 	providers.Handle(http.MethodPost, "/routing/dry-run", h(httphandlers.MerchantDryRunCheckoutRouting), readMW...)
 	providers.Handle(http.MethodGet, "/:provider", h(httphandlers.MerchantGetPaymentProvider), readMW...)
+	// Host-owned provider configuration has no mutation HTTP surface. Keep
+	// reads and routing dry runs available, independently of catalog ownership.
+	if rt != nil && rt.Config.IsManifestMerchantSource() {
+		return
+	}
 	// Provider-config WRITE surface persists secrets; mount it only when OpenRails
-	// can actually write them (#661). Nil ProviderRoutes = permissive (standalone).
-	if opts.ProviderRoutes == nil || opts.ProviderRoutes.SecretWrite {
+	// can actually write them (#661). Explicit route selection cannot override
+	// the runtime backend, and callers may omit ProviderRoutes entirely.
+	secretWrite := opts.ProviderRoutes == nil || opts.ProviderRoutes.SecretWrite
+	if rt != nil && rt.RouteCapabilities != nil {
+		secretWrite = secretWrite && rt.RouteCapabilities.SecretWrite
+	}
+	if secretWrite {
 		providers.Handle(http.MethodPut, "/:provider", h(httphandlers.MerchantPutPaymentProvider), writeMW...)
 	}
 	// Lifecycle archives (#655/#656) write only the PSP row — never a secret,

@@ -297,7 +297,11 @@ Semantics by mode:
 - **Mode 1 (`merchant_source=manifest`, the default)**: this call IS the manifest —
   it steamrolls the DB projections and seeds secrets into the runtime's **in-memory**
   plane (never a persistent store) on every run, then arms checkout/vault/webhooks
-  immediately. Change credentials = change the config + reboot.
+  immediately. Change credentials = change the config + reboot. Provider PUT,
+  DELETE and account-archive HTTP routes are omitted; reads and routing dry
+  runs remain available. The advertised `secret_write` capability is false,
+  including with explicit provider route selections. This does not disable
+  separately configured managed alert-webhook URL updates.
 - **Mode 2 (`merchant_source=api`)**: a manifest-shaped upsert (PSPs, profile,
   invoice, remote-application trust) refuses loudly — two truths. Only a bare
   identity bind (slug + top-level `DisplayName`) is legal; arm providers through

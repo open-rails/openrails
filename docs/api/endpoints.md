@@ -392,7 +392,7 @@ Product/price keys remain merchant-wide; every owner lookup also constrains the
 owned catalog.
 
 Catalog administration uses `GET/POST /v1/merchant/catalogs` and
-`GET /v1/merchant/catalogs/{catalog_id}`. POST idempotently ensures a catalog for
+`GET /v1/merchant/catalogs/{id}`. POST idempotently ensures a catalog for
 its explicit `owner_subject` and requires merchant-wide catalog update authority.
 Catalog IDs use `cat_<uuid>`. Product responses include `catalog_id`; creators
 cannot reassign it. Administrators can select a catalog in product creation and
@@ -402,12 +402,34 @@ use the merchant-owned default catalog.
 Reads need `merchant:catalog:read`; writes need `merchant:catalog:update`. In
 `catalog_source=manifest` deployments every catalog WRITE answers `405` with
 code `manifest_driven` — update and apply the catalog manifest instead. Empty
-`catalog_source` follows `merchant_source`. Provider configuration retains its
-own `merchant_source` guard, so host credentials can accompany API-owned catalogs.
-Reads stay live.
+`catalog_source` follows `merchant_source`. Host-owned credential mode omits provider credential mutation routes while
+keeping reads available. API-owned catalogs remain independently writable.
+These source modes apply to the runtime; mixed source modes per merchant are
+not supported. Catalog reads stay live.
 
 | Method | Path | Purpose |
 |---|---|---|
+| GET | `/v1/catalog` | Read the verified caller's catalog (`merchant:catalog:read-own`) |
+| PUT | `/v1/catalog` | Ensure the verified caller's catalog (`merchant:catalog:update-own`) |
+| GET | `/v1/catalog/products` | List products in the caller's catalog |
+| GET | `/v1/catalog/products/{id}` | Read an owned product |
+| GET | `/v1/catalog/products/by-key/{key}` | Read an owned product by key |
+| POST | `/v1/catalog/products` | Create a product in the caller's catalog |
+| PATCH | `/v1/catalog/products/{id}` | Update an owned product |
+| POST | `/v1/catalog/products/{id}/activate` | Activate an owned product |
+| POST | `/v1/catalog/products/{id}/deactivate` | Deactivate an owned product |
+| GET | `/v1/catalog/prices` | List prices in the caller's catalog |
+| GET | `/v1/catalog/prices/{id}` | Read an owned price |
+| GET | `/v1/catalog/prices/by-key/{key}` | Read an owned price by key |
+| GET | `/v1/catalog/prices/by-key/{key}/history` | Read an owned price key's version history |
+| POST | `/v1/catalog/prices` | Create a price for an owned product |
+| PATCH | `/v1/catalog/prices/{id}` | Update an owned price |
+| POST | `/v1/catalog/prices/{id}/activate` | Activate an owned price |
+| POST | `/v1/catalog/prices/{id}/deactivate` | Deactivate an owned price |
+| POST | `/v1/catalog/prices/{id}/key` | Relabel an owned price's key |
+| GET | `/v1/merchant/catalogs` | List the merchant's catalogs (`merchant:catalog:read`) |
+| GET | `/v1/merchant/catalogs/{id}` | Read one merchant catalog (`merchant:catalog:read`) |
+| POST | `/v1/merchant/catalogs` | Ensure a catalog for an explicit `owner_subject` (`merchant:catalog:update`) |
 | POST | `/v1/merchant/catalog/products` | Create a product: at least `{ key, display_name }`, optionally `entitlements_spec` |
 | GET | `/v1/merchant/catalog/products` | Paginated products; `tier_group` and `archived` (`false` live only, `true` archived only, absent both) filter before count/pagination |
 | GET | `/v1/merchant/catalog/products/{id}` | One product |
@@ -446,8 +468,10 @@ results; selectors and manifest pruning explicitly traverse every page.
 ### Payment providers (`/v1/merchant/payment-providers`)
 
 Reads: `merchant:payment-providers:read`; writes: `merchant:payment-providers:update`
-(writes are mounted only when the deployment can persist secrets, and are
-manifest-guarded like catalog writes).
+Host-owned credential mode omits all provider mutation routes. In API-owned
+credential mode, create/update requires a writable secret backend; archive
+routes remain available with a read-only secret backend. Reads and routing
+dry runs remain mounted in both source modes.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -463,7 +487,7 @@ remain, existing obligations and inbound webhooks keep resolving to it, and
 new checkout selects only active accounts. Archiving the rail's last active
 account answers `409 provider_account_last_active` (metadata: `psp_id`)
 unless `allow_last` is `true`; new checkout on that rail is then refused until
-another account is armed. Both archives are lifecycle writes: they stay
+another account is armed. Both archives are lifecycle writes: in API-owned credential mode they stay
 mounted when the secret backend is read-only.
 
 ### Metrics, dashboard, webhooks, notifications

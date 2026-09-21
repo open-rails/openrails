@@ -50,7 +50,8 @@ type ProviderRoutes struct {
 }
 
 func (p ProviderRoutes) internal() routesurface.ProviderRoutes {
-	// An explicit host selection is authoritative; the write surface stays on.
+	// Select rails explicitly; runtime ownership and backend capabilities still
+	// determine whether provider credential writes are available.
 	return routesurface.ProviderRoutes{
 		StripePortal:  p.StripePortal,
 		Solana:        p.Solana,

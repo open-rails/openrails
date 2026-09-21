@@ -323,10 +323,9 @@ func (g allowAllGate) Authorize(context.Context, *http.Request, string) (billing
 	return billingauth.Principal{MerchantID: g.id}, nil
 }
 
-// TestManifestMode_MutationRoutesRejected405: PUT/DELETE payment-providers and
-// the catalog mutation routes answer 405 with the machine code
-// `manifest_driven` in mode 1; reads keep working.
-func TestManifestMode_MutationRoutesRejected405(t *testing.T) {
+// Host-owned provider mutations are absent; catalog mutations retain their
+// independent manifest guard. Provider reads remain available.
+func TestManifestMode_MutationRoutesOmitted(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 
@@ -375,16 +374,22 @@ func TestManifestMode_MutationRoutesRejected405(t *testing.T) {
 		require.Contains(t, envelope.Error.Message, "host-declared")
 	}
 
-	// Provider-config writes.
-	assertManifestDriven(do(http.MethodPut, "/v1/merchant/payment-providers/stripe", `{"account_id":"acct_x"}`))
-	assertManifestDriven(do(http.MethodDelete, "/v1/merchant/payment-providers/stripe", ""))
+	// Generic method-not-allowed comes from the read route, not a mounted guard.
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		status, body := do(method, "/v1/merchant/payment-providers/stripe", `{"account_id":"acct_x"}`)
+		require.Equal(t, http.StatusMethodNotAllowed, status, body)
+		require.NotContains(t, body, "manifest_driven")
+	}
+	status, body := do(http.MethodPost, "/v1/merchant/payment-providers/stripe/accounts/11111111-1111-1111-1111-111111111111/archive", "")
+	require.Equal(t, http.StatusNotFound, status, body)
+	require.NotContains(t, body, "manifest_driven")
 	// Catalog mutations — including plan-only publish (documented: the plan is
 	// computed at boot from the YAML; the CLI dry-run remains available).
 	assertManifestDriven(do(http.MethodPost, "/v1/merchant/catalog/products", `{"key":"x","display_name":"X"}`))
 	assertManifestDriven(do(http.MethodPost, "/v1/merchant/catalog/publish", `{"catalog":{"version":1}}`))
 
 	// Reads stay served (list providers; empty is fine — not 405).
-	status, body := do(http.MethodGet, "/v1/merchant/payment-providers", "")
+	status, body = do(http.MethodGet, "/v1/merchant/payment-providers", "")
 	require.Equal(t, http.StatusOK, status, body)
 }
 
