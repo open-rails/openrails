@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,19 +22,36 @@ import (
 // AdmitDueSubscriptionCollection freezes one due engine obligation. Existing
 // accepted work is recovered before a hold can refuse a new admission.
 func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subscriptionID uuid.UUID, admittedAt time.Time) (gen.OpenrailsRailIntent, error) {
+	in, _, err := s.admitSubscriptionCollection(ctx, subscriptionID, admittedAt, uuid.Nil, "", nil)
+	return in, err
+}
+
+// AdmitCustomerSubscriptionCollection uses the same locked obligation and
+// receipt custody as scheduled collection. A verified payer may bypass only
+// retry delay after a released attempt, never unresolved financial ownership.
+func (s *MoneyService) AdmitCustomerSubscriptionCollection(ctx context.Context, subscriptionID, payer uuid.UUID, key string, method *uuid.UUID) (gen.OpenrailsRailIntent, bool, error) {
+	if payer == uuid.Nil || strings.TrimSpace(key) == "" || len(key) > 255 || (method != nil && *method == uuid.Nil) {
+		return gen.OpenrailsRailIntent{}, false, errors.New("payer and a 1-255 byte retry key required")
+	}
+	return s.admitSubscriptionCollection(ctx, subscriptionID, s.now(), payer, charge.CustomerPaymentKey(subscriptions.TypeSubscriptionCollection, payer, strings.TrimSpace(key)), method)
+}
+
+func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscriptionID uuid.UUID, admittedAt time.Time, payer uuid.UUID, customerKey string, requestedMethod *uuid.UUID) (gen.OpenrailsRailIntent, bool, error) {
+	replayed := false
+
 	var accepted gen.OpenrailsRailIntent
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return accepted, err
+		return accepted, replayed, err
 	}
 	if admittedAt.IsZero() {
-		return accepted, errors.New("engine admission time is required")
+		return accepted, replayed, errors.New("engine admission time is required")
 	}
 	admittedAt = admittedAt.UTC().Truncate(time.Microsecond)
 	repo := subscriptions.NewSubscriptionRepo(s.db)
 	observed, err := repo.GetByID(ctx, subscriptionID)
 	if err != nil {
-		return accepted, err
+		return accepted, replayed, err
 	}
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.db.NewWithPgxTx(tx)
@@ -45,6 +63,26 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 		if err != nil {
 			return err
 		}
+		if payer != uuid.Nil {
+			if sub.CustomerID != payer {
+				return pgx.ErrNoRows
+			}
+			prior, err := intents.NewStore(d).GetByIdempotencyKey(ctx, customerKey)
+			if err == nil {
+				p, decodeErr := subscriptions.DecodeSubscriptionCollectionPayload(prior)
+				if decodeErr != nil {
+					return decodeErr
+				}
+				if p.Renewal.SubscriptionID != sub.ID || p.Renewal.CustomerID != payer || p.Initiator != charge.InitiatorCustomer || !sameEngineMethodRequest(p.RequestedPaymentMethodID, requestedMethod) {
+					return intents.ErrRebillKeyConflict
+				}
+				accepted, replayed = prior, true
+				return nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
 		if sub.CustomerID != observed.CustomerID || sub.CollectionPolicy != models.CollectionPolicyEngine || (sub.Rail != models.RailNMI && sub.Rail != models.RailStripe) || sub.RailSubscriptionID != "" {
 			return errors.New("subscription is not an engine-owned card obligation")
 		}
@@ -53,7 +91,13 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 			if _, err := subscriptions.DecodeSubscriptionCollectionPayload(current); err != nil {
 				return err
 			}
-			accepted = current
+			if requestedMethod != nil {
+				p, _ := subscriptions.DecodeSubscriptionCollectionPayload(current)
+				if *requestedMethod != p.PaymentMethodID {
+					return intents.ErrRebillKeyConflict
+				}
+			}
+			accepted, replayed = current, true
 			return nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -62,7 +106,7 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 		if s.EngineAdmissionHold {
 			return errors.New("new engine payment admission is held")
 		}
-		if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.After(admittedAt) || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) || (sub.Status == models.StatusPastDue && (sub.NextRetryAt == nil || sub.NextRetryAt.After(admittedAt))) {
+		if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.After(admittedAt) || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) || (payer == uuid.Nil && sub.Status == models.StatusPastDue && (sub.NextRetryAt == nil || sub.NextRetryAt.After(admittedAt))) || (payer != uuid.Nil && sub.Status != models.StatusPastDue) {
 			return errors.New("engine subscription is not due")
 		}
 		attempt := 0
@@ -84,6 +128,11 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 			attempt = old.Attempt + 1
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
+		} else if payer != uuid.Nil {
+			return intents.ErrRebillNotRetryable
+		}
+		if requestedMethod != nil && (sub.PaymentMethodID == nil || *requestedMethod != *sub.PaymentMethodID) {
+			return intents.ErrRebillUnsupported
 		}
 		if sub.PaymentMethodID == nil {
 			return errors.New("engine subscription has no saved method")
@@ -151,13 +200,24 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 		if sub.RetryAttempts != nil {
 			failures = *sub.RetryAttempts
 		}
-		payload := subscriptions.SubscriptionCollectionPayload{Attempt: attempt, FailureCount: failures, Renewal: terms, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC(), AcceptedAt: admittedAt, PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method), HyperSwitch: binding, AmountMinor: minor, OrderReference: subscriptions.RebillOrderReference(key)}
-		accepted, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, IntentType: subscriptions.TypeSubscriptionCollection, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: method.PspID, CustodianID: engineCustodianID(method.CustodianID), Payload: payload, IdempotencyKey: key, NextAttemptAt: admittedAt, Origin: intents.OriginSystem, OriginReason: "accepted engine renewal"})
+		initiator, origin, actor := charge.InitiatorMerchant, intents.OriginSystem, ""
+		if payer != uuid.Nil {
+			key = customerKey
+			initiator = charge.InitiatorCustomer
+			origin = intents.OriginUser
+			actor = payer.String()
+		}
+		payload := subscriptions.SubscriptionCollectionPayload{Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Attempt: attempt, FailureCount: failures, Renewal: terms, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC(), AcceptedAt: admittedAt, PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method), HyperSwitch: binding, AmountMinor: minor, OrderReference: subscriptions.RebillOrderReference(key)}
+		accepted, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, IntentType: subscriptions.TypeSubscriptionCollection, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: method.PspID, CustodianID: engineCustodianID(method.CustodianID), Payload: payload, IdempotencyKey: key, NextAttemptAt: admittedAt, Origin: origin, Actor: actor, OriginReason: "accepted engine renewal"})
 		if err != nil {
 			return err
 		}
 		_, err = subscriptions.DecodeSubscriptionCollectionPayload(accepted)
 		return err
 	})
-	return accepted, err
+	return accepted, replayed, err
+}
+
+func sameEngineMethodRequest(a, b *uuid.UUID) bool {
+	return (a == nil && b == nil) || (a != nil && b != nil && *a == *b)
 }
