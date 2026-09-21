@@ -1480,15 +1480,12 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 		now := s.now()
 
 		if shouldTerminate {
-			// Terminate the subscription
-			if err := sub.ResetCurrentPeriods(); err != nil {
-				return err
-			}
-
+			// Termination ends access; historical paid bounds remain intact.
 			cancelType := models.CancelTypeMerchant // Refund is merchant-initiated
 			sub.Status = models.StatusCancelled
 			sub.CancelType = &cancelType
 			sub.CancelledAt = &now
+			sub.EndedAt = &now
 			if refundReason != "" {
 				sub.CancelFeedback = &refundReason
 			}
@@ -1777,11 +1774,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 
 		now := s.now()
 
-		// IMMEDIATE TERMINATION - chargebacks are the most serious type of dispute
-		if err := sub.ResetCurrentPeriods(); err != nil {
-			return err
-		}
-
+		// A chargeback ends access immediately without rewriting paid history.
 		// Chargebacks are terminal cancellations.
 		cancelType := models.CancelTypeChargeback
 		sub.Status = models.StatusCancelled

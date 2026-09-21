@@ -24,8 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Actual HTTP callbacks must use the same clock as the host runtime for
-// paid terms, dunning and expiry/reactivation decisions.
+// One actual callback lifecycle owns CCBill's paid-term, retry and terminal
+// doctrine; money and access are inspected through the same merchant runtime.
 func TestCCBillCallbacksUseRuntimeClock(t *testing.T) {
 	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
 	clock := clockwork.NewFakeClockAt(now)
@@ -157,4 +157,54 @@ func TestCCBillCallbacksUseRuntimeClock(t *testing.T) {
 	post("UserReactivation", payload())
 	require.Equal(t, models.StatusActive, subscription().Status)
 	access(clock.Now(), true)
+	var before int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.notifications WHERE merchant_id=$1 AND customer_id=$2 AND event_type=$3`, owned.MerchantID.UUID(), customer.UUID(), string(models.NotificationPremiumEnded)).Scan(&before))
+	paid := subscription()
+	chargeback := payload()
+	chargeback["amount"], chargeback["currencyCode"] = "9.99", 840
+	post("Chargeback", chargeback)
+	post("Chargeback", chargeback)
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.notifications WHERE merchant_id=$1 AND customer_id=$2 AND event_type=$3`, owned.MerchantID.UUID(), customer.UUID(), string(models.NotificationPremiumEnded)).Scan(&count))
+	require.Equal(t, before+1, count)
+	terminated := subscription()
+	require.True(t, paid.CurrentPeriodStartsAt.Equal(*terminated.CurrentPeriodStartsAt))
+	require.True(t, paid.CurrentPeriodEndsAt.Equal(*terminated.CurrentPeriodEndsAt))
+	require.True(t, clock.Now().Equal(*terminated.CancelledAt))
+	require.True(t, clock.Now().Equal(*terminated.EndedAt))
+	for _, event := range []string{"UserReactivation", "RenewalSuccess"} {
+		body := payload()
+		body["billedAmount"], body["billedCurrencyCode"] = "9.99", 840
+		post(event, body)
+		sub = subscription()
+		require.Equal(t, models.StatusCancelled, sub.Status)
+		require.Equal(t, models.CancelTypeChargeback, *sub.CancelType)
+		access(clock.Now(), false)
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND transaction_id=$2`, owned.MerchantID.UUID(), body["transactionId"]).Scan(&count))
+		require.Zero(t, count)
+	}
+	// A late full refund must also terminate standing access without destroying
+	// the expired paid interval, and repeated delivery reverses money only once.
+	railSub = "refund-" + uuid.NewString()
+	end = clock.Now().Add(5 * 24 * time.Hour).Truncate(24 * time.Hour).Add(24*time.Hour - time.Second)
+	for key, value := range payload() {
+		initial[key] = value
+	}
+	post("NewSaleSuccess", initial)
+	paid = subscription()
+	clock.Advance(end.Sub(clock.Now()) + time.Hour)
+	access(clock.Now(), true)
+	refund := payload()
+	refund["amount"], refund["currencyCode"] = "9.99", 840
+	post("Refund", refund)
+	post("Refund", refund)
+	terminated = subscription()
+	require.Equal(t, models.StatusCancelled, terminated.Status)
+	require.True(t, paid.CurrentPeriodStartsAt.Equal(*terminated.CurrentPeriodStartsAt))
+	require.True(t, paid.CurrentPeriodEndsAt.Equal(*terminated.CurrentPeriodEndsAt))
+	require.True(t, clock.Now().Equal(*terminated.EndedAt))
+	require.True(t, clock.Now().Equal(*terminated.CancelledAt))
+	access(clock.Now(), false)
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND transaction_id=$2`, owned.MerchantID.UUID(), "refund:"+refund["transactionId"].(string)).Scan(&count))
+	require.Equal(t, 1, count)
+
 }
