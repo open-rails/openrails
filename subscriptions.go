@@ -28,6 +28,8 @@ type SubscriptionFilter struct {
 // this one shape; the self routes additionally fill ScheduledPrice,
 // ScheduledProduct, CancelPortalURL and Access.
 type Subscription struct {
+	// CollectionPolicy is read-only scheduling/recovery ownership.
+	CollectionPolicy    string           `json:"collection_policy"`
 	Recovery            *PaymentRecovery `json:"recovery,omitempty"`
 	LastRetryAt         *time.Time       `json:"last_retry_at"`
 	RetryAttempts       *int             `json:"retry_attempts"`

@@ -61,14 +61,14 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 		RETURNING id`, dbtest.TestMerchantID.UUID()).Scan(&pspID))
 	mk := func(methodRef string) *models.PaymentMethod {
 		pm := &models.PaymentMethod{
-			ID:                   uuid.New(),
-			CustomerID:           customerID,
-			Custodian:            models.CustodianPSP,
-			Rail:                 models.RailNMI,
-			PspID:                pspID,
-			RailCustomerRef:      sharedRailCustomerRef,
-			RailMethodRef:        methodRef,
-			RebillDriver:         models.RebillDriverProvider,
+			ID:              uuid.New(),
+			CustomerID:      customerID,
+			Custodian:       models.CustodianPSP,
+			Rail:            models.RailNMI,
+			PspID:           pspID,
+			RailCustomerRef: sharedRailCustomerRef,
+			RailMethodRef:   methodRef,
+
 			InitialTransactionID: "txn-" + uuid.NewString()[:8],
 			CreatedAt:            time.Now().UTC(),
 			UpdatedAt:            time.Now().UTC(),

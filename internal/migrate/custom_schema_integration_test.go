@@ -43,12 +43,30 @@ func TestCustomSchemaKeepsBillingValuesAndRestoreFunctions(t *testing.T) {
 	require.NoError(t, err)
 	_, err = conn.Exec(ctx, "INSERT INTO "+schema+".psps(id,merchant_id,rail,environment,account_id) VALUES($1,$2,'nmi','test',$3)", psp, mid, psp.String())
 	require.NoError(t, err)
-	for _, driver := range []string{"openrails", "provider"} {
-		_, err = conn.Exec(ctx, "INSERT INTO "+schema+".payment_methods(merchant_id,customer_id,psp_id,rail,initial_transaction_id,rebill_driver,rail_customer_ref) VALUES($1,$2,$3,'nmi','fixture',$4,$4)", mid, cid, psp, driver)
-		require.NoError(t, err, "schema relocation must preserve the billing enum")
+	method := uuid.New()
+	_, err = conn.Exec(ctx, "INSERT INTO "+schema+".payment_methods(id,merchant_id,customer_id,psp_id,rail,rail_customer_ref,initial_transaction_id) VALUES($1,$2,$3,$4,'nmi','relocation-vault','fixture')", method, mid, cid, psp)
+	require.NoError(t, err)
+	var product, subscription uuid.UUID
+	for _, policy := range []string{"provider", "provider_dunning", "engine"} {
+		product = uuid.New()
+		_, err = conn.Exec(ctx, "INSERT INTO "+schema+".products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Policy')", product, mid, product.String())
+		require.NoError(t, err)
+		err = conn.QueryRow(ctx, "INSERT INTO "+schema+".subscriptions(merchant_id,customer_id,product_id,psp_id,rail,collection_policy,payment_method_id) VALUES($1,$2,$3,$4,'nmi',$5,$6) RETURNING id", mid, cid, product, psp, policy, method).Scan(&subscription)
+		require.NoError(t, err, "schema relocation preserves collection policy")
 	}
-	_, err = conn.Exec(ctx, "INSERT INTO "+schema+".payment_methods(merchant_id,customer_id,psp_id,rail,initial_transaction_id,rebill_driver,rail_customer_ref) VALUES($1,$2,$3,'nmi','fixture',$4,$4)", mid, cid, psp, schema)
-	require.ErrorContains(t, err, "payment_methods_rebill_driver_check")
+	_, err = conn.Exec(ctx, "INSERT INTO "+schema+".subscriptions(merchant_id,customer_id,product_id,psp_id,rail,collection_policy,payment_method_id) VALUES($1,$2,$3,$4,'nmi',$5,$6)", mid, cid, product, psp, schema, method)
+	require.ErrorContains(t, err, "subscriptions_collection_policy_check")
+
+	// Removing a credential must not cancel the agreement or invent a remote ID.
+	_, err = conn.Exec(ctx, "UPDATE "+schema+".subscriptions SET status='active',current_period_starts_at=now()-interval '1 month',current_period_ends_at=now() WHERE id=$1", subscription)
+	require.NoError(t, err)
+	_, err = conn.Exec(ctx, "DELETE FROM "+schema+".payment_methods WHERE id=$1", method)
+	require.NoError(t, err)
+	var linked *uuid.UUID
+	require.NoError(t, conn.QueryRow(ctx, "SELECT payment_method_id FROM "+schema+".subscriptions WHERE id=$1", subscription).Scan(&linked))
+	require.Nil(t, linked)
+	_, err = conn.Exec(ctx, "UPDATE "+schema+".subscriptions SET collection_policy='provider' WHERE id=$1", subscription)
+	require.ErrorContains(t, err, "collection policy is immutable")
 
 	var badPaths, relocatedPaths int
 	require.NoError(t, conn.QueryRow(ctx, `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON p.pronamespace=n.oid

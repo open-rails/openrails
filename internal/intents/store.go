@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 
@@ -92,6 +94,9 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	if scope.UUID() != p.MerchantID {
 		return gen.OpenrailsRailIntent{}, errors.New("intent merchant does not match context")
 	}
+	if p.IntentType == subscriptions.TypeInitialMembership {
+		return s.enqueueInitialMembership(ctx, p)
+	}
 	if p.IntentType == TypeNMIPaymentMethodUpdate {
 		return s.enqueueNMIMethodUpdate(ctx, p)
 	}
@@ -104,15 +109,28 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	if p.IntentType == "nmi_sale" {
 		return s.enqueueSale(ctx, p)
 	}
-	if p.IntentType != "nmi_upgrade" && p.IntentType != subscriptions.TypeManualRebill {
+	if p.IntentType != "nmi_upgrade" && p.IntentType != subscriptions.TypeManualRebill && p.IntentType != subscriptions.TypeSubscriptionCollection {
 		return s.enqueue(ctx, p)
 	}
 	if p.SubscriptionID == nil {
 		return gen.OpenrailsRailIntent{}, errors.New("recurring operation requires a subscription")
 	}
+	var engineCustomer uuid.UUID
+	if p.IntentType == subscriptions.TypeSubscriptionCollection {
+		observed, err := subscriptions.NewSubscriptionRepo(s.db).GetByID(ctx, *p.SubscriptionID)
+		if err != nil {
+			return gen.OpenrailsRailIntent{}, err
+		}
+		engineCustomer = observed.CustomerID
+	}
 	var row gen.OpenrailsRailIntent
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.db.NewWithPgxTx(tx)
+		if engineCustomer != uuid.Nil {
+			if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: p.MerchantID, ID: engineCustomer}); err != nil {
+				return err
+			}
+		}
 		sub, err := subscriptions.NewSubscriptionRepo(d).GetByIDForUpdate(ctx, *p.SubscriptionID)
 		if err != nil {
 			return err
@@ -131,6 +149,80 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if p.IntentType == subscriptions.TypeSubscriptionCollection {
+			if sub.CollectionPolicy != "engine" || sub.CustomerID != engineCustomer {
+				return errors.New("engine operation requires engine scheduling ownership")
+			}
+			owner, err := d.Gen(ctx).GetUnresolvedSubscriptionCollection(ctx, gen.GetUnresolvedSubscriptionCollectionParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
+			if err == nil {
+				return fmt.Errorf("subscription already owned by accepted engine operation %s", owner.ID)
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			payload, ok := p.Payload.(subscriptions.SubscriptionCollectionPayload)
+			if !ok || p.Origin != OriginSystem || p.PspID == uuid.Nil || p.CustodianID == uuid.Nil {
+				return errors.New("engine admission requires typed system-owned terms")
+			}
+			handle := paymentmethods.CustodianHandle{Custodian: p.CustodianID, Method: payload.Instrument.RailMethodRef}
+			if err := paymentmethods.LockCustodianHandles(ctx, d.Gen(ctx), p.MerchantID, handle); err != nil {
+				return err
+			}
+			if err := paymentmethods.RequireCustodianHandleAvailable(ctx, d.Gen(ctx), p.MerchantID, handle); err != nil {
+				return err
+			}
+			method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: p.MerchantID, ID: payload.PaymentMethodID})
+			if err != nil {
+				return err
+			}
+			if sub.PaymentMethodID == nil || method.ID != *sub.PaymentMethodID || method.CustomerID != engineCustomer || method.ParkReason != "" {
+				return errors.New("engine admission payment method changed")
+			}
+			if err := payload.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
+				return err
+			}
+			if sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(payload.PreviousPeriodEnd) || (sub.Status != "active" && sub.Status != "past_due") || (sub.Status == "past_due" && (sub.NextRetryAt == nil || sub.NextRetryAt.After(payload.AcceptedAt))) {
+				return errors.New("engine admission is not a due obligation")
+			}
+			failures := 0
+			if sub.RetryAttempts != nil {
+				failures = *sub.RetryAttempts
+			}
+			if payload.FailureCount != failures {
+				return errors.New("engine admission changed the accepted failure count")
+			}
+			terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, payload.AcceptedAt)
+			if err != nil {
+				return err
+			}
+			terms, err = subscriptions.SelectEngineRenewalPeriod(terms, payload.AcceptedAt)
+			if err != nil {
+				return err
+			}
+			if !reflect.DeepEqual(terms, payload.Renewal) {
+				return errors.New("engine admission differs from current accepted catalog terms")
+			}
+			latest, err := d.Gen(ctx).GetLatestSubscriptionCollectionForPeriod(ctx, gen.GetLatestSubscriptionCollectionForPeriodParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID, PreviousPeriodEnd: payload.PreviousPeriodEnd})
+			ordinal := 0
+			if err == nil {
+				if latest.Status != StatusFailedTerminal {
+					return errors.New("previous engine obligation has not been released")
+				}
+				if err := ValidateSubscriptionCollectionTerminal(latest); err != nil {
+					return err
+				}
+				previous, err := subscriptions.DecodeSubscriptionCollectionPayload(latest)
+				if err != nil {
+					return err
+				}
+				ordinal = previous.Attempt + 1
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+			if payload.Attempt != ordinal {
+				return errors.New("engine admission changed its accepted attempt ordinal")
+			}
+		}
 		if p.IntentType == "nmi_upgrade" {
 			if err := subscriptions.RefuseOwnedRebillTerms(ctx, d, sub); err != nil {
 				return err
@@ -145,6 +237,15 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 			}
 		}
 		row, err = bound.enqueue(ctx, p)
+		if err == nil && p.IntentType == subscriptions.TypeSubscriptionCollection {
+			accepted, decodeErr := subscriptions.DecodeSubscriptionCollectionPayload(row)
+			if decodeErr != nil {
+				return decodeErr
+			}
+			if accepted.Renewal.CustomerID != sub.CustomerID || sub.PaymentMethodID == nil || accepted.PaymentMethodID != *sub.PaymentMethodID || accepted.Instrument.PSPID != sub.PspID {
+				return errors.New("engine admission contradicts locked subscription")
+			}
+		}
 		if err != nil || p.IntentType != subscriptions.TypeNMIUpgrade {
 			return err
 		}
@@ -527,7 +628,7 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 		_, err := qx.Exec(ctx,
 			`UPDATE openrails.rail_intents
 			    SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, updated_at = now()
-			  WHERE id = $1 AND merchant_id = $2 AND status = 'succeeded' AND intent_type <> 'nmi_provider_cutover' AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, mid.UUID())
+			  WHERE id = $1 AND merchant_id = $2 AND status = 'succeeded' AND intent_type NOT IN ('nmi_provider_cutover','subscription_collection') AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, mid.UUID())
 		return err
 	}
 	var ev []byte
@@ -542,13 +643,13 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 		_, err := qx.Exec(ctx,
 			`UPDATE openrails.rail_intents
 			    SET result_evidence = CASE WHEN result_evidence ? 'qualified_receipt' THEN coalesce($2::jsonb,'{}'::jsonb) || jsonb_build_object('qualified_receipt',result_evidence->'qualified_receipt') ELSE $2::jsonb END, updated_at = now()
-			  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded' AND intent_type <> 'nmi_provider_cutover' AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, ev, mid.UUID())
+			  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded' AND intent_type NOT IN ('nmi_provider_cutover','subscription_collection') AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, ev, mid.UUID())
 		return err
 	}
 	_, err = qx.Exec(ctx,
 		`UPDATE openrails.rail_intents
 		    SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, result_evidence = CASE WHEN result_evidence ? 'qualified_receipt' THEN coalesce($2::jsonb,'{}'::jsonb) || jsonb_build_object('qualified_receipt',result_evidence->'qualified_receipt') ELSE $2::jsonb END, updated_at = now()
-		  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded' AND intent_type <> 'nmi_provider_cutover' AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, ev, mid.UUID())
+		  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded' AND intent_type NOT IN ('nmi_provider_cutover','subscription_collection') AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, ev, mid.UUID())
 	return err
 }
 
@@ -562,7 +663,7 @@ func (s *Store) PruneTerminalPayload(ctx context.Context, id uuid.UUID) error {
 	_, err = s.db.Qx(ctx).Exec(ctx,
 		`UPDATE openrails.rail_intents
 		    SET payload = CASE WHEN result_evidence ? 'qualified_receipt' THEN payload ELSE NULL END, updated_at = now()
-		  WHERE id = $1 AND merchant_id = $2 AND status = 'failed_terminal' AND intent_type <> 'nmi_provider_cutover' AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, mid.UUID())
+		  WHERE id = $1 AND merchant_id = $2 AND status = 'failed_terminal' AND intent_type NOT IN ('nmi_provider_cutover','subscription_collection') AND NOT (COALESCE(result_evidence,'{}'::jsonb) ? 'qualified_enrollment')`, id, mid.UUID())
 	return err
 }
 
@@ -593,6 +694,9 @@ func slimEvidence(evidence map[string]any) map[string]any {
 // RAW pgx (no sqlc): runs on Qx(ctx) so the schema rewriter (#471) and RLS
 // apply exactly as for the generated queries.
 func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[string]any) error {
+	if _, ok := keys["initial_submitted"]; ok {
+		return errors.New("initial submission fence is write-once")
+	}
 	if err := refuseCustodyKeys(keys); err != nil {
 		return err
 	}
@@ -626,6 +730,9 @@ func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[strin
 // sending another provider request).
 func (s *Store) RecordProgressIfAbsent(ctx context.Context, id uuid.UUID, key string, value any) (bool, error) {
 	key = strings.TrimSpace(key)
+	if key == "initial_submitted" && value != true {
+		return false, errors.New("initial submission fence must be true")
+	}
 	if err := refuseCustodyKeys(map[string]any{key: value}); err != nil {
 		return false, err
 	}
@@ -647,7 +754,8 @@ func (s *Store) RecordProgressIfAbsent(ctx context.Context, id uuid.UUID, key st
 		  WHERE id = $1
 		    AND merchant_id = $4
 		    AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
-		    AND NOT (coalesce(result_evidence, '{}'::jsonb) ? $2::text)`, id, key, b, mid.UUID())
+		    AND NOT (coalesce(result_evidence, '{}'::jsonb) ? $2::text)
+ AND ($2::text <> 'initial_submitted' OR NOT (coalesce(result_evidence,'{}'::jsonb) ? 'qualified_initial_refusal'))`, id, key, b, mid.UUID())
 	if err != nil {
 		return false, err
 	}

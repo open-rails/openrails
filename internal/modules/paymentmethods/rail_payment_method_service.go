@@ -270,11 +270,11 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		// the vault id is an instrument-scoped handle, never a person. NMI has
 		// no person-level identity in our model (see rails registry
 		// HasRemoteCustomer=false); the person is the local customer_id UUID.
-		// Both handles are recorded verbatim; RebillDriver (not ref-emptiness)
-		// carries the rebill-driver mode, defaulting to 'provider'.
-		RailCustomerRef:      nmiResponse.CustomerVaultID,
-		RailMethodRef:        nmiResponse.BillingID,
-		RebillDriver:         models.RebillDriverProvider,
+		// Both handles are identity only. Collection ownership belongs to the
+		// subscription and is not inferred from the presence of a billing ID.
+		RailCustomerRef: nmiResponse.CustomerVaultID,
+		RailMethodRef:   nmiResponse.BillingID,
+
 		InitialTransactionID: "",
 		CreatedAt:            s.now(),
 		UpdatedAt:            s.now(),

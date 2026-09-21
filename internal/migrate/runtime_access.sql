@@ -10,7 +10,7 @@ GRANT ALL ON FUNCTION openrails.current_merchant_id() TO :"runtime_user";
 GRANT ALL ON FUNCTION openrails.custodian_owner_by_identity(p_kind text, p_environment text, p_account_id text) TO :"runtime_user";
 GRANT ALL ON FUNCTION openrails.customer_merchant_ids_for_subject(p_subject uuid) TO :"runtime_user";
 GRANT ALL ON FUNCTION openrails.delinquency_work_merchant_ids(p_now timestamp with time zone, p_limit integer) TO :"runtime_user";
-GRANT ALL ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) TO :"runtime_user";
+GRANT ALL ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer, p_include_engine boolean) TO :"runtime_user";
 GRANT ALL ON FUNCTION openrails.due_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) TO :"runtime_user";
 GRANT ALL ON FUNCTION openrails.due_verify_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) TO :"runtime_user";
 GRANT EXECUTE ON FUNCTION openrails.billing_restore_active(uuid) TO :"runtime_user";

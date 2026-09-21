@@ -124,14 +124,16 @@ func (w CancelSubscriptionWorker) cancel(ctx context.Context, args CancelSubscri
 		return river.JobCancel(subscriptions.ErrSolanaCancelNeedsWalletSignature)
 	}
 
-	switch sub.Rail {
-	case models.RailStripe:
+	switch {
+	case sub.CollectionPolicy == models.CollectionPolicyEngine, sub.Rail == models.RailStripe:
 		if w.SubscriptionLifecycleService == nil {
 			return fmt.Errorf("subscription lifecycle service unavailable")
 		}
-		stripeSvc := &subscriptions.StripeService{Config: w.Config, Rails: w.Rails}
-		if err := stripeSvc.CancelSubscription(ctx, sub.RailSubscriptionID); err != nil {
-			return err
+		if sub.CollectionPolicy != models.CollectionPolicyEngine {
+			stripeSvc := &subscriptions.StripeService{Config: w.Config, Rails: w.Rails}
+			if err := stripeSvc.CancelSubscription(ctx, sub.RailSubscriptionID); err != nil {
+				return err
+			}
 		}
 		var feedback *string
 		if args.Feedback != "" {
@@ -258,18 +260,20 @@ func (w ResumeSubscriptionWorker) resume(ctx context.Context, args ResumeSubscri
 		"rail":            sub.Rail,
 	}).Info("processing subscription resume")
 
-	if sub.Rail == models.RailStripe {
+	if sub.CollectionPolicy == models.CollectionPolicyEngine || sub.Rail == models.RailStripe {
 		if w.SubscriptionLifecycleService == nil {
 			return fmt.Errorf("subscription lifecycle service unavailable")
 		}
-		stripeSvc := &subscriptions.StripeService{Config: w.Config, Rails: w.Rails}
-		if err := stripeSvc.ResumeSubscription(ctx, sub.RailSubscriptionID); err != nil {
-			return err
+		if sub.CollectionPolicy != models.CollectionPolicyEngine {
+			stripeSvc := &subscriptions.StripeService{Config: w.Config, Rails: w.Rails}
+			if err := stripeSvc.ResumeSubscription(ctx, sub.RailSubscriptionID); err != nil {
+				return err
+			}
 		}
 		if _, err := w.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{
 			SubscriptionID: sub.ID,
 		}); err != nil {
-			return fmt.Errorf("resume Stripe membership locally: %w", err)
+			return fmt.Errorf("resume membership locally: %w", err)
 		}
 		return nil
 	}

@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -26,7 +28,9 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -58,6 +62,11 @@ type fakeNMISubGateway struct {
 	subID           string
 	txnID           string
 	charged         atomic.Bool
+	recurringAmount string
+	observedAmount  string
+	observedAt      time.Time
+	beforeResponse  func() error
+	reportedOrder   string
 }
 
 func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNMISubGateway, *nmi.NMIClient) {
@@ -68,15 +77,34 @@ func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNM
 		txnID: "txn-sub-" + uuid.NewString()[:8],
 	}
 	f.createMode.Store("approve")
+	f.recurringAmount = "9.99"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/customers/") {
+			fmt.Fprintf(w, `{"object":"customer","id":"%s","billing":[{"id":"billing-native","priority":1}]}`, f.railCustomerRef)
+			return
+		}
+		form, _ := f.createForm.Load().(url.Values)
+		amount := form.Get("amount")
+		if f.observedAmount != "" {
+			amount = f.observedAmount
+		}
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/payments/") {
+			if f.txnID == "" || !f.charged.Load() {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","amount":"%s","currency":"USD","customer_vault_id":"%s","actions":[{"id":"%s","type":"sale","success":true,"amount":"%s"}]}`, f.txnID, amount, f.railCustomerRef, f.txnID, amount)
+			return
+		}
+
 		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/subscriptions/") {
 			if !strings.HasSuffix(r.URL.Path, "/subscriptions/"+f.subID) || !f.subExists.Load() {
 				w.WriteHeader(http.StatusNotFound)
 				fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"not found"}`)
 				return
 			}
-			fmt.Fprintf(w, `{"object":"subscription","id":"%s","customer_vault_id":"%s","delayed_condition":"active","plan":{"id":"%s"}}`, f.subID, f.railCustomerRef, f.planID)
+			fmt.Fprintf(w, `{"object":"subscription","id":"%s","customer_vault_id":"%s","delayed_condition":"active","paused_subscription":"0","next_billing_date":"%s","plan":{"id":"%s","plan_amount":"%s","day_frequency":"30","plan_payments":"0"}}`, f.subID, f.railCustomerRef, form.Get("start_date")[:4]+"-"+form.Get("start_date")[4:6]+"-"+form.Get("start_date")[6:], f.planID, f.recurringAmount)
 			return
 		}
 		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/subscriptions") {
@@ -90,50 +118,73 @@ func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNM
 			return
 		}
 		_ = r.ParseForm()
+		if r.Form.Get("report_type") == "recurring" {
+			start := form.Get("start_date")
+			order := form.Get("orderid")
+			if f.reportedOrder != "" {
+				order = f.reportedOrder
+			}
+			fmt.Fprintf(w, `<nm_response><subscription id="%s"><subscription_id>%s</subscription_id><plan><plan_id>%s</plan_id></plan><orderid>%s</orderid><ponumber>%s</ponumber><next_charge_date>%s</next_charge_date></subscription></nm_response>`, f.subID, f.subID, f.planID, order, order, start[:4]+"-"+start[4:6]+"-"+start[6:])
+			return
+		}
 		if r.Form.Get("recurring") == "add_subscription" {
 			f.createCalls.Add(1)
 			f.createForm.Store(r.Form)
 			switch f.createMode.Load().(string) {
+			case "decline":
+				fmt.Fprint(w, "response=2&response_code=200&responsetext=DECLINED")
 			case "ambiguous500":
 				// The create LANDED but the response was lost.
 				f.subExists.Store(true)
-				f.charged.Store(true)
+				f.charged.Store(r.Form.Get("type") == "sale" && f.txnID != "")
 				w.WriteHeader(http.StatusBadGateway)
 			default:
 				f.subExists.Store(true)
-				f.charged.Store(true)
+				f.charged.Store(r.Form.Get("type") == "sale" && f.txnID != "")
+				if f.beforeResponse != nil {
+					if err := f.beforeResponse(); err != nil {
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+						return
+					}
+				}
 				fmt.Fprintf(w, "response=1&responsetext=SUCCESS&subscription_id=%s&transactionid=%s&authcode=OK", f.subID, f.txnID)
 			}
 			return
 		}
 		// classic query.php transaction search
 		orderID := r.Form.Get("order_id")
-		if f.charged.Load() {
-			fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, f.txnID, orderID)
+		if f.charged.Load() && orderID == form.Get("orderid") {
+			at := f.observedAt
+			if at.IsZero() {
+				at = time.Now().UTC()
+			}
+			fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><currency>USD</currency><action><action_type>sale</action_type><success>1</success><amount>%s</amount><date>%s</date></action></transaction></nm_response>`, f.txnID, orderID, amount, at.UTC().Format("20060102150405"))
 			return
 		}
 		fmt.Fprint(w, `<nm_response></nm_response>`)
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
+	client, err := nmi.NewAccountClient(dbtest.TestMerchantID.UUID(), dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "mobius"), "mobius", &config.NMIProviderSettings{
 		SecurityKey: "test_security_key", WebhookSecret: "test_secret",
 	}, true)
 	require.NoError(t, err)
 	client.V5BaseURL = srv.URL
 	client.QueryURL = srv.URL
 	client.DirectPostURL = srv.URL
+	require.NoError(t, validateInitialFixtureDestinations(client))
 	return f, client
 }
 
 type subIntentFixture struct {
-	db      *db.DB
-	runner  *intents.Runner
-	gateway *fakeNMISubGateway
-	svc     *CheckoutService
-	payload NMISubscriptionCreatePayload
-	priceID uuid.UUID
-	ctx     context.Context
+	prepared bool
+	db       *db.DB
+	runner   *intents.Runner
+	gateway  *fakeNMISubGateway
+	svc      *CheckoutService
+	payload  InitialMembershipPayload
+	priceID  uuid.UUID
+	ctx      context.Context
 }
 
 func newSubIntentFixture(t *testing.T) *subIntentFixture {
@@ -156,7 +207,7 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 		CreatedAt: now, UpdatedAt: now,
 	})
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE intent_type = 'nmi_subscription_create' AND price_id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE intent_type = 'initial_membership' AND price_id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM billing.notifications WHERE customer_id = $1", customerID)
@@ -184,41 +235,77 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 
 	runner := &intents.Runner{
 		Store:    intents.NewStore(dbi),
-		Registry: intents.NewRegistry(NewNMISubscriptionCreateIntentHandler(svc)),
+		Registry: intents.NewRegistry(NewInitialMembershipIntentHandler(svc)),
 		// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
 		Config: fullModeConfig(),
 	}
 	return &subIntentFixture{
 		db: dbi, runner: runner, gateway: gateway, svc: svc,
-		payload: NMISubscriptionCreatePayload{
-			Provider:               string(models.RailNMI),
-			PSP:                    "mobius",
-			PlanID:                 planID,
-			CustomerVaultID:        railCustomerRef,
-			AmountMicros:           9_990_000,
-			Currency:               "USD",
-			UserID:                 userID,
-			PriceID:                priceID,
-			LocalSubscriptionID:    uuid.New(),
-			CheckoutIdempotencyKey: "sub-key-" + uuid.NewString()[:8],
-			FirstName:              "T", LastName: "User", Address1: "N/A",
-			City: "N/A", State: "N/A", Zip: "00000", Country: "US",
-		},
+		payload: InitialMembershipPayload{PSP: "mobius", CheckoutIdempotencyKey: "sub-key-" + uuid.NewString()[:8], Terms: subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyProvider, SubscriptionID: uuid.New(), CustomerID: uuid.MustParse(userID), PriceID: priceID, Amount: 9_990_000, Currency: "USD"}, Instrument: charge.FrozenInstrument{RailCustomerRef: railCustomerRef}, NativeSchedule: &subscriptions.NMIInitialScheduleTerms{PlanID: planID, Card: nmi.CardUserData{FirstName: "T", LastName: "User", Address1: "N/A", City: "N/A", State: "N/A", Zip: "00000", Country: "US"}}},
 		priceID: priceID, ctx: ctx,
 	}
 }
 
-func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailIntent {
+func (fx *subIntentFixture) prepare(t *testing.T) {
 	t.Helper()
 	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
+	if !fx.prepared {
+		price, err := fx.svc.PriceService.GetByID(fx.ctx, fx.priceID)
+		require.NoError(t, err)
+		product, err := fx.svc.ProductService.GetByID(fx.ctx, price.ProductID)
+		require.NoError(t, err)
+		method := models.PaymentMethod{ID: fx.payload.Terms.PaymentMethodID, CustomerID: fx.payload.Terms.CustomerID, PspID: pspID, Rail: "nmi", Custodian: "psp", RailCustomerRef: fx.payload.Instrument.RailCustomerRef, RailMethodRef: "billing-native"}
+		if method.ID == uuid.Nil {
+			method.ID = uuid.New()
+			require.NoError(t, paymentmethods.NewPaymentMethodRepo(fx.db).Create(db.WithPSPID(fx.ctx, pspID), &method))
+		} else {
+			existing, err := paymentmethods.NewPaymentMethodRepo(fx.db).GetByID(db.WithPSPID(fx.ctx, pspID), method.ID)
+			require.NoError(t, err)
+			method = *existing
+		}
+		fx.payload.Terms.PaymentMethodID = method.ID
+		fx.payload.Instrument = charge.FrozenInstrument{PSPID: pspID, Custodian: "psp", RailCustomerRef: method.RailCustomerRef, RailMethodRef: method.RailMethodRef, StoredCredentialRecurringRef: method.StoredCredentialRecurringRef, StoredCredentialUnscheduledRef: method.StoredCredentialUnscheduledRef}
+		now := fx.svc.now().UTC().Truncate(time.Microsecond)
+		start := now
+		if fx.payload.Terms.Pending {
+			start = fx.payload.Terms.PeriodStart.UTC()
+			fx.payload.Terms.Amount = 0
+		}
+		end := start.Add(720 * time.Hour)
+		if fx.payload.NativeSchedule.StartDate == "" {
+			fx.payload.NativeSchedule.StartDate = end.Format("20060102")
+		}
+		payment := uuid.Nil
+		if fx.payload.Terms.Amount > 0 {
+			payment = uuid.New()
+		}
+		benefits := models.CloneEntitlementsSpec(product.EntitlementsSpec)
+		if benefits == nil {
+			benefits = map[string]*int{}
+		}
+		fx.payload.Terms = subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyProvider, SubscriptionID: fx.payload.Terms.SubscriptionID, PaymentID: payment, CustomerID: method.CustomerID, PSPID: pspID, ProductID: product.ID, PriceID: price.ID, PaymentMethodID: method.ID, ProductName: product.DisplayName, Amount: fx.payload.Terms.Amount, RecurringAmount: price.Amount, Currency: price.Currency, AcceptedAt: now, PeriodStart: start, PeriodEnd: end, Pending: fx.payload.Terms.Pending, Entitlements: benefits}
+		fx.payload.NativeSchedule.DayFrequency = 30
+		fx.payload.RequestFingerprint = strings.Repeat("a", 64)
+		fx.prepared = true
+		if price.Amount == 0 {
+			fx.gateway.recurringAmount = "0.00"
+		}
+	}
+
+}
+
+func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailIntent {
+	fx.prepare(t)
+	pspID := fx.payload.Terms.PSPID
+
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       string(models.RailNMI),
-		IntentType:     TypeNMISubscriptionCreate,
+		IntentType:     TypeInitialMembership,
 		PriceID:        &fx.priceID,
 		PspID:          pspID,
 		Payload:        fx.payload,
-		IdempotencyKey: NMISubscriptionCreateIdempotencyKey(fx.payload.CheckoutIdempotencyKey),
+		IdempotencyKey: InitialMembershipIdempotencyKey(fx.payload.CheckoutIdempotencyKey),
 		NextAttemptAt:  time.Now().UTC(),
 		Origin:         intents.OriginUser,
 		OriginReason:   "test subscription create",
@@ -263,6 +350,7 @@ func TestNMISubscriptionIntent_HappyPathAndReplay(t *testing.T) {
 func TestNMISubscriptionIntent_OrphanedRemoteCreateNeedsExactReceipt(t *testing.T) {
 	fx := newSubIntentFixture(t)
 	fx.gateway.createMode.Store("ambiguous500")
+	fx.gateway.reportedOrder = "another-enrollment"
 
 	intent := fx.enqueueAndExecute(t)
 	require.Equal(t, intents.StatusUnknownNeedsVerify, intent.Status, "lost response is never a decline")
@@ -280,13 +368,14 @@ func TestNMISubscriptionIntent_OrphanedRemoteCreateNeedsExactReceipt(t *testing.
 	require.False(t, ok)
 	resumed := pending
 	resumed.Attempts = 2
-	outcome := fx.runner.Registry.Lookup(TypeNMISubscriptionCreate).Execute(fx.ctx, resumed)
+	outcome := fx.runner.Registry.Lookup(TypeInitialMembership).Execute(fx.ctx, resumed)
 	require.Equal(t, intents.OutcomeAmbiguous, outcome.Class)
 
 	_, err = fx.runner.Resolve(fx.ctx, intent.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "wrong"})
 	require.ErrorIs(t, err, intents.ErrResolutionRejected, "the enrollment charge contradicts non-execution")
 	_, err = fx.runner.Resolve(fx.ctx, intent.ID, intents.Resolution{ProviderReference: "rsub-missing", Actor: "ops", Reason: "wrong"})
 	require.ErrorIs(t, err, intents.ErrResolutionRejected)
+	fx.gateway.reportedOrder = ""
 	resolved, err := fx.runner.Resolve(fx.ctx, intent.ID, intents.Resolution{ProviderReference: fx.gateway.subID, Actor: "ops@example.test", Reason: "NMI subscription detail shows order"})
 	require.NoError(t, err)
 	require.Equal(t, intents.StatusSucceeded, resolved.Status)
@@ -315,7 +404,7 @@ func TestNMISubscriptionIntent_ImmediateActivationIsOneMembership(t *testing.T) 
 	require.Equal(t, intents.StatusSucceeded, intent.Status)
 	sub, ok := fx.localSub(t)
 	require.True(t, ok)
-	require.Equal(t, fx.payload.LocalSubscriptionID, sub.ID)
+	require.Equal(t, fx.payload.Terms.SubscriptionID, sub.ID)
 	require.Equal(t, models.StatusActive, sub.Status)
 	require.NotNil(t, sub.CurrentPeriodStartsAt)
 	require.NotNil(t, sub.CurrentPeriodEndsAt)
@@ -342,11 +431,29 @@ func TestNMISubscriptionIntent_ImmediateActivationIsOneMembership(t *testing.T) 
 			require.NoError(t, rows.Scan(&s))
 			transitions = append(transitions, s)
 		}
-		require.Equal(t, []string{"pending", "active"}, transitions)
+		require.Equal(t, []string{"active"}, transitions)
 	}
 	assertOneMembership()
 
 	replay := fx.enqueueAndExecute(t)
 	require.Equal(t, intents.StatusSucceeded, replay.Status)
 	assertOneMembership()
+}
+
+// Check every configured NMI surface, including readback URLs, before a fixture
+// can run. This catches a missing override without attempting the real URL.
+func validateInitialFixtureDestinations(client *nmi.NMIClient) error {
+	for _, raw := range []string{client.DirectPostURL, client.QueryURL, client.V5BaseURL} {
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme != "http" || net.ParseIP(u.Hostname()) == nil || !net.ParseIP(u.Hostname()).IsLoopback() {
+			return fmt.Errorf("initial fixture refuses non-loopback NMI destination")
+		}
+	}
+	return nil
+}
+
+func TestInitialFixtureRejectsRealProviderDestination(t *testing.T) {
+	_, client := newFakeNMISubGateway(t, "vault", "plan")
+	client.QueryURL = "https://secure.nmi.com/api/query.php"
+	require.Error(t, validateInitialFixtureDestinations(client))
 }

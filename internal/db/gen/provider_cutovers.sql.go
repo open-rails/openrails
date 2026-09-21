@@ -62,8 +62,8 @@ SELECT s.customer_id, s.rail_subscription_id, s.payment_method_id,
  AND source.rail='nmi' AND target.rail='nmi' AND source.environment=target.environment
  AND source.archived AND NOT target.archived AND source.custodian_id IS NULL AND target.custodian_id IS NULL
  AND s.status='active' AND s.scheduled_price_id IS NULL AND s.deletion_scheduled_at IS NULL
- AND pm.custodian='psp' AND COALESCE(pm.park_reason,'')='' AND pm.rebill_driver='provider'
- AND old.custodian='psp' AND old.rebill_driver='provider' AND pr.auto_renew AND NOT pr.archived AND lower(pr.currency)='usd'
+ AND pm.custodian='psp' AND COALESCE(pm.park_reason,'')=''
+ AND old.custodian='psp' AND s.collection_policy='provider' AND pr.auto_renew AND NOT pr.archived AND lower(pr.currency)='usd'
 `
 
 type GetNMIProviderCutoverSnapshotParams struct {
@@ -196,6 +196,67 @@ func (q *Queries) IsProviderCutoverRepointed(ctx context.Context, arg IsProvider
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const listCompletedProviderCutoversForSubscription = `-- name: ListCompletedProviderCutoversForSubscription :many
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id=$1::uuid
+  AND subscription_id=$2::uuid
+  AND intent_type='nmi_provider_cutover' AND status='succeeded'
+ORDER BY created_at,id
+`
+
+type ListCompletedProviderCutoversForSubscriptionParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// Retained forward custody transitions explain historical initial PSP identity.
+func (q *Queries) ListCompletedProviderCutoversForSubscription(ctx context.Context, arg ListCompletedProviderCutoversForSubscriptionParams) ([]OpenrailsRailIntent, error) {
+	rows, err := q.db.Query(ctx, listCompletedProviderCutoversForSubscription, arg.MerchantID, arg.SubscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsRailIntent
+	for rows.Next() {
+		var i OpenrailsRailIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ClaimedUntil,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const lockProviderCutoverPaymentMethods = `-- name: LockProviderCutoverPaymentMethods :exec

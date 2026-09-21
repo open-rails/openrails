@@ -84,6 +84,10 @@ type DunningWorker struct {
 	// driving lifecycle off the returned status. nil builds a Runner over the
 	// worker's own dependencies.
 	Intents *intents.Runner
+	// EngineCollections is deliberately absent from runtime registration until
+	// browser enrollment through recurring MIT is qualified. It only admits
+	// obligations; the existing provider-intent fleet performs the charge.
+	EngineCollections *money.MoneyService
 }
 
 // intentRunner returns the configured Runner or self-assembles one (direct
@@ -153,7 +157,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		}
 	}
 
-	if w.NMIResolver == nil {
+	if w.NMIResolver == nil && w.EngineCollections == nil {
 		log.WithContext(ctx).Warn("NMI client resolver not configured; skipping dunning run")
 		return nil
 	}
@@ -171,7 +175,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	// Use w.now() instead of SQL NOW() to support time mocking in tests.
 	nmiRails := []string{string(models.RailNMI)}
 	merchantIDs, err := w.DB.GenDirectory().ListDueDunningMerchants(ctx, gen.ListDueDunningMerchantsParams{
-		Rails: nmiRails, Now: w.now(), MerchantLimit: dunningMerchantBatch,
+		Rails: nmiRails, Now: w.now(), MerchantLimit: dunningMerchantBatch, IncludeEngine: w.EngineCollections != nil,
 	})
 	if err != nil {
 		return fmt.Errorf("query merchants with due subscriptions: %w", err)
@@ -206,7 +210,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		// The pin AND the proof it took: every read and write below runs under
 		// this merchant's app.merchant_id, exactly as a request would.
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "dunning pass", func(mctx context.Context) error {
-			dueSubscriptions, err := subscriptions.NewSubscriptionRepo(w.DB).ListDueDunningSubscriptions(mctx, nmiRails, w.now())
+			dueSubscriptions, err := subscriptions.NewSubscriptionRepo(w.DB).ListDueDunningSubscriptions(mctx, nmiRails, w.now(), w.EngineCollections != nil)
 			if err != nil {
 				return fmt.Errorf("query due subscriptions: %w", err)
 			}
@@ -278,6 +282,13 @@ func (w *DunningWorker) processSubscription(
 	priceSvc *catalog.PriceService,
 	materialize bool,
 ) (dunningOutcome, error) {
+	if sub.CollectionPolicy == models.CollectionPolicyEngine {
+		if w.EngineCollections == nil {
+			return dunningOutcomeFailed, nil
+		}
+		_, err := w.EngineCollections.AdmitDueSubscriptionCollection(ctx, sub.ID, w.now())
+		return dunningOutcomeMaterialized, err
+	}
 	ctx = db.WithPSPID(ctx, sub.PspID)
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
 
@@ -291,7 +302,7 @@ func (w *DunningWorker) processSubscription(
 
 	periodEnd := sub.CurrentPeriodEndsAt.UTC()
 
-	providerAutoBilled := subscriptionProviderAutoBilled(railName, sub.PaymentMethod)
+	providerAutoBilled := subscriptionProviderAutoBilled(railName, sub)
 
 	// Dunning staleness window (#344, #359): charges are only attempted within
 	// the window DERIVED from the price's billing cycle (last retry offset +
@@ -437,8 +448,8 @@ func (w *DunningWorker) parkStaleSubscription(
 // subscriptionProviderAutoBilled reports whether the provider bills this
 // subscription on its own side, so OpenRails must not manual-rebill or terminate
 // it (#635). Registry-backed (#669); see rails.Descriptor.AutoBilled.
-func subscriptionProviderAutoBilled(rail string, pm *models.PaymentMethod) bool {
-	return rails.AutoBilled(models.Rail(rail), pm)
+func subscriptionProviderAutoBilled(rail string, sub *models.Subscription) bool {
+	return rails.AutoBilled(models.Rail(rail), sub)
 }
 
 func resolveSubscriptionRail(sub *models.Subscription) string {

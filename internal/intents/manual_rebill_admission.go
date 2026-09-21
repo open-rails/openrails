@@ -94,6 +94,9 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		if sub.CollectionPolicy == models.CollectionPolicyEngine {
+			return ErrRebillUnsupported
+		}
 		if sub.Status != models.StatusPastDue || sub.CurrentPeriodEndsAt == nil || (!customer && sub.NextRetryAt != nil && sub.NextRetryAt.After(now)) {
 			return ErrRebillNotRetryable
 		}
@@ -144,7 +147,7 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if method.CustomerID != sub.CustomerID || method.PspID != sub.PspID || method.Rail != sub.Rail {
 			return errors.New("rebill method is not owned by this customer and provider account")
 		}
-		if customer && (!rails.IsNMI(sub.Rail) || method.RebillDriver != models.RebillDriverOpenRails || method.Custodian != models.CustodianPSP) {
+		if customer && (!rails.IsNMI(sub.Rail) || sub.CollectionPolicy != models.CollectionPolicyProviderDunning || method.Custodian != models.CustodianPSP) {
 			return ErrRebillUnsupported
 		}
 		minor, err := moneyutil.NativeToRailMinorExact(terms.Currency, terms.Amount)

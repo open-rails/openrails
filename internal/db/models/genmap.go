@@ -201,6 +201,7 @@ func SubscriptionFromGen(s gen.OpenrailsSubscription) (*Subscription, error) {
 		CurrentPeriodEndsAt:   s.CurrentPeriodEndsAt,
 		Rail:                  Rail(s.Rail),
 		RailSubscriptionID:    s.RailSubscriptionID,
+		CollectionPolicy:      CollectionPolicy(s.CollectionPolicy),
 		PspID:                 s.PspID,
 		UserEmail:             s.UserEmail,
 		PaymentMethodID:       s.PaymentMethodID,
@@ -239,13 +240,13 @@ func SubscriptionsFromGen(rows []gen.OpenrailsSubscription) ([]*Subscription, er
 
 func PaymentMethodFromGen(p gen.OpenrailsPaymentMethod) (*PaymentMethod, error) {
 	m := &PaymentMethod{
-		ID:                   p.ID,
-		CustomerID:           p.CustomerID,
-		Rail:                 Rail(p.Rail),
-		PspID:                p.PspID,
-		RailCustomerRef:      p.RailCustomerRef,
-		RailMethodRef:        p.RailMethodRef,
-		RebillDriver:         p.RebillDriver,
+		ID:              p.ID,
+		CustomerID:      p.CustomerID,
+		Rail:            Rail(p.Rail),
+		PspID:           p.PspID,
+		RailCustomerRef: p.RailCustomerRef,
+		RailMethodRef:   p.RailMethodRef,
+
 		InitialTransactionID: p.InitialTransactionID,
 		LastFour:             p.LastFour,
 		CardType:             p.CardType,

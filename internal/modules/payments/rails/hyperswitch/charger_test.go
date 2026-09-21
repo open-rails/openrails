@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	provider "github.com/open-rails/openrails/internal/integrations/hyperswitch"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/stretchr/testify/require"
@@ -39,6 +40,8 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 		declined  bool
 		wantPosts int32
 		amount    string
+		recurring bool
+		renewal   bool
 	}{
 		{name: "initial USD", amount: "12.34", wantPosts: 1},
 		{name: "JPY native units", request: func(r *charge.Request) { r.Currency = "JPY"; r.AmountMinor = 100 }, amount: "100.00", wantPosts: 1},
@@ -64,10 +67,45 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 		{name: "foreign merchant", mode: "foreign merchant", wantError: provider.ErrBinding},
 		{name: "retargeted method", mode: "retargeted method", wantError: provider.ErrBinding},
 		{name: "readonly", mode: "readonly", wantError: provider.ErrReadOnly},
+		{name: "recurring initial USD", recurring: true, amount: "12.34", wantPosts: 1},
+		{name: "recurring initial JPY", recurring: true, request: func(r *charge.Request) { r.Currency = "JPY"; r.AmountMinor = 100 }, amount: "100.00", wantPosts: 1},
+		{name: "recurring customer reuse", recurring: true, request: func(r *charge.Request) { r.Context = charge.RecurringReuse("original_recurring") }, amount: "12.34", wantPosts: 1},
+		{name: "recurring structured decline", recurring: true, body: `{"response":{"response":"2","response_code":"200","responsetext":"Declined"},"status_code":200,"response_headers":{}}`, declined: true, wantPosts: 1},
+		{name: "recurring gateway uncertainty", recurring: true, body: `{"response":{"response":"3","response_code":"430","responsetext":"Gateway error"},"status_code":200,"response_headers":{}}`, wantError: provider.ErrUnknown, wantPosts: 1},
+		{name: "recurring lost reply", recurring: true, mode: "lost", wantError: provider.ErrUnknown, wantPosts: 1},
+		{name: "recurring missing preflight", recurring: true, mode: "missing", wantError: provider.ErrUnavailable},
+		{name: "recurring foreign customer", recurring: true, mode: "foreign customer", wantError: provider.ErrBinding},
+		{name: "recurring readonly", recurring: true, mode: "readonly", wantError: provider.ErrReadOnly},
+		{name: "recurring wrong rail", recurring: true, request: func(r *charge.Request) { r.Instrument.Rail = "stripe" }, wantError: charge.ErrNotDispatched},
+		{name: "recurring entry rejects unscheduled initial", recurring: true, request: func(r *charge.Request) { r.Context = charge.InitialOneTime() }, wantError: charge.ErrNotDispatched},
+		{name: "recurring entry rejects unscheduled reuse", recurring: true, request: func(r *charge.Request) { r.Context = charge.OneTimeReuse("unscheduled") }, wantError: charge.ErrNotDispatched},
+		{name: "recurring entry rejects merchant", recurring: true, request: func(r *charge.Request) { r.Context = charge.RecurringMIT("recurring") }, wantError: charge.ErrNotDispatched},
+		{name: "recurring entry rejects missing anchor", recurring: true, request: func(r *charge.Request) { r.Context = charge.RecurringReuse("") }, wantError: charge.ErrNotDispatched},
+		{name: "recurring entry rejects padded anchor", recurring: true, request: func(r *charge.Request) { r.Context = charge.RecurringReuse(" padded ") }, wantError: charge.ErrNotDispatched},
+		{name: "recurring entry rejects first-use anchor", recurring: true, request: func(r *charge.Request) { r.Context.PriorRef = "contradiction" }, wantError: charge.ErrNotDispatched},
+		{name: "invoice entry rejects recurring initial", request: func(r *charge.Request) { r.Context = charge.InitialRecurring() }, wantError: charge.ErrNotDispatched},
+		{name: "recurring merchant USD", renewal: true, amount: "12.34", wantPosts: 1},
+		{name: "recurring merchant JPY", renewal: true, request: func(r *charge.Request) { r.Currency = "JPY"; r.AmountMinor = 100 }, amount: "100.00", wantPosts: 1},
+		{name: "renewal structured decline", renewal: true, body: `{"response":{"response":"2","response_code":"200","responsetext":"Declined"},"status_code":200,"response_headers":{}}`, declined: true, wantPosts: 1},
+		{name: "renewal lost reply", renewal: true, mode: "lost", wantError: provider.ErrUnknown, wantPosts: 1},
+		{name: "renewal rejects customer initial", renewal: true, request: func(r *charge.Request) { r.Context = charge.InitialRecurring() }, wantError: charge.ErrNotDispatched},
+		{name: "renewal rejects customer reuse", renewal: true, request: func(r *charge.Request) { r.Context = charge.RecurringReuse("original_recurring") }, wantError: charge.ErrNotDispatched},
+		{name: "renewal rejects unscheduled merchant", renewal: true, request: func(r *charge.Request) { r.Context = charge.UnscheduledMIT("unscheduled") }, wantError: charge.ErrNotDispatched},
+		{name: "renewal rejects missing anchor", renewal: true, request: func(r *charge.Request) { r.Context = charge.RecurringMIT("") }, wantError: charge.ErrNotDispatched},
+		{name: "renewal rejects padded anchor", renewal: true, request: func(r *charge.Request) { r.Context = charge.RecurringMIT(" padded ") }, wantError: charge.ErrNotDispatched},
+		{name: "renewal rejects first use", renewal: true, request: func(r *charge.Request) { r.Context.FirstUse = true }, wantError: charge.ErrNotDispatched},
+		{name: "renewal wrong rail", renewal: true, request: func(r *charge.Request) { r.Instrument.Rail = "stripe" }, wantError: charge.ErrNotDispatched},
+		{name: "invoice entry rejects recurring merchant", request: func(r *charge.Request) { r.Context = charge.RecurringMIT("recurring") }, wantError: charge.ErrNotDispatched},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var posts atomic.Int32
 			req := base
+			if tc.recurring {
+				req.Context = charge.InitialRecurring()
+			}
+			if tc.renewal {
+				req.Context = charge.RecurringMIT("original_recurring")
+			}
 			if tc.request != nil {
 				tc.request(&req)
 			}
@@ -120,7 +158,19 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 				require.Equal(t, req.OrderRef, body["orderid"])
 				require.Equal(t, req.Currency, body["currency"])
 				require.Equal(t, string(req.Context.Initiator), body["initiated_by"])
-				require.Empty(t, body["billing_method"], "invoice anchor is never recurring")
+				if req.Context.Agreement == charge.AgreementRecurring {
+					require.Equal(t, "recurring", body["billing_method"])
+				} else {
+					require.Empty(t, body["billing_method"], "invoice anchor is never recurring")
+				}
+				indicator := "used"
+				if req.Context.FirstUse {
+					indicator = "stored"
+				}
+				require.Equal(t, indicator, body["stored_credential_indicator"])
+				for _, key := range []string{"recurring", "subscription_id", "plan_id", "start_date", "customer_vault_id", "billing_id"} {
+					require.Empty(t, body[key], "the custodian charge never creates or addresses a provider schedule/vault")
+				}
 				require.Equal(t, req.Context.PriorRef, body["initial_transaction_id"])
 				if tc.amount != "" {
 					require.Equal(t, tc.amount, body["amount"])
@@ -146,7 +196,26 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 			require.NoError(t, err)
 			charger := &Charger{Client: client, Destination: destination, SecurityKey: gatewayKey}
 			require.NotContains(t, fmt.Sprintf("%+v %#v", charger, charger), gatewayKey)
-			result, err := charger.Charge(t.Context(), req)
+			var result charge.Result
+			var refusal *nmi.CustomerVaultError
+			if tc.recurring {
+				result, refusal, err = charger.ChargeInitialRecurring(t.Context(), req)
+			} else if tc.renewal {
+				result, refusal, err = charger.ChargeRecurringMIT(t.Context(), req)
+			} else {
+				result, err = charger.Charge(t.Context(), req)
+			}
+			require.Equal(t, tc.wantPosts, posts.Load(), "no lost-response retry or preflight bypass")
+			if (tc.recurring || tc.renewal) && tc.declined {
+				require.NotNil(t, refusal)
+				require.Equal(t, 200, refusal.ResponseCode)
+				require.NotEmpty(t, refusal.LocalizationID)
+				require.Contains(t, refusal.RawResponse, "response_code=200")
+				require.Contains(t, refusal.RawResponse, "response=2")
+				require.NotContains(t, fmt.Sprintf("%+v", refusal), gatewayKey)
+			} else {
+				require.Nil(t, refusal, "uncertainty or preflight failure cannot become provider decline custody")
+			}
 			if tc.wantError != nil {
 				require.ErrorIs(t, err, tc.wantError)
 				require.Equal(t, tc.wantPosts == 0, errors.Is(err, charge.ErrNotDispatched), "only errors before POST prove nonexecution")
@@ -163,11 +232,9 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 					require.Empty(t, result.CapturedRef)
 				}
 			}
-			require.Equal(t, tc.wantPosts, posts.Load(), "no lost-response retry or preflight bypass")
 		})
 	}
 	for _, mutate := range []func(*charge.Request){
-		func(r *charge.Request) { r.Context = charge.RecurringMIT("initial") },
 		func(r *charge.Request) { r.Context = charge.UnscheduledMIT("") },
 		func(r *charge.Request) { r.Context.Initiator = "" },
 		func(r *charge.Request) { r.Context.Initiator = charge.InitiatorMerchant },

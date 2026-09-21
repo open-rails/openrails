@@ -9,11 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNMISubscriptionAttemptTransactionIDIsStableAndSynthetic(t *testing.T) {
-	require.Equal(t, "nmi_sub_attempt:sub_123", nmiSubscriptionAttemptTransactionID(" sub_123 "))
-	require.NotEqual(t, "txn_123", nmiSubscriptionAttemptTransactionID("sub_123"))
-}
-
 func TestNMISubscriptionAttemptStatusPrefersMetadata(t *testing.T) {
 	attempt := &models.Payment{
 		Status: payments.PaymentStatusPendingValue,

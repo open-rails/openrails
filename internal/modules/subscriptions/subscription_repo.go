@@ -66,6 +66,7 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 		CurrentPeriodEndsAt:      s.CurrentPeriodEndsAt,
 		Rail:                     string(s.Rail),
 		RailSubscriptionID:       s.RailSubscriptionID,
+		CollectionPolicy:         string(s.CollectionPolicy),
 		UserEmail:                s.UserEmail,
 		PaymentMethodID:          s.PaymentMethodID,
 		LastRetryAt:              s.LastRetryAt,
@@ -758,16 +759,17 @@ const DueDunningBatch = 500
 // ListDueDunningSubscriptions returns past_due subscriptions on the given
 // rails whose next retry is due (Price + PaymentMethod relations
 // attached) — the dunning worker's work list, capped at DueDunningBatch.
-func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rails []string, now time.Time) ([]models.Subscription, error) {
+func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rails []string, now time.Time, includeEngine bool) ([]models.Subscription, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return nil, scopeErr
 	}
 	rows, err := r.db.Gen(ctx).ListDueDunningSubscriptions(ctx, gen.ListDueDunningSubscriptionsParams{
-		MerchantID: scopeMerchantID.UUID(),
-		Rails:      rails,
-		Now:        now,
-		RowLimit:   DueDunningBatch,
+		IncludeEngine: includeEngine,
+		MerchantID:    scopeMerchantID.UUID(),
+		Rails:         rails,
+		Now:           now,
+		RowLimit:      DueDunningBatch,
 	})
 	if err != nil {
 		return nil, err

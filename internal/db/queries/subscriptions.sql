@@ -9,7 +9,7 @@ INSERT INTO openrails.subscriptions (
     rail_subscription_id, user_email, payment_method_id, last_retry_at,
     retry_attempts, next_retry_at, grace_ends_at, cancel_feedback,
     cancel_type, cancelled_at, deletion_scheduled_at, gateway_response,
-    created_at, updated_at, psp_id
+    created_at, updated_at, psp_id, collection_policy
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, sqlc.narg(scheduled_price_id),
     sqlc.narg(entitlements_spec_snapshot),
@@ -23,7 +23,8 @@ INSERT INTO openrails.subscriptions (
     sqlc.narg(deletion_scheduled_at), sqlc.narg(gateway_response),
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    sqlc.arg(psp_id)::uuid
+    sqlc.arg(psp_id)::uuid,
+    COALESCE(NULLIF(sqlc.arg(collection_policy)::text, ''), 'provider')
 );
 
 -- name: UpdateSubscriptionAt :execrows
@@ -300,7 +301,7 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = 
 SELECT merchant_id FROM openrails.due_dunning_merchant_ids(
     sqlc.arg(rails)::text[],
     sqlc.arg(now)::timestamptz,
-    sqlc.arg(merchant_limit)::int);
+    sqlc.arg(merchant_limit)::int, sqlc.arg(include_engine)::boolean);
 
 -- name: ListDueDunningSubscriptions :many
 -- Dunning: past_due NMI-backed subscriptions whose next retry is due. Runs
@@ -313,10 +314,17 @@ SELECT merchant_id FROM openrails.due_dunning_merchant_ids(
 -- claim lease means the next pass picks up where this one stopped.
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.rail = ANY(sqlc.arg(rails)::text[])
-  AND sub.status = 'past_due'
-  AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz
+  AND ((sub.collection_policy <> 'engine' AND sub.status='past_due' AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz)
+       OR (sqlc.arg(include_engine)::boolean AND sub.collection_policy='engine' AND sub.current_period_ends_at <= sqlc.arg(now)::timestamptz
+           AND (sub.status='active' OR (sub.status='past_due' AND sub.next_retry_at <= sqlc.arg(now)::timestamptz))
+           AND EXISTS (SELECT 1 FROM openrails.payment_methods pm JOIN openrails.psps p ON p.id=pm.psp_id AND p.merchant_id=pm.merchant_id LEFT JOIN openrails.custodians c ON c.id=pm.custodian_id AND c.merchant_id=pm.merchant_id
+                       WHERE pm.id=sub.payment_method_id AND pm.merchant_id=sub.merchant_id AND pm.customer_id=sub.customer_id AND pm.psp_id=sub.psp_id
+                         AND pm.park_reason='' AND pm.stored_credential_recurring_ref<>'' AND NOT p.archived
+                         AND ((pm.custodian='hyperswitch' AND pm.rail='nmi' AND NOT c.archived AND p.environment=c.environment)
+                              OR (pm.custodian='psp' AND pm.rail IN ('nmi','stripe') AND pm.rail_customer_ref<>'' AND pm.rail_method_ref<>'')))
+           AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=sub.merchant_id AND i.subscription_id=sub.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
   AND sub.deleted_at IS NULL
-ORDER BY sub.next_retry_at, sub.id
+ORDER BY CASE WHEN sub.collection_policy='engine' AND sub.status='active' THEN sub.current_period_ends_at ELSE sub.next_retry_at END, sub.id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: GetLatestResumableCancelledSubscription :one
@@ -349,3 +357,13 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
   AND rail_subscription_id=sqlc.arg(rail_subscription_id)::text
   AND deleted_at IS NULL
   AND deletion_scheduled_at IS NOT NULL;
+
+-- name: GetInitialMembershipForUpdate :one
+-- Accepted completion must see tombstones so it never resurrects a membership.
+SELECT * FROM openrails.subscriptions
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
+FOR UPDATE;
+
+-- name: GetInitialMembershipForArchive :one
+SELECT * FROM openrails.subscriptions
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;

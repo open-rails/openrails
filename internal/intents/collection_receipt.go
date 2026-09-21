@@ -35,11 +35,12 @@ type receiptBinding struct {
 	PayloadSHA256 string    `json:"payload_sha256"`
 }
 type collectedReceipt struct {
-	Version int                                    `json:"version"`
-	Family  string                                 `json:"family"`
-	Binding receiptBinding                         `json:"binding"`
-	NMI     *nmi.SaleEvidence                      `json:"nmi,omitempty"`
-	Stripe  *subscriptions.StripeCollectionReceipt `json:"stripe,omitempty"`
+	Version      int                                    `json:"version"`
+	Family       string                                 `json:"family"`
+	Binding      receiptBinding                         `json:"binding"`
+	NMI          *nmi.SaleEvidence                      `json:"nmi,omitempty"`
+	Stripe       *subscriptions.StripeCollectionReceipt `json:"stripe,omitempty"`
+	StripeEngine *subscriptions.StripeEngineReceipt     `json:"stripe_engine,omitempty"`
 }
 
 // Each kind decodes its own accepted payload. These private expected fields
@@ -66,6 +67,13 @@ func decodeCollectedTerms(in gen.OpenrailsRailIntent) (collectedTerms, error) {
 	case "invoice_collection":
 		p, err := DecodeInvoiceCollectionPayload(in)
 		return collectedTerms{p.Rail, p.Currency, p.AmountMinor, p.Instrument, p.ProviderCustomerRef, in.ID.String()}, err
+	case subscriptions.TypeInitialMembership:
+		p, err := subscriptions.DecodeInitialMembershipPayload(in)
+		if err != nil {
+			return collectedTerms{}, err
+		}
+		minor, err := moneyutil.NativeToRailMinorExact(p.Terms.Currency, p.Terms.Amount)
+		return collectedTerms{in.Rail, p.Terms.Currency, minor, p.Instrument, p.Instrument.RailCustomerRef, payments.NMISaleOrderReference(in.ID, p.E2ERunID)}, err
 	case subscriptions.TypeNMIUpgrade:
 		p, err := subscriptions.DecodeNMIUpgradePayload(in)
 		if err != nil {
@@ -73,6 +81,9 @@ func decodeCollectedTerms(in gen.OpenrailsRailIntent) (collectedTerms, error) {
 		}
 		minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.ProrationAmount)
 		return collectedTerms{"nmi", p.Currency, minor, p.Instrument, "", in.ID.String()}, err
+	case subscriptions.TypeSubscriptionCollection:
+		p, err := subscriptions.DecodeSubscriptionCollectionPayload(in)
+		return collectedTerms{in.Rail, p.Renewal.Currency, p.AmountMinor, p.Instrument, p.Instrument.RailCustomerRef, p.OrderReference}, err
 	case subscriptions.TypeManualRebill:
 		p, err := subscriptions.DecodeManualRebillPayload(in)
 		return collectedTerms{p.Rail, p.Renewal.Currency, p.AmountMinor, p.Instrument, "", p.OrderReference}, err
@@ -159,7 +170,17 @@ func (r CollectedReceipt) Validate(in gen.OpenrailsRailIntent) error {
 	}
 	p, _ := decodeCollectedTerms(in)
 	if p.Rail == "stripe" {
-		if r.data.Stripe == nil || r.data.NMI != nil {
+		if in.IntentType == subscriptions.TypeInitialMembership || in.IntentType == subscriptions.TypeSubscriptionCollection {
+			if r.data.StripeEngine == nil || r.data.Stripe != nil || r.data.NMI != nil {
+				return errors.New("qualified engine receipt has wrong provider family")
+			}
+			params, err := StripeEngineParams(in)
+			if err != nil {
+				return err
+			}
+			return r.data.StripeEngine.Matches(params)
+		}
+		if r.data.Stripe == nil || r.data.NMI != nil || r.data.StripeEngine != nil {
 			return errors.New("qualified collection receipt has wrong provider family")
 		}
 		facts := r.data.Stripe
@@ -176,7 +197,7 @@ func (r CollectedReceipt) Validate(in gen.OpenrailsRailIntent) error {
 			return errors.New("Stripe receipt does not match frozen customer and payment method")
 		}
 	} else {
-		if r.data.NMI == nil || r.data.Stripe != nil {
+		if r.data.NMI == nil || r.data.Stripe != nil || r.data.StripeEngine != nil {
 			return errors.New("qualified collection receipt has wrong provider family")
 		}
 		facts := r.data.NMI
@@ -191,6 +212,9 @@ func (r CollectedReceipt) Validate(in gen.OpenrailsRailIntent) error {
 }
 
 func (r CollectedReceipt) TransactionID() string {
+	if r.data.StripeEngine != nil {
+		return r.data.StripeEngine.ChargeID
+	}
 	if r.data.NMI != nil {
 		return r.data.NMI.TransactionID
 	}
@@ -224,7 +248,27 @@ func LoadCollectedReceipt(in gen.OpenrailsRailIntent) (CollectedReceipt, bool, e
 	if err := decoder.Decode(&r.data); err != nil {
 		return r, true, err
 	}
-	return r, true, r.Validate(in)
+	if err := r.Validate(in); err != nil {
+		return r, true, err
+	}
+	// A receipt is not usable custody when the same operation also claims
+	// definitive refusal/nonexecution, including legacy contradictory rows.
+	if _, exists := evidence[qualifiedInitialRefusalKey]; exists {
+		return r, true, errors.New("collected receipt contradicts retained initial refusal")
+	}
+	if _, exists := evidence[rebillDeclineKey]; exists {
+		return r, true, errors.New("collected receipt contradicts retained decline")
+	}
+	if _, exists := evidence[qualifiedCollectionNonexecutionKey]; exists {
+		return r, true, errors.New("collected receipt contradicts retained nonexecution")
+	}
+	if in.Status == StatusSucceeded && (in.IntentType == subscriptions.TypeManualRebill || in.IntentType == subscriptions.TypeSubscriptionCollection) {
+		var transaction string
+		if err := json.Unmarshal(evidence["transaction_id"], &transaction); err != nil || transaction != r.TransactionID() {
+			return r, true, errors.New("collected payment projection contradicts retained receipt")
+		}
+	}
+	return r, true, nil
 }
 
 // RetainCollectedReceipt commits custody before local effects. A transaction-
@@ -361,7 +405,7 @@ func LoadCollectionCandidate(in gen.OpenrailsRailIntent) (CollectionCandidate, b
 }
 
 func refuseCustodyKeys(evidence map[string]any) error {
-	for _, key := range []string{qualifiedInvoiceNonexecutionKey, qualifiedReceiptKey, qualifiedEnrollmentKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, "account_requalifications"} {
+	for _, key := range []string{qualifiedInitialRefusalKey, qualifiedCollectionNonexecutionKey, qualifiedReceiptKey, qualifiedEnrollmentKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, "account_requalifications"} {
 		if _, ok := evidence[key]; ok {
 			return fmt.Errorf("%s is reserved for immutable provider evidence custody", key)
 		}

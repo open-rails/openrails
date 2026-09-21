@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,14 +18,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -42,11 +46,11 @@ import (
 // Payment, subscription, entitlement, grant and host-event rows come from the
 // ordinary purchase/lifecycle writers, never from seedBook or financial SQL.
 func TestRegisteredPurchaseArchiveRoundTrip(t *testing.T) {
-	testPurchaseWorkflowArchive(t, false)
+	testPurchaseWorkflowArchive(t, false, "")
 }
 
 func TestRegisteredSubscriptionArchiveRoundTrip(t *testing.T) {
-	testPurchaseWorkflowArchive(t, true)
+	testPurchaseWorkflowArchive(t, true, "")
 }
 
 type purchaseArchiveServices struct {
@@ -68,7 +72,7 @@ func newPurchaseArchiveServices(d *db.DB, clock clockwork.Clock) purchaseArchive
 		subscriptions.NewSubscriptionLifecycleService(d, products, prices, ents, nil, pay, clock), subs}
 }
 
-func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
+func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 	t.Helper()
 	schema, rail := "archive_purchase_writer", models.RailNMI
 	if recurring {
@@ -81,6 +85,9 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 	customer, product, price, psp := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	account := uuid.NewString()
 	now := time.Now().UTC().Truncate(time.Second)
+	if phase == "activated" {
+		now = now.Add(-7 * 24 * time.Hour)
+	}
 	clock := clockwork.NewFakeClockAt(now)
 	ctx, release, err := source.WithMerchantConn(merchant.WithID(t.Context(), id))
 	require.NoError(t, err)
@@ -99,6 +106,13 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 		require.NoError(t, err)
 	}
 	services := newPurchaseArchiveServices(source, clock)
+	if phase == "pending" || phase == "activated" {
+		before, until := now, now.Add(72*time.Hour)
+		for _, name := range []string{"archive_access", "archive_download"} {
+			_, err := services.entitlements.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: customer.String(), Entitlement: name, NotBefore: &before, EndAt: &until, SourceType: models.EntitlementSourceAdmin, SourceID: uuid.New()})
+			require.NoError(t, err)
+		}
+	}
 	transaction := "archive-purchase-" + uuid.NewString()
 	end, providerSubscription := now.Add(48*time.Hour), "archive-sub-"+uuid.NewString()
 	methodID := uuid.New()
@@ -107,6 +121,8 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 	_, err = source.Qx(ctx).Exec(ctx, `INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,plan_id) VALUES($1,$2,$3,'writer-plan')`, id.UUID(), price, psp)
 	require.NoError(t, err)
 	var gatewayCalls atomic.Int64
+	var cutoverArmed, sourceCanceled atomic.Bool
+	var sourceDeletes atomic.Int64
 	var readMu sync.Mutex
 	var acceptedForm url.Values
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -114,14 +130,47 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if !recurring && (r.Method == http.MethodGet || r.Form.Get("order_id") != "") {
+		if phase == "cutover" && cutoverArmed.Load() {
+			plan := nmi.V5Plan{Object: "plan", ID: "writer-plan", PlanAmount: "2.50", DayFrequency: "2", PlanPayments: "0"}
+			if r.Method == http.MethodGet && r.URL.Path == "/plans/writer-plan" {
+				require.NoError(t, json.NewEncoder(w).Encode(plan))
+				return
+			}
+			if r.Method == http.MethodGet && r.URL.Path == "/subscriptions/"+providerSubscription {
+				status := "active"
+				if sourceCanceled.Load() {
+					status = "inactive"
+				}
+				require.NoError(t, json.NewEncoder(w).Encode(nmi.V5Subscription{Object: "subscription", ID: providerSubscription, CustomerVaultID: "archive-vault", DelayedCondition: status, PausedSubscription: false, Amount: "2.50", NextBillingDate: end.UTC().Format(time.RFC3339), Plan: &plan}))
+				return
+			}
+			if r.Method == http.MethodDelete && r.URL.Path == "/subscriptions/"+providerSubscription {
+				sourceCanceled.Store(true)
+				sourceDeletes.Add(1)
+				fmt.Fprint(w, `{}`)
+				return
+			}
+		}
+		if recurring && r.Method == http.MethodGet && r.URL.Path == "/customers/archive-vault" {
+			fmt.Fprint(w, `{"object":"customer","id":"archive-vault","billing":[{"id":"archive-card","priority":1}]}`)
+			return
+		}
+		if r.Method == http.MethodGet || r.Form.Get("order_id") != "" || r.Form.Get("report_type") == "recurring" {
 			readMu.Lock()
 			defer readMu.Unlock()
 			if acceptedForm == nil {
 				http.NotFound(w, r)
 				return
 			}
-			if r.Method == http.MethodGet {
+			if recurring && r.Method == http.MethodGet && r.URL.Path == "/subscriptions/"+providerSubscription {
+				start, err := time.Parse("20060102", acceptedForm.Get("start_date"))
+				require.NoError(t, err)
+				_ = json.NewEncoder(w).Encode(nmi.V5Subscription{Object: "subscription", ID: providerSubscription, CustomerVaultID: "archive-vault", DelayedCondition: "active", PausedSubscription: false, NextBillingDate: start.Format("2006-01-02"), Plan: &nmi.V5Plan{ID: "writer-plan", PlanAmount: "2.50", DayFrequency: "2", PlanPayments: "0"}})
+			} else if recurring && r.Form.Get("report_type") == "recurring" {
+				start, err := time.Parse("20060102", acceptedForm.Get("start_date"))
+				require.NoError(t, err)
+				fmt.Fprintf(w, `<nm_response><subscription id="%s"><subscription_id>%s</subscription_id><plan><plan_id>writer-plan</plan_id></plan><orderid>%s</orderid><ponumber>%s</ponumber><next_charge_date>%s</next_charge_date></subscription></nm_response>`, providerSubscription, providerSubscription, acceptedForm.Get("orderid"), acceptedForm.Get("ponumber"), start.Format("2006-01-02"))
+			} else if r.Method == http.MethodGet {
 				require.Equal(t, "/payments/"+transaction, r.URL.Path)
 				_ = json.NewEncoder(w).Encode(map[string]any{"id": transaction, "response": "1", "amount": acceptedForm.Get("amount"), "currency": acceptedForm.Get("currency"), "customer_vault_id": acceptedForm.Get("customer_vault_id"), "actions": []map[string]any{{"id": transaction, "type": "sale", "success": true, "amount": acceptedForm.Get("amount")}}})
 			} else if r.Form.Get("order_id") == acceptedForm.Get("orderid") {
@@ -140,16 +189,28 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 			http.Error(w, "unexpected provider call", http.StatusBadRequest)
 			return
 		}
-		if r.Form.Get("amount") != "2.50" || r.Form.Get("customer_vault_id") != "archive-vault" {
+		expectedAmount := "2.50"
+		if phase == "pending" || phase == "activated" {
+			expectedAmount = ""
+		}
+		if r.Form.Get("amount") != expectedAmount || r.Form.Get("customer_vault_id") != "archive-vault" {
 			t.Error("wrong frozen charge amount or vault")
 			http.Error(w, "wrong charge", http.StatusBadRequest)
 			return
 		}
 		gatewayCalls.Add(1)
+		if phase == "refused" {
+			fmt.Fprint(w, "response=2&responsetext=Declined&response_code=200")
+			return
+		}
 		readMu.Lock()
 		acceptedForm = r.Form
 		readMu.Unlock()
-		fmt.Fprintf(w, "response=1&responsetext=SUCCESS&transactionid=%s&subscription_id=%s&response_code=100", transaction, providerSubscription)
+		replyTransaction := transaction
+		if phase == "pending" || phase == "activated" {
+			replyTransaction = ""
+		}
+		fmt.Fprintf(w, "response=1&responsetext=SUCCESS&transactionid=%s&subscription_id=%s&response_code=100", replyTransaction, providerSubscription)
 	}))
 	t.Cleanup(gateway.Close)
 	client, err := nmi.NewAccountClient(id.UUID(), psp, "writer-account", &config.NMIProviderSettings{SecurityKey: "archive-fixture-key", WebhookSecret: "archive-fixture-webhook"}, true)
@@ -163,6 +224,83 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 		return &checkout.CheckoutSessionCreateRequest{PriceID: openrails.PriceID(price).String(), Payment: checkout.CheckoutSessionPaymentRequest{Rail: "writer-account", PaymentMethodID: openrails.PaymentMethodID(methodID).String()}, IdempotencyKey: clientKey}
 	}
 	user := &checkout.UserIdentity{ID: customer.String()}
+	if phase != "" && phase != "cutover" {
+		result, checkoutErr := checkoutService.Checkout(ctx, &checkout.CheckoutRequest{PriceID: openrails.PriceID(price).String(), Rail: "writer-account", PaymentMethodID: openrails.PaymentMethodID(methodID).String(), IdempotencyKey: clientKey}, user)
+		if phase == "refused" {
+			require.Error(t, checkoutErr)
+		} else {
+			require.NoError(t, checkoutErr)
+			require.NotNil(t, result)
+		}
+		operation, err := intents.NewStore(source).GetByIdempotencyKey(ctx, checkout.InitialMembershipIdempotencyKey(clientKey))
+		require.NoError(t, err)
+		payload, err := subscriptions.DecodeInitialMembershipPayload(operation)
+		require.NoError(t, err)
+		if phase == "pending" || phase == "activated" {
+			require.True(t, payload.Terms.Pending)
+		} else {
+			require.Equal(t, intents.StatusFailedTerminal, operation.Status)
+		}
+		var clean bytes.Buffer
+		err = Export(ctx, source, id, &clean)
+		require.NoError(t, err, "baseline archive before corruption must be supported")
+		if phase == "refused" {
+			for _, mutation := range []struct{ column, value string }{{"list_amount", "2500001"}, {"attempt_kind", "renewal"}, {"failure_code", "201"}, {"failure_reason", "insufficient_funds"}, {"purchased_at", now.Add(time.Hour).Format(time.RFC3339Nano)}, {"created_at", now.Add(time.Hour).Format(time.RFC3339Nano)}} {
+				t.Run("failed_attempt_"+mutation.column, func(t *testing.T) {
+					_, err := Restore(ctx, target, id, bytes.NewReader(alteredArchive(t, clean.Bytes(), "payments", mutation.column, &mutation.value)))
+					require.Error(t, err, "failed payment must match sealed refusal and accepted attempt")
+					assertEmptyBook(t, target, id)
+				})
+			}
+		}
+
+		if phase == "activated" {
+			clock.Advance(payload.Terms.PeriodStart.Add(time.Hour).Sub(clock.Now()))
+			observed := payload.Terms
+			observed.Pending = false
+			observed.Amount = observed.RecurringAmount
+			observed.PaymentID = uuid.New()
+			transaction := "observed-first-" + uuid.NewString()
+			purchased := clock.Now()
+			err := source.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				_, _, err := services.lifecycle.CreateMembershipTx(ctx, source.NewWithPgxTx(tx), &subscriptions.CreateMembershipParams{Prepared: &observed, UserID: customer.String(), PriceID: price, Rail: models.RailNMI, RailSubscriptionID: &providerSubscription, TransactionID: transaction, PurchasedAt: &purchased, PaymentMetadata: map[string]any{"order_id": intents.NMIEnrollmentOrder(operation), "provider_transaction_id": transaction}})
+				return err
+			})
+			require.NoError(t, err)
+			_, err = source.Qx(ctx).Exec(ctx, `UPDATE openrails.host_outbox SET delivered_at=$2 WHERE merchant_id=$1`, id.UUID(), clock.Now())
+			require.NoError(t, err)
+			var activated bytes.Buffer
+			require.NoError(t, Export(ctx, source, id, &activated), "first observed payment preserves original no-charge enrollment")
+			for _, mutation := range []struct{ column, value string }{{"amount", "2500001"}, {"list_amount", "2500001"}, {"status", "failed"}} {
+				_, err := Restore(ctx, target, id, bytes.NewReader(alteredArchive(t, activated.Bytes(), "payments", mutation.column, &mutation.value)))
+				require.Error(t, err, "first observed payment cannot contradict frozen terms")
+				assertEmptyBook(t, target, id)
+			}
+			_, err = Restore(ctx, target, id, bytes.NewReader(activated.Bytes()))
+			require.NoError(t, err)
+			return
+		}
+		probeAt := payload.Terms.PeriodEnd.Add(-time.Hour)
+		entitledBefore, err := services.entitlements.IsCustomerEntitled(ctx, customer, "archive_access", probeAt)
+		require.NoError(t, err)
+		require.False(t, entitledBefore, "baseline has no paid access in the probed window")
+		grantID := uuid.New()
+		_, err = source.Qx(ctx).Exec(ctx, `INSERT INTO openrails.grants(merchant_id,id,customer_id,product_id,kind,source_type,source_id,event,spec_snapshot,starts_at,ends_at) VALUES($1,$2,$3,$4,'entitlement','subscription',$5,'grant','{"entitlements":["archive_access"]}',$6,$7)`, id.UUID(), grantID, customer, product, payload.Terms.SubscriptionID.String(), payload.Terms.PeriodStart, payload.Terms.PeriodEnd)
+		require.NoError(t, err)
+		_, err = source.Qx(ctx).Exec(ctx, `INSERT INTO openrails.entitlements(merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type,grant_id) VALUES($1,$2,'archive_access',$3,$4,$5,'subscription',$6)`, id.UUID(), customer, payload.Terms.PeriodStart, payload.Terms.PeriodEnd, payload.Terms.SubscriptionID, grantID)
+		require.NoError(t, err)
+		var rejected bytes.Buffer
+		err = Export(ctx, source, id, &rejected)
+		require.Error(t, err, "export must refuse an unpaid subscription source grant")
+		corrupted := encodeUncheckedInitialArchive(t, ctx, source, id)
+		_, err = archivewire.CopyVerified(io.Discard, bytes.NewReader(corrupted))
+		require.NoError(t, err, "corruption has a valid wire footer and row count")
+		_, err = Restore(ctx, target, id, bytes.NewReader(corrupted))
+		require.Error(t, err, "restore must reject semantic unpaid access, not merely the digest")
+		assertEmptyBook(t, target, id)
+		t.Logf("FIX CONFIRMED %s: export and coherent-wire restore reject unpaid access; destination empty", phase)
+		return
+	}
 	firstRequest := sessionRequest()
 	first, err := sessionService.CreateSession(ctx, firstRequest, user)
 	require.NoError(t, err)
@@ -182,14 +320,15 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 	}
 	operationKey := checkout.NMISaleIdempotencyKey("checkout_session:" + firstRequest.IdempotencyKey)
 	if recurring {
-		operationKey = checkout.NMISubscriptionCreateIdempotencyKey("checkout_session:" + firstRequest.IdempotencyKey)
+		operationKey = checkout.InitialMembershipIdempotencyKey("checkout_session:" + firstRequest.IdempotencyKey)
 	}
 	operation, err := intents.NewStore(source).GetByIdempotencyKey(ctx, operationKey)
 	require.NoError(t, err)
 	require.Equal(t, intents.StatusSucceeded, operation.Status)
 	require.NotEmpty(t, operation.ResultEvidence, "ordinary durable checkout must retain replay receipt")
 	if recurring {
-		require.Contains(t, []string{"", "null", "{}"}, string(operation.Payload), "unchanged enrollment family prunes submission payload")
+		require.NoError(t, intents.ValidateInitialMembershipTerminal(operation))
+		require.NotEmpty(t, operation.Payload, "accepted enrollment terms and both receipts remain in custody")
 	} else {
 		require.NoError(t, intents.ValidateNMISaleTerminal(operation))
 		require.NotEmpty(t, operation.Payload, "accepted sale terms and custody survive terminal replay")
@@ -240,6 +379,16 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 	require.NoError(t, err)
 	require.Equal(t, first, sourceReplay, "source and destination use the same session replay path")
 	require.EqualValues(t, 1, gatewayCalls.Load())
+	if phase == "cutover" {
+		cutoverArmed.Store(true)
+		qualifiedInitialArchiveCutover(t, ctx, source, id, customer, price, subscriptionID, psp, client, clock, end)
+		require.True(t, sourceCanceled.Load())
+		require.EqualValues(t, 1, sourceDeletes.Load())
+		before = readPurchaseArchiveState(t, ctx, source, services, id, customer, product, rail, transaction, now)
+		require.Equal(t, &psp, before.payment.PspID, "original paid receipt remains on its original account")
+		require.NotEqual(t, psp, before.subscription.PspID)
+		require.EqualValues(t, 1, gatewayCalls.Load(), "provider cutover must not add a sale")
+	}
 	release()
 
 	var artifact bytes.Buffer
@@ -287,6 +436,38 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 			require.Error(t, err)
 			assertEmptyBook(t, target, id)
 		})
+	}
+	if recurring {
+		t.Run("conflicting_refusal_custody", func(t *testing.T) {
+			var evidence map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(operation.ResultEvidence, &evidence))
+			var paid struct {
+				Binding json.RawMessage `json:"binding"`
+			}
+			require.NoError(t, json.Unmarshal(evidence["qualified_receipt"], &paid))
+			refusal, err := json.Marshal(map[string]any{"binding": paid.Binding, "kind": "provider_declined", "response_code": 200, "localization_id": ""})
+			require.NoError(t, err)
+			evidence["qualified_initial_refusal"] = refusal
+			encoded, err := json.Marshal(evidence)
+			require.NoError(t, err)
+			changed := string(encoded)
+			_, err = Restore(t.Context(), target, id, bytes.NewReader(alteredArchive(t, artifact.Bytes(), "rail_intents", "result_evidence", &changed)))
+			require.Error(t, err, "successful membership cannot carry simultaneous sealed refusal")
+			assertEmptyBook(t, target, id)
+		})
+		var evidence map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(operation.ResultEvidence, &evidence))
+		delete(evidence, "qualified_enrollment")
+		changed, err := json.Marshal(evidence)
+		require.NoError(t, err)
+		missing := string(changed)
+		_, err = Restore(t.Context(), target, id, bytes.NewReader(alteredArchive(t, artifact.Bytes(), "rail_intents", "result_evidence", &missing)))
+		require.Error(t, err)
+		assertEmptyBook(t, target, id)
+		start := now.Add(time.Hour).UTC().Format("2006-01-02 15:04:05.999999-07")
+		_, err = Restore(t.Context(), target, id, bytes.NewReader(alteredArchive(t, artifact.Bytes(), "grants", "starts_at", &start)))
+		require.Error(t, err)
+		assertEmptyBook(t, target, id)
 	}
 	_, err = Restore(t.Context(), target, id, bytes.NewReader(artifact.Bytes()))
 	require.NoError(t, err)
@@ -402,11 +583,47 @@ func newPurchaseArchiveCheckout(d *db.DB, s purchaseArchiveServices, clock clock
 	c.ProviderSecrets = provider
 	c.ResolveNMIClientOverride = func(context.Context, string) (*nmi.NMIClient, error) { return client, nil }
 	c.SetSubscriptionLifecycleService(s.lifecycle)
-	runner := &intents.Runner{Store: intents.NewStore(d), Registry: intents.NewRegistry(checkout.NewNMISaleIntentHandler(c.NMISaleService), checkout.NewNMISubscriptionCreateIntentHandler(c)), Config: cfg}
+	runner := &intents.Runner{Store: intents.NewStore(d), Registry: intents.NewRegistry(checkout.NewNMISaleIntentHandler(c.NMISaleService), checkout.NewInitialMembershipIntentHandler(c)), Config: cfg}
 	c.Intents, c.NMISaleService.Intents = runner, runner
 	return c
 }
 
 func newPurchaseArchiveSession(d *db.DB, c *checkout.CheckoutService, clock clockwork.Clock) *checkout.CheckoutSessionService {
 	return checkout.NewCheckoutSessionService(d, c.PriceService, c.ProductService, c.PaymentMethodService, nil, c, nil, nil, nil, nil, c.Config, c.Rails, clock)
+}
+
+func encodeUncheckedInitialArchive(t *testing.T, ctx context.Context, d *db.DB, id merchant.ID) []byte {
+	t.Helper()
+	var out bytes.Buffer
+	w, err := archivewire.NewWriter(&out, id.String())
+	require.NoError(t, err)
+	for _, profile := range contract.Profiles {
+		require.NoError(t, w.Table(profile.Name))
+		rows, err := d.Qx(ctx).Query(ctx, exportQuery(profile), id.UUID())
+		require.NoError(t, err)
+		for rows.Next() {
+			values := make([]*string, len(profile.Columns))
+			dest := make([]any, len(values))
+			for i := range values {
+				dest[i] = &values[i]
+			}
+			require.NoError(t, rows.Scan(dest...))
+			require.NoError(t, contract.ValidateValues(profile, values), profile.Name)
+			require.NoError(t, w.Row(values))
+		}
+		require.NoError(t, rows.Err())
+		rows.Close()
+	}
+	require.NoError(t, w.Close())
+	return out.Bytes()
+}
+func TestInitialMembershipRefusalArchiveRejectsOrphanGrant(t *testing.T) {
+	testPurchaseWorkflowArchive(t, true, "refused")
+}
+func TestInitialMembershipPendingArchiveRejectsStartGrant(t *testing.T) {
+	testPurchaseWorkflowArchive(t, true, "pending")
+}
+
+func TestInitialMembershipObservedPaymentArchive(t *testing.T) {
+	testPurchaseWorkflowArchive(t, true, "activated")
 }

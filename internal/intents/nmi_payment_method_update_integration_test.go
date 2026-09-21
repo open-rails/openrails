@@ -125,13 +125,13 @@ func newPaymentMethodUpdateFixture(t *testing.T) *paymentMethodUpdateFixture {
 	oldCard := nmiCard{LastFour: "1111", CardType: "Visa", ExpiryDate: "01/29"}
 	target := nmiCard{LastFour: "4242", CardType: "Mastercard", ExpiryDate: "12/30"}
 	pm := &models.PaymentMethod{
-		ID:                   uuid.New(),
-		CustomerID:           customerID,
-		Rail:                 models.RailNMI,
-		PspID:                pspID,
-		RailCustomerRef:      vaultID,
-		RailMethodRef:        billingID,
-		RebillDriver:         models.RebillDriverProvider,
+		ID:              uuid.New(),
+		CustomerID:      customerID,
+		Rail:            models.RailNMI,
+		PspID:           pspID,
+		RailCustomerRef: vaultID,
+		RailMethodRef:   billingID,
+
 		InitialTransactionID: "txn-update-" + uuid.NewString()[:8],
 		LastFour:             stringPtr(oldCard.LastFour),
 		CardType:             stringPtr(oldCard.CardType),

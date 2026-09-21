@@ -1,7 +1,14 @@
 package charge
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/custodians"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"net/url"
 	"strings"
 )
@@ -33,4 +40,41 @@ func (b HyperSwitchBinding) Validate() error {
 		return errors.New("HyperSwitch deployment binding is not canonical")
 	}
 	return nil
+}
+
+// FreezeHyperSwitchBinding reads the same account/custodian rows under admission
+// locks for invoices, recurring obligations and initial memberships.
+func FreezeHyperSwitchBinding(ctx context.Context, q *gen.Queries, method gen.OpenrailsPaymentMethod, deployment string) (HyperSwitchBinding, error) {
+	if deployment == "" || method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil {
+		return HyperSwitchBinding{}, fmt.Errorf("%w: HyperSwitch custody is not configured", ErrInstrumentChanged)
+	}
+	accounts, err := q.GetCollectionCustodianAccountsForShare(ctx, gen.GetCollectionCustodianAccountsForShareParams{MerchantID: method.MerchantID, PspID: method.PspID, CustodianID: *method.CustodianID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return HyperSwitchBinding{}, ErrInstrumentChanged
+	}
+	if err != nil {
+		return HyperSwitchBinding{}, err
+	}
+	row := accounts.OpenrailsCustodian
+	if accounts.OpenrailsPsp.Rail != method.Rail || row.Kind != method.Custodian || row.Environment != accounts.OpenrailsPsp.Environment {
+		return HyperSwitchBinding{}, ErrInstrumentChanged
+	}
+	return HyperSwitchBindingFromAccount(row, deployment)
+}
+
+func HyperSwitchBindingFromAccount(row gen.OpenrailsCustodian, deployment string) (HyperSwitchBinding, error) {
+	var settings map[string]any
+	if json.Unmarshal(row.Settings, &settings) != nil {
+		return HyperSwitchBinding{}, ErrInstrumentChanged
+	}
+	parsed, err := custodians.ParseSettings(row.Kind, settings)
+	if err != nil {
+		return HyperSwitchBinding{}, ErrInstrumentChanged
+	}
+	canonical, err := CanonicalHyperSwitchDeployment(deployment)
+	if err != nil {
+		return HyperSwitchBinding{}, err
+	}
+	binding := HyperSwitchBinding{AccountID: row.AccountID, ProfileID: parsed.ProfileID, APIBaseURL: canonical}
+	return binding, binding.Validate()
 }

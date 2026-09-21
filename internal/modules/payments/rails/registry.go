@@ -97,7 +97,7 @@ type Descriptor struct {
 	// Stripe is declared false here although it rebills itself — the dunning
 	// worker never processes Stripe cohorts (OpenRailsDrivenDunning=false), and
 	// the historical switch returned false; preserved deliberately (#669 note B).
-	AutoBilled func(pm *models.PaymentMethod) bool
+	AutoBilled func(sub *models.Subscription) bool
 
 	// CancelMode classifies how a cancellation of a subscription on this rail
 	// behaves. Takes the full subscription (never nil — callers guard) because
@@ -114,8 +114,8 @@ type Descriptor struct {
 	CredentialKeys []CredentialKey
 }
 
-func autoBilledNever(*models.PaymentMethod) bool  { return false }
-func autoBilledAlways(*models.PaymentMethod) bool { return true }
+func autoBilledNever(*models.Subscription) bool  { return false }
+func autoBilledAlways(*models.Subscription) bool { return true }
 
 func cancelReversible(*models.Subscription, time.Time) CancelMode  { return CancelModeReversible }
 func cancelDestructive(*models.Subscription, time.Time) CancelMode { return CancelModeDestructive }
@@ -137,13 +137,10 @@ func nmiCancelMode(sub *models.Subscription, now time.Time) CancelMode {
 	return CancelModeReversible
 }
 
-// nmiAutoBilled: reads the EXPLICIT rebill-driver mode (#682) — previously
-// inferred from RailMethodRef emptiness, which made the identity field a
-// behavior flag and blocked capturing billing ids for native vaults (#663).
-// Migration 058 backfilled 'openrails' exactly where the old rule inferred it
-// (legacy-imported methods carrying a billing id).
-func nmiAutoBilled(pm *models.PaymentMethod) bool {
-	return pm == nil || pm.RebillDriver != models.RebillDriverOpenRails
+// nmiAutoBilled preserves native provider scheduling unless the subscription
+// explicitly delegates dunning. Engine subscriptions are excluded from this worker.
+func nmiAutoBilled(sub *models.Subscription) bool {
+	return sub == nil || sub.CollectionPolicy != models.CollectionPolicyProviderDunning
 }
 
 // descriptors is the compile-time-complete registry: UNKEYED struct literals,
@@ -275,9 +272,9 @@ func SupportsPaymentMethodCRUD(rail models.Rail) bool {
 
 // AutoBilled reports whether the provider rebills the subscription itself
 // given its payment method (see Descriptor.AutoBilled). Unknown rails: false.
-func AutoBilled(rail models.Rail, pm *models.PaymentMethod) bool {
+func AutoBilled(rail models.Rail, sub *models.Subscription) bool {
 	d, ok := Lookup(rail)
-	return ok && d.AutoBilled(pm)
+	return ok && d.AutoBilled(sub)
 }
 
 // RemoteDeleteOnTerminalCancel reports whether a terminal cancellation on this
@@ -293,6 +290,9 @@ func RemoteDeleteOnTerminalCancel(rail models.Rail) bool {
 func CancelModeFor(sub *models.Subscription, now time.Time) CancelMode {
 	if sub == nil {
 		return CancelModeDestructive
+	}
+	if sub.CollectionPolicy == models.CollectionPolicyEngine {
+		return CancelModeReversible
 	}
 	if d, ok := Lookup(sub.Rail); ok {
 		return d.CancelMode(sub, now)

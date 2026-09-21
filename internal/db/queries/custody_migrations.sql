@@ -36,7 +36,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND ri.merchant_id = sqlc.arg(
 SELECT count(*)::bigint FROM openrails.rail_intents ri
 WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
   AND ri.status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text])
-  AND (ri.payload->>'payment_method_id' = sqlc.arg(payment_method_id)::uuid::text
+  AND ((CASE WHEN ri.intent_type='initial_membership' THEN ri.payload->'terms'->>'payment_method_id' ELSE ri.payload->>'payment_method_id' END) = sqlc.arg(payment_method_id)::uuid::text
        OR (ri.intent_type = 'nmi_payment_source_update'
            AND sqlc.arg(payment_method_id)::uuid::text IN (ri.payload->>'new_payment_method_id', ri.payload->>'old_payment_method_id')));
 
@@ -69,7 +69,6 @@ UPDATE openrails.payment_methods SET
     network_token_status = sqlc.arg(network_token_status)::text,
     network_token_par = sqlc.arg(network_token_par)::text,
     psp_id = COALESCE(sqlc.narg(to_psp_id)::uuid, psp_id),
-    rebill_driver = 'openrails',
     last_four = COALESCE(NULLIF(sqlc.arg(last_four)::text, ''), last_four),
     card_type = COALESCE(NULLIF(sqlc.arg(card_type)::text, ''), card_type),
     expiry_date = COALESCE(NULLIF(sqlc.arg(expiry_date)::text, ''), expiry_date),

@@ -2,11 +2,13 @@ package subscriptions
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
@@ -14,17 +16,22 @@ import (
 	"github.com/open-rails/openrails/config"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
+	"reflect"
 )
 
 // SubscriptionLifecycleService handles the complete lifecycle of subscriptions
@@ -213,6 +220,77 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 	if txDB == nil {
 		return nil, nil, errors.New("transaction DB is required")
 	}
+	if params.Prepared != nil {
+		terms := params.Prepared
+		if txDB.Pool() != nil {
+			return nil, nil, errors.New("accepted membership requires a transaction")
+		}
+		if err := terms.Validate(); err != nil {
+			return nil, nil, err
+		}
+		if (terms.Amount > 0 && s.PaymentService == nil) || params.UserID != terms.CustomerID.String() || params.PriceID != terms.PriceID || db.PSPIDFromContext(ctx) != terms.PSPID || (terms.Amount > 0) != (strings.TrimSpace(params.TransactionID) != "") || (terms.CollectionPolicy != models.CollectionPolicyEngine && (params.RailSubscriptionID == nil || strings.TrimSpace(*params.RailSubscriptionID) == "")) || (terms.CollectionPolicy == models.CollectionPolicyEngine && params.RailSubscriptionID != nil && strings.TrimSpace(*params.RailSubscriptionID) != "") {
+			return nil, nil, errors.New("membership completion contradicts accepted terms")
+		}
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		prior, err := txDB.Gen(ctx).GetInitialMembershipForUpdate(ctx, gen.GetInitialMembershipForUpdateParams{MerchantID: mid.UUID(), ID: terms.SubscriptionID})
+		if err != nil && !db.IsNotFound(err) {
+			return nil, nil, err
+		}
+		if err == nil {
+			sub, err := models.SubscriptionFromGen(prior)
+			if err != nil {
+				return nil, nil, err
+			}
+			provider := ""
+			if params.RailSubscriptionID != nil {
+				provider = strings.TrimSpace(*params.RailSubscriptionID)
+			}
+			if err := terms.ValidateSubscriptionIdentity(sub, params.Rail, provider); err != nil {
+				return nil, nil, err
+			}
+			if sub.Status != models.StatusPending || terms.Pending {
+				if terms.Amount > 0 {
+					payment, err := payments.NewPaymentRepo(txDB).GetByID(ctx, terms.PaymentID)
+					if err != nil {
+						return nil, nil, err
+					}
+					if err := ValidateInitialMembershipPayment(*terms, payment, params.Rail, params.TransactionID); err != nil {
+						return nil, nil, err
+					}
+				}
+				before := terms.PeriodEnd
+				if terms.Pending {
+					before = terms.PeriodStart
+				}
+				limit, err := safecast.Convert[int32](len(terms.Entitlements) + 2)
+				if err != nil {
+					return nil, nil, err
+				}
+				rows, err := txDB.Gen(ctx).ListInitialMembershipGrants(ctx, gen.ListInitialMembershipGrantsParams{MerchantID: mid.UUID(), SubscriptionID: terms.SubscriptionID, Before: before, RowLimit: limit})
+				if err != nil {
+					return nil, nil, err
+				}
+				if err := ValidateInitialMembershipHistory(mid.UUID(), *terms, rows); err != nil {
+					return nil, nil, err
+				}
+				return sub, nil, nil
+			}
+			snapshot := sub.EntitlementsSpecSnapshot
+			if snapshot == nil {
+				snapshot = map[string]*int{}
+			}
+			if prior.DeletedAt != nil || sub.PriceID != terms.PriceID || sub.ProductID != terms.ProductID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != terms.PaymentMethodID || sub.CurrentPeriodStartsAt != nil || sub.CurrentPeriodEndsAt != nil || !reflect.DeepEqual(snapshot, terms.Entitlements) {
+				return nil, nil, errors.New("pending membership contradicts accepted first paid period")
+			}
+		}
+		copy := *params
+		copy.Amount, copy.Currency, copy.AmountProvided = terms.Amount, terms.Currency, true
+		copy.CurrentPeriodStartsAt, copy.CurrentPeriodEndsAt = &terms.PeriodStart, &terms.PeriodEnd
+		params = &copy
+	}
 	subscription, notifications, err := s.createMembershipCore(ctx, txDB, params)
 	if err != nil {
 		return nil, nil, err
@@ -232,7 +310,13 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	notificationRepo := NewNotificationQueueRepo(dbb)
 	subService := NewSubscriptionService(dbb, priceService, productService, nil, s.Clock())
 
-	price, err := priceService.GetByID(ctx, params.PriceID)
+	var price *models.Price
+	var err error
+	if terms := params.Prepared; terms != nil {
+		price = &models.Price{ID: terms.PriceID, ProductID: terms.ProductID, Amount: terms.RecurringAmount, Currency: terms.Currency, AutoRenew: true}
+	} else {
+		price, err = priceService.GetByID(ctx, params.PriceID)
+	}
 	if err != nil {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"user_id":  params.UserID,
@@ -252,6 +336,10 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		if err != nil && !db.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("failed to check existing subscription by rail subscription ID: %w", err)
 		}
+		if err == nil && params.Prepared != nil && found.ID != params.Prepared.SubscriptionID {
+			return nil, nil, errors.New("provider schedule belongs to another local membership")
+		}
+
 		if err == nil && found.Status == models.StatusPending {
 			if found.CustomerID.String() != params.UserID || found.ProductID != price.ProductID {
 				return nil, nil, fmt.Errorf("rail subscription belongs to a different pending subscription")
@@ -269,6 +357,11 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			return nil, nil, fmt.Errorf("failed to check existing payment: %w", err)
 		}
 		if err == nil {
+			if params.Prepared != nil {
+				if err := ValidateInitialMembershipPayment(*params.Prepared, existingPayment, params.Rail, params.TransactionID); err != nil {
+					return nil, nil, err
+				}
+			}
 			if existingPayment.CustomerID.String() != params.UserID {
 				return nil, nil, fmt.Errorf("payment transaction belongs to a different user")
 			}
@@ -346,6 +439,9 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	now := s.now()
+	if params.Prepared != nil {
+		now = params.Prepared.AcceptedAt
+	}
 	periodStartsAt := now
 	if params.CurrentPeriodStartsAt != nil && !params.CurrentPeriodStartsAt.IsZero() {
 		periodStartsAt = params.CurrentPeriodStartsAt.UTC()
@@ -368,7 +464,13 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		}).Warn("price has no access duration and provider supplied no period end; defaulting membership period to 30d")
 		periodEndsAt = periodStartsAt.Add(30 * 24 * time.Hour)
 	}
-	product, err := productService.GetByID(ctx, price.ProductID)
+	var product *models.Product
+	if terms := params.Prepared; terms != nil {
+		product = &models.Product{ID: terms.ProductID, DisplayName: terms.ProductName, EntitlementsSpec: models.CloneEntitlementsSpec(terms.Entitlements)}
+		err = nil
+	} else {
+		product, err = productService.GetByID(ctx, price.ProductID)
+	}
 	if err != nil {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"product_id": price.ProductID,
@@ -441,6 +543,21 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			subscription.UserEmail = &emailc
 		}
 
+		if terms := params.Prepared; terms != nil {
+			subscription.ID, subscription.PspID = terms.SubscriptionID, terms.PSPID
+			subscription.CollectionPolicy = terms.CollectionPolicy
+			subscription.PaymentMethodID = &terms.PaymentMethodID
+			metadata, err := json.Marshal(params.PaymentMetadata)
+			if err != nil {
+				return nil, nil, fmt.Errorf("accepted membership metadata: %w", err)
+			}
+			subscription.Metadata = metadata
+			if terms.Pending {
+				subscription.Status = models.StatusPending
+				subscription.StartedAt = terms.AcceptedAt
+				subscription.CurrentPeriodStartsAt, subscription.CurrentPeriodEndsAt = nil, nil
+			}
+		}
 		if err := subService.Create(ctx, subscription); err != nil {
 			return nil, nil, fmt.Errorf("failed to create subscription: %w", err)
 		}
@@ -453,6 +570,10 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			"period_start":         periodStartsAt,
 			"period_end":           periodEndsAt,
 		}).Info("Created new subscription record for membership")
+	}
+
+	if params.Prepared != nil && params.Prepared.Pending {
+		return subscription, nil, nil
 	}
 
 	notifications := make([]*models.NotificationQueue, 0, 1)
@@ -486,7 +607,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 		// A membership created with an ALREADY-elapsed period (stale import /
 		// backfill shapes) grants no access window — the period is over.
-		if !periodEndsAt.UTC().After(s.now().UTC()) {
+		if params.Prepared == nil && !periodEndsAt.UTC().After(s.now().UTC()) {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": subscription.ID,
 				"period_end":      periodEndsAt,
@@ -551,6 +672,9 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		EventType:  models.NotificationPremiumStarted,
 	}
 	if err := notificationRepo.Create(ctx, notification); err != nil {
+		if params.Prepared != nil {
+			return nil, nil, fmt.Errorf("accepted membership notification: %w", err)
+		}
 		log.WithContext(ctx).WithError(err).Error("failed to create membership started notification")
 	} else {
 		notifications = append(notifications, notification)
@@ -602,6 +726,14 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			PurchasedAt:              purchasedAt,
 			CreatedAt:                now,
 		}
+		if params.Prepared != nil {
+			payment.ID = params.Prepared.PaymentID
+			token := charge.TokenTypePSPToken
+			if params.Prepared.CollectionPolicy == models.CollectionPolicyEngine {
+				token = charge.TokenTypePANViaProxy
+			}
+			payment.TokenType = &token
+		}
 		if err := paymentService.Create(ctx, payment); err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"transaction_id":  params.TransactionID,
@@ -637,7 +769,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 	}
 	return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		db := db.NewWithPgxTx(tx)
-		subscription, err := NewSubscriptionRepo(db).GetByPSPSubscriptionIDForUpdate(ctx, string(params.Rail), params.RailSubscriptionID)
+		subscription, err := lockedRenewalSubscription(ctx, db, params)
 		if err != nil {
 			return fmt.Errorf("subscription not found: %w", err)
 		}
@@ -666,9 +798,19 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 		}
 
 		var metadata map[string]any
+		if params.PreviousPeriodEnd != nil && len(params.PaymentMetadata) > 0 {
+			metadata = make(map[string]any, len(params.PaymentMetadata))
+			for key, value := range params.PaymentMetadata {
+				metadata[key] = value
+			}
+		}
 		_, terminal := TerminalCancelReason(subscription)
+		terminal = terminal || (subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCancelled)
 		if terminal {
-			metadata = map[string]any{"refund_review": "confirmed charge on a cancelled subscription"}
+			if metadata == nil {
+				metadata = map[string]any{}
+			}
+			metadata["refund_review"] = "confirmed charge on a cancelled subscription"
 		}
 		now := s.now().UTC()
 		payment := &models.Payment{
@@ -680,7 +822,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 			AttemptKind:              func() *string { k := payments.AttemptRenewal; return &k }(),
 			MoneyMovement:            models.MoneyMovementRail, PurchasedAt: now, CreatedAt: now,
 		}
-		if tt := payments.DefaultTokenType(string(params.Rail), models.CustodianPSP); tt != "" {
+		if tt := payments.DefaultTokenType(string(params.Rail), renewalPaymentCustodian(params)); tt != "" {
 			payment.TokenType = &tt
 		}
 		created, err := payments.NewPaymentService(db, s.Clock()).CreateIfNotExists(ctx, payment)
@@ -729,11 +871,10 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		db := db.NewWithPgxTx(tx)
 		priceService := catalog.NewPriceService(db)
 		productService := catalog.NewProductService(db)
-		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
 		paymentService := payments.NewPaymentService(db, s.Clock())
 
 		// Lock before checking terminal state or preparing a full-row update.
-		subscription, err := subService.subscriptionRepo.GetByPSPSubscriptionIDForUpdate(ctx, string(params.Rail), params.RailSubscriptionID)
+		subscription, err := lockedRenewalSubscription(ctx, db, params)
 		if err != nil {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"rail":                 params.Rail,
@@ -776,7 +917,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("load accepted renewal payment: %w", err)
 			}
-			preserveLifecycle, err = applyRenewalTerms(ctx, db, subscription, *terms)
+			preserveLifecycle, err = applyRenewalTerms(ctx, db, subscription, *terms, params.PreviousPeriodEnd)
 			if err != nil {
 				return err
 			}
@@ -926,7 +1067,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				PurchasedAt:              purchasedAt,
 				CreatedAt:                now,
 			}
-			if tt := payments.DefaultTokenType(string(params.Rail), models.CustodianPSP); tt != "" {
+			if tt := payments.DefaultTokenType(string(params.Rail), renewalPaymentCustodian(params)); tt != "" {
 				payment.TokenType = &tt
 			}
 			created, err := paymentService.CreateIfNotExists(ctx, payment)
@@ -1039,18 +1180,54 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 		return nil, fmt.Errorf("resume membership: subscription id is required")
 	}
 
+	observed, err := NewSubscriptionRepo(s.DB).GetByID(ctx, params.SubscriptionID)
+	if err != nil {
+		return nil, fmt.Errorf("resume membership: load subscription: %w", err)
+	}
 	now := s.now().UTC()
 	var resumed *models.Subscription
-	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txdb := db.NewWithPgxTx(tx)
+	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txdb := s.DB.NewWithPgxTx(tx)
+		if observed.CollectionPolicy == models.CollectionPolicyEngine {
+			if _, err := txdb.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: observed.MerchantID, ID: observed.CustomerID}); err != nil {
+				return err
+			}
+		}
 		subscription, err := NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, params.SubscriptionID)
 		if err != nil {
 			return fmt.Errorf("resume membership: load subscription: %w", err)
+		}
+		if subscription.CustomerID != observed.CustomerID || subscription.CollectionPolicy != observed.CollectionPolicy {
+			return errors.New("resume membership: accepted customer or collection ownership changed")
 		}
 		if !Resumable(subscription, now) {
 			return fmt.Errorf("resume membership: subscription %s is not resumable", subscription.ID)
 		}
 
+		if subscription.CollectionPolicy == models.CollectionPolicyEngine {
+			q := txdb.Gen(ctx)
+			method, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: subscription.MerchantID, ID: *subscription.PaymentMethodID})
+			if err != nil {
+				return err
+			}
+			if method.CustodianID == nil || method.Custodian != models.CustodianHyperSwitch {
+				return fmt.Errorf("resume engine: payment method custody is unavailable")
+			}
+			handle := paymentmethods.CustodianHandle{Custodian: *method.CustodianID, Method: method.RailMethodRef}
+			if err := paymentmethods.LockCustodianHandles(ctx, q, subscription.MerchantID, handle); err != nil {
+				return err
+			}
+			if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, subscription.MerchantID, handle); err != nil {
+				return fmt.Errorf("resume engine: %w", err)
+			}
+			method, err = q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: subscription.MerchantID, ID: *subscription.PaymentMethodID})
+			if err != nil {
+				return err
+			}
+			if method.CustomerID != subscription.CustomerID || method.PspID != subscription.PspID || method.ParkReason != "" || method.StoredCredentialRecurringRef == "" || method.CustodianID == nil || *method.CustodianID != handle.Custodian || method.RailMethodRef != handle.Method {
+				return fmt.Errorf("resume engine: payment method is unavailable")
+			}
+		}
 		subscription.Status = models.StatusActive
 		subscription.CancelledAt = nil
 		subscription.CancelType = nil
@@ -1289,6 +1466,18 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	}
 	// A late event must preserve the existing cancellation and its terminal reason.
 	if subscription.Status == models.StatusCancelled && NormalizeCancelType(subscription.CancelType) == string(models.CancelTypeChargeback) {
+		return result, nil
+	}
+
+	// Merchant cancellation admits active or collecting engine obligations under
+	// the same row lock as the mutation. A later terminal state stays terminal.
+	if subscription.CollectionPolicy == models.CollectionPolicyEngine && params.CancelType == models.CancelTypeMerchant && subscription.Status != models.StatusActive && subscription.Status != models.StatusPastDue {
+		return nil, ErrSubscriptionNotActive
+	}
+
+	// A replayed engine user cancel cannot soften a later merchant or system
+	// cancellation. The locked current row is the lifecycle authority.
+	if subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCancelled && params.CancelType == models.CancelTypeUser {
 		return result, nil
 	}
 

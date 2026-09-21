@@ -172,7 +172,7 @@ const createPaymentMethod = `-- name: CreatePaymentMethod :execrows
 INSERT INTO openrails.payment_methods (
     id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
     initial_transaction_id, last_four, card_type, expiry_date,
-    metadata, created_at, updated_at, psp_id, rebill_driver,
+    metadata, created_at, updated_at, psp_id,
     custodian, custodian_id, fingerprint, network_token_id, network_token_status,
     network_token_par, charge_via
 ) VALUES (
@@ -182,13 +182,12 @@ INSERT INTO openrails.payment_methods (
     COALESCE(NULLIF($12::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF($13::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     $14::uuid,
-    COALESCE(NULLIF($15::text, ''), 'provider'),
-    COALESCE(NULLIF($16::text, ''), 'psp'),
-    CASE WHEN COALESCE(NULLIF($16::text, ''), 'psp') <> 'psp' THEN
-      COALESCE($17::uuid, (SELECT p.custodian_id FROM openrails.psps p WHERE p.id=$14::uuid AND p.merchant_id=$4::uuid)) END,
-    $18, $19,
-    $20, $21,
-    COALESCE(NULLIF($22::text, ''), 'pan_proxy')
+    COALESCE(NULLIF($15::text, ''), 'psp'),
+    CASE WHEN COALESCE(NULLIF($15::text, ''), 'psp') <> 'psp' THEN
+      COALESCE($16::uuid, (SELECT p.custodian_id FROM openrails.psps p WHERE p.id=$14::uuid AND p.merchant_id=$4::uuid)) END,
+    $17, $18,
+    $19, $20,
+    COALESCE(NULLIF($21::text, ''), 'pan_proxy')
 )
 `
 
@@ -207,7 +206,6 @@ type CreatePaymentMethodParams struct {
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 	PspID                uuid.UUID
-	RebillDriver         string
 	Custodian            string
 	CustodianID          *uuid.UUID
 	Fingerprint          string
@@ -234,7 +232,6 @@ func (q *Queries) CreatePaymentMethod(ctx context.Context, arg CreatePaymentMeth
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.PspID,
-		arg.RebillDriver,
 		arg.Custodian,
 		arg.CustodianID,
 		arg.Fingerprint,

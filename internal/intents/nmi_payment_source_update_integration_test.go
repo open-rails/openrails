@@ -116,13 +116,13 @@ func newPaymentSourceSwapFixture(t *testing.T) *paymentSourceSwapFixture {
 
 	mkPM := func(railCustomerRef string) *models.PaymentMethod {
 		pm := &models.PaymentMethod{
-			ID:                   uuid.New(),
-			CustomerID:           customerID,
-			Rail:                 models.RailNMI,
-			PspID:                pspID,
-			RailCustomerRef:      railCustomerRef,
-			RailMethodRef:        "bill-" + uuid.NewString()[:8],
-			RebillDriver:         models.RebillDriverProvider,
+			ID:              uuid.New(),
+			CustomerID:      customerID,
+			Rail:            models.RailNMI,
+			PspID:           pspID,
+			RailCustomerRef: railCustomerRef,
+			RailMethodRef:   "bill-" + uuid.NewString()[:8],
+
 			InitialTransactionID: "txn-" + uuid.NewString()[:8],
 			CreatedAt:            time.Now().UTC(),
 			UpdatedAt:            time.Now().UTC(),

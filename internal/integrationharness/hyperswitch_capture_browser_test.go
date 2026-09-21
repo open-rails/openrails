@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -28,10 +29,12 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchantarchive"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -86,8 +89,8 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &vendor))
 	ctx := t.Context()
 	type observation struct {
-		Order, Transaction, Amount, Currency, Initiator, Indicator, Anchor string
-		CardMatched, Approved                                              bool
+		Order, Transaction, Amount, Currency, Initiator, Indicator, Anchor, BillingMethod string
+		CardMatched, Approved                                                             bool
 	}
 	observations := func() []observation {
 		response, err := http.Get(vendor.NMIReadBase + "/observations")
@@ -117,7 +120,13 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 			if delegated == nil {
 				return nil, billingauth.ErrUnauthenticated
 			}
-			return delegated.AuthenticateDelegated(ctx, r)
+			principal, err := delegated.AuthenticateDelegated(ctx, r)
+			// A trusted host may omit interaction classification for nonfinancial
+			// capture. Downgrade only; the real engine CIT retains AuthKit's class.
+			if err == nil && principal != nil && r.Header.Get("X-Qualification-Unknown-Class") == "true" {
+				principal.CredentialClass = billingauth.CredentialClassUnknown
+			}
+			return principal, err
 		})
 	})
 	owned := surface.ProvisionOwnedMerchant("actual-capture-" + uuid.NewString()[:8])
@@ -162,6 +171,56 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	require.NoError(t, err)
 	sdkOrigin := sdkURL.Scheme + "://" + sdkURL.Host
 	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/membership-recover" {
+			var input struct {
+				OperationID uuid.UUID `json:"operation_id"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
+			var financial int
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1)`, owned.MerchantID.UUID()).Scan(&financial))
+			require.Zero(t, financial, "unknown payment grants no membership before exact receipt")
+			require.NoError(t, rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {
+				operation, err := rt.IntentRunner().VerifyByID(c, input.OperationID)
+				require.NoError(t, err)
+				require.Equal(t, intents.StatusSucceeded, operation.Status)
+				return err
+			}))
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/membership-expired" {
+			var input struct {
+				SessionID openrails.CheckoutSessionID `json:"session_id"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
+			_, err := h.sharedPool().Exec(ctx, `UPDATE billing.checkout_sessions SET status='expired',expires_at=now()-interval '1 hour' WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), input.SessionID.UUID())
+			require.NoError(t, err)
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/membership-quoted" {
+			var input struct {
+				PriceID   openrails.PriceID           `json:"price_id"`
+				SessionID openrails.CheckoutSessionID `json:"session_id"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
+			owner := surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID))
+			_, denied := owner.ConfirmCheckoutSession(ctx, input.SessionID, openrails.ConfirmCheckoutSessionRequest{CustomerID: openrails.CustomerID(uuid.MustParse(user.ID)), Payment: openrails.ConfirmPayment{Rail: "nmi"}})
+			require.ErrorIs(t, denied, openrails.ErrDenied, "merchant authority and body customer ID cannot accept recurring agreement")
+			var financial int
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1)`, owned.MerchantID.UUID()).Scan(&financial))
+			require.Zero(t, financial, "priced quote is not payment or membership")
+			_, err := h.sharedPool().Exec(ctx, `UPDATE billing.prices SET amount=1000000,access_duration_hours=24 WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), input.PriceID.UUID())
+			require.NoError(t, err)
+			_, err = h.sharedPool().Exec(ctx, `UPDATE billing.products SET entitlements_spec='{"changed_after_quote":null}' WHERE merchant_id=$1 AND id=(SELECT product_id FROM billing.prices WHERE merchant_id=$1 AND id=$2)`, owned.MerchantID.UUID(), input.PriceID.UUID())
+			require.NoError(t, err)
+			control, err := http.Post(vendor.NMIReadBase+"/control", "application/json", bytes.NewBufferString(`{"Next":"lost"}`))
+			require.NoError(t, err)
+			require.Equal(t, http.StatusNoContent, control.StatusCode)
+			_ = control.Body.Close()
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]int{"financial": financial, "provider_calls": len(observations())}))
+			return
+		}
 		if r.Method == http.MethodPost && r.URL.Path == "/invoice-fixture" {
 			var invoiceID uuid.UUID
 			// Called by the test driver only after Save card completed.
@@ -202,6 +261,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	protected := []string{vendor.APIKey, "4111111111111111"}
 	stores := []bool{false, true}
 	protected = append(protected, vendor.NMIKey)
+	var savedMethod openrails.PaymentMethodID
 	for _, store := range stores {
 		browserParams := map[string]string{"page": page.URL, "vendor_api": vendor.APIBaseURL, "vendor_sdk": vendor.SDKURL, "api": surface.BaseURL, "token": token, "psp_id": psp.String(), "email": "capture-browser@example.test", "name": "Capture Browser", "store": strconv.FormatBool(store)}
 		if store {
@@ -240,6 +300,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 		}
 		t.Logf("Explicit storage consent=%t; vendor readback storage_type=%s", store, method.StorageType)
 		if store {
+			savedMethod = proof.Method
 			require.NotNil(t, proof.InvoicePay)
 			invoiceID := proof.InvoicePay.Invoice.ID
 			require.Equal(t, "succeeded", proof.InvoicePay.Operation.Status)
@@ -404,6 +465,117 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 				}))
 				require.Len(t, observations()[before:], 4, "restored terminal replay is local")
 			})
+			t.Run("actual recurring transport only", func(t *testing.T) {
+				// Transport qualification after actual browser capture; this is not
+				// recurring consent, subscription enrollment or lifecycle completion.
+				var method gen.OpenrailsPaymentMethod
+				require.NoError(t, rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {
+					var err error
+					method, err = rt.DB.Gen(c).GetPaymentMethodByID(c, gen.GetPaymentMethodByIDParams{MerchantID: owned.MerchantID.UUID(), ID: uuid.UUID(proof.Method)})
+					return err
+				}))
+				binding := charge.HyperSwitchBinding{AccountID: vendor.MerchantID, ProfileID: vendor.ProfileID, APIBaseURL: vendor.APIBaseURL}
+				var initial string
+				for _, phase := range []string{"initial", "reuse", "merchant", "lost", "declined"} {
+					baseline := len(observations())
+					outcome := "approved"
+					if phase == "lost" || phase == "declined" {
+						outcome = phase
+					}
+					body, _ := json.Marshal(map[string]string{"next": outcome})
+					control, err := http.Post(vendor.NMIReadBase+"/control", "application/json", bytes.NewReader(body))
+					require.NoError(t, err)
+					require.Equal(t, http.StatusNoContent, control.StatusCode)
+					_ = control.Body.Close()
+					posture := charge.InitialRecurring()
+					if phase == "reuse" {
+						posture = charge.RecurringReuse(initial)
+					} else if phase != "initial" {
+						posture = charge.RecurringMIT(initial)
+					}
+					request := charge.Request{Instrument: charge.Instrument{PaymentMethodID: method.ID, Rail: "nmi", CustomerRef: method.RailCustomerRef, MethodRef: method.RailMethodRef}, AmountMinor: 123, Currency: "USD", OrderRef: uuid.NewString(), Context: posture}
+					if phase == "merchant" {
+						request.Currency = "JPY"
+						request.AmountMinor = 100
+					}
+					var result charge.Result
+					var declined bool
+					err = rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {
+						charger, err := money.PrepareHyperSwitchCharge(c, rt.CollectionResolver, method, binding)
+						if err != nil {
+							return err
+						}
+						var refusal *nmi.CustomerVaultError
+						if phase == "initial" || phase == "reuse" {
+							result, refusal, err = charger.ChargeInitialRecurring(c, request)
+						} else {
+							result, refusal, err = charger.ChargeRecurringMIT(c, request)
+						}
+						declined = refusal != nil
+						if refusal != nil {
+							require.Equal(t, 200, refusal.ResponseCode)
+						}
+						return err
+					})
+					if phase == "lost" {
+						require.ErrorIs(t, err, hyperswitch.ErrUnknown)
+						require.False(t, errors.Is(err, charge.ErrNotDispatched))
+						require.False(t, declined)
+					} else {
+						require.NoError(t, err)
+					}
+					received := observations()[baseline:]
+					require.Len(t, received, 1, "actual vendor never retries a possibly submitted recurring charge")
+					row := received[0]
+					require.Equal(t, request.OrderRef, row.Order)
+					require.Equal(t, "recurring", row.BillingMethod)
+					require.True(t, row.CardMatched)
+					require.Equal(t, string(posture.Initiator), row.Initiator)
+					require.Equal(t, posture.PriorRef, row.Anchor)
+					amount := "1.23"
+					if phase == "merchant" {
+						amount = "100.00"
+					}
+					require.Equal(t, amount, row.Amount)
+					require.Equal(t, request.Currency, row.Currency)
+					if phase == "initial" {
+						require.Equal(t, "stored", row.Indicator)
+						require.Equal(t, row.Transaction, result.CapturedRef)
+						initial = row.Transaction
+					} else {
+						require.Equal(t, "used", row.Indicator)
+						require.Empty(t, result.CapturedRef)
+					}
+					if phase == "declined" {
+						require.True(t, declined)
+						require.True(t, result.Declined)
+						require.False(t, row.Approved)
+					} else {
+						require.True(t, row.Approved)
+						readReq, err := http.NewRequestWithContext(ctx, http.MethodGet, vendor.NMIReadBase+"/payments/"+row.Transaction, nil)
+						require.NoError(t, err)
+						readReq.Header.Set("Authorization", vendor.NMIKey)
+						readResp, err := http.DefaultClient.Do(readReq)
+						require.NoError(t, err)
+						require.Equal(t, http.StatusOK, readResp.StatusCode)
+						var receipt struct{ ID, Amount, Currency string }
+						require.NoError(t, json.NewDecoder(readResp.Body).Decode(&receipt))
+						_ = readResp.Body.Close()
+						require.Equal(t, row.Transaction, receipt.ID)
+						require.Equal(t, amount, receipt.Amount)
+						require.Equal(t, request.Currency, receipt.Currency)
+					}
+				}
+				calls, err := http.Get(vendor.NMIReadBase + "/schedule-calls")
+				require.NoError(t, err)
+				var count struct{ Count int }
+				require.NoError(t, json.NewDecoder(calls.Body).Decode(&count))
+				_ = calls.Body.Close()
+				require.Zero(t, count.Count, "HS never invokes native schedule operations")
+				var retained string
+				require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT stored_credential_recurring_ref FROM billing.payment_methods WHERE id=$1`, method.ID).Scan(&retained))
+				require.Empty(t, retained, "transport result alone cannot establish persisted recurring authority")
+			})
 		}
 	}
 	router := vendor.RouterContainer
@@ -422,4 +594,55 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	require.Equal(t, 1, methods)
 	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2)`, owned.MerchantID.UUID(), user.ID).Scan(&financial))
 	require.Zero(t, financial, "invoice collections do not create checkout payments or subscriptions")
+
+	t.Run("verified browser initial membership", func(t *testing.T) {
+		owner := surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID))
+		product, err := owner.CreateProduct(ctx, openrails.CreateProductRequest{Key: uuid.NewString(), DisplayName: "Browser membership", EntitlementsSpec: map[string]*int{"browser_member": nil}})
+		require.NoError(t, err)
+		hours := 720
+		price, err := owner.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+		require.NoError(t, err)
+		beforeMembership := len(observations())
+		params, _ := json.Marshal(map[string]string{"phase": "membership", "page": page.URL, "checkpoint": page.URL + "/membership-quoted", "expire": page.URL + "/membership-expired", "recover": page.URL + "/membership-recover", "before_provider_calls": strconv.Itoa(beforeMembership), "api": surface.BaseURL, "token": token, "psp_id": psp.String(), "price_id": price.ID.String(), "method": savedMethod.String()})
+		command := exec.CommandContext(ctx, "node", script)
+		command.Env = append(os.Environ(), "OPENRAILS_BROWSER_FIXTURE="+string(params))
+		output, err := command.CombinedOutput()
+		t.Log(string(output))
+		require.NoError(t, err)
+		var proof struct {
+			Membership struct {
+				SubscriptionID openrails.SubscriptionID `json:"subscription_id"`
+				PaymentID      openrails.PaymentID      `json:"payment_id"`
+			} `json:"membership"`
+		}
+		require.NoError(t, json.Unmarshal(output, &proof))
+		rows := observations()[beforeMembership:]
+		require.Len(t, rows, 1, "confirmation and replay submit exactly one recurring CIT")
+		require.Equal(t, "recurring", rows[0].BillingMethod)
+		require.Equal(t, "customer", rows[0].Initiator)
+		require.Equal(t, "stored", rows[0].Indicator)
+		require.Equal(t, "9.99", rows[0].Amount)
+		var policy, providerID, anchor, status string
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT collection_policy,rail_subscription_id,status FROM billing.subscriptions WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), proof.Membership.SubscriptionID.UUID()).Scan(&policy, &providerID, &status))
+		require.Equal(t, "engine", policy)
+		require.Empty(t, providerID)
+		require.Equal(t, "active", status)
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT stored_credential_recurring_ref FROM billing.payment_methods WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), savedMethod.UUID()).Scan(&anchor))
+		require.Equal(t, rows[0].Transaction, anchor)
+		var amount int64
+		var paidStatus, transaction string
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT amount,status,transaction_id FROM billing.payments WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), proof.Membership.PaymentID.UUID()).Scan(&amount, &paidStatus, &transaction))
+		require.EqualValues(t, 9_990_000, amount, "post-quote catalog edit cannot change accepted price")
+		require.Equal(t, "completed", paidStatus)
+		require.Equal(t, rows[0].Transaction, transaction)
+		access, err := owner.HasEntitlement(ctx, openrails.CustomerID(uuid.MustParse(user.ID)), "browser_member", time.Now())
+		require.NoError(t, err)
+		require.True(t, access, "shared membership commit grants the accepted entitlement")
+		response, err := http.Get(vendor.NMIReadBase + "/schedule-calls")
+		require.NoError(t, err)
+		defer response.Body.Close()
+		var scheduleCalls struct{ Count int }
+		require.NoError(t, json.NewDecoder(response.Body).Decode(&scheduleCalls))
+		require.Zero(t, scheduleCalls.Count, "engine enrollment never creates a native schedule")
+	})
 }

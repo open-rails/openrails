@@ -130,13 +130,13 @@ func newVaultDeleteFixture(t *testing.T) *vaultDeleteFixture {
 	billingID := "bill-del-" + uuid.NewString()[:8]
 
 	pm := &models.PaymentMethod{
-		ID:                   uuid.New(),
-		CustomerID:           customerID,
-		Rail:                 models.RailNMI,
-		PspID:                pspID,
-		RailCustomerRef:      vaultID,
-		RailMethodRef:        billingID,
-		RebillDriver:         models.RebillDriverProvider,
+		ID:              uuid.New(),
+		CustomerID:      customerID,
+		Rail:            models.RailNMI,
+		PspID:           pspID,
+		RailCustomerRef: vaultID,
+		RailMethodRef:   billingID,
+
 		InitialTransactionID: "txn-" + uuid.NewString()[:8],
 		CreatedAt:            time.Now().UTC(),
 		UpdatedAt:            time.Now().UTC(),
@@ -304,13 +304,13 @@ func TestNMIVaultDeleteIntent_SharedVaultScopesToBillingEntry(t *testing.T) {
 	fx := newVaultDeleteFixture(t)
 
 	sibling := &models.PaymentMethod{
-		ID:                   uuid.New(),
-		CustomerID:           fx.pm.CustomerID,
-		Rail:                 models.RailNMI,
-		PspID:                fx.pspID,
-		RailCustomerRef:      fx.pm.RailCustomerRef, // shares the vault
-		RailMethodRef:        "bill-sib-" + uuid.NewString()[:8],
-		RebillDriver:         models.RebillDriverProvider,
+		ID:              uuid.New(),
+		CustomerID:      fx.pm.CustomerID,
+		Rail:            models.RailNMI,
+		PspID:           fx.pspID,
+		RailCustomerRef: fx.pm.RailCustomerRef, // shares the vault
+		RailMethodRef:   "bill-sib-" + uuid.NewString()[:8],
+
 		InitialTransactionID: "txn-" + uuid.NewString()[:8],
 		CreatedAt:            time.Now().UTC(),
 		UpdatedAt:            time.Now().UTC(),

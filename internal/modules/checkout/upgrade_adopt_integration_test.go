@@ -72,6 +72,7 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string, merc
 	f.nextChargeDate.Store("")
 	f.reportedOrder.Store("")
 	f.planPayments.Store("0")
+	f.recurringAmount.Store("5.00")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -104,7 +105,9 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string, merc
 			_ = r.ParseForm()
 			if r.Form.Get("recurring") == "add_subscription" {
 				f.createCalls.Add(1)
-				f.recurringAmount.Store(r.Form.Get("amount"))
+				require.Empty(t, r.Form.Get("type"), "successor enrollment cannot submit a sale")
+				require.Empty(t, r.Form.Get("amount"))
+				require.Empty(t, r.Form.Get("stored_credential_indicator"))
 				f.lastOrder.Store(r.Form.Get("orderid"))
 				start, err := time.Parse("20060102", r.Form.Get("start_date"))
 				require.NoError(t, err)
@@ -228,13 +231,13 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 
 	// Stored payment method the upgrade charges against.
 	pm := &models.PaymentMethod{
-		ID:                   uuid.New(),
-		CustomerID:           customerID,
-		Rail:                 models.Rail("nmi"),
-		PspID:                pspID,
-		RailCustomerRef:      railCustomerRef,
-		RailMethodRef:        "bill-upg-" + sfx,
-		RebillDriver:         models.RebillDriverProvider,
+		ID:              uuid.New(),
+		CustomerID:      customerID,
+		Rail:            models.Rail("nmi"),
+		PspID:           pspID,
+		RailCustomerRef: railCustomerRef,
+		RailMethodRef:   "bill-upg-" + sfx,
+
 		InitialTransactionID: "txn-" + sfx,
 		CreatedAt:            now, UpdatedAt: now,
 	}

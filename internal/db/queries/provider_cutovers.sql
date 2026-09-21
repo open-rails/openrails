@@ -15,8 +15,8 @@ SELECT s.customer_id, s.rail_subscription_id, s.payment_method_id,
  AND source.rail='nmi' AND target.rail='nmi' AND source.environment=target.environment
  AND source.archived AND NOT target.archived AND source.custodian_id IS NULL AND target.custodian_id IS NULL
  AND s.status='active' AND s.scheduled_price_id IS NULL AND s.deletion_scheduled_at IS NULL
- AND pm.custodian='psp' AND COALESCE(pm.park_reason,'')='' AND pm.rebill_driver='provider'
- AND old.custodian='psp' AND old.rebill_driver='provider' AND pr.auto_renew AND NOT pr.archived AND lower(pr.currency)='usd';
+ AND pm.custodian='psp' AND COALESCE(pm.park_reason,'')=''
+ AND old.custodian='psp' AND s.collection_policy='provider' AND pr.auto_renew AND NOT pr.archived AND lower(pr.currency)='usd';
 
 -- name: LockProviderCutoverRequest :exec
 SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 0));
@@ -78,3 +78,11 @@ WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
   AND payload = sqlc.arg(accepted_payload)::jsonb
   AND status IN ('in_flight','unknown_needs_verify') AND claimed_until IS NOT NULL
   AND COALESCE(NULLIF(result_evidence->'account_requalifications', 'null'::jsonb), '[]'::jsonb) = sqlc.arg(previous)::jsonb;
+
+-- name: ListCompletedProviderCutoversForSubscription :many
+-- Retained forward custody transitions explain historical initial PSP identity.
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid
+  AND subscription_id=sqlc.arg(subscription_id)::uuid
+  AND intent_type='nmi_provider_cutover' AND status='succeeded'
+ORDER BY created_at,id;

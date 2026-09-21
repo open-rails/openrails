@@ -37,7 +37,8 @@ const (
 )
 
 type Subscription struct {
-	ID uuid.UUID `json:"id"`
+	CollectionPolicy CollectionPolicy `json:"collection_policy"`
+	ID               uuid.UUID        `json:"id"`
 	// MerchantID is the owning merchant (#336): lets workers pin app.merchant_id when
 	// writing on this subscription's behalf.
 	MerchantID uuid.UUID `json:"merchant_id"`

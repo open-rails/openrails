@@ -105,7 +105,8 @@ func ptr[T any](v T) *T { return &v }
 func subscriptionFixtureValue(when time.Time, maxMoney int64, expMonth, expYear int) Subscription {
 	portal := "https://support.ccbill.com/"
 	return Subscription{
-		ID: subscriptionFixture, CustomerID: customerFixture, ProductID: productFixture, PriceID: priceFixture, PSPID: "55555555-5555-5555-5555-555555555555",
+		CollectionPolicy: "provider",
+		ID:               subscriptionFixture, CustomerID: customerFixture, ProductID: productFixture, PriceID: priceFixture, PSPID: "55555555-5555-5555-5555-555555555555",
 		Rail: "nmi", RailSubscriptionID: "rail-sub-1", Status: "active", ScheduledPriceID: &scheduledPriceFixture, PaymentMethodID: &methodFixture,
 		StartedAt: when, CurrentPeriodStartsAt: &when, CurrentPeriodEndsAt: &when, CancelMode: "reversible", CancelPortalURL: &portal, CreatedAt: when, UpdatedAt: when,
 		Price:            &SubscriptionPrice{ID: priceFixture, Key: "pro-monthly", ProductID: productFixture, UnitAmount: maxMoney, Currency: "USD", AutoRenew: true},
