@@ -5,6 +5,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -24,10 +25,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-// startRLSPostgres boots Postgres 18, applies the billing migrations (including
-// 050 RLS + the openrails_app role), and gives the app role a password + LOGIN
-// so the test can connect AS the unprivileged app role — the only role for which
-// RLS actually enforces.
+// startRLSPostgres migrates as the owner, then provisions a test-host LOGIN
+// with the library runtime privileges so merchant RLS actually enforces.
 func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Context) {
 	t.Helper()
 	ctx = context.Background()
@@ -74,13 +73,16 @@ func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Contex
 	m := migratekit.NewPostgres(sqlDB, config.MigratekitApp).WithSchema(config.DefaultSchema)
 	require.NoError(t, m.ApplyMigrations(ctx, migrations))
 
-	// Production attaches LOGIN + a password to the app role out of band; do that
-	// here so we can connect as it. The role keeps NOBYPASSRLS from 001_schema.up.sql.
-	_, err = sqlDB.ExecContext(ctx, `ALTER ROLE openrails_app WITH LOGIN PASSWORD 'app_pw'`)
+	// The test host creates its own regular login, then the library provisions access.
+	_, err = sqlDB.ExecContext(ctx, `CREATE ROLE openrails_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'app_pw'`)
 	require.NoError(t, err)
-
-	// Build the app-role DSN from the superuser one by swapping credentials.
 	appDSN = "postgres://openrails_app:app_pw@" + dsnHostPart(t, superDSN)
+	access, err := os.ReadFile("../migrate/runtime_access.sql")
+	require.NoError(t, err)
+	accessSQL, err := postgresmigrations.RewriteSchema(string(access), config.DefaultSchema)
+	require.NoError(t, err)
+	_, err = profilesPool.Exec(ctx, strings.ReplaceAll(accessSQL, `:"runtime_user"`, `"openrails_app"`))
+	require.NoError(t, err)
 	return superDSN, appDSN, ctx
 }
 

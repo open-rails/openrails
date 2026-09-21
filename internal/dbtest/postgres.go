@@ -36,7 +36,6 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/migrate"
 )
 
@@ -283,19 +282,27 @@ func bootstrapAndMigrate(ctx context.Context, dsn string) error {
 	// Each library owns its own migration source. AuthKit initializes profiles;
 	// OpenRails initializes billing and its managed River tables. The harness
 	// intentionally does not import either package's embedded migration FS.
-	cfg := &config.Config{
-		Env: "dev",
-		DB:  &config.DBConfig{URL: dsn},
-	}
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return fmt.Errorf("open postgres pool for AuthKit migrations: %w", err)
 	}
 	defer pool.Close()
-	if err := migrate.RunPostgres(ctx, cfg); err != nil {
+	if err := enableAppRoleLogin(ctx, dsn); err != nil {
+		return err
+	}
+	runtimeDSN, err := withUserInfo(dsn, appRole, appPassword)
+	if err != nil {
+		return err
+	}
+	runtime, err := pgxpool.New(ctx, runtimeDSN)
+	if err != nil {
+		return err
+	}
+	defer runtime.Close()
+	if err := migrate.ApplyPostgresMigrations(ctx, pool, migrate.Options{RuntimePool: runtime}); err != nil {
 		return fmt.Errorf("apply OpenRails migrations: %w", err)
 	}
-	if err := standalonedb.ApplyAuthKit(ctx, pool); err != nil {
+	if err := standalonedb.ApplyAuthKit(ctx, pool, runtime); err != nil {
 		return err
 	}
 

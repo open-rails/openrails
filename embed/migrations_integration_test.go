@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -61,8 +62,15 @@ func TestApplyMigrationsFreshOwnershipAndSchemas(t *testing.T) {
 		{name: "host_owned", billing: "billing", jobs: "host_jobs", host: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			runtimeUser := fmt.Sprintf("Host \"Runtime\" %d", time.Now().UnixNano())
+			_, err := admin.Exec(ctx, "CREATE ROLE "+pgx.Identifier{runtimeUser}.Sanitize()+" LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'runtime_test'")
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_, err := admin.Exec(context.Background(), "DROP ROLE "+pgx.Identifier{runtimeUser}.Sanitize())
+				require.NoError(t, err)
+			})
 			database := fmt.Sprintf("migration_contract_%d", time.Now().UnixNano())
-			_, err := admin.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{database}.Sanitize())
+			_, err = admin.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{database}.Sanitize())
 			require.NoError(t, err)
 			t.Cleanup(func() {
 				_, err := admin.Exec(context.Background(), "DROP DATABASE "+pgx.Identifier{database}.Sanitize()+" WITH (FORCE)")
@@ -91,16 +99,42 @@ func TestApplyMigrationsFreshOwnershipAndSchemas(t *testing.T) {
 				require.NoError(t, err)
 				opts.River = RiverFromHost()
 			}
+			if tc.name == "defaults" {
+				mismatched := opts
+				mismatched.RuntimePool = admin
+				require.ErrorContains(t, ApplyMigrations(ctx, pool, mismatched), "differs from migration database")
+				var exists bool
+				require.NoError(t, pool.QueryRow(ctx, "SELECT to_regnamespace($1) IS NOT NULL", tc.billing).Scan(&exists))
+				require.False(t, exists, "runtime preflight must happen before schema DDL")
+			}
 			require.NoError(t, ApplyMigrations(ctx, pool, opts))
+			var granted bool
+			require.NoError(t, pool.QueryRow(ctx, "SELECT has_table_privilege($1,$2,'SELECT')", runtimeUser, tc.billing+".merchants").Scan(&granted))
+			require.False(t, granted, "migration-only initialization must not guess a runtime role")
+			runtimeConfig := poolConfig.Copy()
+			runtimeConfig.ConnConfig.User = runtimeUser
+			runtimeConfig.ConnConfig.Password = "runtime_test"
+			runtimePool, err := pgxpool.NewWithConfig(ctx, runtimeConfig)
+			require.NoError(t, err)
+			t.Cleanup(runtimePool.Close)
+			opts.RuntimePool = runtimePool
 			require.NoError(t, ApplyMigrations(ctx, pool, opts), "repeated initialization is idempotent")
+			var concurrent errgroup.Group
+			for range 4 {
+				concurrent.Go(func() error { return ApplyMigrations(ctx, pool, opts) })
+			}
+			require.NoError(t, concurrent.Wait(), "concurrent runtime ACL provisioning must serialize")
+			var canUpdate bool
+			require.NoError(t, runtimePool.QueryRow(ctx, "SELECT has_table_privilege(current_user,$1,'UPDATE')", tc.billing+".ledger_accounts").Scan(&canUpdate))
+			require.False(t, canUpdate, "runtime must not rewrite ledger counters")
 			require.False(t, binderCalled, "migration must never construct the host client")
 			_, err = pool.Exec(ctx, `CREATE TABLE public.host_after (id bigserial)`)
 			require.NoError(t, err)
 			for _, table := range []string{"public.host_before", "public.river_host_app", "public.host_after"} {
 				var allowed bool
-				require.NoError(t, pool.QueryRow(ctx, `SELECT has_table_privilege('openrails_app',$1,'SELECT,INSERT,UPDATE,DELETE')`, table).Scan(&allowed))
+				require.NoError(t, pool.QueryRow(ctx, `SELECT has_table_privilege($2,$1,'SELECT,INSERT,UPDATE,DELETE')`, table, runtimeUser).Scan(&allowed))
 				require.False(t, allowed, table)
-				require.NoError(t, pool.QueryRow(ctx, `SELECT has_sequence_privilege('openrails_app',$1,'USAGE,SELECT,UPDATE')`, table+"_id_seq").Scan(&allowed))
+				require.NoError(t, pool.QueryRow(ctx, `SELECT has_sequence_privilege($2,$1,'USAGE,SELECT,UPDATE')`, table+"_id_seq", runtimeUser).Scan(&allowed))
 				require.False(t, allowed, table+" sequence")
 			}
 			var exists bool
@@ -112,37 +146,28 @@ func TestApplyMigrationsFreshOwnershipAndSchemas(t *testing.T) {
 			require.False(t, exists)
 			for _, table := range []string{"river_job", "river_queue", "river_leader", "river_notification"} {
 				var allowed bool
-				require.NoError(t, pool.QueryRow(ctx, `SELECT has_table_privilege('openrails_app',$1,'SELECT,INSERT,UPDATE,DELETE')`, tc.jobs+"."+table).Scan(&allowed))
+				require.NoError(t, pool.QueryRow(ctx, `SELECT has_table_privilege($2,$1,'SELECT,INSERT,UPDATE,DELETE')`, tc.jobs+"."+table, runtimeUser).Scan(&allowed))
 				require.Equal(t, !tc.host, allowed, table)
 			}
 			var allowed bool
-			require.NoError(t, pool.QueryRow(ctx, `SELECT has_table_privilege('openrails_app',$1,'SELECT,INSERT,UPDATE,DELETE')`, tc.jobs+".river_migration").Scan(&allowed))
+			require.NoError(t, pool.QueryRow(ctx, `SELECT has_table_privilege($2,$1,'SELECT,INSERT,UPDATE,DELETE')`, tc.jobs+".river_migration", runtimeUser).Scan(&allowed))
 			require.False(t, allowed)
 			if tc.jobs != "public" {
 				require.NoError(t, pool.QueryRow(ctx, `SELECT to_regclass('public.river_job') IS NOT NULL`).Scan(&exists))
 				require.False(t, exists)
 			}
 
-			// Runtime pools authenticate as a real non-owner role. PostgreSQL's startup
-			// role option switches before any query, including runtime posture checks.
-			runtimeURL, err := url.Parse(dsn)
-			require.NoError(t, err)
-			require.NotEmpty(t, runtimeURL.Scheme, "integration DSN must be URL form")
-			runtimeURL.Path = "/" + database
-			query := runtimeURL.Query()
-			query.Set("options", "-crole=openrails_app")
-			runtimeURL.RawQuery = query.Encode()
-			runtimeDSN := runtimeURL.String()
-			runtimePool, err := pgxpool.New(ctx, runtimeDSN)
-			require.NoError(t, err)
-			t.Cleanup(runtimePool.Close)
 			if tc.host {
 				// The host chooses its own access policy. OpenRails did not grant these.
-				_, err = pool.Exec(ctx, "GRANT USAGE ON SCHEMA "+pgx.Identifier{tc.jobs}.Sanitize()+" TO openrails_app; GRANT SELECT ON TABLE "+pgx.Identifier{tc.jobs, "river_job"}.Sanitize()+" TO openrails_app")
+				_, err = pool.Exec(ctx, "GRANT USAGE ON SCHEMA "+pgx.Identifier{tc.jobs}.Sanitize()+" TO "+pgx.Identifier{runtimeUser}.Sanitize()+"; GRANT SELECT ON TABLE "+pgx.Identifier{tc.jobs, "river_job"}.Sanitize()+" TO "+pgx.Identifier{runtimeUser}.Sanitize())
 				require.NoError(t, err)
 			}
+			runtimeURL, err := url.Parse(dsn)
+			require.NoError(t, err)
+			runtimeURL.Path = "/" + database
+			runtimeURL.User = url.UserPassword(runtimeUser, "runtime_test")
 			runtimeSchema := opts.Schema
-			rt, err := New(ctx, Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: runtimeDSN, Schema: runtimeSchema}}, PGXPool: runtimePool, River: opts.River})
+			rt, err := New(ctx, Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: runtimeURL.String(), Schema: runtimeSchema}}, PGXPool: runtimePool, River: opts.River})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 			require.False(t, binderCalled, "New must leave composition open")

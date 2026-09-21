@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/migrate"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -95,7 +94,7 @@ func TestMerchantArchiveRealAuthKitHTTPAndEmbeddedParity(t *testing.T) {
 	// Prepare a separately provisioned destination. Its AuthKit group/owner/key
 	// are chosen locally, never from the source archive.
 	const targetSchema = "archive_auth_target"
-	require.NoError(t, migrate.RunPostgres(ctx, &config.Config{DB: &config.DBConfig{URL: h.SuperDSN, Schema: targetSchema}}))
+	dbtest.ApplyPostgresMigrations(t, h.SuperDSN, h.DSN, targetSchema)
 	targetDB, err := db.NewDB(ctx, &config.DBConfig{URL: h.DSN, Schema: targetSchema})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = targetDB.Close() })

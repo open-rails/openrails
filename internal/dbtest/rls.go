@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/stretchr/testify/require"
 )
 
 const (
-	// appRole is the unprivileged, NOBYPASSRLS role created by 0001_schema.up.sql that
-	// production connects as so the per-merchant RLS policies actually constrain
-	// queries. It is the DEFAULT role integration tests connect as.
+	// appRole is a host-created test login. Library migrations never create it.
+	// It is the DEFAULT role integration tests connect as.
 	appRole = "openrails_app"
 	// appPassword is attached to appRole for tests only (production wires the
 	// credential out of band). The role keeps NOBYPASSRLS, so RLS still enforces.
@@ -98,24 +98,19 @@ func checkRLSEnforcing(ctx context.Context, dsn string) error {
 	return nil
 }
 
-// appRoleLoginLockKey serializes the ALTER ROLE below across every test process
-// sharing one Postgres server. Roles are CLUSTER-wide, so `go test -p N` has N
-// processes altering the same pg_authid tuple at once, which Postgres rejects
-// with `tuple concurrently updated` (XX000) — the ALTER is idempotent but not
-// concurrency-safe. An arbitrary fixed key; only this function takes it.
+// appRoleLoginLockKey serializes cluster-role provisioning. Advisory locks are
+// database-local, so every test process takes this lock in database postgres,
+// even when its runtime and migration connections use different scratch DBs.
 const appRoleLoginLockKey = 8670001
 
-// enableAppRoleLogin grants the openrails_app role LOGIN + a password so tests can
-// connect as it. Migration 001 creates the role NOLOGIN; production attaches login
-// credentials out of band. The role keeps NOBYPASSRLS so RLS still enforces.
-//
-// Serialized on a cluster-wide advisory lock, and retried, because the role is
-// shared by every concurrently running test package.
+// enableAppRoleLogin provisions a test-host login through the common lock DB.
 func enableAppRoleLogin(ctx context.Context, superDSN string) error {
-	sqlDB, err := sql.Open("pgx", superDSN)
+	lockConfig, err := pgx.ParseConfig(superDSN)
 	if err != nil {
-		return fmt.Errorf("open super dsn: %w", err)
+		return fmt.Errorf("parse provisioning dsn: %w", err)
 	}
+	lockConfig.Database = "postgres"
+	sqlDB := sql.OpenDB(stdlib.GetConnector(*lockConfig))
 	defer func() { _ = sqlDB.Close() }()
 
 	var lastErr error
@@ -135,6 +130,13 @@ func enableAppRoleLogin(ctx context.Context, superDSN string) error {
 			defer func() {
 				_, _ = conn.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, appRoleLoginLockKey)
 			}()
+			if _, err := conn.ExecContext(ctx, `DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
+                    CREATE ROLE openrails_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'app_pw';
+                END IF;
+            END $$;`); err != nil {
+				return err
+			}
 			if _, err := conn.ExecContext(ctx, `ALTER ROLE `+appRole+` WITH LOGIN PASSWORD '`+appPassword+`'`); err != nil {
 				return fmt.Errorf("grant %s login: %w", appRole, err)
 			}

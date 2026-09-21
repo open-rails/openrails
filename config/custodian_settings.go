@@ -104,6 +104,14 @@ func ValidateCustodianEntry(e CustodianEntry) error {
 	if _, err := custodians.ParseSettings(d.Kind, e.Settings); err != nil {
 		return fmt.Errorf("custodian %q: %w", key, err)
 	}
+	for name, version := range e.CredentialVersions {
+		if name != strings.ToLower(strings.TrimSpace(name)) {
+			return fmt.Errorf("custodian %q: credential version key %q must be canonical", key, name)
+		}
+		if _, ok := d.Secret(name); !ok || version < 0 {
+			return fmt.Errorf("custodian %q: invalid credential version for %q", key, name)
+		}
+	}
 	declared := map[string]bool{}
 	for _, name := range e.SecretKeys {
 		name = strings.ToLower(strings.TrimSpace(name))

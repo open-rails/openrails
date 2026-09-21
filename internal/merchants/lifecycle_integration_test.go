@@ -43,13 +43,6 @@ func (allowAllDestructive) AllowDestructive(context.Context, uuid.UUID) (bool, s
 // routes_merchant_webhook_integration_test.go's bespoke openrails.psps.
 func applyDirectoryFunctionMigration(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	// The functions GRANT to openrails_app, which only the baseline creates.
-	_, err := pool.Exec(ctx, `DO $$ BEGIN
-		IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
-			CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS;
-		END IF;
-	END $$;`)
-	require.NoError(t, err)
 	sql, err := postgresmigrations.BaselineObjects(
 		"current_merchant_id",
 		"assert_cross_merchant_reader",

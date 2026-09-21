@@ -97,7 +97,7 @@ func newRootCmd() *cobra.Command {
 
 	// migrate is the ONE deliberately RLS-posture-EXEMPT command (or#888): DDL
 	// requires the privileged owner role — it creates the merchant_isolation
-	// policies and the unprivileged openrails_app role the gate demands, so it
+	// policies and provisions direct access for the host runtime login, so it
 	// cannot run behind that gate. It opens its own handle in internal/migrate;
 	// every other command that touches merchant rows goes through openCLIDB.
 	migrateCmd := &cobra.Command{
@@ -105,16 +105,16 @@ func newRootCmd() *cobra.Command {
 		Short: "Manage all database tables",
 	}
 
+	var runtimeDatabaseURL string
+	migrateCmd.PersistentFlags().StringVar(&runtimeDatabaseURL, "runtime-database-url", "", "Host runtime database connection to provision with library access")
+
 	migrateUpCmd := &cobra.Command{
 		Use:   "up",
 		Short: "Apply all database migrations",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 			ctx := cmd.Context()
-			if err := migrate.Run(ctx, cfg); err != nil {
-				return fmt.Errorf("migrations failed: %w", err)
-			}
-			return applyStandaloneIdentityMigrations(ctx, cfg)
+			return applyStandaloneMigrations(ctx, cfg, runtimeDatabaseURL)
 		},
 	}
 
@@ -124,10 +124,7 @@ func newRootCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 			ctx := cmd.Context()
-			if err := migrate.RunPostgres(ctx, cfg); err != nil {
-				return fmt.Errorf("postgres migrations failed: %w", err)
-			}
-			return applyStandaloneIdentityMigrations(ctx, cfg)
+			return applyStandaloneMigrations(ctx, cfg, runtimeDatabaseURL)
 		},
 	}
 
@@ -410,11 +407,22 @@ func runWorker(cmd *cobra.Command, args []string) error {
 
 // The CLI is the standalone composition root: billing and AuthKit initialize
 // independently through their owning libraries, using migration credentials.
-func applyStandaloneIdentityMigrations(ctx context.Context, cfg *config.Config) error {
+func applyStandaloneMigrations(ctx context.Context, cfg *config.Config, runtimeURL string) error {
 	pool, err := pgxpool.New(ctx, cfg.DB.GetConnectionString())
 	if err != nil {
 		return fmt.Errorf("standalone identity migration pool: %w", err)
 	}
 	defer pool.Close()
-	return standalonedb.ApplyAuthKit(ctx, pool)
+	var runtime *pgxpool.Pool
+	if runtimeURL != "" {
+		runtime, err = pgxpool.New(ctx, runtimeURL)
+		if err != nil {
+			return fmt.Errorf("standalone runtime pool: %w", err)
+		}
+		defer runtime.Close()
+	}
+	if err := migrate.ApplyPostgresMigrations(ctx, pool, migrate.Options{Schema: cfg.DB.SchemaName(), RuntimePool: runtime}); err != nil {
+		return err
+	}
+	return standalonedb.ApplyAuthKit(ctx, pool, runtime)
 }

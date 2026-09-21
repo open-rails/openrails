@@ -91,7 +91,7 @@ catalogs:
 			err := tc.call()
 			require.Error(t, err, "%s must refuse a BYPASSRLS connection", tc.name)
 			require.ErrorContains(t, err, "bypasses RLS")
-			require.ErrorContains(t, err, "openrails_app")
+			require.ErrorContains(t, err, "host runtime login")
 		})
 	}
 }

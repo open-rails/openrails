@@ -17,7 +17,7 @@ import (
 
 // This test proves end-to-end #227 RLS enforcement on a REAL openrails.* table
 // through a REAL repo: it runs the actual migrations (so 001_schema.up.sql applies
-// its policies + creates openrails_app), connects as openrails_app, and drives
+// its policies + provisions the host test login), connects as openrails_app, and drives
 // ProductRepo.GetAll — a no-filter read — to show it returns ONLY the pinned
 // merchant's rows. This is the request-path chain (middleware pins conn -> repo
 // uses db.Q(ctx) -> Postgres RLS) exercised on production code.

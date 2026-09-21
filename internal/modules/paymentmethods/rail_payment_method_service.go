@@ -317,14 +317,19 @@ func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provide
 		if err != nil {
 			return nil, nil, err
 		}
+		owner, err := merchant.Require(ctx)
+		if err != nil || row.MerchantID != owner.UUID() {
+			return nil, nil, errors.New("stamped provider account is unavailable for this merchant")
+		}
 		if !rails.SameRail(models.Rail(row.Rail), models.Rail(provider)) {
 			return nil, nil, fmt.Errorf("PSP %s belongs to rail %s, not %s", row.ID, row.Rail, provider)
 		}
 		client, err := s.resolveNMIClientForScope(ctx, merchants.PSPScope{
-			ID:          row.ID,
-			Rail:        row.Rail,
-			Environment: row.Environment,
-			AccountID:   row.AccountID,
+			ID:                 row.ID,
+			Rail:               row.Rail,
+			Environment:        row.Environment,
+			AccountID:          row.AccountID,
+			CredentialVersions: merchants.CredentialVersions(row.Evidence),
 		})
 		return client, &row.ID, err
 	}
@@ -422,11 +427,11 @@ func (s *RailPaymentMethodService) resolveNMIClientForScope(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	secretName, err := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, "security_key")
+	ref, err := scope.SecretRef("security_key")
 	if err != nil {
 		return nil, err
 	}
-	sec, err := s.MerchantSecrets.Get(ctx, tid, secretName)
+	sec, err := merchants.ReadSecretRef(ctx, s.MerchantSecrets, tid, ref)
 	if err != nil {
 		if !errors.Is(err, merchants.ErrSecretNotFound) {
 			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
