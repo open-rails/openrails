@@ -237,3 +237,13 @@ friends against tables three statements old.
 A new migration that genuinely needs one of these must add the constraint
 `NOT VALID` and `VALIDATE CONSTRAINT` it in a *later* file — one transaction
 each. That is the only shape that actually reduces lock time here.
+
+### Library schema initialization and standalone identity access
+
+`internal/migrate/migrator.go` issues schema DDL and explicit grants for the
+pinned River runtime tables and sequences only when OpenRails owns River.
+The selected schema is quoted as an identifier; these initialization operations
+are outside sqlc's runtime query catalog. `internal/standalonedb/authkit.go`
+initializes AuthKit through its API and grants the standalone billing role the
+identity data access owned by that application. Embedded billing never installs
+AuthKit grants or initializes a host-owned River fleet.

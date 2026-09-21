@@ -41,7 +41,7 @@ func TestArrearsAccruesOnAnUnpinnedHandle(t *testing.T) {
 	t.Run("failing_before: the bare RunInTx the watermark used is denied 42501", func(t *testing.T) {
 		err := unpinned.RunInTx(mctx, func(ctx context.Context, tx pgx.Tx) error {
 			_, e := tx.Exec(ctx, `
-INSERT INTO openrails.metered_rating_watermarks
+INSERT INTO billing.metered_rating_watermarks
     (merchant_id, customer_id, currency, source, period_from, rated_through, accrued_amount, created_at, updated_at)
 VALUES ($1, $2, 'USD', 'or868-b2-probe', now(), now(), 0, now(), now())`,
 				merchantID, payer.UUID())
@@ -65,23 +65,23 @@ VALUES ($1, $2, 'USD', 'or868-b2-probe', now(), now(), 0, now(), now())`,
 		meter := "or868-b2-meter-" + uuid.NewString()[:8]
 		productID := uuid.New()
 		t.Cleanup(func() {
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE product_id = $1", productID)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE product_id = $1", productID)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 		})
 
 		// Catalog + usage are seeded the way a request would write them (pinned);
 		// only the SWEEP runs unpinned, so this isolates B2 exactly.
 		_, err := pool.Exec(ctx, `
-INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 			productID, "or868-b2-product-"+uuid.NewString()[:8], merchantID)
 		require.NoError(t, err)
 		_, err = pool.Exec(ctx, `
-INSERT INTO openrails.catalog_meters (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
+INSERT INTO billing.catalog_meters (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
 VALUES ($1, $2, $3, 'units', 'sum', 'unit', '{}'::jsonb)`, merchantID, meter, "or868.b2."+meter)
 		require.NoError(t, err)
 		_, err = pool.Exec(ctx, `
-INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
+INSERT INTO billing.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 VALUES ($1, $2, 1, $3, 'in_arrears',
         '{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"1000"}}'::jsonb)`,
 			merchantID, productID, meter)
@@ -108,7 +108,7 @@ VALUES ($1, $2, 1, $3, 'in_arrears',
 
 		var watermarks int
 		require.NoError(t, pool.QueryRow(ctx, `
-SELECT count(*) FROM openrails.metered_rating_watermarks
+SELECT count(*) FROM billing.metered_rating_watermarks
  WHERE customer_id = $1 AND source = $2`, payer.UUID(), "metered:"+meter).Scan(&watermarks))
 		require.Equal(t, 1, watermarks, "the watermark row is what makes metered billing exactly-once")
 	})

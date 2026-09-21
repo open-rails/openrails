@@ -115,11 +115,11 @@ func TestMerchantDashboard(t *testing.T) {
 		// Seed one metered usage event for merchant B (super pool bypasses RLS).
 		customerID := uuid.New()
 		_, err := pool.Exec(ctx,
-			`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+			`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`,
 			customerID, uuid.UUID(b.MerchantID))
 		require.NoError(t, err)
 		_, err = pool.Exec(ctx,
-			`INSERT INTO openrails.usage_events (merchant_id, customer_id, invoker_id, currency, resource, event_type, amount, source, source_id, pricing_authority)
+			`INSERT INTO billing.usage_events (merchant_id, customer_id, invoker_id, currency, resource, event_type, amount, source, source_id, pricing_authority)
 			 VALUES ($1, $2, 'dash-test', 'USD', 'api', 'call', 1000, 'test', $3, 'host')`,
 			uuid.UUID(b.MerchantID), customerID, uuid.NewString())
 		require.NoError(t, err)
@@ -221,7 +221,7 @@ func TestMerchantDashboard(t *testing.T) {
 
 		// Two isolated rows exist for real (super pool sees both).
 		var rows int
-		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.dashboard_configs WHERE merchant_id=ANY($1::uuid[])`, []uuid.UUID{a.MerchantID.UUID(), b.MerchantID.UUID()}).Scan(&rows))
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.dashboard_configs WHERE merchant_id=ANY($1::uuid[])`, []uuid.UUID{a.MerchantID.UUID(), b.MerchantID.UUID()}).Scan(&rows))
 		require.Equal(t, 2, rows)
 	})
 

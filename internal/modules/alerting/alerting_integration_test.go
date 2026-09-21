@@ -65,13 +65,13 @@ func exec(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 func seedMerchant(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) {
 	t.Helper()
 	slug := "alert-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
-	exec(t, pool, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1,$2,'active') ON CONFLICT (id) DO NOTHING`, mid, slug)
+	exec(t, pool, `INSERT INTO billing.merchants (id, slug, status) VALUES ($1,$2,'active') ON CONFLICT (id) DO NOTHING`, mid, slug)
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, tbl := range []string{"notifications", "merchant_webhooks", "payments", "subscriptions", "prices", "products", "customers", "psps", "merchant_configurations", "webhook_health", "webhook_health_daily", "reconciliation_findings", "maintenance_runs"} {
-			_, _ = pool.Exec(ctx, `DELETE FROM openrails.`+tbl+` WHERE merchant_id = $1`, mid)
+			_, _ = pool.Exec(ctx, `DELETE FROM billing.`+tbl+` WHERE merchant_id = $1`, mid)
 		}
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.merchants WHERE id = $1`, mid)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.merchants WHERE id = $1`, mid)
 	})
 }
 
@@ -149,7 +149,7 @@ func countNotifications(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) int {
 	t.Helper()
 	var n int
 	require.NoError(t, pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM openrails.notifications WHERE merchant_id=$1`, mid).Scan(&n))
+		`SELECT count(*) FROM billing.notifications WHERE merchant_id=$1`, mid).Scan(&n))
 	return n
 }
 
@@ -158,7 +158,7 @@ func TestFindingDeliveryRetainsWebhookFormatsRetriesAndBell(t *testing.T) {
 	mid, other := uuid.New(), uuid.New()
 	seedMerchant(t, pool, mid)
 	seedMerchant(t, pool, other)
-	exec(t, pool, `INSERT INTO openrails.merchant_configurations (merchant_id, config) VALUES ($1, $2)`, mid, []byte(`{"alert_email":"ops@example.com"}`))
+	exec(t, pool, `INSERT INTO billing.merchant_configurations (merchant_id, config) VALUES ($1, $2)`, mid, []byte(`{"alert_email":"ops@example.com"}`))
 	email := &fakeEmail{enabled: true}
 	svc := newService(t, appDB, email)
 	generic, discord, slack, disabled := newWebhookRecorder(t, 2), newWebhookRecorder(t, 0), newWebhookRecorder(t, 0), newWebhookRecorder(t, 0)

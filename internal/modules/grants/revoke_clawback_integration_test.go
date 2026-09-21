@@ -4,6 +4,7 @@ package grants_test
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"strings"
 	"testing"
 	"time"
@@ -27,9 +28,9 @@ func TestGrants_RevokeClawback(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
 	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})
-	ml := ledger.New(gen.New(pool), merchantID)
+	ml := ledger.New(dbtest.Queries(pool), merchantID)
 	custAcc, err := ml.EnsureCustomerBalance(ctx, customer, cur)
 	require.NoError(t, err)
 
@@ -66,9 +67,9 @@ func TestGrants_RevokeClawbackReversible(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
 	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})
-	ml := ledger.New(gen.New(pool), merchantID)
+	ml := ledger.New(dbtest.Queries(pool), merchantID)
 	custAcc, err := ml.EnsureCustomerBalance(ctx, customer, cur)
 	require.NoError(t, err)
 
@@ -103,9 +104,9 @@ func TestGrants_ConcurrentClawback_SingleClawback(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
 	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})
-	ml := ledger.New(gen.New(pool), merchantID)
+	ml := ledger.New(dbtest.Queries(pool), merchantID)
 	custAcc, err := ml.EnsureCustomerBalance(ctx, customer, cur)
 	require.NoError(t, err)
 
@@ -119,7 +120,7 @@ func TestGrants_ConcurrentClawback_SingleClawback(t *testing.T) {
 			return err
 		}
 		defer func() { _ = tx.Rollback(ctx) }()
-		gl := grants.New(gen.New(tx), merchantID)
+		gl := grants.New(dbtest.Queries(tx), merchantID)
 		if err := gl.LockCustomer(ctx, customer); err != nil {
 			return err
 		}
@@ -136,7 +137,7 @@ func TestGrants_ConcurrentClawback_SingleClawback(t *testing.T) {
 
 	var n int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.ledger_transfers WHERE merchant_id=$1 AND grant_id=$2 AND transfer_type='credit_revoke'`,
+		`SELECT count(*) FROM billing.ledger_transfers WHERE merchant_id=$1 AND grant_id=$2 AND transfer_type='credit_revoke'`,
 		merchantID, lot.ID).Scan(&n))
 	require.Equal(t, 1, n, "exactly one clawback transfer")
 	mustBal(t, ctx, ml, custAcc, 0)
@@ -157,7 +158,7 @@ func sysBal(t *testing.T, ctx context.Context, ml *ledger.Ledger, at ledger.Acco
 
 func lotSpendable(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchantID, customer uuid.UUID, cur string, lotID uuid.UUID) bool {
 	t.Helper()
-	lots, err := gen.New(pool).ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
+	lots, err := dbtest.Queries(pool).ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
 		MerchantID: merchantID, CustomerID: customer, Currency: cur, AsOf: time.Now().UTC(),
 	})
 	require.NoError(t, err)

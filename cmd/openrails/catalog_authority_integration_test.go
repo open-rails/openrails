@@ -37,7 +37,7 @@ func TestCLICatalogNamespacesStaySeparate(t *testing.T) {
 
 	name := "catalog-cli-" + uuid.NewString()[:8]
 	unboundID, boundID := uuid.New(), uuid.New()
-	_, err = admin.Exec(ctx, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, unboundID, name)
+	_, err = admin.Exec(ctx, `INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`, unboundID, name)
 	require.NoError(t, err)
 	manifestPath := filepath.Join(t.TempDir(), "catalog.yaml")
 	writeManifest := func(title string) {
@@ -95,7 +95,7 @@ catalogs:
 	// The same spelling in the AuthKit namespace owns a different billing row.
 	group, err := core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{Persona: "merchant", InstanceSlug: name})
 	require.NoError(t, err)
-	_, err = admin.Exec(ctx, `INSERT INTO openrails.merchants (id, slug, status, permission_group_id) VALUES ($1, $2, 'active', $3)`, boundID, name, group)
+	_, err = admin.Exec(ctx, `INSERT INTO billing.merchants (id, slug, status, permission_group_id) VALUES ($1, $2, 'active', $3)`, boundID, name, group)
 	require.NoError(t, err)
 	writeManifest("AuthKit catalog")
 	require.NoError(t, push(false))
@@ -109,11 +109,11 @@ catalogs:
 	require.NotContains(t, hostDump, "AuthKit catalog")
 	for id, title := range map[uuid.UUID]string{unboundID: "Host catalog", boundID: "AuthKit catalog"} {
 		var storedTitle string
-		require.NoError(t, admin.QueryRow(context.Background(), `SELECT display_name FROM openrails.products WHERE merchant_id=$1 AND key='base'`, id).Scan(&storedTitle))
+		require.NoError(t, admin.QueryRow(context.Background(), `SELECT display_name FROM billing.products WHERE merchant_id=$1 AND key='base'`, id).Scan(&storedTitle))
 		require.Equal(t, title, storedTitle)
 	}
 
-	_, err = admin.Exec(ctx, `UPDATE openrails.merchants SET deleted_at=now() WHERE id=$1`, unboundID)
+	_, err = admin.Exec(ctx, `UPDATE billing.merchants SET deleted_at=now() WHERE id=$1`, unboundID)
 	require.NoError(t, err)
 	require.ErrorIs(t, push(true), merchants.ErrMerchantNotFound, "unbound mode cannot fall back to a bound projection")
 	_, err = dump(true)

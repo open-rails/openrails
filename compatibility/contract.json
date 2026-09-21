@@ -376,6 +376,8 @@
       "type UsageMeterSpec struct {\n\tKey           string            `json:\"key\"`\n\tEventType     string            `json:\"event_type\"`\n\tValueProperty string            `json:\"value_property\"`\n\tAggregation   string            `json:\"aggregation\"`\n\tUnit          string            `json:\"unit,omitempty\"`\n\tGroupBy       map[string]string `json:\"group_by,omitempty\"`\n}",
       "type UsageReport struct {\n\tCustomerID CustomerID       `json:\"customer_id\"`\n\tInvoker    string           `json:\"invoker\"`\n\tCurrency   string           `json:\"currency,omitempty\"`\n\tEventType  string           `json:\"event_type\"`\n\tDimensions map[string]int64 `json:\"dimensions,omitempty\"`\n\tAmount     int64            `json:\"amount,string\"`\n\tResource   string           `json:\"resource,omitempty\"`\n\tMetadata   map[string]any   `json:\"metadata,omitempty\"`\n\tSource     string           `json:\"source\"`\n\tSourceID   string           `json:\"source_id\"`\n\n\tOccurredAt *time.Time `json:\"occurred_at,omitempty\"`\n}",
       "type UsageRollupRow struct {\n\tKey         string `json:\"key\"`\n\tCurrency    string `json:\"currency\"`\n\tEventCount  int64  `json:\"event_count\"`\n\tTotalAmount int64  `json:\"total_amount,string\"`\n}",
+      "type UserDirectory interface {\n\tExists(ctx context.Context, userID string) (bool, error)\n\tEmailIdentity(ctx context.Context, userID string) (username, email string, ok bool, err error)\n}",
+      "type UsernameResolver interface {\n\tGetUserIDByUsername(ctx context.Context, username string) (string, error)\n}",
       "type WastedSpendReport struct {\n\tCustomerID  CustomerID `json:\"customer_id\"`\n\tInvoker     string     `json:\"invoker\"`\n\tInvokerType string     `json:\"invoker_type,omitempty\"`\n\tCurrency    string     `json:\"currency,omitempty\"`\n\n\tAmount int64 `json:\"amount,string\"`\n\n\tSource string `json:\"source\"`\n\n\tSourceID string `json:\"source_id\"`\n\tReason   string `json:\"reason,omitempty\"`\n}",
       "type WastedSpendResponse struct {\n\tCurrency             string `json:\"currency\"`\n\tPolicyCurrency       string `json:\"policy_currency,omitempty\"`\n\tRecordedAmount       int64  `json:\"recorded_amount,string\"`\n\tPolicyRecordedAmount int64  `json:\"policy_recorded_amount,omitempty,string\"`\n\tForgivenAmount       int64  `json:\"forgiven_amount,string\"`\n\tPolicyForgivenAmount int64  `json:\"policy_forgiven_amount,omitempty,string\"`\n\tChargedAmount        int64  `json:\"charged_amount,string\"`\n\tPolicyChargedAmount  int64  `json:\"policy_charged_amount,omitempty,string\"`\n\tAction               string `json:\"action\"`\n\tDuplicate            bool   `json:\"duplicate,omitempty\"`\n}",
       "var ErrCardDeclined error = newCodedError(CodeCardDeclined, ErrPaymentRefused)",
@@ -412,8 +414,9 @@
       "const (\n\tProviderWriteModeFull     = \"full\"\n\tProviderWriteModeLimited  = \"limited\"\n\tProviderWriteModeReadOnly = \"readonly\"\n)",
       "const (\n\tSecretBackendDB    = \"db\"\n\tSecretBackendVault = \"vault\"\n)",
       "const (\n\tSolanaSettingRPCProvider = \"rpc_provider\"\n\tSolanaSettingRPCAPIKey   = \"rpc_api_key\"\n\tSolanaSettingTokens      = \"tokens\"\n\n\tSolanaSettingRecipientWallet = \"recipient_wallet\"\n)",
+      "const CanonicalSchema = \"openrails\"",
       "const ConfigContextKey configContextKey = \"config\"",
-      "const DefaultSchema = \"openrails\"",
+      "const DefaultSchema = \"billing\"",
       "const DefaultSecretsPath = \"/vault/secrets\"",
       "const MigratekitApp = \"openrails\"",
       "const RiverSchema = \"public\"",
@@ -549,12 +552,13 @@
       "func (r *Runtime) RunWorkers(ctx context.Context) error",
       "func (r *Runtime) SelfHandler(authn billingauth.DelegatedAuthenticator) (http.Handler, error)",
       "func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m MerchantConfig) (merchant.ID, error)",
+      "func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, opts MigrationOptions) error",
       "func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*BillingConfig, error)",
       "func New(ctx context.Context, opts Options) (*Runtime, error)",
       "func ParseMerchantConfig(raw []byte) (MerchantConfig, error)",
       "func ParseMerchantConfigManifest(raw []byte) (*BillingConfig, error)",
       "func RiverFromHost(bind RiverBinder) RiverOwnership",
-      "func RiverManagedByOpenRails() RiverOwnership",
+      "func RiverManagedByOpenRails(schema ...string) RiverOwnership",
       "type BillingConfig = boot.BillingConfig",
       "type CheckoutRoutingMatchConfig = boot.CheckoutRoutingMatchConfig",
       "type CheckoutRoutingRuleConfig = boot.CheckoutRoutingRuleConfig",
@@ -565,8 +569,9 @@
       "type JobProgress = riverjobs.ProgressReport",
       "type MerchantConfig = boot.MerchantConfig",
       "type MerchantProfileConfig = boot.MerchantProfileConfig",
+      "type MigrationOptions struct {\n\tSchema string\n\tRiver  RiverOwnership\n}",
       "type MountOptions struct {\n\tRouteSets []RouteSet\n\n\tAuthenticator billingauth.Authenticator\n\n\tGate billingauth.Gate\n\n\tDelegatedAuthenticator billingauth.DelegatedAuthenticator\n\n\tMountPrefix string\n\n\tProviderRoutes *ProviderRoutes\n}",
-      "type Options struct {\n\tDelegatedAuthenticator billingauth.DelegatedAuthenticator\n\n\tConfig *config.Config\n\n\tPGXPool *pgxpool.Pool\n\tRedis   *redis.Client\n\tCache   cache.Cache\n\n\tRiver RiverOwnership\n\n\tRunWorkers bool\n\n\tConsoleAssets fs.FS\n\n\tStripeTransport http.RoundTripper\n}",
+      "type Options struct {\n\tDelegatedAuthenticator billingauth.DelegatedAuthenticator\n\n\tConfig *config.Config\n\n\tPGXPool *pgxpool.Pool\n\tRedis   *redis.Client\n\tCache   cache.Cache\n\n\tRiver RiverOwnership\n\n\tRunWorkers bool\n\n\tConsoleAssets fs.FS\n\n\tStripeTransport http.RoundTripper\n\n\tUserDirectory    openrails.UserDirectory\n\tUsernameResolver openrails.UsernameResolver\n}",
       "type PSPConfig = boot.PSPConfig",
       "type PSPDeclaration struct {\n\tKey       string\n\tRail      string\n\tAccountID string\n}",
       "type PSPSignerConfig = boot.PSPSignerConfig",
@@ -585,12 +590,15 @@
       "var EmbeddedDefaultRouteSets = append([]RouteSet(nil), embedhttp.EmbeddedDefaultRouteSets...)",
       "var ErrMerchantRestoreConflict = merchants.ErrMerchantRestoreConflict",
       "var ErrNotInitialized = errors.New(\"embedded billing: not initialized\")",
-      "var ErrRiverRequired = errors.New(\"embedded billing: Options.River is required (#895) — declare RiverFromHost(bind) to inject your River client, or RiverManagedByOpenRails() to let OpenRails construct and run its own; OpenRails cannot function without River, so there is no third state\")",
       "var StandaloneDefaultRouteSets = append([]RouteSet(nil), embedhttp.StandaloneDefaultRouteSets...)"
     ],
     "embed/authkit": [
+      "func (d *Directory) EmailIdentity(ctx context.Context, userID string) (username, email string, ok bool, err error)",
+      "func (d *Directory) Exists(ctx context.Context, userID string) (bool, error)",
+      "func (d *Directory) GetUserIDByUsername(ctx context.Context, username string) (string, error)",
       "func NewAuthenticator(v Verifier, opts ...Option) (billingauth.Authenticator, error)",
       "func NewDelegatedAuthenticator(v Verifier, merchantID string, opts ...DelegatedOption) (billingauth.DelegatedAuthenticator, error)",
+      "func NewDirectory(client IdentityClient) *Directory",
       "func NewVerifierAuthenticator(issuers []string, expectedAud string, opts ...Option) (billingauth.Authenticator, error)",
       "func NewVerifierDelegatedAuthenticator(issuers []string, expectedAud string, merchantID string, opts ...DelegatedOption) (billingauth.DelegatedAuthenticator, error)",
       "func WithAdmission(a Admission) DelegatedOption",
@@ -602,6 +610,8 @@
       "func WithoutTokenRoles() Option",
       "type Admission func(ctx context.Context, r *http.Request, cl verify.Claims) error",
       "type DelegatedOption func(*delegatedOptions)",
+      "type Directory struct{}",
+      "type IdentityClient interface {\n\tAdminGetUser(context.Context, string) (*authkit.AdminUser, error)\n\tGetUserByUsername(context.Context, string) (*authkit.User, error)\n}",
       "type Option func(*options)",
       "type PermissionResolver func(ctx context.Context, r *http.Request, cl verify.Claims) ([]string, error)",
       "type Verifier interface {\n\tVerifyRequest(r *http.Request) (verify.Claims, error)\n}",
@@ -798,15 +808,6 @@
       "func (r ProgressReport) Err() error",
       "type KindProgress struct {\n\tKind string\n\n\tExpectedPeriod time.Duration\n\n\tLastEnqueuedAt  *time.Time\n\tLastCompletedAt *time.Time\n\n\tLastSuccessAt *time.Time\n\tOverdue       int64\n\n\tReason string\n}",
       "type ProgressReport struct {\n\tCheckedAt time.Time\n\n\tProgressing bool\n\n\tReason string\n\n\tShortestPeriod time.Duration\n\n\tFleetLastEnqueuedAt  *time.Time\n\tFleetLastCompletedAt *time.Time\n\n\tKinds []KindProgress\n\n\tUnhealthy int\n}"
-    ],
-    "migrations/postgres": [
-      "const BaselineName = \"0001_schema.up.sql\"",
-      "func Baseline() (string, error)",
-      "func BaselineObjects(names ...string) (string, error)",
-      "func UniqueScopeExempt(indexName string, columns []string) bool",
-      "func UniqueScopeExemptDef(indexName, indexDef string) bool",
-      "var CrossMerchantUniqueExemptions = map[string]string{\n\t\"merchants_pkey\":                   \"the tenant directory itself — its rows ARE the merchants\",\n\t\"merchants_slug_key\":               \"slug is the global tenant address (ID-10)\",\n\t\"uq_merchants_api_host_live\":       \"api_host routes unauthenticated webhooks; it must be globally unique (ID-10)\",\n\t\"uq_merchants_permission_group_id\": \"org\u003c-\u003emerchant is 1:1 across the whole install (GAP-9)\",\n\t\"worker_state_pkey\":                \"RLS-exempt: per-worker-kind process health\",\n\t\"destructive_action_switch_pkey\":   \"RLS-exempt: instance-level operator kill switch\",\n\t\"schema_migrations_pkey\":           \"migration ledger\",\n\n\t\"uq_grants_termination\":                       \"supersedes_id FKs a merchant-owned grant\",\n\t\"uq_subscription_reprices_one_scheduled\":      \"subscription_id FKs a merchant-owned subscription\",\n\t\"uq_subscriptions_customer_tier_group_active\": \"customer_id FKs a merchant-owned customer (ID-3's one-live-per-tier-group rule)\",\n\t\"unique_prices_product_amount_window\":         \"product_id FKs a merchant-owned product (ID-5 price financial substance)\",\n\n\t\"solana_subscriptions_subscription_pda_key\": \"a Solana PDA is globally unique on-chain; two merchants CANNOT share one\",\n\t\"uq_psps_identity\":                          \"one (rail, environment, account_id) gateway account belongs to exactly one merchant — operator-declared config, deliberately install-wide\",\n\t\"uq_custodians_identity\":                    \"the custody sibling (or#880, replacing uq_psps_custodian_identity): one (kind, environment, account_id) custodian tenant belongs to exactly one merchant, for the same reason and by the same operator declaration — and inbound custodian webhooks route by it before any merchant context exists\",\n}",
-      "var FS embed.FS"
     ],
     "permissions": [
       "const (\n\tCustomerBalanceRead            = \"customer:balance:read\"\n\tCustomerBillingUpdate          = \"customer:billing:update\"\n\tCustomerPaymentMethodsUpdate   = \"customer:payment-methods:update\"\n\tCustomerCheckoutCreate         = \"customer:checkout:create\"\n\tCustomerSpendDelegationsRead   = \"customer:spend-delegations:read\"\n\tCustomerSpendDelegationsUpdate = \"customer:spend-delegations:update\"\n)",
@@ -1694,6 +1695,15 @@
       "permissions": "github.com/open-rails/openrails/permissions",
       "verify": "github.com/open-rails/authkit/verify"
     },
+    "embed/authkit/directory.go": {
+      "authkit": "github.com/open-rails/authkit",
+      "context": "context",
+      "errors": "errors",
+      "fmt": "fmt",
+      "openrails": "github.com/open-rails/openrails",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
+    },
     "embed/controlplane/controlplane.go": {
       "app": "github.com/open-rails/openrails/internal/app",
       "authcore": "github.com/open-rails/authkit/embedded",
@@ -1740,6 +1750,15 @@
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "openrails": "github.com/open-rails/openrails",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "embed/migrations.go": {
+      "config": "github.com/open-rails/openrails/config",
+      "context": "context",
+      "fmt": "fmt",
+      "migrate": "github.com/open-rails/openrails/internal/migrate",
+      "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
+      "regexp": "regexp",
+      "strings": "strings"
     },
     "embed/mount.go": {
       "app": "github.com/open-rails/openrails/internal/app",
@@ -1818,6 +1837,9 @@
       "fmt": "fmt",
       "strings": "strings",
       "time": "time"
+    },
+    "identity_directory.go": {
+      "context": "context"
     },
     "ids.go": {
       "fmt": "fmt",
@@ -2937,7 +2959,7 @@
       "errors": "errors",
       "fmt": "fmt",
       "migratekit": "github.com/open-rails/migratekit",
-      "postgresmigrations": "github.com/open-rails/openrails/migrations/postgres",
+      "postgresmigrations": "github.com/open-rails/openrails/internal/migrate/postgres",
       "sql": "database/sql",
       "strings": "strings"
     },
@@ -3866,6 +3888,7 @@
       "app": "github.com/open-rails/openrails/internal/app",
       "authcore": "github.com/open-rails/authkit/embedded",
       "authkit": "github.com/open-rails/authkit",
+      "billingauthkit": "github.com/open-rails/openrails/embed/authkit",
       "config": "github.com/open-rails/openrails/config",
       "context": "context",
       "controlplane": "github.com/open-rails/openrails/internal/controlplane",
@@ -3873,7 +3896,8 @@
       "http": "net/http",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
       "ratelimit": "github.com/open-rails/authkit/ratelimit",
-      "reflect": "reflect"
+      "reflect": "reflect",
+      "river": "github.com/riverqueue/river"
     },
     "internal/operator/fleet_analytics.go": {
       "app": "github.com/open-rails/openrails/internal/app",
@@ -4368,16 +4392,6 @@
       "time": "time",
       "uuid": "github.com/google/uuid"
     },
-    "migrations/postgres/baseline.go": {
-      "fmt": "fmt",
-      "strings": "strings"
-    },
-    "migrations/postgres/migrations.go": {
-      "embed": "embed"
-    },
-    "migrations/postgres/unique_scope_exemptions.go": {
-      "strings": "strings"
-    },
     "notifications.go": {
       "time": "time",
       "uuid": "github.com/google/uuid"
@@ -4617,7 +4631,7 @@
   "boundary_sources_sha256": {
     "embed/authkit/authkit.go": "05aeab359a5540dc96f204a0c72cc993023817c2a66af6dd0b362bb002026944",
     "embed/controlplane/controlplane.go": "b553cff0f76cf85074ac3ef5cbb3314877e99b21a4f3fe64f0e70a74ea1b215c",
-    "embed/embed.go": "0ebccb2c716481293932b83058be66c57344bf648a96c63139abe051b01fc501",
+    "embed/embed.go": "3c2b302911a63418a77eaa733604c2d4df037f30f5d0268e70e68ab9589e990d",
     "embed/mount.go": "d1030f96f9c5324d5da440b176f7c0950266a7a03446ef84e928fac5f7df373d",
     "embed/transport.go": "e70853c4608f1bf738c217c1bfe1b0713f3b4114c991fca894d70ff704c2553a",
     "errors.go": "bea224812329fcb558d6b087b3a524107ce5d939d16b303b99354d35a6397d55",
@@ -4646,7 +4660,7 @@
     "internal/controlplane/merchant_team.go": "9589864cac741394d88957ec2adc2bbf7d2a23db2d9f1b13f2181757fedfbc18",
     "internal/controlplane/remote_application.go": "2c0097d0d8bc1063c255b66c75c25d633bd6b6aca69bdaecc2edafaade03fdd3",
     "internal/controlplane/routes.go": "500efe0011ab1a68f6daea30113a02f84590d4f272ad1a14be3d2ea2a1754966",
-    "internal/controlplane/service.go": "ee6753c37d8298eee7c0ee63f8ff3f9fe0faa14fc659ed029f752ea487ad5a8f",
+    "internal/controlplane/service.go": "555aab476210bcf7956deefe916c8af75a8507b4f7af0a7287ce7cfd8f41b7a2",
     "internal/controlplane/service_jwt.go": "0c7497b227447df4caa5ef1effb1649ddf8ac139d077f7a18e153d5e051a4dbe",
     "internal/http/embedhttp/capabilities.go": "7d53acb8e9ba6205b658b5e0e28afe1dbf0a8950176fadb82c4bd1986342d842",
     "internal/http/embedhttp/embedhttp.go": "db5e34a412add96cac6c1fa129aac4c888f4724fb1007428c8dd86f658303449",
@@ -4748,15 +4762,17 @@
     "internal/http/routes_public.go": "ed42f6005a68866be2a4a68214287c308388bb618918430319d76496d69d3013",
     "internal/http/routes_self.go": "f87be5d91c28b31e405b2244f20cf14b03866f2834de36b35b0f519e6ea6b73a",
     "internal/http/routesurface/provider_routes.go": "6a49245b179c577ea3d0d997234eb7314c19827b152931efd581625d54aab909",
-    "internal/http/server.go": "bd486c02567fa35590ee4b117b8d12c1674e4930edc30f1c822c3589a90aa2bd",
+    "internal/http/server.go": "8c37de35c4cf2d8091ff0d7eb7b8eab18ebf4688ec9c48e795bac783e3cdaef7",
     "internal/intents/rate_ceiling.go": "2f14ccb694839b19af499b5346cb052d3296a9346590d15f7f1ed5e4271da962",
+    "internal/migrate/postgres/0001_schema.up.sql": "c7c8eb8828b4d30a9e536836e9704e25f9d7a63ebf1bc20b3c70de66fa87c1b0",
+    "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
+    "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
+    "internal/migrate/postgres/schema.go": "a399bef4859e1c1f8c1f952d279d8b70718d7aa7e8a1ce116cea49c9d5f6b090",
+    "internal/migrate/postgres/schema_tokens.go": "db02b2faeecf3343919ebf74de33c7e72e918a00737d054e86dedb15ed5a8e6d",
+    "internal/migrate/postgres/unique_scope_exemptions.go": "50f144594711a439c71aa95954b102a9ea0b423488a3e850dd6853fccf91ccd8",
     "internal/operator/profile.go": "084d6f735001ff56c70898a2abc5d967b438b24b99c7e5afe8a7d7fef70ea369",
     "internal/requestauth/cache.go": "275b8a83d62c567041a6a3ed307dc4fce74c54f5c061b0cd96a91d08e401bd83",
     "internal/requestauth/hostprincipal.go": "3bcc329a9b5ed5cce301a8a99f92846c35011f596f70a2bd37fe164d6a3ed46f",
-    "migrations/postgres/0001_schema.up.sql": "506a3d374017ce7e787a046420969df71fc41f3399f8d8b24edbff4f56b3c2c0",
-    "migrations/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
-    "migrations/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
-    "migrations/postgres/unique_scope_exemptions.go": "50f144594711a439c71aa95954b102a9ea0b423488a3e850dd6853fccf91ccd8",
     "permissions/permissions.go": "6e549e1b4a103b6b2a0c052d0492aba504c73aaba65d3581cbe8591e8c14452f",
     "pkg/api/error.go": "5b0aff40c4ec2d090e617d903f6da1ce29ba82b9ad2bf82e7bd6cc099d51af41",
     "pkg/api/response.go": "63a9656a11ce061875f8781ce81bf3a447dd34a8d9de0b922b39706b9a5f1871",

@@ -152,7 +152,7 @@ func seedPastDueSubscriptionAt(t *testing.T, merchantID uuid.UUID, now time.Time
 	pool := dbi.Pool()
 
 	fx := rebillFixture{db: dbi, store: NewStore(dbi), merchantID: merchantID}
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.merchants(id,slug) VALUES($1,$2) ON CONFLICT(id) DO NOTHING`, merchantID, "rebill-"+merchantID.String())
+	_, err := pool.Exec(ctx, `INSERT INTO billing.merchants(id,slug) VALUES($1,$2) ON CONFLICT(id) DO NOTHING`, merchantID, "rebill-"+merchantID.String())
 	require.NoError(t, err)
 	fx.subID = uuid.New()
 	now = now.UTC().Truncate(time.Second)
@@ -160,7 +160,7 @@ func seedPastDueSubscriptionAt(t *testing.T, merchantID uuid.UUID, now time.Time
 	fx.orderRef = rebillOrderReference(ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, "nmi", 1))
 
 	userID := uuid.New()
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, merchantID, userID)
+	_, err = pool.Exec(ctx, `INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, merchantID, userID)
 	require.NoError(t, err)
 	productID := uuid.New()
 	priceID := uuid.New()
@@ -174,17 +174,17 @@ func seedPastDueSubscriptionAt(t *testing.T, merchantID uuid.UUID, now time.Time
 	}
 	tenantID := merchantID
 	fx.pspID = dbtest.EnsureTestPSP(ctx, t, pool, tenantID, "nmi")
-	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id, entitlements_spec) VALUES ($1, $2, $2, $3, '{"premium":null}')`,
+	exec(`INSERT INTO billing.products (id, key, display_name, merchant_id, entitlements_spec) VALUES ($1, $2, $2, $3, '{"premium":null}')`,
 		productID, "rebill-prod-"+suffix, tenantID)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 9990000, 'USD', 720, true, $3)`, priceID, productID, tenantID)
-	exec(`INSERT INTO openrails.payment_methods
+	exec(`INSERT INTO billing.payment_methods
 	        (id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
 	         initial_transaction_id, stored_credential_recurring_ref, merchant_id, rebill_driver)
 	      VALUES ($1, $2, 'nmi', $3, $4, $5, $6, $7, $8, 'openrails')`,
 		paymentMethodID, userID, fx.pspID, "vault-"+suffix, "bill-"+suffix,
 		"txn-init-"+suffix, "txn-recurring-init-"+suffix, tenantID)
-	exec(`INSERT INTO openrails.subscriptions
+	exec(`INSERT INTO billing.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id, payment_method_id,
 	         current_period_starts_at, current_period_ends_at, started_at, next_retry_at, retry_attempts, customer_id, merchant_id, psp_id, entitlements_spec_snapshot)
 	      VALUES ($1, $2, $3, 'past_due', 'nmi', $4, $5, $6, $7, $6, $8, 1, $9, $10, $11, '{"premium":null}')`,
@@ -215,14 +215,14 @@ func seedPastDueSubscriptionAt(t *testing.T, merchantID uuid.UUID, now time.Time
 	}))
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", fx.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", userID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", fx.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", userID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", fx.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", paymentMethodID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE subscription_id = $1", fx.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.notifications WHERE customer_id = $1", userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE subscription_id = $1", fx.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", fx.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", paymentMethodID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 	return fx
 }
@@ -293,7 +293,7 @@ func TestManualRebillSynchronousSuccessRenewsLifecycle(t *testing.T) {
 
 	var paymentCount int
 	require.NoError(t, fx.db.Pool().QueryRow(context.Background(),
-		"SELECT count(*) FROM openrails.payments WHERE subscription_id = $1 AND transaction_id = $2",
+		"SELECT count(*) FROM billing.payments WHERE subscription_id = $1 AND transaction_id = $2",
 		fx.subID, fake.txnID).Scan(&paymentCount))
 	assert.Equal(t, 1, paymentCount, "renewal persisted the charge")
 }
@@ -314,7 +314,7 @@ func TestManualRebillSystemOriginParksUnderLimitedThenDrains(t *testing.T) {
 	assert.Equal(t, "past_due", string(fx.subscription(t).Status))
 
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.rebillRunner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 	require.NoError(t, err)
@@ -340,7 +340,7 @@ func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 
 	// A successful empty search is inconclusive and cannot re-arm execution.
 	fake.charged.Store(false)
-	_, err = fx.db.Pool().Exec(context.Background(), "UPDATE openrails.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
+	_, err = fx.db.Pool().Exec(context.Background(), "UPDATE billing.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.rebillRunner(client, fullModeConfig()).RunVerifyOnce(context.Background())
 	require.NoError(t, err)
@@ -354,7 +354,7 @@ func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 	// The charge actually landed at NMI.
 	fake.charged.Store(true)
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.rebillRunner(client, fullModeConfig()).RunVerifyOnce(context.Background())
 	require.NoError(t, err)
@@ -402,11 +402,11 @@ func TestManualRebillRecoveredSubscriptionSupersedes(t *testing.T) {
 
 	// The subscription recovers while the intent waits for full mode.
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.subscriptions SET status = 'active', next_retry_at = NULL WHERE id = $1", fx.subID)
+		"UPDATE billing.subscriptions SET status = 'active', next_retry_at = NULL WHERE id = $1", fx.subID)
 	require.NoError(t, err)
 
 	_, err = fx.db.Pool().Exec(context.Background(),
-		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		"UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
 	_, err = fx.rebillRunner(client, fullModeConfig()).RunExecuteOnce(context.Background())
 	require.NoError(t, err)
@@ -425,12 +425,12 @@ func TestManualRebillPaidPeriodSupersedes(t *testing.T) {
 	fake, client := newFakeNMIRebillGateway(t, fx)
 
 	_, err := fx.db.Pool().Exec(context.Background(), `
-		INSERT INTO openrails.payments
+		INSERT INTO billing.payments
 			(id, merchant_id, customer_id, price_id, subscription_id, rail, psp_id,
 			 transaction_id, amount, list_amount, currency, status, money_movement, purchased_at)
 		SELECT $1, merchant_id, customer_id, price_id, id, rail, psp_id,
 		       $2, 999, 999, 'USD', 'completed', 'rail', $3
-		FROM openrails.subscriptions
+		FROM billing.subscriptions
 		WHERE id = $4`, uuid.New(), "txn-renewal-"+uuid.NewString()[:8], fx.periodEnd, fx.subID)
 	require.NoError(t, err)
 

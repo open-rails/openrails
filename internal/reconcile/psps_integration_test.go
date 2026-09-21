@@ -55,12 +55,12 @@ func TestPSPScopedLocalStateDoesNotBlendCollidingProviderIDs(t *testing.T) {
 		priceID := uuid.New()
 		suffix := uuid.NewString()[:8]
 		_, err = appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
+			`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
 			 VALUES ($1, $2, $2, $3, jsonb_build_object('premium', null), $4)`,
 			productID, "psp-scope-"+suffix, "psp-scope-"+suffix, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)
 		_, err = appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+			`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 			 VALUES ($1, $2, 999, 'USD', 720, true, $3)`,
 			priceID, productID, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)
@@ -72,13 +72,13 @@ func TestPSPScopedLocalStateDoesNotBlendCollidingProviderIDs(t *testing.T) {
 			start := now.Add(-24 * time.Hour)
 			end := now.Add(29 * 24 * time.Hour)
 			_, err = appDB.Qx(ctx).Exec(ctx,
-				`INSERT INTO openrails.payment_methods
+				`INSERT INTO billing.payment_methods
 				   (id, rail, rail_customer_ref, initial_transaction_id, last_four, expiry_date, merchant_id, customer_id, psp_id)
 				 VALUES ($1, 'nmi', 'vault-shared', 'init-' || $2::text, $3, '1029', $4, $5, $6)`,
 				pmID, marker, marker, dbtest.TestMerchantID.UUID(), customerID, account.ID)
 			require.NoError(t, err)
 			_, err = appDB.Qx(ctx).Exec(ctx,
-				`INSERT INTO openrails.subscriptions
+				`INSERT INTO billing.subscriptions
 				   (id, price_id, product_id, status, rail, rail_subscription_id,
 				    payment_method_id, current_period_starts_at, current_period_ends_at, started_at,
 				    entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
@@ -87,7 +87,7 @@ func TestPSPScopedLocalStateDoesNotBlendCollidingProviderIDs(t *testing.T) {
 				subID, priceID, productID, pmID, start, end, customerID, dbtest.TestMerchantID.UUID(), account.ID, marker)
 			require.NoError(t, err)
 			_, err = appDB.Qx(ctx).Exec(ctx,
-				`INSERT INTO openrails.payments
+				`INSERT INTO billing.payments
 				   (id, price_id, rail, transaction_id, amount, list_amount, currency,
 				    status, subscription_id, purchased_at, customer_id, merchant_id, psp_id)
 				 VALUES ($1, $2, 'nmi', 'txn-' || $8::text, 999, 999, 'USD',

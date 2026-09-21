@@ -100,7 +100,7 @@ func TestProviderIntentVerifierFansOutPerMerchant(t *testing.T) {
 	worker := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
 	m := seedIntentMerchant(t)
 	id := seedDueIntent(t, m, intents.TypeNMIDeleteSubscription)
-	m.exec(t, `UPDATE openrails.rail_intents SET status = 'unknown_needs_verify' WHERE id = $1`, id)
+	m.exec(t, `UPDATE billing.rail_intents SET status = 'unknown_needs_verify' WHERE id = $1`, id)
 
 	now := time.Now().UTC()
 	claimed, err := worker.Gen(ctx).ClaimDueVerifyRailIntents(ctx, gen.ClaimDueVerifyRailIntentsParams{
@@ -127,7 +127,7 @@ func TestVolumeBreakerRefusesToReadZeros(t *testing.T) {
 	m := seedIntentMerchant(t)
 	id := seedDueIntent(t, m, intents.TypeNMIDeleteSubscription)
 
-	row, err := gen.New(m.pool).GetRailIntent(ctx, id)
+	row, err := dbtest.Queries(m.pool).GetRailIntent(ctx, id)
 	require.NoError(t, err)
 
 	// The runner pins the intent's merchant as a context VALUE before calling
@@ -151,7 +151,7 @@ func seedIntentMerchant(t *testing.T) intentMerchant {
 	t.Helper()
 	m := intentMerchant{id: uuid.New()}
 	m.pool = dbtest.SharedMerchantPool(t, m.id)
-	m.exec(t, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+	m.exec(t, `INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		m.id, "or862-"+uuid.NewString()[:8])
 	// Self-cleaning: an ACTIVE merchant left behind is not inert. Every
 	// deployment-wide fan-out (ListActiveMerchantIDs — the worker-health repair
@@ -159,9 +159,9 @@ func seedIntentMerchant(t *testing.T) intentMerchant {
 	// the rest of the package inherits whatever that does.
 	t.Cleanup(func() {
 		ctx := context.Background()
-		_, _ = m.pool.Exec(ctx, `DELETE FROM openrails.rail_intents WHERE merchant_id = $1`, m.id)
-		_, _ = m.pool.Exec(ctx, `DELETE FROM openrails.customers WHERE merchant_id = $1`, m.id)
-		_, _ = m.pool.Exec(ctx, `DELETE FROM openrails.merchants WHERE id = $1`, m.id)
+		_, _ = m.pool.Exec(ctx, `DELETE FROM billing.rail_intents WHERE merchant_id = $1`, m.id)
+		_, _ = m.pool.Exec(ctx, `DELETE FROM billing.customers WHERE merchant_id = $1`, m.id)
+		_, _ = m.pool.Exec(ctx, `DELETE FROM billing.merchants WHERE id = $1`, m.id)
 	})
 	return m
 }
@@ -189,7 +189,7 @@ func (m intentMerchant) statusOf(t *testing.T, id uuid.UUID) string {
 	t.Helper()
 	var status string
 	require.NoError(t, m.pool.QueryRow(context.Background(),
-		`SELECT status FROM openrails.rail_intents WHERE id = $1`, id).Scan(&status))
+		`SELECT status FROM billing.rail_intents WHERE id = $1`, id).Scan(&status))
 	return status
 }
 
@@ -199,7 +199,7 @@ func seedDueIntent(t *testing.T, m intentMerchant, intentType string) uuid.UUID 
 	t.Helper()
 	id := uuid.New()
 	pspID := dbtest.EnsureTestPSP(context.Background(), t, m.pool, m.id, "nmi")
-	m.exec(t, `INSERT INTO openrails.rail_intents
+	m.exec(t, `INSERT INTO billing.rail_intents
 	             (id, merchant_id, rail, psp_id, intent_type, idempotency_key, status,
 	              next_attempt_at, origin, payload)
 	           VALUES ($1, $2, 'nmi', $3, $4, $5, 'pending', now() - interval '1 minute', 'system', '{}'::jsonb)`,

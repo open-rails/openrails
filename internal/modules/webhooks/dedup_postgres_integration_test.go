@@ -25,14 +25,14 @@ func dedupMarkRows(t *testing.T, ctx context.Context, dbi *db.DB, op, eventID st
 	t.Helper()
 	var n int
 	require.NoError(t, dbi.Pool().QueryRow(ctx,
-		"SELECT count(*) FROM openrails.webhook_events WHERE op = $1 AND event_id = $2",
+		"SELECT count(*) FROM billing.webhook_events WHERE op = $1 AND event_id = $2",
 		op, eventID).Scan(&n))
 	return n
 }
 
 func cleanupDedupMark(t *testing.T, ctx context.Context, dbi *db.DB, eventID string) {
 	t.Cleanup(func() {
-		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.webhook_events WHERE event_id = $1", eventID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM billing.webhook_events WHERE event_id = $1", eventID)
 	})
 }
 

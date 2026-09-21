@@ -38,12 +38,12 @@ func TestCatalogProductFilteringAndEffectivePagination(t *testing.T) {
 	fx.rt.PriceService = catalog.NewPriceService(fx.dbi)
 	// A thousand newer unrelated records precede this sparse group. Timestamps
 	// deliberately tie: the id tiebreaker must prevent repeated/skipped rows.
-	fx.exec(`INSERT INTO openrails.products (id,merchant_id,key,display_name,tier_group,archived,created_at)
+	fx.exec(`INSERT INTO billing.products (id,merchant_id,key,display_name,tier_group,archived,created_at)
  SELECT uuidv7(),$1,'page-'||i,'Product '||i,CASE WHEN i<=1005 THEN 'target' ELSE 'other' END,
  i<=1005 AND i%20=0,CASE WHEN i<=1005 THEN timestamptz '2026-01-01' ELSE timestamptz '2026-02-01' END
  FROM generate_series(1,2105) i`, fx.merchant)
 	foreign := newFindingsFixture(t)
-	foreign.exec(`INSERT INTO openrails.products(id,merchant_id,key,display_name,tier_group) VALUES(uuidv7(),$1,'foreign-target','Foreign','target')`, foreign.merchant)
+	foreign.exec(`INSERT INTO billing.products(id,merchant_id,key,display_name,tier_group) VALUES(uuidv7(),$1,'foreign-target','Foreign','target')`, foreign.merchant)
 	seen := map[uuid.UUID]bool{}
 	for offset := 0; ; {
 		page := catalogPageRequest[billingservice.CatalogProduct](t, fx, AdminListProducts, fmt.Sprintf("tier_group=TARGET&limit=100&offset=%d", offset))
@@ -81,7 +81,7 @@ func TestCatalogProductFilteringAndEffectivePagination(t *testing.T) {
 	require.Empty(t, absent.Items)
 	// Manifest pruning is another full-list consumer: a request cap is not the
 	// end of a tier group, and the plan must see its thousand-and-first product.
-	fx.exec(`UPDATE openrails.products SET archived=false WHERE tier_group='target'`)
+	fx.exec(`UPDATE billing.products SET archived=false WHERE tier_group='target'`)
 	body, err := json.Marshal(openrails.CatalogPublishRequest{Catalog: manifest.Manifest{Version: manifest.SupportedVersion, Products: []manifest.Product{{Key: "declared", DisplayName: "Declared", TierGroup: "target", Prices: []manifest.Price{{Currency: "USD", UnitAmount: 1, Duration: "30d", AutoRenew: true}}}}}})
 	require.NoError(t, err)
 	rec := httptest.NewRecorder()
@@ -100,8 +100,8 @@ func TestCatalogPricesPageAcross1000AndProductFilter(t *testing.T) {
 	fx.rt.ProductService = catalog.NewProductService(fx.dbi)
 	fx.rt.PriceService = catalog.NewPriceService(fx.dbi)
 	productID := uuid.New()
-	fx.exec(`INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,'many-prices','Many prices')`, productID, fx.merchant)
-	fx.exec(`INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,created_at)
+	fx.exec(`INSERT INTO billing.products(id,merchant_id,key,display_name) VALUES($1,$2,'many-prices','Many prices')`, productID, fx.merchant)
+	fx.exec(`INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,created_at)
  SELECT uuidv7(),$1,$2,'page-price-'||i,i*10000,'USD',timestamptz '2026-01-01' FROM generate_series(1,1001) i`, fx.merchant, productID)
 	for _, filter := range []string{"", "product_id=" + openrails.ProductID(productID).String() + "&"} {
 		zero := catalogPageRequest[billingservice.CatalogPrice](t, fx, AdminListPrices, filter+"limit=0")

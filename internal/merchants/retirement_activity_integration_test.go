@@ -60,7 +60,7 @@ func TestRetirementActivityClassifiesEveryMerchantTable(t *testing.T) {
 	scoped := map[string]bool{}
 	rows, err := pool.Query(ctx, `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
 		JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped
-		WHERE n.nspname='openrails' AND c.relkind IN ('r','p')`)
+		WHERE n.nspname='billing' AND c.relkind IN ('r','p')`)
 	require.NoError(t, err)
 	for rows.Next() {
 		var name string
@@ -77,16 +77,16 @@ func TestRetirementActivityClassifiesEveryMerchantTable(t *testing.T) {
 		var locked bool
 		require.NoError(t, pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_constraint k
 			JOIN pg_attribute a ON a.attrelid=k.conrelid AND a.attnum=ANY(k.conkey)
-			WHERE k.contype='f' AND k.conrelid=('openrails.'||$1)::regclass
-			AND k.confrelid='openrails.merchants'::regclass AND a.attname='merchant_id')`, table).Scan(&locked))
-		require.True(t, locked, "blocker %s has no merchant_id foreign key to openrails.merchants", table)
+			WHERE k.contype='f' AND k.conrelid=('billing.'||$1)::regclass
+			AND k.confrelid='billing.merchants'::regclass AND a.attname='merchant_id')`, table).Scan(&locked))
+		require.True(t, locked, "blocker %s has no merchant_id foreign key to billing.merchants", table)
 	}
 
 	parents := map[string][]string{}
 	rows, err = pool.Query(ctx, `SELECT c.relname, p.relname FROM pg_constraint k
 		JOIN pg_class c ON c.oid=k.conrelid JOIN pg_class p ON p.oid=k.confrelid
 		JOIN pg_namespace n ON n.oid=c.relnamespace
-		WHERE n.nspname='openrails' AND k.contype='f' AND k.conrelid<>k.confrelid
+		WHERE n.nspname='billing' AND k.contype='f' AND k.conrelid<>k.confrelid
 		AND NOT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid=k.conrelid AND a.attnum=ANY(k.conkey) AND NOT a.attnotnull)`)
 	require.NoError(t, err)
 	for rows.Next() {
@@ -160,7 +160,7 @@ func TestRetireUnusedWaitsForConcurrentActivity(t *testing.T) {
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, m.ID.String())
 	require.NoError(t, err)
-	_, err = tx.Exec(ctx, `INSERT INTO openrails.customers (merchant_id, issuer, id) VALUES ($1, 'test', $2)`, m.ID.UUID(), uuid.NewString())
+	_, err = tx.Exec(ctx, `INSERT INTO billing.customers (merchant_id, issuer, id) VALUES ($1, 'test', $2)`, m.ID.UUID(), uuid.NewString())
 	require.NoError(t, err)
 
 	type outcome struct {

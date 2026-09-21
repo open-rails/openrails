@@ -7,20 +7,14 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	authpostgres "github.com/open-rails/authkit/migrations/postgres"
-	"github.com/open-rails/migratekit"
+	authkitembedded "github.com/open-rails/authkit/embedded"
 	"github.com/stretchr/testify/require"
 )
 
-// ApplyAuthKitMigrations runs AuthKit's embedded migration source through
-// migratekit directly. The dedicated adapter handle keeps migration session
-// settings away from the harness' application pool.
+// ApplyAuthKitMigrations asks AuthKit to initialize its own schema. The test
+// harness deliberately does not import AuthKit's private migration source or
+// migratekit.
 func ApplyAuthKitMigrations(t *testing.T, ctx context.Context, pool *pgxpool.Pool, schema string) {
 	t.Helper()
-	migrations, err := migratekit.LoadFromFS(authpostgres.FS)
-	require.NoError(t, err)
-	migrator, err := migratekit.NewPostgresFromPGXPool(pool, "authkit")
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, migrator.Close()) })
-	require.NoError(t, migrator.WithSchema(schema).ApplyMigrations(ctx, migrations))
+	require.NoError(t, authkitembedded.ApplyMigrations(ctx, pool, schema, authkitembedded.MigrationOptions{River: authkitembedded.RiverFromHost()}))
 }

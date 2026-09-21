@@ -42,7 +42,7 @@ func TestOversizedRequestsAreRefusedIdenticallyAcrossDeployments(t *testing.T) {
 	observed := map[string]bodyLimitObservation{}
 	for name, client := range map[string]*openrails.Client{"embedded": local, "hosted_http": host.Client(), "standalone": standalone.Client()} {
 		customer := uuid.New()
-		_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, mid, customer)
+		_, err := h.Pool().Exec(ctx, `INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, mid, customer)
 		require.NoError(t, err)
 		payer := openrails.CustomerID(customer)
 		deposit := openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "body-limit", Currency: "USD", Amount: 1, Source: "body-limit", SourceID: uuid.NewString()}

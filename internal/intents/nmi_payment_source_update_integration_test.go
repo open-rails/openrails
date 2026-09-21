@@ -141,11 +141,11 @@ func newPaymentSourceSwapFixture(t *testing.T) *paymentSourceSwapFixture {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
+	exec(`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "swap-prod-"+sfx, dbtest.TestMerchantID.UUID())
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, dbtest.TestMerchantID.UUID())
-	exec(`INSERT INTO openrails.subscriptions
+	exec(`INSERT INTO billing.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,
 	         payment_method_id, customer_id, merchant_id, psp_id)
@@ -153,11 +153,11 @@ func newPaymentSourceSwapFixture(t *testing.T) *paymentSourceSwapFixture {
 		subID, priceID, productID, railSubID,
 		now.Add(-time.Hour), now.Add(720*time.Hour), oldPM.ID, customerID, dbtest.TestMerchantID.UUID(), pspID)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = $1 AND subscription_id = $2", TypeNMIPaymentSourceUpdate, subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = ANY($1)", []uuid.UUID{oldPM.ID, newPM.ID})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE intent_type = $1 AND subscription_id = $2", TypeNMIPaymentSourceUpdate, subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = ANY($1)", []uuid.UUID{oldPM.ID, newPM.ID})
 	})
 
 	gateway, client := newFakeNMISwapGateway(t, railSubID, oldPM.RailCustomerRef)
@@ -199,7 +199,7 @@ func (fx *paymentSourceSwapFixture) localPaymentMethodID(t *testing.T) uuid.UUID
 func (fx *paymentSourceSwapFixture) latestIntent(t *testing.T) (string, int) {
 	t.Helper()
 	rows, err := fx.db.Pool().Query(fx.ctx,
-		"SELECT status FROM openrails.rail_intents WHERE intent_type = $1 AND subscription_id = $2 ORDER BY created_at DESC, id",
+		"SELECT status FROM billing.rail_intents WHERE intent_type = $1 AND subscription_id = $2 ORDER BY created_at DESC, id",
 		TypeNMIPaymentSourceUpdate, fx.sub.ID)
 	require.NoError(t, err)
 	defer rows.Close()
@@ -257,14 +257,14 @@ func (fx *paymentSourceSwapFixture) otherPSP(t *testing.T) uuid.UUID {
 	t.Helper()
 	id := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "other-mobius-"+uuid.NewString()[:8])
 	t.Cleanup(func() {
-		_, _ = fx.db.Pool().Exec(fx.ctx, "UPDATE openrails.psps SET archived = true WHERE id = $1", id)
+		_, _ = fx.db.Pool().Exec(fx.ctx, "UPDATE billing.psps SET archived = true WHERE id = $1", id)
 	})
 	return id
 }
 
 func (fx *paymentSourceSwapFixture) reattribute(t *testing.T, pm *models.PaymentMethod, psp uuid.UUID) {
 	t.Helper()
-	_, err := fx.db.Pool().Exec(fx.ctx, "UPDATE openrails.payment_methods SET psp_id = $1 WHERE id = $2", psp, pm.ID)
+	_, err := fx.db.Pool().Exec(fx.ctx, "UPDATE billing.payment_methods SET psp_id = $1 WHERE id = $2", psp, pm.ID)
 	require.NoError(t, err)
 	pm.PspID = psp
 }
@@ -273,7 +273,7 @@ func (fx *paymentSourceSwapFixture) intentCount(t *testing.T) int {
 	t.Helper()
 	var n int
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT count(*) FROM openrails.rail_intents WHERE intent_type = $1 AND subscription_id = $2",
+		"SELECT count(*) FROM billing.rail_intents WHERE intent_type = $1 AND subscription_id = $2",
 		TypeNMIPaymentSourceUpdate, fx.sub.ID).Scan(&n))
 	return n
 }
@@ -284,7 +284,7 @@ func (fx *paymentSourceSwapFixture) latestIntentEvidenceCode(t *testing.T) strin
 	t.Helper()
 	var code *string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT result_evidence->>'code' FROM openrails.rail_intents WHERE intent_type = $1 AND subscription_id = $2 ORDER BY created_at DESC, id LIMIT 1",
+		"SELECT result_evidence->>'code' FROM billing.rail_intents WHERE intent_type = $1 AND subscription_id = $2 ORDER BY created_at DESC, id LIMIT 1",
 		TypeNMIPaymentSourceUpdate, fx.sub.ID).Scan(&code))
 	if code == nil {
 		return ""
@@ -311,9 +311,9 @@ func TestNMIPaymentSourceUpdateIntent_CrossPSPRefusesBeforeProviderCall(t *testi
 func (fx *paymentSourceSwapFixture) moveTargetToCustodian(t *testing.T) {
 	t.Helper()
 	custodian := uuid.New()
-	_, err := fx.db.Pool().Exec(fx.ctx, `INSERT INTO openrails.custodians(id,merchant_id,key,kind,account_id) VALUES($1,$2,$3,'basis_theory',$3)`, custodian, dbtest.TestMerchantID.UUID(), "source-update-"+custodian.String())
+	_, err := fx.db.Pool().Exec(fx.ctx, `INSERT INTO billing.custodians(id,merchant_id,key,kind,account_id) VALUES($1,$2,$3,'basis_theory',$3)`, custodian, dbtest.TestMerchantID.UUID(), "source-update-"+custodian.String())
 	require.NoError(t, err)
-	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.payment_methods SET custodian='basis_theory',custodian_id=$2,rail_method_ref='custodian-token' WHERE id=$1`, fx.newPM.ID, custodian)
+	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.payment_methods SET custodian='basis_theory',custodian_id=$2,rail_method_ref='custodian-token' WHERE id=$1`, fx.newPM.ID, custodian)
 	require.NoError(t, err)
 }
 
@@ -565,7 +565,7 @@ func TestNMIPaymentSourceUpdateIntent_ExecutorPinWaitsForReattributionInFlight(t
 	flip, err := fx.db.Pool().Begin(fx.ctx)
 	require.NoError(t, err)
 	defer func() { _ = flip.Rollback(context.Background()) }()
-	_, err = flip.Exec(fx.ctx, "SELECT 1 FROM openrails.payment_methods WHERE id = $1 FOR UPDATE", fx.newPM.ID)
+	_, err = flip.Exec(fx.ctx, "SELECT 1 FROM billing.payment_methods WHERE id = $1 FOR UPDATE", fx.newPM.ID)
 	require.NoError(t, err)
 
 	done := make(chan error, 1)
@@ -578,7 +578,7 @@ func TestNMIPaymentSourceUpdateIntent_ExecutorPinWaitsForReattributionInFlight(t
 	require.Eventually(t, func() bool {
 		var status string
 		if err := fx.db.Pool().QueryRow(fx.ctx,
-			"SELECT status FROM openrails.rail_intents WHERE intent_type = $1 AND subscription_id = $2",
+			"SELECT status FROM billing.rail_intents WHERE intent_type = $1 AND subscription_id = $2",
 			TypeNMIPaymentSourceUpdate, subID).Scan(&status); err != nil {
 			return false
 		}
@@ -596,7 +596,7 @@ func TestNMIPaymentSourceUpdateIntent_ExecutorPinWaitsForReattributionInFlight(t
 	default:
 	}
 
-	_, err = flip.Exec(fx.ctx, "UPDATE openrails.payment_methods SET psp_id = $1 WHERE id = $2", other, fx.newPM.ID)
+	_, err = flip.Exec(fx.ctx, "UPDATE billing.payment_methods SET psp_id = $1 WHERE id = $2", other, fx.newPM.ID)
 	require.NoError(t, err)
 	require.NoError(t, flip.Commit(fx.ctx))
 

@@ -54,7 +54,7 @@ func TestMode2SeedOnceImporterFlow(t *testing.T) {
 	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, opts))
 
 	var merchantIDText string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantIDText))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM billing.merchants WHERE slug = 'host-three'`).Scan(&merchantIDText))
 	merchantID, err := merchant.ParseID(merchantIDText)
 	require.NoError(t, err)
 
@@ -81,7 +81,7 @@ func TestMode2SeedOnceImporterFlow(t *testing.T) {
 
 	var pspUpdatedBefore time.Time
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT updated_at FROM openrails.psps
+		SELECT updated_at FROM billing.psps
 		WHERE merchant_id = $1::uuid AND rail = 'stripe' AND account_id = 'acct_seed_851'
 	`, merchantIDText).Scan(&pspUpdatedBefore))
 
@@ -96,12 +96,12 @@ func TestMode2SeedOnceImporterFlow(t *testing.T) {
 	var pspCount int
 	var pspUpdatedAfter time.Time
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*), max(updated_at) FROM openrails.psps WHERE merchant_id = $1::uuid
+		SELECT count(*), max(updated_at) FROM billing.psps WHERE merchant_id = $1::uuid
 	`, merchantIDText).Scan(&pspCount, &pspUpdatedAfter))
 	require.Equal(t, 1, pspCount)
 	require.True(t, pspUpdatedAfter.Equal(pspUpdatedBefore), "seed re-run must not touch the existing PSP row")
 
 	var merchantCount int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.merchants`).Scan(&merchantCount))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.merchants`).Scan(&merchantCount))
 	require.Equal(t, 1, merchantCount)
 }

@@ -28,13 +28,13 @@ func seedCeilingMerchant(t *testing.T, dbi *db.DB) uuid.UUID {
 	ctx := context.Background()
 	pool := dbi.Pool()
 	id := uuid.New()
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+	_, err := pool.Exec(ctx, `INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		id, "ceiling-"+uuid.NewString()[:8])
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.rail_intents WHERE merchant_id = $1`, id)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1`, id)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.merchants WHERE id = $1`, id)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.rail_intents WHERE merchant_id = $1`, id)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id = $1`, id)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.merchants WHERE id = $1`, id)
 	})
 	return id
 }
@@ -51,7 +51,7 @@ func insertCeilingIntent(t *testing.T, dbi *db.DB, merchantID uuid.UUID, actor s
 	pool := dbtest.SharedMerchantPool(t, merchantID)
 	pspID := dbtest.EnsureTestPSP(context.Background(), t, pool, merchantID, "mobius")
 	_, err := pool.Exec(context.Background(),
-		`INSERT INTO openrails.rail_intents
+		`INSERT INTO billing.rail_intents
 		   (merchant_id, rail, psp_id, intent_type, idempotency_key, status, origin, actor, next_attempt_at, created_at)
 		 VALUES ($1, 'mobius', $2, $3, $4, 'pending', $5, $6, $7, $7)`,
 		merchantID, pspID, ceilingTestType, ceilingTestType+":"+uuid.NewString(), string(origin), actorArg, createdAt.UTC())
@@ -64,7 +64,7 @@ func trippedFindingCount(t *testing.T, dbi *db.DB, merchantID uuid.UUID, finding
 	var severity, status string
 	err := dbi.Pool().QueryRow(context.Background(),
 		`SELECT count(*), coalesce(max(severity),''), coalesce(max(status),'')
-		   FROM openrails.reconciliation_findings
+		   FROM billing.reconciliation_findings
 		  WHERE merchant_id = $1 AND finding_type = $2 AND subject_key = $3`,
 		merchantID, findingType, subjectKey).Scan(&n, &severity, &status)
 	require.NoError(t, err)
@@ -355,7 +355,7 @@ func TestRateCeiling_EnqueueChokepointRefusesSixth(t *testing.T) {
 
 	var rows int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.rail_intents WHERE merchant_id = $1 AND actor = $2`,
+		`SELECT count(*) FROM billing.rail_intents WHERE merchant_id = $1 AND actor = $2`,
 		merchant, actor).Scan(&rows))
 	assert.Equal(t, 5, rows, "exactly 5 rows created; the refused 6th wrote nothing")
 }

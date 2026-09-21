@@ -28,7 +28,7 @@ func TestCapturedPSPCredentialsSurviveRenameAndArchive(t *testing.T) {
 	pspA, pspB := uuid.New(), uuid.New()
 	keyA, keyB := "capture-a-"+uuid.NewString(), "capture-b-"+uuid.NewString()
 	for id, key := range map[uuid.UUID]string{pspA: keyA, pspB: keyB} {
-		_, err = database.Qx(ctx).Exec(ctx, `INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id,key) VALUES($1,$2,'nmi','test',$3,$3)`, id, dbtest.TestMerchantID.UUID(), key)
+		_, err = database.Qx(ctx).Exec(ctx, `INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,key) VALUES($1,$2,'nmi','test',$3,$3)`, id, dbtest.TestMerchantID.UUID(), key)
 		require.NoError(t, err)
 		secretName, err := merchants.PSPSecretName("nmi", "test", key, "security_key")
 		require.NoError(t, err)
@@ -36,7 +36,7 @@ func TestCapturedPSPCredentialsSurviveRenameAndArchive(t *testing.T) {
 		require.NoError(t, err)
 	}
 	captured := db.WithPSPID(ctx, pspA)
-	_, err = database.Qx(ctx).Exec(ctx, `UPDATE openrails.psps SET key=$2,archived=true WHERE id=$1`, pspA, keyA+"-renamed")
+	_, err = database.Qx(ctx).Exec(ctx, `UPDATE billing.psps SET key=$2,archived=true WHERE id=$1`, pspA, keyA+"-renamed")
 	require.NoError(t, err)
 	client, err := service.resolveNMIClient(captured, keyA)
 	require.NoError(t, err)

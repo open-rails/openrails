@@ -11,7 +11,7 @@ import "strings"
 // This is the ONE exemption list. It is deliberately a non-test file so both
 // guards can import it and cannot drift apart:
 //
-//   - TestUniqueIndexesAreMerchantScoped (migrations/postgres) derives the
+//   - TestUniqueIndexesAreMerchantScoped (internal/migrate/postgres) derives the
 //     index inventory from the migration TEXT and so runs with no database;
 //   - TestGAP10_UniqueIndexesAreMerchantScoped (internal/invariantaudit) reads
 //     pg_indexes on a LIVE database as openrails_app, and so catches an index

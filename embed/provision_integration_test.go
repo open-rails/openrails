@@ -61,7 +61,7 @@ func TestUpsertMerchantConfig_SeedsPSPs(t *testing.T) {
 		require.NoError(t, err)
 		var n int
 		require.NoError(t, conn.QueryRow(ctx,
-			`SELECT count(*) FROM openrails.psps WHERE rail = ANY($1)`,
+			`SELECT count(*) FROM billing.psps WHERE rail = ANY($1)`,
 			[]string{"nmi", "ccbill"}).Scan(&n))
 		return n
 	}
@@ -80,6 +80,6 @@ func TestUpsertMerchantConfig_SeedsPSPs(t *testing.T) {
 	require.ErrorContains(t, err, "already bound to merchant")
 	var n int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.merchants WHERE slug = $1`, otherSlug).Scan(&n))
+		`SELECT count(*) FROM billing.merchants WHERE slug = $1`, otherSlug).Scan(&n))
 	require.Zero(t, n, "refused second merchant must not be provisioned")
 }

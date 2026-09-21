@@ -96,10 +96,10 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		pool := h.MerchantPool(f.merchant.MerchantID.UUID())
 		customer := uuid.New()
 		subscription := uuid.New()
-		_, err = pool.Exec(ctx, `INSERT INTO openrails.customers(id,merchant_id) VALUES($1,$2)`, customer, f.merchant.MerchantID.UUID())
+		_, err = pool.Exec(ctx, `INSERT INTO billing.customers(id,merchant_id) VALUES($1,$2)`, customer, f.merchant.MerchantID.UUID())
 		require.NoError(t, err)
 		psp := dbtest.EnsureTestPSP(ctx, t, pool, f.merchant.MerchantID.UUID(), "nmi")
-		_, err = pool.Exec(ctx, `INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,psp_id) VALUES($1,$2,$3,$4,$5,'active','nmi',$6,$7)`, subscription, f.merchant.MerchantID.UUID(), customer, original.ProductID, original.ID, "grandfather-"+subscription.String(), psp)
+		_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,psp_id) VALUES($1,$2,$3,$4,$5,'active','nmi',$6,$7)`, subscription, f.merchant.MerchantID.UUID(), customer, original.ProductID, original.ID, "grandfather-"+subscription.String(), psp)
 		require.NoError(t, err)
 		history := func() []openrails.CatalogPrice {
 			t.Helper()
@@ -129,7 +129,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.True(t, old.Archived)
 		require.Equal(t, "premium-monthly", old.Key)
 		var pinned uuid.UUID
-		require.NoError(t, pool.QueryRow(ctx, `SELECT price_id FROM openrails.subscriptions WHERE merchant_id=$1 AND id=$2`, f.merchant.MerchantID.UUID(), subscription).Scan(&pinned))
+		require.NoError(t, pool.QueryRow(ctx, `SELECT price_id FROM billing.subscriptions WHERE merchant_id=$1 AND id=$2`, f.merchant.MerchantID.UUID(), subscription).Scan(&pinned))
 		require.Equal(t, original.ID.UUID(), pinned)
 		require.EqualValues(t, 10_000_000, old.UnitAmount)
 		require.Len(t, history(), 2, "initial binding and version bump are recorded")

@@ -4,6 +4,7 @@ package grants_test
 
 import (
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/stretchr/testify/require"
 	"math/rand"
@@ -51,13 +52,13 @@ func TestEntitlementSourceUnionAndRevocation(t *testing.T) {
 					want = true
 				}
 			}
-			got, err := gen.New(pool).EntitlementExistsActive(ctx, gen.EntitlementExistsActiveParams{MerchantID: mid, CustomerID: customer,
+			got, err := dbtest.Queries(pool).EntitlementExistsActive(ctx, gen.EntitlementExistsActiveParams{MerchantID: mid, CustomerID: customer,
 				Entitlement: "union", At: start.Add(time.Duration(halfHour) * 30 * time.Minute)})
 			require.NoError(t, err)
 			require.Equal(t, want, got, "coverage at %v hours", at)
 		}
 		var count int
-		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='union'`, mid, customer).Scan(&count))
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='union'`, mid, customer).Scan(&count))
 		require.Equal(t, len(intervals), count, "replay must not duplicate projections")
 		missing, err := l.MissingEffects(ctx, &customer)
 		require.NoError(t, err)

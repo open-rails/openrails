@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/migrate"
-	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
+	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 )
 
 // or#901: reproduce, through the REAL migrator entrypoint, the condition that
@@ -34,7 +34,7 @@ import (
 //
 // RunPostgres must refuse such a database instead of reporting success.
 
-const orphanedSchema = "openrails" // the production default; the stacks' schema
+const orphanedSchema = config.DefaultSchema
 
 func seedAppliedMigration(t *testing.T, sqlDB *sql.DB, name string) {
 	t.Helper()

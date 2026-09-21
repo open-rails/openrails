@@ -5,6 +5,7 @@ package ledger_test
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"strings"
 	"sync"
 	"testing"
@@ -73,7 +74,7 @@ func TestLedger_ReplayPreservesCountersAndDepletedBalance(t *testing.T) {
 			paused, resume := make(chan struct{}), make(chan struct{})
 			release := sync.OnceFunc(func() { close(resume) })
 			defer release()
-			queries := gen.New(pausedResultDB{DBTX: pool, afterResult: sync.OnceFunc(func() {
+			queries := dbtest.Queries(pausedResultDB{DBTX: pool, afterResult: sync.OnceFunc(func() {
 				close(paused)
 				select {
 				case <-resume:
@@ -130,14 +131,14 @@ func TestLedger_RollbackAndRejectedInsertPreserveCounters(t *testing.T) {
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
-	txLedger := ledger.New(gen.New(tx), merchantID)
+	txLedger := ledger.New(dbtest.Queries(tx), merchantID)
 	rolledBack, applied, err := txLedger.ApplyIdempotent(ctx, transfer)
 	require.NoError(t, err)
 	require.True(t, applied)
 	mustBalance(t, ctx, txLedger, balance, 0)
 	require.NoError(t, tx.Rollback(ctx))
 	var retained bool
-	require.NoError(t, pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM openrails.ledger_transfers WHERE id=$1)", rolledBack.ID).Scan(&retained))
+	require.NoError(t, pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM billing.ledger_transfers WHERE id=$1)", rolledBack.ID).Scan(&retained))
 	require.False(t, retained)
 
 	transfer.Amount++
@@ -158,11 +159,11 @@ func TestLedger_ConcurrentTransfersWithAccountReferences(t *testing.T) {
 	require.NoError(t, err)
 	// Model another host-owned row referencing an account in the same database
 	// transaction. PostgreSQL's own FK trigger acquires the KEY SHARE lock.
-	references := pgx.Identifier{"openrails", "test_account_reference_" + strings.ReplaceAll(uuid.NewString(), "-", "")}.Sanitize()
+	references := pgx.Identifier{"billing", "test_account_reference_" + strings.ReplaceAll(uuid.NewString(), "-", "")}.Sanitize()
 	owner := ledgerOwnerPool(t)
 	_, err = owner.Exec(ctx, fmt.Sprintf(`CREATE TABLE %s (
 		merchant_id uuid NOT NULL, account_id uuid NOT NULL,
-		FOREIGN KEY(merchant_id,account_id) REFERENCES openrails.ledger_accounts(merchant_id,id));
+		FOREIGN KEY(merchant_id,account_id) REFERENCES billing.ledger_accounts(merchant_id,id));
 		ALTER TABLE %s ENABLE ROW LEVEL SECURITY;
 		ALTER TABLE %s FORCE ROW LEVEL SECURITY;
 		CREATE POLICY merchant_isolation ON %s USING (merchant_id=NULLIF(current_setting('app.merchant_id',true),'')::uuid);
@@ -173,7 +174,7 @@ func TestLedger_ConcurrentTransfersWithAccountReferences(t *testing.T) {
 		require.NoError(t, err)
 	})
 	other := uuid.New()
-	_, err = gen.New(pool).EnsureCustomer(ctx, gen.EnsureCustomerParams{ID: other, MerchantID: merchantID})
+	_, err = dbtest.Queries(pool).EnsureCustomer(ctx, gen.EnsureCustomerParams{ID: other, MerchantID: merchantID})
 	require.NoError(t, err)
 	var transactions []pgx.Tx
 	var transfers []ledger.Transfer
@@ -196,7 +197,7 @@ func TestLedger_ConcurrentTransfersWithAccountReferences(t *testing.T) {
 	for i, tx := range transactions {
 		go func() {
 			defer func() { _ = tx.Rollback(context.Background()) }()
-			_, _, err := ledger.New(gen.New(tx), merchantID).ApplyIdempotent(ctx, transfers[i])
+			_, _, err := ledger.New(dbtest.Queries(tx), merchantID).ApplyIdempotent(ctx, transfers[i])
 			if err == nil {
 				err = tx.Commit(ctx)
 			}

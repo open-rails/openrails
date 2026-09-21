@@ -128,12 +128,12 @@ func TestClientCatalogPublishingWorkflow(t *testing.T) {
 			publish(all)
 			pool := h.MerchantPool(d.mid.UUID())
 			overrideID := uuid.New()
-			_, err = pool.Exec(t.Context(), `INSERT INTO openrails.catalog_rate_cards(id,merchant_id,customer_id,ordinal,meter_key,payment_term,price,allowance) VALUES($1,$2,$3,1,'protected-override','in_arrears','{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"2"}}'::jsonb,'{"included":20}'::jsonb)`, overrideID, d.mid.UUID(), customer.ID.UUID())
+			_, err = pool.Exec(t.Context(), `INSERT INTO billing.catalog_rate_cards(id,merchant_id,customer_id,ordinal,meter_key,payment_term,price,allowance) VALUES($1,$2,$3,1,'protected-override','in_arrears','{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"2"}}'::jsonb,'{"included":20}'::jsonb)`, overrideID, d.mid.UUID(), customer.ID.UUID())
 			require.NoError(t, err)
 			override := func() string {
 				t.Helper()
 				var value string
-				require.NoError(t, pool.QueryRow(t.Context(), `SELECT row_to_json(card)::text FROM openrails.catalog_rate_cards card WHERE merchant_id=$1 AND id=$2`, d.mid.UUID(), overrideID).Scan(&value))
+				require.NoError(t, pool.QueryRow(t.Context(), `SELECT row_to_json(card)::text FROM billing.catalog_rate_cards card WHERE merchant_id=$1 AND id=$2`, d.mid.UUID(), overrideID).Scan(&value))
 				return value
 			}
 			originalOverride := override()

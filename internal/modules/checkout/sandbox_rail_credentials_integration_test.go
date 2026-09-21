@@ -37,7 +37,7 @@ func TestSandboxPostureCheckoutResolvesNMIAndCCBillFromTestRows(t *testing.T) {
 	// tests also seed accounts into.
 	seed := func(rail, key, accountID string) {
 		_, err := pool.Exec(ctx, `
-			INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, key, archived, evidence)
+			INSERT INTO billing.psps (merchant_id, rail, environment, account_id, key, archived, evidence)
 			VALUES ($1::uuid, $2, 'test', $3, $4, false, '{"source":"test_681"}'::jsonb)
 			ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = false, key = EXCLUDED.key
 		`, dbtest.TestMerchantID.String(), rail, accountID, key)

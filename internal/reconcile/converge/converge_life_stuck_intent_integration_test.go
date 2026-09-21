@@ -29,7 +29,7 @@ func TestConverge_LifeStuckIntent(t *testing.T) {
 	mID := merchant.ID(uuid.New())
 	baseCtx := merchant.WithID(context.Background(), mID)
 	_, err := appDB.Pool().Exec(context.Background(),
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		mID.UUID(), "stuck-"+suffix)
 	require.NoError(t, err)
 
@@ -43,7 +43,7 @@ func TestConverge_LifeStuckIntent(t *testing.T) {
 		seed := func(id uuid.UUID, status string, age time.Duration, reason *string) {
 			t.Helper()
 			_, err := appDB.Qx(ctx).Exec(ctx,
-				`INSERT INTO openrails.rail_intents
+				`INSERT INTO billing.rail_intents
 				   (id, rail, intent_type, idempotency_key,
 				    status, attempts, next_attempt_at, origin, last_failure_reason, created_at, merchant_id, psp_id)
 				 VALUES ($1, 'mobius', 'nmi_delete_subscription', $2, $3, 2, now(), 'system', $4, now() - make_interval(mins => $5), $6, $7)`,
@@ -64,18 +64,18 @@ func TestConverge_LifeStuckIntent(t *testing.T) {
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for _, table := range []string{"reconciliation_findings", "maintenance_runs", "rail_intents"} {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.`+table+` WHERE merchant_id=$1`, mID.UUID())
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.`+table+` WHERE merchant_id=$1`, mID.UUID())
 			}
 			return nil
 		})
-		_, _ = appDB.Pool().Exec(context.Background(), `DELETE FROM openrails.merchants WHERE id=$1`, mID.UUID())
+		_, _ = appDB.Pool().Exec(context.Background(), `DELETE FROM billing.merchants WHERE id=$1`, mID.UUID())
 	})
 
 	e := NewConvergeEngine(appDB)
 	findingStatus := func(ctx context.Context, intentID uuid.UUID) (string, string, bool) {
 		var status, severity string
 		err := appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, severity FROM openrails.reconciliation_findings
+			`SELECT status, severity FROM billing.reconciliation_findings
 			 WHERE merchant_id=$1 AND finding_type='life.provider_intent.stuck' AND subject_key=$2`,
 			mID.UUID(), intentID.String()).Scan(&status, &severity)
 		if err != nil {
@@ -112,7 +112,7 @@ func TestConverge_LifeStuckIntent(t *testing.T) {
 		var intentStatus string
 		var attempts int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, attempts FROM openrails.rail_intents WHERE id=$1`, oldPending).Scan(&intentStatus, &attempts))
+			`SELECT status, attempts FROM billing.rail_intents WHERE id=$1`, oldPending).Scan(&intentStatus, &attempts))
 		require.Equal(t, "pending", intentStatus)
 		require.Equal(t, 2, attempts)
 		return nil
@@ -122,10 +122,10 @@ func TestConverge_LifeStuckIntent(t *testing.T) {
 	// their findings auto-resolve subject-first on the next pass.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, err := appDB.Qx(ctx).Exec(ctx,
-			`UPDATE openrails.rail_intents SET status='succeeded', executed_at=now() WHERE id=$1`, oldPending)
+			`UPDATE billing.rail_intents SET status='succeeded', executed_at=now() WHERE id=$1`, oldPending)
 		require.NoError(t, err)
 		_, err = appDB.Qx(ctx).Exec(ctx,
-			`UPDATE openrails.rail_intents SET status='superseded' WHERE id=$1`, oldUnknown)
+			`UPDATE billing.rail_intents SET status='superseded' WHERE id=$1`, oldUnknown)
 		require.NoError(t, err)
 
 		res, err := e.Converge(ctx, Scope{Merchant: mID})
@@ -135,7 +135,7 @@ func TestConverge_LifeStuckIntent(t *testing.T) {
 		for _, id := range []uuid.UUID{oldPending, oldUnknown} {
 			var status, resolution string
 			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-				`SELECT status, COALESCE(resolution,'') FROM openrails.reconciliation_findings
+				`SELECT status, COALESCE(resolution,'') FROM billing.reconciliation_findings
 				 WHERE merchant_id=$1 AND finding_type='life.provider_intent.stuck' AND subject_key=$2`,
 				mID.UUID(), id.String()).Scan(&status, &resolution))
 			require.Equal(t, "fixed", status)

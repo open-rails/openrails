@@ -76,9 +76,9 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 	require.False(t, id.IsZero())
 	t.Cleanup(func() {
 		for _, stmt := range []string{
-			`DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1`,
-			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
-			`DELETE FROM openrails.merchants WHERE id = $1`,
+			`DELETE FROM billing.merchant_secrets WHERE merchant_id = $1`,
+			`DELETE FROM billing.psps WHERE merchant_id = $1`,
+			`DELETE FROM billing.merchants WHERE id = $1`,
 		} {
 			_, _ = appDB.Pool().Exec(context.Background(), stmt, id.UUID())
 		}
@@ -183,18 +183,18 @@ func pullCLIManifestMerchant(t *testing.T, ctx context.Context, dsn, slug string
 	require.NoError(t, rt.Close(ctx))
 	t.Cleanup(func() {
 		for _, stmt := range []string{
-			`DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1`,
-			`DELETE FROM openrails.maintenance_runs WHERE merchant_id = $1`,
-			`DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1`,
-			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
-			`DELETE FROM openrails.merchants WHERE id = $1`,
+			`DELETE FROM billing.reconciliation_findings WHERE merchant_id = $1`,
+			`DELETE FROM billing.maintenance_runs WHERE merchant_id = $1`,
+			`DELETE FROM billing.merchant_secrets WHERE merchant_id = $1`,
+			`DELETE FROM billing.psps WHERE merchant_id = $1`,
+			`DELETE FROM billing.merchants WHERE id = $1`,
 		} {
 			_, _ = appDB.Pool().Exec(context.Background(), stmt, id.UUID())
 		}
 	})
 	// STORE-ABSENT precondition: mode 1 never wrote openrails.merchant_secrets.
 	var n int
-	require.NoError(t, appDB.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.merchant_secrets WHERE merchant_id = $1`, id.UUID()).Scan(&n))
+	require.NoError(t, appDB.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.merchant_secrets WHERE merchant_id = $1`, id.UUID()).Scan(&n))
 	require.Zero(t, n, "mode 1 must not persist merchant secrets")
 	return id
 }

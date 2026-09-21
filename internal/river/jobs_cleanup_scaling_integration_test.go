@@ -158,14 +158,14 @@ func seedScalingMerchant(t *testing.T, ctx context.Context, super *pgxpool.Pool)
 	t.Helper()
 	mid := uuid.New()
 	_, err := super.Exec(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		mid, fmt.Sprintf("or837-%s", mid.String()[:8]))
 	require.NoError(t, err)
 	scalingSeeded[mid] = true
 	t.Cleanup(func() {
 		bg := context.Background()
-		_, _ = super.Exec(bg, "DELETE FROM openrails.webhook_events WHERE merchant_id = $1", mid)
-		_, _ = super.Exec(bg, "DELETE FROM openrails.merchants WHERE id = $1", mid)
+		_, _ = super.Exec(bg, "DELETE FROM billing.webhook_events WHERE merchant_id = $1", mid)
+		_, _ = super.Exec(bg, "DELETE FROM billing.merchants WHERE id = $1", mid)
 		delete(scalingSeeded, mid)
 	})
 	return mid
@@ -174,7 +174,7 @@ func seedScalingMerchant(t *testing.T, ctx context.Context, super *pgxpool.Pool)
 func insertWebhookMark(t *testing.T, ctx context.Context, super *pgxpool.Pool, mid uuid.UUID, at time.Time) {
 	t.Helper()
 	_, err := super.Exec(ctx,
-		`INSERT INTO openrails.webhook_events (merchant_id, op, event_id, created_at, completed_at)
+		`INSERT INTO billing.webhook_events (merchant_id, op, event_id, created_at, completed_at)
 		 VALUES ($1, 'webhook.ccbill.TestEvent', $2, $3, $3)`,
 		mid, "or837_"+uuid.NewString(), at)
 	require.NoError(t, err)
@@ -184,7 +184,7 @@ func countWebhookMarks(t *testing.T, ctx context.Context, super *pgxpool.Pool, m
 	t.Helper()
 	var n int
 	require.NoError(t, super.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.webhook_events WHERE merchant_id = $1", mid).Scan(&n))
+		"SELECT count(*) FROM billing.webhook_events WHERE merchant_id = $1", mid).Scan(&n))
 	return n
 }
 
@@ -192,7 +192,7 @@ func readSweepCursor(t *testing.T, ctx context.Context, super *pgxpool.Pool) *uu
 	t.Helper()
 	var cur *uuid.UUID
 	require.NoError(t, super.QueryRow(ctx,
-		"SELECT cursor_merchant_id FROM openrails.worker_state WHERE worker_kind = $1",
+		"SELECT cursor_merchant_id FROM billing.worker_state WHERE worker_kind = $1",
 		KindCleanupExpiredData).Scan(&cur))
 	return cur
 }
@@ -202,10 +202,10 @@ func readSweepCursor(t *testing.T, ctx context.Context, super *pgxpool.Pool) *uu
 func resetSweepCursor(t *testing.T, ctx context.Context, super *pgxpool.Pool) {
 	t.Helper()
 	_, err := super.Exec(ctx,
-		"DELETE FROM openrails.worker_state WHERE worker_kind = $1", KindCleanupExpiredData)
+		"DELETE FROM billing.worker_state WHERE worker_kind = $1", KindCleanupExpiredData)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = super.Exec(context.Background(),
-			"DELETE FROM openrails.worker_state WHERE worker_kind = $1", KindCleanupExpiredData)
+			"DELETE FROM billing.worker_state WHERE worker_kind = $1", KindCleanupExpiredData)
 	})
 }

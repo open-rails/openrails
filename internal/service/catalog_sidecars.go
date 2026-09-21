@@ -68,7 +68,7 @@ func (s *Service) PlanCatalogBilling(ctx context.Context, desired SyncCatalogSid
 	err = dbi.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if opts.Insert || opts.Overwrite || opts.Prune {
 			var locked uuid.UUID
-			if err := tx.QueryRow(ctx, `SELECT id FROM openrails.merchants WHERE id=$1 FOR UPDATE`, tid.UUID()).Scan(&locked); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT id FROM billing.merchants WHERE id=$1 FOR UPDATE`, tid.UUID()).Scan(&locked); err != nil {
 				return err
 			}
 		}
@@ -106,7 +106,7 @@ func (s *Service) SyncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 		// Serializes declaration merges. Re-read after acquiring the lock so partial
 		// flags cannot restore state read by an earlier, now stale plan.
 		var merchantID uuid.UUID
-		if err := tx.QueryRow(ctx, `SELECT id FROM openrails.merchants WHERE id=$1 FOR UPDATE`, tid.UUID()).Scan(&merchantID); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT id FROM billing.merchants WHERE id=$1 FOR UPDATE`, tid.UUID()).Scan(&merchantID); err != nil {
 			return err
 		}
 		current, err := readCatalogBilling(ctx, tx, merchantID)
@@ -123,7 +123,7 @@ func (s *Service) SyncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 		for _, card := range next.RateCards {
 			if card.ProductKey != "" {
 				var exists bool
-				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM openrails.products WHERE merchant_id=$1 AND key=$2)`, merchantID, card.ProductKey).Scan(&exists); err != nil {
+				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing.products WHERE merchant_id=$1 AND key=$2)`, merchantID, card.ProductKey).Scan(&exists); err != nil {
 					return err
 				}
 				if !exists {
@@ -163,13 +163,13 @@ func (s *Service) SyncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 			if keep && sameCatalogCards([]CatalogRateCardSpec{card}, []CatalogRateCardSpec{replacement}) {
 				continue
 			}
-			if _, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_rate_cards WHERE merchant_id=$1 AND id=$2 AND customer_id IS NULL`, merchantID, card.id); err != nil {
+			if _, err := tx.Exec(ctx, `DELETE FROM billing.catalog_rate_cards WHERE merchant_id=$1 AND id=$2 AND customer_id IS NULL`, merchantID, card.id); err != nil {
 				return err
 			}
 		}
 		for _, meter := range current.Meters {
 			if !nextMeters[meter.Key] {
-				if _, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_meters WHERE merchant_id=$1 AND key=$2`, merchantID, meter.Key); err != nil {
+				if _, err := tx.Exec(ctx, `DELETE FROM billing.catalog_meters WHERE merchant_id=$1 AND key=$2`, merchantID, meter.Key); err != nil {
 					return err
 				}
 			}
@@ -258,7 +258,7 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 
 func readCatalogBilling(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID) (SyncCatalogSidecarsRequest, error) {
 	var out SyncCatalogSidecarsRequest
-	rows, err := tx.Query(ctx, `SELECT key, COALESCE(event_type,''), COALESCE(value_property,''), COALESCE(aggregation,''), COALESCE(unit,''), group_by FROM openrails.catalog_meters WHERE merchant_id=$1`, merchantID)
+	rows, err := tx.Query(ctx, `SELECT key, COALESCE(event_type,''), COALESCE(value_property,''), COALESCE(aggregation,''), COALESCE(unit,''), group_by FROM billing.catalog_meters WHERE merchant_id=$1`, merchantID)
 	if err != nil {
 		return out, err
 	}
@@ -275,7 +275,7 @@ func readCatalogBilling(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID) (S
 	if err != nil {
 		return out, err
 	}
-	rows, err = tx.Query(ctx, `SELECT rc.id, rc.created_at, COALESCE(p.key,''), rc.ordinal, COALESCE(rc.meter_key,''), rc.payment_term, rc.filter, rc.allowance, rc.price FROM openrails.catalog_rate_cards rc LEFT JOIN openrails.products p ON p.merchant_id=rc.merchant_id AND p.id=rc.product_id WHERE rc.merchant_id=$1 AND rc.customer_id IS NULL`, merchantID)
+	rows, err = tx.Query(ctx, `SELECT rc.id, rc.created_at, COALESCE(p.key,''), rc.ordinal, COALESCE(rc.meter_key,''), rc.payment_term, rc.filter, rc.allowance, rc.price FROM billing.catalog_rate_cards rc LEFT JOIN billing.products p ON p.merchant_id=rc.merchant_id AND p.id=rc.product_id WHERE rc.merchant_id=$1 AND rc.customer_id IS NULL`, merchantID)
 	if err != nil {
 		return out, err
 	}
@@ -444,7 +444,7 @@ func syncMeter(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, meter Catal
 		return err
 	}
 	_, err = tx.Exec(ctx, `
-INSERT INTO openrails.catalog_meters (merchant_id,key,event_type,value_property,aggregation,unit,group_by)
+INSERT INTO billing.catalog_meters (merchant_id,key,event_type,value_property,aggregation,unit,group_by)
 VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),$7::jsonb)
 ON CONFLICT (merchant_id,key) DO UPDATE SET event_type=EXCLUDED.event_type,
  value_property=EXCLUDED.value_property,aggregation=EXCLUDED.aggregation,
@@ -473,7 +473,7 @@ func syncRateCard(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, spec Cat
 		created = &spec.createdAt
 	}
 	_, err = tx.Exec(ctx, `
-INSERT INTO openrails.catalog_rate_cards
+INSERT INTO billing.catalog_rate_cards
  (merchant_id,product_id,ordinal,meter_key,payment_term,filter,allowance,price,id,created_at)
 VALUES ($1,$2,$3,NULLIF($4,''),$5,$6::jsonb,NULLIF($7,'')::jsonb,$8::jsonb,COALESCE($9,gen_random_uuid()),COALESCE($10,now()))
 ON CONFLICT (merchant_id,product_id,ordinal) DO UPDATE SET meter_key=EXCLUDED.meter_key,
@@ -484,7 +484,7 @@ ON CONFLICT (merchant_id,product_id,ordinal) DO UPDATE SET meter_key=EXCLUDED.me
 
 func resolveProductID(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, key string) (uuid.UUID, error) {
 	var id uuid.UUID
-	if err := tx.QueryRow(ctx, `SELECT id FROM openrails.products WHERE merchant_id = $1 AND key = $2`, merchantID, strings.TrimSpace(key)).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT id FROM billing.products WHERE merchant_id = $1 AND key = $2`, merchantID, strings.TrimSpace(key)).Scan(&id); err != nil {
 		return uuid.Nil, fmt.Errorf("resolve product %q: %w", key, err)
 	}
 	return id, nil

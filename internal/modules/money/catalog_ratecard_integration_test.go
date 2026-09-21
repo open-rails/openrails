@@ -20,12 +20,12 @@ func TestFinalizeInvoice_RatesCatalogRateCardsWithMatrixCapAndAllowance(t *testi
 	dropletMeter := "droplet-seconds-" + uuid.NewString()
 	bandwidthMeter := "bandwidth-bytes-" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND product_id = ANY($2::uuid[])", merchantID, []uuid.UUID{dropletProductID, bandwidthProductID})
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = ANY($2::text[])", merchantID, []string{dropletMeter, bandwidthMeter})
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = ANY($1::uuid[])", []uuid.UUID{dropletProductID, bandwidthProductID})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND product_id = ANY($2::uuid[])", merchantID, []uuid.UUID{dropletProductID, bandwidthProductID})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = ANY($2::text[])", merchantID, []string{dropletMeter, bandwidthMeter})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = ANY($1::uuid[])", []uuid.UUID{dropletProductID, bandwidthProductID})
 	})
 
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
@@ -34,18 +34,18 @@ func TestFinalizeInvoice_RatesCatalogRateCardsWithMatrixCapAndAllowance(t *testi
 	require.NoError(t, err)
 
 	_, err = pool.Exec(ctx, `
-INSERT INTO openrails.products (id, key, display_name, merchant_id)
+INSERT INTO billing.products (id, key, display_name, merchant_id)
 VALUES ($1, 'droplet-runtime', 'Droplet Runtime', $3),
        ($2, 'bandwidth-transfer', 'Bandwidth Transfer', $3)`, dropletProductID, bandwidthProductID, merchantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-INSERT INTO openrails.catalog_meters (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
+INSERT INTO billing.catalog_meters (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
 VALUES ($1, $2, 'droplet.usage', 'seconds', 'sum', 'second', '{"size_slug":"metadata.size_slug","resource_id":"metadata.resource_id","region":"metadata.region"}'::jsonb),
        ($1, $3, 'bandwidth.transfer', 'bytes', 'sum', 'byte', '{}'::jsonb)`,
 		merchantID, dropletMeter, bandwidthMeter)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-INSERT INTO openrails.catalog_rate_cards
+INSERT INTO billing.catalog_rate_cards
     (merchant_id, product_id, ordinal, meter_key, payment_term, filter, price)
 VALUES
     ($1, $2, 1, $4, 'in_arrears', '{"region":["eu"]}'::jsonb, '{
@@ -61,7 +61,7 @@ VALUES
 		merchantID, dropletProductID, bandwidthProductID, dropletMeter, bandwidthMeter)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-UPDATE openrails.catalog_rate_cards
+UPDATE billing.catalog_rate_cards
 SET allowance = jsonb_build_object(
 	'accrue_from', $3::text,
 	'cap', '28d',
@@ -119,7 +119,7 @@ WHERE merchant_id = $1 AND product_id = $2`, merchantID, bandwidthProductID, dro
 	var itemTotal int64
 	require.NoError(t, pool.QueryRow(ctx, `
 SELECT count(*), COALESCE(sum(amount), 0)::bigint
-FROM openrails.invoice_items
+FROM billing.invoice_items
 WHERE customer_id = $1
   AND invoice_id = $2
   AND status = 'invoiced'
@@ -138,26 +138,26 @@ func TestFinalizeInvoice_MatrixCellIncludedIsNotSelfAllowance(t *testing.T) {
 	productID := uuid.New()
 	meterKey := "droplet-seconds-" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meterKey)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meterKey)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, 'droplet-self-allow', 'Droplet', $2)`, productID, merchantID)
+	_, err = pool.Exec(ctx, `INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, 'droplet-self-allow', 'Droplet', $2)`, productID, merchantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-INSERT INTO openrails.catalog_meters (merchant_id, key, event_type, value_property, aggregation, group_by)
+INSERT INTO billing.catalog_meters (merchant_id, key, event_type, value_property, aggregation, group_by)
 VALUES ($1, $2, 'droplet.usage', 'seconds', 'sum', '{"size_slug":"metadata.size_slug","resource_id":"metadata.resource_id"}'::jsonb)`, merchantID, meterKey)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
+INSERT INTO billing.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 VALUES ($1, $2, 1, $3, 'in_arrears', '{
   "model":"per_unit","currency":"USD",
   "per_unit":{"divide_by":3600,"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":"8930","maximum_amount":"6000000","included":1000}}}}

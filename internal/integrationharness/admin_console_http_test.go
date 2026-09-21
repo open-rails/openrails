@@ -173,7 +173,7 @@ func TestAdminCustomersSearch(t *testing.T) {
 	seedCustomer := func(merchantID uuid.UUID, subject string) uuid.UUID {
 		id := uuid.MustParse(subject)
 		_, err := pool.Exec(ctx,
-			`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+			`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`,
 			id, merchantID)
 		require.NoError(t, err)
 		return id
@@ -191,13 +191,13 @@ func TestAdminCustomersSearch(t *testing.T) {
 	// subscriptions). Customer detail must still identify inactive customers.
 	productID := uuid.New()
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Cust Search Product', $3)`,
+		`INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Cust Search Product', $3)`,
 		productID, "cust-search-"+uuid.NewString(), uuid.UUID(dbtest.TestMerchantID))
 	require.NoError(t, err)
 	aliceEmail := fmt.Sprintf("alice-%s@example.test", uuid.NewString()[:8])
 	aliceMerchantPSP := dbtest.EnsureTestPSP(ctx, t, pool, uuid.UUID(dbtest.TestMerchantID), "nmi")
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.subscriptions (product_id, status, rail, user_email, merchant_id, customer_id, psp_id, cancelled_at, cancel_type)
+		`INSERT INTO billing.subscriptions (product_id, status, rail, user_email, merchant_id, customer_id, psp_id, cancelled_at, cancel_type)
 		 VALUES ($1, 'cancelled', 'nmi', $2, $3, $4, $5, NOW(), 'user')`,
 		productID, aliceEmail, uuid.UUID(dbtest.TestMerchantID), alice, aliceMerchantPSP)
 	require.NoError(t, err)

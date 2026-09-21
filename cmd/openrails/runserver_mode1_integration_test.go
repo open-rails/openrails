@@ -179,7 +179,7 @@ func TestRunServerMode1BootArmsNMIPSPFromManifest(t *testing.T) {
 
 	var merchantID, permissionGroupID string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT id::text, COALESCE(permission_group_id, '') FROM openrails.merchants WHERE slug = $1
+		SELECT id::text, COALESCE(permission_group_id, '') FROM billing.merchants WHERE slug = $1
 	`, mode1TestMerchantSlug).Scan(&merchantID, &permissionGroupID))
 	require.NotEmpty(t, permissionGroupID, "manifest boot must bind the merchant permission group")
 
@@ -196,7 +196,7 @@ func TestRunServerMode1BootArmsNMIPSPFromManifest(t *testing.T) {
 
 	var pspCount int
 	require.NoError(t, scoped.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.psps
+		SELECT count(*) FROM billing.psps
 		 WHERE merchant_id = $1 AND rail = 'nmi' AND environment = 'test'
 		   AND account_id = '100001' AND NOT archived
 	`, merchantID).Scan(&pspCount))
@@ -207,7 +207,7 @@ func TestRunServerMode1BootArmsNMIPSPFromManifest(t *testing.T) {
 	// persistent secret store.
 	var secretCount int
 	require.NoError(t, scoped.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.merchant_secrets WHERE merchant_id = $1
+		SELECT count(*) FROM billing.merchant_secrets WHERE merchant_id = $1
 	`, merchantID).Scan(&secretCount))
 	require.Zero(t, secretCount, "MODE-1 secrets must never persist (#723)")
 	require.NoError(t, scoped.Rollback(ctx))
@@ -216,12 +216,13 @@ func TestRunServerMode1BootArmsNMIPSPFromManifest(t *testing.T) {
 	// (#734) and prove the armed rail passes checkoutRailConfigured while an
 	// unarmed rail is refused. The user token is minted through a second
 	// control-plane attach sharing the config-declared signing key.
-	_, err = pool.Exec(ctx, `UPDATE openrails.merchants SET api_host = 'chaos-mode1.test' WHERE id = $1`, merchantID)
+	_, err = pool.Exec(ctx, `UPDATE billing.merchants SET api_host = 'chaos-mode1.test' WHERE id = $1`, merchantID)
 	require.NoError(t, err)
 
 	cfg, err := config.Load(cfgPath)
 	require.NoError(t, err)
-	mintApp := &app.App{Config: cfg}
+	mintApp, err := app.Bootstrap(ctx, cfg)
+	require.NoError(t, err)
 	defer func() { _ = mintApp.Close(context.Background()) }()
 	require.NoError(t, embcp.Attach(ctx, mintApp, cfg, nil))
 	cp := embcp.Get(mintApp)

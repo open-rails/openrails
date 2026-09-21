@@ -65,10 +65,10 @@ func (f *reconcileCase) subscription(ref, status, email string, customer uuid.UU
 		s.CancelledAt = tp(f.now.Add(-3 * 24 * time.Hour))
 		s.CancelType = "user"
 	}
-	f.exec(`INSERT INTO openrails.customers (merchant_id,id,issuer) VALUES ($1,$2,'reconcile-case') ON CONFLICT DO NOTHING`, f.merchant.UUID(), customer)
-	f.exec(`INSERT INTO openrails.products (id,merchant_id,key,display_name,entitlements_spec) VALUES ($1,$2,$3,'Premium','{"premium":null}')`, product, f.merchant.UUID(), "case-"+product.String())
-	f.exec(`INSERT INTO openrails.prices (id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew) VALUES ($1,$2,$3,9990000,'USD',720,true)`, price, f.merchant.UUID(), product)
-	f.exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,user_email,started_at,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot,psp_id,cancelled_at,cancel_type)
+	f.exec(`INSERT INTO billing.customers (merchant_id,id,issuer) VALUES ($1,$2,'reconcile-case') ON CONFLICT DO NOTHING`, f.merchant.UUID(), customer)
+	f.exec(`INSERT INTO billing.products (id,merchant_id,key,display_name,entitlements_spec) VALUES ($1,$2,$3,'Premium','{"premium":null}')`, product, f.merchant.UUID(), "case-"+product.String())
+	f.exec(`INSERT INTO billing.prices (id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew) VALUES ($1,$2,$3,9990000,'USD',720,true)`, price, f.merchant.UUID(), product)
+	f.exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,user_email,started_at,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot,psp_id,cancelled_at,cancel_type)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'{"premium":null}',$13,$14,NULLIF($15,''))`, s.ID, f.merchant.UUID(), customer, product, price, status, s.Rail, ref, email, s.StartedAt, s.CurrentPeriodStartsAt, s.CurrentPeriodEndsAt, f.psp.ID, s.CancelledAt, s.CancelType)
 	f.snap.Subscriptions = append(f.snap.Subscriptions, RemoteSubscription{RailSubscriptionID: ref, Status: SubscriptionStatus(status), NextBillingAt: s.CurrentPeriodEndsAt})
 	return s
@@ -76,20 +76,20 @@ func (f *reconcileCase) subscription(ref, status, email string, customer uuid.UU
 
 func (f *reconcileCase) grant(s LocalSubscription) {
 	f.t.Helper()
-	f.exec(`INSERT INTO openrails.entitlements (merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type) VALUES ($1,$2,'premium',$3,$4,$5,'subscription')`, f.merchant.UUID(), s.CustomerID, s.CurrentPeriodStartsAt, s.CurrentPeriodEndsAt, s.ID)
+	f.exec(`INSERT INTO billing.entitlements (merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type) VALUES ($1,$2,'premium',$3,$4,$5,'subscription')`, f.merchant.UUID(), s.CustomerID, s.CurrentPeriodStartsAt, s.CurrentPeriodEndsAt, s.ID)
 }
 
 func (f *reconcileCase) payment(s LocalSubscription, txn, status string, amount int64, refunded *uuid.UUID, at time.Time) uuid.UUID {
 	f.t.Helper()
 	id := uuid.New()
-	f.exec(`INSERT INTO openrails.payments (id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,subscription_id,refunded_payment_id,purchased_at,psp_id)
+	f.exec(`INSERT INTO billing.payments (id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,subscription_id,refunded_payment_id,purchased_at,psp_id)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$7,'USD',$8,$9,$10,$11,$12)`, id, f.merchant.UUID(), s.CustomerID, s.PriceID, s.Rail, txn, amount, status, s.ID, refunded, at, f.psp.ID)
 	return id
 }
 
 func (f *reconcileCase) method(customer uuid.UUID, ref string) {
 	f.t.Helper()
-	f.exec(`INSERT INTO openrails.payment_methods (merchant_id,customer_id,psp_id,rail,initial_transaction_id,rail_customer_ref,last_four,expiry_date) VALUES ($1,$2,$3,$4,'initial',$5,'1111','1029')`, f.merchant.UUID(), customer, f.psp.ID, f.psp.Rail, ref)
+	f.exec(`INSERT INTO billing.payment_methods (merchant_id,customer_id,psp_id,rail,initial_transaction_id,rail_customer_ref,last_four,expiry_date) VALUES ($1,$2,$3,$4,'initial',$5,'1111','1029')`, f.merchant.UUID(), customer, f.psp.ID, f.psp.Rail, ref)
 }
 
 func (f *reconcileCase) run(mode Mode) *RunResult {
@@ -233,7 +233,7 @@ func TestReconcileTaxonomyWorkflow(t *testing.T) {
 	t.Run("PS3 user cancellation is never resurrected", func(t *testing.T) {
 		f := newReconcileCase(t, ProviderStripe)
 		s := f.subscription("sub_dead", "cancelled", "", uuid.Nil)
-		f.exec(`UPDATE openrails.subscriptions SET cancel_type='user',cancelled_at=$2 WHERE id=$1`, s.ID, f.now.Add(-3*24*time.Hour))
+		f.exec(`UPDATE billing.subscriptions SET cancel_type='user',cancelled_at=$2 WHERE id=$1`, s.ID, f.now.Add(-3*24*time.Hour))
 		f.snap.Subscriptions[0].Status = SubscriptionStatusActive
 		before := f.state()
 		finding := f.finding(f.run(ModeEnforce), FindingStatusMismatch)
@@ -261,7 +261,7 @@ func TestReconcileTaxonomyWorkflow(t *testing.T) {
 			require.Equal(t, s.CustomerID, payments[0].CustomerID)
 			require.EqualValues(t, 999, payments[0].AmountCents)
 			var entitlements []string
-			require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT array_agg(entitlement ORDER BY entitlement) FROM openrails.entitlements WHERE customer_id=$1`, s.CustomerID).Scan(&entitlements))
+			require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT array_agg(entitlement ORDER BY entitlement) FROM billing.entitlements WHERE customer_id=$1`, s.CustomerID).Scan(&entitlements))
 			require.Equal(t, []string{"premium"}, entitlements)
 			return nil
 		}))
@@ -325,7 +325,7 @@ func TestReconcileTaxonomyWorkflow(t *testing.T) {
 		f := newReconcileCase(t, ProviderNMI)
 		s := f.subscription("dup-1", "active", "", uuid.Nil)
 		other := f.subscription("dup-2", "past_due", "", s.CustomerID)
-		f.exec(`UPDATE openrails.subscriptions SET tier_group='premium' WHERE id=ANY($1)`, []uuid.UUID{s.ID, other.ID})
+		f.exec(`UPDATE billing.subscriptions SET tier_group='premium' WHERE id=ANY($1)`, []uuid.UUID{s.ID, other.ID})
 		f.snap.Subscriptions[1].Status = SubscriptionStatusActive
 		finding := f.finding(f.run(ModeEnforce), FindingDuplicateSubscriptions)
 		require.Equal(t, FindingStatusAdminRequired, finding.Status)
@@ -333,7 +333,7 @@ func TestReconcileTaxonomyWorkflow(t *testing.T) {
 		// The mismatch may repair the second row's status, but neither row may be cancelled.
 		require.NoError(t, f.db.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
 			var remaining, cancelled int
-			require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE status='cancelled') FROM openrails.subscriptions`).Scan(&remaining, &cancelled))
+			require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE status='cancelled') FROM billing.subscriptions`).Scan(&remaining, &cancelled))
 			require.Equal(t, 2, remaining)
 			require.Zero(t, cancelled)
 			return nil
@@ -345,7 +345,7 @@ func TestReconcileIntentAndIgnoredFinding(t *testing.T) {
 	t.Run("recorded delete keeps status drift out of the operator queue", func(t *testing.T) {
 		f := newReconcileCase(t, ProviderNMI)
 		s := f.subscription("nmi-intent", "cancelled", "", uuid.Nil)
-		f.exec(`UPDATE openrails.subscriptions SET cancel_type='user',cancelled_at=$2,deletion_scheduled_at=$3 WHERE id=$1`, s.ID, f.now.Add(-24*time.Hour), f.now.Add(12*time.Hour))
+		f.exec(`UPDATE billing.subscriptions SET cancel_type='user',cancelled_at=$2,deletion_scheduled_at=$3 WHERE id=$1`, s.ID, f.now.Add(-24*time.Hour), f.now.Add(12*time.Hour))
 		f.snap.Subscriptions[0].Status = SubscriptionStatusActive
 		before := f.state()
 		finding := f.finding(f.run(ModeEnforce), FindingStatusMismatch)
@@ -400,10 +400,10 @@ func TestReconcileMaterializationRefusals(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			f := newReconcileCase(t, ProviderNMI)
 			owner := f.subscription("known", "active", "", uuid.Nil)
-			f.exec(`DELETE FROM openrails.subscriptions WHERE id=$1`, owner.ID)
+			f.exec(`DELETE FROM billing.subscriptions WHERE id=$1`, owner.ID)
 			f.snap.Subscriptions = nil
 			f.method(owner.CustomerID, "vault-77")
-			f.exec(`INSERT INTO openrails.price_psp_bindings (merchant_id,price_id,psp_id,plan_id) VALUES ($1,$2,$3,'plan-gold')`, f.merchant.UUID(), owner.PriceID, f.psp.ID)
+			f.exec(`INSERT INTO billing.price_psp_bindings (merchant_id,price_id,psp_id,plan_id) VALUES ($1,$2,$3,'plan-gold')`, f.merchant.UUID(), owner.PriceID, f.psp.ID)
 			f.snap.Capabilities = Capabilities{Subscriptions: true, Transactions: true, Vault: true}
 			remote := RemoteSubscription{RailSubscriptionID: "remote-77", Status: SubscriptionStatusActive, CustomerID: "vault-77", Email: "owner@example.com", PlanID: "plan-gold", NextBillingAt: tp(f.now.Add(20 * 24 * time.Hour)), LastBilledAt: tp(f.now.Add(-10 * 24 * time.Hour)), AmountCents: 999, Currency: "USD"}
 			f.snap.Transactions = []RemoteTransaction{{TransactionID: "txn-mat-1", Type: TransactionTypeSale, Success: true, AmountCents: 999, Currency: "USD", OccurredAt: f.now.Add(-10 * 24 * time.Hour), Raw: rawJSON(map[string]any{"customer_vault_id": "vault-77"})}}
@@ -417,7 +417,7 @@ func TestReconcileMaterializationRefusals(t *testing.T) {
 				f.subscription("other", "active", "owner@example.com", uuid.Nil)
 				blocker = "ambiguous"
 			case "unresolved plan":
-				f.exec(`DELETE FROM openrails.price_psp_bindings WHERE price_id=$1`, owner.PriceID)
+				f.exec(`DELETE FROM billing.price_psp_bindings WHERE price_id=$1`, owner.PriceID)
 				blocker = "plan unresolved"
 			case "past due without period":
 				remote.Status = SubscriptionStatusPastDue
@@ -509,7 +509,7 @@ func TestReconcileCancellationBudget(t *testing.T) {
 				require.Equal(t, 3, result.Summary.Providers["nmi"].AutoFixed)
 				require.NoError(t, f.db.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
 					var remaining, cancelled int
-					require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE status='cancelled') FROM openrails.subscriptions`).Scan(&remaining, &cancelled))
+					require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE status='cancelled') FROM billing.subscriptions`).Scan(&remaining, &cancelled))
 					require.Equal(t, 200, remaining)
 					require.Equal(t, 3, cancelled)
 					return nil

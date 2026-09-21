@@ -11,6 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -62,10 +63,15 @@ func (a *App) SetControlPlane(cp any, ownedPool *pgxpool.Pool) {
 // hosts supply their database as a pgx pool (PGXPool); the bun-era *sql.DB
 // override was removed with the ORM (#334).
 type BootstrapOptions struct {
-	PGXPool *pgxpool.Pool
-	Redis   *redis.Client
-	Cache   cache.Cache
-	Clock   clockwork.Clock
+	RiverSchema string
+	PGXPool     *pgxpool.Pool
+	Redis       *redis.Client
+	Cache       cache.Cache
+	Clock       clockwork.Clock
+	// UserDirectory and UsernameResolver are explicit host identity seams.
+	// OpenRails never assumes ownership of AuthKit's profiles schema.
+	UserDirectory    openrails.UserDirectory
+	UsernameResolver openrails.UsernameResolver
 
 	ConfiguredMerchant merchant.ID
 }
@@ -109,6 +115,12 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 
 	runtime, err := buildRuntimeWithOverrides(ctx, cfg, &runtimeOverrides{
 		DB: dbOverride,
+		RiverSchema: func() string {
+			if opts != nil {
+				return opts.RiverSchema
+			}
+			return ""
+		}(),
 		Redis: func() *redis.Client {
 			if opts != nil {
 				return opts.Redis
@@ -118,6 +130,18 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		Clock: func() clockwork.Clock {
 			if opts != nil {
 				return opts.Clock
+			}
+			return nil
+		}(),
+		UserDirectory: func() openrails.UserDirectory {
+			if opts != nil {
+				return opts.UserDirectory
+			}
+			return nil
+		}(),
+		UsernameResolver: func() openrails.UsernameResolver {
+			if opts != nil {
+				return opts.UsernameResolver
 			}
 			return nil
 		}(),
@@ -167,6 +191,13 @@ func (a *App) Close(ctx context.Context) error {
 	if a.stopRedisMonitor != nil {
 		a.stopRedisMonitor()
 	}
+	var errs []error
+	// Shared workers must stop before their optional components release pools.
+	if a.Runtime != nil {
+		if err := a.Runtime.Close(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	if cp, ok := a.ControlPlane.(interface{ Close() }); ok {
 		cp.Close()
 	}
@@ -175,15 +206,9 @@ func (a *App) Close(ctx context.Context) error {
 		a.controlPlanePool.Close()
 		a.controlPlanePool = nil
 	}
-	var errs []error
 	if a.Cache != nil {
 		if err := a.Cache.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close cache: %w", err))
-		}
-	}
-	if a.Runtime != nil {
-		if err := a.Runtime.Close(ctx); err != nil {
-			errs = append(errs, err)
 		}
 	}
 	if len(errs) == 0 {

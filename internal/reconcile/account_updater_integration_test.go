@@ -43,7 +43,7 @@ func TestReconcileAdoptsAccountUpdaterRefreshedCard(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		seeded = seedReconcileFixtures(t, ctx, appDB, mid.UUID(), psp.ID)
 		_, err := appDB.Qx(ctx).Exec(ctx, `
-			INSERT INTO openrails.payment_methods
+			INSERT INTO billing.payment_methods
 			  (id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
 			   initial_transaction_id, last_four, card_type, expiry_date, psp_id)
 			VALUES ($1, $2, $3, 'nmi', $4, '', '', '1111', 'visa', '1226', $5)`,
@@ -52,7 +52,7 @@ func TestReconcileAdoptsAccountUpdaterRefreshedCard(t *testing.T) {
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payment_methods WHERE id = $1`, methodID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payment_methods WHERE id = $1`, methodID)
 			return nil
 		})
 	})
@@ -66,9 +66,9 @@ func TestReconcileAdoptsAccountUpdaterRefreshedCard(t *testing.T) {
 		var alive, dead string
 		require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-				`SELECT rail_subscription_id FROM openrails.subscriptions WHERE id = $1`, seeded.subAlive).Scan(&alive))
+				`SELECT rail_subscription_id FROM billing.subscriptions WHERE id = $1`, seeded.subAlive).Scan(&alive))
 			return appDB.Qx(ctx).QueryRow(ctx,
-				`SELECT rail_subscription_id FROM openrails.subscriptions WHERE id = $1`, seeded.subDead).Scan(&dead)
+				`SELECT rail_subscription_id FROM billing.subscriptions WHERE id = $1`, seeded.subDead).Scan(&dead)
 		}))
 		return &RemoteSnapshot{
 			Provider:     ProviderNMI,
@@ -118,7 +118,7 @@ func TestReconcileAdoptsAccountUpdaterRefreshedCard(t *testing.T) {
 			var last4, expiry string
 			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `
 				SELECT COALESCE(last_four,''), COALESCE(expiry_date,'')
-				  FROM openrails.payment_methods WHERE id = $1`, methodID).
+				  FROM billing.payment_methods WHERE id = $1`, methodID).
 				Scan(&last4, &expiry))
 			assert.Equal(t, wantLast4, last4)
 			assert.Equal(t, wantExpiry, expiry)
@@ -136,7 +136,7 @@ func TestReconcileAdoptsAccountUpdaterRefreshedCard(t *testing.T) {
 			var status string
 			var cancelledAt, deletedAt *time.Time
 			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-				`SELECT status::text, cancelled_at, deleted_at FROM openrails.subscriptions WHERE id = $1`, id).
+				`SELECT status::text, cancelled_at, deleted_at FROM billing.subscriptions WHERE id = $1`, id).
 				Scan(&status, &cancelledAt, &deletedAt))
 			assert.Equal(t, "active", status, "a refreshed card must never cost a subscription")
 			assert.Nil(t, cancelledAt, "no cancellation")
@@ -144,7 +144,7 @@ func TestReconcileAdoptsAccountUpdaterRefreshedCard(t *testing.T) {
 		}
 		var live int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements WHERE id = $1 AND revoked_at IS NULL`, seeded.entDeadID).Scan(&live))
+			`SELECT count(*) FROM billing.entitlements WHERE id = $1 AND revoked_at IS NULL`, seeded.entDeadID).Scan(&live))
 		assert.Equal(t, 1, live, "entitlements survive an instrument refresh")
 		return nil
 	}))

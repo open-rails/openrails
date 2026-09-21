@@ -47,7 +47,7 @@ func EnsureCustomerIDPgxFor(ctx context.Context, t testing.TB, qx gen.DBTX, merc
 
 func ensureCustomerUnder(ctx context.Context, t testing.TB, qx gen.DBTX, merchantID, uid uuid.UUID) uuid.UUID {
 	t.Helper()
-	row, err := gen.New(qx).EnsureCustomer(ctx, gen.EnsureCustomerParams{
+	row, err := Queries(qx).EnsureCustomer(ctx, gen.EnsureCustomerParams{
 		ID:         uid,
 		MerchantID: merchantID,
 	})

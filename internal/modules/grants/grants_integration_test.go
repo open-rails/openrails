@@ -32,20 +32,20 @@ func testGrants(t *testing.T) (*grants.Ledger, *pgxpool.Pool, context.Context, u
 	merchantID := dbtest.TestMerchantID.UUID()
 	customer := uuid.New()
 	product := uuid.New()
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, customer, merchantID)
+	_, err := pool.Exec(ctx, `INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, customer, merchantID)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+	_, err = pool.Exec(ctx, `INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
 		product, "grant-test-"+short(), "Grant Test Product", merchantID)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		// child (terminating) events before parent grant rows (self-FK).
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2 AND event <> 'grant'`, merchantID, customer)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2`, merchantID, customer)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id = $1 AND customer_id = $2`, merchantID, customer)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_transfers WHERE merchant_id = $1 AND customer_id = $2`, merchantID, customer)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id = $1 AND customer_id = $2 AND event <> 'grant'`, merchantID, customer)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.grants WHERE merchant_id = $1 AND customer_id = $2`, merchantID, customer)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.entitlements WHERE merchant_id = $1 AND customer_id = $2`, merchantID, customer)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.ledger_transfers WHERE merchant_id = $1 AND customer_id = $2`, merchantID, customer)
 	})
-	return grants.New(gen.New(pool), merchantID), pool, ctx, customer, product, merchantID
+	return grants.New(dbtest.Queries(pool), merchantID), pool, ctx, customer, product, merchantID
 }
 
 // A grant materializes to an entitlement window dated to the grant; re-deriving
@@ -78,7 +78,7 @@ func TestGrants_EntitlementProjection(t *testing.T) {
 	require.NoError(t, l.MaterializeGrant(ctx, hg))
 	var gotEnd time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT end_at FROM openrails.entitlements WHERE merchant_id=$1 AND grant_id=$2 AND entitlement='legacy90' AND deleted_at IS NULL`,
+		`SELECT end_at FROM billing.entitlements WHERE merchant_id=$1 AND grant_id=$2 AND entitlement='legacy90' AND deleted_at IS NULL`,
 		merchantID, hg.ID).Scan(&gotEnd))
 	require.True(t, gotEnd.Equal(end), "window dated to the source event")
 	require.True(t, gotEnd.Before(time.Now()), "a 2025 grant replays already-expired")
@@ -128,7 +128,7 @@ func TestGrants_RevokeAlreadyExpired(t *testing.T) {
 
 	var endsAtNull bool
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT ends_at IS NULL FROM openrails.grants WHERE merchant_id=$1 AND supersedes_id=$2 AND event='revoke'`,
+		`SELECT ends_at IS NULL FROM billing.grants WHERE merchant_id=$1 AND supersedes_id=$2 AND event='revoke'`,
 		merchantID, g.ID).Scan(&endsAtNull))
 	require.True(t, endsAtNull, "termination row leaves ends_at NULL")
 }
@@ -148,7 +148,7 @@ func TestGrants_TerminationRejectsWindow(t *testing.T) {
 	// Otherwise-valid revoke row (satisfies grants_valid_window with a future
 	// window) but carrying an ends_at — must be rejected by grants_termination_no_window.
 	_, err = pool.Exec(ctx, `
-		INSERT INTO openrails.grants
+		INSERT INTO billing.grants
 			(merchant_id, customer_id, kind, source_type, source_id, event, supersedes_id, starts_at, ends_at)
 		VALUES ($1, $2, 'entitlement', 'subscription', $3, 'revoke', $4, now(), now() + interval '1 hour')`,
 		merchantID, customer, g.SourceID, g.ID)
@@ -172,7 +172,7 @@ func TestGrants_RevokeAsOfOwnershipRevokedAt(t *testing.T) {
 	_, err = l.RevokeAsOf(ctx, g.ID, "subscription source revoked", asOf)
 	require.NoError(t, err)
 
-	rows, err := gen.New(pool).ListOwnershipGrantsWithStatus(ctx, gen.ListOwnershipGrantsWithStatusParams{
+	rows, err := dbtest.Queries(pool).ListOwnershipGrantsWithStatus(ctx, gen.ListOwnershipGrantsWithStatusParams{
 		MerchantID: merchantID, CustomerID: customer,
 	})
 	require.NoError(t, err)
@@ -200,7 +200,7 @@ func TestGrants_CreditDepositSeam(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, l.MaterializeGrant(ctx, g))
 
-	ml := ledger.New(gen.New(pool), merchantID)
+	ml := ledger.New(dbtest.Queries(pool), merchantID)
 	custAcc, err := ml.EnsureCustomerBalance(ctx, customer, cur)
 	require.NoError(t, err)
 	bal, err := ml.Balance(ctx, custAcc)
@@ -216,7 +216,7 @@ func TestGrants_CreditDepositSeam(t *testing.T) {
 	require.Equal(t, amount, bal2)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})
 }
 
@@ -251,10 +251,10 @@ func TestGrants_AppendOnly(t *testing.T) {
 	_, err = conn.Exec(ctx, `SELECT set_config('app.merchant_id', $1, false)`, merchantID.String())
 	require.NoError(t, err)
 
-	_, err = conn.Exec(ctx, `UPDATE openrails.grants SET reason = 'x' WHERE id = $1`, g.ID)
+	_, err = conn.Exec(ctx, `UPDATE billing.grants SET reason = 'x' WHERE id = $1`, g.ID)
 	require.Error(t, err)
 	require.Contains(t, strings.ToLower(err.Error()), "permission denied")
-	_, err = conn.Exec(ctx, `DELETE FROM openrails.grants WHERE id = $1`, g.ID)
+	_, err = conn.Exec(ctx, `DELETE FROM billing.grants WHERE id = $1`, g.ID)
 	require.Error(t, err)
 	require.Contains(t, strings.ToLower(err.Error()), "permission denied")
 }
@@ -269,7 +269,7 @@ func entWindows(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchant,
 	}
 	var n int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND grant_id=$2 AND entitlement=$3 AND deleted_at IS NULL AND `+cond,
+		`SELECT count(*) FROM billing.entitlements WHERE merchant_id=$1 AND grant_id=$2 AND entitlement=$3 AND deleted_at IS NULL AND `+cond,
 		merchant, grantID, feature).Scan(&n))
 	return n
 }
@@ -280,7 +280,7 @@ func requireConserved(t *testing.T, ctx context.Context, pool *pgxpool.Pool, mer
 	t.Helper()
 	var net int64
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT COALESCE(SUM(credits_posted - debits_posted), 0)::bigint FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`,
+		`SELECT COALESCE(SUM(credits_posted - debits_posted), 0)::bigint FROM billing.ledger_accounts WHERE merchant_id=$1 AND currency=$2`,
 		merchantID, cur).Scan(&net))
 	require.Equal(t, int64(0), net, "ledger conserves (Σ == 0)")
 }
@@ -289,14 +289,14 @@ func liveOwnershipCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, m
 	t.Helper()
 	var n int
 	require.NoError(t, pool.QueryRow(ctx, `
-SELECT count(*) FROM openrails.grants g
+SELECT count(*) FROM billing.grants g
 WHERE g.merchant_id = $1
   AND g.customer_id = $2
   AND g.product_id = $3
   AND g.kind = 'ownership'
   AND g.event = 'grant'
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants t
+      SELECT 1 FROM billing.grants t
       WHERE t.merchant_id = g.merchant_id
         AND t.supersedes_id = g.id
         AND t.event IN ('revoke', 'expire', 'supersede')
@@ -311,7 +311,7 @@ WHERE g.merchant_id = $1
 // are untouched; idempotent.
 func TestGrants_RevokeBySource(t *testing.T) {
 	l, pool, ctx, customer, _, merchantID := testGrants(t)
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	now := time.Now().UTC()
 	subID := uuid.New()
 	otherSubID := uuid.New()

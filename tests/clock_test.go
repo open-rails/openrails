@@ -85,7 +85,7 @@ func TestRuntimeClockInjectedBeforeConstruction(t *testing.T) {
 	})
 	countDueRetries := func() int {
 		return suite.Count(ctx, `
-			SELECT COUNT(*) FROM openrails.subscriptions sub
+			SELECT COUNT(*) FROM billing.subscriptions sub
 			WHERE sub.rail = $1
 			  AND sub.customer_id = $2
 			  AND sub.status = $3

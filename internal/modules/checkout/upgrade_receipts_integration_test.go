@@ -48,7 +48,7 @@ func (fx *upgradeAdoptFixture) operation(t *testing.T) gen.OpenrailsRailIntent {
 func (fx *upgradeAdoptFixture) restartAndVerify(t *testing.T) gen.OpenrailsRailIntent {
 	t.Helper()
 	in := fx.operation(t)
-	_, err := fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE openrails.rail_intents SET next_attempt_at='epoch',claimed_until=NULL WHERE id=$1`, in.ID)
+	_, err := fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE billing.rail_intents SET next_attempt_at='epoch',claimed_until=NULL WHERE id=$1`, in.ID)
 	require.NoError(t, err)
 	// New runner and handler: all recovery state lives in the database.
 	runner := &intents.Runner{Store: intents.NewStore(fx.db), Registry: intents.NewRegistry(NewNMIUpgradeIntentHandler(fx.svc)), Config: fullModeConfig(), Clock: fx.svc.Clock()}
@@ -70,10 +70,10 @@ func TestUpgradeReceiptsRestartAfterLocalRollback(t *testing.T) {
 	// Reject only this successor insert, after the old-subscription UPDATE.
 	// The failed transaction must preserve old access and all provider receipts.
 	constraint := "test_upgrade_" + fx.newPrice.ID.String()[:8]
-	_, err := ddl.Exec(fx.ctx, fmt.Sprintf(`ALTER TABLE openrails.subscriptions ADD CONSTRAINT %s CHECK (price_id <> '%s'::uuid)`, constraint, fx.newPrice.ID))
+	_, err := ddl.Exec(fx.ctx, fmt.Sprintf(`ALTER TABLE billing.subscriptions ADD CONSTRAINT %s CHECK (price_id <> '%s'::uuid)`, constraint, fx.newPrice.ID))
 	require.NoError(t, err)
 	remove := func() {
-		_, err := ddl.Exec(fx.ctx, `ALTER TABLE openrails.subscriptions DROP CONSTRAINT IF EXISTS `+constraint)
+		_, err := ddl.Exec(fx.ctx, `ALTER TABLE billing.subscriptions DROP CONSTRAINT IF EXISTS `+constraint)
 		require.NoError(t, err)
 	}
 	t.Cleanup(remove)
@@ -90,7 +90,7 @@ func TestUpgradeReceiptsRestartAfterLocalRollback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, models.StatusActive, old.Status)
 	var count int
-	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT count(*) FROM openrails.payments WHERE customer_id=$1`, old.CustomerID).Scan(&count))
+	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT count(*) FROM billing.payments WHERE customer_id=$1`, old.CustomerID).Scan(&count))
 	require.Zero(t, count)
 	remove()
 	// Replay cannot consult mutable provider credentials or recalculate pricing.
@@ -110,12 +110,12 @@ func TestUpgradeReceiptsRestartAfterLocalRollback(t *testing.T) {
 	require.NoError(t, json.Unmarshal(result.Payload, &payload))
 	require.True(t, payload.PeriodEnd.Equal(*next.CurrentPeriodEndsAt), "recovered period preserves the frozen instant")
 	var amount int64
-	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT count(*),min(amount) FROM openrails.payments WHERE subscription_id=$1`, next.ID).Scan(&count, &amount))
+	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT count(*),min(amount) FROM billing.payments WHERE subscription_id=$1`, next.ID).Scan(&count, &amount))
 	require.Equal(t, 1, count)
 	require.Equal(t, payload.ProrationAmount, amount)
-	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT count(*) FROM openrails.entitlements WHERE source_id=$1`, next.ID).Scan(&count))
+	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT count(*) FROM billing.entitlements WHERE source_id=$1`, next.ID).Scan(&count))
 	require.Equal(t, 1, count)
-	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1 AND intent_type=$2`, old.ID, intents.TypeNMIDeleteSubscription).Scan(&count))
+	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1 AND intent_type=$2`, old.ID, intents.TypeNMIDeleteSubscription).Scan(&count))
 	require.Equal(t, 1, count)
 }
 
@@ -188,10 +188,10 @@ func TestUpgradeSuccessorReceiptResumesOnlyUnsentProration(t *testing.T) {
 	fx.upgradeProcessing(t)
 	in := fx.operation(t)
 	constraint := "test_step_" + in.ID.String()[:8]
-	_, err := ddl.Exec(fx.ctx, fmt.Sprintf(`ALTER TABLE openrails.rail_intents ADD CONSTRAINT %s CHECK (id <> '%s'::uuid OR NOT (coalesce(result_evidence,'{}') ? 'proration'))`, constraint, in.ID))
+	_, err := ddl.Exec(fx.ctx, fmt.Sprintf(`ALTER TABLE billing.rail_intents ADD CONSTRAINT %s CHECK (id <> '%s'::uuid OR NOT (coalesce(result_evidence,'{}') ? 'proration'))`, constraint, in.ID))
 	require.NoError(t, err)
 	remove := func() {
-		_, err := ddl.Exec(fx.ctx, `ALTER TABLE openrails.rail_intents DROP CONSTRAINT IF EXISTS `+constraint)
+		_, err := ddl.Exec(fx.ctx, `ALTER TABLE billing.rail_intents DROP CONSTRAINT IF EXISTS `+constraint)
 		require.NoError(t, err)
 	}
 	t.Cleanup(remove)
@@ -220,7 +220,7 @@ func TestUpgradePublicReplayUsesFrozenReceiptAfterCatalogArchive(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", first.Status)
 	require.Equal(t, fx.operation(t).ID.String(), first.OperationID)
-	_, err = fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE openrails.prices SET archived=true WHERE id=$1`, fx.newPrice.ID)
+	_, err = fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE billing.prices SET archived=true WHERE id=$1`, fx.newPrice.ID)
 	require.NoError(t, err)
 	request := &TierChangeRequest{SubscriptionID: fx.existingSub.ID, PriceID: openrails.PriceID(fx.newPrice.ID).String(), IdempotencyKey: fx.req.IdempotencyKey}
 	replayed, err := fx.svc.TierChange(fx.ctx, request, fx.user)
@@ -278,7 +278,7 @@ func TestUpgradeUnresolvedPredecessorRejectsASecondRequest(t *testing.T) {
 	require.ErrorIs(t, err, ErrTierChangePending)
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "a second request cannot bypass the first operation's unresolved submission")
 	require.Zero(t, fx.gateway.saleCalls.Load())
-	require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1 AND intent_type=$2`, fx.existingSub.ID, TypeNMIUpgrade))
+	require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1 AND intent_type=$2`, fx.existingSub.ID, TypeNMIUpgrade))
 }
 
 // requireSameWire: a replay answers the stored result byte for byte.
@@ -375,9 +375,9 @@ func TestUpgradeUnknownSuccessorResolvesOnlyFromExactReceipt(t *testing.T) {
 	old, err = fx.svc.SubscriptionService.GetByID(fx.ctx, fx.existingSub.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusCancelled, old.Status)
-	require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM openrails.payments WHERE subscription_id=$1 AND amount=60000000`, next.ID))
-	require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM openrails.entitlements WHERE source_id=$1`, next.ID))
-	require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1 AND intent_type=$2`, old.ID, intents.TypeNMIDeleteSubscription))
+	require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND amount=60000000`, next.ID))
+	require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM billing.entitlements WHERE source_id=$1`, next.ID))
+	require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1 AND intent_type=$2`, old.ID, intents.TypeNMIDeleteSubscription))
 	require.Equal(t, 1, operatorResolutionLogs(t, fx.db, resolved.ID))
 
 	_, err = fx.resolve(t, intents.Resolution{Step: "successor", ProviderReference: fx.gateway.subID, Actor: "ops", Reason: "again"})
@@ -401,7 +401,7 @@ func TestUpgradeUnknownProrationResolution(t *testing.T) {
 		require.Equal(t, intents.StatusSucceeded, resolved.Status)
 		var p NMIUpgradePayload
 		require.NoError(t, json.Unmarshal(resolved.Payload, &p))
-		require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM openrails.payments WHERE subscription_id=$1 AND transaction_id=$2`, p.NewSubscriptionID, fx.gateway.saleTxn))
+		require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND transaction_id=$2`, p.NewSubscriptionID, fx.gateway.saleTxn))
 		require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 		require.EqualValues(t, 1, fx.gateway.createCalls.Load())
 	})
@@ -426,7 +426,7 @@ func TestUpgradeUnknownProrationResolution(t *testing.T) {
 		old, err := fx.svc.SubscriptionService.GetByID(fx.ctx, p.OldSubscriptionID)
 		require.NoError(t, err)
 		require.Equal(t, models.StatusActive, old.Status)
-		require.Equal(t, 0, fx.count(t, `SELECT count(*) FROM openrails.payments WHERE subscription_id=$1`, p.NewSubscriptionID))
+		require.Equal(t, 0, fx.count(t, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1`, p.NewSubscriptionID))
 		_, err = fx.upgrade(t)
 		var refused *TierChangeError
 		require.ErrorAs(t, err, &refused)
@@ -472,7 +472,7 @@ func TestUpgradeRequiresIdempotencyKey(t *testing.T) {
 	require.Equal(t, openrails.CodeTierChangeIdempotencyKeyRequired, refused.Code)
 	require.Zero(t, fx.gateway.createCalls.Load())
 	require.Zero(t, fx.gateway.saleCalls.Load())
-	require.Zero(t, fx.count(t, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1`, fx.existingSub.ID))
+	require.Zero(t, fx.count(t, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1`, fx.existingSub.ID))
 }
 
 // Two upgrade requests under one merchant-scoped key both miss the replay
@@ -497,7 +497,7 @@ func TestUpgradeKeyReusedByAnotherRequestIsRefused(t *testing.T) {
 	tx, err := pool.Begin(fx.ctx)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(fx.ctx) }()
-	_, err = tx.Exec(fx.ctx, `INSERT INTO openrails.rail_intents
+	_, err = tx.Exec(fx.ctx, `INSERT INTO billing.rail_intents
 	        (merchant_id, rail, intent_type, subscription_id, price_id, payload, idempotency_key, status, next_attempt_at, executed_at, origin, psp_id)
 	      VALUES ($1,'nmi',$2,$3,$4,$5,$6,'succeeded', now(), now(), 'user', $7)`,
 		dbtest.TestMerchantID.UUID(), TypeNMIUpgrade, other.OldSubscriptionID, other.PriceID, payload, key, fx.existingSub.PspID)
@@ -530,6 +530,6 @@ func TestUpgradeKeyReusedByAnotherRequestIsRefused(t *testing.T) {
 	old, err := fx.svc.SubscriptionService.GetByID(fx.ctx, fx.existingSub.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusActive, old.Status)
-	require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM openrails.rail_intents WHERE idempotency_key=$1`, key))
-	_, _ = pool.Exec(fx.ctx, `DELETE FROM openrails.rail_intents WHERE idempotency_key=$1`, key)
+	require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM billing.rail_intents WHERE idempotency_key=$1`, key))
+	_, _ = pool.Exec(fx.ctx, `DELETE FROM billing.rail_intents WHERE idempotency_key=$1`, key)
 }

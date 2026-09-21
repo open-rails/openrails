@@ -31,18 +31,18 @@ func TestPayerRateOverride_AllowanceNettedBeforeOverage(t *testing.T) {
 
 	t.Cleanup(func() {
 		for _, p := range []uuid.UUID{payer.UUID(), defaultPayer.UUID()} {
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", p)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", p)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", p)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.metered_rating_watermarks WHERE customer_id = $1", p)
-			_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.metered_rating_watermarks WHERE customer_id = $1", p)
+			_, _ = pool.Exec(ctx, "DELETE FROM billing.money_settings WHERE customer_id = $1", p)
 		}
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meter)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meter)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Storage', $3)`,
+	_, err := pool.Exec(ctx, `INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Storage', $3)`,
 		productID, "or909-storage-"+uuid.NewString()[:8], merchantID)
 	require.NoError(t, err)
 	require.NoError(t, svc.EnsureUsageMeter(ctx, money.UsageMeterSpec{
@@ -109,12 +109,12 @@ func TestPayerRateOverride_MerchantScoped(t *testing.T) {
 	meter := "or909-scope-" + uuid.NewString()[:8]
 	productID := uuid.New()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meter)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meter)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Scope', $3)`,
+	_, err := pool.Exec(ctx, `INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Scope', $3)`,
 		productID, "or909-scope-"+uuid.NewString()[:8], merchantID)
 	require.NoError(t, err)
 	require.NoError(t, svc.EnsureUsageMeter(ctx, money.UsageMeterSpec{
@@ -133,11 +133,11 @@ func TestPayerRateOverride_MerchantScoped(t *testing.T) {
 	}))
 
 	otherID := uuid.New()
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (slug) WHERE deleted_at IS NULL AND permission_group_id IS NULL DO NOTHING`,
+	_, err = pool.Exec(ctx, `INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (slug) WHERE deleted_at IS NULL AND permission_group_id IS NULL DO NOTHING`,
 		otherID, "or909-other-"+otherID.String()[:8])
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.merchants WHERE id = $1", otherID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.merchants WHERE id = $1", otherID)
 	})
 	otherSvc := money.NewMoneyService(dbtest.OpenMerchantDB(t, otherID))
 	otherCtx := merchant.WithID(context.Background(), merchant.ID(otherID))

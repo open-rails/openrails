@@ -10,21 +10,15 @@
 // credits never expire, invoices are never cut, webhooks are never reconciled.
 // There is no degraded mode worth having, so River is not optional.
 //
-// Options.River is therefore MANDATORY and has exactly two values — there is no
-// third state that silently means "nobody owns the fleet":
-//
-//   - RiverFromHost(bind): the HOST owns River. bind is called during New with
-//     OpenRails' workers already registered; it must return a live, unstarted
-//     *river.Client. Returning nil, or an error, fails construction. This is the
-//     embedded posture, and the only way to declare host ownership: a host can
-//     no longer claim the fleet and then never deliver it.
-//   - RiverManagedByOpenRails(): OpenRails constructs and runs its own client
-//     (the standalone posture). The caller must run RunWorkers.
+// Options.River defaults to OpenRails ownership. RiverFromHost(bind) gives the
+// host ownership; the binder receives registered billing workers and returns an
+// unstarted client. Otherwise OpenRails constructs its client and the caller runs
+// RunWorkers (or sets Options.RunWorkers).
 //
 // # Schema contract (issues #165, #545)
 //
 // OpenRails owns a single configurable Postgres schema, set via config `db.schema`
-// / env `DB_SCHEMA`, defaulting to `openrails`. It holds OpenRails' own DDL/DML —
+// / env `DB_SCHEMA`, defaulting to `billing`. It holds OpenRails' own DDL/DML —
 // the portable billing data, and ONLY that.
 //
 // River job-queue tables (river_*) are runtime/infra state, NEVER portable billing
@@ -33,9 +27,9 @@
 //
 // WHERE the river_* set lives is the client owner's call. When OpenRails
 // constructs its own client (standalone, or embedded without an injected
-// client) it uses `public` (config.RiverSchema) — River's own documented
-// default, alongside `public.migrations` and `pgcrypto`. A HOST-injected
-// client owns its schema: the engine adopts client.Schema() for everything it
+// client) it defaults to `public` (config.RiverSchema), alongside the migration
+// ledger and shared extensions. RiverManagedByOpenRails(schema) overrides that
+// namespace. A host-injected client owns its schema: the engine adopts client.Schema() for everything it
 // does with River (progress detection included), refusing only a schema that
 // collides with the billing schema. Two applications embedding OpenRails in
 // one database each keep their own river_* set this way; a shared set would
@@ -69,9 +63,6 @@ import (
 
 // ErrNotInitialized is returned when operations are attempted on an uninitialized Embedded instance.
 var ErrNotInitialized = errors.New("embedded billing: not initialized")
-
-// ErrRiverRequired is returned by New when Options.River is unset (#895).
-var ErrRiverRequired = errors.New("embedded billing: Options.River is required (#895) — declare RiverFromHost(bind) to inject your River client, or RiverManagedByOpenRails() to let OpenRails construct and run its own; OpenRails cannot function without River, so there is no third state")
 
 // QueueBilling is the River queue name used by billing workers. A host-owned
 // client MUST configure it, or billing jobs are inserted and never worked.
@@ -139,35 +130,62 @@ type RiverFleet struct {
 // periodic jobs on it before the host starts it, so the host cannot omit them.
 type RiverBinder func(ctx context.Context, fleet *RiverFleet) (*river.Client[pgx.Tx], error)
 
-// RiverOwnership declares who owns the River fleet. Build it with
-// RiverFromHost or RiverManagedByOpenRails; the zero value is the rejected
-// "nobody" state.
+// RiverOwnership declares who owns the River fleet. Its zero value lets
+// OpenRails manage River in public. Use the same value for New and ApplyMigrations.
 type RiverOwnership struct {
-	managed bool
-	bind    RiverBinder
+	host   bool
+	bind   RiverBinder
+	schema string
+	err    error
 }
 
-func (o RiverOwnership) declared() bool { return o.managed || o.bind != nil }
-
-// RiverFromHost declares that the HOST owns River and hands OpenRails the
-// client. bind is invoked during New; if it returns an error or a nil client,
-// construction fails.
+// RiverFromHost gives the host ownership of River's migrations and client
+// lifecycle. bind runs during New, after billing workers have been registered.
 func RiverFromHost(bind RiverBinder) RiverOwnership {
-	return RiverOwnership{bind: bind}
+	return RiverOwnership{host: true, bind: bind}
 }
 
-// RiverManagedByOpenRails declares that OpenRails constructs and runs its own
-// River client — the standalone posture. The caller MUST run RunWorkers, or the
-// fleet never starts (and the progress monitor will say so).
-func RiverManagedByOpenRails() RiverOwnership {
-	return RiverOwnership{managed: true}
+// RiverManagedByOpenRails selects OpenRails ownership, optionally in a separate
+// schema (default public). The caller runs RunWorkers to start the fleet.
+func RiverManagedByOpenRails(schema ...string) RiverOwnership {
+	o := RiverOwnership{}
+	if len(schema) > 1 {
+		o.err = fmt.Errorf("embedded billing: at most one River schema is allowed")
+	} else if len(schema) == 1 {
+		o.schema = schema[0]
+	}
+	return o
+}
+
+func (o RiverOwnership) managedSchema(billingSchema string) (string, error) {
+	if o.err != nil {
+		return "", o.err
+	}
+	if o.host {
+		if o.bind == nil {
+			return "", fmt.Errorf("embedded billing: RiverFromHost requires a non-nil binder")
+		}
+		return "", nil
+	}
+	schema := strings.TrimSpace(o.schema)
+	if schema == "" {
+		schema = config.RiverSchema
+	}
+	schema, err := validateMigrationSchema(schema)
+	if err != nil {
+		return "", fmt.Errorf("embedded billing: River schema: %w", err)
+	}
+	if schema == billingSchema {
+		return "", fmt.Errorf("embedded billing: River schema %q must differ from the billing schema", schema)
+	}
+	return schema, nil
 }
 
 // bindRiver runs the host's binder and folds the result into the engine. Called
 // once, from New, after the application graph exists.
 func (r *Runtime) bindRiver(ctx context.Context, own RiverOwnership) error {
 	rt := r.app.Runtime
-	if own.managed {
+	if !own.host {
 		// Populate the health registrations (kind -> declared cadence) NOW, even
 		// though standalone builds its client later in RunWorkers: the progress
 		// monitor needs to know what "expected" means before the fleet starts, or

@@ -23,7 +23,7 @@ import (
 
 func (suite *TestContainerSuite) ensureCustomer(ctx context.Context, userID string) uuid.UUID {
 	suite.t.Helper()
-	tenantSubjectID, err := db.EnsureCustomerID(ctx, suite.Pool, dbtest.TestMerchantID.UUID(), userID)
+	tenantSubjectID, err := db.EnsureCustomerID(ctx, db.WrapPool(suite.Pool, ""), dbtest.TestMerchantID.UUID(), userID)
 	require.NoError(suite.t, err, "Failed to ensure customer")
 	return tenantSubjectID
 }
@@ -399,7 +399,7 @@ func (suite *TestContainerSuite) SeedProducts() []TestProduct {
 func (suite *TestContainerSuite) upsertProduct(ctx context.Context, p *models.Product, onConflictSet string) {
 	suite.t.Helper()
 	_, err := suite.Pool.Exec(ctx, `
-			INSERT INTO openrails.products (
+			INSERT INTO billing.products (
 				id, key, display_name, description, entitlements_spec,
 				tier_group, tier_rank, archived, created_at, updated_at, merchant_id
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -432,7 +432,7 @@ func (suite *TestContainerSuite) insertPriceIfAbsent(ctx context.Context, price 
 		link[models.RailKeyRail] = rail
 	}
 	_, err := suite.Pool.Exec(ctx, `
-		INSERT INTO openrails.prices (
+		INSERT INTO billing.prices (
 			id, product_id, archived, amount, currency, access_duration_hours, auto_renew,
 			key, created_at, updated_at, merchant_id
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), $9, $10, $11)
@@ -942,7 +942,7 @@ func (suite *TestContainerSuite) GetAllSubscriptionsByUserID(userID string) []*m
 	repo := subscriptions.NewSubscriptionRepo(suite.FixtureDB())
 	var subs []*models.Subscription
 	for _, id := range suite.queryIDs(ctx,
-		"SELECT id FROM openrails.subscriptions WHERE customer_id = $1 ORDER BY created_at DESC",
+		"SELECT id FROM billing.subscriptions WHERE customer_id = $1 ORDER BY created_at DESC",
 		tenantSubjectID) {
 		sub, err := repo.GetByID(ctx, id)
 		require.NoError(suite.t, err, "Failed to get subscriptions for user %s", userID)
@@ -961,7 +961,7 @@ func (suite *TestContainerSuite) GetPaymentsByUserID(userID string) []*models.Pa
 	repo := payments.NewPaymentRepo(suite.FixtureDB())
 	var payments []*models.Payment
 	for _, id := range suite.queryIDs(ctx,
-		"SELECT id FROM openrails.payments WHERE customer_id = $1 ORDER BY purchased_at DESC",
+		"SELECT id FROM billing.payments WHERE customer_id = $1 ORDER BY purchased_at DESC",
 		tenantSubjectID) {
 		p, err := repo.GetByID(ctx, id)
 		require.NoError(suite.t, err, "Failed to get payments for user %s", userID)
@@ -980,7 +980,7 @@ func (suite *TestContainerSuite) GetPaymentMethodsByUserID(userID string) []*mod
 	repo := paymentmethods.NewPaymentMethodRepo(suite.FixtureDB())
 	var pms []*models.PaymentMethod
 	for _, id := range suite.queryIDs(ctx,
-		"SELECT id FROM openrails.payment_methods WHERE customer_id = $1 ORDER BY created_at DESC",
+		"SELECT id FROM billing.payment_methods WHERE customer_id = $1 ORDER BY created_at DESC",
 		tenantSubjectID) {
 		pm, err := repo.GetByID(ctx, id)
 		require.NoError(suite.t, err, "Failed to get payment methods for user %s", userID)
@@ -1035,7 +1035,7 @@ func (suite *TestContainerSuite) CountUnreadNotifications(userID string) int {
 	tenantSubjectID := suite.resolveCustomer(ctx, userID)
 
 	return suite.Count(ctx,
-		"SELECT COUNT(*) FROM openrails.notifications WHERE customer_id = $1 AND read_at IS NULL",
+		"SELECT COUNT(*) FROM billing.notifications WHERE customer_id = $1 AND read_at IS NULL",
 		tenantSubjectID)
 }
 
@@ -1100,14 +1100,14 @@ func (suite *TestContainerSuite) CleanupSubscriptionsForUser(userID string) {
 
 	// Also delete entitlements for this user
 	_, _ = suite.Pool.Exec(ctx,
-		"DELETE FROM openrails.entitlements WHERE customer_id = $1", tenantSubjectID)
+		"DELETE FROM billing.entitlements WHERE customer_id = $1", tenantSubjectID)
 
 	_, _ = suite.Pool.Exec(ctx,
-		"DELETE FROM openrails.checkout_sessions WHERE customer_id = $1", tenantSubjectID)
+		"DELETE FROM billing.checkout_sessions WHERE customer_id = $1", tenantSubjectID)
 
 	// Delete subscriptions
 	_, err := suite.Pool.Exec(ctx,
-		"DELETE FROM openrails.subscriptions WHERE customer_id = $1", tenantSubjectID)
+		"DELETE FROM billing.subscriptions WHERE customer_id = $1", tenantSubjectID)
 	if err != nil {
 		suite.t.Logf("Warning: failed to cleanup subscriptions for user %s: %v", userID, err)
 	}

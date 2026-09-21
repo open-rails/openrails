@@ -41,8 +41,8 @@ func armMerchantWithFirstPull(t *testing.T, appDB *db.DB, baseCtx context.Contex
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id=$1`, mid)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE finding_type=$1`, string(FindingEvidenceStale))
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.merchant_destructive_policy WHERE merchant_id=$1`, mid)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE finding_type=$1`, string(FindingEvidenceStale))
 			return nil
 		})
 	})
@@ -100,7 +100,7 @@ func subscriptionStatuses(t *testing.T, appDB *db.DB, baseCtx context.Context, c
 	out := map[string]int{}
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		rows, err := appDB.Qx(ctx).Query(ctx,
-			`SELECT status::text, count(*) FROM openrails.subscriptions WHERE id = ANY($1) GROUP BY 1`, c.subs)
+			`SELECT status::text, count(*) FROM billing.subscriptions WHERE id = ANY($1) GROUP BY 1`, c.subs)
 		if err != nil {
 			return err
 		}
@@ -144,7 +144,7 @@ func TestPull_ArmedMerchantWillNotCancelOnEvidencePredatingTheFirstPull(t *testi
 	var intents int
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		return appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.rail_intents WHERE subscription_id = ANY($1)`, cohort.subs).Scan(&intents)
+			`SELECT count(*) FROM billing.rail_intents WHERE subscription_id = ANY($1)`, cohort.subs).Scan(&intents)
 	}))
 	require.Zero(t, intents, "inherited evidence must never queue the irreversible NMI delete")
 

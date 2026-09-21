@@ -47,7 +47,7 @@ func countNMIAccounts(t *testing.T, svc *Service, accountID string) int {
 	t.Helper()
 	var count int
 	require.NoError(t, svc.pool.QueryRow(context.Background(), `
-		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = $1
+		SELECT count(*) FROM billing.psps WHERE rail = 'nmi' AND account_id = $1
 	`, accountID).Scan(&count))
 	return count
 }

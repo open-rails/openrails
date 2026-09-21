@@ -280,7 +280,7 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	admin, err := pgx.Connect(ctx, dbtest.SharedSuperuserDSN(t))
 	require.NoError(t, err)
 	tag, err := admin.Exec(ctx, `
-		UPDATE openrails.ledger_accounts
+		UPDATE billing.ledger_accounts
 		SET credits_posted = $1, debits_posted = 0
 		WHERE merchant_id = $2
 		  AND customer_id = $3
