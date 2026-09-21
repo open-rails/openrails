@@ -169,7 +169,7 @@ func (h *ManualRebillHandler) validateAndFence(ctx context.Context, in gen.Openr
 		if paid {
 			return errRebillSuperseded
 		}
-		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, h.now())
+		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, h.now(), nil)
 		if err != nil {
 			return err
 		}

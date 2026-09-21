@@ -756,3 +756,16 @@ SELECT * FROM openrails.rail_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='subscription_collection'
   AND (sqlc.narg(after_id)::uuid IS NULL OR id>sqlc.narg(after_id)::uuid)
 ORDER BY id LIMIT sqlc.arg(page_size)::int;
+
+-- name: ListPaidEngineAgreementsAtBoundary :many
+-- Select by obligation identity and boundary, not mutable catalog/account
+-- filters: an ambiguous or mismatched retained owner must fail qualification.
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND status='succeeded'
+  AND ((intent_type='initial_membership'
+        AND payload->'terms'->>'subscription_id'=sqlc.arg(subscription_id)::uuid::text
+        AND (payload->'terms'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz)
+    OR (intent_type='subscription_collection'
+        AND subscription_id=sqlc.arg(subscription_id)::uuid
+        AND (payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz))
+ORDER BY id LIMIT 2;

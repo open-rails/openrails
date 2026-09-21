@@ -41,7 +41,7 @@ func TestAcceptedRenewalKeepsItsCatalogBenefitsAndPeriod(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				terms, err = PrepareRenewalTerms(ctx, txdb, sub, f.clock.Now())
+				terms, err = PrepareRenewalTerms(ctx, txdb, sub, f.clock.Now(), nil)
 				return err
 			}))
 			require.Equal(t, targetPrice, terms.PriceID)
@@ -97,7 +97,7 @@ func TestAcceptedRenewalCompletesObservedPaymentAndPreservesLaterDunning(t *test
 		if err != nil {
 			return err
 		}
-		terms, err = PrepareRenewalTerms(ctx, d, sub, f.clock.Now())
+		terms, err = PrepareRenewalTerms(ctx, d, sub, f.clock.Now(), nil)
 		return err
 	}))
 	// Two actual accounts carry identical provider subscription/transaction

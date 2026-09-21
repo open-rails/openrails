@@ -202,7 +202,7 @@ func seedPastDueSubscriptionAt(t *testing.T, merchantID uuid.UUID, now time.Time
 		if err != nil {
 			return err
 		}
-		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, now)
+		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, now, nil)
 		if err != nil {
 			return err
 		}
