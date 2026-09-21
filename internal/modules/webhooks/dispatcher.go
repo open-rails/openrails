@@ -134,6 +134,7 @@ func (h CCBillWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		EventBody: json.RawMessage(event.Payload),
 	}
 	service := CCBillWebhookService{
+		Clock:                        d.Clock,
 		Data:                         data,
 		DB:                           d.DB,
 		CCBillClient:                 ccbill.NewRESTClient(ccbillConfig),
