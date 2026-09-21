@@ -341,9 +341,9 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			} {
 				tx, err := h.sharedPool().Begin(ctx)
 				require.NoError(t, err)
-				_, err = tx.Exec(ctx, `UPDATE openrails.payment_methods SET psp_id=$2 WHERE id=$1`, f.Method, replacement.account)
+				_, err = tx.Exec(ctx, `UPDATE billing.payment_methods SET psp_id=$2 WHERE id=$1`, f.Method, replacement.account)
 				require.NoError(t, err)
-				_, err = tx.Exec(ctx, `UPDATE openrails.subscriptions SET psp_id=$2,rail_subscription_id=$3 WHERE id=$1`, subscription, replacement.account, replacement.reference)
+				_, err = tx.Exec(ctx, `UPDATE billing.subscriptions SET psp_id=$2,rail_subscription_id=$3 WHERE id=$1`, subscription, replacement.account, replacement.reference)
 				require.NoError(t, err)
 				require.NoError(t, tx.Commit(ctx))
 				rebound, err := client.GetMySubscription(ctx, retry.SubscriptionID)
@@ -352,9 +352,9 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			}
 			tx, err := h.sharedPool().Begin(ctx)
 			require.NoError(t, err)
-			_, err = tx.Exec(ctx, `UPDATE openrails.payment_methods SET psp_id=$2 WHERE id=$1`, f.Method, psp)
+			_, err = tx.Exec(ctx, `UPDATE billing.payment_methods SET psp_id=$2 WHERE id=$1`, f.Method, psp)
 			require.NoError(t, err)
-			_, err = tx.Exec(ctx, `UPDATE openrails.subscriptions SET psp_id=$2,rail_subscription_id=$3 WHERE id=$1`, subscription, psp, railSub)
+			_, err = tx.Exec(ctx, `UPDATE billing.subscriptions SET psp_id=$2,rail_subscription_id=$3 WHERE id=$1`, subscription, psp, railSub)
 			require.NoError(t, err)
 			require.NoError(t, tx.Commit(ctx))
 
@@ -392,10 +392,10 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			unsupported := h.SeedPastDueInvoiceForCustomer(app.HostGraph(rt).Runtime, owned.MerchantID, customer, "USD", 50_000)
 			// This is an explicitly customer-collected invoice, not work for the
 			// later automatic collection leg of this shared workflow.
-			_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.invoices SET collection_method='send_invoice' WHERE id=$1`, unsupported.Invoice)
+			_, err = h.sharedPool().Exec(ctx, `UPDATE billing.invoices SET collection_method='send_invoice' WHERE id=$1`, unsupported.Invoice)
 			require.NoError(t, err)
 			stripePSP := dbtest.EnsureTestPSP(ctx, t, h.sharedPool(), owned.MerchantID.UUID(), "stripe")
-			_, err = h.sharedPool().Exec(ctx, `UPDATE openrails.payment_methods SET rail='stripe',psp_id=$2,rail_customer_ref=$3,rail_method_ref=$3 WHERE id=$1`, unsupported.Method, stripePSP, "pm_unsupported_"+unsupported.Method.String())
+			_, err = h.sharedPool().Exec(ctx, `UPDATE billing.payment_methods SET rail='stripe',psp_id=$2,rail_customer_ref=$3,rail_method_ref=$3 WHERE id=$1`, unsupported.Method, stripePSP, "pm_unsupported_"+unsupported.Method.String())
 			require.NoError(t, err)
 			_, err = client.PayInvoiceNow(ctx, openrails.PayInvoiceNowRequest{InvoiceID: unsupported.Invoice, PaymentMethodID: openrails.PaymentMethodID(unsupported.Method), IdempotencyKey: uuid.NewString()})
 			var unsupportedError *openrails.StatusError
@@ -404,7 +404,7 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			require.Equal(t, "customer_payment_unsupported", unsupportedError.Code)
 			require.Equal(t, before+4, gateway.SaleAttempts())
 			var attempts int
-			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM openrails.invoice_payments WHERE invoice_id=$1`, unsupported.Invoice).Scan(&attempts))
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.invoice_payments WHERE invoice_id=$1`, unsupported.Invoice).Scan(&attempts))
 			require.Zero(t, attempts, "unsupported customer payment refuses before durable charge admission")
 
 		})
