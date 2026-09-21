@@ -233,9 +233,12 @@ func RetryAdminInvoiceCollection(r *httprequest.Request) {
 	if !r.BindJSON(&body) {
 		return
 	}
-	key := strings.TrimSpace(r.Request.Header.Get("Idempotency-Key"))
-	if body.PaymentMethodID.IsZero() || key == "" || len(key) > 255 {
-		r.ErrorJSON(http.StatusBadRequest, "payment_method_id and Idempotency-Key (1–255 bytes) are required")
+	key, ok := paymentActionKey(r)
+	if !ok {
+		return
+	}
+	if body.PaymentMethodID.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "payment_method_id is required")
 		return
 	}
 	// Do not gate on the read snapshot: a successful retry replay is valid even
