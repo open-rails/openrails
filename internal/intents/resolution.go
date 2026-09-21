@@ -116,6 +116,13 @@ func (r Resolution) Record(at time.Time) map[string]any {
 
 type operatorResolutionContextKey struct{}
 
+// OperatorResolutionRecord exposes the runner-verified attribution to internal
+// domain transactions that commit their own terminal outcome.
+func OperatorResolutionRecord(ctx context.Context) map[string]any {
+	record, _ := ctx.Value(operatorResolutionContextKey{}).(map[string]any)
+	return record
+}
+
 // RejectResolution wraps a handler's reason for refusing operator evidence.
 func RejectResolution(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrResolutionRejected, fmt.Sprintf(format, args...))
