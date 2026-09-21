@@ -7,12 +7,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/intents"
+	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/riverqueue/river"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
@@ -34,10 +39,12 @@ func TestStripeEngineSignupSelfHTTP(t *testing.T) {
 		if name == "" {
 			name = "authentication"
 		}
-		t.Run(name, func(t *testing.T) { stripeEngineSignupSelfHTTP(t, reversal) })
+		t.Run(name, func(t *testing.T) { stripeEngineSignupSelfHTTP(t, reversal, false) })
 	}
 }
-func stripeEngineSignupSelfHTTP(t *testing.T, reversal string) {
+func TestStripeEngineCustomerRetrySelfHTTP(t *testing.T) { stripeEngineSignupSelfHTTP(t, "", true) }
+func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry bool) {
+	clock := clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second))
 	h := New(t, t.Context())
 	var mu sync.Mutex
 	var setup, payment map[string]any
@@ -84,9 +91,29 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string) {
 			paymentCreates++
 			meta := metadata()
 			require.Equal(t, "999", r.PostForm.Get("amount"))
-			require.Equal(t, "off_session", r.PostForm.Get("setup_future_usage"))
-			require.Equal(t, "false", r.PostForm.Get("off_session"))
+			if meta["openrails_initial"] == "true" {
+				require.Equal(t, "off_session", r.PostForm.Get("setup_future_usage"))
+				require.Equal(t, "false", r.PostForm.Get("off_session"))
+			} else {
+				require.Empty(t, r.PostForm.Get("setup_future_usage"))
+				if meta["openrails_customer_retry"] == "true" {
+					require.Equal(t, "false", r.PostForm.Get("off_session"))
+				} else {
+					require.Equal(t, "true", r.PostForm.Get("off_session"))
+				}
+			}
 			payment = map[string]any{"id": "pi_signup", "status": "requires_action", "customer": "cus_signup", "payment_method": "pm_signup", "amount": 999, "amount_received": 0, "currency": "usd", "setup_future_usage": "off_session", "capture_method": "automatic", "confirmation_method": "automatic", "livemode": false, "metadata": meta, "client_secret": "pi_signup_secret_private", "latest_charge": "ch_signup"}
+			if customerRetry && paymentCreates > 1 {
+				id, charge := "pi_renewal", "ch_renewal"
+				if paymentCreates > 2 {
+					id, charge = "pi_customerretry", "ch_customerretry"
+				}
+				payment["id"], payment["latest_charge"], payment["client_secret"], payment["setup_future_usage"] = id, charge, id+"_secret_private", ""
+				if paymentCreates == 2 {
+					payment["status"] = "requires_payment_method"
+					payment["last_payment_error"] = map[string]any{"code": "card_declined", "decline_code": "insufficient_funds"}
+				}
+			}
 			if reversal != "" {
 				paymentPaid = true
 				w.WriteHeader(http.StatusBadGateway)
@@ -96,14 +123,19 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string) {
 			write(payment)
 		case r.Method == "GET" && r.URL.Path == "/v1/payment_intents":
 			write(map[string]any{"data": []any{payment}, "has_more": false})
-		case r.Method == "GET" && r.URL.Path == "/v1/payment_intents/pi_signup":
+		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/v1/payment_intents/") && strings.HasSuffix(r.URL.Path, "/cancel"):
+			require.Equal(t, "/v1/payment_intents/"+payment["id"].(string)+"/cancel", r.URL.Path)
+			payment["status"] = "canceled"
+			write(payment)
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/payment_intents/"):
+			require.Equal(t, "/v1/payment_intents/"+payment["id"].(string), r.URL.Path)
 			if paymentPaid {
 				payment["status"] = "succeeded"
 				payment["amount_received"] = 999
 			}
 			write(payment)
-		case r.Method == "GET" && r.URL.Path == "/v1/charges/ch_signup":
-			ch := map[string]any{"id": "ch_signup", "payment_intent": "pi_signup", "customer": "cus_signup", "payment_method": "pm_signup", "amount": 999, "amount_captured": 999, "currency": "usd", "status": "succeeded", "paid": true, "captured": true}
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/charges/"):
+			ch := map[string]any{"id": payment["latest_charge"], "payment_intent": payment["id"], "customer": "cus_signup", "payment_method": "pm_signup", "amount": 999, "amount_captured": 999, "currency": "usd", "status": "succeeded", "paid": true, "captured": true}
 			if reversal == "refund" {
 				ch["refunded"] = true
 				ch["amount_refunded"] = 999
@@ -123,7 +155,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string) {
 	}))
 	defer gateway.Close()
 	var host billingauth.DelegatedAuthenticator
-	surface := h.StartStandalone("USD", WithConfig(func(c *config.Config) {
+	surface := h.StartStandalone("USD", WithClock(clock), WithConfig(func(c *config.Config) {
 		c.ProviderSandbox = &config.ProviderSandboxConfig{StripeAPIURL: gateway.URL}
 		c.ProviderWriteMode = config.ProviderWriteModeFull
 		c.NewSubscriptionCollectionPolicy = "engine"
@@ -264,8 +296,62 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string) {
 			require.Equal(t, "cancelled", status, "won dispute restores money without restarting an engine agreement")
 		}
 	}
+	if customerRetry {
+		subscription, err := openrails.ParseSubscriptionID(completed["subscription_id"].(string))
+		require.NoError(t, err)
+		mu.Lock()
+		paymentPaid = false
+		mu.Unlock()
+		clock.Advance(720*time.Hour + time.Second)
+		worker := riverjobs.DunningWorker{DB: rt.DB, Config: rt.Config, Clock: clock, NMIResolver: rt.CollectionResolver, EngineCollections: rt.MoneyService, Intents: rt.IntentRunner()}
+		require.NoError(t, worker.Work(t.Context(), &river.Job[riverjobs.DunningArgs]{}))
+		var dueID uuid.UUID
+		require.NoError(t, pool.QueryRow(t.Context(), `SELECT id FROM billing.rail_intents WHERE subscription_id=$1 AND intent_type='subscription_collection' ORDER BY created_at DESC LIMIT 1`, subscription.UUID()).Scan(&dueID))
+		scope := db.WithPSPID(merchant.WithID(t.Context(), owned.MerchantID), psp)
+		require.NoError(t, rt.DB.RunInMerchantConn(scope, func(ctx context.Context) error {
+			result, err := rt.IntentRunner().ExecuteByID(ctx, dueID)
+			require.NoError(t, err)
+			require.Equal(t, intents.StatusFailedTerminal, result.Status)
+			return err
+		}))
+		var retryAt *time.Time
+		var subStatus string
+		require.NoError(t, pool.QueryRow(t.Context(), `SELECT status,next_retry_at FROM billing.subscriptions WHERE id=$1`, subscription.UUID()).Scan(&subStatus, &retryAt))
+		require.Equal(t, "past_due", subStatus)
+		require.NotNil(t, retryAt)
+		require.True(t, retryAt.After(clock.Now()), "customer retry explicitly bypasses future automatic delay")
+		customer, err := openrails.NewRemote(surface.BaseURL, openrails.WithMerchantID(owned.MerchantID), openrails.WithTokenProvider(func(context.Context) (string, error) { return token, nil }))
+		require.NoError(t, err)
+		localMethod, err := openrails.ParsePaymentMethodID(method["payment_method_id"].(string))
+		require.NoError(t, err)
+		retryRequest := openrails.RetrySubscriptionNowRequest{SubscriptionID: subscription, IdempotencyKey: "retry-" + uuid.NewString(), PaymentMethodID: &localMethod}
+		retried, err := customer.RetrySubscriptionNow(t.Context(), retryRequest)
+		require.NoError(t, err)
+		require.True(t, retried.Operation.Unresolved())
+		again, err := customer.RetrySubscriptionNow(t.Context(), retryRequest)
+		require.NoError(t, err)
+		require.Equal(t, retried.Operation.ID, again.Operation.ID)
+		recovery := call("GET", fmt.Sprintf("/payment-operations/%s/authentication", retried.Operation.ID), "", nil)
+		require.Equal(t, "pi_customerretry_secret_private", recovery["client_secret"])
+		mu.Lock()
+		paymentPaid = true
+		mu.Unlock()
+		result := call("POST", fmt.Sprintf("/payment-operations/%s/authentication/confirm", retried.Operation.ID), "", nil)
+		require.Equal(t, "succeeded", result["status"])
+		final, err := customer.RetrySubscriptionNow(t.Context(), retryRequest)
+		require.NoError(t, err)
+		require.True(t, final.Replayed)
+		require.Equal(t, retried.Operation.ID, final.Operation.ID)
+		require.Equal(t, "active", string(final.Subscription.Status))
+		require.NoError(t, pool.QueryRow(t.Context(), `SELECT count(*) FROM billing.payments WHERE customer_id=$1 AND status='completed'`, user.ID).Scan(&paid))
+		require.Equal(t, 2, paid, "initial and recovered period settle once")
+	}
 	mu.Lock()
 	require.Equal(t, 1, setupCreates)
-	require.Equal(t, 1, paymentCreates)
+	if customerRetry {
+		require.Equal(t, 3, paymentCreates)
+	} else {
+		require.Equal(t, 1, paymentCreates)
+	}
 	mu.Unlock()
 }
