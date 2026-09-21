@@ -22,11 +22,8 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// This suite proves the migration-050 Row Level Security DESIGN actually enforces
-// cross-merchant isolation when the app connects as the unprivileged openrails_app
-// role (issue #227). It replicates 050's exact policy form on a probe table and
-// drives it through the real db.DB GUC plumbing (TestRLSEnforcement_PgxSide,
-// in rls_pgx_integration_test.go) — not a reimplementation of either.
+// Shared PostgreSQL fixtures for connection/session scope tests. The probe
+// table has no RLS; tenant selection is explicit in each query.
 
 var (
 	rlsTenantA = mustID("00000000-0000-0000-0000-0000000000a1")
@@ -64,13 +61,6 @@ CREATE TABLE IF NOT EXISTS billing.rls_probe (
     merchant_id UUID NOT NULL,
     val       TEXT NOT NULL
 );
--- Exact migration-050 policy form.
-ALTER TABLE billing.rls_probe ENABLE ROW LEVEL SECURITY;
-ALTER TABLE billing.rls_probe FORCE  ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS merchant_isolation ON billing.rls_probe;
-CREATE POLICY merchant_isolation ON billing.rls_probe
-    USING      (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid)
-    WITH CHECK (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid);
 -- Unprivileged application role (migration-050 form) WITH LOGIN for the test.
 	DO $$ BEGIN
 	    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
@@ -124,33 +114,4 @@ func startRLSContainer(t *testing.T) (superDSN string, appDSN string) {
 func postgresTestLimits(hc *container.HostConfig) {
 	hc.Resources.Memory = 2 << 30
 	hc.Resources.NanoCPUs = 2_000_000_000
-}
-
-// TestRLSPosture_Reporting proves CheckRLSPosture/EnforceRLSPosture classify
-// privileged vs unprivileged roles correctly. The enforcement semantics
-// themselves (fail-closed visibility, WITH CHECK, GUC scoping) are covered by
-// TestRLSEnforcement_PgxSide.
-func TestRLSPosture_Reporting(t *testing.T) {
-	ctx := context.Background()
-	superDSN, appDSN := startRLSContainer(t)
-
-	super := newDBRetry(t, superDSN)
-	defer super.Close()
-	_, err := super.Pool().Exec(ctx, rlsSetupDDL)
-	require.NoError(t, err)
-
-	// The superuser BYPASSES RLS -> posture is non-enforcing, and the gate must
-	// fail (unconditionally — there is no environment argument, or#782).
-	superPosture, err := super.CheckRLSPosture(ctx)
-	require.NoError(t, err)
-	require.False(t, superPosture.Enforcing, "superuser must report non-enforcing")
-	require.Error(t, super.EnforceRLSPosture(ctx))
-
-	// As openrails_app: RLS ENFORCES.
-	app := newDBRetry(t, appDSN)
-	defer app.Close()
-	appPosture, err := app.CheckRLSPosture(ctx)
-	require.NoError(t, err)
-	require.True(t, appPosture.Enforcing, "openrails_app must report enforcing")
-	require.NoError(t, app.EnforceRLSPosture(ctx))
 }

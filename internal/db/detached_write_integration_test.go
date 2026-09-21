@@ -65,7 +65,7 @@ func TestDetachedWriteRepinsAConnectionTheCallerClosed(t *testing.T) {
 
 	release()
 	require.Zero(t, app.Pool().Stat().AcquiredConns())
-	n, err = visible(ctx)
-	require.NoError(t, err)
-	require.Zero(t, n, "the released replacement carries no merchant scope")
+	var remainingScope string
+	require.NoError(t, app.Pool().QueryRow(ctx, `SELECT COALESCE(current_setting('app.merchant_id', true), '')`).Scan(&remainingScope))
+	require.Empty(t, remainingScope, "the released replacement carries no merchant scope")
 }

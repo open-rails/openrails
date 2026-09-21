@@ -93,10 +93,7 @@ type Config struct {
 	// as "development": a container shipped without ENV would otherwise boot
 	// with PLAINTEXT merchant secrets (NMI security_key, Stripe sk_, CCBill
 	// DataLink passwords, webhook signing secrets) after a single warning —
-	// silently, and in exactly the deployment least likely to be watching. (The
-	// DB role must enforce RLS in every environment; that one is not on this
-	// switch.) Load() refuses an
-	// empty ENV, and IsDev() reads empty as NOT development so any path that
+	// silently. Load() refuses an empty ENV, and IsDev() reads empty as NOT development so any path that
 	// bypasses Load still fails closed. Env: ENV.
 	Env  string       `koanf:"env,omitempty"`
 	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 3053)
@@ -189,24 +186,29 @@ type Config struct {
 	// It is declared intent, never auto-detected and never auto-fallback — the data
 	// lives in exactly one place (#661). REQUIRED in merchant_source=api mode
 	// (or#893 deleted the vault.enabled derivation). Env: SECRET_BACKEND. Only
-	// consulted in merchant_source=api mode — MODE 1 (#723) holds secrets in
-	// memory and never constructs a persistent secret store.
+	// Provider credentials use this backend only in merchant_source=api mode.
+	// Manifest providers stay in memory; optional managed alert-webhook URLs
+	// can independently use this backend and require encryption when stored in DB.
 	SecretBackend string `koanf:"secret_backend,omitempty"`
 
-	// MerchantSource is the two-mode doctrine switch (#723/#724): where merchant
-	// config + catalog truth lives. ONE knob for both — deliberately no separate
-	// catalog_source.
+	// MerchantSource selects authority for merchant configuration and provider
+	// credentials. CatalogSource independently selects catalog authority.
 	//   - "manifest" (DEFAULT, empty = manifest): MODE 1. The boot YAML (merchant
-	//     manifest + catalog + the host's structured secret overlays) IS
-	//     the truth, held in memory. No merchant-secret store is constructed;
-	//     catalog/provider-config mutation APIs are rejected (405); change =
+	//     manifest + the host's structured secret overlays) IS
+	//     the truth, held in memory. Provider-config mutation APIs are rejected
+	//     (405); change =
 	//     edit the YAML + reboot. DB rows are boot-converged projections for FKs.
 	//   - "api": MODE 2. No manifests at boot (their presence refuses boot —
-	//     two truths); merchants/catalog/secrets live in the DB + secret backend
+	//     two truths); merchant configuration/secrets live in the DB + secret backend
 	//     and mutate over the HTTP APIs.
 	// Deployment shape does NOT imply mode — embedded and standalone can run
 	// either. Env: MERCHANT_SOURCE. Unknown values refuse to load.
 	MerchantSource string `koanf:"merchant_source,omitempty"`
+	// CatalogSource selects "manifest" or "api" for product, price and metering
+	// definitions. Empty follows MerchantSource. Use "api" with manifest-owned
+	// merchant configuration to allow dynamic catalogs with host-supplied,
+	// read-only provider credentials. Env: CATALOG_SOURCE.
+	CatalogSource string `koanf:"catalog_source,omitempty"`
 	// MerchantManifestOverlays are YAML files in the manifest's own shape
 	// (secrets rendered by Vault Agent / a k8s Secret volume) merged over the
 	// MODE-1 boot manifest in order, later wins. Env: MERCHANT_MANIFEST_OVERLAYS
@@ -397,6 +399,26 @@ const (
 	MerchantSourceAPI      = "api"
 )
 
+const (
+	CatalogSourceManifest = "manifest"
+	CatalogSourceAPI      = "api"
+)
+
+// CatalogSourceMode returns catalog authority, defaulting to merchant authority.
+// Validate rejects unknown values before the configuration is used.
+func (cfg *Config) CatalogSourceMode() string {
+	if cfg != nil {
+		if source := strings.ToLower(strings.TrimSpace(cfg.CatalogSource)); source != "" {
+			return source
+		}
+	}
+	return cfg.MerchantSourceMode()
+}
+
+func (cfg *Config) IsManifestCatalogSource() bool {
+	return cfg.CatalogSourceMode() == CatalogSourceManifest
+}
+
 // MerchantSourceMode returns the normalized merchant-source mode: "manifest"
 // (MODE 1, the default) or "api" (MODE 2). Unknown values are rejected by
 // Validate; this accessor treats only an explicit "api" as mode 2.
@@ -408,7 +430,7 @@ func (cfg *Config) MerchantSourceMode() string {
 }
 
 // IsManifestMerchantSource reports MODE 1 (#723): manifest-is-truth, secrets
-// in memory, mutation APIs rejected.
+// in memory, provider-configuration mutation APIs rejected.
 func (cfg *Config) IsManifestMerchantSource() bool {
 	return cfg.MerchantSourceMode() == MerchantSourceManifest
 }
@@ -417,8 +439,8 @@ func (cfg *Config) IsManifestMerchantSource() bool {
 // ONLY the declared secret_backend is consulted — or#893 deleted the
 // vault.enabled inference, so enabling Vault for Transit signing can no longer
 // silently move the secret store. merchant_source=api requires the declaration
-// (validateMerchantSource); MODE 1 never constructs a store, so the "db" here is
-// an inert default, not a fallback.
+// (validateMerchantSource). Manifest mode uses this backend only for optional
+// managed alert-webhook URLs, never for provider credentials.
 func (cfg *Config) SecretStoreBackend() string {
 	if cfg == nil {
 		return SecretBackendDB
@@ -437,8 +459,10 @@ func (cfg *Config) SecretStoreBackend() string {
 // Self-hosted / dev: supply MasterKey (base64 of 32 raw bytes) via config or the
 // ENCRYPTION_MASTER_KEY env var. PRODUCTION: the master key should come from a
 // KMS (the wrapped DEKs in openrails.merchant_deks stay in the DB; the master key
-// that unwraps them never does). When MasterKey is empty, encryption is disabled
-// and values are stored in plaintext (back-compat with pre-#227 deployments).
+// that unwraps them never does). An empty key disables this encryptor. Managed
+// DB provider credentials then require development posture, while sensitive
+// optional features such as stored webhook URLs and SDK capture tokens refuse
+// persistence. Host-owned provider credentials remain in memory.
 type EncryptionConfig struct {
 	// MasterKey is the base64-encoded 32-byte AES-256 master key that wraps
 	// per-merchant DEKs. Empty disables at-rest encryption.
@@ -1441,7 +1465,7 @@ func validateSourceCIDRs(cidrs []string) error {
 
 // validateMerchantSource enforces the #723 boot matrix rows that are pure
 // config posture:
-//   - unknown merchant_source values refuse to load (a typo must never
+//   - unknown merchant_source/catalog_source values refuse to load (a typo must never
 //     silently pick a truth model);
 //   - api mode outside development requires a merchant-secret backend (Vault,
 //     or ENCRYPTION_MASTER_KEY for the DB store) — extends the #667 posture
@@ -1451,6 +1475,11 @@ func validateSourceCIDRs(cidrs []string) error {
 // with a merchants.yaml on disk) are enforced where manifests load: serverboot
 // (standalone) and embed.UpsertMerchantConfig (embedded).
 func validateMerchantSource(cfg *Config, isDev bool) error {
+	switch strings.ToLower(strings.TrimSpace(cfg.CatalogSource)) {
+	case "", CatalogSourceManifest, CatalogSourceAPI:
+	default:
+		return fmt.Errorf("catalog_source must be %q or %q (empty follows merchant_source)", CatalogSourceManifest, CatalogSourceAPI)
+	}
 	switch strings.ToLower(strings.TrimSpace(cfg.MerchantSource)) {
 	case "", MerchantSourceManifest, MerchantSourceAPI:
 	default:
@@ -1511,11 +1540,11 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 }
 
 // validateEncryption fails fast on a malformed at-rest encryption master key.
-// An empty key is a legitimate state (encryption disabled) but is surfaced as a
-// warning so the plaintext-storage downgrade is never silent (#227).
+// An empty key is legitimate for host-owned provider credentials or Vault.
+// The managed DB store enforces and reports its actual encryption posture;
+// syntax validation cannot infer that any secret will be persisted.
 func validateEncryption(cfg *EncryptionConfig) error {
 	if cfg == nil || strings.TrimSpace(cfg.MasterKey) == "" {
-		log.Warn("encryption.master_key not set; per-merchant secrets are stored WITHOUT at-rest encryption")
 		return nil
 	}
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(cfg.MasterKey))
@@ -1881,17 +1910,12 @@ func (cfg *Config) IsProviderReadOnly() bool {
 // IsDev returns true if the environment is development.
 //
 // SEC-18: an EMPTY Env is NOT development. It used to be, which made every
-// dev-only relaxation (plaintext merchant secrets, an RLS-bypassing DB role)
+// dev-only relaxation (plaintext merchant secrets)
 // the default for any deployment that simply forgot to set ENV. Unset is now
 // the strict posture; Load() refuses it outright.
 func (cfg *Config) IsDev() bool {
 	return cfg != nil && (cfg.Env == "dev" || cfg.Env == "development")
 }
-
-// RLS enforcement is deliberately NOT a config knob (or#782). Every
-// environment, development included, must connect as an RLS-enforcing role;
-// db.EnforceRLSPosture takes no environment argument, so there is nothing here
-// to point back at a superuser.
 
 // RequiresSecretEncryption reports whether startup must fail if the DB-backed
 // merchant secret store would persist secrets PLAINTEXT (no ENCRYPTION_MASTER_KEY).
@@ -1943,7 +1967,7 @@ func validateDatabase(cfg *DBConfig) error {
 // local, zero-config working set. Load() uses it as its base but CLEARS Env
 // first (SEC-18): the deployment environment is the one knob whose default
 // cannot be safe, because "development" is the permissive posture (plaintext
-// merchant secrets, an RLS-bypassing DB role is tolerated). A deployment
+// merchant secrets). A deployment
 // declares ENV or does not boot.
 func GetDefaultBillingConfig() *Config {
 	return &Config{
@@ -1955,10 +1979,7 @@ func GetDefaultBillingConfig() *Config {
 			Host:     "localhost",
 			Port:     "5434",
 			Database: "openrails_db",
-			// The unprivileged NOBYPASSRLS role, matching docker-compose
-			// (or#782). The default must NOT be the superuser: boot refuses a
-			// BYPASSRLS role in every environment, and a superuser default
-			// would only teach developers to reach for one.
+			// Application login used by the local Docker setup.
 			Username: "app",
 			Password: "app_password",
 			SSLMode:  "disable",
@@ -2369,7 +2390,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return nil, fmt.Errorf("cors_origins config was removed (#519/#765): browser CORS is a fixed engine policy (checkout/self-service = public *, everything else = none) — bearer JWTs are the security boundary, not a configurable origin allowlist; delete the cors_origins yaml key and CORS_ORIGINS env var")
 	}
 	if retiredDBRequireRLS {
-		return nil, fmt.Errorf("db.require_rls config was removed: RLS enforcement is derived from env — development may bypass RLS, every other env requires an RLS-enforcing DB role; delete the db.require_rls yaml key and DB_REQUIRE_RLS env var")
+		return nil, fmt.Errorf("db.require_rls config was removed: merchant isolation uses explicit scoped queries, not PostgreSQL RLS; delete the db.require_rls yaml key and DB_REQUIRE_RLS env var")
 	}
 	if retiredAuthIssuers {
 		return nil, fmt.Errorf("auth.issuers / auth.expected_audience config was removed (#521/#527): declare each merchant's host-app trust under merchants[].remote_application in the merchant config manifest; delete the keys and AUTH_ISSUERS / AUTH_EXPECTED_AUDIENCE env vars")
@@ -2409,12 +2430,10 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	// SEC-18: ENV is REQUIRED and has no default. Every other knob can fail
 	// closed on its own; this one decides WHICH way the others fail, so it must
 	// be declared, not inferred. Silently reading unset as "development" meant a
-	// container deployed without ENV kept merchant secrets in PLAINTEXT. (The
-	// DB role is no longer on this switch — or#782 made RLS enforcement
-	// unconditional.)
+	// container deployed without ENV kept merchant secrets in PLAINTEXT.
 	cfg.Env = strings.TrimSpace(cfg.Env)
 	if cfg.Env == "" {
-		return nil, fmt.Errorf("ENV is required (SEC-18): set env (env ENV) to development for a local/dev deployment, or to production/staging/<name> — there is no default, because the permissive posture (plaintext merchant secrets) is the development one. The DB role is NOT one of those relaxations: a BYPASSRLS role is refused in every environment")
+		return nil, fmt.Errorf("ENV is required (SEC-18): set env (env ENV) to development for a local/dev deployment, or to production/staging/<name> — there is no default, because the permissive posture (plaintext merchant secrets) is the development one")
 	}
 
 	// Sandbox-by-default in development (#355/#745): when test_mode is not

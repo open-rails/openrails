@@ -3,6 +3,8 @@
 package webhooks
 
 import (
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"context"
 	"encoding/json"
 	"testing"
@@ -144,7 +146,9 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 	require.NoError(t, svc.handleRenewalFailure(ctx))
 
 	// The standing access window is UNTOUCHED — dunning never gates access.
-	gotPaid, err := q.GetEntitlementByID(ctx, paidEntID)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	require.NoError(t, scopeErr)
+	gotPaid, err := q.GetEntitlementByID(ctx, gen.GetEntitlementByIDParams{MerchantID: scopeMerchantID.UUID(), ID: paidEntID})
 	require.NoError(t, err)
 	require.Nil(t, gotPaid.EndAt, "standing window stays open through a renewal failure")
 	require.Nil(t, gotPaid.RevokedAt)

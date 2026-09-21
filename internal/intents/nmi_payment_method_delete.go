@@ -116,7 +116,11 @@ func (h *NMIPaymentMethodDeleteHandler) CheckRelevance(ctx context.Context, inte
 	if err != nil {
 		return StillRelevant(), nil // Execute reports the terminal payload error
 	}
-	subs, err := h.DB.Gen(ctx).ListSubscriptionsByPaymentMethodIDs(ctx, []uuid.UUID{p.PaymentMethodID})
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return Relevance{}, scopeErr
+	}
+	subs, err := h.DB.Gen(ctx).ListSubscriptionsByPaymentMethodIDs(ctx, gen.ListSubscriptionsByPaymentMethodIDsParams{MerchantID: scopeMerchantID.UUID(), PaymentMethodIds: []uuid.UUID{p.PaymentMethodID}})
 	if err != nil {
 		return Relevance{}, err
 	}

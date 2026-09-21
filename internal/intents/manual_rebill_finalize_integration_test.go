@@ -262,7 +262,7 @@ func TestManualRebillConfirmedAfterDunningParkedUnknownRenewsOnce(t *testing.T) 
 	fx := seedPastDueSubscription(t)
 	fake, client := newFakeNMIRebillGateway(t, fx)
 	fake.saleStatus.Store(http.StatusBadGateway)
-	ctx := context.Background()
+	ctx := fx.handlerCtx()
 
 	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(ctx, fx.enqueueParams(1))
 	require.NoError(t, err)
@@ -307,7 +307,7 @@ func TestManualRebillConfirmedOnCancelledSubscriptionRecordsPaymentOnly(t *testi
 	fx := seedPastDueSubscription(t)
 	fake, client := newFakeNMIRebillGateway(t, fx)
 	fake.saleStatus.Store(http.StatusBadGateway)
-	ctx := context.Background()
+	ctx := fx.handlerCtx()
 
 	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(ctx, fx.enqueueParams(1))
 	require.NoError(t, err)

@@ -45,7 +45,6 @@ func applyDirectoryFunctionMigration(t *testing.T, ctx context.Context, pool *pg
 	t.Helper()
 	sql, err := postgresmigrations.BaselineObjects(
 		"current_merchant_id",
-		"assert_cross_merchant_reader",
 		"psp_owner_by_identity",
 		"customer_merchant_ids_for_subject",
 	)

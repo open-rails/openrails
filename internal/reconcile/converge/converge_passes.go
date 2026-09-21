@@ -718,7 +718,12 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	// repaired here: the intent executor/verifier own the intent.
 	if scope.IsGlobal() {
 		actionCutoff, verifyCutoff := now.Add(-stuckActionableAge), now.Add(-stuckVerifyAge)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return nil, scopeErr
+		}
 		stuck, err := q.ListStuckRailIntents(ctx, gen.ListStuckRailIntentsParams{
+			MerchantID:   scopeMerchantID.UUID(),
 			ActionCutoff: actionCutoff, VerifyCutoff: verifyCutoff,
 		})
 		if err != nil {
@@ -906,13 +911,18 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	// (derive.entitlement.unjustified); this reference check keeps the
 	// non-live rest.
 	cust := scope.Customer
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	orphanSubs, err := q.ConOrphanEntitlementSubscriptionSource(ctx, gen.ConOrphanEntitlementSubscriptionSourceParams{
-		Now: now, CustomerID: cust,
+		MerchantID: scopeMerchantID.UUID(),
+		Now:        now, CustomerID: cust,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("con: scan orphan subscription sources: %w", err)
 	}
-	orphanPays, err := q.ConOrphanEntitlementPaymentSource(ctx, cust)
+	orphanPays, err := q.ConOrphanEntitlementPaymentSource(ctx, gen.ConOrphanEntitlementPaymentSourceParams{MerchantID: scopeMerchantID.UUID(), CustomerID: cust})
 	if err != nil {
 		return nil, fmt.Errorf("con: scan orphan payment sources: %w", err)
 	}
@@ -953,7 +963,7 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	// carries the duplicate payment ids + the #692 refund recommendation.
 	// Severity CRITICAL (#690, Paul): a duplicate charge is money harm — worse
 	// than a freeloader's marginal content access.
-	dupCharges, err := q.ConDuplicateChargesSamePeriod(ctx, cust)
+	dupCharges, err := q.ConDuplicateChargesSamePeriod(ctx, gen.ConDuplicateChargesSamePeriodParams{MerchantID: scopeMerchantID.UUID(), CustomerID: cust})
 	if err != nil {
 		return nil, fmt.Errorf("con: scan duplicate charges: %w", err)
 	}
@@ -991,7 +1001,7 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	// misses. CRITICAL (customer charged twice), ADMIN surface-only, with the
 	// #692 cancel_and_refund recommendation targeting the LATER purchase
 	// (default only — override_params can flip it before approving).
-	dupOwn, err := q.ConDuplicateOwnershipGrants(ctx, gen.ConDuplicateOwnershipGrantsParams{Now: now, CustomerID: cust})
+	dupOwn, err := q.ConDuplicateOwnershipGrants(ctx, gen.ConDuplicateOwnershipGrantsParams{MerchantID: scopeMerchantID.UUID(), Now: now, CustomerID: cust})
 	if err != nil {
 		return nil, fmt.Errorf("con: scan duplicate ownership grants: %w", err)
 	}

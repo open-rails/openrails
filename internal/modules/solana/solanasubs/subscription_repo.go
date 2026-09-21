@@ -51,6 +51,13 @@ func (r *SolanaSubscriptionRepo) Upsert(ctx context.Context, s *models.SolanaSub
 	if s == nil {
 		return errors.New("solana subscription is nil")
 	}
+	scope, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	if s.MerchantID != scope.UUID() {
+		return errors.New("solana subscription merchant does not match context")
+	}
 	now := time.Now().UTC()
 	if s.ID == uuid.Nil {
 		s.ID = uuid.New()
@@ -64,7 +71,7 @@ func (r *SolanaSubscriptionRepo) Upsert(ctx context.Context, s *models.SolanaSub
 	}
 	return r.db.Gen(ctx).UpsertSolanaSubscription(ctx, gen.UpsertSolanaSubscriptionParams{
 		ID:                       s.ID,
-		MerchantID:               s.MerchantID,
+		MerchantID:               scope.UUID(),
 		SubscriptionID:           s.SubscriptionID,
 		SubscriberWallet:         s.SubscriberWallet,
 		AuthorityPda:             s.AuthorityPDA,
@@ -92,7 +99,11 @@ func (r *SolanaSubscriptionRepo) UpsertTx(ctx context.Context, txDB *db.DB, s *m
 
 // GetBySubscriptionPDA returns the row for an on-chain subscription PDA.
 func (r *SolanaSubscriptionRepo) GetBySubscriptionPDA(ctx context.Context, pda string) (*models.SolanaSubscription, error) {
-	row, err := r.db.Gen(ctx).GetSolanaSubscriptionByPDA(ctx, pda)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	row, err := r.db.Gen(ctx).GetSolanaSubscriptionByPDA(ctx, gen.GetSolanaSubscriptionByPDAParams{MerchantID: scopeMerchantID.UUID(), SubscriptionPda: pda})
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +112,11 @@ func (r *SolanaSubscriptionRepo) GetBySubscriptionPDA(ctx context.Context, pda s
 
 // GetBySubscriptionID returns the row linked to a lifecycle subscription.
 func (r *SolanaSubscriptionRepo) GetBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.SolanaSubscription, error) {
-	row, err := r.db.Gen(ctx).GetSolanaSubscriptionBySubscriptionID(ctx, subscriptionID)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	row, err := r.db.Gen(ctx).GetSolanaSubscriptionBySubscriptionID(ctx, gen.GetSolanaSubscriptionBySubscriptionIDParams{MerchantID: scopeMerchantID.UUID(), SubscriptionID: subscriptionID})
 	if err != nil {
 		return nil, err
 	}
@@ -145,9 +160,14 @@ func (r *SolanaSubscriptionRepo) ListDue(ctx context.Context, now time.Time, lim
 
 func (r *SolanaSubscriptionRepo) listDueScoped(ctx context.Context, now time.Time, limit int) ([]*models.SolanaSubscription, error) {
 	limit32, _ := safecast.Convert[int32](limit)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	rows, err := r.db.Gen(ctx).ListDueSolanaSubscriptions(ctx, gen.ListDueSolanaSubscriptionsParams{
-		Now:       now.UTC(),
-		PageLimit: limit32,
+		MerchantID: scopeMerchantID.UUID(),
+		Now:        now.UTC(),
+		PageLimit:  limit32,
 	})
 	if err != nil {
 		return nil, err
@@ -166,7 +186,12 @@ func (r *SolanaSubscriptionRepo) listDueScoped(ctx context.Context, now time.Tim
 // confirmed pull, not wall-clock.
 func (r *SolanaSubscriptionRepo) AdvanceAfterPull(ctx context.Context, id uuid.UUID, periodStart time.Time, signature string, nextPullAt time.Time) error {
 	ps := periodStart.UTC()
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
 	return r.db.Gen(ctx).AdvanceSolanaSubscriptionAfterPull(ctx, gen.AdvanceSolanaSubscriptionAfterPullParams{
+		MerchantID:            scopeMerchantID.UUID(),
 		ID:                    id,
 		LastPulledPeriodStart: &ps,
 		LastSignature:         &signature,
@@ -180,7 +205,12 @@ func (r *SolanaSubscriptionRepo) AdvanceAfterPull(ctx context.Context, id uuid.U
 // the hourly worker doesn't re-attempt + re-fail every hour, collapsing the
 // multi-day dunning window).
 func (r *SolanaSubscriptionRepo) SetNextPullAt(ctx context.Context, id uuid.UUID, nextPullAt time.Time) error {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
 	return r.db.Gen(ctx).SetSolanaSubscriptionNextPullAt(ctx, gen.SetSolanaSubscriptionNextPullAtParams{
+		MerchantID: scopeMerchantID.UUID(),
 		ID:         id,
 		NextPullAt: nextPullAt.UTC(),
 		UpdatedAt:  time.Now().UTC(),
@@ -222,7 +252,11 @@ func (r *SolanaSubscriptionRepo) ListActiveMerchantWallets(ctx context.Context) 
 }
 
 func (r *SolanaSubscriptionRepo) listActiveMerchantWalletsScoped(ctx context.Context) ([]MerchantWallet, error) {
-	rows, err := r.db.Gen(ctx).ListActiveSolanaMerchantWallets(ctx)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	rows, err := r.db.Gen(ctx).ListActiveSolanaMerchantWallets(ctx, scopeMerchantID.UUID())
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +305,11 @@ func (r *SolanaSubscriptionRepo) ListActiveWithSignature(ctx context.Context, li
 
 func (r *SolanaSubscriptionRepo) listActiveWithSignatureScoped(ctx context.Context, limit int) ([]*models.SolanaSubscription, error) {
 	limit32, _ := safecast.Convert[int32](limit)
-	rows, err := r.db.Gen(ctx).ListActiveSolanaSubscriptionsWithSignature(ctx, limit32)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	rows, err := r.db.Gen(ctx).ListActiveSolanaSubscriptionsWithSignature(ctx, gen.ListActiveSolanaSubscriptionsWithSignatureParams{MerchantID: scopeMerchantID.UUID(), PageLimit: limit32})
 	if err != nil {
 		return nil, err
 	}
@@ -284,10 +322,15 @@ func (r *SolanaSubscriptionRepo) listActiveWithSignatureScoped(ctx context.Conte
 
 // SetStatus transitions the on-chain record's lifecycle (cancelled/expired).
 func (r *SolanaSubscriptionRepo) SetStatus(ctx context.Context, id uuid.UUID, status string) error {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return scopeErr
+	}
 	return r.db.Gen(ctx).SetSolanaSubscriptionStatus(ctx, gen.SetSolanaSubscriptionStatusParams{
-		ID:        id,
-		Status:    status,
-		UpdatedAt: time.Now().UTC(),
+		MerchantID: scopeMerchantID.UUID(),
+		ID:         id,
+		Status:     status,
+		UpdatedAt:  time.Now().UTC(),
 	})
 }
 

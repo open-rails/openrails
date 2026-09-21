@@ -146,11 +146,11 @@ func (h *NMIProviderCutover) freeze(ctx context.Context, d *db.DB, id uuid.UUID,
 	p.SourcePaymentMethodID, p.PriceID, p.PlanID = *snapshot.PaymentMethodID, *snapshot.PriceID, *snapshot.PlanID
 	p.Currency, p.Amount, p.CycleHours = snapshot.Currency, snapshot.Amount, *snapshot.AccessDurationHours
 	p.PeriodStart, p.PeriodEnd = *snapshot.CurrentPeriodStartsAt, *snapshot.CurrentPeriodEndsAt
-	sourceMethod, err := d.Gen(ctx).GetPaymentMethodByID(ctx, p.SourcePaymentMethodID)
+	sourceMethod, err := d.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: p.SourcePaymentMethodID})
 	if err != nil {
 		return p, err
 	}
-	targetMethod, err := d.Gen(ctx).GetPaymentMethodByID(ctx, req.TargetPaymentMethodID)
+	targetMethod, err := d.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: req.TargetPaymentMethodID})
 	if err != nil {
 		return p, err
 	}
@@ -292,7 +292,11 @@ func (h *NMIProviderCutover) Submit(ctx context.Context, runner *Runner, id uuid
 		if !errors.Is(e, pgx.ErrNoRows) {
 			return e
 		}
-		if _, e = d.Gen(ctx).GetSubscriptionByIDForUpdate(ctx, id); e != nil {
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return scopeErr
+		}
+		if _, e = d.Gen(ctx).GetSubscriptionByIDForUpdate(ctx, gen.GetSubscriptionByIDForUpdateParams{MerchantID: scopeMerchantID.UUID(), ID: id}); e != nil {
 			return e
 		}
 		if e = d.Gen(ctx).LockProviderCutoverPaymentMethods(ctx, gen.LockProviderCutoverPaymentMethodsParams{
@@ -724,7 +728,11 @@ func (h *NMIProviderCutover) repoint(ctx context.Context, p nmiCutoverPayload, t
 	defer cancel()
 	return h.DB.MerchantTx(wctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := h.DB.NewWithPgxTx(tx)
-		if _, e := d.Gen(ctx).GetSubscriptionByIDForUpdate(ctx, p.SubscriptionID); e != nil {
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return scopeErr
+		}
+		if _, e := d.Gen(ctx).GetSubscriptionByIDForUpdate(ctx, gen.GetSubscriptionByIDForUpdateParams{MerchantID: scopeMerchantID.UUID(), ID: p.SubscriptionID}); e != nil {
 			return e
 		}
 		live, e := h.freeze(ctx, d, p.SubscriptionID, p.Request)

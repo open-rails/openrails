@@ -112,7 +112,12 @@ func (s *EntitlementService) HasActiveIndefiniteByCustomer(ctx context.Context, 
 }
 
 func (s *EntitlementService) ExistsBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID, entitlement string) (bool, error) {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return false, scopeErr
+	}
 	return s.db.Gen(ctx).EntitlementExistsBySource(ctx, gen.EntitlementExistsBySourceParams{
+		MerchantID:  scopeMerchantID.UUID(),
 		SourceType:  string(sourceType),
 		SourceID:    sourceID,
 		Entitlement: entitlement,
@@ -147,21 +152,19 @@ func (s *EntitlementService) LatestFiniteWindowByCustomer(ctx context.Context, t
 // Insert persists a fully-populated entitlement window directly (test/seed
 // surface; the production write path is PushNewEntitlement via the grant ledger).
 func (s *EntitlementService) Insert(ctx context.Context, entitlement *models.Entitlement) error {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	if entitlement.MerchantID != uuid.Nil && entitlement.MerchantID != tid.UUID() {
+		return errors.New("entitlement merchant does not match context")
+	}
 	// Validate that end_at > start_at if end_at is provided (non-indefinite entitlement)
 	if entitlement.EndAt != nil && !entitlement.EndAt.After(entitlement.StartAt) {
 		return fmt.Errorf("invalid entitlement: end_at (%v) must be after start_at (%v)", entitlement.EndAt, entitlement.StartAt)
 	}
 
-	// Stamp the resolved merchant (issue #223) when the caller did not set one,
-	// so new rows are merchant-scoped consistently with reads. The merchant is
-	// required from context — an absent merchant is an error.
-	if (entitlement.MerchantID == uuid.UUID{}) {
-		tid, err := merchant.Require(ctx)
-		if err != nil {
-			return err
-		}
-		entitlement.MerchantID = tid.UUID()
-	}
+	entitlement.MerchantID = tid.UUID()
 
 	id, err := s.db.Gen(ctx).CreateEntitlement(ctx, gen.CreateEntitlementParams{
 		ID:           entitlement.ID,
@@ -189,7 +192,11 @@ func (s *EntitlementService) ListByUser(ctx context.Context, userID string) ([]m
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Gen(ctx).ListEntitlementsByCustomer(ctx, tsid)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	rows, err := s.db.Gen(ctx).ListEntitlementsByCustomer(ctx, gen.ListEntitlementsByCustomerParams{MerchantID: scopeMerchantID.UUID(), CustomerID: tsid})
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +291,12 @@ func (s *EntitlementService) ListActiveRecordsByExternalSubjects(ctx context.Con
 }
 
 func (s *EntitlementService) ListDistinctEntitlementNamesBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID) ([]string, error) {
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	return s.db.Gen(ctx).ListDistinctEntitlementNamesBySource(ctx, gen.ListDistinctEntitlementNamesBySourceParams{
+		MerchantID: scopeMerchantID.UUID(),
 		SourceType: string(sourceType),
 		SourceID:   sourceID,
 	})
@@ -296,7 +308,12 @@ func (s *EntitlementService) ListActiveEntitlements(ctx context.Context, userID 
 	if err != nil {
 		return nil, err
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	return s.db.Gen(ctx).ListActiveEntitlementNames(ctx, gen.ListActiveEntitlementNamesParams{
+		MerchantID: scopeMerchantID.UUID(),
 		CustomerID: tsid,
 		At:         at,
 	})
@@ -334,7 +351,12 @@ func (s *EntitlementService) ListCustomersWithEntitlement(ctx context.Context, e
 	if limit > CustomersWithEntitlementMaxPageSize {
 		limit = CustomersWithEntitlementMaxPageSize
 	}
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
 	return s.db.Gen(ctx).ListCustomersWithEntitlement(ctx, gen.ListCustomersWithEntitlementParams{
+		MerchantID:  scopeMerchantID.UUID(),
 		Entitlement: strings.TrimSpace(entitlement),
 		At:          at,
 		AfterID:     afterID,
@@ -344,7 +366,11 @@ func (s *EntitlementService) ListCustomersWithEntitlement(ctx context.Context, e
 
 // GetByID retrieves an entitlement by its ID
 func (s *EntitlementService) GetByID(ctx context.Context, id uuid.UUID) (*models.Entitlement, error) {
-	row, err := s.db.Gen(ctx).GetEntitlementByID(ctx, id)
+	scopeMerchantID, scopeErr := merchant.Require(ctx)
+	if scopeErr != nil {
+		return nil, scopeErr
+	}
+	row, err := s.db.Gen(ctx).GetEntitlementByID(ctx, gen.GetEntitlementByIDParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 	if err != nil {
 		return nil, err
 	}
@@ -598,13 +624,19 @@ func (s *EntitlementService) BoundSubscriptionAccess(ctx context.Context, subscr
 	now := s.now().UTC()
 	return s.withTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return scopeErr
+		}
 		if err := q.SoftDeleteFutureEntitlementsBySubscription(ctx, gen.SoftDeleteFutureEntitlementsBySubscriptionParams{
-			SourceID: subscriptionID, EndAt: endAt.UTC(), Now: now,
+			MerchantID: scopeMerchantID.UUID(),
+			SourceID:   subscriptionID, EndAt: endAt.UTC(), Now: now,
 		}); err != nil {
 			return err
 		}
 		return q.EndActiveEntitlementsBySubscription(ctx, gen.EndActiveEntitlementsBySubscriptionParams{
-			SourceID: subscriptionID, EndAt: endAt.UTC(), Now: now, SetRevoked: false,
+			MerchantID: scopeMerchantID.UUID(),
+			SourceID:   subscriptionID, EndAt: endAt.UTC(), Now: now, SetRevoked: false,
 		})
 	})
 }
@@ -634,7 +666,8 @@ func (s *EntitlementService) ResumeSubscriptionAccess(ctx context.Context, subsc
 			return nil
 		}
 		return q.ResumeEntitlementsBySubscription(ctx, gen.ResumeEntitlementsBySubscriptionParams{
-			SourceID: subscriptionID, Now: now,
+			MerchantID: mID.UUID(),
+			SourceID:   subscriptionID, Now: now,
 		})
 	})
 }
@@ -653,9 +686,14 @@ func (s *EntitlementService) extendActiveBySubscription(ctx context.Context, sub
 		// Preserve the purchased duration of following scheduled windows when
 		// the subscription's finite period extends.
 		q := gen.New(tx)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return scopeErr
+		}
 		rows, err := q.ListExtendableSubscriptionEntitlements(ctx, gen.ListExtendableSubscriptionEntitlementsParams{
-			SourceID: subscriptionID,
-			EndAt:    endAt,
+			MerchantID: scopeMerchantID.UUID(),
+			SourceID:   subscriptionID,
+			EndAt:      endAt,
 		})
 		if err != nil {
 			return err
@@ -701,11 +739,16 @@ func (s *EntitlementService) extendActiveBySubscription(ctx context.Context, sub
 			}
 
 			// Extend the subscription's entitlement row.
+			scopeMerchantID, scopeErr := merchant.Require(ctx)
+			if scopeErr != nil {
+				return scopeErr
+			}
 			if err := q.UpdateEntitlementEndAtIfMatch(ctx, gen.UpdateEntitlementEndAtIfMatchParams{
-				ID:       ent.ID,
-				NewEndAt: newEnd,
-				Now:      now,
-				OldEndAt: oldEnd,
+				MerchantID: scopeMerchantID.UUID(),
+				ID:         ent.ID,
+				NewEndAt:   newEnd,
+				Now:        now,
+				OldEndAt:   oldEnd,
 			}); err != nil {
 				return err
 			}
@@ -727,14 +770,20 @@ func (s *EntitlementService) EndActiveByPayment(ctx context.Context, paymentID u
 func (s *EntitlementService) endActiveByPayment(ctx context.Context, paymentID uuid.UUID, endAt time.Time, now time.Time, reason *models.EntitlementRevokeReason) error {
 	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		scopeMerchantID, scopeErr := merchant.Require(ctx)
+		if scopeErr != nil {
+			return scopeErr
+		}
 		if err := q.SoftDeleteFutureOneOffEntitlements(ctx, gen.SoftDeleteFutureOneOffEntitlementsParams{
-			SourceID: paymentID,
-			Now:      now,
-			EndAt:    endAt,
+			MerchantID: scopeMerchantID.UUID(),
+			SourceID:   paymentID,
+			Now:        now,
+			EndAt:      endAt,
 		}); err != nil {
 			return err
 		}
 		return q.RevokeActiveOneOffEntitlements(ctx, gen.RevokeActiveOneOffEntitlementsParams{
+			MerchantID:   scopeMerchantID.UUID(),
 			SourceID:     paymentID,
 			EndAt:        endAt,
 			Now:          now,

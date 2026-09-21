@@ -15,13 +15,15 @@ const getDashboardConfig = `-- name: GetDashboardConfig :one
 
 SELECT merchant_id, layout, updated_at, updated_by
 FROM openrails.dashboard_configs
+
+WHERE dashboard_configs.merchant_id = $1::uuid
 LIMIT 1
 `
 
 // openrails.dashboard_configs — #741 per-merchant dashboard widget layout.
 // RLS (app.merchant_id GUC) scopes every statement to the request's merchant.
-func (q *Queries) GetDashboardConfig(ctx context.Context) (OpenrailsDashboardConfig, error) {
-	row := q.db.QueryRow(ctx, getDashboardConfig)
+func (q *Queries) GetDashboardConfig(ctx context.Context, merchantID uuid.UUID) (OpenrailsDashboardConfig, error) {
+	row := q.db.QueryRow(ctx, getDashboardConfig, merchantID)
 	var i OpenrailsDashboardConfig
 	err := row.Scan(
 		&i.MerchantID,
@@ -33,14 +35,16 @@ func (q *Queries) GetDashboardConfig(ctx context.Context) (OpenrailsDashboardCon
 }
 
 const hasUsageActivity = `-- name: HasUsageActivity :one
-SELECT (EXISTS (SELECT 1 FROM openrails.usage_events)
-    OR EXISTS (SELECT 1 FROM openrails.grants WHERE kind = 'credit' AND event = 'grant' AND source_type = 'purchase'))::boolean AS has_activity
+SELECT (EXISTS (SELECT 1 FROM openrails.usage_events
+WHERE usage_events.merchant_id = $1::uuid
+)
+    OR EXISTS (SELECT 1 FROM openrails.grants WHERE grants.merchant_id = $1::uuid AND kind = 'credit' AND event = 'grant' AND source_type = 'purchase'))::boolean AS has_activity
 `
 
 // Any usage-stream signal for the merchant: metered events or purchased credit
 // lots. Drives seeding usage widgets into the #741 default dashboard template.
-func (q *Queries) HasUsageActivity(ctx context.Context) (bool, error) {
-	row := q.db.QueryRow(ctx, hasUsageActivity)
+func (q *Queries) HasUsageActivity(ctx context.Context, merchantID uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasUsageActivity, merchantID)
 	var has_activity bool
 	err := row.Scan(&has_activity)
 	return has_activity, err

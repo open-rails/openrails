@@ -75,17 +75,17 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
 		return nil, fmt.Errorf("refusing to charge without an established currency: %w", err)
 	}
-	merchantID := req.MerchantID
-	if merchantID == uuid.Nil {
-		tid, err := merchant.Require(ctx)
-		if err != nil {
-			return nil, err
-		}
-		merchantID = tid.UUID()
-		req.MerchantID = merchantID
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
 	}
+	merchantID := tid.UUID()
+	if req.MerchantID != uuid.Nil && req.MerchantID != merchantID {
+		return nil, fmt.Errorf("charge request belongs to another merchant")
+	}
+	req.MerchantID = merchantID
 
-	method, err := c.db.Gen(ctx).GetPaymentMethodByID(ctx, req.PaymentMethodID)
+	method, err := c.db.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: merchantID, ID: req.PaymentMethodID})
 	if err != nil {
 		return nil, fmt.Errorf("load payment method: %w", err)
 	}

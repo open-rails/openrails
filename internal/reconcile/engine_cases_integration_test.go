@@ -333,7 +333,7 @@ func TestReconcileTaxonomyWorkflow(t *testing.T) {
 		// The mismatch may repair the second row's status, but neither row may be cancelled.
 		require.NoError(t, f.db.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
 			var remaining, cancelled int
-			require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE status='cancelled') FROM billing.subscriptions`).Scan(&remaining, &cancelled))
+			require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE status='cancelled') FROM billing.subscriptions WHERE merchant_id=$1`, f.merchant.UUID()).Scan(&remaining, &cancelled))
 			require.Equal(t, 2, remaining)
 			require.Zero(t, cancelled)
 			return nil
@@ -399,9 +399,11 @@ func TestReconcileMaterializationRefusals(t *testing.T) {
 	for _, scenario := range []string{"advisory", "ambiguous identity", "unresolved plan", "past due without period"} {
 		t.Run(scenario, func(t *testing.T) {
 			f := newReconcileCase(t, ProviderNMI)
-			owner := f.subscription("known", "active", "", uuid.Nil)
-			f.exec(`DELETE FROM billing.subscriptions WHERE id=$1`, owner.ID)
-			f.snap.Subscriptions = nil
+			customerID, productID, priceID := uuid.New(), uuid.New(), uuid.New()
+			owner := LocalSubscription{CustomerID: customerID, ProductID: productID, PriceID: &priceID}
+			f.exec(`INSERT INTO billing.customers (merchant_id,id,issuer) VALUES ($1,$2,'reconcile-case')`, f.merchant.UUID(), customerID)
+			f.exec(`INSERT INTO billing.products (id,merchant_id,key,display_name,entitlements_spec) VALUES ($1,$2,$3,'Premium','{"premium":null}')`, productID, f.merchant.UUID(), "case-"+productID.String())
+			f.exec(`INSERT INTO billing.prices (id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew) VALUES ($1,$2,$3,9990000,'USD',720,true)`, priceID, f.merchant.UUID(), productID)
 			f.method(owner.CustomerID, "vault-77")
 			f.exec(`INSERT INTO billing.price_psp_bindings (merchant_id,price_id,psp_id,plan_id) VALUES ($1,$2,$3,'plan-gold')`, f.merchant.UUID(), owner.PriceID, f.psp.ID)
 			f.snap.Capabilities = Capabilities{Subscriptions: true, Transactions: true, Vault: true}
@@ -509,7 +511,7 @@ func TestReconcileCancellationBudget(t *testing.T) {
 				require.Equal(t, 3, result.Summary.Providers["nmi"].AutoFixed)
 				require.NoError(t, f.db.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
 					var remaining, cancelled int
-					require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE status='cancelled') FROM billing.subscriptions`).Scan(&remaining, &cancelled))
+					require.NoError(t, f.db.Qx(ctx).QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE status='cancelled') FROM billing.subscriptions WHERE merchant_id=$1`, f.merchant.UUID()).Scan(&remaining, &cancelled))
 					require.Equal(t, 200, remaining)
 					require.Equal(t, 3, cancelled)
 					return nil

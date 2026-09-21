@@ -190,7 +190,12 @@ func (r *PaymentRepo) CreateIfNotExists(ctx context.Context, payment *models.Pay
 }
 
 func (r *PaymentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Payment, error) {
-	row, err := r.db.Gen(ctx).GetPaymentByID(ctx, id)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
+	row, err := r.db.Gen(ctx).GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: queryMerchant.UUID(), ID: id})
 	if err != nil {
 		return nil, err
 	}
@@ -200,8 +205,13 @@ func (r *PaymentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Paymen
 // GetByIDWithDetails fetches a payment with all related entities (Price, Product, Subscription)
 // and also loads any refund entries linked to this payment
 func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*models.Payment, []*models.Payment, error) {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, nil, queryScopeErr
+	}
+
 	q := r.db.Gen(ctx)
-	row, err := q.GetPaymentWithPriceProduct(ctx, id)
+	row, err := q.GetPaymentWithPriceProduct(ctx, gen.GetPaymentWithPriceProductParams{MerchantID: queryMerchant.UUID(), ID: id})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -221,7 +231,7 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 	payment.Price = price
 
 	if payment.SubscriptionID != nil {
-		subRow, err := q.GetSubscriptionByID(ctx, *payment.SubscriptionID)
+		subRow, err := q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: queryMerchant.UUID(), ID: *payment.SubscriptionID})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil, err
 		}
@@ -234,7 +244,7 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 		}
 	}
 
-	refundRows, err := q.ListRefundsForPayment(ctx, &id)
+	refundRows, err := q.ListRefundsForPayment(ctx, gen.ListRefundsForPaymentParams{MerchantID: queryMerchant.UUID(), RefundedPaymentID: &id})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -291,7 +301,12 @@ func (r *PaymentRepo) GetByPSPTransactionID(ctx context.Context, rail models.Rai
 }
 
 func (r *PaymentRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	rows, err := r.db.Gen(ctx).DeletePayment(ctx, id)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return queryScopeErr
+	}
+
+	rows, err := r.db.Gen(ctx).DeletePayment(ctx, gen.DeletePaymentParams{MerchantID: queryMerchant.UUID(), ID: id})
 	if err != nil {
 		return err
 	}
@@ -302,7 +317,12 @@ func (r *PaymentRepo) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PaymentRepo) GetRefundTotalByPaymentID(ctx context.Context, paymentID uuid.UUID) (int64, error) {
-	rows, err := r.db.Gen(ctx).ListRefundRowsForTotal(ctx, &paymentID)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return 0, queryScopeErr
+	}
+
+	rows, err := r.db.Gen(ctx).ListRefundRowsForTotal(ctx, gen.ListRefundRowsForTotalParams{MerchantID: queryMerchant.UUID(), RefundedPaymentID: &paymentID})
 	if err != nil {
 		return 0, err
 	}
@@ -314,7 +334,12 @@ func (r *PaymentRepo) GetRefundTotalByPaymentID(ctx context.Context, paymentID u
 }
 
 func (r *PaymentRepo) LinkRefundedPayment(ctx context.Context, paymentID, originalPaymentID uuid.UUID) error {
-	rows, err := r.db.Gen(ctx).LinkRefundedPayment(ctx, gen.LinkRefundedPaymentParams{
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return queryScopeErr
+	}
+
+	rows, err := r.db.Gen(ctx).LinkRefundedPayment(ctx, gen.LinkRefundedPaymentParams{MerchantID: queryMerchant.UUID(),
 		ID:                paymentID,
 		RefundedPaymentID: &originalPaymentID,
 	})
@@ -356,7 +381,12 @@ func RefundStatusCountsTowardTotal(status string) bool {
 }
 
 func (r *PaymentRepo) GetRefundByAdminIdempotencyKey(ctx context.Context, originalPaymentID uuid.UUID, key string) (*models.Payment, error) {
-	row, err := r.db.Gen(ctx).GetRefundByAdminIdempotencyKey(ctx, gen.GetRefundByAdminIdempotencyKeyParams{
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
+	row, err := r.db.Gen(ctx).GetRefundByAdminIdempotencyKey(ctx, gen.GetRefundByAdminIdempotencyKeyParams{MerchantID: queryMerchant.UUID(),
 		RefundedPaymentID: &originalPaymentID,
 		IdemKey:           strings.TrimSpace(key),
 	})
@@ -367,11 +397,16 @@ func (r *PaymentRepo) GetRefundByAdminIdempotencyKey(ctx context.Context, origin
 }
 
 func (r *PaymentRepo) CompleteRefundReservation(ctx context.Context, reservationID uuid.UUID, refundTransactionID string, metadata map[string]any) error {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return queryScopeErr
+	}
+
 	meta, err := models.ToJSONB(metadata)
 	if err != nil {
 		return err
 	}
-	rows, err := r.db.Gen(ctx).CompleteRefundReservation(ctx, gen.CompleteRefundReservationParams{
+	rows, err := r.db.Gen(ctx).CompleteRefundReservation(ctx, gen.CompleteRefundReservationParams{MerchantID: queryMerchant.UUID(),
 		ID:            reservationID,
 		TransactionID: refundTransactionID,
 		Metadata:      meta,
@@ -405,11 +440,16 @@ func (r *PaymentRepo) GetByPSPMetadataValue(ctx context.Context, key, value stri
 }
 
 func (r *PaymentRepo) CompleteProviderAttempt(ctx context.Context, attemptID uuid.UUID, providerTransactionID string, metadata map[string]any) error {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return queryScopeErr
+	}
+
 	meta, err := models.ToJSONB(metadata)
 	if err != nil {
 		return err
 	}
-	rows, err := r.db.Gen(ctx).CompleteProviderAttempt(ctx, gen.CompleteProviderAttemptParams{
+	rows, err := r.db.Gen(ctx).CompleteProviderAttempt(ctx, gen.CompleteProviderAttemptParams{MerchantID: queryMerchant.UUID(),
 		ID:            attemptID,
 		TransactionID: strings.TrimSpace(providerTransactionID),
 		Metadata:      meta,
@@ -424,11 +464,16 @@ func (r *PaymentRepo) CompleteProviderAttempt(ctx context.Context, attemptID uui
 }
 
 func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemptID uuid.UUID, metadata map[string]any) error {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return queryScopeErr
+	}
+
 	meta, err := models.ToJSONB(metadata)
 	if err != nil {
 		return err
 	}
-	rows, err := r.db.Gen(ctx).CompleteProviderAttemptInPlace(ctx, gen.CompleteProviderAttemptInPlaceParams{
+	rows, err := r.db.Gen(ctx).CompleteProviderAttemptInPlace(ctx, gen.CompleteProviderAttemptInPlaceParams{MerchantID: queryMerchant.UUID(),
 		ID:       attemptID,
 		Metadata: meta,
 	})
@@ -474,6 +519,11 @@ func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, p
 }
 
 func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[PaymentFilters]) ([]*models.Payment, int64, error) {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, 0, queryScopeErr
+	}
+
 	f := opts.Filters
 
 	var tsid *uuid.UUID
@@ -505,7 +555,7 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 	}
 
 	q := r.db.Gen(ctx)
-	total, err := q.CountPaymentsFiltered(ctx, gen.CountPaymentsFilteredParams{
+	total, err := q.CountPaymentsFiltered(ctx, gen.CountPaymentsFilteredParams{MerchantID: queryMerchant.UUID(),
 		CustomerID:      tsid,
 		PriceID:         priceID,
 		SubscriptionID:  subID,
@@ -530,7 +580,7 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 	}
 	optsLimit32, _ := safecast.Convert[int32](opts.GetLimit())
 	optsOffset32, _ := safecast.Convert[int32](opts.GetOffset())
-	rows, err := q.ListPaymentsFiltered(ctx, gen.ListPaymentsFilteredParams{
+	rows, err := q.ListPaymentsFiltered(ctx, gen.ListPaymentsFilteredParams{MerchantID: queryMerchant.UUID(),
 		CustomerID:      tsid,
 		PriceID:         priceID,
 		SubscriptionID:  subID,
@@ -564,6 +614,11 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 // supplied payments in two batched lookups — the sqlc replacement for bun's
 // Relation("Price").Relation("Price.Product").Relation("Subscription").
 func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*models.Payment) error {
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return queryScopeErr
+	}
+
 	if len(payments) == 0 {
 		return nil
 	}
@@ -585,7 +640,7 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 	q := r.db.Gen(ctx)
 	prices := map[uuid.UUID]*models.Price{}
 	if len(priceIDs) > 0 {
-		rows, err := q.ListPricesWithProductByIDs(ctx, priceIDs)
+		rows, err := q.ListPricesWithProductByIDs(ctx, gen.ListPricesWithProductByIDsParams{MerchantID: queryMerchant.UUID(), Ids: priceIDs})
 		if err != nil {
 			return err
 		}
@@ -611,7 +666,7 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 	}
 	subs := map[uuid.UUID]*models.Subscription{}
 	if len(subIDs) > 0 {
-		rows, err := q.ListSubscriptionsByIDs(ctx, subIDs)
+		rows, err := q.ListSubscriptionsByIDs(ctx, gen.ListSubscriptionsByIDsParams{MerchantID: queryMerchant.UUID(), Ids: subIDs})
 		if err != nil {
 			return err
 		}
@@ -636,7 +691,12 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 }
 
 func (r *PaymentRepo) GetLatestChargeBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.Payment, error) {
-	row, err := r.db.Gen(ctx).GetLatestChargeBySubscriptionID(ctx, &subscriptionID)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return nil, queryScopeErr
+	}
+
+	row, err := r.db.Gen(ctx).GetLatestChargeBySubscriptionID(ctx, gen.GetLatestChargeBySubscriptionIDParams{MerchantID: queryMerchant.UUID(), SubscriptionID: &subscriptionID})
 	if err != nil {
 		return nil, err
 	}
@@ -644,5 +704,10 @@ func (r *PaymentRepo) GetLatestChargeBySubscriptionID(ctx context.Context, subsc
 }
 
 func (r *PaymentRepo) MarkFailed(ctx context.Context, id uuid.UUID) error {
-	return r.db.Gen(ctx).MarkPaymentFailed(ctx, id)
+	queryMerchant, queryScopeErr := merchant.Require(ctx)
+	if queryScopeErr != nil {
+		return queryScopeErr
+	}
+
+	return r.db.Gen(ctx).MarkPaymentFailed(ctx, gen.MarkPaymentFailedParams{MerchantID: queryMerchant.UUID(), ID: id})
 }

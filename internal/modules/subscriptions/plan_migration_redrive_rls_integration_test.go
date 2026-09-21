@@ -60,10 +60,9 @@ VALUES ($1, $2, $3, 'plan_change', 'blocked', $4, $5, now() + interval '30 days'
 	unpinned := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
 	repo := NewRepriceRepo(unpinned)
 
-	t.Run("failing_before: the base-pool row read returns nothing", func(t *testing.T) {
-		rows, err := dbtest.Queries(unpinned.Pool()).ListRedrivableBlockedPlanChangeReprices(ctx, 500)
-		require.NoError(t, err, "no error is exactly why this went unnoticed for a whole feature")
-		require.Empty(t, rows, "a GUC-less read of subscription_reprices can only ever return nothing")
+	t.Run("a merchant row read requires explicit scope", func(t *testing.T) {
+		_, err := repo.ListRedrivableBlockedPlanChanges(ctx, 500)
+		require.ErrorIs(t, err, merchant.ErrNoMerchant)
 	})
 
 	t.Run("the definer work queue names the merchant", func(t *testing.T) {

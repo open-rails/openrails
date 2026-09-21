@@ -35,7 +35,7 @@ RETURNING *;
 
 -- name: GetCustodian :one
 SELECT * FROM openrails.custodians
-WHERE id = $1;
+WHERE custodians.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: GetCustodianByKey :one
 SELECT * FROM openrails.custodians

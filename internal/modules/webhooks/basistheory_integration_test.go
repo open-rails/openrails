@@ -6,12 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -148,7 +149,9 @@ func (fx *btWebhookFixture) deliver(t *testing.T, eventID, eventType string, dat
 
 func (fx *btWebhookFixture) methodRow(t *testing.T) gen.OpenrailsPaymentMethod {
 	t.Helper()
-	row, err := fx.dbi.Gen(fx.ctx).GetPaymentMethodByID(fx.ctx, fx.methodID)
+	scopeMerchantID, scopeErr := merchant.Require(fx.ctx)
+	require.NoError(t, scopeErr)
+	row, err := fx.dbi.Gen(fx.ctx).GetPaymentMethodByID(fx.ctx, gen.GetPaymentMethodByIDParams{MerchantID: scopeMerchantID.UUID(), ID: fx.methodID})
 	require.NoError(t, err)
 	return row
 }

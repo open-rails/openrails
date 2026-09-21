@@ -406,8 +406,7 @@ SELECT merchant_id,
        SUM(credits_posted - debits_posted)::bigint AS net,
        COUNT(*)::bigint AS accounts
 FROM openrails.ledger_accounts
-WHERE ($1::uuid IS NULL
-    OR merchant_id = $1::uuid)
+WHERE merchant_id = $1::uuid
 GROUP BY merchant_id, currency
 HAVING SUM(credits_posted - debits_posted) <> 0
 ORDER BY merchant_id, currency
@@ -423,7 +422,7 @@ type ListLedgerConservationBreachesRow struct {
 // ListLedgerConservationBreaches is an on-demand integrity diagnostic. It must
 // return every breached ledger so the operator cannot receive a false healthy
 // result from pagination.
-func (q *Queries) ListLedgerConservationBreaches(ctx context.Context, merchantID *uuid.UUID) ([]ListLedgerConservationBreachesRow, error) {
+func (q *Queries) ListLedgerConservationBreaches(ctx context.Context, merchantID uuid.UUID) ([]ListLedgerConservationBreachesRow, error) {
 	rows, err := q.db.Query(ctx, listLedgerConservationBreaches, merchantID)
 	if err != nil {
 		return nil, err
@@ -454,13 +453,11 @@ WITH logged AS (
     FROM (
         SELECT credit_account_id AS account_id, amount AS credit, 0::bigint AS debit
         FROM openrails.ledger_transfers
-        WHERE ($1::uuid IS NULL
-            OR merchant_id = $1::uuid)
+        WHERE merchant_id = $1::uuid
         UNION ALL
         SELECT debit_account_id, 0::bigint, amount
         FROM openrails.ledger_transfers
-        WHERE ($1::uuid IS NULL
-            OR merchant_id = $1::uuid)
+        WHERE merchant_id = $1::uuid
     ) legs
     GROUP BY account_id
 )
@@ -475,8 +472,7 @@ SELECT a.id AS account_id,
        COALESCE(l.debits, 0)::bigint AS logged_debits
 FROM openrails.ledger_accounts a
 LEFT JOIN logged l ON l.account_id = a.id
-WHERE ($1::uuid IS NULL
-    OR a.merchant_id = $1::uuid)
+WHERE a.merchant_id = $1::uuid
   AND (a.credits_posted <> COALESCE(l.credits, 0)
     OR a.debits_posted <> COALESCE(l.debits, 0))
 ORDER BY a.merchant_id, a.currency, a.id
@@ -496,7 +492,7 @@ type ListLedgerCounterDriftsRow struct {
 
 // ListLedgerCounterDrifts rebuilds account counters from the immutable
 // transfer log and returns every account whose maintained projection differs.
-func (q *Queries) ListLedgerCounterDrifts(ctx context.Context, merchantID *uuid.UUID) ([]ListLedgerCounterDriftsRow, error) {
+func (q *Queries) ListLedgerCounterDrifts(ctx context.Context, merchantID uuid.UUID) ([]ListLedgerCounterDriftsRow, error) {
 	rows, err := q.db.Query(ctx, listLedgerCounterDrifts, merchantID)
 	if err != nil {
 		return nil, err

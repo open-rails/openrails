@@ -15,12 +15,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
@@ -726,15 +728,14 @@ func TestAccountUpdaterBatchesAreMerchantIsolated(t *testing.T) {
 	require.Len(t, fx.batches(a), 1)
 	require.Len(t, fx.batches(b), 1)
 
-	// b's RLS-enforcing handle cannot see a's row, by id or at all.
-	var n int
-	require.NoError(t, b.pool.QueryRow(fx.ctx,
-		"SELECT count(*) FROM billing.account_updater_batches WHERE id = $1", fx.batches(a)[0].ID).Scan(&n))
-	require.Zero(t, n, "merchant B must not be able to read merchant A's batch")
-
-	require.NoError(t, b.pool.QueryRow(fx.ctx,
-		"SELECT count(*) FROM billing.account_updater_batches WHERE merchant_id = $1", a.id).Scan(&n))
-	require.Zero(t, n)
+	// The persistence predicates isolate B even when the connection can read A.
+	q := dbtest.Queries(b.pool)
+	_, err = q.GetAccountUpdaterBatch(fx.ctx, gen.GetAccountUpdaterBatchParams{MerchantID: b.id, ID: fx.batches(a)[0].ID})
+	require.ErrorIs(t, err, pgx.ErrNoRows, "merchant B must not read merchant A's batch")
+	rows, err := q.ListOpenAccountUpdaterBatches(fx.ctx, gen.ListOpenAccountUpdaterBatchesParams{MerchantID: b.id, RowLimit: 100})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, b.id, rows[0].MerchantID)
 }
 
 // --- result CSV helpers -----------------------------------------------------
