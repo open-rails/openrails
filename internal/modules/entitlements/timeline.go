@@ -1,8 +1,6 @@
 package entitlements
 
 import (
-	"github.com/open-rails/openrails/pkg/merchant"
-
 	"context"
 	"errors"
 	"fmt"

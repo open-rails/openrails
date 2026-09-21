@@ -152,21 +152,19 @@ func (s *EntitlementService) LatestFiniteWindowByCustomer(ctx context.Context, t
 // Insert persists a fully-populated entitlement window directly (test/seed
 // surface; the production write path is PushNewEntitlement via the grant ledger).
 func (s *EntitlementService) Insert(ctx context.Context, entitlement *models.Entitlement) error {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	if entitlement.MerchantID != uuid.Nil && entitlement.MerchantID != tid.UUID() {
+		return errors.New("entitlement merchant does not match context")
+	}
 	// Validate that end_at > start_at if end_at is provided (non-indefinite entitlement)
 	if entitlement.EndAt != nil && !entitlement.EndAt.After(entitlement.StartAt) {
 		return fmt.Errorf("invalid entitlement: end_at (%v) must be after start_at (%v)", entitlement.EndAt, entitlement.StartAt)
 	}
 
-	// Stamp the resolved merchant (issue #223) when the caller did not set one,
-	// so new rows are merchant-scoped consistently with reads. The merchant is
-	// required from context — an absent merchant is an error.
-	if (entitlement.MerchantID == uuid.UUID{}) {
-		tid, err := merchant.Require(ctx)
-		if err != nil {
-			return err
-		}
-		entitlement.MerchantID = tid.UUID()
-	}
+	entitlement.MerchantID = tid.UUID()
 
 	id, err := s.db.Gen(ctx).CreateEntitlement(ctx, gen.CreateEntitlementParams{
 		ID:           entitlement.ID,

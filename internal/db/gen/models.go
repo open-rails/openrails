@@ -354,7 +354,7 @@ type OpenrailsDashboardConfig struct {
 	UpdatedBy *string
 }
 
-// RLS-exempt by design: instance-level operator kill switch for destructive convergence (#836), not tenant data. One row. Read from the no-GUC background connections the intent runner and sweep scheduler use, so it cannot be defeated by the connection scope it polices. Default disabled: a fresh deployment cancels nothing until an operator arms it.
+// Global by design: instance-level operator kill switch for destructive convergence (#836), not tenant data. One row. Read from the no-GUC background connections the intent runner and sweep scheduler use, so it cannot be defeated by the connection scope it polices. Default disabled: a fresh deployment cancels nothing until an operator arms it.
 type OpenrailsDestructiveActionSwitch struct {
 	ID        uuid.UUID
 	Singleton bool
@@ -638,7 +638,7 @@ type OpenrailsMaintenanceRun struct {
 	RunClass string
 }
 
-// Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant. RLS-exempt by design: it IS the tenant directory — the scope, not a scoped row.
+// Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant. Global by design: it IS the tenant directory — the scope, not a scoped row.
 type OpenrailsMerchant struct {
 	ID uuid.UUID
 	// Mirror of the merchant permission-group's CURRENT instance slug (or#914): the group namespace is the naming authority — claim arbitration, renames (ak#264 tombstone forwarding) and release-on-delete happen there; this column is kept in sync for fast lookup (lazily re-synced after a rename) and is unique among LIVE rows only.
@@ -666,7 +666,7 @@ type OpenrailsMerchantConfiguration struct {
 	UpdatedAt time.Time
 }
 
-// Wrapped per-merchant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = merchant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. Merchant-owned and RLS protected.
+// Wrapped per-merchant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = merchant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. Merchant-owned; queries carry explicit merchant predicates.
 type OpenrailsMerchantDek struct {
 	MerchantID uuid.UUID
 	// AES-256-GCM(master_key, merchant_dek): nonce(12) || ciphertext(32) || tag(16).
@@ -688,7 +688,7 @@ type OpenrailsMerchantDestructivePolicy struct {
 	UpdatedAt            time.Time
 }
 
-// DB-backed per-merchant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned and RLS protected.
+// DB-backed per-merchant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned; queries carry explicit merchant predicates.
 type OpenrailsMerchantSecret struct {
 	MerchantID uuid.UUID
 	Name       string
@@ -1329,7 +1329,7 @@ type OpenrailsWebhookHealthDaily struct {
 	Drift      int64
 }
 
-// RLS-exempt by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.
+// Global by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.
 type OpenrailsWorkerState struct {
 	WorkerKind       string
 	CursorMerchantID *uuid.UUID

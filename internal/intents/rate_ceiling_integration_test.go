@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
+	merchantctx "github.com/open-rails/openrails/pkg/merchant"
 )
 
 // destructiveType is a stable destructive intent type for seeding (the ceiling
@@ -320,6 +321,7 @@ func TestRateCeiling_EnqueueChokepointRefusesSixth(t *testing.T) {
 	merchant := seedCeilingMerchant(t, bootstrap)
 	dbi := dbtest.OpenMerchantDB(t, merchant)
 	pool := dbi.Pool()
+	ctx = merchantctx.WithID(ctx, merchantctx.ID(merchant))
 
 	// No window scrubbing: the ceiling counts THIS merchant's rows and the
 	// merchant is freshly seeded, so no sibling test can inflate it. It needed

@@ -56,7 +56,7 @@ func seedGuardCohortForPSP(t *testing.T, appDB *db.DB, baseCtx context.Context, 
 			require.NoError(t, err)
 		}
 		for i := 0; i < n; i++ {
-			cust := dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+			cust := dbtest.EnsureCustomerIDPgxFor(ctx, t, appDB.Qx(ctx), merchantID, uuid.NewString())
 			prod, price, sub := uuid.New(), uuid.New(), uuid.New()
 			rs := fmt.Sprintf("rs-guard-%s-%d", c.suffix, i)
 			key := fmt.Sprintf("guard-%s-%d", c.suffix, i)
