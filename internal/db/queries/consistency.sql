@@ -11,8 +11,8 @@
 -- name: ConOrphanEntitlementSubscriptionSource :many
 SELECT ent.id AS ent_id, ent.customer_id::text AS user_id, ent.entitlement, ent.source_type, ent.source_id
 FROM openrails.entitlements ent
-LEFT JOIN openrails.subscriptions sub ON ent.source_id = sub.id AND sub.deleted_at IS NULL
-WHERE ent.source_type = 'subscription'
+LEFT JOIN openrails.subscriptions sub ON sub.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_id = sub.id AND sub.deleted_at IS NULL
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'subscription'
   AND ent.source_id IS NOT NULL
   AND ent.deleted_at IS NULL
   AND sub.id IS NULL
@@ -24,8 +24,8 @@ WHERE ent.source_type = 'subscription'
 -- name: ConOrphanEntitlementPaymentSource :many
 SELECT ent.id AS ent_id, ent.customer_id::text AS user_id, ent.entitlement, ent.source_type, ent.source_id
 FROM openrails.entitlements ent
-LEFT JOIN openrails.payments purch ON ent.source_id = purch.id AND purch.deleted_at IS NULL
-WHERE ent.source_type = 'one_off'
+LEFT JOIN openrails.payments purch ON purch.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_id = purch.id AND purch.deleted_at IS NULL
+WHERE ent.merchant_id = sqlc.arg(merchant_id)::uuid AND ent.source_type = 'one_off'
   AND ent.source_id IS NOT NULL
   AND ent.deleted_at IS NULL
   AND purch.id IS NULL
@@ -55,8 +55,8 @@ WITH live_ownership AS (
            pay.amount AS payment_amount, pay.currency AS payment_currency,
            pay.purchased_at
     FROM openrails.grants g
-    LEFT JOIN openrails.payments pay ON pay.id = g.payment_id AND pay.deleted_at IS NULL
-    WHERE g.event = 'grant' AND g.kind = 'ownership'
+    LEFT JOIN openrails.payments pay ON pay.merchant_id = sqlc.arg(merchant_id)::uuid AND pay.id = g.payment_id AND pay.deleted_at IS NULL
+    WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.event = 'grant' AND g.kind = 'ownership'
       AND g.product_id IS NOT NULL
       AND g.source_type IN ('purchase', 'subscription')
       AND g.source_id NOT LIKE 'include:%'
@@ -65,10 +65,10 @@ WITH live_ownership AS (
       AND (sqlc.narg(customer_id)::uuid IS NULL OR g.customer_id = sqlc.narg(customer_id)::uuid)
       AND NOT EXISTS (
           SELECT 1 FROM openrails.grants t
-          WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
+          WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
       )
       AND (pay.id IS NULL OR (pay.status <> 'refunded' AND NOT EXISTS (
-          SELECT 1 FROM openrails.payments r WHERE r.refunded_payment_id = pay.id AND r.deleted_at IS NULL
+          SELECT 1 FROM openrails.payments r WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.refunded_payment_id = pay.id AND r.deleted_at IS NULL
       )))
 )
 SELECT lo.customer_id, lo.product_id, prod.key AS product_key,
@@ -84,6 +84,8 @@ SELECT lo.customer_id, lo.product_id, prod.key AS product_key,
        ) ORDER BY COALESCE(lo.purchased_at, lo.starts_at), lo.created_at) AS purchases
 FROM live_ownership lo
 JOIN openrails.products prod ON prod.id = lo.product_id
+
+WHERE prod.merchant_id = sqlc.arg(merchant_id)::uuid
 GROUP BY lo.customer_id, lo.product_id, prod.key
 HAVING COUNT(*) > 1;
 
@@ -97,12 +99,12 @@ WITH payment_products AS (
     FROM openrails.payments purch
     JOIN openrails.prices price ON purch.price_id = price.id
     JOIN openrails.products prod ON price.product_id = prod.id
-    WHERE purch.deleted_at IS NULL
+    WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.deleted_at IS NULL
       AND purch.amount > 0
       AND purch.refunded_payment_id IS NULL
       AND purch.status <> 'refunded'
       AND NOT EXISTS (
-          SELECT 1 FROM openrails.payments r WHERE r.refunded_payment_id = purch.id AND r.deleted_at IS NULL
+          SELECT 1 FROM openrails.payments r WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid AND r.refunded_payment_id = purch.id AND r.deleted_at IS NULL
       )
       AND (sqlc.narg(customer_id)::uuid IS NULL OR purch.customer_id = sqlc.narg(customer_id)::uuid)
 )

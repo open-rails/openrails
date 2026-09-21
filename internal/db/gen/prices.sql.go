@@ -14,14 +14,15 @@ import (
 
 const countPricesFiltered = `-- name: CountPricesFiltered :one
 SELECT count(*) FROM openrails.prices price
-WHERE ($1::boolean IS NULL OR price.archived = $1::boolean)
-  AND ($2::text IS NULL OR LOWER(price.currency) = LOWER($2::text))
-  AND ($3::uuid IS NULL OR price.product_id = $3::uuid)
-  AND (NOT $4::boolean OR price.auto_renew)
-  AND (NOT $5::boolean OR NOT price.auto_renew)
+WHERE price.merchant_id = $1::uuid AND ($2::boolean IS NULL OR price.archived = $2::boolean)
+  AND ($3::text IS NULL OR LOWER(price.currency) = LOWER($3::text))
+  AND ($4::uuid IS NULL OR price.product_id = $4::uuid)
+  AND (NOT $5::boolean OR price.auto_renew)
+  AND (NOT $6::boolean OR NOT price.auto_renew)
 `
 
 type CountPricesFilteredParams struct {
+	MerchantID    uuid.UUID
 	Archived      *bool
 	Currency      *string
 	ProductID     *uuid.UUID
@@ -31,6 +32,7 @@ type CountPricesFilteredParams struct {
 
 func (q *Queries) CountPricesFiltered(ctx context.Context, arg CountPricesFilteredParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countPricesFiltered,
+		arg.MerchantID,
 		arg.Archived,
 		arg.Currency,
 		arg.ProductID,
@@ -131,11 +133,16 @@ func (q *Queries) GetCurrentPriceByKey(ctx context.Context, arg GetCurrentPriceB
 }
 
 const getPriceByID = `-- name: GetPriceByID :one
-SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key FROM openrails.prices WHERE id = $1
+SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key FROM openrails.prices WHERE prices.merchant_id = $2::uuid AND id = $1
 `
 
-func (q *Queries) GetPriceByID(ctx context.Context, id uuid.UUID) (OpenrailsPrice, error) {
-	row := q.db.QueryRow(ctx, getPriceByID, id)
+type GetPriceByIDParams struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) GetPriceByID(ctx context.Context, arg GetPriceByIDParams) (OpenrailsPrice, error) {
+	row := q.db.QueryRow(ctx, getPriceByID, arg.ID, arg.MerchantID)
 	var i OpenrailsPrice
 	err := row.Scan(
 		&i.ID,
@@ -324,12 +331,17 @@ func (q *Queries) GetPriceWithProductByStripePriceID(ctx context.Context, arg Ge
 
 const listActivePricesByProductOrdered = `-- name: ListActivePricesByProductOrdered :many
 SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key FROM openrails.prices price
-WHERE price.product_id = $1 AND NOT price.archived
+WHERE price.merchant_id = $2::uuid AND price.product_id = $1 AND NOT price.archived
 ORDER BY price.amount ASC
 `
 
-func (q *Queries) ListActivePricesByProductOrdered(ctx context.Context, productID uuid.UUID) ([]OpenrailsPrice, error) {
-	rows, err := q.db.Query(ctx, listActivePricesByProductOrdered, productID)
+type ListActivePricesByProductOrderedParams struct {
+	ProductID  uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) ListActivePricesByProductOrdered(ctx context.Context, arg ListActivePricesByProductOrderedParams) ([]OpenrailsPrice, error) {
+	rows, err := q.db.Query(ctx, listActivePricesByProductOrdered, arg.ProductID, arg.MerchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -366,7 +378,7 @@ const listAllActivePricesWithProduct = `-- name: ListAllActivePricesWithProduct 
 SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
-WHERE NOT price.archived
+WHERE price.merchant_id = $1::uuid AND prod.merchant_id = $1::uuid AND NOT price.archived
 ORDER BY price.amount ASC
 `
 
@@ -375,8 +387,8 @@ type ListAllActivePricesWithProductRow struct {
 	OpenrailsProduct OpenrailsProduct
 }
 
-func (q *Queries) ListAllActivePricesWithProduct(ctx context.Context) ([]ListAllActivePricesWithProductRow, error) {
-	rows, err := q.db.Query(ctx, listAllActivePricesWithProduct)
+func (q *Queries) ListAllActivePricesWithProduct(ctx context.Context, merchantID uuid.UUID) ([]ListAllActivePricesWithProductRow, error) {
+	rows, err := q.db.Query(ctx, listAllActivePricesWithProduct, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -424,6 +436,8 @@ const listAllPricesWithProduct = `-- name: ListAllPricesWithProduct :many
 SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
+
+WHERE price.merchant_id = $1::uuid AND prod.merchant_id = $1::uuid
 ORDER BY price.amount ASC
 `
 
@@ -432,8 +446,8 @@ type ListAllPricesWithProductRow struct {
 	OpenrailsProduct OpenrailsProduct
 }
 
-func (q *Queries) ListAllPricesWithProduct(ctx context.Context) ([]ListAllPricesWithProductRow, error) {
-	rows, err := q.db.Query(ctx, listAllPricesWithProduct)
+func (q *Queries) ListAllPricesWithProduct(ctx context.Context, merchantID uuid.UUID) ([]ListAllPricesWithProductRow, error) {
+	rows, err := q.db.Query(ctx, listAllPricesWithProduct, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -524,11 +538,16 @@ func (q *Queries) ListPriceChainByKey(ctx context.Context, arg ListPriceChainByK
 }
 
 const listPricesByIDs = `-- name: ListPricesByIDs :many
-SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key FROM openrails.prices WHERE id = ANY($1::uuid[])
+SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key FROM openrails.prices WHERE prices.merchant_id = $1::uuid AND id = ANY($2::uuid[])
 `
 
-func (q *Queries) ListPricesByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsPrice, error) {
-	rows, err := q.db.Query(ctx, listPricesByIDs, ids)
+type ListPricesByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+func (q *Queries) ListPricesByIDs(ctx context.Context, arg ListPricesByIDsParams) ([]OpenrailsPrice, error) {
+	rows, err := q.db.Query(ctx, listPricesByIDs, arg.MerchantID, arg.Ids)
 	if err != nil {
 		return nil, err
 	}
@@ -563,14 +582,19 @@ func (q *Queries) ListPricesByIDs(ctx context.Context, ids []uuid.UUID) ([]Openr
 
 const listPricesByProduct = `-- name: ListPricesByProduct :many
 SELECT id, product_id, amount, currency, archived, created_at, updated_at, merchant_id, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key FROM openrails.prices price
-WHERE price.product_id = $1
+WHERE price.merchant_id = $2::uuid AND price.product_id = $1
 `
+
+type ListPricesByProductParams struct {
+	ProductID  uuid.UUID
+	MerchantID uuid.UUID
+}
 
 // All prices for a product, archived included — the catalog converge needs
 // archived rows to reconcile legacy_import prices instead of re-creating them
 // (would violate unique_prices_product_amount_cycle).
-func (q *Queries) ListPricesByProduct(ctx context.Context, productID uuid.UUID) ([]OpenrailsPrice, error) {
-	rows, err := q.db.Query(ctx, listPricesByProduct, productID)
+func (q *Queries) ListPricesByProduct(ctx context.Context, arg ListPricesByProductParams) ([]OpenrailsPrice, error) {
+	rows, err := q.db.Query(ctx, listPricesByProduct, arg.ProductID, arg.MerchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -607,16 +631,17 @@ const listPricesFiltered = `-- name: ListPricesFiltered :many
 SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
-WHERE ($1::boolean IS NULL OR price.archived = $1::boolean)
-  AND ($2::text IS NULL OR LOWER(price.currency) = LOWER($2::text))
-  AND ($3::uuid IS NULL OR price.product_id = $3::uuid)
-  AND (NOT $4::boolean OR price.auto_renew)
-  AND (NOT $5::boolean OR NOT price.auto_renew)
+WHERE price.merchant_id = $1::uuid AND prod.merchant_id = $1::uuid AND ($2::boolean IS NULL OR price.archived = $2::boolean)
+  AND ($3::text IS NULL OR LOWER(price.currency) = LOWER($3::text))
+  AND ($4::uuid IS NULL OR price.product_id = $4::uuid)
+  AND (NOT $5::boolean OR price.auto_renew)
+  AND (NOT $6::boolean OR NOT price.auto_renew)
 ORDER BY price.created_at DESC, price.id DESC
-LIMIT NULLIF($7::int, 0) OFFSET $6::int
+LIMIT NULLIF($8::int, 0) OFFSET $7::int
 `
 
 type ListPricesFilteredParams struct {
+	MerchantID    uuid.UUID
 	Archived      *bool
 	Currency      *string
 	ProductID     *uuid.UUID
@@ -633,6 +658,7 @@ type ListPricesFilteredRow struct {
 
 func (q *Queries) ListPricesFiltered(ctx context.Context, arg ListPricesFilteredParams) ([]ListPricesFilteredRow, error) {
 	rows, err := q.db.Query(ctx, listPricesFiltered,
+		arg.MerchantID,
 		arg.Archived,
 		arg.Currency,
 		arg.ProductID,
@@ -688,16 +714,21 @@ const listPricesWithProductByIDs = `-- name: ListPricesWithProductByIDs :many
 SELECT price.id, price.product_id, price.amount, price.currency, price.archived, price.created_at, price.updated_at, price.merchant_id, price.access_duration_hours, price.auto_renew, price.trial_unit_amount, price.trial_duration_hours, price.key, prod.id, prod.key, prod.display_name, prod.description, prod.entitlements_spec, prod.tier_group, prod.tier_rank, prod.archived, prod.created_at, prod.updated_at, prod.merchant_id
 FROM openrails.prices price
 JOIN openrails.products prod ON prod.id = price.product_id
-WHERE price.id = ANY($1::uuid[])
+WHERE price.merchant_id = $1::uuid AND prod.merchant_id = $1::uuid AND price.id = ANY($2::uuid[])
 `
+
+type ListPricesWithProductByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
 
 type ListPricesWithProductByIDsRow struct {
 	OpenrailsPrice   OpenrailsPrice
 	OpenrailsProduct OpenrailsProduct
 }
 
-func (q *Queries) ListPricesWithProductByIDs(ctx context.Context, ids []uuid.UUID) ([]ListPricesWithProductByIDsRow, error) {
-	rows, err := q.db.Query(ctx, listPricesWithProductByIDs, ids)
+func (q *Queries) ListPricesWithProductByIDs(ctx context.Context, arg ListPricesWithProductByIDsParams) ([]ListPricesWithProductByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listPricesWithProductByIDs, arg.MerchantID, arg.Ids)
 	if err != nil {
 		return nil, err
 	}
@@ -791,18 +822,19 @@ const updatePriceKey = `-- name: UpdatePriceKey :execrows
 UPDATE openrails.prices SET
     key = $1::text,
     updated_at = now()
-WHERE id = $2
+WHERE prices.merchant_id = $2::uuid AND id = $3
 `
 
 type UpdatePriceKeyParams struct {
-	Key string
-	ID  uuid.UUID
+	Key        string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
 }
 
 // #774: key is a mutable LABEL (the movable pointer), not financial substance —
 // its own narrow query, same pattern as psp_links/archived above.
 func (q *Queries) UpdatePriceKey(ctx context.Context, arg UpdatePriceKeyParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updatePriceKey, arg.Key, arg.ID)
+	result, err := q.db.Exec(ctx, updatePriceKey, arg.Key, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -814,12 +846,13 @@ const updatePriceStatus = `-- name: UpdatePriceStatus :execrows
 UPDATE openrails.prices SET
     archived = $1::boolean,
     updated_at = now()
-WHERE id = $2
+WHERE prices.merchant_id = $2::uuid AND id = $3
 `
 
 type UpdatePriceStatusParams struct {
-	Archived bool
-	ID       uuid.UUID
+	Archived   bool
+	MerchantID uuid.UUID
+	ID         uuid.UUID
 }
 
 // #662: a price's money/identity columns (product_id, amount, currency,
@@ -829,7 +862,7 @@ type UpdatePriceStatusParams struct {
 // layer at all (not merely by caller convention). A change to any immutable
 // column is, by construction, a different price with a different deterministic id.
 func (q *Queries) UpdatePriceStatus(ctx context.Context, arg UpdatePriceStatusParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updatePriceStatus, arg.Archived, arg.ID)
+	result, err := q.db.Exec(ctx, updatePriceStatus, arg.Archived, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

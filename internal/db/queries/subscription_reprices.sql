@@ -35,7 +35,7 @@ SELECT * FROM openrails.subscription_reprices WHERE merchant_id = sqlc.arg(merch
 -- (effective_at <= now, checked in Go).
 -- name: GetScheduledRepriceForSubscription :one
 SELECT * FROM openrails.subscription_reprices
-WHERE subscription_id = sqlc.arg(subscription_id)::uuid AND status = 'scheduled'
+WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid AND status = 'scheduled'
 LIMIT 1;
 
 -- name: ListSubscriptionReprices :many
@@ -57,7 +57,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status
 UPDATE openrails.subscription_reprices SET
     status = 'applied',
     applied_at = now()
-WHERE id = sqlc.arg(id) AND status = 'scheduled';
+WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'scheduled';
 
 -- #813: converge hook — when an OBSERVED rail (stripe) reports the
 -- subscription now carries the target price, the matching scheduled row is
@@ -66,7 +66,7 @@ WHERE id = sqlc.arg(id) AND status = 'scheduled';
 UPDATE openrails.subscription_reprices SET
     status = 'applied',
     applied_at = now()
-WHERE subscription_id = sqlc.arg(subscription_id)::uuid
+WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
   AND to_price_id = sqlc.arg(to_price_id)::uuid
   AND status = 'scheduled';
 
@@ -76,7 +76,7 @@ WHERE subscription_id = sqlc.arg(subscription_id)::uuid
 UPDATE openrails.subscription_reprices SET
     status = 'blocked',
     blocked_reason = sqlc.arg(blocked_reason)::text
-WHERE id = sqlc.arg(id) AND status = 'scheduled';
+WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'scheduled';
 
 -- #816: the re-driver's cross-merchant enumeration. Only push-failure blocks
 -- are re-drivable (the prefix covers the deferred-window refusals and the NMI
@@ -85,7 +85,7 @@ WHERE id = sqlc.arg(id) AND status = 'scheduled';
 -- at classify time) never carried a push attempt and stay terminal.
 -- name: ListRedrivableBlockedPlanChangeReprices :many
 SELECT * FROM openrails.subscription_reprices
-WHERE kind = 'plan_change'
+WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND kind = 'plan_change'
   AND status = 'blocked'
   AND blocked_reason LIKE 'rail_push_failed:%'
 ORDER BY created_at
@@ -100,7 +100,7 @@ LIMIT sqlc.arg(batch_size)::int;
 UPDATE openrails.subscription_reprices SET
     status = 'scheduled',
     blocked_reason = ''
-WHERE id = sqlc.arg(id) AND status = 'blocked';
+WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'blocked';
 
 -- #816: batch-header re-sync source of truth. Rows exist only for
 -- scheduled/blocked cohort members (skips are header-only), and the header's
@@ -111,7 +111,7 @@ SELECT
     count(*) FILTER (WHERE status = 'blocked')  AS blocked,
     count(*) FILTER (WHERE status <> 'blocked') AS scheduled
 FROM openrails.subscription_reprices
-WHERE reprice_batch_id = sqlc.arg(batch_id)::uuid;
+WHERE subscription_reprices.merchant_id = sqlc.arg(merchant_id)::uuid AND reprice_batch_id = sqlc.arg(batch_id)::uuid;
 
 -- CROSS-MERCHANT: merchants holding a rail-push-blocked plan_change reprice,
 -- through migration 0022's SECURITY DEFINER reader (or#861). The #816 re-driver

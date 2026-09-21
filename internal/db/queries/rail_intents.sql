@@ -94,7 +94,7 @@ RETURNING *;
 -- name: ClaimDueRailIntents :many
 WITH due AS (
     SELECT id FROM openrails.rail_intents
-    WHERE (
+    WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND (
             (status IN ('pending', 'failed_retryable') AND next_attempt_at <= sqlc.arg(now)::timestamptz)
             OR (status = 'in_flight' AND claimed_until IS NOT NULL AND claimed_until <= sqlc.arg(now)::timestamptz)
           )
@@ -109,7 +109,7 @@ SET status = 'in_flight',
     attempts = pi.attempts + 1,
     updated_at = now()
 FROM due
-WHERE pi.id = due.id
+WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND pi.id = due.id
 RETURNING pi.*;
 
 -- Claims ONE specific intent for the synchronous execute path (#358 phase B):
@@ -124,7 +124,7 @@ SET status = 'in_flight',
     claimed_until = sqlc.arg(lease_until)::timestamptz,
     attempts = pi.attempts + 1,
     updated_at = now()
-WHERE pi.id = sqlc.arg(id)
+WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND pi.id = sqlc.arg(id)
   AND (
         pi.status IN ('pending', 'failed_retryable')
         OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= sqlc.arg(now)::timestamptz)
@@ -138,7 +138,7 @@ RETURNING pi.*;
 -- name: ClaimDueVerifyRailIntents :many
 WITH due AS (
     SELECT id FROM openrails.rail_intents
-    WHERE status = 'unknown_needs_verify'
+    WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'unknown_needs_verify'
       AND next_attempt_at <= sqlc.arg(now)::timestamptz
       AND (claimed_until IS NULL OR claimed_until <= sqlc.arg(now)::timestamptz)
     ORDER BY next_attempt_at
@@ -149,7 +149,7 @@ UPDATE openrails.rail_intents pi
 SET claimed_until = sqlc.arg(lease_until)::timestamptz,
     updated_at = now()
 FROM due
-WHERE pi.id = due.id
+WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND pi.id = due.id
 RETURNING pi.*;
 
 -- Claims ONE unknown operation for operator resolution. Like the verifier
@@ -159,7 +159,7 @@ RETURNING pi.*;
 UPDATE openrails.rail_intents
 SET claimed_until = sqlc.arg(lease_until)::timestamptz,
     updated_at = now()
-WHERE id = sqlc.arg(id)
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)
   AND status = 'unknown_needs_verify'
   AND (claimed_until IS NULL OR claimed_until <= sqlc.arg(now)::timestamptz)
 RETURNING *;
@@ -170,7 +170,7 @@ RETURNING *;
 UPDATE openrails.rail_intents
 SET claimed_until = NULL,
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status = 'unknown_needs_verify';
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'unknown_needs_verify';
 
 -- Renews a live claim while its handler runs (xs-007 row 32): the executor
 -- beats this every lease/4, so claimed_until measures SILENCE from a dead
@@ -181,7 +181,7 @@ WHERE id = sqlc.arg(id) AND status = 'unknown_needs_verify';
 UPDATE openrails.rail_intents
 SET claimed_until = sqlc.arg(lease_until)::timestamptz,
     updated_at = now()
-WHERE id = sqlc.arg(id)
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)
   AND status IN ('in_flight', 'unknown_needs_verify')
   AND claimed_until IS NOT NULL
   AND claimed_until > sqlc.arg(now)::timestamptz;
@@ -208,7 +208,7 @@ SET status = 'succeeded',
     last_failure_reason = NULL,
     claimed_until = NULL,
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
   AND intent_type NOT IN ('invoice_collection', 'manual_rebill', 'nmi_upgrade', 'stripe_tier_change');
 
 -- name: MarkRailIntentFailedRetryable :execrows
@@ -218,7 +218,7 @@ SET status = 'failed_retryable',
     last_failure_reason = sqlc.arg(reason),
     claimed_until = NULL,
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
 
 -- Ambiguous outcome (or a verify that stayed inconclusive): park for the
 -- verifier, scheduled at next_attempt_at.
@@ -230,7 +230,7 @@ SET status = 'unknown_needs_verify',
     last_failure_reason = sqlc.arg(reason),
     claimed_until = NULL,
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
 
 -- name: MarkRailIntentFailedTerminal :execrows
 UPDATE openrails.rail_intents
@@ -249,7 +249,7 @@ SET status = 'failed_terminal',
     END,
     claimed_until = NULL,
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
   AND intent_type NOT IN ('invoice_collection', 'manual_rebill', 'nmi_upgrade', 'stripe_tier_change');
 
 -- Park: the attempt was deliberately NOT made (mode gate, kill switch,
@@ -264,7 +264,7 @@ SET status = 'pending',
     last_failure_reason = sqlc.arg(reason),
     claimed_until = NULL,
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status = 'in_flight';
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'in_flight';
 
 -- name: MarkRailIntentSuperseded :execrows
 UPDATE openrails.rail_intents
@@ -272,7 +272,7 @@ SET status = 'superseded',
     last_failure_reason = sqlc.arg(reason),
     claimed_until = NULL,
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify');
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify');
 
 -- =====================================================================
 -- Supersede-by-subject + relevance-window expiry
@@ -287,7 +287,7 @@ UPDATE openrails.rail_intents
 SET status = 'superseded',
     last_failure_reason = sqlc.arg(reason),
     updated_at = now()
-WHERE intent_type = sqlc.arg(intent_type)
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type = sqlc.arg(intent_type)
   AND subscription_id = sqlc.arg(subscription_id)
   AND (status = 'failed_retryable' OR (status = 'pending' AND attempts = 0));
 
@@ -300,14 +300,14 @@ SET status = 'expired',
     last_failure_reason = 'relevance window elapsed before execution',
     claimed_until = NULL,
     updated_at = now()
-WHERE (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
+WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
   AND pi.expires_at IS NOT NULL
   AND pi.expires_at <= sqlc.arg(now)::timestamptz
   AND NOT (
         pi.intent_type = ANY (sqlc.arg(breaker_held_types)::text[])
         AND EXISTS (
             SELECT 1 FROM openrails.reconciliation_findings f
-            WHERE f.merchant_id = pi.merchant_id
+            WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.merchant_id = pi.merchant_id
               AND f.finding_type = 'life.provider_intent.held_bulk'
               AND f.status IN ('reconcile_required', 'requires_review')
         )
@@ -325,27 +325,27 @@ WHERE (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts 
 -- on the engine's tenant-pinned connection.
 -- name: ListStuckRailIntents :many
 SELECT * FROM openrails.rail_intents
-WHERE (status IN ('pending', 'failed_retryable') AND created_at <= sqlc.arg(action_cutoff)::timestamptz)
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= sqlc.arg(action_cutoff)::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= sqlc.arg(verify_cutoff)::timestamptz)
-ORDER BY created_at, id;
+) ORDER BY created_at, id;
 
 -- =====================================================================
 -- Reads
 -- =====================================================================
 
 -- name: GetRailIntent :one
-SELECT * FROM openrails.rail_intents WHERE id = $1;
+SELECT * FROM openrails.rail_intents WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
 -- name: CountRailIntents :one
 SELECT count(*) FROM openrails.rail_intents
-WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(intent_type)::text IS NULL OR intent_type = sqlc.narg(intent_type)::text)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid);
 
 -- name: ListRailIntents :many
 SELECT * FROM openrails.rail_intents
-WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(intent_type)::text IS NULL OR intent_type = sqlc.narg(intent_type)::text)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)

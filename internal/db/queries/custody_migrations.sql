@@ -20,7 +20,7 @@ FOR UPDATE;
 -- later", not a failure.
 SELECT count(*)::bigint FROM openrails.rail_intents ri
 JOIN openrails.subscriptions s ON s.id = ri.subscription_id
-WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND ri.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.payment_method_id = sqlc.arg(payment_method_id)::uuid
   AND s.deleted_at IS NULL
   AND ri.status = ANY (ARRAY['in_flight'::text, 'unknown_needs_verify'::text]);

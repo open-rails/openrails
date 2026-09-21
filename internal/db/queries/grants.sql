@@ -138,14 +138,14 @@ ORDER BY g.ends_at ASC;
 -- name: ListCustomersWithLapsedCreditLots :many
 SELECT DISTINCT g.merchant_id, g.customer_id, g.currency
 FROM openrails.grants g
-WHERE g.kind = 'credit' AND g.event = 'grant'
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.kind = 'credit' AND g.event = 'grant'
   AND g.ends_at IS NOT NULL AND g.ends_at <= sqlc.arg(as_of)::timestamptz
   AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants tt WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
+      SELECT 1 FROM openrails.grants tt WHERE tt.merchant_id = sqlc.arg(merchant_id)::uuid AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
   )
   AND (g.amount - COALESCE((
         SELECT SUM(t.amount) FROM openrails.ledger_transfers t
-        WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
+        WHERE t.merchant_id = sqlc.arg(merchant_id)::uuid AND t.merchant_id = g.merchant_id AND t.grant_id = g.id
           AND t.transfer_type IN ('credit_spend', 'credit_expire')
     ), 0)) > 0
 LIMIT sqlc.arg(batch_size)::int;
