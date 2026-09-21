@@ -21,7 +21,9 @@ import (
 type tierCompletion struct {
 	db        *db.DB
 	current   gen.OpenrailsRailIntent
-	outcome   intents.Outcome
+	class     intents.OutcomeClass
+	reason    string
+	evidence  []byte
 	now       time.Time
 	committed bool
 }
@@ -63,23 +65,19 @@ func prepareTierCompletion(ctx context.Context, d *db.DB, in gen.OpenrailsRailIn
 		if current.Status != status {
 			return nil, errors.New("tier terminal replay contradicts its committed outcome")
 		}
-		return &tierCompletion{db: d, current: current, outcome: outcome, now: now, committed: true}, nil
+		return &tierCompletion{db: d, current: current, class: outcome.Class, reason: outcome.Reason, evidence: expected, now: now, committed: true}, nil
 	}
-	return &tierCompletion{db: d, current: current, outcome: outcome, now: now}, nil
+	return &tierCompletion{db: d, current: current, class: outcome.Class, reason: outcome.Reason, evidence: expected, now: now}, nil
 }
 
 func (c *tierCompletion) commit(ctx context.Context) error {
 	if c.committed {
 		return nil
 	}
-	d, current, outcome, now := c.db, c.current, c.outcome, c.now
+	d, current, now := c.db, c.current, c.now
 	status := intents.StatusFailedTerminal
-	if outcome.Class == intents.OutcomeSucceeded {
+	if c.class == intents.OutcomeSucceeded {
 		status = intents.StatusSucceeded
-	}
-	expected, err := json.Marshal(outcome.Evidence)
-	if err != nil {
-		return err
 	}
 	// Preserve retained provider custody and attribution; the command projection
 	// may add its final resource/result but cannot replace independent custody.
@@ -93,7 +91,7 @@ func (c *tierCompletion) commit(ctx context.Context) error {
 		evidence = map[string]json.RawMessage{}
 	}
 	projection := map[string]json.RawMessage{}
-	if err := json.Unmarshal(expected, &projection); err != nil {
+	if err := json.Unmarshal(c.evidence, &projection); err != nil {
 		return err
 	}
 	for k, v := range projection {
@@ -113,7 +111,7 @@ func (c *tierCompletion) commit(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	reason := outcome.Reason
+	reason := c.reason
 	rows, err := d.Gen(ctx).CompleteTierChangeOutcome(ctx, gen.CompleteTierChangeOutcomeParams{ID: current.ID, MerchantID: current.MerchantID, Status: status, Reason: &reason, Evidence: raw, Now: now})
 	if err != nil {
 		return err
