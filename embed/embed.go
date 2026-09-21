@@ -48,7 +48,7 @@ type Options struct {
 	// OpenRails-managed client in public. RiverFromHost transfers ownership
 	// to the host; RiverManagedByOpenRails optionally selects another schema.
 	River RiverOwnership
-	// RunWorkers starts the River workers on a goroutine owned by the Runtime
+	// RunWorkers is managed-only. It starts workers on a goroutine owned by the Runtime
 	// (stopped by Close), detached from the ctx passed to New. Leave false to
 	// drive Runtime.RunWorkers yourself.
 	RunWorkers bool
@@ -77,6 +77,9 @@ type Runtime struct {
 	activeRouteSets        []RouteSet
 	releaseStripeTransport func()
 
+	closeOnce sync.Once
+	closeErr  error
+
 	workersCancel context.CancelFunc
 	workersDone   chan error
 
@@ -104,6 +107,9 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
 	}
+	if opts.River.host && opts.RunWorkers {
+		return nil, fmt.Errorf("openrails embed: host-owned River must BindRiver before host startup; Options.RunWorkers is managed-only")
+	}
 	riverSchema, err := opts.River.managedSchema(opts.Config.DB.SchemaName())
 	if err != nil {
 		return nil, err
@@ -115,6 +121,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		return nil, fmt.Errorf("openrails embed: Options.StripeTransport is a test seam and is refused with config.TestMode=live")
 	}
 	application, err := app.BootstrapWithOptions(ctx, opts.Config, &app.BootstrapOptions{
+		HostRiver:        opts.River.host,
 		PGXPool:          opts.PGXPool,
 		RiverSchema:      riverSchema,
 		Redis:            opts.Redis,
@@ -137,13 +144,13 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.StripeTransport != nil {
 		r.releaseStripeTransport = stripeapi.InstallBaseTransport(opts.StripeTransport)
 	}
-	if err := r.bindRiver(ctx, opts.River); err != nil {
-		_ = r.Close(ctx)
-		return nil, err
+	if !opts.River.host {
+		if _, err := application.Runtime.GetBillingPeriodicJobs(ctx); err != nil {
+			_ = r.Close(ctx)
+			return nil, fmt.Errorf("build billing periodic jobs: %w", err)
+		}
+		application.Runtime.StartRiverProgressMonitor(ctx)
 	}
-	// The out-of-River progress detector starts at construction: a host that
-	// never calls RunWorkers is exactly the case that must be detectable.
-	application.Runtime.StartRiverProgressMonitor(ctx)
 	svc, err := service.New(application.Runtime)
 	if err != nil {
 		_ = r.Close(ctx)
@@ -239,16 +246,16 @@ func (r *Runtime) Close(ctx context.Context) error {
 	if r == nil || r.app == nil {
 		return nil
 	}
-	if r.workersCancel != nil {
-		r.workersCancel()
-		select {
-		case <-r.workersDone:
-		case <-ctx.Done():
+	r.closeOnce.Do(func() {
+		if r.workersCancel != nil {
+			r.workersCancel()
+			<-r.workersDone // join before closing resources even if shutdown ctx was canceled
+			r.workersCancel = nil
 		}
-		r.workersCancel = nil
-	}
-	if r.releaseStripeTransport != nil {
-		defer r.releaseStripeTransport()
-	}
-	return r.app.Close(ctx)
+		if r.releaseStripeTransport != nil {
+			defer r.releaseStripeTransport()
+		}
+		r.closeErr = r.app.Close(ctx)
+	})
+	return r.closeErr
 }

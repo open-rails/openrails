@@ -72,7 +72,8 @@ func (*NMIUpgradeIntentHandler) Type() string { return TypeNMIUpgrade }
 func (*NMIUpgradeIntentHandler) Backoff(attempts int32) time.Duration {
 	return intents.DefaultBackoff.Delay(attempts)
 }
-func (*NMIUpgradeIntentHandler) PrunePolicy() (bool, bool) { return true, true }
+func (*NMIUpgradeIntentHandler) PrunePolicy() (bool, bool)    { return true, true }
+func (*NMIUpgradeIntentHandler) CommitsTerminalOutcome() bool { return true }
 func (*NMIUpgradeIntentHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
@@ -89,15 +90,15 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 	}
 	p, err := subscriptions.DecodeNMIUpgradePayload(in)
 	if err != nil {
-		return intents.Terminal("invalid upgrade payload: " + err.Error())
+		return h.terminal(ctx, in, intents.Terminal("invalid upgrade payload: "+err.Error()))
 	}
 	recurring, err := moneyutil.NativeToRailMinorExact(p.Currency, p.RecurringAmount)
 	if err != nil {
-		return intents.Terminal(err.Error())
+		return h.terminal(ctx, in, intents.Terminal(err.Error()))
 	}
 	proration, err := moneyutil.NativeToRailMinorExact(p.Currency, p.ProrationAmount)
 	if err != nil {
-		return intents.Terminal(err.Error())
+		return h.terminal(ctx, in, intents.Terminal(err.Error()))
 	}
 	database := h.Checkout.SubscriptionService.Database()
 	store := intents.NewStore(database)
@@ -148,7 +149,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 		return intents.Ambiguous("retained paid proration has incomplete predecessor step evidence")
 	}
 	if progress.Successor != nil && progress.Successor.Refusal != "" {
-		return intents.TerminalWithEvidence(progress.Successor.Refusal, evidence())
+		return h.terminal(ctx, in, intents.TerminalWithEvidence(progress.Successor.Refusal, evidence()))
 	}
 	if progress.Proration != nil && progress.Proration.Refusal != "" {
 		return h.refusedProration(ctx, in, p, progress, evidence(), enrollment)
@@ -180,7 +181,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 			return intents.Parked(err.Error())
 		}
 		if old.Status != models.StatusActive || old.PriceID != p.OldPriceID || old.PspID != *in.PspID {
-			return intents.Terminal("upgrade predecessor changed before submission")
+			return h.terminal(ctx, in, intents.Terminal("upgrade predecessor changed before submission"))
 		}
 		progress.Successor = &nmiUpgradeStep{SubmittedAt: h.Checkout.now().UTC()}
 		claimed, err := store.RecordProgressIfAbsent(ctx, in.ID, "successor", progress.Successor)
@@ -204,7 +205,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 			if err = save("successor", progress.Successor); err != nil {
 				return intents.AmbiguousWithEvidence("persist successor refusal: "+err.Error(), evidence())
 			}
-			return intents.TerminalWithEvidence(callErr.Error(), evidence())
+			return h.terminal(ctx, in, intents.TerminalWithEvidence(callErr.Error(), evidence()))
 		}
 		if receipt == nil || receipt.SubscriptionID == "" {
 			return intents.Ambiguous("successor response omitted subscription identity")
@@ -297,16 +298,17 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 		}
 
 	}
-	if err = h.finalize(ctx, in, p, progress, receipt, enrollment); err != nil {
-		return intents.Ambiguous("upgrade receipts retained; local commit pending: " + err.Error())
-	}
 	out := evidence()
 	out["subscription_id"] = p.NewSubscriptionID.String()
 	out["message"] = "Upgraded to " + p.ProductName
 	if progress.Proration != nil && progress.Proration.Sale != nil {
 		out["transaction_id"] = progress.Proration.Sale.TransactionID
 	}
-	return intents.Succeeded(out)
+	outcome := intents.Succeeded(out)
+	if err = h.finalize(ctx, in, p, progress, receipt, enrollment, outcome); err != nil {
+		return intents.Ambiguous("upgrade receipts retained; local commit pending: " + err.Error())
+	}
+	return outcome
 }
 
 // Resolve accepts exact provider evidence for one submitted step that has no
@@ -408,12 +410,21 @@ func (h *NMIUpgradeIntentHandler) refusedProration(ctx context.Context, in gen.O
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
+	outcome := intents.TerminalWithEvidence("proration refused; unpaid successor queued for cancellation: "+progress.Proration.Refusal, evidence)
 	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txDB := database.NewWithPgxTx(tx)
 		repo := subscriptions.NewSubscriptionRepo(txDB)
 		if _, err := repo.GetByIDForUpdate(ctx, p.OldSubscriptionID); err != nil {
 			return err
 		}
+		completion, err := prepareTierCompletion(ctx, txDB, in, outcome, h.Checkout.now())
+		if err != nil {
+			return err
+		}
+		if completion.committed {
+			return nil
+		}
+
 		if _, err := repo.GetByID(ctx, p.NewSubscriptionID); db.IsNotFound(err) {
 			reason := models.CancelType("upgrade")
 			sub := &models.Subscription{ID: p.NewSubscriptionID, CustomerID: customer, PspID: *in.PspID, ProductID: p.ProductID, PriceID: p.PriceID, Rail: models.Rail(in.Rail), RailSubscriptionID: progress.Successor.Enrollment.SubscriptionID, PaymentMethodID: &p.PaymentMethodID, Status: models.StatusCancelled, StartedAt: p.PeriodStart, CancelledAt: &p.PeriodStart, DeletionScheduledAt: &p.PeriodStart, CancelType: &reason}
@@ -423,16 +434,19 @@ func (h *NMIUpgradeIntentHandler) refusedProration(ctx context.Context, in gen.O
 		} else if err != nil {
 			return err
 		}
-		_, err := intents.NewStore(txDB).Enqueue(ctx, intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: *in.PspID, SubscriptionID: &p.NewSubscriptionID, IntentType: intents.TypeNMIDeleteSubscription, Payload: intents.NMIDeletePayload{UserID: p.UserID, RailSubscriptionID: progress.Successor.Enrollment.SubscriptionID}, IdempotencyKey: intents.NMIDeleteIdempotencyKey(p.NewSubscriptionID, *in.PspID, progress.Successor.Enrollment.SubscriptionID), NextAttemptAt: p.PeriodStart, Origin: intents.OriginUser, OriginReason: "cancel unpaid upgrade successor after definitive proration refusal"})
-		return err
+		_, err = intents.NewStore(txDB).Enqueue(ctx, intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: *in.PspID, SubscriptionID: &p.NewSubscriptionID, IntentType: intents.TypeNMIDeleteSubscription, Payload: intents.NMIDeletePayload{UserID: p.UserID, RailSubscriptionID: progress.Successor.Enrollment.SubscriptionID}, IdempotencyKey: intents.NMIDeleteIdempotencyKey(p.NewSubscriptionID, *in.PspID, progress.Successor.Enrollment.SubscriptionID), NextAttemptAt: p.PeriodStart, Origin: intents.OriginUser, OriginReason: "cancel unpaid upgrade successor after definitive proration refusal"})
+		if err != nil {
+			return err
+		}
+		return completion.commit(ctx)
 	})
 	if err != nil {
 		return intents.AmbiguousWithEvidence("proration refused; durable successor cancellation pending: "+err.Error(), evidence)
 	}
-	return intents.TerminalWithEvidence("proration refused; unpaid successor queued for cancellation: "+progress.Proration.Refusal, evidence)
+	return outcome
 }
 
-func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, progress nmiUpgradeProgress, receipt intents.CollectedReceipt, enrollment intents.NMIEnrollmentReceipt) error {
+func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.NMIUpgradePayload, progress nmiUpgradeProgress, receipt intents.CollectedReceipt, enrollment intents.NMIEnrollmentReceipt, outcome intents.Outcome) error {
 	if err := enrollment.Validate(in); err != nil {
 		return err
 	}
@@ -455,6 +469,17 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.Openrails
 	}
 	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txDB := database.NewWithPgxTx(tx)
+		if _, err := subscriptions.NewSubscriptionRepo(txDB).GetByIDForUpdate(ctx, p.OldSubscriptionID); err != nil {
+			return err
+		}
+		completion, err := prepareTierCompletion(ctx, txDB, in, outcome, h.Checkout.now())
+		if err != nil {
+			return err
+		}
+		if completion.committed {
+			return nil
+		}
+
 		if err := h.Checkout.Lifecycle.CompleteUpgradeTx(ctx, txDB, models.Subscription{ID: p.OldSubscriptionID, PriceID: p.OldPriceID, RailSubscriptionID: p.OldProviderSubscriptionID}, next, payment); err != nil {
 			return err
 		}
@@ -465,9 +490,11 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.Openrails
 				return err
 			}
 		}
-
-		_, err := intents.NewStore(txDB).Enqueue(ctx, intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: *in.PspID, SubscriptionID: &p.OldSubscriptionID, IntentType: intents.TypeNMIDeleteSubscription, Payload: intents.NMIDeletePayload{UserID: p.UserID, RailSubscriptionID: p.OldProviderSubscriptionID}, IdempotencyKey: intents.NMIDeleteIdempotencyKey(p.OldSubscriptionID, *in.PspID, p.OldProviderSubscriptionID), NextAttemptAt: p.PeriodStart, Origin: intents.OriginUser, OriginReason: "cancel predecessor after durable tier upgrade"})
-		return err
+		_, err = intents.NewStore(txDB).Enqueue(ctx, intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: *in.PspID, SubscriptionID: &p.OldSubscriptionID, IntentType: intents.TypeNMIDeleteSubscription, Payload: intents.NMIDeletePayload{UserID: p.UserID, RailSubscriptionID: p.OldProviderSubscriptionID}, IdempotencyKey: intents.NMIDeleteIdempotencyKey(p.OldSubscriptionID, *in.PspID, p.OldProviderSubscriptionID), NextAttemptAt: p.PeriodStart, Origin: intents.OriginUser, OriginReason: "cancel predecessor after durable tier upgrade"})
+		if err != nil {
+			return err
+		}
+		return completion.commit(ctx)
 	})
 }
 
@@ -512,4 +539,8 @@ type upgradeReceiptResolver struct{ client *nmi.NMIClient }
 
 func (r upgradeReceiptResolver) ResolveNMIClient(context.Context, uuid.UUID, *uuid.UUID) (*nmi.NMIClient, bool, error) {
 	return r.client, r.client != nil, nil
+}
+
+func (h *NMIUpgradeIntentHandler) terminal(ctx context.Context, in gen.OpenrailsRailIntent, outcome intents.Outcome) intents.Outcome {
+	return commitTierRefusal(ctx, h.Checkout.SubscriptionService.Database(), in, outcome, h.Checkout.now())
 }

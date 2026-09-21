@@ -2,8 +2,6 @@ package money
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -294,7 +292,7 @@ func (s *MoneyService) retryInvoiceCollection(ctx context.Context, runner *inten
 	if err != nil {
 		return nil, err
 	}
-	key := invoiceRetryOperationKey(request.InvoiceID, request.IdempotencyKey)
+	key := intents.InvoiceCollectionRetryKey(request.InvoiceID, request.IdempotencyKey)
 	origin, reason := intents.OriginAdmin, "manual invoice collection retry"
 	if initiator == charge.InitiatorCustomer {
 		key = charge.CustomerPaymentKey(TypeInvoiceCollection, payer.UUID(), request.IdempotencyKey)
@@ -327,12 +325,6 @@ func (s *MoneyService) retryInvoiceCollection(ctx context.Context, runner *inten
 		return nil, fmt.Errorf("load invoice retry outcome: %w", err)
 	}
 	return &InvoiceCollectionRetryResult{Invoice: invoice, Attempt: invoicePaymentAttemptFromGen(attemptRow), Replayed: replayed, Operation: operation}, nil
-}
-
-// invoiceRetryOperationKey binds one client retry key to one invoice.
-func invoiceRetryOperationKey(invoiceID uuid.UUID, clientKey string) string {
-	digest := sha256.Sum256([]byte(invoiceID.String() + "\x00" + clientKey))
-	return fmt.Sprintf("%s:%s:retry:%s", TypeInvoiceCollection, invoiceID, hex.EncodeToString(digest[:16]))
 }
 
 func scheduledInvoiceCollectionKey(invoiceID uuid.UUID, ordinal int64) string {

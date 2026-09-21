@@ -6,8 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +15,9 @@ import (
 	"testing"
 	"time"
 
+	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/pkg/merchant"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
@@ -24,6 +25,7 @@ import (
 	orauthkit "github.com/open-rails/openrails/embed/authkit"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/dbtest"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/stretchr/testify/require"
@@ -185,6 +187,14 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			require.Equal(t, 402, invoiceRefusal.Status)
 			require.Equal(t, openrails.CodeCardDeclined, invoiceRefusal.Code)
 			require.NotEmpty(t, invoiceRefusal.Metadata["operation_id"])
+			declinedInvoice, err := client.GetMyInvoice(ctx, f.Invoice)
+			require.NoError(t, err)
+			require.True(t, declinedInvoice.Recovery.Retryable)
+			require.Equal(t, invoiceRefusal.Metadata["decline_reason"], declinedInvoice.Recovery.LastFailureReason)
+			require.NotEmpty(t, declinedInvoice.Recovery.LastFailureReason)
+			require.Positive(t, declinedInvoice.CollectionFailureCount)
+			require.NotNil(t, declinedInvoice.NextCollectionAttemptAt)
+
 			gateway.SetMode(NMISaleApprove)
 			request.IdempotencyKey = uuid.NewString()
 			before := gateway.SaleAttempts()
@@ -245,6 +255,7 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			require.Equal(t, before+1, gateway.SaleAttempts(), "old refusal cannot charge or disturb paid invoice")
 			read, err := client.GetMyInvoice(ctx, f.Invoice)
 			require.NoError(t, err)
+			require.Empty(t, read.Recovery.LastFailureReason)
 			require.Equal(t, "paid", read.Status)
 			require.False(t, read.Recovery.Retryable)
 			require.Equal(t, 1, h.OwedPaymentTransfers(customer))
@@ -313,6 +324,40 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			require.ErrorAs(t, err, &subscriptionRefusal)
 			require.Equal(t, 402, subscriptionRefusal.Status)
 			require.Equal(t, openrails.CodeCardDeclined, subscriptionRefusal.Code)
+			declinedSubscription, err := client.GetMySubscription(ctx, retry.SubscriptionID)
+			require.NoError(t, err)
+			require.True(t, declinedSubscription.Recovery.Retryable)
+			require.Equal(t, subscriptionRefusal.Metadata["decline_reason"], declinedSubscription.Recovery.LastFailureReason)
+			require.NotEmpty(t, declinedSubscription.Recovery.LastFailureReason)
+			require.NotNil(t, declinedSubscription.RetryAttempts)
+			require.Greater(t, *declinedSubscription.RetryAttempts, *due.RetryAttempts)
+			require.NotNil(t, declinedSubscription.NextRetryAt)
+			replacementPSP := dbtest.EnsureTestPSP(ctx, t, h.sharedPool(), owned.MerchantID.UUID(), "replacement-nmi-"+uuid.NewString())
+			for _, replacement := range []struct {
+				account   uuid.UUID
+				reference string
+			}{
+				{psp, railSub + "-replacement"}, {replacementPSP, railSub},
+			} {
+				tx, err := h.sharedPool().Begin(ctx)
+				require.NoError(t, err)
+				_, err = tx.Exec(ctx, `UPDATE billing.payment_methods SET psp_id=$2 WHERE id=$1`, f.Method, replacement.account)
+				require.NoError(t, err)
+				_, err = tx.Exec(ctx, `UPDATE billing.subscriptions SET psp_id=$2,rail_subscription_id=$3 WHERE id=$1`, subscription, replacement.account, replacement.reference)
+				require.NoError(t, err)
+				require.NoError(t, tx.Commit(ctx))
+				rebound, err := client.GetMySubscription(ctx, retry.SubscriptionID)
+				require.NoError(t, err, "a valid prior account/refusal cannot break current readback")
+				require.Empty(t, rebound.Recovery.LastFailureReason)
+			}
+			tx, err := h.sharedPool().Begin(ctx)
+			require.NoError(t, err)
+			_, err = tx.Exec(ctx, `UPDATE billing.payment_methods SET psp_id=$2 WHERE id=$1`, f.Method, psp)
+			require.NoError(t, err)
+			_, err = tx.Exec(ctx, `UPDATE billing.subscriptions SET psp_id=$2,rail_subscription_id=$3 WHERE id=$1`, subscription, psp, railSub)
+			require.NoError(t, err)
+			require.NoError(t, tx.Commit(ctx))
+
 			gateway.SetMode(NMISaleApprove)
 			retry.IdempotencyKey = uuid.NewString()
 			recovered, err := client.RetrySubscriptionNow(ctx, retry)
@@ -339,8 +384,29 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 			after, err := client.GetMySubscription(ctx, retry.SubscriptionID)
 			require.NoError(t, err)
 			require.Equal(t, "active", after.Status)
+			require.Empty(t, after.Recovery.LastFailureReason)
 			require.True(t, after.CurrentPeriodEndsAt.Equal(*recovered.Subscription.CurrentPeriodEndsAt))
 			require.Equal(t, before+4, gateway.SaleAttempts(), fmt.Sprintf("%s invoice/CIT/MIT/rebill workflow", mode))
+			// Stripe customer-action continuation is explicitly unsupported in this
+			// release; a verified customer cannot accidentally invoke off-session MIT.
+			unsupported := h.SeedPastDueInvoiceForCustomer(app.HostGraph(rt).Runtime, owned.MerchantID, customer, "USD", 50_000)
+			// This is an explicitly customer-collected invoice, not work for the
+			// later automatic collection leg of this shared workflow.
+			_, err = h.sharedPool().Exec(ctx, `UPDATE billing.invoices SET collection_method='send_invoice' WHERE id=$1`, unsupported.Invoice)
+			require.NoError(t, err)
+			stripePSP := dbtest.EnsureTestPSP(ctx, t, h.sharedPool(), owned.MerchantID.UUID(), "stripe")
+			_, err = h.sharedPool().Exec(ctx, `UPDATE billing.payment_methods SET rail='stripe',psp_id=$2,rail_customer_ref=$3,rail_method_ref=$3 WHERE id=$1`, unsupported.Method, stripePSP, "pm_unsupported_"+unsupported.Method.String())
+			require.NoError(t, err)
+			_, err = client.PayInvoiceNow(ctx, openrails.PayInvoiceNowRequest{InvoiceID: unsupported.Invoice, PaymentMethodID: openrails.PaymentMethodID(unsupported.Method), IdempotencyKey: uuid.NewString()})
+			var unsupportedError *openrails.StatusError
+			require.ErrorAs(t, err, &unsupportedError)
+			require.Equal(t, 400, unsupportedError.Status)
+			require.Equal(t, "customer_payment_unsupported", unsupportedError.Code)
+			require.Equal(t, before+4, gateway.SaleAttempts())
+			var attempts int
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.invoice_payments WHERE invoice_id=$1`, unsupported.Invoice).Scan(&attempts))
+			require.Zero(t, attempts, "unsupported customer payment refuses before durable charge admission")
+
 		})
 	}
 }

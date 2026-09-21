@@ -1,6 +1,8 @@
 package intents
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -74,4 +76,20 @@ func DecodeInvoiceCollectionPayload(intent gen.OpenrailsRailIntent) (InvoiceColl
 		return p, errors.New("Stripe operation has no frozen customer or payment method")
 	}
 	return p, nil
+}
+
+// InvoiceCollectionRetryKey scopes a merchant retry's opaque key to its invoice.
+func InvoiceCollectionRetryKey(invoiceID uuid.UUID, clientKey string) string {
+	digest := sha256.Sum256([]byte(invoiceID.String() + "\x00" + clientKey))
+	return fmt.Sprintf("invoice_collection:%s:retry:%x", invoiceID, digest[:16])
+}
+
+func InvoiceCollectionRetryKeyValid(invoiceID uuid.UUID, key string) bool {
+	prefix := fmt.Sprintf("invoice_collection:%s:retry:", invoiceID)
+	if invoiceID == uuid.Nil || !strings.HasPrefix(key, prefix) {
+		return false
+	}
+	encoded := strings.TrimPrefix(key, prefix)
+	decoded, err := hex.DecodeString(encoded)
+	return err == nil && len(decoded) == 16 && encoded == strings.ToLower(encoded)
 }

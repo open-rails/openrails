@@ -104,3 +104,10 @@ original refusal even if a later attempt has recovered the account.
 `payment_in_progress` and `payment_idempotency_conflict` are 409 refusals.
 A caller should retain its key through network uncertainty and read the existing
 resource before starting a different action.
+
+Fresh payer invoice/subscription reads include `recovery.last_failure_reason`
+when the latest applicable collection failed. This is the same normalized machine
+category as a payment error's `decline_reason` metadata, never provider response
+text. The existing invoice collection failure count/next attempt and subscription
+retry count/next retry fields accompany it. A successful recovery, a newer pending
+attempt, or a different subscription period does not inherit an old refusal.

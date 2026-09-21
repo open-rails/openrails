@@ -449,3 +449,20 @@ SELECT * FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1
 FOR UPDATE;
+
+-- name: ListEncodedInvoiceAttemptsForArchive :many
+-- The archive validates both copies of the generated payer-scoped coordinate
+-- against the canonical collection operation before exporting or restoring it.
+SELECT sqlc.embed(a), sqlc.embed(i), l.amount AS ledger_amount,
+    COALESCE(l.merchant_id = a.merchant_id AND l.customer_id = a.customer_id
+        AND l.invoice_id = a.invoice_id AND l.currency = a.currency
+        AND l.source = 'invoice_charge' AND l.source_id = i.idempotency_key
+        AND l.operation = 'invoice_payment' AND l.transfer_type = 'owed_payment', false)::boolean AS ledger_matches
+FROM openrails.invoice_payments a
+JOIN openrails.rail_intents i ON i.merchant_id = a.merchant_id
+    AND i.idempotency_key = a.idempotency_key AND i.intent_type = 'invoice_collection'
+LEFT JOIN openrails.ledger_transfers l ON l.merchant_id = a.merchant_id AND l.id = a.ledger_transfer_id
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.idempotency_key LIKE 'invoice_collection:%'
+  AND (sqlc.narg(after_id)::uuid IS NULL OR a.id > sqlc.narg(after_id)::uuid)
+ORDER BY a.id
+LIMIT sqlc.arg(page_size)::int;
