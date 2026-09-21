@@ -41,26 +41,26 @@ func newPSPFixture(t *testing.T) pspFixture {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	exec(`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+	exec(`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		f.merchant, "or893-"+uuid.NewString()[:8])
 	f.pspA = dbtest.EnsureTestPSP(ctx, t, pool, f.merchant, "nmi")
 	// A SECOND account on the same rail — the state 0017 exists for.
 	f.pspB = uuid.New()
-	exec(`INSERT INTO openrails.psps (id, merchant_id, rail, environment, account_id, key, archived)
+	exec(`INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id, key, archived)
 	      VALUES ($1, $2, 'nmi', 'live', $3, 'paykings', false)`,
 		f.pspB, f.merchant, "or893-b-"+uuid.NewString()[:8])
 
 	f.customer = uuid.New()
-	exec(`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+	exec(`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`,
 		f.customer, f.merchant)
 	f.product, f.price = uuid.New(), uuid.New()
-	exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id)
+	exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id)
 	      VALUES ($1, $2, $2, '{}'::jsonb, $3)`, f.product, "or893-p-"+uuid.NewString()[:8], f.merchant)
-	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+	exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 1000000, 'USD', 720, true, $3)`, f.price, f.product, f.merchant)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM openrails.merchants WHERE id = $1`, f.merchant)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM billing.merchants WHERE id = $1`, f.merchant)
 	})
 	return f
 }
@@ -68,7 +68,7 @@ func newPSPFixture(t *testing.T) pspFixture {
 func (f pspFixture) insertPayment(t *testing.T, txnID, rail string, psp *uuid.UUID) error {
 	t.Helper()
 	_, err := f.pool.Exec(context.Background(),
-		`INSERT INTO openrails.payments
+		`INSERT INTO billing.payments
 		   (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount,
 		    currency, status, purchased_at, psp_id, money_movement)
 		 VALUES ($1, $2, $3, $4, $5, $6, 1000000, 1000000, 'USD', 'completed', now(), $7, 'rail')`,
@@ -82,7 +82,7 @@ func (f pspFixture) insertPayment(t *testing.T, txnID, rail string, psp *uuid.UU
 func (f pspFixture) insertSubscription(t *testing.T, railSubID string, customer uuid.UUID, psp *uuid.UUID) error {
 	t.Helper()
 	_, err := f.pool.Exec(context.Background(),
-		`INSERT INTO openrails.subscriptions
+		`INSERT INTO billing.subscriptions
 		   (id, merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id,
 		    started_at, entitlements_spec_snapshot, psp_id)
 		 VALUES ($1, $2, $3, $4, $5, 'active', 'nmi', $6, now(), '{}'::jsonb, $7)`,
@@ -94,7 +94,7 @@ func (f pspFixture) newCustomer(t *testing.T) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	_, err := f.pool.Exec(context.Background(),
-		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`,
 		id, f.merchant)
 	require.NoError(t, err)
 	return id
@@ -167,7 +167,7 @@ func TestRailCustomerAccountsAreScopedPerPSP(t *testing.T) {
 
 	upsert := func(psp uuid.UUID, accountID string) error {
 		_, err := f.pool.Exec(ctx,
-			`INSERT INTO openrails.rail_customer_accounts
+			`INSERT INTO billing.rail_customer_accounts
 			   (id, merchant_id, customer_id, rail, psp_id, account_id, created_at, updated_at)
 			 VALUES ($1, $2, $3, 'nmi', $4, $5, $6, $6)
 			 ON CONFLICT (merchant_id, customer_id, rail, psp_id) DO UPDATE
@@ -181,20 +181,20 @@ func TestRailCustomerAccountsAreScopedPerPSP(t *testing.T) {
 
 	var n int
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.rail_customer_accounts WHERE merchant_id = $1 AND customer_id = $2`,
+		`SELECT count(*) FROM billing.rail_customer_accounts WHERE merchant_id = $1 AND customer_id = $2`,
 		f.merchant, f.customer).Scan(&n))
 	require.Equal(t, 2, n, "one mapping per PSP; neither account overwrites the other")
 
 	var got string
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT account_id FROM openrails.rail_customer_accounts
+		`SELECT account_id FROM billing.rail_customer_accounts
 		  WHERE merchant_id = $1 AND customer_id = $2 AND rail = 'nmi' AND psp_id = $3`,
 		f.merchant, f.customer, f.pspA).Scan(&got))
 	require.Equal(t, "cus_a", got, "the reverse/forward lookup resolves the RIGHT account's customer")
 
 	// The column is required: an unattributed mapping is unrepresentable.
 	_, err := f.pool.Exec(ctx,
-		`INSERT INTO openrails.rail_customer_accounts
+		`INSERT INTO billing.rail_customer_accounts
 		   (id, merchant_id, customer_id, rail, account_id, created_at, updated_at)
 		 VALUES ($1, $2, $3, 'nmi', 'cus_x', $4, $4)`,
 		uuid.New(), f.merchant, f.customer, now)
@@ -209,7 +209,7 @@ func TestPaymentMethodsCannotHoldAnUnattributedTwin(t *testing.T) {
 
 	insert := func(psp *uuid.UUID) error {
 		_, err := f.pool.Exec(ctx,
-			`INSERT INTO openrails.payment_methods
+			`INSERT INTO billing.payment_methods
 			   (id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref, initial_transaction_id, psp_id)
 			 VALUES ($1, $2, $3, 'nmi', 'vault-1', 'bill-1', '', $4)`,
 			uuid.New(), f.merchant, f.customer, psp)

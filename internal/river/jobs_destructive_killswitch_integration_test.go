@@ -40,22 +40,22 @@ func TestKillSwitchHaltsAndResumesTheConvergeSweep(t *testing.T) {
 				_, err := dbi.Qx(ctx).Exec(ctx, sql, args...)
 				require.NoError(t, err)
 			}
-			exec(`INSERT INTO openrails.products (id,key,display_name,tier_group,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
+			exec(`INSERT INTO billing.products (id,key,display_name,tier_group,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 				productID, "ks-prod-"+suffix, "ks-tier-"+suffix, merchantID)
-			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
+			exec(`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
 				priceID, productID, merchantID)
 			pspID := dbtest.EnsureTestPSP(ctx, t, dbi.Qx(ctx), merchantID, "nmi")
-			exec(`INSERT INTO openrails.checkout_sessions (id,price_id,mode,rail,psp_id,status,amount,currency,expires_at,merchant_id,customer_id)
+			exec(`INSERT INTO billing.checkout_sessions (id,price_id,mode,rail,psp_id,status,amount,currency,expires_at,merchant_id,customer_id)
 			      VALUES ($1,$2,'one_off','nmi',$3,'created',999,'USD',$4,$5,$6)`,
 				sessionID, priceID, pspID, time.Now().Add(-time.Hour), merchantID, customer)
 			return nil
 		}))
 		t.Cleanup(func() {
 			_ = dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-				_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "checkout_session:"+sessionID.String())
-				_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.checkout_sessions WHERE id=$1`, sessionID)
-				_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-				_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+				_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "checkout_session:"+sessionID.String())
+				_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.checkout_sessions WHERE id=$1`, sessionID)
+				_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+				_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 				return nil
 			})
 		})
@@ -64,7 +64,7 @@ func TestKillSwitchHaltsAndResumesTheConvergeSweep(t *testing.T) {
 	sessionStatus := func(id uuid.UUID) string {
 		var status string
 		require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			return dbi.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.checkout_sessions WHERE id=$1`, id).Scan(&status)
+			return dbi.Qx(ctx).QueryRow(ctx, `SELECT status FROM billing.checkout_sessions WHERE id=$1`, id).Scan(&status)
 		}))
 		return status
 	}
@@ -110,22 +110,22 @@ func TestConvergeSweepHonorsReadonlyMode(t *testing.T) {
 			_, err := dbi.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id,key,display_name,tier_group,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
+		exec(`INSERT INTO billing.products (id,key,display_name,tier_group,entitlements_spec,merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "ro-prod-"+suffix, "ro-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
+		exec(`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
 			priceID, productID, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, dbi.Qx(ctx), merchantID, "nmi")
-		exec(`INSERT INTO openrails.checkout_sessions (id,price_id,mode,rail,psp_id,status,amount,currency,expires_at,merchant_id,customer_id)
+		exec(`INSERT INTO billing.checkout_sessions (id,price_id,mode,rail,psp_id,status,amount,currency,expires_at,merchant_id,customer_id)
 		      VALUES ($1,$2,'one_off','nmi',$3,'created',999,'USD',$4,$5,$6)`,
 			sessionID, priceID, pspID, time.Now().Add(-time.Hour), merchantID, customer)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "checkout_session:"+sessionID.String())
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.checkout_sessions WHERE id=$1`, sessionID)
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "checkout_session:"+sessionID.String())
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.checkout_sessions WHERE id=$1`, sessionID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -134,7 +134,7 @@ func TestConvergeSweepHonorsReadonlyMode(t *testing.T) {
 
 	var status string
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		return dbi.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.checkout_sessions WHERE id=$1`, sessionID).Scan(&status)
+		return dbi.Qx(ctx).QueryRow(ctx, `SELECT status FROM billing.checkout_sessions WHERE id=$1`, sessionID).Scan(&status)
 	}))
 	require.Equal(t, "created", status, "readonly mode must make the converge sweep a pure observer")
 }

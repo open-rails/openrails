@@ -751,7 +751,7 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 	// The durable intent records the execution.
 	var intentStatus string
 	require.NoError(t, suite.MerchantPool().QueryRow(context.Background(),
-		"SELECT status FROM openrails.rail_intents WHERE intent_type = 'nmi_refund' AND payment_id = $1",
+		"SELECT status FROM billing.rail_intents WHERE intent_type = 'nmi_refund' AND payment_id = $1",
 		payment.ID).Scan(&intentStatus))
 	assert.Equal(t, "succeeded", intentStatus)
 
@@ -818,14 +818,14 @@ func TestAdminRefundCCBillRefusedBeforeDataLink(t *testing.T) {
 	require.Zero(t, providerCalls.Load(), "neither refund nor cancel nor provider read may be sent")
 	var count int
 	require.NoError(t, suite.MerchantPool().QueryRow(context.Background(),
-		"SELECT count(*) FROM openrails.rail_intents WHERE payment_id=$1", payment.ID).Scan(&count))
+		"SELECT count(*) FROM billing.rail_intents WHERE payment_id=$1", payment.ID).Scan(&count))
 	require.Zero(t, count)
 	require.NoError(t, suite.MerchantPool().QueryRow(context.Background(),
-		"SELECT count(*) FROM openrails.payments WHERE refunded_payment_id=$1", payment.ID).Scan(&count))
+		"SELECT count(*) FROM billing.payments WHERE refunded_payment_id=$1", payment.ID).Scan(&count))
 	require.Zero(t, count)
 	var status string
 	require.NoError(t, suite.MerchantPool().QueryRow(context.Background(),
-		"SELECT status FROM openrails.subscriptions WHERE id=$1", payment.SubscriptionID).Scan(&status))
+		"SELECT status FROM billing.subscriptions WHERE id=$1", payment.SubscriptionID).Scan(&status))
 	require.Equal(t, "active", status)
 }
 
@@ -861,10 +861,10 @@ func TestAdminRefundCCBillRefusedWhenDataLinkUnconfigured(t *testing.T) {
 	require.Contains(t, w.Body.String(), "automatic CCBill refunds are unavailable")
 	var count int
 	require.NoError(t, suite.MerchantPool().QueryRow(context.Background(),
-		"SELECT count(*) FROM openrails.rail_intents WHERE payment_id=$1", payment.ID).Scan(&count))
+		"SELECT count(*) FROM billing.rail_intents WHERE payment_id=$1", payment.ID).Scan(&count))
 	require.Zero(t, count)
 	require.NoError(t, suite.MerchantPool().QueryRow(context.Background(),
-		"SELECT count(*) FROM openrails.payments WHERE refunded_payment_id=$1", payment.ID).Scan(&count))
+		"SELECT count(*) FROM billing.payments WHERE refunded_payment_id=$1", payment.ID).Scan(&count))
 	require.Zero(t, count)
 }
 

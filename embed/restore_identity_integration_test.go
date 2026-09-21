@@ -42,7 +42,7 @@ func TestRuntimeRegistersRestoreDestinationBeforeClient(t *testing.T) {
 	t.Cleanup(pool.Close)
 	var group, host *string
 	var count int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT permission_group_id, api_host FROM openrails.merchants WHERE id=$1`, id.UUID()).Scan(&group, &host))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT permission_group_id, api_host FROM billing.merchants WHERE id=$1`, id.UUID()).Scan(&group, &host))
 	require.Nil(t, group)
 	require.Nil(t, host)
 	tx, err := pool.Begin(ctx)
@@ -50,7 +50,7 @@ func TestRuntimeRegistersRestoreDestinationBeforeClient(t *testing.T) {
 	t.Cleanup(func() { _ = tx.Rollback(ctx) })
 	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, id.String())
 	require.NoError(t, err)
-	require.NoError(t, tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM openrails.merchant_configurations) + (SELECT count(*) FROM openrails.psps) + (SELECT count(*) FROM openrails.merchant_secrets)`).Scan(&count))
+	require.NoError(t, tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.merchant_configurations) + (SELECT count(*) FROM billing.psps) + (SELECT count(*) FROM billing.merchant_secrets)`).Scan(&count))
 	require.Zero(t, count, "registration creates directory identity only")
 	require.NoError(t, tx.Rollback(ctx))
 	client, err := rt.Client()

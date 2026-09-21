@@ -24,13 +24,13 @@ func TestSyncCatalogSidecars_PersistsRateCards(t *testing.T) {
 	productKey := "sidecar-product-" + uuid.NewString()
 	meterKey := "droplet-seconds-" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1", merchantID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meterKey)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1", merchantID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meterKey)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	_, err := pool.Exec(ctx, `
-INSERT INTO openrails.products (id, key, display_name, merchant_id)
+INSERT INTO billing.products (id, key, display_name, merchant_id)
 VALUES ($1, $2, 'Sidecar Product', $3)`, productID, productKey, merchantID)
 	require.NoError(t, err)
 
@@ -62,8 +62,8 @@ VALUES ($1, $2, 'Sidecar Product', $3)`, productID, productKey, merchantID)
 SELECT cm.event_type,
        cm.group_by ->> 'size_slug',
        rc.price ->> 'currency'
-FROM openrails.catalog_meters cm
-JOIN openrails.catalog_rate_cards rc
+FROM billing.catalog_meters cm
+JOIN billing.catalog_rate_cards rc
   ON rc.merchant_id = cm.merchant_id AND rc.meter_key = cm.key
 WHERE cm.merchant_id = $1 AND cm.key = $2`, merchantID, meterKey).
 		Scan(&eventType, &groupBy, &priceCurrency))

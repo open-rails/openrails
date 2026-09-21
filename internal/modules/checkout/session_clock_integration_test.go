@@ -31,7 +31,7 @@ func TestFindOpenCheckoutUsesBusinessClockForExpiry(t *testing.T) {
 	}
 	require.NoError(t, repo.Create(fx.ctx, session))
 	t.Cleanup(func() {
-		_, _ = fx.db.Pool().Exec(fx.ctx, "DELETE FROM openrails.checkout_sessions WHERE id = $1", session.ID)
+		_, _ = fx.db.Pool().Exec(fx.ctx, "DELETE FROM billing.checkout_sessions WHERE id = $1", session.ID)
 	})
 	svc := &CheckoutSessionService{repo: repo, clock: clock}
 	got, err := svc.FindOpenByUserPriceRail(fx.ctx, fx.userID, fx.priceID, models.RailNMI)
@@ -76,7 +76,7 @@ func TestConfirmSolanaLifecycleSessionPersistsAndPinsSessionPSP(t *testing.T) {
 	}
 	require.NoError(t, repo.Create(fx.ctx, session), "solana_cancel sessions must be admitted by checkout_sessions_mode_check")
 	t.Cleanup(func() {
-		_, _ = fx.db.Pool().Exec(fx.ctx, "DELETE FROM openrails.checkout_sessions WHERE id = $1", session.ID)
+		_, _ = fx.db.Pool().Exec(fx.ctx, "DELETE FROM billing.checkout_sessions WHERE id = $1", session.ID)
 	})
 
 	cancel := &pspCapturingCancel{}

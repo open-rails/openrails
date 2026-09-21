@@ -75,7 +75,7 @@ func TestCatalogDisjointPatchesAndClearSemantics(t *testing.T) {
 			tx, err := h.MerchantPool(owned.MerchantID.UUID()).Begin(ctx)
 			require.NoError(t, err)
 			defer tx.Rollback(ctx)
-			_, err = tx.Exec(ctx, `SELECT id FROM openrails.products WHERE id=$1 FOR UPDATE`, p.ID)
+			_, err = tx.Exec(ctx, `SELECT id FROM billing.products WHERE id=$1 FOR UPDATE`, p.ID)
 			require.NoError(t, err)
 			name, archived, rank, nextGroup := "Renamed", true, 7, "new-"+uuid.NewString()
 			results := make(chan error, 2)
@@ -87,7 +87,7 @@ func TestCatalogDisjointPatchesAndClearSemantics(t *testing.T) {
 			require.Eventually(t, func() bool {
 				var n int
 				err := h.Pool().QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database()
-                    AND wait_event_type='Lock' AND query LIKE '%UPDATE openrails.products%'`).Scan(&n)
+                    AND wait_event_type='Lock' AND query LIKE '%UPDATE billing.products%'`).Scan(&n)
 				return err == nil && n >= 2
 			}, 10*time.Second, 20*time.Millisecond, "both public patches must reach the blocked UPDATE")
 			require.NoError(t, tx.Commit(ctx))
@@ -119,7 +119,7 @@ func TestCatalogDisjointPatchesAndClearSemantics(t *testing.T) {
 			require.Empty(t, got.EntitlementsSpec)
 			var cleared bool
 			require.NoError(t, h.MerchantPool(owned.MerchantID.UUID()).QueryRow(ctx,
-				`SELECT description IS NULL AND tier_group IS NULL AND entitlements_spec IS NULL FROM openrails.products WHERE id=$1`, p.ID).Scan(&cleared))
+				`SELECT description IS NULL AND tier_group IS NULL AND entitlements_spec IS NULL FROM billing.products WHERE id=$1`, p.ID).Scan(&cleared))
 			require.True(t, cleared)
 		})
 	}
@@ -143,9 +143,9 @@ func TestCatalogTierRegroupConflictsThroughPublicSurface(t *testing.T) {
 			p, err := svc.CreateProduct(ctx, service.CreateProductRequest{Key: uuid.NewString(), DisplayName: "Tier", TierGroup: &group})
 			require.NoError(t, err)
 			customer := uuid.New()
-			_, err = pool.Exec(ctx, `INSERT INTO openrails.customers(id,merchant_id) VALUES($1,$2)`, customer, mid)
+			_, err = pool.Exec(ctx, `INSERT INTO billing.customers(id,merchant_id) VALUES($1,$2)`, customer, mid)
 			require.NoError(t, err)
-			_, err = pool.Exec(ctx, `INSERT INTO openrails.subscriptions(merchant_id,customer_id,product_id,status,rail,psp_id,current_period_ends_at)
+			_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(merchant_id,customer_id,product_id,status,rail,psp_id,current_period_ends_at)
                 VALUES($1,$2,$3,$4,'stripe',$5,now()+interval '1 day')`, mid, customer, p.ID, status, psp)
 			require.NoError(t, err)
 			_, err = svc.UpdateProduct(ctx, p.ID, service.UpdateProductRequest{SetTierGroup: true, TierGroup: &next})
@@ -160,7 +160,7 @@ func TestCatalogTierRegroupConflictsThroughPublicSurface(t *testing.T) {
 			// past_due and unknown reserve the same group just like pending/active.
 			second, err := svc.CreateProduct(ctx, service.CreateProductRequest{Key: uuid.NewString(), DisplayName: "Other", TierGroup: &group})
 			require.NoError(t, err)
-			_, err = pool.Exec(ctx, `INSERT INTO openrails.subscriptions(merchant_id,customer_id,product_id,status,rail,psp_id)
+			_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(merchant_id,customer_id,product_id,status,rail,psp_id)
                 VALUES($1,$2,$3,'pending','stripe',$4)`, mid, customer, second.ID, psp)
 			var pe interface{ SQLState() string }
 			require.ErrorAs(t, err, &pe)

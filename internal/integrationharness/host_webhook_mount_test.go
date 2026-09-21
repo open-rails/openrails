@@ -84,7 +84,7 @@ func postHostWebhook(t *testing.T, url, host string) (int, []byte) {
 func insertMerchantWithHost(t *testing.T, pool *pgxpool.Pool, slug, apiHost string) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `
-		INSERT INTO openrails.merchants (slug, status, api_host)
+		INSERT INTO billing.merchants (slug, status, api_host)
 		VALUES ($1, 'active', $2)
 	`, slug, apiHost)
 	require.NoError(t, err)

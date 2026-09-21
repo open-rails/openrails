@@ -473,6 +473,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// and the app's Redis client (#753) are wired here once; authhttp.New
 	// below reuses the same Redis for its OIDC/SIWS caches and rate limiter.
 	deps := authcore.Deps{
+		River:    authcore.RiverFromHost(),
 		Postgres: pool,
 		Redis:    options.redis,
 		Email:    options.email,

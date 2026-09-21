@@ -77,7 +77,7 @@ func (r *repo) configure() {
 // honest about what the tree looks like.
 func (r *repo) migration(name string) {
 	r.t.Helper()
-	p := filepath.Join(r.dir, "migrations", "postgres", name)
+	p := filepath.Join(r.dir, "internal", "migrate", "postgres", name)
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		r.t.Fatal(err)
 	}
@@ -217,8 +217,8 @@ func TestLiveIncidentReplay(t *testing.T) {
 	}
 	res.mustContain(t,
 		"prefix 0005",
-		"migrations/postgres/0005_spend_delegation_provenance.up.sql",
-		"migrations/postgres/0005_customer_business_profiles.up.sql",
+		"internal/migrate/postgres/0005_spend_delegation_provenance.up.sql",
+		"internal/migrate/postgres/0005_customer_business_profiles.up.sql",
 		"git rebase origin/master",
 	)
 	if lane.git("rev-parse", "--is-shallow-repository") != "false" {
@@ -312,8 +312,8 @@ func TestDuplicatePrefixRepairPasses(t *testing.T) {
 	)
 	lane := clone(t, origin)
 	lane.git("mv",
-		"migrations/postgres/0005_spend_delegation_provenance.up.sql",
-		"migrations/postgres/0006_spend_delegation_provenance.up.sql")
+		"internal/migrate/postgres/0005_spend_delegation_provenance.up.sql",
+		"internal/migrate/postgres/0006_spend_delegation_provenance.up.sql")
 	lane.commit("hotfix: repair the duplicate 0005 (the PR #278 shape)")
 
 	res := lane.run()
@@ -361,7 +361,7 @@ func TestChainSquashIsNotApplicable(t *testing.T) {
 	)
 	lane := clone(t, origin)
 	for _, m := range []string{"0001_schema.up.sql", "0002_drop_credit_purchase_round.up.sql", "0005_customer_business_profiles.up.sql"} {
-		if err := os.Remove(filepath.Join(lane.dir, "migrations", "postgres", m)); err != nil {
+		if err := os.Remove(filepath.Join(lane.dir, "internal", "migrate", "postgres", m)); err != nil {
 			t.Fatal(err)
 		}
 	}

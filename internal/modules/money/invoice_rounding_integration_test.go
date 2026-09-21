@@ -36,18 +36,18 @@ func TestInvoiceCollectionRoundingConservesCustomerFunds(t *testing.T) {
 			mid := merchant.ID(uuid.New())
 			database := dbtest.OpenMerchantDB(t, mid.UUID())
 			pool, ctx := database.Pool(), merchant.WithID(t.Context(), mid)
-			_, err := pool.Exec(ctx, `INSERT INTO openrails.merchants(id,slug) VALUES($1,$2)`, mid.UUID(), "rounding-"+mid.String())
+			_, err := pool.Exec(ctx, `INSERT INTO billing.merchants(id,slug) VALUES($1,$2)`, mid.UUID(), "rounding-"+mid.String())
 			require.NoError(t, err)
 			svc := money.NewMoneyService(database)
 			payer := identity.CustomerIDFromString(uuid.NewString())
 			msvc := merchantsServiceForTest(t, database)
 			psp, method := uuid.New(), uuid.New()
 			account := "gw-rounding-" + psp.String()
-			_, err = pool.Exec(ctx, `INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), payer.UUID())
+			_, err = pool.Exec(ctx, `INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), payer.UUID())
 			require.NoError(t, err)
-			_, err = pool.Exec(ctx, `INSERT INTO openrails.psps(merchant_id,id,rail,environment,account_id) VALUES($1,$2,'nmi','test',$3)`, mid.UUID(), psp, account)
+			_, err = pool.Exec(ctx, `INSERT INTO billing.psps(merchant_id,id,rail,environment,account_id) VALUES($1,$2,'nmi','test',$3)`, mid.UUID(), psp, account)
 			require.NoError(t, err)
-			_, err = pool.Exec(ctx, `INSERT INTO openrails.payment_methods(merchant_id,id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,stored_credential_unscheduled_ref) VALUES($1,$2,$3,$4,'nmi',$5,'billing','initial','approved-unscheduled')`, mid.UUID(), method, payer.UUID(), psp, "vault_"+method.String())
+			_, err = pool.Exec(ctx, `INSERT INTO billing.payment_methods(merchant_id,id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,stored_credential_unscheduled_ref) VALUES($1,$2,$3,$4,'nmi',$5,'billing','initial','approved-unscheduled')`, mid.UUID(), method, payer.UUID(), psp, "vault_"+method.String())
 			require.NoError(t, err)
 			secret, err := merchants.PSPSecretName("nmi", "test", account, "security_key")
 			require.NoError(t, err)
@@ -63,7 +63,7 @@ func TestInvoiceCollectionRoundingConservesCustomerFunds(t *testing.T) {
 			t.Cleanup(func() {
 				// Fleet-worker tests share this package database. The deliberate overflow
 				// refusal is not scheduled work for a later, unrelated test's worker.
-				_, err := pool.Exec(context.WithoutCancel(ctx), `UPDATE openrails.invoices SET collection_method='send_invoice' WHERE merchant_id=$1 AND id=$2`, mid.UUID(), invoice.ID)
+				_, err := pool.Exec(context.WithoutCancel(ctx), `UPDATE billing.invoices SET collection_method='send_invoice' WHERE merchant_id=$1 AND id=$2`, mid.UUID(), invoice.ID)
 				require.NoError(t, err)
 			})
 			gateway, server := newFakeNMIReceiptGateway(t)
@@ -76,12 +76,12 @@ func TestInvoiceCollectionRoundingConservesCustomerFunds(t *testing.T) {
 			if tc.failSettlement {
 				// Fail after invoice/ledger/credit writes, while settling the attempt.
 				admin := dbtest.SharedSuperuserPGXPool(t)
-				_, err = admin.Exec(ctx, fmt.Sprintf(`CREATE FUNCTION openrails.%s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+				_, err = admin.Exec(ctx, fmt.Sprintf(`CREATE FUNCTION billing.%s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
 				 IF NEW.invoice_id = '%s'::uuid AND NEW.status='settled' THEN RAISE EXCEPTION 'injected rounding settlement failure'; END IF;
-				 RETURN NEW; END $$; CREATE TRIGGER %s BEFORE UPDATE ON openrails.invoice_payments FOR EACH ROW EXECUTE FUNCTION openrails.%s()`, trigger, invoice.ID, trigger, trigger))
+				 RETURN NEW; END $$; CREATE TRIGGER %s BEFORE UPDATE ON billing.invoice_payments FOR EACH ROW EXECUTE FUNCTION billing.%s()`, trigger, invoice.ID, trigger, trigger))
 				require.NoError(t, err)
 				t.Cleanup(func() {
-					_, _ = admin.Exec(context.WithoutCancel(ctx), "DROP FUNCTION IF EXISTS openrails."+trigger+"() CASCADE")
+					_, _ = admin.Exec(context.WithoutCancel(ctx), "DROP FUNCTION IF EXISTS billing."+trigger+"() CASCADE")
 				})
 			}
 			n, err := svc.ChargeOutstanding(ctx, runner, 0)
@@ -118,10 +118,10 @@ func TestInvoiceCollectionRoundingConservesCustomerFunds(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, tc.due, current.AmountDue)
 				var transfers int
-				require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.ledger_transfers WHERE customer_id=$1 AND transfer_type IN ('owed_payment','deposit')`, payer.UUID()).Scan(&transfers))
+				require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.ledger_transfers WHERE customer_id=$1 AND transfer_type IN ('owed_payment','deposit')`, payer.UUID()).Scan(&transfers))
 				require.Zero(t, transfers)
 				admin := dbtest.SharedSuperuserPGXPool(t)
-				_, err = admin.Exec(ctx, "DROP TRIGGER "+trigger+" ON openrails.invoice_payments")
+				_, err = admin.Exec(ctx, "DROP TRIGGER "+trigger+" ON billing.invoice_payments")
 				require.NoError(t, err)
 				dueNow(t, pool, ctx, op.ID)
 				_, err = collectionRunner(database, charger, plane).RunVerifyOnce(ctx)
@@ -140,7 +140,7 @@ func TestInvoiceCollectionRoundingConservesCustomerFunds(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tc.excess, balance.Balance)
 			var settled int64
-			require.NoError(t, pool.QueryRow(ctx, `SELECT sum(amount)::bigint FROM openrails.ledger_transfers WHERE customer_id=$1 AND transfer_type IN ('owed_payment','deposit')`, payer.UUID()).Scan(&settled))
+			require.NoError(t, pool.QueryRow(ctx, `SELECT sum(amount)::bigint FROM billing.ledger_transfers WHERE customer_id=$1 AND transfer_type IN ('owed_payment','deposit')`, payer.UUID()).Scan(&settled))
 			require.Equal(t, tc.charged, settled, "actual charge = debt paid + customer credit")
 			_, err = runner.ExecuteByID(ctx, op.ID)
 			require.NoError(t, err)

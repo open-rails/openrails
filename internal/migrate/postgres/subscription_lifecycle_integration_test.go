@@ -26,7 +26,7 @@ func TestRetiredSubscriptionLifecycleValuesAreUnrepresentable(t *testing.T) {
 	rows, err := f.pool.Query(ctx,
 		`SELECT enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
 		 JOIN pg_namespace n ON n.oid = t.typnamespace
-		 WHERE n.nspname = 'openrails' AND t.typname = 'subscription_status'`)
+		 WHERE n.nspname = 'billing' AND t.typname = 'subscription_status'`)
 	require.NoError(t, err)
 	for rows.Next() {
 		var l string
@@ -72,13 +72,13 @@ func TestSubscriptionConstraintsSurvivedTheLifecycleTypeSwap(t *testing.T) {
 		var n int
 		require.NoError(t, f.pool.QueryRow(ctx,
 			`SELECT count(*) FROM pg_constraint
-			 WHERE conrelid = 'openrails.subscriptions'::regclass AND conname = $1`, name).Scan(&n))
+			 WHERE conrelid = 'billing.subscriptions'::regclass AND conname = $1`, name).Scan(&n))
 		require.Equal(t, 1, n, "constraint %s must survive the enum swap", name)
 	}
 	var sst int
 	require.NoError(t, f.pool.QueryRow(ctx,
 		`SELECT count(*) FROM pg_constraint
-		 WHERE conrelid = 'openrails.subscription_status_transitions'::regclass
+		 WHERE conrelid = 'billing.subscription_status_transitions'::regclass
 		   AND conname = 'chk_sst_real_transition'`).Scan(&sst))
 	require.Equal(t, 1, sst, "#733's real-transition check constrains two enum columns and names no label — the swap must still carry it")
 
@@ -92,7 +92,7 @@ func TestSubscriptionConstraintsSurvivedTheLifecycleTypeSwap(t *testing.T) {
 	} {
 		var n int
 		require.NoError(t, f.pool.QueryRow(ctx,
-			`SELECT count(*) FROM pg_indexes WHERE schemaname = 'openrails' AND indexname = $1`, name).Scan(&n))
+			`SELECT count(*) FROM pg_indexes WHERE schemaname = 'billing' AND indexname = $1`, name).Scan(&n))
 		require.Equal(t, 1, n, "index %s must survive the enum swap", name)
 	}
 
@@ -104,12 +104,12 @@ func TestSubscriptionConstraintsSurvivedTheLifecycleTypeSwap(t *testing.T) {
 		require.NoError(t, f.pool.QueryRow(ctx,
 			`SELECT 'security_invoker=true' = ANY (c.reloptions)
 			   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-			  WHERE n.nspname = 'openrails' AND c.relname = $1`, view).Scan(&invoker))
+			  WHERE n.nspname = 'billing' AND c.relname = $1`, view).Scan(&invoker))
 		require.True(t, invoker, "%s must be restored WITH (security_invoker=true) — it reads merchant-scoped tables", view)
 
 		var granted bool
 		require.NoError(t, f.pool.QueryRow(ctx,
-			`SELECT has_table_privilege('openrails_app', 'openrails.'||$1, 'SELECT')`, view).Scan(&granted))
+			`SELECT has_table_privilege('openrails_app', 'billing.'||$1, 'SELECT')`, view).Scan(&granted))
 		require.True(t, granted, "%s must be readable by openrails_app again", view)
 	}
 
@@ -117,7 +117,7 @@ func TestSubscriptionConstraintsSurvivedTheLifecycleTypeSwap(t *testing.T) {
 	var trig int
 	require.NoError(t, f.pool.QueryRow(ctx,
 		`SELECT count(*) FROM pg_trigger
-		 WHERE tgrelid = 'openrails.subscriptions'::regclass
+		 WHERE tgrelid = 'billing.subscriptions'::regclass
 		   AND tgname = 'trg_subscriptions_status_transition' AND NOT tgisinternal`).Scan(&trig))
 	require.Equal(t, 1, trig, "#733's status-transition audit trigger must be reattached")
 }
@@ -129,21 +129,21 @@ func TestStatusTransitionsAreStillAuditedThroughTheCanonicalType(t *testing.T) {
 
 	id := uuid.New()
 	_, err := f.pool.Exec(ctx,
-		`INSERT INTO openrails.subscriptions
+		`INSERT INTO billing.subscriptions
 		   (id, merchant_id, customer_id, product_id, price_id, status, rail, psp_id, started_at)
 		 VALUES ($1, $2, $3, $4, $5, 'active', 'nmi', $6, now())`,
 		id, f.merchant, f.customer, f.product, f.price, f.pspA)
 	require.NoError(t, err)
 
 	_, err = f.pool.Exec(ctx,
-		`UPDATE openrails.subscriptions
+		`UPDATE billing.subscriptions
 		    SET status = 'cancelled', cancel_type = 'expired', cancelled_at = now(), ended_at = now()
 		  WHERE id = $1`, id)
 	require.NoError(t, err)
 
 	var from, to string
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT from_status::text, to_status::text FROM openrails.subscription_status_transitions
+		`SELECT from_status::text, to_status::text FROM billing.subscription_status_transitions
 		  WHERE subscription_id = $1 AND from_status IS NOT NULL`, id).Scan(&from, &to))
 	require.Equal(t, "active", from)
 	require.Equal(t, "cancelled", to)
@@ -157,9 +157,9 @@ func (f pspFixture) insertSubscriptionWithStatus(t *testing.T, status string) er
 	// past_due needs a period end and cancelled needs its cancel columns; this
 	// helper is for the states that need neither.
 	_, err := f.pool.Exec(context.Background(),
-		`INSERT INTO openrails.subscriptions
+		`INSERT INTO billing.subscriptions
 		   (id, merchant_id, customer_id, product_id, price_id, status, rail, psp_id, started_at)
-		 VALUES ($1, $2, $3, $4, $5, $6::openrails.subscription_status, 'nmi', $7, now())`,
+		 VALUES ($1, $2, $3, $4, $5, $6::billing.subscription_status, 'nmi', $7, now())`,
 		uuid.New(), f.merchant, f.newCustomer(t), f.product, f.price, status, f.pspA)
 	return err
 }
@@ -167,7 +167,7 @@ func (f pspFixture) insertSubscriptionWithStatus(t *testing.T, status string) er
 func (f pspFixture) insertCancelledExpiredSubscription(t *testing.T) error {
 	t.Helper()
 	_, err := f.pool.Exec(context.Background(),
-		`INSERT INTO openrails.subscriptions
+		`INSERT INTO billing.subscriptions
 		   (id, merchant_id, customer_id, product_id, price_id, status, cancel_type,
 		    cancelled_at, ended_at, rail, psp_id, started_at)
 		 VALUES ($1, $2, $3, $4, $5, 'cancelled', 'expired', now(), now(), 'nmi', $6, now())`,

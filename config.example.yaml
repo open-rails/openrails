@@ -30,7 +30,7 @@ db:
   username: openrails_app
   password: openrails_app_password
   sslmode: disable
-  schema: openrails # defaults to 'openrails' if not specified
+  schema: billing # defaults to 'billing' if not specified
 
 redis:
   addr: localhost:6380

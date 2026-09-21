@@ -327,7 +327,7 @@ func (suite *TestContainerSuite) seedPSPWithEvidence(ctx context.Context, rail, 
 	defer tx.Rollback(ctx)
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO openrails.psps
+		INSERT INTO billing.psps
 		    (merchant_id, rail, environment, account_id, archived, evidence, last_verified_at)
 		VALUES ($1::uuid, $2, $3, $4, false, $5::jsonb, now())
 		ON CONFLICT (rail, environment, account_id) DO UPDATE
@@ -335,7 +335,7 @@ func (suite *TestContainerSuite) seedPSPWithEvidence(ctx context.Context, rail, 
 		       evidence = EXCLUDED.evidence,
 		       last_verified_at = EXCLUDED.last_verified_at,
 		       updated_at = now()
-		 WHERE openrails.psps.merchant_id = EXCLUDED.merchant_id
+		 WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
 	`, dbtest.TestMerchantID.UUID(), rail, environment, accountID, evidence)
 	require.NoError(suite.t, err)
 	require.NoError(suite.t, tx.Commit(ctx))
@@ -431,7 +431,7 @@ func (suite *TestContainerSuite) SeedNMIPSP(t *testing.T, accountID, securityKey
 	// which one.
 	rowID, _, _, _ := merchants.PSPNaturalKey(string(models.RailNMI), env, accountID)
 	_, err := suite.MerchantPool().Exec(context.Background(),
-		`UPDATE openrails.psps SET key = $1
+		`UPDATE billing.psps SET key = $1
 		  WHERE rail = $2 AND environment = $3 AND account_id = $4`,
 		accountID, string(models.RailNMI), env, accountID)
 	require.NoError(t, err)
@@ -449,7 +449,7 @@ func (suite *TestContainerSuite) SeedNMIPSP(t *testing.T, accountID, securityKey
 		// psps FORCEs RLS, so this MUST run on the merchant-pinned pool — on the
 		// bare one the UPDATE matched nothing and the extra armed NMI account
 		// leaked into every later test's rail resolution as an ambiguity.
-		_, _ = suite.MerchantPool().Exec(ctx, `UPDATE openrails.psps SET archived = true WHERE id = $1`, rowID)
+		_, _ = suite.MerchantPool().Exec(ctx, `UPDATE billing.psps SET archived = true WHERE id = $1`, rowID)
 	})
 }
 

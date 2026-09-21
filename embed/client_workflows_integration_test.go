@@ -222,7 +222,7 @@ func checkClientDeclaredAccess(t *testing.T, ctx context.Context, h *integration
 	require.ElementsMatch(t, []string{source, trial}, replay.Skipped)
 	require.Empty(t, replay.Imported)
 	var windows int
-	require.NoError(t, h.MerchantPool(d.mid.UUID()).QueryRow(ctx, `SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND source_type='admin'`, d.mid.UUID(), comped.UUID()).Scan(&windows))
+	require.NoError(t, h.MerchantPool(d.mid.UUID()).QueryRow(ctx, `SELECT count(*) FROM billing.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND source_type='admin'`, d.mid.UUID(), comped.UUID()).Scan(&windows))
 	require.Equal(t, 1, windows)
 	_, err = client.ImportBilling(ctx, openrails.DeclaredBilling{AdminGrants: book.AdminGrants})
 	require.ErrorIs(t, err, openrails.ErrInvalid)
@@ -310,9 +310,9 @@ func checkClientPlanMigration(t *testing.T, ctx context.Context, h *integrationh
 	subscriber, subscription := uuid.New(), uuid.New()
 	psp := dbtest.EnsureTestPSP(ctx, t, h.Pool(), mid.UUID(), "ccbill")
 	exec := func(sql string, args ...any) { _, err := h.Pool().Exec(ctx, sql, args...); require.NoError(t, err) }
-	exec(`INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), subscriber)
+	exec(`INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), subscriber)
 	now := time.Now().UTC()
-	exec(`INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,'ccbill','active',$7,$8,$9)`,
+	exec(`INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,'ccbill','active',$7,$8,$9)`,
 		subscription, mid.UUID(), subscriber, source.ID, sourcePrice.ID, psp, subscription.String(), now, now.Add(720*time.Hour))
 	migration := openrails.PlanMigrationRequest{SourcePrice: key + "-legacy", TargetPrice: targetPrice.ID.String(), FallbackPolicy: "keep_grandfathered"}
 	preview, err := client.PreviewPlanMigration(ctx, migration)
@@ -350,7 +350,7 @@ func checkClientCheckout(t *testing.T, ctx context.Context, h *integrationharnes
 		price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: "checkout-" + uuid.NewString(), UnitAmount: amount, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 		require.NoError(t, err)
 		psp := dbtest.EnsureTestPSP(ctx, t, h.MerchantPool(d.mid.UUID()), d.mid.UUID(), "ccbill")
-		_, err = h.MerchantPool(d.mid.UUID()).Exec(ctx, `INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,flex_id,configuration) VALUES($1,$2,$3,$4,'{"form_name":"test-form"}')`, d.mid.UUID(), price.ID.UUID(), psp, uuid.NewString())
+		_, err = h.MerchantPool(d.mid.UUID()).Exec(ctx, `INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,flex_id,configuration) VALUES($1,$2,$3,$4,'{"form_name":"test-form"}')`, d.mid.UUID(), price.ID.UUID(), psp, uuid.NewString())
 		require.NoError(t, err)
 		prices = append(prices, price)
 	}

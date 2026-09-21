@@ -30,10 +30,10 @@ func TestLateRebillCompletionDoesNotPayANewerMissedPeriod(t *testing.T) {
 			require.NoError(t, err)
 			admin := dbtest.SharedSuperuserPGXPool(t)
 			trigger := "late_rebill_" + uuid.NewString()[:8]
-			_, err = admin.Exec(ctx, fmt.Sprintf(`CREATE FUNCTION openrails.%s() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RAISE EXCEPTION 'injected terminal failure'; END$$; CREATE TRIGGER %s BEFORE UPDATE ON openrails.rail_intents FOR EACH ROW WHEN (NEW.id='%s'::uuid AND NEW.status='succeeded') EXECUTE FUNCTION openrails.%s()`, trigger, trigger, accepted.ID, trigger))
+			_, err = admin.Exec(ctx, fmt.Sprintf(`CREATE FUNCTION billing.%s() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RAISE EXCEPTION 'injected terminal failure'; END$$; CREATE TRIGGER %s BEFORE UPDATE ON billing.rail_intents FOR EACH ROW WHEN (NEW.id='%s'::uuid AND NEW.status='succeeded') EXECUTE FUNCTION billing.%s()`, trigger, trigger, accepted.ID, trigger))
 			require.NoError(t, err)
 			t.Cleanup(func() {
-				_, _ = admin.Exec(context.WithoutCancel(ctx), "DROP FUNCTION IF EXISTS openrails."+trigger+"() CASCADE")
+				_, _ = admin.Exec(context.WithoutCancel(ctx), "DROP FUNCTION IF EXISTS billing."+trigger+"() CASCADE")
 			})
 			row, err := runner.ExecuteByID(ctx, accepted.ID)
 			require.NoError(t, err)
@@ -41,7 +41,7 @@ func TestLateRebillCompletionDoesNotPayANewerMissedPeriod(t *testing.T) {
 			_, found, err := LoadCollectedReceipt(row)
 			require.NoError(t, err)
 			require.True(t, found)
-			_, err = admin.Exec(ctx, "DROP FUNCTION openrails."+trigger+"() CASCADE")
+			_, err = admin.Exec(ctx, "DROP FUNCTION billing."+trigger+"() CASCADE")
 			require.NoError(t, err)
 			p, err := DecodeManualRebillPayload(row)
 			require.NoError(t, err)
@@ -74,14 +74,14 @@ func TestLateRebillCompletionDoesNotPayANewerMissedPeriod(t *testing.T) {
 			if corrupt {
 				// A local payment contradicting its qualified historical receipt must
 				// refuse before the next provider write, even though its interval is old.
-				_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.payments SET amount=amount+1 WHERE subscription_id=$1 AND transaction_id=$2`, fx.subID, gateway.txnID)
+				_, err = fx.db.Pool().Exec(ctx, `UPDATE billing.payments SET amount=amount+1 WHERE subscription_id=$1 AND transaction_id=$2`, fx.subID, gateway.txnID)
 				require.NoError(t, err)
 				blocked, err := nextRunner.ExecuteByID(ctx, next.ID)
 				require.NoError(t, err)
 				require.Equal(t, StatusPending, blocked.Status)
 				require.Zero(t, nextGateway.saleCalls.Load())
 				require.Contains(t, *blocked.LastFailureReason, "contradicts its accepted receipt terms")
-				_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.payments SET amount=amount-1 WHERE subscription_id=$1 AND transaction_id=$2`, fx.subID, gateway.txnID)
+				_, err = fx.db.Pool().Exec(ctx, `UPDATE billing.payments SET amount=amount-1 WHERE subscription_id=$1 AND transaction_id=$2`, fx.subID, gateway.txnID)
 				require.NoError(t, err)
 			}
 			completed, err := nextRunner.ExecuteByID(ctx, next.ID)

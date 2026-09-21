@@ -1160,7 +1160,7 @@ func reconcileManifestCustodians(ctx context.Context, cfg *config.Config, databa
 		// #650: a custodian identity belongs to exactly one merchant. Say so
 		// clearly, rather than letting the global-uniqueness upsert reject it
 		// with an opaque violation the RLS-blinded operator cannot read.
-		if err := merchants.AssertCustodianUnowned(ctx, gen.New(database.Pool()), merchantID.UUID(), rc.kind, rc.environment, rc.accountID); err != nil {
+		if err := merchants.AssertCustodianUnowned(ctx, gen.New(database.DataPool()), merchantID.UUID(), rc.kind, rc.environment, rc.accountID); err != nil {
 			return nil, err
 		}
 		// Same apply tiers as a PSP (#527): plan-only runs mutate nothing, and
@@ -1805,7 +1805,7 @@ func reconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 	// #650: a PSP belongs to exactly one merchant. Fail with a clear
 	// error if another merchant already owns this identity, rather than letting the
 	// global-uniqueness upsert reject it with an opaque unique-violation under RLS.
-	if err := merchants.AssertPSPUnowned(ctx, gen.New(database.Pool()), merchantID.UUID(), rail, environment, accountID); err != nil {
+	if err := merchants.AssertPSPUnowned(ctx, gen.New(database.DataPool()), merchantID.UUID(), rail, environment, accountID); err != nil {
 		return err
 	}
 	mctx := merchant.WithID(ctx, merchantID)

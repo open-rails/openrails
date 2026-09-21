@@ -18,7 +18,7 @@ import (
 
 // PriceIntervalLabel derives the canonical interval name used by #774's
 // auto-default price key (`<product-key>-<interval>`). Mirrored EXACTLY by
-// migrations/postgres/0001_schema.up.sql's trg_prices_default_key
+// internal/migrate/postgres/0001_schema.up.sql's trg_prices_default_key
 // (prices_default_key) trigger function's CASE expression — keep the two in
 // sync so a forward re-apply never relabels a backfilled key.
 func PriceIntervalLabel(accessDurationHours *int, autoRenew bool) string {

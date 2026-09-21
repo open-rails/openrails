@@ -250,16 +250,16 @@ func seedCutoverHTTP(t *testing.T, h *Harness, s *Surface, g *cutoverGateway, mo
 	planID := "plan-" + suffix
 	exec := func(q string, args ...any) { t.Helper(); _, e := pool.Exec(ctx, q, args...); require.NoError(t, e) }
 	dbtest.EnsureCustomerIDPgxFor(ctx, t, pool, mid, p.Customer.String())
-	exec(`INSERT INTO openrails.products(id,key,display_name,merchant_id) VALUES($1,$2,$2,$3)`, product, suffix, mid)
-	exec(`INSERT INTO openrails.prices(id,product_id,key,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES($1,$2,$3,10000000,'USD',720,true,$4)`, p.Price, product, suffix, mid)
-	exec(`INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,plan_id,configuration) VALUES($1,$2,$3,$4,'{}')`, mid, p.Price, target, planID)
+	exec(`INSERT INTO billing.products(id,key,display_name,merchant_id) VALUES($1,$2,$2,$3)`, product, suffix, mid)
+	exec(`INSERT INTO billing.prices(id,product_id,key,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES($1,$2,$3,10000000,'USD',720,true,$4)`, p.Price, product, suffix, mid)
+	exec(`INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,plan_id,configuration) VALUES($1,$2,$3,$4,'{}')`, mid, p.Price, target, planID)
 	for _, pm := range []struct {
 		ID, PSP uuid.UUID
 		Vault   string
 	}{{p.OldMethod, source, oldVault}, {p.NewMethod, target, newVault}} {
-		exec(`INSERT INTO openrails.payment_methods(id,merchant_id,customer_id,rail,psp_id,rail_customer_ref,rail_method_ref,initial_transaction_id,custodian,rebill_driver) VALUES($1,$2,$3,'nmi',$4,$5,'only-card','','psp','provider')`, pm.ID, mid, p.Customer, pm.PSP, pm.Vault)
+		exec(`INSERT INTO billing.payment_methods(id,merchant_id,customer_id,rail,psp_id,rail_customer_ref,rail_method_ref,initial_transaction_id,custodian,rebill_driver) VALUES($1,$2,$3,'nmi',$4,$5,'only-card','','psp','provider')`, pm.ID, mid, p.Customer, pm.PSP, pm.Vault)
 	}
-	exec(`INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,status,started_at,current_period_starts_at,current_period_ends_at,rail,rail_subscription_id,psp_id,payment_method_id) VALUES($1,$2,$3,$4,$5,'active',$6,$6,$7,'nmi',$8,$9,$10)`, p.Sub, mid, p.Customer, product, p.Price, p.Start, p.Anchor, providerSub, source, p.OldMethod)
+	exec(`INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,status,started_at,current_period_starts_at,current_period_ends_at,rail,rail_subscription_id,psp_id,payment_method_id) VALUES($1,$2,$3,$4,$5,'active',$6,$6,$7,'nmi',$8,$9,$10)`, p.Sub, mid, p.Customer, product, p.Price, p.Start, p.Anchor, providerSub, source, p.OldMethod)
 	plan := nmi.V5Plan{Object: "plan", ID: planID, PlanAmount: "10.00", PlanPayments: "0", DayFrequency: "30", MonthFrequency: "0"}
 	sourceAcct := &cutoverAccount{Source: true, Plan: plan, Subs: map[string]nmi.V5Subscription{providerSub: {Object: "subscription", ID: providerSub, CustomerVaultID: oldVault, Amount: "10.00", Plan: &plan, PausedSubscription: 0, DelayedCondition: "active", NextBillingDate: p.Anchor.Format(time.RFC3339)}}}
 	targetAcct := &cutoverAccount{Plan: plan, Subs: map[string]nmi.V5Subscription{}}
@@ -283,7 +283,7 @@ func assertCutoverCommitted(t *testing.T, h *Harness, g *cutoverGateway, p cutov
 	var account, method, customer, price uuid.UUID
 	var providerID string
 	var start, end time.Time
-	require.NoError(t, h.Pool().QueryRow(context.Background(), `SELECT psp_id,payment_method_id,customer_id,price_id,rail_subscription_id,current_period_starts_at,current_period_ends_at FROM openrails.subscriptions WHERE id=$1`, p.Sub).Scan(&account, &method, &customer, &price, &providerID, &start, &end))
+	require.NoError(t, h.Pool().QueryRow(context.Background(), `SELECT psp_id,payment_method_id,customer_id,price_id,rail_subscription_id,current_period_starts_at,current_period_ends_at FROM billing.subscriptions WHERE id=$1`, p.Sub).Scan(&account, &method, &customer, &price, &providerID, &start, &end))
 	require.Equal(t, p.Target, account)
 	require.Equal(t, p.NewMethod, method)
 	require.Equal(t, p.Customer, customer)
@@ -292,7 +292,7 @@ func assertCutoverCommitted(t *testing.T, h *Harness, g *cutoverGateway, p cutov
 	require.True(t, p.Start.Equal(start))
 	require.True(t, p.Anchor.Equal(end))
 	var payload, evidence string
-	require.NoError(t, h.Pool().QueryRow(context.Background(), `SELECT payload::text,result_evidence::text FROM openrails.rail_intents WHERE id=$1`, result.ID).Scan(&payload, &evidence))
+	require.NoError(t, h.Pool().QueryRow(context.Background(), `SELECT payload::text,result_evidence::text FROM billing.rail_intents WHERE id=$1`, result.ID).Scan(&payload, &evidence))
 	profile := contract.Profile{Name: "rail_intents", Columns: []contract.Column{{Name: "intent_type", Type: "text"}, {Name: "status", Type: "text"}, {Name: "payload", Type: "jsonb"}, {Name: "result_evidence", Type: "jsonb"}}}
 	typ, status := intents.TypeNMIProviderCutover, "succeeded"
 	require.NoError(t, contract.ValidateValues(profile, []*string{&typ, &status, &payload, &evidence}), "real cutover receipts must survive merchant archive")
@@ -313,9 +313,9 @@ func TestNMIProviderCutoverHTTP(t *testing.T) {
 	h := New(t, ctx)
 	g := newCutoverGateway(t)
 	s := h.StartStandalone("USD", WithConfig(func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeFull }))
-	_, err := h.Pool().Exec(ctx, `UPDATE openrails.destructive_action_switch SET enabled=true`)
+	_, err := h.Pool().Exec(ctx, `UPDATE billing.destructive_action_switch SET enabled=true`)
 	require.NoError(t, err)
-	t.Cleanup(func() { _, _ = h.Pool().Exec(ctx, `UPDATE openrails.destructive_action_switch SET enabled=false`) })
+	t.Cleanup(func() { _, _ = h.Pool().Exec(ctx, `UPDATE billing.destructive_action_switch SET enabled=false`) })
 	builder, ok := s.App().Runtime.CollectionResolver.(*money.MerchantCollectionAdapterBuilder)
 	require.True(t, ok)
 	builder.Endpoints.NMIV5BaseURL = g.Server.URL
@@ -348,11 +348,11 @@ func TestNMIProviderCutoverHTTP(t *testing.T) {
 				}
 				g.mu.Unlock()
 				var actual uuid.UUID
-				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT psp_id FROM openrails.subscriptions WHERE id=$1`, p.Sub).Scan(&actual))
+				require.NoError(t, h.Pool().QueryRow(ctx, `SELECT psp_id FROM billing.subscriptions WHERE id=$1`, p.Sub).Scan(&actual))
 				require.Equal(t, p.Source, actual)
-				_, e = h.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET status='cancelled' WHERE id=$1`, p.Sub)
+				_, e = h.Pool().Exec(ctx, `UPDATE billing.subscriptions SET status='cancelled' WHERE id=$1`, p.Sub)
 				require.Error(t, e, "unresolved cutover fences lifecycle")
-				_, e = h.Pool().Exec(ctx, `UPDATE openrails.payment_methods SET rail_customer_ref='changed' WHERE id=$1`, p.NewMethod)
+				_, e = h.Pool().Exec(ctx, `UPDATE billing.payment_methods SET rail_customer_ref='changed' WHERE id=$1`, p.NewMethod)
 				require.Error(t, e, "unresolved cutover fences card remap")
 			} else {
 				if mode != "success" {

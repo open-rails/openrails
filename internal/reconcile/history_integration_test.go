@@ -38,9 +38,9 @@ func TestPGHistorySource(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
+		exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			prodID, "hist-"+tag+"-"+sfx, mid)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`,
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,9990000,'USD',720,true,$3)`,
 			priceID, prodID, mid)
 	}
 
@@ -53,19 +53,19 @@ func TestPGHistorySource(t *testing.T) {
 			require.NoError(t, err)
 		}
 		// Older payment evidence and an off-rail control remain ordinary receipts.
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		exec(`INSERT INTO billing.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
 		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','failed',$6,$7)`,
 			payOlderA, merchantA.UUID(), custA, priceA, "older-txn-"+sfx, t1, pspA)
 		pspOther := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantA.UUID(), "ccbill")
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		exec(`INSERT INTO billing.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
 		      VALUES ($1,$2,$3,$4,'ccbill',$5,9990000,9990000,'USD','failed',$6,$7)`,
 			payOtherRailA, merchantA.UUID(), custA, priceA, "offrail-txn-"+sfx, t1, pspOther)
 		// Failed payment = go-forward dunning evidence.
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		exec(`INSERT INTO billing.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
 		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','failed',$6,$7)`,
 			payFailedA, merchantA.UUID(), custA, priceA, "fail-txn-"+sfx, t2, pspA)
 		// Completed payment: not dunning evidence.
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		exec(`INSERT INTO billing.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
 		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','completed',$6,$7)`,
 			payCompletedA, merchantA.UUID(), custA, priceA, "ok-txn-"+sfx, t2, pspA)
 		return nil
@@ -73,7 +73,7 @@ func TestPGHistorySource(t *testing.T) {
 
 	// Merchant B: same-shaped evidence that must never leak into A's report.
 	_, err := appDB.Pool().Exec(context.Background(),
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1,$2,'active')`, merchantB.UUID(), "hist-b-"+sfx)
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1,$2,'active')`, merchantB.UUID(), "hist-b-"+sfx)
 	require.NoError(t, err)
 	require.NoError(t, appDB.RunInMerchantConn(ctxB, func(ctx context.Context) error {
 		exec := func(sql string, args ...any) {
@@ -81,10 +81,10 @@ func TestPGHistorySource(t *testing.T) {
 			require.NoError(t, err)
 		}
 		custB = uuid.New()
-		exec(`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`, custB, merchantB.UUID())
+		exec(`INSERT INTO billing.customers (id, merchant_id) VALUES ($1, $2)`, custB, merchantB.UUID())
 		seed(ctx, merchantB.UUID(), prodB, priceB, "b")
 		pspB := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantB.UUID(), "nmi")
-		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		exec(`INSERT INTO billing.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
 		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','failed',$6,$7)`,
 			payFailedB, merchantB.UUID(), custB, priceB, "fail-txn-b-"+sfx, t2, pspB)
 		return nil
@@ -96,13 +96,13 @@ func TestPGHistorySource(t *testing.T) {
 			mid uuid.UUID
 		}{{ctxA, merchantA.UUID()}, {ctxB, merchantB.UUID()}} {
 			_ = appDB.RunInMerchantConn(c.ctx, func(ctx context.Context) error {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=ANY($1)`, []uuid.UUID{payFailedA, payCompletedA, payFailedB, payOlderA, payOtherRailA})
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=ANY($1)`, []uuid.UUID{priceA, priceB})
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=ANY($1)`, []uuid.UUID{prodA, prodB})
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE id=ANY($1)`, []uuid.UUID{payFailedA, payCompletedA, payFailedB, payOlderA, payOtherRailA})
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=ANY($1)`, []uuid.UUID{priceA, priceB})
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=ANY($1)`, []uuid.UUID{prodA, prodB})
 				return nil
 			})
 		}
-		_, _ = appDB.Pool().Exec(context.Background(), `DELETE FROM openrails.merchants WHERE id=$1`, merchantB.UUID())
+		_, _ = appDB.Pool().Exec(context.Background(), `DELETE FROM billing.merchants WHERE id=$1`, merchantB.UUID())
 	})
 
 	src := NewPGHistorySource(appDB)

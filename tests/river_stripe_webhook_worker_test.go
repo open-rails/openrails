@@ -45,7 +45,7 @@ func TestStripeWebhookReconcileRiverWorker(t *testing.T) {
 		// By natural key: seedPSPWithEvidence lets the DB assign
 		// the row id, so PSPNaturalKey's deterministic id would match nothing.
 		_, _ = suite.MerchantPool().Exec(context.Background(),
-			`UPDATE openrails.psps SET archived = true
+			`UPDATE billing.psps SET archived = true
 			  WHERE rail = 'stripe' AND environment = $1 AND account_id = $2`, env, accountID)
 	})
 

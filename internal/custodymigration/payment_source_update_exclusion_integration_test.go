@@ -50,7 +50,7 @@ func seedSwapIntent(t *testing.T, fx *custodyFixture, subID, oldMethod, newMetho
 	})
 	require.NoError(t, err)
 	if status != intents.StatusPending {
-		_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.rail_intents SET status = $2 WHERE id = $1`, row.ID, status)
+		_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.rail_intents SET status = $2 WHERE id = $1`, row.ID, status)
 		require.NoError(t, err)
 	}
 	return row.ID
@@ -60,7 +60,7 @@ func intentRow(t *testing.T, fx *custodyFixture, id uuid.UUID) (status, code, re
 	t.Helper()
 	var c, r *string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		`SELECT status, result_evidence->>'code', last_failure_reason FROM openrails.rail_intents WHERE id = $1`, id).Scan(&status, &c, &r))
+		`SELECT status, result_evidence->>'code', last_failure_reason FROM billing.rail_intents WHERE id = $1`, id).Scan(&status, &c, &r))
 	if c != nil {
 		code = *c
 	}
@@ -95,7 +95,7 @@ func TestCustodyMigration_RefusesUnresolvedPaymentSourceUpdate(t *testing.T) {
 			requireMigrationCount(t, fx, newMethod, 0)
 
 			_, err = fx.db.Pool().Exec(fx.ctx,
-				`UPDATE openrails.rail_intents SET status = 'succeeded', executed_at = now() WHERE id = $1`, intentID)
+				`UPDATE billing.rail_intents SET status = 'succeeded', executed_at = now() WHERE id = $1`, intentID)
 			require.NoError(t, err)
 			res, err = custodymigration.Migrate(fx.ctx, fx.opts(exp, true))
 			require.NoError(t, err)
@@ -145,7 +145,7 @@ func TestCustodyMigration_RemapVersusPaymentSourceUpdateRace(t *testing.T) {
 		gateway, client := newFakeSwapGateway(t, "railsub-"+oldVault, oldVault)
 		gateway.observe = func() uuid.UUID {
 			var psp uuid.UUID // uuid.Nil on a read error fails the assertion below
-			_ = fx.db.Pool().QueryRow(fx.ctx, `SELECT psp_id FROM openrails.payment_methods WHERE id = $1`, newMethod).Scan(&psp)
+			_ = fx.db.Pool().QueryRow(fx.ctx, `SELECT psp_id FROM billing.payment_methods WHERE id = $1`, newMethod).Scan(&psp)
 			return psp
 		}
 		runner := &intents.Runner{
@@ -193,7 +193,7 @@ func TestCustodyMigration_RemapVersusPaymentSourceUpdateRace(t *testing.T) {
 			require.Equal(t, fx.oldPSP.ID, psp, "iteration %d: a provider write after the target was re-attributed", i)
 		}
 		var subMethod uuid.UUID
-		require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT payment_method_id FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&subMethod))
+		require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT payment_method_id FROM billing.subscriptions WHERE id = $1`, subID).Scan(&subMethod))
 		remap := res.Rows[0]
 		switch {
 		case serr == nil && swap.Done:
@@ -260,7 +260,7 @@ func TestCustodyMigration_RemapThenPaymentSourceUpdateIsRefused(t *testing.T) {
 	require.ErrorIs(t, err, subscriptions.ErrPaymentMethodProviderAccountMismatch)
 	require.Zero(t, gateway.updateCalls.Load())
 	var n int
-	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id = $1`, subID).Scan(&n))
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id = $1`, subID).Scan(&n))
 	require.Zero(t, n, "a refused producer leaves no intent")
 
 	intentID := seedSwapIntent(t, fx, subID, oldMethod, newMethod, intents.StatusPending)
@@ -271,7 +271,7 @@ func TestCustodyMigration_RemapThenPaymentSourceUpdateIsRefused(t *testing.T) {
 	require.Equal(t, intents.EvidenceCodePSPMismatch, code)
 	require.Zero(t, gateway.updateCalls.Load())
 	var subMethod uuid.UUID
-	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT payment_method_id FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&subMethod))
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT payment_method_id FROM billing.subscriptions WHERE id = $1`, subID).Scan(&subMethod))
 	require.Equal(t, oldMethod, subMethod)
 }
 
@@ -283,7 +283,7 @@ func (fx *custodyFixture) seedStandaloneCard(t *testing.T, subID uuid.UUID, vaul
 	t.Helper()
 	methodID := uuid.New()
 	var customerID uuid.UUID
-	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT customer_id FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&customerID))
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT customer_id FROM billing.subscriptions WHERE id = $1`, subID).Scan(&customerID))
 	now := time.Now().UTC().Truncate(time.Second)
 	require.NoError(t, fx.db.RunInMerchantConn(fx.ctx, func(ctx context.Context) error {
 		_, err := fx.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
@@ -295,8 +295,8 @@ func (fx *custodyFixture) seedStandaloneCard(t *testing.T, subID uuid.UUID, vaul
 	}))
 	t.Cleanup(func() {
 		bg := context.Background()
-		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM openrails.custody_migrations WHERE payment_method_id = $1`, methodID)
-		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM openrails.payment_methods WHERE id = $1`, methodID)
+		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM billing.custody_migrations WHERE payment_method_id = $1`, methodID)
+		_, _ = fx.db.Pool().Exec(bg, `DELETE FROM billing.payment_methods WHERE id = $1`, methodID)
 	})
 	return methodID
 }

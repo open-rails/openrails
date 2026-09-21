@@ -44,18 +44,18 @@ func TestAdminBillingPredicatesWithoutRLS(t *testing.T) {
 			_, e := pool.Exec(ctx, query, args...)
 			require.NoError(t, e)
 		}
-		exec(`INSERT INTO openrails.merchants (id,slug,status) VALUES ($1,$2,'active')`, f.merchant, "sec18-"+f.merchant.String())
+		exec(`INSERT INTO billing.merchants (id,slug,status) VALUES ($1,$2,'active')`, f.merchant, "sec18-"+f.merchant.String())
 		dbtest.EnsureCustomerIDPgxFor(ctx, t, pool, f.merchant, customerID.String())
 		product, low, high := uuid.New(), uuid.New(), uuid.New()
-		exec(`INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,'scope-product','Scope product')`, product, f.merchant)
+		exec(`INSERT INTO billing.products(id,merchant_id,key,display_name) VALUES($1,$2,'scope-product','Scope product')`, product, f.merchant)
 		for i, id := range []uuid.UUID{low, high} {
-			exec(`INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,$5,'USD',720,true)`, id, f.merchant, product, id.String(), int64(i+1)*1000000)
+			exec(`INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,$5,'USD',720,true)`, id, f.merchant, product, id.String(), int64(i+1)*1000000)
 		}
 		psp := dbtest.EnsureTestPSP(ctx, t, pool, f.merchant, "nmi")
-		exec(`INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,status,rail,psp_id,started_at,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,'active','nmi',$6,$7,$7,$8)`, f.sub, f.merchant, customerID, product, low, psp, now, now.Add(30*24*time.Hour))
-		exec(`INSERT INTO openrails.payments(id,merchant_id,customer_id,price_id,subscription_id,rail,psp_id,transaction_id,amount,list_amount,currency,status,money_movement,purchased_at) VALUES($1,$2,$3,$4,$5,'nmi',$6,$7,1000000,1000000,'USD','completed','rail',$8)`, f.payment, f.merchant, customerID, low, f.sub, psp, f.payment.String(), now)
-		exec(`INSERT INTO openrails.payment_methods(id,merchant_id,customer_id,rail,psp_id,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES($1,$2,$3,'nmi',$4,$5::text,$5::text,$5::text)`, f.method, f.merchant, customerID, psp, f.method.String())
-		exec(`INSERT INTO openrails.entitlements(id,merchant_id,customer_id,entitlement,source_type,source_id,start_at,end_at) VALUES($1,$2,$3,'scope-access','subscription',$4,$5,$6)`, uuid.New(), f.merchant, customerID, f.sub, now, now.Add(24*time.Hour))
+		exec(`INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,status,rail,psp_id,started_at,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,'active','nmi',$6,$7,$7,$8)`, f.sub, f.merchant, customerID, product, low, psp, now, now.Add(30*24*time.Hour))
+		exec(`INSERT INTO billing.payments(id,merchant_id,customer_id,price_id,subscription_id,rail,psp_id,transaction_id,amount,list_amount,currency,status,money_movement,purchased_at) VALUES($1,$2,$3,$4,$5,'nmi',$6,$7,1000000,1000000,'USD','completed','rail',$8)`, f.payment, f.merchant, customerID, low, f.sub, psp, f.payment.String(), now)
+		exec(`INSERT INTO billing.payment_methods(id,merchant_id,customer_id,rail,psp_id,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES($1,$2,$3,'nmi',$4,$5::text,$5::text,$5::text)`, f.method, f.merchant, customerID, psp, f.method.String())
+		exec(`INSERT INTO billing.entitlements(id,merchant_id,customer_id,entitlement,source_type,source_id,start_at,end_at) VALUES($1,$2,$3,'scope-access','subscription',$4,$5,$6)`, uuid.New(), f.merchant, customerID, f.sub, now, now.Add(24*time.Hour))
 		mctx := merchant.WithID(ctx, merchant.ID(f.merchant))
 		repo := subscriptions.NewRepriceRepo(database)
 		key := "scope-price"
@@ -90,7 +90,7 @@ func TestAdminBillingPredicatesWithoutRLS(t *testing.T) {
 	t.Run("reprice cancellation", func(t *testing.T) {
 		require.ErrorIs(t, repo.Cancel(mctx, b.reprice), subscriptions.ErrRepriceNotScheduled)
 		var status string
-		require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM openrails.subscription_reprices WHERE id=$1`, b.reprice).Scan(&status))
+		require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM billing.subscription_reprices WHERE id=$1`, b.reprice).Scan(&status))
 		require.Equal(t, "scheduled", status)
 		require.NoError(t, repo.Cancel(mctx, a.reprice))
 	})

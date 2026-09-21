@@ -73,9 +73,9 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 			cust := dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
 			prod, price := uuid.New(), uuid.New()
 			prices[id] = price
-			exec(`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "ur-"+railSub, merchantID)
-			exec(`INSERT INTO openrails.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
-			exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
+			exec(`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`, prod, "ur-"+railSub, merchantID)
+			exec(`INSERT INTO billing.prices (id,product_id,amount,currency,merchant_id) VALUES ($1,$2,5000000,'USD',$3)`, price, prod, merchantID)
+			exec(`INSERT INTO billing.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,psp_id)
 			      VALUES ($1,$2,$3,$4,$5,'unknown',$6,$7,$8,$8,$9,$10)`, id, merchantID, cust, prod, price, rail, railSub, start, periodEnd, pspByRail[rail])
 			return cust
 		}
@@ -87,24 +87,24 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 		mk(subProbe, "nmi", rsProbe)
 		// Legacy import shape: NO local period evidence — only the per-sub probe
 		// can resolve it (#665).
-		exec(`UPDATE openrails.subscriptions SET current_period_starts_at=NULL, current_period_ends_at=NULL WHERE id=$1`, subProbe)
+		exec(`UPDATE billing.subscriptions SET current_period_starts_at=NULL, current_period_ends_at=NULL WHERE id=$1`, subProbe)
 		// A lingering entitlement window on the to-be-cancelled sub so the
 		// revocation is observable (ported #367 remote-absent scenario).
-		exec(`INSERT INTO openrails.entitlements (id, entitlement, start_at, end_at, source_id, source_type, customer_id, merchant_id)
+		exec(`INSERT INTO billing.entitlements (id, entitlement, start_at, end_at, source_id, source_type, customer_id, merchant_id)
 		      VALUES ($1,'premium', now() - interval '40 days', now() + interval '10 days', $2, 'subscription', $3, $4)`,
 			uuid.New(), subCancel, custCancel, merchantID)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.rail_customer_accounts WHERE account_id=$1`, nmiVault)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.rail_customer_accounts WHERE account_id=$1`, nmiVault)
 			for id, price := range prices {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE source_id=$1`, id)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE subscription_id=$1`, id)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, id)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE source_id=$1`, id)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE subscription_id=$1`, id)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, id)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, price)
 			}
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE key LIKE 'ur-rs-%'||$1`, sfx)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE key LIKE 'ur-rs-%'||$1`, sfx)
 			return nil
 		})
 	})
@@ -162,18 +162,18 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		status := func(id uuid.UUID) string {
 			var s string
-			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.subscriptions WHERE id=$1`, id).Scan(&s))
+			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM billing.subscriptions WHERE id=$1`, id).Scan(&s))
 			return s
 		}
 		payCount := func(id uuid.UUID, st string) int {
 			var n int
-			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE subscription_id=$1 AND status=$2`, id, st).Scan(&n))
+			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND status=$2`, id, st).Scan(&n))
 			return n
 		}
 		railCustomerCount := func(id uuid.UUID, ridVal string) int {
 			var n int
 			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-				`SELECT count(*) FROM openrails.rail_customer_accounts rc JOIN openrails.subscriptions s ON s.customer_id = rc.customer_id
+				`SELECT count(*) FROM billing.rail_customer_accounts rc JOIN billing.subscriptions s ON s.customer_id = rc.customer_id
 				 WHERE s.id=$1 AND rc.rail='nmi' AND rc.account_id=$2`, id, ridVal).Scan(&n))
 			return n
 		}
@@ -182,13 +182,13 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 		require.Equal(t, "cancelled", status(subCancel), "roster cancelled → cancelled")
 		var liveEnts int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.entitlements WHERE source_id=$1 AND revoked_at IS NULL AND deleted_at IS NULL AND (end_at IS NULL OR end_at > now())`, subCancel).Scan(&liveEnts))
+			`SELECT count(*) FROM billing.entitlements WHERE source_id=$1 AND revoked_at IS NULL AND deleted_at IS NULL AND (end_at IS NULL OR end_at > now())`, subCancel).Scan(&liveEnts))
 		require.Zero(t, liveEnts, "entitlements must be revoked with the cancellation (ported #367)")
 		require.Equal(t, "past_due", status(subDecline), "declined within window → past_due")
 		require.Equal(t, 1, payCount(subDecline, "failed"), "declined charge backfilled as failed")
 		require.Equal(t, "active", status(subNMI), "nmi roster-alive sub adopted → active")
 		var adoptedEnd *time.Time
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT current_period_ends_at FROM openrails.subscriptions WHERE id=$1`, subNMI).Scan(&adoptedEnd))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT current_period_ends_at FROM billing.subscriptions WHERE id=$1`, subNMI).Scan(&adoptedEnd))
 		require.NotNil(t, adoptedEnd)
 		require.True(t, adoptedEnd.Equal(nextEnd), "remote next billing adopted as the local period end")
 		require.Zero(t, payCount(subNMI, "completed"), "adoption never fabricates a charge")
@@ -197,7 +197,7 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 		// #665: the NULL-period legacy row was resolved by the targeted probe.
 		require.Equal(t, "active", status(subProbe), "NULL-period row adopted via per-sub probe")
 		var probedEnd *time.Time
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT current_period_ends_at FROM openrails.subscriptions WHERE id=$1`, subProbe).Scan(&probedEnd))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT current_period_ends_at FROM billing.subscriptions WHERE id=$1`, subProbe).Scan(&probedEnd))
 		require.NotNil(t, probedEnd)
 		require.True(t, probedEnd.Equal(probeEnd), "probe-sourced next billing adopted")
 		return nil
@@ -224,7 +224,7 @@ func TestReconcileUnknownCohort_FixtureSnapshot(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, res2.Renewed+res2.Adopted+res2.PastDue+res2.Cancelled)
 		var n int
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE subscription_id=$1`, subRenew).Scan(&n))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1`, subRenew).Scan(&n))
 		require.Equal(t, 1, n, "a second pass must not duplicate the backfilled payment")
 		return nil
 	}))

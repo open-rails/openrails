@@ -61,20 +61,20 @@ func TestConvergeSweepWorker_RemediatesDriftAcrossMerchant(t *testing.T) {
 			_, err := dbi.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`,
 			productID, "sweep-prod-"+suffix, "sweep-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`, priceID, productID, merchantID)
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`, priceID, productID, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, dbi.Qx(ctx), merchantID, "nmi")
 		// drift #1: a checkout session that expired but is still 'created'
-		exec(`INSERT INTO openrails.checkout_sessions (id, price_id, mode, rail, psp_id, status, amount, currency, expires_at, merchant_id, customer_id)
+		exec(`INSERT INTO billing.checkout_sessions (id, price_id, mode, rail, psp_id, status, amount, currency, expires_at, merchant_id, customer_id)
 		      VALUES ($1,$2,'one_off','nmi',$3,'created',999,'USD',$4,$5,$6)`,
 			sessionID, priceID, pspID, time.Now().Add(-1*time.Hour), merchantID, customer)
 		// drift #2: a past_due subscription whose grace window already elapsed
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, grace_ends_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		exec(`INSERT INTO billing.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, grace_ends_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
 		      VALUES ($1,$2,$3,'past_due','nmi',$4,$5,$6,$5,$7,'{}'::jsonb,$8,$9,$10)`,
 			subID, priceID, productID, "sweep-sub-"+suffix,
 			time.Now().Add(-33*24*time.Hour), time.Now().Add(-3*time.Hour), graceEnd, customer, merchantID, pspID)
-		exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
+		exec(`INSERT INTO billing.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 		      VALUES ($1,$2,$3,$4,$5,$6,'subscription',$7)`,
 			entID, customer, feature, time.Now().Add(-33*24*time.Hour), time.Now().Add(27*24*time.Hour), subID, merchantID)
 		return nil
@@ -82,13 +82,13 @@ func TestConvergeSweepWorker_RemediatesDriftAcrossMerchant(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=ANY($2)`,
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=ANY($2)`,
 				merchantID, []string{"checkout_session:" + sessionID.String(), "subscription:" + subID.String()})
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE id=$1`, entID)
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.checkout_sessions WHERE id=$1`, sessionID)
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE id=$1`, entID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.checkout_sessions WHERE id=$1`, sessionID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, subID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 	})
@@ -100,22 +100,22 @@ func TestConvergeSweepWorker_RemediatesDriftAcrossMerchant(t *testing.T) {
 	// Both drift items converged.
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var sessionStatus string
-		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.checkout_sessions WHERE id=$1`, sessionID).Scan(&sessionStatus))
+		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT status FROM billing.checkout_sessions WHERE id=$1`, sessionID).Scan(&sessionStatus))
 		require.Equal(t, "expired", sessionStatus, "sweep converged the stale checkout session")
 
 		// #664: parked as unknown, never cancelled, access intact.
 		var subStatus string
-		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&subStatus))
+		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM billing.subscriptions WHERE id=$1`, subID).Scan(&subStatus))
 		require.Equal(t, "unknown", subStatus, "sweep parked the grace-exhausted subscription for verification")
 
 		var revokedAt *time.Time
-		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT revoked_at FROM openrails.entitlements WHERE id=$1`, entID).Scan(&revokedAt))
+		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx, `SELECT revoked_at FROM billing.entitlements WHERE id=$1`, entID).Scan(&revokedAt))
 		require.Nil(t, revokedAt, "entitlement NOT revoked on a guess")
 
 		// findings were recorded as auto_fixed
 		var n int
 		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND status='auto_fixed' AND subject_key=ANY($2)`,
+			`SELECT count(*) FROM billing.reconciliation_findings WHERE merchant_id=$1 AND status='auto_fixed' AND subject_key=ANY($2)`,
 			merchantID, []string{"checkout_session:" + sessionID.String(), "subscription:" + subID.String()}).Scan(&n))
 		require.Equal(t, 2, n, "both findings recorded auto_fixed")
 		return nil

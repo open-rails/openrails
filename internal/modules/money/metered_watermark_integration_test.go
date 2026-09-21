@@ -27,13 +27,13 @@ func TestMeteredUsage_OverlappingCloses_RatedExactlyOnce(t *testing.T) {
 	merchantID := dbtest.TestMerchantID.UUID()
 	meterKey := "vm-seconds-" + uuid.NewString()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.metered_rating_watermarks WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE key = $1", meterKey)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.metered_rating_watermarks WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoice_items WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.invoices WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.catalog_meters WHERE key = $1", meterKey)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
@@ -44,15 +44,15 @@ func TestMeteredUsage_OverlappingCloses_RatedExactlyOnce(t *testing.T) {
 	// Catalog: legacy gauge meter (unit-seconds) + the translated rate card at
 	// 500_000 micros per 3600s — rounding-relevant aggregates below prove
 	// rate-once semantics.
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4)`,
+	_, err = pool.Exec(ctx, `INSERT INTO billing.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4)`,
 		productID, "metered-watermark-"+uuid.NewString(), "Metered Watermark Product", merchantID)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'sum')`,
+	_, err = pool.Exec(ctx, `INSERT INTO billing.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'sum')`,
 		merchantID, meterKey)
 	require.NoError(t, err)
 	rateMicros, divideBy := int64(500_000), int64(3600)
 	_, err = pool.Exec(ctx, `
-INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
+INSERT INTO billing.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
     'model', 'per_unit',
     'currency', 'USD',
@@ -90,7 +90,7 @@ VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
 	accrualTotals := func() (count int, total int64) {
 		require.NoError(t, pool.QueryRow(ctx, `
 			SELECT count(*), COALESCE(SUM(amount), 0)::bigint
-			FROM openrails.ledger_transfers
+			FROM billing.ledger_transfers
 			WHERE merchant_id = $1 AND customer_id = $2
 			  AND transfer_type = 'owed_accrual' AND source = $3`,
 			merchantID, payer.UUID(), "metered:"+meterKey).Scan(&count, &total))
@@ -137,7 +137,7 @@ VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
 	var ratedThrough time.Time
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT accrued_amount, rated_through
-		FROM openrails.metered_rating_watermarks
+		FROM billing.metered_rating_watermarks
 		WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3 AND source = $4 AND period_from = $5`,
 		merchantID, payer.UUID(), cur, "metered:"+meterKey, from).Scan(&accrued, &ratedThrough))
 	require.Equal(t, rate(2000), accrued)
@@ -148,10 +148,10 @@ VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
 
 	// Replace the rate card mid-period (a re-push: delete + reinsert, new id).
 	// The next close accrues nothing new — the watermark survived.
-	_, err = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
+	_, err = pool.Exec(ctx, "DELETE FROM billing.catalog_rate_cards WHERE merchant_id = $1 AND product_id = $2", merchantID, productID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
-INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
+INSERT INTO billing.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
     'model', 'per_unit',
     'currency', 'USD',

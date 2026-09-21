@@ -72,7 +72,7 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 	ctx := context.Background()
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 
 	// Real "now": the NMI prober classifies roster liveness against the wall
 	// clock (next charge before today's boundary = stalled), so a historical
@@ -188,12 +188,12 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 
 	t.Cleanup(func() {
 		cctx := context.Background()
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", f.tenantSubjectID)
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", f.tenantSubjectID)
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.payments WHERE customer_id = $1", f.tenantSubjectID)
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.subscriptions WHERE id = $1", f.subscriptionID)
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.prices WHERE id = $1", f.priceID)
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.products WHERE id = $1", f.productID)
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.notifications WHERE customer_id = $1", f.tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", f.tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.payments WHERE customer_id = $1", f.tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.subscriptions WHERE id = $1", f.subscriptionID)
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.prices WHERE id = $1", f.priceID)
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.products WHERE id = $1", f.productID)
 	})
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -218,7 +218,7 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 
 func (f *nmiConvergeFixture) status(t *testing.T, ctx context.Context) string {
 	t.Helper()
-	row, err := gen.New(f.dbi.Pool()).GetSubscriptionByID(ctx, f.subscriptionID)
+	row, err := dbtest.Queries(f.dbi.Pool()).GetSubscriptionByID(ctx, f.subscriptionID)
 	require.NoError(t, err)
 	return string(row.Status)
 }
@@ -249,7 +249,7 @@ func TestNMIConvergeActivatesPendingFromFetchedCharge(t *testing.T) {
 	var paymentCustomerID uuid.UUID
 	var paymentSubscriptionID *uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT customer_id, subscription_id FROM openrails.payments WHERE transaction_id = $1",
+		"SELECT customer_id, subscription_id FROM billing.payments WHERE transaction_id = $1",
 		txnID).Scan(&paymentCustomerID, &paymentSubscriptionID))
 	require.Equal(t, f.tenantSubjectID, paymentCustomerID)
 	require.NotNil(t, paymentSubscriptionID)
@@ -258,7 +258,7 @@ func TestNMIConvergeActivatesPendingFromFetchedCharge(t *testing.T) {
 	var entitled bool
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT EXISTS (
-			SELECT 1 FROM openrails.entitlements
+			SELECT 1 FROM billing.entitlements
 			WHERE customer_id = $1 AND entitlement = 'premium'
 			  AND source_type = $2 AND source_id = $3
 			  AND revoked_at IS NULL AND deleted_at IS NULL
@@ -271,7 +271,7 @@ func TestNMIConvergeActivatesPendingFromFetchedCharge(t *testing.T) {
 	require.NoError(t, err)
 	var count int
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.payments WHERE customer_id = $1", f.tenantSubjectID).Scan(&count))
+		"SELECT count(*) FROM billing.payments WHERE customer_id = $1", f.tenantSubjectID).Scan(&count))
 	require.Equal(t, 1, count, "duplicate converge must not duplicate the payment")
 	require.Equal(t, string(models.StatusActive), f.status(t, ctx))
 }

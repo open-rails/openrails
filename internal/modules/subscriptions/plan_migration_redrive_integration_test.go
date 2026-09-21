@@ -27,7 +27,7 @@ import (
 func (f *planMigrationFixture) rollPeriod(t *testing.T, ctx context.Context, subID uuid.UUID) {
 	t.Helper()
 	_, err := f.pool.Exec(ctx, `
-		UPDATE openrails.subscriptions
+		UPDATE billing.subscriptions
 		SET current_period_starts_at = current_period_ends_at,
 		    current_period_ends_at   = current_period_ends_at + interval '30 days'
 		WHERE id = $1`, subID)
@@ -37,7 +37,7 @@ func (f *planMigrationFixture) rollPeriod(t *testing.T, ctx context.Context, sub
 func (f *planMigrationFixture) repriceRow(t *testing.T, ctx context.Context, subID uuid.UUID) (id uuid.UUID, status, reason string) {
 	t.Helper()
 	require.NoError(t, f.pool.QueryRow(ctx, `
-		SELECT id, status, COALESCE(blocked_reason, '') FROM openrails.subscription_reprices
+		SELECT id, status, COALESCE(blocked_reason, '') FROM billing.subscription_reprices
 		WHERE subscription_id = $1 ORDER BY created_at DESC LIMIT 1`, subID).Scan(&id, &status, &reason))
 	return id, status, reason
 }
@@ -46,7 +46,7 @@ func (f *planMigrationFixture) periodEnd(t *testing.T, ctx context.Context, subI
 	t.Helper()
 	var end time.Time
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT current_period_ends_at FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&end))
+		`SELECT current_period_ends_at FROM billing.subscriptions WHERE id = $1`, subID).Scan(&end))
 	return end
 }
 
@@ -172,7 +172,7 @@ func TestPlanMigrationRedrive_CrashWindowConvergesWithoutPush(t *testing.T) {
 	// transition died — sub on target, row blocked with the push-failure
 	// prefix.
 	_, err := f.pool.Exec(ctx, `
-		UPDATE openrails.subscriptions SET price_id = $2, product_id = $3 WHERE id = $1`,
+		UPDATE billing.subscriptions SET price_id = $2, product_id = $3 WHERE id = $1`,
 		subID, f.targetPriceID, f.targetProductID)
 	require.NoError(t, err)
 	row, err := f.repriceRepo.CreateBlockedReprice(ctx, subID, f.lowPriceID, f.targetPriceID,
@@ -224,7 +224,7 @@ func TestPlanMigrationRedrive_ConcurrentManualRerunPushesOnce(t *testing.T) {
 	require.Equal(t, 1, schedulesFor(f.stripe, railSubID))
 	var oldStatus string
 	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT status FROM openrails.subscription_reprices WHERE id = $1`, blockedID).Scan(&oldStatus))
+		`SELECT status FROM billing.subscription_reprices WHERE id = $1`, blockedID).Scan(&oldStatus))
 	require.Equal(t, "blocked", oldStatus)
 }
 
@@ -333,7 +333,7 @@ func TestPlanMigrationRedrive_CancelledSubscriptionLeftBlocked(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = f.pool.Exec(ctx, `
-		UPDATE openrails.subscriptions
+		UPDATE billing.subscriptions
 		SET status = 'cancelled', cancelled_at = now(), cancel_type = 'user_cancelled'
 		WHERE id = $1`, subID)
 	require.NoError(t, err)

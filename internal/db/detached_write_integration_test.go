@@ -27,7 +27,7 @@ func TestDetachedWriteRepinsAConnectionTheCallerClosed(t *testing.T) {
 	app := dbtest.OpenOneConnAppDB(t)
 	visible := func(ctx context.Context) (int, error) {
 		var n int
-		err := app.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.psps WHERE id = $1`, psp).Scan(&n)
+		err := app.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.psps WHERE id = $1`, psp).Scan(&n)
 		return n, err
 	}
 

@@ -23,7 +23,7 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	// or#893: a provider attempt is a provider-bound row; arrive in the shape
 	// every production caller does — the routed PSP pinned on ctx.
 	ctx = db.WithPSPID(ctx, dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI)))
@@ -64,9 +64,9 @@ func TestCompleteProviderAttemptInPlace_ResolvesStatus(t *testing.T) {
 
 	t.Cleanup(func() {
 		cctx := context.Background()
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.payments WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.payments WHERE customer_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(cctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	reserve := func(orderID string) *models.Payment {

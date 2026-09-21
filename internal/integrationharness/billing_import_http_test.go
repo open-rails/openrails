@@ -38,22 +38,22 @@ func TestBillingImportHTTP(t *testing.T) {
 	cActive, cCancelled := uuid.New(), uuid.New()
 
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`,
+		`INSERT INTO billing.products (id,key,display_name,entitlements_spec,merchant_id) VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`,
 		prod, "imphttp-"+sfx, merchantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,23000000,'USD',720,true,$3)`,
+		`INSERT INTO billing.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES ($1,$2,23000000,'USD',720,true,$3)`,
 		price, prod, merchantID)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		for _, c := range []uuid.UUID{cActive, cCancelled} {
-			_, _ = pool.Exec(ctx, `DELETE FROM openrails.entitlements WHERE customer_id=$1`, c)
-			_, _ = pool.Exec(ctx, `DELETE FROM openrails.grants WHERE customer_id=$1`, c)
-			_, _ = pool.Exec(ctx, `DELETE FROM openrails.payments WHERE customer_id=$1`, c)
-			_, _ = pool.Exec(ctx, `DELETE FROM openrails.subscriptions WHERE customer_id=$1`, c)
+			_, _ = pool.Exec(ctx, `DELETE FROM billing.entitlements WHERE customer_id=$1`, c)
+			_, _ = pool.Exec(ctx, `DELETE FROM billing.grants WHERE customer_id=$1`, c)
+			_, _ = pool.Exec(ctx, `DELETE FROM billing.payments WHERE customer_id=$1`, c)
+			_, _ = pool.Exec(ctx, `DELETE FROM billing.subscriptions WHERE customer_id=$1`, c)
 		}
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, price)
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, prod)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, price)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, prod)
 	})
 
 	day := 24 * time.Hour
@@ -124,7 +124,7 @@ func TestBillingImportHTTP(t *testing.T) {
 			require.Contains(t, envelope.Error.Message, "card-number-shaped")
 			require.NotContains(t, string(body), "4111111111111111")
 			var rows int
-			require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.customers WHERE merchant_id=$1 AND id=$2`, merchantID, customer).Scan(&rows))
+			require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.customers WHERE merchant_id=$1 AND id=$2`, merchantID, customer).Scan(&rows))
 			require.Zero(t, rows, "the whole book is refused before customer creation")
 		}
 	})
@@ -139,17 +139,17 @@ func TestBillingImportHTTP(t *testing.T) {
 
 		var st string
 		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT status::text FROM openrails.subscriptions WHERE merchant_id=$1 AND rail_subscription_id=$2`,
+			`SELECT status::text FROM billing.subscriptions WHERE merchant_id=$1 AND rail_subscription_id=$2`,
 			merchantID, subActive).Scan(&st))
 		require.Equal(t, "active", st, "paid-through beyond AsOf adopts as active")
 		var ct string
 		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT COALESCE(cancel_type::text,'') FROM openrails.subscriptions WHERE merchant_id=$1 AND rail_subscription_id=$2`,
+			`SELECT COALESCE(cancel_type::text,'') FROM billing.subscriptions WHERE merchant_id=$1 AND rail_subscription_id=$2`,
 			merchantID, subCancelled).Scan(&ct))
 		require.Equal(t, "user", ct, "explicit cancel evidence written faithfully")
 		var amt int64
 		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT amount FROM openrails.payments WHERE merchant_id=$1 AND transaction_id=$2`,
+			`SELECT amount FROM billing.payments WHERE merchant_id=$1 AND transaction_id=$2`,
 			merchantID, "tx-"+sfx).Scan(&amt))
 		require.EqualValues(t, 23_000_000, amt, "amount_cents lands as ledger micros")
 	})
@@ -163,7 +163,7 @@ func TestBillingImportHTTP(t *testing.T) {
 		require.Empty(t, res.Imported)
 		var n int
 		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT count(*) FROM openrails.payments WHERE merchant_id=$1 AND transaction_id=$2`,
+			`SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND transaction_id=$2`,
 			merchantID, "tx-"+sfx).Scan(&n))
 		require.Equal(t, 1, n)
 	})
@@ -189,10 +189,10 @@ func TestBillingImportHTTP(t *testing.T) {
 		require.Contains(t, string(body), "invalid_psp_reference")
 		var n int
 		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT count(*) FROM openrails.subscriptions WHERE merchant_id=$1`, b.MerchantID.UUID()).Scan(&n))
+			`SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1`, b.MerchantID.UUID()).Scan(&n))
 		require.Zero(t, n, "no rows may land under the wrong merchant")
 		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT count(*) FROM openrails.subscriptions WHERE merchant_id=$1 AND rail_subscription_id IN ($2,$3)`,
+			`SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1 AND rail_subscription_id IN ($2,$3)`,
 			merchantID, subActive, subCancelled).Scan(&n))
 		require.Equal(t, 2, n, "merchant A's book untouched")
 	})

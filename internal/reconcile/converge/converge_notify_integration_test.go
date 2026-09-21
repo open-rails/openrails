@@ -35,7 +35,7 @@ func TestConvergeNotify_AccessEnded(t *testing.T) {
 	seedWindow := func(ctx context.Context, f *fixture, entName string, start time.Time, end *time.Time) {
 		id := uuid.New()
 		_, err := appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.entitlements (id, merchant_id, customer_id, entitlement, start_at, end_at, source_id, source_type)
+			`INSERT INTO billing.entitlements (id, merchant_id, customer_id, entitlement, start_at, end_at, source_id, source_type)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,'admin')`,
 			id, merchantID, f.cust, entName, start, end, uuid.New())
 		require.NoError(t, err)
@@ -58,7 +58,7 @@ func TestConvergeNotify_AccessEnded(t *testing.T) {
 		// (the dunning/transition-site email already went out).
 		seedWindow(ctx, &alreadyTold, feat, now.Add(-30*24*time.Hour), &closedAt)
 		_, err := appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.notifications (id, merchant_id, customer_id, event_type, data)
+			`INSERT INTO billing.notifications (id, merchant_id, customer_id, event_type, data)
 			 VALUES ($1,$2,$3,'premium_ended','{"reason":"expired"}'::jsonb)`,
 			uuid.New(), merchantID, alreadyTold.cust)
 		require.NoError(t, err)
@@ -67,9 +67,9 @@ func TestConvergeNotify_AccessEnded(t *testing.T) {
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for _, f := range []fixture{lapsed, replaced, alreadyTold} {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notifications WHERE merchant_id=$1 AND customer_id=$2`, merchantID, f.cust)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE id=ANY($1)`, f.ents)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "customer:"+f.cust.String())
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.notifications WHERE merchant_id=$1 AND customer_id=$2`, merchantID, f.cust)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE id=ANY($1)`, f.ents)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "customer:"+f.cust.String())
 			}
 			return nil
 		})
@@ -79,7 +79,7 @@ func TestConvergeNotify_AccessEnded(t *testing.T) {
 		t.Helper()
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.notifications WHERE merchant_id=$1 AND customer_id=$2 AND event_type='premium_ended'`,
+			`SELECT count(*) FROM billing.notifications WHERE merchant_id=$1 AND customer_id=$2 AND event_type='premium_ended'`,
 			merchantID, cust).Scan(&n))
 		return n
 	}
@@ -97,7 +97,7 @@ func TestConvergeNotify_AccessEnded(t *testing.T) {
 		var reason, endedAt, source string
 		var emailedAt *time.Time
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT data->>'reason', data->>'ended_at', data->>'source', emailed_at FROM openrails.notifications
+			`SELECT data->>'reason', data->>'ended_at', data->>'source', emailed_at FROM billing.notifications
 			 WHERE merchant_id=$1 AND customer_id=$2 AND event_type='premium_ended'`,
 			merchantID, lapsed.cust).Scan(&reason, &endedAt, &source, &emailedAt))
 		require.Equal(t, "access_ended", reason)
@@ -109,7 +109,7 @@ func TestConvergeNotify_AccessEnded(t *testing.T) {
 
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type='notify.access_ended.missing' AND subject_key=$2`,
+			`SELECT status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND finding_type='notify.access_ended.missing' AND subject_key=$2`,
 			merchantID, "customer:"+lapsed.cust.String()).Scan(&status))
 		require.Equal(t, "auto_fixed", status)
 
@@ -132,7 +132,7 @@ func TestConvergeNotify_AccessEnded(t *testing.T) {
 		require.Equal(t, 1, countPremiumEnded(ctx, alreadyTold.cust), "only the pre-existing dunning notification remains")
 		var reason string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT data->>'reason' FROM openrails.notifications WHERE merchant_id=$1 AND customer_id=$2 AND event_type='premium_ended'`,
+			`SELECT data->>'reason' FROM billing.notifications WHERE merchant_id=$1 AND customer_id=$2 AND event_type='premium_ended'`,
 			merchantID, alreadyTold.cust).Scan(&reason))
 		require.Equal(t, "expired", reason, "no access_ended row was added")
 		return nil

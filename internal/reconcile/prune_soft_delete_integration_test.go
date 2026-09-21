@@ -60,22 +60,22 @@ func seedPruneFixture(t *testing.T, appDB *db.DB, baseCtx context.Context) prune
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.psps (id, merchant_id, rail, account_id, archived) VALUES ($1,$2,'nmi',$3,false)`,
+		exec(`INSERT INTO billing.psps (id, merchant_id, rail, account_id, archived) VALUES ($1,$2,'nmi',$3,false)`,
 			f.pspID, merchantID, "acct-sd-"+suffix)
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{"pro": null}'::jsonb,$4)`,
+		exec(`INSERT INTO billing.products (id, key, display_name, tier_group, entitlements_spec, merchant_id) VALUES ($1,$2,$2,$3,'{"pro": null}'::jsonb,$4)`,
 			productID, "sd-"+suffix, "sd-tier-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,999,'USD',720,true,$3)`,
 			priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, psp_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
+		exec(`INSERT INTO billing.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, psp_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id)
 		      VALUES ($1,$2,$3,'active','nmi',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9)`,
 			f.subID, priceID, productID, f.railSub, f.pspID, time.Now().Add(-20*24*time.Hour), time.Now().Add(10*24*time.Hour), f.customer, merchantID)
-		exec(`INSERT INTO openrails.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, psp_id, subscription_id)
+		exec(`INSERT INTO billing.payments (id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, customer_id, merchant_id, psp_id, subscription_id)
 		      VALUES ($1,$2,'nmi',$3,999,999,'USD','completed',$4,$5,$6,$7,$8)`,
 			f.payID, priceID, f.railTxn, time.Now().Add(-20*24*time.Hour), f.customer, merchantID, f.pspID, f.subID)
-		exec(`INSERT INTO openrails.checkout_sessions (id, merchant_id, customer_id, price_id, mode, rail, status, amount, currency, subscription_id, psp_id)
+		exec(`INSERT INTO billing.checkout_sessions (id, merchant_id, customer_id, price_id, mode, rail, status, amount, currency, subscription_id, psp_id)
 		      VALUES ($1,$2,$3,$4,'subscription','nmi','completed',999,'USD',$5,$6)`,
 			f.sessID, merchantID, f.customer, priceID, f.subID, f.pspID)
-		exec(`INSERT INTO openrails.entitlements (id, merchant_id, customer_id, entitlement, source_type, source_id, start_at, end_at)
+		exec(`INSERT INTO billing.entitlements (id, merchant_id, customer_id, entitlement, source_type, source_id, start_at, end_at)
 		      VALUES ($1,$2,$3,'pro','subscription',$4,$5,$6)`,
 			f.entID, merchantID, f.customer, f.subID, time.Now().Add(-20*24*time.Hour), time.Now().Add(10*24*time.Hour))
 		return nil
@@ -83,17 +83,17 @@ func seedPruneFixture(t *testing.T, appDB *db.DB, baseCtx context.Context) prune
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			for _, sql := range []string{
-				`DELETE FROM openrails.entitlements WHERE id=$1`,
-				`DELETE FROM openrails.checkout_sessions WHERE id=$2`,
-				`DELETE FROM openrails.payments WHERE id=$3`,
-				`DELETE FROM openrails.subscriptions WHERE id=$4`,
+				`DELETE FROM billing.entitlements WHERE id=$1`,
+				`DELETE FROM billing.checkout_sessions WHERE id=$2`,
+				`DELETE FROM billing.payments WHERE id=$3`,
+				`DELETE FROM billing.subscriptions WHERE id=$4`,
 			} {
 				_, _ = appDB.Qx(ctx).Exec(ctx, sql, f.entID, f.sessID, f.payID, f.subID)
 			}
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.maintenance_runs WHERE psp_id=$1`, f.pspID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.psps WHERE id=$1`, f.pspID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.maintenance_runs WHERE psp_id=$1`, f.pspID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.psps WHERE id=$1`, f.pspID)
 			return nil
 		})
 	})
@@ -180,7 +180,7 @@ func TestPruneRefusesWrongExpectedRowCount(t *testing.T) {
 		require.True(t, subLive(ctx, t, appDB, f.subID), "a miscounted confirmation writes nothing")
 
 		var runs int
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.maintenance_runs WHERE psp_id=$1`, f.pspID).Scan(&runs))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.maintenance_runs WHERE psp_id=$1`, f.pspID).Scan(&runs))
 		require.Zero(t, runs, "a refused prune opens no run")
 		return nil
 	}))
@@ -247,7 +247,7 @@ func TestPruneSoftDeletesAndRollbackRestores(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.subscriptions WHERE id=$1 AND deleted_at IS NOT NULL AND destructive_run_id=$2`, f.subID, runID).Scan(&n))
+			`SELECT count(*) FROM billing.subscriptions WHERE id=$1 AND deleted_at IS NOT NULL AND destructive_run_id=$2`, f.subID, runID).Scan(&n))
 		require.Equal(t, 1, n, "the row is still there, stamped with its run")
 
 		run, err := appDB.Gen(ctx).GetDestructiveRun(ctx, gen.GetDestructiveRunParams{MerchantID: merchantID, ID: runID})
@@ -290,13 +290,13 @@ func TestPruneSoftDeletesAndRollbackRestores(t *testing.T) {
 func subLive(ctx context.Context, t *testing.T, appDB *db.DB, id uuid.UUID) bool {
 	t.Helper()
 	var n int
-	require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.subscriptions WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&n))
+	require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.subscriptions WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&n))
 	return n == 1
 }
 
 func payLive(ctx context.Context, t *testing.T, appDB *db.DB, id uuid.UUID) bool {
 	t.Helper()
 	var n int
-	require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&n))
+	require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM billing.payments WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&n))
 	return n == 1
 }

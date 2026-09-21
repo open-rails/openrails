@@ -14,6 +14,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/cmd/openrails/consoleassets"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
@@ -22,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/migrate"
+	"github.com/open-rails/openrails/internal/standalonedb"
 )
 
 func main() {
@@ -112,20 +114,20 @@ func newRootCmd() *cobra.Command {
 			if err := migrate.Run(ctx, cfg); err != nil {
 				return fmt.Errorf("migrations failed: %w", err)
 			}
-			return nil
+			return applyStandaloneIdentityMigrations(ctx, cfg)
 		},
 	}
 
 	migratePgCmd := &cobra.Command{
 		Use:   "pg",
-		Short: "Apply all Postgres migrations (River and OpenRails)",
+		Short: "Apply standalone Postgres migrations (OpenRails, River, and AuthKit)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 			ctx := cmd.Context()
 			if err := migrate.RunPostgres(ctx, cfg); err != nil {
 				return fmt.Errorf("postgres migrations failed: %w", err)
 			}
-			return nil
+			return applyStandaloneIdentityMigrations(ctx, cfg)
 		},
 	}
 
@@ -404,4 +406,15 @@ func runWorker(cmd *cobra.Command, args []string) error {
 
 	log.Info("Billing service workers shutdown complete")
 	return nil
+}
+
+// The CLI is the standalone composition root: billing and AuthKit initialize
+// independently through their owning libraries, using migration credentials.
+func applyStandaloneIdentityMigrations(ctx context.Context, cfg *config.Config) error {
+	pool, err := pgxpool.New(ctx, cfg.DB.GetConnectionString())
+	if err != nil {
+		return fmt.Errorf("standalone identity migration pool: %w", err)
+	}
+	defer pool.Close()
+	return standalonedb.ApplyAuthKit(ctx, pool)
 }

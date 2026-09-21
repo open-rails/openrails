@@ -68,7 +68,7 @@ func TestListCustomersWithEntitlement_Reverse(t *testing.T) {
 	ent(idE, "basic-rev-"+uuid.NewString()[:8], now.Add(-time.Hour), &future, nil)
 	_, idF := mkCustomer() // active then soft-deleted -> excluded
 	ent(idF, premium, now.Add(-time.Hour), &future, nil)
-	_, err := suite.Pool.Exec(ctx, `UPDATE openrails.entitlements SET deleted_at = now() WHERE customer_id = $1`, idF)
+	_, err := suite.Pool.Exec(ctx, `UPDATE billing.entitlements SET deleted_at = now() WHERE customer_id = $1`, idF)
 	require.NoError(t, err)
 
 	want := []uuid.UUID{idA, idB}

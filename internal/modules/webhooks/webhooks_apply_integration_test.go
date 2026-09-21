@@ -147,7 +147,7 @@ type stripeApplyFixture struct {
 // StripeConvergeService whose prober reads the fake Stripe transport.
 func newStripeApplyFixture(t *testing.T, ctx context.Context, dbi *db.DB, pool *pgxpool.Pool, subStatus models.SubscriptionStatus, cancelType *models.CancelType, periodEnd time.Time) *stripeApplyFixture {
 	t.Helper()
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	now := time.Now().UTC().Truncate(time.Second)
 
 	f := &stripeApplyFixture{
@@ -221,13 +221,13 @@ func newStripeApplyFixture(t *testing.T, ctx context.Context, dbi *db.DB, pool *
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_customer_accounts WHERE account_id = $1", f.railCustomerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", f.tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", f.tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", f.tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", f.subID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", f.priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", f.productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_customer_accounts WHERE account_id = $1", f.railCustomerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.notifications WHERE customer_id = $1", f.tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", f.tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", f.tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", f.subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", f.priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", f.productID)
 	})
 
 	priceSvc := catalog.NewPriceService(dbi)
@@ -262,7 +262,7 @@ func (f *stripeApplyFixture) paymentCount(t *testing.T, ctx context.Context, sta
 	t.Helper()
 	var n int
 	require.NoError(t, f.pool.QueryRow(ctx,
-		"SELECT count(*) FROM openrails.payments WHERE customer_id = $1 AND status = $2",
+		"SELECT count(*) FROM billing.payments WHERE customer_id = $1 AND status = $2",
 		f.tenantSubjectID, status).Scan(&n))
 	return n
 }
@@ -365,7 +365,7 @@ func TestStripeConvergeTerminalRowKeepsMoneyTruth(t *testing.T) {
 	require.Equal(t, models.StatusCancelled, f.reload(t, ctx).Status, "terminal subscription must stay cancelled")
 	var txn string
 	require.NoError(t, pool.QueryRow(ctx,
-		"SELECT transaction_id FROM openrails.payments WHERE customer_id = $1 AND status = 'completed'",
+		"SELECT transaction_id FROM billing.payments WHERE customer_id = $1 AND status = 'completed'",
 		f.tenantSubjectID).Scan(&txn))
 	require.Equal(t, "ch_tb1", txn, "the charge against the terminal row is money truth and must be recorded")
 }
@@ -497,7 +497,7 @@ func TestNMIOneOffRefundReversesPayment(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
@@ -530,9 +530,9 @@ func TestNMIOneOffRefundReversesPayment(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	paymentSvc := payments.NewPaymentService(dbi)

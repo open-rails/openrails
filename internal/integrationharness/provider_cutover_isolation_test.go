@@ -60,9 +60,9 @@ func TestNMIProviderCutoverIsolation(t *testing.T) {
 	h := New(t, ctx)
 	g := newCutoverGateway(t)
 	s := h.StartStandalone("USD", WithConfig(func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeFull }))
-	_, err := h.Pool().Exec(ctx, `UPDATE openrails.destructive_action_switch SET enabled=true`)
+	_, err := h.Pool().Exec(ctx, `UPDATE billing.destructive_action_switch SET enabled=true`)
 	require.NoError(t, err)
-	t.Cleanup(func() { _, _ = h.Pool().Exec(ctx, `UPDATE openrails.destructive_action_switch SET enabled=false`) })
+	t.Cleanup(func() { _, _ = h.Pool().Exec(ctx, `UPDATE billing.destructive_action_switch SET enabled=false`) })
 	s.App().Runtime.CollectionResolver.(*money.MerchantCollectionAdapterBuilder).Endpoints.NMIV5BaseURL = g.Server.URL
 	owner := s.ProvisionOwnedMerchant("cutover-isolation-" + uuid.NewString())
 	client := s.Client(openrails.WithAPIKey(owner.APIKey), openrails.WithMerchantID(owner.MerchantID))
@@ -162,7 +162,7 @@ func TestNMIProviderCutoverIsolation(t *testing.T) {
 		_, err = otherClient.GetProviderCutover(ctx, openrails.SubscriptionID(p.Sub), key)
 		require.ErrorIs(t, err, openrails.ErrNotFound)
 		var count int
-		require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.rail_intents WHERE merchant_id=$1 AND intent_type=$2`, other.MerchantID, intents.TypeNMIProviderCutover).Scan(&count))
+		require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.rail_intents WHERE merchant_id=$1 AND intent_type=$2`, other.MerchantID, intents.TypeNMIProviderCutover).Scan(&count))
 		require.Zero(t, count)
 	})
 
@@ -181,31 +181,31 @@ func TestNMIProviderCutoverIsolation(t *testing.T) {
 		wg.Wait()
 		require.NotEqual(t, errs[0] == nil, errs[1] == nil, "one operation must own the subscription: %v", errs)
 		var count int
-		require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1 AND intent_type=$2`, p.Sub, intents.TypeNMIProviderCutover).Scan(&count))
+		require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1 AND intent_type=$2`, p.Sub, intents.TypeNMIProviderCutover).Scan(&count))
 		require.Equal(t, 1, count)
 		g.mu.Lock()
 		require.Equal(t, 1, g.Accounts[p.TargetKey].Creates)
 		require.Zero(t, g.Accounts[p.TargetKey].Activations)
 		g.mu.Unlock()
 		for _, id := range []uuid.UUID{p.OldMethod, p.NewMethod} {
-			_, err := h.Pool().Exec(ctx, `UPDATE openrails.payment_methods SET rail_customer_ref='changed' WHERE id=$1`, id)
+			_, err := h.Pool().Exec(ctx, `UPDATE billing.payment_methods SET rail_customer_ref='changed' WHERE id=$1`, id)
 			require.Error(t, err)
-			_, err = h.Pool().Exec(ctx, `DELETE FROM openrails.payment_methods WHERE id=$1`, id)
+			_, err = h.Pool().Exec(ctx, `DELETE FROM billing.payment_methods WHERE id=$1`, id)
 			require.Error(t, err)
 			for _, typ := range []string{"nmi_vault_delete", "nmi_payment_method_update"} {
-				_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.rail_intents(id,merchant_id,rail,intent_type,psp_id,payload,idempotency_key) VALUES($1,$2,'nmi',$3,$4,jsonb_build_object('payment_method_id',$5::text),$6)`, uuid.New(), owner.MerchantID.UUID(), typ, p.Source, id.String(), uuid.NewString())
+				_, err = h.Pool().Exec(ctx, `INSERT INTO billing.rail_intents(id,merchant_id,rail,intent_type,psp_id,payload,idempotency_key) VALUES($1,$2,'nmi',$3,$4,jsonb_build_object('payment_method_id',$5::text),$6)`, uuid.New(), owner.MerchantID.UUID(), typ, p.Source, id.String(), uuid.NewString())
 				require.ErrorContains(t, err, "unresolved provider cutover")
 			}
 		}
-		_, err := h.Pool().Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, p.Sub)
+		_, err := h.Pool().Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, p.Sub)
 		require.ErrorContains(t, err, "unresolved provider cutover")
-		_, err = h.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET current_period_ends_at=current_period_ends_at + interval '1 day' WHERE id=$1`, p.Sub)
+		_, err = h.Pool().Exec(ctx, `UPDATE billing.subscriptions SET current_period_ends_at=current_period_ends_at + interval '1 day' WHERE id=$1`, p.Sub)
 		require.ErrorContains(t, err, "unresolved provider cutover")
 	})
 
 	t.Run("missing_billing_id_is_ineligible", func(t *testing.T) {
 		p := seed(t, "success")
-		_, err := h.Pool().Exec(ctx, `UPDATE openrails.payment_methods SET rail_method_ref='' WHERE id=$1`, p.NewMethod)
+		_, err := h.Pool().Exec(ctx, `UPDATE billing.payment_methods SET rail_method_ref='' WHERE id=$1`, p.NewMethod)
 		require.NoError(t, err)
 		path := s.BaseURL + "/v1/merchant/subscriptions/" + openrails.SubscriptionID(p.Sub).String() + "/provider-cutover"
 		status, raw := cutoverHTTPRequest(t, http.MethodPost, path, owner.APIKey, uuid.NewString(), p.Req)
@@ -303,7 +303,7 @@ func TestNMIProviderCutoverIsolation(t *testing.T) {
 				AnchorResolutions []map[string]any `json:"anchor_resolutions"`
 			}
 			var payloadBefore, retained []byte
-			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload,result_evidence FROM openrails.rail_intents WHERE id=$1`, result.ID).Scan(&payloadBefore, &retained))
+			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload,result_evidence FROM billing.rail_intents WHERE id=$1`, result.ID).Scan(&payloadBefore, &retained))
 			require.NoError(t, json.Unmarshal(retained, &evidence))
 			require.Len(t, evidence.AnchorResolutions, 1)
 			g.mu.Lock()
@@ -316,7 +316,7 @@ func TestNMIProviderCutoverIsolation(t *testing.T) {
 			assertCutoverCommitted(t, h, g, p, result)
 			require.True(t, result.Anchor.Equal(anchor))
 			var payloadAfter []byte
-			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload FROM openrails.rail_intents WHERE id=$1`, result.ID).Scan(&payloadAfter))
+			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT payload FROM billing.rail_intents WHERE id=$1`, result.ID).Scan(&payloadAfter))
 			require.JSONEq(t, string(payloadBefore), string(payloadAfter))
 			require.NoError(t, resolve(resolution), "completed authorization replays without retiming")
 			g.mu.Lock()
@@ -361,7 +361,7 @@ func TestNMIProviderCutoverIsolation(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "failed_terminal", result.Status)
 		require.Equal(t, "not_executed", result.Stage)
-		_, err = h.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET current_period_ends_at=current_period_ends_at + interval '30 days' WHERE id=$1`, p.Sub)
+		_, err = h.Pool().Exec(ctx, `UPDATE billing.subscriptions SET current_period_ends_at=current_period_ends_at + interval '30 days' WHERE id=$1`, p.Sub)
 		require.NoError(t, err, "unsent expiry must release the renewal fence")
 		replay, err := client.CutoverProvider(ctx, openrails.SubscriptionID(p.Sub), key, p.Req)
 		require.NoError(t, err)

@@ -111,9 +111,9 @@ func TestZeroEstimateStillEnforcesProspectiveRateAndDelegation(t *testing.T) {
 	name := "rate-" + uuid.NewString()
 	database := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	t.Cleanup(func() {
-		_, err := database.Qx(ctx).Exec(ctx, "DELETE FROM openrails.billing_policy_bindings WHERE merchant_id=$1 AND customer_id=$2", dbtest.TestMerchantID.UUID(), payer.UUID())
+		_, err := database.Qx(ctx).Exec(ctx, "DELETE FROM billing.billing_policy_bindings WHERE merchant_id=$1 AND customer_id=$2", dbtest.TestMerchantID.UUID(), payer.UUID())
 		require.NoError(t, err)
-		_, err = database.Qx(ctx).Exec(ctx, "DELETE FROM openrails.billing_policies WHERE merchant_id=$1 AND name=$2", dbtest.TestMerchantID.UUID(), name)
+		_, err = database.Qx(ctx).Exec(ctx, "DELETE FROM billing.billing_policies WHERE merchant_id=$1 AND name=$2", dbtest.TestMerchantID.UUID(), name)
 		require.NoError(t, err)
 	})
 	require.NoError(t, svc.SetBillingPolicy(ctx, billingservice.BillingPolicyInput{Name: name, Kind: "accrual_rate_cap", AccrualRateCapPerHour: 10_000_000}))

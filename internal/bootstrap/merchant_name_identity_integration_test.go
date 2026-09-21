@@ -61,8 +61,8 @@ func TestManifestKeepsCapturedOwnerThroughNameReclaim(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, allowed, "a reclaimed name cannot receive the old owner's application role")
 	var displayA, displayB string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT coalesce(display_name,'') FROM openrails.merchants WHERE id=$1`, a.ID.UUID()).Scan(&displayA))
-	require.NoError(t, pool.QueryRow(ctx, `SELECT coalesce(display_name,'') FROM openrails.merchants WHERE id=$1`, b.ID.UUID()).Scan(&displayB))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT coalesce(display_name,'') FROM billing.merchants WHERE id=$1`, a.ID.UUID()).Scan(&displayA))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT coalesce(display_name,'') FROM billing.merchants WHERE id=$1`, b.ID.UUID()).Scan(&displayB))
 	require.Equal(t, "Original owner", displayA)
 	require.Empty(t, displayB)
 	// A subsequent name-bearing dump resolves the current claimant, while the

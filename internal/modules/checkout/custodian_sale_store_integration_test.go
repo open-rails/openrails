@@ -53,7 +53,7 @@ func TestCustodianSale_ChargesThroughStoreArmedCustodian(t *testing.T) {
 	// converges to (internal/bootstrap proves the manifest lands these rows).
 	var custodianID uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx, `
-		INSERT INTO openrails.custodians (merchant_id, key, kind, environment, account_id, settings)
+		INSERT INTO billing.custodians (merchant_id, key, kind, environment, account_id, settings)
 		VALUES ($1::uuid, 'bt', 'basis_theory', 'test', $2, '{"public_api_key":"key_pub_880"}'::jsonb)
 		ON CONFLICT (kind, environment, account_id) DO UPDATE SET settings = EXCLUDED.settings
 		RETURNING id
@@ -62,7 +62,7 @@ func TestCustodianSale_ChargesThroughStoreArmedCustodian(t *testing.T) {
 	for _, gateway := range []string{primaryGateway, backupGateway} {
 		var pspID uuid.UUID
 		require.NoError(t, pool.QueryRow(ctx, `
-			INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence, custodian_id)
+			INSERT INTO billing.psps (merchant_id, rail, environment, account_id, archived, evidence, custodian_id)
 			VALUES ($1::uuid, 'nmi', 'test', $2, false, '{"source":"test_880"}'::jsonb, $3::uuid)
 			ON CONFLICT (rail, environment, account_id) DO UPDATE SET archived = false, custodian_id = EXCLUDED.custodian_id
 			RETURNING id
@@ -72,8 +72,8 @@ func TestCustodianSale_ChargesThroughStoreArmedCustodian(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.psps WHERE account_id = ANY($1)", []string{primaryGateway, backupGateway})
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.custodians WHERE id = $1", custodianID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.psps WHERE account_id = ANY($1)", []string{primaryGateway, backupGateway})
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.custodians WHERE id = $1", custodianID)
 	})
 
 	store := merchants.NewMemorySecretStore()
@@ -110,12 +110,12 @@ func TestCustodianSale_ChargesThroughStoreArmedCustodian(t *testing.T) {
 		Amount: 1_990_000, Currency: "USD", CreatedAt: now, UpdatedAt: now,
 	})
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE price_id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE price_id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	clock := clockwork.NewRealClock()
@@ -180,13 +180,13 @@ func TestCustodianSale_ChargesThroughStoreArmedCustodian(t *testing.T) {
 
 	var tokenType string
 	require.NoError(t, dbi.Pool().QueryRow(ctx,
-		"SELECT COALESCE(token_type,'') FROM openrails.payments WHERE rail='nmi' AND transaction_id=$1 AND status='completed'",
+		"SELECT COALESCE(token_type,'') FROM billing.payments WHERE rail='nmi' AND transaction_id=$1 AND status='completed'",
 		bt.txnID).Scan(&tokenType))
 	require.Equal(t, charge.TokenTypePANViaProxy, tokenType)
 
 	var custodian, methodRef string
 	require.NoError(t, dbi.Pool().QueryRow(ctx,
-		`SELECT custodian, rail_method_ref FROM openrails.payment_methods
+		`SELECT custodian, rail_method_ref FROM billing.payment_methods
 		 WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1`,
 		bt.tokenID).Scan(&custodian, &methodRef))
 	require.Equal(t, models.CustodianBasisTheory, custodian)

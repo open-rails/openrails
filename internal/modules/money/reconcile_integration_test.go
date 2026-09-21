@@ -53,15 +53,15 @@ func resetMoneyLedger(t *testing.T, _ *pgxpool.Pool, ctx context.Context) {
 	// dependents first; transfers before accounts; grants after (self-FK ok in
 	// one statement).
 	for _, table := range []string{
-		"openrails.invoice_payments",
-		"openrails.usage_events",
-		"openrails.provider_billing_observations",
-		"openrails.provider_billing_qualifications",
-		"openrails.operation_authorizations",
-		"openrails.ledger_transfers",
-		"openrails.grants",
-		"openrails.ledger_accounts",
-		"openrails.money_settings",
+		"billing.invoice_payments",
+		"billing.usage_events",
+		"billing.provider_billing_observations",
+		"billing.provider_billing_qualifications",
+		"billing.operation_authorizations",
+		"billing.ledger_transfers",
+		"billing.grants",
+		"billing.ledger_accounts",
+		"billing.money_settings",
 	} {
 		_, err := pool.Exec(ctx, "DELETE FROM "+table)
 		require.NoError(t, err, "reset %s", table)

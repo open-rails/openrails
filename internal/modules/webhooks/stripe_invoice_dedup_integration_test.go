@@ -29,7 +29,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 
 	now := time.Date(2026, 6, 4, 0, 0, 0, 0, time.UTC)
 	userID := uuid.New().String()
@@ -68,9 +68,9 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", tenantSubjectID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	paymentSvc := payments.NewPaymentService(dbi)

@@ -21,6 +21,12 @@ The ordinary Docker-backed integration suite carries the build tag
 
 Redis: `OPENRAILS_TEST_REDIS_ADDR` (host:port), else a testcontainer.
 
+The shared fixture uses the real default `billing` schema. Raw fixture SQL uses
+`billing.*`; `dbtest.Queries(handle)` applies the production schema rewriter to
+SQLC queries authored in `openrails`. Custom-schema tests use their configured
+`DB.Gen`/`DB.Qx`. SQLC vet independently initializes canonical `openrails` because
+it prepares authored SQL before runtime rewriting.
+
 ### RLS is enforced by default
 
 `dbtest.SharedPostgresDSN(t)` — the default handle — connects as **`openrails_app`**

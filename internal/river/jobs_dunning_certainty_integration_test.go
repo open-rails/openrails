@@ -136,12 +136,12 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 	t.Cleanup(func() {
 		_ = dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			qx := dbi.Qx(ctx)
-			_, _ = qx.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", subID)
-			_, _ = qx.Exec(ctx, "DELETE FROM openrails.payments WHERE subscription_id = $1", subID)
-			_, _ = qx.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
-			_, _ = qx.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pmID)
-			_, _ = qx.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-			_, _ = qx.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+			_, _ = qx.Exec(ctx, "DELETE FROM billing.rail_intents WHERE subscription_id = $1", subID)
+			_, _ = qx.Exec(ctx, "DELETE FROM billing.payments WHERE subscription_id = $1", subID)
+			_, _ = qx.Exec(ctx, "DELETE FROM billing.subscriptions WHERE id = $1", subID)
+			_, _ = qx.Exec(ctx, "DELETE FROM billing.payment_methods WHERE id = $1", pmID)
+			_, _ = qx.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+			_, _ = qx.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 			return nil
 		})
 	})
@@ -264,12 +264,12 @@ func (f *dunningCertaintyFixture) state(t *testing.T) dunningRowState {
 		qx := f.dbi.Qx(ctx)
 		if err := qx.QueryRow(ctx,
 			`SELECT status, retry_attempts, last_retry_at, next_retry_at, cancelled_at, deletion_scheduled_at
-			   FROM openrails.subscriptions WHERE id = $1`, f.subID).
+			   FROM billing.subscriptions WHERE id = $1`, f.subID).
 			Scan(&s.status, &s.retryAttempts, &s.lastRetryAt, &s.nextRetryAt, &s.cancelledAt, &s.deletionScheduledAt); err != nil {
 			return err
 		}
 		return qx.QueryRow(ctx,
-			`SELECT count(*) FROM openrails.rail_intents
+			`SELECT count(*) FROM billing.rail_intents
 			  WHERE subscription_id = $1 AND intent_type = 'nmi_delete_subscription'`, f.subID).Scan(&s.deleteIntents)
 	}))
 	return s
@@ -321,7 +321,7 @@ func TestDunning_MissingLocalPaymentMethodParksAndNeverDeletesTheVault(t *testin
 	var paymentRows int
 	require.NoError(t, f.dbi.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
 		return f.dbi.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.payments WHERE subscription_id = $1`, f.subID).Scan(&paymentRows)
+			`SELECT count(*) FROM billing.payments WHERE subscription_id = $1`, f.subID).Scan(&paymentRows)
 	}))
 	assert.Zero(t, paymentRows, "no charge was attempted, so no payment row is invented either")
 }

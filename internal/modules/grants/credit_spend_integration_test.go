@@ -4,6 +4,7 @@ package grants_test
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +24,7 @@ func TestGrants_CreditSpendFIFO(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
 	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})
 
 	now := time.Now().UTC()
@@ -32,7 +33,7 @@ func TestGrants_CreditSpendFIFO(t *testing.T) {
 	lotA := mustCreditLot(t, ctx, l, customer, product, cur, 100, now, &soonEnd) // expires sooner
 	lotB := mustCreditLot(t, ctx, l, customer, product, cur, 500, now, &lateEnd) // expires later
 
-	ml := ledger.New(gen.New(pool), merchantID)
+	ml := ledger.New(dbtest.Queries(pool), merchantID)
 	custAcc, err := ml.EnsureCustomerBalance(ctx, customer, cur)
 	require.NoError(t, err)
 	mustBal(t, ctx, ml, custAcc, 600) // both deposited
@@ -57,7 +58,7 @@ func TestGrants_CreditExpire(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
 	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})
 
 	now := time.Now().UTC()
@@ -65,7 +66,7 @@ func TestGrants_CreditExpire(t *testing.T) {
 	end := now.Add(-1 * time.Hour)
 	mustCreditLot(t, ctx, l, customer, product, cur, 100, start, &end) // already lapsed
 
-	ml := ledger.New(gen.New(pool), merchantID)
+	ml := ledger.New(dbtest.Queries(pool), merchantID)
 	custAcc, err := ml.EnsureCustomerBalance(ctx, customer, cur)
 	require.NoError(t, err)
 	mustBal(t, ctx, ml, custAcc, 100)
@@ -98,7 +99,7 @@ func TestGrants_SpendExpiryConcurrency_LockSerializes(t *testing.T) {
 	l, pool, ctx, customer, product, merchantID := testGrants(t)
 	cur := "TC" + strings.ToUpper(short())
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM openrails.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
+		_, _ = pool.Exec(ctx, `DELETE FROM billing.ledger_accounts WHERE merchant_id=$1 AND currency=$2`, merchantID, cur)
 	})
 
 	edge := time.Now().UTC() // lot A lapses exactly here
@@ -120,7 +121,7 @@ func TestGrants_SpendExpiryConcurrency_LockSerializes(t *testing.T) {
 				return err
 			}
 			defer func() { _ = tx.Rollback(ctx) }()
-			gl := grants.New(gen.New(tx), merchantID)
+			gl := grants.New(dbtest.Queries(tx), merchantID)
 			gl.SetClock(func() time.Time { return edge.Add(-time.Second) })
 			if err := gl.LockCustomer(ctx, customer); err != nil {
 				return err
@@ -144,7 +145,7 @@ func TestGrants_SpendExpiryConcurrency_LockSerializes(t *testing.T) {
 				return err
 			}
 			defer func() { _ = tx.Rollback(ctx) }()
-			gl := grants.New(gen.New(tx), merchantID)
+			gl := grants.New(dbtest.Queries(tx), merchantID)
 			gl.SetClock(func() time.Time { return edge.Add(time.Second) })
 			var e error
 			if expired, e = gl.ExpireLapsed(ctx, customer, cur); e != nil {
@@ -161,7 +162,7 @@ func TestGrants_SpendExpiryConcurrency_LockSerializes(t *testing.T) {
 	// Lot A consumed exactly once: spend 800 + expire 200 == the 1000 deposited.
 	var consumed int64
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT COALESCE(SUM(amount),0)::bigint FROM openrails.ledger_transfers
+		`SELECT COALESCE(SUM(amount),0)::bigint FROM billing.ledger_transfers
 		 WHERE merchant_id=$1 AND grant_id=$2 AND transfer_type IN ('credit_spend','credit_expire')`,
 		merchantID, lotA.ID).Scan(&consumed))
 	require.Equal(t, int64(1000), consumed, "lot A must not be over-consumed")
@@ -188,7 +189,7 @@ func mustBal(t *testing.T, ctx context.Context, ml *ledger.Ledger, acc uuid.UUID
 
 func lotRemaining(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merchantID, customer uuid.UUID, cur string, lotID uuid.UUID) int64 {
 	t.Helper()
-	lots, err := gen.New(pool).ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
+	lots, err := dbtest.Queries(pool).ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
 		MerchantID: merchantID, CustomerID: customer, Currency: cur, AsOf: time.Now().UTC(),
 	})
 	require.NoError(t, err)

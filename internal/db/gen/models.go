@@ -1348,11 +1348,3 @@ type OpenrailsWorkerState struct {
 	LastAlertedAt *time.Time
 	UpdatedAt     time.Time
 }
-
-type ProfilesUser struct {
-	ID            uuid.UUID
-	Email         *string
-	Username      *string
-	EmailVerified bool
-	DeletedAt     *time.Time
-}

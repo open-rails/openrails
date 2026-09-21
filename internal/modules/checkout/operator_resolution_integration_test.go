@@ -17,7 +17,7 @@ func operatorResolutionLogs(t *testing.T, database *db.DB, intentID uuid.UUID) i
 	t.Helper()
 	var n int
 	require.NoError(t, database.Pool().QueryRow(t.Context(),
-		`SELECT count(*) FROM openrails.rail_mutation_logs WHERE rail_intent_id=$1 AND evidence ? 'operator_resolution'`, intentID).Scan(&n))
+		`SELECT count(*) FROM billing.rail_mutation_logs WHERE rail_intent_id=$1 AND evidence ? 'operator_resolution'`, intentID).Scan(&n))
 	return n
 }
 

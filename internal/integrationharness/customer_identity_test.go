@@ -79,7 +79,7 @@ func TestOneSubjectHasIndependentMerchantBillingThroughBothClients(t *testing.T)
 			// Host-provisioned access facts exercise the subject batch reader;
 			// the same UUID must resolve only this merchant's entitlement.
 			_, err = h.MerchantPool(side.merchant.UUID()).Exec(ctx, `
-				INSERT INTO openrails.entitlements
+				INSERT INTO billing.entitlements
 				(id, merchant_id, customer_id, entitlement, start_at, source_id, source_type)
 				VALUES ($1, $2, $3, $4, now() - interval '1 hour', $5, 'admin')`,
 				uuid.New(), side.merchant.UUID(), subject, side.feature, uuid.New())

@@ -28,7 +28,7 @@ func TestOr906_TheDatabaseRefusesADuplicateDepositGrant(t *testing.T) {
 	customer := payer.UUID()
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, customer.String())
 
-	q := gen.New(pool)
+	q := dbtest.Queries(pool)
 	amount := int64(5_000)
 	sourceID := "or906-raw-" + uuid.NewString()
 	params := gen.InsertGrantParams{
@@ -56,7 +56,7 @@ func TestOr906_TheDatabaseRefusesADuplicateDepositGrant(t *testing.T) {
 	var rows int
 	var total int64
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*), COALESCE(sum(amount), 0)::bigint FROM openrails.grants
+		SELECT count(*), COALESCE(sum(amount), 0)::bigint FROM billing.grants
 		 WHERE merchant_id = $1 AND customer_id = $2 AND source_id = $3
 		   AND kind = 'credit' AND event = 'grant'
 	`, merchantID, customer, sourceID).Scan(&rows, &total))

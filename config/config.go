@@ -607,21 +607,9 @@ type DBConfig struct {
 	Password string `koanf:"password"`
 	SSLMode  string `koanf:"sslmode"`
 
-	// Schema is the Postgres schema OpenRails owns (issue #165, #471). It is used
-	// for OpenRails' own DDL/DML (the openrails tables) and, in STANDALONE mode,
-	// for the River job-queue tables as well — i.e. standalone River schema ==
-	// DB.Schema.
-	//
-	// Default: "openrails" (zero-config). Configure via config `db.schema` or env
-	// `DB_SCHEMA`; OpenRails relocates ALL its tables (DDL + runtime queries) to
-	// the configured schema, in both standalone and embedded mode (#471).
-	//
-	// Embedded/library mode: the host controls where River tables live by injecting
-	// its own River client (embedded.SetRiverClient); that client owns its schema and
-	// OpenRails never overrides it. See pkg/embedded for the full schema contract.
-	//
-	// Read the effective value via DBConfig.SchemaName() (it applies the default and
-	// normalization). Do not read this field directly.
+	// Schema holds OpenRails billing tables, defaulting to "billing". Configure
+	// it through db.schema or DB_SCHEMA. River's runtime tables live separately.
+	// Read the effective normalized value through SchemaName().
 	Schema string `koanf:"schema"`
 
 	// SQLTrace enables debug-level pgx query tracing on pools OpenRails
@@ -671,12 +659,12 @@ func (c *DBConfig) GetConnectionString() string {
 	return ""
 }
 
-// DefaultSchema is the Postgres schema OpenRails uses when none is configured
-// (#471 renamed it from the historical `billing`). It is also the canonical
-// schema OpenRails' SQL is authored against; when a host configures a different
-// schema, runtime queries and migration DDL are rewritten from this name to the
-// configured one (see internal/db schema rewriting).
-const DefaultSchema = "openrails"
+// DefaultSchema is the Postgres schema used when none is configured.
+const DefaultSchema = "billing"
+
+// CanonicalSchema is the namespace used in authored SQL. Queries and migration
+// DDL are rewritten from this fixed namespace to the configured billing schema.
+const CanonicalSchema = "openrails"
 
 // MigratekitApp is the migratekit app/tracking key written to
 // public.migrations.app for OpenRails' own (non-River, non-AuthKit) migrations.
@@ -686,16 +674,8 @@ const DefaultSchema = "openrails"
 // for this value, so hosts must keep it in lockstep.
 const MigratekitApp = "openrails"
 
-// RiverSchema is the Postgres schema River job-queue tables (`river_*`) always
-// live in, in every mode (#545). It is deliberately NOT the OpenRails billing
-// schema: River is runtime/infra state, never portable billing data, so keeping
-// it in `public` (River's own documented default, alongside `public.migrations`
-// and `pgcrypto`) leaves the OpenRails billing schema 100% portable for the
-// embedded↔standalone data move (#544). In embedded mode a host that runs River
-// injects its own client (which owns its schema); OpenRails only uses this when
-// it constructs its own River client (standalone, or embedded with no injected
-// client). The embedded engine adopts an injected client's schema everywhere it
-// reads River state, refusing only the billing schema itself.
+// RiverSchema is the default namespace for managed River tables. Embedded
+// hosts can select another managed schema or supply a client with its own schema.
 const RiverSchema = "public"
 
 // schemaIdentRe restricts the OpenRails schema to a safe SQL identifier: it must
@@ -705,7 +685,7 @@ const RiverSchema = "public"
 var schemaIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // SchemaName returns the effective OpenRails Postgres schema (issue #165, #471),
-// applying the `openrails` default and normalization (trim + lower-case). All
+// applying the `billing` default and normalization (trim + lower-case). All
 // OpenRails code that needs the schema (migrator, River client construction,
 // runtime query rewriting) MUST go through this accessor rather than reading
 // DBConfig.Schema directly or hardcoding "openrails".
@@ -2485,7 +2465,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 
 	// Normalize the OpenRails Postgres schema to its canonical form (#165) so the
 	// stored config value matches what SchemaName() resolves to. Validation of the
-	// identifier happens in Validate(). Defaults to `openrails` (config.DefaultSchema).
+	// identifier happens in Validate(). Defaults to `billing` (config.DefaultSchema).
 	if cfg.DB != nil {
 		cfg.DB.Schema = normalizeSchema(cfg.DB.Schema)
 	}

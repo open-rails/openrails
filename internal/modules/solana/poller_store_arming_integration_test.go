@@ -33,12 +33,12 @@ func newSolanaTestMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 	t.Helper()
 	id := merchant.ID(uuid.New())
 	_, err := dbi.Pool().Exec(context.Background(),
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
 		id.UUID(), slug)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = dbi.Pool().Exec(context.Background(), `DELETE FROM openrails.psps WHERE merchant_id = $1`, id.UUID())
-		_, _ = dbi.Pool().Exec(context.Background(), `DELETE FROM openrails.merchants WHERE id = $1`, id.UUID())
+		_, _ = dbi.Pool().Exec(context.Background(), `DELETE FROM billing.psps WHERE merchant_id = $1`, id.UUID())
+		_, _ = dbi.Pool().Exec(context.Background(), `DELETE FROM billing.merchants WHERE id = $1`, id.UUID())
 	})
 	return id
 }
@@ -54,7 +54,7 @@ func seedSolanaRailAccount(t *testing.T, dbi *db.DB, mid merchant.ID, accountID 
 	// psps is merchant-policied: seed it on a connection pinned to the merchant
 	// that owns the row, which is the production posture — not on dbi's base pool.
 	_, err = dbtest.SharedMerchantPool(t, mid.UUID()).Exec(context.Background(), `
-		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence)
+		INSERT INTO billing.psps (merchant_id, rail, environment, account_id, archived, evidence)
 		VALUES ($1::uuid, 'solana', 'live', $2, false, $3::jsonb)
 	`, mid.String(), accountID, raw)
 	require.NoError(t, err)

@@ -93,11 +93,11 @@ func TestSubscriptionConvergeBurstCoalescesToOneFetch(t *testing.T) {
 			require.NoError(t, err)
 		}
 		pspID = dbtest.EnsureTestPSP(ctx, t, dbi.Qx(ctx), merchantID, "stripe")
-		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
+		exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			productID, "burst-prod-"+suffix, merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'USD',720,true,$3)`,
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'USD',720,true,$3)`,
 			priceID, productID, merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		exec(`INSERT INTO billing.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
 		      VALUES ($1,$2,$3,'active','stripe',$4,$5,$6,$5,'{}'::jsonb,$7,$8,$9)`,
 			subID, priceID, productID, railSubID, now.Add(-25*24*time.Hour), oldEnd, customer, merchantID, pspID)
 		return nil
@@ -105,10 +105,10 @@ func TestSubscriptionConvergeBurstCoalescesToOneFetch(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE subscription_id=$1`, subID)
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE subscription_id=$1`, subID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, subID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, productID)
 			return nil
 		})
 		_, _ = pool.Exec(context.Background(), `DELETE FROM river_job WHERE kind=$1 AND args->>'subscription_reference'=$2`,
@@ -196,14 +196,14 @@ func TestSubscriptionConvergeBurstCoalescesToOneFetch(t *testing.T) {
 		var status string
 		var periodEnd time.Time
 		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx,
-			`SELECT status::text, current_period_ends_at FROM openrails.subscriptions WHERE id=$1`, subID).
+			`SELECT status::text, current_period_ends_at FROM billing.subscriptions WHERE id=$1`, subID).
 			Scan(&status, &periodEnd))
 		require.Equal(t, "active", status)
 		require.True(t, periodEnd.UTC().Equal(newEnd), "period end %v, want %v", periodEnd, newEnd)
 
 		var paymentCount int
 		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.payments WHERE subscription_id=$1 AND status='completed'`, subID).
+			`SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND status='completed'`, subID).
 			Scan(&paymentCount))
 		require.Equal(t, 1, paymentCount, "renewal payment recorded exactly once")
 		return nil
@@ -288,23 +288,23 @@ func seedConvergeE2ESubscription(t *testing.T, dbi *db.DB, baseCtx context.Conte
 		}
 		pspID := dbtest.EnsureTestPSP(ctx, t, dbi.Qx(ctx), f.merchantID, rail)
 		f.pspID = pspID
-		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
+		exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			f.productID, "e2e-prod-"+suffix, f.merchantID)
-		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'USD',720,true,$3)`,
+		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'USD',720,true,$3)`,
 			f.priceID, f.productID, f.merchantID)
-		exec(`INSERT INTO openrails.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		exec(`INSERT INTO billing.subscriptions (id, price_id, product_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, started_at, entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
 		      VALUES ($1,$2,$3,'active',$4,$5,$6,$7,$6,'{}'::jsonb,$8,$9,$10)`,
 			f.subID, f.priceID, f.productID, rail, railSubID, f.oldEnd.Add(-30*24*time.Hour), f.oldEnd, f.customer, f.merchantID, pspID)
 		return nil
 	}))
 	t.Cleanup(func() {
 		_ = dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.webhook_events WHERE merchant_id=$1`, f.merchantID)
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.rail_customer_accounts WHERE customer_id=$1`, f.customer)
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE subscription_id=$1`, f.subID)
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, f.subID)
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, f.priceID)
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, f.productID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.webhook_events WHERE merchant_id=$1`, f.merchantID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.rail_customer_accounts WHERE customer_id=$1`, f.customer)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE subscription_id=$1`, f.subID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.subscriptions WHERE id=$1`, f.subID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, f.priceID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=$1`, f.productID)
 			return nil
 		})
 		_, _ = dbtest.SharedPGXPool(t).Exec(context.Background(),
@@ -319,14 +319,14 @@ func (f *convergeE2EFixture) assertConverged(t *testing.T, baseCtx context.Conte
 		var status string
 		var periodEnd time.Time
 		require.NoError(t, f.dbi.Qx(ctx).QueryRow(ctx,
-			`SELECT status::text, current_period_ends_at FROM openrails.subscriptions WHERE id=$1`, f.subID).
+			`SELECT status::text, current_period_ends_at FROM billing.subscriptions WHERE id=$1`, f.subID).
 			Scan(&status, &periodEnd))
 		require.Equal(t, "active", status)
 		require.True(t, periodEnd.UTC().Equal(wantEnd), "period end %v, want %v", periodEnd.UTC(), wantEnd)
 
 		var txn string
 		require.NoError(t, f.dbi.Qx(ctx).QueryRow(ctx,
-			`SELECT transaction_id FROM openrails.payments WHERE subscription_id=$1 AND status='completed'`, f.subID).
+			`SELECT transaction_id FROM billing.payments WHERE subscription_id=$1 AND status='completed'`, f.subID).
 			Scan(&txn))
 		require.Equal(t, wantTxn, txn)
 		return nil
@@ -437,7 +437,7 @@ func TestWebhookWakeUpEndToEnd_StripeRenewal(t *testing.T) {
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var n int
 		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.webhook_events WHERE event_id='evt_e2e_1'`).Scan(&n))
+			`SELECT count(*) FROM billing.webhook_events WHERE event_id='evt_e2e_1'`).Scan(&n))
 		require.Equal(t, 1, n)
 		return nil
 	}))
@@ -563,12 +563,12 @@ func TestSubscriptionConverge_SnoozeHandsOffOnObservedPullCoverage(t *testing.T)
 
 	f := seedConvergeE2ESubscription(t, dbi, baseCtx, "nmi", "nmi_pend_"+uuid.NewString()[:8])
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		_, err := dbi.Qx(ctx).Exec(ctx, `UPDATE openrails.subscriptions SET status = 'pending', created_at = now() - interval '2 days' WHERE id = $1`, f.subID)
+		_, err := dbi.Qx(ctx).Exec(ctx, `UPDATE billing.subscriptions SET status = 'pending', created_at = now() - interval '2 days' WHERE id = $1`, f.subID)
 		return err
 	}))
 	t.Cleanup(func() {
 		_ = dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.rail_refresh_watermarks WHERE merchant_id = $1 AND rail = 'nmi'`, f.merchantID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.rail_refresh_watermarks WHERE merchant_id = $1 AND rail = 'nmi'`, f.merchantID)
 			return nil
 		})
 	})
@@ -611,7 +611,7 @@ func TestSubscriptionConverge_SnoozeHandsOffOnObservedPullCoverage(t *testing.T)
 	// A current pull for a sibling account does not cover this account.
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		otherPSP := uuid.New()
-		_, err := dbi.Qx(ctx).Exec(ctx, `INSERT INTO openrails.psps(id, merchant_id, rail, environment, account_id, key) VALUES($1,$2,'nmi','test',$3,$3)`, otherPSP, f.merchantID, uuid.NewString())
+		_, err := dbi.Qx(ctx).Exec(ctx, `INSERT INTO billing.psps(id, merchant_id, rail, environment, account_id, key) VALUES($1,$2,'nmi','test',$3,$3)`, otherPSP, f.merchantID, uuid.NewString())
 		if err != nil {
 			return err
 		}

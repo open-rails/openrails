@@ -647,7 +647,7 @@ func (s *Surface) ProvisionOwnedMerchant(slug string) OwnedMerchant {
 
 	mid := merchant.ID(uuid.New())
 	_, err := h.sharedPool().Exec(h.ctx, `
-		INSERT INTO openrails.merchants (id, slug, status, permission_group_id)
+		INSERT INTO billing.merchants (id, slug, status, permission_group_id)
 		VALUES ($1, $2, 'active', $3)
 	`, mid.UUID(), slug, groupID)
 	require.NoError(h.t, err, "insert owned merchant")

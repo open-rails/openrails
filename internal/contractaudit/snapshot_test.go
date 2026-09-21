@@ -53,7 +53,7 @@ func TestContractGateDetectsCoveredMutations(t *testing.T) {
 		{"changed route authority", under("internal/http/routes/"), goEdit(swapPermission), "boundary source changed: internal/http/routes/"},
 		{"changed role permission mapping", under("permissions/"), goEdit(editFuncString), "boundary source changed: permissions/"},
 		{"changed authority decision outside HTTP", outsideBoundaryPrefixes, goEdit(editAuthorityFile), "boundary source changed: "},
-		{"changed schema invariant", under("migrations/postgres/"), textEdit(".sql", " NOT NULL", ""), "boundary source changed: migrations/postgres/"},
+		{"changed schema invariant", under("internal/migrate/postgres/"), textEdit(".sql", " NOT NULL", ""), "boundary source changed: internal/migrate/postgres/"},
 		{"changed canonical wire fixture", under("testdata/wire/"), textEdit(".json", `"`, `"renamed_`), "boundary source changed: testdata/wire/"},
 	} {
 		t.Run(m.name, func(t *testing.T) {

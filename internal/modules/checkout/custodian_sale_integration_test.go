@@ -157,12 +157,12 @@ func newCustodianSaleFixture(t *testing.T, networkTokens bool) *custodianSaleFix
 	})
 	bt := newFakeBTServer(t)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = 'custodian_sale' AND price_id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE intent_type = 'custodian_sale' AND price_id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.payment_methods WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
 	})
 
 	clock := clockwork.NewRealClock()
@@ -212,11 +212,11 @@ func (fx *custodianSaleFixture) enqueueAndExecute(t *testing.T, key string) gen.
 	t.Helper()
 	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), string(models.RailNMI))
 	var custodianID *uuid.UUID
-	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT custodian_id FROM openrails.psps WHERE id=$1`, pspID).Scan(&custodianID))
+	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT custodian_id FROM billing.psps WHERE id=$1`, pspID).Scan(&custodianID))
 	if custodianID == nil {
 		id := dbtest.EnsureTestCustodian(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID())
 		custodianID = &id
-		_, err := fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE openrails.psps SET custodian_id=$2 WHERE id=$1`, pspID, id)
+		_, err := fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE billing.psps SET custodian_id=$2 WHERE id=$1`, pspID, id)
 		require.NoError(t, err)
 	}
 	fx.ctx = db.WithCustodianID(fx.ctx, *custodianID)
@@ -267,7 +267,7 @@ func TestCustodianSale_CollectChargeConvert(t *testing.T) {
 	// Payments row: completed, token_type pan_via_proxy, attempt initial.
 	var tokenType, attemptKind string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT COALESCE(token_type,''), COALESCE(attempt_kind,'') FROM openrails.payments WHERE rail='nmi' AND transaction_id=$1 AND status='completed'",
+		"SELECT COALESCE(token_type,''), COALESCE(attempt_kind,'') FROM billing.payments WHERE rail='nmi' AND transaction_id=$1 AND status='completed'",
 		fx.bt.txnID).Scan(&tokenType, &attemptKind))
 	require.Equal(t, charge.TokenTypePANViaProxy, tokenType)
 	require.Equal(t, payments.AttemptInitial, attemptKind)
@@ -277,7 +277,7 @@ func TestCustodianSale_CollectChargeConvert(t *testing.T) {
 	var custodian, fingerprint, chargeVia, anchor, lastFour string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
 		`SELECT custodian, fingerprint, charge_via, stored_credential_unscheduled_ref, COALESCE(last_four,'')
-		 FROM openrails.payment_methods WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1`,
+		 FROM billing.payment_methods WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1`,
 		fx.bt.tokenID).Scan(&custodian, &fingerprint, &chargeVia, &anchor, &lastFour))
 	require.Equal(t, nmiproxy.Custodian, custodian)
 	require.Equal(t, fx.bt.fingerprint, fingerprint)
@@ -335,7 +335,7 @@ func TestCustodianSale_DeclineWritesFailedRow(t *testing.T) {
 	var failureCode, failureReason, tokenType string
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
 		`SELECT COALESCE(failure_code,''), COALESCE(failure_reason,''), COALESCE(token_type,'')
-		 FROM openrails.payments WHERE rail='nmi' AND status='failed' AND transaction_id=$1`,
+		 FROM billing.payments WHERE rail='nmi' AND status='failed' AND transaction_id=$1`,
 		"custodian_sale_declined:"+intent.ID.String()).Scan(&failureCode, &failureReason, &tokenType))
 	require.Equal(t, "insufficient_funds", failureCode) // NMI 202, verbatim localization id
 	require.Equal(t, payments.FailureInsufficientFunds, failureReason)
@@ -353,7 +353,7 @@ func TestCustodianSale_BTFailureIsNotADecline(t *testing.T) {
 
 	var n int
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT count(*) FROM openrails.payments WHERE rail='nmi' AND price_id=$1", fx.priceID).Scan(&n))
+		"SELECT count(*) FROM billing.payments WHERE rail='nmi' AND price_id=$1", fx.priceID).Scan(&n))
 	require.Zero(t, n)
 }
 
@@ -373,7 +373,7 @@ func TestCustodianSale_AmbiguousNeverDeclines(t *testing.T) {
 
 	var n int
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT count(*) FROM openrails.payments WHERE rail='nmi' AND price_id=$1", fx.priceID).Scan(&n))
+		"SELECT count(*) FROM billing.payments WHERE rail='nmi' AND price_id=$1", fx.priceID).Scan(&n))
 	require.Zero(t, n, "ambiguity is never recorded as an outcome")
 }
 
@@ -401,7 +401,7 @@ func TestCustodianSale_NTProvisioning(t *testing.T) {
 		var ntID, ntStatus, par, chargeVia string
 		require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
 			`SELECT network_token_id, network_token_status, network_token_par, charge_via
-			 FROM openrails.payment_methods WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1`,
+			 FROM billing.payment_methods WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1`,
 			fx.bt.tokenID).Scan(&ntID, &ntStatus, &par, &chargeVia))
 		require.Equal(t, fx.bt.ntID, ntID)
 		require.Equal(t, "active", ntStatus)
@@ -416,7 +416,7 @@ func TestCustodianSale_NTProvisioning(t *testing.T) {
 
 		var ntID string
 		require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-			"SELECT network_token_id FROM openrails.payment_methods WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1",
+			"SELECT network_token_id FROM billing.payment_methods WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1",
 			fx.bt.tokenID).Scan(&ntID))
 		require.Empty(t, ntID)
 	})
@@ -429,7 +429,7 @@ func TestCustodianProxyCollectionAdapter_ParkedInstrumentFailsClosed(t *testing.
 	intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
 	require.Equal(t, intents.StatusSucceeded, intent.Status)
 	_, err := fx.db.Pool().Exec(fx.ctx,
-		"UPDATE openrails.payment_methods SET park_reason='bt_token_deleted', parked_at=now() WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1",
+		"UPDATE billing.payment_methods SET park_reason='bt_token_deleted', parked_at=now() WHERE rail='nmi' AND custodian='basis_theory' AND rail_method_ref=$1",
 		fx.bt.tokenID)
 	require.NoError(t, err)
 
@@ -525,6 +525,6 @@ func TestCustodianSale_PostChargeReadonlyRetainsReceipt(t *testing.T) {
 	require.Equal(t, intents.StatusSucceeded, final.Status)
 	require.EqualValues(t, 1, fx.bt.proxyCalls.Load())
 	var payments int
-	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM openrails.payments WHERE transaction_id=$1`, fx.bt.txnID).Scan(&payments))
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.payments WHERE transaction_id=$1`, fx.bt.txnID).Scan(&payments))
 	require.Equal(t, 1, payments)
 }

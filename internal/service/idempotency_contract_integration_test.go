@@ -66,8 +66,8 @@ func idemEnv(t *testing.T, seed int64) (*billingservice.Service, *money.MoneySer
 	payer := identity.CustomerIDFromString(uuid.NewString())
 	payerID := payer.UUID()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.usage_events WHERE customer_id = $1", payerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM billing.money_settings WHERE customer_id = $1", payerID)
 	})
 	ms := money.NewMoneyService(dbi)
 	if seed > 0 {
