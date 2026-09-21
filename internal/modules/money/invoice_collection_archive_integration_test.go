@@ -5,6 +5,12 @@ package money_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/open-rails/openrails/internal/archivewire"
+	"github.com/open-rails/openrails/internal/merchantarchive/contract"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"testing"
 
 	"github.com/google/uuid"
@@ -22,7 +28,7 @@ import (
 )
 
 func TestInvoiceCollectionArchivePreservesTerminalReplay(t *testing.T) {
-	for _, resolution := range []string{"verifier", "operator"} {
+	for _, resolution := range []string{"verifier", "operator", "customer", "admin_retry"} {
 		t.Run(resolution, func(t *testing.T) { testInvoiceCollectionArchive(t, resolution) })
 	}
 }
@@ -58,7 +64,21 @@ func testInvoiceCollectionArchive(t *testing.T, resolution string) {
 	charger.SetAdapterResolver(plane)
 	e := nmiReceiptEnv{collectionEnv: collectionEnv{svc: svc, db: database, pool: database.Pool(), payer: payer, currency: "USD", method: method, invoice: invoiceID, ctx: ctx},
 		gateway: gateway, plane: plane, runner: collectionRunner(database, charger, plane), merchants: msvc, vault: vault}
-	e.collectUncertain(t)
+	if resolution == "customer" {
+		result, err := e.svc.PayInvoiceNow(e.ctx, e.runner, e.payer, money.InvoiceCollectionRetryRequest{InvoiceID: e.invoice, PaymentMethodID: e.method, IdempotencyKey: "archive-key-1461"})
+		require.NoError(t, err)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, result.Operation.Status)
+		e.op = result.Operation.ID
+	} else if resolution == "admin_retry" {
+		_, err := e.svc.MarkInvoiceUncollectible(e.ctx, e.payer, e.invoice)
+		require.NoError(t, err)
+		result, err := e.svc.RetryInvoiceCollection(e.ctx, e.runner, e.payer, money.InvoiceCollectionRetryRequest{InvoiceID: e.invoice, PaymentMethodID: e.method, IdempotencyKey: "admin-archive-3817"})
+		require.NoError(t, err)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, result.Operation.Status)
+		e.op = result.Operation.ID
+	} else {
+		e.collectUncertain(t)
+	}
 	var archive bytes.Buffer
 	// The live invoice pointer is not portable while a provider answer is unknown.
 	err = merchantarchive.Export(t.Context(), e.db, mid, &archive)
@@ -84,6 +104,64 @@ func testInvoiceCollectionArchive(t *testing.T, resolution string) {
 	t.Cleanup(func() { _ = target.Close() })
 	_, err = target.Qx(t.Context()).Exec(t.Context(), `INSERT INTO openrails.merchants(id,slug) VALUES($1,'archive-invoice-destination')`, mid.UUID())
 	require.NoError(t, err)
+	if resolution == "customer" {
+		accepted, err := intents.DecodeInvoiceCollectionPayload(original)
+		require.NoError(t, err)
+		for _, tc := range []struct {
+			name, column, wire string
+			changed, original  any
+		}{
+			{"orphan key", "idempotency_key", charge.CustomerPaymentKey("invoice_collection", payer.UUID(), "orphan"), charge.CustomerPaymentKey("invoice_collection", payer.UUID(), "orphan"), original.IdempotencyKey},
+			{"wrong amount", "amount", "50001", int64(50001), int64(50000)},
+			{"caller PAN text", "failure_message", "4111111111111111", "4111111111111111", nil},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				// The source mutation and altered artifact represent the same bad
+				// row. Both export and restore must refuse it; recompute the footer
+				// so the restore proof reaches semantic identity validation.
+				query := fmt.Sprintf("UPDATE billing.invoice_payments SET %s=$2 WHERE id=$1", tc.column)
+				_, err := database.Pool().Exec(e.ctx, query, accepted.AttemptID, tc.changed)
+				require.NoError(t, err)
+				defer func() {
+					_, err := database.Pool().Exec(e.ctx, query, accepted.AttemptID, tc.original)
+					require.NoError(t, err)
+				}()
+				var refused bytes.Buffer
+				require.Error(t, merchantarchive.Export(t.Context(), database, mid, &refused))
+				_, err = merchantarchive.Restore(t.Context(), target, mid, bytes.NewReader(rewriteCollectionArchive(t, archive.Bytes(), "invoice_payments", tc.column, tc.wire)))
+				require.Error(t, err)
+				var count int
+				require.NoError(t, target.Qx(t.Context()).QueryRow(t.Context(), `SELECT count(*) FROM openrails.customers WHERE merchant_id=$1`, mid.UUID()).Scan(&count))
+				require.Zero(t, count, "refused restore rolls back every row")
+			})
+		}
+		t.Run("malformed accepted amount", func(t *testing.T) {
+			const canary = "invalid-amount-4111111111111111"
+			var payload map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(original.Payload, &payload))
+			payload["amount"], err = json.Marshal(canary)
+			require.NoError(t, err)
+			malformed, err := json.Marshal(payload)
+			require.NoError(t, err)
+			_, err = database.Pool().Exec(e.ctx, `UPDATE billing.rail_intents SET payload=$2 WHERE id=$1`, original.ID, malformed)
+			require.NoError(t, err)
+			defer func() {
+				_, err := database.Pool().Exec(e.ctx, `UPDATE billing.rail_intents SET payload=$2 WHERE id=$1`, original.ID, original.Payload)
+				require.NoError(t, err)
+			}()
+			var refused bytes.Buffer
+			exportErr := merchantarchive.Export(t.Context(), database, mid, &refused)
+			require.Error(t, exportErr)
+			var classified *merchantarchive.Error
+			require.True(t, errors.As(exportErr, &classified))
+			require.Equal(t, "unsupported_state", classified.Code, "the canonical decoder must refuse before any SQL numeric cast")
+			require.NotContains(t, exportErr.Error(), canary)
+			_, restoreErr := merchantarchive.Restore(t.Context(), target, mid, bytes.NewReader(rewriteCollectionArchive(t, archive.Bytes(), "rail_intents", "payload", string(malformed))))
+			require.Error(t, restoreErr)
+			require.NotContains(t, restoreErr.Error(), canary)
+		})
+
+	}
 	_, err = merchantarchive.Restore(t.Context(), target, mid, bytes.NewReader(archive.Bytes()))
 	require.NoError(t, err)
 	ctx, release, err := target.WithMerchantConn(merchant.WithID(context.Background(), mid))
@@ -111,4 +189,39 @@ func testInvoiceCollectionArchive(t *testing.T, resolution string) {
 	require.Equal(t, 1, settled)
 	require.Equal(t, 1, transfers)
 	require.Equal(t, 1, e.gateway.sends)
+}
+
+func rewriteCollectionArchive(t *testing.T, raw []byte, table, column, value string) []byte {
+	t.Helper()
+	var result bytes.Buffer
+	var writer *archivewire.Writer
+	current, changed := "", false
+	_, err := archivewire.Read(bytes.NewReader(raw), func(header archivewire.Header) error {
+		var err error
+		writer, err = archivewire.NewWriter(&result, header.MerchantID)
+		return err
+	}, func(record archivewire.Record) error {
+		if record.Kind == "table" {
+			current = record.Table
+			return writer.Table(current)
+		}
+		if current == table {
+			for _, profile := range contract.Profiles {
+				if profile.Name != table {
+					continue
+				}
+				for i, field := range profile.Columns {
+					if field.Name == column {
+						record.Values[i] = &value
+						changed = true
+					}
+				}
+			}
+		}
+		return writer.Row(record.Values)
+	})
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NoError(t, writer.Close())
+	return result.Bytes()
 }

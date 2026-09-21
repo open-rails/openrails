@@ -27,7 +27,7 @@ func customerActionPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 	}
 	return selfAccountPayer(r)
 }
-func customerPaymentKey(r *httprequest.Request) (string, bool) {
+func paymentActionKey(r *httprequest.Request) (string, bool) {
 	key := strings.TrimSpace(r.Request.Header.Get("Idempotency-Key"))
 	if key == "" || len(key) > 255 {
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "invalid_param", "Idempotency-Key (1–255 bytes) is required"))
@@ -44,7 +44,7 @@ func PayMyInvoiceNow(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	key, ok := customerPaymentKey(r)
+	key, ok := paymentActionKey(r)
 	if !ok {
 		return
 	}
@@ -83,7 +83,7 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	key, ok := customerPaymentKey(r)
+	key, ok := paymentActionKey(r)
 	if !ok {
 		return
 	}
