@@ -203,6 +203,9 @@ func TestStripeEngineRejectsWrongEvidence(t *testing.T) {
 		{"charge_pi", func(pi, ch map[string]any) { ch["payment_intent"] = "pi_other" }},
 		{"charge_capture", func(pi, ch map[string]any) { ch["captured"] = false }},
 		{"charge_amount", func(pi, ch map[string]any) { ch["amount_captured"] = 1 }},
+		{"charge_refunded", func(pi, ch map[string]any) { ch["refunded"] = true }},
+		{"charge_disputed", func(pi, ch map[string]any) { ch["disputed"] = true }},
+		{"charge_part_refunded", func(pi, ch map[string]any) { ch["amount_refunded"] = 1 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, p := engineFixture()

@@ -115,6 +115,9 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Ope
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
+	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine && h.Checkout.Config != nil && h.Checkout.Config.EngineAdmissionHold {
+		return intents.Parked("engine payment admission is held")
+	}
 	if in.Rail == "stripe" {
 		return h.executeStripeInitial(ctx, in, p)
 	}
@@ -468,7 +471,7 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 		}
 		// Generic diagnostic progress is not financial authority. Only the
 		// validated private refusal above may populate terminal refusal fields.
-		for _, key := range []string{"declined", "not_executed", "request_refused", "response_code", "localization_id"} {
+		for _, key := range []string{"authentication_required", "declined", "not_executed", "request_refused", "response_code", "localization_id"} {
 			delete(evidence, key)
 		}
 
@@ -642,6 +645,9 @@ func subscriptionMetadataString(raw json.RawMessage, key string) string {
 // record so client replays get the cached response.
 
 func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Context, in gen.OpenrailsRailIntent, p InitialMembershipPayload) (bool, error) {
+	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine && h.Checkout.Config != nil && h.Checkout.Config.EngineAdmissionHold {
+		return false, errors.New("engine payment admission is held")
+	}
 	submitted := false
 	err := h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := h.database().NewWithPgxTx(tx)

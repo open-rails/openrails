@@ -73,7 +73,7 @@ type checkoutSessionCreateRequest struct {
 type checkoutSessionConfirmRequest struct {
 	Payment struct {
 		Capture   *openrails.CustodianCaptureReference `json:"capture,omitempty"`
-		Rail      string                               `json:"rail,omitempty" binding:"omitempty,oneof=solana nmi"`
+		Rail      string                               `json:"rail,omitempty" binding:"omitempty,oneof=solana nmi stripe"`
 		Signature string                               `json:"signature,omitempty"`
 		Wallet    string                               `json:"wallet,omitempty"`
 	} `json:"payment" binding:"required"`

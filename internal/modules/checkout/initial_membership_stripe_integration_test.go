@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -49,7 +50,7 @@ func initialStripeResponse(v any) *http.Response {
 }
 
 func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
-	for _, mode := range []string{"paid", "lost response", "authentication", "declined", "wrong method"} {
+	for _, mode := range []string{"paid", "lost response", "authentication", "declined", "wrong method", "setup"} {
 		t.Run(mode, func(t *testing.T) {
 			fx := newSubIntentFixture(t)
 			fx.prepare(t)
@@ -71,12 +72,36 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 			fx.runner.Registry = intents.NewRegistry(NewInitialMembershipIntentHandler(fx.svc, resolver))
 			var mu sync.Mutex
 			var pi map[string]any
+			var setup map[string]any
+			setupStatus := "requires_payment_method"
 			posts, cancels := 0, 0
 			release := stripeapi.InstallBaseTransport(initialStripeWire(func(r *http.Request) (*http.Response, error) {
 				mu.Lock()
 				defer mu.Unlock()
 				require.Equal(t, stripeapi.APIVersion, r.Header.Get(stripeapi.VersionHeader))
 				switch {
+				case r.Method == "GET" && r.URL.Path == "/v1/customers/search":
+					return initialStripeResponse(map[string]any{"data": []any{}}), nil
+				case r.Method == "POST" && r.URL.Path == "/v1/customers":
+					return initialStripeResponse(map[string]any{"id": "cus_setup"}), nil
+				case r.Method == "POST" && r.URL.Path == "/v1/setup_intents":
+					b, _ := io.ReadAll(r.Body)
+					v, _ := url.ParseQuery(string(b))
+					require.Equal(t, "off_session", v.Get("usage"))
+					require.Equal(t, "cus_setup", v.Get("customer"))
+					metadata := map[string]string{}
+					for k, values := range v {
+						if strings.HasPrefix(k, "metadata[") {
+							metadata[strings.TrimSuffix(strings.TrimPrefix(k, "metadata["), "]")] = values[0]
+						}
+					}
+					setup = map[string]any{"id": "seti_setup", "status": setupStatus, "customer": "cus_setup", "payment_method": "pm_setup", "usage": "off_session", "livemode": false, "payment_method_types": []string{"card"}, "metadata": metadata, "client_secret": "seti_setup_secret_private"}
+					return initialStripeResponse(setup), nil
+				case r.Method == "GET" && r.URL.Path == "/v1/setup_intents/seti_setup":
+					setup["status"] = setupStatus
+					return initialStripeResponse(setup), nil
+				case r.Method == "GET" && r.URL.Path == "/v1/payment_methods/pm_setup":
+					return initialStripeResponse(map[string]any{"id": "pm_setup", "customer": "cus_setup", "type": "card", "livemode": false, "card": map[string]any{"last4": "4242", "brand": "visa", "exp_month": 12, "exp_year": 2035}}), nil
 				case r.Method == "POST" && r.URL.Path == "/v1/payment_intents":
 					posts++
 					b, _ := io.ReadAll(r.Body)
@@ -90,7 +115,7 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 							metadata[strings.TrimSuffix(strings.TrimPrefix(k, "metadata["), "]")] = values[0]
 						}
 					}
-					pi = map[string]any{"id": "pi_initial", "status": "succeeded", "customer": "cus_initial", "payment_method": "pm_initial", "amount": 999, "amount_received": 999, "currency": "usd", "setup_future_usage": "off_session", "capture_method": "automatic", "confirmation_method": "automatic", "latest_charge": "ch_initial", "metadata": metadata, "livemode": false, "client_secret": "pi_initial_secret_sensitive"}
+					pi = map[string]any{"id": "pi_initial", "status": "succeeded", "customer": v.Get("customer"), "payment_method": v.Get("payment_method"), "amount": 999, "amount_received": 999, "currency": "usd", "setup_future_usage": "off_session", "capture_method": "automatic", "confirmation_method": "automatic", "latest_charge": "ch_initial", "metadata": metadata, "livemode": false, "client_secret": "pi_initial_secret_sensitive"}
 					if mode == "authentication" {
 						pi["status"] = "requires_action"
 					}
@@ -112,10 +137,15 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 					return initialStripeResponse(pi), nil
 				case r.Method == "GET" && r.URL.Path == "/v1/charges/ch_initial":
 					method := "pm_initial"
+					customer := "cus_initial"
+					if mode == "setup" {
+						method = "pm_setup"
+						customer = "cus_setup"
+					}
 					if mode == "wrong method" {
 						method = "pm_other"
 					}
-					return initialStripeResponse(map[string]any{"id": "ch_initial", "amount": 999, "amount_captured": 999, "currency": "usd", "customer": "cus_initial", "payment_method": method, "payment_intent": "pi_initial", "paid": true, "captured": true, "status": "succeeded"}), nil
+					return initialStripeResponse(map[string]any{"id": "ch_initial", "amount": 999, "amount_captured": 999, "currency": "usd", "customer": customer, "payment_method": method, "payment_intent": "pi_initial", "paid": true, "captured": true, "status": "succeeded"}), nil
 				default:
 					t.Errorf("unexpected Stripe route %s %s", r.Method, r.URL.Path)
 					return nil, errors.New("unexpected Stripe route")
@@ -124,10 +154,47 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 			defer release()
 			principal := billingauth.DelegatedPrincipal{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid.String(), SubjectID: terms.CustomerID.String()}
 			key := "stripe-initial-" + uuid.NewString()
+			if mode == "setup" {
+				fx.svc.RailCustomerService = payments.NewRailCustomerService(fx.db)
+				setupKey := "setup-key-" + uuid.NewString()
+				action, err := fx.svc.CreateStripeMethodSetup(fx.ctx, terms.PSPID, setupKey, principal, resolver)
+				require.NoError(t, err)
+				require.Equal(t, "seti_setup_secret_private", action.ClientSecret)
+				again, err := fx.svc.CreateStripeMethodSetup(fx.ctx, terms.PSPID, setupKey, principal, resolver)
+				require.NoError(t, err)
+				require.Equal(t, action.ID, again.ID)
+				_, err = fx.svc.ConfirmStripeMethodSetup(fx.ctx, action.ID.UUID(), principal, resolver)
+				require.Error(t, err)
+				var before int
+				require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.payments WHERE customer_id=$1`, terms.CustomerID).Scan(&before))
+				require.Zero(t, before)
+				stranger := principal
+				stranger.SubjectID = uuid.NewString()
+				_, err = fx.svc.StripeMethodSetup(fx.ctx, action.ID.UUID(), stranger, resolver)
+				require.Error(t, err)
+				mu.Lock()
+				setupStatus = "succeeded"
+				mu.Unlock()
+				completed, err := fx.svc.ConfirmStripeMethodSetup(fx.ctx, action.ID.UUID(), principal, resolver)
+				require.NoError(t, err)
+				require.NotNil(t, completed.PaymentMethodID)
+				require.Empty(t, completed.ClientSecret)
+				terms.PaymentMethodID = completed.PaymentMethodID.UUID()
+				stored, err := NewCheckoutSessionRepo(fx.db).GetByID(fx.ctx, action.ID.UUID())
+				require.NoError(t, err)
+				raw, _ := json.Marshal(stored.RailState)
+				require.NotContains(t, string(raw), "secret")
+			}
+			cfg.EngineAdmissionHold = true
+			_, heldErr := fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal)
+			require.Error(t, heldErr)
+			require.Zero(t, posts, "hold refuses fresh payment before provider I/O")
+			cfg.EngineAdmissionHold = false
 			_, confirmErr := fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal)
 			op, err := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, InitialMembershipIdempotencyKey(key))
 			require.NoError(t, err)
 			if mode == "lost response" {
+				cfg.EngineAdmissionHold = true // reconciliation survives an admission hold
 				require.ErrorIs(t, confirmErr, ErrCheckoutProcessing)
 				op, err = fx.runner.VerifyByID(fx.ctx, op.ID)
 				require.NoError(t, err)

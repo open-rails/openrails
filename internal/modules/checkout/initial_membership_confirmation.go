@@ -76,6 +76,9 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 	if !db.IsNotFound(err) {
 		return nil, err
 	}
+	if s.Config != nil && s.Config.EngineAdmissionHold {
+		return nil, apperr.Conflictf("engine payment admission is held")
+	}
 	if err := accepted.Validate(); err != nil {
 		return nil, err
 	}
