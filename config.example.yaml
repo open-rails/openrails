@@ -1,13 +1,19 @@
 # OpenRails runtime infrastructure config.
 #
-# Merchant/provider/catalog/auth authority is seeded with the bootstrap/catalog
-# commands and stored in OpenRails/AuthKit state. Keep config.yaml for process
+# Merchant/provider and catalog authority are selected independently below.
+# Keep config.yaml for process
 # infrastructure: listeners, databases, Vault, rate limits, captcha, and similar
 # deployment concerns.
 
 env: development # REQUIRED (SEC-18); no default — an undeclared environment refuses to boot, because the permissive posture (plaintext merchant secrets, an RLS-bypassing DB role) is the development one
 provider_write_mode: full # full | limited | readonly; UNSET fail-closes to readonly (no provider writes) — set full/limited explicitly; required outside development
 test_mode: sandbox        # sandbox | live; allowed in every environment (#762) — rail-credential validation, not env, keeps it honest. REQUIRED outside development (or#915): the credential posture is never inherited by omission
+
+merchant_source: manifest # host-declared merchant/provider config; credentials stay in memory
+catalog_source: ""        # manifest | api; empty follows merchant_source
+# Set catalog_source: api for dynamic products/prices with host-owned credentials.
+# merchant_source: api instead uses managed provider credentials and requires
+# secret_backend: db | vault; DB credentials need an encryption key outside dev.
 
 host: 0.0.0.0
 port: 3053
@@ -53,7 +59,8 @@ auth:
   # or development-only generated keys under .runtime/authkit
 
 encryption:
-  master_key: ""    # base64-encoded 32-byte AES-256 key; empty disables it
+  master_key: ""    # base64 32-byte AES-256 key; host provider credentials alone do not need it
+                    # Required for DB-backed alert webhook URLs and HyperSwitch SDK captures.
 
 vault:
   enabled: false

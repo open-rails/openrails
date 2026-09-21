@@ -356,14 +356,8 @@ func RegisterPaymentProviderRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	registerPaymentProviderActionRoutes(rr, rt, opts, dbMW...)
 }
 
-// manifestModeWriteGuardMW is the ONE mode-1 mutation choke point (#723): in
-// merchant_source=manifest every catalog/provider-config mutation route —
-// standalone and embedded mount alike — answers 405 with a machine-readable
-// code instead of executing. That includes plan-only POST /catalog/publish
-// (the plan is computed at boot from the YAML; use the CLI dry-run instead) —
-// the middleware deliberately does not parse bodies to carve exceptions.
-// Reads (GET) are not guarded; routes stay MOUNTED so callers get this pointed
-// error, never a bare 404.
+// manifestModeWriteGuardMW keeps host-declared provider configuration immutable.
+// Catalog mutation has its own authority guard below.
 func manifestModeWriteGuardMW(rt *app.Runtime) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
@@ -372,7 +366,25 @@ func manifestModeWriteGuardMW(rt *app.Runtime) router.Middleware {
 					HTTPStatus: http.StatusMethodNotAllowed,
 					Type:       api.ErrorTypeInvalidRequest,
 					Code:       "manifest_driven",
-					Message:    "merchant_source=manifest: catalog and payment-provider configuration are manifest-driven; edit the YAML/secret files and reboot (#723)",
+					Message:    "merchant_source=manifest: payment-provider configuration is host-declared; update the host configuration and restart",
+				})
+				return
+			}
+			next(r)
+		}
+	}
+}
+
+// catalogModeWriteGuardMW permits API catalogs independently of provider secrets.
+func catalogModeWriteGuardMW(rt *app.Runtime) router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			if rt != nil && rt.Config.IsManifestCatalogSource() {
+				r.APIError(&api.APIError{
+					HTTPStatus: http.StatusMethodNotAllowed,
+					Type:       api.ErrorTypeInvalidRequest,
+					Code:       "manifest_driven",
+					Message:    "catalog_source=manifest: catalog definitions are host-declared; update the catalog manifest and apply it",
 				})
 				return
 			}
@@ -642,9 +654,8 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 	read := opts.merchantActionPermissionMW(controlplane.PermMerchantCatalogRead)
 	write := opts.merchantActionPermissionMW(authpolicy.PermMerchantCatalogUpdate)
 	readMW := append([]router.Middleware{read}, dbMW...)
-	// Mode-1 guard runs FIRST: a manifest-driven deployment answers 405 before
-	// auth work (#723).
-	writeMW := append([]router.Middleware{manifestModeWriteGuardMW(rt), write}, dbMW...)
+	// Reject mutations of a manifest-owned catalog before authorization work.
+	writeMW := append([]router.Middleware{catalogModeWriteGuardMW(rt), write}, dbMW...)
 
 	products := catalog.Group("/products")
 	products.Handle(http.MethodPost, "", h(httphandlers.AdminCreateProduct), writeMW...)
