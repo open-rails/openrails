@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/stretchr/testify/require"
@@ -20,7 +19,7 @@ func TestSaleStaleUnsentVerificationCannotExpireSubmittedPayment(t *testing.T) {
 	store := intents.NewStore(f.db)
 	now := time.Now().UTC()
 	expiry := now.Add(time.Minute)
-	row, err := store.Enqueue(f.ctx, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", PspID: f.payload.Instrument.PSPID, PriceID: &f.priceID, IntentType: payments.TypeNMISale, IdempotencyKey: NMISaleIdempotencyKey(uuid.NewString()), Payload: f.payload, Origin: intents.OriginUser, NextAttemptAt: now, ExpiresAt: &expiry})
+	row, err := store.Enqueue(f.ctx, intents.EnqueueParams{MerchantID: f.merchantID.UUID(), Provider: "nmi", PspID: f.payload.Instrument.PSPID, PriceID: &f.priceID, IntentType: payments.TypeNMISale, IdempotencyKey: NMISaleIdempotencyKey(uuid.NewString()), Payload: f.payload, Origin: intents.OriginUser, NextAttemptAt: now, ExpiresAt: &expiry})
 	require.NoError(t, err)
 	claimed, ok, err := store.ClaimByID(f.ctx, row.ID, now, now.Add(time.Second))
 	require.NoError(t, err)
