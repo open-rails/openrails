@@ -83,6 +83,11 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 	provision(t, source, id)
 	provision(t, target, id)
 	customer, product, price, psp := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	// These two safe IDs make the real checkout writer produce a SHA256 with
+	// a PAN-shaped numeric substring. Archive it as a digest, not free text.
+	if !recurring {
+		price = uuid.MustParse("19874931-ed8e-4150-848c-cf78caac1a9e")
+	}
 	account := uuid.NewString()
 	now := time.Now().UTC().Truncate(time.Second)
 	if phase == "activated" {
@@ -116,6 +121,9 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 	transaction := "archive-purchase-" + uuid.NewString()
 	end, providerSubscription := now.Add(48*time.Hour), "archive-sub-"+uuid.NewString()
 	methodID := uuid.New()
+	if !recurring {
+		methodID = uuid.MustParse("10000000-0000-4000-8000-000000000001")
+	}
 	method := &models.PaymentMethod{ID: methodID, CustomerID: customer, PspID: psp, Rail: rail, RailCustomerRef: "archive-vault", RailMethodRef: "archive-card", InitialTransactionID: "archive-initial", CreatedAt: now, UpdatedAt: now}
 	require.NoError(t, paymentmethods.NewPaymentMethodRepo(source).Create(ctx, method))
 	_, err = source.Qx(ctx).Exec(ctx, `INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,plan_id) VALUES($1,$2,$3,'writer-plan')`, id.UUID(), price, psp)
@@ -308,6 +316,13 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 	require.Equal(t, transaction, first.Payment.TransactionID)
 	require.EqualValues(t, 1, gatewayCalls.Load())
 	sessionID := first.ID.UUID()
+	if !recurring {
+		stored, err := source.Gen(ctx).GetCheckoutSessionByID(ctx, gen.GetCheckoutSessionByIDParams{MerchantID: id.UUID(), ID: sessionID})
+		require.NoError(t, err)
+		var state map[string]any
+		require.NoError(t, json.Unmarshal(stored.RailState, &state))
+		require.Equal(t, "cf0b56594a544b069795b7521f553ad1ab9dbc4413daf5369343142307519d66", state["_openrails_request_fingerprint"])
+	}
 	first, err = sessionService.GetSession(ctx, sessionID, user)
 	require.NoError(t, err)
 	payment, err := services.payments.GetByPSPTransactionID(ctx, rail, transaction)
