@@ -7,11 +7,10 @@ runs.
 
 Webhook endpoints:
 
-- `/v1/webhooks/{rail}` — merchant derived from payload account identity
 - `/v1/webhooks/{rail}/{account_id}` — the receiving PSP account pinned
 
-e.g. `https://<your-hostname>/v1/webhooks/nmi`. `{rail}` is the gateway kind,
-never a PSP key — a mobius account still posts to `/v1/webhooks/nmi`.
+e.g. `https://<your-hostname>/v1/webhooks/nmi/{account_id}`. `{rail}` is the gateway kind,
+never a PSP key — a mobius account still uses `nmi`. The account segment is required; payload identity must agree with it.
 
 ## Prereqs (one-time, Cloudflare side)
 

@@ -576,23 +576,21 @@ boundary). Success returns `200 { "status": "accepted" }`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/v1/webhooks/{provider}` | The standalone surface: NMI-backed rails / CCBill; the merchant is derived from the payload's account identity |
-| POST | `/v1/webhooks/{provider}/{account_id}` | Same, with the receiving PSP account pinned in the path (direct Stripe; multi-account rails) |
-| POST | `/billing/v1/merchants/{merchant}/webhooks/{provider}` | Embedded only: the host pins one merchant, so the `{merchant}` slug resolves it and THAT merchant's signing secret verifies the payload |
-| POST | `/billing/v1/merchants/{merchant}/webhooks/{provider}/{account_id}` | Embedded only, per-account (e.g. multiple NMI accounts) |
+| POST | `/v1/webhooks/{provider}/{account_id}` | Standalone: the receiving PSP account is explicitly pinned in the path and its credentials verify the callback |
+| POST | `/billing/v1/merchants/{merchant}/webhooks/{provider}/{account_id}` | Embedded: the host pins the merchant and receiving PSP account; that account's credentials verify the callback |
 
 `{provider}` is the gateway KIND — `nmi`, `ccbill`, `stripe`, `solana`,
 `basistheory`. It is never a PSP key: `mobius` and `paykings` both post to
-`/v1/webhooks/nmi` and are told apart by `{account_id}` or the payload's own
-account identity.
+`/v1/webhooks/nmi/{account_id}` and are distinguished by the explicit receiving
+account. Callback account information must agree with that selected account.
 
 Deployments using per-merchant hostnames (`api.<slug>.<domain>`) additionally
-serve `/v1/webhooks/{provider}[/{account_id}]` with the merchant resolved from
-the Host header.
+serve account-explicit webhook routes with the merchant resolved from the Host
+header. Accountless routes are not mounted.
 
 Verification per rail:
 
-- **NMI** (`/v1/webhooks/nmi`): JSON body; `Webhook-Signature`
+- **NMI** (`/v1/webhooks/nmi/{account_id}`): JSON body; `Webhook-Signature`
   (`t=...,s=...`) — the one header NMI sends, and the only one read.
   Test mode (config) bypasses the check.
 - **CCBill**: form-encoded; verified via CCBill's published source-IP ranges

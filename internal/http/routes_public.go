@@ -31,8 +31,8 @@ func (s *Server) registerUserRoutes(mux router.Registrar) {
 }
 
 // registerWebhookRoutes mounts the canonical provider-only webhook surface (#650):
-// /webhooks/:provider (NMI/CCBill, merchant derived from payload account identity) and
-// /webhooks/:provider/:account_id (direct Stripe). Standalone mounts this; embedded hosts
+// /webhooks/:provider/:account_id (the configured account resolves its merchant).
+// Standalone mounts this; embedded hosts
 // use the merchant-scoped surface because they pin one merchant in context.
 func (s *Server) registerWebhookRoutes(mux router.Registrar) {
 	if s.controlPlane != nil && !s.controlPlane.SelfHostedPosture() {

@@ -393,18 +393,18 @@ Inbound rail webhooks resolve the merchant first, then verify. Each deployment
 shape mounts ONE surface, all sharing one handler:
 
 ```text
-POST /v1/webhooks/:rail                                      # standalone: merchant derived from the
-POST /v1/webhooks/:rail/:account_id                          #   payload's account identity (NMI/CCBill; Stripe with account)
-POST /billing/v1/merchants/:merchant/webhooks/:rail          # embedded: the host pins one merchant,
-POST /billing/v1/merchants/:merchant/webhooks/:rail/:account_id  #   slug resolves once to immutable identity
+POST /v1/webhooks/:rail/:account_id                          # standalone: configured account resolves merchant
+POST /billing/v1/merchants/:merchant/webhooks/:rail/:account_id  # embedded: merchant and account are explicit
 ```
 
 `:rail` is the gateway KIND — `nmi`, `ccbill`, `stripe`, `solana`,
 `basistheory` — never a PSP key. A PSP is named by `:account_id`, not by the
-rail segment: `mobius` and `paykings` both post to `/v1/webhooks/nmi`.
+rail segment: `mobius` and `paykings` both post to `/v1/webhooks/nmi/{account_id}`. Accountless routes are not registered; payload account identities must agree with the selected account.
+
+Before deploying this route contract, update existing provider webhook registrations that omit the account segment. Old URLs return404. Updating the callback URL does not change subscription ownership or billing schedules.
 
 Deployments with per-merchant API hosts additionally resolve the merchant from
-the `Host` header at `/webhooks/:provider[/:account_id]` (see
+the `Host` header at `/webhooks/:provider/:account_id` (see
 [operations.md](operations.md)). In every case the router is **not** the trust
 boundary: OpenRails re-derives the merchant, loads that merchant's signing
 secret, and verifies the signature. An unresolvable slug/host is rejected —

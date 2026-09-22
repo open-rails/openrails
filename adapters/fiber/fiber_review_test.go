@@ -73,7 +73,7 @@ func TestFiberReviewRequestBodyContextAndHostFallback(t *testing.T) {
 		return c.Next()
 	})
 	const body = "{ \"whitespace\": true, \"unicode\": \"é\" }\n"
-	const target = "/api/pay/v1/webhooks/stripe?signature=original"
+	const target = "/api/pay/v1/webhooks/stripe/acct_test?signature=original"
 	calls := 0
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -81,12 +81,12 @@ func TestFiberReviewRequestBodyContextAndHostFallback(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, body, string(raw))
 		require.Equal(t, target, r.RequestURI)
-		require.Equal(t, "/api/pay/v1/webhooks/stripe", r.URL.Path)
+		require.Equal(t, "/api/pay/v1/webhooks/stripe/acct_test", r.URL.Path)
 		require.Equal(t, "exact-signature", r.Header.Get("Stripe-Signature"))
 		require.Equal(t, "host", r.Context().Value(reviewContextKey{}))
 		w.WriteHeader(http.StatusNoContent)
 	})
-	b := &Bundle{routes: []embed.HTTPRoute{{Method: http.MethodPost, Path: "/v1/webhooks/{provider}", Handler: h}}}
+	b := &Bundle{routes: []embed.HTTPRoute{{Method: http.MethodPost, Path: "/v1/webhooks/{provider}/{account_id}", Handler: h}}}
 	require.NoError(t, b.Mount(engine.Group("/api/pay")))
 	engine.Use(func(c fiber.Ctx) error { return c.SendStatus(418) })
 	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
@@ -96,7 +96,7 @@ func TestFiberReviewRequestBodyContextAndHostFallback(t *testing.T) {
 	response.Body.Close()
 	require.Equal(t, http.StatusNoContent, response.StatusCode)
 	require.Equal(t, 1, calls)
-	for _, path := range []string{"/other", "/api/pay/v1/unrelated", "/api/payment/v1/webhooks/stripe"} {
+	for _, path := range []string{"/other", "/api/pay/v1/unrelated", "/api/payment/v1/webhooks/stripe/acct_test"} {
 		response, err = engine.Test(httptest.NewRequest(http.MethodPost, path, nil))
 		require.NoError(t, err)
 		response.Body.Close()

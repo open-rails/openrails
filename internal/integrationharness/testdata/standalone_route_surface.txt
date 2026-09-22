@@ -248,7 +248,6 @@ POST /v1/merchant/wasted-spend
 POST /v1/merchant/webhooks
 POST /v1/platform/merchants/{id}/restore
 POST /v1/solana/recurring/enroll
-POST /v1/webhooks/{provider}
 POST /v1/webhooks/{provider}/{account_id}
 PUT /v1/catalog
 PUT /v1/catalog/products/by-key/{key}

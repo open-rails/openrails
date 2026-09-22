@@ -15,9 +15,9 @@ import (
 
 func TestPublicStripeWebhookURL(t *testing.T) {
 	got, ok, err := PublicStripeWebhookURL(&config.Config{APIURL: "https://billing.example.com/billing"}, "acme", "")
-	require.NoError(t, err)
-	require.True(t, ok)
-	require.Equal(t, "https://billing.example.com/billing/v1/merchants/acme/webhooks/stripe", got)
+	require.ErrorContains(t, err, "account_id is required")
+	require.False(t, ok)
+	require.Empty(t, got)
 
 	// #641: a set account_id yields the per-account endpoint.
 	perAcct, ok, err := PublicStripeWebhookURL(&config.Config{APIURL: "https://billing.example.com/billing"}, "acme", "acct_123")
@@ -25,7 +25,11 @@ func TestPublicStripeWebhookURL(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "https://billing.example.com/billing/v1/merchants/acme/webhooks/stripe/acct_123", perAcct)
 
-	_, ok, err = PublicStripeWebhookURL(&config.Config{APIURL: "http://localhost:3053"}, "acme", "")
+	standalone, ok, err := PublicStripeWebhookURL(&config.Config{APIURL: "https://billing.example.com"}, "", "acct_123")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, "https://billing.example.com/v1/webhooks/stripe/acct_123", standalone)
+	_, ok, err = PublicStripeWebhookURL(&config.Config{APIURL: "http://localhost:3053"}, "acme", "acct_123")
 	require.NoError(t, err)
 	require.False(t, ok)
 }
@@ -76,6 +80,7 @@ func TestReconcileManagedStripeWebhookWithoutStoreDestinationFails(t *testing.T)
 		// Mint is mode-2 (api) behavior; manifest mode refuses (#723).
 		Config:        &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantConfigSource: config.MerchantConfigSourceAPI},
 		SecretKey:     "sk_test_123",
+		PspID:         "acct_123",
 		EnabledEvents: []string{"invoice.paid"},
 		StripeBaseURL: svc.BaseURL,
 	})

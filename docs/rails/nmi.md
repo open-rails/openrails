@@ -68,7 +68,7 @@ never commit them. A PSP declares no environment (#882): the deployment-level
 In the NMI dashboard, register a webhook endpoint pointing at your OpenRails
 deployment:
 
-- URL: `https://<your-host>/v1/webhooks/nmi` — the rail, not the PSP key; a
+- URL: `https://<your-host>/v1/webhooks/nmi/{account_id}` — the rail, not the PSP key; a
   `mobius` account posts here too, and is identified by the payload's Gateway ID
 - Signing secret: exactly the value you declared as `webhook_signing_secret`
 

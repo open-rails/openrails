@@ -55,12 +55,12 @@ var retiredRailSegments = map[string]string{
 // CanonicalRail normalizes a webhook URL's rail segment to the rail (or event
 // source) it names. The segment is the gateway KIND — nmi, ccbill, stripe,
 // solana, basistheory. Which PSP on that rail sent the event comes from the
-// :account_id segment or the payload's own account identity, never from this
-// segment: mobius and paykings both post to /webhooks/nmi.
+// required :account_id segment, verified against payload identity when present,
+// never from this segment: mobius and paykings use /webhooks/nmi/{account_id}.
 func CanonicalRail(rail string) (string, error) {
 	rail = strings.Trim(strings.ToLower(rail), " /")
 	if canonical, retired := retiredRailSegments[rail]; retired {
-		return "", fmt.Errorf("%w: /webhooks/%s was removed (or#893) — post to /webhooks/%s; a PSP is named by the account_id path segment or the payload's account identity, not by the rail segment", ErrWebhookRailRetired, rail, canonical)
+		return "", fmt.Errorf("%w: /webhooks/%s was removed (or#893) — post to /webhooks/%s/{account_id}; a provider account is named by the required account_id path segment, not by the rail segment", ErrWebhookRailRetired, rail, canonical)
 	}
 	// #795: the event source of a Basis Theory event is the CUSTODIAN itself
 	// (or#879) — Basis Theory holds the card, NMI charges it, and only the

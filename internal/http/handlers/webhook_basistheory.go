@@ -9,6 +9,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
@@ -55,15 +56,31 @@ func basisTheoryWebhookTenantID(body []byte) string {
 	return strings.TrimSpace(evt.TenantID)
 }
 
-func processMerchantBasisTheoryWebhook(r *httprequest.Request, merchantID merchant.ID, _ string) bool {
+func processMerchantBasisTheoryWebhook(r *httprequest.Request, merchantID merchant.ID, accountID string) bool {
 	body, ok := readLimitedWebhookBody(r, maxBTWebhookBytes)
 	if !ok {
 		return false
 	}
-	// or#880: the identity a Basis Theory event carries is ITS OWN tenant id.
-	// A route-supplied account_id is a rail account and never addresses a
-	// custodian, so the envelope is the only honest source here.
-	return processMerchantBasisTheoryWebhookBody(r, merchantID, basisTheoryWebhookTenantID(body), body)
+	// Basis Theory's account segment is its custodian tenant ID, not a PSP ID.
+	if tenantID := basisTheoryWebhookTenantID(body); tenantID == "" || tenantID != accountID {
+		r.ErrorJSON(http.StatusBadRequest, "Webhook account does not match payload")
+		return false
+	}
+	if r.State.Merchants == nil {
+		r.ErrorJSON(http.StatusServiceUnavailable, "Merchant webhook routing is not configured")
+		return false
+	}
+	custodian, found, err := r.State.Merchants.ResolveCustodianByIdentity(r.Request.Context(), models.CustodianBasisTheory, webhookProviderEnvironment(r), accountID)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "Webhook account resolution failed")
+		return false
+	}
+	if !found || custodian.MerchantID != merchantID {
+		r.ErrorJSON(http.StatusNotFound, "Unknown custodian account")
+		return false
+	}
+	r.Request = r.Request.WithContext(db.WithCustodianID(r.Request.Context(), custodian.ID))
+	return processMerchantBasisTheoryWebhookBody(r, merchantID, accountID, body)
 }
 
 func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID merchant.ID, tenantID string, body []byte) bool {

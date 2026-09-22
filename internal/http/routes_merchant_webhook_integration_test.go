@@ -112,23 +112,32 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 
 	body := []byte(`{"id":"evt_1","type":"checkout.session.completed"}`)
 	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	for _, path := range []string{"/global/stripe", "/global/nmi", "/global/ccbill", "/global/basistheory", "/v1/merchants/" + acmeSlug + "/webhooks/stripe"} {
+		require.Equal(t, http.StatusNotFound, postMerchantWebhook(t, server.URL+path, body, stripeSig("whsec_acme_test", ts, body)), "accountless route %s must not exist", path)
+	}
 
-	require.Equal(t, http.StatusNotFound, postMerchantWebhook(t, server.URL+"/v1/merchants/nope/webhooks/stripe", body, stripeSig("whsec_acme_test", ts, body)))
-	require.Equal(t, http.StatusUnauthorized, postMerchantWebhook(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/stripe", body, stripeSig("whsec_evil", ts, body)))
+	require.Equal(t, http.StatusNotFound, postMerchantWebhook(t, server.URL+"/v1/merchants/nope/webhooks/stripe/"+acctAcmeTest, body, stripeSig("whsec_acme_test", ts, body)))
+	require.Equal(t, http.StatusUnauthorized, postMerchantWebhook(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/stripe/"+acctAcmeTest, body, stripeSig("whsec_evil", ts, body)))
 	// test_mode posture resolves the environment=test account's secret (#681);
 	// the live account's secret no longer verifies.
-	require.Equal(t, http.StatusUnauthorized, postMerchantWebhook(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/stripe", body, stripeSig("whsec_acme", ts, body)))
-	require.Equal(t, http.StatusInternalServerError, postMerchantWebhook(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/stripe", body, stripeSig("whsec_acme_test", ts, body)))
+	require.Equal(t, http.StatusUnauthorized, postMerchantWebhook(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/stripe/"+acctAcmeTest, body, stripeSig("whsec_acme", ts, body)))
+	require.Equal(t, http.StatusInternalServerError, postMerchantWebhook(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/stripe/"+acctAcmeTest, body, stripeSig("whsec_acme_test", ts, body)))
+	foreignStripe := []byte(`{"id":"evt_wrong_account","type":"checkout.session.completed","account":"` + acctEvil + `"}`)
+	require.Equal(t, http.StatusBadGateway, postMerchantWebhook(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/stripe/"+acctAcmeTest, foreignStripe, stripeSig("whsec_acme_test", ts, foreignStripe)))
+	require.Equal(t, http.StatusNotFound, postMerchantWebhook(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/stripe/"+acctEvil, body, stripeSig("whsec_evil", ts, body)))
 
 	nmiBody := []byte(`{"event_id":"evt_nmi_1","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"` + nmiAcmeTest + `"},"transaction_id":"txn_1"}}`)
-	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/nmi", nmiBody, "Webhook-Signature", nmiSig("nmi_evil", ts, nmiBody)))
-	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/nmi", nmiBody, "Webhook-Signature", nmiSig("nmi_acme", ts, nmiBody)))
-	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/nmi", nmiBody, "Webhook-Signature", nmiSig("nmi_acme_test", ts, nmiBody)))
+	wrongNMI := []byte(strings.ReplaceAll(string(nmiBody), nmiAcmeTest, nmiEvil))
+	require.Equal(t, http.StatusBadRequest, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/nmi/"+nmiAcmeTest, wrongNMI, "Webhook-Signature", nmiSig("nmi_acme_test", ts, wrongNMI)))
+	require.Equal(t, http.StatusBadRequest, postMerchantWebhookWithHeader(t, server.URL+"/global/nmi/"+nmiAcmeTest, wrongNMI, "Webhook-Signature", nmiSig("nmi_acme_test", ts, wrongNMI)))
+	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/nmi/"+nmiAcmeTest, nmiBody, "Webhook-Signature", nmiSig("nmi_evil", ts, nmiBody)))
+	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/nmi/"+nmiAcmeTest, nmiBody, "Webhook-Signature", nmiSig("nmi_acme", ts, nmiBody)))
+	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/nmi/"+nmiAcmeTest, nmiBody, "Webhook-Signature", nmiSig("nmi_acme_test", ts, nmiBody)))
 
 	// or#893 phase 6: /webhooks/mobius is gone. It is a PSP key, not a rail —
 	// and a VALIDLY signed body must still be refused, at the route, before any
 	// secret is loaded.
-	status, refusal := postMerchantWebhookBody(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/mobius", nmiBody, "Webhook-Signature", nmiSig("nmi_acme_test", ts, nmiBody))
+	status, refusal := postMerchantWebhookBody(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/mobius/"+nmiAcmeTest, nmiBody, "Webhook-Signature", nmiSig("nmi_acme_test", ts, nmiBody))
 	require.Equal(t, http.StatusBadRequest, status)
 	require.Contains(t, refusal, "/webhooks/mobius was removed (or#893) — post to /webhooks/nmi")
 
@@ -137,22 +146,24 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	// them is unsigned.
 	for _, retired := range []string{"X-Signature", "X-NMI-Signature", "X-Mobius-Signature"} {
 		require.Equal(t, http.StatusUnauthorized,
-			postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/nmi", nmiBody, retired, nmiSig("nmi_acme_test", ts, nmiBody)),
+			postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/nmi/"+nmiAcmeTest, nmiBody, retired, nmiSig("nmi_acme_test", ts, nmiBody)),
 			retired)
 	}
 
 	ccbillBody := []byte(`{"eventType":"RenewalSuccess","clientAccnum":"945282","clientSubacc":"0000","subscriptionId":"ccs_1","transactionId":"cct_1"}`)
-	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/ccbill?eventType=RenewalSuccess", ccbillBody, "X-Unused", "unused"))
+	require.Equal(t, http.StatusBadRequest, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/ccbill/945282-0001?eventType=RenewalSuccess", ccbillBody, "X-Unused", "unused"))
+	require.Equal(t, http.StatusBadRequest, postMerchantWebhookWithHeader(t, server.URL+"/global/ccbill/945282-0001?eventType=RenewalSuccess", ccbillBody, "X-Unused", "unused"))
+	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/v1/merchants/"+acmeSlug+"/webhooks/ccbill/945282-0000?eventType=RenewalSuccess", ccbillBody, "X-Unused", "unused"))
 
 	globalNMIBody := []byte(`{"event_id":"evt_nmi_2","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"` + nmiAcmeTest + `"},"transaction_id":"txn_2"}}`)
 	archivedNMIBody := []byte(`{"event_id":"evt_nmi_3","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"` + nmiArchived + `"},"transaction_id":"txn_3"}}`)
 	globalCCBillBody := []byte(`{"eventType":"RenewalSuccess","clientAccnum":"945282","clientSubacc":"0000","subscriptionId":"ccs_2","transactionId":"cct_2"}`)
 	require.Equal(t, http.StatusUnauthorized, postMerchantWebhook(t, server.URL+"/global/stripe/"+acctAcmeTest, body, stripeSig("whsec_evil", ts, body)))
 	require.Equal(t, http.StatusInternalServerError, postMerchantWebhook(t, server.URL+"/global/stripe/"+acctAcmeTest, body, stripeSig("whsec_acme_test", ts, body)))
-	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/global/nmi", globalNMIBody, "Webhook-Signature", nmiSig("nmi_evil", ts, globalNMIBody)))
-	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/global/nmi", globalNMIBody, "Webhook-Signature", nmiSig("nmi_acme_test", ts, globalNMIBody)))
-	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/global/nmi", archivedNMIBody, "Webhook-Signature", nmiSig("nmi_archived", ts, archivedNMIBody)))
-	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/global/ccbill?eventType=RenewalSuccess", globalCCBillBody, "X-Unused", "unused"))
+	require.Equal(t, http.StatusUnauthorized, postMerchantWebhookWithHeader(t, server.URL+"/global/nmi/"+nmiAcmeTest, globalNMIBody, "Webhook-Signature", nmiSig("nmi_evil", ts, globalNMIBody)))
+	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/global/nmi/"+nmiAcmeTest, globalNMIBody, "Webhook-Signature", nmiSig("nmi_acme_test", ts, globalNMIBody)))
+	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/global/nmi/"+nmiArchived, archivedNMIBody, "Webhook-Signature", nmiSig("nmi_archived", ts, archivedNMIBody)))
+	require.Equal(t, http.StatusInternalServerError, postMerchantWebhookWithHeader(t, server.URL+"/global/ccbill/945282-0000?eventType=RenewalSuccess", globalCCBillBody, "X-Unused", "unused"))
 }
 
 func postMerchantWebhook(t *testing.T, url string, body []byte, sig string) int {

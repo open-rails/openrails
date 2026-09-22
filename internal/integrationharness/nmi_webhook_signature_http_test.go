@@ -51,7 +51,7 @@ func TestNMIMerchantWebhookSignatureHTTP(t *testing.T) {
 	body := []byte(fmt.Sprintf(`{"event_id":"evt_%s","event_type":"recurring.subscription.delete","event_body":{"merchant":{"id":"%s"},"subscription_id":%s}}`, uuid.NewString(), account, railSub))
 	post := func(body []byte, signature string) (int, []byte) {
 		t.Helper()
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, surface.BaseURL+"/v1/webhooks/nmi", bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, surface.BaseURL+"/v1/webhooks/nmi/"+account, bytes.NewReader(body))
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		if signature != "" {
