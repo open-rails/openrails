@@ -79,9 +79,9 @@ func TestStripeEngineCancellationUsesExecuteGates(t *testing.T) {
 					cancels++
 					pi["status"] = "canceled"
 					if mode == "lost cancel" {
-						c, _, err := w.(http.Hijacker).Hijack()
-						require.NoError(t, err)
-						_ = c.Close()
+						// Cancellation committed; its successful acknowledgement was lost.
+						w.WriteHeader(http.StatusBadGateway)
+						_, _ = w.Write([]byte(`{"error":"lost cancel acknowledgement"}`))
 						return
 					}
 					_ = json.NewEncoder(w).Encode(pi)
