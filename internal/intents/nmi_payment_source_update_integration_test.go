@@ -69,7 +69,7 @@ func newFakeNMISwapGateway(t *testing.T, railSubID, initialVault string) (*fakeN
 				w.WriteHeader(http.StatusBadGateway)
 			case "rejected":
 				// Parsed clean refusal: NMI understood and said no.
-				fmt.Fprint(w, "response=3&responsetext=Invalid Customer Vault Id")
+				fmt.Fprint(w, "response=2&response_code=200&responsetext=DECLINED")
 			default:
 				f.vault.Store(r.PostFormValue("customer_vault_id"))
 				fmt.Fprint(w, "response=1&responsetext=SUCCESS")

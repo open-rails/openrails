@@ -109,7 +109,7 @@ func TestTerminalRefundCanRetryWithNewClientKey(t *testing.T) {
 	payID := fx.seedCompletedPayment("audit-"+uuid.NewString(), nil)
 	hr := httprequest.NewHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/refund", nil).WithContext(fx.ctx), fx.rt)
 	req := refundRequest{Amount: 5000000}
-	fx.fake.refundStatus.Store(`{"object":"transaction","id":"txn_refund_1","response":"2","response_text":"DECLINED","response_code":"300"}`)
+	fx.fake.refundStatus.Store(`{"object":"transaction","id":"txn_refund_1","response":"2","response_text":"DECLINED","response_code":"200"}`)
 	_, _, err := executeAdminRefund(fx.ctx, hr, payID, req, "first-key")
 	require.Error(t, err)
 	require.EqualValues(t, 1, fx.fake.refundCalls.Load())

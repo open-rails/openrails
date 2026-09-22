@@ -131,6 +131,10 @@ func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNM
 			f.createCalls.Add(1)
 			f.createForm.Store(r.Form)
 			switch f.createMode.Load().(string) {
+			case "duplicate_response":
+				fmt.Fprint(w, "response=2&response=1&response_code=202&response_code=100")
+			case "communication_response":
+				fmt.Fprint(w, "response=3&response_code=420&responsetext=RAW_PROVIDER_SENTINEL")
 			case "decline":
 				fmt.Fprint(w, "response=2&response_code=200&responsetext=DECLINED")
 			case "ambiguous500":

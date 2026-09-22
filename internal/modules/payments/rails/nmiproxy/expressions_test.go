@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -289,6 +290,29 @@ func TestChargerOutcomes(t *testing.T) {
 			t.Fatal("430 must surface as an error for retry machinery")
 		}
 	})
+
+	for _, body := range []string{
+		"response=3&response_code=400&responsetext=RAW_PROVIDER_SENTINEL",
+		"response=2&response=1&response_code=202&response_code=100",
+		"response=2&response_code=100", "response=2",
+	} {
+		t.Run(body, func(t *testing.T) {
+			posts := 0
+			c, srv := newCharger(func(w http.ResponseWriter, r *http.Request) {
+				posts++
+				w.Header().Set(basistheory.ProxyDestinationStatusHeader, "200")
+				_, _ = w.Write([]byte(body))
+			})
+			defer srv.Close()
+			result, err := c.Charge(t.Context(), req)
+			if err == nil || !nmi.RequiresVerification(err) || result.Declined || posts != 1 {
+				t.Fatalf("unqualified reply: result=%+v err=%v posts=%d", result, err, posts)
+			}
+			if strings.Contains(err.Error(), "RAW_PROVIDER_SENTINEL") {
+				t.Fatal("opaque provider text escaped")
+			}
+		})
+	}
 
 	t.Run("BT pre-forward failure is an error, never a decline", func(t *testing.T) {
 		c, srv := newCharger(func(w http.ResponseWriter, r *http.Request) {

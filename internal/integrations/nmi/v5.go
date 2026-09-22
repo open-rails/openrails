@@ -35,14 +35,6 @@ const (
 // ErrV5NotFound marks a v5 404 — the resource does not exist at NMI.
 var ErrV5NotFound = errors.New("nmi: resource not found")
 
-// v5Error is the modern error envelope (HTTP 4xx/5xx bodies).
-type v5Error struct {
-	Type      string `json:"type"`
-	ErrorCode string `json:"error_code"`
-	Message   string `json:"message"`
-	RefID     string `json:"ref_id"`
-}
-
 // centsJSONAmount renders integer cents as an exact two-decimal JSON number
 // (1099 -> 10.99). Never float math: this is a money wire boundary (#671).
 func centsJSONAmount(cents moneyutil.Cents) json.RawMessage {
@@ -155,17 +147,11 @@ func (c *NMIClient) sendV5Request(ctx context.Context, method, path string, body
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		var envelope v5Error
-		_ = json.Unmarshal(raw, &envelope)
-		msg := strings.TrimSpace(envelope.Message)
-		if msg == "" {
-			msg = strings.TrimSpace(string(raw))
-		}
+		// Provider envelopes and raw bodies are internal data, never diagnostics.
 		if resp.StatusCode == http.StatusNotFound {
-			return fmt.Errorf("%w: %s %s: %s", ErrV5NotFound, method, path, msg)
+			return fmt.Errorf("%w: status %d", ErrV5NotFound, resp.StatusCode)
 		}
-		err := fmt.Errorf("nmi v5 %s %s: status %d (%s %s): %s",
-			method, path, resp.StatusCode, envelope.Type, envelope.ErrorCode, msg)
+		err := fmt.Errorf("nmi v5 request failed: status %d", resp.StatusCode)
 		if resp.StatusCode >= 500 {
 			return classify(err)
 		}
@@ -261,14 +247,13 @@ func (t *v5Transaction) resultCode() int {
 // CustomerVaultError shape the classic path produced, so caller error handling
 // (localization ids, hard/soft decline classification) is unchanged.
 func newV5TransactionError(prefix string, txn *v5Transaction) error {
-	message := strings.TrimSpace(txn.ResponseText)
-	if message == "" {
-		message = "declined"
+	code, _ := strconv.Atoi(strings.TrimSpace(txn.ResponseCode))
+	if strings.TrimSpace(txn.Response) != "2" || code < 200 || code >= 300 {
+		return ambiguous(fmt.Errorf("NMI outcome requires verification (response code %d)", code))
 	}
-	code := txn.resultCode()
 	rawResponse, _ := json.Marshal(txn)
 	return &CustomerVaultError{
-		Message:        fmt.Sprintf("%s: %s", prefix, message),
+		Message:        prefix,
 		ResponseCode:   code,
 		LocalizationID: nmiLocalizationID(code),
 		Detail:         nmiResponseDetail(code),
