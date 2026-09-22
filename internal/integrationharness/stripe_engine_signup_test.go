@@ -417,6 +417,36 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 		recoveryView := view["recovery"].(map[string]any)
 		require.Equal(t, true, recoveryView["retryable"])
 		require.Equal(t, "insufficient_funds", recoveryView["last_failure_reason"])
+		// Readback and admission agree on disabled obligations and unavailable
+		// provider accounts; none of these failures is an internal-server error.
+		for _, probe := range []struct {
+			name, change, restore string
+			status                int
+		}{
+			{"nil_retry", `UPDATE billing.subscriptions SET next_retry_at=NULL WHERE id=$1`, `UPDATE billing.subscriptions SET next_retry_at=$2 WHERE id=$1`, http.StatusConflict},
+			{"cancelled", `UPDATE billing.subscriptions SET cancelled_at=now() WHERE id=$1`, `UPDATE billing.subscriptions SET cancelled_at=NULL WHERE id=$1`, http.StatusConflict},
+			{"deletion", `UPDATE billing.subscriptions SET deletion_scheduled_at=now() WHERE id=$1`, `UPDATE billing.subscriptions SET deletion_scheduled_at=NULL WHERE id=$1`, http.StatusConflict},
+			{"archived_account", `UPDATE billing.psps SET archived=true WHERE id=(SELECT psp_id FROM billing.subscriptions WHERE id=$1)`, `UPDATE billing.psps SET archived=false WHERE id=(SELECT psp_id FROM billing.subscriptions WHERE id=$1)`, http.StatusBadRequest},
+		} {
+			_, err := pool.Exec(t.Context(), probe.change, subscription.UUID())
+			require.NoError(t, err)
+			blocked := call("GET", "/subscriptions/"+subscription.String(), "", nil)["recovery"].(map[string]any)
+			require.Equal(t, false, blocked["retryable"], probe.name)
+			_, err = customer.RetrySubscriptionNow(t.Context(), openrails.RetrySubscriptionNowRequest{SubscriptionID: subscription, IdempotencyKey: probe.name + uuid.NewString()})
+			var refusal *openrails.StatusError
+			require.ErrorAs(t, err, &refusal)
+			require.Equal(t, probe.status, refusal.Status, probe.name)
+			mu.Lock()
+			require.Equal(t, 2, paymentCreates, "refused retries cannot submit payments")
+			mu.Unlock()
+			if probe.name == "nil_retry" {
+				_, err = pool.Exec(t.Context(), probe.restore, subscription.UUID(), retryAt)
+			} else {
+				_, err = pool.Exec(t.Context(), probe.restore, subscription.UUID())
+			}
+			require.NoError(t, err)
+		}
+
 		replacement := openrails.PaymentMethodID(uuid.New())
 		_, err = customer.RetrySubscriptionNow(t.Context(), openrails.RetrySubscriptionNowRequest{SubscriptionID: subscription, IdempotencyKey: "wrong-method-" + uuid.NewString(), PaymentMethodID: &replacement})
 		require.Error(t, err)

@@ -3,6 +3,7 @@ package money
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -12,10 +13,10 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -29,11 +30,18 @@ func (s *MoneyService) AdmitDueSubscriptionCollection(ctx context.Context, subsc
 // AdmitCustomerSubscriptionCollection uses the same locked obligation and
 // receipt custody as scheduled collection. A verified payer may bypass only
 // retry delay after a released attempt, never unresolved financial ownership.
-func (s *MoneyService) AdmitCustomerSubscriptionCollection(ctx context.Context, subscriptionID, payer uuid.UUID, key string, method *uuid.UUID) (gen.OpenrailsRailIntent, bool, error) {
+func (s *MoneyService) AdmitCustomerSubscriptionCollection(ctx context.Context, subscriptionID, payer uuid.UUID, key string, method *uuid.UUID, principal billingauth.DelegatedPrincipal) (gen.OpenrailsRailIntent, bool, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return gen.OpenrailsRailIntent{}, false, err
+	}
+	if principal.Validate() != nil || principal.CredentialClass != billingauth.CredentialClassUserSession || principal.Invoker != "" || principal.MerchantID != mid.String() || principal.SubjectID != payer.String() {
+		return gen.OpenrailsRailIntent{}, false, ErrCustomerSessionRequired
+	}
 	if payer == uuid.Nil || strings.TrimSpace(key) == "" || len(key) > 255 || (method != nil && *method == uuid.Nil) {
 		return gen.OpenrailsRailIntent{}, false, errors.New("payer and a 1-255 byte retry key required")
 	}
-	return s.admitSubscriptionCollection(ctx, subscriptionID, s.now(), payer, charge.CustomerPaymentKey(subscriptions.TypeSubscriptionCollection, payer, strings.TrimSpace(key)), method)
+	return s.admitSubscriptionCollection(ctx, subscriptionID, s.now(), payer, charge.CustomerPaymentKey(subscriptions.TypeManualRebill, payer, strings.TrimSpace(key)), method)
 }
 
 func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscriptionID uuid.UUID, admittedAt time.Time, payer uuid.UUID, customerKey string, requestedMethod *uuid.UUID) (gen.OpenrailsRailIntent, bool, error) {
@@ -69,6 +77,9 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 			}
 			prior, err := intents.NewStore(d).GetByIdempotencyKey(ctx, customerKey)
 			if err == nil {
+				if prior.IntentType != subscriptions.TypeSubscriptionCollection {
+					return intents.ErrRebillKeyConflict
+				}
 				p, decodeErr := subscriptions.DecodeSubscriptionCollectionPayload(prior)
 				if decodeErr != nil {
 					return decodeErr
@@ -107,10 +118,10 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 			return err
 		}
 		if s.EngineAdmissionHold {
-			return errors.New("new engine payment admission is held")
+			return fmt.Errorf("%w: new engine payment admission is held", intents.ErrRebillNotRetryable)
 		}
-		if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.After(admittedAt) || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) || (payer == uuid.Nil && sub.Status == models.StatusPastDue && (sub.NextRetryAt == nil || sub.NextRetryAt.After(admittedAt))) || (payer != uuid.Nil && sub.Status != models.StatusPastDue) {
-			return errors.New("engine subscription is not due")
+		if !subscriptions.EngineCollectionDue(sub, admittedAt, payer != uuid.Nil) {
+			return fmt.Errorf("%w: engine subscription is not due", intents.ErrRebillNotRetryable)
 		}
 		attempt := 0
 		previous, err := q.GetLatestSubscriptionCollectionForPeriod(ctx, gen.GetLatestSubscriptionCollectionForPeriodParams{MerchantID: mid.UUID(), SubscriptionID: sub.ID, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC()})
@@ -137,53 +148,8 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 		if requestedMethod != nil && (sub.PaymentMethodID == nil || *requestedMethod != *sub.PaymentMethodID) {
 			return intents.ErrRebillUnsupported
 		}
-		if sub.PaymentMethodID == nil {
-			return errors.New("engine subscription has no saved method")
-		}
-		observedMethod, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: *sub.PaymentMethodID})
+		method, binding, err := s.engineCollectionMethod(ctx, d, sub)
 		if err != nil {
-			return err
-		}
-		if observedMethod.CustodianID != nil {
-			handle := paymentmethods.CustodianHandle{Custodian: *observedMethod.CustodianID, Method: observedMethod.RailMethodRef}
-			if err := paymentmethods.LockCustodianHandles(ctx, q, mid.UUID(), handle); err != nil {
-				return err
-			}
-			if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, mid.UUID(), handle); err != nil {
-				return err
-			}
-		}
-		method, err := q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: mid.UUID(), ID: *sub.PaymentMethodID})
-		if err != nil {
-			return err
-		}
-		if err := charge.FreezeInstrument(observedMethod).Matches(method, charge.AgreementRecurring); err != nil {
-			return err
-		}
-		if method.CustomerID != sub.CustomerID || method.PspID != sub.PspID || method.Rail != string(sub.Rail) || method.ParkReason != "" {
-			return errors.New("engine recurring method is not qualified for this obligation")
-		}
-		account, err := q.GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: method.PspID})
-		if err != nil {
-			return err
-		}
-		if account.Archived {
-			return errors.New("archived account cannot admit a new engine renewal")
-		}
-		binding, err := engineCollectionBinding(ctx, q, method, s.hyperSwitchDeployment)
-		if err != nil {
-			return err
-		}
-		if method.CustodianID != nil {
-			custodian, err := q.GetCustodian(ctx, gen.GetCustodianParams{MerchantID: mid.UUID(), ID: *method.CustodianID})
-			if err != nil {
-				return err
-			}
-			if custodian.Archived {
-				return errors.New("archived custodian cannot admit a new engine renewal")
-			}
-		}
-		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method), engineHyperSwitchPointer(method.Custodian, binding), true); err != nil {
 			return err
 		}
 		terms, err := intents.PrepareEngineRenewalTerms(ctx, d, sub, admittedAt)
@@ -214,6 +180,9 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 		accepted, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, IntentType: subscriptions.TypeSubscriptionCollection, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: method.PspID, CustodianID: engineCustodianID(method.CustodianID), Payload: payload, IdempotencyKey: key, NextAttemptAt: admittedAt, Origin: origin, Actor: actor, OriginReason: "accepted engine renewal"})
 		if err != nil {
 			return err
+		}
+		if accepted.IntentType != subscriptions.TypeSubscriptionCollection {
+			return intents.ErrRebillKeyConflict
 		}
 		_, err = subscriptions.DecodeSubscriptionCollectionPayload(accepted)
 		return err
