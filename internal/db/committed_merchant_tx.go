@@ -19,8 +19,8 @@ func transactionContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, transactionContextKey{}, true)
 }
 
-// CommittedMerchantTx is for durable DEK custody. It commits independently on
-// the request's compatible, idle lazy pin, or a scoped pool connection when no
+// CommittedMerchantTx is for durable custody and queue handoff. It commits
+// independently on the request's compatible, idle lazy pin, or a scoped pool connection when no
 // pin exists. It never joins or commits an existing caller-owned transaction.
 // Supported DB/Pool transaction callbacks carry the private marker below;
 // manually managed raw pgx transactions must use BindMerchantTx to bind context.
