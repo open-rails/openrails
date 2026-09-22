@@ -52,3 +52,15 @@ func TestPaymentCorrelationMetadataContract(t *testing.T) {
 		}
 	}
 }
+
+func TestInitialReversalMetadataIsNarrowlyTyped(t *testing.T) {
+	for _, profile := range []string{"payments.metadata", "subscriptions.gateway_response"} {
+		for _, value := range []string{`"refund"`, `"dispute"`, `"refunded"`, `true`, `null`, `{"raw":"body"}`, `"sk_test_secret"`} {
+			err := validateJSON(profile, `{"initial_payment_reversal":`+value+`}`)
+			want := value == `"refund"` || value == `"dispute"`
+			if (err == nil) != want {
+				t.Fatalf("%s value %s: accepted=%v, want %v", profile, value, err == nil, want)
+			}
+		}
+	}
+}

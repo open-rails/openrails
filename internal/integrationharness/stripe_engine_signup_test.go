@@ -34,7 +34,7 @@ import (
 // Real self HTTP/auth/session/runtime/ledger path with a deterministic Stripe
 // transport. Card entry and issuer authentication still require sandbox proof.
 func TestStripeEngineSignupSelfHTTP(t *testing.T) {
-	for _, reversal := range []string{"", "refund", "dispute", "partial_refund"} {
+	for _, reversal := range []string{"", "refund", "dispute", "partial_refund", "decline"} {
 		name := reversal
 		if name == "" {
 			name = "authentication"
@@ -49,7 +49,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 	var mu sync.Mutex
 	var setup, payment map[string]any
 	setupPaid, paymentPaid := false, false
-	setupCreates, paymentCreates := 0, 0
+	setupCreates, paymentCreates, paymentCancels := 0, 0, 0
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -114,7 +114,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 					payment["last_payment_error"] = map[string]any{"code": "card_declined", "decline_code": "insufficient_funds"}
 				}
 			}
-			if reversal != "" {
+			if reversal != "" && reversal != "decline" {
 				paymentPaid = true
 				w.WriteHeader(http.StatusBadGateway)
 				write(map[string]any{"error": "simulated accepted payment with lost response"})
@@ -124,6 +124,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 		case r.Method == "GET" && r.URL.Path == "/v1/payment_intents":
 			write(map[string]any{"data": []any{payment}, "has_more": false})
 		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/v1/payment_intents/") && strings.HasSuffix(r.URL.Path, "/cancel"):
+			paymentCancels++
 			require.Equal(t, "/v1/payment_intents/"+payment["id"].(string)+"/cancel", r.URL.Path)
 			payment["status"] = "canceled"
 			write(payment)
@@ -226,6 +227,39 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 	enrollment := call("POST", fmt.Sprintf("/checkout/%s/confirm", quote["id"]), "", map[string]any{"payment": map[string]string{"rail": "stripe"}})
 	operation := enrollment["operation"].(map[string]any)
 	require.Equal(t, "unknown_needs_verify", operation["status"])
+	if reversal == "decline" {
+		mu.Lock()
+		payment["status"] = "requires_payment_method"
+		payment["last_payment_error"] = map[string]any{"code": "card_declined", "decline_code": "insufficient_funds"}
+		mu.Unlock()
+		verified := call("POST", fmt.Sprintf("/payment-operations/%s/authentication/confirm", operation["id"]), "", nil)
+		require.Equal(t, "failed_retryable", verified["status"], "read-only confirm retains cancellation work")
+		pending := call("GET", fmt.Sprintf("/checkout/%s", quote["id"]), "", nil)
+		require.NotEqual(t, "failed", pending["status"], "uncanceled PI still owns checkout")
+		mu.Lock()
+		require.Equal(t, 1, paymentCreates)
+		require.Zero(t, paymentCancels, "HTTP verification does not cancel")
+		mu.Unlock()
+		id := uuid.MustParse(operation["id"].(string))
+		scope := db.WithPSPID(merchant.WithID(t.Context(), owned.MerchantID), psp)
+		require.NoError(t, rt.DB.RunInMerchantConn(scope, func(ctx context.Context) error {
+			result, err := rt.IntentRunner().ExecuteByID(ctx, id)
+			require.NoError(t, err)
+			require.Equal(t, intents.StatusFailedTerminal, result.Status)
+			return err
+		}))
+		completed := call("GET", fmt.Sprintf("/checkout/%s", quote["id"]), "", nil)
+		require.Equal(t, "failed", completed["status"])
+		replay := call("POST", fmt.Sprintf("/payment-operations/%s/authentication/confirm", operation["id"]), "", nil)
+		require.Equal(t, "failed_terminal", replay["status"])
+		mu.Lock()
+		require.Equal(t, 1, paymentCreates)
+		require.Equal(t, 1, paymentCancels)
+		mu.Unlock()
+		require.NoError(t, pool.QueryRow(t.Context(), `SELECT count(*) FROM billing.payments WHERE customer_id=$1`, user.ID).Scan(&paid))
+		require.Zero(t, paid)
+		return
+	}
 	var reversalEvent []byte
 	webhookService := &webhooks.StripeWebhookService{DB: rt.DB, PaymentService: rt.PaymentService, SubscriptionService: rt.SubscriptionService, PriceService: rt.PriceService, SubscriptionLifecycleService: rt.SubscriptionLifecycleService, Clock: rt.Clock}
 	deliverReversal := func() error {
