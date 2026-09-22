@@ -236,7 +236,7 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	authFirstTx, err := rt.app.Runtime.DB.Pool().Begin(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = authFirstTx.Rollback(context.Background()) })
-	_, err = rt.HostTransactions().OpenOperationAuthorization(ctx, authFirstTx, newAuthorization(authFirstPayer, 6_000))
+	_, err = NewHostTransactions(rt).OpenOperationAuthorization(ctx, authFirstTx, newAuthorization(authFirstPayer, 6_000))
 	require.NoError(t, err)
 	admissionStarted := make(chan struct{})
 	admissionDone := make(chan admissionResult, 1)
@@ -333,7 +333,7 @@ func openOperationAuthorizationInCommittedTx(ctx context.Context, rt *Runtime, r
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	auth, err := rt.HostTransactions().OpenOperationAuthorization(ctx, tx, request)
+	auth, err := NewHostTransactions(rt).OpenOperationAuthorization(ctx, tx, request)
 	if err != nil {
 		return nil, err
 	}

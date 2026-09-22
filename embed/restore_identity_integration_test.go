@@ -4,6 +4,7 @@ package embed_test
 
 import (
 	"context"
+	embedoperator "github.com/open-rails/openrails/embed/operator"
 	"testing"
 
 	"github.com/google/uuid"
@@ -24,18 +25,18 @@ func TestRuntimeRegistersRestoreDestinationBeforeClient(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	id, slug := merchant.ID(uuid.New()), "restore-host-"+uuid.NewString()[:8]
-	_, err = rt.RegisterMerchantForRestore(ctx, merchant.ID{}, slug)
+	_, err = embedoperator.New(rt).RegisterMerchantForRestore(ctx, merchant.ID{}, slug)
 	require.ErrorContains(t, err, "merchant_id is required")
-	registered, err := rt.RegisterMerchantForRestore(ctx, id, slug)
+	registered, err := embedoperator.New(rt).RegisterMerchantForRestore(ctx, id, slug)
 	require.NoError(t, err)
 	require.Equal(t, id, registered)
-	again, err := rt.RegisterMerchantForRestore(ctx, id, slug)
+	again, err := embedoperator.New(rt).RegisterMerchantForRestore(ctx, id, slug)
 	require.NoError(t, err)
 	require.Equal(t, id, again)
-	_, err = rt.RegisterMerchantForRestore(ctx, merchant.ID(uuid.New()), slug+"-other")
-	require.ErrorIs(t, err, embed.ErrMerchantRestoreConflict)
-	_, err = rt.RegisterMerchantForRestore(ctx, id, slug+"-other")
-	require.ErrorIs(t, err, embed.ErrMerchantRestoreConflict)
+	_, err = embedoperator.New(rt).RegisterMerchantForRestore(ctx, merchant.ID(uuid.New()), slug+"-other")
+	require.ErrorIs(t, err, embedoperator.ErrMerchantRestoreConflict)
+	_, err = embedoperator.New(rt).RegisterMerchantForRestore(ctx, id, slug+"-other")
+	require.ErrorIs(t, err, embedoperator.ErrMerchantRestoreConflict)
 
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)

@@ -30,7 +30,7 @@ func TestHostTransactionsCommitAndRollBackWithHostRows(t *testing.T) {
 	runtime := newProviderObligationRuntime(t, ctx, h)
 	client, err := runtime.Client()
 	require.NoError(t, err)
-	hostTx := runtime.HostTransactions()
+	hostTx := embed.NewHostTransactions(runtime)
 	pool := app.HostGraph(runtime).Runtime.DB.Pool()
 
 	_, err = h.Pool().Exec(ctx, `

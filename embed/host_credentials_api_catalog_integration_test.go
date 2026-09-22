@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	embedoperator "github.com/open-rails/openrails/embed/operator"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -65,8 +66,8 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: "post-usd", UnitAmount: 5_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	require.Equal(t, product.ID, price.ProductID)
-	require.ErrorContains(t, rt.PushCatalog(ctx, embed.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Insert: true}), "catalog_source=api")
-	require.NoError(t, rt.PushCatalog(ctx, embed.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Out: io.Discard}), "API catalogs still permit a read-only manifest comparison")
+	require.ErrorContains(t, embedoperator.New(rt).PushCatalog(ctx, embedoperator.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Insert: true}), "catalog_source=api")
+	require.NoError(t, embedoperator.New(rt).PushCatalog(ctx, embedoperator.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Out: io.Discard}), "API catalogs still permit a read-only manifest comparison")
 	runtime := app.HostGraph(rt).Runtime
 	mid := runtime.ConfiguredMerchant()
 	name, err := merchants.PSPSecretName("stripe", "test", accountID, "secret_key")
@@ -103,7 +104,7 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, title, read.DisplayName)
 	require.Zero(t, merchantSecretRowCount(t, app.HostGraph(rt2).Runtime.DB.Pool(), ctx, mid))
-	require.NoError(t, rt2.PushCatalog(ctx, embed.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Out: io.Discard}), "provider comparison must use the rotated host credential")
+	require.NoError(t, embedoperator.New(rt2).PushCatalog(ctx, embedoperator.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Out: io.Discard}), "provider comparison must use the rotated host credential")
 }
 
 // The inverse combination keeps provider API custody while catalog mutations
@@ -154,7 +155,7 @@ func TestManagedCredentialsWithManifestCatalog(t *testing.T) {
 			require.NotEqual(t, secret, persisted, "managed provider credentials must be encrypted")
 		})
 	}
-	require.NoError(t, rt.PushCatalog(ctx, embed.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 3_000_000), Insert: true, Out: io.Discard}))
+	require.NoError(t, embedoperator.New(rt).PushCatalog(ctx, embedoperator.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 3_000_000), Insert: true, Out: io.Discard}))
 	client, err := rt.Client()
 	require.NoError(t, err)
 	product, err := client.GetProductByKey(ctx, "pro")

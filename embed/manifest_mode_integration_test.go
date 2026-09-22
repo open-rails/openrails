@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	embedoperator "github.com/open-rails/openrails/embed/operator"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -102,7 +103,7 @@ func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug, nmiV5Base
 		MerchantsFn: func() *merchants.Service { return runtime.Merchants },
 		Endpoints:   money.CollectionEndpoints{NMIV5BaseURL: nmiV5BaseURL},
 	}
-	require.NoError(t, rt.PushCatalog(ctx, embed.PushCatalogOptions{
+	require.NoError(t, embedoperator.New(rt).PushCatalog(ctx, embedoperator.PushCatalogOptions{
 		Manifest: catalogRaw,
 		Insert:   true, Overwrite: true, Prune: true,
 	}))

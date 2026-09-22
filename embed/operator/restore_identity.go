@@ -1,4 +1,4 @@
-package embed
+package operator
 
 import (
 	"context"
@@ -17,7 +17,7 @@ var ErrMerchantRestoreConflict = merchants.ErrMerchantRestoreConflict
 // constructing Clients or starting workers. Ordinary manifest/config creation
 // continues allocating its own merchant UUIDs. This registers no provider
 // accounts or credentials; ImportMerchantBilling must still require an empty book.
-func (r *Runtime) RegisterMerchantForRestore(ctx context.Context, id merchant.ID, slug string) (merchant.ID, error) {
+func (r *Operator) RegisterMerchantForRestore(ctx context.Context, id merchant.ID, slug string) (merchant.ID, error) {
 	if r == nil || r.app == nil || r.app.Runtime == nil || r.app.Runtime.DB == nil {
 		return merchant.ID{}, fmt.Errorf("openrails embed: runtime database not initialized")
 	}

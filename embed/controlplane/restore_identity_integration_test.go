@@ -4,6 +4,7 @@ package controlplane_test
 
 import (
 	"context"
+	embedoperator "github.com/open-rails/openrails/embed/operator"
 	"testing"
 
 	"github.com/google/uuid"
@@ -81,7 +82,7 @@ func TestControlPlaneProvisionsRestoreIdentityUnderDestinationAuthority(t *testi
 	wrongID.MerchantID = merchant.ID(uuid.New())
 	_, err = cp.ProvisionMerchantForRestore(ctx, wrongID)
 	require.ErrorIs(t, err, controlplane.ErrMerchantRestoreConflict)
-	_, err = rt.RegisterMerchantForRestore(ctx, id, canonical)
+	_, err = embedoperator.New(rt).RegisterMerchantForRestore(ctx, id, canonical)
 	require.ErrorContains(t, err, "attached control plane")
 
 	customerGroup, err := cp.Core().CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{
