@@ -1,10 +1,11 @@
 package controlplane
 
 import (
+	"net/http"
+
 	authhttp "github.com/open-rails/authkit/authhttp"
 	authcore "github.com/open-rails/authkit/embedded"
 	riverhelpers "github.com/open-rails/helpers/river"
-	"net/http"
 )
 
 // The private HTTP constructor is the only place where local protocol
@@ -36,8 +37,15 @@ func (c controlPlaneHTTP) BuildHTTP(backend authcore.HTTPBackend) (authcore.HTTP
 	}
 	delegated.WithService(backend)
 	c.controlPlane.delegatedVerifier = delegated
+	surface := &controlPlaneHTTPSurface{Service: service}
+	groups := c.controlPlane.MountedRouteGroups()
+	if len(groups) == 0 {
+		// AuthKit interprets an empty allow-list as its default surface.
+		// OpenRails keeps an empty selection closed instead.
+		return surface, nil
+	}
 	mount, err := authhttp.NewMount(service, authhttp.MountOptions{
-		APIPrefix: "/auth", Groups: c.controlPlane.MountedRouteGroups(),
+		APIPrefix: "/auth", Groups: groups,
 		ExcludeRoutes: []authhttp.RouteRef{{Method: http.MethodGet, Path: authhttp.JWKSPath}},
 		Wrap:          c.controlPlane.WrapAuthRoute,
 	})
@@ -45,7 +53,6 @@ func (c controlPlaneHTTP) BuildHTTP(backend authcore.HTTPBackend) (authcore.HTTP
 		service.Close()
 		return nil, err
 	}
-	surface := &controlPlaneHTTPSurface{Service: service}
 	for _, route := range mount.Routes() {
 		surface.routes = append(surface.routes, authcore.HTTPRoute{Method: route.Method, Path: route.Path, Handler: mount})
 	}
