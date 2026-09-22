@@ -17,7 +17,6 @@ func TestManifestKeepsCapturedOwnerThroughNameReclaim(t *testing.T) {
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
 	core := cp.Core()
-	require.NoError(t, controlplane.EnsureRootContainment(ctx, core))
 	owner, err := core.CreateUser(ctx, "manifest-owner@example.test", "manifest_owner")
 	require.NoError(t, err)
 	groupA, err := core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{Persona: controlplane.MerchantType, InstanceSlug: "manifest-former", OwnerSubjectID: owner.ID})

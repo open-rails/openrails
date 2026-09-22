@@ -25,7 +25,7 @@ type ProvisionMerchantRequest struct {
 	// user-chosen slug and branch on Created; a slug squatter cannot be granted
 	// ownership of someone else's merchant). Re-runs stay idempotent: the
 	// creating call already seeded the owner. Later owner changes go through
-	// Core().Genesis().AssignGroupRole explicitly (authkit v0.79.0, #241).
+	// Core().AdminAssignGroupRole explicitly.
 	OwnerUserID string
 	// ExistingGroupID carries a group already selected for owner repair. This
 	// path checks live ownership and never resolves or creates another group.
@@ -93,9 +93,6 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 
 	// Root group + declared containment first (idempotent, concurrent-boot
 	// tolerant — #844), as bootstrap does.
-	if err := controlplane.EnsureRootContainment(ctx, core); err != nil {
-		return nil, fmt.Errorf("control plane provision: %w", err)
-	}
 
 	groupID := strings.TrimSpace(req.ExistingGroupID)
 	if groupID != "" {

@@ -210,7 +210,7 @@ func TestHostMerchantVsUserSessionMembershipMismatchHTTP(t *testing.T) {
 	user, err := core.CreateUser(ctx, email, username)
 	require.NoError(t, err, "create user")
 	// Owner of merchant A ONLY — no membership in B whatsoever.
-	require.NoError(t, core.Genesis().AssignGroupRole(
+	require.NoError(t, core.AdminAssignGroupRole(
 		ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(user.ID), controlplane.MerchantRoleOwner,
 	), "assign merchant A owner role")
 	token, _, err := core.MintAccessToken(ctx, user.ID, nil)

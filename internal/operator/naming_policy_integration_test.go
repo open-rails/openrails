@@ -4,7 +4,10 @@ package operator_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -47,7 +50,6 @@ func TestNamingPolicyForwarding(t *testing.T) {
 			cp := embcp.Get(e.App())
 			want, err := tc.input.Normalize()
 			require.NoError(t, err)
-			require.Equal(t, want, cp.Core().NamingPolicy())
 			user, err := cp.Core().CreateUser(ctx, "naming-"+sfx+"@example.test", "naming"+sfx)
 			require.NoError(t, err)
 			original := "before-" + sfx
@@ -60,8 +62,24 @@ func TestNamingPolicyForwarding(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			state, err := cp.Core().GroupNamingState(ctx, res.GroupID)
+			token, _, err := cp.Core().MintAccessToken(ctx, user.ID, nil)
 			require.NoError(t, err)
+			routes, err := cp.AuthRoutes()
+			require.NoError(t, err)
+			mux := http.NewServeMux()
+			for _, route := range routes {
+				mux.Handle(route.Method+" "+route.Path, route.Handler)
+			}
+			request := httptest.NewRequest(http.MethodGet, "/auth/merchant/"+name, nil)
+			request.Header.Set("Authorization", "Bearer "+token)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var descriptor struct {
+				Naming authkit.NamingState `json:"naming"`
+			}
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &descriptor))
+			state := descriptor.Naming
 			require.Equal(t, want.Enabled, state.Policy.Enabled)
 			require.Equal(t, want.FormerNameRetentionMode, state.Policy.FormerNameRetentionMode)
 			require.Equal(t, want.FormerNameRetention.Seconds(), state.Policy.FormerNameRetentionSeconds)

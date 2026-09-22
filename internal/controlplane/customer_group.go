@@ -22,10 +22,6 @@ func (c *ControlPlane) EnsureCustomerPermissionGroup(ctx context.Context, custom
 	}
 	ownerSubject = strings.TrimSpace(ownerSubject)
 
-	if err := EnsureRootContainment(ctx, core); err != nil {
-		return "", fmt.Errorf("controlplane: %w", err)
-	}
-
 	groupID, err := core.ResolveGroupIDForSlug(ctx, CustomerGroup(customerID))
 	if errors.Is(err, authkit.ErrGroupNotFound) {
 		if ownerSubject == "" {
@@ -48,7 +44,7 @@ func (c *ControlPlane) EnsureCustomerPermissionGroup(ctx context.Context, custom
 	} else if err != nil {
 		return "", fmt.Errorf("controlplane: resolve customer group %q: %w", customerID, err)
 	} else if ownerSubject != "" {
-		if err := core.Genesis().AssignGroupRole(ctx, CustomerGroup(customerID), authkit.UserSubject(ownerSubject), CustomerRoleOwner); err != nil {
+		if err := core.AdminAssignGroupRole(ctx, CustomerGroup(customerID), authkit.UserSubject(ownerSubject), CustomerRoleOwner); err != nil {
 			return "", fmt.Errorf("controlplane: assign customer owner: %w", err)
 		}
 	}

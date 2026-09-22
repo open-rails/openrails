@@ -20,7 +20,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/authkit/authhttp"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
@@ -128,9 +127,7 @@ func TestHyperSwitchActualBrowserDeletion(t *testing.T) {
 	})
 	owned := surface.ProvisionOwnedMerchant("actual-delete-" + uuid.NewString()[:8])
 	core := operator.Get(surface.App()).Core()
-	auth, err := authhttp.New(core, authhttp.Config{DirectPeerIP: true})
-	require.NoError(t, err)
-	t.Cleanup(auth.Close)
+	auth := operator.Get(surface.App()).AuthService()
 	delegated, err = embedauth.NewDelegatedAuthenticator(auth.Verifier(), owned.MerchantID.String())
 	require.NoError(t, err)
 	user, err := core.CreateUser(ctx, "delete-"+uuid.NewString()+"@example.test", "delete"+uuid.NewString()[:8])

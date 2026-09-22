@@ -38,7 +38,9 @@ import (
 type delegationHTTPFixture struct {
 	surface                 *Surface
 	issuer                  *httptest.Server
-	engine                  *authcore.Runtime
+	signer                  *jwtkit.RSASigner
+	schema                  string
+	claimProof              func(context.Context, string, time.Duration) (bool, error)
 	application             *authkit.RemoteApplication
 	email, password, access string
 	subject                 string
@@ -55,8 +57,13 @@ func newDelegationHTTPFixture(t *testing.T, h *Harness) *delegationHTTPFixture {
 	dbtest.ApplyAuthKitMigrations(t, ctx, h.sharedPool(), schema)
 	signer, err := jwtkit.NewRSASigner(2048, "browser-issuer")
 	require.NoError(t, err)
+	var claimProof func(context.Context, string, time.Duration) (bool, error)
 	engine, err := authcore.New(authcore.Config{
-		Schema:       schema,
+		Schema: schema,
+		HTTP: httpBackendBuild(func(backend authcore.HTTPBackend) (authcore.HTTPSurface, error) {
+			claimProof = backend.ClaimDPoPProof
+			return (authhttp.Config{DirectPeerIP: true, DisableRateLimiting: true, Mount: authhttp.MountOptions{APIPrefix: "/auth"}}).BuildHTTP(backend)
+		}),
 		Keys:         authcore.KeysConfig{Source: jwtkit.StaticKeySource{Active: signer, Pubs: map[string]crypto.PublicKey{signer.KID(): signer.PublicKey()}}},
 		Token:        authcore.TokenConfig{Issuer: issuerURL, IssuedAudiences: []string{"merchant"}, ExpectedAudiences: []string{"merchant"}},
 		Registration: authcore.RegistrationConfig{Verification: authkit.RegistrationVerificationNone},
@@ -66,13 +73,12 @@ func newDelegationHTTPFixture(t *testing.T, h *Harness) *delegationHTTPFixture {
 	}})
 	require.NoError(t, err)
 	t.Cleanup(engine.Close)
-	svc, err := authhttp.New(engine, authhttp.Config{DirectPeerIP: true, DisableRateLimiting: true})
-	require.NoError(t, err)
-	t.Cleanup(svc.Close)
-	authHandler, err := authhttp.MountHandler(svc, authhttp.MountOptions{APIPrefix: "/auth"})
+	routes, err := engine.HTTPRoutes()
 	require.NoError(t, err)
 	mux := http.NewServeMux()
-	mux.Handle("/auth/", authHandler)
+	for _, route := range routes {
+		mux.Handle(route.Method+" "+route.Path, route.Handler)
+	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = io.WriteString(w, "<!doctype html><title>Merchant delegation test</title>")
@@ -81,9 +87,9 @@ func newDelegationHTTPFixture(t *testing.T, h *Harness) *delegationHTTPFixture {
 	issuer.Start()
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
 	email, password := "browser"+suffix+"@example.test", "Browser-proof-test-2026!"
-	user, err := engine.CreateUser(ctx, email, "browser"+suffix)
+	user, err := engine.Client().CreateUser(ctx, email, "browser"+suffix)
 	require.NoError(t, err)
-	require.NoError(t, engine.AdminSetPassword(ctx, user.ID, password))
+	require.NoError(t, engine.Client().AdminSetPassword(ctx, user.ID, password))
 	response, err := issuer.Client().Post(issuer.URL+"/auth/password/login", "application/json", strings.NewReader(`{"identifier":"`+email+`","password":"`+password+`"}`))
 	require.NoError(t, err)
 	var session authkit.TokenSet
@@ -100,9 +106,9 @@ func newDelegationHTTPFixture(t *testing.T, h *Harness) *delegationHTTPFixture {
 		PublicKeys: []authkit.RemoteAppKey{{KID: signer.KID(), PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER}))}},
 	})
 	require.NoError(t, err)
-	require.NoError(t, cp.Core().Genesis().AssignRemoteApplicationRole(ctx, app.ID, controlplane.MerchantRoleOwner))
+	require.NoError(t, cp.Core().AdminAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(app.ID), controlplane.MerchantRoleOwner))
 	require.NoError(t, cp.ReloadRemoteApplications(ctx))
-	return &delegationHTTPFixture{surface: surface, issuer: issuer, engine: engine, application: app, email: email, password: password, access: session.AccessToken, subject: user.ID}
+	return &delegationHTTPFixture{surface: surface, issuer: issuer, signer: signer, schema: schema, claimProof: claimProof, application: app, email: email, password: password, access: session.AccessToken, subject: user.ID}
 }
 
 func TestDelegationHTTPWorkflow(t *testing.T) {
@@ -183,7 +189,7 @@ func TestDelegationHTTPWorkflow(t *testing.T) {
 	require.NoError(t, cp.Core().RemoveGroupSubjectAs(ctx, h.ensureAPIKeyActor(cp, dbtest.TestMerchantSlug), controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(f.application.ID)))
 	status, _, _ = call(path, "DPoP", token.Token, fresh(path, token.Token))
 	require.Equal(t, 401, status)
-	require.NoError(t, cp.Core().Genesis().AssignRemoteApplicationRole(ctx, f.application.ID, controlplane.MerchantRoleOwner))
+	require.NoError(t, cp.Core().AdminAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(f.application.ID), controlplane.MerchantRoleOwner))
 	f.application.Enabled = false
 	_, err = cp.Core().UpsertRemoteApplication(ctx, *f.application)
 	require.NoError(t, err)
@@ -241,4 +247,10 @@ func TestDelegationNativeTLSWorkflow(t *testing.T) {
 	require.NoError(t, err)
 	response.Body.Close()
 	require.Equal(t, 401, response.StatusCode)
+}
+
+type httpBackendBuild func(authcore.HTTPBackend) (authcore.HTTPSurface, error)
+
+func (f httpBackendBuild) BuildHTTP(b authcore.HTTPBackend) (authcore.HTTPSurface, error) {
+	return f(b)
 }
