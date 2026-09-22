@@ -108,6 +108,11 @@ func TestLedger_ReplayPreservesCountersAndDepletedBalance(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, applied)
 			require.Equal(t, secondRow.ID, row.ID)
+			var rows int
+			require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.ledger_transfers
+			 WHERE merchant_id=$1 AND customer_id=$2 AND operation=$3 AND source=$4 AND source_id=$5`,
+				merchantID, customer, string(transfer.Coord.Operation), transfer.Coord.Source, transfer.Coord.SourceID).Scan(&rows))
+			require.Equal(t, 1, rows, "one durable transfer per coordinate")
 			mustBalance(t, ctx, l, balance, wantBalance)
 			requireNoCounterDrift(t, ctx, pool, merchantID, cur)
 			requireLedgerNetZero(t, ctx, pool, merchantID, cur)
