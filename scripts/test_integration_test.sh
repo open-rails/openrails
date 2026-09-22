@@ -111,6 +111,12 @@ done
 printf '//go:build !integration\n\npackage defaulttest\nimport "testing"\nfunc TestDefaultOnly(t *testing.T) {}\n' >"$fixture/defaulttest/default_test.go"
 printf '//go:build !integration\n\npackage defaultprod\nconst DefaultOnly = true\n' >"$fixture/defaultprod/default.go"
 
+# Native adapters are separate modules. Their integration files must not enter
+# the root-module package partition, even when no root integration files remain.
+mkdir -p "$fixture/adapters/nested"
+printf 'module example.test/partition/adapters/nested\n\ngo 1.26.0\n' >"$fixture/adapters/nested/go.mod"
+printf '//go:build integration\n\npackage nested\n' >"$fixture/adapters/nested/integration.go"
+
 run_selection() {
     : >"$log"
     (cd "$fixture"; PATH="$fixture/bin:$PATH" GOWORK=off bash scripts/test_integration.sh "$1")
