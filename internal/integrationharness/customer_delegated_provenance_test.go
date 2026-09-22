@@ -45,6 +45,7 @@ func TestCustomerDelegationRetainsIssuerVerifiedInteraction(t *testing.T) {
 	pub := signer.(jwtkit.PublicKeySigner).PublicKey()
 	var sawDevice atomic.Bool
 	issuerCore, err := authcore.NewWithKeys(authcore.Config{
+		HTTP:         authhttp.Config{DirectPeerIP: true, DisableRateLimiting: true},
 		Token:        authcore.TokenConfig{Issuer: di.Issuer, IssuedAudiences: []string{"native-session"}, AccessTokenDuration: time.Hour, RefreshTokenDuration: time.Hour},
 		DeviceKeys:   authcore.DeviceKeysConfig{Enabled: true},
 		Ephemeral:    authcore.EphemeralConfig{KeyPrefix: "interaction-" + uuid.NewString()[:8]},
@@ -64,28 +65,39 @@ func TestCustomerDelegationRetainsIssuerVerifiedInteraction(t *testing.T) {
 	}})
 	require.NoError(t, err)
 	t.Cleanup(issuerCore.Close)
-	service, err := authhttp.New(issuerCore, authhttp.Config{DirectPeerIP: true, DisableRateLimiting: true})
+	routes, err := issuerCore.HTTPRoutes()
 	require.NoError(t, err)
-	t.Cleanup(service.Close)
-	mounted, err := authhttp.MountHandler(service, authhttp.MountOptions{})
-	require.NoError(t, err)
+	mounted := http.NewServeMux()
+	for _, route := range routes {
+		mounted.Handle(route.Method+" "+route.Path, route.Handler)
+	}
 	issuer := httptest.NewServer(mounted)
 	t.Cleanup(issuer.Close)
-	user, err := issuerCore.CreateUser(ctx, "provenance-"+uuid.NewString()+"@example.test", "provenance"+uuid.NewString()[:8])
+	user, err := issuerCore.Client().CreateUser(ctx, "provenance-"+uuid.NewString()+"@example.test", "provenance"+uuid.NewString()[:8])
 	require.NoError(t, err)
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	require.NoError(t, err)
 	deviceID := uuid.NewString()
 	_, err = h.sharedPool().Exec(ctx, `INSERT INTO profiles.user_device_keys(id,user_id,public_key) VALUES($1,$2,$3)`, deviceID, user.ID, []byte(public))
 	require.NoError(t, err)
-	challenge, err := issuerCore.BeginDeviceKeyLogin(ctx, deviceID)
-	require.NoError(t, err)
+	status, body := requestJSON(t, http.MethodPost, issuer.URL+"/api/v1/device-keys/login/begin", "", map[string]any{"device_key_id": deviceID})
+	require.Equal(t, http.StatusAccepted, status, string(body))
+	var challenge struct {
+		ID        string `json:"challenge_id"`
+		Challenge string `json:"challenge"`
+	}
+	require.NoError(t, json.Unmarshal(body, &challenge))
 	nonce, err := base64.RawURLEncoding.DecodeString(challenge.Challenge)
 	require.NoError(t, err)
 	message := append([]byte("authkit.device-key-login/1\x00"), nonce...)
-	device, err := issuerCore.FinishDeviceKeyLogin(ctx, challenge.ID, base64.RawURLEncoding.EncodeToString(ed25519.Sign(private, message)))
-	require.NoError(t, err)
-	session, _, err := issuerCore.MintAccessToken(ctx, user.ID, nil)
+	status, body = requestJSON(t, http.MethodPost, issuer.URL+"/api/v1/device-keys/login/finish", "", map[string]any{"challenge_id": challenge.ID, "signature": base64.RawURLEncoding.EncodeToString(ed25519.Sign(private, message))})
+	require.Equal(t, http.StatusOK, status, string(body))
+	var deviceResponse struct {
+		TokenSet authkit.TokenSet `json:"token_set"`
+	}
+	require.NoError(t, json.Unmarshal(body, &deviceResponse))
+	device := deviceResponse.TokenSet
+	session, _, err := issuerCore.Client().MintAccessToken(ctx, user.ID, nil)
 	require.NoError(t, err)
 	fixture := h.SeedPastDueInvoiceForCustomer(receiver.App().Runtime, owned.MerchantID, uuid.MustParse(user.ID), "USD", 50_000)
 	sender, err := testauth.NewSender()

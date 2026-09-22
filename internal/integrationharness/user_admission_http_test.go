@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	embcp "github.com/open-rails/openrails/internal/operator"
@@ -37,8 +36,7 @@ func TestHTTPUserAdmissionWorkflow(t *testing.T) {
 	}
 	require.Equal(t, http.StatusUnauthorized, post(enrollment))
 	// Completing MFA never upgrades the already-issued enrollment credential.
-	_, err = core.Enable2FA(ctx, userID, "email", nil, authcore.AllowAdditionalFactors)
-	require.NoError(t, err)
+	seedEmailMFA(t, h, userID)
 	require.Equal(t, http.StatusUnauthorized, post(enrollment))
 	token, _, err := core.MintAccessToken(ctx, userID, nil)
 	require.NoError(t, err)
@@ -50,8 +48,7 @@ func TestHTTPUserAdmissionWorkflow(t *testing.T) {
 	status, body = requestJSON(t, http.MethodDelete, platform, token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 	backupID, _ := makeUser(t, core, "backup"+suffix)
-	_, err = core.Enable2FA(ctx, backupID, "email", nil, authcore.AllowAdditionalFactors)
-	require.NoError(t, err)
+	seedEmailMFA(t, h, backupID)
 	require.NoError(t, core.AdminAssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(backupID), "owner"))
 	reason := "test account admission"
 	require.NoError(t, core.BanUser(ctx, userID, &reason, nil, userID))
@@ -61,4 +58,15 @@ func TestHTTPUserAdmissionWorkflow(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, post(token))
 	status, body = requestJSON(t, http.MethodDelete, platform, token, nil)
 	require.Equal(t, http.StatusUnauthorized, status, string(body))
+}
+
+// This admission test starts with completed MFA; the actual enrollment workflow
+// is exercised by AuthKit's transport suite. Fixture SQL avoids exporting local
+// ceremony primitives solely for test setup.
+func seedEmailMFA(t *testing.T, h *Harness, userID string) {
+	t.Helper()
+	_, err := h.sharedPool().Exec(t.Context(), `INSERT INTO profiles.mfa_settings(user_id,enabled) VALUES($1::uuid,true) ON CONFLICT(user_id) DO UPDATE SET enabled=true`, userID)
+	require.NoError(t, err)
+	_, err = h.sharedPool().Exec(t.Context(), `INSERT INTO profiles.mfa_factors(user_id,method,is_default) VALUES($1::uuid,'email',true)`, userID)
+	require.NoError(t, err)
 }

@@ -207,3 +207,7 @@ func TestDelegatedVerify_RejectsServiceCredential(t *testing.T) {
 var _ = authkit.ErrAccessTokenExpired
 
 type testHTTPBackend struct{ authcore.HTTPBackend }
+
+func (*testHTTPBackend) ClaimDPoPProof(context.Context, string, time.Duration) (bool, error) {
+	return true, nil
+}

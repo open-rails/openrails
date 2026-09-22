@@ -5,6 +5,7 @@ package integrationharness
 import (
 	"context"
 	"encoding/json"
+	"github.com/open-rails/authkit"
 	"net/http"
 	"strings"
 	"testing"
