@@ -74,6 +74,7 @@ func TestDepositReplayPreservesFinancialTermsAndReceipt(t *testing.T) {
 		Amount: 1000000, Source: "original-source", SourceID: &key, ExpiresAt: &expiry, Description: &description}
 	first, err := svc.Deposit(ctx, in)
 	require.NoError(t, err)
+	require.False(t, first.Replayed)
 
 	for _, field := range []string{"amount", "currency", "expires_at", "permanent"} {
 		t.Run(field, func(t *testing.T) {
@@ -106,6 +107,7 @@ func TestDepositReplayPreservesFinancialTermsAndReceipt(t *testing.T) {
 	retry.Description = &replacementDescription
 	replayed, err := svc.Deposit(ctx, retry)
 	require.NoError(t, err)
+	require.True(t, replayed.Replayed)
 	first.Replayed = true
 	require.Equal(t, first, replayed, "diagnostic retry inputs cannot rewrite the original receipt")
 	read, err := svc.GetDepositBySourceID(ctx, payer, key)
@@ -117,38 +119,4 @@ func TestDepositReplayPreservesFinancialTermsAndReceipt(t *testing.T) {
 	eur, err := svc.GetBalanceForCustomer(ctx, payer, "EUR")
 	require.NoError(t, err)
 	require.Zero(t, eur.Balance)
-}
-
-// A deposit replay carrying a different amount is refused with the typed
-// conflict, and the identical replay still answers the original grant.
-func TestOr906_MoneyDepositRefusesAChangedAmount(t *testing.T) {
-	ms, _, _, payer, cur, ctx := moneyInEnvWithDB(t)
-	sourceID := "or906-" + uuid.NewString()
-	src := "admin"
-
-	first, err := ms.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: cur,
-		Amount: 5_000, Source: src, SourceID: &sourceID,
-	})
-	require.NoError(t, err)
-	require.False(t, first.Replayed)
-
-	_, err = ms.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: cur,
-		Amount: 10_000, Source: src, SourceID: &sourceID,
-	})
-	require.ErrorIs(t, err, money.ErrIdempotencyKeyReused,
-		"a changed-amount deposit retry must be refused, not answered with the original")
-
-	replay, err := ms.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: cur,
-		Amount: 5_000, Source: src, SourceID: &sourceID,
-	})
-	require.NoError(t, err, "the identical retry is still an idempotent replay")
-	require.True(t, replay.Replayed)
-	require.Equal(t, first.ID, replay.ID)
-
-	bal, err := ms.GetBalanceForCustomer(ctx, payer, cur)
-	require.NoError(t, err)
-	require.Equal(t, int64(5_000), bal.Balance, "exactly one deposit moved money")
 }

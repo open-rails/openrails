@@ -5,10 +5,12 @@ package integrationharness
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -30,6 +32,14 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 	gateway := NewFakeStripeGateway(t)
 	runProviderDeployments(t, h, config.ProviderSandboxConfig{StripeAPIURL: gateway.URL}, func(t *testing.T, d moneyDeployment) {
 		client := d.client()
+		assertUnrelatedWrite := func() {
+			// A live collection worker can POST an unrelated PaymentIntent here.
+			// That unsupported route must not consume the tier-change fault.
+			unrelated, err := http.Post(gateway.URL+"/v1/payment_intents", "application/x-www-form-urlencoded", nil)
+			require.NoError(t, err)
+			require.NoError(t, unrelated.Body.Close())
+			assert.Equal(t, http.StatusNotImplemented, unrelated.StatusCode)
+		}
 
 		// Success, then the stored receipt.
 		fixture := h.SeedStripeTierSubscription(d.runtime(), d.merchant, gateway)
@@ -62,6 +72,7 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 		releaseReadback := gateway.HoldLostSubscriptionReadback(lost.StripeSub)
 		defer releaseReadback()
 		gateway.SetSubscriptionMode(lost.StripeSub, StripeWriteLostAfterLanding)
+		assertUnrelatedWrite()
 		pending, err := client.ChangeTier(ctx, lost.Subscription, lostKey, lostRequest)
 		require.NoError(t, err)
 		require.Equal(t, "processing", pending.Status)
@@ -115,6 +126,7 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 		declinedRequest := openrails.ChangeTierRequest{PriceID: (declined.ProPrice).String()}
 		declinedKey := "decl-" + uuid.NewString()[:8]
 		gateway.SetSubscriptionMode(declined.StripeSub, StripeWriteDecline)
+		assertUnrelatedWrite()
 		_, err = client.ChangeTier(ctx, declined.Subscription, declinedKey, declinedRequest)
 		requireRefusal(t, err, openrails.ErrPaymentRefused, "insufficient_funds")
 		require.Equal(t, "failed_terminal", h.LatestTierChangeOperation(declined.SubscriptionID).Status)

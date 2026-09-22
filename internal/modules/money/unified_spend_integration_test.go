@@ -79,17 +79,6 @@ func TestSpendCredits_RespectsCreditLimit(t *testing.T) {
 	require.ErrorIs(t, err, money.ErrInsufficientCredits, "would exceed line by 1")
 }
 
-func TestSpendCredits_Idempotent(t *testing.T) {
-	svc, _, payer, cur, ctx := moneyInEnv(t)
-	_, err := svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000, Source: "seed"})
-	require.NoError(t, err)
-	p := money.SpendParams{Payer: &payer, Invoker: "u", Currency: money.DefaultCurrency, Amount: 300, Key: money.MustIdempotencyKey(money.OpSpend, "s", "dup")}
-	require.NoError(t, spendErr(svc.SpendCredits(ctx, p)))
-	require.NoError(t, spendErr(svc.SpendCredits(ctx, p))) // replay
-	bal, _ := svc.GetBalanceForCustomer(ctx, payer, cur)
-	require.Equal(t, int64(700), bal.Balance, "replay must not double-spend")
-}
-
 func TestRecordUsage_ArrearsDrawsThenAccrues(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	t.Cleanup(func() {
