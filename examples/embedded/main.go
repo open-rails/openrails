@@ -23,6 +23,7 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails"
+	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -50,6 +51,9 @@ func run(ctx context.Context, getenv func(string) string) (runErr error) {
 	// River is mandatory: renewals, dunning, invoices and reconciliation run
 	// there. Compose components before binding; extend the supplied config.
 	runtime, err := embed.New(ctx, embed.Options{
+		HTTP: &embed.HTTPConfig{Checkout: true, Authenticator: billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
+			return billingauth.UserContext{}, fmt.Errorf("sign in required")
+		})},
 		Config: &config.Config{
 			Env: "development", TestMode: config.CredentialPostureSandbox,
 			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
@@ -106,15 +110,12 @@ func run(ctx context.Context, getenv func(string) string) (runErr error) {
 	if addr == "" {
 		return nil
 	}
-	handler, err := runtime.Handler(embed.MountOptions{
-		MountPrefix: "/billing",
-		RouteSets:   []embed.RouteSet{embed.RouteSetCheckout, embed.RouteSetWebhooks},
-		// Replace with the host's session verifier; subjects must be UUIDs.
-		Authenticator: billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
-			return billingauth.UserContext{}, fmt.Errorf("sign in required")
-		}),
-	})
+	routes, err := openrailshttp.Routes(runtime)
 	if err != nil {
+		return err
+	}
+	handler := http.NewServeMux()
+	if err := routes.Mount(handler, "/billing"); err != nil {
 		return err
 	}
 	server := &http.Server{Addr: addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}

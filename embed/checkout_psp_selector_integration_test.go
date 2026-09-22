@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -63,10 +64,7 @@ func TestCheckoutPreGate_PSPKeySelector(t *testing.T) {
 	authn := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: uuid.NewString()}, nil
 	})
-	handler, err := rt.Handler(embed.MountOptions{
-		RouteSets:              []embed.RouteSet{embed.RouteSetCustomer},
-		DelegatedAuthenticator: authn,
-	})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Customer: true}, DelegatedAuthenticator: authn})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)

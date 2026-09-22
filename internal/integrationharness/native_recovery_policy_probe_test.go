@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/embed"
 	orauthkit "github.com/open-rails/openrails/embed/authkit"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
@@ -100,7 +101,7 @@ func TestFreshNativeProviderRecoveryGap(t *testing.T) {
 	require.NoError(t, err)
 	defer customerRuntime.Close(context.Background())
 	app.HostGraph(customerRuntime).Runtime.SetConfiguredMerchant(owned.MerchantID)
-	handler, err := customerRuntime.Handler(embed.MountOptions{RouteSets: []embed.RouteSet{embed.RouteSetCustomer}})
+	handler, err := httptesthost.Handler(customerRuntime, httptesthost.Options{HTTP: embed.HTTPConfig{Customer: true}, DelegatedAuthenticator: authn})
 	require.NoError(t, err)
 	mounted := httptest.NewServer(handler)
 	defer mounted.Close()

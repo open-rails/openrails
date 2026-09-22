@@ -44,9 +44,15 @@ func (b *Bundle) Mount(target any, prefix ...string) error {
 	}:
 		// Chi owns method/path matching. Bind net/http PathValue for the neutral
 		// handlers without coupling this adapter to Chi or rewriting signed URLs.
+		heads := map[string]bool{}
+		for _, route := range b.routes {
+			if route.Method == http.MethodHead {
+				heads[route.Path] = true
+			}
+		}
 		for _, route := range b.routes {
 			r.Method(route.Method, base+route.Path, route.Handler)
-			if route.Method == http.MethodGet {
+			if route.Method == http.MethodGet && !heads[route.Path] {
 				r.Method(http.MethodHead, base+route.Path, route.Handler)
 			}
 		}

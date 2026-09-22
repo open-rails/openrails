@@ -25,6 +25,7 @@ import (
 	orauthkit "github.com/open-rails/openrails/embed/authkit"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/testauth"
@@ -99,7 +100,7 @@ func newTreasuryWorkflow(t *testing.T, sandbox ...*config.ProviderSandboxConfig)
 		}
 		return principal, nil
 	})
-	handler, err := host.Handler(embed.MountOptions{RouteSets: []embed.RouteSet{embed.RouteSetCustomer}, DelegatedAuthenticator: principalSource})
+	handler, err := httptesthost.Handler(host, httptesthost.Options{HTTP: embed.HTTPConfig{Customer: true}, DelegatedAuthenticator: principalSource})
 	require.NoError(t, err)
 	hostServer := httptest.NewServer(handler)
 	t.Cleanup(hostServer.Close)

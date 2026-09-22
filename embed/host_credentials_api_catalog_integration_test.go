@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
@@ -71,7 +72,7 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, secret, value.Value)
 	require.Zero(t, merchantSecretRowCount(t, runtime.DB.Pool(), ctx, mid))
-	handler, err := rt.Handler(embed.MountOptions{RouteSets: []embed.RouteSet{embed.RouteSetPaymentProviders}, Gate: allowAllGate{id: mid}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, Gate: allowAllGate{id: mid}}})
 	require.NoError(t, err)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/v1/merchant/payment-providers/stripe", strings.NewReader(`{"credentials":{"secret_key":"replacement"}}`)))
@@ -123,7 +124,7 @@ func TestManagedCredentialsWithManifestCatalog(t *testing.T) {
 	runtime := app.HostGraph(rt).Runtime
 	mid := runtime.ConfiguredMerchant()
 	require.Nil(t, runtime.ManifestSecrets, "managed credentials must not acquire a host fallback")
-	handler, err := rt.Handler(embed.MountOptions{RouteSets: []embed.RouteSet{embed.RouteSetPaymentProviders}, Gate: allowAllGate{id: mid}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, Gate: allowAllGate{id: mid}}})
 	require.NoError(t, err)
 	for _, secret := range []string{"whsec_managed_catalog_v1", "whsec_managed_catalog_v2"} {
 		payload, err := json.Marshal(map[string]any{"account_id": account, "credentials": map[string]string{"webhook_signing_secret": secret}})

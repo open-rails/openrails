@@ -23,6 +23,7 @@ checks() {
   # compile/vet guard that catches dependency drift before the E2E runner.
   go vet -tags=integration ./...
   go test -race -count=1 ./...
+  bash scripts/check-adapters.sh
   bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
   pnpm --dir web/admin run lint
   pnpm --dir web/admin exec vitest run --maxWorkers=2

@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/hosttools"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -236,11 +237,7 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	delegated := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: userID, Email: email, EmailVerified: true, Username: username}, nil
 	})
-	handler, err := rt.Handler(embed.MountOptions{
-		RouteSets:              []embed.RouteSet{embed.RouteSetCheckout, embed.RouteSetCustomer, embed.RouteSetWebhooks},
-		Authenticator:          userAuthn,
-		DelegatedAuthenticator: delegated,
-	})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, Customer: true, Authenticator: userAuthn}, DelegatedAuthenticator: delegated})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -292,11 +289,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	require.NoError(t, app.HostGraph(rt).Runtime.EnsureMerchantsService(ctx))
 	cleanupCCBillWebhookMerchant(t, id)
 
-	handler, err := rt.Handler(embed.MountOptions{
-		RouteSets:      []embed.RouteSet{embed.RouteSetPaymentProviders, embed.RouteSetCatalog},
-		Gate:           allowAllGate{id: id},
-		ProviderRoutes: &embed.ProviderRoutes{Webhooks: true},
-	})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, Catalog: true, Gate: allowAllGate{id: id}}})
 	require.NoError(t, err)
 	adminServer := httptest.NewServer(handler)
 	t.Cleanup(adminServer.Close)
@@ -339,9 +332,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	seedProfileUser(t, ctx, dsn, username)
 
 	// Webhook-only mount (the ingestion surface a MODE-2 host exposes).
-	webhookHandler, err := rt.Handler(embed.MountOptions{
-		RouteSets: []embed.RouteSet{embed.RouteSetWebhooks},
-	})
+	webhookHandler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{}})
 	require.NoError(t, err)
 	webhookServer := httptest.NewServer(webhookHandler)
 	t.Cleanup(webhookServer.Close)
@@ -381,10 +372,7 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 
 	// Force the webhook route mounted (the armed-account derivation would
 	// drop it) so the DISPATCHER's fail-closed rejection is what answers.
-	handler, err := rt.Handler(embed.MountOptions{
-		RouteSets:      []embed.RouteSet{embed.RouteSetWebhooks},
-		ProviderRoutes: &embed.ProviderRoutes{Webhooks: true},
-	})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{}})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)

@@ -25,9 +25,15 @@ func (b *Bundle) Mount(target gin.IRoutes) error {
 	if b == nil || target == nil {
 		return fmt.Errorf("openrails Gin: bundle and router are required")
 	}
+	heads := map[string]bool{}
+	for _, route := range b.routes {
+		if route.Method == http.MethodHead {
+			heads[route.Path] = true
+		}
+	}
 	for _, route := range b.routes {
 		target.Handle(route.Method, nativePath(route.Path), gin.WrapH(route.Handler))
-		if route.Method == http.MethodGet {
+		if route.Method == http.MethodGet && !heads[route.Path] {
 			target.Handle(http.MethodHead, nativePath(route.Path), gin.WrapH(route.Handler))
 		}
 	}

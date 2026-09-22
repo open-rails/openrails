@@ -53,7 +53,7 @@ func bindHTTPPathValues(pattern string, next http.Handler) http.Handler {
 	parts := strings.Split(strings.TrimPrefix(pattern, "/"), "/")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Mount groups add leading segments; route patterns describe the suffix.
-		path := strings.Split(strings.TrimPrefix(r.URL.EscapedPath(), "/"), "/")
+		path := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.EscapedPath(), "/"), "/"), "/")
 		if len(path) < len(parts) {
 			http.NotFound(w, r)
 			return

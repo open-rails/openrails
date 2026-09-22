@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	embcp "github.com/open-rails/openrails/internal/operator"
 )
 
@@ -57,9 +58,7 @@ func TestHostRoutedWebhookMountHTTP(t *testing.T) {
 	hostA := "api.host-webhook-a-" + strings.ReplaceAll(uuid.NewString(), "-", "") + ".test"
 	insertMerchantWithHost(t, h.sharedPool(), "host-webhook-a-"+strings.ReplaceAll(uuid.NewString(), "-", ""), hostA)
 
-	handler, err := e.Handler(embed.MountOptions{
-		RouteSets: []embed.RouteSet{embed.RouteSetWebhooks},
-	})
+	handler, err := httptesthost.Handler(e, httptesthost.Options{HTTP: embed.HTTPConfig{}})
 	require.NoError(t, err)
 
 	srv := httptest.NewServer(handler)

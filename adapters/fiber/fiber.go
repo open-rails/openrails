@@ -27,6 +27,12 @@ func (b *Bundle) Mount(target fiber.Router) error {
 	if b == nil || target == nil {
 		return fmt.Errorf("openrails Fiber: bundle and router are required")
 	}
+	heads := map[string]bool{}
+	for _, route := range b.routes {
+		if route.Method == http.MethodHead {
+			heads[route.Path] = true
+		}
+	}
 	for _, route := range b.routes {
 		h := adaptor.HTTPHandlerWithContext(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if ctx, ok := adaptor.LocalContextFromHTTPRequest(r); ok {
@@ -35,7 +41,7 @@ func (b *Bundle) Mount(target fiber.Router) error {
 			route.Handler.ServeHTTP(w, r)
 		}))
 		methods := []string{route.Method}
-		if route.Method == http.MethodGet {
+		if route.Method == http.MethodGet && !heads[route.Path] {
 			methods = append(methods, http.MethodHead)
 		}
 		target.Add(methods, nativePath(route.Path), h)

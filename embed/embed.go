@@ -71,7 +71,7 @@ type Options struct {
 	UsernameResolver openrails.UsernameResolver
 }
 
-// Runtime is the in-process engine: Client() for the shared client, Handler()
+// Runtime is the in-process engine: Client() for the shared client, HTTPRoutes()
 // to mount the billing HTTP surface, RunWorkers/Close for lifecycle.
 type Runtime struct {
 	httpConfig *HTTPConfig
@@ -80,7 +80,6 @@ type Runtime struct {
 	app                    *app.App
 	svc                    *service.Service
 
-	activeRouteSets        []RouteSet
 	releaseStripeTransport func()
 
 	closeOnce sync.Once
@@ -263,22 +262,6 @@ func (r *Runtime) newClient(subject string, options ...openrails.ClientOption) (
 		return nil, fmt.Errorf("openrails embed: %s", merchantMismatchMsg(bound, client.MerchantID()))
 	}
 	return client, nil
-}
-
-// ActiveRouteSets returns the route groups of the most recently mounted HTTP
-// surface; nil before any mount. It is the in-process twin of
-// GET /v1/capabilities.
-func (r *Runtime) ActiveRouteSets() []RouteSet {
-	if r == nil {
-		return nil
-	}
-	return append([]RouteSet(nil), r.activeRouteSets...)
-}
-
-func (r *Runtime) mountRouteSets(sets []RouteSet) []RouteSet {
-	resolved := embedhttp.ResolveRouteSets(sets)
-	r.activeRouteSets = resolved
-	return resolved
 }
 
 // RunWorkers runs the River workers, blocking until ctx is done.
