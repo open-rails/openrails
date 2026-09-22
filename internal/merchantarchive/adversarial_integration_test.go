@@ -93,7 +93,7 @@ func TestRestoreRejectsTamperingAtomically(t *testing.T) {
 		{"foreign merchant", "customers", "merchant_id", text(uuid.NewString())},
 		{"unbalanced ledger counters", "ledger_accounts", "credits_posted", text("7")},
 		{"unsafe opaque intent evidence", "rail_intents", "result_evidence", text(`{"transaction_id":"retained","raw_body":{"secret":"must-refuse"}}`)},
-		{"unsafe checkout replay state", "checkout_sessions", "rail_state", text(`{"_openrails_request_fingerprint":"retained","unknown":"must-refuse"}`)},
+		{"unsafe checkout replay state", "checkout_sessions", "rail_state", text(`{"_openrails_request_fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","unknown":"must-refuse"}`)},
 		{"unacknowledged event", "host_outbox", "delivered_at", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
