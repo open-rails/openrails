@@ -1456,7 +1456,7 @@
     ],
     "internal/modules/subscriptions": [
       "type AdminSubscriptionResponse struct {\n\t*models.Subscription\n\n\tPrice    *models.Price     `json:\"price,omitempty\"`\n\tPayments []*models.Payment `json:\"payments,omitempty\"`\n}",
-      "type InitialMembershipPayload struct {\n\tTerms                  InitialMembershipTerms     `json:\"terms\"`\n\tInstrument             charge.FrozenInstrument    `json:\"instrument\"`\n\tRequestFingerprint     string                     `json:\"request_fingerprint\"`\n\tCheckoutIdempotencyKey string                     `json:\"checkout_idempotency_key\"`\n\tNativeSchedule         *NMIInitialScheduleTerms   `json:\"native_schedule,omitempty\"`\n\tHyperSwitch            *charge.HyperSwitchBinding `json:\"hyperswitch,omitempty\"`\n\tPSP                    string                     `json:\"psp\"`\n\tEmail                  string                     `json:\"email,omitempty\"`\n\tE2ERunID               string                     `json:\"e2e_run_id,omitempty\"`\n}",
+      "type InitialMembershipPayload struct {\n\tCheckoutSessionID      *uuid.UUID                 `json:\"checkout_session_id,omitempty\"`\n\tTerms                  InitialMembershipTerms     `json:\"terms\"`\n\tInstrument             charge.FrozenInstrument    `json:\"instrument\"`\n\tRequestFingerprint     string                     `json:\"request_fingerprint\"`\n\tCheckoutIdempotencyKey string                     `json:\"checkout_idempotency_key\"`\n\tNativeSchedule         *NMIInitialScheduleTerms   `json:\"native_schedule,omitempty\"`\n\tHyperSwitch            *charge.HyperSwitchBinding `json:\"hyperswitch,omitempty\"`\n\tPSP                    string                     `json:\"psp\"`\n\tEmail                  string                     `json:\"email,omitempty\"`\n\tE2ERunID               string                     `json:\"e2e_run_id,omitempty\"`\n}",
       "type InitialMembershipTerms struct {\n\tCollectionPolicy models.CollectionPolicy `json:\"collection_policy\"`\n\tSubscriptionID   uuid.UUID               `json:\"subscription_id\"`\n\tPaymentID        uuid.UUID               `json:\"payment_id\"`\n\tCustomerID       uuid.UUID               `json:\"customer_id\"`\n\tPSPID            uuid.UUID               `json:\"psp_id\"`\n\tProductID        uuid.UUID               `json:\"product_id\"`\n\tPriceID          uuid.UUID               `json:\"price_id\"`\n\tPaymentMethodID  uuid.UUID               `json:\"payment_method_id\"`\n\tProductName      string                  `json:\"product_name\"`\n\tAmount           int64                   `json:\"amount,string\"`\n\tRecurringAmount  int64                   `json:\"recurring_amount,string\"`\n\tCurrency         string                  `json:\"currency\"`\n\tAcceptedAt       time.Time               `json:\"accepted_at\"`\n\tPeriodStart      time.Time               `json:\"period_start\"`\n\tPeriodEnd        time.Time               `json:\"period_end\"`\n\tPending          bool                    `json:\"pending\"`\n\tEntitlements     map[string]*int         `json:\"entitlements\"`\n}",
       "type ManualRebillPayload struct {\n\tInitiator                charge.Initiator        `json:\"initiator\"`\n\tRequestedPaymentMethodID *uuid.UUID              `json:\"requested_payment_method_id,omitempty\"`\n\tRenewal                  RenewalTerms            `json:\"renewal\"`\n\tPaymentMethodID          uuid.UUID               `json:\"payment_method_id\"`\n\tInstrument               charge.FrozenInstrument `json:\"instrument\"`\n\tRail                     string                  `json:\"rail\"`\n\tRailSubscriptionID       string                  `json:\"rail_subscription_id\"`\n\tOrderReference           string                  `json:\"order_reference\"`\n\tAttempt                  int                     `json:\"attempt\"`\n\tFailureCount             int                     `json:\"failure_count\"`\n\tAmountMinor              moneyutil.Cents         `json:\"amount_minor,string\"`\n}",
       "type NMIInitialScheduleTerms struct {\n\tPlanID       string           `json:\"plan_id\"`\n\tStartDate    string           `json:\"start_date\"`\n\tDayFrequency int              `json:\"day_frequency\"`\n\tPlanPayments int              `json:\"plan_payments\"`\n\tCard         nmi.CardUserData `json:\"card\"`\n}",
@@ -3012,6 +3012,7 @@
     },
     "internal/intents/river_dispatch.go": {
       "context": "context",
+      "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "math": "math",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
@@ -4097,6 +4098,7 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/webhooks/stripe.go": {
+      "bytes": "bytes",
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
@@ -4105,6 +4107,7 @@
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "io": "io",
       "json": "encoding/json",
       "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
@@ -4264,6 +4267,7 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/reconcile/converge/converge_passes.go": {
+      "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
       "fmt": "fmt",
@@ -5055,8 +5059,8 @@
     "internal/migrate/postgres/schema.go": "a399bef4859e1c1f8c1f952d279d8b70718d7aa7e8a1ce116cea49c9d5f6b090",
     "internal/migrate/postgres/schema_tokens.go": "db02b2faeecf3343919ebf74de33c7e72e918a00737d054e86dedb15ed5a8e6d",
     "internal/migrate/postgres/unique_scope_exemptions.go": "50f144594711a439c71aa95954b102a9ea0b423488a3e850dd6853fccf91ccd8",
-    "internal/modules/checkout/initial_membership_confirmation.go": "e45d8b1537924ab5a69348a9a1944e6b503f41fb575bd5dd707b426ec082d0bf",
-    "internal/modules/checkout/session_service.go": "cffd6b06e63df57833c3cc594e900e0dc942a6a90c5fb01ec31d3dfbb6824aa3",
+    "internal/modules/checkout/initial_membership_confirmation.go": "6dc9eccb014d577c56911710433188265a09e9eb7c0d1b8260ada68ae569777f",
+    "internal/modules/checkout/session_service.go": "93ff759dd578fa13bd3c270f7325fa73ef1fe448a83090b63ccda1f26b9b3741",
     "internal/modules/checkout/stripe_engine_authentication.go": "9d29d4932050802be68007b3195885306faa9ce594b606f5e4af7ad7a3d6fe4d",
     "internal/modules/checkout/stripe_method_setup.go": "3e124eb2c1bf3efa59035e20b57be6fe8520009c46f9b817b6b82da1b8ad1748",
     "internal/modules/money/subscription_collection_admission.go": "4eae0c069c25b78100f63003334b9391c7845558ad51a8e7f2dd7aeeb1e62130",

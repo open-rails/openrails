@@ -6,6 +6,21 @@ one PostgreSQL transaction. The job carries merchant and operation IDs only.
 supplies the host-composed client and its actual River schema. Missing composition
 or a failed enqueue rolls admission back.
 
+Before enabling a producer, composition proves that the actual River pool and
+billing pool reach the same physical PostgreSQL database. It observes random
+transaction-scoped advisory locks, their holder backend, and the current database
+through PostgreSQL's catalog. Matching connection strings or table names are not
+identity evidence. The proof transaction is rolled back and borrowed connections
+are released even on cancellation; host pools remain host-owned. The same check
+qualifies a separately supplied runtime pool before migrations grant access.
+
+RiverKit supplies an explicit Binding containing its actual client and pool. It
+pins an omitted schema to `public`; custom schemas remain explicit. Binding checks
+that the qualified queue table exists before exposing the producer. Composition
+must precede caller transactions or merchant connection pins; attempts inside
+those scopes fail immediately. Subsequent InsertTx admission uses its existing
+transaction and never reacquires the pool for identity checks.
+
 The request can attempt the operation immediately. The River job remains durable
 while the ledger is pending, retryable, held, in flight, or unknown. Each dispatch
 loads the ledger, waits until its recorded due time/live claim expiry, and applies

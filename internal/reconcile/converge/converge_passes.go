@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -460,6 +461,10 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 	// staleness follow.
 	q := p.e.DB.Gen(ctx)
 	now := p.e.Now()
+	// Repairs retain this pass's detection clock without mutating the lifecycle
+	// shared by overlapping runs. Its dependencies are fixed during wiring.
+	lifecycle := *p.e.lifecycle
+	lifecycle.SetClock(clockwork.NewFakeClockAt(now.UTC()))
 	stale, err := q.ListStaleCheckoutSessions(ctx, gen.ListStaleCheckoutSessionsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Now: now,
 	})
@@ -566,7 +571,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 				if err != nil {
 					return fmt.Errorf("life: load lapsed subscription %s: %w", subID, err)
 				}
-				_, err = reconcile.ApplyDecision(ctx, p.e.DB, p.e.lifecycle, sub, decision, now)
+				_, err = reconcile.ApplyDecision(ctx, p.e.DB, &lifecycle, sub, decision, now)
 				return err
 			},
 		})
@@ -642,7 +647,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 						return nil
 					}
 					fb := "pending stale (never confirmed)"
-					return p.e.lifecycle.ApplyLocalCancellation(ctx, txdb, sub, subscriptions.LocalCancellation{
+					return lifecycle.ApplyLocalCancellation(ctx, txdb, sub, subscriptions.LocalCancellation{
 						EndedAt:    now,
 						CancelType: models.CancelTypeExpired,
 						Feedback:   &fb,

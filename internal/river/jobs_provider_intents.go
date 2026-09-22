@@ -2,10 +2,12 @@ package riverjobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -41,12 +43,17 @@ func (ProviderOperationWorker) Kind() string { return intents.OperationJobKind }
 const operationInfrastructureRetry = time.Minute
 
 func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intents.OperationArgs]) (result error) {
+	var successorCommitted bool
 	// A handler panic is still unresolved money. River snoozing leaves the job
 	// active without spending its finite infrastructure-crash rescue attempts.
 	defer func() {
 		if p := recover(); p != nil {
 			log.WithContext(ctx).WithField("panic", p).Error("provider operation panicked; retained for retry")
-			result = river.JobSnooze(operationInfrastructureRetry)
+			if successorCommitted {
+				result = nil
+			} else {
+				result = river.JobSnooze(operationInfrastructureRetry)
+			}
 		}
 	}()
 	if job == nil || job.Args.MerchantID == uuid.Nil || job.Args.IntentID == uuid.Nil {
@@ -58,11 +65,22 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 	args := job.Args
 	store := intents.NewStore(w.DB)
 	runner := &intents.Runner{Store: store, Registry: w.Registry, Config: w.Config, Clock: w.Clock, Logger: w.MutationLogger, Breaker: intents.NewVolumeBreaker(w.DB), Destructive: destructive.New(w.DB)}
+	runner.OnSuccessorCommitted = func(mid, id uuid.UUID) {
+		if mid == args.MerchantID && id == args.IntentID {
+			successorCommitted = true
+		}
+	}
 	delay := time.Duration(0)
 	terminal := false
 	err := w.DB.RunInMerchantScope(ctx, merchant.ID(args.MerchantID), "provider operation", func(ctx context.Context) error {
 		now := workerNow(w.Clock)
 		row, err := store.PrepareDispatch(ctx, args.IntentID, now)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The scoped ledger is authoritative. An old JSON-addressed wake
+			// can outlive an authorized purge; there is no operation to run.
+			terminal = true
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -109,6 +127,11 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 		}
 		return nil
 	})
+	if successorCommitted {
+		// The replacement wake is already durable. Retaining this consumed job
+		// as another snooze would grow active jobs on every unresolved cycle.
+		return nil
+	}
 	if err != nil {
 		log.WithContext(ctx).WithError(err).WithField("intent_id", args.IntentID).Error("provider operation unresolved; River will retry")
 		return river.JobSnooze(operationInfrastructureRetry)

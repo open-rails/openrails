@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
@@ -54,7 +55,7 @@ func initialStripeResponse(v any) *http.Response {
 }
 
 func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
-	for _, mode := range []string{"paid", "lost response", "authentication", "declined", "wrong method", "setup", "not dispatched", "refunded", "disputed", "verify readonly", "verify limited", "verify full", "verify lost cancel"} {
+	for _, mode := range []string{"paid", "lost response", "authentication", "declined", "wrong method", "setup", "not dispatched", "refunded", "disputed", "verify readonly", "verify limited", "verify full", "verify lost cancel", "opaque valid", "opaque malformed", "bound missing", "bound wrong owner", "bound changed quote", "bound paid"} {
 		t.Run(mode, func(t *testing.T) {
 			fx := newSubIntentFixtureForMerchant(t, merchant.ID(uuid.New()))
 			_, seedErr := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{"stripe_engine_access":null}' WHERE id=(SELECT product_id FROM billing.prices WHERE id=$1)`, fx.priceID)
@@ -211,14 +212,64 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 				raw, _ := json.Marshal(stored.RailState)
 				require.NotContains(t, string(raw), "secret")
 			}
+			var sessionID *uuid.UUID
+			if mode == "opaque valid" {
+				key = "checkout_session:" + uuid.NewString()
+			}
+			if mode == "opaque malformed" {
+				key = "checkout_session:not-a-uuid"
+			}
+			if strings.HasPrefix(mode, "bound ") || mode == "refunded" || mode == "disputed" {
+				id := uuid.New()
+				sessionID = &id
+				if mode != "bound missing" {
+					quote := terms
+					if mode == "bound changed quote" {
+						quote.Entitlements = map[string]*int{"changed": nil}
+					}
+					raw, err := json.Marshal(quote)
+					require.NoError(t, err)
+					expires := fx.svc.now().Add(time.Hour)
+					session := &models.CheckoutSession{ID: id, CustomerID: terms.CustomerID, PriceID: &terms.PriceID, PspID: terms.PSPID, Mode: models.CheckoutSessionModeSubscription, Rail: models.RailStripe, Status: models.CheckoutSessionStatusRequiresAction, Amount: &terms.Amount, Currency: &terms.Currency, ExpiresAt: &expires, RailState: map[string]any{initialMembershipQuoteKey: string(raw)}}
+					require.NoError(t, NewCheckoutSessionRepo(fx.db).Create(fx.ctx, session))
+					if mode == "bound wrong owner" {
+						other := uuid.New()
+						_, err = fx.db.Pool().Exec(fx.ctx, `INSERT INTO billing.customers(id,merchant_id) VALUES($1,$2)`, other, mid.UUID())
+						require.NoError(t, err)
+						_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.checkout_sessions SET customer_id=$2 WHERE id=$1`, id, other)
+						require.NoError(t, err)
+					}
+				}
+			}
 			cfg.EngineAdmissionHold = true
-			_, heldErr := fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal)
+			_, heldErr := fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal, sessionID)
 			require.Error(t, heldErr)
 			require.Zero(t, posts, "hold refuses fresh payment before provider I/O")
 			cfg.EngineAdmissionHold = false
-			_, confirmErr := fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal)
+			_, confirmErr := fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal, sessionID)
+			if mode == "bound missing" || mode == "bound wrong owner" || mode == "bound changed quote" {
+				require.Error(t, confirmErr)
+				require.Zero(t, posts, "invalid session binding refuses before provider I/O")
+				return
+			}
 			op, err := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, InitialMembershipIdempotencyKey(key))
 			require.NoError(t, err)
+			if sessionID != nil {
+				before := posts
+				changed := uuid.New()
+				_, err = fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal, &changed)
+				require.Error(t, err, "canonical replay cannot change session binding")
+				_, err = fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal, nil)
+				require.Error(t, err, "canonical replay cannot erase session binding")
+				require.Equal(t, before, posts)
+				if mode == "refunded" || mode == "disputed" {
+					_, err = fx.db.Gen(fx.ctx).ExpireCheckoutSessions(fx.ctx, gen.ExpireCheckoutSessionsParams{MerchantID: mid.UUID(), Now: fx.svc.now().Add(2 * time.Hour), RowLimit: 100})
+					require.NoError(t, err)
+					expired, err := NewCheckoutSessionRepo(fx.db).GetByID(fx.ctx, *sessionID)
+					require.NoError(t, err, "expiry retains the accepted session row")
+					require.Equal(t, models.CheckoutSessionStatusExpired, expired.Status)
+				}
+			}
 			if strings.HasPrefix(mode, "verify ") {
 				require.ErrorIs(t, confirmErr, ErrCheckoutProcessing)
 				mu.Lock()
@@ -340,8 +391,19 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 					var restored bytes.Buffer
 					require.NoError(t, merchantarchive.Export(t.Context(), target, mid, &restored))
 					require.Equal(t, artifact.Bytes(), restored.Bytes(), "actual initial reversal book survives restore")
+					_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.rail_intents SET payload=jsonb_set(payload,'{checkout_session_id}',to_jsonb($2::text)) WHERE id=$1`, op.ID, uuid.NewString())
+					require.NoError(t, err)
+					require.Error(t, merchantarchive.Export(t.Context(), fx.db, mid, io.Discard), "typed but missing session binding cannot export")
+					_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.rail_intents SET payload=$2 WHERE id=$1`, op.ID, op.Payload)
+					require.NoError(t, err)
 
 				}
+			}
+			if sessionID != nil {
+				projected, err := NewCheckoutSessionRepo(fx.db).GetByID(fx.ctx, *sessionID)
+				require.NoError(t, err)
+				require.Equal(t, models.CheckoutSessionStatusSucceeded, projected.Status)
+				require.Nil(t, projected.ExpiresAt)
 			}
 			var successCount int
 			require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM billing.payments WHERE customer_id=$1 AND status='completed'`, terms.CustomerID).Scan(&successCount))
@@ -350,7 +412,7 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 			} else {
 				require.Equal(t, 1, successCount)
 			}
-			_, _ = fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal)
+			_, _ = fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal, sessionID)
 			if mode == "not dispatched" {
 				require.Zero(t, posts)
 			} else {

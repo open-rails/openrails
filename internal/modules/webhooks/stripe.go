@@ -1,10 +1,12 @@
 package webhooks
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -218,7 +220,43 @@ type stripeDispute struct {
 	Reason        string `json:"reason"`
 }
 
+// redactStripeClientSecrets preserves JSON numbers exactly while removing only
+// Stripe's client_secret field, including expanded objects and previous values.
+func redactStripeClientSecrets(payload []byte) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var event any
+	if err := decoder.Decode(&event); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return nil, errors.New("Stripe event has trailing data")
+	}
+	var scrub func(any)
+	scrub = func(value any) {
+		switch value := value.(type) {
+		case map[string]any:
+			delete(value, "client_secret")
+			for _, child := range value {
+				scrub(child)
+			}
+		case []any:
+			for _, child := range value {
+				scrub(child)
+			}
+		}
+	}
+	scrub(event)
+	return json.Marshal(event)
+}
+
 func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload []byte) error {
+	// Ingestion authenticates the original bytes before this service runs.
+	// Browser credentials are never needed by handlers or completed replay.
+	payload, err := redactStripeClientSecrets(payload)
+	if err != nil {
+		return fmt.Errorf("parse stripe event: %w", err)
+	}
 	var evt stripeEvent
 	if err := json.Unmarshal(payload, &evt); err != nil {
 		return fmt.Errorf("parse stripe event: %w", err)
@@ -241,22 +279,6 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 			"event_api_version":  v,
 			"pinned_api_version": stripeapi.APIVersion,
 		}).Warn("stripe webhook api_version differs from pinned version; pin the webhook endpoint in the Stripe dashboard to match")
-	}
-
-	// The signed envelope has already been verified at ingestion. A PI wakeup
-	// needs identity and accepted terms, never the browser's client credential.
-	// Strip it before ProcessWebhook serializes its completed replay-cache value.
-	if strings.HasPrefix(eventType, "payment_intent.") {
-		var object map[string]json.RawMessage
-		if err := json.Unmarshal(evt.Data.Object, &object); err != nil {
-			return fmt.Errorf("parse Stripe payment notification: %w", err)
-		}
-		delete(object, "client_secret")
-		redacted, err := json.Marshal(object)
-		if err != nil {
-			return err
-		}
-		evt.Data.Object = redacted
 	}
 
 	if s.DeduplicationService != nil {
