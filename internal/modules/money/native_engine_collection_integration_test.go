@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/testfixture"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,17 +26,18 @@ func TestNativeEngineRecurringCollectionOwnsOnlyNewAgreement(t *testing.T) {
 			e.svc.SetClock(clock)
 			mid := dbtest.TestMerchantID.UUID()
 			product, price, sub, legacy := uuid.New(), uuid.New(), uuid.New(), uuid.New()
-			_, err := e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET rail_method_ref='engine-billing',stored_credential_recurring_ref='original-recurring' WHERE id=$1`, e.method)
+			_, err := e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET rail_method_ref='engine-billing',stored_credential_recurring_ref='' WHERE id=$1`, e.method)
 			require.NoError(t, err)
 			method := e.methodRow(t)
 			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name) VALUES($1,$2,$1::uuid::text,'Engine native')`, product, mid)
 			require.NoError(t, err)
 			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency,auto_renew,access_duration_hours) VALUES($1,$2,$3,9990000,'USD',true,720)`, price, mid, product)
 			require.NoError(t, err)
+			testfixture.EngineMembership(t, e.ctx, e.db, subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: sub, PaymentID: uuid.New(), CustomerID: e.payer.UUID(), PSPID: method.PspID, ProductID: product, PriceID: price, PaymentMethodID: e.method, ProductName: "Engine native", Amount: 9990000, RecurringAmount: 9990000, Currency: "USD", AcceptedAt: now.Add(-30 * 24 * time.Hour), PeriodStart: now.Add(-30 * 24 * time.Hour), PeriodEnd: now})
 			for _, r := range []struct {
 				id                     uuid.UUID
 				policy, remote, status string
-			}{{sub, "engine", "", "active"}, {legacy, "provider_dunning", "legacy-schedule", "cancelled"}} {
+			}{{legacy, "provider_dunning", "legacy-schedule", "cancelled"}} {
 				_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,payment_method_id,rail,collection_policy,rail_subscription_id,status,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type) VALUES($1,$2,$3,$4,$5,$6,$7,'nmi',$8,$9,$10::text::billing.subscription_status,$11,$12,CASE WHEN $10='cancelled' THEN $11::timestamptz END,CASE WHEN $10='cancelled' THEN 'user' END)`, r.id, mid, e.payer.UUID(), product, price, method.PspID, e.method, r.policy, r.remote, r.status, now.Add(-30*24*time.Hour), now)
 				require.NoError(t, err)
 			}
@@ -143,7 +145,7 @@ func TestNativeEngineRecurringCollectionOwnsOnlyNewAgreement(t *testing.T) {
 			require.Equal(t, []string{"engine-billing"}, e.gateway.saleBillingIDs)
 			e.gateway.mu.Unlock()
 			var count int
-			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND status='completed' AND token_type='psp_token'`, sub).Scan(&count))
+			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND attempt_kind='renewal' AND status='completed' AND token_type='psp_token'`, sub).Scan(&count))
 			require.Equal(t, 1, count)
 			var status, policy, remote string
 			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT status,collection_policy,rail_subscription_id FROM billing.subscriptions WHERE id=$1`, legacy).Scan(&status, &policy, &remote))
