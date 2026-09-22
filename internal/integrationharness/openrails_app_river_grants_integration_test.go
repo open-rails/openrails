@@ -18,25 +18,9 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
-// TestFullStackServesAndDrainsRiverAsOpenrailsApp proves #764: the
-// 0001_schema.up.sql baseline's cross-schema grants section must give the
-// openrails_app role everything the runtime actually needs on `public`
-// (River) and `profiles` (AuthKit), not just the `openrails` schema grants.
-//
-// StartStandalone already connects as openrails_app (dbtest.SharedRLSPostgres's
-// app DSN) — that part is old news. WithWorkers is the new ingredient: no
-// existing test starts the real in-process River workers against that role.
-// The one pre-existing WithWorkers() caller (tests/testcontainer_suite.go)
-// deliberately boots over the SUPER/BYPASSRLS DSN instead, so River's own
-// tables have never been exercised end to end under the role production
-// actually connects as. river.Client.Start alone does leader election + queue
-// registration (writes to river_leader/river_queue) before any job is ever
-// enqueued; enqueuing and draining one job exercises river_job end to end
-// (INSERT to enqueue, SELECT+UPDATE to claim and finalize). AuthKit/profiles
-// access is exercised by the same boot for free: minting the API key below
-// (and StartStandalone's own bootstrap) round-trips through the real control
-// plane's AuthKit core, which lives entirely in the `profiles` schema.
-func TestFullStackServesAndDrainsRiverAsOpenrailsApp(t *testing.T) {
+// Prove the unprivileged standalone runtime can serve authenticated HTTP and
+// enqueue, claim and complete real River work using its cross-schema grants.
+func testFullStackServesAndDrainsRiverAsOpenrailsApp(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd", WithWorkers())

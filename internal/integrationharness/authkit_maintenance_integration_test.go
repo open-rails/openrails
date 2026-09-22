@@ -22,6 +22,7 @@ func TestStandaloneAuthKitLifecycle(t *testing.T) {
 	// Check cleanup before the recovery fleets can complete this hour's unique
 	// maintenance job. Each subtest closes its fleet before the next starts.
 	t.Run("maintenance", testStandaloneAuthKitMaintenance)
+	t.Run("runtime_grants", testFullStackServesAndDrainsRiverAsOpenrailsApp)
 	t.Run("api_only", func(t *testing.T) { testStandaloneAccountRecovery(t, false) })
 	t.Run("with_workers", func(t *testing.T) { testStandaloneAccountRecovery(t, true) })
 }
