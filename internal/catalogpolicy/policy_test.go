@@ -21,5 +21,6 @@ func TestCatalogWritePolicy(t *testing.T) {
 	child, cancel := context.WithCancel(OperatorContext(ctx))
 	defer cancel()
 	require.NoError(t, Check(child, nil), "nested service calls retain operator authority")
-	require.ErrorIs(t, Check(context.WithValue(ctx, "operator", true), nil), ErrUpdatesDisabled)
+	type callerKey string
+	require.ErrorIs(t, Check(context.WithValue(ctx, callerKey("operator"), true), nil), ErrUpdatesDisabled)
 }
