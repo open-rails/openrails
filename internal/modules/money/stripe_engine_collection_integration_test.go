@@ -13,9 +13,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/testfixture"
 	"github.com/stretchr/testify/require"
 )
 
@@ -30,15 +33,15 @@ func TestStripeEngineRecurringExactPaymentWorkflow(t *testing.T) {
 			seedPSPSecrets(t, e.db, e.merchants, "stripe", account, map[string]string{"secret_key": "sk_test_synthetic"})
 			var psp uuid.UUID
 			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT id FROM billing.psps WHERE merchant_id=$1 AND account_id=$2 AND rail='stripe'`, mid, account).Scan(&psp))
-			_, err := e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET rail='stripe',psp_id=$2,rail_customer_ref='cus_engine',rail_method_ref='pm_engine',stored_credential_recurring_ref='pi_initial' WHERE id=$1`, e.method, psp)
+			_, err := e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET rail='stripe',psp_id=$2,rail_customer_ref='cus_engine',rail_method_ref='pm_engine',stored_credential_recurring_ref='' WHERE id=$1`, e.method, psp)
 			require.NoError(t, err)
 			product, price, sub := uuid.New(), uuid.New(), uuid.New()
 			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name,entitlements_spec) VALUES($1,$2,$1::uuid::text,'Engine Stripe','{"engine_access":null}')`, product, mid)
 			require.NoError(t, err)
 			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency,auto_renew,access_duration_hours) VALUES($1,$2,$3,9990000,'USD',true,720)`, price, mid, product)
 			require.NoError(t, err)
-			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,payment_method_id,rail,collection_policy,status,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7,'stripe','engine','active',$8,$9,'{"engine_access":null}')`, sub, mid, e.payer.UUID(), product, price, psp, e.method, now.Add(-30*24*time.Hour), now)
-			require.NoError(t, err)
+			initialPayment := uuid.New()
+			testfixture.EngineMembership(t, e.ctx, e.db, subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: sub, PaymentID: initialPayment, CustomerID: e.payer.UUID(), PSPID: psp, ProductID: product, PriceID: price, PaymentMethodID: e.method, ProductName: "Engine Stripe", Amount: 9990000, RecurringAmount: 9990000, Currency: "USD", AcceptedAt: now.Add(-30 * 24 * time.Hour), PeriodStart: now.Add(-30 * 24 * time.Hour), PeriodEnd: now, Entitlements: map[string]*int{"engine_access": nil}})
 			var mu sync.Mutex
 			var pi map[string]any
 			posts, cancels := 0, 0
@@ -135,10 +138,10 @@ func TestStripeEngineRecurringExactPaymentWorkflow(t *testing.T) {
 			}
 			mu.Unlock()
 			var count int
-			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1`, sub).Scan(&count))
+			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND id<>$2`, sub, initialPayment).Scan(&count))
 			require.Equal(t, 1, count)
 			var grants int
-			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.grants WHERE source_id=$1 AND source_type='subscription' AND event='grant'`, sub.String()).Scan(&grants))
+			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.grants WHERE source_id=$1 AND source_type='subscription' AND event='grant' AND starts_at >= $2`, sub.String(), now).Scan(&grants))
 			if mode == "refunded" || mode == "disputed" || mode == "declined" {
 				require.Zero(t, grants)
 			} else {
