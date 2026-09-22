@@ -34,11 +34,6 @@ func ProductToAPI(p *models.Product, prices []*models.Price) api.ProductObject {
 }
 
 func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObject {
-	var subID *openrails.SubscriptionID
-	if p.SubscriptionID != nil {
-		s := openrails.SubscriptionID(*p.SubscriptionID)
-		subID = &s
-	}
 	var amountRefunded int64
 	var refundObjects []api.PaymentObject
 	for _, r := range refunds {
@@ -50,6 +45,24 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 			}
 		}
 		refundObjects = append(refundObjects, PaymentToAPI(r, nil))
+	}
+	payment := paymentToAPIWithRefundTotal(p, amountRefunded)
+	if refunds != nil {
+		if refundObjects == nil {
+			refundObjects = []api.PaymentObject{}
+		}
+		payment.Refunds = &api.PaymentRefundsList{Object: "list", Data: refundObjects}
+	}
+	return payment
+}
+
+// paymentToAPIWithRefundTotal keeps status derivation identical for detailed
+// payments and customer history, without loading unbounded refund objects.
+func paymentToAPIWithRefundTotal(p *models.Payment, amountRefunded int64) api.PaymentObject {
+	var subID *openrails.SubscriptionID
+	if p.SubscriptionID != nil {
+		s := openrails.SubscriptionID(*p.SubscriptionID)
+		subID = &s
 	}
 	object := "charge"
 	status := paymentAPIStatus(p.Status)
@@ -65,12 +78,6 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 		status = "partially_refunded"
 	}
 	payment := api.PaymentObject{ID: openrails.PaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, CustomerID: (openrails.CustomerID(p.CustomerID)).String(), SubscriptionID: subID, Rail: string(p.Rail), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, FailureCode: p.FailureCode, FailureReason: p.FailureReason, CreatedAt: p.CreatedAt}
-	if refunds != nil {
-		if refundObjects == nil {
-			refundObjects = []api.PaymentObject{}
-		}
-		payment.Refunds = &api.PaymentRefundsList{Object: "list", Data: refundObjects}
-	}
 	if p.Price != nil {
 		priceObj := PriceToAPI(p.Price)
 		payment.Price = &priceObj
@@ -116,8 +123,8 @@ func paymentCardFromModel(p *models.Payment) *paymentCardJSON {
 	return &paymentCardJSON{Brand: brand, Last4: last4}
 }
 
-func PaymentToUserAPI(p *models.Payment) userPaymentObject {
-	payment := PaymentToAPI(p, nil)
+func PaymentToUserAPI(p *models.Payment, amountRefunded int64) userPaymentObject {
+	payment := paymentToAPIWithRefundTotal(p, amountRefunded)
 	return userPaymentObject{
 		ID:             payment.ID,
 		Object:         payment.Object,
