@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -81,7 +84,7 @@ func TestFinalizeInvoice_PrepaidStatement(t *testing.T) {
 func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
 	cleanupCollection(t, pool, ctx, payer)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears),
 	})
@@ -124,11 +127,20 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 	`, payer.UUID()).Scan(&pendingAfter))
 	require.Equal(t, 0, pendingAfter, "finalization attaches pending invoice items")
 
-	ch := &fakeCharger{}
-	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
+	adapter := &fakeCollectionAdapter{}
+	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
+		string(models.RailNMI): adapter,
+	})
+	runner := collectionRunner(dbi, ch, adapter)
+	n, err := svc.ChargeOutstanding(ctx, runner, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
-	require.Len(t, ch.charges, 1)
+	require.Len(t, adapter.charges, 1)
+	require.Equal(t, dbtest.TestMerchantID.UUID(), adapter.charges[0].MerchantID)
+	require.NotNil(t, adapter.charges[0].InvoiceID)
+	require.Equal(t, inv.ID, *adapter.charges[0].InvoiceID)
+	require.Equal(t, pm, adapter.charges[0].PaymentMethodID)
+	require.Equal(t, moneyutil.Cents(1), adapter.charges[0].AmountCents)
 
 	paid, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
 	require.NoError(t, err)
@@ -136,12 +148,29 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 	require.Equal(t, int64(500), paid.AmountPaid)
 	require.Equal(t, int64(0), paid.AmountDue)
 	require.NotNil(t, paid.PaidAt)
+	var rail, railPaymentID string
+	var paymentCount int
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT count(*), COALESCE(MAX(rail), ''), COALESCE(MAX(rail_payment_id), '')
+		FROM billing.invoice_payments
+		WHERE invoice_id = $1 AND status = 'settled'
+	`, inv.ID).Scan(&paymentCount, &rail, &railPaymentID))
+	require.Equal(t, 1, paymentCount)
+	require.Equal(t, string(models.RailNMI), rail)
+	op := latestCollectionIntent(t, pool, ctx, inv.ID)
+	require.Equal(t, "tx_"+op.ID.String(), railPaymentID)
+	require.Equal(t, intents.StatusSucceeded, op.Status)
+
+	n, err = svc.ChargeOutstanding(ctx, runner, 0)
+	require.NoError(t, err)
+	require.Equal(t, 0, n)
+	require.Len(t, adapter.charges, 1, "paid invoice must not be recharged")
 }
 
 func TestInvoiceCollectionDeclineMarksInvoicePastDueAndBlocksArrears(t *testing.T) {
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
 	cleanupCollection(t, pool, ctx, payer)
-	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
+	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears),
 	})
@@ -157,11 +186,14 @@ func TestInvoiceCollectionDeclineMarksInvoicePastDueAndBlocksArrears(t *testing.
 	require.Equal(t, "open", inv.Status)
 	require.Equal(t, int64(500), inv.AmountDue)
 
-	ch := &fakeCharger{declineAll: true}
-	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
+	adapter := &fakeCollectionAdapter{decline: true}
+	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
+		string(models.RailNMI): adapter,
+	})
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, adapter), 0)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
-	require.Len(t, ch.charges, 1)
+	require.Len(t, adapter.charges, 1)
 
 	pastDue, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
 	require.NoError(t, err)
@@ -180,6 +212,19 @@ func TestInvoiceCollectionDeclineMarksInvoicePastDueAndBlocksArrears(t *testing.
 	require.NoError(t, err)
 	require.EqualValues(t, 500, owed, "declined collection leaves the debt consuming the credit line")
 
+	require.Nil(t, pastDue.CollectionIntentID, "a definitive refusal releases the invoice")
+	var rail, railPaymentID, failureCode, failureMessage string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT COALESCE(rail, ''), COALESCE(rail_payment_id, ''), COALESCE(failure_code, ''), COALESCE(failure_message, '')
+		FROM billing.invoice_payments
+		WHERE invoice_id = $1 AND status = 'failed'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, inv.ID).Scan(&rail, &railPaymentID, &failureCode, &failureMessage))
+	require.Equal(t, string(models.RailNMI), rail)
+	require.Equal(t, "declined_"+latestCollectionIntent(t, pool, ctx, inv.ID).ID.String(), railPaymentID)
+	require.Equal(t, "card_declined", failureCode)
+	require.Equal(t, "card declined", failureMessage)
 }
 
 func TestFinalizeThresholdInvoices_CapHitCreatesCollectableInvoice(t *testing.T) {
