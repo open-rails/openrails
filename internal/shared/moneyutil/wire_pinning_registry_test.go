@@ -42,6 +42,8 @@ var converters = []string{
 // pinnedBoundaries: file -> the wire-pinning test that covers it (known micros
 // in ⇒ exact integer on the wire).
 var pinnedBoundaries = map[string]string{
+	// Shared loopback initial fixture feeds the literal9.99 recurring wire matrix.
+	"internal/testfixture/engine_membership.go":              "internal/modules/money/subscription_collection_execution_integration_test.go",
 	"internal/modules/subscriptions/initial_terms.go":        "internal/modules/checkout/initial_membership_hyperswitch_integration_test.go",
 	"internal/modules/checkout/initial_membership_intent.go": "internal/modules/checkout/initial_membership_hyperswitch_integration_test.go",
 	// The deferred first-payment control pins the provider's 9.99 readback to

@@ -13,7 +13,7 @@ SET xmloption = content;
 SET client_min_messages = warning;
 
 -- btree_gist backs the EXCLUDE constraints on uuid+tstzrange
-CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 
 CREATE SCHEMA IF NOT EXISTS openrails;
@@ -241,7 +241,7 @@ COMMENT ON FUNCTION openrails.delinquency_work_merchant_ids(p_now timestamp with
 
 REVOKE ALL ON FUNCTION openrails.delinquency_work_merchant_ids(p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
 
-CREATE FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
+CREATE FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer, p_include_engine boolean) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
@@ -250,18 +250,26 @@ BEGIN
     SELECT s.merchant_id
       FROM openrails.subscriptions s
      WHERE s.rail = ANY(p_rails)
-       AND s.status = 'past_due'
-       AND s.next_retry_at IS NOT NULL AND s.next_retry_at <= p_now
+       AND ((s.collection_policy <> 'engine' AND s.rail='nmi' AND s.status='past_due' AND s.next_retry_at IS NOT NULL AND s.next_retry_at <= p_now)
+            OR (p_include_engine AND s.collection_policy='engine' AND s.current_period_ends_at <= p_now
+                AND (s.status='active' OR (s.status='past_due' AND s.next_retry_at <= p_now))
+                AND EXISTS (SELECT 1 FROM openrails.payment_methods pm JOIN openrails.psps p ON p.id=pm.psp_id AND p.merchant_id=pm.merchant_id LEFT JOIN openrails.custodians c ON c.id=pm.custodian_id AND c.merchant_id=pm.merchant_id
+                            WHERE pm.id=s.payment_method_id AND pm.merchant_id=s.merchant_id AND pm.customer_id=s.customer_id AND pm.psp_id=s.psp_id
+                              AND pm.park_reason='' AND pm.stored_credential_recurring_ref<>'' AND NOT p.archived
+                         AND ((pm.custodian='hyperswitch' AND pm.rail='nmi' AND NOT c.archived AND p.environment=c.environment)
+                              OR (pm.custodian='psp' AND pm.rail IN ('nmi','stripe') AND pm.rail_customer_ref<>'' AND pm.rail_method_ref<>'')))
+                AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=s.merchant_id AND i.subscription_id=s.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
        AND s.deleted_at IS NULL
      GROUP BY s.merchant_id
-     ORDER BY MIN(s.next_retry_at)
+     ORDER BY MIN(CASE WHEN s.collection_policy='engine' AND s.status='active' THEN s.current_period_ends_at ELSE s.next_retry_at END), s.merchant_id
      LIMIT p_limit;
 END;
 $$;
 
-COMMENT ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) IS 'Merchants with a due past_due subscription on the named rails — the fan-out list for DunningWorker. Ids only; the due rows, the charges and every lifecycle transition run per-merchant under RunInMerchantScope. Replaces a bare-context scan that returned an empty slice on every run, so scheduled dunning (retries, #839 staleness parking, #840 terminal handling) never fired at all (or#877 B5).';
+COMMENT ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer, p_include_engine boolean) IS 'Merchants with a due past_due subscription on the named rails — the fan-out list for DunningWorker. Ids only; the due rows, the charges and every lifecycle transition run per-merchant under RunInMerchantScope. Replaces a bare-context scan that returned an empty slice on every run, so scheduled dunning (retries, #839 staleness parking, #840 terminal handling) never fired at all (or#877 B5).';
 
-REVOKE ALL ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer, p_include_engine boolean) FROM PUBLIC;
+
 
 CREATE FUNCTION openrails.due_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -2000,6 +2008,12 @@ CREATE INDEX idx_rail_intents_psp ON openrails.rail_intents USING btree (psp_id)
 
 CREATE INDEX idx_rail_intents_subscription ON openrails.rail_intents USING btree (subscription_id) WHERE (subscription_id IS NOT NULL);
 
+-- Initial membership identity is frozen in terms, including failed attempts
+-- with no subscription row. Paid agreement lookup must not scan the whole book.
+CREATE INDEX idx_rail_intents_initial_membership_history ON openrails.rail_intents
+    (merchant_id, ((payload->'terms')->>'subscription_id'))
+    WHERE intent_type='initial_membership' AND status='succeeded';
+
 CREATE UNIQUE INDEX uq_rail_intents_merchant_idempotency_key ON openrails.rail_intents USING btree (merchant_id, idempotency_key);
 
 ALTER TABLE ONLY openrails.rail_intents
@@ -2566,7 +2580,6 @@ CREATE TABLE openrails.payment_methods (
     psp_id uuid NOT NULL,
     rail_customer_ref text DEFAULT ''::text NOT NULL,
     rail_method_ref text DEFAULT ''::text NOT NULL,
-    rebill_driver text DEFAULT 'provider'::text NOT NULL,
     stored_credential_recurring_ref text DEFAULT ''::text NOT NULL,
     stored_credential_unscheduled_ref text DEFAULT ''::text NOT NULL,
     custodian text DEFAULT 'psp'::text NOT NULL,
@@ -2581,8 +2594,7 @@ CREATE TABLE openrails.payment_methods (
     parked_at timestamp with time zone,
     account_updater_checked_at timestamp with time zone,
     CONSTRAINT payment_methods_charge_via_check CHECK ((charge_via = ANY (ARRAY['pan_proxy'::text, 'network_token'::text]))),
-    CONSTRAINT payment_methods_custodian_check CHECK ((custodian = ANY (ARRAY['psp'::text, 'basis_theory'::text, 'hyperswitch'::text]))),
-    CONSTRAINT payment_methods_rebill_driver_check CHECK ((rebill_driver = ANY (ARRAY['provider'::text, 'openrails'::text])))
+    CONSTRAINT payment_methods_custodian_check CHECK ((custodian = ANY (ARRAY['psp'::text, 'basis_theory'::text, 'hyperswitch'::text])))
 );
 
 COMMENT ON TABLE openrails.payment_methods IS 'Generalized payment method table supporting multiple rails.';
@@ -2714,6 +2726,7 @@ CREATE TABLE openrails.subscriptions (
     product_id uuid NOT NULL,
     status openrails.subscription_status DEFAULT 'pending'::openrails.subscription_status NOT NULL,
     rail text NOT NULL,
+    collection_policy text DEFAULT 'provider' NOT NULL,
     rail_subscription_id text DEFAULT ''::text NOT NULL,
     user_email text,
     payment_method_id uuid,
@@ -2741,6 +2754,9 @@ CREATE TABLE openrails.subscriptions (
     deleted_at timestamp with time zone,
     destructive_run_id uuid,
     destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
+    CONSTRAINT subscriptions_collection_policy_check CHECK (collection_policy IN ('provider', 'provider_dunning', 'engine')),
+    CONSTRAINT subscriptions_engine_binding_check CHECK (collection_policy <> 'engine' OR ((rail IN ('nmi','stripe') AND rail_subscription_id='') OR rail='solana')),
+    CONSTRAINT subscriptions_dunning_rail_check CHECK (collection_policy <> 'provider_dunning' OR rail = 'nmi'),
     CONSTRAINT chk_cancelled_has_timestamp CHECK (((status <> 'cancelled'::openrails.subscription_status) OR (cancelled_at IS NOT NULL))),
     CONSTRAINT chk_cancelled_has_type CHECK (((status <> 'cancelled'::openrails.subscription_status) OR (cancel_type IS NOT NULL))),
     CONSTRAINT chk_cancelled_no_retry_schedule CHECK (((status <> 'cancelled'::openrails.subscription_status) OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL)))),
@@ -2775,6 +2791,8 @@ CREATE INDEX idx_subscriptions_customer ON openrails.subscriptions USING btree (
 CREATE INDEX idx_subscriptions_customer_active_created ON openrails.subscriptions USING btree (customer_id, created_at DESC) WHERE (status = 'active'::openrails.subscription_status);
 
 CREATE INDEX idx_subscriptions_destructive_run ON openrails.subscriptions USING btree (destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
+
+CREATE INDEX idx_subscriptions_engine_due ON openrails.subscriptions (merchant_id, current_period_ends_at, next_retry_at) WHERE collection_policy = 'engine' AND status IN ('active', 'past_due') AND deleted_at IS NULL;
 
 CREATE INDEX idx_subscriptions_due_dunning ON openrails.subscriptions USING btree (next_retry_at, rail) WHERE ((status = 'past_due'::openrails.subscription_status) AND (next_retry_at IS NOT NULL));
 
@@ -3819,6 +3837,69 @@ BEGIN
         FOR item IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
             JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped
             WHERE n.nspname=TG_TABLE_SCHEMA AND c.relkind IN ('r','p')
+              AND c.relname = ANY(ARRAY[
+                  'account_updater_batches',
+                  'admission_denials_hourly',
+                  'admission_operations',
+                  'billing_policies',
+                  'billing_policy_bindings',
+                  'catalog_meters',
+                  'catalog_rate_cards',
+                  'catalogs',
+                  'checkout_sessions',
+                  'custodians',
+                  'custody_migrations',
+                  'customer_delinquency',
+                  'customer_invoice_profiles',
+                  'customers',
+                  'dashboard_configs',
+                  'destructive_action_switch',
+                  'destructive_run_before_images',
+                  'entitlements',
+                  'grants',
+                  'host_outbox',
+                  'invoice_items',
+                  'invoice_payments',
+                  'invoices',
+                  'invoker_spend_limits',
+                  'ledger_accounts',
+                  'ledger_transfers',
+                  'maintenance_runs',
+                  'merchant_configurations',
+                  'merchant_deks',
+                  'merchant_destructive_policy',
+                  'merchant_secrets',
+                  'merchant_webhooks',
+                  'merchants',
+                  'metered_rating_watermarks',
+                  'money_settings',
+                  'notifications',
+                  'operation_authorizations',
+                  'payment_methods',
+                  'payments',
+                  'price_key_movements',
+                  'price_psp_bindings',
+                  'prices',
+                  'products',
+                  'provider_billing_observations',
+                  'provider_billing_qualifications',
+                  'psps',
+                  'rail_customer_accounts',
+                  'rail_intents',
+                  'rail_mutation_logs',
+                  'rail_refresh_watermarks',
+                  'reconciliation_findings',
+                  'reconciliation_state',
+                  'reprice_batches',
+                  'solana_subscriptions',
+                  'subscription_reprices',
+                  'subscription_status_transitions',
+                  'subscriptions',
+                  'usage_events',
+                  'webhook_events',
+                  'webhook_health',
+                  'webhook_health_daily',
+                  'worker_state']::text[])
         LOOP
             EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.%I WHERE merchant_id=$1)',TG_TABLE_SCHEMA,item.relname)
                 INTO occupied USING NEW.merchant_id;
@@ -4056,3 +4137,19 @@ CREATE TRIGGER immutable_grants_truncate BEFORE TRUNCATE ON openrails.grants
 EXECUTE FUNCTION openrails.reject_immutable_billing_fact();
 CREATE TRIGGER immutable_maintenance_runs_truncate BEFORE TRUNCATE ON openrails.maintenance_runs
 EXECUTE FUNCTION openrails.reject_immutable_billing_fact();
+
+
+CREATE FUNCTION openrails.preserve_subscription_collection_policy() RETURNS trigger
+ LANGUAGE plpgsql SET search_path TO 'openrails','pg_catalog' AS $$
+BEGIN
+ IF NEW.collection_policy IS DISTINCT FROM OLD.collection_policy THEN
+  RAISE EXCEPTION 'subscription collection policy is immutable' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER subscriptions_collection_policy_immutable BEFORE UPDATE OF collection_policy
+ ON openrails.subscriptions FOR EACH ROW EXECUTE FUNCTION openrails.preserve_subscription_collection_policy();
+
+
+CREATE INDEX idx_subscriptions_engine_due_global ON openrails.subscriptions (current_period_ends_at,merchant_id) WHERE collection_policy='engine' AND status IN ('active','past_due') AND deleted_at IS NULL;

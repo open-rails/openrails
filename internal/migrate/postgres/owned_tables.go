@@ -66,3 +66,63 @@ var OwnedTables = []string{
 	"webhook_health_daily",
 	"worker_state",
 }
+
+// OwnedViews are the OpenRails views which may accompany its tables in an
+// exclusive schema. They are not table data and are never archived as rows.
+var OwnedViews = []string{"catalog_drift_events", "freeloader_episodes", "orphaned_episodes"}
+
+// OwnedFunctions identifies exact routine signatures; host overloads are not owned.
+var OwnedFunctions = []string{
+	"account_updater_open_batch_merchant_ids(integer)",
+	"account_updater_work_merchant_ids(text, text, timestamp with time zone, integer, uuid, integer)",
+	"assign_product_catalog()",
+	"begin_billing_restore(uuid)",
+	"billing_restore_active(uuid)",
+	"check_billing_restore_ledger(uuid)",
+	"count_destructive_intents_by_actor_since(text, text[], timestamp with time zone)",
+	"count_destructive_intents_for_merchant_since(uuid, text[], text[], timestamp with time zone)",
+	"current_merchant_id()",
+	"custodian_owner_by_identity(text, text, text)",
+	"customer_merchant_ids_for_subject(uuid)",
+	"delinquency_work_merchant_ids(timestamp with time zone, integer)",
+	"due_dunning_merchant_ids(text[], timestamp with time zone, integer, boolean)",
+	"due_rail_intent_merchant_ids(timestamp with time zone, integer)",
+	"due_verify_rail_intent_merchant_ids(timestamp with time zone, integer)",
+	"enqueue_payment_settlement_event()",
+	"ensure_default_catalog(uuid)",
+	"financial_held_amount(uuid, uuid, text, timestamptz)",
+	"finish_billing_restore(uuid, text, bigint)",
+	"fleet_merchant_funnel(uuid, timestamp with time zone)",
+	"fleet_mrr_by_currency(uuid)",
+	"fleet_rail_health(uuid, timestamp with time zone)",
+	"fleet_revenue_by_currency(uuid, timestamp with time zone)",
+	"fleet_weekly_active_merchants(uuid, timestamp with time zone)",
+	"fleet_weekly_cancelled_subscriptions(uuid, timestamp with time zone)",
+	"fleet_weekly_volume(uuid, timestamp with time zone)",
+	"guard_billing_fact_columns()",
+	"guard_billing_restore_receipt()",
+	"guard_catalog_identity()",
+	"guard_ledger_account_facts()",
+	"guard_merchant_group_binding()",
+	"guard_merchant_restore()",
+	"guard_product_catalog_identity()",
+	"guard_provider_cutover_card()",
+	"guard_provider_cutover_intent()",
+	"guard_provider_cutover_subscription()",
+	"lapsed_credit_lot_merchant_ids(timestamp with time zone, integer)",
+	"ledger_transfers_apply_counters()",
+	"pending_merchant_secret_cleanups(uuid, integer)",
+	"preserve_subscription_collection_policy()",
+	"prices_default_key()",
+	"products_guard_tier_group()",
+	"psp_owner_by_identity(text, text, text)",
+	"psp_rail_merchant_ids(text[], integer, uuid)",
+	"redrivable_plan_change_merchant_ids(integer)",
+	"reject_immutable_billing_fact()",
+	"require_finished_billing_restore()",
+	"retention_work_merchant_ids(timestamp with time zone, timestamp with time zone, timestamp with time zone, timestamp with time zone, timestamp with time zone, timestamp with time zone, uuid, integer)",
+	"subscriptions_record_status_transition()",
+	"subscriptions_set_tier_group()",
+}
+
+var OwnedTypes = []string{"payment_status", "subscription_status"}
