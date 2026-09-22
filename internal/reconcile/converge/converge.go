@@ -195,9 +195,6 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeRes
 	if scope.Merchant.UUID() == uuid.Nil {
 		return res, fmt.Errorf("converge: scope.Merchant required")
 	}
-	runClock := clockwork.NewFakeClockAt(e.Now().UTC())
-	e.lifecycle.SetClock(runClock)
-
 	var collected []ConvergeFinding
 	for _, p := range e.passes {
 		fs, err := p.Run(ctx, scope)
