@@ -84,11 +84,11 @@ type Runtime struct {
 	RouteCapabilities *routesurface.RuntimeCapabilities
 
 	Clock clockwork.Clock
-	// RiverProducer is an enqueue-only River client. It should never be started.
+	// RiverProducer inserts jobs. Host mode uses the composed worker client;
+	// managed HTTP-only processes use an unstarted producer client.
 	RiverProducer     *river.Client[pgx.Tx]
 	riverProducerPool *pgxpool.Pool
 	RiverClient       *river.Client[pgx.Tx]
-	riverPool         *pgxpool.Pool
 
 	SubscriptionService      *subscriptions.SubscriptionService
 	ProductService           *catalog.ProductService
@@ -341,10 +341,6 @@ func (r *Runtime) Close(ctx context.Context) error {
 			}
 		}
 		r.riverStarted = false
-	}
-	if r.riverPool != nil {
-		r.riverPool.Close()
-		r.riverPool = nil
 	}
 	if r.riverProducerPool != nil {
 		r.riverProducerPool.Close()

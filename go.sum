@@ -250,6 +250,8 @@ github.com/open-rails/authkit v0.112.0 h1:iKyQNvJnIIrT2sCbkaJ3U+uCv8QAUuH0AbzUak
 github.com/open-rails/authkit v0.112.0/go.mod h1:GGEfH6RtgLBPLRngd0sUBCjZa0TW5sR2S4ia7cLP89w=
 github.com/open-rails/migratekit v1.0.4 h1:i/azuFFLY3Si5nUz3hKAIqngynAGa5TIMUe+GDFS6pU=
 github.com/open-rails/migratekit v1.0.4/go.mod h1:ONDMUycRcwAB+eKlPvho6mnNAZf9gf9+yqwCKDRuO9g=
+github.com/open-rails/riverkit v0.1.0 h1:j79U1wC47ZNA8dMJtsPMUlWvnVnYIuX58TonAk6BH2Q=
+github.com/open-rails/riverkit v0.1.0/go.mod h1:ya9Vwa62QBbh/TW5fGxawYyRwnycw+57Tr2vPOLnBdw=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
 github.com/opencontainers/go-digest v1.0.0/go.mod h1:0JzlMkj0TRzQZfJkVvzbP0HBR3IKzErnv2BNG4W4MAM=
 github.com/opencontainers/image-spec v1.1.1 h1:y0fUlFfIZhPF1W537XOLg0/fcx6zcHCJwooC2xJA040=
