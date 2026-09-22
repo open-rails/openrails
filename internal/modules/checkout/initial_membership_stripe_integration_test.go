@@ -55,7 +55,7 @@ func initialStripeResponse(v any) *http.Response {
 }
 
 func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
-	for _, mode := range []string{"paid", "lost response", "authentication", "declined", "wrong method", "setup", "not dispatched", "refunded", "disputed", "verify readonly", "verify limited", "verify full", "verify lost cancel", "opaque valid", "opaque malformed", "bound missing", "bound wrong owner", "bound changed quote", "bound paid"} {
+	for _, mode := range []string{"paid", "lost response", "authentication", "declined", "wrong method", "setup", "not dispatched", "refunded", "disputed", "verify readonly", "verify limited", "verify full", "verify lost cancel", "opaque valid", "opaque malformed", "bound missing", "bound wrong owner", "bound changed quote", "bound deleted", "bound paid"} {
 		t.Run(mode, func(t *testing.T) {
 			fx := newSubIntentFixtureForMerchant(t, merchant.ID(uuid.New()))
 			_, seedErr := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{"stripe_engine_access":null}' WHERE id=(SELECT product_id FROM billing.prices WHERE id=$1)`, fx.priceID)
@@ -232,6 +232,10 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 					expires := fx.svc.now().Add(time.Hour)
 					session := &models.CheckoutSession{ID: id, CustomerID: terms.CustomerID, PriceID: &terms.PriceID, PspID: terms.PSPID, Mode: models.CheckoutSessionModeSubscription, Rail: models.RailStripe, Status: models.CheckoutSessionStatusRequiresAction, Amount: &terms.Amount, Currency: &terms.Currency, ExpiresAt: &expires, RailState: map[string]any{initialMembershipQuoteKey: string(raw)}}
 					require.NoError(t, NewCheckoutSessionRepo(fx.db).Create(fx.ctx, session))
+					if mode == "bound deleted" {
+						_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.checkout_sessions SET deleted_at=now() WHERE id=$1`, id)
+						require.NoError(t, err)
+					}
 					if mode == "bound wrong owner" {
 						other := uuid.New()
 						_, err = fx.db.Pool().Exec(fx.ctx, `INSERT INTO billing.customers(id,merchant_id) VALUES($1,$2)`, other, mid.UUID())
@@ -247,9 +251,11 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 			require.Zero(t, posts, "hold refuses fresh payment before provider I/O")
 			cfg.EngineAdmissionHold = false
 			_, confirmErr := fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal, sessionID)
-			if mode == "bound missing" || mode == "bound wrong owner" || mode == "bound changed quote" {
+			if mode == "bound missing" || mode == "bound wrong owner" || mode == "bound changed quote" || mode == "bound deleted" {
 				require.Error(t, confirmErr)
 				require.Zero(t, posts, "invalid session binding refuses before provider I/O")
+				_, lookupErr := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, InitialMembershipIdempotencyKey(key))
+				require.True(t, db.IsNotFound(lookupErr), "invalid session cannot admit a durable payment operation")
 				return
 			}
 			op, err := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, InitialMembershipIdempotencyKey(key))
