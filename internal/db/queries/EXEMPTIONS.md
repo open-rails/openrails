@@ -272,22 +272,3 @@ claim is made that the lock is released between them. The
 `products_catalog_present` CHECK; PostgreSQL can prove non-nullness without a
 second table scan when setting the column flag. These are statement-specific
 exceptions, not exclusions of the file or rule.
-
-
-### Physical database and River binding preflight
-
-`internal/pgidentity/identity.go` owns exactly the transient advisory-lock witness
-and its `pg_catalog.pg_locks` observation on two borrowed pools. These queries
-must precede application bootstrap and require no OpenRails schema, generated
-merchant adapter, persistent identity record or runtime role. Random lock keys,
-backend PID and current-database scope prove actual physical identity; matching
-DSNs or database names cannot replace the proof. The holder transaction is
-rolled back on every exit. This is catalog/session plumbing, not application
-row access.
-
-`internal/db/river.go` uses one parameterized `pg_catalog.to_regclass` probe for
-the exact configured River schema's `river_job`. River owns that schema and its
-migrations; OpenRails' SQLC schema cannot define it. The probe runs only during
-binding, after physical database qualification, before enabling the producer.
-The ordinary checkout-session lock remains a merchant-scoped SQLC query and
-has no exemption.

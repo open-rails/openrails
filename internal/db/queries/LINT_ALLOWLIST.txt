@@ -10,8 +10,6 @@
 # holds raw SQL fails the build as stale — delete it when you port a file.
 
 # --- PERMANENT: the DB layer itself -----------------------------------------
-PERMANENT internal/db/river.go             # qualify external River table before producer binding
-PERMANENT internal/pgidentity/identity.go  # transient catalog lock witness across physical pools
 PERMANENT internal/db/db_pgx.go            # MerchantTx GUC + tx plumbing
 PERMANENT internal/db/schema_rewrite.go    # execution-time schema rewriting wrapper
 PERMANENT internal/db/merchant_scope.go    # reads the app.merchant_id GUC (current_setting)
