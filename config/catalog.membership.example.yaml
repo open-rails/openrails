@@ -1,0 +1,67 @@
+# Example merchant: host-three. Select the merchant outside this payload.
+# Amounts are integer USD micros. These are illustrative prices, not current quotes.
+# Reuse ID/revision only for retries; a new intent needs a new ID and current revision.
+schema_version: 1
+application_id: example-host-three-initial-v1
+expected_revision: 0
+
+products:
+  - key: novice
+    display_name: Novice
+    description: Monthly Host Three membership with membership access.
+    tier_group: membership
+    tier_rank: 1
+    entitlements_spec:
+      tier:novice: null
+    prices:
+      - key: novice-offer-1
+        currency: usd
+        unit_amount: "12000000"
+        access_duration_hours: 720
+        auto_renew: true
+        psps: [stripe]
+
+  - key: craftsman
+    display_name: Craftsman
+    description: Monthly Host Three membership with membership access.
+    tier_group: membership
+    tier_rank: 2
+    entitlements_spec:
+      tier:craftsman: null
+    prices:
+      - key: craftsman-offer-1
+        currency: usd
+        unit_amount: "29000000"
+        access_duration_hours: 720
+        auto_renew: true
+        psps: [stripe]
+
+  - key: expert
+    display_name: Expert
+    description: Monthly Host Three membership with membership access.
+    tier_group: membership
+    tier_rank: 3
+    entitlements_spec:
+      tier:expert: null
+    prices:
+      - key: expert-offer-1
+        currency: usd
+        unit_amount: "59000000"
+        access_duration_hours: 720
+        auto_renew: true
+        psps: [stripe]
+
+  - key: grandmaster
+    display_name: Grandmaster
+    description: Monthly Host Three membership with membership access.
+    tier_group: membership
+    tier_rank: 4
+    entitlements_spec:
+      tier:grandmaster: null
+    prices:
+      - key: grandmaster-offer-1
+        currency: usd
+        unit_amount: "119000000"
+        access_duration_hours: 720
+        auto_renew: true
+        psps: [stripe]

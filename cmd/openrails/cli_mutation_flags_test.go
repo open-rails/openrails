@@ -31,8 +31,8 @@ func TestPushCommandsRejectOtherManifestShapes(t *testing.T) {
 		},
 		{
 			name: "catalog rejects merchants",
-			cmd:  newPushCatalogCmd(),
-			body: "version: 1\nmerchants: []\n",
+			cmd:  newApplyCatalogCmd(),
+			body: "schema_version: 1\napplication_id: invalid-authority\nexpected_revision: 0\nmerchants: []\n",
 			want: "merchants",
 		},
 	}
@@ -47,7 +47,11 @@ func TestPushCommandsRejectOtherManifestShapes(t *testing.T) {
 			var out bytes.Buffer
 			tt.cmd.SetOut(&out)
 			tt.cmd.SetErr(&out)
-			tt.cmd.SetArgs([]string{"--file", path})
+			args := []string{"--file", path}
+			if tt.cmd.Name() == "apply-catalog" {
+				args = append(args, "--merchant", "example")
+			}
+			tt.cmd.SetArgs(args)
 			err := tt.cmd.Execute()
 			if err == nil {
 				t.Fatalf("expected error, got nil")
@@ -60,9 +64,14 @@ func TestPushCommandsRejectOtherManifestShapes(t *testing.T) {
 }
 
 func TestPushCommandsHaveNoDryRunFlag(t *testing.T) {
-	push := newPushCatalogCmd()
-	if push.Flags().Lookup("dry-run") != nil {
-		t.Fatal("push-merchant-catalog must not declare --dry-run")
+	apply := newApplyCatalogCmd()
+	for _, retired := range []string{"dry-run", "insert", "overwrite", "prune", "force"} {
+		if apply.Flags().Lookup(retired) != nil {
+			t.Fatalf("apply-catalog must not declare --%s; intent belongs in the document", retired)
+		}
+	}
+	if apply.Flags().Lookup("merchant") == nil {
+		t.Fatal("apply-catalog requires an explicit merchant selector")
 	}
 	cfg := newPushMerchantConfigCmd()
 	if cfg.Flags().Lookup("dry-run") != nil {
