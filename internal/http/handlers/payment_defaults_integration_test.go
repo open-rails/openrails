@@ -58,7 +58,7 @@ func readDefaultMethods(t *testing.T, fx *findingsFixture, customer uuid.UUID, h
 	}
 	out := make(map[string][]string)
 	for _, method := range methods {
-		out[method.ID.String()] = method.CollectionDefaultCurrencies
+		out[method.ID] = method.CollectionDefaultCurrencies
 	}
 	return out
 }
