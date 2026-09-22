@@ -64,7 +64,7 @@ func (c *ControlPlane) loadRemoteApplications(ctx context.Context) error {
 	if c.Core() == nil {
 		return ErrRemoteApplicationSourceUnavailable
 	}
-	if err := c.delegatedVerifier.LoadRemoteApplications(ctx, c.Core(), c.delegatedAudiences); err != nil {
+	if err := c.delegatedVerifier.LoadRemoteApplications(ctx, nil, c.delegatedAudiences); err != nil {
 		return err
 	}
 	c.issuerRefresh.lastLoad.Store(time.Now().UnixNano())

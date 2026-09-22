@@ -12,8 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	authcore "github.com/open-rails/authkit/embedded"
-
 	embcp "github.com/open-rails/openrails/internal/operator"
 )
 
@@ -50,7 +48,7 @@ func inviteTeamHTTP(t *testing.T, base, token, email, role string) (int, []byte)
 
 // makeUser creates a real AuthKit user (so it can be invited by email) and
 // returns its id and email.
-func makeUser(t *testing.T, core *authcore.Runtime, handle string) (string, string) {
+func makeUser(t *testing.T, core authkit.Client, handle string) (string, string) {
 	t.Helper()
 	email := handle + "@example.com"
 	u, err := core.CreateUser(context.Background(), email, handle)

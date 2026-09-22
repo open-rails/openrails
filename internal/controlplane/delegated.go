@@ -173,7 +173,7 @@ func (c *ControlPlane) DelegatedVerifier() *verify.Verifier {
 // (AddIssuer with JWKS-URL fetching), so at runtime the verifier trusts every
 // registered+enabled merchant issuer — and ONLY those. OpenRails signs no delegated
 // tokens itself; there is no self-issuer.
-func newDelegatedVerifier(coreSvc *authcore.Runtime, tokenPrefix string, requestURL func(*http.Request) string) (*verify.Verifier, error) {
+func newDelegatedVerifier(coreSvc authcore.HTTPBackend, tokenPrefix string, requestURL func(*http.Request) string) (*verify.Verifier, error) {
 	if coreSvc == nil {
 		return nil, ErrDelegatedNotConfigured
 	}

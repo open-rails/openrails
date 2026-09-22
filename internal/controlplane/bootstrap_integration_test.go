@@ -100,7 +100,7 @@ func enrollTestMFA(ctx context.Context, t *testing.T, pool *pgxpool.Pool, userID
 	require.NoError(t, err)
 }
 
-func newTestControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
+func newTestControlPlane(t *testing.T, pool *pgxpool.Pool, opts ...Option) *ControlPlane {
 	t.Helper()
 	cfg := &config.Config{
 		// "dev": authkit v0.78.0 resolves signing keys fail-closed outside dev
@@ -108,7 +108,7 @@ func newTestControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 		Env:  "dev",
 		Auth: &config.AuthConfig{Issuer: "https://openrails.test", KeysPath: t.TempDir()},
 	}
-	cp, err := New(context.Background(), cfg, pool)
+	cp, err := New(context.Background(), cfg, pool, opts...)
 	require.NoError(t, err)
 	t.Cleanup(cp.Close)
 	require.NotNil(t, cp)
@@ -378,7 +378,7 @@ func TestRootOperatorBoundary_ReachNotMerchantCapability(t *testing.T) {
 	// authkit v0.84.0 #49: assigning an MFA-required root role fails closed
 	// unless the subject already has 2FA enrolled.
 	enrollTestMFA(ctx, t, pool, rootOperator.ID)
-	require.NoError(t, cp.Core().Genesis().AssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(rootOperator.ID), authkit.OwnerRole))
+	require.NoError(t, cp.Core().AdminAssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(rootOperator.ID), authkit.OwnerRole))
 
 	canModerateMerchant, err := cp.Core().Can(ctx, authkit.UserSubject(rootOperator.ID), authkit.RootGroup(), "root:merchants:delete")
 	require.NoError(t, err)

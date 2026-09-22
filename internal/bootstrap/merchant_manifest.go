@@ -2129,12 +2129,6 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 		return "", fmt.Errorf("merchant bootstrap: control plane core unavailable")
 	}
 
-	// Ensure the root group + containment exist before creating typed groups
-	// (concurrent-boot tolerant, #844).
-	if err := controlplane.EnsureRootContainment(ctx, core); err != nil {
-		return "", fmt.Errorf("merchant bootstrap: %w", err)
-	}
-
 	// Idempotently create the merchant permission-group (resolve, else create).
 	groupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantGroup(slug))
 	if errors.Is(err, authkit.ErrGroupNotFound) {
@@ -2186,7 +2180,7 @@ func configureMerchantRemoteApplication(ctx context.Context, cp *controlplane.Co
 	if err != nil {
 		return fmt.Errorf("merchant bootstrap: register remote_application for group %s: %w", groupID, err)
 	}
-	if err := core.Genesis().AssignGroupRole(ctx, controlplane.MerchantGroup(group.InstanceSlug), authkit.RemoteAppSubject(stored.ID), controlplane.MerchantRoleOwner); err != nil {
+	if err := core.AdminAssignGroupRole(ctx, controlplane.MerchantGroup(group.InstanceSlug), authkit.RemoteAppSubject(stored.ID), controlplane.MerchantRoleOwner); err != nil {
 		return fmt.Errorf("merchant bootstrap: grant remote_application owner role for group %s: %w", groupID, err)
 	}
 	return nil

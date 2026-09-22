@@ -58,7 +58,7 @@ func mintPlatformOperatorToken(t *testing.T, ctx context.Context, s *Surface, ro
 		_, err = core.EnsureRootGroup(ctx)
 		require.NoError(t, err, "ensure root group")
 		require.NoError(t,
-			core.Genesis().AssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(user.ID), authkit.Role(role)),
+			core.AdminAssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(user.ID), authkit.Role(role)),
 			"assign root role %s", role)
 	}
 	token, _, err := core.MintAccessToken(ctx, user.ID, nil)

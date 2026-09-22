@@ -36,9 +36,9 @@ import (
 type ControlPlane struct {
 	cfg     *config.Config
 	authSvc *authhttp.Service
-	// authClient owns the local AuthKit engine. authSvc adapts its HTTP surface;
-	// Core exposes runtime-only provisioning and verification capabilities.
+	// authClient owns infrastructure; Core returns only its portable Client.
 	authClient *authcore.Runtime
+	client     authkit.Client
 	hosted     bool
 	// merchantCreation is the WithMerchantCreation config when the merchant
 	// persona is opted into authkit's generated creation path (or#914); nil
@@ -506,69 +506,25 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	}
 	httpCfg.RateLimits = options.rateLimitOverrides
 
-	// Client-first construction (#142): build the AuthKit engine, then adapt it
-	// with the HTTP server. Core() / the delegated verifier hold this client.
-	authClient, err := authcore.New(coreCfg, deps)
-	if err != nil {
-		return nil, fmt.Errorf("controlplane: build authkit client: %w", err)
-	}
-	defer func() {
-		if retErr != nil {
-			authClient.Close()
-		}
-	}()
-	if options.merchantCreation != nil {
-		// ak#263 prerequisite (or#914): the generated POST /merchant creates
-		// groups parented at ROOT, and unlike Bootstrap/ProvisionMerchant the
-		// route has no ensure step of its own — a fresh deployment would 404
-		// (parent group not found) until something else seeded root. Ensure it
-		// here, once, at construction (idempotent).
-		if err := EnsureRootContainment(ctx, authClient); err != nil {
-			return nil, fmt.Errorf("controlplane: merchant creation enabled: %w", err)
-		}
-	}
-	authSvc, err := authhttp.New(authClient, httpCfg)
-	if err != nil {
-		return nil, fmt.Errorf("controlplane: build authkit service: %w", err)
-	}
-	defer func() {
-		if retErr != nil {
-			authSvc.Close()
-		}
-	}()
-
-	authSvc.Verifier().WithLiveness(authClient)
-
-	// Build the browser-direct delegated-access-token verifier (#222 browser
-	// tier). It accepts registered delegated tokens with the canonical
-	// `openrails` audience. Customer delegated self-service JWTs may be
-	// permissionless; any supplied permissions are bounded by the signing remote
-	// application's stored authority in AuthKit.
-	delegatedVerifier, err := newDelegatedVerifier(authClient, APIKeyPrefix, delegatedRequestURL(cfg.APIURL, options.dpopRequestURL))
-	if err != nil {
-		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)
-	}
-
-	// Wire AuthKit's core as the verifier's enrichment + remote_application source
-	// so it can lazy-load any single issuer on first use (#481). *core.Service
-	// satisfies verify.Enricher directly under the permission-group model (#567):
-	// remote-app authority is resolved as the additive walk-up of the app's group
-	// roles, kept as raw grant tokens; OpenRails gates them with its own
-	// namespace-glob matcher on every credential type (#565).
-	delegatedVerifier.WithService(authClient)
-
 	cp2 := &ControlPlane{
-		cfg:                     cfg,
-		authSvc:                 authSvc,
-		authClient:              authClient,
-		hosted:                  options.hosted,
-		merchantCreation:        options.merchantCreation,
+		cfg: cfg, hosted: options.hosted, merchantCreation: options.merchantCreation,
 		merchantCreationPattern: merchantCreationPattern,
-		pool:                    db.WrapPool(pool, cfg.DB.SchemaName()),
-		delegatedVerifier:       delegatedVerifier,
-		issuer:                  issuer,
-		delegatedAudiences:      []string{billingauth.TokenAudience},
+		pool:                    db.WrapPool(pool, cfg.DB.SchemaName()), issuer: issuer,
+		delegatedAudiences: []string{billingauth.TokenAudience},
 	}
+	coreCfg.HTTP = controlPlaneHTTP{controlPlane: cp2, config: httpCfg,
+		requestURL: delegatedRequestURL(cfg.APIURL, options.dpopRequestURL)}
+	authRuntime, err := authcore.New(coreCfg, deps)
+	if err != nil {
+		return nil, fmt.Errorf("controlplane: build authkit runtime: %w", err)
+	}
+	cp2.authClient = authRuntime
+	cp2.client = authRuntime.Client()
+	defer func() {
+		if retErr != nil {
+			authRuntime.Close()
+		}
+	}()
 
 	// Load AuthKit's ACTIVE remote_applications into the multi-issuer verifier
 	// (#481: standalone JWKS trust is AuthKit's remote_application registry, #74).
@@ -588,25 +544,20 @@ func (c *ControlPlane) Close() {
 	if c == nil {
 		return
 	}
-	if c.authSvc != nil {
-		c.authSvc.Close()
-		c.authSvc = nil
-	}
 	if c.authClient != nil {
 		c.authClient.Close()
 		c.authClient = nil
+		c.authSvc = nil
+		c.client = nil
 	}
 }
 
-// Core returns the local AuthKit Runtime for provisioning and verification.
-// Ordinary typed identity calls may use Core().Client(). Operator bootstrap and
-// migration code may use Core().Genesis(); request handlers use actor-checked
-// operations instead of the privileged Genesis surface.
-func (c *ControlPlane) Core() *authcore.Runtime {
+// Core returns the portable AuthKit operation Client. Runtime is kept private.
+func (c *ControlPlane) Core() authkit.Client {
 	if c == nil {
 		return nil
 	}
-	return c.authClient
+	return c.client
 }
 
 // MerchantCreationEnabled reports whether the merchant persona is opted into

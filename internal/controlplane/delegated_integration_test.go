@@ -4,7 +4,6 @@ package controlplane
 
 import (
 	"context"
-	"github.com/open-rails/authkit/verify"
 	"github.com/open-rails/openrails/internal/testauth"
 	"net/http"
 	"testing"
@@ -18,9 +17,8 @@ import (
 func TestDelegatedStoredAuthorityWorkflow(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedSuperuserPGXPool(t)
-	cp := newTestControlPlane(t, pool)
 	const target = "https://receiver.openrails.test/v1/me/status"
-	verify.WithDPoP(cp.Core().ClaimDPoPProof, func(*http.Request) string { return target })(cp.DelegatedVerifier())
+	cp := newTestControlPlane(t, pool, WithDPoPRequestURL(func(*http.Request) string { return target }))
 	owner, err := cp.Core().CreateUser(ctx, "delegation-owner@example.test", "delegation-owner")
 	require.NoError(t, err)
 	// Revoking the app must leave the merchant's human recovery owner intact.
@@ -45,7 +43,7 @@ func TestDelegatedStoredAuthorityWorkflow(t *testing.T) {
 		PublicKeys:        []authkit.RemoteAppKey{{KID: signer.KID(), PublicKeyPEM: testPublicKeyPEM(t, signer.PublicKey())}},
 	})
 	require.NoError(t, err)
-	require.NoError(t, cp.Core().Genesis().AssignRemoteApplicationRole(ctx, app.ID, "owner"))
+	require.NoError(t, cp.Core().AdminAssignGroupRole(ctx, MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(app.ID), "owner"))
 	require.NoError(t, cp.ReloadRemoteApplications(ctx))
 	for _, permissions := range [][]string{nil, {PermMerchantAdmissionsCreate}} {
 		token := mint(authkit.DelegatedAccessParams{Permissions: permissions})

@@ -32,8 +32,6 @@ func TestControlPlaneClosesOwnedAuthKitPools(t *testing.T) {
 	}, host, WithRedis(rdb))
 	require.NoError(t, err)
 	t.Cleanup(cp.Close)
-	owned := cp.Core().Postgres()
-	require.NotSame(t, host, owned)
 
 	count := func() int {
 		var n int
@@ -51,7 +49,6 @@ func TestControlPlaneClosesOwnedAuthKitPools(t *testing.T) {
 	}
 	cp.Close()
 	cp.Close()
-	require.EqualValues(t, 0, owned.Stat().TotalConns(), "the control plane owns AuthKit's cloned pool")
 	require.NoError(t, host.Ping(ctx), "the caller still owns the source pool")
 	require.Eventually(t, func() bool { return count() == int(host.Stat().TotalConns()) },
 		5*time.Second, 10*time.Millisecond, "closing the control plane must leave only caller-owned connections")
