@@ -7,8 +7,29 @@ import (
 	"unicode/utf8"
 )
 
+// ForCatalogOwner returns a catalog-only view of this client for one owner.
+// The selector grants no authority: the server verifies the original credential,
+// requiring catalog-administrator permission to select a different subject.
+// The returned client cannot switch owner or call merchant-administrator APIs.
+// Embedded and remote clients use the same routes and authorization checks.
+func (c *Client) ForCatalogOwner(subject string) (*Client, error) {
+	if subject == "" || !utf8.ValidString(subject) || strings.ContainsRune(subject, 0) {
+		return nil, invalidErr("catalog owner subject must be nonempty UTF-8 text without NUL")
+	}
+	if c == nil {
+		return nil, invalidErr("client is required")
+	}
+	if c.catalogOwner != "" && c.catalogOwner != subject {
+		return nil, &StatusError{Status: http.StatusForbidden, ErrorDetails: ErrorDetails{Type: "invalid_request_error", Code: "permission_denied", Message: "catalog-scoped clients cannot change owner"}}
+	}
+	scoped := *c
+	scoped.ownCatalog = true
+	scoped.catalogOwner = subject
+	return &scoped, nil
+}
+
 // EnsureOwnCatalog returns the catalog belonging to the Gate-verified subject.
-// No request owner ID is accepted; use Runtime.CatalogClient or WithOwnCatalog
+// Use ForCatalogOwner for an explicitly scoped host client, or WithOwnCatalog
 // with a credential whose Gate resolves the owner subject and permissions.
 func (c *Client) EnsureOwnCatalog(ctx context.Context) (*Catalog, error) {
 	var out Catalog

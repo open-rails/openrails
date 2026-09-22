@@ -176,6 +176,11 @@ func FromApp(a *app.App) *Assembler {
 // (mirroring the standalone engine's authProvider.Optional() → RateLimit
 // order).
 func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
+	return s.NewRoutes(opts).Handler()
+}
+
+// NewRoutes records actual registrations, retaining each route's security chain.
+func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	routeSets := routeSetMap(opts.RouteSets)
 	if err := s.validateAuthBoundary(routeSets); err != nil {
 		panic(err)
@@ -184,7 +189,7 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	if !providerRoutes.Webhooks {
 		delete(routeSets, RouteSetWebhooks)
 	}
-	mux := http.NewServeMux()
+	mux := &router.Table{}
 
 	// Capability discovery (#623): always-on, public, independent of selection so
 	// even a minimal deployment is discoverable. Reports the full advertised set
@@ -203,14 +208,15 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	// browser tier. Empty (matches nothing) when RouteSetCheckout isn't
 	// selected, so PermissiveCORSHTTP is a pure no-op for a merchant-admin/
 	// catalog/payment-providers/merchant-API/webhooks-only mount.
-	browserTier := middleware.NewBrowserTierRoutes()
+	browserRoutes := make(map[string]bool)
+	recordBrowser := func(pattern string) { browserRoutes[pattern] = true }
 	if routeSets[RouteSetCheckout] {
 		// Captcha discovery routes (net/http), mirroring registerUserRoutesAt.
 		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/status", s.captchaStatusHandler)
-		browserTier.Add(http.MethodGet + " " + EmbeddedV1Prefix + "/captcha/status")
+		recordBrowser(http.MethodGet + " " + EmbeddedV1Prefix + "/captcha/status")
 		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/client.js", s.captchaClientScriptHandler)
-		browserTier.Add(http.MethodGet + " " + EmbeddedV1Prefix + "/captcha/client.js")
-		httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, EmbeddedV1Prefix, s.Runtime, browserTier.Add), s.Runtime, httproutes.Options{
+		recordBrowser(http.MethodGet + " " + EmbeddedV1Prefix + "/captcha/client.js")
+		httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, EmbeddedV1Prefix, s.Runtime, recordBrowser), s.Runtime, httproutes.Options{
 			Authenticator:  s.Authenticator,
 			ProviderRoutes: &providerRoutes,
 		})
@@ -276,24 +282,33 @@ func (s *Assembler) NewHTTPHandler(opts Options) http.Handler {
 	if s.Runtime != nil {
 		resolver = s.Runtime.TrustedProxies
 	}
-	return middleware.ChainHTTP(mux,
-		middleware.SecurityHeadersHTTP(),
-		// #765: static permissive CORS on exactly the checkout patterns
-		// registered into browserTier above — `*` from any origin, no
-		// credentials, nothing on merchant-admin/catalog/payment-providers/
-		// merchant-API/webhooks.
-		middleware.PermissiveCORSHTTP(browserTier.Match),
-		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
-		middleware.ResolveMerchantHTTP(s.Runtime.ConfiguredMerchant),
-		// #734: Host-based multi-merchant resolution (a no-op when HostResolve is
-		// nil), unrelated to CORS since #765.
-		middleware.ResolveMerchantFromHostHTTP(s.HostResolve),
-		// Best-effort auth so the rate limiter can key by user, not only IP.
-		middleware.HTTPMiddleware(billingauth.Optional(s.Authenticator)),
-		// OpenRails-native rate-limiting + captcha for embedded hosts.
-		middleware.RateLimitHTTP(rateLimits, captchaCfg, s.RDB, s.CaptchaStore, resolver),
-	)
+	for i := range mux.Entries {
+		entry := &mux.Entries[i]
+		entry.Browser = browserRoutes[entry.Method+" "+entry.Path]
+	}
+	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, s.RDB, s.CaptchaStore, resolver)
+	mux.Wrap(func(entry router.Entry) http.Handler {
+		return middleware.ChainHTTP(entry.Handler,
+			middleware.WithRoutePath(entry.Path),
+			middleware.SecurityHeadersHTTP(),
+			// #765: static permissive CORS on exactly the checkout patterns
+			// registered into browserTier above — `*` from any origin, no
+			// credentials, nothing on merchant-admin/catalog/payment-providers/
+			// merchant-API/webhooks.
+			middleware.PermissiveCORSHTTP(func(*http.Request) bool { return entry.Browser }),
+			middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
+			middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
+			middleware.ResolveMerchantHTTP(s.Runtime.ConfiguredMerchant),
+			// #734: Host-based multi-merchant resolution (a no-op when HostResolve is
+			// nil), unrelated to CORS since #765.
+			middleware.ResolveMerchantFromHostHTTP(s.HostResolve),
+			// Best-effort auth so the rate limiter can key by user, not only IP.
+			middleware.HTTPMiddleware(billingauth.Optional(s.Authenticator)),
+			// OpenRails-native rate-limiting + captcha for embedded hosts.
+			limiter,
+		)
+	})
+	return mux
 }
 
 func (s *Assembler) providerRoutes(override *routesurface.ProviderRoutes) routesurface.ProviderRoutes {

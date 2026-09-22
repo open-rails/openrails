@@ -54,7 +54,7 @@ milestone order, each verifiable before the next:
 4. **Catalog.** Author products/prices per [merchant-guide.md](merchant-guide.md);
    push at boot. Verify: catalog list routes return the products.
 5. **Mount routes.** Implement `billingauth` authenticators mapping the host's existing
-   auth; mount `rt.Handler(embed.MountOptions{...})` under a prefix. Verify: an authenticated request to
+   auth in `embed.Options.HTTP`; obtain `openrailshttp.Routes(rt)` (or the Gin/Fiber adapter) and mount the bundle under a prefix. Verify: an authenticated request to
    `GET <prefix>/v1/me/status` returns the caller's own subject.
 6. **Backend calls.** Wire `rt.Client()` where the host needs admission/holds, usage,
    or entitlement reads. Verify: `AdmitBatch` + `Capture` round-trip in a test.

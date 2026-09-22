@@ -11,6 +11,7 @@ ignore ./web/admin/node_modules
 require (
 	github.com/ccoveille/go-safecast/v2 v2.0.1
 	github.com/gagliardetto/solana-go v1.20.0
+	github.com/go-chi/chi/v5 v5.3.2
 	github.com/goccy/go-yaml v1.18.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0

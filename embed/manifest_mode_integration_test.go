@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -338,11 +339,7 @@ func TestManifestMode_MutationRoutesOmitted(t *testing.T) {
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
 
-	handler, err := rt.Handler(embed.MountOptions{
-		RouteSets:      []embed.RouteSet{embed.RouteSetCatalog, embed.RouteSetPaymentProviders},
-		Gate:           allowAllGate{id: id},
-		ProviderRoutes: &embed.ProviderRoutes{Webhooks: true},
-	})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, PaymentProviders: true, Gate: allowAllGate{id: id}}})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -430,11 +427,7 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 		}
 	})
 
-	handler, err := rt.Handler(embed.MountOptions{
-		RouteSets:      []embed.RouteSet{embed.RouteSetPaymentProviders},
-		Gate:           allowAllGate{id: id},
-		ProviderRoutes: &embed.ProviderRoutes{Webhooks: true},
-	})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, Gate: allowAllGate{id: id}}})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -603,10 +596,7 @@ func TestManifestMode_CheckoutPreGateAcceptsDBArmedRail(t *testing.T) {
 	authn := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: uuid.NewString()}, nil
 	})
-	handler, err := rt.Handler(embed.MountOptions{
-		RouteSets:              []embed.RouteSet{embed.RouteSetCustomer},
-		DelegatedAuthenticator: authn,
-	})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Customer: true}, DelegatedAuthenticator: authn})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -658,9 +648,7 @@ func TestManifestMode_ProviderRoutesDeriveWebhooksFromDBArmedAccounts(t *testing
 	// (validateAuthBoundary only requires them for checkout/customer/merchant-admin
 	// route sets) — and ProviderRoutes is left nil, so MountHandler must derive it
 	// via ProviderRoutesForRuntime.
-	handler, err := rt.Handler(embed.MountOptions{
-		RouteSets: []embed.RouteSet{embed.RouteSetWebhooks},
-	})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{}})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)

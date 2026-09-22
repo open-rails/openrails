@@ -422,6 +422,11 @@
       "var ErrUnauthorized = errors.New(\"openrails: unauthorized\")",
       "var ErrUnreachable = errors.New(\"openrails: unreachable\")"
     ],
+    "adapters/http": [
+      "func (b *Bundle) Mount(target any, prefix ...string) error",
+      "func Routes(runtime *embed.Runtime) (*Bundle, error)",
+      "type Bundle struct{}"
+    ],
     "config": [
       "const (\n\tCaptchaProviderTurnstile   = \"turnstile\"\n\tCaptchaProviderRecaptchaV3 = \"recaptcha-v3\"\n\tCaptchaProviderHCaptcha    = \"hcaptcha\"\n)",
       "const (\n\tCatalogSourceManifest = \"manifest\"\n\tCatalogSourceAPI      = \"api\"\n)",
@@ -548,7 +553,6 @@
       "var ValidProviderWriteModes = map[string]bool{\n\t\"\":                        true,\n\tProviderWriteModeFull:     true,\n\tProviderWriteModeLimited:  true,\n\tProviderWriteModeReadOnly: true,\n}"
     ],
     "embed": [
-      "const (\n\tRouteSetCheckout = embedhttp.RouteSetCheckout\n\n\tRouteSetCustomer = embedhttp.RouteSetCustomer\n\n\tRouteSetMerchantAdmin = embedhttp.RouteSetMerchantAdmin\n\n\tRouteSetCatalog = embedhttp.RouteSetCatalog\n\n\tRouteSetPaymentProviders = embedhttp.RouteSetPaymentProviders\n\n\tRouteSetMerchantAPI = embedhttp.RouteSetMerchantAPI\n\n\tRouteSetWebhooks = embedhttp.RouteSetWebhooks\n)",
       "const QueueBilling = riverjobs.QueueBilling",
       "func (InvoiceSweepArgs) InsertOpts() river.InsertOpts",
       "func (InvoiceSweepArgs) Kind() string",
@@ -557,14 +561,14 @@
       "func (h *HostTransactions) OpenOperationAuthorization(ctx context.Context, tx pgx.Tx, req openrails.OperationAuthorizationRequest) (*openrails.OperationAuthorization, error)",
       "func (h *HostTransactions) RecordProviderBillingObservation(ctx context.Context, tx pgx.Tx, req openrails.ProviderBillingObservationRequest) (*openrails.ProviderBillingQualification, error)",
       "func (h *HostTransactions) ReleaseOperationAuthorization(ctx context.Context, tx pgx.Tx, req openrails.ReleaseOperationAuthorizationRequest) (*openrails.OperationAuthorization, error)",
-      "func (r *Runtime) ActiveRouteSets() []RouteSet",
       "func (r *Runtime) CatalogClient(subject string, options ...openrails.ClientOption) (*openrails.Client, error)",
       "func (r *Runtime) CheckJobProgress(ctx context.Context) (JobProgress, error)",
       "func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, error)",
       "func (r *Runtime) Close(ctx context.Context) error",
+      "func (r *Runtime) ConfigureHTTP(cfg HTTPConfig) error",
       "func (r *Runtime) Converge(ctx context.Context, merchantID merchant.ID) (ConvergeResult, error)",
       "func (r *Runtime) DeclarePSP(ctx context.Context, merchantID merchant.ID, declaration PSPDeclaration) (uuid.UUID, error)",
-      "func (r *Runtime) Handler(opts MountOptions) (http.Handler, error)",
+      "func (r *Runtime) HTTPRoutes() ([]HTTPRoute, error)",
       "func (r *Runtime) HasExternalRiverClient() bool",
       "func (r *Runtime) HostTransactions() *HostTransactions",
       "func (r *Runtime) PullProvider(ctx context.Context, opts PullProviderOptions) error",
@@ -575,7 +579,6 @@
       "func (r *Runtime) ResolveMerchant(ctx context.Context, name string) (merchant.ID, string, error)",
       "func (r *Runtime) RiverJobs() riverhelpers.Contribution",
       "func (r *Runtime) RunWorkers(ctx context.Context) error",
-      "func (r *Runtime) SelfHandler(authn billingauth.DelegatedAuthenticator) (http.Handler, error)",
       "func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m MerchantConfig) (merchant.ID, error)",
       "func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, opts MigrationOptions) error",
       "func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*BillingConfig, error)",
@@ -588,6 +591,8 @@
       "type CheckoutRoutingMatchConfig = boot.CheckoutRoutingMatchConfig",
       "type CheckoutRoutingRuleConfig = boot.CheckoutRoutingRuleConfig",
       "type ConvergeResult = hosttools.ConvergeMerchantResult",
+      "type HTTPConfig = embedhttp.HTTPConfig",
+      "type HTTPRoute struct {\n\tMethod  string\n\tPath    string\n\tHandler http.Handler\n}",
       "type HostTransactions struct{}",
       "type InvoiceConfig = boot.InvoiceConfig",
       "type InvoiceSweepArgs struct {\n\tCollect bool `json:\"collect,omitempty\"`\n\n\tCollectionThresholdAmount int64 `json:\"collection_threshold_amount,omitempty\"`\n\n\tUseMonthlyFloor bool `json:\"use_monthly_floor,omitempty\"`\n\n\tFinalizePreviousMonth bool `json:\"finalize_previous_month,omitempty\"`\n}",
@@ -595,25 +600,20 @@
       "type MerchantConfig = boot.MerchantConfig",
       "type MerchantProfileConfig = boot.MerchantProfileConfig",
       "type MigrationOptions struct {\n\tSchema string\n\tRiver  RiverOwnership\n\n\tRuntimePool *pgxpool.Pool\n}",
-      "type MountOptions struct {\n\tRouteSets []RouteSet\n\n\tAuthenticator billingauth.Authenticator\n\n\tGate billingauth.Gate\n\n\tDelegatedAuthenticator billingauth.DelegatedAuthenticator\n\n\tMountPrefix string\n\n\tProviderRoutes *ProviderRoutes\n}",
-      "type Options struct {\n\tDelegatedAuthenticator billingauth.DelegatedAuthenticator\n\n\tConfig *config.Config\n\n\tPGXPool *pgxpool.Pool\n\tRedis   *redis.Client\n\tCache   cache.Cache\n\n\tRiver RiverOwnership\n\n\tRunWorkers bool\n\n\tConsoleAssets fs.FS\n\n\tStripeTransport http.RoundTripper\n\n\tUserDirectory    openrails.UserDirectory\n\tUsernameResolver openrails.UsernameResolver\n}",
+      "type Options struct {\n\tHTTP *HTTPConfig\n\n\tDelegatedAuthenticator billingauth.DelegatedAuthenticator\n\n\tConfig *config.Config\n\n\tPGXPool *pgxpool.Pool\n\tRedis   *redis.Client\n\tCache   cache.Cache\n\n\tRiver RiverOwnership\n\n\tRunWorkers bool\n\n\tConsoleAssets fs.FS\n\n\tStripeTransport http.RoundTripper\n\n\tUserDirectory    openrails.UserDirectory\n\tUsernameResolver openrails.UsernameResolver\n}",
       "type PSPConfig = boot.PSPConfig",
       "type PSPDeclaration struct {\n\tKey       string\n\tRail      string\n\tAccountID string\n}",
       "type PSPSignerConfig = boot.PSPSignerConfig",
       "type ProviderRailAccountConfig = boot.ProviderRailAccountConfig",
-      "type ProviderRoutes struct {\n\tStripePortal bool\n\tSolana       bool\n\tWebhooks     bool\n}",
       "type PullProviderOptions struct {\n\tMerchantID      merchant.ID\n\tProviders       []string\n\tPSP             string\n\tSince           string\n\tUntil           string\n\tFormat          string\n\tLogDir          string\n\tInsert          bool\n\tOverwrite       bool\n\tPrune           bool\n\tPruneExpectRows *int\n\tPruneActor      string\n\tOut             io.Writer\n\n\tMerchantManifest     *BillingConfig\n\tMerchantManifestPath string\n\n\tEndpoints reconcile.ProviderEndpoints\n}",
       "type PushCatalogOptions struct {\n\tFile      string\n\tManifest  []byte\n\tOut       io.Writer\n\tInsert    bool\n\tOverwrite bool\n\tPrune     bool\n}",
       "type RemoteApplicationConfig = boot.RemoteApplicationConfig",
       "type RiverOwnership struct {\n}",
-      "type RouteSet = embedhttp.RouteSet",
       "type Runtime struct {\n}",
       "type StaticJWKConfig = boot.StaticJWKConfig",
       "type StaticJWKSConfig = boot.StaticJWKSConfig",
-      "var EmbeddedDefaultRouteSets = append([]RouteSet(nil), embedhttp.EmbeddedDefaultRouteSets...)",
       "var ErrMerchantRestoreConflict = merchants.ErrMerchantRestoreConflict",
-      "var ErrNotInitialized = errors.New(\"embedded billing: not initialized\")",
-      "var StandaloneDefaultRouteSets = append([]RouteSet(nil), embedhttp.StandaloneDefaultRouteSets...)"
+      "var ErrNotInitialized = errors.New(\"embedded billing: not initialized\")"
     ],
     "embed/authkit": [
       "func (d *Directory) EmailIdentity(ctx context.Context, userID string) (username, email string, ok bool, err error)",
@@ -766,7 +766,7 @@
       "type ConvergeMerchantResult struct {\n\tFindings          int\n\tAutoFixed         int\n\tReconcileRequired int\n\tAdminRequired     int\n}"
     ],
     "internal/http/embedhttp": [
-      "type RouteSet string"
+      "type HTTPConfig struct {\n\tDelegatedAuthenticator billingauth.DelegatedAuthenticator\n\tCheckout               bool\n\tCustomer               bool\n\tMerchantAdmin          bool\n\tCatalog                bool\n\tPaymentProviders       bool\n\tMerchantAPI            bool\n\tAuthenticator          billingauth.Authenticator\n\tGate                   billingauth.Gate\n}"
     ],
     "internal/merchants": [
       "func (e *LastActiveProviderAccountError) Error() string",
@@ -1624,6 +1624,12 @@
     ]
   },
   "declaring_file_imports": {
+    "adapters/http/http.go": {
+      "embed": "github.com/open-rails/openrails/embed",
+      "fmt": "fmt",
+      "http": "net/http",
+      "strings": "strings"
+    },
     "amount_map.go": {
       "fmt": "fmt",
       "json": "encoding/json",
@@ -1812,6 +1818,14 @@
       "openrails": "github.com/open-rails/openrails",
       "v5": "github.com/jackc/pgx/v5"
     },
+    "embed/http_routes.go": {
+      "embedhttp": "github.com/open-rails/openrails/internal/http/embedhttp",
+      "fmt": "fmt",
+      "http": "net/http",
+      "router": "github.com/open-rails/openrails/internal/http/router",
+      "strings": "strings",
+      "url": "net/url"
+    },
     "embed/migrations.go": {
       "config": "github.com/open-rails/openrails/config",
       "context": "context",
@@ -1819,16 +1833,6 @@
       "migrate": "github.com/open-rails/openrails/internal/migrate",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
       "regexp": "regexp",
-      "strings": "strings"
-    },
-    "embed/mount.go": {
-      "app": "github.com/open-rails/openrails/internal/app",
-      "billingauth": "github.com/open-rails/openrails/pkg/billingauth",
-      "embedhttp": "github.com/open-rails/openrails/internal/http/embedhttp",
-      "fmt": "fmt",
-      "http": "net/http",
-      "merchant": "github.com/open-rails/openrails/pkg/merchant",
-      "routesurface": "github.com/open-rails/openrails/internal/http/routesurface",
       "strings": "strings"
     },
     "embed/provision.go": {
@@ -2162,6 +2166,13 @@
       "json": "encoding/json",
       "routesurface": "github.com/open-rails/openrails/internal/http/routesurface",
       "sha256": "crypto/sha256"
+    },
+    "internal/http/embedhttp/configured.go": {
+      "app": "github.com/open-rails/openrails/internal/app",
+      "billingauth": "github.com/open-rails/openrails/pkg/billingauth",
+      "context": "context",
+      "fmt": "fmt",
+      "router": "github.com/open-rails/openrails/internal/http/router"
     },
     "internal/http/handlers/admin_catalog.go": {
       "billingservice": "github.com/open-rails/openrails/internal/service",
@@ -4912,11 +4923,10 @@
   "boundary_sources_sha256": {
     "embed/authkit/authkit.go": "05aeab359a5540dc96f204a0c72cc993023817c2a66af6dd0b362bb002026944",
     "embed/controlplane/controlplane.go": "b0382e52a64034afe8231d171973da10be3c0d812d53d9d03621838f59d18147",
-    "embed/embed.go": "852143e04322d0f6e50be34bee7a3178423ee739b40d7659b189af412f470a53",
-    "embed/mount.go": "d1030f96f9c5324d5da440b176f7c0950266a7a03446ef84e928fac5f7df373d",
+    "embed/embed.go": "e4cf1302f1a4229a8fab345a63b5e2d8c89ed98e704c89021ecfe18f4a9e8743",
     "embed/transport.go": "899bb2d32b56308257d971595770fa73aace5054d280d0b7143f286bc63cb3b1",
     "errors.go": "bea224812329fcb558d6b087b3a524107ce5d939d16b303b99354d35a6397d55",
-    "examples/embedded/main.go": "1b32270189c7a632691617536a6d8894a30b192516bc7f014a77af3a563b09c9",
+    "examples/embedded/main.go": "af08d68e64c7da1877fad1c3b70171a35ab22a0cde37b8e4bbd9ebffab152ac7",
     "internal/auth/delegated.go": "d0cc54d53043dbf70fca244031bf96921a7e737175f513f0a50747b36525725f",
     "internal/auth/policy/admin.go": "f8b7328b4c87926097aa07a72a97ddafd62290db764bb0d2b9f9cc3626f4769c",
     "internal/auth/provider.go": "bca5b1e71635a8ac9d0f7fdb3324de353a6eea81d35815384ba49e9e2aeca915",
@@ -4944,9 +4954,10 @@
     "internal/controlplane/service.go": "dd1d6e0c2c29b0e5a99cb2f1450a6f4117a80920b99a29ee25887a06472e525c",
     "internal/controlplane/service_jwt.go": "0c7497b227447df4caa5ef1effb1649ddf8ac139d077f7a18e153d5e051a4dbe",
     "internal/http/embedhttp/capabilities.go": "7d53acb8e9ba6205b658b5e0e28afe1dbf0a8950176fadb82c4bd1986342d842",
-    "internal/http/embedhttp/embedhttp.go": "4350ed179cfe94f90fa56a5b43d2314f43fddb2c7c6e28e3931db3d8899ae4ad",
+    "internal/http/embedhttp/configured.go": "50303cf42ac4d4da8619c2f5db1e7a3b0df2e058fdcaac49ab4f0225af512835",
+    "internal/http/embedhttp/embedhttp.go": "772ff5b945fe8618dd16736128d4fadd933b9d9a1d4fc1211fe51f1e2ec7399a",
     "internal/http/embedhttp/route_set.go": "969f2f510a55479d674367881f5dc6c18491e310a51a8aeb62bca0c139e045de",
-    "internal/http/embedhttp/self.go": "a19b169315a90f2e61283ebe91840eff7c8a00a5e5a3e1f7b9bb87464df587d6",
+    "internal/http/embedhttp/self.go": "5309cd56614661d4b5fcf1d0d1f5f317cdfa7ee9db374cfcc2be7455262e7482",
     "internal/http/handlers/admin_catalog.go": "c5d9ad4368e36fb166a639c517c2658a545bb738df5a3c5b58f9e559aeabc636",
     "internal/http/handlers/admin_catalog_drift.go": "fce9fd694763d9f6707773c6b33759364c4951553930c3df2f5edcba396a4804",
     "internal/http/handlers/admin_change_tier.go": "156c991d5727216df4c8f2618cca377c4a081b44c63bbeabf4af8105963ea519",
@@ -5031,12 +5042,14 @@
     "internal/http/middleware/merchant_binding.go": "f05432e9fcac214b6b36f8d0918bfd652c1a2141e644da2942c1fb413ca20944",
     "internal/http/middleware/merchant_conn_neutral.go": "ceb41c35ec5087089d29519a29a01c506d5812b6519fb1267e1853ea73b984f1",
     "internal/http/middleware/neutral_paths.go": "d4fabb91f24b03f6d0a6512006fb25d85d51748d73fde2027d179ac8612ba7ee",
-    "internal/http/middleware/ratelimit_neutral.go": "596ea4d7d5d0d8689e79c617b106458b4283ed52b9ec9f3ccb7734ea709ca174",
+    "internal/http/middleware/ratelimit_neutral.go": "7b792bf1cfc018da1cf56b80dcc60712f2726bfa1fc55d234127d85eee834772",
+    "internal/http/middleware/route_path.go": "5eb9a4e5bb88ebd3b2d6fbf785ec39ef929a6e05fdda718ccc586f8481195005",
     "internal/http/paths.go": "8b0e6d00c9e926c204f5d6b5146aee6fccd1ba586e625e0877593fee5d158b5a",
     "internal/http/request/request.go": "37cfcf8f0ad8941d2e5f0cdeabe5bb62bc8c402b50e781d4aa3437547e4f9198",
     "internal/http/request/stream.go": "cc15d534e028f3ed8b4c4c725bffe33466ebc633f359207e045fbebdb9f5b755",
-    "internal/http/router/mux.go": "d2ebb1886749d56fc464d5c61dd1c999fbbecc3c998cf299c2d78b1b79f75a74",
+    "internal/http/router/mux.go": "580b315df02c66c7568c01af0806f8a6149bc7c2b812c04b5ad177f989273d56",
     "internal/http/router/router.go": "30ddebbb8d3b25bfcaf1c33d9fc62537599e50f965bd063e7f577a3fadf225b9",
+    "internal/http/router/table.go": "454a793572fd27b8da4eadd64d8dcbb120ac021920a6ed2403a065381ce6b642",
     "internal/http/routes/owner_catalog.go": "c9eb894523db431e91c60b8c6496de78a65ee04b96aea174253e70fb7c1c7388",
     "internal/http/routes/platform.go": "91ee70c261cd3c5a0685f996a7c225e771263405ede2267fed07dc08bab263f3",
     "internal/http/routes/routes.go": "d4e607ec79127a34c90cbc7660bcebb3bc9d50d2830a8c69491bd475ba62aedd",
@@ -5049,6 +5062,7 @@
     "internal/http/routes_self.go": "f87be5d91c28b31e405b2244f20cf14b03866f2834de36b35b0f519e6ea6b73a",
     "internal/http/routesurface/provider_routes.go": "6a49245b179c577ea3d0d997234eb7314c19827b152931efd581625d54aab909",
     "internal/http/server.go": "91550bffb6edd332df027c40301e220ec494019a1b721213f622d2a8b3c74ce5",
+    "internal/httptesthost/routes.go": "8d7f26ea4f3647c7f81e5e7c462e293ec8d04b2368384e55739d49ceb0ae60ff",
     "internal/intents/payment_method_delete_authority.go": "edc67d168ceae15e148a920c5bacf5f3cfcb10c82f549265f61f8e9ff4855e7b",
     "internal/intents/rate_ceiling.go": "2f14ccb694839b19af499b5346cb052d3296a9346590d15f7f1ed5e4271da962",
     "internal/migrate/postgres/0001_schema.up.sql": "1e4438fbb45a566d83717dc0f4f4f4c26355a95bfa18ea407a7141eea0aaceb1",

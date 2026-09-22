@@ -50,6 +50,6 @@ func TestRuntimeOwnsReadinessAndRiverChecks(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, first, again, "declaration is idempotent")
 
-	_, err = rt.SelfHandler(nil)
+	_, err = embed.New(ctx, embed.Options{Config: &config.Config{}, HTTP: &embed.HTTPConfig{Customer: true}})
 	require.ErrorContains(t, err, "DelegatedAuthenticator", "the self surface never mounts without authentication")
 }

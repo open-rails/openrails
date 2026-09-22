@@ -56,14 +56,15 @@ type StripeSubscription struct {
 type FakeStripeGateway struct {
 	URL string
 
-	server    *httptest.Server
-	mu        sync.Mutex
-	mode      StripeWriteMode
-	subs      map[string]*StripeSubscription
-	schedules map[string]map[string]any
-	stored    map[string]storedStripeAnswer
-	requests  []StripeRequest
-	created   int
+	server          *httptest.Server
+	mu              sync.Mutex
+	mode            StripeWriteMode
+	subs            map[string]*StripeSubscription
+	schedules       map[string]map[string]any
+	stored          map[string]storedStripeAnswer
+	requests        []StripeRequest
+	created         int
+	hiddenReadbacks map[string]bool
 }
 
 type storedStripeAnswer struct {
@@ -87,6 +88,20 @@ func (g *FakeStripeGateway) SetMode(mode StripeWriteMode) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.mode = mode
+}
+
+// HideSubscriptionReadbackAfterWrite models a provider that has accepted the
+// mutation but cannot yet return its receipt. Preflight reads remain available;
+// the barrier activates only after the tier-change metadata lands. The returned
+// function restores read-back without delaying or blocking any HTTP request.
+func (g *FakeStripeGateway) HideSubscriptionReadbackAfterWrite(id string) func() {
+	g.mu.Lock()
+	if g.hiddenReadbacks == nil {
+		g.hiddenReadbacks = map[string]bool{}
+	}
+	g.hiddenReadbacks[id] = true
+	g.mu.Unlock()
+	return func() { g.mu.Lock(); delete(g.hiddenReadbacks, id); g.mu.Unlock() }
 }
 
 // DeclareSubscription registers a live subscription billing priceID.
@@ -151,6 +166,10 @@ func (g *FakeStripeGateway) handle(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/v1/subscriptions/"):
 			if s, ok := g.subs[strings.TrimPrefix(r.URL.Path, "/v1/subscriptions/")]; ok {
+				if g.hiddenReadbacks[s.ID] && s.Metadata["openrails_tier_change"] != "" {
+					stripeAnswer(w, http.StatusServiceUnavailable, map[string]any{"error": map[string]any{"message": "accepted subscription receipt temporarily unavailable"}})
+					return
+				}
 				stripeAnswer(w, http.StatusOK, g.subscriptionJSON(s))
 				return
 			}

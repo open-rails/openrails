@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -54,9 +55,9 @@ func TestCreatorCatalogAuthority(t *testing.T) {
 	rt, mid, admin := newRuntime()
 	const subjectA = "creator|Alice/雪:%2f"
 	const subjectB = "creator:bob"
-	alice, err := rt.CatalogClient(subjectA)
+	alice, err := admin.ForCatalogOwner(subjectA)
 	require.NoError(t, err)
-	bob, err := rt.CatalogClient(subjectB)
+	bob, err := admin.ForCatalogOwner(subjectB)
 	require.NoError(t, err)
 	catA, err := alice.EnsureOwnCatalog(ctx)
 	require.NoError(t, err)
@@ -164,8 +165,8 @@ func TestCreatorCatalogAuthority(t *testing.T) {
 	})
 
 	t.Run("same host subject in another merchant remains separate", func(t *testing.T) {
-		otherRuntime, _, otherAdmin := newRuntime()
-		otherOwner, err := otherRuntime.CatalogClient(subjectA)
+		_, _, otherAdmin := newRuntime()
+		otherOwner, err := otherAdmin.ForCatalogOwner(subjectA)
 		require.NoError(t, err)
 		otherCatalog, err := otherOwner.EnsureOwnCatalog(ctx)
 		require.NoError(t, err)
@@ -176,13 +177,42 @@ func TestCreatorCatalogAuthority(t *testing.T) {
 		require.Error(t, err)
 	})
 
+	t.Run("remote administrator scope matches embedded scope", func(t *testing.T) {
+		handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, Gate: creatorAdminTestGate{mid: mid}}})
+		require.NoError(t, err)
+		server := httptest.NewServer(handler)
+		t.Cleanup(server.Close)
+		remote, err := openrails.NewRemote(server.URL, openrails.WithAPIKey("administrator"))
+		require.NoError(t, err)
+		scoped, err := remote.ForCatalogOwner(subjectA)
+		require.NoError(t, err)
+		own, err := scoped.EnsureOwnCatalog(ctx)
+		require.NoError(t, err)
+		require.Equal(t, catA.ID, own.ID)
+		_, err = scoped.GetProduct(ctx, productB.ID)
+		require.ErrorIs(t, err, openrails.ErrNotFound)
+		_, err = scoped.EnsureCatalogForOwner(ctx, subjectB)
+		require.ErrorIs(t, err, openrails.ErrDenied)
+		_, err = scoped.ForCatalogOwner(subjectB)
+		require.ErrorIs(t, err, openrails.ErrDenied)
+	})
+
 	t.Run("HTTP identity comes only from the gate", func(t *testing.T) {
-		handler, err := rt.Handler(embed.MountOptions{RouteSets: []embed.RouteSet{embed.RouteSetCatalog}, Gate: creatorTestGate{mid: mid, subject: subjectA}})
+		handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, Gate: creatorTestGate{mid: mid, subject: subjectA}}})
 		require.NoError(t, err)
 		server := httptest.NewServer(handler)
 		t.Cleanup(server.Close)
 		remote, err := openrails.NewRemote(server.URL, openrails.WithOwnCatalog(), openrails.WithAPIKey("owner"))
 		require.NoError(t, err)
+		ownView, err := remote.ForCatalogOwner(subjectA)
+		require.NoError(t, err)
+		same, err := ownView.EnsureOwnCatalog(ctx)
+		require.NoError(t, err)
+		require.Equal(t, catA.ID, same.ID)
+		forged, err := remote.ForCatalogOwner(subjectB)
+		require.NoError(t, err, "selection itself grants no authority")
+		_, err = forged.EnsureOwnCatalog(ctx)
+		require.ErrorIs(t, err, openrails.ErrDenied, "verified creators cannot select a different owner")
 		catalog, err := remote.EnsureOwnCatalog(ctx)
 		require.NoError(t, err)
 		require.Equal(t, catA.ID, catalog.ID)
@@ -243,4 +273,13 @@ func creatorRawRequest(t *testing.T, base, token, method, path string, input any
 	require.NoError(t, err)
 	require.False(t, strings.Contains(string(raw), "sk_test_"))
 	return response.StatusCode, raw
+}
+
+type creatorAdminTestGate struct{ mid merchant.ID }
+
+func (g creatorAdminTestGate) Authorize(_ context.Context, req *http.Request, permission string) (billingauth.Principal, error) {
+	if req.Header.Get("Authorization") != "Bearer administrator" {
+		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "invalid administrator"}
+	}
+	return billingauth.Principal{MerchantID: g.mid, Subject: "actual-administrator", Permissions: []string{permissions.MerchantAll}}, nil
 }

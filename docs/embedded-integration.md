@@ -151,6 +151,7 @@ defer rt.Close(ctx)
 | Option | Type | Notes |
 |---|---|---|
 | `Config` | `*config.Config` | Required. |
+| `HTTP` | `*embed.HTTPConfig` | Leave nil for headless mode or configure once later with `rt.ConfigureHTTP`. A non-nil policy exposes discovery and verified provider callbacks; buyer and management capabilities are opt-in. |
 | `PGXPool` | `*pgxpool.Pool` | Host-supplied pool (pgx/v5). |
 | `Redis` | `*redis.Client` | Optional (rate limits, admission holds). |
 | `Cache` | `cache.Cache` | Optional cache override. |
@@ -160,9 +161,9 @@ defer rt.Close(ctx)
 | `StripeTransport` | `http.RoundTripper` | Test seam under the Stripe API choke point; refused with a live posture. |
 
 **Runtime surface**: `rt.Client()` (the shared `*openrails.Client`, the only
-in-process business API), `rt.UpsertMerchantConfig`, `rt.Handler(MountOptions)`,
-`rt.SelfHandler`, `rt.Ready(ctx)`, `rt.CheckJobProgress(ctx)`,
-`rt.HasExternalRiverClient()`, `rt.DeclarePSP`, `rt.ActiveRouteSets()`,
+in-process business API), `rt.UpsertMerchantConfig`, `rt.ConfigureHTTP`, `rt.HTTPRoutes()`,
+`rt.Ready(ctx)`, `rt.CheckJobProgress(ctx)`,
+`rt.HasExternalRiverClient()`, `rt.DeclarePSP`,
 `rt.RunWorkers(ctx)`, `rt.Close(ctx)`, the manifest tooling (`rt.PushCatalog`,
 `rt.Converge`, `rt.PullProvider`, `rt.PullProviderReport`, `rt.ResolveMerchant`)
 and the host transaction extension `rt.HostTransactions()`. There is no
@@ -398,7 +399,7 @@ raw provider bindings, provider selection, meters or bulk publishing. The engine
 selects applicable configured providers for creator prices. It does not create
 separate merchants, provider accounts, payout policies or checkout authority.
 
-HTTP hosts mount these endpoints through the existing `RouteSetCatalog`, under
+HTTP hosts mount these endpoints by configuring `HTTP.Catalog: true`, under
 `/v1/catalog`. Their existing Gate must return a verified `Principal.Subject`
 and authorize the narrow owner permission. If Subject is absent, the library
 uses only that Gate result's `UserContext.UserID`; both absent is a refusal.
@@ -486,35 +487,104 @@ customer self-service set; read-only → its `:read` subset). The options
   `UserContext`. It is stale for the token's lifetime; omit it rather than pass
   a snapshot nothing should authorize on.
 
-Mount everything as one framework-neutral `net/http` handler (gin hosts use
-`gin.WrapH`, chi `Mount`, …):
+Configure HTTP once when constructing the runtime, then mount its configured
+routes once on your framework. Enable only the capabilities the application
+actually exposes; in-process `Client` and `CatalogClient` access never enables
+HTTP management endpoints.
 
 ```go
-handler, err := rt.Handler(embed.MountOptions{
-    MountPrefix:            "/billing", // routes arrive at /billing/v1/*
-    Authenticator:          myAuth,
+rt, err := embed.New(ctx, embed.Options{
+    Config: cfg,
     DelegatedAuthenticator: myDelegatedAuth,
-    // RouteSets: nil,      // = EmbeddedDefaultRouteSets
-    // Gate:                // required for RouteSetMerchantAdmin
-    // ProviderRoutes:      // *embed.ProviderRoutes{StripePortal, Solana, Webhooks} — nil derives from armed accounts
+    HTTP: &embed.HTTPConfig{
+        Checkout: true, Customer: true,
+        Authenticator: myAuth,
+        // Catalog: true, MerchantAdmin: true, // opt in if the host needs these
+        // Gate: myGate, // required for any management capability
+    },
 })
-mux.Handle("/billing/", handler)
+if err != nil { return err }
+// Declare merchant/provider configuration and compose River before serving.
 ```
 
-| RouteSet | Mounts | Default? |
-|---|---|---|
-| `RouteSetCheckout` | Buyer-facing products, prices, config, checkout | yes |
-| `RouteSetCustomer` | `/v1/me/*` self-service + `/v1/customers/:id/*` treasury | yes |
-| `RouteSetMerchantAdmin` | Human merchant-admin customer/support routes | yes |
-| `RouteSetCatalog` | Merchant catalog routes | yes |
-| `RouteSetWebhooks` | Merchant-scoped inbound rail webhooks | yes |
-| `RouteSetPaymentProviders` | Provider config + secret routes | opt-in |
-| `RouteSetMerchantAPI` | The standalone service/API-key surface (`/v1/merchant/*` over the wire) — most embedded hosts use `Client()` instead | opt-in |
+When your AuthKit bridge needs the merchant ID returned by provisioning, leave
+`Options.HTTP` nil and configure the runtime once afterward:
 
-Admin routes **fail closed**: without a `Gate` and an attached control plane
-(`controlplane.Attach(ctx, rt, opts)` for hosts on OpenRails' own AuthKit),
-omit `RouteSetMerchantAdmin` and run admin operations through the in-process
-client.
+```go
+merchantID, err := rt.UpsertMerchantConfig(ctx, slug, merchantConfig)
+if err != nil { return err }
+authn, err := orauthkit.NewDelegatedAuthenticator(verifier, merchantID.String())
+if err != nil { return err }
+if err := rt.ConfigureHTTP(embed.HTTPConfig{
+    Customer: true,
+    DelegatedAuthenticator: authn,
+}); err != nil { return err }
+```
+
+`Options.HTTP` and `ConfigureHTTP` share the same validation and copy semantics.
+A second configuration attempt is rejected, and requesting routes freezes the
+policy. Configuration and route construction after `Close` are also rejected.
+Invalid configuration leaves HTTP disabled. `HTTP.DelegatedAuthenticator` can
+select the customer HTTP verifier; otherwise the runtime's
+`Options.DelegatedAuthenticator` is used, matching in-process customer calls.
+
+Use the adapter for your host. The Gin and Fiber adapters are separate Go modules;
+net/http and Chi use the core module's `adapters/http` package.
+
+```go
+// net/http: github.com/open-rails/openrails/adapters/http
+routes, err := openrailshttp.Routes(rt)
+if err != nil { return err }
+if err := routes.Mount(mux, "/billing"); err != nil { return err }
+
+// Chi: inside router.Route("/billing", func(group chi.Router) { ... })
+// routes.Mount(group)
+
+// Gin: github.com/open-rails/openrails/adapters/gin
+routes, err := openrailsgin.Routes(rt)
+if err != nil { return err }
+if err := routes.Mount(engine.Group("/billing")); err != nil { return err }
+
+// Fiber v3: github.com/open-rails/openrails/adapters/fiber
+routes, err := openrailsfiber.Routes(rt)
+if err != nil { return err }
+if err := routes.Mount(app.Group("/billing")); err != nil { return err }
+```
+
+Each adapter registers ordinary method/path routes. Route inspection sees the
+actual endpoints, and unrelated host paths retain the host's normal 404/405
+behavior. The host owns prefix, middleware and server lifecycle. Original request
+URLs and body bytes reach authentication and webhook verification unchanged.
+ServeMux handles implicit HEAD itself; other adapters register HEAD for GET and
+browser routes include CORS OPTIONS. Framework case, slash and redirect settings
+remain host-owned (Fiber defaults are case-insensitive and non-strict).
+
+| HTTP capability | Exposed surface |
+|---|---|
+| non-nil `HTTP` | Capability discovery and generic merchant-scoped verified provider callbacks |
+| `Checkout` | Buyer products, prices, checkout/config; requires `Authenticator` |
+| `Customer` | `/v1/me/*` and customer treasury; requires `HTTP.DelegatedAuthenticator` or the runtime verifier |
+| `MerchantAdmin` | Customer/support management; requires `Gate` |
+| `Catalog` | Merchant and creator catalog HTTP; requires `Gate` |
+| `PaymentProviders` | Provider configuration reads and supported writes; requires `Gate` |
+| `MerchantAPI` | Service/API-key routes; requires `Gate` (most embedded hosts use `Client` instead) |
+
+Host-owned credentials omit mutation routes regardless of catalog ownership.
+Callbacks are registered generically so adding an API-managed provider account
+after startup does not require mounting another route. Each request still checks
+the configured provider account and signature. API-managed buyer surfaces likewise
+retain optional provider paths; account readiness remains a request-time guard.
+Manifest-owned buyer surfaces must be materialized after merchant/provider
+configuration; provider discovery errors are returned rather than hiding routes.
+An unconfigured runtime refuses `Routes` with an explicit disabled error.
+Configure HTTP before requesting routes, including when using the late provisioning
+form. The runtime materializes the inventory once, so remounting cannot reset its
+rate limits. Invalid constructor HTTP configuration fails before opening resources.
+
+Migration is a pre-v1 API change: `Runtime.Handler(MountOptions)`, `SelfHandler`,
+`RouteSet` selections and mutable `ActiveRouteSets` are removed. Move exposure and
+auth into `embed.Options`, obtain the adapter bundle, and mount it once. Remove
+catch-all `gin.WrapH`/Fiber fallback glue and separately mounted webhook paths.
 
 **Admin console** (optional, #754): the engine ships zero frontend bytes. The host
 builds the SPA (`scripts/build-admin-console.sh` from the module cache into a

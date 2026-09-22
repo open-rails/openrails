@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -31,6 +30,10 @@ import (
 
 // Options configures the embedded runtime.
 type Options struct {
+	// HTTP configures the externally mounted surface once. Leave nil for a
+	// headless runtime or call ConfigureHTTP after merchant/auth provisioning.
+	HTTP *HTTPConfig
+
 	// DelegatedAuthenticator verifies explicit customer credentials for Client
 	// self-service calls and is the default verifier for customer HTTP mounts.
 	// Use the existing embed/authkit bridge; ambient host sessions confer no authority.
@@ -68,14 +71,20 @@ type Options struct {
 	UsernameResolver openrails.UsernameResolver
 }
 
-// Runtime is the in-process engine: Client() for the shared client, Handler()
+// Runtime is the in-process engine: Client() for the shared client, HTTPRoutes()
 // to mount the billing HTTP surface, RunWorkers/Close for lifecycle.
 type Runtime struct {
+	httpMu     sync.Mutex
+	httpConfig *HTTPConfig
+	httpFrozen bool
+	httpRoutes []HTTPRoute
+	httpBuilt  bool
+	closed     bool
+
 	delegatedAuthenticator billingauth.DelegatedAuthenticator
 	app                    *app.App
 	svc                    *service.Service
 
-	activeRouteSets        []RouteSet
 	releaseStripeTransport func()
 
 	closeOnce sync.Once
@@ -107,6 +116,9 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	}
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
+	}
+	if err := embedhttp.ValidateHTTPConfig(opts.HTTP, opts.DelegatedAuthenticator); err != nil {
+		return nil, err
 	}
 	if opts.River.host && opts.RunWorkers {
 		return nil, fmt.Errorf("openrails embed: host-owned River must compose RiverJobs with riverhelpers.New before host startup; Options.RunWorkers is managed-only")
@@ -142,6 +154,12 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	application.ConsoleAssets = opts.ConsoleAssets
 
 	r := &Runtime{app: application, delegatedAuthenticator: opts.DelegatedAuthenticator}
+	if opts.HTTP != nil {
+		if err := r.ConfigureHTTP(*opts.HTTP); err != nil {
+			_ = r.Close(ctx)
+			return nil, err
+		}
+	}
 	if opts.StripeTransport != nil {
 		r.releaseStripeTransport = stripeapi.InstallBaseTransport(opts.StripeTransport)
 	}
@@ -194,35 +212,9 @@ func applyEmbeddedDefaults(cfg *config.Config) error {
 // operation transport. It is bound to the runtime's configured merchant, or to
 // WithMerchantID on a multi-merchant runtime; an unbound client is refused.
 func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, error) {
-	return r.newClient("", options...)
-}
-
-// CatalogClient creates a restricted creator client for a host-authenticated
-// subject. The subject is opaque; never take it from an untrusted request body
-// or impersonate the owner read from a product row. Administrators use Client.
-// Options may select merchant, currency and timeout; this constructor always
-// retains its restricted in-process transport and credential.
-func (r *Runtime) CatalogClient(subject string, options ...openrails.ClientOption) (*openrails.Client, error) {
-	if err := catalogscope.ValidateSubject(subject); err != nil {
-		return nil, err
-	}
-	return r.newClient(subject, append(options, openrails.WithOwnCatalog())...)
-}
-
-func (r *Runtime) newClient(subject string, options ...openrails.ClientOption) (*openrails.Client, error) {
 	rt := r.app.Runtime
 	r.handlerOnce.Do(func() { r.handler = newServiceHandler(rt, r.delegatedAuthenticator) })
-	var transport http.RoundTripper
-	var hostCapability string
-	if subject == "" {
-		transport, hostCapability = inprocess.NewTransport(r.handler, rt.ConfiguredMerchant)
-	} else {
-		var err error
-		transport, hostCapability, err = inprocess.NewCatalogTransport(r.handler, rt.ConfiguredMerchant, subject)
-		if err != nil {
-			return nil, err
-		}
-	}
+	transport, hostCapability := inprocess.NewTransport(r.handler, rt.ConfiguredMerchant)
 	defaults := []openrails.ClientOption{
 		openrails.WithHTTPClient(&http.Client{Transport: transport}),
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return hostCapability, nil }),
@@ -231,15 +223,6 @@ func (r *Runtime) newClient(subject string, options ...openrails.ClientOption) (
 		defaults = append(defaults, openrails.WithMerchantID(id))
 	}
 	clientOptions := append(defaults, options...)
-	if subject != "" {
-		// Options may select a merchant/currency/timeout, but cannot replace the
-		// restricted host transport or inherit an administrator's credential.
-		clientOptions = append(clientOptions,
-			openrails.WithHTTPClient(&http.Client{Transport: transport}),
-			openrails.WithTokenProvider(func(context.Context) (string, error) { return hostCapability, nil }),
-			openrails.WithOwnCatalog(),
-		)
-	}
 	client, err := openrails.NewRemote(inprocessBaseURL, clientOptions...)
 	if err != nil {
 		return nil, err
@@ -251,22 +234,6 @@ func (r *Runtime) newClient(subject string, options ...openrails.ClientOption) (
 		return nil, fmt.Errorf("openrails embed: %s", merchantMismatchMsg(bound, client.MerchantID()))
 	}
 	return client, nil
-}
-
-// ActiveRouteSets returns the route groups of the most recently mounted HTTP
-// surface; nil before any mount. It is the in-process twin of
-// GET /v1/capabilities.
-func (r *Runtime) ActiveRouteSets() []RouteSet {
-	if r == nil {
-		return nil
-	}
-	return append([]RouteSet(nil), r.activeRouteSets...)
-}
-
-func (r *Runtime) mountRouteSets(sets []RouteSet) []RouteSet {
-	resolved := embedhttp.ResolveRouteSets(sets)
-	r.activeRouteSets = resolved
-	return resolved
 }
 
 // RunWorkers runs the River workers, blocking until ctx is done.
@@ -284,6 +251,9 @@ func (r *Runtime) Close(ctx context.Context) error {
 		return nil
 	}
 	r.closeOnce.Do(func() {
+		r.httpMu.Lock()
+		r.closed = true
+		r.httpMu.Unlock()
 		if r.workersCancel != nil {
 			r.workersCancel()
 			<-r.workersDone // join before closing resources even if shutdown ctx was canceled

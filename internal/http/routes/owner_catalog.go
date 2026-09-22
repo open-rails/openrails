@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"encoding/base64"
 	"net/http"
 
 	"github.com/open-rails/openrails/internal/app"
@@ -22,7 +23,7 @@ func RegisterOwnedCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options)
 	if rt != nil && rt.DB != nil {
 		scope = append(scope, middleware.MerchantDBConnMW(rt.DB))
 	}
-	scope = append(scope, ownerCatalogScopeMW(rt))
+	scope = append(scope, ownerCatalogScopeMW(rt, opts.Gate))
 	read := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCatalogOwnRead)}, scope...)
 	write := append([]router.Middleware{catalogModeWriteGuardMW(rt), opts.merchantActionPermissionMW(permissions.MerchantCatalogOwnUpdate)}, scope...)
 	rr.Handle(http.MethodGet, "", h(handlers.OwnCatalog), read...)
@@ -45,7 +46,7 @@ func RegisterOwnedCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options)
 	rr.Handle(http.MethodPost, "/prices/:id/key", h(handlers.AdminSetPriceKey), write...)
 }
 
-func ownerCatalogScopeMW(rt *app.Runtime) router.Middleware {
+func ownerCatalogScopeMW(rt *app.Runtime, gate billingauth.Gate) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *request.Request) {
 			value, ok := r.Get(handlers.MerchantRoutePrincipalContextKey)
@@ -59,6 +60,26 @@ func ownerCatalogScopeMW(rt *app.Runtime) router.Middleware {
 				// Only the identity returned by this Gate is a valid fallback.
 				// Ambient user contexts, request headers and bodies are ignored.
 				subject = principal.UserContext.UserID
+			}
+			if encoded := r.Header("OpenRails-Catalog-Owner"); encoded != "" {
+				decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+				selected := string(decoded)
+				if err != nil || catalogscope.ValidateSubject(selected) != nil {
+					r.ErrorJSON(http.StatusBadRequest, "invalid catalog owner selector")
+					return
+				}
+				if selected != subject {
+					permission := permissions.MerchantCatalogRead
+					if r.Request.Method != http.MethodGet && r.Request.Method != http.MethodHead {
+						permission = permissions.MerchantCatalogUpdate
+					}
+					authorized, err := gate.Authorize(r.Request.Context(), r.Request, permission)
+					if err != nil || authorized.MerchantID != principal.MerchantID {
+						r.ErrorJSON(http.StatusForbidden, "catalog owner selection requires administrator permission")
+						return
+					}
+				}
+				subject = selected
 			}
 			if err := catalogscope.ValidateSubject(subject); err != nil || principal.MerchantID.IsZero() {
 				r.ErrorJSON(http.StatusForbidden, "catalog owner identity required")

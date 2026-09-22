@@ -27,8 +27,8 @@ import (
 )
 
 // ControlPlane is OpenRails' in-process AuthKit control plane (issue #224). It
-// wraps an AuthKit http.Service (which exposes selectable route groups) and its
-// underlying core.Service (used for in-process group/role/API-key bootstrap calls).
+// wraps AuthKit HTTP handling and its local Runtime for identity provisioning,
+// lifecycle and group/role/API-key bootstrap calls.
 //
 // HARD CUT (#469): the control plane is mandatory in standalone mode — the
 // standalone binary always constructs it at boot and a construction failure is

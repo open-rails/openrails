@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -159,7 +160,7 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 		assert.Equal(t, 1, count)
 	})
 	t.Run("HTTP_authorization_for_A_does_not_authorize_B_resource", func(t *testing.T) {
-		handler, err := a.runtime.Handler(embed.MountOptions{RouteSets: []embed.RouteSet{embed.RouteSetCatalog}, Gate: scopeWithoutRLSGate{mid: a.mid}})
+		handler, err := httptesthost.Handler(a.runtime, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, Gate: scopeWithoutRLSGate{mid: a.mid}}})
 		require.NoError(t, err)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/merchant/catalog/products/"+b.product.ID.String(), nil))
@@ -170,7 +171,7 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 		assert.Error(t, err)
 		_, err = app.HostGraph(platform).Runtime.ProductService.GetByID(ctx, b.product.ID.UUID())
 		assert.Error(t, err, "service access without a merchant must fail before unscoped SQL")
-		handler, err := platform.Handler(embed.MountOptions{RouteSets: []embed.RouteSet{embed.RouteSetCatalog}, Gate: scopeWithoutRLSGate{}})
+		handler, err := httptesthost.Handler(platform, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, Gate: scopeWithoutRLSGate{}}})
 		require.NoError(t, err)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/merchant/catalog/products/"+b.product.ID.String(), nil))
