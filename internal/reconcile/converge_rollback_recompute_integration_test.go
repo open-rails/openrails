@@ -45,6 +45,7 @@ func TestConvergeEnforceRollback_AccessReturnsByRecomputationNotRestoration(t *t
 	t.Cleanup(pool.Close)
 	appDB, err := db.NewWithPGXPool(pool, "")
 	require.NoError(t, err)
+	dbtest.BindRiver(t, appDB)
 
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	merchantID := dbtest.TestMerchantID.UUID()

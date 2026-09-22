@@ -33,6 +33,9 @@ func startReconcilePostgres(t *testing.T) *db.DB {
 	t.Cleanup(pool.Close)
 	appDB, err := db.NewWithPGXPool(pool, "") // default schema (shared harness)
 	require.NoError(t, err)
+	// Module-level tests provide the real producer normally bound by runtime.
+	// Deferred provider mutations must commit their ledger row and River job.
+	dbtest.BindRiver(t, appDB)
 	return appDB
 }
 
