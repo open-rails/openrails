@@ -3,6 +3,7 @@ package openrails
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,12 +22,13 @@ import (
 // Client executes the same typed billing operations over an HTTP or in-process
 // transport. Applications may define narrow interfaces for the methods they use.
 type Client struct {
-	baseURL    string
-	merchantID MerchantID
-	ownCatalog bool
-	currency   string
-	client     *http.Client
-	timeout    time.Duration
+	baseURL      string
+	merchantID   MerchantID
+	ownCatalog   bool
+	catalogOwner string
+	currency     string
+	client       *http.Client
+	timeout      time.Duration
 	// tokenFn mints the per-call Bearer (e.g. a host-signed AuthKit service JWT,
 	// #411, or an OpenRails-issued API key). It is the SOLE credential; a
 	// mint failure errors the call so the problem surfaces instead of being
@@ -810,6 +812,9 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 // assertions, credentials, cancellation and timeouts. consume owns response
 // decoding, but cannot outlive the request or leak its body.
 func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr io.Reader, headers http.Header, consume func(*http.Response) error) error {
+	if c.catalogOwner != "" && path != "/v1/catalog" && !strings.HasPrefix(path, "/v1/catalog/") {
+		return &StatusError{Status: http.StatusForbidden, ErrorDetails: ErrorDetails{Type: "invalid_request_error", Code: "permission_denied", Message: "catalog-scoped clients only support catalog operations"}}
+	}
 	expectedMerchant := c.merchantID
 	if pinned, ok := merchant.FromContext(ctx); ok && !pinned.IsZero() {
 		// A merchant on the caller's context is never a selection. Against a
@@ -850,6 +855,9 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 		req.Header[name] = append([]string(nil), values...)
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
+	if c.catalogOwner != "" {
+		req.Header.Set("OpenRails-Catalog-Owner", base64.RawURLEncoding.EncodeToString([]byte(c.catalogOwner)))
+	}
 	if req.Header.Get("Accept") == "" {
 		req.Header.Set("Accept", "application/json")
 	}

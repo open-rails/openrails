@@ -9,12 +9,10 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/requestauth"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/middleware"
-	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -31,16 +29,6 @@ func hostPermissions() []string {
 // each call so a runtime may be bound after constructing its client.
 func NewTransport(handler http.Handler, configuredMerchant func() merchant.ID) (http.RoundTripper, string) {
 	return newTransport(handler, configuredMerchant, "", hostPermissions())
-}
-
-// NewCatalogTransport captures verified host subject authority with only
-// creator-catalog permissions. It never inherits the host's merchant wildcard.
-func NewCatalogTransport(handler http.Handler, configuredMerchant func() merchant.ID, subject string) (http.RoundTripper, string, error) {
-	if err := catalogscope.ValidateSubject(subject); err != nil {
-		return nil, "", err
-	}
-	transport, capability := newTransport(handler, configuredMerchant, subject, []string{permissions.MerchantCatalogOwnRead, permissions.MerchantCatalogOwnUpdate})
-	return transport, capability, nil
 }
 
 func newTransport(handler http.Handler, configuredMerchant func() merchant.ID, subject string, grants []string) (http.RoundTripper, string) {
