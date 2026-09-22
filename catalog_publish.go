@@ -155,9 +155,9 @@ func (plan *CatalogPlan) HasChanges() bool {
 // no flags it only returns the plan. Customer-specific rate-card overrides are
 // never replaced by a merchant declaration. Provider failures or concurrent
 // changes can leave partial progress; a subsequent publish computes a new plan.
-func (c *Client) PublishCatalog(ctx context.Context, request CatalogPublishRequest) (*CatalogPublishResponse, error) {
+func (c *Client) PublishCatalog(ctx context.Context, request CatalogPublishRequest, requestOptions ...RequestOption) (*CatalogPublishResponse, error) {
 	var out CatalogPublishResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/publish", request, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/publish", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

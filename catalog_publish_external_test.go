@@ -8,5 +8,5 @@ import (
 )
 
 // An application needs only the shared Client and public declaration types.
-var _ func(*openrails.Client, context.Context, openrails.CatalogPublishRequest) (*openrails.CatalogPublishResponse, error) = (*openrails.Client).PublishCatalog
+var _ func(*openrails.Client, context.Context, openrails.CatalogPublishRequest, ...openrails.RequestOption) (*openrails.CatalogPublishResponse, error) = (*openrails.Client).PublishCatalog
 var _ = openrails.CatalogPublishRequest{Catalog: catalog.Manifest{Version: catalog.SupportedVersion}}

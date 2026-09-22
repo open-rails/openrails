@@ -16,7 +16,7 @@ func pageQuery(options PageOptions) url.Values {
 	return url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(options.Offset)}}
 }
 
-func (c *Client) ListSubscriptions(ctx context.Context, filter SubscriptionFilter) (*Page[Subscription], error) {
+func (c *Client) ListSubscriptions(ctx context.Context, filter SubscriptionFilter, requestOptions ...RequestOption) (*Page[Subscription], error) {
 	q := pageQuery(filter.PageOptions)
 	if filter.CustomerID != "" {
 		q.Set("customer_id", filter.CustomerID)
@@ -28,7 +28,7 @@ func (c *Client) ListSubscriptions(ctx context.Context, filter SubscriptionFilte
 		q.Set("rail", filter.Rail)
 	}
 	var out Page[Subscription]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/subscriptions?"+q.Encode(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/subscriptions?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -50,37 +50,37 @@ func customerPath(customerID string) (string, error) {
 	return "/v1/merchant/customers/" + customer, nil
 }
 
-func (c *Client) GetSubscription(ctx context.Context, id SubscriptionID) (*Subscription, error) {
+func (c *Client) GetSubscription(ctx context.Context, id SubscriptionID, requestOptions ...RequestOption) (*Subscription, error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return nil, err
 	}
 	var out Subscription
-	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) CancelSubscription(ctx context.Context, id SubscriptionID, request CancelSubscriptionRequest) error {
+func (c *Client) CancelSubscription(ctx context.Context, id SubscriptionID, request CancelSubscriptionRequest, requestOptions ...RequestOption) error {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return err
 	}
-	return c.do(ctx, http.MethodPost, path+"/cancel", request, nil)
+	return c.do(ctx, http.MethodPost, path+"/cancel", request, nil, requestOptions...)
 }
 
 // ResumeSubscription queues recovery. A successful return confirms durable
 // acceptance; GetSubscription reads the resulting state after worker execution.
-func (c *Client) ResumeSubscription(ctx context.Context, id SubscriptionID) error {
+func (c *Client) ResumeSubscription(ctx context.Context, id SubscriptionID, requestOptions ...RequestOption) error {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return err
 	}
-	return c.do(ctx, http.MethodPost, path+"/resume", nil, nil)
+	return c.do(ctx, http.MethodPost, path+"/resume", nil, nil, requestOptions...)
 }
 
-func (c *Client) UpdateSubscriptionPaymentMethod(ctx context.Context, id SubscriptionID, request UpdateSubscriptionPaymentMethodRequest) error {
+func (c *Client) UpdateSubscriptionPaymentMethod(ctx context.Context, id SubscriptionID, request UpdateSubscriptionPaymentMethodRequest, requestOptions ...RequestOption) error {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return err
@@ -88,10 +88,10 @@ func (c *Client) UpdateSubscriptionPaymentMethod(ctx context.Context, id Subscri
 	if request.PaymentMethodID.IsZero() {
 		return invalidErr("payment_method_id is required")
 	}
-	return c.do(ctx, http.MethodPut, path+"/payment-method", request, nil)
+	return c.do(ctx, http.MethodPut, path+"/payment-method", request, nil, requestOptions...)
 }
 
-func (c *Client) PreviewTierChange(ctx context.Context, id SubscriptionID, request ChangeTierRequest) (*TierChangePreviewResponse, error) {
+func (c *Client) PreviewTierChange(ctx context.Context, id SubscriptionID, request ChangeTierRequest, requestOptions ...RequestOption) (*TierChangePreviewResponse, error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return nil, err
@@ -100,13 +100,13 @@ func (c *Client) PreviewTierChange(ctx context.Context, id SubscriptionID, reque
 		return nil, err
 	}
 	var out TierChangePreviewResponse
-	if err := c.do(ctx, http.MethodPost, path+"/change-tier/preview", request, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, path+"/change-tier/preview", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) ChangeTier(ctx context.Context, id SubscriptionID, key string, request ChangeTierRequest) (*TierChangeResponse, error) {
+func (c *Client) ChangeTier(ctx context.Context, id SubscriptionID, key string, request ChangeTierRequest, requestOptions ...RequestOption) (*TierChangeResponse, error) {
 	path, err := subscriptionPath(id)
 	if err != nil {
 		return nil, err
@@ -115,19 +115,19 @@ func (c *Client) ChangeTier(ctx context.Context, id SubscriptionID, key string, 
 		return nil, err
 	}
 	var out TierChangeResponse
-	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/change-tier", request, &out, http.Header{"Idempotency-Key": {key}}); err != nil {
+	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/change-tier", request, &out, http.Header{"Idempotency-Key": {key}}, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) ListPaymentMethods(ctx context.Context, customerID string, options PageOptions) (*Page[PaymentMethod], error) {
+func (c *Client) ListPaymentMethods(ctx context.Context, customerID string, options PageOptions, requestOptions ...RequestOption) (*Page[PaymentMethod], error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err
 	}
 	var out Page[PaymentMethod]
-	if err := c.do(ctx, http.MethodGet, path+"/payment-methods?"+pageQuery(options).Encode(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, path+"/payment-methods?"+pageQuery(options).Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -137,7 +137,7 @@ func (c *Client) ListPaymentMethods(ctx context.Context, customerID string, opti
 // operation awaiting provider reconciliation. Pending is never reported deleted.
 type PaymentMethodDeletion struct{ Pending bool }
 
-func (c *Client) DeletePaymentMethod(ctx context.Context, customerID string, methodID PaymentMethodID) (*PaymentMethodDeletion, error) {
+func (c *Client) DeletePaymentMethod(ctx context.Context, customerID string, methodID PaymentMethodID, requestOptions ...RequestOption) (*PaymentMethodDeletion, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func (c *Client) DeletePaymentMethod(ctx context.Context, customerID string, met
 	if err != nil {
 		return nil, err
 	}
-	response, err := c.doResponse(ctx, http.MethodDelete, path+"/payment-methods/"+method, nil, nil)
+	response, err := c.doResponse(ctx, http.MethodDelete, path+"/payment-methods/"+method, nil, nil, requestOptions...)
 	if err != nil {
 		return nil, err
 	}

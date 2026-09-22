@@ -158,12 +158,12 @@ type BillingImportResult struct {
 }
 
 // ImportBilling lands declared billing facts under the bound merchant.
-func (c *Client) ImportBilling(ctx context.Context, book DeclaredBilling) (*BillingImportResult, error) {
+func (c *Client) ImportBilling(ctx context.Context, book DeclaredBilling, requestOptions ...RequestOption) (*BillingImportResult, error) {
 	if book.AsOf.IsZero() {
 		return nil, invalidErr("as_of is required")
 	}
 	var out BillingImportResult
-	if err := c.do(ctx, http.MethodPost, "/v1/import/billing", book, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/import/billing", book, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

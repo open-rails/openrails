@@ -182,7 +182,7 @@ func TestErrorEnvelopeFixtureThroughClient(t *testing.T) {
 		_, _ = w.Write(fixture)
 	}))
 	defer server.Close()
-	client, err := NewRemote(server.URL, WithAPIKey("fixture"))
+	client, err := NewRemote(server.URL, WithAPIKey("fixture"), WithDefaultMerchant("fixture"))
 	if err != nil {
 		t.Fatal(err)
 	}

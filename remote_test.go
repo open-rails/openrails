@@ -40,7 +40,7 @@ func TestRemoteTrustLevelWireNames(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, clientErr := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
+	client, clientErr := NewRemote(srv.URL, WithDefaultMerchant("fixture"), WithTokenProvider(func(context.Context) (string, error) {
 		return "test-token", nil
 	}))
 	if clientErr != nil {
@@ -115,7 +115,7 @@ func TestRemoteSetCustomerSpendDelegation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, clientErr := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
+	client, clientErr := NewRemote(srv.URL, WithDefaultMerchant("fixture"), WithTokenProvider(func(context.Context) (string, error) {
 		return "test-token", nil
 	}))
 	if clientErr != nil {
@@ -150,7 +150,7 @@ func TestRemoteSetCustomerSpendDelegationsUsesMerchantMachineRoute(t *testing.T)
 	}))
 	defer srv.Close()
 
-	client, clientErr := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
+	client, clientErr := NewRemote(srv.URL, WithDefaultMerchant("fixture"), WithTokenProvider(func(context.Context) (string, error) {
 		return "test-token", nil
 	}))
 	if clientErr != nil {
@@ -177,7 +177,7 @@ func TestRemoteDeleteCustomerSpendDelegation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, clientErr := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
+	client, clientErr := NewRemote(srv.URL, WithDefaultMerchant("fixture"), WithTokenProvider(func(context.Context) (string, error) {
 		return "test-token", nil
 	}))
 	if clientErr != nil {
@@ -201,7 +201,7 @@ func TestRemoteDeleteCustomerSpendDelegation(t *testing.T) {
 // No live server is required; validation fires before any HTTP call.
 func TestRemoteValidationErrorParity(t *testing.T) {
 	// Use an unreachable URL — none of the tested calls should reach the network.
-	client, clientErr := NewRemote("http://127.0.0.1:0", WithTokenProvider(func(context.Context) (string, error) {
+	client, clientErr := NewRemote("http://127.0.0.1:0", WithDefaultMerchant("fixture"), WithTokenProvider(func(context.Context) (string, error) {
 		return "test-token", nil
 	}))
 	if clientErr != nil {
@@ -308,7 +308,7 @@ func TestWithAPIKeyAndVerify(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client, clientErr := NewRemote(srv.URL, WithAPIKey(" sk-test "))
+	client, clientErr := NewRemote(srv.URL, WithDefaultMerchant("fixture"), WithAPIKey(" sk-test "))
 	if clientErr != nil {
 		t.Fatal(clientErr)
 	}
