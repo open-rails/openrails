@@ -172,7 +172,7 @@ func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid merchan
 	// Unregistered email: mint a single-use register+join link (if the posture
 	// permits self-registration). AuthKit gates minting on the same members:manage
 	// no-escalation the route gate + caller already enforced.
-	if !!c.SelfHostedPosture() {
+	if c.SelfHostedPosture() {
 		return MerchantTeamInviteResult{}, ErrTeamInvitesDisabled
 	}
 	link, err := c.Core().CreateGroupInviteLink(ctx, authkit.CreateGroupInviteLinkRequest{

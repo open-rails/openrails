@@ -5,11 +5,13 @@ package integrationharness
 import (
 	"context"
 	"encoding/base64"
+	"github.com/open-rails/authkit/authhttp"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
@@ -30,14 +32,15 @@ func TestDelegationProxyStorageAndMerchantAdmission(t *testing.T) {
 	cp := embcp.Get(f.surface.App())
 	sender, err := testauth.NewSender()
 	require.NoError(t, err)
-	token, err := f.engine.MintDelegatedAccessToken(ctx, authkit.DelegatedAccessParams{
+	token, err := testauth.MintDelegated(ctx, f.signer, authkit.DelegatedAccessParams{
+		Issuer:    f.issuer.URL,
 		Audiences: []string{"openrails"}, DelegatedSubject: f.subject, Permissions: []string{permissions.MerchantAll}, ConfirmationJWKThumbprintSHA256: &sender.Thumbprint,
 	})
 	require.NoError(t, err)
 	proxy := httptest.NewServer(http.StripPrefix("/edge", f.surface.Server().Handler()))
 	t.Cleanup(proxy.Close)
 	target := func(r *http.Request) string { return proxy.URL + "/edge" + r.URL.EscapedPath() }
-	verify.WithDPoP(cp.Core().ClaimDPoPProof, target)(cp.DelegatedVerifier())
+	verify.WithDPoP(f.claimProof, target)(cp.DelegatedVerifier())
 	request := func(proofTarget string) (int, http.Header) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, proxy.URL+"/edge/v1/me/status", nil)
 		require.NoError(t, err)
@@ -69,18 +72,23 @@ func TestDelegationProxyStorageAndMerchantAdmission(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, h.Redis.Do(context.Background(), "ACL", "DELUSER", aclUser).Err()) })
 	denied := redis.NewClient(&redis.Options{Addr: h.Redis.Options().Addr, Username: aclUser, Password: password})
 	t.Cleanup(func() { require.NoError(t, denied.Close()) })
+	var blockedProof func(context.Context, string, time.Duration) (bool, error)
 	blocked, err := authcore.New(authcore.Config{
-		Schema: f.engine.Schema(), Keys: authcore.KeysConfig{VerifyOnly: true},
+		HTTP: httpBackendBuild(func(backend authcore.HTTPBackend) (authcore.HTTPSurface, error) {
+			blockedProof = backend.ClaimDPoPProof
+			return (authhttp.Config{DirectPeerIP: true}).BuildHTTP(backend)
+		}),
+		Schema: f.schema, Keys: authcore.KeysConfig{VerifyOnly: true},
 		Token:        authcore.TokenConfig{Issuer: "https://proof-store.example", IssuedAudiences: []string{"proof-store"}, ExpectedAudiences: []string{"proof-store"}},
 		Registration: authcore.RegistrationConfig{Verification: authkit.RegistrationVerificationNone},
 	}, authcore.Deps{Postgres: h.sharedPool(), Redis: denied})
 	require.NoError(t, err)
 	t.Cleanup(blocked.Close)
-	verify.WithDPoP(blocked.ClaimDPoPProof, target)(cp.DelegatedVerifier())
+	verify.WithDPoP(blockedProof, target)(cp.DelegatedVerifier())
 	status, headers := request(external)
 	require.Equal(t, 503, status)
 	require.Empty(t, headers.Get("WWW-Authenticate"))
-	verify.WithDPoP(cp.Core().ClaimDPoPProof, target)(cp.DelegatedVerifier())
+	verify.WithDPoP(f.claimProof, target)(cp.DelegatedVerifier())
 	status, _ = request(external)
 	require.Equal(t, 200, status)
 

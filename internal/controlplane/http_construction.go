@@ -1,7 +1,6 @@
 package controlplane
 
 import (
-	"context"
 	authhttp "github.com/open-rails/authkit/authhttp"
 	authcore "github.com/open-rails/authkit/embedded"
 	riverhelpers "github.com/open-rails/helpers/river"
@@ -54,7 +53,6 @@ func (c controlPlaneHTTP) BuildHTTP(backend authcore.HTTPBackend) (authcore.HTTP
 }
 
 func (c *ControlPlane) RiverJobs() riverhelpers.Contribution { return c.authClient.RiverJobs() }
-func (c *ControlPlane) Start(ctx context.Context) error      { return c.authClient.Start(ctx) }
 
 // AuthRoutes returns the runtime's already configured local HTTP inventory.
 func (c *ControlPlane) AuthRoutes() ([]authcore.HTTPRoute, error) {

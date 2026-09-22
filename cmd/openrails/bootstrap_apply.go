@@ -286,7 +286,7 @@ func applyAuthKitAuthorityManifest(ctx context.Context, a *app.App, manifest aut
 	if cp.Core() == nil {
 		return fmt.Errorf("AuthKit authority bootstrap: core service unavailable")
 	}
-	res, err := cp.Core().ApplyBootstrapManifest(ctx, manifest, opts)
+	res, err := cp.Core().AdminApplyBootstrapManifest(ctx, manifest, opts)
 	if err != nil {
 		return fmt.Errorf("apply AuthKit authority bootstrap: %w", err)
 	}
