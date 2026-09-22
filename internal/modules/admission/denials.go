@@ -26,11 +26,11 @@ const denialKeyTTL = 30 * 24 * time.Hour
 
 // DenialRecorder increments the hourly denial counters.
 type DenialRecorder struct {
-	rdb redis.Cmdable
+	rdb *redis.Client
 }
 
 // NewDenialRecorder builds a recorder over the shared Redis client.
-func NewDenialRecorder(rdb redis.Cmdable) *DenialRecorder {
+func NewDenialRecorder(rdb *redis.Client) *DenialRecorder {
 	return &DenialRecorder{rdb: rdb}
 }
 
