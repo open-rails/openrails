@@ -263,21 +263,21 @@ func TestRemoteValidationErrorParity(t *testing.T) {
 		{
 			name: "ListProductAccess empty subject",
 			fn: func() error {
-				_, err := client.ListProductAccess(ctx, CustomerID{})
+				_, err := client.ProductAccess.List(ctx, &ProductAccessListParams{})
 				return err
 			},
 		},
 		{
 			name: "HasProductAccess empty subject",
 			fn: func() error {
-				_, err := client.HasProductAccess(ctx, CustomerID{}, ProductID(uuid.New()))
+				_, err := client.ProductAccess.Check(ctx, &ProductAccessCheckParams{ProductID: ProductID(uuid.New()).String()})
 				return err
 			},
 		},
 		{
 			name: "HasProductAccess empty product_id",
 			fn: func() error {
-				_, err := client.HasProductAccess(ctx, testCustomer, ProductID{})
+				_, err := client.ProductAccess.Check(ctx, &ProductAccessCheckParams{CustomerID: testCustomer.String()})
 				return err
 			},
 		},

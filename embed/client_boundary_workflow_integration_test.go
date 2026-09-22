@@ -68,7 +68,10 @@ func TestClientBoundaryWorkflow(t *testing.T) {
 					_, err := client.ListActiveEntitlements(ctx, ids, time.Time{})
 					return err
 				}},
-				{"zero access product", false, func() error { _, err := client.HasProductAccess(ctx, valid, openrails.ProductID{}); return err }},
+				{"zero access product", false, func() error {
+					_, err := client.ProductAccess.Check(ctx, &openrails.ProductAccessCheckParams{CustomerID: valid.String()})
+					return err
+				}},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					got := observeClientError(t, tc.name, tc.call())

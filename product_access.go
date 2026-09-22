@@ -7,9 +7,9 @@ import (
 	"strconv"
 )
 
-// ProductAccessService checks access for a bounded set of products and lists
+// ProductAccessClient checks access for a bounded set of products and lists
 // purchases one page at a time. IDs use the same strings as the HTTP API.
-type ProductAccessService struct{ client *Client }
+type ProductAccessClient struct{ client *Client }
 
 const ProductAccessMaxPageSize = 100
 
@@ -40,7 +40,7 @@ func productAccessCustomerPath(id string) (string, error) {
 	return "/v1/merchant/users/" + customer.String() + "/product-access", nil
 }
 
-func (s *ProductAccessService) Check(ctx context.Context, params *ProductAccessCheckParams) (*ProductAccessCheck, error) {
+func (s *ProductAccessClient) Check(ctx context.Context, params *ProductAccessCheckParams) (*ProductAccessCheck, error) {
 	if params == nil {
 		return nil, invalidErr("params are required")
 	}
@@ -61,7 +61,7 @@ func (s *ProductAccessService) Check(ctx context.Context, params *ProductAccessC
 
 // CheckMany returns an explicit decision for each requested product. Empty input
 // returns an empty map; duplicates share one decision. At most 100 IDs are accepted.
-func (s *ProductAccessService) CheckMany(ctx context.Context, params *ProductAccessCheckManyParams) (map[string]bool, error) {
+func (s *ProductAccessClient) CheckMany(ctx context.Context, params *ProductAccessCheckManyParams) (map[string]bool, error) {
 	if params == nil {
 		return nil, invalidErr("params are required")
 	}
@@ -94,7 +94,7 @@ func (s *ProductAccessService) CheckMany(ctx context.Context, params *ProductAcc
 	return out.Access, nil
 }
 
-func (s *ProductAccessService) List(ctx context.Context, params *ProductAccessListParams) (*ProductAccessList, error) {
+func (s *ProductAccessClient) List(ctx context.Context, params *ProductAccessListParams) (*ProductAccessList, error) {
 	if params == nil {
 		return nil, invalidErr("params are required")
 	}

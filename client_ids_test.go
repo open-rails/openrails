@@ -146,18 +146,24 @@ func TestClientRefusesEmptyIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.GrantEntitlement(ctx, CustomerID{}, GrantEntitlementRequest{Entitlement: "pro"})
 			return err
 		},
-		"RevokeEntitlement customer":  func() error { return c.RevokeEntitlement(ctx, CustomerID{}, "ent") },
-		"GetDeposit customer":         func() error { _, err := c.GetDeposit(ctx, CustomerID{}, "src"); return err },
-		"Balance":                     func() error { _, err := c.Balance(ctx, CustomerID{}); return err },
-		"GetCreditAccount":            func() error { _, err := c.GetCreditAccount(ctx, CustomerID{}, "USD"); return err },
-		"UsageRollup":                 func() error { _, err := c.UsageRollup(ctx, CustomerID{}, "USD", now, now, "day"); return err },
-		"GetTrustLevel":               func() error { _, err := c.GetTrustLevel(ctx, CustomerID{}, "USD"); return err },
-		"SetCreditLimit":              func() error { return c.SetCreditLimit(ctx, CustomerID{}, "USD", 1) },
-		"GetCreditLimit":              func() error { _, err := c.GetCreditLimit(ctx, CustomerID{}, "USD"); return err },
-		"ListEntitlements":            func() error { _, err := c.ListEntitlements(ctx, CustomerID{}, now); return err },
-		"ListProductAccess":           func() error { _, err := c.ListProductAccess(ctx, CustomerID{}); return err },
-		"HasProductAccess subject":    func() error { _, err := c.HasProductAccess(ctx, CustomerID{}, ProductID(uuid.New())); return err },
-		"HasProductAccess product":    func() error { _, err := c.HasProductAccess(ctx, customer, ProductID{}); return err },
+		"RevokeEntitlement customer": func() error { return c.RevokeEntitlement(ctx, CustomerID{}, "ent") },
+		"GetDeposit customer":        func() error { _, err := c.GetDeposit(ctx, CustomerID{}, "src"); return err },
+		"Balance":                    func() error { _, err := c.Balance(ctx, CustomerID{}); return err },
+		"GetCreditAccount":           func() error { _, err := c.GetCreditAccount(ctx, CustomerID{}, "USD"); return err },
+		"UsageRollup":                func() error { _, err := c.UsageRollup(ctx, CustomerID{}, "USD", now, now, "day"); return err },
+		"GetTrustLevel":              func() error { _, err := c.GetTrustLevel(ctx, CustomerID{}, "USD"); return err },
+		"SetCreditLimit":             func() error { return c.SetCreditLimit(ctx, CustomerID{}, "USD", 1) },
+		"GetCreditLimit":             func() error { _, err := c.GetCreditLimit(ctx, CustomerID{}, "USD"); return err },
+		"ListEntitlements":           func() error { _, err := c.ListEntitlements(ctx, CustomerID{}, now); return err },
+		"ListProductAccess":          func() error { _, err := c.ProductAccess.List(ctx, &ProductAccessListParams{}); return err },
+		"HasProductAccess subject": func() error {
+			_, err := c.ProductAccess.Check(ctx, &ProductAccessCheckParams{ProductID: ProductID(uuid.New()).String()})
+			return err
+		},
+		"HasProductAccess product": func() error {
+			_, err := c.ProductAccess.Check(ctx, &ProductAccessCheckParams{CustomerID: customer.String()})
+			return err
+		},
 		"GetCustomerBillingPolicy":    func() error { _, err := c.GetCustomerBillingPolicy(ctx, CustomerID{}); return err },
 		"SetCustomerBillingPolicy":    func() error { _, err := c.SetCustomerBillingPolicy(ctx, CustomerID{}, nil); return err },
 		"SetCustomerSpendDelegations": func() error { return c.SetCustomerSpendDelegations(ctx, CustomerID{}, nil) },

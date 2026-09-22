@@ -21,7 +21,7 @@ import (
 // Client executes the same typed billing operations over an HTTP or in-process
 // transport. Applications may define narrow interfaces for the methods they use.
 type Client struct {
-	ProductAccess *ProductAccessService
+	ProductAccess *ProductAccessClient
 	baseURL       string
 	merchantID    MerchantID
 	ownCatalog    bool
@@ -137,7 +137,7 @@ func NewRemote(baseURL string, opts ...ClientOption) (*Client, error) {
 	if r.client == nil {
 		r.client = &http.Client{}
 	}
-	r.ProductAccess = &ProductAccessService{client: r}
+	r.ProductAccess = &ProductAccessClient{client: r}
 	return r, nil
 }
 

@@ -37,6 +37,60 @@ func (q *Queries) AdminGrantExistsForSource(ctx context.Context, arg AdminGrantE
 	return exists, err
 }
 
+const checkProductAccess = `-- name: CheckProductAccess :many
+SELECT candidate.product_id, EXISTS (
+ SELECT 1 FROM openrails.grants g
+ WHERE g.merchant_id = $1::uuid
+   AND g.customer_id = $2::uuid
+   AND g.product_id = candidate.product_id
+   AND g.kind = 'ownership' AND g.event = 'grant'
+   AND g.starts_at <= $3::timestamptz
+   AND (g.ends_at IS NULL OR g.ends_at > $3::timestamptz)
+   AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+    WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+      AND t.event IN ('revoke','expire','supersede'))
+) AS has_access
+FROM unnest($4::uuid[]) AS candidate(product_id)
+`
+
+type CheckProductAccessParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	AtTime     time.Time
+	ProductIds []uuid.UUID
+}
+
+type CheckProductAccessRow struct {
+	ProductID *uuid.UUID
+	HasAccess bool
+}
+
+// CheckProductAccess: one bounded lookup for the page's candidate products.
+func (q *Queries) CheckProductAccess(ctx context.Context, arg CheckProductAccessParams) ([]CheckProductAccessRow, error) {
+	rows, err := q.db.Query(ctx, checkProductAccess,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.AtTime,
+		arg.ProductIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CheckProductAccessRow
+	for rows.Next() {
+		var i CheckProductAccessRow
+		if err := rows.Scan(&i.ProductID, &i.HasAccess); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countUnpaidEngineRenewalGrants = `-- name: CountUnpaidEngineRenewalGrants :one
 SELECT count(*) FROM openrails.grants g
 WHERE g.merchant_id=$1::uuid AND g.source_type='subscription'
@@ -364,6 +418,75 @@ func (q *Queries) LatestEntitlementGrantEndForSource(ctx context.Context, arg La
 	var latest_end time.Time
 	err := row.Scan(&latest_end)
 	return latest_end, err
+}
+
+const listActiveOwnershipGrantsPage = `-- name: ListActiveOwnershipGrantsPage :many
+SELECT g.id, g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id, g.event, g.supersedes_id, g.spec_snapshot, g.starts_at, g.ends_at, g.amount, g.currency, g.reason, g.created_at FROM openrails.grants g
+WHERE g.merchant_id = $1::uuid
+  AND g.customer_id = $2::uuid
+  AND g.kind = 'ownership' AND g.event = 'grant'
+  AND g.product_id IS NOT NULL
+  AND g.starts_at <= $3::timestamptz
+  AND (g.ends_at IS NULL OR g.ends_at > $3::timestamptz)
+  AND g.id > $4::uuid
+  AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+   WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+    AND t.event IN ('revoke','expire','supersede'))
+ORDER BY g.id
+LIMIT $5::int
+`
+
+type ListActiveOwnershipGrantsPageParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	AtTime     time.Time
+	AfterID    uuid.UUID
+	PageLimit  int32
+}
+
+// ListActiveOwnershipGrantsPage returns a bounded, stable ID-ordered page.
+func (q *Queries) ListActiveOwnershipGrantsPage(ctx context.Context, arg ListActiveOwnershipGrantsPageParams) ([]OpenrailsGrant, error) {
+	rows, err := q.db.Query(ctx, listActiveOwnershipGrantsPage,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.AtTime,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsGrant
+	for rows.Next() {
+		var i OpenrailsGrant
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.ProductID,
+			&i.Kind,
+			&i.SourceType,
+			&i.SourceID,
+			&i.PaymentID,
+			&i.Event,
+			&i.SupersedesID,
+			&i.SpecSnapshot,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.Amount,
+			&i.Currency,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listCustomersWithLapsedCreditLots = `-- name: ListCustomersWithLapsedCreditLots :many
