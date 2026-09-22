@@ -62,6 +62,9 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 		return outcome
 	}
 	if intents.EvidenceString(in, "submitted_at") != "" {
+		if in.Rail == "stripe" {
+			return h.executeStripeEngineDecline(ctx, in)
+		}
 		return h.Verify(ctx, in)
 	}
 	if h.Config == nil {
@@ -206,6 +209,9 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Openr
 		return outcome
 	}
 	if intents.EvidenceString(in, "submitted_at") == "" {
+		if in.Rail == "stripe" {
+			return intents.Retryable("Stripe payment awaits gated execution")
+		}
 		return h.Execute(ctx, in)
 	}
 	reference := ""

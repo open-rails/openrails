@@ -41,7 +41,7 @@ func (h *InitialMembershipIntentHandler) executeStripeInitial(ctx context.Contex
 		return intents.Ambiguous(err.Error())
 	}
 	if !first {
-		return h.Verify(ctx, in)
+		return h.executeStripeInitialDecline(ctx, in)
 	}
 	result, err := service.CreateEnginePayment(ctx, params)
 	if errors.Is(err, charge.ErrNotDispatched) {
@@ -56,7 +56,7 @@ func (h *InitialMembershipIntentHandler) executeStripeInitial(ctx context.Contex
 	if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, map[string]any{"stripe_payment_intent_id": result.PaymentIntentID}); err != nil {
 		return intents.Ambiguous(err.Error())
 	}
-	return h.Verify(ctx, in)
+	return h.executeStripeInitialDecline(ctx, in)
 }
 func (h *InitialMembershipIntentHandler) verifyStripeInitial(ctx context.Context, in gen.OpenrailsRailIntent, p InitialMembershipPayload) intents.Outcome {
 	service, err := h.stripeEngineService(ctx, in)
@@ -81,6 +81,9 @@ func (h *InitialMembershipIntentHandler) verifyStripeInitial(ctx context.Context
 	case subscriptions.StripeEngineAuthenticationRequired:
 		return intents.AmbiguousWithEvidence("Stripe payment requires customer authentication", map[string]any{"authentication_required": true, "stripe_payment_intent_id": result.PaymentIntentID})
 	case subscriptions.StripeEngineDeclined:
+		if result.FailureCode != "canceled" {
+			return intents.Retryable("Stripe decline requires gated cancellation of the existing payment")
+		}
 		if err := intents.NewStore(h.database()).RetainInitialStripeDecline(ctx, in, service, result.PaymentIntentID); err != nil {
 			return intents.Ambiguous(err.Error())
 		}
@@ -100,4 +103,38 @@ func (h *InitialMembershipIntentHandler) verifyStripeInitial(ctx context.Context
 	default:
 		return intents.Ambiguous("Stripe payment is still processing")
 	}
+}
+
+// Cancellation uses the original submission fence and the normal Execute lease.
+// Recovery always reads the same payment before considering another cancel.
+func (h *InitialMembershipIntentHandler) executeStripeInitialDecline(ctx context.Context, in gen.OpenrailsRailIntent) intents.Outcome {
+	current, err := intents.NewStore(h.database()).Get(ctx, in.ID)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	if h.Checkout.Config == nil {
+		return intents.Parked("Stripe execution mode unavailable")
+	}
+	if blocked, reason := intents.GateExecution(h.Checkout.Config, intents.Origin(current.Origin)); blocked {
+		return intents.Parked(reason)
+	}
+	service, err := h.stripeEngineService(ctx, current)
+	if err != nil {
+		return intents.Parked(err.Error())
+	}
+	params, err := intents.StripeEngineParams(current)
+	if err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	reference := intents.EvidenceString(current, "stripe_payment_intent_id")
+	result, found, err := service.ReadEnginePayment(ctx, params, reference)
+	if err != nil || !found {
+		return intents.Ambiguous("submitted Stripe payment requires exact readback; no resend")
+	}
+	if result.State == subscriptions.StripeEngineDeclined && result.FailureCode != "canceled" {
+		if _, err := service.FinalizeEngineDecline(ctx, params, result.PaymentIntentID); err != nil {
+			return intents.Ambiguous(err.Error())
+		}
+	}
+	return h.Verify(ctx, current)
 }
