@@ -271,8 +271,8 @@ func checkClientDTOShapes(t *testing.T, ctx context.Context, h *integrationharne
 	want := dtoShapeObservation{
 		SubscriptionID: f.subscription, ListedSubscriptionID: f.subscription, MethodSubscriptionID: f.subscription,
 		CustomerID: (f.customer).String(),
-		ProductID:  (sdkProductID(t, product.ID)).String(), PriceProductID: sdkProductID(t, product.ID), ProductOwnID: sdkProductID(t, product.ID),
-		PriceID: (sdkPriceID(t, price.ID)).String(), PriceOwnID: sdkPriceID(t, price.ID), CatalogPriceID: sdkPriceID(t, price.ID),
+		ProductID:  product.ID, PriceProductID: product.ID, ProductOwnID: product.ID,
+		PriceID: price.ID, PriceOwnID: price.ID, CatalogPriceID: price.ID,
 		PaymentMethodID: f.method, MethodID: f.method, PaymentID: f.payment,
 		ReadByID: true, HasPayment: true,
 		DepositCurrency: "USD", BalanceCurrency: "USD", PriceCurrency: "USD", RuleCurrency: "USD",

@@ -25,17 +25,15 @@ func TestCatalogResourceAtomicOffers(t *testing.T) {
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{
+	rt, mid, err := newDeclaredMerchant(ctx, embed.Options{Config: &config.Config{
 		Env: "development", TestMode: config.CredentialPostureSandbox,
 		MerchantConfigSource: config.MerchantConfigSourceManifest, CatalogSource: config.CatalogSourceAPI,
 		ProviderWriteMode: config.ProviderWriteModeFull, NewSubscriptionCollectionPolicy: "engine", DB: &config.DBConfig{URL: dsn},
-	}, PGXPool: pool, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t}})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
-	mid, err := rt.UpsertMerchantConfig(ctx, "inline-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Inline catalog", PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {
+	}, PGXPool: pool, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t}}, "inline-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Inline catalog", PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {
 		AccountID: "acct_inline_fixture", Secrets: map[string]string{"secret_key": "sk_test_inline_fixture", "webhook_signing_secret": "whsec_inline_fixture"},
 	}}}})
 	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 	local, err := rt.Client()
 	require.NoError(t, err)
 	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, Gate: creatorAdminTestGate{mid: mid}}})

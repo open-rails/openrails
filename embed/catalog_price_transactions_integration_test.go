@@ -38,15 +38,13 @@ func TestCatalogPriceKeyTransactions(t *testing.T) {
 	owner, pool, dsn := scopeWithoutRLSDatabase(t)
 	require.Greater(t, pool.Config().MaxConns, int32(1), "concurrent transactions use independent connections")
 	provider := &catalogFailingProvider{}
-	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{
+	rt, mid, err := newDeclaredMerchant(ctx, embed.Options{Config: &config.Config{
 		Env: "development", TestMode: config.CredentialPostureSandbox,
 		MerchantConfigSource: config.MerchantConfigSourceManifest, CatalogSource: config.CatalogSourceAPI,
 		ProviderWriteMode: config.ProviderWriteModeFull, NewSubscriptionCollectionPolicy: "engine", DB: &config.DBConfig{URL: dsn},
-	}, PGXPool: pool, River: embed.RiverManagedByOpenRails(), StripeTransport: provider})
+	}, PGXPool: pool, River: embed.RiverManagedByOpenRails(), StripeTransport: provider}, "price-tx-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Price transaction", PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {AccountID: "acct_transaction_fixture", Secrets: map[string]string{"secret_key": "sk_test_transaction_fixture", "webhook_signing_secret": "whsec_transaction_fixture"}}}}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
-	mid, err := rt.UpsertMerchantConfig(ctx, "price-tx-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Price transaction", PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {AccountID: "acct_transaction_fixture", Secrets: map[string]string{"secret_key": "sk_test_transaction_fixture", "webhook_signing_secret": "whsec_transaction_fixture"}}}}})
-	require.NoError(t, err)
 	local, err := rt.Client()
 	require.NoError(t, err)
 	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, Gate: creatorAdminTestGate{mid: mid}}})
