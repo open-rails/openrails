@@ -393,6 +393,54 @@ func (q *Queries) DeletePayment(ctx context.Context, arg DeletePaymentParams) (i
 	return result.RowsAffected(), nil
 }
 
+const getCustomerPaymentRefundTotals = `-- name: GetCustomerPaymentRefundTotals :many
+SELECT original.id AS payment_id, sum(abs(refund.amount::numeric))::bigint AS amount_refunded
+FROM openrails.payments original
+JOIN openrails.payments refund ON refund.refunded_payment_id = original.id
+    AND refund.merchant_id = $1::uuid
+WHERE original.merchant_id = $1::uuid
+    AND original.customer_id = $2::uuid
+    AND original.id = ANY($3::uuid[])
+    AND original.amount > 0 AND original.refunded_payment_id IS NULL
+    AND original.deleted_at IS NULL AND refund.deleted_at IS NULL
+    AND refund.status = 'completed'
+GROUP BY original.id
+`
+
+type GetCustomerPaymentRefundTotalsParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	PaymentIds []uuid.UUID
+}
+
+type GetCustomerPaymentRefundTotalsRow struct {
+	PaymentID      uuid.UUID
+	AmountRefunded int64
+}
+
+// Customer history needs completed display totals, not pending refund reservations.
+// Scope ownership through the original charge: imported linked refund rows may
+// carry a different legacy customer identifier.
+func (q *Queries) GetCustomerPaymentRefundTotals(ctx context.Context, arg GetCustomerPaymentRefundTotalsParams) ([]GetCustomerPaymentRefundTotalsRow, error) {
+	rows, err := q.db.Query(ctx, getCustomerPaymentRefundTotals, arg.MerchantID, arg.CustomerID, arg.PaymentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetCustomerPaymentRefundTotalsRow
+	for rows.Next() {
+		var i GetCustomerPaymentRefundTotalsRow
+		if err := rows.Scan(&i.PaymentID, &i.AmountRefunded); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getLatestChargeBySubscriptionID = `-- name: GetLatestChargeBySubscriptionID :one
 SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement FROM openrails.payments purch
 WHERE purch.merchant_id = $2::uuid AND purch.subscription_id = $1
