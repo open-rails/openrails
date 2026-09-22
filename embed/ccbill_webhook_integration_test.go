@@ -92,7 +92,7 @@ catalogs:
 }
 
 // ccbillIdentity explicitly selects AuthKit as this host's identity provider.
-func ccbillIdentity(t *testing.T, ctx context.Context, dsn string) *authcore.Client {
+func ccbillIdentity(t *testing.T, ctx context.Context, dsn string) *authcore.Runtime {
 	t.Helper()
 	appDB := dbtest.OpenAppDB(t, dsn)
 	core, err := authcore.New(authcore.Config{

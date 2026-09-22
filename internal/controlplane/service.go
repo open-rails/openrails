@@ -27,8 +27,8 @@ import (
 )
 
 // ControlPlane is OpenRails' in-process AuthKit control plane (issue #224). It
-// wraps an AuthKit http.Service (which exposes selectable route groups) and its
-// underlying core.Service (used for in-process group/role/API-key bootstrap calls).
+// wraps AuthKit HTTP handling and its local Runtime for identity provisioning,
+// lifecycle and group/role/API-key bootstrap calls.
 //
 // HARD CUT (#469): the control plane is mandatory in standalone mode — the
 // standalone binary always constructs it at boot and a construction failure is
@@ -36,10 +36,9 @@ import (
 type ControlPlane struct {
 	cfg     *config.Config
 	authSvc *authhttp.Service
-	// authClient is the in-process AuthKit engine the host built (client-first,
-	// #142); authSvc adapts it for HTTP, Core()/the delegated verifier use it
-	// directly. The server no longer vends it (.Client() was dropped).
-	authClient *authcore.Client
+	// authClient owns the local AuthKit engine. authSvc adapts its HTTP surface;
+	// Core exposes runtime-only provisioning and verification capabilities.
+	authClient *authcore.Runtime
 	hosted     bool
 	// merchantCreation is the WithMerchantCreation config when the merchant
 	// persona is opted into authkit's generated creation path (or#914); nil
@@ -599,20 +598,11 @@ func (c *ControlPlane) Close() {
 	}
 }
 
-// Core returns the underlying AuthKit core service used for in-process
-// group/role/API key operations. The return type is the concrete
-// *authcore.Client (not the authkit.Client interface): it satisfies
-// authkit.Client in full (every existing Core()-based call site keeps
-// compiling unchanged) AND additionally exposes .Genesis() (authkit v0.79.0,
-// #241) — the unchecked bootstrap/migration mutators (AssignGroupRole,
-// AssignRoleBySlug, RemoveRoleBySlug, RemoveGroupSubject) that authkit
-// deliberately dropped from the swappable Client interface. Bootstrap/seed/
-// lazy-materialization code (internal/controlplane/bootstrap.go,
-// customer_group.go, internal/bootstrap/merchant_manifest.go, the integration
-// harness) calls Core().Genesis().AssignGroupRole(...) etc.; runtime request
-// handlers must use the actor-checked *As methods on the Client interface
-// instead (never Genesis()).
-func (c *ControlPlane) Core() *authcore.Client {
+// Core returns the local AuthKit Runtime for provisioning and verification.
+// Ordinary typed identity calls may use Core().Client(). Operator bootstrap and
+// migration code may use Core().Genesis(); request handlers use actor-checked
+// operations instead of the privileged Genesis surface.
+func (c *ControlPlane) Core() *authcore.Runtime {
 	if c == nil {
 		return nil
 	}

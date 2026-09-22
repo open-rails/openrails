@@ -38,7 +38,7 @@ import (
 type delegationHTTPFixture struct {
 	surface                 *Surface
 	issuer                  *httptest.Server
-	engine                  *authcore.Client
+	engine                  *authcore.Runtime
 	application             *authkit.RemoteApplication
 	email, password, access string
 	subject                 string

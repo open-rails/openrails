@@ -11,6 +11,7 @@ ignore ./web/admin/node_modules
 require (
 	github.com/ccoveille/go-safecast/v2 v2.0.1
 	github.com/gagliardetto/solana-go v1.20.0
+	github.com/go-chi/chi/v5 v5.3.2
 	github.com/goccy/go-yaml v1.18.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
@@ -25,7 +26,7 @@ require (
 	github.com/knadh/koanf/v2 v2.2.2
 	github.com/moby/moby/api v1.54.2
 	github.com/moby/moby/client v0.4.1
-	github.com/open-rails/authkit v0.114.0
+	github.com/open-rails/authkit v0.115.0
 	github.com/open-rails/migratekit v1.0.4
 	github.com/pganalyze/pg_query_go/v6 v6.2.2
 	github.com/redis/go-redis/v9 v9.22.0
@@ -41,7 +42,6 @@ require (
 
 require (
 	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
-	github.com/go-chi/chi/v5 v5.3.2 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-webauthn/webauthn v0.18.1 // indirect
 	github.com/go-webauthn/x v0.3.1 // indirect

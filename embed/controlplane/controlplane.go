@@ -187,7 +187,7 @@ func (c *ControlPlane) Handler() (http.Handler, error) {
 }
 
 // Core is the control plane's AuthKit engine client.
-func (c *ControlPlane) Core() *authcore.Client { return c.cp.Core() }
+func (c *ControlPlane) Core() *authcore.Runtime { return c.cp.Core() }
 
 // UserAuthenticator verifies control-plane session tokens in process.
 func (c *ControlPlane) UserAuthenticator() billingauth.Authenticator { return c.cp.UserAuthenticator() }
