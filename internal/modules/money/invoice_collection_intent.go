@@ -135,7 +135,7 @@ func (h *InvoiceCollectionHandler) Execute(ctx context.Context, intent gen.Openr
 	}
 	// Write-ahead fence: from here on the charge may exist at the provider.
 	store := intents.NewStore(h.DB)
-	proof, first, err := store.BeginInvoiceCollection(ctx, intent, h.now())
+	proof, first, err := store.BeginCollectedPayment(ctx, intent, h.now())
 	if err != nil {
 		return intents.Parked("record submission fence: " + err.Error())
 	}
@@ -283,7 +283,7 @@ func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.Openr
 	if receipt := intents.EvidenceString(intent, collectionEvidenceTransactionID); receipt != "" {
 		return intents.Outcome{}, intents.RejectResolution("operation already holds receipt %s; its verifier completes settlement", receipt)
 	}
-	if _, found, err := intents.LoadInvoiceNonexecution(intent); err != nil || found {
+	if _, found, err := intents.LoadCollectionNonexecution(intent); err != nil || found {
 		return intents.Outcome{}, intents.RejectResolution("operation holds nonexecution custody; its verifier must complete it")
 	}
 	if intents.EvidenceString(intent, collectionEvidenceFailureCode) != "" {
@@ -296,7 +296,7 @@ func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.Openr
 		if contradiction := intents.EvidenceString(intent, collectionEvidenceContradiction); contradiction != "" {
 			return intents.Outcome{}, intents.RejectResolution("provider evidence contradicts this operation (%s); non-execution cannot be attested, repair from the provider record", contradiction)
 		}
-		proof, err := intents.NewStore(h.DB).ConfirmInvoiceNotExecuted(ctx, intent, h.Verifier)
+		proof, err := intents.NewStore(h.DB).ConfirmCollectedPaymentNotExecuted(ctx, intent, h.Verifier)
 		if err != nil {
 			return intents.Outcome{}, intents.RejectResolution("%v", err)
 		}
@@ -351,7 +351,7 @@ func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, int
 	if rail == "" {
 		rail = p.Rail
 	}
-	nonexecution, hasNonexecution, err := intents.LoadInvoiceNonexecution(intent)
+	nonexecution, hasNonexecution, err := intents.LoadCollectionNonexecution(intent)
 	if err != nil {
 		return intents.Ambiguous("stored nonexecution rejected: " + err.Error()), true
 	}
@@ -601,7 +601,7 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 // finalizeNotExecuted records a collection that provably never charged: the
 // attempt fails without a decline and the invoice is due again immediately.
 // code/reason default to provider-confirmed non-execution.
-func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, intent gen.OpenrailsRailIntent, p intents.InvoiceCollectionPayload, code, reason string, proof ...intents.InvoiceNonexecutionProof) intents.Outcome {
+func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, intent gen.OpenrailsRailIntent, p intents.InvoiceCollectionPayload, code, reason string, proof ...intents.CollectionNonexecutionProof) intents.Outcome {
 	if code == "" {
 		code, reason = "not_executed", "provider confirmed the collection was not executed"
 	}
@@ -609,7 +609,7 @@ func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, inte
 		if len(proof) != 1 {
 			return intents.Ambiguous("invalid nonexecution capability")
 		}
-		if err := intents.NewStore(h.DB).RetainInvoiceNonexecution(ctx, intent, proof[0], code, reason); err != nil {
+		if err := intents.NewStore(h.DB).RetainCollectionNonexecution(ctx, intent, proof[0], code, reason); err != nil {
 			return intents.Ambiguous("retain nonexecution proof: " + err.Error())
 		}
 	}

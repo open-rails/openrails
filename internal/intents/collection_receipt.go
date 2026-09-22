@@ -80,6 +80,9 @@ func decodeCollectedTerms(in gen.OpenrailsRailIntent) (collectedTerms, error) {
 		}
 		minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.ProrationAmount)
 		return collectedTerms{"nmi", p.Currency, minor, p.Instrument, "", in.ID.String()}, err
+	case subscriptions.TypeSubscriptionCollection:
+		p, err := subscriptions.DecodeSubscriptionCollectionPayload(in)
+		return collectedTerms{"nmi", p.Renewal.Currency, p.AmountMinor, p.Instrument, "", p.OrderReference}, err
 	case subscriptions.TypeManualRebill:
 		p, err := subscriptions.DecodeManualRebillPayload(in)
 		return collectedTerms{p.Rail, p.Renewal.Currency, p.AmountMinor, p.Instrument, "", p.OrderReference}, err
@@ -231,10 +234,27 @@ func LoadCollectedReceipt(in gen.OpenrailsRailIntent) (CollectedReceipt, bool, e
 	if err := decoder.Decode(&r.data); err != nil {
 		return r, true, err
 	}
+	if err := r.Validate(in); err != nil {
+		return r, true, err
+	}
+	// A receipt is not usable custody when the same operation also claims
+	// definitive refusal/nonexecution, including legacy contradictory rows.
 	if _, exists := evidence[qualifiedInitialRefusalKey]; exists {
 		return r, true, errors.New("collected receipt contradicts retained initial refusal")
 	}
-	return r, true, r.Validate(in)
+	if _, exists := evidence[rebillDeclineKey]; exists {
+		return r, true, errors.New("collected receipt contradicts retained decline")
+	}
+	if _, exists := evidence[qualifiedCollectionNonexecutionKey]; exists {
+		return r, true, errors.New("collected receipt contradicts retained nonexecution")
+	}
+	if in.Status == StatusSucceeded && (in.IntentType == subscriptions.TypeManualRebill || in.IntentType == subscriptions.TypeSubscriptionCollection) {
+		var transaction string
+		if err := json.Unmarshal(evidence["transaction_id"], &transaction); err != nil || transaction != r.TransactionID() {
+			return r, true, errors.New("collected payment projection contradicts retained receipt")
+		}
+	}
+	return r, true, nil
 }
 
 // RetainCollectedReceipt commits custody before local effects. A transaction-
@@ -371,7 +391,7 @@ func LoadCollectionCandidate(in gen.OpenrailsRailIntent) (CollectionCandidate, b
 }
 
 func refuseCustodyKeys(evidence map[string]any) error {
-	for _, key := range []string{qualifiedInitialRefusalKey, qualifiedInvoiceNonexecutionKey, qualifiedReceiptKey, qualifiedEnrollmentKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, "account_requalifications"} {
+	for _, key := range []string{qualifiedInitialRefusalKey, qualifiedCollectionNonexecutionKey, qualifiedReceiptKey, qualifiedEnrollmentKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, "account_requalifications"} {
 		if _, ok := evidence[key]; ok {
 			return fmt.Errorf("%s is reserved for immutable provider evidence custody", key)
 		}

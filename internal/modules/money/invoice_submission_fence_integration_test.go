@@ -4,6 +4,7 @@ package money_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
@@ -86,7 +87,7 @@ func TestInvoiceSubmissionFenceRecovery(t *testing.T) {
 		require.Empty(t, outcome.Evidence)
 		current, err := store.Get(e.ctx, claimed.ID)
 		require.NoError(t, err)
-		_, found, err := intents.LoadInvoiceNonexecution(current)
+		_, found, err := intents.LoadCollectionNonexecution(current)
 		require.NoError(t, err)
 		require.True(t, found)
 		require.NotNil(t, e.invoiceRow(t).CollectionIntentID)
@@ -115,10 +116,10 @@ func TestInvoiceSubmissionFenceRecovery(t *testing.T) {
 		claimed, ok, err := store.ClaimByID(e.ctx, pending.ID, time.Now(), time.Now().Add(time.Minute))
 		require.NoError(t, err)
 		require.True(t, ok)
-		proof, first, err := store.BeginInvoiceCollection(e.ctx, claimed, time.Now())
+		proof, first, err := store.BeginCollectedPayment(e.ctx, claimed, time.Now())
 		require.NoError(t, err)
 		require.True(t, first)
-		require.NoError(t, store.RetainInvoiceNonexecution(e.ctx, claimed, proof, "not_dispatched", "known before POST"))
+		require.NoError(t, store.RetainCollectionNonexecution(e.ctx, claimed, proof, "not_dispatched", "known before POST"))
 		// Inject conflicting positive provider facts, rather than an untrusted
 		// outcome boolean. Neither qualified fact may silently win this conflict.
 		e.gateway.orderSale(claimed.ID.String(), "contradicted-paid")
@@ -127,6 +128,25 @@ func TestInvoiceSubmissionFenceRecovery(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, found)
 		_, err = store.RetainCollectedReceipt(e.ctx, claimed, receipt)
+		require.Error(t, err, "receipt retention must atomically reject existing nonexecution")
+		refused, err := store.Get(e.ctx, claimed.ID)
+		require.NoError(t, err)
+		// Exercise recovery from legacy contradictory custody separately from
+		// the now-rejected write. Both facts remain bound to this exact row.
+		_, err = e.pool.Exec(e.ctx, `UPDATE billing.rail_intents SET result_evidence='{}' WHERE id=$1`, claimed.ID)
+		require.NoError(t, err)
+		_, err = store.RetainCollectedReceipt(e.ctx, claimed, receipt)
+		require.NoError(t, err)
+		paid, err := store.Get(e.ctx, claimed.ID)
+		require.NoError(t, err)
+		var contradictory map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(refused.ResultEvidence, &contradictory))
+		var paidEvidence map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(paid.ResultEvidence, &paidEvidence))
+		contradictory["qualified_receipt"] = paidEvidence["qualified_receipt"]
+		raw, err := json.Marshal(contradictory)
+		require.NoError(t, err)
+		_, err = e.pool.Exec(e.ctx, `UPDATE billing.rail_intents SET result_evidence=$2 WHERE id=$1`, claimed.ID, raw)
 		require.NoError(t, err)
 		handler := money.NewInvoiceCollectionHandler(e.db, nil, nil, fullModeConfig(), nil)
 		require.Equal(t, intents.OutcomeAmbiguous, handler.Verify(e.ctx, claimed).Class)
@@ -139,7 +159,7 @@ func TestInvoiceSubmissionFenceRecovery(t *testing.T) {
 			}
 			return intents.NewStore(e.db.NewWithPgxTx(tx)).CompleteInvoiceCollection(c, current, intents.Succeeded(nil), time.Now())
 		})
-		require.ErrorContains(t, err, "contradicts qualified nonexecution")
+		require.ErrorContains(t, err, "contradicts retained nonexecution")
 		require.NotNil(t, e.invoiceRow(t).CollectionIntentID)
 		require.Zero(t, e.settledPayments(t))
 		require.Zero(t, e.owedPaymentTransfers(t))

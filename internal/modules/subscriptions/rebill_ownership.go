@@ -20,6 +20,16 @@ func RefuseOwnedRebillTerms(ctx context.Context, d *db.DB, sub *models.Subscript
 	if d == nil || d.Pool() != nil || sub == nil {
 		return fmt.Errorf("%w: ownership check requires a locked subscription", ErrRebillTermsCommitted)
 	}
+	engine, err := d.Gen(ctx).GetUnresolvedSubscriptionCollection(ctx, gen.GetUnresolvedSubscriptionCollectionParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
+	if err == nil {
+		if _, err := DecodeSubscriptionCollectionPayload(engine); err != nil {
+			return fmt.Errorf("%w: invalid engine owner: %v", ErrRebillTermsCommitted, err)
+		}
+		return ErrRebillTermsCommitted
+	}
+	if !db.IsNotFound(err) {
+		return err
+	}
 	rows, err := d.Gen(ctx).ListRebillTermOwners(ctx, gen.ListRebillTermOwnersParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
 	if err != nil {
 		return err

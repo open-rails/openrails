@@ -241,7 +241,7 @@ COMMENT ON FUNCTION openrails.delinquency_work_merchant_ids(p_now timestamp with
 
 REVOKE ALL ON FUNCTION openrails.delinquency_work_merchant_ids(p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
 
-CREATE FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
+CREATE FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer, p_include_engine boolean DEFAULT false) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
@@ -250,19 +250,23 @@ BEGIN
     SELECT s.merchant_id
       FROM openrails.subscriptions s
      WHERE s.rail = ANY(p_rails)
-       AND s.status = 'past_due'
-       AND s.collection_policy <> 'engine'
-       AND s.next_retry_at IS NOT NULL AND s.next_retry_at <= p_now
+       AND ((s.collection_policy <> 'engine' AND s.status='past_due' AND s.next_retry_at IS NOT NULL AND s.next_retry_at <= p_now)
+            OR (p_include_engine AND s.collection_policy='engine' AND s.current_period_ends_at <= p_now
+                AND (s.status='active' OR (s.status='past_due' AND s.next_retry_at <= p_now))
+                AND EXISTS (SELECT 1 FROM openrails.payment_methods pm JOIN openrails.psps p ON p.id=pm.psp_id AND p.merchant_id=pm.merchant_id JOIN openrails.custodians c ON c.id=pm.custodian_id AND c.merchant_id=pm.merchant_id
+                            WHERE pm.id=s.payment_method_id AND pm.merchant_id=s.merchant_id AND pm.customer_id=s.customer_id AND pm.psp_id=s.psp_id
+                              AND pm.custodian='hyperswitch' AND pm.park_reason='' AND pm.stored_credential_recurring_ref<>'' AND NOT p.archived AND NOT c.archived AND p.environment=c.environment)
+                AND NOT EXISTS (SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=s.merchant_id AND i.subscription_id=s.id AND i.intent_type='subscription_collection' AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable'))))
        AND s.deleted_at IS NULL
      GROUP BY s.merchant_id
-     ORDER BY MIN(s.next_retry_at)
+     ORDER BY MIN(CASE WHEN s.collection_policy='engine' AND s.status='active' THEN s.current_period_ends_at ELSE s.next_retry_at END), s.merchant_id
      LIMIT p_limit;
 END;
 $$;
 
-COMMENT ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) IS 'Merchants with a due past_due subscription on the named rails — the fan-out list for DunningWorker. Ids only; the due rows, the charges and every lifecycle transition run per-merchant under RunInMerchantScope. Replaces a bare-context scan that returned an empty slice on every run, so scheduled dunning (retries, #839 staleness parking, #840 terminal handling) never fired at all (or#877 B5).';
+COMMENT ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer, p_include_engine boolean) IS 'Merchants with a due past_due subscription on the named rails — the fan-out list for DunningWorker. Ids only; the due rows, the charges and every lifecycle transition run per-merchant under RunInMerchantScope. Replaces a bare-context scan that returned an empty slice on every run, so scheduled dunning (retries, #839 staleness parking, #840 terminal handling) never fired at all (or#877 B5).';
 
-REVOKE ALL ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer, p_include_engine boolean) FROM PUBLIC;
 
 CREATE FUNCTION openrails.due_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -2001,6 +2005,12 @@ CREATE INDEX idx_rail_intents_psp ON openrails.rail_intents USING btree (psp_id)
 
 CREATE INDEX idx_rail_intents_subscription ON openrails.rail_intents USING btree (subscription_id) WHERE (subscription_id IS NOT NULL);
 
+-- Initial membership identity is frozen in terms, including failed attempts
+-- with no subscription row. Paid agreement lookup must not scan the whole book.
+CREATE INDEX idx_rail_intents_initial_membership_history ON openrails.rail_intents
+    (merchant_id, ((payload->'terms')->>'subscription_id'))
+    WHERE intent_type='initial_membership' AND status='succeeded';
+
 CREATE UNIQUE INDEX uq_rail_intents_merchant_idempotency_key ON openrails.rail_intents USING btree (merchant_id, idempotency_key);
 
 ALTER TABLE ONLY openrails.rail_intents
@@ -2780,6 +2790,7 @@ CREATE INDEX idx_subscriptions_customer_active_created ON openrails.subscription
 CREATE INDEX idx_subscriptions_destructive_run ON openrails.subscriptions USING btree (destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
 
 CREATE INDEX idx_subscriptions_engine_due ON openrails.subscriptions (merchant_id, current_period_ends_at, next_retry_at) WHERE collection_policy = 'engine' AND status IN ('active', 'past_due') AND deleted_at IS NULL;
+CREATE INDEX idx_subscriptions_engine_due_global ON openrails.subscriptions (current_period_ends_at, merchant_id) WHERE collection_policy = 'engine' AND status IN ('active', 'past_due') AND deleted_at IS NULL;
 
 CREATE INDEX idx_subscriptions_due_dunning ON openrails.subscriptions USING btree (next_retry_at, rail) WHERE ((status = 'past_due'::openrails.subscription_status) AND (next_retry_at IS NOT NULL));
 

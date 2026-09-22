@@ -46,6 +46,7 @@ const DefaultDunningWindow = 14 * 24 * time.Hour
 
 // SubscriptionState is the decider's view of the local row.
 type SubscriptionState struct {
+	CollectionPolicy   models.CollectionPolicy
 	Status             string // openrails.subscription_status
 	Rail               string
 	HasPaymentMethod   bool // payment_method_id IS NOT NULL
@@ -529,6 +530,12 @@ func decideFromSnapshot(railSubID string, periodEnd time.Time, snap *RemoteSnaps
 
 // decideFromFirstParty is the #664 LIFE law over charge + watermark evidence.
 func decideFromFirstParty(sub SubscriptionState, ev EvidenceBundle, now time.Time) Decision {
+	// Engine cadence and uncertain recovery belong to the accepted operation.
+	// Native roster freshness and a saved card cannot supply that ownership.
+	// Explicit terminal charge evidence still passes the shared certainty gates.
+	if sub.CollectionPolicy == models.CollectionPolicyEngine && (sub.Status != string(models.StatusPastDue) || ev.Charge.certaintyLeg() == "") {
+		return Decision{Kind: TransitionNone, Reason: "engine_collection_owned"}
+	}
 	switch sub.Status {
 	case string(models.StatusActive):
 		if sub.PeriodEnd == nil || !sub.PeriodEnd.Before(now) {
