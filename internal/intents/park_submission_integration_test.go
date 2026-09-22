@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
@@ -34,6 +36,11 @@ func TestParkRetainsSubmittedPaymentsAndSealedCompletion(t *testing.T) {
 			id := uuid.New()
 			_, err := d.Pool().Exec(ctx, `INSERT INTO billing.rail_intents(id,merchant_id,psp_id,rail,intent_type,idempotency_key,status,origin,payload,result_evidence) VALUES($1,$2,$3,'nmi',$4,$1::uuid::text,'in_flight','system','{}',$5)`, id, mid, psp, tc.kind, tc.evidence)
 			require.NoError(t, err)
+			wakeups := func() int {
+				var count int
+				require.NoError(t, d.Pool().QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{config.RiverSchema, "river_job"}.Sanitize()+" WHERE args->>'intent_id'=$1", id.String()).Scan(&count))
+				return count
+			}
 			before, err := store.Get(ctx, id)
 			require.NoError(t, err)
 			other := merchant.WithID(t.Context(), merchant.ID(uuid.New()))
@@ -48,6 +55,7 @@ func TestParkRetainsSubmittedPaymentsAndSealedCompletion(t *testing.T) {
 			require.Equal(t, StatusUnknownNeedsVerify, owned.Status)
 			require.Equal(t, before.ResultEvidence, owned.ResultEvidence)
 			require.Equal(t, before.Payload, owned.Payload)
+			require.Equal(t, 1, wakeups(), "submitted Park fallback creates one wake")
 			require.Error(t, store.MarkFailedRetryable(ctx, id, time.Now(), "not a Stripe cancellation"))
 			native, err := store.Get(ctx, id)
 			require.NoError(t, err)
@@ -77,6 +85,7 @@ func TestParkRetainsSubmittedPaymentsAndSealedCompletion(t *testing.T) {
 			require.Equal(t, StatusFailedTerminal, sealed.Status)
 			require.Contains(t, string(sealed.ResultEvidence), `"sealed": true`)
 			require.Equal(t, before.Payload, sealed.Payload)
+			require.Equal(t, 1, wakeups(), "stale Park cannot wake a concurrently sealed operation")
 		})
 	}
 }
