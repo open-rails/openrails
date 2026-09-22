@@ -70,9 +70,6 @@ psql_command "$ADMIN_URL" -v ON_ERROR_STOP=1 -q \
 # Swap the database name in the admin URL.
 VET_URL="$(printf '%s' "$ADMIN_URL" | sed -E "s|(postgres(ql)?://[^/]+/)[^?]+|\1${VET_DB}|")"
 
-for f in migrations/bootstrap/*.sql; do
-    psql_file "$VET_URL" "$f" 1>&2
-done
 # SQLC prepares authored SQL before runtime schema rewriting. Explicitly use
 # canonical openrails here, independently of the runtime default billing schema.
 # migratekit owns its tracker DDL.

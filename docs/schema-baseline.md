@@ -24,12 +24,13 @@ history does not cascade when operational rows are removed.
 
 The baseline includes the previously qualified Solana cancel/tier-change modes
 and successful-insert-only ledger counters. Duplicate operation attempts do not
-change counters or recheck an already consumed balance. The obsolete0002–0004
-files are folded into this fresh installation target.
+change counters or recheck an already consumed balance. Creator catalogs, immutable catalog ownership, default-catalog assignment and
+product/catalog constraints are included directly in this fresh installation
+target. No catalog backfill or historical upgrade fixture remains.
 
 Apply the baseline to a new database or explicitly disposable task-owned schema.
 Do not relabel an old migration ledger as current. Normal startup migration
 verification remains in place to reject mismatched artifacts. Tests use the
-actual migrator, PostgreSQL18 and the enforcing application role; schema checks
+actual migrator, PostgreSQL 18 and the enforcing application role; schema checks
 cover customer keys, operational relationships and deliberate immutable-history
 exceptions, alongside shared-subject HTTP and embedded workflows.
