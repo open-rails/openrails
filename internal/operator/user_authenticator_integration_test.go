@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/authkit"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -67,20 +68,47 @@ func TestUserAuthenticator_InProcess(t *testing.T) {
 	require.Equal(t, user.ID, uc.UserID)
 	require.NoError(t, uc.ValidateSubject())
 
-	// The hosted adapter observes both ban and deletion on an unexpired token.
-	reason := "hosted liveness test"
+	subject := authkit.UserSubject(user.ID)
+	role := authkit.Role("merchant-directory-viewer")
+	const permission = "root:merchants:read"
+	permissionAllowed := func(want bool) {
+		t.Helper()
+		allowed, err := cp.HasRootPermission(ctx, user.ID, permission)
+		require.NoError(t, err)
+		require.Equal(t, want, allowed)
+	}
+	require.NoError(t, cp.Core().OperatorAssignGroupRole(ctx, authkit.RootGroup(), subject, role))
+	permissionAllowed(true)
+
+	// Native identity remains valid for its issued lifetime; permission gates
+	// independently consult live authority, and login/refresh enforce bans.
+	reason := "hosted token lifetime test"
 	require.NoError(t, cp.Core().BanUser(ctx, user.ID, &reason, nil, user.ID))
 	_, err = authn.Authenticate(ctx, req)
-	require.Error(t, err)
+	require.NoError(t, err)
+	permissionAllowed(true)
 	require.NoError(t, cp.Core().UnbanUser(ctx, user.ID))
 	_, err = authn.Authenticate(ctx, req)
 	require.NoError(t, err)
-	deleted, err := cp.Core().HardDeleteUsers(ctx, []string{user.ID})
+	require.NoError(t, cp.Core().OperatorUnassignGroupRole(ctx, authkit.RootGroup(), subject, role))
+	permissionAllowed(false)
+	require.NoError(t, cp.Core().OperatorAssignGroupRole(ctx, authkit.RootGroup(), subject, role))
+	_, err = cp.Core().UpdateImportedUser(ctx, user.ID, authkit.ImportUserInput{Email: email, Username: "authee" + sfx, EmailVerified: true, Metadata: map[string]any{"reserved": true}})
+	require.NoError(t, err)
+	permissionAllowed(false)
+	latent, err := cp.Core().ListEffectivePermissions(ctx, subject, authkit.RootGroup())
+	require.NoError(t, err)
+	require.Contains(t, latent, permission, "raw grant enumeration must not substitute for authorization")
+	_, err = cp.Core().UpdateImportedUser(ctx, user.ID, authkit.ImportUserInput{Email: email, Username: "authee" + sfx, EmailVerified: true, Metadata: map[string]any{"reserved": false}})
+	require.NoError(t, err)
+	permissionAllowed(true)
+	deleted, err := cp.Core().SoftDeleteUsers(ctx, []string{user.ID})
 	require.NoError(t, err)
 	require.Len(t, deleted, 1)
 	require.NoError(t, deleted[0].Err)
 	_, err = authn.Authenticate(ctx, req)
-	require.Error(t, err)
+	require.NoError(t, err)
+	permissionAllowed(false)
 
 	// Garbage credentials are rejected.
 	bad, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://saas.internal/api/v1/me", nil)

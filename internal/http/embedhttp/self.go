@@ -122,6 +122,7 @@ func ProviderRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRo
 		}
 		if caps := rt.RouteCapabilities; caps != nil {
 			r.SecretWrite = r.SecretWrite && caps.SecretWrite
+			r.SolanaSigning = r.SolanaSigning && caps.SolanaCanSign
 		}
 	}
 	return r

@@ -26,7 +26,7 @@ require (
 	github.com/knadh/koanf/v2 v2.2.2
 	github.com/moby/moby/api v1.54.2
 	github.com/moby/moby/client v0.4.1
-	github.com/open-rails/authkit v0.121.0
+	github.com/open-rails/authkit v0.122.0
 	github.com/open-rails/migratekit v1.0.4
 	github.com/pganalyze/pg_query_go/v6 v6.2.2
 	github.com/redis/go-redis/v9 v9.22.0

@@ -25,7 +25,7 @@ func TestProviderRoutesCredentialAuthority(t *testing.T) {
 				routes := ProviderRoutesForRuntime(rt, override)
 				wantWrite := source == config.MerchantConfigSourceAPI && backendWritable
 				require.Equal(t, wantWrite, routes.SecretWrite, "source=%s backend=%v explicit=%v", source, backendWritable, explicit)
-				require.Equal(t, wantWrite, routes.SecretWrite)
+				require.False(t, routes.SolanaSigning, "an explicit route override cannot manufacture a runtime signer")
 				require.True(t, routes.Webhooks)
 				require.Equal(t, backendWritable, rt.RouteCapabilities.SecretWrite, "provider visibility must not disable managed alert URL storage")
 			}

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -237,11 +239,6 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
 		return
 	}
-	if err == nil && found {
-		if pid, ok, rerr := r.State.Merchants.ResolvePSPID(r.Request.Context(), merchantID, provider, accountID); rerr == nil && ok {
-			r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), pid))
-		}
-	}
 	if err != nil {
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "Secret backend temporarily unavailable, retry")
@@ -249,6 +246,10 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		}
 		log.WithError(err).Error("merchant webhook: load merchant credentials failed")
 		r.ErrorJSON(http.StatusInternalServerError, "Credential load failed")
+		return
+	}
+	pspID, found, resolveErr := r.State.Merchants.ResolvePSPID(r.Request.Context(), merchantID, provider, accountID)
+	if !bindResolvedWebhookPSP(r, pspID, found, resolveErr) {
 		return
 	}
 	var secrets []string
@@ -527,11 +528,6 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
 		return false
 	}
-	if err == nil && found {
-		if pid, ok, rerr := r.State.Merchants.ResolvePSPID(r.Request.Context(), merchantID, provider, accountID); rerr == nil && ok {
-			r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), pid))
-		}
-	}
 	if err != nil {
 		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
 			r.ErrorJSON(http.StatusServiceUnavailable, "Secret backend temporarily unavailable, retry")
@@ -539,6 +535,10 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		}
 		log.WithError(err).Error("merchant webhook: load nmi signing secret failed")
 		r.ErrorJSON(http.StatusInternalServerError, "Credential load failed")
+		return false
+	}
+	pspID, found, resolveErr := r.State.Merchants.ResolvePSPID(r.Request.Context(), merchantID, provider, accountID)
+	if !bindResolvedWebhookPSP(r, pspID, found, resolveErr) {
 		return false
 	}
 	// or#893: ONE signature header. NMI sends `Webhook-Signature: t=<ts>,s=<hex>`
@@ -596,6 +596,21 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing failed")
 		return false
 	}
+	return true
+}
+
+// Credentials alone do not identify the account that will own the receipt.
+// Every merchant-specific dispatcher must retain a concrete persisted PSP.
+func bindResolvedWebhookPSP(r *httprequest.Request, id uuid.UUID, found bool, err error) bool {
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "Webhook account resolution failed")
+		return false
+	}
+	if !found || id == uuid.Nil {
+		r.ErrorJSON(http.StatusNotFound, "Unknown PSP")
+		return false
+	}
+	r.Request = r.Request.WithContext(db.WithPSPID(r.Request.Context(), id))
 	return true
 }
 
