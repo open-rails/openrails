@@ -62,7 +62,7 @@ func (s *Store) PrepareDispatch(ctx context.Context, id uuid.UUID, now time.Time
 // earlier verification time; authorization, financial status, and live leases
 // remain unchanged. Do not deduplicate against a running/scheduled job: it may
 // be completing an earlier terminal state or sleeping until an obsolete time.
-func (s *Store) WakeOperation(ctx context.Context, id uuid.UUID) error {
+func (s *Store) WakeOperation(ctx context.Context, id uuid.UUID, now time.Time) error {
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		row, err := s.withTxDB(s.db.NewWithPgxTx(tx)).Get(ctx, id)
 		if err != nil {
@@ -71,7 +71,6 @@ func (s *Store) WakeOperation(ctx context.Context, id uuid.UUID) error {
 		if row.Status != StatusUnknownNeedsVerify && row.Status != StatusInFlight {
 			return nil
 		}
-		now := time.Now()
 		if _, err := s.db.NewWithPgxTx(tx).Gen(ctx).AdvanceRailIntentVerification(ctx, gen.AdvanceRailIntentVerificationParams{MerchantID: row.MerchantID, ID: row.ID, Now: now}); err != nil {
 			return err
 		}
