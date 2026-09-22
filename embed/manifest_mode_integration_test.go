@@ -646,7 +646,7 @@ func TestManifestMode_ProviderRoutesDeriveWebhooksFromDBArmedAccounts(t *testing
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/merchants/"+slug+"/webhooks/ccbill", strings.NewReader("{}"))
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/merchants/"+slug+"/webhooks/ccbill/"+ccbillAccount, strings.NewReader("{}"))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)

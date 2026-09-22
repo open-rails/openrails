@@ -36,5 +36,4 @@ curl -fsS "$PUBLIC_BASE/health/ready" >/dev/null
 echo "  OK"
 
 echo "Webhook base URL:"
-echo "  $PUBLIC_BASE/v1/webhooks/nmi"
-
+echo "  $PUBLIC_BASE/v1/webhooks/nmi/{account_id} (replace with the configured NMI account ID)"

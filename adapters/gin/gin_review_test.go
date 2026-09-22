@@ -64,7 +64,7 @@ func TestGinReviewRequestBodyAndHostFallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	const body = "{ \"whitespace\": true, \"unicode\": \"é\" }\n"
-	const target = "/api/pay/v1/webhooks/stripe?signature=original"
+	const target = "/api/pay/v1/webhooks/stripe/acct_test?signature=original"
 	calls := 0
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -72,11 +72,11 @@ func TestGinReviewRequestBodyAndHostFallback(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, body, string(raw))
 		require.Equal(t, target, r.RequestURI)
-		require.Equal(t, "/api/pay/v1/webhooks/stripe", r.URL.Path)
+		require.Equal(t, "/api/pay/v1/webhooks/stripe/acct_test", r.URL.Path)
 		require.Equal(t, "exact-signature", r.Header.Get("Stripe-Signature"))
 		w.WriteHeader(http.StatusNoContent)
 	})
-	b := &Bundle{routes: []embed.HTTPRoute{{Method: http.MethodPost, Path: "/v1/webhooks/{provider}", Handler: h}}}
+	b := &Bundle{routes: []embed.HTTPRoute{{Method: http.MethodPost, Path: "/v1/webhooks/{provider}/{account_id}", Handler: h}}}
 	require.NoError(t, b.Mount(engine.Group("/api/pay")))
 	engine.NoRoute(func(c *gin.Context) { c.String(418, "host fallback") })
 	w := httptest.NewRecorder()
@@ -85,7 +85,7 @@ func TestGinReviewRequestBodyAndHostFallback(t *testing.T) {
 	engine.ServeHTTP(w, req)
 	require.Equal(t, http.StatusNoContent, w.Code)
 	require.Equal(t, 1, calls)
-	for _, path := range []string{"/other", "/api/pay/v1/unrelated", "/api/payment/v1/webhooks/stripe"} {
+	for _, path := range []string{"/other", "/api/pay/v1/unrelated", "/api/payment/v1/webhooks/stripe/acct_test"} {
 		w = httptest.NewRecorder()
 		engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, nil))
 		require.Equal(t, 418, w.Code)

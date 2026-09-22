@@ -26,7 +26,7 @@ if [ -n "${CLOUDFLARED_TUNNEL_NAME:-}" ]; then
 fi
 if [ -n "${CLOUDFLARED_PUBLIC_HOSTNAME:-}" ]; then
   echo "  public hostname: https://${CLOUDFLARED_PUBLIC_HOSTNAME}"
-  echo "  webhook URL: https://${CLOUDFLARED_PUBLIC_HOSTNAME}/v1/webhooks/nmi"
+  echo "  webhook URL: https://${CLOUDFLARED_PUBLIC_HOSTNAME}/v1/webhooks/nmi/{account_id} (use the configured NMI account ID)"
 fi
 
 exec cloudflared tunnel run --token "$CLOUDFLARED_TUNNEL_TOKEN"

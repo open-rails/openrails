@@ -63,15 +63,17 @@ func TestHostRoutedWebhookMountHTTP(t *testing.T) {
 
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
+	accountless, raw := postHostWebhook(t, srv.URL+"/v1/webhooks/bogus", hostA)
+	require.Equal(t, http.StatusNotFound, accountless, string(raw))
 
 	// Unknown Host: no merchant resolves. Hard 404, never a fall-through.
-	status, body := postHostWebhook(t, srv.URL+"/v1/webhooks/bogus", "api.unknown-webhook-host.test")
+	status, body := postHostWebhook(t, srv.URL+"/v1/webhooks/bogus/account", "api.unknown-webhook-host.test")
 	require.Equal(t, http.StatusNotFound, status, string(body))
 
 	// Known Host, unsupported provider: proves resolution DID succeed (a 400
 	// from inside processResolvedMerchantWebhook, reachable only once the
 	// merchant is pinned) rather than a 404 from unresolved Host.
-	status, body = postHostWebhook(t, srv.URL+"/v1/webhooks/bogus", hostA)
+	status, body = postHostWebhook(t, srv.URL+"/v1/webhooks/bogus/account", hostA)
 	require.Equal(t, http.StatusBadRequest, status, string(body))
 }
 

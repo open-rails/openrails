@@ -73,7 +73,7 @@ func TestHTTPReviewRawWebhookRequestAcrossMounts(t *testing.T) {
 	const body = "{ \"signed\" : \"bytes\" }\n"
 	for _, kind := range []string{"servemux", "chi"} {
 		t.Run(kind, func(t *testing.T) {
-			const target = "/api/pay/v1/webhooks/stripe?signature=unchanged"
+			const target = "/api/pay/v1/webhooks/stripe/acct_test?signature=unchanged"
 			calls := 0
 			h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
@@ -81,11 +81,11 @@ func TestHTTPReviewRawWebhookRequestAcrossMounts(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, body, string(raw))
 				require.Equal(t, target, r.RequestURI)
-				require.Equal(t, "/api/pay/v1/webhooks/stripe", r.URL.Path)
+				require.Equal(t, "/api/pay/v1/webhooks/stripe/acct_test", r.URL.Path)
 				require.Equal(t, "signed-header", r.Header.Get("Stripe-Signature"))
 				w.WriteHeader(http.StatusNoContent)
 			})
-			b := &Bundle{routes: []embed.HTTPRoute{{Method: http.MethodPost, Path: "/v1/webhooks/{provider}", Handler: h}}}
+			b := &Bundle{routes: []embed.HTTPRoute{{Method: http.MethodPost, Path: "/v1/webhooks/{provider}/{account_id}", Handler: h}}}
 			var engine http.Handler
 			if kind == "servemux" {
 				mux := http.NewServeMux()

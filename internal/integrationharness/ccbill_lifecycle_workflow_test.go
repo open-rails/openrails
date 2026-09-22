@@ -64,7 +64,7 @@ func TestCCBillCallbacksUseRuntimeClock(t *testing.T) {
 		t.Helper()
 		raw, err := json.Marshal(body)
 		require.NoError(t, err)
-		response, err := http.Post(surface.BaseURL+"/v1/webhooks/ccbill?eventType="+event, "application/json", bytes.NewReader(raw))
+		response, err := http.Post(surface.BaseURL+"/v1/webhooks/ccbill/"+account+"-"+subaccount+"?eventType="+event, "application/json", bytes.NewReader(raw))
 		require.NoError(t, err)
 		data, err := io.ReadAll(response.Body)
 		require.NoError(t, err)

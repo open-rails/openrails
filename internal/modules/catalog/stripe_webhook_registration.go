@@ -59,18 +59,13 @@ type ManagedStripeWebhookResult struct {
 }
 
 // PublicStripeWebhookURL builds the inbound Stripe webhook URL for a merchant.
-// When accountID is set it returns the per-account endpoint
-// (…/merchants/{slug}/webhooks/stripe/{account_id}, #641) so a merchant with
-// multiple Stripe accounts gets one managed endpoint each; empty accountID
-// returns the shared …/webhooks/stripe path.
+// Every endpoint includes accountID. An empty account is an error; there is no
+// default-account webhook URL. Embedded hosts include their merchant slug,
+// while standalone hosts pass an empty slug for /v1/webhooks/stripe/{account_id}.
 //
 // or#893: the slug form is the EMBEDDED surface. Standalone stopped mounting
 // the merchant-slug alias — its one surface is …/webhooks/stripe/{account_id},
-// with the merchant derived from that globally unique account. Every managed-
-// endpoint caller today passes a slug, and every Stripe consumer is embedded,
-// so this is correct as written; a standalone deployment that adopts managed
-// Stripe registration must pass an empty slug and get the account-derived path
-// (the else-branch below then needs the account segment too).
+// with the merchant derived from that globally unique configured account.
 func PublicStripeWebhookURL(cfg *config.Config, merchantSlug, accountID string) (string, bool, error) {
 	base := ""
 	if cfg != nil {
@@ -78,6 +73,10 @@ func PublicStripeWebhookURL(cfg *config.Config, merchantSlug, accountID string) 
 	}
 	if base == "" {
 		return "", false, nil
+	}
+	accountID = strings.TrimSpace(accountID)
+	if accountID == "" {
+		return "", false, fmt.Errorf("Stripe webhook account_id is required")
 	}
 	u, err := url.Parse(base)
 	if err != nil || u.Scheme == "" || u.Host == "" {
@@ -95,12 +94,10 @@ func PublicStripeWebhookURL(cfg *config.Config, merchantSlug, accountID string) 
 	parts := []string{"v1"}
 	if strings.TrimSpace(merchantSlug) != "" {
 		parts = append(parts, "merchants", merchantSlug, "webhooks", "stripe")
-		if id := strings.TrimSpace(accountID); id != "" {
-			parts = append(parts, id) // #641 per-account endpoint
-		}
 	} else {
 		parts = append(parts, "webhooks", "stripe")
 	}
+	parts = append(parts, accountID)
 	out, err := url.JoinPath(strings.TrimRight(base, "/"), parts...)
 	if err != nil {
 		return "", false, err
