@@ -73,6 +73,10 @@ Preserve the host's optional explicit admission/liveness hook. The default nativ
 
 The standard customer adapter accepts native user credentials only. Machine/API-key/delegated credentials use the existing explicit credential path, with the issuer/audience/proof/revocation rules, controlling merchant/group/resource binding, permission ceilings and any invoker restrictions intact. Live authorization never widens a credential ceiling. A downscoped credential does not become unrestricted `/me` authority because it carries a user field.
 
+## Reusable Client credential selection
+
+The adjacent1048 design passes the immutable requested merchant slug/ID explicitly to a per-request credential provider. This matches the authorization boundary: it is requested target data, not proof of merchant existence or authority. The server resolves and authorizes independently; no anonymous preflight or broader-credential fallback is needed. Keep that callback within the existing Bearer/API-key mint path unless a typed credential contract explicitly preserves other schemes. A sender-constrained/DPoP credential must not lose its scheme, proof or ceiling through a string-token convenience. Requests on one shared Client must never mutate the Client's merchant, headers or credential source.
+
 ## Customer routes and ownership
 
 One `CustomerRoutes` model replaces `Customer bool` and `CustomerExposures`. The ordinary entry uses the fixed `/v1/me` route group. The app's outer mount remains `/billing` (or another app-chosen prefix). Route sets are generated once and consumed identically by HTTP/Chi, Gin and Fiber.
