@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -109,6 +111,67 @@ func TestClientCredentialFailureNeverFallsBack(t *testing.T) {
 	}
 }
 
+func TestClientRequestSelectionReachesResourceAndScopedOperations(t *testing.T) {
+	var calls atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Header.Get(merchant.SlugHeader) != "selected" || r.Header.Get(merchant.BindingHeader) != "" {
+			t.Errorf("request options not forwarded by %s %s: %v", r.Method, r.URL.Path, r.Header)
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(server.Close)
+	client, err := NewRemote(server.URL, WithAPIKey("test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := client.ForCatalogOwner("channel-owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	product, price, customer := ProductID(uuid.New()).String(), PriceID(uuid.New()).String(), CustomerID(uuid.New()).String()
+	selected := WithMerchant("selected")
+	for name, call := range map[string]func() error{
+		"product read": func() error { _, err := client.Products.Retrieve(t.Context(), product, selected); return err },
+		"price read":   func() error { _, err := client.Prices.Retrieve(t.Context(), price, selected); return err },
+		"price update": func() error {
+			_, err := client.Prices.Update(t.Context(), price, &PriceUpdateParams{}, selected)
+			return err
+		},
+		"catalog owner create": func() error {
+			_, err := owner.Products.Create(t.Context(), &ProductCreateParams{Key: "post", DisplayName: "Post"}, selected)
+			return err
+		},
+		"bounded access check": func() error {
+			_, err := client.ProductAccess.CheckMany(t.Context(), &ProductAccessCheckManyParams{CustomerID: customer, ProductIDs: []string{product}}, selected)
+			return err
+		},
+		"subscription cancellation": func() error {
+			return client.CancelSubscription(t.Context(), SubscriptionID(uuid.New()), CancelSubscriptionRequest{}, selected)
+		},
+		"payment read":          func() error { _, err := client.GetPayment(t.Context(), PaymentID(uuid.New()), selected); return err },
+		"settings verification": func() error { return client.Verify(t.Context(), selected) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			before := calls.Load()
+			if err := call(); err != nil {
+				t.Fatal(err)
+			}
+			if calls.Load() != before+1 {
+				t.Fatal("operation did not reach the HTTP boundary exactly once")
+			}
+		})
+	}
+	before := calls.Load()
+	var refusal *StatusError
+	if err := owner.Verify(t.Context(), selected); !errors.As(err, &refusal) || refusal.Status != http.StatusForbidden {
+		t.Fatalf("merchant option escaped catalog-only client: %v", err)
+	}
+	if calls.Load() != before {
+		t.Fatal("catalog-only client issued a merchant-admin request")
+	}
+}
+
 func TestClientMerchantIDAndStreamingSelection(t *testing.T) {
 	id := MerchantID(uuid.New())
 	archive := archiveTransportFixture(t, id, 1)
@@ -154,5 +217,47 @@ func TestClientMerchantIDAndStreamingSelection(t *testing.T) {
 	}
 	if err := client.Verify(ctx, WithMerchant("alpha")); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("ambiguous slug/ambient ID allowed: %v", err)
+	}
+}
+
+func TestClientExtraHeadersCannotDuplicateMerchantSelection(t *testing.T) {
+	id := MerchantID(uuid.New())
+	for _, byID := range []bool{false, true} {
+		t.Run(fmt.Sprint(byID), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				slugs, ids := r.Header.Values(merchant.SlugHeader), r.Header.Values(merchant.BindingHeader)
+				if byID {
+					if len(slugs) != 0 || !reflect.DeepEqual(ids, []string{id.String()}) {
+						t.Errorf("duplicate/wrong targets: slugs=%v ids=%v", slugs, ids)
+					}
+				} else if len(ids) != 0 || !reflect.DeepEqual(slugs, []string{"alpha"}) {
+					t.Errorf("duplicate/wrong targets: slugs=%v ids=%v", slugs, ids)
+				}
+				if !reflect.DeepEqual(r.Header.Values("Authorization"), []string{"Bearer selected-key"}) {
+					t.Errorf("extra headers supplied alternate authority: %v", r.Header.Values("Authorization"))
+				}
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			t.Cleanup(server.Close)
+			client, err := NewRemote(server.URL, WithAPIKey("selected-key"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			extra := http.Header{
+				merchant.BindingHeader: {"wrong", "another"}, strings.ToLower(merchant.BindingHeader): {"lowercase"},
+				merchant.SlugHeader: {"wrong"}, strings.ToLower(merchant.SlugHeader): {"lowercase"},
+				"authorization": {"Bearer broader-key"},
+			}
+			option := WithMerchant("alpha")
+			if byID {
+				option = ForMerchantID(id)
+			}
+			if err := client.doWithHeaders(t.Context(), http.MethodGet, "/v1/merchant/settings", nil, nil, extra, option); err != nil {
+				t.Fatal(err)
+			}
+			if extra["authorization"][0] != "Bearer broader-key" {
+				t.Fatal("request mutated the caller's header map")
+			}
+		})
 	}
 }
