@@ -357,7 +357,8 @@ func TestNMIFetcher_ErrorResponse(t *testing.T) {
 
 	_, err = NewNMIFetcher(client).Fetch(context.Background(), FetchParams{})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "Invalid Security Key")
+	require.Contains(t, err.Error(), "status 401")
+	require.NotContains(t, err.Error(), "Invalid Security Key")
 }
 
 func TestParseAmountCents(t *testing.T) {
