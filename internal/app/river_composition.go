@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/jackc/pgx/v5"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/riverkit"
 	"github.com/riverqueue/river"
@@ -88,7 +87,11 @@ func (r *Runtime) riverJobs(host bool) riverkit.Contribution {
 		}
 		cfg.PeriodicJobs = append(cfg.PeriodicJobs, periodic...)
 		return nil
-	}, func(ctx context.Context, client *river.Client[pgx.Tx]) error {
+	}, func(ctx context.Context, binding riverkit.Binding) error {
+		client := binding.Client
+		if err := r.DB.ValidateRiverJobBinding(ctx, binding.Pool, client.Schema()); err != nil {
+			return err
+		}
 		r.riverCompositionMu.Lock()
 		if r.riverClosed.Load() || r.riverCompositionFailed {
 			r.riverCompositionMu.Unlock()

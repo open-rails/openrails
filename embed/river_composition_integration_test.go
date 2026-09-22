@@ -95,7 +95,7 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 	t.Run("late binding failure invalidates partial producer", func(t *testing.T) {
 		rt, pool := newRuntime(t)
 		cause := errors.New("bind failure")
-		bad := riverkit.NewContribution("bad", func(context.Context, *river.Config) error { return nil }, func(context.Context, *river.Client[pgx.Tx]) error { return cause }, func() error { return nil })
+		bad := riverkit.NewContribution("bad", func(context.Context, *river.Config) error { return nil }, func(context.Context, riverkit.Binding) error { return cause }, func() error { return nil })
 		client, err := riverkit.New(t.Context(), pool, nil, rt.RiverJobs(), bad)
 		require.ErrorIs(t, err, cause)
 		require.Nil(t, client)
