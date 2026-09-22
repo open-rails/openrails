@@ -10,6 +10,9 @@ import (
 	"strings"
 )
 
+// RouteNamePrefix identifies native OpenRails registrations in Fiber inspection.
+const RouteNamePrefix = "openrails."
+
 type Bundle struct{ routes []embed.HTTPRoute }
 
 func Routes(runtime *embed.Runtime) (*Bundle, error) {
@@ -44,7 +47,7 @@ func (b *Bundle) Mount(target fiber.Router) error {
 		if route.Method == http.MethodGet && !heads[route.Path] {
 			methods = append(methods, http.MethodHead)
 		}
-		target.Add(methods, nativePath(route.Path), h)
+		target.Add(methods, nativePath(route.Path), h).Name(RouteNamePrefix + route.Method + " " + route.Path)
 	}
 	return nil
 }

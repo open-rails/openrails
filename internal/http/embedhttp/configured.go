@@ -3,6 +3,7 @@ package embedhttp
 import (
 	"context"
 	"fmt"
+
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/pkg/billingauth"

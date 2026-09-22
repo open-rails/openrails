@@ -208,14 +208,15 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	// browser tier. Empty (matches nothing) when RouteSetCheckout isn't
 	// selected, so PermissiveCORSHTTP is a pure no-op for a merchant-admin/
 	// catalog/payment-providers/merchant-API/webhooks-only mount.
-	browserTier := middleware.NewBrowserTierRoutes()
+	browserRoutes := make(map[string]bool)
+	recordBrowser := func(pattern string) { browserRoutes[pattern] = true }
 	if routeSets[RouteSetCheckout] {
 		// Captcha discovery routes (net/http), mirroring registerUserRoutesAt.
 		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/status", s.captchaStatusHandler)
-		browserTier.Add(http.MethodGet + " " + EmbeddedV1Prefix + "/captcha/status")
+		recordBrowser(http.MethodGet + " " + EmbeddedV1Prefix + "/captcha/status")
 		mux.HandleFunc(http.MethodGet+" "+EmbeddedV1Prefix+"/captcha/client.js", s.captchaClientScriptHandler)
-		browserTier.Add(http.MethodGet + " " + EmbeddedV1Prefix + "/captcha/client.js")
-		httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, EmbeddedV1Prefix, s.Runtime, browserTier.Add), s.Runtime, httproutes.Options{
+		recordBrowser(http.MethodGet + " " + EmbeddedV1Prefix + "/captcha/client.js")
+		httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, EmbeddedV1Prefix, s.Runtime, recordBrowser), s.Runtime, httproutes.Options{
 			Authenticator:  s.Authenticator,
 			ProviderRoutes: &providerRoutes,
 		})
@@ -283,8 +284,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	}
 	for i := range mux.Entries {
 		entry := &mux.Entries[i]
-		req, _ := http.NewRequest(entry.Method, entry.Path, nil)
-		entry.Browser = browserTier.Match(req)
+		entry.Browser = browserRoutes[entry.Method+" "+entry.Path]
 	}
 	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, s.RDB, s.CaptchaStore, resolver)
 	mux.Wrap(func(entry router.Entry) http.Handler {

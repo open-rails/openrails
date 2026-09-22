@@ -16,6 +16,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/httptesthost"
@@ -53,6 +54,8 @@ func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+
+	app.HostGraph(rt).Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
 	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantAPI: true, Customer: true, Gate: httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn})}, Prefix: "/api/openrails", DelegatedAuthenticator: authn})
 	require.NoError(t, err)

@@ -4,7 +4,6 @@ package openrailshttp
 import (
 	"fmt"
 	"net/http"
-
 	"strings"
 
 	"github.com/open-rails/openrails/embed"

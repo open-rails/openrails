@@ -14,9 +14,8 @@ import (
 type HTTPConfig = embedhttp.HTTPConfig
 
 // HTTPRoute is one native registration. Path uses net/http whole-segment
-// wildcards, relative to the host mount (for example /v1/me/{id}). Handler expects
-// the host router to set Request.PathValue for those wildcards. The original URL
-// and raw body must be retained for request-bound authorization and signatures.
+// wildcards, relative to the mount (for example /v1/me/{id}). Handler binds
+// Request.PathValue while retaining the original URL and body for authorization.
 type HTTPRoute struct {
 	Method  string
 	Path    string
@@ -53,7 +52,7 @@ func bindHTTPPathValues(pattern string, next http.Handler) http.Handler {
 	parts := strings.Split(strings.TrimPrefix(pattern, "/"), "/")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Mount groups add leading segments; route patterns describe the suffix.
-		path := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.EscapedPath(), "/"), "/"), "/")
+		path := strings.Split(strings.Trim(r.URL.EscapedPath(), "/"), "/")
 		if len(path) < len(parts) {
 			http.NotFound(w, r)
 			return
