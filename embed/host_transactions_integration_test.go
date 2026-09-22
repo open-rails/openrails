@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/pkg/merchant"
