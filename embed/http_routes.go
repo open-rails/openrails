@@ -78,11 +78,11 @@ func (r *Runtime) HTTPRoutes() ([]HTTPRoute, error) {
 		var err error
 		trimPrefix := "/billing"
 		if r.httpConfig.Standalone {
-			srv, buildErr := operator.StandaloneServer(r.app)
+			standalone, buildErr := operator.StandaloneRoutes(r.app)
 			if buildErr != nil {
 				return nil, buildErr
 			}
-			table = srv.HTTPRoutes()
+			table = standalone
 			trimPrefix = ""
 		} else {
 			table, err = embedhttp.ConfiguredRoutes(r.app, r.httpConfig, r.delegatedAuthenticator)
@@ -118,6 +118,8 @@ func publicHTTPRoutes(table *router.Table) []HTTPRoute {
 func bindHTTPPathValues(pattern string, next http.Handler) http.Handler {
 	parts := strings.Split(strings.TrimPrefix(pattern, "/"), "/")
 	if strings.HasSuffix(pattern, "...}") {
+		// Only root-anchored console assets use subtree routes. Their handler
+		// reads the original URL; customer exposure prefixes forbid subtrees.
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -140,4 +142,15 @@ func bindHTTPPathValues(pattern string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// HTTPRequiresRoot reports whether configured routes include issuer-anchored
+// control-plane and console URLs. Such bundles mount at the host root.
+func (r *Runtime) HTTPRequiresRoot() bool {
+	if r == nil {
+		return false
+	}
+	r.httpMu.Lock()
+	defer r.httpMu.Unlock()
+	return r.httpConfig != nil && r.httpConfig.Standalone
 }

@@ -9,14 +9,17 @@ import (
 	"strings"
 )
 
-type Bundle struct{ routes []embed.HTTPRoute }
+type Bundle struct {
+	routes   []embed.HTTPRoute
+	rootOnly bool
+}
 
 func Routes(runtime *embed.Runtime) (*Bundle, error) {
 	routes, err := runtime.HTTPRoutes()
 	if err != nil {
 		return nil, err
 	}
-	return &Bundle{routes: routes}, nil
+	return &Bundle{routes: routes, rootOnly: runtime.HTTPRequiresRoot()}, nil
 }
 
 // Mount registers one route per method/path under the host's router group.
@@ -24,6 +27,11 @@ func Routes(runtime *embed.Runtime) (*Bundle, error) {
 func (b *Bundle) Mount(target gin.IRoutes) error {
 	if b == nil || target == nil {
 		return fmt.Errorf("openrails Gin: bundle and router are required")
+	}
+	if b.rootOnly {
+		if _, ok := target.(*gin.Engine); !ok {
+			return fmt.Errorf("openrails Gin: standalone routes must mount on the root Engine")
+		}
 	}
 	heads := map[string]bool{}
 	for _, route := range b.routes {

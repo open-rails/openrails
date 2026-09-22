@@ -149,7 +149,19 @@ func (s *Server) handleBrowser(mux router.Registrar, pattern string, h http.Hand
 	s.browserTierRoutes.Add(pattern)
 }
 
-func New(deps Dependencies) (*Server, error) {
+func New(deps Dependencies) (*Server, error) { return newServer(deps, false) }
+
+// ConfiguredRoutes reuses the already initialized runtime and control plane.
+// Materializing HTTP must never open another secret backend or rearm services.
+func ConfiguredRoutes(deps Dependencies) (*router.Table, error) {
+	srv, err := newServer(deps, true)
+	if err != nil {
+		return nil, err
+	}
+	return srv.HTTPRoutes(), nil
+}
+
+func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 	if deps.Config == nil {
 		return nil, fmt.Errorf("server config is required")
 	}
@@ -231,7 +243,12 @@ func New(deps Dependencies) (*Server, error) {
 	// merchant_config_source=manifest) serves read-only provider credentials from the
 	// manifest and operator webhook URLs from managed encrypted storage. Provider
 	// write routes retain their manifest_driven 405. MODE 2 uses managed storage.
-	{
+	if routesOnly {
+		if deps.Runtime.Merchants == nil {
+			return nil, fmt.Errorf("standalone routes require initialized runtime merchant services")
+		}
+		s.merchants = deps.Runtime.Merchants
+	} else {
 		var secretBackend *merchantsecrets.Store
 		if deps.Config.IsManifestMerchantConfigSource() {
 			if deps.Runtime == nil || deps.Runtime.ManifestSecrets == nil {

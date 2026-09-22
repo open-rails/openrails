@@ -9,7 +9,10 @@ import (
 	"github.com/open-rails/openrails/embed"
 )
 
-type Bundle struct{ routes []embed.HTTPRoute }
+type Bundle struct {
+	routes   []embed.HTTPRoute
+	rootOnly bool
+}
 
 // Routes materializes the HTTP configuration declared when the runtime was built.
 func Routes(runtime *embed.Runtime) (*Bundle, error) {
@@ -17,13 +20,20 @@ func Routes(runtime *embed.Runtime) (*Bundle, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Bundle{routes: routes}, nil
+	return &Bundle{routes: routes, rootOnly: runtime.HTTPRequiresRoot()}, nil
 }
 
 // Mount registers every route natively. target may be a *http.ServeMux or any
 // router with Chi's Method(string,string,http.Handler) signature. An optional
 // prefix is for routers without a group; a Chi Route group needs no prefix.
-func (b *Bundle) Mount(target any, prefix ...string) error {
+func (b *Bundle) Mount(target any, prefix ...string) error { return b.mount(target, false, prefix...) }
+
+// MountRoot mounts an anchored standalone bundle on a router whose root cannot
+// be identified through its public API, such as Chi. The caller asserts that
+// target is the application's root router, not a Route/Group subrouter.
+func (b *Bundle) MountRoot(target any) error { return b.mount(target, true) }
+
+func (b *Bundle) mount(target any, rootAsserted bool, prefix ...string) error {
 	if b == nil {
 		return fmt.Errorf("openrails HTTP: nil route bundle")
 	}
@@ -36,6 +46,14 @@ func (b *Bundle) Mount(target any, prefix ...string) error {
 	}
 	if base != "" && (!strings.HasPrefix(base, "/") || strings.ContainsAny(base, "{}?# ")) {
 		return fmt.Errorf("openrails HTTP: invalid mount prefix %q", base)
+	}
+	if b.rootOnly {
+		if base != "" {
+			return fmt.Errorf("openrails HTTP: standalone routes must mount at root without a prefix")
+		}
+		if _, ok := target.(*http.ServeMux); !ok && !rootAsserted {
+			return fmt.Errorf("openrails HTTP: standalone routes require a root ServeMux or MountRoot(rootRouter)")
+		}
 	}
 	switch r := target.(type) {
 	case interface {

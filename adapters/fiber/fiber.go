@@ -13,14 +13,17 @@ import (
 // RouteNamePrefix identifies native OpenRails registrations in Fiber inspection.
 const RouteNamePrefix = "openrails."
 
-type Bundle struct{ routes []embed.HTTPRoute }
+type Bundle struct {
+	routes   []embed.HTTPRoute
+	rootOnly bool
+}
 
 func Routes(runtime *embed.Runtime) (*Bundle, error) {
 	routes, err := runtime.HTTPRoutes()
 	if err != nil {
 		return nil, err
 	}
-	return &Bundle{routes: routes}, nil
+	return &Bundle{routes: routes, rootOnly: runtime.HTTPRequiresRoot()}, nil
 }
 
 // Mount registers one route per method/path under the host's router group.
@@ -29,6 +32,11 @@ func Routes(runtime *embed.Runtime) (*Bundle, error) {
 func (b *Bundle) Mount(target fiber.Router) error {
 	if b == nil || target == nil {
 		return fmt.Errorf("openrails Fiber: bundle and router are required")
+	}
+	if b.rootOnly {
+		if _, ok := target.(*fiber.App); !ok {
+			return fmt.Errorf("openrails Fiber: standalone routes must mount on the root App")
+		}
 	}
 	heads := map[string]bool{}
 	for _, route := range b.routes {
@@ -58,7 +66,7 @@ func nativePath(path string) string {
 		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
 			name := part[1 : len(part)-1]
 			if strings.HasSuffix(name, "...") {
-				parts[i] = "*" + strings.TrimSuffix(name, "...")
+				parts[i] = "*"
 			} else {
 				parts[i] = ":" + name
 			}
