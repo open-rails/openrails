@@ -4264,6 +4264,7 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/reconcile/converge/converge_passes.go": {
+      "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
       "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
       "fmt": "fmt",
