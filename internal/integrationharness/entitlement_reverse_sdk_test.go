@@ -53,5 +53,5 @@ func TestEntitlementReverseLookupSDKClient(t *testing.T) {
 
 	got, err := client.ListCustomersWithEntitlement(ctx, premium, now)
 	require.NoError(t, err)
-	require.ElementsMatch(t, []openrails.CustomerID{openrails.CustomerID(a), openrails.CustomerID(b)}, got)
+	require.ElementsMatch(t, []string{a.String(), b.String()}, got)
 }

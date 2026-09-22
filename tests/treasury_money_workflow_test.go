@@ -47,7 +47,7 @@ func checkTreasuryMoney(t *testing.T, f treasuryWorkflow) {
 		t.Helper()
 		account, err := f.client.Balance(ctx, (payer).String())
 		require.NoError(t, err)
-		require.Equal(t, payer, account.CustomerID)
+		require.Equal(t, payer.String(), account.CustomerID)
 		require.Equal(t, "USD", account.Currency)
 		require.Equal(t, "prepaid", account.BillingMode)
 		require.Equal(t, balance, account.BalanceAmount)
@@ -158,7 +158,7 @@ func checkTreasuryMoney(t *testing.T, f treasuryWorkflow) {
 		name  string
 	}{{payer, "premium"}, {other, "foreign"}} {
 		require.Len(t, batch[(row.payer).String()], 1)
-		require.Equal(t, row.payer, batch[(row.payer).String()][0].CustomerID)
+		require.Equal(t, row.payer.String(), batch[(row.payer).String()][0].CustomerID)
 		require.Equal(t, row.name, batch[(row.payer).String()][0].Entitlement)
 	}
 	serviceCaller := f.surface.RegisterServiceJWTIssuer("billing-service-"+uuid.NewString()[:8], f.merchant.MerchantSlug,

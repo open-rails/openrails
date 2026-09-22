@@ -57,7 +57,7 @@ func TestCreatorRoleThroughRealAuthKitAndHTTP(t *testing.T) {
 	require.Equal(t, owned.MerchantID, catalog.MerchantID)
 	product, err := creator.Products.Create(ctx, &openrails.ProductCreateParams{Key: "creator-product", DisplayName: "Creator product"})
 	require.NoError(t, err)
-	require.Equal(t, catalog.ID, product.CatalogID)
+	require.Equal(t, catalog.ID.String(), product.CatalogID)
 	_, err = creator.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: "creator-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	title := "Creator update"

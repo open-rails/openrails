@@ -99,7 +99,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		_, err = pool.Exec(ctx, `INSERT INTO billing.customers(id,merchant_id) VALUES($1,$2)`, customer, f.merchant.MerchantID.UUID())
 		require.NoError(t, err)
 		psp := dbtest.EnsureTestPSP(ctx, t, pool, f.merchant.MerchantID.UUID(), "nmi")
-		_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,psp_id) VALUES($1,$2,$3,$4,$5,'active','nmi',$6,$7)`, subscription, f.merchant.MerchantID.UUID(), customer, original.ProductID, original.ID, "grandfather-"+subscription.String(), psp)
+		_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,psp_id) VALUES($1,$2,$3,$4,$5,'active','nmi',$6,$7)`, subscription, f.merchant.MerchantID.UUID(), customer, sdkProductID(t, original.ProductID).UUID(), sdkPriceID(t, original.ID).UUID(), "grandfather-"+subscription.String(), psp)
 		require.NoError(t, err)
 		history := func() []openrails.CatalogPrice {
 			t.Helper()
@@ -328,7 +328,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		f.publish(t, m, openrails.CatalogPublishRequest{Overwrite: true})
 		renamed, err := f.client.Prices.RetrieveByKey(ctx, "intro-renamed")
 		require.NoError(t, err)
-		require.Equal(t, ids["intro-flat"], renamed.ID)
+		require.Equal(t, ids["intro-flat"].String(), renamed.ID)
 		_, err = f.client.Prices.RetrieveByKey(ctx, "intro-flat")
 		require.ErrorIs(t, err, openrails.ErrNotFound)
 		require.False(t, f.publish(t, m, openrails.CatalogPublishRequest{}).Plan.HasChanges())

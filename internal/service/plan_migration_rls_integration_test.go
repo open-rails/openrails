@@ -109,8 +109,8 @@ func TestPlanMigrationFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	})
 	require.NoError(t, err, "PreviewPlanMigration must SEE the price it just wrote (or#900)")
 	require.NotNil(t, res)
-	require.Equal(t, sourcePrice.ID, res.SourcePriceID)
-	require.Equal(t, targetPrice.ID, res.TargetPriceID)
+	require.Equal(t, sourcePrice.ID.String(), res.SourcePriceID)
+	require.Equal(t, targetPrice.ID.String(), res.TargetPriceID)
 	require.Equal(t, 0, res.Matched, "no subscriptions on the source price yet")
 
 	// Commit the same migration: the write path resolves the same rows.

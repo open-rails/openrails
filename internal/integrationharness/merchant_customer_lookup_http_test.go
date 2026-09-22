@@ -89,6 +89,6 @@ func TestStandaloneMerchantCustomerLookupClientHTTP(t *testing.T) {
 
 	balance, err := client.GetCreditAccount(ctx, (customer).String(), money.DefaultCurrency)
 	require.NoError(t, err)
-	require.Equal(t, customer, balance.CustomerID)
+	require.Equal(t, customer.String(), balance.CustomerID)
 	require.Equal(t, money.DefaultCurrency, balance.Currency)
 }

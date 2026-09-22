@@ -5009,7 +5009,7 @@
   "boundary_sources_sha256": {
     "embed/authkit/authkit.go": "05aeab359a5540dc96f204a0c72cc993023817c2a66af6dd0b362bb002026944",
     "embed/controlplane/controlplane.go": "ab3379c2a320361f693dd1ce24ccecadb263a57dcf314ad642f94e0491d8a6fa",
-    "embed/embed.go": "49c9c3d829533b0f67c9cb77564e4aac714f2f9ec814ed2b22fcf8dbdd078d84",
+    "embed/embed.go": "b57dee5dc1a8753ef25ad4573a33f3e11402f7e9cf29075655ef30988c89ff8c",
     "embed/transport.go": "899bb2d32b56308257d971595770fa73aace5054d280d0b7143f286bc63cb3b1",
     "errors.go": "bea224812329fcb558d6b087b3a524107ce5d939d16b303b99354d35a6397d55",
     "examples/embedded/main.go": "ea2c0d812fe543d23b397fb6fec4eca0710e7afc8458d9f59065201d89f8d8d4",

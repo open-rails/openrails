@@ -65,7 +65,8 @@ type FakeStripeGateway struct {
 	requests  []StripeRequest
 	created   int
 
-	heldReadbacks map[string]bool // false until the scripted lost write lands
+	heldReadbacks     map[string]bool // false until the scripted lost write lands
+	subscriptionModes map[string]StripeWriteMode
 }
 
 type storedStripeAnswer struct {
@@ -89,6 +90,17 @@ func (g *FakeStripeGateway) SetMode(mode StripeWriteMode) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.mode = mode
+}
+
+// SetSubscriptionMode scripts only this subscription's next write. Other
+// subscriptions can be collected concurrently by the deployment's live workers.
+func (g *FakeStripeGateway) SetSubscriptionMode(id string, mode StripeWriteMode) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.subscriptionModes == nil {
+		g.subscriptionModes = make(map[string]StripeWriteMode)
+	}
+	g.subscriptionModes[id] = mode
 }
 
 // HoldLostSubscriptionReadback keeps reads available for the initial price-change
@@ -199,6 +211,13 @@ func (g *FakeStripeGateway) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	mode := g.mode
 	g.mode = StripeWriteApply
+	if strings.HasPrefix(r.URL.Path, "/v1/subscriptions/") {
+		id := strings.TrimPrefix(r.URL.Path, "/v1/subscriptions/")
+		if scripted, ok := g.subscriptionModes[id]; ok {
+			mode = scripted
+			delete(g.subscriptionModes, id)
+		}
+	}
 	switch mode {
 	case StripeWriteLostBeforeLanding:
 		stripeAnswer(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"message": "upstream failure"}})

@@ -81,7 +81,7 @@ func TestAdmissionClientRecoveryAndCaptureReceipt(t *testing.T) {
 				Dimensions: map[string]int64{"tokens": 7}, Metadata: map[string]any{"availability_tier": "paid"}}
 			captured, err := client.Capture(ctx, in.RequestID, 500, &usage)
 			require.NoError(t, err)
-			require.Equal(t, openrails.CustomerID(payer), captured.CustomerID)
+			require.Equal(t, payer.String(), captured.CustomerID)
 			require.Equal(t, "USD", captured.Currency)
 			require.EqualValues(t, 500, captured.Amount)
 			require.NotNil(t, captured.LedgerTransferID)

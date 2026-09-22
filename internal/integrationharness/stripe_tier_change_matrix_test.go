@@ -61,7 +61,7 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 		// pending/replay assertions finish and the deployment has restarted.
 		releaseReadback := gateway.HoldLostSubscriptionReadback(lost.StripeSub)
 		defer releaseReadback()
-		gateway.SetMode(StripeWriteLostAfterLanding)
+		gateway.SetSubscriptionMode(lost.StripeSub, StripeWriteLostAfterLanding)
 		pending, err := client.ChangeTier(ctx, lost.Subscription, lostKey, lostRequest)
 		require.NoError(t, err)
 		require.Equal(t, "processing", pending.Status)
@@ -95,7 +95,7 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 		require.Equal(t, "succeeded", done.Status)
 		require.Equal(t, pending.OperationID, done.OperationID)
 		require.Equal(t, "upgrade", done.Action)
-		require.Equal(t, lost.ProPrice, done.PriceID)
+		require.Equal(t, lost.ProPrice.String(), done.PriceID)
 		require.Equal(t, lost.ProAmount, done.NextChargeAmount)
 		doneAgain, err := client.ChangeTier(ctx, lost.Subscription, lostKey, lostRequest)
 		require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 		declined := h.SeedStripeTierSubscription(d.runtime(), d.merchant, gateway)
 		declinedRequest := openrails.ChangeTierRequest{PriceID: (declined.ProPrice).String()}
 		declinedKey := "decl-" + uuid.NewString()[:8]
-		gateway.SetMode(StripeWriteDecline)
+		gateway.SetSubscriptionMode(declined.StripeSub, StripeWriteDecline)
 		_, err = client.ChangeTier(ctx, declined.Subscription, declinedKey, declinedRequest)
 		requireRefusal(t, err, openrails.ErrPaymentRefused, "insufficient_funds")
 		require.Equal(t, "failed_terminal", h.LatestTierChangeOperation(declined.SubscriptionID).Status)

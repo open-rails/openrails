@@ -55,6 +55,8 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 		return rt
 	}
 	rt := boot(secret)
+	require.ErrorContains(t, rt.ConfigureHTTP(embed.HTTPConfig{}), "already configured",
+		"constructor-owned HTTP configuration is applied once and cannot be replaced")
 	client, err := rt.Client()
 	require.NoError(t, err)
 	product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: "post", DisplayName: "First title"})
