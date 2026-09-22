@@ -151,7 +151,7 @@ defer rt.Close(ctx)
 | Option | Type | Notes |
 |---|---|---|
 | `Config` | `*config.Config` | Required. |
-| `HTTP` | `*embed.HTTPConfig` | Nil disables HTTP. A non-nil policy exposes discovery and verified provider callbacks; buyer and management capabilities are opt-in. |
+| `HTTP` | `*embed.HTTPConfig` | Leave nil for headless mode or configure once later with `rt.ConfigureHTTP`. A non-nil policy exposes discovery and verified provider callbacks; buyer and management capabilities are opt-in. |
 | `PGXPool` | `*pgxpool.Pool` | Host-supplied pool (pgx/v5). |
 | `Redis` | `*redis.Client` | Optional (rate limits, admission holds). |
 | `Cache` | `cache.Cache` | Optional cache override. |
@@ -161,7 +161,7 @@ defer rt.Close(ctx)
 | `StripeTransport` | `http.RoundTripper` | Test seam under the Stripe API choke point; refused with a live posture. |
 
 **Runtime surface**: `rt.Client()` (the shared `*openrails.Client`, the only
-in-process business API), `rt.UpsertMerchantConfig`, `rt.HTTPRoutes()`,
+in-process business API), `rt.UpsertMerchantConfig`, `rt.ConfigureHTTP`, `rt.HTTPRoutes()`,
 `rt.Ready(ctx)`, `rt.CheckJobProgress(ctx)`,
 `rt.HasExternalRiverClient()`, `rt.DeclarePSP`,
 `rt.RunWorkers(ctx)`, `rt.Close(ctx)`, the manifest tooling (`rt.PushCatalog`,
@@ -502,6 +502,27 @@ if err != nil { return err }
 // Declare merchant/provider configuration and compose River before serving.
 ```
 
+When your AuthKit bridge needs the merchant ID returned by provisioning, leave
+`Options.HTTP` nil and configure the runtime once afterward:
+
+```go
+merchantID, err := rt.UpsertMerchantConfig(ctx, slug, merchantConfig)
+if err != nil { return err }
+authn, err := orauthkit.NewDelegatedAuthenticator(verifier, merchantID.String())
+if err != nil { return err }
+if err := rt.ConfigureHTTP(embed.HTTPConfig{
+    Customer: true,
+    DelegatedAuthenticator: authn,
+}); err != nil { return err }
+```
+
+`Options.HTTP` and `ConfigureHTTP` share the same validation and copy semantics.
+A second configuration attempt is rejected, and requesting routes freezes the
+policy. Configuration and route construction after `Close` are also rejected.
+Invalid configuration leaves HTTP disabled. `HTTP.DelegatedAuthenticator` can
+select the customer HTTP verifier; otherwise the runtime's
+`Options.DelegatedAuthenticator` is used, matching in-process customer calls.
+
 Use the adapter for your host. The Gin and Fiber adapters are separate Go modules;
 net/http and Chi use the core module's `adapters/http` package.
 
@@ -537,7 +558,7 @@ remain host-owned (Fiber defaults are case-insensitive and non-strict).
 |---|---|
 | non-nil `HTTP` | Capability discovery and generic merchant-scoped verified provider callbacks |
 | `Checkout` | Buyer products, prices, checkout/config; requires `Authenticator` |
-| `Customer` | `/v1/me/*` and customer treasury; requires runtime `DelegatedAuthenticator` |
+| `Customer` | `/v1/me/*` and customer treasury; requires `HTTP.DelegatedAuthenticator` or the runtime verifier |
 | `MerchantAdmin` | Customer/support management; requires `Gate` |
 | `Catalog` | Merchant and creator catalog HTTP; requires `Gate` |
 | `PaymentProviders` | Provider configuration reads and supported writes; requires `Gate` |
@@ -550,8 +571,10 @@ the configured provider account and signature. API-managed buyer surfaces likewi
 retain optional provider paths; account readiness remains a request-time guard.
 Manifest-owned buyer surfaces must be materialized after merchant/provider
 configuration; provider discovery errors are returned rather than hiding routes.
-A nil `HTTP` policy yields an empty bundle. Invalid auth configuration fails at
-runtime construction, before opening resources.
+An unconfigured runtime refuses `Routes` with an explicit disabled error.
+Configure HTTP before requesting routes, including when using the late provisioning
+form. The runtime materializes the inventory once, so remounting cannot reset its
+rate limits. Invalid constructor HTTP configuration fails before opening resources.
 
 Migration is a pre-v1 API change: `Runtime.Handler(MountOptions)`, `SelfHandler`,
 `RouteSet` selections and mutable `ActiveRouteSets` are removed. Move exposure and

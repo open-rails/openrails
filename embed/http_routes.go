@@ -22,22 +22,57 @@ type HTTPRoute struct {
 	Handler http.Handler
 }
 
-// HTTPRoutes materializes the runtime's configured surface for framework
-// adapters. Call after merchant/provider configuration and River composition,
-// before starting the host server. No server, database or worker is created.
-// Nil HTTP configuration returns an empty bundle.
+// ConfigureHTTP declares the runtime's HTTP policy once, after host identity and
+// merchant provisioning if needed. Options.HTTP is the constructor convenience.
+// Invalid policy leaves the runtime unconfigured. Routes freezes configuration;
+// subsequent configuration or configuration after Close is refused.
+func (r *Runtime) ConfigureHTTP(cfg HTTPConfig) error {
+	if r == nil || r.app == nil || r.app.Runtime == nil {
+		return fmt.Errorf("openrails HTTP: runtime is not initialized")
+	}
+	r.httpMu.Lock()
+	defer r.httpMu.Unlock()
+	if r.closed {
+		return fmt.Errorf("openrails HTTP: runtime is closed")
+	}
+	if r.httpFrozen {
+		return fmt.Errorf("openrails HTTP: routes have already frozen configuration")
+	}
+	if r.httpConfig != nil {
+		return fmt.Errorf("openrails HTTP: already configured")
+	}
+	if err := embedhttp.ValidateHTTPConfig(&cfg, r.delegatedAuthenticator); err != nil {
+		return err
+	}
+	r.httpConfig = &cfg
+	return nil
+}
+
+// HTTPRoutes materializes the configured surface once for framework adapters.
+// Call after provisioning and River composition, before starting HTTP. No server,
+// database or worker is created. An unconfigured runtime refuses HTTP explicitly.
 func (r *Runtime) HTTPRoutes() ([]HTTPRoute, error) {
 	if r == nil || r.app == nil || r.app.Runtime == nil {
 		return nil, fmt.Errorf("openrails HTTP: runtime is not initialized")
 	}
+	r.httpMu.Lock()
+	defer r.httpMu.Unlock()
+	if r.closed {
+		return nil, fmt.Errorf("openrails HTTP: runtime is closed")
+	}
+	r.httpFrozen = true
 	if r.httpConfig == nil {
-		return nil, nil
+		return nil, fmt.Errorf("openrails HTTP: disabled; configure Options.HTTP or call ConfigureHTTP before Routes")
 	}
-	table, err := embedhttp.ConfiguredRoutes(r.app, r.httpConfig, r.delegatedAuthenticator)
-	if err != nil {
-		return nil, err
+	if !r.httpBuilt {
+		table, err := embedhttp.ConfiguredRoutes(r.app, r.httpConfig, r.delegatedAuthenticator)
+		if err != nil {
+			return nil, err
+		}
+		r.httpRoutes = publicHTTPRoutes(table)
+		r.httpBuilt = true
 	}
-	return publicHTTPRoutes(table), nil
+	return append([]HTTPRoute(nil), r.httpRoutes...), nil
 }
 
 func publicHTTPRoutes(table *router.Table) []HTTPRoute {

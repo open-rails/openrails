@@ -565,6 +565,7 @@
       "func (r *Runtime) CheckJobProgress(ctx context.Context) (JobProgress, error)",
       "func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, error)",
       "func (r *Runtime) Close(ctx context.Context) error",
+      "func (r *Runtime) ConfigureHTTP(cfg HTTPConfig) error",
       "func (r *Runtime) Converge(ctx context.Context, merchantID merchant.ID) (ConvergeResult, error)",
       "func (r *Runtime) DeclarePSP(ctx context.Context, merchantID merchant.ID, declaration PSPDeclaration) (uuid.UUID, error)",
       "func (r *Runtime) HTTPRoutes() ([]HTTPRoute, error)",
@@ -765,7 +766,7 @@
       "type ConvergeMerchantResult struct {\n\tFindings          int\n\tAutoFixed         int\n\tReconcileRequired int\n\tAdminRequired     int\n}"
     ],
     "internal/http/embedhttp": [
-      "type HTTPConfig struct {\n\tCheckout         bool\n\tCustomer         bool\n\tMerchantAdmin    bool\n\tCatalog          bool\n\tPaymentProviders bool\n\tMerchantAPI      bool\n\tAuthenticator    billingauth.Authenticator\n\tGate             billingauth.Gate\n}"
+      "type HTTPConfig struct {\n\tDelegatedAuthenticator billingauth.DelegatedAuthenticator\n\tCheckout               bool\n\tCustomer               bool\n\tMerchantAdmin          bool\n\tCatalog                bool\n\tPaymentProviders       bool\n\tMerchantAPI            bool\n\tAuthenticator          billingauth.Authenticator\n\tGate                   billingauth.Gate\n}"
     ],
     "internal/merchants": [
       "func (e *LastActiveProviderAccountError) Error() string",
@@ -4922,7 +4923,7 @@
   "boundary_sources_sha256": {
     "embed/authkit/authkit.go": "05aeab359a5540dc96f204a0c72cc993023817c2a66af6dd0b362bb002026944",
     "embed/controlplane/controlplane.go": "b553cff0f76cf85074ac3ef5cbb3314877e99b21a4f3fe64f0e70a74ea1b215c",
-    "embed/embed.go": "6a0be21d3158d96d36fe0f23fb508b3c57703663c963c0964808c6a7cda57cfb",
+    "embed/embed.go": "e4cf1302f1a4229a8fab345a63b5e2d8c89ed98e704c89021ecfe18f4a9e8743",
     "embed/transport.go": "899bb2d32b56308257d971595770fa73aace5054d280d0b7143f286bc63cb3b1",
     "errors.go": "bea224812329fcb558d6b087b3a524107ce5d939d16b303b99354d35a6397d55",
     "examples/embedded/main.go": "af08d68e64c7da1877fad1c3b70171a35ab22a0cde37b8e4bbd9ebffab152ac7",
@@ -4953,7 +4954,7 @@
     "internal/controlplane/service.go": "555aab476210bcf7956deefe916c8af75a8507b4f7af0a7287ce7cfd8f41b7a2",
     "internal/controlplane/service_jwt.go": "0c7497b227447df4caa5ef1effb1649ddf8ac139d077f7a18e153d5e051a4dbe",
     "internal/http/embedhttp/capabilities.go": "7d53acb8e9ba6205b658b5e0e28afe1dbf0a8950176fadb82c4bd1986342d842",
-    "internal/http/embedhttp/configured.go": "494f499aca6104551c1a120bd663a1c0f3845e9423dbeddc52bc047ac623f9a1",
+    "internal/http/embedhttp/configured.go": "50303cf42ac4d4da8619c2f5db1e7a3b0df2e058fdcaac49ab4f0225af512835",
     "internal/http/embedhttp/embedhttp.go": "772ff5b945fe8618dd16736128d4fadd933b9d9a1d4fc1211fe51f1e2ec7399a",
     "internal/http/embedhttp/route_set.go": "969f2f510a55479d674367881f5dc6c18491e310a51a8aeb62bca0c139e045de",
     "internal/http/embedhttp/self.go": "5309cd56614661d4b5fcf1d0d1f5f317cdfa7ee9db374cfcc2be7455262e7482",

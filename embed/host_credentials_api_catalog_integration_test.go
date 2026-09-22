@@ -90,6 +90,9 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	// Rotation follows the host configuration/restart contract, while dynamic
 	// catalog state survives that restart and is not overwritten by a manifest.
 	require.NoError(t, rt.Close(ctx))
+	require.ErrorContains(t, rt.ConfigureHTTP(embed.HTTPConfig{}), "closed")
+	_, closedErr := rt.HTTPRoutes()
+	require.ErrorContains(t, closedErr, "closed")
 	rt2 := boot("sk_test_rotated_fixture")
 	value, err = app.HostGraph(rt2).Runtime.ManifestSecrets.Get(ctx, mid, name)
 	require.NoError(t, err)

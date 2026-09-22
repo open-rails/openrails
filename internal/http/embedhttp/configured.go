@@ -15,14 +15,17 @@ import (
 // and valid provider verification. Management and buyer surfaces are opt-in and
 // independent of in-process Client or CatalogClient access.
 type HTTPConfig struct {
-	Checkout         bool
-	Customer         bool
-	MerchantAdmin    bool
-	Catalog          bool
-	PaymentProviders bool
-	MerchantAPI      bool
-	Authenticator    billingauth.Authenticator
-	Gate             billingauth.Gate
+	// DelegatedAuthenticator verifies customer HTTP credentials. When nil, the
+	// embedded runtime's Options.DelegatedAuthenticator is used.
+	DelegatedAuthenticator billingauth.DelegatedAuthenticator
+	Checkout               bool
+	Customer               bool
+	MerchantAdmin          bool
+	Catalog                bool
+	PaymentProviders       bool
+	MerchantAPI            bool
+	Authenticator          billingauth.Authenticator
+	Gate                   billingauth.Gate
 }
 
 func ValidateHTTPConfig(cfg *HTTPConfig, delegated billingauth.DelegatedAuthenticator) error {
@@ -32,8 +35,8 @@ func ValidateHTTPConfig(cfg *HTTPConfig, delegated billingauth.DelegatedAuthenti
 	if cfg.Checkout && cfg.Authenticator == nil {
 		return fmt.Errorf("openrails HTTP: Checkout requires HTTP.Authenticator")
 	}
-	if cfg.Customer && delegated == nil {
-		return fmt.Errorf("openrails HTTP: Customer requires Options.DelegatedAuthenticator")
+	if cfg.Customer && cfg.DelegatedAuthenticator == nil && delegated == nil {
+		return fmt.Errorf("openrails HTTP: Customer requires HTTP.DelegatedAuthenticator or Options.DelegatedAuthenticator")
 	}
 	if (cfg.MerchantAdmin || cfg.Catalog || cfg.PaymentProviders || cfg.MerchantAPI) && cfg.Gate == nil {
 		return fmt.Errorf("openrails HTTP: management surfaces require HTTP.Gate")
@@ -67,6 +70,9 @@ func ConfiguredRoutes(a *app.App, policy *HTTPConfig, delegated billingauth.Dele
 		return &router.Table{}, nil
 	}
 	cfg := *policy
+	if cfg.DelegatedAuthenticator != nil {
+		delegated = cfg.DelegatedAuthenticator
+	}
 	if err := ValidateHTTPConfig(&cfg, delegated); err != nil {
 		return nil, err
 	}

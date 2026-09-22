@@ -31,7 +31,8 @@ import (
 
 // Options configures the embedded runtime.
 type Options struct {
-	// HTTP configures the externally mounted surface once. Nil disables HTTP.
+	// HTTP configures the externally mounted surface once. Leave nil for a
+	// headless runtime or call ConfigureHTTP after merchant/auth provisioning.
 	HTTP *HTTPConfig
 
 	// DelegatedAuthenticator verifies explicit customer credentials for Client
@@ -74,7 +75,12 @@ type Options struct {
 // Runtime is the in-process engine: Client() for the shared client, HTTPRoutes()
 // to mount the billing HTTP surface, RunWorkers/Close for lifecycle.
 type Runtime struct {
+	httpMu     sync.Mutex
 	httpConfig *HTTPConfig
+	httpFrozen bool
+	httpRoutes []HTTPRoute
+	httpBuilt  bool
+	closed     bool
 
 	delegatedAuthenticator billingauth.DelegatedAuthenticator
 	app                    *app.App
@@ -150,8 +156,10 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 
 	r := &Runtime{app: application, delegatedAuthenticator: opts.DelegatedAuthenticator}
 	if opts.HTTP != nil {
-		cfg := *opts.HTTP
-		r.httpConfig = &cfg
+		if err := r.ConfigureHTTP(*opts.HTTP); err != nil {
+			_ = r.Close(ctx)
+			return nil, err
+		}
 	}
 	if opts.StripeTransport != nil {
 		r.releaseStripeTransport = stripeapi.InstallBaseTransport(opts.StripeTransport)
@@ -279,6 +287,9 @@ func (r *Runtime) Close(ctx context.Context) error {
 		return nil
 	}
 	r.closeOnce.Do(func() {
+		r.httpMu.Lock()
+		r.closed = true
+		r.httpMu.Unlock()
 		if r.workersCancel != nil {
 			r.workersCancel()
 			<-r.workersDone // join before closing resources even if shutdown ctx was canceled

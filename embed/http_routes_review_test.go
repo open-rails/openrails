@@ -36,9 +36,9 @@ func TestConfiguredRoutesReviewExposureAndCredentialOwnership(t *testing.T) {
 	delegated := billingauth.DelegatedAuthenticatorFunc(reviewReject)
 	rt := reviewRuntime(nil, delegated)
 	routes, err := rt.HTTPRoutes()
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "disabled")
 	require.Empty(t, routes)
-	rt.httpConfig = &HTTPConfig{}
+	rt = reviewRuntime(&HTTPConfig{}, delegated)
 	routes, err = rt.HTTPRoutes()
 	require.NoError(t, err)
 	for _, r := range routes {
@@ -46,8 +46,8 @@ func TestConfiguredRoutesReviewExposureAndCredentialOwnership(t *testing.T) {
 		require.NotContains(t, r.Path, "/me/")
 		require.NotContains(t, r.Path, "/merchant/")
 	}
+	rt = reviewRuntime(&HTTPConfig{PaymentProviders: true, Gate: billingauth.NewDelegatedGate(delegated)}, delegated)
 	rt.app.Config.MerchantConfigSource = config.MerchantConfigSourceManifest
-	rt.httpConfig = &HTTPConfig{PaymentProviders: true, Gate: billingauth.NewDelegatedGate(delegated)}
 	routes, err = rt.HTTPRoutes()
 	require.NoError(t, err)
 	for _, r := range routes {
@@ -56,11 +56,10 @@ func TestConfiguredRoutesReviewExposureAndCredentialOwnership(t *testing.T) {
 			require.False(t, r.Method == http.MethodPost && strings.HasSuffix(r.Path, "/archive"))
 		}
 	}
-	rt.app.Config.MerchantConfigSource = config.MerchantConfigSourceAPI
-	rt.httpConfig = &HTTPConfig{Checkout: true, Customer: true, MerchantAdmin: true, Catalog: true, PaymentProviders: true, MerchantAPI: true,
+	rt = reviewRuntime(&HTTPConfig{Checkout: true, Customer: true, MerchantAdmin: true, Catalog: true, PaymentProviders: true, MerchantAPI: true,
 		Authenticator: billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
 			return billingauth.UserContext{}, billingauth.ErrUnauthenticated
-		}), Gate: billingauth.NewDelegatedGate(delegated)}
+		}), Gate: billingauth.NewDelegatedGate(delegated)}, delegated)
 	routes, err = rt.HTTPRoutes()
 	require.NoError(t, err)
 	require.NotEmpty(t, routes)
