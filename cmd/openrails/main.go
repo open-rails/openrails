@@ -209,6 +209,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 		cleanupOnError = true
 		return err
 	}
+	// Bind request-side producers before HTTP can accept work, including when
+	// --no-workers delegates execution to a separate process. This starts no workers.
+	if err := graph.Runtime.InitRiver(cmd.Context()); err != nil {
+		return fmt.Errorf("bind standalone job producers: %w", err)
+	}
 
 	cleanupOnError = false
 
@@ -337,7 +342,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	// xs-007 row 40: see runServer — the database wait ends on a stop signal.
 	bootCtx, stopBoot := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopBoot()
-	application, err := app.Bootstrap(bootCtx, cfg)
+	application, err := serverboot.NewWorker(bootCtx, cfg)
 	if err != nil {
 		if bootCtx.Err() != nil {
 			log.WithError(err).Info("Shutdown requested while booting; exiting")

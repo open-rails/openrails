@@ -75,6 +75,7 @@ export function consumeOIDCFragment(): boolean {
   const hash = window.location.hash
   if (!hash.includes("access_token=")) return false
   const params = new URLSearchParams(hash.slice(1))
+  if (params.has("error")) return false
   const accessToken = params.get("access_token")
   if (!accessToken) return false
   const expiresIn = Number(params.get("expires_in") || "0")
