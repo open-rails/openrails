@@ -62,7 +62,10 @@ func TestNMIProviderCutoverIsolation(t *testing.T) {
 	s := h.StartStandalone("USD", WithConfig(func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeFull }))
 	_, err := h.Pool().Exec(ctx, `UPDATE billing.destructive_action_switch SET enabled=true`)
 	require.NoError(t, err)
-	t.Cleanup(func() { _, _ = h.Pool().Exec(ctx, `UPDATE billing.destructive_action_switch SET enabled=false`) })
+	t.Cleanup(func() {
+		_, err := h.Pool().Exec(context.WithoutCancel(ctx), `UPDATE billing.destructive_action_switch SET enabled=false`)
+		require.NoError(t, err, "restore default destructive action switch")
+	})
 	s.App().Runtime.CollectionResolver.(*money.MerchantCollectionAdapterBuilder).Endpoints.NMIV5BaseURL = g.Server.URL
 	owner := s.ProvisionOwnedMerchant("cutover-isolation-" + uuid.NewString())
 	client := s.Client(openrails.WithAPIKey(owner.APIKey), openrails.WithMerchantID(owner.MerchantID))

@@ -101,39 +101,23 @@ func (e collectionEnv) retry(t *testing.T, runner *intents.Runner, key string, m
 	return e.svc.RetryInvoiceCollection(e.ctx, runner, e.payer, money.InvoiceCollectionRetryRequest{InvoiceID: e.invoice, IdempotencyKey: key, PaymentMethodID: method})
 }
 
-func TestInvoiceCollection_ManualRetrySelectsSeparateMethodAndSettles(t *testing.T) {
-	e := newCollectionEnv(t, string(models.RailStripe))
-	declined := &fakeCharger{declineAll: true}
-	_, err := e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, declined, nil), 0)
-	require.NoError(t, err)
-	require.Equal(t, "past_due", e.invoiceRow(t).Status)
-
-	collectionMethod := seedPaymentMethod(t, e.pool, e.ctx, e.payer, string(models.RailStripe))
-	ok := &fakeCharger{}
-	result, err := e.retry(t, collectionRunner(e.db, ok, nil), "retry-1", collectionMethod)
-	require.NoError(t, err)
-	require.False(t, result.Replayed)
-	require.Equal(t, "paid", result.Invoice.Status)
-	require.Nil(t, result.Invoice.LastCollectionFailureCode)
-	require.Equal(t, "settled", result.Attempt.Status)
-	require.Equal(t, collectionMethod, *result.Attempt.PaymentMethodID)
-	require.Equal(t, 1, ok.chargeCount())
-	require.Equal(t, collectionMethod, ok.charges[0].PaymentMethodID)
-	require.Equal(t, []string{"settled", "failed"}, e.attemptStatuses(t))
-	e.requireSettledOnce(t)
-}
-
 func TestInvoiceCollection_ClientKeyReplaysDurableOutcomeWithoutRecharging(t *testing.T) {
 	e := newCollectionEnv(t, string(models.RailStripe))
 	_, err := e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, &fakeCharger{declineAll: true}, nil), 0)
 	require.NoError(t, err)
+	require.Equal(t, "past_due", e.invoiceRow(t).Status)
 	bound := seedPaymentMethod(t, e.pool, e.ctx, e.payer, string(models.RailStripe))
 
 	charger := &fakeCharger{}
 	result, err := e.retry(t, collectionRunner(e.db, charger, nil), "client-retry-key", bound)
 	require.NoError(t, err)
 	require.False(t, result.Replayed)
+	require.Equal(t, "paid", result.Invoice.Status)
+	require.Nil(t, result.Invoice.LastCollectionFailureCode)
 	require.Equal(t, "settled", result.Attempt.Status)
+	require.Equal(t, bound, *result.Attempt.PaymentMethodID)
+	require.Equal(t, bound, charger.charges[0].PaymentMethodID)
+	require.Equal(t, []string{"settled", "failed"}, e.attemptStatuses(t))
 	require.Equal(t, 1, charger.chargeCount())
 
 	replayCharger := &fakeCharger{}
