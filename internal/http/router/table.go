@@ -33,7 +33,7 @@ func (t *Table) Handler() http.Handler {
 }
 
 // Wrap retains the global security chain on each native registration. Explicit
-// browser OPTIONS and GET HEAD make the HTTP contract independent of framework.
+// browser OPTIONS make the HTTP contract independent of framework.
 func (t *Table) Wrap(wrap func(Entry) http.Handler) {
 	originals := append([]Entry(nil), t.Entries...)
 	seen := make(map[string]bool)
@@ -44,12 +44,6 @@ func (t *Table) Wrap(wrap func(Entry) http.Handler) {
 		t.Entries[i].Handler = wrap(r)
 	}
 	for i, r := range originals {
-		if r.Method == http.MethodGet && !seen[http.MethodHead+" "+r.Path] {
-			head := t.Entries[i]
-			head.Method = http.MethodHead
-			t.Entries = append(t.Entries, head)
-			seen[http.MethodHead+" "+r.Path] = true
-		}
 		if r.Browser && !seen[http.MethodOptions+" "+r.Path] {
 			options := t.Entries[i]
 			options.Method = http.MethodOptions

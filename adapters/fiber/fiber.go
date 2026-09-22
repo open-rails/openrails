@@ -34,7 +34,11 @@ func (b *Bundle) Mount(target fiber.Router) error {
 			}
 			route.Handler.ServeHTTP(w, r)
 		}))
-		target.Add([]string{route.Method}, nativePath(route.Path), h)
+		methods := []string{route.Method}
+		if route.Method == http.MethodGet {
+			methods = append(methods, http.MethodHead)
+		}
+		target.Add(methods, nativePath(route.Path), h)
 	}
 	return nil
 }

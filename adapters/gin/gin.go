@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/open-rails/openrails/embed"
+	"net/http"
 	"strings"
 )
 
@@ -26,6 +27,9 @@ func (b *Bundle) Mount(target gin.IRoutes) error {
 	}
 	for _, route := range b.routes {
 		target.Handle(route.Method, nativePath(route.Path), gin.WrapH(route.Handler))
+		if route.Method == http.MethodGet {
+			target.Handle(http.MethodHead, nativePath(route.Path), gin.WrapH(route.Handler))
+		}
 	}
 	return nil
 }

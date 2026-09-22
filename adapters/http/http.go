@@ -46,6 +46,9 @@ func (b *Bundle) Mount(target any, prefix ...string) error {
 		// handlers without coupling this adapter to Chi or rewriting signed URLs.
 		for _, route := range b.routes {
 			r.Method(route.Method, base+route.Path, route.Handler)
+			if route.Method == http.MethodGet {
+				r.Method(http.MethodHead, base+route.Path, route.Handler)
+			}
 		}
 	case interface{ Handle(string, http.Handler) }:
 		for _, route := range b.routes {

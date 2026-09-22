@@ -113,7 +113,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
 	}
-	if err := validateHTTPConfig(opts.HTTP, opts.DelegatedAuthenticator); err != nil {
+	if err := embedhttp.ValidateHTTPConfig(opts.HTTP, opts.DelegatedAuthenticator); err != nil {
 		return nil, err
 	}
 	if opts.River.host && opts.RunWorkers {
