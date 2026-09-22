@@ -429,38 +429,6 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent,
 	return s.db.Gen(ctx).GetRailIntent(ctx, gen.GetRailIntentParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 }
 
-// DueExecuteMerchants lists the merchants with executor work (claimable or
-// expirable intents) through migration 0022's SECURITY DEFINER work queue —
-// the executor's fan-out list. Ids only; each merchant's pass then runs under
-// its own pinned connection (or#862).
-func (s *Store) DueExecuteMerchants(ctx context.Context, now time.Time, limit int32) ([]uuid.UUID, error) {
-	rows, err := s.db.GenDirectory().ListDueRailIntentMerchants(ctx, gen.ListDueRailIntentMerchantsParams{
-		Now: now.UTC(), MerchantLimit: limit,
-	})
-	return derefIDs(rows), err
-}
-
-// DueVerifyMerchants is DueExecuteMerchants for the verifier pass (or#862).
-func (s *Store) DueVerifyMerchants(ctx context.Context, now time.Time, limit int32) ([]uuid.UUID, error) {
-	rows, err := s.db.GenDirectory().ListDueVerifyRailIntentMerchants(ctx, gen.ListDueVerifyRailIntentMerchantsParams{
-		Now: now.UTC(), MerchantLimit: limit,
-	})
-	return derefIDs(rows), err
-}
-
-// derefIDs drops the pointer indirection sqlc emits for a set-returning
-// function's column. The definer bodies select a NOT NULL column, so a nil
-// here is impossible; it is skipped rather than dereferenced.
-func derefIDs(rows []*uuid.UUID) []uuid.UUID {
-	out := make([]uuid.UUID, 0, len(rows))
-	for _, id := range rows {
-		if id != nil {
-			out = append(out, *id)
-		}
-	}
-	return out
-}
-
 // ClaimDue leases up to batch due executable intents (SKIP LOCKED).
 //
 // or#862: this MUST run on a merchant-pinned connection. rail_intents FORCEs

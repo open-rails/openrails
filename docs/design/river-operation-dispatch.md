@@ -43,3 +43,9 @@ River schemas and a one-connection admission pool, missing-producer rollback,
 post-provider acceptance interruption followed by readback without another write,
 duplicate delivery, generic revival racing prior job completion, and earlier
 wakeups. Deterministic provider transports do not qualify live provider behavior.
+
+The old `Runner.RunExecuteOnce`/`RunVerifyOnce` helpers remain solely to drive
+existing regression fixtures during their conversion to individual operations;
+there are no production callers or periodic registrations. Merchant fanout
+methods and SQL readers are removed. Keeping the fixture helpers preserves
+financial coverage rather than retaining an alternative runtime queue.

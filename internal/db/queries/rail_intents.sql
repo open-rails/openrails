@@ -425,27 +425,6 @@ SELECT openrails.count_destructive_intents_for_merchant_since(
     sqlc.arg(intent_types)::text[],
     sqlc.arg(since)::timestamptz);
 
--- ==============================================================-- or#862: deployment-wide executor / verifier fan-out
--- ==============================================================
--- CROSS-MERCHANT: the merchants the executor pass must visit, through migration
--- 0022's SECURITY DEFINER reader. The executor used to run ClaimDue on a bare
--- River job context; rail_intents FORCEs RLS, so with no app.merchant_id the
--- claim matched `merchant_id = NULL` and leased ZERO intents — the whole
--- outbound provider-mutation plane was inert, and the #836 kill switch and #679
--- volume breaker (which only run on a claimed intent) never executed. Ids only:
--- the claim, the gates and the execution run per-merchant under
--- RunInMerchantConn, where these same predicates re-apply.
--- name: ListDueRailIntentMerchants :many
-SELECT merchant_id FROM openrails.due_rail_intent_merchant_ids(
-    sqlc.arg(now)::timestamptz,
-    sqlc.arg(merchant_limit)::int);
-
--- CROSS-MERCHANT: the verifier's fan-out list, same posture (or#862).
--- name: ListDueVerifyRailIntentMerchants :many
-SELECT merchant_id FROM openrails.due_verify_rail_intent_merchant_ids(
-    sqlc.arg(now)::timestamptz,
-    sqlc.arg(merchant_limit)::int);
-
 -- name: GetRailIntentByIdempotencyKey :one
 SELECT * FROM openrails.rail_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND idempotency_key = sqlc.arg(idempotency_key)::text;
