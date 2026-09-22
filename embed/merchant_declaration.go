@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/hosttools"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
@@ -66,7 +67,7 @@ func configureMerchant(ctx context.Context, application *app.App, declaration *M
 		return err
 	}
 	for _, psp := range declaration.PSPs {
-		if _, err := declarePSP(ctx, application, id, psp); err != nil {
+		if _, err := hosttools.DeclarePSP(ctx, application, id, psp); err != nil {
 			return err
 		}
 	}

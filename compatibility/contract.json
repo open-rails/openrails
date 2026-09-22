@@ -621,7 +621,7 @@
       "type MigrationOptions struct {\n\tSchema string\n\tRiver  RiverOwnership\n\n\tRuntimePool *pgxpool.Pool\n}",
       "type Options struct {\n\tMerchant *MerchantDeclaration\n\n\tHTTP *HTTPConfig\n\n\tDelegatedAuthenticator billingauth.DelegatedAuthenticator\n\n\tConfig *config.Config\n\n\tPGXPool *pgxpool.Pool\n\tRedis   *redis.Client\n\tCache   cache.Cache\n\n\tRiver RiverOwnership\n\n\tRunWorkers bool\n\n\tConsoleAssets fs.FS\n\n\tStripeTransport http.RoundTripper\n\n\tUserDirectory    openrails.UserDirectory\n\tUsernameResolver openrails.UsernameResolver\n}",
       "type PSPConfig = boot.PSPConfig",
-      "type PSPDeclaration struct {\n\tKey       string\n\tRail      string\n\tAccountID string\n}",
+      "type PSPDeclaration = hosttools.PSPDeclaration",
       "type PSPSignerConfig = boot.PSPSignerConfig",
       "type ProviderRailAccountConfig = boot.ProviderRailAccountConfig",
       "type RemoteApplicationConfig = boot.RemoteApplicationConfig",
@@ -746,6 +746,7 @@
     ],
     "embed/operator": [
       "func (r *Operator) Converge(ctx context.Context, merchantID merchant.ID) (ConvergeResult, error)",
+      "func (r *Operator) DeclarePSP(ctx context.Context, merchantID merchant.ID, declaration embed.PSPDeclaration) (uuid.UUID, error)",
       "func (r *Operator) PullProvider(ctx context.Context, opts PullProviderOptions) error",
       "func (r *Operator) PullProviderReport(ctx context.Context, merchantID merchant.ID, runID, format string, out io.Writer) error",
       "func (r *Operator) PushCatalog(ctx context.Context, opts PushCatalogOptions) error",
@@ -793,7 +794,8 @@
       "type Rail string"
     ],
     "internal/hosttools": [
-      "type ConvergeMerchantResult struct {\n\tFindings          int\n\tAutoFixed         int\n\tReconcileRequired int\n\tAdminRequired     int\n}"
+      "type ConvergeMerchantResult struct {\n\tFindings          int\n\tAutoFixed         int\n\tReconcileRequired int\n\tAdminRequired     int\n}",
+      "type PSPDeclaration struct {\n\tKey       string\n\tRail      string\n\tAccountID string\n}"
     ],
     "internal/http/embedhttp": [
       "type CustomerHTTPConfig struct {\n\tPrefix                 string\n\tScope                  CustomerHTTPScope\n\tDelegatedAuthenticator billingauth.DelegatedAuthenticator\n}",
@@ -1864,6 +1866,7 @@
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "hosttools": "github.com/open-rails/openrails/internal/hosttools",
       "merchants": "github.com/open-rails/openrails/internal/merchants",
       "strings": "strings",
       "uuid": "github.com/google/uuid"
@@ -1880,6 +1883,13 @@
     "embed/operator/operator.go": {
       "app": "github.com/open-rails/openrails/internal/app",
       "embed": "github.com/open-rails/openrails/embed"
+    },
+    "embed/operator/psp_declaration.go": {
+      "context": "context",
+      "embed": "github.com/open-rails/openrails/embed",
+      "hosttools": "github.com/open-rails/openrails/internal/hosttools",
+      "merchant": "github.com/open-rails/openrails/pkg/merchant",
+      "uuid": "github.com/google/uuid"
     },
     "embed/operator/restore_identity.go": {
       "context": "context",
@@ -1910,15 +1920,7 @@
       "strings": "strings"
     },
     "embed/psp_declaration.go": {
-      "app": "github.com/open-rails/openrails/internal/app",
-      "config": "github.com/open-rails/openrails/config",
-      "context": "context",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "merchant": "github.com/open-rails/openrails/pkg/merchant",
-      "merchants": "github.com/open-rails/openrails/internal/merchants",
-      "strings": "strings",
-      "uuid": "github.com/google/uuid"
+      "hosttools": "github.com/open-rails/openrails/internal/hosttools"
     },
     "embed/ready.go": {
       "context": "context",
@@ -2182,6 +2184,20 @@
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
       "time": "time"
+    },
+    "internal/hosttools/psp_declaration.go": {
+      "app": "github.com/open-rails/openrails/internal/app",
+      "config": "github.com/open-rails/openrails/config",
+      "context": "context",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "merchant": "github.com/open-rails/openrails/pkg/merchant",
+      "merchants": "github.com/open-rails/openrails/internal/merchants",
+      "openrails": "github.com/open-rails/openrails",
+      "strings": "strings",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/hosttools/pull_provider.go": {
       "boot": "github.com/open-rails/openrails/internal/bootstrap",

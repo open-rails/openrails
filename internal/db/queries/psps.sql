@@ -150,3 +150,14 @@ SET evidence = CASE WHEN sqlc.narg(qualification)::jsonb IS NULL
         || jsonb_build_object('nmi_cutover_qualification', sqlc.narg(qualification)::jsonb)) END,
     updated_at = now()
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid;
+
+-- Declaration supplies attribution only. A matching existing account retains
+-- its original ID, alias, archive state, custody and credential evidence.
+-- name: DeclarePSPIdentity :one
+INSERT INTO openrails.psps (id, merchant_id, rail, environment, account_id, key)
+VALUES (sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(rail)::text,
+        sqlc.arg(environment)::text, sqlc.arg(account_id)::text, sqlc.arg(key)::text)
+ON CONFLICT (rail, environment, account_id) DO UPDATE SET id=openrails.psps.id
+WHERE openrails.psps.merchant_id=EXCLUDED.merchant_id
+  AND openrails.psps.key IS NOT DISTINCT FROM EXCLUDED.key
+RETURNING id;

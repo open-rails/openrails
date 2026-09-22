@@ -98,3 +98,11 @@ are explicit local maintenance tools in `embed/operator`. They are outside the
 ordinary HTTP client contract. Shared host database commits use the explicit
 `embed.NewHostTransactions(runtime)` extension. Neither exposes a database
 handle or adds domain methods to Runtime.
+
+A multi-merchant host may learn a merchant ID only after its local control plane
+provisions it. During setup, `embed/operator.New(runtime).DeclarePSP` supplies
+attribution for that merchant's imported trial or historical facts. It shares
+constructor declaration behavior: existing identity, alias, archive state,
+custody and evidence are preserved; mismatched ownership or aliases refuse.
+It neither configures credentials nor arms a provider. Keep this operator local
+to setup before serving requests or starting workers, not in request handlers.
