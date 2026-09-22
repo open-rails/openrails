@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -109,7 +110,10 @@ func TestSaleRecoveryPreservesAnotherPurchasesLaterEntitlement(t *testing.T) {
 	first := fx.enqueueAndExecute(t, uuid.NewString())
 	require.Equal(t, intents.StatusUnknownNeedsVerify, first.Status)
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	insertProductAndPrice(fx.ctx, t, fx.db.Pool(), &models.Product{ID: productID, Key: "later-purchase-" + productID.String(), DisplayName: "Later purchase", EntitlementsSpec: map[string]*int{"shared_purchase_feature": nil}, CreatedAt: now, UpdatedAt: now}, &models.Price{ID: priceID, ProductID: productID, Amount: 5_000_000, Currency: "USD", AccessDurationHours: &hours, CreatedAt: now, UpdatedAt: now})
+	_, err := fx.db.Gen(fx.ctx).CreateProduct(fx.ctx, gen.CreateProductParams{MerchantID: fx.merchantID.UUID(), ID: productID, Key: "later-purchase-" + productID.String(), DisplayName: "Later purchase", Description: new(string), EntitlementsSpec: []byte(`{"shared_purchase_feature":null}`), CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
+	_, err = fx.db.Gen(fx.ctx).CreatePrice(fx.ctx, gen.CreatePriceParams{MerchantID: fx.merchantID.UUID(), ID: priceID, ProductID: productID, Amount: 5_000_000, Currency: "USD", AccessDurationHours: new(int32(hours)), CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
 
 	// Another real observed purchase completes while the first is provider-unknown.
 	// It owns its own later rights on the shared entitlement timeline.

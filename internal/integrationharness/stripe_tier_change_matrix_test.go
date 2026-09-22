@@ -57,11 +57,10 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 		lost := h.SeedStripeTierSubscription(d.runtime(), d.merchant, gateway)
 		lostRequest := openrails.ChangeTierRequest{PriceID: lost.ProPrice}
 		lostKey := "lost-" + uuid.NewString()[:8]
-		// Workers are live in every deployment. Keep the landed provider receipt
-		// unavailable until restart so verification cannot legitimately complete
-		// between ChangeTier and the assertions about its unresolved state.
-		revealReadback := gateway.HideSubscriptionReadbackAfterWrite(lost.StripeSub)
-		t.Cleanup(revealReadback)
+		// The live verifier must not receive the landed receipt until the
+		// pending/replay assertions finish and the deployment has restarted.
+		releaseReadback := gateway.HoldLostSubscriptionReadback(lost.StripeSub)
+		defer releaseReadback()
 		gateway.SetMode(StripeWriteLostAfterLanding)
 		pending, err := client.ChangeTier(ctx, lost.Subscription, lostKey, lostRequest)
 		require.NoError(t, err)
@@ -82,8 +81,8 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 		require.Len(t, gateway.Posts("/v1/subscriptions/"+lost.StripeSub), 1, "nothing is resent while the outcome is unknown")
 
 		d.stop()
-		revealReadback()
 		d.start()
+		releaseReadback()
 		client = d.client()
 		h.MakeOperationDue(op.ID)
 		h.FireProviderIntentVerify(h.Pool(), op.ID)

@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	riverkit "github.com/open-rails/helpers/river"
+	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
@@ -59,7 +59,7 @@ func TestAdmissionDenialFlush_HostRiverOptionalRedis(t *testing.T) {
 			})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
-			jobs, err := riverkit.New(ctx, pool, &river.Config{Schema: schema,
+			jobs, err := riverhelpers.New(ctx, pool, &river.Config{Schema: schema,
 				Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 1}}}, rt.RiverJobs())
 			require.NoError(t, err)
 			customer := uuid.New()

@@ -5,6 +5,7 @@ import (
 	authcore "github.com/open-rails/authkit/embedded"
 	riverhelpers "github.com/open-rails/helpers/river"
 	"net/http"
+	"strings"
 )
 
 // The private HTTP constructor is the only place where local protocol
@@ -47,6 +48,9 @@ func (c controlPlaneHTTP) BuildHTTP(backend authcore.HTTPBackend) (authcore.HTTP
 	}
 	surface := &controlPlaneHTTPSurface{Service: service}
 	for _, route := range mount.Routes() {
+		if !strings.HasPrefix(route.Path, "/auth/") {
+			continue
+		}
 		surface.routes = append(surface.routes, authcore.HTTPRoute{Method: route.Method, Path: route.Path, Handler: mount})
 	}
 	return surface, nil

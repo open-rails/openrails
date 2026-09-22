@@ -28,7 +28,7 @@ func TestSaleAndObservedPurchaseDoNotInvertCustomerTimelineLocks(t *testing.T) {
 	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{"lock_order_feature":null}' WHERE id=$1`, fx.productID)
 	require.NoError(t, err)
 	ddl := dbtest.SharedSuperuserPGXPool(t)
-	params := intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", PspID: fx.payload.Instrument.PSPID, PriceID: &fx.priceID, IntentType: payments.TypeNMISale, Payload: fx.payload, IdempotencyKey: "sale-lock-" + uuid.NewString(), NextAttemptAt: fx.payload.AcceptedAt, Origin: intents.OriginUser}
+	params := intents.EnqueueParams{MerchantID: fx.merchantID.UUID(), Provider: "nmi", PspID: fx.payload.Instrument.PSPID, PriceID: &fx.priceID, IntentType: payments.TypeNMISale, Payload: fx.payload, IdempotencyKey: "sale-lock-" + uuid.NewString(), NextAttemptAt: fx.payload.AcceptedAt, Origin: intents.OriginUser}
 	operation, err := intents.NewStore(fx.db).Enqueue(fx.ctx, params)
 	require.NoError(t, err)
 	gate, err := ddl.Begin(fx.ctx)

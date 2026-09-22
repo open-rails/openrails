@@ -161,6 +161,12 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	application.ConsoleAssets = opts.ConsoleAssets
 
 	r := &Runtime{app: application, delegatedAuthenticator: opts.DelegatedAuthenticator}
+	if opts.HTTP != nil {
+		if err := r.ConfigureHTTP(*opts.HTTP); err != nil {
+			_ = r.Close(ctx)
+			return nil, err
+		}
+	}
 	if opts.StripeTransport != nil {
 		r.releaseStripeTransport = stripeapi.InstallBaseTransport(opts.StripeTransport)
 	}
