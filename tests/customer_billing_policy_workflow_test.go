@@ -20,7 +20,7 @@ func checkCustomerPolicyBoundary(t *testing.T, f treasuryWorkflow) {
 	ctx := t.Context()
 	payer, _ := f.actor(t, nil)
 	large := "large" // Declared by the preceding settings/precedence journey.
-	_, err := f.client.SetCustomerBillingPolicy(ctx, payer, &large)
+	_, err := f.client.SetCustomerBillingPolicy(ctx, (payer).String(), &large)
 	require.NoError(t, err)
 	path := f.surface.BaseURL + "/v1/merchant/customers/" + payer.String() + "/billing-policy"
 
@@ -59,32 +59,32 @@ func checkCustomerPolicyBoundary(t *testing.T, f treasuryWorkflow) {
 	other := f.surface.ProvisionOwnedMerchant("policy-other-" + uuid.NewString()[:8])
 	otherClient := f.surface.Client(openrails.WithAPIKey(other.APIKey), openrails.WithMerchantID(other.MerchantID))
 	foreignCustomer := openrails.CustomerID(uuid.New())
-	_, err = otherClient.EnsureCustomer(ctx, foreignCustomer)
+	_, err = otherClient.EnsureCustomer(ctx, (foreignCustomer).String())
 	require.NoError(t, err)
 	foreignPolicy := "foreign_only"
 	require.NoError(t, otherClient.SetMerchantSettings(ctx, openrails.MerchantSettings{BillingPolicies: []openrails.BillingPolicyInput{{Name: foreignPolicy, Kind: "outstanding_cap", OutstandingCapAmount: 1}}}))
 	for _, client := range []*openrails.Client{f.client, f.embedded} {
 		for _, id := range []openrails.CustomerID{openrails.CustomerID(uuid.New()), foreignCustomer} {
-			_, err := client.GetCustomerBillingPolicy(ctx, id)
+			_, err := client.GetCustomerBillingPolicy(ctx, (id).String())
 			requirePolicyNotFound(t, err, "customer_not_found")
-			_, err = client.SetCustomerBillingPolicy(ctx, id, &large)
+			_, err = client.SetCustomerBillingPolicy(ctx, (id).String(), &large)
 			requirePolicyNotFound(t, err, "customer_not_found")
-			_, err = client.SetCustomerBillingPolicy(ctx, id, nil)
+			_, err = client.SetCustomerBillingPolicy(ctx, (id).String(), nil)
 			requirePolicyNotFound(t, err, "customer_not_found")
-			_, err = client.GetCustomerBillingPolicy(ctx, id)
+			_, err = client.GetCustomerBillingPolicy(ctx, (id).String())
 			requirePolicyNotFound(t, err, "customer_not_found") // no implicit creation
 		}
 		for _, name := range []string{"missing_policy", foreignPolicy} {
-			_, err := client.SetCustomerBillingPolicy(ctx, payer, &name)
+			_, err := client.SetCustomerBillingPolicy(ctx, (payer).String(), &name)
 			requirePolicyNotFound(t, err, "billing_policy_not_found")
 		}
 	}
-	_, err = otherClient.SetCustomerBillingPolicy(ctx, payer, &foreignPolicy)
+	_, err = otherClient.SetCustomerBillingPolicy(ctx, (payer).String(), &foreignPolicy)
 	requirePolicyNotFound(t, err, "customer_not_found")
-	assignment, err := f.client.GetCustomerBillingPolicy(ctx, payer)
+	assignment, err := f.client.GetCustomerBillingPolicy(ctx, (payer).String())
 	require.NoError(t, err)
 	require.Equal(t, &openrails.CustomerBillingPolicyAssignment{CustomerID: payer, PolicyName: &large}, assignment, "every refused write preserves the assignment")
-	untouched, err := otherClient.GetCustomerBillingPolicy(ctx, foreignCustomer)
+	untouched, err := otherClient.GetCustomerBillingPolicy(ctx, (foreignCustomer).String())
 	require.NoError(t, err)
 	require.Nil(t, untouched.PolicyName)
 	for range 2 {
@@ -92,7 +92,7 @@ func checkCustomerPolicyBoundary(t *testing.T, f treasuryWorkflow) {
 		require.Equal(t, http.StatusOK, status, string(raw))
 		require.Equal(t, map[string]any{"customer_id": payer.String(), "policy_name": nil}, workflowObject(t, raw))
 	}
-	assignment, err = f.embedded.GetCustomerBillingPolicy(ctx, payer)
+	assignment, err = f.embedded.GetCustomerBillingPolicy(ctx, (payer).String())
 	require.NoError(t, err)
 	require.Nil(t, assignment.PolicyName, "explicit null is visible in the other deployment")
 	// Assignment and declaration replacement share the same merchant lock.
@@ -111,11 +111,15 @@ func checkCustomerPolicyBoundary(t *testing.T, f treasuryWorkflow) {
 		require.NoError(t, f.client.SetMerchantSettings(ctx, *doc))
 		start := make(chan struct{})
 		setDone, removeDone := make(chan error, 1), make(chan error, 1)
-		go func() { <-start; _, err := f.client.SetCustomerBillingPolicy(ctx, payer, &large); setDone <- err }()
+		go func() {
+			<-start
+			_, err := f.client.SetCustomerBillingPolicy(ctx, (payer).String(), &large)
+			setDone <- err
+		}()
 		go func() { <-start; removeDone <- f.embedded.SetMerchantSettings(ctx, withoutLarge) }()
 		close(start)
 		setErr, removeErr := <-setDone, <-removeDone
-		current, err := f.embedded.GetCustomerBillingPolicy(ctx, payer)
+		current, err := f.embedded.GetCustomerBillingPolicy(ctx, (payer).String())
 		require.NoError(t, err)
 		if setErr == nil {
 			require.ErrorIs(t, removeErr, openrails.ErrInvalid)
@@ -125,7 +129,7 @@ func checkCustomerPolicyBoundary(t *testing.T, f treasuryWorkflow) {
 			require.NoError(t, removeErr)
 			require.Nil(t, current.PolicyName)
 		}
-		_, err = f.client.SetCustomerBillingPolicy(ctx, payer, nil)
+		_, err = f.client.SetCustomerBillingPolicy(ctx, (payer).String(), nil)
 		require.NoError(t, err)
 	}
 }

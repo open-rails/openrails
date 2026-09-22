@@ -73,7 +73,7 @@ func TestNativeEngineSignupSelfHTTPAndDueWorker(t *testing.T) {
 	require.NoError(t, err)
 	token, _, err := cp.Core().MintAccessToken(t.Context(), user.ID, nil)
 	require.NoError(t, err)
-	_, err = owner.EnsureCustomer(t.Context(), openrails.CustomerID(uuid.MustParse(user.ID)))
+	_, err = owner.EnsureCustomer(t.Context(), (openrails.CustomerID(uuid.MustParse(user.ID))).String())
 	require.NoError(t, err)
 	call := func(path, key string, body any) map[string]any {
 		status, raw := cutoverHTTPRequest(t, "POST", surface.BaseURL+"/v1/me"+path, token, key, body)

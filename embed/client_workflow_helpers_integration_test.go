@@ -66,9 +66,9 @@ func observeClientError(t *testing.T, label string, err error) errorObservation 
 // dtoShapeObservation is the id and currency spelling one deployment returned.
 type dtoShapeObservation struct {
 	SubscriptionID, ListedSubscriptionID, MethodSubscriptionID openrails.SubscriptionID
-	CustomerID                                                 openrails.CustomerID
-	ProductID, PriceProductID, ProductOwnID                    openrails.ProductID
-	PriceID, PriceOwnID, CatalogPriceID                        openrails.PriceID
+	CustomerID                                                 string
+	ProductID, PriceProductID, ProductOwnID                    string
+	PriceID, PriceOwnID, CatalogPriceID                        string
 	PaymentMethodID, MethodID                                  openrails.PaymentMethodID
 	PaymentID                                                  openrails.PaymentID
 	ReadByID, HasPayment                                       bool

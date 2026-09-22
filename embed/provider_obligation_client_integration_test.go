@@ -100,7 +100,7 @@ func (f *providerFixture) observation(operationID, observationID string, costs .
 
 func (f *providerFixture) account(t *testing.T, ctx context.Context) string {
 	t.Helper()
-	account, err := f.client.GetCreditAccount(ctx, openrails.CustomerID(f.payer), "USD")
+	account, err := f.client.GetCreditAccount(ctx, (openrails.CustomerID(f.payer)).String(), "USD")
 	require.NoError(t, err)
 	return fmt.Sprintf("balance=%d held=%d available=%d owed=%d", account.BalanceAmount, account.HeldAmount, account.AvailableAmount, account.OutstandingOwedAmount)
 }

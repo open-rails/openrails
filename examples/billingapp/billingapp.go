@@ -74,10 +74,10 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 			r.PolicyWindows = len(policy.SpendWindows)
 		}
 	}
-	if err := client.SetCreditLimit(ctx, payer, in.Currency, 0); err != nil {
+	if err := client.SetCreditLimit(ctx, (payer).String(), in.Currency, 0); err != nil {
 		return r, fmt.Errorf("set credit limit: %w", err)
 	}
-	if r.CreditLimit, err = client.GetCreditLimit(ctx, payer, in.Currency); err != nil {
+	if r.CreditLimit, err = client.GetCreditLimit(ctx, (payer).String(), in.Currency); err != nil {
 		return r, fmt.Errorf("read credit limit: %w", err)
 	}
 
@@ -116,12 +116,12 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	}
 	r.DeniedBy = denied.BlockedBy
 	r.UnknownRelease = errors.Is(client.Release(ctx, uuid.NewString()), openrails.ErrNotFound)
-	balance, err := client.Balance(ctx, payer)
+	balance, err := client.Balance(ctx, (payer).String())
 	if err != nil {
 		return r, fmt.Errorf("balance: %w", err)
 	}
 	r.Balance = balance.BalanceAmount
-	rows, err := client.UsageRollup(ctx, payer, in.Currency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "resource")
+	rows, err := client.UsageRollup(ctx, (payer).String(), in.Currency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "resource")
 	if err != nil {
 		return r, fmt.Errorf("usage rollup: %w", err)
 	}
@@ -137,7 +137,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	if err != nil {
 		return r, fmt.Errorf("checkout price ID: %w", err)
 	}
-	options, err := client.ListCheckoutRailOptions(ctx, priceID)
+	options, err := client.ListCheckoutRailOptions(ctx, (priceID).String())
 	if err != nil {
 		return r, fmt.Errorf("checkout options: %w", err)
 	}
@@ -170,7 +170,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	if err := client.CancelSubscription(ctx, in.SubscriptionID, openrails.CancelSubscriptionRequest{Reason: "customer request"}); err != nil {
 		return r, fmt.Errorf("cancel subscription: %w", err)
 	}
-	page, err := client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: in.SubscriberID, PageOptions: openrails.PageOptions{Limit: 10}})
+	page, err := client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: (in.SubscriberID).String(), PageOptions: openrails.PageOptions{Limit: 10}})
 	if err != nil {
 		return r, fmt.Errorf("list subscriptions: %w", err)
 	}
@@ -188,7 +188,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	if err != nil {
 		return r, fmt.Errorf("read invoice: %w", err)
 	}
-	if r.InvoiceProfileSet, err = client.EnsureCustomerInvoiceProfile(ctx, invoice.CustomerID, openrails.InvoiceProfileDTO{
+	if r.InvoiceProfileSet, err = client.EnsureCustomerInvoiceProfile(ctx, (invoice.CustomerID).String(), openrails.InvoiceProfileDTO{
 		NetTermsDays: 14, CollectionMethod: "send_invoice",
 	}); err != nil {
 		return r, fmt.Errorf("invoice profile: %w", err)

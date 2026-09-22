@@ -45,7 +45,7 @@ func checkTreasuryUsageInvoice(t *testing.T, f treasuryWorkflow) {
 		first.Replayed = true
 		require.Equal(t, first, replay)
 	}
-	account, err := f.client.Balance(ctx, captured)
+	account, err := f.client.Balance(ctx, (captured).String())
 	require.NoError(t, err)
 	require.EqualValues(t, 99_988, account.BalanceAmount, "three captures plus retries debit once each")
 	from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
@@ -56,11 +56,11 @@ func checkTreasuryUsageInvoice(t *testing.T, f treasuryWorkflow) {
 		{"resource", []openrails.UsageRollupRow{{Key: "alpha", Currency: "USD", EventCount: 2, TotalAmount: 8}, {Key: "beta", Currency: "USD", EventCount: 1, TotalAmount: 4}}},
 		{"tier", []openrails.UsageRollupRow{{Key: "standard", Currency: "USD", EventCount: 2, TotalAmount: 8}, {Key: "fast", Currency: "USD", EventCount: 1, TotalAmount: 4}}},
 	} {
-		rows, err := f.client.UsageRollup(ctx, captured, "USD", from, to, group.key)
+		rows, err := f.client.UsageRollup(ctx, (captured).String(), "USD", from, to, group.key)
 		require.NoError(t, err)
 		require.ElementsMatch(t, group.expected, rows)
 	}
-	_, err = f.client.UsageRollup(ctx, captured, "USD", from, to, "bogus")
+	_, err = f.client.UsageRollup(ctx, (captured).String(), "USD", from, to, "bogus")
 	require.ErrorIs(t, err, openrails.ErrInvalid)
 	for _, row := range []struct {
 		event                 string

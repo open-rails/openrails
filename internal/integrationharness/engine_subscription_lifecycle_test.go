@@ -155,7 +155,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 		token, _, err := cp.Core().MintAccessToken(t.Context(), user.ID, nil)
 		require.NoError(t, err)
 		customer := uuid.MustParse(user.ID)
-		_, err = owner.EnsureCustomer(t.Context(), openrails.CustomerID(customer))
+		_, err = owner.EnsureCustomer(t.Context(), (openrails.CustomerID(customer)).String())
 		require.NoError(t, err)
 		c, err := openrails.NewRemote(surface.BaseURL, openrails.WithMerchantID(owned.MerchantID), openrails.WithTokenProvider(func(context.Context) (string, error) { return token, nil }))
 		require.NoError(t, err)
@@ -295,7 +295,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 					t.Cleanup(releaseDelete)
 					done := make(chan error, 1)
 					go func() {
-						result, err := owner.DeletePaymentMethod(t.Context(), openrails.CustomerID(user), openrails.PaymentMethodID(method))
+						result, err := owner.DeletePaymentMethod(t.Context(), (openrails.CustomerID(user)).String(), openrails.PaymentMethodID(method))
 						if err == nil && result.Pending {
 							err = fmt.Errorf("deletion remains pending")
 						}
@@ -320,7 +320,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 					releaseDelete()
 					require.NoError(t, <-done)
 				} else {
-					result, err := owner.DeletePaymentMethod(t.Context(), openrails.CustomerID(user), openrails.PaymentMethodID(method))
+					result, err := owner.DeletePaymentMethod(t.Context(), (openrails.CustomerID(user)).String(), openrails.PaymentMethodID(method))
 					require.NoError(t, err)
 					require.False(t, result.Pending)
 				}
@@ -361,7 +361,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 				require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1`, id).Scan(&count))
 				require.Equal(t, 1, count)
 			}
-			access, err := owner.HasEntitlement(t.Context(), openrails.CustomerID(user), "engine_access", end)
+			access, err := owner.HasEntitlement(t.Context(), (openrails.CustomerID(user)).String(), "engine_access", end)
 			require.NoError(t, err)
 			require.False(t, access)
 			if scenario == "engine_expired" || scenario == "engine_chargeback" || pastDue {
@@ -369,7 +369,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 				require.Equal(t, 400, status, string(raw))
 				_, err = rt.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{SubscriptionID: id})
 				require.Error(t, err)
-				access, err = owner.HasEntitlement(t.Context(), openrails.CustomerID(user), "engine_access", now)
+				access, err = owner.HasEntitlement(t.Context(), (openrails.CustomerID(user)).String(), "engine_access", now)
 				require.NoError(t, err)
 				require.False(t, access)
 				return
@@ -384,12 +384,12 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 			require.NoError(t, pool.QueryRow(ctx, `SELECT status,deletion_scheduled_at FROM billing.subscriptions WHERE id=$1`, id).Scan(&state, &marker))
 			require.Equal(t, "active", state)
 			require.Nil(t, marker)
-			access, err = owner.HasEntitlement(t.Context(), openrails.CustomerID(user), "engine_access", now)
+			access, err = owner.HasEntitlement(t.Context(), (openrails.CustomerID(user)).String(), "engine_access", now)
 			require.NoError(t, err)
 			require.True(t, access)
 			if scenario == "engine_resume_then_delete" {
 				before := deleteCalls.Load()
-				_, err := owner.DeletePaymentMethod(t.Context(), openrails.CustomerID(user), openrails.PaymentMethodID(method))
+				_, err := owner.DeletePaymentMethod(t.Context(), (openrails.CustomerID(user)).String(), openrails.PaymentMethodID(method))
 				require.Error(t, err)
 				require.Equal(t, before, deleteCalls.Load())
 				return
@@ -406,7 +406,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 				require.Equal(t, 400, apiErr.Status)
 				require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM billing.subscriptions WHERE id=$1`, id).Scan(&state))
 				require.Equal(t, "cancelled", state)
-				access, err = owner.HasEntitlement(t.Context(), openrails.CustomerID(user), "engine_access", now)
+				access, err = owner.HasEntitlement(t.Context(), (openrails.CustomerID(user)).String(), "engine_access", now)
 				require.NoError(t, err)
 				require.False(t, access)
 			}

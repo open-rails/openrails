@@ -76,7 +76,7 @@ func TestQualifiedOneTimeSaleClientAcrossEmbeddedAndHTTP(t *testing.T) {
 			}
 			t.Run(name+"/"+mode, func(t *testing.T) {
 				customer, method := uuid.New(), uuid.New()
-				_, err := client.EnsureCustomer(ctx, openrails.CustomerID(customer))
+				_, err := client.EnsureCustomer(ctx, (openrails.CustomerID(customer)).String())
 				require.NoError(t, err)
 				product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: "sale-" + uuid.NewString(), DisplayName: "Accepted purchase", EntitlementsSpec: map[string]*int{"sale_qualified_access": nil}})
 				require.NoError(t, err)
@@ -90,7 +90,7 @@ func TestQualifiedOneTimeSaleClientAcrossEmbeddedAndHTTP(t *testing.T) {
 				before := gateway.SaleAttempts()
 				var result *openrails.CheckoutSession
 				if token {
-					request.PaymentOptions.PaymentMethodID = openrails.PaymentMethodID{}
+					request.PaymentOptions.PaymentMethodID = ""
 					request.PaymentOptions.PaymentToken = "token-" + uuid.NewString()
 					beforeVaults := vaultCreates.Load()
 					type completion struct {

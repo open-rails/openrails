@@ -84,7 +84,7 @@ func TestCCBillCallbacksUseRuntimeClock(t *testing.T) {
 	}
 	access := func(at time.Time, want bool) {
 		t.Helper()
-		got, err := client.HasEntitlement(t.Context(), customer, "callback_access", at)
+		got, err := client.HasEntitlement(t.Context(), (customer).String(), "callback_access", at)
 		require.NoError(t, err)
 		require.Equal(t, want, got)
 	}

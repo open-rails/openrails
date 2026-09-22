@@ -281,9 +281,9 @@ func TestManifestMode_Loop(t *testing.T) {
 	client, err := rt1.Client()
 	require.NoError(t, err)
 	userID := openrails.CustomerID(uuid.New())
-	_, err = client.GrantEntitlement(ctx, userID, openrails.GrantEntitlementRequest{Entitlement: "pro-access"})
+	_, err = client.GrantEntitlement(ctx, (userID).String(), openrails.GrantEntitlementRequest{Entitlement: "pro-access"})
 	require.NoError(t, err)
-	ents, err := client.ListEntitlements(ctx, userID, time.Time{})
+	ents, err := client.ListEntitlements(ctx, (userID).String(), time.Time{})
 	require.NoError(t, err)
 	var names []string
 	for _, ent := range ents {

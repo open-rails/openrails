@@ -259,8 +259,8 @@ func (c *Client) DepositCredits(ctx context.Context, req DepositCreditsRequest) 
 
 // GetDeposit implements Client (handler ServiceGetDeposit, or#906). A key that
 // never committed returns an error matching ErrNotFound.
-func (c *Client) GetDeposit(ctx context.Context, customerID CustomerID, sourceID string) (*CreditTransaction, error) {
-	customer, err := requireTypedID("customer_id", customerID)
+func (c *Client) GetDeposit(ctx context.Context, customerID string, sourceID string) (*CreditTransaction, error) {
+	customer, err := requireCustomerID(customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -333,8 +333,8 @@ func (c *Client) ExtendHold(ctx context.Context, requestID string, expiresAt tim
 }
 
 // Balance implements Client (handler ServiceGetCreditsBalance).
-func (c *Client) Balance(ctx context.Context, customerID CustomerID) (*BalanceResponse, error) {
-	customer, err := requireTypedID("customer_id", customerID)
+func (c *Client) Balance(ctx context.Context, customerID string) (*BalanceResponse, error) {
+	customer, err := requireCustomerID(customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -351,8 +351,8 @@ func (c *Client) Balance(ctx context.Context, customerID CustomerID) (*BalanceRe
 }
 
 // GetCreditAccount implements Client (handler ServiceGetCreditsBalance).
-func (c *Client) GetCreditAccount(ctx context.Context, customerID CustomerID, currency string) (*CreditAccount, error) {
-	customer, err := requireTypedID("customer_id", customerID)
+func (c *Client) GetCreditAccount(ctx context.Context, customerID string, currency string) (*CreditAccount, error) {
+	customer, err := requireCustomerID(customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -367,8 +367,8 @@ func (c *Client) GetCreditAccount(ctx context.Context, customerID CustomerID, cu
 }
 
 // UsageRollup implements Client (handler ServiceUsageRollup).
-func (c *Client) UsageRollup(ctx context.Context, customerID CustomerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error) {
-	customer, err := requireTypedID("customer_id", customerID)
+func (c *Client) UsageRollup(ctx context.Context, customerID string, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error) {
+	customer, err := requireCustomerID(customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -389,8 +389,8 @@ func (c *Client) UsageRollup(ctx context.Context, customerID CustomerID, currenc
 }
 
 // GetTrustLevel implements Client (handler ServiceGetTrustLevel, #477).
-func (c *Client) GetTrustLevel(ctx context.Context, customerID CustomerID, currency string) (string, error) {
-	customer, err := requireTypedID("customer_id", customerID)
+func (c *Client) GetTrustLevel(ctx context.Context, customerID string, currency string) (string, error) {
+	customer, err := requireCustomerID(customerID)
 	if err != nil {
 		return "", err
 	}
@@ -428,8 +428,8 @@ func (c *Client) RecordUsage(ctx context.Context, report UsageReport) error {
 }
 
 // SetCreditLimit implements Client (handler ServiceSetCreditLimit, #489).
-func (c *Client) SetCreditLimit(ctx context.Context, customerID CustomerID, currency string, creditLimit int64) error {
-	if _, err := requireTypedID("customer_id", customerID); err != nil {
+func (c *Client) SetCreditLimit(ctx context.Context, customerID string, currency string, creditLimit int64) error {
+	if _, err := requireCustomerID(customerID); err != nil {
 		return err
 	}
 	body := CreditLimitRequest{CustomerID: customerID, Currency: normalizeCurrency(currency), CreditLimitAmount: creditLimit}
@@ -437,8 +437,8 @@ func (c *Client) SetCreditLimit(ctx context.Context, customerID CustomerID, curr
 }
 
 // GetCreditLimit implements Client (handler ServiceGetCreditLimit, #489).
-func (c *Client) GetCreditLimit(ctx context.Context, customerID CustomerID, currency string) (int64, error) {
-	customer, err := requireTypedID("customer_id", customerID)
+func (c *Client) GetCreditLimit(ctx context.Context, customerID string, currency string) (int64, error) {
+	customer, err := requireCustomerID(customerID)
 	if err != nil {
 		return 0, err
 	}
@@ -502,7 +502,7 @@ func (c *Client) SetMerchantSettings(ctx context.Context, settings MerchantSetti
 }
 
 // GetCustomerBillingPolicy reads the explicit assignment, not the resolved tier/default policy.
-func (c *Client) GetCustomerBillingPolicy(ctx context.Context, customerID CustomerID) (*CustomerBillingPolicyAssignment, error) {
+func (c *Client) GetCustomerBillingPolicy(ctx context.Context, customerID string) (*CustomerBillingPolicyAssignment, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err
@@ -516,7 +516,7 @@ func (c *Client) GetCustomerBillingPolicy(ctx context.Context, customerID Custom
 
 // SetCustomerBillingPolicy assigns a declared policy; nil explicitly clears the
 // assignment and restores tier/default inheritance. It never creates a customer.
-func (c *Client) SetCustomerBillingPolicy(ctx context.Context, customerID CustomerID, policyName *string) (*CustomerBillingPolicyAssignment, error) {
+func (c *Client) SetCustomerBillingPolicy(ctx context.Context, customerID string, policyName *string) (*CustomerBillingPolicyAssignment, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err
@@ -533,7 +533,7 @@ func (c *Client) SetCustomerBillingPolicy(ctx context.Context, customerID Custom
 
 // SetCustomerSpendDelegations replaces the customer's complete delegation
 // document over the machine-authenticated merchant surface.
-func (c *Client) SetCustomerSpendDelegations(ctx context.Context, customerID CustomerID, delegations []SpendDelegationInput) error {
+func (c *Client) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []SpendDelegationInput) error {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return err
@@ -543,7 +543,7 @@ func (c *Client) SetCustomerSpendDelegations(ctx context.Context, customerID Cus
 }
 
 // SetCustomerSpendDelegation atomically upserts one customer delegation.
-func (c *Client) SetCustomerSpendDelegation(ctx context.Context, customerID CustomerID, delegation SpendDelegationInput) error {
+func (c *Client) SetCustomerSpendDelegation(ctx context.Context, customerID string, delegation SpendDelegationInput) error {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return err
@@ -554,7 +554,7 @@ func (c *Client) SetCustomerSpendDelegation(ctx context.Context, customerID Cust
 
 // DeleteCustomerSpendDelegation revokes exactly one delegation (or#911); a
 // missing grant returns ErrNotFound.
-func (c *Client) DeleteCustomerSpendDelegation(ctx context.Context, customerID CustomerID, scope, scopeKey string) error {
+func (c *Client) DeleteCustomerSpendDelegation(ctx context.Context, customerID string, scope, scopeKey string) error {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return err
@@ -570,30 +570,30 @@ func (c *Client) DeleteCustomerSpendDelegation(ctx context.Context, customerID C
 // ListActiveEntitlements returns active records for up to 500 subjects, keyed
 // by every requested subject after trim and dedupe; unknown subjects map to an
 // empty slice. A zero at means now.
-func (c *Client) ListActiveEntitlements(ctx context.Context, subjects []CustomerID, at time.Time) (map[CustomerID][]EntitlementRecord, error) {
+func (c *Client) ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
 	body := map[string]any{
 		"subjects": subjects,
 	}
 	if !at.IsZero() {
 		body["at"] = at.UTC().Format(time.RFC3339Nano)
 	}
-	var out map[CustomerID][]EntitlementRecord
+	var out map[string][]EntitlementRecord
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/customers/entitlements:batch", body, &out); err != nil {
 		return nil, err
 	}
 	if out == nil {
-		out = map[CustomerID][]EntitlementRecord{}
+		out = map[string][]EntitlementRecord{}
 	}
 	return out, nil
 }
 
 // ListEntitlements implements Client as the single-subject form of
 // ListActiveEntitlements.
-func (c *Client) ListEntitlements(ctx context.Context, subject CustomerID, at time.Time) ([]EntitlementRecord, error) {
-	if subject.IsZero() {
+func (c *Client) ListEntitlements(ctx context.Context, subject string, at time.Time) ([]EntitlementRecord, error) {
+	if strings.TrimSpace(subject) == "" {
 		return nil, invalidErr("subject is required")
 	}
-	out, err := c.ListActiveEntitlements(ctx, []CustomerID{subject}, at)
+	out, err := c.ListActiveEntitlements(ctx, []string{subject}, at)
 	if err != nil {
 		return nil, err
 	}
@@ -602,7 +602,7 @@ func (c *Client) ListEntitlements(ctx context.Context, subject CustomerID, at ti
 
 // HasEntitlement implements Client by checking the single-subject entitlement
 // list returned from /v1/merchant/customers/entitlements:batch.
-func (c *Client) HasEntitlement(ctx context.Context, subject CustomerID, entitlement string, at time.Time) (bool, error) {
+func (c *Client) HasEntitlement(ctx context.Context, subject string, entitlement string, at time.Time) (bool, error) {
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
 		return false, invalidErr("entitlement is required")
@@ -622,7 +622,7 @@ func (c *Client) HasEntitlement(ctx context.Context, subject CustomerID, entitle
 // ListCustomersWithEntitlement implements Client (handler
 // ServiceGetCustomersWithEntitlement). It walks the keyset-paginated reverse
 // route to completion.
-func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time) ([]CustomerID, error) {
+func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time) ([]string, error) {
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
 		return nil, invalidErr("entitlement is required")
@@ -631,7 +631,7 @@ func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement s
 	if !at.IsZero() {
 		base += "&at=" + url.QueryEscape(at.UTC().Format(time.RFC3339Nano))
 	}
-	var all []CustomerID
+	var all []string
 	cursor := ""
 	for {
 		path := base
@@ -639,9 +639,9 @@ func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement s
 			path += "&cursor=" + url.QueryEscape(cursor)
 		}
 		var out struct {
-			Customers  []CustomerID `json:"customers"`
-			NextCursor string       `json:"next_cursor"`
-			HasMore    bool         `json:"has_more"`
+			Customers  []string `json:"customers"`
+			NextCursor string   `json:"next_cursor"`
+			HasMore    bool     `json:"has_more"`
 		}
 		if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 			return nil, err

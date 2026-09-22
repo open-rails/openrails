@@ -204,7 +204,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 	require.NoError(t, err)
 	token, _, err := cp.Core().MintAccessToken(t.Context(), user.ID, nil)
 	require.NoError(t, err)
-	_, err = owner.EnsureCustomer(t.Context(), openrails.CustomerID(uuid.MustParse(user.ID)))
+	_, err = owner.EnsureCustomer(t.Context(), (openrails.CustomerID(uuid.MustParse(user.ID))).String())
 	require.NoError(t, err)
 	call := func(method, path, key string, body any) map[string]any {
 		var data bytes.Buffer

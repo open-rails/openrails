@@ -62,7 +62,7 @@ type UsageMeterRequest struct {
 }
 
 type DefaultUsageRateCardRequest struct {
-	ProductID ProductID           `json:"product_id"`
+	ProductID string              `json:"product_id"`
 	Filter    map[string][]string `json:"filter"`
 	Price     pricing.RatePrice   `json:"price"`
 	Allowance *pricing.Allowance  `json:"allowance,omitempty"`

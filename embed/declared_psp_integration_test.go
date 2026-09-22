@@ -69,7 +69,7 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 			price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: key + "-price", UnitAmount: 1_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 			require.NoError(t, err)
 
-			options, err := client.ListCheckoutRailOptions(ctx, sdkPriceID(t, price.ID))
+			options, err := client.ListCheckoutRailOptions(ctx, (sdkPriceID(t, price.ID)).String())
 			require.NoError(t, err)
 			for _, option := range options {
 				require.NotEqual(t, declaredKey, option.Selector, "an unarmed PSP is never a checkout option")

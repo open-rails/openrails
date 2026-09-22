@@ -173,12 +173,12 @@ type ConfirmPayment struct {
 }
 
 type EffectiveTier struct {
-	Group       string    `json:"group"`
-	Entitlement string    `json:"entitlement"`
-	DisplayName string    `json:"display_name"`
-	TierRank    int       `json:"tier_rank"`
-	ProductID   ProductID `json:"product_id"`
-	ProductKey  string    `json:"product_key"`
+	Group       string `json:"group"`
+	Entitlement string `json:"entitlement"`
+	DisplayName string `json:"display_name"`
+	TierRank    int    `json:"tier_rank"`
+	ProductID   string `json:"product_id"`
+	ProductKey  string `json:"product_key"`
 }
 
 // CustodianCaptureReference is a vendor session token, not a card or payment

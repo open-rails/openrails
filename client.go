@@ -455,7 +455,7 @@ func (v AdmitBatchVerdict) Allowed() bool {
 
 // CreditLimitRequest carries an exact native-currency arrears limit.
 type CreditLimitRequest struct {
-	CustomerID        CustomerID `json:"customer_id"`
-	Currency          string     `json:"currency"`
-	CreditLimitAmount int64      `json:"credit_limit_amount,string"`
+	CustomerID        string `json:"customer_id"`
+	Currency          string `json:"currency"`
+	CreditLimitAmount int64  `json:"credit_limit_amount,string"`
 }

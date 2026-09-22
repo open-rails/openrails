@@ -486,7 +486,7 @@ func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, pro
 		SourceID:   depositSourceID,
 	})
 	require.NoError(t, err)
-	balance, err := client.Balance(ctx, openrails.CustomerID(payerID))
+	balance, err := client.Balance(ctx, (openrails.CustomerID(payerID)).String())
 	require.NoError(t, err)
 	require.Equal(t, int64(10_000), balance.BalanceAmount)
 
@@ -518,7 +518,7 @@ func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, pro
 	from := time.Now().Add(-time.Hour)
 	to := time.Now().Add(time.Hour)
 
-	rows, err := client.UsageRollup(ctx, openrails.CustomerID(payerID), "usd", from, to, "resource")
+	rows, err := client.UsageRollup(ctx, (openrails.CustomerID(payerID)).String(), "usd", from, to, "resource")
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, "vm-small", rows[0].Key)

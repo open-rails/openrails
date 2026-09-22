@@ -82,7 +82,7 @@ func TestCCBillUpgradeBilledPriceAndDuplicateCallback(t *testing.T) {
 	require.Zero(t, count)
 	require.NoError(t, pool.QueryRow(t.Context(), `SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2 AND subscription_id=$3 AND price_id=$4 AND transaction_id=$5 AND amount=24990000 AND list_amount=24990000 AND currency='USD'`, owned.MerchantID.UUID(), uuid.MustParse(user.ID), sub, price, transaction).Scan(&count))
 	require.Equal(t, 1, count)
-	active, err := client.HasEntitlement(t.Context(), openrails.CustomerID(uuid.MustParse(user.ID)), "upgrade_access", time.Now().UTC())
+	active, err := client.HasEntitlement(t.Context(), (openrails.CustomerID(uuid.MustParse(user.ID))).String(), "upgrade_access", time.Now().UTC())
 	require.NoError(t, err)
 	require.True(t, active)
 }

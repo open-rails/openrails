@@ -56,21 +56,21 @@ func TestStandaloneMerchantCustomerLookupClientHTTP(t *testing.T) {
 
 	ghost := openrails.CustomerID(uuid.New())
 	customer := openrails.CustomerID(subjectID)
-	batch, err := client.ListActiveEntitlements(ctx, []openrails.CustomerID{customer, ghost}, time.Time{})
+	batch, err := client.ListActiveEntitlements(ctx, []string{(customer).String(), (ghost).String()}, time.Time{})
 	require.NoError(t, err)
-	require.Len(t, batch[customer], 1)
-	require.Equal(t, "premium", batch[customer][0].Entitlement)
-	require.Empty(t, batch[ghost])
+	require.Len(t, batch[(customer).String()], 1)
+	require.Equal(t, "premium", batch[(customer).String()][0].Entitlement)
+	require.Empty(t, batch[(ghost).String()])
 
-	single, err := client.ListEntitlements(ctx, customer, time.Time{})
+	single, err := client.ListEntitlements(ctx, (customer).String(), time.Time{})
 	require.NoError(t, err)
 	require.Len(t, single, 1)
 	require.Equal(t, "premium", single[0].Entitlement)
 
-	hasPremium, err := client.HasEntitlement(ctx, customer, "premium", time.Time{})
+	hasPremium, err := client.HasEntitlement(ctx, (customer).String(), "premium", time.Time{})
 	require.NoError(t, err)
 	require.True(t, hasPremium)
-	hasMissing, err := client.HasEntitlement(ctx, customer, "missing", time.Time{})
+	hasMissing, err := client.HasEntitlement(ctx, (customer).String(), "missing", time.Time{})
 	require.NoError(t, err)
 	require.False(t, hasMissing)
 
@@ -87,7 +87,7 @@ func TestStandaloneMerchantCustomerLookupClientHTTP(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, hasOtherProduct.HasAccess)
 
-	balance, err := client.GetCreditAccount(ctx, customer, money.DefaultCurrency)
+	balance, err := client.GetCreditAccount(ctx, (customer).String(), money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, customer, balance.CustomerID)
 	require.Equal(t, money.DefaultCurrency, balance.Currency)

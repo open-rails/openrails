@@ -88,7 +88,7 @@ func TestCustomerBillingReadWorkflow(t *testing.T) {
 		}
 		return nil
 	}))
-	_, err = f.client.GrantEntitlement(t.Context(), customer, openrails.GrantEntitlementRequest{Entitlement: "premium", EndAt: &end})
+	_, err = f.client.GrantEntitlement(t.Context(), (customer).String(), openrails.GrantEntitlementRequest{Entitlement: "premium", EndAt: &end})
 	require.NoError(t, err)
 	current := list("/v1/me/subscriptions?status=active", token)
 	require.Len(t, current, 1)

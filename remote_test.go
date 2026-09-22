@@ -89,7 +89,7 @@ func TestRemoteTrustLevelWireNames(t *testing.T) {
 		t.Fatalf("prospective rate missing from admission: %#v", admitBody)
 	}
 
-	trustLevel, err := client.GetTrustLevel(context.Background(), testCustomer, "USD")
+	trustLevel, err := client.GetTrustLevel(context.Background(), (testCustomer).String(), "USD")
 	if err != nil {
 		t.Fatalf("GetTrustLevel: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestRemoteSetCustomerSpendDelegation(t *testing.T) {
 	if clientErr != nil {
 		t.Fatal(clientErr)
 	}
-	err := client.SetCustomerSpendDelegation(context.Background(), testCustomer, SpendDelegationInput{
+	err := client.SetCustomerSpendDelegation(context.Background(), (testCustomer).String(), SpendDelegationInput{
 		Scope: "invoker", ScopeKey: "issuer:subject:digest:entitlement",
 		Windows: []SpendLimitWindow{{Key: "month", WindowSeconds: 2592000, Limit: 42, Currency: "USD"}},
 	})
@@ -156,7 +156,7 @@ func TestRemoteSetCustomerSpendDelegationsUsesMerchantMachineRoute(t *testing.T)
 	if clientErr != nil {
 		t.Fatal(clientErr)
 	}
-	err := client.SetCustomerSpendDelegations(context.Background(), testCustomer, []SpendDelegationInput{{
+	err := client.SetCustomerSpendDelegations(context.Background(), (testCustomer).String(), []SpendDelegationInput{{
 		Scope: "invoker", ScopeKey: "invoker-1",
 		Windows: []SpendLimitWindow{{Key: "month", WindowSeconds: 2592000, Limit: 42, Currency: "USD"}},
 	}})
@@ -183,7 +183,7 @@ func TestRemoteDeleteCustomerSpendDelegation(t *testing.T) {
 	if clientErr != nil {
 		t.Fatal(clientErr)
 	}
-	err := client.DeleteCustomerSpendDelegation(context.Background(), testCustomer, "invoker", "user:11111111-1111-1111-1111-111111111111")
+	err := client.DeleteCustomerSpendDelegation(context.Background(), (testCustomer).String(), "invoker", "user:11111111-1111-1111-1111-111111111111")
 	if err != nil {
 		t.Fatalf("DeleteCustomerSpendDelegation: %v", err)
 	}
@@ -230,26 +230,26 @@ func TestRemoteValidationErrorParity(t *testing.T) {
 		{
 			name: "SetCustomerSpendDelegations empty customer_id",
 			fn: func() error {
-				return client.SetCustomerSpendDelegations(ctx, CustomerID{}, nil)
+				return client.SetCustomerSpendDelegations(ctx, (CustomerID{}).String(), nil)
 			},
 		},
 		{
 			name: "SetCustomerSpendDelegation empty customer_id",
 			fn: func() error {
-				return client.SetCustomerSpendDelegation(ctx, CustomerID{}, SpendDelegationInput{})
+				return client.SetCustomerSpendDelegation(ctx, (CustomerID{}).String(), SpendDelegationInput{})
 			},
 		},
 		{
 			name: "ListEntitlements empty subject",
 			fn: func() error {
-				_, err := client.ListEntitlements(ctx, CustomerID{}, time.Time{})
+				_, err := client.ListEntitlements(ctx, (CustomerID{}).String(), time.Time{})
 				return err
 			},
 		},
 		{
 			name: "HasEntitlement empty entitlement",
 			fn: func() error {
-				_, err := client.HasEntitlement(ctx, testCustomer, "", time.Time{})
+				_, err := client.HasEntitlement(ctx, (testCustomer).String(), "", time.Time{})
 				return err
 			},
 		},

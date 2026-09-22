@@ -16,7 +16,7 @@ type PageOptions struct{ Limit, Offset int }
 
 type SubscriptionFilter struct {
 	PageOptions
-	CustomerID CustomerID
+	CustomerID string
 	Status     string
 	Rail       string
 }
@@ -40,14 +40,14 @@ type Subscription struct {
 	// GET /v1/merchant/payments serves.
 	Payments              []Payment            `json:"payments,omitempty"`
 	ID                    SubscriptionID       `json:"id"`
-	CustomerID            CustomerID           `json:"customer_id"`
-	ProductID             ProductID            `json:"product_id"`
-	PriceID               PriceID              `json:"price_id"`
+	CustomerID            string               `json:"customer_id"`
+	ProductID             string               `json:"product_id"`
+	PriceID               string               `json:"price_id"`
 	PSPID                 string               `json:"psp_id"`
 	Rail                  string               `json:"rail"`
 	RailSubscriptionID    string               `json:"rail_subscription_id"`
 	Status                string               `json:"status"`
-	ScheduledPriceID      *PriceID             `json:"scheduled_price_id,omitempty"`
+	ScheduledPriceID      *string              `json:"scheduled_price_id,omitempty"`
 	PaymentMethodID       *PaymentMethodID     `json:"payment_method_id"`
 	StartedAt             time.Time            `json:"started_at"`
 	EndedAt               *time.Time           `json:"ended_at"`
@@ -112,24 +112,24 @@ type SubscriptionAccess struct {
 // SubscriptionPrice is the price a subscription is on; UnitAmount is spelled
 // unit_amount as on every other price shape.
 type SubscriptionPrice struct {
-	ID                  PriceID   `json:"id"`
-	Key                 string    `json:"key"`
-	ProductID           ProductID `json:"product_id"`
-	UnitAmount          int64     `json:"unit_amount,string"`
-	Currency            string    `json:"currency"`
-	AutoRenew           bool      `json:"auto_renew"`
-	AccessDurationHours *int      `json:"access_duration_hours"`
-	Archived            bool      `json:"archived"`
+	ID                  string `json:"id"`
+	Key                 string `json:"key"`
+	ProductID           string `json:"product_id"`
+	UnitAmount          int64  `json:"unit_amount,string"`
+	Currency            string `json:"currency"`
+	AutoRenew           bool   `json:"auto_renew"`
+	AccessDurationHours *int   `json:"access_duration_hours"`
+	Archived            bool   `json:"archived"`
 }
 
 type SubscriptionProduct struct {
-	ID          ProductID `json:"id"`
-	Key         string    `json:"key"`
-	DisplayName string    `json:"display_name"`
-	Description string    `json:"description"`
-	TierGroup   *string   `json:"tier_group,omitempty"`
-	TierRank    int       `json:"tier_rank"`
-	Archived    bool      `json:"archived"`
+	ID          string  `json:"id"`
+	Key         string  `json:"key"`
+	DisplayName string  `json:"display_name"`
+	Description string  `json:"description"`
+	TierGroup   *string `json:"tier_group,omitempty"`
+	TierRank    int     `json:"tier_rank"`
+	Archived    bool    `json:"archived"`
 }
 
 type CancelSubscriptionRequest struct {

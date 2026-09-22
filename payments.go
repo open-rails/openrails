@@ -65,8 +65,8 @@ type PaymentList struct {
 // completed, failed or refunded.
 type PaymentFilter struct {
 	PageOptions
-	CustomerID CustomerID
-	PriceID    PriceID
+	CustomerID string
+	PriceID    string
 	Status     string
 	Rail       string
 }
@@ -87,7 +87,7 @@ func (c *Client) GetPayment(ctx context.Context, id PaymentID) (*Payment, error)
 // ListPayments lists the merchant's payments, newest first.
 func (c *Client) ListPayments(ctx context.Context, filter PaymentFilter) (*Page[Payment], error) {
 	q := pageQuery(filter.PageOptions)
-	for key, value := range map[string]string{"customer_id": filter.CustomerID.String(), "price_id": filter.PriceID.String(), "status": filter.Status, "rail": filter.Rail} {
+	for key, value := range map[string]string{"customer_id": filter.CustomerID, "price_id": filter.PriceID, "status": filter.Status, "rail": filter.Rail} {
 		if value = strings.TrimSpace(value); value != "" {
 			q.Set(key, value)
 		}

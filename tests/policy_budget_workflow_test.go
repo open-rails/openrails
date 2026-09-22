@@ -23,8 +23,8 @@ func checkPolicyBudgetEffects(t *testing.T, f treasuryWorkflow) {
 	payer := func() openrails.CustomerID {
 		t.Helper()
 		id, _ := f.actor(t, nil)
-		require.NoError(t, f.client.SetCreditLimit(ctx, id, "USD", 100_000_000_000))
-		account, err := f.client.Balance(ctx, id)
+		require.NoError(t, f.client.SetCreditLimit(ctx, (id).String(), "USD", 100_000_000_000))
+		account, err := f.client.Balance(ctx, (id).String())
 		require.NoError(t, err)
 		require.Equal(t, "arrears", account.BillingMode)
 		return id
@@ -68,7 +68,7 @@ func checkPolicyBudgetEffects(t *testing.T, f treasuryWorkflow) {
 	require.False(t, check(busy, 1000, 2_000_000, "").Allowed, "tier override must not lift unrelated requests")
 
 	debtPayer := payer()
-	require.NoError(t, f.client.SetCreditLimit(ctx, debtPayer, "USD", 100_000_000))
+	require.NoError(t, f.client.SetCreditLimit(ctx, (debtPayer).String(), "USD", 100_000_000))
 	_, err = ledger.AccrueOwed(ctx, identity.CustomerID(debtPayer), "USD", "usage", uuid.NewString(), 500_000_000)
 	require.NoError(t, err)
 	require.True(t, check(debtPayer, 1000, 1_000_000, "large").Allowed, "prior debt does not gate a rate cap")
@@ -78,7 +78,7 @@ func checkPolicyBudgetEffects(t *testing.T, f treasuryWorkflow) {
 	window.BillingPolicies = append(previous.BillingPolicies, window.BillingPolicies...)
 	require.NoError(t, f.client.SetMerchantSettings(ctx, window))
 	cloud := payer()
-	require.NoError(t, f.client.SetCreditLimit(ctx, cloud, "USD", 2_500_000_000))
+	require.NoError(t, f.client.SetCreditLimit(ctx, (cloud).String(), "USD", 2_500_000_000))
 	_, err = ledger.AccrueOwed(ctx, identity.CustomerID(cloud), "USD", "usage", uuid.NewString(), 3_000_000_000)
 	require.NoError(t, err)
 	require.True(t, check(cloud, 10_000_000, 0, "").Allowed, "prior debt is a separate delinquency signal, not new window spend")

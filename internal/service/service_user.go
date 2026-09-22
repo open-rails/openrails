@@ -62,18 +62,42 @@ func (s *Service) ListCheckoutRailOptions(ctx context.Context, priceRef string) 
 // CreateCheckoutSessionForCustomer creates a checkout session with host-resolved
 // identity attributes for rails that require them.
 func (s *Service) CreateCheckoutSessionForCustomer(ctx context.Context, customer CheckoutCustomerIdentity, req CreateCheckoutSessionRequest) (*CheckoutSession, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	return s.createCheckoutSessionForCustomer(ctx, customer, req, "", "", "")
 }
 
 func (s *Service) CreatePaymentMethodSessionForCustomer(ctx context.Context, req openrails.CreatePaymentMethodSessionRequest) (*CheckoutSession, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	return s.createCheckoutSessionForCustomer(ctx, req.Customer, CreateCheckoutSessionRequest{PaymentOptions: req.PaymentOptions, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey}, "payment_method", "", "")
 }
 
 func (s *Service) CreateSolanaCancelSessionForCustomer(ctx context.Context, req openrails.CreateSolanaCancelSessionRequest) (*CheckoutSession, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	return s.createCheckoutSessionForCustomer(ctx, req.Customer, CreateCheckoutSessionRequest{PaymentOptions: req.PaymentOptions, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey}, "solana_cancel", req.SubscriptionID, "")
 }
 
 func (s *Service) CreateSolanaTierChangeSessionForCustomer(ctx context.Context, req openrails.CreateSolanaTierChangeSessionRequest) (*CheckoutSession, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
 	return s.createCheckoutSessionForCustomer(ctx, req.Customer, CreateCheckoutSessionRequest{PaymentOptions: req.PaymentOptions, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey}, "solana_tier_change", req.SubscriptionID, req.NewPriceID)
 }
 
@@ -283,7 +307,7 @@ func (s *Service) ResolveEffectiveTier(ctx context.Context, userID, group string
 		Entitlement: tier.Entitlement,
 		DisplayName: tier.ProductDisplayName,
 		TierRank:    tier.TierRank,
-		ProductID:   openrails.ProductID(tier.ProductID),
+		ProductID:   openrails.ProductID(tier.ProductID).String(),
 		ProductKey:  tier.ProductKey,
 	}, nil
 }

@@ -128,7 +128,7 @@ type MerchantInvoiceDTO struct {
 }
 
 type MerchantInvoiceFilter struct {
-	CustomerID CustomerID
+	CustomerID string
 	Currency   *string
 	Status     *string
 	PeriodFrom *time.Time

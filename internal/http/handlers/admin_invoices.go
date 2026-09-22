@@ -71,7 +71,7 @@ func ListAdminInvoices(gate billingauth.Gate) func(*httprequest.Request) {
 				r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 				return
 			}
-			filter.CustomerID = id
+			filter.CustomerID = (id).String()
 		}
 		if raw := strings.ToUpper(strings.TrimSpace(r.Query("currency"))); raw != "" {
 			if err := money.RequireBillingCurrency(raw); err != nil {

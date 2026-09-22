@@ -65,7 +65,7 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 		require.NoError(t, err, "authorized JWKS principal must administer the merchant")
 		require.Equal(t, int64(500_000), dep.Amount)
 
-		bal, err := c.Balance(ctx, openrails.CustomerID(payer))
+		bal, err := c.Balance(ctx, (openrails.CustomerID(payer)).String())
 		require.NoError(t, err, "authorized JWKS principal balance read")
 		require.Equal(t, int64(500_000), bal.BalanceAmount)
 	})

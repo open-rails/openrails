@@ -39,9 +39,9 @@ func TestClientBoundaryWorkflow(t *testing.T) {
 				call   func() error
 			}{
 				{"zero subscription", false, func() error { _, err := client.GetSubscription(ctx, openrails.SubscriptionID{}); return err }},
-				{"blank grant", false, func() error { return client.RevokeEntitlement(ctx, valid, "") }},
+				{"blank grant", false, func() error { return client.RevokeEntitlement(ctx, (valid).String(), "") }},
 				{"zero customer grant", false, func() error {
-					_, err := client.GrantEntitlement(ctx, openrails.CustomerID{}, openrails.GrantEntitlementRequest{Entitlement: "pro"})
+					_, err := client.GrantEntitlement(ctx, (openrails.CustomerID{}).String(), openrails.GrantEntitlementRequest{Entitlement: "pro"})
 					return err
 				}},
 				{"blank migration source", false, func() error {
@@ -51,19 +51,22 @@ func TestClientBoundaryWorkflow(t *testing.T) {
 				{"nil migration batch", false, func() error { _, err := client.CancelPlanMigration(ctx, uuid.Nil); return err }},
 				{"nil price key", false, func() error { _, err := client.Prices.SetKey(ctx, "", "key"); return err }},
 				{"nil invoice", false, func() error { _, err := client.GetMerchantInvoice(ctx, uuid.Nil); return err }},
-				{"zero balance customer", false, func() error { _, err := client.Balance(ctx, openrails.CustomerID{}); return err }},
+				{"zero balance customer", false, func() error { _, err := client.Balance(ctx, (openrails.CustomerID{}).String()); return err }},
 				{"dot operation", false, func() error { _, err := client.GetOperationAuthorization(ctx, ".."); return err }},
-				{"zero entitlement subject", false, func() error { _, err := client.ListEntitlements(ctx, openrails.CustomerID{}, time.Now()); return err }},
-				{"malformed grant", true, func() error { return client.RevokeEntitlement(ctx, valid, "not-a-uuid") }},
+				{"zero entitlement subject", false, func() error {
+					_, err := client.ListEntitlements(ctx, (openrails.CustomerID{}).String(), time.Now())
+					return err
+				}},
+				{"malformed grant", true, func() error { return client.RevokeEntitlement(ctx, (valid).String(), "not-a-uuid") }},
 				{"empty admission batch", true, func() error { _, err := client.AdmitBatch(ctx, nil); return err }},
 				{"zero entitlement subjects", true, func() error {
-					_, err := client.ListActiveEntitlements(ctx, []openrails.CustomerID{{}, {}}, time.Time{})
+					_, err := client.ListActiveEntitlements(ctx, []string{"", ""}, time.Time{})
 					return err
 				}},
 				{"too many entitlement subjects", true, func() error {
-					ids := make([]openrails.CustomerID, 501)
+					ids := make([]string, 501)
 					for i := range ids {
-						ids[i] = openrails.CustomerID(uuid.New())
+						ids[i] = uuid.NewString()
 					}
 					_, err := client.ListActiveEntitlements(ctx, ids, time.Time{})
 					return err
@@ -119,15 +122,15 @@ func clientBoundaryErrors(t *testing.T, ctx context.Context, h *integrationharne
 	exec(`INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,'nmi','active',$7,$8,$9,$10)`, sub, mid, customer, product, price, nmi, sub.String(), card, now, now.Add(48*time.Hour))
 
 	out := map[string]errorObservation{}
-	_, err := client.DeletePaymentMethod(ctx, openrails.CustomerID(customer), openrails.PaymentMethodID(card))
+	_, err := client.DeletePaymentMethod(ctx, (openrails.CustomerID(customer)).String(), openrails.PaymentMethodID(card))
 	out["delete_in_use"] = observeClientError(t, "delete in use", err)
-	_, err = client.DeletePaymentMethod(ctx, openrails.CustomerID(uuid.New()), openrails.PaymentMethodID(card))
+	_, err = client.DeletePaymentMethod(ctx, (openrails.CustomerID(uuid.New())).String(), openrails.PaymentMethodID(card))
 	out["delete_foreign_customer"] = observeClientError(t, "delete foreign customer", err)
-	_, err = client.DeletePaymentMethod(ctx, openrails.CustomerID(customer), openrails.PaymentMethodID(portalCard))
+	_, err = client.DeletePaymentMethod(ctx, (openrails.CustomerID(customer)).String(), openrails.PaymentMethodID(portalCard))
 	out["delete_unsupported_rail"] = observeClientError(t, "delete unsupported rail", err)
 	_, err = client.GetSubscription(ctx, openrails.SubscriptionID(uuid.New()))
 	out["subscription_not_found"] = observeClientError(t, "subscription not found", err)
-	_, err = client.ListPaymentMethods(ctx, openrails.CustomerID(customer), openrails.PageOptions{Limit: 101})
+	_, err = client.ListPaymentMethods(ctx, (openrails.CustomerID(customer)).String(), openrails.PageOptions{Limit: 101})
 	out["page_limit"] = observeClientError(t, "page limit", err)
 	_, err = client.Products.Retrieve(ctx, (openrails.ProductID(uuid.New())).String())
 	require.Equal(t, errorObservation{StatusError: true, Status: 404, Type: "invalid_request_error", Code: "product_not_found", NotFound: true, HasRequestID: true}, observeClientError(t, "product not found", err))
@@ -142,7 +145,7 @@ func clientBoundaryErrors(t *testing.T, ctx context.Context, h *integrationharne
 	payer := openrails.CustomerID(customer)
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "parity", Currency: "conformance_missing_currency", Amount: 1, Source: "parity", SourceID: uuid.NewString()})
 	require.Equal(t, errorObservation{StatusError: true, Status: 400, Type: "invalid_request_error", Code: "currency_unsupported", Param: "currency", HasRequestID: true, Invalid: true}, observeClientError(t, "unsupported currency", err))
-	_, err = client.UsageRollup(ctx, payer, "USD", time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "bogus")
+	_, err = client.UsageRollup(ctx, (payer).String(), "USD", time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "bogus")
 	require.Equal(t, errorObservation{StatusError: true, Status: 400, Type: "invalid_request_error", Code: "invalid_param", HasRequestID: true, Invalid: true}, observeClientError(t, "unknown rollup grouping", err))
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "parity", Currency: "USD", Amount: 1_000_000, Source: "parity", SourceID: uuid.NewString()})
 	require.NoError(t, err)
@@ -219,23 +222,23 @@ func checkClientDTOShapes(t *testing.T, ctx context.Context, h *integrationharne
 	require.NotNil(t, sub.Product)
 	o.PriceOwnID, o.PriceProductID, o.ProductOwnID = sub.Price.ID, sub.Price.ProductID, sub.Product.ID
 	o.ReadByID = sub.ID == f.subscription
-	listed, err := client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: f.customer})
+	listed, err := client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: (f.customer).String()})
 	require.NoError(t, err)
 	require.Len(t, listed.Data, 1)
 	o.ListedSubscriptionID = listed.Data[0].ID
-	methods, err := client.ListPaymentMethods(ctx, f.customer, openrails.PageOptions{Limit: 10})
+	methods, err := client.ListPaymentMethods(ctx, (f.customer).String(), openrails.PageOptions{Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, methods.Data, 1)
 	o.MethodID = methods.Data[0].ID
 	require.True(t, methods.Data[0].CreatedAt.Equal(now))
 	require.Len(t, methods.Data[0].Subscriptions, 1)
 	o.MethodSubscriptionID = methods.Data[0].Subscriptions[0].ID
-	catalogPrice, err := client.Prices.Retrieve(ctx, (sub.PriceID).String())
+	catalogPrice, err := client.Prices.Retrieve(ctx, sub.PriceID)
 	require.NoError(t, err)
-	o.CatalogPriceID = sdkPriceID(t, catalogPrice.ID)
-	o.HasPayment, err = client.HasSettledPayment(ctx, f.customer, sub.PriceID)
+	o.CatalogPriceID = catalogPrice.ID
+	o.HasPayment, err = client.HasSettledPayment(ctx, (f.customer).String(), sub.PriceID)
 	require.NoError(t, err)
-	payments, err := client.ListPayments(ctx, openrails.PaymentFilter{CustomerID: f.customer, PriceID: sdkPriceID(t, price.ID)})
+	payments, err := client.ListPayments(ctx, openrails.PaymentFilter{CustomerID: (f.customer).String(), PriceID: (sdkPriceID(t, price.ID)).String()})
 	require.NoError(t, err)
 	require.Len(t, payments.Data, 1)
 	require.Equal(t, f.payment, payments.Data[0].ID)
@@ -250,7 +253,7 @@ func checkClientDTOShapes(t *testing.T, ctx context.Context, h *integrationharne
 	require.NoError(t, err)
 	require.Equal(t, f.customer, deposit.CustomerID)
 	o.DepositCurrency = deposit.Currency
-	balance, err := client.Balance(ctx, f.customer)
+	balance, err := client.Balance(ctx, (f.customer).String())
 	require.NoError(t, err)
 	require.Equal(t, f.customer, balance.CustomerID)
 	o.BalanceCurrency = balance.Currency
@@ -265,9 +268,9 @@ func checkClientDTOShapes(t *testing.T, ctx context.Context, h *integrationharne
 
 	want := dtoShapeObservation{
 		SubscriptionID: f.subscription, ListedSubscriptionID: f.subscription, MethodSubscriptionID: f.subscription,
-		CustomerID: f.customer,
-		ProductID:  sdkProductID(t, product.ID), PriceProductID: sdkProductID(t, product.ID), ProductOwnID: sdkProductID(t, product.ID),
-		PriceID: sdkPriceID(t, price.ID), PriceOwnID: sdkPriceID(t, price.ID), CatalogPriceID: sdkPriceID(t, price.ID),
+		CustomerID: (f.customer).String(),
+		ProductID:  (sdkProductID(t, product.ID)).String(), PriceProductID: sdkProductID(t, product.ID), ProductOwnID: sdkProductID(t, product.ID),
+		PriceID: (sdkPriceID(t, price.ID)).String(), PriceOwnID: sdkPriceID(t, price.ID), CatalogPriceID: sdkPriceID(t, price.ID),
 		PaymentMethodID: f.method, MethodID: f.method, PaymentID: f.payment,
 		ReadByID: true, HasPayment: true,
 		DepositCurrency: "USD", BalanceCurrency: "USD", PriceCurrency: "USD", RuleCurrency: "USD",
@@ -327,7 +330,7 @@ func checkClientCredentials(t *testing.T, ctx context.Context, d clientWorkflowD
 	bad, err := openrails.NewRemote(d.url, openrails.WithAPIKey("openrails_st_wrong_token"), openrails.WithTimeout(30*time.Second))
 	require.NoError(t, err)
 	require.ErrorIs(t, bad.Verify(ctx), openrails.ErrUnauthorized)
-	_, err = bad.Balance(ctx, openrails.CustomerID(uuid.New()))
+	_, err = bad.Balance(ctx, (openrails.CustomerID(uuid.New())).String())
 	require.ErrorIs(t, err, openrails.ErrUnauthorized)
 	wrongBinding, err := openrails.NewRemote(d.url, openrails.WithAPIKey(d.token), openrails.WithMerchantID(openrails.MerchantID(uuid.New())))
 	require.NoError(t, err)
@@ -343,11 +346,11 @@ func checkClientCredentials(t *testing.T, ctx context.Context, d clientWorkflowD
 		reader, err := openrails.NewRemote(d.url, openrails.WithAPIKey(d.authority.MintAPIKey(d.slug, "reader", []string{allowed})))
 		require.NoError(t, err)
 		if allowed == permissions.MerchantCatalogRead {
-			_, err = reader.EnsureCustomer(ctx, openrails.CustomerID(uuid.New()))
+			_, err = reader.EnsureCustomer(ctx, (openrails.CustomerID(uuid.New())).String())
 			require.ErrorIs(t, err, openrails.ErrDenied)
 			_, err = reader.ImportBilling(ctx, openrails.DeclaredBilling{AsOf: time.Now()})
 			require.ErrorIs(t, err, openrails.ErrDenied)
-			_, err = reader.GrantEntitlement(ctx, openrails.CustomerID(uuid.New()), openrails.GrantEntitlementRequest{Entitlement: "premium"})
+			_, err = reader.GrantEntitlement(ctx, (openrails.CustomerID(uuid.New())).String(), openrails.GrantEntitlementRequest{Entitlement: "premium"})
 			require.ErrorIs(t, err, openrails.ErrDenied)
 			_, err = reader.CreatePlanMigration(ctx, openrails.PlanMigrationRequest{SourcePrice: uuid.NewString(), TargetPrice: uuid.NewString()})
 			require.ErrorIs(t, err, openrails.ErrDenied)

@@ -124,7 +124,7 @@ func TestPolicyMoneyAndUsageSummaryAreExact(t *testing.T) {
 		SpendDelegationInput{Scope: "invoker", ScopeKey: "worker", Windows: []SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: max, Currency: "USD"}}},
 		BillingPolicyInput{Name: "credit-line", Kind: "outstanding_cap", OutstandingCapAmount: max, AccrualRateCapPerHour: max, CollectionThresholdAmount: &max, DelinquencyAmountFloor: &max},
 		MerchantSettings{InvoiceCollectionThreshold: &max, InvoiceMonthlyFloor: &max, ArrearsDelinquencyFloor: &max},
-		CreditLimitRequest{CustomerID: CustomerID(uuid.New()), Currency: "USD", CreditLimitAmount: max},
+		CreditLimitRequest{CustomerID: (CustomerID(uuid.New())).String(), Currency: "USD", CreditLimitAmount: max},
 		UsageRollupRow{Key: "api", EventCount: 1, TotalAmount: max, Currency: "USD"},
 		ResourceRevenueResponse{Currency: "USD", RevenueAmount: max, Daily: []ResourceRevenueDailyRow{{Date: "2026-09-16", Currency: "USD", Amount: max}}},
 	} {

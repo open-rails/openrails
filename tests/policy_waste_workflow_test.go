@@ -26,7 +26,7 @@ func checkPolicyWasteAndProfiles(t *testing.T, f treasuryWorkflow) {
 	}
 	grant := func(c *openrails.Client, payer openrails.CustomerID, invoker string) {
 		t.Helper()
-		require.NoError(t, c.SetCustomerSpendDelegation(ctx, payer, openrails.SpendDelegationInput{Scope: "invoker", ScopeKey: invoker,
+		require.NoError(t, c.SetCustomerSpendDelegation(ctx, (payer).String(), openrails.SpendDelegationInput{Scope: "invoker", ScopeKey: invoker,
 			Windows: []openrails.SpendLimitWindow{{Key: "delegated", WindowSeconds: 3600, Limit: 100_000_000, Currency: "USD"}}}))
 	}
 	admit := func(c *openrails.Client, payer openrails.CustomerID, invoker string) *openrails.AdmitResponse {
@@ -118,7 +118,7 @@ func checkPolicyWasteAndProfiles(t *testing.T, f treasuryWorkflow) {
 	require.EqualValues(t, 1_000_000, result.ChargedAmount)
 	_, err = f.client.ReportWastedSpend(ctx, over)
 	require.NoError(t, err)
-	balance, err := f.client.Balance(ctx, direct)
+	balance, err := f.client.Balance(ctx, (direct).String())
 	require.NoError(t, err)
 	require.EqualValues(t, 99_000_000, balance.BalanceAmount, "only overage is debited, exactly once across retry")
 	pool := dbtest.OpenMerchantDB(t, f.merchant.MerchantID.UUID()).Pool()

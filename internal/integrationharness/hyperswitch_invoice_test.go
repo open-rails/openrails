@@ -372,7 +372,7 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.ledger_transfers WHERE customer_id=$1 AND transfer_type='owed_payment'`, customer.UUID()).Scan(&transfers))
 	require.Equal(t, 1, transfers)
 	t.Run("deleted method archive stays deleted", func(t *testing.T) {
-		_, err := client.EnsureCustomer(ctx, openrails.CustomerID(uuid.MustParse(foreign.ID)))
+		_, err := client.EnsureCustomer(ctx, (openrails.CustomerID(uuid.MustParse(foreign.ID))).String())
 		require.NoError(t, err)
 		var original []byte
 		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT to_jsonb(i) FROM billing.rail_intents i WHERE id=$1`, deletion).Scan(&original))

@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -141,7 +142,7 @@ func providerIDs(items []merchants.PaymentProviderConfig) []uuid.UUID {
 // psp ids of every ccbill option it would offer a buyer.
 func ccbillOptionPSPs(t *testing.T, ctx context.Context, client *openrails.Client, price openrails.PriceID) []string {
 	t.Helper()
-	options, err := client.ListCheckoutRailOptions(ctx, price)
+	options, err := client.ListCheckoutRailOptions(ctx, (price).String())
 	require.NoError(t, err)
 	var out []string
 	for _, option := range options {

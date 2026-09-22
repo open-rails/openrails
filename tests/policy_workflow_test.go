@@ -52,7 +52,7 @@ func checkPolicyDelegationDocument(t *testing.T, f treasuryWorkflow) {
 	status, raw := requestWorkflowJSON(t, http.MethodPut, path, token, map[string]any{"delegations": []openrails.SpendDelegationInput{invoker, role, tier}})
 	require.Equal(t, http.StatusOK, status, string(raw))
 	invoker.Windows[0].Limit = 321
-	require.NoError(t, machine.SetCustomerSpendDelegation(ctx, payer, invoker))
+	require.NoError(t, machine.SetCustomerSpendDelegation(ctx, (payer).String(), invoker))
 	require.ElementsMatch(t, []openrails.SpendDelegationInput{invoker, role, tier}, read(), "singular upsert preserves sibling role and tier grants")
 	invoker.Windows[0].Limit = 322
 	status, raw = requestWorkflowJSON(t, http.MethodPut, path+":upsert", token, invoker)
@@ -63,12 +63,12 @@ func checkPolicyDelegationDocument(t *testing.T, f treasuryWorkflow) {
 	status, raw = requestWorkflowJSON(t, http.MethodPut, path, token, map[string]any{"delegations": []openrails.SpendDelegationInput{role}})
 	require.Equal(t, http.StatusOK, status, string(raw))
 	require.Equal(t, []openrails.SpendDelegationInput{role}, read(), "customer replacement removes omitted invoker and tier grants")
-	require.NoError(t, machine.SetCustomerSpendDelegation(ctx, payer, invoker))
-	require.NoError(t, machine.SetCustomerSpendDelegations(ctx, payer, []openrails.SpendDelegationInput{role}))
+	require.NoError(t, machine.SetCustomerSpendDelegation(ctx, (payer).String(), invoker))
+	require.NoError(t, machine.SetCustomerSpendDelegations(ctx, (payer).String(), []openrails.SpendDelegationInput{role}))
 	require.Equal(t, []openrails.SpendDelegationInput{role}, read())
 	duplicate := role
 	duplicate.Scope, duplicate.ScopeKey = " role ", " "+role.ScopeKey+" "
-	err = machine.SetCustomerSpendDelegations(ctx, payer, []openrails.SpendDelegationInput{role, duplicate})
+	err = machine.SetCustomerSpendDelegations(ctx, (payer).String(), []openrails.SpendDelegationInput{role, duplicate})
 	require.ErrorIs(t, err, openrails.ErrInvalid)
 	var refusal *openrails.StatusError
 	require.ErrorAs(t, err, &refusal)
@@ -77,7 +77,7 @@ func checkPolicyDelegationDocument(t *testing.T, f treasuryWorkflow) {
 	require.Equal(t, []openrails.SpendDelegationInput{role}, read(), "refused replacement changes nothing")
 	status, raw = requestWorkflowJSON(t, http.MethodPut, path, token, map[string]any{"customer_id": uuid.NewString(), "delegations": []any{}})
 	require.Equal(t, http.StatusBadRequest, status, string(raw))
-	require.NoError(t, machine.SetCustomerSpendDelegation(ctx, payer, invoker))
+	require.NoError(t, machine.SetCustomerSpendDelegation(ctx, (payer).String(), invoker))
 	require.ElementsMatch(t, []openrails.SpendDelegationInput{invoker, role}, read(), "provenance belongs only to its own grant")
 	status, raw = requestWorkflowJSON(t, http.MethodDelete, path+"/invoker/"+invoker.ScopeKey, token, nil)
 	require.Equal(t, http.StatusOK, status, string(raw))
@@ -88,8 +88,8 @@ func checkPolicyDelegationDocument(t *testing.T, f treasuryWorkflow) {
 	require.Contains(t, string(raw), "spend_delegation_not_found")
 	status, raw = requestWorkflowJSON(t, http.MethodDelete, path+"/bogus/"+invoker.ScopeKey, token, nil)
 	require.Equal(t, http.StatusBadRequest, status, string(raw))
-	require.NoError(t, machine.DeleteCustomerSpendDelegation(ctx, payer, "role", role.ScopeKey))
-	require.ErrorIs(t, machine.DeleteCustomerSpendDelegation(ctx, payer, "role", role.ScopeKey), openrails.ErrNotFound)
+	require.NoError(t, machine.DeleteCustomerSpendDelegation(ctx, (payer).String(), "role", role.ScopeKey))
+	require.ErrorIs(t, machine.DeleteCustomerSpendDelegation(ctx, (payer).String(), "role", role.ScopeKey), openrails.ErrNotFound)
 	require.Empty(t, read())
 }
 
@@ -137,7 +137,7 @@ func checkPolicyPrecedence(t *testing.T, f treasuryWorkflow) {
 	require.Equal(t, []openrails.BillingPolicyBindingInput{{PolicyName: "cloud_monthly", Tier: "cloud"}, {PolicyName: "api_line"}}, stored.BillingPolicyBindings)
 
 	payer, _ := f.actor(t, nil)
-	require.NoError(t, f.client.SetCreditLimit(ctx, payer, "USD", 10_000_000_000))
+	require.NoError(t, f.client.SetCreditLimit(ctx, (payer).String(), "USD", 10_000_000_000))
 	doc = openrails.MerchantSettings{BillingPolicies: []openrails.BillingPolicyInput{
 		{Name: "tiny", Kind: "window_spend_cap", SpendWindows: []openrails.BudgetWindowInput{{Key: "month", WindowSeconds: 30 * 24 * 3600, Limit: 1_000_000}}},
 		{Name: "medium", Kind: "window_spend_cap", SpendWindows: []openrails.BudgetWindowInput{{Key: "month", WindowSeconds: 30 * 24 * 3600, Limit: 50_000_000}}},
@@ -168,11 +168,11 @@ func checkPolicyPrecedence(t *testing.T, f treasuryWorkflow) {
 	require.Contains(t, string(raw), "customer_id", "refusal must identify the removed field, not another malformed declaration key")
 	require.False(t, allows(100_000_000), "the refused document cannot change the current binding")
 	for _, client := range []*openrails.Client{f.client, f.embedded} {
-		assignment, err := client.GetCustomerBillingPolicy(ctx, payer)
+		assignment, err := client.GetCustomerBillingPolicy(ctx, (payer).String())
 		require.NoError(t, err)
 		require.Equal(t, &openrails.CustomerBillingPolicyAssignment{CustomerID: payer}, assignment)
 		large, tiny := "large", "tiny"
-		assignment, err = client.SetCustomerBillingPolicy(ctx, payer, &large)
+		assignment, err = client.SetCustomerBillingPolicy(ctx, (payer).String(), &large)
 		require.NoError(t, err)
 		require.Equal(t, &openrails.CustomerBillingPolicyAssignment{CustomerID: payer, PolicyName: &large}, assignment)
 		require.True(t, allows(100_000_000))
@@ -181,13 +181,13 @@ func checkPolicyPrecedence(t *testing.T, f treasuryWorkflow) {
 		removed := doc
 		removed.BillingPolicies = doc.BillingPolicies[:2]
 		require.ErrorIs(t, client.SetMerchantSettings(ctx, removed), openrails.ErrInvalid, "cannot remove a referenced policy")
-		assignment, err = client.GetCustomerBillingPolicy(ctx, payer)
+		assignment, err = client.GetCustomerBillingPolicy(ctx, (payer).String())
 		require.NoError(t, err)
 		require.Equal(t, &large, assignment.PolicyName)
-		_, err = client.SetCustomerBillingPolicy(ctx, payer, &tiny)
+		_, err = client.SetCustomerBillingPolicy(ctx, (payer).String(), &tiny)
 		require.NoError(t, err)
 		require.False(t, allows(2_000_000), "rebinding changes the next decision, not a future cache expiry")
-		assignment, err = client.SetCustomerBillingPolicy(ctx, payer, nil)
+		assignment, err = client.SetCustomerBillingPolicy(ctx, (payer).String(), nil)
 		require.NoError(t, err)
 		require.Nil(t, assignment.PolicyName)
 		require.True(t, allows(2_000_000), "clearing restores the tier policy")

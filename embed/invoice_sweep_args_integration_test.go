@@ -63,7 +63,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 		Key: meter, EventType: eventType, ValueProperty: "amount_micros", Aggregation: "sum", Unit: "currency_micros",
 	}))
 	_, err = client.SetDefaultUsageRateCard(ctx, meter, openrails.DefaultUsageRateCardRequest{
-		ProductID: sdkProductID(t, productID.ID),
+		ProductID: (sdkProductID(t, productID.ID)).String(),
 		Price: pricing.RatePrice{Model: pricing.ModelPerUnit, Currency: "USD",
 			PerUnit: &pricing.PerUnitPrice{UnitAmount: 100, DivideBy: 10_000}},
 	})
@@ -100,7 +100,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	}
 	listInvoices := func() []openrails.MerchantInvoiceDTO {
 		t.Helper()
-		invoices, total, err := client.ListMerchantInvoices(ctx, openrails.MerchantInvoiceFilter{CustomerID: openrails.CustomerID(payer)}, 10, 0)
+		invoices, total, err := client.ListMerchantInvoices(ctx, openrails.MerchantInvoiceFilter{CustomerID: (openrails.CustomerID(payer)).String()}, 10, 0)
 		require.NoError(t, err)
 		require.EqualValues(t, len(invoices), total)
 		return invoices

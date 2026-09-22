@@ -199,7 +199,8 @@ func defaultUsageRateCardInput(
 	meter billingservice.UsageMeterDTO,
 	req adminDefaultUsageRateCardRequest,
 ) (billingservice.UsageRateCardInput, error) {
-	if req.ProductID.IsZero() {
+	typedProductID, err := openrails.ParseProductID(req.ProductID)
+	if err != nil || typedProductID.IsZero() {
 		return billingservice.UsageRateCardInput{}, errors.New("product_id required")
 	}
 	if err := pricing.ValidateUsagePrice("usage rate card", &req.Price); err != nil {
@@ -217,7 +218,7 @@ func defaultUsageRateCardInput(
 	if err := pricing.ValidateDimensions("usage rate card", meter.GroupBy, req.Filter, &req.Price); err != nil {
 		return billingservice.UsageRateCardInput{}, err
 	}
-	productID := req.ProductID.UUID()
+	productID := typedProductID.UUID()
 	return billingservice.UsageRateCardInput{
 		ProductID: &productID,
 		MeterKey:  meter.Key,

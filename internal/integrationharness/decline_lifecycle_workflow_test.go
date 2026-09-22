@@ -76,7 +76,7 @@ func TestDeclineLifecyclePreservesCustomerInstruments(t *testing.T) {
 		user, err := embcp.Get(surface.App()).Core().CreateUser(t.Context(), suffix+"@example.test", "decline"+suffix)
 		require.NoError(t, err)
 		customer := openrails.CustomerID(uuid.MustParse(user.ID))
-		_, err = client.EnsureCustomer(t.Context(), customer)
+		_, err = client.EnsureCustomer(t.Context(), (customer).String())
 		require.NoError(t, err)
 		s := subject{customer.UUID(), uuid.New(), uuid.New()}
 		_, err = pool.Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,rail_customer_ref,initial_transaction_id) VALUES($1,$2,$3,$4,'nmi','psp',$5,'')`, s.method, owned.MerchantID.UUID(), s.customer, psp, "vault-"+s.method.String())
@@ -86,7 +86,7 @@ func TestDeclineLifecyclePreservesCustomerInstruments(t *testing.T) {
 		require.NoError(t, err)
 		_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: customer.String(), Entitlement: "decline_access", Indefinite: true, SourceType: models.EntitlementSourceSubscription, SourceID: s.subscription})
 		require.NoError(t, err)
-		active, err := client.HasEntitlement(t.Context(), customer, "decline_access", now)
+		active, err := client.HasEntitlement(t.Context(), (customer).String(), "decline_access", now)
 		require.NoError(t, err)
 		require.True(t, active, "the seeded subscription begins with standing access")
 		return s
@@ -148,7 +148,7 @@ func TestDeclineLifecyclePreservesCustomerInstruments(t *testing.T) {
 			require.NoError(t, pool.QueryRow(ctx, `SELECT origin FROM billing.rail_intents WHERE intent_type='nmi_delete_subscription' AND subscription_id=$1`, s.subscription).Scan(&origin))
 			require.Equal(t, string(intents.OriginSystem), origin)
 		}
-		entitled, err := client.HasEntitlement(t.Context(), openrails.CustomerID(s.customer), "decline_access", now)
+		entitled, err := client.HasEntitlement(t.Context(), (openrails.CustomerID(s.customer)).String(), "decline_access", now)
 		require.NoError(t, err)
 		require.Equal(t, want != "cancelled", entitled)
 	}
@@ -197,7 +197,7 @@ func TestDeclineLifecyclePreservesCustomerInstruments(t *testing.T) {
 		require.Nil(t, deleted)
 		require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM billing.rail_intents WHERE subscription_id=$1 AND intent_type='nmi_delete_subscription'`, s.subscription).Scan(&status))
 		require.Equal(t, intents.StatusSuperseded, status)
-		entitled, err := client.HasEntitlement(t.Context(), openrails.CustomerID(s.customer), "decline_access", now)
+		entitled, err := client.HasEntitlement(t.Context(), (openrails.CustomerID(s.customer)).String(), "decline_access", now)
 		require.NoError(t, err)
 		require.True(t, entitled)
 		// Invisible requested work must fail, rather than reporting a completed job.

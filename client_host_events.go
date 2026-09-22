@@ -25,15 +25,15 @@ const (
 // without a second read; SubscriptionID is set for renewal payments.
 type PaymentSettledEvent struct {
 	PaymentID      PaymentID       `json:"payment_id"`
-	CustomerID     CustomerID      `json:"customer_id"`
-	PriceID        PriceID         `json:"price_id"`
+	CustomerID     string          `json:"customer_id"`
+	PriceID        string          `json:"price_id"`
 	SubscriptionID *SubscriptionID `json:"subscription_id,omitempty"`
 	Amount         int64           `json:"amount,string"`
 	Currency       string          `json:"currency"`
 }
 
 type DelinquencyHostEvent struct {
-	CustomerID      CustomerID `json:"customer_id"`
+	CustomerID      string     `json:"customer_id"`
 	Currency        string     `json:"currency"`
 	FromState       string     `json:"from_state"`
 	ToState         string     `json:"to_state"`

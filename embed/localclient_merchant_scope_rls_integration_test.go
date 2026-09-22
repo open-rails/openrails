@@ -81,7 +81,7 @@ func TestEmbeddedTranscribedPathPinsTheMerchantConnection(t *testing.T) {
 	})
 
 	t.Run("spend-delegation writes land under the merchant's own scope", func(t *testing.T) {
-		require.NoError(t, client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID),
+		require.NoError(t, client.SetCustomerSpendDelegations(ctx, (openrails.CustomerID(customerID)).String(),
 			[]openrails.SpendDelegationInput{{
 				Scope:    "invoker",
 				ScopeKey: "or868-b3-invoker",

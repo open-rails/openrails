@@ -25,7 +25,7 @@ func checkTreasuryMoney(t *testing.T, f treasuryWorkflow) {
 	fund := func(t *testing.T, amount int64) openrails.CustomerID {
 		t.Helper()
 		payer := openrails.CustomerID(uuid.New())
-		_, err := f.client.EnsureCustomer(ctx, payer)
+		_, err := f.client.EnsureCustomer(ctx, (payer).String())
 		require.NoError(t, err)
 		_, err = f.client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: payer.String(), Currency: "USD", Amount: amount, Source: "treasury", SourceID: uuid.NewString()})
 		require.NoError(t, err)
@@ -45,7 +45,7 @@ func checkTreasuryMoney(t *testing.T, f treasuryWorkflow) {
 	}
 	assertLedger := func(t *testing.T, payer openrails.CustomerID, balance, held int64, withdrawals int) {
 		t.Helper()
-		account, err := f.client.Balance(ctx, payer)
+		account, err := f.client.Balance(ctx, (payer).String())
 		require.NoError(t, err)
 		require.Equal(t, payer, account.CustomerID)
 		require.Equal(t, "USD", account.Currency)
@@ -148,18 +148,18 @@ func checkTreasuryMoney(t *testing.T, f treasuryWorkflow) {
 		payer openrails.CustomerID
 		name  string
 	}{{payer, "premium"}, {other, "foreign"}} {
-		_, err := f.client.GrantEntitlement(ctx, row.payer, openrails.GrantEntitlementRequest{Entitlement: row.name})
+		_, err := f.client.GrantEntitlement(ctx, (row.payer).String(), openrails.GrantEntitlementRequest{Entitlement: row.name})
 		require.NoError(t, err)
 	}
-	batch, err := f.client.ListActiveEntitlements(ctx, []openrails.CustomerID{payer, other}, time.Now())
+	batch, err := f.client.ListActiveEntitlements(ctx, []string{(payer).String(), (other).String()}, time.Now())
 	require.NoError(t, err)
 	for _, row := range []struct {
 		payer openrails.CustomerID
 		name  string
 	}{{payer, "premium"}, {other, "foreign"}} {
-		require.Len(t, batch[row.payer], 1)
-		require.Equal(t, row.payer, batch[row.payer][0].CustomerID)
-		require.Equal(t, row.name, batch[row.payer][0].Entitlement)
+		require.Len(t, batch[(row.payer).String()], 1)
+		require.Equal(t, row.payer, batch[(row.payer).String()][0].CustomerID)
+		require.Equal(t, row.name, batch[(row.payer).String()][0].Entitlement)
 	}
 	serviceCaller := f.surface.RegisterServiceJWTIssuer("billing-service-"+uuid.NewString()[:8], f.merchant.MerchantSlug,
 		[]string{controlplane.PermMerchantCustomerSettingsRead, controlplane.PermMerchantCustomerSettingsUpdate, controlplane.PermMerchantAdmissionsCreate})
@@ -216,13 +216,13 @@ func checkTreasuryDepositTerms(t *testing.T, f treasuryWorkflow) {
 			require.NoError(t, err)
 			first.Replayed = true
 			require.Equal(t, first, replay, "nonfinancial retry labels do not rewrite the accepted grant")
-			read, err := client.GetDeposit(ctx, payer, request.SourceID)
+			read, err := client.GetDeposit(ctx, (payer).String(), request.SourceID)
 			require.NoError(t, err)
 			require.Equal(t, first, read)
-			balance, err := client.Balance(ctx, payer)
+			balance, err := client.Balance(ctx, (payer).String())
 			require.NoError(t, err)
 			require.EqualValues(t, 1_000_000, balance.BalanceAmount)
-			missing, err := client.GetDeposit(ctx, payer, "never-"+uuid.NewString())
+			missing, err := client.GetDeposit(ctx, (payer).String(), "never-"+uuid.NewString())
 			require.ErrorIs(t, err, openrails.ErrNotFound)
 			require.Nil(t, missing)
 		})

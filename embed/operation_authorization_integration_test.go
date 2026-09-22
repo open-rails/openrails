@@ -289,7 +289,7 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	overflowClient, err := overflowRuntime.Client()
 	require.NoError(t, err)
 	overflowCustomer := openrails.CustomerID(uuid.New())
-	_, err = overflowClient.EnsureCustomer(ctx, overflowCustomer)
+	_, err = overflowClient.EnsureCustomer(ctx, (overflowCustomer).String())
 	require.NoError(t, err)
 	_, err = overflowClient.DepositCredits(ctx, openrails.DepositCreditsRequest{
 		CustomerID: &overflowCustomer, Invoker: overflowCustomer.String(), Currency: "USD",

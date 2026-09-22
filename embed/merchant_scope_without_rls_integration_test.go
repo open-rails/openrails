@@ -146,14 +146,14 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 	t.Run("A_cannot_reference_B_only_customer", func(t *testing.T) {
 		// This API explicitly does not create customers. EnsureCustomer is a
 		// different contract: the same host subject can exist under both merchants.
-		_, err := a.client.SetCustomerBillingPolicy(ctx, b.customer, nil)
+		_, err := a.client.SetCustomerBillingPolicy(ctx, (b.customer).String(), nil)
 		assert.ErrorIs(t, err, openrails.ErrNotFound)
 		var count int
 		require.NoError(t, admin.QueryRow(ctx, `SELECT count(*) FROM billing.customers WHERE merchant_id=$1 AND id=$2`, a.mid.UUID(), b.customer.UUID()).Scan(&count))
 		assert.Zero(t, count)
 	})
 	t.Run("A_cannot_delete_B_customer_delegation", func(t *testing.T) {
-		err := a.client.DeleteCustomerSpendDelegation(ctx, b.customer, "invoker", "scope-worker")
+		err := a.client.DeleteCustomerSpendDelegation(ctx, (b.customer).String(), "invoker", "scope-worker")
 		assert.ErrorIs(t, err, openrails.ErrNotFound)
 		var count int
 		require.NoError(t, admin.QueryRow(ctx, `SELECT count(*) FROM billing.invoker_spend_limits WHERE merchant_id=$1 AND customer_id=$2 AND scope_key='scope-worker'`, b.mid.UUID(), b.customer.UUID()).Scan(&count))
@@ -213,9 +213,9 @@ func scopeWithoutRLSSeed(t *testing.T, rt *embed.Runtime, slug string) scopeWith
 	price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: slug + "-price", UnitAmount: 1000, Currency: "USD"})
 	require.NoError(t, err)
 	customer := openrails.CustomerID(uuid.New())
-	_, err = client.EnsureCustomer(ctx, customer)
+	_, err = client.EnsureCustomer(ctx, (customer).String())
 	require.NoError(t, err)
-	require.NoError(t, client.SetCustomerSpendDelegations(ctx, customer, []openrails.SpendDelegationInput{{Scope: "invoker", ScopeKey: "scope-worker", Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 1000000, Currency: "USD"}}}}))
+	require.NoError(t, client.SetCustomerSpendDelegations(ctx, (customer).String(), []openrails.SpendDelegationInput{{Scope: "invoker", ScopeKey: "scope-worker", Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 1000000, Currency: "USD"}}}}))
 	scoped := merchant.WithID(ctx, mid)
 	graph := app.HostGraph(rt).Runtime
 	mode := money.BillingModeArrears
@@ -223,7 +223,7 @@ func scopeWithoutRLSSeed(t *testing.T, rt *embed.Runtime, slug string) scopeWith
 		_, err := graph.MoneyService.UpsertAccountSettings(c, identity.CustomerID(customer), "USD", money.AccountSettingsInput{BillingMode: &mode})
 		return err
 	}))
-	_, err = client.EnsureCustomerInvoiceProfile(ctx, customer, openrails.InvoiceProfileDTO{NetTermsDays: 7, CollectionMethod: "send_invoice"})
+	_, err = client.EnsureCustomerInvoiceProfile(ctx, (customer).String(), openrails.InvoiceProfileDTO{NetTermsDays: 7, CollectionMethod: "send_invoice"})
 	require.NoError(t, err)
 	_, err = graph.MoneyService.AccrueOwed(scoped, identity.CustomerID(customer), "USD", "scope-test", uuid.NewString(), 500)
 	require.NoError(t, err)

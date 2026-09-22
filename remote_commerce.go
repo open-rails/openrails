@@ -39,11 +39,7 @@ func (c *Client) CreateSolanaTierChangeSession(ctx context.Context, request Crea
 }
 
 func (c *Client) GetCheckoutSession(ctx context.Context, customerID string, sessionID string) (*CheckoutSession, error) {
-	typedCustomer, err := ParseCustomerID(customerID)
-	if err != nil {
-		return nil, invalidErr("invalid customer_id")
-	}
-	customer, err := requireTypedID("customer_id", typedCustomer)
+	customer, err := requireCustomerID(customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -79,8 +75,8 @@ func (c *Client) ConfirmCheckoutSession(ctx context.Context, sessionID string, r
 	return &out, nil
 }
 
-func (c *Client) ListCheckoutRailOptions(ctx context.Context, priceID PriceID) ([]CheckoutRailOption, error) {
-	price, err := requireTypedID("price_id", priceID)
+func (c *Client) ListCheckoutRailOptions(ctx context.Context, priceID string) ([]CheckoutRailOption, error) {
+	price, err := requirePriceID(priceID)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +96,7 @@ func (c *Client) GetCheckoutConfig(ctx context.Context) (*CheckoutConfig, error)
 	return &out, nil
 }
 
-func (c *Client) ResolveEffectiveTier(ctx context.Context, customerID CustomerID, group string) (*EffectiveTier, error) {
+func (c *Client) ResolveEffectiveTier(ctx context.Context, customerID string, group string) (*EffectiveTier, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err

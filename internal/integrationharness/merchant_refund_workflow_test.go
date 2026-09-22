@@ -74,7 +74,7 @@ func TestMerchantRefundAuthorityAndReplayWorkflow(t *testing.T) {
 	payment := func(rail string) openrails.PaymentID {
 		t.Helper()
 		customer := openrails.CustomerID(uuid.New())
-		_, err := client.EnsureCustomer(ctx, customer)
+		_, err := client.EnsureCustomer(ctx, (customer).String())
 		require.NoError(t, err)
 		id := uuid.New()
 		psp := dbtest.EnsureTestPSP(ctx, t, pool, owned.MerchantID.UUID(), rail)
@@ -115,7 +115,7 @@ func TestMerchantRefundAuthorityAndReplayWorkflow(t *testing.T) {
 	foreign := surface.ProvisionOwnedMerchant("refund-other-" + uuid.NewString()[:8])
 	t.Run("manual access authority and deleted projection", func(t *testing.T) {
 		customer := openrails.CustomerID(uuid.New())
-		_, err := client.EnsureCustomer(ctx, customer)
+		_, err := client.EnsureCustomer(ctx, (customer).String())
 		require.NoError(t, err)
 		admin := surface.RegisterDelegatedIssuer("access-admin-"+uuid.NewString()[:8], owned.MerchantSlug).Mint(uuid.NewString(), "", "", []string{controlplane.PermMerchantCustomerSettingsUpdate})
 		reader := surface.RegisterServiceJWTIssuer("access-read-"+uuid.NewString()[:8], owned.MerchantSlug, []string{controlplane.PermMerchantCustomerSettingsRead}).Token
@@ -147,12 +147,12 @@ func TestMerchantRefundAuthorityAndReplayWorkflow(t *testing.T) {
 				require.Equal(t, "admin", result.SourceType)
 				require.NotNil(t, result.SourceID)
 				at := time.Now().UTC()
-				active, err := client.HasEntitlement(ctx, customer, "manual_access", at)
+				active, err := client.HasEntitlement(ctx, (customer).String(), "manual_access", at)
 				require.NoError(t, err)
 				require.True(t, active)
 				_, err = pool.Exec(ctx, `UPDATE billing.entitlements SET deleted_at=now() WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='manual_access'`, owned.MerchantID.UUID(), customer.UUID())
 				require.NoError(t, err)
-				active, err = client.HasEntitlement(ctx, customer, "manual_access", at)
+				active, err = client.HasEntitlement(ctx, (customer).String(), "manual_access", at)
 				require.NoError(t, err)
 				require.False(t, active)
 			}
