@@ -25,6 +25,7 @@ func (c *Client) ForCatalogOwner(subject string) (*Client, error) {
 	scoped := *c
 	scoped.ownCatalog = true
 	scoped.catalogOwner = subject
+	scoped.ProductAccess = &ProductAccessClient{client: &scoped}
 	return &scoped, nil
 }
 
