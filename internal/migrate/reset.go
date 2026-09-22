@@ -102,7 +102,8 @@ func ApplyEmbeddedReset(ctx context.Context, dsn, allowedTargets, confirmation s
  CROSS JOIN LATERAL pg_catalog.pg_identify_object(d.classid,d.objid,d.objsubid) dependent
  LEFT JOIN pg_catalog.pg_rewrite rw ON d.classid='pg_rewrite'::regclass AND rw.oid=d.objid
  LEFT JOIN pg_catalog.pg_trigger tr ON d.classid='pg_trigger'::regclass AND tr.oid=d.objid
- LEFT JOIN pg_catalog.pg_class relation ON relation.oid=COALESCE(rw.ev_class,tr.tgrelid)
+ LEFT JOIN pg_catalog.pg_attrdef ad ON d.classid='pg_attrdef'::regclass AND ad.oid=d.objid
+ LEFT JOIN pg_catalog.pg_class relation ON relation.oid=COALESCE(rw.ev_class,tr.tgrelid,ad.adrelid)
  LEFT JOIN pg_catalog.pg_namespace relation_schema ON relation_schema.oid=relation.relnamespace
  WHERE d.deptype='n' AND referenced.schema=$1 AND COALESCE(dependent.schema,relation_schema.nspname,'')<>$1
  )`, embeddedResetSchema, postgresmigrations.OwnedTables, postgresmigrations.OwnedViews,
