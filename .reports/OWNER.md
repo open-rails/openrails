@@ -1,6 +1,5 @@
 Owner: /root/astra_engine_cancel
-Purpose: OpenRails #297 engine recurring due admission, receipt completion, Runtime registration and local browser qualification
-Branch: feat/297-engine-recurring-worker-20260921
-Base: 58aa2922d45b460d9e85f084150813e4de2281df (fetched origin/master)
-Dependencies: #579 263c965102e46045a2183ed9a6b7a66f0debd59a; #578 94f3aa8bb; #580 7fc3f4a7d (includes concrete MIT hook 605622e79)
-Integrated master: 1e902c7821b6befeaa42512f45b6b2f3a3ca4451 (#576, including #567/#578/#580)
+Purpose: OpenRails #297/#584 shared NMI response cardinality and safe error diagnostics
+Branch: fix/297-nmi-response-boundary-20260921
+Base: cb37d163a159a7dd4c8c178b4888de2659aa94f8 (fetched origin/master)
+Authority: root owns tracker/merge; this lane owns NMI parser/error files and focused tests, not #809 engine initiation or foreign #584/#586 worktrees
