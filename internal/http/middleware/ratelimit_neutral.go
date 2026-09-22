@@ -667,7 +667,7 @@ func resolveRateLimitPolicy(cfg *config.RateLimitsConfig, req *http.Request) (*c
 	if cfg == nil || req == nil {
 		return nil, ""
 	}
-	bucket := ClassifyBucket(strings.ToLower(req.URL.Path), req.Method)
+	bucket := ClassifyBucket(strings.ToLower(policyRequestPath(req)), req.Method)
 	if bucket == "captcha" {
 		return nil, bucket
 	}
@@ -741,7 +741,7 @@ func captchaShouldEnforce(cfg *config.CaptchaConfig, req *http.Request, bucket s
 	if !cfg.IsEnabled() || req == nil || bucket == "" || bucket == "webhook" || bucket == "captcha" {
 		return false
 	}
-	path := strings.ToLower(req.URL.Path)
+	path := strings.ToLower(policyRequestPath(req))
 	if strings.HasPrefix(path, "/billing") {
 		path = strings.TrimPrefix(path, "/billing")
 		if path == "" {

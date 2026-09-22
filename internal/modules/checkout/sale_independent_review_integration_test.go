@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -60,10 +59,10 @@ func TestIndependentSaleWebhookFirstKeepsAcceptedAccessWindow(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEqual(t, uuid.Nil, observed.PaymentID)
 			if name == "revoked_original_window" {
-				original, err := fx.db.Gen(ctx).ListOriginalPurchaseGrants(ctx, gen.ListOriginalPurchaseGrantsParams{MerchantID: dbtest.TestMerchantID.UUID(), PaymentID: observed.PaymentID, RowLimit: 3})
+				original, err := fx.db.Gen(ctx).ListOriginalPurchaseGrants(ctx, gen.ListOriginalPurchaseGrantsParams{MerchantID: fx.merchantID.UUID(), PaymentID: observed.PaymentID, RowLimit: 3})
 				require.NoError(t, err)
 				require.Len(t, original, 2)
-				ledger := grants.New(fx.db.Gen(ctx), dbtest.TestMerchantID.UUID())
+				ledger := grants.New(fx.db.Gen(ctx), fx.merchantID.UUID())
 				for _, grant := range original {
 					_, err := ledger.Revoke(ctx, grant.ID, "deliberate removal before receipt recovery")
 					require.NoError(t, err)

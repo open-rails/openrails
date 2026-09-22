@@ -14,7 +14,9 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
@@ -59,40 +61,27 @@ func TestMountHandlerRouteSelection(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
+	app.HostGraph(rt).Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
+
 	// Case 1: customer omitted -> /v1/me is not mounted, capabilities.customer=false.
-	h1, err := rt.Handler(embed.MountOptions{
-		MountPrefix:    "/billing",
-		RouteSets:      []embed.RouteSet{embed.RouteSetCheckout, embed.RouteSetWebhooks},
-		Authenticator:  authn,
-		ProviderRoutes: &embed.ProviderRoutes{},
-	})
+	h1, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, Authenticator: authn}, Prefix: "/billing"})
 	require.NoError(t, err)
-	require.ElementsMatch(t,
-		[]embed.RouteSet{embed.RouteSetCheckout, embed.RouteSetWebhooks},
-		rt.ActiveRouteSets())
 
 	w := doMounted(h1, http.MethodGet, "/billing/v1/me/balance?currency=USD", nil)
 	require.Equal(t, http.StatusNotFound, w.Code, "customer omitted -> /v1/me must 404")
 
 	caps1 := getCapabilities(t, h1)
 	require.True(t, caps1.RouteGroups["checkout"])
-	require.False(t, caps1.RouteGroups["webhooks"])
+	require.True(t, caps1.RouteGroups["webhooks"])
 	require.False(t, caps1.RouteGroups["customer"])
 	require.False(t, caps1.RouteGroups["payment_providers"])
 	require.False(t, caps1.Routes["billing_portal"])
 	require.False(t, caps1.Routes["solana"])
-	require.False(t, caps1.Routes["webhooks"])
+	require.True(t, caps1.Routes["webhooks"])
 
 	// Case 2: customer included -> /v1/me mounted, capabilities.customer=true.
-	h2, err := rt.Handler(embed.MountOptions{
-		MountPrefix:            "/billing",
-		RouteSets:              []embed.RouteSet{embed.RouteSetCheckout, embed.RouteSetCustomer, embed.RouteSetWebhooks},
-		Authenticator:          authn,
-		DelegatedAuthenticator: delegated,
-		ProviderRoutes:         &embed.ProviderRoutes{},
-	})
+	h2, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, Customer: true, Authenticator: authn}, Prefix: "/billing", DelegatedAuthenticator: delegated})
 	require.NoError(t, err)
-	require.Contains(t, rt.ActiveRouteSets(), embed.RouteSetCustomer)
 
 	caps2 := getCapabilities(t, h2)
 	require.True(t, caps2.RouteGroups["customer"], "customer selected -> advertised true even though the user handler strips it")

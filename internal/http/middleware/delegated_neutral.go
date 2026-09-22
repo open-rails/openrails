@@ -175,6 +175,11 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) router
 			}
 			principal, err := authn.AuthenticateDelegated(r.Request.Context(), r.Request)
 			if err != nil {
+				var gate billingauth.GateError
+				if errors.As(err, &gate) && gate.Status >= 400 && gate.Status <= 599 {
+					r.AbortJSON(gate.Status, gate.Message)
+					return
+				}
 				r.AbortJSON(http.StatusUnauthorized, billingauth.UnauthenticatedMessage(err))
 				return
 			}

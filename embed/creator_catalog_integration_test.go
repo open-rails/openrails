@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -177,7 +178,7 @@ func TestCreatorCatalogAuthority(t *testing.T) {
 	})
 
 	t.Run("HTTP identity comes only from the gate", func(t *testing.T) {
-		handler, err := rt.Handler(embed.MountOptions{RouteSets: []embed.RouteSet{embed.RouteSetCatalog}, Gate: creatorTestGate{mid: mid, subject: subjectA}})
+		handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, Gate: creatorTestGate{mid: mid, subject: subjectA}}})
 		require.NoError(t, err)
 		server := httptest.NewServer(handler)
 		t.Cleanup(server.Close)

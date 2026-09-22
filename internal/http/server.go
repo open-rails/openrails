@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/openrails/internal/http/router"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -90,7 +91,10 @@ type Server struct {
 
 	// routeTable records every registered route pattern (ServeMux syntax), the
 	// standalone surface's introspectable route table for the #670 parity test.
-	routeTable []string
+	routeTable      []string
+	nativeRoutes    *router.Table
+	nativeBrowser   map[string]bool
+	sharedRateLimit middleware.HTTPMiddleware
 }
 
 // recordRoute appends a registered pattern to the server's route table.
@@ -105,6 +109,10 @@ func (s *Server) recordRoute(pattern string) {
 // browserTierRoutes so hand-built *Server{} unit tests that skip New() still
 // behave correctly.
 func (s *Server) recordBrowserRoute(pattern string) {
+	if s.nativeBrowser == nil {
+		s.nativeBrowser = map[string]bool{}
+	}
+	s.nativeBrowser[pattern] = true
 	s.recordRoute(pattern)
 	if s.browserTierRoutes == nil {
 		s.browserTierRoutes = middleware.NewBrowserTierRoutes()
@@ -120,7 +128,7 @@ func (s *Server) RouteTable() []string {
 }
 
 // handle registers a plain net/http handler on the mux and records it.
-func (s *Server) handle(mux *http.ServeMux, pattern string, h http.Handler) {
+func (s *Server) handle(mux router.Registrar, pattern string, h http.Handler) {
 	s.recordRoute(pattern)
 	mux.Handle(pattern, h)
 }
@@ -129,7 +137,11 @@ func (s *Server) handle(mux *http.ServeMux, pattern string, h http.Handler) {
 // raw net/http handlers (not routed through router.Router) that belong to the
 // checkout/self-service surface, e.g. the captcha discovery endpoints
 // registered alongside RegisterUserRoutes.
-func (s *Server) handleBrowser(mux *http.ServeMux, pattern string, h http.Handler) {
+func (s *Server) handleBrowser(mux router.Registrar, pattern string, h http.Handler) {
+	if s.nativeBrowser == nil {
+		s.nativeBrowser = map[string]bool{}
+	}
+	s.nativeBrowser[pattern] = true
 	s.handle(mux, pattern, h)
 	if s.browserTierRoutes == nil {
 		s.browserTierRoutes = middleware.NewBrowserTierRoutes()
@@ -137,7 +149,19 @@ func (s *Server) handleBrowser(mux *http.ServeMux, pattern string, h http.Handle
 	s.browserTierRoutes.Add(pattern)
 }
 
-func New(deps Dependencies) (*Server, error) {
+func New(deps Dependencies) (*Server, error) { return newServer(deps, false) }
+
+// ConfiguredRoutes reuses the already initialized runtime and control plane.
+// Materializing HTTP must never open another secret backend or rearm services.
+func ConfiguredRoutes(deps Dependencies) (*router.Table, error) {
+	srv, err := newServer(deps, true)
+	if err != nil {
+		return nil, err
+	}
+	return srv.HTTPRoutes(), nil
+}
+
+func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 	if deps.Config == nil {
 		return nil, fmt.Errorf("server config is required")
 	}
@@ -219,7 +243,12 @@ func New(deps Dependencies) (*Server, error) {
 	// merchant_config_source=manifest) serves read-only provider credentials from the
 	// manifest and operator webhook URLs from managed encrypted storage. Provider
 	// write routes retain their manifest_driven 405. MODE 2 uses managed storage.
-	{
+	if routesOnly {
+		if deps.Runtime.Merchants == nil {
+			return nil, fmt.Errorf("standalone routes require initialized runtime merchant services")
+		}
+		s.merchants = deps.Runtime.Merchants
+	} else {
 		var secretBackend *merchantsecrets.Store
 		if deps.Config.IsManifestMerchantConfigSource() {
 			if deps.Runtime == nil || deps.Runtime.ManifestSecrets == nil {
@@ -269,7 +298,7 @@ func New(deps Dependencies) (*Server, error) {
 
 	// Single (standalone-friendly) HTTP surface on the framework-neutral
 	// net/http mux (#670): the same stack the embedded surface serves.
-	mux := http.NewServeMux()
+	mux := &router.Table{}
 	// Standalone mode owns service-level health/meta routes.
 	s.registerStandaloneMetaRoutes(mux)
 	// Canonical: /v1/*
@@ -313,7 +342,20 @@ func New(deps Dependencies) (*Server, error) {
 	// hosts still mount it — a pinned merchant has no payload-derived identity
 	// to resolve — via internal/http/embedhttp.
 
-	s.publicHandler = s.wrapPublicHandler(mux)
+	s.sharedRateLimit = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore, s.trustedProxies())
+	s.publicHandler = s.wrapPublicHandler(mux.Handler())
+	s.nativeRoutes = &router.Table{}
+	for _, entry := range mux.Entries {
+		switch entry.Path {
+		case "/{$}", "/health/live", "/health/ready", "/healthz", "/readyz":
+			continue
+		}
+		entry.Browser = s.nativeBrowser[entry.Method+" "+entry.Path]
+		s.nativeRoutes.Entries = append(s.nativeRoutes.Entries, entry)
+	}
+	s.nativeRoutes.Wrap(func(entry router.Entry) http.Handler {
+		return middleware.WithRoutePath(entry.Path)(s.wrapHandler(entry.Handler, func(*http.Request) bool { return entry.Browser }))
+	})
 
 	log.Info("Billing service initialized successfully")
 	return s, nil
@@ -330,8 +372,16 @@ func (s *Server) trustedProxies() *iputil.TrustedProxies {
 
 // wrapPublicHandler applies the global middleware chain — the neutral analogue
 // (and successor, #670) of the old gin engine's global middleware, same order.
-func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
-	return middleware.ChainHTTP(mux,
+func (s *Server) wrapPublicHandler(mux http.Handler) http.Handler {
+	return s.wrapHandler(mux, s.browserTierRoutes.Match)
+}
+
+func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool) http.Handler {
+	limiter := s.sharedRateLimit
+	if limiter == nil {
+		limiter = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore, s.trustedProxies())
+	}
+	return middleware.ChainHTTP(next,
 		middleware.RecoverHTTP(),
 		middleware.RequestLogHTTP("/health/live", "/health/ready", "/healthz", "/readyz", "/health"),
 		middleware.SecurityHeadersHTTP(),
@@ -346,7 +396,7 @@ func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
 		// tracked in browserTierRoutes as they register) and NO CORS headers
 		// anywhere else (admin/platform/merchant-API/webhooks/auth), so a
 		// browser refuses cross-origin script access to those by default.
-		middleware.PermissiveCORSHTTP(s.browserTierRoutes.Match),
+		middleware.PermissiveCORSHTTP(browser),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
 		billingCredentialsHTTP,
 		// Resolve the merchant / billing namespace before authorization and before any
@@ -364,7 +414,7 @@ func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
 		middleware.ResolveMerchantFromHostHTTP(s.hostMerchantResolver),
 		// Best-effort auth so the rate limiter can key by user, not only IP.
 		middleware.HTTPMiddleware(billingauth.Optional(s.authenticator)),
-		middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore, s.trustedProxies()),
+		limiter,
 	)
 }
 
@@ -398,4 +448,9 @@ func billingCredentialsHTTP(next http.Handler) http.Handler {
 		}
 		billing.ServeHTTP(w, r)
 	})
+}
+
+// HTTPRoutes returns the native hosted surface without process health routes.
+func (s *Server) HTTPRoutes() *router.Table {
+	return &router.Table{Entries: append([]router.Entry(nil), s.nativeRoutes.Entries...)}
 }

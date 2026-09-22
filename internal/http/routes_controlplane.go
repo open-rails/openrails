@@ -1,7 +1,9 @@
 package server
 
 import (
+	"github.com/open-rails/openrails/internal/http/router"
 	"net/http"
+	"strings"
 
 	authhttp "github.com/open-rails/authkit/authhttp"
 	log "github.com/sirupsen/logrus"
@@ -19,7 +21,7 @@ const ControlPlaneAuthPrefix = "/auth"
 // expose AuthKit's JWKS on this surface) and browser OIDC is in no mounted
 // group list. Hosted merchant creation's directory attachment rides
 // MountOptions.Wrap; other requests never create portal groups.
-func (s *Server) registerControlPlaneAuthRoutes(mux *http.ServeMux) error {
+func (s *Server) registerControlPlaneAuthRoutes(mux router.Registrar) error {
 	cp := s.controlPlane
 	if cp == nil || cp.AuthService() == nil {
 		return nil
@@ -29,7 +31,7 @@ func (s *Server) registerControlPlaneAuthRoutes(mux *http.ServeMux) error {
 		// Fail closed: an empty allow-list mounts nothing, never the default surface.
 		return nil
 	}
-	mount, err := authhttp.MountHandler(cp.AuthService(), authhttp.MountOptions{
+	mount, err := authhttp.NewMount(cp.AuthService(), authhttp.MountOptions{
 		Groups:        groups,
 		APIPrefix:     ControlPlaneAuthPrefix,
 		ExcludeRoutes: []authhttp.RouteRef{{Method: http.MethodGet, Path: authhttp.JWKSPath}},
@@ -38,15 +40,12 @@ func (s *Server) registerControlPlaneAuthRoutes(mux *http.ServeMux) error {
 	if err != nil {
 		return err
 	}
-	// Record the served surface per spec — the mount serves exactly
-	// ControlPlane.RouteSpecs() under /auth (pinned by the route-surface test).
-	specs := cp.RouteSpecs()
+	specs := mount.Routes()
 	for _, spec := range specs {
-		s.recordRoute(spec.Method + " " + ControlPlaneAuthPrefix + spec.Path)
+		if strings.HasPrefix(spec.Path, ControlPlaneAuthPrefix+"/") {
+			s.handle(mux, spec.Method+" "+spec.Path, mount)
+		}
 	}
-	mux.Handle(ControlPlaneAuthPrefix+"/", mount)
-	// Exact /auth: the mount's clean 404, not ServeMux's implicit 301 to /auth/.
-	mux.Handle(ControlPlaneAuthPrefix, mount)
 	log.WithFields(log.Fields{
 		"prefix":      ControlPlaneAuthPrefix,
 		"routes":      len(specs),

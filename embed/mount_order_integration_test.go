@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -32,7 +33,7 @@ func TestMountedHandlerResolvesMerchantBoundAfterMount(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
 	slug := fmt.Sprintf("mount-order-%d", time.Now().UnixNano())
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}}
+	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB}
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
@@ -44,10 +45,7 @@ func TestMountedHandlerResolvesMerchantBoundAfterMount(t *testing.T) {
 	noAuth := billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
 		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	})
-	handler, err := rt.Handler(embed.MountOptions{
-		RouteSets:     []embed.RouteSet{embed.RouteSetCheckout},
-		Authenticator: noAuth,
-	})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, Authenticator: noAuth}})
 	require.NoError(t, err)
 
 	// Bind the merchant AFTER the handler is already mounted and could be
@@ -55,9 +53,7 @@ func TestMountedHandlerResolvesMerchantBoundAfterMount(t *testing.T) {
 	_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
 
-	// Empty MountOptions.MountPrefix means incoming paths already arrive
-	// canonical ("/v1/..."); combinedMount adds the "/billing" segment the
-	// mux registered under before dispatching.
+	// The host registers these routes at /v1 with no path rewrite.
 	req := httptest.NewRequest(http.MethodGet, "/v1/products", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)

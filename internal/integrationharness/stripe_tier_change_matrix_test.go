@@ -57,6 +57,10 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 		lost := h.SeedStripeTierSubscription(d.runtime(), d.merchant, gateway)
 		lostRequest := openrails.ChangeTierRequest{PriceID: lost.ProPrice}
 		lostKey := "lost-" + uuid.NewString()[:8]
+		// The live verifier must not receive the landed receipt until the
+		// pending/replay assertions finish and the deployment has restarted.
+		releaseReadback := gateway.HoldLostSubscriptionReadback(lost.StripeSub)
+		defer releaseReadback()
 		gateway.SetMode(StripeWriteLostAfterLanding)
 		pending, err := client.ChangeTier(ctx, lost.Subscription, lostKey, lostRequest)
 		require.NoError(t, err)
@@ -78,6 +82,7 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 
 		d.stop()
 		d.start()
+		releaseReadback()
 		client = d.client()
 		h.MakeOperationDue(op.ID)
 		h.FireProviderIntentVerify(h.Pool(), op.ID)
@@ -89,6 +94,12 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "succeeded", done.Status)
 		require.Equal(t, pending.OperationID, done.OperationID)
+		require.Equal(t, "upgrade", done.Action)
+		require.Equal(t, lost.ProPrice, done.PriceID)
+		require.Equal(t, lost.ProAmount, done.NextChargeAmount)
+		doneAgain, err := client.ChangeTier(ctx, lost.Subscription, lostKey, lostRequest)
+		require.NoError(t, err)
+		require.Equal(t, done, doneAgain, "after restart the settled operation replays the exact stored receipt")
 		require.Len(t, gateway.Posts("/v1/subscriptions/"+lost.StripeSub), 1)
 		require.Equal(t, 1, h.TierChangeOperations(lost.SubscriptionID))
 

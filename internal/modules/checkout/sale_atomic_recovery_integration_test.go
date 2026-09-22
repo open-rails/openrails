@@ -156,7 +156,7 @@ func TestSaleUnsentRecoveryDispatchesOnceThroughWriteGates(t *testing.T) {
 func TestSaleSubmissionFenceSurvivesStalePark(t *testing.T) {
 	fx := newSaleIntentFixture(t)
 	store := intents.NewStore(fx.db)
-	row, err := store.Enqueue(fx.ctx, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", PspID: fx.payload.Instrument.PSPID, IntentType: payments.TypeNMISale, PriceID: &fx.priceID, Payload: fx.payload, IdempotencyKey: NMISaleIdempotencyKey(uuid.NewString()), Origin: intents.OriginUser})
+	row, err := store.Enqueue(fx.ctx, intents.EnqueueParams{MerchantID: fx.merchantID.UUID(), Provider: "nmi", PspID: fx.payload.Instrument.PSPID, IntentType: payments.TypeNMISale, PriceID: &fx.priceID, Payload: fx.payload, IdempotencyKey: NMISaleIdempotencyKey(uuid.NewString()), Origin: intents.OriginUser})
 	require.NoError(t, err)
 	now := time.Now().UTC()
 	row, claimed, err := store.ClaimByID(fx.ctx, row.ID, now, now.Add(time.Minute))

@@ -6,7 +6,12 @@ set -euo pipefail
 # Checks selects the remaining packages, preserving default-only variants.
 # `./...` (and no args) expands to this set; explicit arguments pass through.
 integration_packages() {
-  grep -rl --include='*.go' -E '^//go:build (.*[^a-zA-Z0-9_])?integration([^a-zA-Z0-9_].*)?$' . |
+  # Match Go's ./... module boundary. Nested adapters run through their own
+  # workspace check; passing their paths to the root module's go list fails.
+  find . -mindepth 1 \
+    \( -type d \( -name .git -o -name node_modules -o -name vendor -o -exec test -f '{}/go.mod' \; \) -prune \) -o \
+    \( -type f -name '*.go' -print0 \) |
+    xargs -0 -r grep -l -E '^//go:build (.*[^a-zA-Z0-9_])?integration([^a-zA-Z0-9_].*)?$' |
     xargs -n1 dirname | sed -e 's|^\./||' -e 's|^|./|' | sort -u
 }
 

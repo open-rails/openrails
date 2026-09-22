@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -59,7 +60,7 @@ func TestSelfSubscriptionWireParity(t *testing.T) {
 		}
 		return &billingauth.DelegatedPrincipal{MerchantID: dbtest.TestMerchantID.String(), MerchantSlug: dbtest.TestMerchantSlug, SubjectID: embeddedCustomer.String(), Issuer: "embedded-host"}, nil
 	})
-	handler, err := rt.Handler(embed.MountOptions{RouteSets: []embed.RouteSet{embed.RouteSetCustomer}, Gate: httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn}), DelegatedAuthenticator: authn})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Customer: true, Gate: httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn})}, DelegatedAuthenticator: authn})
 	require.NoError(t, err)
 	surfaces["embedded"] = surface{customer: embeddedCustomer, call: func(method, path string, body any) (int, []byte) {
 		var buf bytes.Buffer

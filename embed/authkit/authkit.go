@@ -178,7 +178,7 @@ func WithIssuer(issuer string) DelegatedOption {
 // NewAuthenticator builds a framework-neutral billingauth.Authenticator over
 // the HOST's own verifier: the credential is checked exactly the way the host
 // checks every other request. Pass the result as
-// gin.MountOptions.Authenticator or a host Gate input.
+// embed.HTTPConfig.Authenticator or a host Gate input.
 func NewAuthenticator(v Verifier, opts ...Option) (billingauth.Authenticator, error) {
 	if v == nil {
 		return nil, fmt.Errorf("authenticator: verifier is required (pass the host's own verifier, or use NewVerifierAuthenticator for remote JWKS issuers)")
@@ -235,7 +235,7 @@ func NewVerifierAuthenticator(issuers []string, expectedAud string, opts ...Opti
 // Every host used to hand-write this mapping; host-four's was a live bug
 // (upstream#1765) and host-three simply never wrote one, 404ing its whole
 // self-service surface (upstream#269). Pass the result as
-// embedded.MountOptions.DelegatedAuthenticator.
+// embed.Options.DelegatedAuthenticator.
 func NewDelegatedAuthenticator(v Verifier, merchantID string, opts ...DelegatedOption) (billingauth.DelegatedAuthenticator, error) {
 	if v == nil {
 		return nil, fmt.Errorf("delegated authenticator: verifier is required (pass the host's own verifier, or use NewVerifierDelegatedAuthenticator for remote JWKS issuers)")

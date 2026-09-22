@@ -63,6 +63,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	server "github.com/open-rails/openrails/internal/http"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/testauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -343,12 +344,9 @@ func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug st
 	// transport (#685) pins this merchant per request.
 	app.HostGraph(rt).Runtime.SetConfiguredMerchant(id)
 
-	handler, err := rt.Handler(embed.MountOptions{
-		RouteSets: []embed.RouteSet{embed.RouteSetMerchantAPI, embed.RouteSetCatalog, embed.RouteSetMerchantAdmin},
-		Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
-			merchantID: id, merchantSlug: slug,
-		}}),
-	})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantAPI: true, Catalog: true, MerchantAdmin: true, Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
+		merchantID: id, merchantSlug: slug,
+	}})}})
 	require.NoError(h.t, err, "mount production embedded merchant surface")
 	srv := httptest.NewServer(handler)
 	h.cleanup(srv.Close)

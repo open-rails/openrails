@@ -73,3 +73,26 @@ func TestInitialSessionBindingIsTyped(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckoutRequestFingerprintIsTypedSHA256(t *testing.T) {
+	// Produced by the ordinary NMI checkout writer from safe price/method IDs.
+	const digest = "cf0b56594a544b069795b7521f553ad1ab9dbc4413daf5369343142307519d66"
+	if safeText(digest) {
+		t.Fatal("fixture must exercise the PAN-shaped substring")
+	}
+	for _, tc := range []struct {
+		raw   string
+		valid bool
+	}{
+		{`{"_openrails_request_fingerprint":"` + digest + `"}`, true},
+		{`{"_openrails_request_fingerprint":"4111111111111111"}`, false},
+		{`{"_openrails_request_fingerprint":"not-a-sha256"}`, false},
+		{`{"_openrails_request_fingerprint":42}`, false},
+		{`{"_openrails_request_fingerprint":"` + digest + `","message":"4111111111111111"}`, false},
+		{`{"_openrails_request_fingerprint":"` + digest + `","unknown":"retained"}`, false},
+	} {
+		if err := validateJSON("checkout_sessions.rail_state", tc.raw); (err == nil) != tc.valid {
+			t.Errorf("valid=%v, error=%v", tc.valid, err)
+		}
+	}
+}
