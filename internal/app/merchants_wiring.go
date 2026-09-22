@@ -17,7 +17,7 @@ import (
 // pull plane — provider refresh, unknown-cohort resolution, per-sub probes —
 // can arm per merchant from the merchant-secrets store the manifest seeds.
 //
-// MODE 1 (#723, merchant_source=manifest): the store is the runtime's
+// MODE 1 (#723, merchant_config_source=manifest): the store is the runtime's
 // read-only provider manifest, alongside encrypted managed webhook URLs.
 //
 // A configured backend that cannot be initialized fails construction in every
@@ -28,9 +28,9 @@ func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 	}
 	var store merchants.MerchantSecretStore
 	var ping func(context.Context) error
-	if r.Config.IsManifestMerchantSource() {
+	if r.Config.IsManifestMerchantConfigSource() {
 		if r.ManifestSecrets == nil {
-			return r.armingFailure(fmt.Errorf("merchant_source=manifest but the manifest secret plane is missing (#723)"))
+			return r.armingFailure(fmt.Errorf("merchant_config_source=manifest but the manifest secret plane is missing (#723)"))
 		}
 		backend, err := merchantsecrets.BuildManifest(ctx, r.Config, r.ManifestSecrets, r.DB.DataPool())
 		if err != nil {

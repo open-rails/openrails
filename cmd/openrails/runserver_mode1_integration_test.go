@@ -81,10 +81,10 @@ func writeMode1Config(t *testing.T, dir, dsn string, port int, merchantSource, k
 	// makes this package pass only where the repo stack is up. Point it at the
 	// suite's own Redis (testcontainer or OPENRAILS_TEST_REDIS_ADDR).
 	redisAddr := dbtest.SharedRedisAddr(t)
-	// or#893: merchant_source=api must declare where secrets live. MODE 1 never
+	// or#893: merchant_config_source=api must declare where secrets live. MODE 1 never
 	// consults it, so declaring db is inert there and honest here.
 	cfgYAML := fmt.Sprintf(`env: development
-merchant_source: %s
+merchant_config_source: %s
 secret_backend: db
 test_mode: sandbox
 provider_write_mode: full
@@ -135,7 +135,7 @@ merchants:
 
 // TestRunServerMode1BootArmsNMIPSPFromManifest proves #847 end-to-end at the
 // REAL server entrypoint: `openrails run-server` in MODE 1
-// (merchant_source=manifest) converges the boot merchant manifest — merchant +
+// (merchant_config_source=manifest) converges the boot merchant manifest — merchant +
 // psps rows as DB projections, secrets held ONLY in the in-memory plane — and
 // the armed NMI PSP serves checkout-rail readiness over real HTTP. The #348
 // test_mode arm probe hits an injected fake gateway, never the live sandbox.
@@ -284,7 +284,7 @@ func TestRunServerRefusesMissingExplicitMerchantManifest(t *testing.T) {
 	require.Contains(t, err.Error(), "merchant manifest")
 }
 
-// TestRunServerAPIModeRefusesMerchantManifest: merchant_source=api refuses a
+// TestRunServerAPIModeRefusesMerchantManifest: merchant_config_source=api refuses a
 // present boot manifest — two truths (#723).
 func TestRunServerAPIModeRefusesMerchantManifest(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
@@ -296,7 +296,7 @@ func TestRunServerAPIModeRefusesMerchantManifest(t *testing.T) {
 	root.SetArgs([]string{"run-server", "--config", cfgPath, "--merchant-manifest", manifestPath, "--no-workers"})
 	err := root.Execute()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "merchant_source=api refuses")
+	require.Contains(t, err.Error(), "merchant_config_source=api refuses")
 }
 
 func waitForServerLive(t *testing.T, liveURL string, done <-chan error) {

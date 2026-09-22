@@ -130,7 +130,7 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.OpenrailsRa
 		}
 	}
 	if current.IntentType == subscriptions.TypeManualRebill || current.IntentType == subscriptions.TypeSubscriptionCollection {
-		for _, key := range []string{rebillPreparationKey, rebillDeclineKey} {
+		for _, key := range []string{rebillPreparationKey, rebillDeclineKey, stripeRecurringDeclineKey} {
 			if value, ok := existing[key]; ok {
 				evidence[key] = value
 			}
@@ -140,7 +140,15 @@ func (s *Store) completeCollectedPayment(ctx context.Context, in gen.OpenrailsRa
 			if err != nil {
 				return err
 			}
-			if found {
+			stripeCode, stripePI, stripeFound, err := LoadStripeRecurringDecline(current)
+			if err != nil {
+				return err
+			}
+			if stripeFound {
+				if outcome.Evidence["declined"] != true || outcome.Evidence["failure_code"] != stripeCode || outcome.Evidence["stripe_payment_intent_id"] != stripePI {
+					return errors.New("Stripe terminal result contradicts canceled payment custody")
+				}
+			} else if found {
 				if outcome.Evidence["declined"] != true || outcome.Evidence["response_code"] != refusal.ResponseCode {
 					return errors.New("rebill terminal result contradicts retained refusal")
 				}

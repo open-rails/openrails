@@ -35,11 +35,12 @@ type receiptBinding struct {
 	PayloadSHA256 string    `json:"payload_sha256"`
 }
 type collectedReceipt struct {
-	Version int                                    `json:"version"`
-	Family  string                                 `json:"family"`
-	Binding receiptBinding                         `json:"binding"`
-	NMI     *nmi.SaleEvidence                      `json:"nmi,omitempty"`
-	Stripe  *subscriptions.StripeCollectionReceipt `json:"stripe,omitempty"`
+	Version      int                                    `json:"version"`
+	Family       string                                 `json:"family"`
+	Binding      receiptBinding                         `json:"binding"`
+	NMI          *nmi.SaleEvidence                      `json:"nmi,omitempty"`
+	Stripe       *subscriptions.StripeCollectionReceipt `json:"stripe,omitempty"`
+	StripeEngine *subscriptions.StripeEngineReceipt     `json:"stripe_engine,omitempty"`
 }
 
 // Each kind decodes its own accepted payload. These private expected fields
@@ -72,7 +73,7 @@ func decodeCollectedTerms(in gen.OpenrailsRailIntent) (collectedTerms, error) {
 			return collectedTerms{}, err
 		}
 		minor, err := moneyutil.NativeToRailMinorExact(p.Terms.Currency, p.Terms.Amount)
-		return collectedTerms{"nmi", p.Terms.Currency, minor, p.Instrument, "", payments.NMISaleOrderReference(in.ID, p.E2ERunID)}, err
+		return collectedTerms{in.Rail, p.Terms.Currency, minor, p.Instrument, p.Instrument.RailCustomerRef, payments.NMISaleOrderReference(in.ID, p.E2ERunID)}, err
 	case subscriptions.TypeNMIUpgrade:
 		p, err := subscriptions.DecodeNMIUpgradePayload(in)
 		if err != nil {
@@ -82,7 +83,7 @@ func decodeCollectedTerms(in gen.OpenrailsRailIntent) (collectedTerms, error) {
 		return collectedTerms{"nmi", p.Currency, minor, p.Instrument, "", in.ID.String()}, err
 	case subscriptions.TypeSubscriptionCollection:
 		p, err := subscriptions.DecodeSubscriptionCollectionPayload(in)
-		return collectedTerms{"nmi", p.Renewal.Currency, p.AmountMinor, p.Instrument, "", p.OrderReference}, err
+		return collectedTerms{in.Rail, p.Renewal.Currency, p.AmountMinor, p.Instrument, p.Instrument.RailCustomerRef, p.OrderReference}, err
 	case subscriptions.TypeManualRebill:
 		p, err := subscriptions.DecodeManualRebillPayload(in)
 		return collectedTerms{p.Rail, p.Renewal.Currency, p.AmountMinor, p.Instrument, "", p.OrderReference}, err
@@ -127,7 +128,13 @@ func ReadNMICollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, r
 	if err != nil {
 		return CollectedReceipt{}, false, err
 	}
-	facts, found, err := client.ReadSaleEvidence(ctx, p.OrderReference, reference)
+	var facts nmi.SaleEvidence
+	var found bool
+	if engineCollectionOperation(in) && !p.Instrument.CustodianHeld() {
+		facts, found, err = client.ReadRecurringSaleEvidence(ctx, p.OrderReference, reference, p.Instrument.RailCustomerRef, p.Instrument.RailMethodRef)
+	} else {
+		facts, found, err = client.ReadSaleEvidence(ctx, p.OrderReference, reference)
+	}
 	if err != nil || !found {
 		return CollectedReceipt{}, found, err
 	}
@@ -169,7 +176,17 @@ func (r CollectedReceipt) Validate(in gen.OpenrailsRailIntent) error {
 	}
 	p, _ := decodeCollectedTerms(in)
 	if p.Rail == "stripe" {
-		if r.data.Stripe == nil || r.data.NMI != nil {
+		if in.IntentType == subscriptions.TypeInitialMembership || in.IntentType == subscriptions.TypeSubscriptionCollection {
+			if r.data.StripeEngine == nil || r.data.Stripe != nil || r.data.NMI != nil {
+				return errors.New("qualified engine receipt has wrong provider family")
+			}
+			params, err := StripeEngineParams(in)
+			if err != nil {
+				return err
+			}
+			return r.data.StripeEngine.Matches(params)
+		}
+		if r.data.Stripe == nil || r.data.NMI != nil || r.data.StripeEngine != nil {
 			return errors.New("qualified collection receipt has wrong provider family")
 		}
 		facts := r.data.Stripe
@@ -186,10 +203,14 @@ func (r CollectedReceipt) Validate(in gen.OpenrailsRailIntent) error {
 			return errors.New("Stripe receipt does not match frozen customer and payment method")
 		}
 	} else {
-		if r.data.NMI == nil || r.data.Stripe != nil {
+		if r.data.NMI == nil || r.data.Stripe != nil || r.data.StripeEngine != nil {
 			return errors.New("qualified collection receipt has wrong provider family")
 		}
 		facts := r.data.NMI
+		if engineCollectionOperation(in) && !p.Instrument.CustodianHeld() && (facts.VaultBillingID == "" || facts.VaultBillingID != p.Instrument.RailMethodRef) {
+			return fmt.Errorf("%w: sale does not match frozen billing entry", nmi.ErrReceiptMismatch)
+		}
+
 		if facts.TransactionID == "" || facts.OrderReference != p.OrderReference || !facts.Approved || facts.Amount != p.AmountMinor || !strings.EqualFold(facts.Currency, p.Currency) {
 			return fmt.Errorf("%w: sale does not match frozen operation", nmi.ErrReceiptMismatch)
 		}
@@ -201,6 +222,9 @@ func (r CollectedReceipt) Validate(in gen.OpenrailsRailIntent) error {
 }
 
 func (r CollectedReceipt) TransactionID() string {
+	if r.data.StripeEngine != nil {
+		return r.data.StripeEngine.ChargeID
+	}
 	if r.data.NMI != nil {
 		return r.data.NMI.TransactionID
 	}
@@ -241,6 +265,9 @@ func LoadCollectedReceipt(in gen.OpenrailsRailIntent) (CollectedReceipt, bool, e
 	// definitive refusal/nonexecution, including legacy contradictory rows.
 	if _, exists := evidence[qualifiedInitialRefusalKey]; exists {
 		return r, true, errors.New("collected receipt contradicts retained initial refusal")
+	}
+	if _, exists := evidence[stripeRecurringDeclineKey]; exists {
+		return r, true, errors.New("collected receipt contradicts retained Stripe refusal")
 	}
 	if _, exists := evidence[rebillDeclineKey]; exists {
 		return r, true, errors.New("collected receipt contradicts retained decline")
@@ -391,10 +418,21 @@ func LoadCollectionCandidate(in gen.OpenrailsRailIntent) (CollectionCandidate, b
 }
 
 func refuseCustodyKeys(evidence map[string]any) error {
-	for _, key := range []string{qualifiedInitialRefusalKey, qualifiedCollectionNonexecutionKey, qualifiedReceiptKey, qualifiedEnrollmentKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, "account_requalifications"} {
+	for _, key := range []string{qualifiedInitialRefusalKey, qualifiedCollectionNonexecutionKey, qualifiedReceiptKey, qualifiedEnrollmentKey, collectionCandidateKey, rebillPreparationKey, rebillDeclineKey, stripeRecurringDeclineKey, "account_requalifications"} {
 		if _, ok := evidence[key]; ok {
 			return fmt.Errorf("%s is reserved for immutable provider evidence custody", key)
 		}
 	}
 	return nil
+}
+
+func engineCollectionOperation(in gen.OpenrailsRailIntent) bool {
+	if in.IntentType == subscriptions.TypeSubscriptionCollection {
+		return true
+	}
+	if in.IntentType == subscriptions.TypeInitialMembership {
+		p, err := subscriptions.DecodeInitialMembershipPayload(in)
+		return err == nil && p.Terms.CollectionPolicy == "engine"
+	}
+	return false
 }

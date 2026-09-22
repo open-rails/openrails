@@ -78,6 +78,14 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 
+	if subscription.CollectionPolicy == models.CollectionPolicyEngine {
+		if err := r.State.SubscriptionLifecycleService.UpdateEnginePaymentMethod(ctx, subscription.ID, subscription.CustomerID, paymentMethodID); err != nil {
+			writeRefusal(r, err, "Failed to select payment method")
+			return
+		}
+		r.SuccessJSON(map[string]any{"success": true, "message": "Payment method updated successfully", "subscription_id": openrails.SubscriptionID(subscription.ID), "payment_method_id": openrails.PaymentMethodID(paymentMethodID)})
+		return
+	}
 	if !rails.IsNMI(subscription.Rail) {
 		r.ErrorJSON(http.StatusBadRequest, "Only NMI-backed subscriptions can have their payment method updated")
 		return

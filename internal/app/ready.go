@@ -61,7 +61,7 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 
 	var riverErr error
 	if r.hostRiver && !r.hostRiverBound.Load() {
-		riverErr = fmt.Errorf("host-owned River is not bound; call BindRiver after composition")
+		riverErr = fmt.Errorf("host-owned River is not bound; compose RiverJobs with riverkit.New")
 	} else if r.RiverProducer == nil {
 		riverErr = fmt.Errorf("river producer not initialized")
 	}
@@ -86,7 +86,7 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 // merchants service (or, in MODE 1, the manifest plane) must be armed, and —
 // when arming built a live backend (Vault) — that backend must still answer.
 func (r *Runtime) merchantSecretsReady(ctx context.Context) error {
-	if r.Config != nil && r.Config.IsManifestMerchantSource() {
+	if r.Config != nil && r.Config.IsManifestMerchantConfigSource() {
 		if r.ManifestSecrets == nil {
 			return fmt.Errorf("manifest secret plane not armed (#723)")
 		}

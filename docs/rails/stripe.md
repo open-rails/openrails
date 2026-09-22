@@ -59,10 +59,10 @@ open/close). Registration is skipped when the configured `api_url` is not a publ
 
 Signing-secret handling depends on the merchant source:
 
-- **API/DB mode** (`merchant_source: api`): when OpenRails creates the endpoint,
+- **API/DB mode** (`merchant_config_source: api`): when OpenRails creates the endpoint,
   Stripe mints the signing secret and OpenRails stores it in the merchant secret
   store. Fully hands-off.
-- **Manifest mode** (`merchant_source: manifest`): a freshly minted secret would
+- **Manifest mode** (`merchant_config_source: manifest`): a freshly minted secret would
   live only in process memory and be lost on reboot, so OpenRails refuses to create
   the endpoint. Register it once in the Stripe Dashboard (same URL, same events) and
   declare its `whsec_…` as `secrets.webhook_signing_secret`; reconcile then manages
@@ -93,9 +93,52 @@ first tries to repair the local record (a `psps` row whose `environment` or
 `account_id` changed moves the derived secret name), and only if that fails does it
 roll over. It never deletes a remote endpoint because of a local miss.
 
-### Catalog sync
+### Thin event destinations (account qualification required)
 
-The Stripe catalog adapter pushes OpenRails catalog definitions into your Stripe
+Stripe API-v1 thin events are a **private preview**, separate from SDK or CLI
+support. OpenRails continues to register snapshot endpoints. It does not enable
+thin delivery or change an existing endpoint to a preview API version. Qualify a
+separate thin destination in a Stripe sandbox before activating one; configure its
+secret as `webhook_signing_secret_thin` on the same exact account.
+
+For supported `v1.*` equivalents of the snapshot events listed above, ingestion
+verifies the original signed bytes, verifies the API key's account, retrieves the
+full v2 event (using the documented `2025-11-17.preview` metadata version), and
+fetches the related resource with OpenRails' regular pinned resource API version.
+Only the canonical resource endpoint for that event type can be fetched. The
+original context and event metadata survive normalization; `snapshot_event`, when
+present, becomes the same deduplication key used by the snapshot destination.
+Processing remains inline before acknowledgement except subscription convergence
+and accepted engine-payment verification, which are durably enqueued. This does not make all webhook effects atomically exactly-once.
+
+Unknown or malformed thin events, scope mismatches, and hydration failures return
+an error so that delivery is not silently acknowledged. The supported
+`v1.payment_intent.succeeded`, `v1.payment_intent.payment_failed`, and
+`v1.payment_intent.requires_action` notifications resolve an existing accepted
+engine operation from its merchant/account and immutable provider metadata,
+then enqueue its receipt verification through River. Customer, payment method,
+amount, currency, environment and retained payment identity must match. A
+notification cannot admit a new charge, release a hold, or declare payment
+success; the operation worker reads current Stripe truth and qualifies its
+receipt. Native invoice payments without OpenRails engine metadata continue
+through their existing handlers.
+
+Real account preview access, provider event fixtures, and live destination
+overlap remain unqualified by local transport tests.
+
+References: [Stripe event destinations](https://docs.stripe.com/event-destinations)
+and [Stripe snapshot-to-thin migration](https://docs.stripe.com/webhooks/migrate-snapshot-to-thin-events).
+
+### Catalog ownership
+
+With `new_subscription_collection_policy: engine`, new Stripe products and
+prices stay in OpenRails, including creator catalogs and secondary provider
+accounts. Recurring setup uses saved Customer/PaymentMethod references and
+PaymentIntents; it creates no Stripe Subscription. One-time hosted checkout uses
+inline accepted product/price presentation without a maintained remote catalog.
+Existing explicit Stripe links remain available for provider-owned agreements.
+
+For provider-managed catalog configuration, the Stripe catalog adapter pushes OpenRails catalog definitions into your Stripe
 account with **find-or-create** semantics — identity is content-based, so re-syncing
 (even after a database rebuild) reattaches to the same Stripe objects instead of
 duplicating them:

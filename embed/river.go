@@ -11,27 +11,26 @@
 // There is no degraded mode worth having, so River is not optional.
 //
 // Options.River defaults to OpenRails ownership. RiverFromHost() gives the
-// host ownership; BindRiver receives a fully composed config and constructs one
-// unstarted client after components attach. Otherwise OpenRails constructs its client and the caller runs
+// host ownership; pass RiverJobs to riverkit.New after optional components attach.
+// The composer returns one unstarted client with request-side producers bound. Otherwise OpenRails constructs its client and the caller runs
 // RunWorkers (or sets Options.RunWorkers).
 //
 // # Schema contract (issues #165, #545)
 //
 // OpenRails owns a single configurable Postgres schema, set via config `db.schema`
 // / env `DB_SCHEMA`, defaulting to `billing`. It holds OpenRails' own DDL/DML —
-// the portable billing data, and ONLY that.
+// the portable billing data. The host may place other tables in the same schema.
 //
 // River job-queue tables (river_*) are runtime/infra state, NEVER portable billing
-// data, so they NEVER live in the OpenRails billing schema — that is what keeps
-// the billing schema 100% portable for the embedded<->standalone data move (#544).
+// data. They may share a namespace with billing and host-owned tables; archives
+// select explicitly owned billing tables instead of treating a schema as ownership.
 //
 // WHERE the river_* set lives is the client owner's call. When OpenRails
 // constructs its own client (standalone, or embedded without an injected
 // client) it defaults to `public` (config.RiverSchema), alongside the migration
 // ledger and shared extensions. RiverManagedByOpenRails(schema) overrides that
 // namespace. A host-injected client owns its schema: the engine adopts client.Schema() for everything it
-// does with River (progress detection included), refusing only a schema that
-// collides with the billing schema. Two applications embedding OpenRails in
+// does with River (progress detection included). Two applications embedding OpenRails in
 // one database each keep their own river_* set this way; a shared set would
 // share river_leader, and River's elected leader schedules only its own
 // app's periodic jobs.
@@ -52,14 +51,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/riverkit"
 	"github.com/riverqueue/river"
-	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"github.com/open-rails/openrails/config"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -68,8 +63,8 @@ import (
 // ErrNotInitialized is returned when operations are attempted on an uninitialized Embedded instance.
 var ErrNotInitialized = errors.New("embedded billing: not initialized")
 
-// QueueBilling is the billing queue already present in BindRiver's composed
-// config. Hosts may adjust its concurrency; at least one worker is required.
+// QueueBilling is the billing queue contributed by RiverJobs. Hosts may set its
+// concurrency in the RiverKit config; at least one worker is required.
 const QueueBilling = riverjobs.QueueBilling
 
 // InvoiceSweepArgs is the invoice job OpenRails schedules on the billing queue
@@ -111,7 +106,7 @@ type RiverOwnership struct {
 }
 
 // RiverFromHost gives the host ownership of River's migrations and client
-// lifecycle. Call Runtime.BindRiver after attaching every component.
+// lifecycle. Pass Runtime.RiverJobs to riverkit.New after attaching components.
 func RiverFromHost() RiverOwnership { return RiverOwnership{host: true} }
 
 // RiverManagedByOpenRails selects OpenRails ownership, optionally in a separate
@@ -126,7 +121,7 @@ func RiverManagedByOpenRails(schema ...string) RiverOwnership {
 	return o
 }
 
-func (o RiverOwnership) managedSchema(billingSchema string) (string, error) {
+func (o RiverOwnership) managedSchema(_ string) (string, error) {
 	if o.err != nil {
 		return "", o.err
 	}
@@ -141,75 +136,20 @@ func (o RiverOwnership) managedSchema(billingSchema string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("embedded billing: River schema: %w", err)
 	}
-	if schema == billingSchema {
-		return "", fmt.Errorf("embedded billing: River schema %q must differ from the billing schema", schema)
-	}
 	return schema, nil
 }
 
-// BindRiver constructs and binds the host-owned fleet after component
-// composition. The optional configure callback extends the supplied complete
-// config; required workers, queues and schedules must remain. The host owns the
-// pool and the returned client's Start/Stop lifecycle. Call once before serving
-// traffic. A failed attempt requires closing and recreating the runtime.
-func (r *Runtime) BindRiver(ctx context.Context, pool *pgxpool.Pool, configure func(context.Context, *river.Config) error) (*river.Client[pgx.Tx], error) {
+// RiverJobs contributes billing and any already attached control-plane jobs.
+// Attach components first, then pass this contribution to riverkit.New alongside
+// other libraries. The host owns the returned client's Start/Stop lifecycle.
+func (r *Runtime) RiverJobs() riverkit.Contribution {
 	if r == nil || r.app == nil || r.app.Runtime == nil {
-		return nil, ErrNotInitialized
+		return riverkit.NewContribution("openrails", func(context.Context, *river.Config) error { return ErrNotInitialized }, nil, nil)
 	}
-	if pool == nil {
-		return nil, fmt.Errorf("embedded billing: host River pool is required")
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	rt := r.app.Runtime
-	cfg, err := rt.PrepareHostRiverConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	workers := cfg.Workers
-	queues := maps.Clone(cfg.Queues)
-	periodic := slices.Clone(cfg.PeriodicJobs)
-	if configure != nil {
-		if err := configure(ctx, cfg); err != nil {
-			return nil, fmt.Errorf("embedded billing: configure host River: %w", err)
-		}
-	}
-	if cfg.Workers != workers {
-		return nil, fmt.Errorf("embedded billing: preserve the composed River worker registry")
-	}
-	for name := range queues {
-		if cfg.Queues[name].MaxWorkers < 1 {
-			return nil, fmt.Errorf("embedded billing: required River queue %q was removed or disabled", name)
-		}
-	}
-	for _, job := range periodic {
-		if !slices.Contains(cfg.PeriodicJobs, job) {
-			return nil, fmt.Errorf("embedded billing: preserve the composed River periodic jobs")
-		}
-	}
-	schema, err := resolveHostRiverSchema(cfg.Schema, r.app.Config.DB.SchemaName())
-	if err != nil {
-		return nil, err
-	}
-	cfg.Schema = schema
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	client, err := river.NewClient(riverpgxv5.New(pool), cfg)
-	if err != nil {
-		return nil, fmt.Errorf("embedded billing: construct host River: %w", err)
-	}
-	if err := rt.BindHostRiverClient(ctx, client, schema); err != nil {
-		return nil, err // the unstarted client acquired no external lifecycle
-	}
-	return client, nil
+	return r.app.Runtime.RiverJobs()
 }
 
-// HasExternalRiverClient reports whether BindRiver has successfully bound the
+// HasExternalRiverClient reports whether RiverKit has successfully bound the
 // host-owned client. Ownership declaration alone returns false.
 func (r *Runtime) HasExternalRiverClient() bool {
 	if r == nil || r.app == nil || r.app.Runtime == nil {
@@ -239,20 +179,4 @@ func (r *Runtime) CheckJobProgress(ctx context.Context) (JobProgress, error) {
 		return JobProgress{}, ErrNotInitialized
 	}
 	return r.app.Runtime.RiverProgress(ctx)
-}
-
-// resolveHostRiverSchema decides the schema the engine uses for everything it
-// does with River, from the host client's own schema. Empty means River's
-// default. The billing schema is refused: river_* is runtime state, and
-// placing it inside the portable billing schema breaks the
-// embedded<->standalone data move the schema exists for.
-func resolveHostRiverSchema(clientSchema, billingSchema string) (string, error) {
-	schema := strings.TrimSpace(clientSchema)
-	if schema == "" {
-		schema = config.RiverSchema
-	}
-	if schema == billingSchema {
-		return "", fmt.Errorf("embedded billing: host River client uses the billing schema %q for river_* tables — River state is not portable billing data and must live elsewhere (default %q)", billingSchema, config.RiverSchema)
-	}
-	return schema, nil
 }

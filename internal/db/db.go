@@ -18,8 +18,9 @@ import (
 // The bun ORM side that coexisted here during the #334 transition is gone:
 // one driver, one pool.
 type DB struct {
-	pool *pgxpool.Pool
-	pgtx pgx.Tx
+	pool  *pgxpool.Pool
+	pgtx  pgx.Tx
+	river *riverBinding
 
 	// ownsPool: NewDB created the pool and Close() must close it; pools
 	// injected by embedded hosts (NewWithPGXPool) stay open.
@@ -69,7 +70,7 @@ func NewDB(ctx context.Context, cfg *config.DBConfig) (_ *DB, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DB{pool: pool, ownsPool: true, rw: newSchemaRewriter(cfg.SchemaName())}, nil
+	return &DB{river: &riverBinding{}, pool: pool, ownsPool: true, rw: newSchemaRewriter(cfg.SchemaName())}, nil
 }
 
 // newTunedPGXPool parses the connection string, applies the pool tuning,
@@ -160,7 +161,7 @@ func NewWithPGXPool(pool *pgxpool.Pool, schema string) (*DB, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("pgx pool is nil")
 	}
-	return &DB{pool: pool, rw: newSchemaRewriter(schema)}, nil
+	return &DB{river: &riverBinding{}, pool: pool, rw: newSchemaRewriter(schema)}, nil
 }
 
 // DataPool returns a schema-aware wrapper over the base pool for the rare
@@ -170,7 +171,7 @@ func (d *DB) DataPool() *Pool {
 	if d == nil || d.pool == nil {
 		return nil
 	}
-	return &Pool{raw: d.pool, rw: d.rw, schema: d.rw.schema()}
+	return &Pool{raw: d.pool, rw: d.rw, schema: d.rw.schema(), river: d.river}
 }
 
 // Pool exposes the pgx pool (nil for tx-scoped wrappers).
@@ -192,12 +193,12 @@ func (d *DB) Close() error {
 // the transaction, so repos called with this DB run inside it.
 func NewWithPgxTx(tx pgx.Tx) *DB {
 	if scoped, ok := tx.(schemaTx); ok {
-		return &DB{pgtx: tx, rw: scoped.rw}
+		return &DB{pgtx: tx, rw: scoped.rw, river: scoped.river}
 	}
 	rw := newSchemaRewriter("")
-	return &DB{pgtx: rw.wrapTx(tx), rw: rw}
+	return &DB{pgtx: rw.wrapTx(tx), rw: rw, river: &riverBinding{}}
 }
 
 func (d *DB) NewWithPgxTx(tx pgx.Tx) *DB {
-	return &DB{pgtx: d.rw.wrapTx(tx), rw: d.rw}
+	return &DB{pgtx: schemaTx{Tx: tx, rw: d.rw, river: d.river}, rw: d.rw, river: d.river}
 }

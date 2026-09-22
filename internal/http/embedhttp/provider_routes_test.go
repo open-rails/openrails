@@ -10,11 +10,11 @@ import (
 )
 
 func TestProviderRoutesCredentialAuthority(t *testing.T) {
-	for _, source := range []string{config.MerchantSourceManifest, config.MerchantSourceAPI} {
+	for _, source := range []string{config.MerchantConfigSourceManifest, config.MerchantConfigSourceAPI} {
 		for _, backendWritable := range []bool{false, true} {
 			for _, explicit := range []bool{false, true} {
 				rt := &app.Runtime{
-					Config:            &config.Config{MerchantSource: source, CatalogSource: config.CatalogSourceAPI},
+					Config:            &config.Config{MerchantConfigSource: source, CatalogSource: config.CatalogSourceAPI},
 					RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: backendWritable},
 				}
 				var override *routesurface.ProviderRoutes
@@ -23,7 +23,7 @@ func TestProviderRoutesCredentialAuthority(t *testing.T) {
 					override = &all
 				}
 				routes := ProviderRoutesForRuntime(rt, override)
-				wantWrite := source == config.MerchantSourceAPI && backendWritable
+				wantWrite := source == config.MerchantConfigSourceAPI && backendWritable
 				require.Equal(t, wantWrite, routes.SecretWrite, "source=%s backend=%v explicit=%v", source, backendWritable, explicit)
 				require.Equal(t, wantWrite, routes.Map()["secret_write"])
 				require.True(t, routes.Webhooks)

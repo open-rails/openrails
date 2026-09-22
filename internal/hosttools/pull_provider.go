@@ -71,7 +71,7 @@ type PullProviderOptions struct {
 	// MerchantManifestPath reads the MODE-1 manifest from disk when
 	// MerchantManifest is nil. Empty tries the conventional
 	// bootstrap.DefaultMerchantConfigManifestPath (optional); an explicit path
-	// must load. Ignored in merchant_source=api.
+	// must load. Ignored in merchant_config_source=api.
 	MerchantManifestPath string
 
 	// Endpoints overrides provider base URLs on store-armed pull clients — a
@@ -384,7 +384,7 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 	// read zero providers and reported success-shaped output over a snapshot it
 	// never fetched. There is no credential plane to fall back to; say so.
 	var merchantsSvc *merchants.Service
-	if cfg.IsManifestMerchantSource() {
+	if cfg.IsManifestMerchantConfigSource() {
 		svc, err := pullProviderManifestPlane(ctx, cfg, database, opts)
 		if err != nil {
 			cleanup()
@@ -429,7 +429,7 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 		}
 		raw, err := os.ReadFile(path) // #nosec G304 -- path is opts.MerchantManifestPath (operator CLI flag) or a fixed conventional default
 		if os.IsNotExist(err) && !explicit {
-			log.Warn("pull-provider: merchant_source=manifest but no merchant manifest was supplied or found; no rail can be armed (#723)")
+			log.Warn("pull-provider: merchant_config_source=manifest but no merchant manifest was supplied or found; no rail can be armed (#723)")
 			return nil, nil
 		}
 		if err != nil {

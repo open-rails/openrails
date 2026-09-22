@@ -361,12 +361,12 @@ func RegisterPaymentProviderRoutes(rr router.Router, rt *app.Runtime, opts Optio
 func manifestModeWriteGuardMW(rt *app.Runtime) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
-			if rt != nil && rt.Config.IsManifestMerchantSource() {
+			if rt != nil && rt.Config.IsManifestMerchantConfigSource() {
 				r.APIError(&api.APIError{
 					HTTPStatus: http.StatusMethodNotAllowed,
 					Type:       api.ErrorTypeInvalidRequest,
 					Code:       "manifest_driven",
-					Message:    "merchant_source=manifest: payment-provider configuration is host-declared; update the host configuration and restart",
+					Message:    "merchant_config_source=manifest: payment-provider configuration is host-declared; update the host configuration and restart",
 				})
 				return
 			}
@@ -731,7 +731,7 @@ func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtim
 	providers.Handle(http.MethodGet, "/:provider", h(httphandlers.MerchantGetPaymentProvider), readMW...)
 	// Host-owned provider configuration has no mutation HTTP surface. Keep
 	// reads and routing dry runs available, independently of catalog ownership.
-	if rt != nil && rt.Config.IsManifestMerchantSource() {
+	if rt != nil && rt.Config.IsManifestMerchantConfigSource() {
 		return
 	}
 	// Provider-config WRITE surface persists secrets; mount it only when OpenRails

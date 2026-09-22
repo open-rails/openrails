@@ -35,6 +35,7 @@ func TestDeclaredAdminGrantThenConverge(t *testing.T) {
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	appDB, err := db.NewWithPGXPool(pool, "")
 	require.NoError(t, err)
+	dbtest.BindRiver(t, appDB)
 
 	sfx := uuid.NewString()[:8]
 	prod, price := uuid.New(), uuid.New()
@@ -82,10 +83,9 @@ func TestDeclaredAdminGrantThenConverge(t *testing.T) {
 		})
 	})
 
-	// (1) Admin comp handed over as a grant via the public seam (Config nil ->
-	// DefaultSchema, identical to the host-one embed wiring).
+	// (1) Admin comp handed over through the already configured runtime database.
 	res, err := billingimport.Import(context.Background(), billingimport.Options{
-		PGXPool:    pool,
+		DB:         appDB,
 		MerchantID: dbtest.TestMerchantID,
 		Book: billingimport.DeclaredBilling{AsOf: time.Now().UTC(),
 			AdminGrants: []billingimport.DeclaredAdminGrant{{Customer: openrails.CustomerID(custAdmin), Product: openrails.ProductID(prod), SourceID: adminSource, StartsAt: start, EndsAt: &end}}},

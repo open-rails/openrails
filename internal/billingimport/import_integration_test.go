@@ -34,6 +34,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	appDB, err := db.NewWithPGXPool(pool, "")
 	require.NoError(t, err)
+	dbtest.BindRiver(t, appDB)
 
 	sfx := uuid.NewString()[:8]
 	prod, price := uuid.New(), uuid.New()
@@ -104,7 +105,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 				RailSubscriptionID: "sub-runway-" + sfx, StartedAt: asOf.Add(-100 * day), PaidThrough: &paidRunway,
 			},
 			{
-				SourceID: "dunning", Customer: openrails.CustomerID(cDunning), Price: openrails.PriceID(price), Rail: "nmi",
+				SourceID: "dunning", CollectionPolicy: "provider_dunning", Customer: openrails.CustomerID(cDunning), Price: openrails.PriceID(price), Rail: "nmi",
 				RailSubscriptionID: "sub-dunning-" + sfx, StartedAt: asOf.Add(-200 * day), PaidThrough: &paidDunning,
 				Dunning:       &billingimport.DunningEvidence{Retries: 2, LastRetryAt: &lastRetryAt, ScheduleLive: true},
 				PaymentMethod: &billingimport.PaymentMethodRef{Rail: "nmi", RailCustomerRef: "vault-" + sfx, RailMethodRef: ""},
@@ -157,14 +158,14 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	}
 
 	res, err := billingimport.Import(context.Background(), billingimport.Options{
-		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: book,
+		DB: appDB, MerchantID: dbtest.TestMerchantID, Book: book,
 	})
 	require.NoError(t, err)
 	require.Empty(t, res.Blocked, "no blocks expected: %v", res.Reasons)
 	require.ElementsMatch(t, []string{"runway", "dunning", "lapsed", "usercancel", "usercancel-nmi-live", "chargeback", "parked", "incremental"}, res.Imported)
 
 	type subRow struct {
-		status, cancelType             string
+		status, cancelType, policy     string
 		cancelledAt, endedAt, graceEnd *time.Time
 		periodStart, periodEnd         *time.Time
 		pmLinked                       bool
@@ -175,9 +176,9 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		var ct *string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT status::text, COALESCE(cancel_type::text,''), cancelled_at, ended_at, grace_ends_at,
-			        current_period_starts_at, current_period_ends_at, payment_method_id IS NOT NULL, deletion_scheduled_at
+			        current_period_starts_at, current_period_ends_at, payment_method_id IS NOT NULL, deletion_scheduled_at, collection_policy
 			 FROM billing.subscriptions WHERE rail_subscription_id=$1`, railSubID).
-			Scan(&r.status, &ct, &r.cancelledAt, &r.endedAt, &r.graceEnd, &r.periodStart, &r.periodEnd, &r.pmLinked, &r.deletionScheduledAt))
+			Scan(&r.status, &ct, &r.cancelledAt, &r.endedAt, &r.graceEnd, &r.periodStart, &r.periodEnd, &r.pmLinked, &r.deletionScheduledAt, &r.policy))
 		if ct != nil {
 			r.cancelType = *ct
 		}
@@ -187,12 +188,14 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		// 1) Active with runway: adopted at the declared paid-through.
 		r := load(ctx, "sub-runway-"+sfx)
+		require.Equal(t, "provider", r.policy)
 		require.Equal(t, "active", r.status)
 		require.NotNil(t, r.periodEnd)
 		require.True(t, r.periodEnd.Equal(paidRunway), "period end = declared paid-through")
 
 		// 2) Mid-dunning: past_due with grace = period end + 48h.
 		r = load(ctx, "sub-dunning-"+sfx)
+		require.Equal(t, "provider_dunning", r.policy)
 		require.Equal(t, "past_due", r.status)
 		require.NotNil(t, r.graceEnd)
 		require.True(t, r.graceEnd.Equal(paidDunning.Add(48*time.Hour)), "grace = missed period end + PeriodGrace")
@@ -244,6 +247,13 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 			Scan(&declStatus, &declOrigin))
 		require.Equal(t, "pending", declStatus)
 		require.Equal(t, "user", declOrigin)
+		var jobs int
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM public.river_job j
+ JOIN billing.rail_intents i ON i.id::text=j.args->>'intent_id'
+ WHERE i.subscription_id=$1 AND i.merchant_id=$2::uuid
+ AND j.kind=$3 AND j.args->>'merchant_id'=$2::uuid::text`, nmiSubID, merchantID, "openrails.provider_operation").Scan(&jobs))
+		require.Equal(t, 1, jobs, "declared cancellation and its real River dispatch commit together")
+
 		r = load(ctx, "sub-user-"+sfx)
 		require.Nil(t, r.deletionScheduledAt, "ccbill cancel: no remote-delete marker")
 
@@ -272,7 +282,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	// 8) Re-import: pure no-op — everything already present, no dup payments,
 	// no lifecycle regression.
 	res2, err := billingimport.Import(context.Background(), billingimport.Options{
-		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: book,
+		DB: appDB, MerchantID: dbtest.TestMerchantID, Book: book,
 	})
 	require.NoError(t, err)
 	require.Empty(t, res2.Imported)
@@ -303,7 +313,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		}},
 	}
 	res3, err := billingimport.Import(context.Background(), billingimport.Options{
-		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: twin,
+		DB: appDB, MerchantID: dbtest.TestMerchantID, Book: twin,
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{"twin"}, res3.Blocked)
@@ -355,7 +365,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		}},
 	}
 	res4, err := billingimport.Import(context.Background(), billingimport.Options{
-		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: restalled,
+		DB: appDB, MerchantID: dbtest.TestMerchantID, Book: restalled,
 	})
 	require.NoError(t, err)
 	require.Empty(t, res4.Blocked, "no blocks expected: %v", res4.Reasons)
@@ -396,7 +406,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		}},
 	}
 	res5, err := billingimport.Import(context.Background(), billingimport.Options{
-		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: terminated,
+		DB: appDB, MerchantID: dbtest.TestMerchantID, Book: terminated,
 	})
 	require.NoError(t, err)
 	require.Empty(t, res5.Blocked, "no blocks expected: %v", res5.Reasons)
@@ -411,6 +421,18 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		require.NotNil(t, revokedAt, "entitlement window closed on a PROVEN terminal cancel")
 		return nil
 	}))
+	book.Subscriptions[0].CollectionPolicy = "engine"
+	book.Subscriptions[1].CollectionPolicy = "provider"
+	refused, err := billingimport.Import(context.Background(), billingimport.Options{DB: appDB, MerchantID: dbtest.TestMerchantID, Book: book})
+	require.NoError(t, err)
+	require.Contains(t, refused.Blocked, "runway", "provider import cannot turn a live provider agreement into engine ownership")
+	require.Contains(t, refused.Blocked, "dunning", "repeat import cannot change existing recovery authority")
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		require.Equal(t, "provider", load(ctx, "sub-runway-"+sfx).policy)
+		require.Equal(t, "provider_dunning", load(ctx, "sub-dunning-"+sfx).policy)
+		return nil
+	}))
+
 }
 
 func TestImportBilling_RollsBackWholeBookOnInfrastructureError(t *testing.T) {
@@ -423,6 +445,7 @@ func TestImportBilling_RollsBackWholeBookOnInfrastructureError(t *testing.T) {
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	appDB, err := db.NewWithPGXPool(pool, "")
 	require.NoError(t, err)
+	dbtest.BindRiver(t, appDB)
 
 	sfx := uuid.NewString()[:8]
 	productID, priceID, customerID := uuid.New(), uuid.New(), uuid.New()
@@ -472,7 +495,7 @@ func TestImportBilling_RollsBackWholeBookOnInfrastructureError(t *testing.T) {
 	}
 
 	_, err = billingimport.Import(context.Background(), billingimport.Options{
-		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: book,
+		DB: appDB, MerchantID: dbtest.TestMerchantID, Book: book,
 	})
 	require.Error(t, err)
 
@@ -491,7 +514,7 @@ func TestImportBilling_RollsBackWholeBookOnInfrastructureError(t *testing.T) {
 
 	book.Subscriptions[0].Evidence = json.RawMessage(`{"legacy_source":"atomic-test"}`)
 	result, err := billingimport.Import(context.Background(), billingimport.Options{
-		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: book,
+		DB: appDB, MerchantID: dbtest.TestMerchantID, Book: book,
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{"atomic"}, result.Imported)
@@ -507,6 +530,7 @@ func TestImportBilling_RefusesPaymentMethodOwnerChange(t *testing.T) {
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	appDB, err := db.NewWithPGXPool(pool, "")
 	require.NoError(t, err)
+	dbtest.BindRiver(t, appDB)
 
 	sfx := uuid.NewString()[:8]
 	owner, other := uuid.New(), uuid.New()
@@ -537,11 +561,11 @@ func TestImportBilling_RefusesPaymentMethodOwnerChange(t *testing.T) {
 	}
 
 	_, err = billingimport.Import(context.Background(), billingimport.Options{
-		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: method(owner),
+		DB: appDB, MerchantID: dbtest.TestMerchantID, Book: method(owner),
 	})
 	require.NoError(t, err)
 	_, err = billingimport.Import(context.Background(), billingimport.Options{
-		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: method(other),
+		DB: appDB, MerchantID: dbtest.TestMerchantID, Book: method(other),
 	})
 	require.ErrorContains(t, err, "already belongs to customer")
 

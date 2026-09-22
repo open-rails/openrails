@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -30,7 +31,7 @@ import (
 // Every assertion here runs on the RLS-enforcing default handle, which is the
 // only reason the bug is visible at all: on a superuser connection the old code
 // claims fine and every one of these subtests passes against it.
-func TestProviderIntentExecutorFansOutPerMerchant(t *testing.T) {
+func TestProviderOperationExecutesWithExactMerchant(t *testing.T) {
 	ctx := context.Background()
 	worker := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)) // UNPINNED, like a real River job
 	m := seedIntentMerchant(t)
@@ -45,10 +46,6 @@ func TestProviderIntentExecutorFansOutPerMerchant(t *testing.T) {
 		_, err := intents.NewStore(worker).ClaimDue(ctx, now, now.Add(time.Minute), 50)
 		require.ErrorIs(t, err, merchant.ErrNoMerchant)
 
-		// And the merchant IS there to be found, through the sanctioned path.
-		ids, err := intents.NewStore(worker).DueExecuteMerchants(ctx, now, 500)
-		require.NoError(t, err)
-		require.Contains(t, ids, m.id, "0022's work queue must surface the merchant the bare claim could not see")
 	})
 
 	t.Run("the executor claims and executes under the merchant's own scope", func(t *testing.T) {
@@ -57,11 +54,11 @@ func TestProviderIntentExecutorFansOutPerMerchant(t *testing.T) {
 		require.NoError(t, destructive.New(worker).SetSwitch(ctx, true, "or862-test", "arm for the execute leg"))
 		id := seedDueIntent(t, m, intents.TypeNMIDeleteSubscription)
 		h := &recordingIntentHandler{intentType: intents.TypeNMIDeleteSubscription}
-		require.NoError(t, ProviderIntentExecuteWorker{
+		require.NoError(t, ProviderOperationWorker{
 			DB:       worker,
 			Config:   &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
 			Registry: intents.NewRegistry(h),
-		}.Work(ctx, nil))
+		}.Work(ctx, &river.Job[intents.OperationArgs]{Args: intents.OperationArgs{MerchantID: m.id, IntentID: id}}))
 
 		require.NotZero(t, h.executed, "the intent must actually reach its handler")
 		require.Equal(t, m.id, h.sawMerchant, "the handler must run under the intent's merchant")
@@ -74,11 +71,11 @@ func TestProviderIntentExecutorFansOutPerMerchant(t *testing.T) {
 
 		id := seedDueIntent(t, m, intents.TypeNMIDeleteSubscription)
 		h := &recordingIntentHandler{intentType: intents.TypeNMIDeleteSubscription}
-		require.NoError(t, ProviderIntentExecuteWorker{
+		require.ErrorAs(t, ProviderOperationWorker{
 			DB:       worker,
 			Config:   &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
 			Registry: intents.NewRegistry(h),
-		}.Work(ctx, nil))
+		}.Work(ctx, &river.Job[intents.OperationArgs]{Args: intents.OperationArgs{MerchantID: m.id, IntentID: id}}), new(*river.JobSnoozeError))
 
 		require.Zero(t, h.executed, "the kill switch must stop the provider write BEFORE the handler")
 		require.Equal(t, intents.StatusPending, m.statusOf(t, id),
@@ -86,10 +83,10 @@ func TestProviderIntentExecutorFansOutPerMerchant(t *testing.T) {
 	})
 }
 
-// TestProviderIntentVerifierFansOutPerMerchant is the verifier half of or#862:
+// TestProviderOperationVerifiesWithExactMerchant is the verifier half of or#862:
 // an ambiguous outcome that is never verified is never retried, so a blind
 // verifier plane strands every unknown intent forever.
-func TestProviderIntentVerifierFansOutPerMerchant(t *testing.T) {
+func TestProviderOperationVerifiesWithExactMerchant(t *testing.T) {
 	ctx := context.Background()
 	worker := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
 	m := seedIntentMerchant(t)
@@ -101,7 +98,7 @@ func TestProviderIntentVerifierFansOutPerMerchant(t *testing.T) {
 	require.ErrorIs(t, err, merchant.ErrNoMerchant)
 
 	h := &recordingIntentHandler{intentType: intents.TypeNMIDeleteSubscription}
-	require.NoError(t, ProviderIntentVerifyWorker{DB: worker, Registry: intents.NewRegistry(h)}.Work(ctx, nil))
+	require.NoError(t, ProviderOperationWorker{DB: worker, Registry: intents.NewRegistry(h)}.Work(ctx, &river.Job[intents.OperationArgs]{Args: intents.OperationArgs{MerchantID: m.id, IntentID: id}}))
 	require.Equal(t, 1, h.verified, "the verifier must reach the handler's read-only Verify")
 	require.Equal(t, intents.StatusSucceeded, m.statusOf(t, id))
 }

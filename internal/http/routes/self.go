@@ -61,6 +61,10 @@ func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	group.Handle(http.MethodGet, "/invoices/:id", h(httphandlers.GetMyInvoice))
 	group.Handle(http.MethodPost, "/invoices/:id/pay-now", h(httphandlers.PayMyInvoiceNow))
 
+	// Authentication continues the original accepted Stripe payment.
+	group.Handle(http.MethodGet, "/payment-operations/:id/authentication", h(httphandlers.GetStripePaymentAuthentication))
+	group.Handle(http.MethodPost, "/payment-operations/:id/authentication/confirm", h(httphandlers.ConfirmStripePaymentAuthentication))
+
 	// Payment / transaction history.
 	group.Handle(http.MethodGet, "/payments", h(httphandlers.GetUserPayments))
 	group.Handle(http.MethodGet, "/entitlements/active", h(httphandlers.SelfGetActiveEntitlements))
@@ -98,6 +102,9 @@ func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	// Payment methods.
 	pm := group.Group("/payment-methods")
 	pm.Handle(http.MethodGet, "", h(httphandlers.ListPaymentMethods))
+	pm.Handle(http.MethodPost, "/stripe-setup", h(httphandlers.CreateStripeMethodSetup))
+	pm.Handle(http.MethodGet, "/stripe-setup/:id", h(httphandlers.GetStripeMethodSetup))
+	pm.Handle(http.MethodPost, "/stripe-setup/:id/confirm", h(httphandlers.ConfirmStripeMethodSetup))
 	pm.Handle(http.MethodPost, "", h(httphandlers.CreatePaymentMethod))
 	pm.Handle(http.MethodPut, "/:id", h(httphandlers.UpdatePaymentMethod))
 	pm.Handle(http.MethodDelete, "/:id", h(httphandlers.DeletePaymentMethod))

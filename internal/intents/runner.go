@@ -70,9 +70,8 @@ func LedgerWriteContext(ctx context.Context) (context.Context, context.CancelFun
 	return db.DetachedWriteContext(ctx, ledgerWriteTimeout)
 }
 
-// Runner drains the intent ledger: RunExecuteOnce is the executor pass,
-// RunVerifyOnce the verifier pass. Both are single steps — scheduling is the
-// River periodic jobs' concern.
+// Runner applies financial claims and provider evidence. Production River
+// dispatch calls ExecuteByID/VerifyByID for one accepted operation.
 type Runner struct {
 	Store    ledger
 	Logger   MutationLogger
@@ -141,7 +140,8 @@ func (s *Stats) Add(o Stats) {
 	s.Expired += o.Expired
 }
 
-// RunExecuteOnce expires overdue intents, claims due ones and executes them
+// RunExecuteOnce is retained for legacy regression fixtures; production uses
+// per-operation River dispatch. It expires overdue intents and executes them
 // through their registered handlers. Intent-level problems are recorded on
 // the intent (never returned); the returned error is reserved for
 // infrastructure failure (claim query failed).
@@ -242,6 +242,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 		return
 	}
 	stopBeat := r.renewClaimWhile(ctx, logEntry, intent.ID)
+	defer stopBeat() // A panic must not keep an abandoned claim alive.
 	outcome := handler.Execute(ctx, intent)
 	stopBeat()
 	r.record(ctx, logEntry, stats, handler, intent, outcome, outcome.Reason, false)
@@ -326,7 +327,8 @@ func (r *Runner) ExecuteByID(ctx context.Context, id uuid.UUID) (gen.OpenrailsRa
 	return r.Store.Get(ctx, row.ID)
 }
 
-// RunVerifyOnce claims due unknown_needs_verify intents and resolves them via
+// RunVerifyOnce is retained for legacy regression fixtures; production uses
+// per-operation River dispatch. It claims unknown_needs_verify intents via
 // the handlers' read-only Verify.
 func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 	var stats Stats
@@ -664,6 +666,7 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.OpenrailsRai
 	out := Ambiguous("no verifier registered")
 	logger := log.WithContext(ctx).WithField("intent_id", in.ID)
 	stop := r.renewClaimWhile(ctx, logger, in.ID)
+	defer stop()
 	if h != nil {
 		out = h.Verify(ctx, in)
 	}

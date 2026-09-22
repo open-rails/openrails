@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/stretchr/testify/require"
@@ -132,14 +133,15 @@ func (h *Harness) MakeOperationDue(id uuid.UUID) {
 	require.NoError(h.t, err)
 }
 
-// FireProviderIntentVerify inserts the periodic provider-intent verify job on
-// the billing queue, the job the 5-minute schedule inserts, so whichever
-// deployment runs workers on this database performs the pass now.
-func (h *Harness) FireProviderIntentVerify(pool *pgxpool.Pool) {
+// FireProviderIntentVerify wakes one identified operation through River. Tests
+// may insert a redundant wakeup; the financial claim still prevents repeats.
+func (h *Harness) FireProviderIntentVerify(pool *pgxpool.Pool, id uuid.UUID) {
 	h.t.Helper()
+	var mid uuid.UUID
+	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT merchant_id FROM billing.rail_intents WHERE id=$1`, id).Scan(&mid))
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
 	require.NoError(h.t, err)
-	_, err = client.Insert(h.ctx, riverjobs.ProviderIntentVerifyArgs{}, &river.InsertOpts{Queue: riverjobs.QueueBilling})
+	_, err = client.Insert(h.ctx, intents.OperationArgs{MerchantID: mid, IntentID: id}, &river.InsertOpts{Queue: riverjobs.QueueBilling})
 	require.NoError(h.t, err)
 }
 
@@ -162,7 +164,7 @@ func (h *Harness) ResolveOperationWith(sandbox config.ProviderSandboxConfig, mid
 	if h.Redis != nil {
 		redisAddr = h.Redis.Options().Addr
 	}
-	cfg := "env: dev\nmerchant_source: api\nsecret_backend: db\ntest_mode: sandbox\nprovider_write_mode: full\ndb:\n  url: " + h.DSN + "\nredis:\n  addr: " + redisAddr + "\n" + providerSandboxYAML(sandbox)
+	cfg := "env: dev\nmerchant_config_source: api\nsecret_backend: db\ntest_mode: sandbox\nprovider_write_mode: full\ndb:\n  url: " + h.DSN + "\nredis:\n  addr: " + redisAddr + "\n" + providerSandboxYAML(sandbox)
 	require.NoError(h.t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o600))
 	args := []string{"intents", "resolve", "--config", filepath.Join(dir, "config.yaml"), "--merchant", "id:" + mid.String(), "--intent", id.String(), "--actor", "ops@example.test", "--reason", "gateway portal"}
 	if step != "" {

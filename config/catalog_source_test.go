@@ -7,12 +7,12 @@ import (
 )
 
 func TestIndependentCatalogAuthority(t *testing.T) {
-	for _, merchantSource := range []string{MerchantSourceManifest, MerchantSourceAPI} {
+	for _, merchantSource := range []string{MerchantConfigSourceManifest, MerchantConfigSourceAPI} {
 		for _, catalogSource := range []string{"", CatalogSourceManifest, CatalogSourceAPI} {
 			t.Run(merchantSource+"/"+catalogSource, func(t *testing.T) {
 				cfg := validationConfig("production")
-				cfg.MerchantSource, cfg.CatalogSource = merchantSource, catalogSource
-				if merchantSource == MerchantSourceAPI {
+				cfg.MerchantConfigSource, cfg.CatalogSource = merchantSource, catalogSource
+				if merchantSource == MerchantConfigSourceAPI {
 					cfg.SecretBackend = SecretBackendVault
 					cfg.Vault = &VaultConfig{Enabled: true}
 				}
@@ -23,7 +23,7 @@ func TestIndependentCatalogAuthority(t *testing.T) {
 				}
 				require.Equal(t, want, cfg.CatalogSourceMode())
 				require.Equal(t, want == CatalogSourceManifest, cfg.IsManifestCatalogSource())
-				require.Equal(t, merchantSource == MerchantSourceManifest, cfg.IsManifestMerchantSource())
+				require.Equal(t, merchantSource == MerchantConfigSourceManifest, cfg.IsManifestMerchantConfigSource())
 			})
 		}
 	}
@@ -37,11 +37,11 @@ func TestIndependentCatalogAuthority(t *testing.T) {
 func TestCatalogSourceLoadsIndependently(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv("ENV", "development")
-	t.Setenv("MERCHANT_SOURCE", "manifest")
+	t.Setenv("MERCHANT_CONFIG_SOURCE", "manifest")
 	t.Setenv("CATALOG_SOURCE", "api")
 	cfg, err := Load("")
 	require.NoError(t, err)
-	require.True(t, cfg.IsManifestMerchantSource())
+	require.True(t, cfg.IsManifestMerchantConfigSource())
 	require.Equal(t, CatalogSourceAPI, cfg.CatalogSourceMode())
 	t.Setenv("CATALOG_SOURCE", "typo")
 	_, err = Load("")

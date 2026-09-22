@@ -104,6 +104,11 @@ var pendingNumericMoney = map[string]string{
 	"internal/modules/ratelimit/limiter.go:WindowInfo.Remaining remaining":                                                                           notMoneyCount,
 	"internal/modules/solana/pay.go:PendingSolanaPayment.Amount amount":                                                                              notHTTPInternalRow,
 	"internal/modules/solana/pay.go:PendingSolanaPayment.TokenAmount token_amount":                                                                   notHTTPInternalRow,
+	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.Amount amount":                                                       notHTTPProviderWire,
+	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.AmountRefunded amount_refunded":                                      notHTTPProviderWire,
+	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.AmountCaptured amount_captured":                                      notHTTPProviderWire,
+	"internal/modules/subscriptions/stripe_engine_payment.go:stripeEngineIntent.Amount amount":                                                       notHTTPProviderWire,
+	"internal/modules/subscriptions/stripe_engine_payment.go:stripeEngineIntent.AmountReceived amount_received":                                      notHTTPProviderWire,
 	"internal/modules/subscriptions/stripe_invoice_collection.go:stripeCollectionInvoice.AmountPaid amount_paid":                                     notHTTPProviderWire,
 	"internal/modules/subscriptions/stripe_liveness_source.go:stripeLivenessSubscriptionEnvelope.AmountDue amount_due":                               notHTTPProviderWire,
 	"internal/modules/subscriptions/stripe_liveness_source.go:stripeLivenessSubscriptionEnvelope.AmountPaid amount_paid":                             notHTTPProviderWire,
@@ -171,6 +176,14 @@ const (
 // whose value is not a string: each is stored JSONB, a provider's own wire, a
 // log context or a page size — never served by a route. Same shrink-only rule.
 var pendingDynamicMoney = map[string]string{
+	// This integration-only loopback server reproduces Stripe's PaymentIntent
+	// and Charge response contracts, not an OpenRails HTTP response. Real
+	// enrollment/renewal tests require numeric minor units on that provider wire.
+	"internal/testfixture/engine_membership.go:func stripeEngineMembership \"amount\"":          notHTTPProviderWire,
+	"internal/testfixture/engine_membership.go:func stripeEngineMembership \"amount_received\"": notHTTPProviderWire,
+	"internal/testfixture/engine_membership.go:func stripeEngineMembership \"amount_captured\"": notHTTPProviderWire,
+	"internal/testfixture/engine_membership.go:func stripeEngineMembership \"captured\"":        "not money: Stripe provider capture-status boolean in an integration-only fixture",
+
 	"internal/http/handlers/admin_credit_grants.go:func ListAdminCreditTransactions \"limit\"":                     notMoneyPageSize,
 	"internal/http/handlers/admin_payments.go:func GetAdminUserPayments \"limit\"":                                 notMoneyPageSize,
 	"internal/http/handlers/admin_payments.go:func adminRefundMetadata \"admin_refund_amount\"":                    notHTTPStoredMetadata,

@@ -124,8 +124,8 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 	}
 	// Provider credentials in manifest deployments must stay in the manifest.
 	// BuildManifest supplies the narrow managed webhook namespace beside it.
-	if cfg.IsManifestMerchantSource() {
-		return nil, fmt.Errorf("merchant_source=manifest requires BuildManifest so provider credentials remain in the manifest")
+	if cfg.IsManifestMerchantConfigSource() {
+		return nil, fmt.Errorf("merchant_config_source=manifest requires BuildManifest so provider credentials remain in the manifest")
 	}
 	return buildManaged(ctx, cfg, pool)
 }
@@ -256,7 +256,7 @@ func buildDBSecretStore(cfg *config.Config, pool *db.Pool) (merchants.MerchantSe
 	if err != nil {
 		return nil, fmt.Errorf("build merchant encryptor: %w", err)
 	}
-	if !cfg.IsManifestMerchantSource() {
+	if !cfg.IsManifestMerchantConfigSource() {
 		if err := enforceEncryptionPosture(enc.Enabled(), cfg.RequiresSecretEncryption()); err != nil {
 			return nil, err
 		}

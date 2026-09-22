@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/jackc/pgx/v5"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/riverkit"
 	"github.com/riverqueue/river"
 )
 
@@ -14,11 +16,10 @@ func (r *Runtime) riverConfigurableLocked() error {
 		return fmt.Errorf("runtime is closed")
 	}
 	if r.riverCompositionSealed || r.RiverClient != nil || r.externalRiverClient {
-		return fmt.Errorf("River composition is already bound: attach components before initialization")
+		return fmt.Errorf("River composition is already sealed: attach components before requesting RiverJobs")
 	}
 	return nil
 }
-
 func (r *Runtime) CheckRiverConfigurable() error {
 	if r == nil {
 		return fmt.Errorf("runtime is nil")
@@ -28,38 +29,103 @@ func (r *Runtime) CheckRiverConfigurable() error {
 	return r.riverConfigurableLocked()
 }
 
-// PrepareHostRiverConfig seals one startup attempt before any component can
-// register twice. A failed attempt is fatal setup; recreate the runtime.
-func (r *Runtime) PrepareHostRiverConfig(ctx context.Context) (*river.Config, error) {
-	r.riverCompositionMu.Lock()
-	if !r.hostRiver {
-		r.riverCompositionMu.Unlock()
-		return nil, fmt.Errorf("BindRiver requires RiverFromHost ownership")
+// RiverJobs seals the attached component set before handing it to the host.
+// Request it only after optional control-plane attachment. No client is built
+// and no job starts until the host composes and starts the returned group.
+func (r *Runtime) RiverJobs() riverkit.Contribution { return r.riverJobs(true) }
+func (r *Runtime) riverJobs(host bool) riverkit.Contribution {
+	refuse := func(err error) riverkit.Contribution {
+		return riverkit.NewContribution("openrails", func(context.Context, *river.Config) error { return err }, nil, nil)
 	}
+	if r == nil {
+		return refuse(fmt.Errorf("runtime is nil"))
+	}
+	r.riverCompositionMu.Lock()
 	if err := r.riverConfigurableLocked(); err != nil {
 		r.riverCompositionMu.Unlock()
-		return nil, err
+		return refuse(err)
+	}
+	if r.hostRiver != host {
+		r.riverCompositionMu.Unlock()
+		return refuse(fmt.Errorf("host composition requires RiverFromHost ownership"))
 	}
 	r.riverCompositionSealed = true
-	configure := slices.Clone(r.riverConfigurers)
+	components := slices.Clone(r.riverContributions)
 	r.riverCompositionMu.Unlock()
-	workers := river.NewWorkers()
-	if err := r.AddBillingWorkersTo(ctx, workers); err != nil {
-		return nil, fmt.Errorf("register billing workers: %w", err)
-	}
-	periodic, err := r.GetBillingPeriodicJobs(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("build billing periodic jobs: %w", err)
-	}
-	cfg := &river.Config{
-		Schema: r.riverSchemaOrDefault(), Workers: workers, JobTimeout: riverNoJobTimeout,
-		Queues:       map[string]river.QueueConfig{riverjobs.QueueBilling: {MaxWorkers: standaloneRiverBillingQueueMaxWorkers}},
-		PeriodicJobs: periodic,
-	}
-	for _, fn := range configure {
-		if err := fn(ctx, cfg); err != nil {
-			return nil, fmt.Errorf("configure River component: %w", err)
+	claimed := false
+	own := riverkit.NewContribution("openrails", func(ctx context.Context, cfg *river.Config) error {
+		r.riverCompositionMu.Lock()
+		if r.riverClosed.Load() || r.riverCompositionFailed {
+			r.riverCompositionMu.Unlock()
+			return fmt.Errorf("runtime is closed or River composition failed")
 		}
-	}
-	return cfg, nil
+		claimed = true
+		r.riverCompositionMu.Unlock()
+		queues := map[string]int{riverjobs.QueueBilling: standaloneRiverBillingQueueMaxWorkers}
+		refreshQueue := riverjobs.QueueBilling
+		if !host {
+			queues[river.QueueDefault] = standaloneRiverDefaultQueueMaxWorkers
+			queues[riverjobs.QueueProviderRefresh] = standaloneRiverProviderRefreshQueueMaxWorkers
+			refreshQueue = riverjobs.QueueProviderRefresh
+		}
+		for name, count := range queues {
+			if _, present := cfg.Queues[name]; !present {
+				cfg.Queues[name] = river.QueueConfig{MaxWorkers: count}
+			}
+			if cfg.Queues[name].MaxWorkers < 1 {
+				return fmt.Errorf("required River queue %q is disabled", name)
+			}
+		}
+		if cfg.JobTimeout == 0 {
+			cfg.JobTimeout = riverNoJobTimeout
+		}
+		if err := r.addBillingWorkersToRegistry(ctx, cfg.Workers, refreshQueue); err != nil {
+			return err
+		}
+		periodic, err := r.buildRiverPeriodicJobs(ctx)
+		if err != nil {
+			return err
+		}
+		cfg.PeriodicJobs = append(cfg.PeriodicJobs, periodic...)
+		return nil
+	}, func(ctx context.Context, client *river.Client[pgx.Tx]) error {
+		r.riverCompositionMu.Lock()
+		if r.riverClosed.Load() || r.riverCompositionFailed {
+			r.riverCompositionMu.Unlock()
+			return fmt.Errorf("runtime closed during River composition")
+		}
+		r.SetRiverSchema(client.Schema())
+		r.RiverClient = client
+		r.DB.SetRiverJobInserter(client)
+		if host {
+			r.RiverProducer = client
+			r.externalRiverClient = true
+			r.hostRiverBound.Store(true)
+		}
+		// Close must not consume the monitor's stop-once before its start hook.
+		r.StartRiverProgressMonitor(ctx)
+		r.riverCompositionMu.Unlock()
+		return nil
+	}, func() error {
+		if !claimed {
+			return nil
+		}
+		r.riverCompositionMu.Lock()
+		if r.riverClosed.Load() {
+			r.riverCompositionMu.Unlock()
+			return nil
+		}
+		r.riverCompositionFailed = true
+		r.RiverClient = nil
+		r.DB.SetRiverJobInserter(nil)
+		if host {
+			r.RiverProducer = nil
+			r.externalRiverClient = false
+			r.hostRiverBound.Store(false)
+		}
+		r.riverCompositionMu.Unlock()
+		r.stopRiverProgressMonitor()
+		return nil
+	})
+	return riverkit.Group(append([]riverkit.Contribution{own}, components...)...)
 }

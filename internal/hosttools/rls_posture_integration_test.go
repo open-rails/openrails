@@ -38,11 +38,11 @@ func runManifestPlaneEntryPoints(t *testing.T, appDSN string) {
 	require.NoError(t, err)
 
 	cfg := &config.Config{
-		Env:               "staging",
-		TestMode:          config.CredentialPostureLive,
-		ProviderWriteMode: config.ProviderWriteModeReadOnly,
-		MerchantSource:    config.MerchantSourceManifest,
-		DB:                &config.DBConfig{URL: appDSN, Schema: config.DefaultSchema},
+		Env:                  "staging",
+		TestMode:             config.CredentialPostureLive,
+		ProviderWriteMode:    config.ProviderWriteModeReadOnly,
+		MerchantConfigSource: config.MerchantConfigSourceManifest,
+		DB:                   &config.DBConfig{URL: appDSN, Schema: config.DefaultSchema},
 	}
 
 	var out bytes.Buffer

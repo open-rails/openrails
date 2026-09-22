@@ -247,8 +247,10 @@ func TestInvoiceSubmissionFenceRecovery(t *testing.T) {
 			}
 			current, err := store.Get(e.ctx, stale.ID)
 			require.NoError(t, err)
-			if mode == "retry fenced unknown" {
+			if mode == "retry fenced unknown" || mode == "park during Prepare" {
 				require.Equal(t, intents.StatusUnknownNeedsVerify, current.Status)
+				require.Nil(t, current.ClaimedUntil)
+				require.Equal(t, stale.Attempts, current.Attempts)
 			} else if mode == "expire fenced pending" {
 				require.Equal(t, intents.StatusPending, current.Status)
 			} else {

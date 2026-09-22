@@ -79,6 +79,7 @@ func PayMyInvoiceNow(r *httprequest.Request) {
 	r.JSON(status, result)
 }
 func RetryMySubscriptionNow(r *httprequest.Request) {
+	r.SetHeader("Cache-Control", "no-store")
 	payer, ok := customerActionPayer(r)
 	if !ok {
 		return
@@ -106,7 +107,7 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 		r.InternalError("billing service unavailable", err)
 		return
 	}
-	result, err := svc.RetrySubscriptionNow(r.Request.Context(), payer, body)
+	result, err := svc.RetrySubscriptionNow(r.Request.Context(), payer, body, checkoutVerifiedPrincipal(r))
 	if err != nil {
 		customerPaymentError(r, err)
 		return
@@ -129,6 +130,8 @@ func customerPaymentError(r *httprequest.Request, err error) {
 		return
 	}
 	switch {
+	case errors.Is(err, money.ErrCustomerSessionRequired):
+		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "customer_action_required", "verified customer action required"))
 	case errors.Is(err, pgx.ErrNoRows):
 		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, api.CodeResourceNotFound, "billing resource not found"))
 	case errors.Is(err, money.ErrInvoiceRetryIdempotencyConflict), errors.Is(err, intents.ErrRebillKeyConflict):

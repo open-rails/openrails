@@ -67,6 +67,9 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 			}
 			prior, err := d.Gen(ctx).GetRailIntentByIdempotencyKey(ctx, gen.GetRailIntentByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: customerKey})
 			if err == nil {
+				if prior.IntentType != subscriptions.TypeManualRebill {
+					return ErrRebillKeyConflict
+				}
 				p, err := subscriptions.DecodeManualRebillPayload(prior)
 				if err != nil {
 					return err
@@ -162,6 +165,9 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		accepted, err = store.Enqueue(ctx, EnqueueParams{MerchantID: mid.UUID(), Provider: p.Rail, IntentType: subscriptions.TypeManualRebill, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: sub.PspID, Payload: p, IdempotencyKey: key, NextAttemptAt: now, Origin: origin, OriginReason: reason, Actor: actor, ExpiresAt: &windowEnd})
 		if err != nil {
 			return err
+		}
+		if accepted.IntentType != subscriptions.TypeManualRebill {
+			return ErrRebillKeyConflict
 		}
 		canonical, err := subscriptions.DecodeManualRebillPayload(accepted)
 		if err != nil {

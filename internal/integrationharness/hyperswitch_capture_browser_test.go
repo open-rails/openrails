@@ -62,7 +62,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 		require.NoError(t, err)
 		var input recovery
 		require.NoError(t, json.Unmarshal(raw, &input))
-		restored, err := embed.New(t.Context(), embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: input.DB, Redis: input.Redis, HyperSwitch: input.HyperSwitch, ProviderSandbox: input.ProviderSandbox, Encryption: input.Encryption}, River: embed.RiverManagedByOpenRails()})
+		restored, err := embed.New(t.Context(), embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: input.DB, Redis: input.Redis, HyperSwitch: input.HyperSwitch, ProviderSandbox: input.ProviderSandbox, Encryption: input.Encryption}, River: embed.RiverManagedByOpenRails()})
 		require.NoError(t, err)
 		defer restored.Close(context.Background())
 		runtime := app.HostGraph(restored).Runtime
@@ -112,6 +112,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	billingClock := NewSettableClock(nil)
 	var delegated billingauth.DelegatedAuthenticator
 	surface := h.StartStandalone("USD", WithClock(billingClock), WithConfig(func(c *config.Config) {
+		c.NewSubscriptionCollectionPolicy = "engine"
 		c.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: vendor.APIBaseURL, SDKURL: vendor.SDKURL}
 		c.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 		{
@@ -674,6 +675,13 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 		runJob := func(args river.JobArgs) {
 			job, err := rt.RiverClient.Insert(ctx, args, &river.InsertOpts{Queue: queue, MaxAttempts: 1})
 			require.NoError(t, err)
+			if args.Kind() == intents.OperationJobKind {
+				require.Eventually(t, func() bool {
+					row, err := rt.RiverClient.JobGet(ctx, job.Job.ID)
+					return err == nil && row.Attempt > 0 && (string(row.State) == "scheduled" || string(row.State) == "completed")
+				}, 20*time.Second, 20*time.Millisecond, "operation worker must retain unknown work for verification")
+				return
+			}
 			require.Eventually(t, func() bool {
 				row, err := rt.RiverClient.JobGet(ctx, job.Job.ID)
 				return err == nil && (string(row.State) == "completed" || string(row.State) == "discarded")
@@ -708,7 +716,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, http.StatusNoContent, control.StatusCode)
 		control.Body.Close()
-		runJob(riverjobs.ProviderIntentExecuteArgs{})
+		runJob(intents.OperationArgs{MerchantID: owned.MerchantID.UUID(), IntentID: renewal.ID})
 		loadRenewal := func() gen.OpenrailsRailIntent {
 			var row gen.OpenrailsRailIntent
 			require.NoError(t, rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {

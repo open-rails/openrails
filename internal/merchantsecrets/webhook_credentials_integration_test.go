@@ -18,12 +18,12 @@ func TestWebhookCredentialsRequireEncryption(t *testing.T) {
 	ctx := context.Background()
 	pool := db.WrapPool(dbtest.SharedSuperuserPGXPool(t), config.DefaultSchema)
 	for _, manifestMode := range []bool{false, true} {
-		cfg := &config.Config{Env: "dev", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB}
+		cfg := &config.Config{Env: "dev", MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB}
 		var backend *Store
 		var err error
 		if manifestMode {
 			cfg.Env = "production"
-			cfg.MerchantSource = config.MerchantSourceManifest
+			cfg.MerchantConfigSource = config.MerchantConfigSourceManifest
 			backend, err = BuildManifest(ctx, cfg, merchants.NewManifestSecretStore(), pool)
 		} else {
 			backend, err = Build(ctx, cfg, pool)

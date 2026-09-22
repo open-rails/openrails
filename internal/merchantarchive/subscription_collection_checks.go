@@ -84,6 +84,11 @@ func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries
 	if declineErr != nil {
 		return declineErr
 	}
+	stripeCode, _, stripeDeclined, stripeErr := intents.LoadStripeRecurringDecline(op)
+	if stripeErr != nil {
+		return stripeErr
+	}
+	declined = declined || stripeDeclined
 	if !paid && !declined {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
@@ -105,6 +110,9 @@ func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries
 	}
 	if !paid {
 		response := strconv.Itoa(code)
+		if stripeDeclined {
+			response = stripeCode
+		}
 		reason := payments.NormalizeFailureReason(op.Rail, response)
 		if payment.ID != uuid.NewSHA1(op.ID, []byte("decline")) || payment.CustomerID != t.CustomerID || payment.SubscriptionID == nil || *payment.SubscriptionID != t.SubscriptionID || payment.PriceID != t.PriceID || payment.Amount != t.Amount || payment.ListAmount != t.Amount || payment.Currency != t.Currency || payment.Status != payments.PaymentStatusFailedValue || payment.MoneyMovement != models.MoneyMovementNone || payment.FailureCode == nil || *payment.FailureCode != response || payment.FailureReason == nil || *payment.FailureReason != reason || payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptRenewal {
 			return errors.New("engine decline contradicts its original failed payment")
@@ -118,7 +126,7 @@ func validateSubscriptionCollectionReference(ctx context.Context, q *gen.Queries
 	if err := subscriptions.ValidateInitialMembershipPayment(accepted, payment, models.Rail(op.Rail), transaction); err != nil {
 		return err
 	}
-	if payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptRenewal || payment.TokenType == nil || *payment.TokenType != payments.DefaultTokenType(op.Rail, models.CustodianHyperSwitch) {
+	if payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptRenewal || payment.TokenType == nil || *payment.TokenType != payments.DefaultTokenType(op.Rail, p.Instrument.Custodian) {
 		return errors.New("engine payment lacks its recurring custody stamp")
 	}
 	limit, err := safecast.Convert[int32](len(t.Entitlements) + 2)

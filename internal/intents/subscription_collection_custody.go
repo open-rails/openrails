@@ -23,11 +23,15 @@ func ValidateSubscriptionCollectionTerminal(in gen.OpenrailsRailIntent) error {
 	if err != nil {
 		return err
 	}
+	stripeCode, stripePI, stripeDeclined, err := LoadStripeRecurringDecline(in)
+	if err != nil {
+		return err
+	}
 	proof, notExecuted, err := LoadCollectionNonexecution(in)
 	if err != nil {
 		return err
 	}
-	if paid && (declined || notExecuted) {
+	if paid && (declined || stripeDeclined || notExecuted) {
 		return errors.New("engine receipt contradicts retained refusal")
 	}
 	if in.Status == StatusSucceeded {
@@ -47,6 +51,12 @@ func ValidateSubscriptionCollectionTerminal(in gen.OpenrailsRailIntent) error {
 	}
 	if err := json.Unmarshal(in.ResultEvidence, &result); err != nil {
 		return err
+	}
+	if stripeDeclined {
+		if !result.Declined || result.NotExecuted || result.ResponseCode != 0 || EvidenceString(in, "failure_code") != stripeCode || EvidenceString(in, "stripe_payment_intent_id") != stripePI {
+			return errors.New("Stripe decline projection contradicts custody")
+		}
+		return nil
 	}
 	if declined {
 		if !result.Declined || result.NotExecuted || result.ResponseCode != refusal.ResponseCode {

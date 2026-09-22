@@ -399,6 +399,9 @@ func (s *CheckoutService) processSubscription(
 	if err != nil {
 		return nil, err
 	}
+	if s.Config != nil && s.Config.NewSubscriptionCollectionPolicy == "engine" {
+		return nil, errors.New("new engine subscriptions require a saved-method checkout session and explicit agreement confirmation")
+	}
 	price = priceForCheckoutTarget(price, target)
 	switch {
 	case target.Rail == "ccbill":
@@ -457,7 +460,7 @@ func (s *CheckoutService) processOneTimePurchase(
 	case target.Rail == "ccbill":
 		return nil, errors.New("ccbill does not support one-time purchases; use a subscription price instead")
 	case target.Rail == "stripe":
-		return s.processStripePayment(ctx, req, user, price)
+		return s.processStripePayment(ctx, req, user, price, product)
 	default:
 		return nil, fmt.Errorf("unsupported rail for one-time purchases: %s", target.Rail)
 	}
@@ -834,14 +837,32 @@ func (s *CheckoutService) processStripePayment(
 	req *CheckoutRequest,
 	user *UserIdentity,
 	price *models.Price,
+	product *models.Product,
 ) (*CheckoutResponse, error) {
 	_, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
 		return nil, err
 	}
-	stripePriceID, err := getStripePriceID(price)
-	if err != nil {
-		return nil, err
+	var stripePriceID string
+	var inline *stripeCheckoutInlinePrice
+	if s.Config != nil && s.Config.NewSubscriptionCollectionPolicy == "engine" {
+		minor, err := moneyutil.NativeToRailMinorExact(price.Currency, price.Amount)
+		if err != nil {
+			return nil, err
+		}
+		if product == nil || product.ID != price.ProductID {
+			return nil, errors.New("checkout product does not match accepted price")
+		}
+		name := strings.TrimSpace(product.DisplayName)
+		if name == "" {
+			name = product.Key
+		}
+		inline = &stripeCheckoutInlinePrice{Name: name, Currency: price.Currency, AmountMinor: minor}
+	} else {
+		stripePriceID, err = getStripePriceID(price)
+		if err != nil {
+			return nil, err
+		}
 	}
 	successURL := strings.TrimSpace(req.SuccessURL)
 	cancelURL := strings.TrimSpace(req.CancelURL)
@@ -852,6 +873,7 @@ func (s *CheckoutService) processStripePayment(
 	urlStr, err := s.createStripeCheckoutSession(ctx, stripeCheckoutParams{
 		Mode:              "payment",
 		PriceID:           stripePriceID,
+		InlinePrice:       inline,
 		SuccessURL:        successURL,
 		CancelURL:         cancelURL,
 		UserID:            user.ID,
@@ -1087,7 +1109,14 @@ func getStripePriceID(price *models.Price) (string, error) {
 	return id, nil
 }
 
+type stripeCheckoutInlinePrice struct {
+	Name        string
+	Currency    string
+	AmountMinor moneyutil.Cents
+}
+
 type stripeCheckoutParams struct {
+	InlinePrice       *stripeCheckoutInlinePrice
 	Mode              string
 	PriceID           string
 	SuccessURL        string
@@ -1119,7 +1148,16 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	} else if email := strings.TrimSpace(params.CustomerEmail); email != "" {
 		values.Set("customer_email", email)
 	}
-	values.Set("line_items[0][price]", params.PriceID)
+	if params.InlinePrice != nil {
+		if params.Mode != "payment" || params.PriceID != "" || params.InlinePrice.AmountMinor < 0 || strings.TrimSpace(params.InlinePrice.Name) == "" {
+			return "", errors.New("invalid inline checkout price")
+		}
+		values.Set("line_items[0][price_data][currency]", strings.ToLower(params.InlinePrice.Currency))
+		values.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(int64(params.InlinePrice.AmountMinor), 10))
+		values.Set("line_items[0][price_data][product_data][name]", params.InlinePrice.Name)
+	} else {
+		values.Set("line_items[0][price]", params.PriceID)
+	}
 	values.Set("line_items[0][quantity]", "1")
 	values.Set("metadata[user_id]", params.UserID)
 	values.Set("metadata[internal_price_id]", params.InternalPriceID)

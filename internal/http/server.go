@@ -216,14 +216,14 @@ func New(deps Dependencies) (*Server, error) {
 	// Build the merchant provisioning/lifecycle/secret service (issue #225). It
 	// uses the runtime data pool for request-time secret custody, matching the
 	// merchant pin, and the control plane for provisioning. MODE 1 (#723,
-	// merchant_source=manifest) serves read-only provider credentials from the
+	// merchant_config_source=manifest) serves read-only provider credentials from the
 	// manifest and operator webhook URLs from managed encrypted storage. Provider
 	// write routes retain their manifest_driven 405. MODE 2 uses managed storage.
 	{
 		var secretBackend *merchantsecrets.Store
-		if deps.Config.IsManifestMerchantSource() {
+		if deps.Config.IsManifestMerchantConfigSource() {
 			if deps.Runtime == nil || deps.Runtime.ManifestSecrets == nil {
-				return nil, fmt.Errorf("merchant_source=manifest requires the runtime manifest secret plane (#723)")
+				return nil, fmt.Errorf("merchant_config_source=manifest requires the runtime manifest secret plane (#723)")
 			}
 			b, err := merchantsecrets.BuildManifest(context.Background(), deps.Config, deps.Runtime.ManifestSecrets, deps.Runtime.DB.DataPool())
 			if err != nil {

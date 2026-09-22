@@ -57,24 +57,16 @@ func TestCustomSchemaKeepsBillingValuesAndRestoreFunctions(t *testing.T) {
 	_, err = conn.Exec(ctx, "INSERT INTO "+schema+".subscriptions(merchant_id,customer_id,product_id,psp_id,rail,collection_policy,payment_method_id) VALUES($1,$2,$3,$4,'nmi',$5,$6)", mid, cid, product, psp, schema, method)
 	require.ErrorContains(t, err, "subscriptions_collection_policy_check")
 
-	// The method FK uses ON DELETE SET NULL. A live engine obligation must
-	// refuse deletion; resolved cancelled history must allow it without a
-	// shadow payment-method identifier or a post-provider local failure.
-	for _, status := range []string{"pending", "active", "past_due"} {
-		_, err = conn.Exec(ctx, "UPDATE "+schema+".subscriptions SET status=$2::"+schema+".subscription_status,current_period_starts_at=now()-interval '30 days',current_period_ends_at=now() WHERE id=$1", subscription, status)
-		require.NoError(t, err)
-		_, err = conn.Exec(ctx, "DELETE FROM "+schema+".payment_methods WHERE id=$1", method)
-		require.ErrorContains(t, err, "subscriptions_engine_binding_check", status)
-	}
-	_, err = conn.Exec(ctx, "UPDATE "+schema+".subscriptions SET status='cancelled',cancelled_at=now(),cancel_type='user' WHERE id=$1", subscription)
+	// Removing a credential must not cancel the agreement or invent a remote ID.
+	_, err = conn.Exec(ctx, "UPDATE "+schema+".subscriptions SET status='active',current_period_starts_at=now()-interval '1 month',current_period_ends_at=now() WHERE id=$1", subscription)
 	require.NoError(t, err)
 	_, err = conn.Exec(ctx, "DELETE FROM "+schema+".payment_methods WHERE id=$1", method)
-	require.NoError(t, err, "cancelled engine history permits the real FK SET NULL")
+	require.NoError(t, err)
 	var linked *uuid.UUID
 	require.NoError(t, conn.QueryRow(ctx, "SELECT payment_method_id FROM "+schema+".subscriptions WHERE id=$1", subscription).Scan(&linked))
 	require.Nil(t, linked)
-	_, err = conn.Exec(ctx, "UPDATE "+schema+".subscriptions SET status='active',cancelled_at=NULL,cancel_type=NULL WHERE id=$1", subscription)
-	require.ErrorContains(t, err, "subscriptions_engine_binding_check", "history without a method cannot become active")
+	_, err = conn.Exec(ctx, "UPDATE "+schema+".subscriptions SET collection_policy='provider' WHERE id=$1", subscription)
+	require.ErrorContains(t, err, "collection policy is immutable")
 
 	var badPaths, relocatedPaths int
 	require.NoError(t, conn.QueryRow(ctx, `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON p.pronamespace=n.oid

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,22 +13,24 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// TypeSubscriptionCollection names the existing fleet's accepted engine renewal.
+// TypeSubscriptionCollection identifies an accepted engine renewal.
 const TypeSubscriptionCollection = "subscription_collection"
 
 // SubscriptionCollectionPayload is one accepted engine renewal. PreviousPeriodEnd
 // fences the old obligation even when the purchased period starts after a gap.
 type SubscriptionCollectionPayload struct {
-	Renewal           RenewalTerms              `json:"renewal"`
-	PreviousPeriodEnd time.Time                 `json:"previous_period_end"`
-	AcceptedAt        time.Time                 `json:"accepted_at"`
-	PaymentMethodID   uuid.UUID                 `json:"payment_method_id"`
-	Instrument        charge.FrozenInstrument   `json:"instrument"`
-	HyperSwitch       charge.HyperSwitchBinding `json:"hyperswitch"`
-	Attempt           int                       `json:"attempt"`
-	FailureCount      int                       `json:"failure_count"`
-	AmountMinor       moneyutil.Cents           `json:"amount_minor,string"`
-	OrderReference    string                    `json:"order_reference"`
+	Initiator                charge.Initiator          `json:"initiator"`
+	RequestedPaymentMethodID *uuid.UUID                `json:"requested_payment_method_id,omitempty"`
+	Renewal                  RenewalTerms              `json:"renewal"`
+	PreviousPeriodEnd        time.Time                 `json:"previous_period_end"`
+	AcceptedAt               time.Time                 `json:"accepted_at"`
+	PaymentMethodID          uuid.UUID                 `json:"payment_method_id"`
+	Instrument               charge.FrozenInstrument   `json:"instrument"`
+	HyperSwitch              charge.HyperSwitchBinding `json:"hyperswitch"`
+	Attempt                  int                       `json:"attempt"`
+	FailureCount             int                       `json:"failure_count"`
+	AmountMinor              moneyutil.Cents           `json:"amount_minor,string"`
+	OrderReference           string                    `json:"order_reference"`
 }
 
 func SubscriptionCollectionKey(id uuid.UUID, previousPeriodEnd time.Time, attempt int) string {
@@ -65,13 +66,19 @@ func DecodeSubscriptionCollectionPayload(in gen.OpenrailsRailIntent) (Subscripti
 	if err := p.Instrument.Validate(); err != nil {
 		return p, err
 	}
-	if err := p.HyperSwitch.Validate(); err != nil {
+	var binding *charge.HyperSwitchBinding
+	if p.HyperSwitch != (charge.HyperSwitchBinding{}) {
+		binding = &p.HyperSwitch
+	}
+	if err := charge.ValidateEngineInstrument(in.Rail, p.Instrument, binding, true); err != nil {
 		return p, err
 	}
-	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeSubscriptionCollection || in.Rail != "nmi" || in.Origin != "system" || in.SubscriptionID == nil || *in.SubscriptionID != p.Renewal.SubscriptionID || in.PriceID == nil || *in.PriceID != p.Renewal.PriceID || in.PspID == nil || *in.PspID != p.Renewal.PSPID || p.Instrument.PSPID != p.Renewal.PSPID || in.CustodianID == nil || p.Instrument.CustodianID == nil || *in.CustodianID != *p.Instrument.CustodianID {
+	sameCustodian := (in.CustodianID == nil && p.Instrument.CustodianID == nil) ||
+		(in.CustodianID != nil && p.Instrument.CustodianID != nil && *in.CustodianID == *p.Instrument.CustodianID)
+	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeSubscriptionCollection || in.SubscriptionID == nil || *in.SubscriptionID != p.Renewal.SubscriptionID || in.PriceID == nil || *in.PriceID != p.Renewal.PriceID || in.PspID == nil || *in.PspID != p.Renewal.PSPID || p.Instrument.PSPID != p.Renewal.PSPID || !sameCustodian {
 		return p, errors.New("engine renewal operation contradicts accepted scope")
 	}
-	if p.Instrument.Custodian != models.CustodianHyperSwitch || strings.TrimSpace(p.Instrument.StoredCredentialRecurringRef) == "" || p.PaymentMethodID == uuid.Nil || p.Attempt < 0 || p.FailureCount < 0 || p.AcceptedAt.IsZero() || p.PreviousPeriodEnd.IsZero() || p.AcceptedAt.Before(p.PreviousPeriodEnd) {
+	if p.PaymentMethodID == uuid.Nil || p.Attempt < 0 || p.FailureCount < 0 || p.AcceptedAt.IsZero() || p.PreviousPeriodEnd.IsZero() || p.AcceptedAt.Before(p.PreviousPeriodEnd) {
 		return p, errors.New("engine renewal lacks recurring custody or admission identity")
 	}
 	cycle := p.Renewal.PeriodEnd.Sub(p.Renewal.PeriodStart)
@@ -84,6 +91,17 @@ func DecodeSubscriptionCollectionPayload(in gen.OpenrailsRailIntent) (Subscripti
 	}
 
 	key := SubscriptionCollectionKey(p.Renewal.SubscriptionID, p.PreviousPeriodEnd, p.Attempt)
+	if p.Initiator == charge.InitiatorCustomer {
+		if in.Origin != "user" || in.Actor == nil || *in.Actor != p.Renewal.CustomerID.String() || !charge.CustomerPaymentKeyValid(TypeManualRebill, p.Renewal.CustomerID, in.IdempotencyKey) {
+			return p, errors.New("engine customer retry lacks its accepted payer action")
+		}
+		key = in.IdempotencyKey
+		if p.RequestedPaymentMethodID != nil && *p.RequestedPaymentMethodID != p.PaymentMethodID {
+			return p, errors.New("engine customer retry substituted its method")
+		}
+	} else if p.Initiator != charge.InitiatorMerchant || in.Origin != "system" || p.RequestedPaymentMethodID != nil {
+		return p, errors.New("engine renewal initiation is invalid")
+	}
 	if in.IdempotencyKey != key || p.OrderReference != RebillOrderReference(key) {
 		return p, errors.New("engine renewal key contradicts accepted attempt")
 	}
@@ -92,4 +110,16 @@ func DecodeSubscriptionCollectionPayload(in gen.OpenrailsRailIntent) (Subscripti
 		return p, errors.New("engine renewal amount contradicts accepted terms")
 	}
 	return p, nil
+}
+
+// EngineCollectionDue checks current scheduling eligibility for a fresh attempt.
+// Customer retries bypass a future backoff, never the absence of a retry schedule.
+func EngineCollectionDue(sub *models.Subscription, at time.Time, customer bool) bool {
+	if sub == nil || sub.CancelledAt != nil || sub.DeletionScheduledAt != nil || sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.After(at) {
+		return false
+	}
+	if customer {
+		return sub.Status == models.StatusPastDue && sub.NextRetryAt != nil
+	}
+	return sub.Status == models.StatusActive || (sub.Status == models.StatusPastDue && sub.NextRetryAt != nil && !sub.NextRetryAt.After(at))
 }

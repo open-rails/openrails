@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -76,10 +77,13 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 	if !db.IsNotFound(err) {
 		return nil, err
 	}
+	if s.Config != nil && s.Config.EngineAdmissionHold {
+		return nil, apperr.Conflictf("engine payment admission is held")
+	}
 	if err := accepted.Validate(); err != nil {
 		return nil, err
 	}
-	if s.Config == nil || s.Config.HyperSwitch == nil {
+	if s.Config == nil {
 		return nil, errors.New("engine initial membership custody is not configured")
 	}
 	var operation gen.OpenrailsRailIntent
@@ -100,11 +104,21 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != accepted.CustomerID || method.PspID != accepted.PSPID || method.Rail != "nmi" || method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil || method.ChargeVia != "pan_proxy" || method.ParkReason != "" || method.RailCustomerRef == "" || method.RailMethodRef == "" {
+		if method.CustomerID != accepted.CustomerID || method.PspID != accepted.PSPID || method.ParkReason != "" {
 			return charge.ErrInstrumentChanged
 		}
-		binding, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, s.Config.HyperSwitch.APIBaseURL)
-		if err != nil {
+		var binding *charge.HyperSwitchBinding
+		if method.Custodian == models.CustodianHyperSwitch {
+			if s.Config.HyperSwitch == nil {
+				return errors.New("engine HyperSwitch custody is not configured")
+			}
+			frozen, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, s.Config.HyperSwitch.APIBaseURL)
+			if err != nil {
+				return err
+			}
+			binding = &frozen
+		}
+		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method), binding, false); err != nil {
 			return err
 		}
 		price, err := d.Gen(ctx).GetPriceByID(ctx, gen.GetPriceByIDParams{MerchantID: mid.UUID(), ID: accepted.PriceID})
@@ -114,16 +128,28 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		if price.ProductID != accepted.ProductID {
 			return errors.New("quoted initial membership has another catalog identity")
 		}
-		psp, err := d.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: accepted.PSPID})
+		psp, err := d.Gen(ctx).GetPSPForCutoverWrite(ctx, gen.GetPSPForCutoverWriteParams{MerchantID: mid.UUID(), ID: accepted.PSPID})
 		if err != nil {
 			return err
+		}
+		if psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(s.Config.IsTestMode()) {
+			return errors.New("new membership provider account is no longer available")
+		}
+		if method.CustodianID != nil {
+			custodian, err := d.Gen(ctx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: mid.UUID(), ID: *method.CustodianID})
+			if err != nil {
+				return err
+			}
+			if custodian.Archived {
+				return errors.New("new membership custodian is archived")
+			}
 		}
 		label := psp.ID.String()
 		if psp.Key != nil && strings.TrimSpace(*psp.Key) != "" {
 			label = *psp.Key
 		}
-		payload := subscriptions.InitialMembershipPayload{Terms: accepted, Instrument: charge.FreezeInstrument(method), RequestFingerprint: fingerprint, CheckoutIdempotencyKey: key, HyperSwitch: &binding, PSP: label, Email: principal.Email}
-		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: "nmi", PspID: accepted.PSPID, IntentType: subscriptions.TypeInitialMembership, PriceID: &accepted.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: accepted.AcceptedAt, Origin: intents.OriginUser, Actor: principal.SubjectID, OriginReason: "customer confirmed initial membership"})
+		payload := subscriptions.InitialMembershipPayload{Terms: accepted, Instrument: charge.FreezeInstrument(method), RequestFingerprint: fingerprint, CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: label, Email: principal.Email}
+		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, PspID: accepted.PSPID, IntentType: subscriptions.TypeInitialMembership, PriceID: &accepted.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: accepted.AcceptedAt, Origin: intents.OriginUser, Actor: principal.SubjectID, OriginReason: "customer confirmed initial membership"})
 		return err
 	})
 	if err != nil {

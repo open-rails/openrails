@@ -8,9 +8,9 @@ import (
 )
 
 // ErrManifestSecretsReadOnly is returned for runtime writes against the MODE-1
-// credential plane (#723): in merchant_source=manifest the boot YAML is the
+// credential plane (#723): in merchant_config_source=manifest the boot YAML is the
 // truth — rotate the value in the manifest/secret files and reboot.
-var ErrManifestSecretsReadOnly = fmt.Errorf("merchants: merchant_source=manifest holds credentials in memory from the boot manifest; edit the YAML/secret files and reboot (#723)")
+var ErrManifestSecretsReadOnly = fmt.Errorf("merchants: merchant_config_source=manifest holds credentials in memory from the boot manifest; edit the YAML/secret files and reboot (#723)")
 
 // ManifestSecretStore is the MODE-1 (#723) credential plane: an in-memory,
 // merchant-namespaced store seeded from the boot manifest (env + secret-file

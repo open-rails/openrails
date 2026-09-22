@@ -39,6 +39,7 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 	defer pool.Close()
 	database, err := db.NewWithPGXPool(pool, config.DefaultSchema)
 	require.NoError(t, err)
+	dbtest.BindRiver(t, database)
 	core, err := authcore.New(authcore.Config{Keys: authcore.KeysConfig{VerifyOnly: true}, Token: authcore.TokenConfig{Issuer: "https://names.test", IssuedAudiences: []string{"test"}}, RBAC: []authcore.PersonaDef{{Name: "merchant", Parent: authkit.RootPersona}}, Ephemeral: authcore.EphemeralConfig{AllowMemory: true}}, authcore.Deps{Postgres: admin})
 	require.NoError(t, err)
 	t.Cleanup(core.Close)
@@ -77,7 +78,7 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 		require.Equal(t, first.ID, selected.ID)
 		require.Equal(t, newName, selected.Slug)
 	}
-	cfg := &config.Config{DB: &config.DBConfig{Schema: config.DefaultSchema}, MerchantSource: "manifest"}
+	cfg := &config.Config{DB: &config.DBConfig{Schema: config.DefaultSchema}, MerchantConfigSource: "manifest"}
 	catalogFor := func(name, display string) []byte {
 		return []byte("version: 1\ncatalogs:\n  - merchant: " + name + "\n    products:\n      - key: owner_product\n        display_name: " + display + "\n")
 	}
@@ -142,7 +143,7 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 	require.Contains(t, reclaimedCatalog.String(), "New owner catalog")
 	require.NotContains(t, reclaimedCatalog.String(), "Original catalog")
 	importedCustomer := uuid.New()
-	_, err = billingimport.Import(ctx, billingimport.Options{PGXPool: pool, MerchantID: first.ID,
+	_, err = billingimport.Import(ctx, billingimport.Options{DB: database, MerchantID: first.ID,
 		Book: billingimport.DeclaredBilling{AsOf: time.Now().UTC(), Customers: []billingimport.DeclaredCustomer{{Customer: openrails.CustomerID(importedCustomer)}}},
 	})
 	require.NoError(t, err)

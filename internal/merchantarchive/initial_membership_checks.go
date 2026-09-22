@@ -141,6 +141,23 @@ func validateInitialEnrollmentReference(ctx context.Context, q *gen.Queries, op 
 		}
 	}
 	historyTerms := p.Terms
+	receipt, paid, err := intents.LoadCollectedReceipt(op)
+	if err != nil {
+		return err
+	}
+	if paid && receipt.ReversalKind() != "" {
+		if sub.Status != models.StatusCancelled {
+			return errors.New("reversed initial payment has an active agreement")
+		}
+		hasGrant, err := q.HasInitialMembershipGrant(ctx, gen.HasInitialMembershipGrantParams{MerchantID: op.MerchantID, SubscriptionID: sub.ID})
+		if err != nil {
+			return err
+		}
+		if hasGrant {
+			return errors.New("reversed initial payment granted access")
+		}
+		historyTerms.Entitlements = map[string]*int{}
+	}
 	if p.Terms.Pending && sub.Status != models.StatusPending {
 		anyGrant, err := q.HasInitialMembershipGrant(ctx, gen.HasInitialMembershipGrantParams{MerchantID: op.MerchantID, SubscriptionID: sub.ID})
 		if err != nil {

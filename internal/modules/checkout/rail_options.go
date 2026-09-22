@@ -123,10 +123,32 @@ func (s *CheckoutSessionService) checkoutRailSkipReason(price *models.Price, tar
 	if price == nil || providerConfig == nil {
 		return models.CheckoutRoutingSkipNotArmed
 	}
+	if mode == models.CheckoutSessionModeSubscription && s.config != nil && s.config.NewSubscriptionCollectionPolicy == "engine" {
+		if price.Amount <= 0 || price.TrialUnitAmount != nil || price.TrialDurationHours != nil || price.RecurringCycleHours() == nil {
+			return models.CheckoutRoutingSkipModeUnsupported
+		}
+		switch target.Rail {
+		case "stripe":
+			if providerConfig.Stripe == nil || strings.TrimSpace(providerConfig.Stripe.SecretKey) == "" {
+				return models.CheckoutRoutingSkipCredentialsMissing
+			}
+			return ""
+		case "nmi":
+			if providerConfig.NMI == nil || strings.TrimSpace(providerConfig.NMI.SecurityKey) == "" {
+				return models.CheckoutRoutingSkipCredentialsMissing
+			}
+			return ""
+		default:
+			return models.CheckoutRoutingSkipModeUnsupported
+		}
+	}
 	switch target.Rail {
 	case string(models.RailStripe):
 		if providerConfig.Stripe == nil || strings.TrimSpace(providerConfig.Stripe.SecretKey) == "" {
 			return models.CheckoutRoutingSkipCredentialsMissing
+		}
+		if mode == models.CheckoutSessionModeOneOff && s.config != nil && s.config.NewSubscriptionCollectionPolicy == "engine" {
+			return ""
 		}
 		if stripePaidIntroUnsupported(price) {
 			return models.CheckoutRoutingSkipModeUnsupported

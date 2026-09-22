@@ -49,8 +49,8 @@ func sandboxModeConfig(dsn string, source string) *config.Config {
 		// suite and internal/http's merchant-webhook suite.
 		TestMode:                 config.CredentialPostureSandbox,
 		CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
-		MerchantSource:           source,
-		// or#893: merchant_source=api declares where secrets live. MODE 1 never
+		MerchantConfigSource:     source,
+		// or#893: merchant_config_source=api declares where secrets live. MODE 1 never
 		// consults it, so db is inert there and honest in MODE 2.
 		SecretBackend:     config.SecretBackendDB,
 		ProviderWriteMode: config.ProviderWriteModeFull,
@@ -207,7 +207,7 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	slug := fmt.Sprintf("mwhe2e%d", nano)
 	ccbillAccount := fmt.Sprintf("94%04d-0001", nano%10_000)
 
-	cfg := sandboxModeConfig(dsn, config.MerchantSourceManifest)
+	cfg := sandboxModeConfig(dsn, config.MerchantConfigSourceManifest)
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
@@ -282,7 +282,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	slug := fmt.Sprintf("mwhapi%d", nano)
 	ccbillAccount := fmt.Sprintf("95%04d-0002", nano%10_000)
 
-	cfg := sandboxModeConfig(dsn, config.MerchantSourceAPI)
+	cfg := sandboxModeConfig(dsn, config.MerchantConfigSourceAPI)
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
@@ -367,7 +367,7 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 	nano := time.Now().UnixNano()
 	slug := fmt.Sprintf("mwhoff%d", nano)
 
-	cfg := sandboxModeConfig(dsn, config.MerchantSourceManifest)
+	cfg := sandboxModeConfig(dsn, config.MerchantConfigSourceManifest)
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })

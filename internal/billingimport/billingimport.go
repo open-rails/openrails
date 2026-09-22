@@ -18,13 +18,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -50,11 +49,11 @@ type (
 	Result                = openrails.BillingImportResult
 )
 
-// Options configures Import. MerchantID is the already resolved or authorized
+// Options retains the runtime database and its bound River producer. Import
+// borrows them and never opens or closes resources. MerchantID is the already resolved or authorized
 // immutable merchant UUID; imports never interpret a public name.
 type Options struct {
-	Config     *config.Config
-	PGXPool    *pgxpool.Pool
+	DB         *db.DB
 	MerchantID merchant.ID
 	Book       DeclaredBilling
 }
@@ -80,11 +79,10 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	}
 	asOf := opts.Book.AsOf.UTC()
 
-	database, err := openDB(ctx, opts.Config, opts.PGXPool)
-	if err != nil {
-		return res, err
+	database := opts.DB
+	if database == nil {
+		return res, fmt.Errorf("billing import requires the runtime database")
 	}
-	defer database.Close()
 
 	merchantID := opts.MerchantID
 	if err := database.RequireMerchantID(ctx, merchantID); err != nil {
@@ -92,7 +90,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	}
 	ctx = merchant.WithID(ctx, merchantID)
 
-	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txdb := database.NewWithPgxTx(tx)
 		qx := txdb.Qx(ctx)
 		q := txdb.Gen(ctx)
@@ -228,6 +226,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				return err
 			}
 			f := reconcile.DeclaredSubscriptionFact{
+				CollectionPolicy:   models.CollectionPolicy(s.CollectionPolicy),
 				SourceID:           s.SourceID,
 				Customer:           s.Customer.UUID(),
 				PriceID:            s.Price.UUID(),
@@ -303,36 +302,6 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		return nil
 	})
 	return res, err
-}
-
-// openDB wraps a caller pool (borrowed; Close is a no-op) or opens from
-// config, and enforces the RLS posture either way: an import runs
-// merchant-scoped writes, and a privileged role skips the policies that make
-// that scoping real.
-func openDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
-	var (
-		database *db.DB
-		err      error
-	)
-	if pool != nil {
-		schema := config.DefaultSchema
-		if cfg != nil && cfg.DB != nil {
-			schema = cfg.DB.SchemaName()
-		}
-		database, err = db.NewWithPGXPool(pool, schema)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		if cfg == nil || cfg.DB == nil {
-			return nil, fmt.Errorf("config database is required")
-		}
-		database, err = db.NewDB(ctx, cfg.DB)
-		if err != nil {
-			return nil, fmt.Errorf("open postgres: %w", err)
-		}
-	}
-	return database, nil
 }
 
 func nilIfEmpty(s string) *string {

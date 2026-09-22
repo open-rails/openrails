@@ -56,7 +56,7 @@ func moneyDeploymentBuilders(h *Harness, providers config.ProviderSandboxConfig)
 			var embedded *embed.Runtime
 			start := func() {
 				cfg := &config.Config{
-					Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI,
+					Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
 					SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN},
 				}
 				sandbox(cfg)
@@ -279,7 +279,7 @@ func TestRestartConvergesCollectionExactlyOnce(t *testing.T) {
 		require.Equal(t, sales+1, gateway.SaleCount(), "the restarted deployment does not resend")
 
 		h.MakeOperationDue(op.ID)
-		h.FireProviderIntentVerify(h.Pool())
+		h.FireProviderIntentVerify(h.Pool(), op.ID)
 		require.Eventually(t, func() bool {
 			invoice, err := client.GetMerchantInvoice(ctx, fixture.Invoice)
 			return err == nil && invoice.Status == "paid"
