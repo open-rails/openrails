@@ -321,4 +321,5 @@ ORDER BY created_at,id LIMIT 2;
 -- name: LockPaymentForRefund :one
 SELECT id FROM openrails.payments
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(payment_id)::uuid
+  AND deleted_at IS NULL
 FOR UPDATE;

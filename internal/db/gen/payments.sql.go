@@ -1250,6 +1250,7 @@ func (q *Queries) ListRefundsForPayment(ctx context.Context, arg ListRefundsForP
 const lockPaymentForRefund = `-- name: LockPaymentForRefund :one
 SELECT id FROM openrails.payments
 WHERE merchant_id=$1::uuid AND id=$2::uuid
+  AND deleted_at IS NULL
 FOR UPDATE
 `
 
