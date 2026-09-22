@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
@@ -38,7 +39,8 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	accountID := "acct_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	const secret = "sk_test_host_owned_fixture"
 	boot := func(key string) *embed.Runtime {
-		rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t, key: key}})
+		gate := &allowAllGate{}
+		rt, err := embed.New(ctx, embed.Options{HTTP: &embed.HTTPConfig{PaymentProviders: true, Gate: gate}, Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t, key: key}})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
 		_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
@@ -49,6 +51,7 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 			}}},
 		})
 		require.NoError(t, err)
+		gate.id = app.HostGraph(rt).Runtime.ConfiguredMerchant()
 		return rt
 	}
 	rt := boot(secret)
@@ -72,8 +75,10 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, secret, value.Value)
 	require.Zero(t, merchantSecretRowCount(t, runtime.DB.Pool(), ctx, mid))
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, Gate: allowAllGate{id: mid}}})
+	routes, err := openrailshttp.Routes(rt)
 	require.NoError(t, err)
+	handler := http.NewServeMux()
+	require.NoError(t, routes.Mount(handler))
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/v1/merchant/payment-providers/stripe", strings.NewReader(`{"credentials":{"secret_key":"replacement"}}`)))
 	require.Equal(t, http.StatusMethodNotAllowed, recorder.Code)

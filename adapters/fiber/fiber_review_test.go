@@ -18,16 +18,17 @@ import (
 )
 
 func TestFiberReviewFullInventoryMountsNatively(t *testing.T) {
-	cfg := &config.Config{CatalogSource: config.CatalogSourceAPI}
+	cfg := &config.Config{CatalogSource: config.CatalogSourceAPI, MerchantConfigSource: config.MerchantConfigSourceAPI}
 	delegated := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return nil, billingauth.ErrUnauthenticated
 	})
-	asm := embedhttp.FromApp(&app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg}})
-	asm.Authenticator = billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
-		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
-	})
-	asm.Gate = billingauth.NewDelegatedGate(delegated)
-	table := asm.NewRoutes(embedhttp.Options{RouteSets: embedhttp.StandaloneDefaultRouteSets})
+	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg}}
+	policy := &embed.HTTPConfig{Checkout: true, Customer: true, MerchantAdmin: true, Catalog: true, PaymentProviders: true, MerchantAPI: true,
+		Authenticator: billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
+			return billingauth.UserContext{}, billingauth.ErrUnauthenticated
+		}), Gate: billingauth.NewDelegatedGate(delegated)}
+	table, err := embedhttp.ConfiguredRoutes(graph, policy, delegated)
+	require.NoError(t, err)
 	b := &Bundle{}
 	for _, route := range table.Entries {
 		b.routes = append(b.routes, embed.HTTPRoute{Method: route.Method, Path: strings.TrimPrefix(route.Path, "/billing"), Handler: route.Handler})
