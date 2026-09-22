@@ -85,7 +85,7 @@ func (s *Store) RetainStripeRecurringDecline(ctx context.Context, in gen.Openrai
 	if err != nil {
 		return err
 	}
-	_, _, found, err := LoadStripeRecurringDecline(current)
+	_, _, found, err = LoadStripeRecurringDecline(current)
 	if err != nil {
 		return err
 	}
