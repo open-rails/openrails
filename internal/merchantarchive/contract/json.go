@@ -335,7 +335,7 @@ var jsonRules = map[string]jsonRule{
 		d := json.NewDecoder(strings.NewReader(raw))
 		d.UseNumber()
 		return d.Decode(&decoded) == nil && d.Decode(new(any)) == io.EOF && initialMembershipTermsJSON(decoded)
-	}, "kind": textValue, "customer_ref": textValue, "consent": textValue, "payment_method_id": uuidValue, "capture": captureJSON, "_openrails_request_fingerprint": textValue, "subscription_id": textValue, "message": textValue, "failure_reason": textValue, "failure_code": textValue})),
+	}, "kind": textValue, "customer_ref": textValue, "consent": textValue, "payment_method_id": uuidValue, "capture": captureJSON, "_openrails_request_fingerprint": sha256Value, "subscription_id": textValue, "message": textValue, "failure_reason": textValue, "failure_code": textValue})),
 	"checkout_sessions.routing_reason":   nullable(object(map[string]jsonRule{"policy": textValue, "rule": integerValue, "selected": textValue, "rail": textValue, "fallbacks": array(textValue), "skipped": array(object(map[string]jsonRule{"selector": textValue, "reason": textValue}))})),
 	"host_outbox.data":                   object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_since": textValue, "overdue_amount": integerValue, "overdue_invoices": integerValue, "entered_at": textValue, "evaluated_at": textValue}),
 	"rail_intents.payload":               nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),

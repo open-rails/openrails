@@ -2,7 +2,9 @@ package embedhttp
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
 
 	redis "github.com/redis/go-redis/v9"
 
@@ -38,12 +40,20 @@ import (
 // gets the #765 static permissive CORS policy unconditionally — no
 // control-plane/source dependency, unlike hostResolve.
 func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes, hostResolve merchant.HostResolver) http.Handler {
-	mux := http.NewServeMux()
+	return NewSelfRoutes(rt, authn, providerRouteOverride, hostResolve).Handler()
+}
+
+func NewSelfRoutes(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes, hostResolve merchant.HostResolver) *router.Table {
+	mux := &router.Table{}
 	delegatedMW := middleware.DelegatedPrincipalRequired(authn)
 	providerRoutes := ProviderRoutesForRuntime(rt, providerRouteOverride)
 	httproutes.RegisterSelfServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+httproutes.SelfRoutePrefix, rt), rt, delegatedMW, providerRoutes)
 	httproutes.RegisterCustomerTreasuryRoutes(router.NewMux(mux, EmbeddedV1Prefix+httproutes.CustomerRoutePrefix, rt), rt, delegatedMW, providerRoutes)
 
+	return wrapCustomerRoutes(rt, mux, hostResolve, "")
+}
+
+func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant.HostResolver, selfPrefix string) *router.Table {
 	// OpenRails-native rate-limiting + captcha, matching the base NewHTTPHandler
 	// chain. IP-keyed: the delegated principal is pinned per-route inside the mux,
 	// after this outer chain — exactly like the standalone self surface.
@@ -59,22 +69,34 @@ func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, p
 			captchaCfg = rt.Config.Captcha
 		}
 	}
-	return middleware.ChainHTTP(mux,
-		middleware.RecoverHTTP(),
-		middleware.SecurityHeadersHTTP(),
-		// #765: this handler's entire surface is browser tier — always the
-		// static permissive `*` grant, no per-request source.
-		middleware.PermissiveCORSHTTP(middleware.AllRequests),
-		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
-		// Resolved PER REQUEST off the Runtime (#744) — never a value snapshotted
-		// here at construction time, so a mount that races UpsertMerchantConfig's
-		// post-boot bind still resolves correctly on every request.
-		middleware.ResolveMerchantHTTP(rt.ConfiguredMerchant),
-		// #734: a no-op when hostResolve is nil (no control plane attached).
-		middleware.ResolveMerchantFromHostHTTP(hostResolve),
-		middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, captcha.NewChallengeStore(rdb), resolver),
-	)
+	for i := range mux.Entries {
+		mux.Entries[i].Browser = true
+	}
+	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, captcha.NewChallengeStore(rdb), resolver)
+	mux.Wrap(func(entry router.Entry) http.Handler {
+		canonical := entry.Path
+		if selfPrefix != "" {
+			canonical = EmbeddedV1Prefix + "/me" + strings.TrimPrefix(entry.Path, selfPrefix)
+		}
+		return middleware.ChainHTTP(entry.Handler,
+			middleware.WithRoutePath(canonical),
+			middleware.RecoverHTTP(),
+			middleware.SecurityHeadersHTTP(),
+			// #765: this handler's entire surface is browser tier — always the
+			// static permissive `*` grant, no per-request source.
+			middleware.PermissiveCORSHTTP(middleware.AllRequests),
+			middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
+			middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
+			// Resolved PER REQUEST off the Runtime (#744) — never a value snapshotted
+			// here at construction time, so a mount that races UpsertMerchantConfig's
+			// post-boot bind still resolves correctly on every request.
+			middleware.ResolveMerchantHTTP(rt.ConfiguredMerchant),
+			// #734: a no-op when hostResolve is nil (no control plane attached).
+			middleware.ResolveMerchantFromHostHTTP(hostResolve),
+			limiter,
+		)
+	})
+	return mux
 }
 
 // ProviderRoutesForRuntime derives provider-specific route gating from the
@@ -124,4 +146,38 @@ func armedProviderRoutes(ctx context.Context, rt *app.Runtime, mid merchant.ID) 
 		Solana:       solana,
 		Webhooks:     stripe || armed(string(models.RailNMI)) || armed(string(models.RailCCBill)),
 	}
+}
+
+// ConfiguredProviderRoutes resolves optional buyer routes without hiding store
+// failures. API-owned configurations retain routes as providers are added; each
+// request still enforces actual account readiness. Manifest-owned hosts must
+// finish provider declaration before materializing their buyer HTTP surface.
+func ConfiguredProviderRoutes(ctx context.Context, rt *app.Runtime, buyer bool) (routesurface.ProviderRoutes, error) {
+	if rt == nil || rt.Config == nil {
+		return routesurface.ProviderRoutes{}, fmt.Errorf("openrails HTTP: runtime configuration is missing")
+	}
+	selected := routesurface.AllProviderRoutes()
+	if !buyer {
+		selected.StripePortal = false
+		selected.Solana = false
+		selected.SolanaSigning = false
+	} else if rt.Config.IsManifestMerchantConfigSource() {
+		mid := rt.ConfiguredMerchant()
+		if mid.IsZero() || rt.Merchants == nil {
+			return selected, fmt.Errorf("openrails HTTP: declare the manifest merchant before mounting buyer routes")
+		}
+		environment := config.ExpectedProviderEnvironment(rt.Config.IsTestMode())
+		_, stripe, err := rt.Merchants.ActivePSPScope(ctx, mid, string(models.RailStripe), environment)
+		if err != nil {
+			return selected, fmt.Errorf("openrails HTTP: resolve Stripe routes: %w", err)
+		}
+		_, solana, err := rt.Merchants.ActivePSPScope(ctx, mid, string(models.RailSolana), environment)
+		if err != nil {
+			return selected, fmt.Errorf("openrails HTTP: resolve Solana routes: %w", err)
+		}
+		selected.StripePortal = stripe
+		selected.Solana = solana
+		selected.SolanaSigning = solana
+	}
+	return ProviderRoutesForRuntime(rt, &selected), nil
 }

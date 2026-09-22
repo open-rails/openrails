@@ -17,10 +17,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
@@ -37,7 +39,8 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	accountID := "acct_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	const secret = "sk_test_host_owned_fixture"
 	boot := func(key string) *embed.Runtime {
-		rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t, key: key}})
+		gate := &allowAllGate{}
+		rt, err := embed.New(ctx, embed.Options{HTTP: &embed.HTTPConfig{PaymentProviders: true, Gate: gate}, Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t, key: key}})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
 		_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
@@ -48,6 +51,7 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 			}}},
 		})
 		require.NoError(t, err)
+		gate.id = app.HostGraph(rt).Runtime.ConfiguredMerchant()
 		return rt
 	}
 	rt := boot(secret)
@@ -71,8 +75,10 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, secret, value.Value)
 	require.Zero(t, merchantSecretRowCount(t, runtime.DB.Pool(), ctx, mid))
-	handler, err := rt.Handler(embed.MountOptions{RouteSets: []embed.RouteSet{embed.RouteSetPaymentProviders}, Gate: allowAllGate{id: mid}})
+	routes, err := openrailshttp.Routes(rt)
 	require.NoError(t, err)
+	handler := http.NewServeMux()
+	require.NoError(t, routes.Mount(handler))
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/v1/merchant/payment-providers/stripe", strings.NewReader(`{"credentials":{"secret_key":"replacement"}}`)))
 	require.Equal(t, http.StatusMethodNotAllowed, recorder.Code)
@@ -84,6 +90,9 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	// Rotation follows the host configuration/restart contract, while dynamic
 	// catalog state survives that restart and is not overwritten by a manifest.
 	require.NoError(t, rt.Close(ctx))
+	require.ErrorContains(t, rt.ConfigureHTTP(embed.HTTPConfig{}), "closed")
+	_, closedErr := rt.HTTPRoutes()
+	require.ErrorContains(t, closedErr, "closed")
 	rt2 := boot("sk_test_rotated_fixture")
 	value, err = app.HostGraph(rt2).Runtime.ManifestSecrets.Get(ctx, mid, name)
 	require.NoError(t, err)
@@ -123,7 +132,7 @@ func TestManagedCredentialsWithManifestCatalog(t *testing.T) {
 	runtime := app.HostGraph(rt).Runtime
 	mid := runtime.ConfiguredMerchant()
 	require.Nil(t, runtime.ManifestSecrets, "managed credentials must not acquire a host fallback")
-	handler, err := rt.Handler(embed.MountOptions{RouteSets: []embed.RouteSet{embed.RouteSetPaymentProviders}, Gate: allowAllGate{id: mid}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, Gate: allowAllGate{id: mid}}})
 	require.NoError(t, err)
 	for _, secret := range []string{"whsec_managed_catalog_v1", "whsec_managed_catalog_v2"} {
 		payload, err := json.Marshal(map[string]any{"account_id": account, "credentials": map[string]string{"webhook_signing_secret": secret}})

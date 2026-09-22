@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -53,7 +54,7 @@ func doSelf(h http.Handler, method, path string) *httptest.ResponseRecorder {
 // auth admitted the request — a 401/403/404 would mean the surface is unmounted
 // or gated wrong.
 func TestSelfHandler_EmbeddedPathsMountedWithoutSelfPermissions(t *testing.T) {
-	self := newSelfHandler(nil, stubSelfAuthenticator{
+	self := embedhttp.NewSelfHandler(nil, stubSelfAuthenticator{
 		principal: selfPrincipal(),
 	}, nil, nil)
 
@@ -82,12 +83,12 @@ func TestSelfHandler_EmbeddedPathsMountedWithoutSelfPermissions(t *testing.T) {
 // Host authenticator rejection and invalid principals map to 401 (fail closed),
 // exactly like the standalone host-pluggable mode.
 func TestSelfHandler_FailClosed(t *testing.T) {
-	h := newSelfHandler(nil, stubSelfAuthenticator{err: billingauth.ErrUnauthenticated}, nil, nil)
+	h := embedhttp.NewSelfHandler(nil, stubSelfAuthenticator{err: billingauth.ErrUnauthenticated}, nil, nil)
 	w := doSelf(h, http.MethodGet, "/billing/v1/me/balance?currency=usd")
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
 
 	// Principal missing its explicit merchant mapping => 401.
-	h = newSelfHandler(nil, stubSelfAuthenticator{
+	h = embedhttp.NewSelfHandler(nil, stubSelfAuthenticator{
 		principal: &billingauth.DelegatedPrincipal{
 			SubjectID: "user-1",
 		},
@@ -97,28 +98,15 @@ func TestSelfHandler_FailClosed(t *testing.T) {
 	require.Contains(t, w.Body.String(), "delegated_principal_invalid")
 
 	// Merchant-admin routes live on the base embedded handler, not SelfHandler.
-	h = newSelfHandler(nil, stubSelfAuthenticator{
+	h = embedhttp.NewSelfHandler(nil, stubSelfAuthenticator{
 		principal: selfPrincipal("platform:metrics:read"),
 	}, nil, nil)
 	w = doSelf(h, http.MethodGet, "/billing/v1/merchant/metrics")
 	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 }
 
-// SelfHandler (the exported constructor) fails loud without an initialized app
-// graph — the identity-gated surface is never silently mounted.
-func TestSelfHandler_RequiresInitializedApp(t *testing.T) {
-	h, err := (*Runtime)(nil).SelfHandler(stubSelfAuthenticator{})
-	require.Error(t, err)
+func TestHTTPRoutesRequiresInitializedRuntime(t *testing.T) {
+	routes, err := (*Runtime)(nil).HTTPRoutes()
 	require.ErrorContains(t, err, "not initialized")
-	require.Nil(t, h)
-}
-
-// #913: requesting the customer surface without a DelegatedAuthenticator must
-// name the standard bridge constructor, not just refuse.
-func TestSelfHandler_MissingAuthenticatorHintNamesTheBridge(t *testing.T) {
-	h, err := (*Runtime)(nil).SelfHandler(nil)
-	require.Error(t, err)
-	require.Nil(t, h)
-	require.ErrorContains(t, err, "RouteSetCustomer")
-	require.ErrorContains(t, err, "NewVerifierDelegatedAuthenticator")
+	require.Nil(t, routes)
 }

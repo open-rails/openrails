@@ -8,6 +8,8 @@ import (
 	"github.com/open-rails/openrails/internal/http/request"
 )
 
+type Registrar interface{ Handle(string, http.Handler) }
+
 // muxRouter adapts a *http.ServeMux to the neutral Router. It is the embedded
 // backend and imports ZERO gin (issue #282): every registered handler becomes an
 // http.HandlerFunc that constructs request.NewHTTP(w, r, rt) and runs the neutral
@@ -18,7 +20,7 @@ import (
 // wildcards ("{id}") so the same Register*Routes code drives both backends. The
 // resulting r.PathValue("id") is read by request.NewHTTP's bindURI/param.
 type muxRouter struct {
-	mux    *http.ServeMux
+	mux    Registrar
 	rt     *app.Runtime
 	prefix string
 	mw     []Middleware
@@ -27,14 +29,14 @@ type muxRouter struct {
 
 // NewMux builds a neutral Router over a ServeMux rooted at basePrefix (e.g.
 // "/billing/v1"). basePrefix is prepended to every registered pattern.
-func NewMux(mux *http.ServeMux, basePrefix string, rt *app.Runtime) Router {
+func NewMux(mux Registrar, basePrefix string, rt *app.Runtime) Router {
 	return &muxRouter{mux: mux, rt: rt, prefix: basePrefix}
 }
 
 // NewMuxRecorded is NewMux plus a registration recorder: record is invoked with
 // each final ServeMux pattern ("GET /v1/me/balance"). The standalone assembly
 // uses it to expose its route table for the #670 route-surface parity test.
-func NewMuxRecorded(mux *http.ServeMux, basePrefix string, rt *app.Runtime, record func(pattern string)) Router {
+func NewMuxRecorded(mux Registrar, basePrefix string, rt *app.Runtime, record func(pattern string)) Router {
 	return &muxRouter{mux: mux, rt: rt, prefix: basePrefix, record: record}
 }
 
@@ -49,9 +51,9 @@ func (m *muxRouter) Handle(method, path string, h Handler, mw ...Middleware) {
 		m.record(pattern)
 	}
 	rt := m.rt
-	m.mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+	m.mux.Handle(pattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		final(request.NewHTTP(w, r, rt))
-	})
+	}))
 }
 
 func (m *muxRouter) Group(prefix string, mw ...Middleware) Router {

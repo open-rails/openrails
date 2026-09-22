@@ -31,6 +31,10 @@ import (
 
 // Options configures the embedded runtime.
 type Options struct {
+	// HTTP configures the externally mounted surface once. Leave nil for a
+	// headless runtime or call ConfigureHTTP after merchant/auth provisioning.
+	HTTP *HTTPConfig
+
 	// DelegatedAuthenticator verifies explicit customer credentials for Client
 	// self-service calls and is the default verifier for customer HTTP mounts.
 	// Use the existing embed/authkit bridge; ambient host sessions confer no authority.
@@ -68,14 +72,20 @@ type Options struct {
 	UsernameResolver openrails.UsernameResolver
 }
 
-// Runtime is the in-process engine: Client() for the shared client, Handler()
+// Runtime is the in-process engine: Client() for the shared client, HTTPRoutes()
 // to mount the billing HTTP surface, RunWorkers/Close for lifecycle.
 type Runtime struct {
+	httpMu     sync.Mutex
+	httpConfig *HTTPConfig
+	httpFrozen bool
+	httpRoutes []HTTPRoute
+	httpBuilt  bool
+	closed     bool
+
 	delegatedAuthenticator billingauth.DelegatedAuthenticator
 	app                    *app.App
 	svc                    *service.Service
 
-	activeRouteSets        []RouteSet
 	releaseStripeTransport func()
 
 	closeOnce sync.Once
@@ -107,6 +117,9 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	}
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
+	}
+	if err := embedhttp.ValidateHTTPConfig(opts.HTTP, opts.DelegatedAuthenticator); err != nil {
+		return nil, err
 	}
 	if opts.River.host && opts.RunWorkers {
 		return nil, fmt.Errorf("openrails embed: host-owned River must compose RiverJobs with riverhelpers.New before host startup; Options.RunWorkers is managed-only")
@@ -142,6 +155,12 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	application.ConsoleAssets = opts.ConsoleAssets
 
 	r := &Runtime{app: application, delegatedAuthenticator: opts.DelegatedAuthenticator}
+	if opts.HTTP != nil {
+		if err := r.ConfigureHTTP(*opts.HTTP); err != nil {
+			_ = r.Close(ctx)
+			return nil, err
+		}
+	}
 	if opts.StripeTransport != nil {
 		r.releaseStripeTransport = stripeapi.InstallBaseTransport(opts.StripeTransport)
 	}
@@ -253,22 +272,6 @@ func (r *Runtime) newClient(subject string, options ...openrails.ClientOption) (
 	return client, nil
 }
 
-// ActiveRouteSets returns the route groups of the most recently mounted HTTP
-// surface; nil before any mount. It is the in-process twin of
-// GET /v1/capabilities.
-func (r *Runtime) ActiveRouteSets() []RouteSet {
-	if r == nil {
-		return nil
-	}
-	return append([]RouteSet(nil), r.activeRouteSets...)
-}
-
-func (r *Runtime) mountRouteSets(sets []RouteSet) []RouteSet {
-	resolved := embedhttp.ResolveRouteSets(sets)
-	r.activeRouteSets = resolved
-	return resolved
-}
-
 // RunWorkers runs the River workers, blocking until ctx is done.
 func (r *Runtime) RunWorkers(ctx context.Context) error {
 	if r == nil || r.app == nil || r.app.Runtime == nil {
@@ -284,6 +287,9 @@ func (r *Runtime) Close(ctx context.Context) error {
 		return nil
 	}
 	r.closeOnce.Do(func() {
+		r.httpMu.Lock()
+		r.closed = true
+		r.httpMu.Unlock()
 		if r.workersCancel != nil {
 			r.workersCancel()
 			<-r.workersDone // join before closing resources even if shutdown ctx was canceled

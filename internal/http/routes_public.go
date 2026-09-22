@@ -16,7 +16,7 @@ import (
 // registerUserRoutesAt mounts the buyer-facing checkout/catalog surface —
 // browser tier (#765): every pattern registered here is also recorded into
 // browserTierRoutes, so it's eligible for the static permissive CORS policy.
-func (s *Server) registerUserRoutesAt(mux *http.ServeMux, apiPrefix string) {
+func (s *Server) registerUserRoutesAt(mux router.Registrar, apiPrefix string) {
 	s.handleBrowser(mux, http.MethodGet+" "+apiPrefix+"/captcha/status",
 		embedhttp.CaptchaStatusHandler(s.cfg.Captcha, s.captchaStore, s.trustedProxies()))
 	s.handleBrowser(mux, http.MethodGet+" "+apiPrefix+"/captcha/client.js",
@@ -26,7 +26,7 @@ func (s *Server) registerUserRoutesAt(mux *http.ServeMux, apiPrefix string) {
 	})
 }
 
-func (s *Server) registerUserRoutes(mux *http.ServeMux) {
+func (s *Server) registerUserRoutes(mux router.Registrar) {
 	s.registerUserRoutesAt(mux, StandaloneV1Prefix)
 }
 
@@ -34,13 +34,17 @@ func (s *Server) registerUserRoutes(mux *http.ServeMux) {
 // /webhooks/:provider (NMI/CCBill, merchant derived from payload account identity) and
 // /webhooks/:provider/:account_id (direct Stripe). Standalone mounts this; embedded hosts
 // use the merchant-scoped surface because they pin one merchant in context.
-func (s *Server) registerWebhookRoutes(mux *http.ServeMux) {
+func (s *Server) registerWebhookRoutes(mux router.Registrar) {
+	if s.controlPlane != nil && !s.controlPlane.SelfHostedPosture() {
+		httproutes.RegisterHostWebhookRoutes(router.NewMuxRecorded(mux, StandaloneV1Prefix, s.runtime, s.recordRoute), s.runtime, s.hostMerchantResolver)
+		return
+	}
 	httproutes.RegisterWebhookRoutes(router.NewMuxRecorded(mux, StandaloneV1Prefix+"/webhooks", s.runtime, s.recordRoute), s.runtime)
 }
 
 // registerStandaloneMetaRoutes registers banner/health endpoints that are appropriate for the
 // standalone billing service, but should not be forced onto embedded hosts.
-func (s *Server) registerStandaloneMetaRoutes(mux *http.ServeMux) {
+func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
 	// Root: simple JSON banner for API servers. "GET /{$}" pins the exact root
 	// (a bare "/" ServeMux pattern would swallow every unmatched path).
 	s.handle(mux, http.MethodGet+" /{$}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

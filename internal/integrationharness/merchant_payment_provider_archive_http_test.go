@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -362,11 +363,7 @@ func TestEmbeddedProviderAccountArchiveLifecycle(t *testing.T) {
 	probe := newFakeDataLink(t)
 	runtime.Merchants.SetCredentialProbeEndpointsForIntegration("", probe.URL)
 
-	handler, err := rt.Handler(embed.MountOptions{
-		RouteSets:      []embed.RouteSet{embed.RouteSetPaymentProviders},
-		Gate:           archiveGate{id: mid},
-		ProviderRoutes: &embed.ProviderRoutes{Webhooks: true},
-	})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, Gate: archiveGate{id: mid}}})
 	require.NoError(t, err)
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)

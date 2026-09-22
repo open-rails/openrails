@@ -1,8 +1,6 @@
 package server
 
 import (
-	"net/http"
-
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
@@ -12,7 +10,7 @@ import (
 // platform tier does not exist on the embedded surface (an embedded host
 // controls exactly one merchant, and the control plane the root-group check
 // needs only runs here).
-func (s *Server) registerPlatformRoutes(mux *http.ServeMux) {
+func (s *Server) registerPlatformRoutes(mux router.Registrar) {
 	opts := httproutes.PlatformOptions{
 		Authenticator: s.authenticator,
 		Root:          s.controlPlane,
