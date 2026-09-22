@@ -71,6 +71,9 @@ const (
 // RateCard binds a meter (or a flat fee) to a charge-model price within a product.
 // It references the meter directly (Lago-style), not via an OpenMeter Feature.
 type RateCard struct {
+	// Ordinal preserves a card's stable position when gaps exist after deletion.
+	// Zero uses its declaration position; an explicit value must be positive.
+	Ordinal int `json:"ordinal,omitempty" yaml:"ordinal,omitempty"`
 	// Meter is the metered usage stream this card rates. Empty == a flat fee
 	// (the Price must be model: flat).
 	Meter string `json:"meter,omitempty" yaml:"meter,omitempty"`

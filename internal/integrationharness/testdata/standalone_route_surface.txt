@@ -79,6 +79,7 @@ GET /v1/merchant/catalog/products
 GET /v1/merchant/catalog/products/by-key/{key}
 GET /v1/merchant/catalog/products/{id}
 GET /v1/merchant/catalog/reprice-all-prior-versions/preview
+GET /v1/merchant/catalog/revision
 GET /v1/merchant/catalogs
 GET /v1/merchant/catalogs/by-owner
 GET /v1/merchant/catalogs/{id}
@@ -189,6 +190,7 @@ POST /v1/merchant/admissions/{id}/extend
 POST /v1/merchant/admissions/{id}/release
 POST /v1/merchant/api-keys
 POST /v1/merchant/billing-archive
+POST /v1/merchant/catalog/applications
 POST /v1/merchant/catalog/ask
 POST /v1/merchant/catalog/copilot/confirm
 POST /v1/merchant/catalog/drift/refresh
@@ -199,7 +201,6 @@ POST /v1/merchant/catalog/prices/{id}/key
 POST /v1/merchant/catalog/products
 POST /v1/merchant/catalog/products/{id}/activate
 POST /v1/merchant/catalog/products/{id}/deactivate
-POST /v1/merchant/catalog/publish
 POST /v1/merchant/catalog/reprice-all-prior-versions
 POST /v1/merchant/catalogs
 POST /v1/merchant/checkout-sessions

@@ -39,7 +39,7 @@ func TestCreatorCatalogAuthority(t *testing.T) {
 		rt, mid, err := newDeclaredMerchant(ctx, embed.Options{
 			Config: &config.Config{
 				Env: "development", TestMode: config.CredentialPostureSandbox,
-				MerchantConfigSource: config.MerchantConfigSourceManifest, CatalogSource: config.CatalogSourceAPI,
+				MerchantConfigSource: config.MerchantConfigSourceManifest, AllowCatalogUpdates: true,
 				ProviderWriteMode: config.ProviderWriteModeReadOnly,
 				DB:                &config.DBConfig{URL: ownerURL.String()},
 			},
@@ -52,6 +52,15 @@ func TestCreatorCatalogAuthority(t *testing.T) {
 		return rt, mid, admin
 	}
 	rt, mid, admin := newRuntime()
+	t.Run("missing owner reads do not create catalogs", func(t *testing.T) {
+		const subject = "never-created-reader"
+		reader, err := admin.ForCatalogOwner(subject)
+		require.NoError(t, err)
+		_, err = reader.Products.List(ctx, nil)
+		require.ErrorIs(t, err, openrails.ErrNotFound)
+		_, err = admin.GetCatalogForOwner(ctx, subject)
+		require.ErrorIs(t, err, openrails.ErrNotFound)
+	})
 	const subjectA = "creator|Alice/雪:%2f"
 	const subjectB = "creator:bob"
 	alice, err := admin.ForCatalogOwner(subjectA)
@@ -226,7 +235,7 @@ func TestCreatorCatalogAuthority(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, status)
 		status, _ = creatorRawRequest(t, server.URL, "owner", http.MethodPost, "/v1/merchant/catalogs", map[string]string{"owner_subject": subjectB})
 		require.Equal(t, http.StatusForbidden, status)
-		status, _ = creatorRawRequest(t, server.URL, "owner", http.MethodPost, "/v1/catalog/publish", map[string]any{})
+		status, _ = creatorRawRequest(t, server.URL, "owner", http.MethodPost, "/v1/catalog/applications", map[string]any{})
 		require.Equal(t, http.StatusNotFound, status)
 		status, _ = creatorRawRequest(t, server.URL, "owner", http.MethodPatch, "/v1/catalog/products/"+productA.ID, map[string]string{"display_name": "HTTP edit", "owner_subject": subjectB, "catalog_id": catB.ID.String()})
 		require.Equal(t, http.StatusBadRequest, status)

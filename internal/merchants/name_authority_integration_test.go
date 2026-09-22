@@ -77,12 +77,19 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 		require.Equal(t, newName, selected.Slug)
 	}
 	cfg := &config.Config{DB: &config.DBConfig{Schema: config.DefaultSchema}, MerchantConfigSource: "manifest"}
-	catalogFor := func(name, display string) []byte {
-		return []byte("version: 1\ncatalogs:\n  - merchant: " + name + "\n    products:\n      - key: owner_product\n        display_name: " + display + "\n")
+	applicationID := "name-authority-" + suffix
+	catalogFor := func(display string) []byte {
+		// Both newly provisioned merchant catalogs start at revision zero. The
+		// external name is deliberately outside the application payload.
+		return []byte(fmt.Sprintf("schema_version: 1\napplication_id: %s\nexpected_revision: 0\nproducts:\n  - key: owner_product\n    display_name: %q\n", applicationID, display))
 	}
-	require.NoError(t, hosttools.PushMerchantCatalog(ctx, hosttools.CatalogPushOptions{
-		Config: cfg, PGXPool: pool, NameAuthority: authority, Manifest: catalogFor(old, "Original catalog"), Insert: true, Overwrite: true, Prune: true,
-	}))
+	originalReceipt, err := hosttools.ApplyMerchantCatalog(ctx, hosttools.CatalogApplyOptions{
+		Config: cfg, PGXPool: pool, NameAuthority: authority, Merchant: old, Manifest: catalogFor("Original catalog"),
+	})
+	require.NoError(t, err)
+	require.False(t, originalReceipt.Replayed)
+	require.EqualValues(t, 0, originalReceipt.BaseRevision)
+	require.EqualValues(t, 1, originalReceipt.AppliedRevision)
 	_, err = core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{Persona: "merchant", InstanceSlug: old, OwnerSubjectID: ownerB.ID})
 	require.Error(t, err, "retained former name cannot be reclaimed")
 	var projection, status string
@@ -129,15 +136,24 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 	}
 	// The alias initially selected A's catalog; after reclaim, the same external
 	// name selects B. UUID-scoped import still writes only to captured A.
-	require.NoError(t, hosttools.PushMerchantCatalog(ctx, hosttools.CatalogPushOptions{
-		Config: cfg, PGXPool: pool, NameAuthority: authority, Manifest: catalogFor(old, "New owner catalog"), Insert: true, Overwrite: true, Prune: true,
-	}))
+	// Reusing this operation ID with a different declaration is legal in B's
+	// distinct namespace; it must neither replay nor overwrite A's receipt.
+	reclaimedReceipt, err := hosttools.ApplyMerchantCatalog(ctx, hosttools.CatalogApplyOptions{
+		Config: cfg, PGXPool: pool, NameAuthority: authority, Merchant: old, Manifest: catalogFor("New owner catalog"),
+	})
+	require.NoError(t, err)
+	require.False(t, reclaimedReceipt.Replayed)
+	require.EqualValues(t, 0, reclaimedReceipt.BaseRevision)
+	require.NotEqual(t, originalReceipt.CatalogID, reclaimedReceipt.CatalogID)
 	var originalCatalog, reclaimedCatalog bytes.Buffer
 	require.NoError(t, hosttools.DumpMerchantCatalog(ctx, hosttools.CatalogDumpOptions{Config: cfg, PGXPool: pool, NameAuthority: authority, Merchant: newName, Out: &originalCatalog}))
 	require.NoError(t, hosttools.DumpMerchantCatalog(ctx, hosttools.CatalogDumpOptions{Config: cfg, PGXPool: pool, NameAuthority: authority, Merchant: old, Out: &reclaimedCatalog}))
 	require.Contains(t, originalCatalog.String(), "Original catalog")
 	require.NotContains(t, originalCatalog.String(), "New owner catalog")
-	require.Contains(t, originalCatalog.String(), "merchant: "+newName)
+	originalDump, err := openrails.ParseCatalogApplicationYAML(originalCatalog.Bytes())
+	require.NoError(t, err)
+	require.EqualValues(t, 1, *originalDump.ExpectedRevision)
+	require.NotContains(t, originalCatalog.String(), "\nmerchant:", "merchant authority is selected outside the payload")
 	require.Contains(t, reclaimedCatalog.String(), "New owner catalog")
 	require.NotContains(t, reclaimedCatalog.String(), "Original catalog")
 	importedCustomer := uuid.New()

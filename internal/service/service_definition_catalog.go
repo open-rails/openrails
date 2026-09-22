@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -79,6 +80,12 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	if owned && !req.CatalogID.IsZero() && req.CatalogID.UUID() != *catalogscope.QueryID(ctx) {
 		return nil, catalog.ErrOwnerScope
 	}
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogProduct, error) {
+		return scoped.createProduct(ctx, req)
+	})
+}
+
+func (s *Service) createProduct(ctx context.Context, req CreateProductRequest) (*CatalogProduct, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -144,6 +151,12 @@ func (s *Service) UpdateProduct(ctx context.Context, id openrails.ProductID, req
 	if owned && (req.EntitlementsSpec != nil || req.SetEntitlements || req.TierGroup != nil || req.SetTierGroup || req.TierRank != nil || req.SkipRailSync) {
 		return nil, catalog.ErrOwnerOperation
 	}
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogProduct, error) {
+		return scoped.updateProduct(ctx, id, req)
+	})
+}
+
+func (s *Service) updateProduct(ctx context.Context, id openrails.ProductID, req UpdateProductRequest) (*CatalogProduct, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -172,49 +185,52 @@ func (s *Service) UpdateProduct(ctx context.Context, id openrails.ProductID, req
 		return nil, productLookup(err)
 	}
 
-	// Propagate mutable Product changes to Stripe (display name + description + active).
-	// The Stripe product ID is not stored on the OpenRails product row itself —
-	// it lives on associated prices' psp_links.stripe.product_id. Look up one
-	// such price to find it; if no prices have a Stripe link yet, there is
-	// nothing to propagate (no Stripe Product exists for this OpenRails product).
-	if !req.SkipRailSync && (req.DisplayName != nil || req.Description != nil || req.Archived != nil) && s.rt.Config != nil {
-		stripeProductID := s.lookupStripeProductID(ctx, productID)
-		if stripeProductID != "" {
-			stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.RailConfigs}
-			params := catalog.UpdateProductParams{}
-			if req.DisplayName != nil {
-				name := strings.TrimSpace(*req.DisplayName)
-				params.Name = &name
+	s.catalogAfterCommit(ctx, func(ctx context.Context, s *Service) {
+		// Propagate mutable Product changes to Stripe (display name + description + active).
+		// The Stripe product ID is not stored on the OpenRails product row itself —
+		// it lives on associated prices' psp_links.stripe.product_id. Look up one
+		// such price to find it; if no prices have a Stripe link yet, there is
+		// nothing to propagate (no Stripe Product exists for this OpenRails product).
+		if !s.localCatalogOnly && !req.SkipRailSync && (req.DisplayName != nil || req.Description != nil || req.Archived != nil) && s.rt.Config != nil {
+			stripeProductID := s.lookupStripeProductID(ctx, productID)
+			if stripeProductID != "" {
+				stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.RailConfigs}
+				params := catalog.UpdateProductParams{}
+				if req.DisplayName != nil {
+					name := strings.TrimSpace(*req.DisplayName)
+					params.Name = &name
+				}
+				if req.Description != nil {
+					desc := strings.TrimSpace(*req.Description)
+					params.Description = &desc
+				}
+				if req.Archived != nil {
+					// archived -> Stripe active=false.
+					active := !*req.Archived
+					params.Active = &active
+				}
+				// Best-effort propagation: log on failure, do not roll back the DB change.
+				// Drift will surface on next ?verify=true read.
+				_ = stripeSvc.UpdateProduct(ctx, stripeProductID, params)
 			}
-			if req.Description != nil {
-				desc := strings.TrimSpace(*req.Description)
-				params.Description = &desc
-			}
-			if req.Archived != nil {
-				// archived -> Stripe active=false.
-				active := !*req.Archived
-				params.Active = &active
-			}
-			// Best-effort propagation: log on failure, do not roll back the DB change.
-			// Drift will surface on next ?verify=true read.
-			_ = stripeSvc.UpdateProduct(ctx, stripeProductID, params)
 		}
-	}
 
-	// #586: when entitlements change, re-sync the product's Stripe Features so the
-	// mirror matches OpenRails. An emptied spec detaches all OpenRails-managed
-	// features. Best-effort, like the propagation above. Only runs once a Stripe
-	// Product exists for this product (i.e. a price has linked it).
-	if !req.SkipRailSync && req.SetEntitlements && s.rt.Config != nil {
-		if stripeProductID := s.lookupStripeProductID(ctx, productID); stripeProductID != "" {
-			stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.RailConfigs}
-			keys := make([]string, 0, len(p.EntitlementsSpec))
-			for k := range p.EntitlementsSpec {
-				keys = append(keys, k)
+		// #586: when entitlements change, re-sync the product's Stripe Features so the
+		// mirror matches OpenRails. An emptied spec detaches all OpenRails-managed
+		// features. Best-effort, like the propagation above. Only runs once a Stripe
+		// Product exists for this product (i.e. a price has linked it).
+		if !s.localCatalogOnly && !req.SkipRailSync && req.SetEntitlements && s.rt.Config != nil {
+			if stripeProductID := s.lookupStripeProductID(ctx, productID); stripeProductID != "" {
+				stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.RailConfigs}
+				keys := make([]string, 0, len(p.EntitlementsSpec))
+				for k := range p.EntitlementsSpec {
+					keys = append(keys, k)
+				}
+				_ = stripeSvc.SyncProductFeatures(ctx, stripeProductID, keys)
 			}
-			_ = stripeSvc.SyncProductFeatures(ctx, stripeProductID, keys)
 		}
-	}
+
+	})
 
 	return productToCatalogProduct(p), nil
 }
@@ -226,6 +242,15 @@ func (s *Service) UpdateProduct(ctx context.Context, id openrails.ProductID, req
 // but the dedicated lifecycle entrypoints bypass it. Best-effort: failures are
 // swallowed (drift surfaces on the next product reconcile).
 func (s *Service) propagateProductActiveToStripe(ctx context.Context, productID uuid.UUID, active bool) {
+	s.catalogAfterCommit(ctx, func(ctx context.Context, committed *Service) {
+		committed.propagateProductActiveToStripeCommitted(ctx, productID, active)
+	})
+}
+
+func (s *Service) propagateProductActiveToStripeCommitted(ctx context.Context, productID uuid.UUID, active bool) {
+	if s.localCatalogOnly {
+		return
+	}
 	if s.rt == nil || s.rt.Config == nil {
 		return
 	}
@@ -341,15 +366,27 @@ func priceRequestCycleDays(req CreatePriceRequest) *int {
 }
 
 func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*CatalogPrice, error) {
-	if req.ProductData != nil {
-		return s.createPriceWithProduct(ctx, req)
-	}
 	owned, err := catalogOwnerRequest(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if owned && (req.PSPs != nil || req.PSPLinks != nil) {
 		return nil, catalog.ErrOwnerOperation
+	}
+	if err := s.checkCatalogWritePolicy(ctx); err != nil {
+		return nil, err
+	}
+	if req.ProductData != nil {
+		return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogPrice, error) {
+			return scoped.createPrice(ctx, req, owned)
+		})
+	}
+	return s.createPrice(ctx, req, owned)
+}
+
+func (s *Service) createPrice(ctx context.Context, req CreatePriceRequest, owned bool) (*CatalogPrice, error) {
+	if req.ProductData != nil {
+		return s.createPriceWithProduct(ctx, req)
 	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
@@ -368,37 +405,8 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	// is case-insensitive, so without this a caller-supplied "usd" validated
 	// fine and then failed the prices_currency_shape CHECK at INSERT.
 	req.Currency = money.NormalizeCurrency(req.Currency)
-	if req.UnitAmount < 0 {
-		return nil, apperr.Invalidf("unit_amount must be non-negative")
-	}
-	if req.Currency == "" {
-		return nil, apperr.Invalidf("currency required")
-	}
-	// #622 access window: a finite window must be positive; auto_renew needs one.
-	if req.AccessDurationHours != nil && *req.AccessDurationHours <= 0 {
-		return nil, apperr.Invalidf("access_duration_hours must be positive (omit for indefinite)")
-	}
-	if req.AutoRenew && req.AccessDurationHours == nil {
-		return nil, apperr.Invalidf("auto_renew requires a finite access_duration_hours")
-	}
-	// #622 trial: both-or-neither; non-negative amount (0 = free trial); positive
-	// period; only on an auto-renewing price (there is a "then recurring" part).
-	if (req.TrialUnitAmount == nil) != (req.TrialDurationHours == nil) {
-		return nil, apperr.Invalidf("trial_unit_amount and trial_duration_hours must be set together")
-	}
-	if req.TrialUnitAmount != nil {
-		if *req.TrialUnitAmount < 0 {
-			return nil, apperr.Invalidf("trial_unit_amount must be >= 0 (0 = free trial)")
-		}
-		if *req.TrialDurationHours <= 0 {
-			return nil, apperr.Invalidf("trial_duration_hours must be positive")
-		}
-		if !req.AutoRenew {
-			return nil, apperr.Invalidf("trial pricing requires auto_renew")
-		}
-	}
-	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
-		return nil, apperr.Invalidf("%v", err)
+	if err := validateCatalogPriceTerms(req); err != nil {
+		return nil, err
 	}
 
 	product, err := products.GetByID(ctx, req.ProductID.UUID())
@@ -418,12 +426,48 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		}
 	}
 
-	rails, providerStates, pending, err := s.resolveProviders(ctx, product, req, priceID)
-	if err != nil {
-		return nil, err
+	var rails map[string]map[string]string
+	var providerStates map[string]ProviderState
+	var pending []PendingAction
+	if prepared, ok := s.catalogPreparedLinks[req.Key]; s.localCatalogOnly && ok {
+		rails = cloneRails(prepared)
+	} else {
+		rails, providerStates, pending, err = s.resolveProviders(ctx, product, req, priceID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	price, err := s.writeCatalogPrice(ctx, req, product, priceID, rails)
+	price, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*models.Price, error) {
+		products, err := scoped.requireProductService()
+		if err != nil {
+			return nil, err
+		}
+		current, err := products.GetByID(ctx, product.ID)
+		if err != nil {
+			return nil, productLookup(err)
+		}
+		if !reflect.DeepEqual(productToCatalogProduct(current), productToCatalogProduct(product)) {
+			return nil, ErrCatalogConflict
+		}
+		price, err := scoped.writeCatalogPrice(ctx, req, current, priceID, rails)
+		if err != nil {
+			return nil, err
+		}
+		if prepared, ok := scoped.catalogPreparedLinks[req.Key]; scoped.localCatalogOnly && ok {
+			prices, err := scoped.requirePriceService()
+			if err != nil {
+				return nil, err
+			}
+			if !sameCatalogLinks(price.PSPLinks, prepared) {
+				if err := prices.UpdatePSPLinks(ctx, price.ID, prepared); err != nil {
+					return nil, err
+				}
+				return prices.GetByID(ctx, price.ID)
+			}
+		}
+		return price, nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +475,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	// Created-as-archived: the providers were auto-created active above, so
 	// propagate active=false to match the archived lifecycle (best-effort; drift
 	// surfaces on next verify if a provider rejects it).
-	if req.Archived && len(rails) > 0 && !s.catalogRemoteWritesDisabled() {
+	if !s.localCatalogOnly && req.Archived && len(rails) > 0 && !s.catalogRemoteWritesDisabled() {
 		inactive := false
 		adapters := s.providerAdapters()
 		for provider, ids := range rails {
@@ -469,11 +513,19 @@ func (s *Service) UpdatePrice(ctx context.Context, id openrails.PriceID, req Upd
 	if owned && (req.PSPLinks != nil || req.ReplacePSPLinks || req.SkipRailSync) {
 		return nil, catalog.ErrOwnerOperation
 	}
+	if err := s.checkCatalogWritePolicy(ctx); err != nil {
+		return nil, err
+	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
 	}
 	defer release()
+
+	return s.updatePrice(ctx, id, req)
+}
+
+func (s *Service) updatePrice(ctx context.Context, id openrails.PriceID, req UpdatePriceRequest) (*CatalogPrice, error) {
 
 	prices, err := s.requirePriceService()
 	if err != nil {
@@ -486,21 +538,33 @@ func (s *Service) UpdatePrice(ctx context.Context, id openrails.PriceID, req Upd
 	// Declarative PSP link rotation. ReplacePSPLinks=true overwrites the
 	// entire psp_links map; otherwise the supplied entries are merged
 	// into the existing map (partial PATCH). Empty inner maps clear a provider.
+	existing, getErr := prices.GetByID(ctx, priceID)
+	if getErr != nil {
+		return nil, priceLookup(getErr)
+	}
+	var preparedProduct *models.Product
+	var next map[string]map[string]string
 	var pending []PendingAction
 	if req.PSPLinks != nil {
 		// The existing price + its product give the substance (product key + money terms)
 		// each adapter's Attach validates the supplied link against. Fetch it
 		// regardless of merge/replace so a rotated link is verified, not blindly
 		// stored.
-		existing, getErr := prices.GetByID(ctx, priceID)
-		if getErr != nil {
-			return nil, priceLookup(getErr)
+		if s.localCatalogOnly {
+			return nil, apperr.Invalidf("provider link changes must be prepared outside a catalog application")
+		}
+		products, err := s.requireProductService()
+		if err != nil {
+			return nil, err
+		}
+		preparedProduct, err = products.GetByID(ctx, existing.ProductID)
+		if err != nil {
+			return nil, productLookup(err)
 		}
 		pctx, ctxErr := s.priceLinkContext(ctx, existing)
 		if ctxErr != nil {
 			return nil, ctxErr
 		}
-		var next map[string]map[string]string
 		if req.ReplacePSPLinks {
 			next = map[string]map[string]string{}
 		} else {
@@ -560,24 +624,61 @@ func (s *Service) UpdatePrice(ctx context.Context, id openrails.PriceID, req Upd
 			ids[models.RailKeyRail] = rail
 			next[psp] = ids
 		}
-		if err := prices.UpdatePSPLinks(ctx, priceID, next); err != nil {
+	}
+	updated, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*models.Price, error) {
+		prices, err := scoped.requirePriceService()
+		if err != nil {
+			return nil, err
+		}
+		current, err := prices.GetByID(ctx, priceID)
+		if err != nil {
 			return nil, priceLookup(err)
 		}
-	}
-	if req.Archived != nil {
-		if err := prices.SetArchived(ctx, priceID, *req.Archived); err != nil {
-			return nil, priceLookup(err)
+		if !reflect.DeepEqual(current, existing) {
+			return nil, ErrCatalogConflict
 		}
-	}
-	updated, err := prices.GetByID(ctx, priceID)
+		if preparedProduct != nil {
+			products, err := scoped.requireProductService()
+			if err != nil {
+				return nil, err
+			}
+			product, err := products.GetByID(ctx, preparedProduct.ID)
+			if err != nil {
+				return nil, productLookup(err)
+			}
+			if !reflect.DeepEqual(productToCatalogProduct(product), productToCatalogProduct(preparedProduct)) {
+				return nil, ErrCatalogConflict
+			}
+		}
+		if req.PSPLinks != nil {
+			if err := prices.UpdatePSPLinks(ctx, priceID, next); err != nil {
+				return nil, priceLookup(err)
+			}
+		}
+		if req.Archived != nil {
+			// This method propagates once, after its complete local commit and
+			// only when SkipRailSync permits it; nested lifecycle work is local.
+			lifecycle := *scoped
+			lifecycle.localCatalogOnly = true
+			if *req.Archived {
+				_, err = lifecycle.deactivatePrice(ctx, id)
+			} else {
+				_, err = lifecycle.activatePrice(ctx, id)
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+		return prices.GetByID(ctx, priceID)
+	})
 	if err != nil {
-		return nil, priceLookup(err)
+		return nil, err
 	}
 
 	// Propagate mutable changes to every attached provider via its adapter.
 	// Only when the caller did not opt out via SkipRailSync. Failures are
 	// logged-and-swallowed: drift will surface on the next ?verify=true read.
-	if !req.SkipRailSync && req.Archived != nil {
+	if !s.localCatalogOnly && !req.SkipRailSync && req.Archived != nil {
 		active := !*req.Archived
 		mutable := mutableUpdate{IsActive: &active}
 		if !s.catalogRemoteWritesDisabled() {
@@ -634,4 +735,41 @@ func priceToCatalogPrice(p *models.Price) *CatalogPrice {
 		cp.Providers[name] = state
 	}
 	return cp
+}
+
+func validateCatalogPriceTerms(req CreatePriceRequest) error {
+	if req.UnitAmount < 0 {
+		return apperr.Invalidf("unit_amount must be non-negative")
+	}
+	if req.Currency == "" {
+		return apperr.Invalidf("currency required")
+	}
+	// #622 access window: a finite window must be positive; auto_renew needs one.
+	if req.AccessDurationHours != nil && *req.AccessDurationHours <= 0 {
+		return apperr.Invalidf("access_duration_hours must be positive (omit for indefinite)")
+	}
+	if req.AutoRenew && req.AccessDurationHours == nil {
+		return apperr.Invalidf("auto_renew requires a finite access_duration_hours")
+	}
+	// #622 trial: both-or-neither; non-negative amount (0 = free trial); positive
+	// period; only on an auto-renewing price (there is a "then recurring" part).
+	if (req.TrialUnitAmount == nil) != (req.TrialDurationHours == nil) {
+		return apperr.Invalidf("trial_unit_amount and trial_duration_hours must be set together")
+	}
+	if req.TrialUnitAmount != nil {
+		if *req.TrialUnitAmount < 0 {
+			return apperr.Invalidf("trial_unit_amount must be >= 0 (0 = free trial)")
+		}
+		if *req.TrialDurationHours <= 0 {
+			return apperr.Invalidf("trial_duration_hours must be positive")
+		}
+		if !req.AutoRenew {
+			return apperr.Invalidf("trial pricing requires auto_renew")
+		}
+	}
+	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
+		return apperr.Invalidf("%v", err)
+	}
+
+	return nil
 }

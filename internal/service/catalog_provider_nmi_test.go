@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -426,5 +427,51 @@ func TestMobiusAdapter_VerifyUnconfiguredIsSyncDisabled(t *testing.T) {
 	drift, missing, err := a.Verify(context.Background(), map[string]string{models.RailKeyPlanID: "p"}, &priceVerifyContext{Currency: "USD"})
 	if !errors.Is(err, errProviderNotArmed) || missing || drift != nil {
 		t.Fatalf("expected a not-armed error, got drift=%v missing=%v err=%v", drift, missing, err)
+	}
+}
+
+// The ordinary catalog factory must honor the validated sandbox configuration;
+// testing only the private adapter override cannot qualify the CLI/runtime path.
+func TestNMICatalogClientUsesConfiguredSandboxEndpoint(t *testing.T) {
+	for _, privateOverride := range []bool{false, true} {
+		t.Run(strconv.FormatBool(privateOverride), func(t *testing.T) {
+			var reads atomic.Int32
+			gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/plans/known" {
+					t.Errorf("unexpected provider request: %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				reads.Add(1)
+				_, _ = w.Write([]byte(`{"object":"plan","id":"known","plan_amount":"23.00","day_frequency":"30","plan_payments":"0"}`))
+			}))
+			defer gateway.Close()
+			other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Error("private endpoint must take priority")
+				w.WriteHeader(http.StatusBadRequest)
+			}))
+			defer other.Close()
+			adapter := newMobiusAdapterWithServer(t, "")
+			adapter.svc.rt.Config.TestMode = config.CredentialPostureSandbox
+			adapter.svc.rt.Config.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: gateway.URL}
+			if privateOverride {
+				adapter.testEndpointURL = gateway.URL
+				adapter.svc.rt.Config.ProviderSandbox.NMIGatewayURL = other.URL
+			}
+			client, _, ok := adapter.nmiClientFor(t.Context(), "mobius")
+			if !ok || client == nil {
+				t.Fatal("NMI client must be armed")
+			}
+			if client.V5BaseURL != gateway.URL || client.QueryURL != gateway.URL || client.DirectPostURL != gateway.URL {
+				t.Fatal("refusing to issue a query outside the configured local fixture")
+			}
+			detail, err := client.GetRecurringPlanDetailByID(t.Context(), "known", "USD")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !detail.Found || reads.Load() != 1 {
+				t.Fatalf("expected one local verification read, found=%v reads=%d", detail.Found, reads.Load())
+			}
+		})
 	}
 }

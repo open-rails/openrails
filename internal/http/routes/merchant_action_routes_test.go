@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -58,9 +59,9 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 			AdminPermissionChecker: checker,
 		}),
 	}
-	RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
+	RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), &app.Runtime{Config: &config.Config{AllowCatalogUpdates: true}}, opts)
 	RegisterServiceRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
-	RegisterCatalogRoutes(router.NewMux(mux, "/billing/v1/merchant/catalog", nil), nil, opts)
+	RegisterCatalogRoutes(router.NewMux(mux, "/billing/v1/merchant/catalog", nil), &app.Runtime{Config: &config.Config{AllowCatalogUpdates: true}}, opts)
 	RegisterPaymentProviderRoutes(router.NewMux(mux, "/billing/v1/merchant/payment-providers", nil), nil, opts)
 
 	tests := []struct {
@@ -78,9 +79,9 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 			perm:   controlplane.PermMerchantCatalogRead,
 		},
 		{
-			name:   "catalog publish",
+			name:   "catalog application",
 			method: http.MethodPost,
-			path:   "/billing/v1/merchant/catalog/publish",
+			path:   "/billing/v1/merchant/catalog/applications",
 			perm:   controlplane.PermMerchantCatalogUpdate,
 		},
 		{
@@ -311,7 +312,7 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 	}
 }
 
-func TestCatalogMeterWritesUseManifestModeGuard(t *testing.T) {
+func TestCatalogMeterWritesOmittedWhenDisabled(t *testing.T) {
 	mux := http.NewServeMux()
 	checker := &merchantActionChecker{}
 	rt := &app.Runtime{Config: &config.Config{MerchantConfigSource: config.MerchantConfigSourceManifest}}
@@ -330,8 +331,8 @@ func TestCatalogMeterWritesUseManifestModeGuard(t *testing.T) {
 		strings.NewReader(`{"aggregation":"count"}`),
 	))
 	require.Equal(t, http.StatusMethodNotAllowed, recorder.Code)
-	require.Contains(t, recorder.Body.String(), `"code":"manifest_driven"`)
-	require.Empty(t, checker.perm, "manifest guard must run before authorization")
+	require.NotContains(t, recorder.Body.String(), "manifest_driven")
+	require.Empty(t, checker.perm, "an omitted route cannot invoke authorization")
 
 	recorder = httptest.NewRecorder()
 	mux.ServeHTTP(recorder, httptest.NewRequest(
@@ -345,22 +346,25 @@ func TestCatalogMeterWritesUseManifestModeGuard(t *testing.T) {
 
 func TestCatalogAuthorityDoesNotChangeProviderAuthority(t *testing.T) {
 	for _, merchantSource := range []string{config.MerchantConfigSourceManifest, config.MerchantConfigSourceAPI} {
-		for _, catalogSource := range []string{config.CatalogSourceManifest, config.CatalogSourceAPI} {
-			t.Run(merchantSource+"/"+catalogSource, func(t *testing.T) {
+		for _, allow := range []bool{false, true} {
+			t.Run(merchantSource+"/"+strconv.FormatBool(allow), func(t *testing.T) {
 				mux := http.NewServeMux()
 				checker := &merchantActionChecker{}
-				rt := &app.Runtime{Config: &config.Config{MerchantConfigSource: merchantSource, CatalogSource: catalogSource}}
+				rt := &app.Runtime{Config: &config.Config{MerchantConfigSource: merchantSource, AllowCatalogUpdates: allow}}
 				opts := Options{Gate: NewGate(GateOptions{Authenticator: merchantActionAuth{}, AdminPermissionChecker: checker})}
 				RegisterCatalogRoutes(router.NewMux(mux, "/catalog", nil), rt, opts)
 				RegisterPaymentProviderRoutes(router.NewMux(mux, "/providers", nil), rt, opts)
-				for _, request := range []struct{ path, source, permission string }{
-					{"/catalog/meters/storage", catalogSource, policy.PermMerchantCatalogUpdate},
-					{"/providers/stripe", merchantSource, controlplane.PermMerchantPaymentProvidersUpdate},
+				for _, request := range []struct {
+					path, permission string
+					enabled          bool
+				}{
+					{"/catalog/meters/storage", policy.PermMerchantCatalogUpdate, allow},
+					{"/providers/stripe", controlplane.PermMerchantPaymentProvidersUpdate, merchantSource == config.MerchantConfigSourceAPI},
 				} {
 					checker.perm = ""
 					rec := httptest.NewRecorder()
 					mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, request.path, strings.NewReader(`{}`)))
-					if request.source == "manifest" {
+					if !request.enabled {
 						require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
 						require.Empty(t, checker.perm)
 					} else {
@@ -468,9 +472,9 @@ func TestMerchantActionRoutesDelegatedTokenGated(t *testing.T) {
 		Gate: NewGate(GateOptions{DelegatedResolver: del}),
 	}
 	RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
-	RegisterCatalogRoutes(router.NewMux(mux, "/billing/v1/merchant/catalog", nil), nil, opts)
+	RegisterCatalogRoutes(router.NewMux(mux, "/billing/v1/merchant/catalog", nil), &app.Runtime{Config: &config.Config{AllowCatalogUpdates: true}}, opts)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/billing/v1/merchant/catalog/publish", nil)
+	req := httptest.NewRequest(http.MethodPost, "/billing/v1/merchant/catalog/applications", nil)
 	req.Header.Set("Authorization", "Bearer aaa.bbb.ccc") // JWT-shaped delegated token
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
@@ -540,7 +544,7 @@ func TestProviderMutationRouteInventory(t *testing.T) {
 				name = source + "/writable"
 			}
 			t.Run(name, func(t *testing.T) {
-				rt := &app.Runtime{Config: &config.Config{MerchantConfigSource: source, CatalogSource: config.CatalogSourceAPI}}
+				rt := &app.Runtime{Config: &config.Config{MerchantConfigSource: source, AllowCatalogUpdates: true}}
 				providerRoutes := routesurface.AllProviderRoutes()
 				providerRoutes.SecretWrite = secretWrite
 				opts := Options{ProviderRoutes: &providerRoutes}

@@ -4,9 +4,8 @@ import (
 	"context"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/pkg/catalog"
 )
 
 // An application needs only the shared Client and public declaration types.
-var _ func(*openrails.Client, context.Context, openrails.CatalogPublishRequest) (*openrails.CatalogPublishResponse, error) = (*openrails.Client).PublishCatalog
-var _ = openrails.CatalogPublishRequest{Catalog: catalog.Manifest{Version: catalog.SupportedVersion}}
+var _ func(*openrails.CatalogClient, context.Context, *openrails.CatalogApplyParams) (*openrails.CatalogApplicationReceipt, error) = (*openrails.CatalogClient).Apply
+var _ = openrails.CatalogApplyParams{SchemaVersion: 1}

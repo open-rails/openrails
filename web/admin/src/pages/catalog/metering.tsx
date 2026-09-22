@@ -96,8 +96,8 @@ export function CatalogMeteringPage() {
 
       {data && !writesAllowed && (
         <ReadOnlyNotice>
-          This catalog is manifest-managed. Meter definitions and rates are
-          visible here but must be changed in the host catalog manifest.
+          Catalog updates are disabled. Meter definitions and rates are visible
+          here; changes require the host operator.
         </ReadOnlyNotice>
       )}
 
@@ -318,8 +318,8 @@ export function MeterDetailPage() {
             <h1 className="truncate text-xl font-semibold tracking-tight">
               {meter.key}
             </h1>
-            {meter.configuration_source === "manifest" && (
-              <Badge variant="secondary">manifest</Badge>
+            {!meter.writes_allowed && (
+              <Badge variant="secondary">read-only</Badge>
             )}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -345,8 +345,7 @@ export function MeterDetailPage() {
 
       {!meter.writes_allowed && (
         <ReadOnlyNotice>
-          This meter is managed by the catalog manifest. The console is
-          read-only.
+          Catalog updates are disabled. The console is read-only.
         </ReadOnlyNotice>
       )}
 

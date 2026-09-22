@@ -18,7 +18,7 @@ import (
 )
 
 func TestFiberReviewFullInventoryMountsNatively(t *testing.T) {
-	cfg := &config.Config{CatalogSource: config.CatalogSourceAPI, MerchantConfigSource: config.MerchantConfigSourceAPI}
+	cfg := &config.Config{AllowCatalogUpdates: true, MerchantConfigSource: config.MerchantConfigSourceAPI}
 	delegated := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return nil, billingauth.ErrUnauthenticated
 	})

@@ -98,6 +98,8 @@ func TestApplicationRejectsAmbiguousInput(t *testing.T) {
 	}
 	for _, raw := range []string{
 		`{"schema_version":1,"application_id":"op","expected_revision":0,"prune":true,"prune":false}`,
+		`{"schema_version":1,"application_id":"op","expected_revision":0,"prune":false,"Prune":true}`,
+		`{"schema_version":1,"application_id":"op","expected_revision":0,"products":[{"key":"p","Archived":true}]}`,
 		`{"schema_version":1,"application_id":"op","expected_revision":0,"products":[{"key":"a","entitlements_spec":{"premium":1,"premium":2}}]}`,
 		`{"schema_version":1,"application_id":"op","expected_revision":0} {}`,
 	} {
@@ -136,5 +138,22 @@ func TestApplicationCanonicalOrder(t *testing.T) {
 	}
 	if ha == hb {
 		t.Fatal("prune was not included in identity")
+	}
+}
+
+func TestApplicationRejectsHiddenGoValues(t *testing.T) {
+	revision := int64(0)
+	for _, hidden := range []Field[map[string]*int]{
+		{Value: map[string]*int{"premium": nil}},
+		{Set: true, Null: true, Value: map[string]*int{"premium": nil}},
+		{Null: true},
+	} {
+		a := Application{SchemaVersion: 1, ApplicationID: "op", ExpectedRevision: &revision, Products: []ApplyProduct{{Key: "p", EntitlementsSpec: hidden}}}
+		if err := a.Validate(); err == nil {
+			t.Fatal("typed operator request accepted a value absent from its wire representation")
+		}
+		if _, err := a.CanonicalDigest(); err == nil {
+			t.Fatal("hidden value acquired a receipt digest")
+		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,7 +28,16 @@ type Field[T any] struct {
 func Value[T any](v T) Field[T] { return Field[T]{Set: true, Value: v} }
 func Null[T any]() Field[T]     { return Field[T]{Set: true, Null: true} }
 func (f Field[T]) IsZero() bool { return !f.Set }
+func (f Field[T]) validateField() error {
+	if !f.Set && f.Null || (!f.Set || f.Null) && !reflect.ValueOf(&f.Value).Elem().IsZero() {
+		return fmt.Errorf("omitted or null field cannot carry a hidden value")
+	}
+	return nil
+}
 func (f Field[T]) MarshalJSON() ([]byte, error) {
+	if err := f.validateField(); err != nil {
+		return nil, err
+	}
 	if !f.Set || f.Null {
 		return []byte("null"), nil
 	}
@@ -123,6 +133,9 @@ func (a Application) Validate() error {
 	products, prices, meters := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	count := len(a.Products) + len(a.Meters)
 	for _, p := range a.Products {
+		if err := validateApplicationFields(p); err != nil {
+			return fmt.Errorf("product %q: %w", p.Key, err)
+		}
 		if err := uniqueApplicationKey(products, p.Key, "product"); err != nil {
 			return err
 		}
@@ -134,6 +147,9 @@ func (a Application) Validate() error {
 		}
 		count += len(p.Prices) + len(p.RateCards.Value)
 		for _, price := range p.Prices {
+			if err := validateApplicationFields(price); err != nil {
+				return fmt.Errorf("price %q: %w", price.Key, err)
+			}
 			if err := uniqueApplicationKey(prices, price.Key, "price"); err != nil {
 				return err
 			}
@@ -149,6 +165,9 @@ func (a Application) Validate() error {
 		}
 	}
 	for _, m := range a.Meters {
+		if err := validateApplicationFields(m); err != nil {
+			return fmt.Errorf("meter %q: %w", m.Key, err)
+		}
 		if err := uniqueApplicationKey(meters, m.Key, "meter"); err != nil {
 			return err
 		}
@@ -162,6 +181,20 @@ func (a Application) Validate() error {
 	}
 	if len(raw) > MaxApplicationBytes {
 		return fmt.Errorf("catalog application exceeds %d bytes", MaxApplicationBytes)
+	}
+	return nil
+}
+
+// Check every presence-aware field before hashing or executing a direct Go
+// request. The operator and JSON paths must interpret identical values.
+func validateApplicationFields(value any) error {
+	v := reflect.ValueOf(value)
+	for i := 0; i < v.NumField(); i++ {
+		if f, ok := v.Field(i).Interface().(interface{ validateField() error }); ok {
+			if err := f.validateField(); err != nil {
+				return fmt.Errorf("%s: %w", v.Type().Field(i).Name, err)
+			}
+		}
 	}
 	return nil
 }
@@ -187,7 +220,9 @@ func (a Application) CanonicalDigest() ([32]byte, error) {
 		a.Products[i].Prices = append([]ApplyPrice(nil), a.Products[i].Prices...)
 		for j := range a.Products[i].Prices {
 			p := &a.Products[i].Prices[j]
-			p.PSPs.Value = append([]string(nil), p.PSPs.Value...)
+			if p.PSPs.Value != nil {
+				p.PSPs.Value = append([]string{}, p.PSPs.Value...)
+			}
 			sort.Strings(p.PSPs.Value)
 		}
 		sort.Slice(a.Products[i].Prices, func(j, k int) bool { return a.Products[i].Prices[j].Key < a.Products[i].Prices[k].Key })

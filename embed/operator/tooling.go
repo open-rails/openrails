@@ -11,34 +11,6 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// CatalogSource selects catalog authority independently of MerchantConfigSource.
-// Manifest catalogs use PushCatalog; API catalogs use the Client's mutations.
-
-// PushCatalogOptions declares one catalog push. Exactly one of File or
-// Manifest names the catalog YAML. Insert, Overwrite and Prune are the
-// mutation classes and compose; declaring none is plan-only.
-type PushCatalogOptions struct {
-	File      string
-	Manifest  []byte
-	Out       io.Writer
-	Insert    bool
-	Overwrite bool
-	Prune     bool
-}
-
-// PushCatalog converges the declared catalog (products, prices by explicit
-// key, meters, tier groups) into the runtime's merchant, using its armed PSPs
-// and signers. A mutating push runs the full converge for manifest catalogs.
-func (r *Operator) PushCatalog(ctx context.Context, opts PushCatalogOptions) error {
-	if err := r.initialized(); err != nil {
-		return err
-	}
-	return hosttools.PushMerchantCatalog(ctx, hosttools.CatalogPushOptions{
-		App: r.app, File: opts.File, Manifest: opts.Manifest, Out: opts.Out,
-		Insert: opts.Insert, Overwrite: opts.Overwrite, Prune: opts.Prune,
-	})
-}
-
 // ConvergeResult summarizes one merchant-wide convergence pass.
 type ConvergeResult = hosttools.ConvergeMerchantResult
 

@@ -1,9 +1,11 @@
 package contract
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -19,6 +21,40 @@ import (
 func ValidateValues(p Profile, values []*string) error {
 	if len(values) != len(p.Columns) {
 		return fmt.Errorf("invalid row width for %s", p.Name)
+	}
+	if p.Name == "catalog_applications" {
+		var receipt struct {
+			ApplicationID   string `json:"application_id"`
+			CatalogID       string `json:"catalog_id"`
+			BaseRevision    int64  `json:"base_revision"`
+			AppliedRevision int64  `json:"applied_revision"`
+			Replayed        bool   `json:"replayed"`
+			ProductsChanged int    `json:"products_changed"`
+			PricesChanged   int    `json:"prices_changed"`
+		}
+		raw := value(p, values, "result")
+		id := value(p, values, "application_id")
+		base := value(p, values, "base_revision")
+		applied := value(p, values, "applied_revision")
+		digest := value(p, values, "request_sha256")
+		if raw == nil || id == nil || base == nil || applied == nil || digest == nil || json.Unmarshal([]byte(*raw), &receipt) != nil {
+			return fmt.Errorf("invalid catalog application receipt")
+		}
+		if receipt.ApplicationID != *id || strconv.FormatInt(receipt.BaseRevision, 10) != *base || strconv.FormatInt(receipt.AppliedRevision, 10) != *applied || receipt.BaseRevision < 0 || receipt.AppliedRevision != receipt.BaseRevision+1 || receipt.Replayed || receipt.ProductsChanged < 0 || receipt.PricesChanged < 0 {
+			return fmt.Errorf("contradictory catalog application receipt")
+		}
+		if len(*digest) != 66 || !strings.HasPrefix(*digest, `\x`) {
+			return fmt.Errorf("invalid catalog application digest")
+		}
+		if _, err := hex.DecodeString((*digest)[2:]); err != nil {
+			return fmt.Errorf("invalid catalog application digest")
+		}
+		catalogID := value(p, values, "catalog_id")
+		parsed, err := openrails.ParseCatalogID(receipt.CatalogID)
+		if err != nil || catalogID == nil || parsed.UUID().String() != *catalogID {
+			return fmt.Errorf("catalog application receipt target mismatch")
+		}
+
 	}
 	if p.Name == "subscriptions" {
 		policy, rail, binding := value(p, values, "collection_policy"), value(p, values, "rail"), value(p, values, "rail_subscription_id")

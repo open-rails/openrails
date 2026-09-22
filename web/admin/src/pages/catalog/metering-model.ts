@@ -585,8 +585,7 @@ export function summarizeRateCard(card?: DefaultUsageRateCard): string {
 }
 
 export function meterDefinitionLocked(meter: UsageMeter): string | null {
-  if (!meter.writes_allowed)
-    return "This meter is managed by the catalog manifest."
+  if (!meter.writes_allowed) return "Catalog updates are disabled."
   if (meter.has_activity) return "Meter definitions lock after the first event."
   return null
 }

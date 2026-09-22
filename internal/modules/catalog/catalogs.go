@@ -35,6 +35,24 @@ func (r *CatalogRepo) Ensure(ctx context.Context, ownerSubject *string) (gen.Ope
 	if err != nil {
 		return gen.OpenrailsCatalog{}, err
 	}
+	var row gen.OpenrailsCatalog
+	err = r.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := gen.New(tx).LockCatalogRevision(ctx, mid.UUID()); err != nil {
+			return err
+		}
+		scoped := NewCatalogRepo(r.db.NewWithPgxTx(tx))
+		var err error
+		row, err = scoped.ensure(ctx, ownerSubject)
+		return err
+	})
+	return row, err
+}
+
+func (r *CatalogRepo) ensure(ctx context.Context, ownerSubject *string) (gen.OpenrailsCatalog, error) {
+	mid, err := catalogMerchant(ctx)
+	if err != nil {
+		return gen.OpenrailsCatalog{}, err
+	}
 	if ownerSubject != nil {
 		if err := catalogscope.ValidateSubject(*ownerSubject); err != nil {
 			return gen.OpenrailsCatalog{}, err

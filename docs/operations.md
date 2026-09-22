@@ -16,14 +16,17 @@ exactly four ways the system diverges, each with its own mechanism:
 
 | # | Divergence | Direction | Mechanism |
 |---|---|---|---|
-| 1 | Catalog wrong at the provider | push (OpenRails → provider) | `push-merchant-catalog` — verify-or-create at apply; alert-only scheduled drift watching (`catalog_reconciliation_interval`, default 1h, `0` disables); provider extras archived only under `--prune` |
+| 1 | Catalog wrong at the provider | push (OpenRails → provider) | `apply-catalog` commits authored database changes with durable provider work where supported; scheduled drift watching is alert-only (`catalog_reconciliation_interval`, default 1h, `0` disables); catalog prune never deletes provider extras |
 | 2 | Money state wrong locally | pull (provider → OpenRails) | webhooks in real time; **Provider Refresh** as the always-on scheduled read; **`pull-provider`** as the manual batch truth-pull |
 | 3 | Outbound action never executed | (intent, not sync) | **durable intent + replay** — see "Durability model"; the Convergence Engine's stuck-intent check is its detector |
 | 4 | Entitlements inconsistent | derived | the **Convergence Engine** re-derives them once 1–3 are true |
 
 ## Mutation Flags
 
-Operator commands share one mutation contract:
+Provider pull and merchant-configuration commands use mutation flags. Catalog
+application instead carries `application_id`, `expected_revision` and optional
+`prune` in its document; it has no insert/overwrite flags. For commands that use
+mutation flags:
 
 - no mutation flags: plan/report only
 - `--insert`: create records or provider objects missing from the target
@@ -45,7 +48,7 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `migrate status [--json]` | compare embedded OpenRails migrations with the applied ledger; non-zero unless names and hashes match exactly |
 | `push-auth-bootstrap [--file] [--dry-run] [--startup-only --name]` | push AuthKit root authority from a bootstrap manifest |
 | `push-merchant-config [--file] [mutation flags]` | push merchant groups + PSP declarations + secrets from `merchants.yaml` |
-| `push-merchant-catalog [--file] [mutation flags]` | terraform-style catalog apply (OpenRails rows + provider objects) |
+| `apply-catalog --merchant NAME --file PATH` | atomic local catalog application with durable replay identity |
 | `dump-merchant-config --slug [--out] [--include-secrets]` / `dump-merchant-catalog --slug` | export a merchant's config / catalog manifest |
 | `pull-provider` / `pull-provider report` | manual provider truth-pull / run report — see "Provider Pull" |
 | `prune list` / `converge list` | inspect the destructive runs a `--prune` / an enforcing pull opened |
@@ -78,7 +81,7 @@ an init job or manual operation:
 ```bash
 openrails push-auth-bootstrap --config /etc/openrails/config.yaml --file /run/openrails/bootstrap.yaml
 openrails push-merchant-config --config /etc/openrails/config.yaml --file /run/openrails/merchants.yaml --insert
-openrails push-merchant-catalog --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml --insert --overwrite
+openrails apply-catalog --merchant your-merchant --config /etc/openrails/config.yaml --file /run/openrails/catalog.yaml
 ```
 
 `push-auth-bootstrap` runs first because it creates the initial AuthKit root
@@ -641,7 +644,7 @@ in any mode):
 | User/admin cancel → rail-side delete | yes | yes | no — intent parks for replay |
 | Dunning charges + window-expiry cancellations | yes | no — runs dry, intents park | no |
 | Invoice collection, Solana pulls | yes | no | no |
-| Catalog provider-object writes (`push-merchant-catalog`) | yes | deferred | deferred |
+| Catalog provider intents (from `apply-catalog`) | yes | deferred | deferred |
 | Provider reads (query APIs, catalog verification) | yes | yes | yes |
 | Webhook ingestion + local serving | yes | yes | yes |
 

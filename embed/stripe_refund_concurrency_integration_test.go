@@ -43,7 +43,7 @@ func TestStripeRefundDeliveriesConcurrentlyRevokeOnePurchase(t *testing.T) {
 	rt, mid, err := newDeclaredMerchant(ctx, embed.Options{Config: &config.Config{
 		Env: "development", TestMode: config.CredentialPostureSandbox,
 		MerchantConfigSource: config.MerchantConfigSourceManifest,
-		CatalogSource:        config.CatalogSourceAPI,
+		AllowCatalogUpdates:  true,
 		ProviderWriteMode:    config.ProviderWriteModeReadOnly,
 		DB:                   &config.DBConfig{URL: dsn},
 	}}, slug, embed.MerchantConfig{PSPs: map[string]embed.PSPConfig{

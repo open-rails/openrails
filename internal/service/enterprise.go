@@ -120,6 +120,13 @@ type UsageMeterSpec = openrails.UsageMeterSpec
 
 // EnsureUsageMeter idempotently declares a host-owned catalog meter.
 func (s *Service) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec) error {
+	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
+		return struct{}{}, scoped.ensureUsageMeter(ctx, spec)
+	})
+	return err
+}
+
+func (s *Service) ensureUsageMeter(ctx context.Context, spec UsageMeterSpec) error {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return pinErr
@@ -129,7 +136,7 @@ func (s *Service) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec) err
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	return s.moneyService().EnsureUsageMeter(ctx, money.UsageMeterSpec{
+	return money.NewMoneyService(s.catalogDatabase()).EnsureUsageMeter(ctx, money.UsageMeterSpec{
 		Key:           spec.Key,
 		EventType:     spec.EventType,
 		ValueProperty: spec.ValueProperty,
@@ -155,6 +162,13 @@ type UsageRateCardInput struct {
 // SetUsageRateCard upserts an in_arrears usage rate card: the merchant
 // default (ProductID set) or a negotiated per-payer override (Payer set).
 func (s *Service) SetUsageRateCard(ctx context.Context, in UsageRateCardInput) error {
+	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
+		return struct{}{}, scoped.setUsageRateCard(ctx, in)
+	})
+	return err
+}
+
+func (s *Service) setUsageRateCard(ctx context.Context, in UsageRateCardInput) error {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return pinErr
@@ -164,7 +178,7 @@ func (s *Service) SetUsageRateCard(ctx context.Context, in UsageRateCardInput) e
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	return s.moneyService().SetUsageRateCard(ctx, money.UsageRateCardInput{
+	return money.NewMoneyService(s.catalogDatabase()).SetUsageRateCard(ctx, money.UsageRateCardInput{
 		Payer:     in.Payer,
 		ProductID: in.ProductID,
 		MeterKey:  in.MeterKey,
@@ -177,6 +191,13 @@ func (s *Service) SetUsageRateCard(ctx context.Context, in UsageRateCardInput) e
 // DeleteDefaultUsageRateCard removes a meter's merchant-default card after all
 // negotiated payer overrides have been removed.
 func (s *Service) DeleteDefaultUsageRateCard(ctx context.Context, meterKey string) error {
+	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
+		return struct{}{}, scoped.deleteDefaultUsageRateCard(ctx, meterKey)
+	})
+	return err
+}
+
+func (s *Service) deleteDefaultUsageRateCard(ctx context.Context, meterKey string) error {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return pinErr
@@ -186,7 +207,7 @@ func (s *Service) DeleteDefaultUsageRateCard(ctx context.Context, meterKey strin
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	return s.moneyService().DeleteDefaultUsageRateCard(ctx, meterKey)
+	return money.NewMoneyService(s.catalogDatabase()).DeleteDefaultUsageRateCard(ctx, meterKey)
 }
 
 // PayerRateCardDTO is one negotiated per-payer override (or#909): the price
@@ -230,6 +251,13 @@ func (s *Service) ListPayerRateCards(ctx context.Context, payer identity.Custome
 
 // DeletePayerRateCard removes a payer's negotiated override for a meter.
 func (s *Service) DeletePayerRateCard(ctx context.Context, payer identity.CustomerID, meterKey string) error {
+	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
+		return struct{}{}, scoped.deletePayerRateCard(ctx, payer, meterKey)
+	})
+	return err
+}
+
+func (s *Service) deletePayerRateCard(ctx context.Context, payer identity.CustomerID, meterKey string) error {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return pinErr
@@ -239,7 +267,7 @@ func (s *Service) DeletePayerRateCard(ctx context.Context, payer identity.Custom
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	return s.moneyService().DeletePayerRateCard(ctx, payer, meterKey)
+	return money.NewMoneyService(s.catalogDatabase()).DeletePayerRateCard(ctx, payer, meterKey)
 }
 
 // SweepUsage rates a payer's reported usage over [from, to) into pending owed

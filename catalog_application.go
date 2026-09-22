@@ -28,7 +28,8 @@ type CatalogApplicationReceipt struct {
 }
 
 type CatalogRevision struct {
-	Revision int64 `json:"revision"`
+	Revision      int64 `json:"revision"`
+	WritesAllowed bool  `json:"writes_allowed"`
 }
 type CatalogClient struct{ client *Client }
 

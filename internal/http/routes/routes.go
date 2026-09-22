@@ -380,24 +380,6 @@ func manifestModeWriteGuardMW(rt *app.Runtime) router.Middleware {
 	}
 }
 
-// catalogModeWriteGuardMW permits API catalogs independently of provider secrets.
-func catalogModeWriteGuardMW(rt *app.Runtime) router.Middleware {
-	return func(next router.Handler) router.Handler {
-		return func(r *httprequest.Request) {
-			if rt != nil && rt.Config.IsManifestCatalogSource() {
-				r.APIError(&api.APIError{
-					HTTPStatus: http.StatusMethodNotAllowed,
-					Type:       api.ErrorTypeInvalidRequest,
-					Code:       "manifest_driven",
-					Message:    "catalog_source=manifest: catalog definitions are host-declared; update the catalog manifest and apply it",
-				})
-				return
-			}
-			next(r)
-		}
-	}
-}
-
 func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
@@ -658,11 +640,12 @@ func bearerToken(header string) string {
 }
 
 func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {
+	readActions := catalog
+	catalog = withCatalogWritePolicy(catalog, rt)
 	read := opts.merchantActionPermissionMW(controlplane.PermMerchantCatalogRead)
 	write := opts.merchantActionPermissionMW(authpolicy.PermMerchantCatalogUpdate)
 	readMW := append([]router.Middleware{read}, dbMW...)
-	// Reject mutations of a manifest-owned catalog before authorization work.
-	writeMW := append([]router.Middleware{catalogModeWriteGuardMW(rt), write}, dbMW...)
+	writeMW := append([]router.Middleware{write}, dbMW...)
 
 	products := catalog.Group("/products")
 	products.Handle(http.MethodPost, "", h(httphandlers.AdminCreateProduct), writeMW...)
@@ -686,7 +669,7 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 	prices.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivatePrice), writeMW...)
 	prices.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivatePrice), writeMW...)
 	// #774: relabel a price's key (a plain rename; version-bump repoint on
-	// collision) — mode-1-guarded like every other catalog write.
+	// collision), governed by the same policy as every catalog write.
 	prices.Handle(http.MethodPost, "/:id/key", h(httphandlers.AdminSetPriceKey), writeMW...)
 
 	meters := catalog.Group("/meters")
@@ -699,26 +682,27 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 
 	catalog.Handle(http.MethodGet, "/drift", h(httphandlers.AdminListCatalogDrift), readMW...)
 	catalog.Handle(http.MethodPost, "/drift/refresh", h(httphandlers.AdminRefreshCatalogDrift), writeMW...)
-	catalog.Handle(http.MethodPost, "/publish", h(httphandlers.MerchantPublishCatalog), writeMW...)
+	catalog.Handle(http.MethodGet, "/revision", h(httphandlers.MerchantCatalogRevision), readMW...)
+	catalog.Handle(http.MethodPost, "/applications", h(httphandlers.MerchantApplyCatalog), writeMW...)
 
 	// #779 catalog copilot: read-only Q&A (+ flag-gated Phase 2 drafting,
 	// never a mutation) shares the catalog-read permission, like #756's
 	// metrics ask shares metrics-read — the LLM-cost axis is guarded by the
 	// service's own per-merchant rate limit + fail-closed consent flag. NOT
-	// manifest-guarded: it never mutates catalog rows, even when drafting.
+	// governed by catalog write policy: it never mutates catalog rows, even when drafting.
 	// Registered only when the copilot is configured (llm.api_key +
 	// llm.catalog_copilot_enabled): an absent route is the only honest
 	// advertisement of an absent capability (#1001), and the console keys its
 	// panels on /admin/config.json, never on probing here.
 	if rt != nil && rt.CopilotService.Configured() {
-		catalog.Handle(http.MethodPost, "/ask", h(httphandlers.CatalogCopilotAsk), readMW...)
+		readActions.Handle(http.MethodPost, "/ask", h(httphandlers.CatalogCopilotAsk), readMW...)
 		// The confirm-provenance log rides the catalog-WRITE permission (only a
 		// caller who could actually apply a price change should be able to log a
-		// draft as confirmed) but skips the mode-1 write guard: it never touches
+		// draft as confirmed) but does not require catalog writes: it never touches
 		// a catalog row, only an audit log entry, for a mutation that already
 		// happened via the normal catalog/reprice endpoints.
 		copilotConfirmMW := append([]router.Middleware{write}, dbMW...)
-		catalog.Handle(http.MethodPost, "/copilot/confirm", h(httphandlers.CatalogCopilotConfirmDraft), copilotConfirmMW...)
+		readActions.Handle(http.MethodPost, "/copilot/confirm", h(httphandlers.CatalogCopilotConfirmDraft), copilotConfirmMW...)
 	}
 }
 
@@ -800,8 +784,9 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	// overage). PUT rides the grant class; DELETE the destructive class —
 	// dropping a negotiated card silently reprices the customer at default.
 	customers.Handle(http.MethodGet, "/rate-overrides", h(httphandlers.ListAdminRateOverrides), customerRead...)
-	customers.Handle(http.MethodPut, "/rate-overrides/:meter_key", h(httphandlers.PutAdminRateOverride), grantWrite...)
-	customers.Handle(http.MethodDelete, "/rate-overrides/:meter_key", h(httphandlers.DeleteAdminRateOverride), revokeWrite...)
+	catalogRates := withCatalogWritePolicy(customers, rt)
+	catalogRates.Handle(http.MethodPut, "/rate-overrides/:meter_key", h(httphandlers.PutAdminRateOverride), grantWrite...)
+	catalogRates.Handle(http.MethodDelete, "/rate-overrides/:meter_key", h(httphandlers.DeleteAdminRateOverride), revokeWrite...)
 
 	payments := rr.Group("/payments")
 	payments.Handle(http.MethodGet, "", h(httphandlers.GetAdminPayments), payRead...)

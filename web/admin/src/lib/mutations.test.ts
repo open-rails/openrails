@@ -36,7 +36,7 @@ const meter = { event_type: "token.used", value_property: "tokens", aggregation:
 const refund = { amount: MAX_INT64, reason: "requested", revokeAccess: true }
 const offChannel = { price_id: "price_1", transaction_id: "external-1" }
 const creditLimit = { customerId: "cus_1", currency: "USD", amount: MAX_INT64 }
-const manifest = { manifest: { products: [] }, planOnly: false }
+const application = { schema_version: 1, application_id: "catalog-test", expected_revision: 0, products: [] }
 const effectiveAt = "2026-09-05T00:00:00.000Z"
 
 const cases: Case[] = [
@@ -71,10 +71,8 @@ const cases: Case[] = [
     "POST /merchant/catalog/ask", []],
   ["loads the live price and product behind a copilot draft", (_c, g) => g(M.loadCatalogPriceDraft(), "pro-monthly"),
     ["GET /merchant/catalog/prices/by-key/pro-monthly", "GET /merchant/catalog/products/prod_1"], []],
-  ["publishes an applied manifest", (c, g) => g(M.publishCatalog(c), manifest),
-    "POST /merchant/catalog/publish", catalogTree, { catalog: { products: [] }, insert: true, overwrite: true }],
-  ["previews a manifest without invalidating the catalog", (c, g) => g(M.publishCatalog(c), { ...manifest, planOnly: true }),
-    "POST /merchant/catalog/publish", [], { catalog: { products: [] } }],
+  ["applies a catalog application", (c, g) => g(M.applyCatalog(c), JSON.stringify(application)),
+    "POST /merchant/catalog/applications", catalogTree, application],
   ["refreshes drift alone", (c, g) => g(M.refreshCatalogDrift(c), undefined),
     "POST /merchant/catalog/drift/refresh", ["drift"]],
   ["creates a product", (c, g) => g(M.createProduct(c), { key: "pro", display_name: "Pro", description: "" }),

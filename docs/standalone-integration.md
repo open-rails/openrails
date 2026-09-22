@@ -100,12 +100,12 @@ openrails run-server --config /etc/openrails/config.yaml \
 | Provider configuration mutation APIs | routes omitted (reads and dry runs work) | credential writes require a writable secret backend; metadata archives remain available |
 | Pick when | one/few merchants you operate yourself; secrets rendered by Vault Agent/k8s | merchants managed at runtime, SaaS-style |
 
-`catalog_source` independently selects `manifest` or `api`; empty follows
-`merchant_config_source`. Thus host-owned credentials can accompany an API-owned
-catalog, and managed credentials can accompany a manifest-owned catalog.
-Catalog manifest mode rejects API writes with 405 `manifest_driven`; API mode
-rejects mutating catalog pushes but allows plan-only comparisons. This does not
-change provider permissions, sandbox/live posture, or `provider_write_mode`.
+Catalogs always use database state. `allow_catalog_updates` independently controls
+ordinary catalog Client/API mutations and defaults to false in both credential
+modes. Disabled mutations are absent from the route bundle; reads remain available.
+Trusted operator application is still permitted and uses durable application IDs
+so an unchanged artifact does not overwrite later edits. This does not change
+provider permissions, sandbox/live posture, or `provider_write_mode`.
 
 Full MODE 1 walkthrough (file layout, YAML secret overlays via
 `merchant_manifest_overlays`, rotation): [self-hosting-mode1.md](self-hosting-mode1.md).
@@ -134,7 +134,7 @@ openrails push-merchant-config --config /etc/openrails/config.yaml --file /etc/o
 
 # 3. Catalog: products, entitlements, prices, per-PSP links; pushes to
 #    providers where supported (Stripe auto-creates; NMI/CCBill are link-only).
-openrails push-merchant-catalog --config /etc/openrails/config.yaml --file /etc/openrails/catalog.yaml --insert --overwrite
+openrails apply-catalog --merchant your-merchant --config /etc/openrails/config.yaml --file /etc/openrails/catalog.yaml
 ```
 
 Mode notes: in MODE 1 the server itself loads `/etc/openrails/merchants.yaml`

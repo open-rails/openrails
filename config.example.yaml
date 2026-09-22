@@ -1,6 +1,6 @@
 # OpenRails runtime infrastructure config.
 #
-# Merchant/provider and catalog authority are selected independently below.
+# Provider credential custody and catalog write policy are independent.
 # Keep config.yaml for process
 # infrastructure: listeners, databases, Vault, rate limits, captcha, and similar
 # deployment concerns.
@@ -10,8 +10,8 @@ provider_write_mode: full # full | limited | readonly; UNSET fail-closes to read
 test_mode: sandbox        # sandbox | live; allowed in every environment (#762) — rail-credential validation, not env, keeps it honest. REQUIRED outside development (or#915): the credential posture is never inherited by omission
 
 merchant_config_source: manifest # host-declared merchant/provider config; credentials stay in memory
-catalog_source: ""        # manifest | api; empty follows merchant_config_source
-# Set catalog_source: api for dynamic products/prices with host-owned credentials.
+allow_catalog_updates: false # enable ordinary catalog Client/API writes; independent of credential custody
+# Trusted local operator catalog application remains available when false.
 # merchant_config_source: api instead uses managed provider credentials and requires
 # secret_backend: db | vault; DB credentials need an encryption key outside dev.
 
