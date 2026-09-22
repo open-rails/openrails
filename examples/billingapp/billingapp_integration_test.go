@@ -62,7 +62,7 @@ func TestBillingApplicationRunsUnchangedAcrossDeployments(t *testing.T) {
 	integrationharness.SeedPSPs(ctx, t, standalone.App().Runtime, embeddedMerchant, ccbill("999981-0002"))
 	embeddedClient, err := bound.Client(openrails.WithCurrency("USD"))
 	require.NoError(t, err)
-	unbound := newRuntime(&embed.MerchantDeclaration{Slug: "billingapp-embedded"})
+	unbound := newRuntime(nil)
 	sharedEngineClient, err := unbound.Client(openrails.WithMerchantID(dbtest.TestMerchantID), openrails.WithCurrency("USD"))
 	require.NoError(t, err)
 	// SaaS: two merchants provisioned by registered owners on one shared
