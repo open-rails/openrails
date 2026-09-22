@@ -31,7 +31,7 @@ func engineFixture() (*StripeService, StripeEnginePaymentParams) {
 	return NewAccountStripeService(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox}, p.MerchantID, p.PSPID, "acct_fixture", "sk_test_fixture"), p
 }
 func enginePI(p StripeEnginePaymentParams) map[string]any {
-	return map[string]any{"id": "pi_fixture", "status": "succeeded", "customer": p.Instrument.RailCustomerRef, "payment_method": p.Instrument.RailMethodRef, "amount": 1299, "amount_received": 1299, "currency": "usd", "setup_future_usage": "off_session", "capture_method": "automatic", "confirmation_method": "automatic", "latest_charge": "ch_fixture", "metadata": p.metadata(), "livemode": false}
+	return map[string]any{"object": "payment_intent", "id": "pi_fixture", "status": "succeeded", "customer": p.Instrument.RailCustomerRef, "payment_method": p.Instrument.RailMethodRef, "amount": 1299, "amount_received": 1299, "currency": "usd", "setup_future_usage": "off_session", "capture_method": "automatic", "confirmation_method": "automatic", "latest_charge": "ch_fixture", "metadata": p.metadata(), "livemode": false}
 }
 func engineCharge(p StripeEnginePaymentParams) map[string]any {
 	return map[string]any{"id": "ch_fixture", "amount": 1299, "amount_captured": 1299, "currency": "usd", "customer": p.Instrument.RailCustomerRef, "payment_method": p.Instrument.RailMethodRef, "payment_intent": "pi_fixture", "status": "succeeded", "paid": true, "captured": true}
@@ -380,6 +380,8 @@ func TestStripeEngineNotificationQualifiesAcceptedTermsWithoutPaymentAuthority(t
 		name   string
 		change func(map[string]any)
 	}{
+		{"object", func(p map[string]any) { p["object"] = "charge" }},
+		{"missing object", func(p map[string]any) { delete(p, "object") }},
 		{"customer", func(p map[string]any) { p["customer"] = "cus_other" }},
 		{"method", func(p map[string]any) { p["payment_method"] = "pm_other" }},
 		{"amount", func(p map[string]any) { p["amount"] = 999 }},

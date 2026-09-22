@@ -14,6 +14,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 )
 
+// stripeAPIBase is the ONE host thin-event hydration may reach. Not derived
+// from the payload, not configurable per request.
+const stripeAPIBase = "https://api.stripe.com"
+
 // Only v2 event retrieval uses the preview that exposes snapshot_event. Resource
 // reads retain our stable parser version. This does not register a destination
 // or enable the account's API-v1 thin private preview.
@@ -48,7 +52,9 @@ func hydrateThinStripeEvent(ctx context.Context, secretKey, accountID string, bo
 	}
 	thin := notice.Object == "v2.core.event" || strings.HasPrefix(notice.Type, "v1.") || strings.HasPrefix(notice.Type, "v2.") || notice.RelatedObject != nil
 	if !thin {
-		return nil, nil
+		// A signed snapshot can still name a foreign Connect account/context.
+		// The routed credential scope applies before either delivery format.
+		return nil, validateStripeEventScope(notice, accountID)
 	}
 	eventType := strings.TrimPrefix(notice.Type, "v1.")
 	if !strings.HasPrefix(notice.Type, "v1.") || !slices.Contains(webhooks.HandledStripeEventTypes, eventType) {
@@ -57,7 +63,7 @@ func hydrateThinStripeEvent(ctx context.Context, secretKey, accountID string, bo
 	if !stripeIdentifier(notice.ID, "evt_") || !stripeIdentifier(accountID, "acct_") || strings.TrimSpace(secretKey) == "" {
 		return nil, fmt.Errorf("thin stripe event requires event id and exact account credentials")
 	}
-	if err := validateThinStripeScope(notice, accountID); err != nil {
+	if err := validateStripeEventScope(notice, accountID); err != nil {
 		return nil, err
 	}
 	if _, _, err := thinStripeResource(notice, eventType); err != nil {
@@ -90,7 +96,7 @@ func hydrateThinStripeEvent(ctx context.Context, secretKey, accountID string, bo
 	if event.ID != notice.ID || event.Type != notice.Type || event.Context != notice.Context || event.Account != notice.Account {
 		return nil, fmt.Errorf("fetched stripe event does not match signed notification")
 	}
-	if err := validateThinStripeScope(event, accountID); err != nil {
+	if err := validateStripeEventScope(event, accountID); err != nil {
 		return nil, err
 	}
 	resourcePath, resourceType, err := thinStripeResource(event, eventType)
@@ -120,7 +126,7 @@ func hydrateThinStripeEvent(ctx context.Context, secretKey, accountID string, bo
 		if snapshot.ID != event.SnapshotEvent || snapshot.Type != eventType {
 			return nil, fmt.Errorf("stripe snapshot correlation identity mismatch")
 		}
-		if err := validateThinStripeScope(snapshot, accountID); err != nil {
+		if err := validateStripeEventScope(snapshot, accountID); err != nil {
 			return nil, err
 		}
 		if err := validateThinStripeResource(snapshot.Data.Object, event.RelatedObject.ID, resourceType); err != nil {
@@ -156,7 +162,7 @@ func hydrateThinStripeEvent(ctx context.Context, secretKey, accountID string, bo
 	return json.Marshal(result)
 }
 
-func validateThinStripeScope(event stripeThinEnvelope, accountID string) error {
+func validateStripeEventScope(event stripeThinEnvelope, accountID string) error {
 	if (event.Account != "" && event.Account != accountID) || (event.Context != "" && event.Context != accountID) {
 		return fmt.Errorf("stripe event account/context does not match routed account")
 	}

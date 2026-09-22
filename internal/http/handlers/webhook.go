@@ -715,10 +715,6 @@ func prepareStripeMultiSecret(body []byte, secrets []string, header string, tole
 	return webhookutil.Prepared{}, lastErr
 }
 
-// stripeAPIBase is the ONE host thin-event hydration may reach. Not derived
-// from the payload, not configurable per request.
-const stripeAPIBase = "https://api.stripe.com"
-
 func nmiWebhookAccountID(body []byte) string {
 	var envelope struct {
 		EventBody json.RawMessage `json:"event_body"`
