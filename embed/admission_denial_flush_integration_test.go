@@ -35,8 +35,21 @@ func TestAdmissionDenialFlush_HostRiverOptionalRedis(t *testing.T) {
 			dbtest.EnsureTestMerchant(ctx, t, pool)
 			var rdb *redis.Client
 			if mode != "absent" {
-				rdb = redis.NewClient(&redis.Options{Addr: dbtest.SharedRedisAddr(t)})
+				// Keep SCAN away from the default database used by other fixtures.
+				// The configured case reserves this otherwise-empty test database;
+				// cleanup deletes only this test's lock and counter key.
+				rdb = redis.NewClient(&redis.Options{Addr: dbtest.SharedRedisAddr(t), DB: 15})
 				t.Cleanup(func() { _ = rdb.Close() })
+			}
+			if mode == "configured" {
+				const lock = "openrails:test:admission-denial-flush"
+				owned, err := rdb.SetNX(ctx, lock, "reserved", 0).Result()
+				require.NoError(t, err)
+				require.True(t, owned, "another denial-flush test owns Redis DB 15")
+				t.Cleanup(func() { require.NoError(t, rdb.Del(context.Background(), lock).Err()) })
+				keys, err := rdb.Keys(ctx, admission.DenialKeyPrefix+"*").Result()
+				require.NoError(t, err)
+				require.Empty(t, keys, "refuse to flush another test's denial counters")
 			}
 			rt, err := embed.New(ctx, embed.Options{
 				Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox,

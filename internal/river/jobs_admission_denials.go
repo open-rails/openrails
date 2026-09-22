@@ -33,7 +33,7 @@ func (AdmissionDenialFlushArgs) Kind() string { return KindAdmissionDenialFlush 
 type AdmissionDenialFlushWorker struct {
 	river.WorkerDefaults[AdmissionDenialFlushArgs]
 	DB    *db.DB
-	Redis redis.UniversalClient
+	Redis *redis.Client
 	Clock clockwork.Clock
 }
 
