@@ -93,6 +93,38 @@ first tries to repair the local record (a `psps` row whose `environment` or
 `account_id` changed moves the derived secret name), and only if that fails does it
 roll over. It never deletes a remote endpoint because of a local miss.
 
+### Thin event destinations (account qualification required)
+
+Stripe API-v1 thin events are a **private preview**, separate from SDK or CLI
+support. OpenRails continues to register snapshot endpoints. It does not enable
+thin delivery or change an existing endpoint to a preview API version. Qualify a
+separate thin destination in a Stripe sandbox before activating one; configure its
+secret as `webhook_signing_secret_thin` on the same exact account.
+
+For supported `v1.*` equivalents of the snapshot events listed above, ingestion
+verifies the original signed bytes, verifies the API key's account, retrieves the
+full v2 event (using the documented `2025-11-17.preview` metadata version), and
+fetches the related resource with OpenRails' regular pinned resource API version.
+Only the canonical resource endpoint for that event type can be fetched. The
+original context and event metadata survive normalization; `snapshot_event`, when
+present, becomes the same deduplication key used by the snapshot destination.
+Processing remains inline before acknowledgement, except the existing subscription
+convergence work. This does not make all webhook effects atomically exactly-once.
+
+Unknown or malformed thin events, scope mismatches, and hydration failures return
+an error so that delivery is not silently acknowledged. In particular,
+`v1.payment_intent.succeeded`, `v1.payment_intent.payment_failed`, and
+`v1.payment_intent.requires_action` are **not yet supported** by the webhook
+consumer. Do not configure these destinations as the sole completion mechanism.
+The followup acceptance gate is to resolve the exact accepted operation from the
+account and immutable provider metadata, then enqueue that operation's existing
+receipt verification through River; the webhook must not invent a financial
+outcome from the notification alone. Real account preview access, provider event
+fixtures, and live destination overlap remain unqualified by local transport tests.
+
+References: [Stripe event destinations](https://docs.stripe.com/event-destinations)
+and [Stripe snapshot-to-thin migration](https://docs.stripe.com/webhooks/migrate-snapshot-to-thin-events).
+
 ### Catalog sync
 
 The Stripe catalog adapter pushes OpenRails catalog definitions into your Stripe
