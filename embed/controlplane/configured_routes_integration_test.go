@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
@@ -31,17 +33,24 @@ func TestConfiguredStandaloneRoutesReuseOwnedResources(t *testing.T) {
 	routes, err := rt.HTTPRoutes()
 	require.NoError(t, err)
 	require.True(t, rt.HTTPRequiresRoot())
+	bundle, err := openrailshttp.Routes(rt)
+	require.NoError(t, err)
 	mux := http.NewServeMux()
-	for _, route := range routes {
-		require.NotEqual(t, "/health/ready", route.Path)
-		mux.Handle(route.Method+" "+route.Path, route.Handler)
+	require.ErrorContains(t, bundle.Mount(mux, "/outer"), "root")
+	require.NoError(t, bundle.Mount(mux))
+	chiRoot := chi.NewRouter()
+	require.NoError(t, bundle.MountRoot(chiRoot))
+	for _, target := range []http.Handler{mux, chiRoot} {
+		w := httptest.NewRecorder()
+		target.ServeHTTP(w, httptest.NewRequest("GET", "/auth/capabilities", nil))
+		require.Equal(t, 200, w.Code, w.Body.String())
+		w = httptest.NewRecorder()
+		target.ServeHTTP(w, httptest.NewRequest("GET", "/auth/me", nil))
+		require.Equal(t, 401, w.Code, w.Body.String())
+		w = httptest.NewRecorder()
+		target.ServeHTTP(w, httptest.NewRequest("GET", "/health/ready", nil))
+		require.Equal(t, 404, w.Code)
 	}
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, httptest.NewRequest("GET", "/auth/capabilities", nil))
-	require.Equal(t, 200, w.Code, w.Body.String())
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, httptest.NewRequest("GET", "/auth/me", nil))
-	require.Equal(t, 401, w.Code, w.Body.String())
 	require.Same(t, merchants, graph.Merchants)
 	require.Same(t, capabilities, graph.RouteCapabilities)
 	require.Same(t, solana, graph.SolanaRPCResolver)
