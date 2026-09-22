@@ -34,7 +34,7 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 		// Success, then the stored receipt.
 		fixture := h.SeedStripeTierSubscription(d.runtime(), d.merchant, gateway)
 		key := "tier-" + uuid.NewString()[:8]
-		request := openrails.ChangeTierRequest{PriceID: fixture.ProPrice}
+		request := openrails.ChangeTierRequest{PriceID: (fixture.ProPrice).String()}
 		first, err := client.ChangeTier(ctx, fixture.Subscription, key, request)
 		require.NoError(t, err)
 		require.Equal(t, "succeeded", first.Status)
@@ -55,7 +55,7 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 
 		// Lost response: accepted, owned, converged once after a restart.
 		lost := h.SeedStripeTierSubscription(d.runtime(), d.merchant, gateway)
-		lostRequest := openrails.ChangeTierRequest{PriceID: lost.ProPrice}
+		lostRequest := openrails.ChangeTierRequest{PriceID: (lost.ProPrice).String()}
 		lostKey := "lost-" + uuid.NewString()[:8]
 		// The live verifier must not receive the landed receipt until the
 		// pending/replay assertions finish and the deployment has restarted.
@@ -105,14 +105,14 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 
 		// A tier change without the client's key never mutates.
 		unkeyed := h.SeedStripeTierSubscription(d.runtime(), d.merchant, gateway)
-		_, err = client.ChangeTier(ctx, unkeyed.Subscription, "", openrails.ChangeTierRequest{PriceID: unkeyed.ProPrice})
+		_, err = client.ChangeTier(ctx, unkeyed.Subscription, "", openrails.ChangeTierRequest{PriceID: (unkeyed.ProPrice).String()})
 		requireRefusal(t, err, openrails.ErrInvalid, openrails.CodeTierChangeIdempotencyKeyRequired)
 		require.Empty(t, gateway.Posts("/v1/subscriptions/"+unkeyed.StripeSub))
 		require.Equal(t, unkeyed.BasicPrice, h.LocalSubscriptionPrice(unkeyed.SubscriptionID))
 
 		// A definitive decline is coded, replays as itself and is never resent.
 		declined := h.SeedStripeTierSubscription(d.runtime(), d.merchant, gateway)
-		declinedRequest := openrails.ChangeTierRequest{PriceID: declined.ProPrice}
+		declinedRequest := openrails.ChangeTierRequest{PriceID: (declined.ProPrice).String()}
 		declinedKey := "decl-" + uuid.NewString()[:8]
 		gateway.SetMode(StripeWriteDecline)
 		_, err = client.ChangeTier(ctx, declined.Subscription, declinedKey, declinedRequest)

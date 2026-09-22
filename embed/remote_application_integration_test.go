@@ -54,7 +54,7 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 		pid := openrails.CustomerID(payer)
 		src := uuid.NewString()
 		dep, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
-			CustomerID:  &pid,
+			CustomerID:  new(pid.String()),
 			Invoker:     "or484-test",
 			Currency:    "USD",
 			Amount:      500_000,
@@ -78,7 +78,7 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 		pid := openrails.CustomerID(payer)
 		src := uuid.NewString()
 		_, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
-			CustomerID:  &pid,
+			CustomerID:  new(pid.String()),
 			Invoker:     "or484-test",
 			Currency:    "USD",
 			Amount:      500_000,
@@ -100,7 +100,7 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 		pid := openrails.CustomerID(payer)
 		src := uuid.NewString()
 		_, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
-			CustomerID:  &pid,
+			CustomerID:  new(pid.String()),
 			Invoker:     "or484-test",
 			Currency:    "USD",
 			Amount:      1_000,

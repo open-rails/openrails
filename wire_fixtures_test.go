@@ -82,8 +82,8 @@ func canonicalWireFixtures() map[string]any {
 			Entitlements: []EntitlementRecord{{ID: "66666666-6666-4666-8666-666666666666", CustomerID: customerFixture.String(), Entitlement: "premium", StartAt: when, EndAt: &when, SourceID: &subscriptionSource, SourceType: "subscription", CreatedAt: when, UpdatedAt: when}},
 		},
 		"notification.json": Notification{
-			ID: uuid.MustParse("77777777-7777-4777-8777-777777777777"), CustomerID: customerFixture, EventType: "subscription_reprice_scheduled", CreatedAt: when,
-			Data: NotificationData{SubscriptionID: subscriptionFixture, FromPriceID: priceFixture, ToPriceID: scheduledPriceFixture, OldAmount: &maxMoney, NewAmount: &minMoney, Currency: "USD", EffectiveAt: &when},
+			ID: uuid.MustParse("77777777-7777-4777-8777-777777777777"), CustomerID: (customerFixture).String(), EventType: "subscription_reprice_scheduled", CreatedAt: when,
+			Data: NotificationData{SubscriptionID: subscriptionFixture, FromPriceID: (priceFixture).String(), ToPriceID: (scheduledPriceFixture).String(), OldAmount: &maxMoney, NewAmount: &minMoney, Currency: "USD", EffectiveAt: &when},
 		},
 		"catalog_price.json": CatalogPrice{ID: priceFixture, Key: "pro-monthly", ProductID: productFixture, UnitAmount: maxMoney, Currency: "USD", AutoRenew: true, CreatedAt: when, UpdatedAt: when},
 		"checkout_session.json": CheckoutSession{
@@ -91,9 +91,9 @@ func canonicalWireFixtures() map[string]any {
 			SubscriptionID: new(subscriptionFixture.String()), PaymentID: new(paymentFixture.String()), ExpiresAt: &when, CreatedAt: when, Metadata: map[string]string{"plan": "pro"}, RailData: map[string]any{"rail": "nmi"},
 		},
 		"payment.json": Payment{
-			ID: paymentFixture, Object: "charge", Status: "succeeded", Amount: maxMoney, AmountRefunded: zero, Currency: "USD", CustomerID: customerFixture,
+			ID: paymentFixture, Object: "charge", Status: "succeeded", Amount: maxMoney, AmountRefunded: zero, Currency: "USD", CustomerID: (customerFixture).String(),
 			SubscriptionID: &subscriptionFixture, Rail: "nmi", TransactionID: "txn-1", Captured: true, CreatedAt: when,
-			Price: &PublicPrice{ID: priceFixture, Key: "pro-monthly", Object: "price", UnitAmount: maxMoney, Currency: "USD", Type: "recurring", Product: productFixture, Active: true, CreatedAt: when},
+			Price: &PublicPrice{ID: (priceFixture).String(), Key: "pro-monthly", Object: "price", UnitAmount: maxMoney, Currency: "USD", Type: "recurring", Product: (productFixture).String(), Active: true, CreatedAt: when},
 		},
 	}
 }
@@ -115,7 +115,7 @@ func subscriptionFixtureValue(when time.Time, maxMoney int64, expMonth, expYear 
 		ScheduledProduct: &SubscriptionProduct{ID: (productFixture).String(), Key: "pro", DisplayName: "Pro"},
 		Card:             &SubscriptionCard{Brand: "visa", Last4: "4242", ExpMonth: &expMonth, ExpYear: &expYear},
 		Access:           &SubscriptionAccess{Kind: "subscription", Entitlement: "premium", SubscriptionID: subscriptionFixture, Rail: "nmi", StartAt: when, EndAt: &when},
-		Payments:         []Payment{{ID: paymentFixture, Object: "charge", Status: "succeeded", Amount: maxMoney, Currency: "USD", CustomerID: customerFixture, SubscriptionID: &subscriptionFixture, Rail: "nmi", TransactionID: "txn-1", Captured: true, CreatedAt: when}},
+		Payments:         []Payment{{ID: paymentFixture, Object: "charge", Status: "succeeded", Amount: maxMoney, Currency: "USD", CustomerID: (customerFixture).String(), SubscriptionID: &subscriptionFixture, Rail: "nmi", TransactionID: "txn-1", Captured: true, CreatedAt: when}},
 	}
 }
 

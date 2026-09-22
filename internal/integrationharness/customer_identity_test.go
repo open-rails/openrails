@@ -58,7 +58,7 @@ func TestOneSubjectHasIndependentMerchantBillingThroughBothClients(t *testing.T)
 			local, err := host.Runtime().Client(openrails.WithCurrency("USD"))
 			require.NoError(t, err)
 			request := openrails.DepositCreditsRequest{
-				CustomerID: &payer, Invoker: subject.String(), Currency: "USD", Amount: side.amount,
+				CustomerID: new(payer.String()), Invoker: subject.String(), Currency: "USD", Amount: side.amount,
 				Source: "shared-subject", SourceID: sourceID,
 			}
 			// The exact external subject and caller key can independently fund

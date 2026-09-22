@@ -61,7 +61,7 @@ func newProviderFixture(t *testing.T, ctx context.Context, h *integrationharness
 	require.NoError(t, err)
 	id := openrails.CustomerID(payer)
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
-		CustomerID: &id, Invoker: "provider-obligations", Currency: "USD", Amount: funded,
+		CustomerID: new(id.String()), Invoker: "provider-obligations", Currency: "USD", Amount: funded,
 		Source: "provider-obligations", SourceID: uuid.NewString(),
 	})
 	require.NoError(t, err)

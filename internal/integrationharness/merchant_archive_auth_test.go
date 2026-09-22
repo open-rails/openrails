@@ -45,7 +45,7 @@ func TestMerchantArchiveRealAuthKitHTTPAndEmbeddedParity(t *testing.T) {
 	// created by the ordinary owner Client, rather than inserted as fixture rows.
 	payer := openrails.CustomerID(uuid.New())
 	const amount int64 = 9_007_199_254_740_993
-	depositRequest := openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "archive-qualification", Currency: "USD", Amount: amount, Source: "archive-qualification", SourceID: uuid.NewString()}
+	depositRequest := openrails.DepositCreditsRequest{CustomerID: new(payer.String()), Invoker: "archive-qualification", Currency: "USD", Amount: amount, Source: "archive-qualification", SourceID: uuid.NewString()}
 	deposit, err := sourceOwner.DepositCredits(ctx, depositRequest)
 	require.NoError(t, err)
 	require.False(t, deposit.Replayed)

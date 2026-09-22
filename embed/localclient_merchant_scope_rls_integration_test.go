@@ -63,7 +63,7 @@ func TestEmbeddedTranscribedPathPinsTheMerchantConnection(t *testing.T) {
 		admitter := client
 
 		resp, err := admitter.Admit(ctx, openrails.AdmitRequest{
-			CustomerID:      openrails.CustomerID(customerID),
+			CustomerID:      (openrails.CustomerID(customerID)).String(),
 			Invoker:         "or868-b3-invoker",
 			InvokerType:     openrails.InvokerTypePayer,
 			Currency:        "USD",

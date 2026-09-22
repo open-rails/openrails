@@ -40,7 +40,7 @@ func TestNMITierChangeReplayAcrossDeployments(t *testing.T) {
 		var recurringBefore string
 		require.NoError(t, h.Pool().QueryRow(ctx, `SELECT pm.stored_credential_recurring_ref FROM billing.payment_methods pm JOIN billing.subscriptions s ON s.payment_method_id=pm.id WHERE s.id=$1`, fixture.SubscriptionID).Scan(&recurringBefore))
 		require.NotEmpty(t, recurringBefore)
-		request := openrails.ChangeTierRequest{PriceID: fixture.ProPrice}
+		request := openrails.ChangeTierRequest{PriceID: (fixture.ProPrice).String()}
 		key := "tier-" + uuid.NewString()[:8]
 		sales, enrollments := gateway.SaleCount(), len(gateway.Enrollments())
 		first, err := client.ChangeTier(ctx, fixture.Subscription, key, request)
@@ -77,7 +77,7 @@ func TestNMITierChangeReplayAcrossDeployments(t *testing.T) {
 		// A tier change without the client's key never mutates.
 		unkeyed := h.SeedNMITierSubscription(d.runtime(), d.merchant)
 		gateway.DeclarePlan(nmi.V5Plan{ID: unkeyed.ProPlan, PlanAmount: dollars(unkeyed.ProAmount), DayFrequency: "30", PlanPayments: "0"})
-		_, err = client.ChangeTier(ctx, unkeyed.Subscription, "", openrails.ChangeTierRequest{PriceID: unkeyed.ProPrice})
+		_, err = client.ChangeTier(ctx, unkeyed.Subscription, "", openrails.ChangeTierRequest{PriceID: (unkeyed.ProPrice).String()})
 		requireRefusal(t, err, openrails.ErrInvalid, openrails.CodeTierChangeIdempotencyKeyRequired)
 		require.Equal(t, 0, h.TierChangeOperations(unkeyed.SubscriptionID))
 		require.Equal(t, unkeyed.BasicPrice, h.LocalSubscriptionPrice(unkeyed.SubscriptionID))
@@ -87,7 +87,7 @@ func TestNMITierChangeReplayAcrossDeployments(t *testing.T) {
 		gateway.DeclarePlan(nmi.V5Plan{ID: lost.ProPlan, PlanAmount: dollars(lost.ProAmount), DayFrequency: "30", PlanPayments: "0"})
 		_, err = h.Pool().Exec(ctx, `UPDATE billing.payment_methods SET stored_credential_recurring_ref='',stored_credential_unscheduled_ref='' WHERE id=(SELECT payment_method_id FROM billing.subscriptions WHERE id=$1)`, lost.SubscriptionID)
 		require.NoError(t, err)
-		lostRequest := openrails.ChangeTierRequest{PriceID: lost.ProPrice}
+		lostRequest := openrails.ChangeTierRequest{PriceID: (lost.ProPrice).String()}
 		lostKey := "lost-" + uuid.NewString()[:8]
 		sales, enrollments = gateway.SaleCount(), len(gateway.Enrollments())
 		gateway.SetMode(NMISaleUncertain)
@@ -140,7 +140,7 @@ func TestNMITierChangeReplayAcrossDeployments(t *testing.T) {
 		// A definitive decline is coded, replays as itself and is never resent.
 		declined := h.SeedNMITierSubscription(d.runtime(), d.merchant)
 		gateway.DeclarePlan(nmi.V5Plan{ID: declined.ProPlan, PlanAmount: dollars(declined.ProAmount), DayFrequency: "30", PlanPayments: "0"})
-		declinedRequest := openrails.ChangeTierRequest{PriceID: declined.ProPrice}
+		declinedRequest := openrails.ChangeTierRequest{PriceID: (declined.ProPrice).String()}
 		declinedKey := "decl-" + uuid.NewString()[:8]
 		sales, attempts := gateway.SaleCount(), gateway.SaleAttempts()
 		gateway.SetMode(NMISaleDecline)

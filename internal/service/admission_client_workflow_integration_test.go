@@ -32,10 +32,10 @@ func TestAdmissionClientRecoveryAndCaptureReceipt(t *testing.T) {
 	for name, client := range clients {
 		t.Run(name, func(t *testing.T) {
 			payer := openrails.CustomerID(uuid.New())
-			_, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "owner", Currency: "USD", Amount: 1000, Source: "fixture", SourceID: uuid.NewString()})
+			_, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(payer.String()), Invoker: "owner", Currency: "USD", Amount: 1000, Source: "fixture", SourceID: uuid.NewString()})
 			require.NoError(t, err)
 			deadline := time.Now().Add(time.Hour)
-			in := openrails.AdmitRequest{CustomerID: openrails.CustomerID(payer), Invoker: "original", InvokerType: openrails.InvokerTypePayer,
+			in := openrails.AdmitRequest{CustomerID: (openrails.CustomerID(payer)).String(), Invoker: "original", InvokerType: openrails.InvokerTypePayer,
 				Currency: "USD", EstimatedAmount: 200, RequestID: ".", ExpiresAt: &deadline}
 			admit := func(in openrails.AdmitRequest) openrails.AdmitBatchVerdict {
 				t.Helper()

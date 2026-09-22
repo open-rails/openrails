@@ -115,12 +115,12 @@ func TestClientRefusesEmptyIdentifiersBeforeIO(t *testing.T) {
 			return c.UpdateSubscriptionPaymentMethod(ctx, subscription, UpdateSubscriptionPaymentMethodRequest{})
 		},
 		"PreviewTierChange subscription": func() error {
-			_, err := c.PreviewTierChange(ctx, SubscriptionID{}, ChangeTierRequest{PriceID: price})
+			_, err := c.PreviewTierChange(ctx, SubscriptionID{}, ChangeTierRequest{PriceID: (price).String()})
 			return err
 		},
 		"PreviewTierChange price": func() error { _, err := c.PreviewTierChange(ctx, subscription, ChangeTierRequest{}); return err },
 		"ChangeTier subscription": func() error {
-			_, err := c.ChangeTier(ctx, SubscriptionID{}, "key", ChangeTierRequest{PriceID: price})
+			_, err := c.ChangeTier(ctx, SubscriptionID{}, "key", ChangeTierRequest{PriceID: (price).String()})
 			return err
 		},
 		"ChangeTier price":             func() error { _, err := c.ChangeTier(ctx, subscription, "key", ChangeTierRequest{}); return err },

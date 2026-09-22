@@ -478,7 +478,7 @@ func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, pro
 	client := surface.Client()
 	depositSourceID := uuid.NewString()
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
-		CustomerID: &payer,
+		CustomerID: new(payer.String()),
 		Invoker:    payerID.String(),
 		Currency:   "USD",
 		Amount:     10_000,
@@ -492,7 +492,7 @@ func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, pro
 
 	requestID := "native-lifecycle-" + surface.Name + "-" + uuid.NewString()
 	verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
-		CustomerID:      openrails.CustomerID(payerID),
+		CustomerID:      (openrails.CustomerID(payerID)).String(),
 		Invoker:         payerID.String(),
 		InvokerType:     string(identity.InvokerTypePayer),
 		Resource:        "vm-small",

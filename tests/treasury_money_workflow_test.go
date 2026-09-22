@@ -27,13 +27,13 @@ func checkTreasuryMoney(t *testing.T, f treasuryWorkflow) {
 		payer := openrails.CustomerID(uuid.New())
 		_, err := f.client.EnsureCustomer(ctx, (payer).String())
 		require.NoError(t, err)
-		_, err = f.client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: payer.String(), Currency: "USD", Amount: amount, Source: "treasury", SourceID: uuid.NewString()})
+		_, err = f.client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(payer.String()), Invoker: payer.String(), Currency: "USD", Amount: amount, Source: "treasury", SourceID: uuid.NewString()})
 		require.NoError(t, err)
 		return payer
 	}
 	admission := func(payer openrails.CustomerID, estimate int64) openrails.AdmitRequest {
 		deadline := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
-		return openrails.AdmitRequest{CustomerID: payer, Invoker: payer.String(), InvokerType: openrails.InvokerTypePayer,
+		return openrails.AdmitRequest{CustomerID: (payer).String(), Invoker: payer.String(), InvokerType: openrails.InvokerTypePayer,
 			Currency: "USD", Source: "workflow", RequestID: uuid.NewString(), EstimatedAmount: estimate, ExpiresAt: &deadline}
 	}
 	admit := func(t *testing.T, req openrails.AdmitRequest) *openrails.AdmitResponse {
@@ -187,7 +187,7 @@ func checkTreasuryDepositTerms(t *testing.T, f treasuryWorkflow) {
 			ctx := t.Context()
 			payer := openrails.CustomerID(uuid.New())
 			expires := time.Now().UTC().Truncate(time.Microsecond).Add(24 * time.Hour)
-			request := openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "original", Currency: "USD", Amount: 1_000_000,
+			request := openrails.DepositCreditsRequest{CustomerID: new(payer.String()), Invoker: "original", Currency: "USD", Amount: 1_000_000,
 				Source: "original", SourceID: uuid.NewString(), ExpiresAt: &expires, Description: "Original grant"}
 			first, err := client.DepositCredits(ctx, request)
 			require.NoError(t, err)

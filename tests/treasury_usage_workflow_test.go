@@ -24,7 +24,7 @@ func checkTreasuryUsageInvoice(t *testing.T, f treasuryWorkflow) {
 	captured, _ := f.actor(t, nil)
 	payer, token := f.actor(t, []string{permissions.CustomerAll})
 	for _, who := range []openrails.CustomerID{captured, payer} {
-		_, err := f.client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &who, Invoker: who.String(), Currency: "USD", Amount: 100_000, Source: "usage-workflow", SourceID: uuid.NewString()})
+		_, err := f.client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(who.String()), Invoker: who.String(), Currency: "USD", Amount: 100_000, Source: "usage-workflow", SourceID: uuid.NewString()})
 		require.NoError(t, err)
 	}
 	for _, row := range []struct {
@@ -33,7 +33,7 @@ func checkTreasuryUsageInvoice(t *testing.T, f treasuryWorkflow) {
 	}{{"alpha", "standard", 5}, {"alpha", "standard", 3}, {"beta", "fast", 4}} {
 		deadline := time.Now().Add(time.Hour)
 		key := uuid.NewString()
-		decision, err := f.client.Admit(ctx, openrails.AdmitRequest{CustomerID: captured, Invoker: captured.String(), InvokerType: openrails.InvokerTypePayer, Currency: "USD", RequestID: key, EstimatedAmount: row.amount, ExpiresAt: &deadline})
+		decision, err := f.client.Admit(ctx, openrails.AdmitRequest{CustomerID: (captured).String(), Invoker: captured.String(), InvokerType: openrails.InvokerTypePayer, Currency: "USD", RequestID: key, EstimatedAmount: row.amount, ExpiresAt: &deadline})
 		require.NoError(t, err)
 		require.True(t, decision.Allowed)
 		usage := &openrails.CaptureUsage{EventType: "owner/" + row.resource, Resource: row.resource,
@@ -70,7 +70,7 @@ func checkTreasuryUsageInvoice(t *testing.T, f treasuryWorkflow) {
 		if row.output != 0 {
 			dimensions["output_tokens"] = row.output
 		}
-		report := openrails.UsageReport{CustomerID: payer, Invoker: "user:a", Currency: "USD", EventType: row.event, Dimensions: dimensions, Amount: row.amount, Source: "req", SourceID: uuid.NewString()}
+		report := openrails.UsageReport{CustomerID: (payer).String(), Invoker: "user:a", Currency: "USD", EventType: row.event, Dimensions: dimensions, Amount: row.amount, Source: "req", SourceID: uuid.NewString()}
 		require.NoError(t, f.client.RecordUsage(ctx, report))
 		require.NoError(t, f.client.RecordUsage(ctx, report))
 	}
