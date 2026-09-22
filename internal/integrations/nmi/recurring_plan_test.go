@@ -102,7 +102,8 @@ func TestAddRecurringPlan_SurfacesDeclineError(t *testing.T) {
 	client := newTestClient(t, server.URL)
 	err := client.AddRecurringPlan(context.Background(), "dup", "Dup", 500, "USD", 30, 0)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Plan already exists")
+	assert.Contains(t, err.Error(), "status 400")
+	assert.NotContains(t, err.Error(), "Plan already exists")
 }
 
 func TestEditRecurringPlan_OnlyMutableFields(t *testing.T) {

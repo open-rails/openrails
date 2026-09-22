@@ -347,7 +347,8 @@ func TestDeleteCustomerBillingEntry(t *testing.T) {
 	client2 := newTestClient(t, refusing.URL)
 	err := client2.DeleteCustomerBillingEntry(context.Background(), "vault-9", "bill-last")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "at least one billing")
+	require.Contains(t, err.Error(), "status 400")
+	require.NotContains(t, err.Error(), "at least one billing")
 }
 
 // TestAddRecurringSubscription_BillingTargeted: the classic enroll binds the

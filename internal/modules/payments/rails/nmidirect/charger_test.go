@@ -149,3 +149,22 @@ func TestCharger_TransientGatewayConditionIsError(t *testing.T) {
 	_, err := c.Charge(context.Background(), baseRequest(charge.UnscheduledMIT("anchor-1")))
 	require.Error(t, err)
 }
+
+func TestCharger_UnqualifiedResponseCannotBecomeDecline(t *testing.T) {
+	for _, body := range []string{
+		"response=3&response_code=400&responsetext=RAW_PROVIDER_SENTINEL",
+		"response=2&response=1&response_code=202&response_code=100",
+		"response=2&response_code=100", "response=2",
+	} {
+		t.Run(body, func(t *testing.T) {
+			posts := 0
+			c := newChargerAgainst(t, func(w http.ResponseWriter, r *http.Request) { posts++; fmt.Fprint(w, body) })
+			result, err := c.Charge(t.Context(), baseRequest(charge.UnscheduledMIT("anchor-1")))
+			require.Error(t, err)
+			require.True(t, nmi.RequiresVerification(err))
+			require.False(t, result.Declined)
+			require.NotContains(t, err.Error(), "RAW_PROVIDER_SENTINEL")
+			require.Equal(t, 1, posts)
+		})
+	}
+}
