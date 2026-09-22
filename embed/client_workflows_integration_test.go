@@ -94,73 +94,73 @@ func TestClientCatalogAndAccessWorkflow(t *testing.T) {
 				"ccbill": {AccountID: "999981-" + new(big.Int).SetBytes(merchantUUID[:]).String(), CCBill: &config.CCBillRailConfig{Salt: "client-workflow-local-signing"}},
 			})
 			group := "client-catalog-" + uuid.NewString()
-			product, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: group, DisplayName: "Initial", TierGroup: &group, EntitlementsSpec: map[string]*int{"access": nil}})
+			product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: group, DisplayName: "Initial", TierGroup: &group, EntitlementsSpec: map[string]*int{"access": nil}})
 			require.NoError(t, err)
-			id, err := client.EnsureUsageProduct(ctx, group, "Must not overwrite existing")
+			id, err := client.Products.Ensure(ctx, group, "Must not overwrite existing")
 			require.NoError(t, err)
-			require.Equal(t, product.ID, id)
-			read, err := client.GetProductByKey(ctx, group)
+			require.Equal(t, product.ID, id.ID)
+			read, err := client.Products.RetrieveByKey(ctx, group)
 			require.NoError(t, err)
 			require.Equal(t, "Initial", read.DisplayName)
 			title := "Renamed"
-			updated, err := client.UpdateProduct(ctx, product.ID, openrails.UpdateProductRequest{DisplayName: &title})
+			updated, err := client.Products.Update(ctx, product.ID, &openrails.ProductUpdateParams{DisplayName: &title})
 			require.NoError(t, err)
 			require.Equal(t, title, updated.DisplayName)
 			require.Contains(t, updated.EntitlementsSpec, "access")
-			_, err = client.GetProduct(ctx, openrails.ProductID(uuid.New()))
+			_, err = client.Products.Retrieve(ctx, (openrails.ProductID(uuid.New())).String())
 			require.ErrorIs(t, err, openrails.ErrNotFound)
 
 			live, archived := false, true
-			retired, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: group + "-retired", DisplayName: "Retired", TierGroup: &group})
+			retired, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: group + "-retired", DisplayName: "Retired", TierGroup: &group})
 			require.NoError(t, err)
-			_, err = client.UpdateProduct(ctx, retired.ID, openrails.UpdateProductRequest{Archived: &archived})
+			_, err = client.Products.Update(ctx, retired.ID, &openrails.ProductUpdateParams{Archived: &archived})
 			require.NoError(t, err)
 			duration := 720
-			price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: group + "-monthly", UnitAmount: 1234567, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
+			price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: group + "-monthly", UnitAmount: 1234567, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 			require.NoError(t, err)
 			require.EqualValues(t, 1234567, price.UnitAmount)
-			byKey, err := client.GetPriceByKey(ctx, price.Key)
+			byKey, err := client.Prices.RetrieveByKey(ctx, price.Key)
 			require.NoError(t, err)
 			require.Equal(t, price.ID, byKey.ID)
-			byID, err := client.GetPrice(ctx, price.ID)
+			byID, err := client.Prices.Retrieve(ctx, price.ID)
 			require.NoError(t, err)
 			require.Equal(t, product.ID, byID.ProductID)
-			oldPrice, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: group + "-old", UnitAmount: 1000000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
+			oldPrice, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: group + "-old", UnitAmount: 1000000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 			require.NoError(t, err)
-			_, err = client.UpdatePrice(ctx, oldPrice.ID, openrails.UpdatePriceRequest{Archived: &archived})
+			_, err = client.Prices.Update(ctx, oldPrice.ID, &openrails.PriceUpdateParams{Archived: &archived})
 			require.NoError(t, err)
 			for _, tc := range []struct {
 				archived *bool
-				products []openrails.ProductID
-				prices   []openrails.PriceID
+				products []string
+				prices   []string
 			}{
-				{nil, []openrails.ProductID{product.ID, retired.ID}, []openrails.PriceID{price.ID, oldPrice.ID}},
-				{&live, []openrails.ProductID{product.ID}, []openrails.PriceID{price.ID}},
-				{&archived, []openrails.ProductID{retired.ID}, []openrails.PriceID{oldPrice.ID}},
+				{nil, []string{product.ID, retired.ID}, []string{price.ID, oldPrice.ID}},
+				{&live, []string{product.ID}, []string{price.ID}},
+				{&archived, []string{retired.ID}, []string{oldPrice.ID}},
 			} {
-				products, err := client.ListProducts(ctx, openrails.ProductFilter{TierGroup: group, Archived: tc.archived})
+				products, err := client.Products.List(ctx, &openrails.ProductListParams{TierGroup: group, Archived: tc.archived})
 				require.NoError(t, err)
 				require.EqualValues(t, len(tc.products), products.Total)
-				var ids []openrails.ProductID
+				var ids []string
 				for _, p := range products.Items {
 					ids = append(ids, p.ID)
 				}
 				require.ElementsMatch(t, tc.products, ids)
-				prices, err := client.ListPrices(ctx, openrails.PriceFilter{ProductID: product.ID, Archived: tc.archived})
+				prices, err := client.Prices.List(ctx, &openrails.PriceListParams{ProductID: product.ID, Archived: tc.archived})
 				require.NoError(t, err)
 				require.EqualValues(t, len(tc.prices), prices.Total)
-				var priceIDs []openrails.PriceID
+				var priceIDs []string
 				for _, p := range prices.Items {
 					priceIDs = append(priceIDs, p.ID)
 				}
 				require.ElementsMatch(t, tc.prices, priceIDs)
 			}
-			_, err = client.UpdatePrice(ctx, price.ID, openrails.UpdatePriceRequest{Archived: &archived})
+			_, err = client.Prices.Update(ctx, price.ID, &openrails.PriceUpdateParams{Archived: &archived})
 			require.NoError(t, err)
-			prices, err := client.ListPrices(ctx, openrails.PriceFilter{ProductID: product.ID, Archived: &live})
+			prices, err := client.Prices.List(ctx, &openrails.PriceListParams{ProductID: product.ID, Archived: &live})
 			require.NoError(t, err)
 			require.Empty(t, prices.Items)
-			byID, err = client.GetPrice(ctx, price.ID)
+			byID, err = client.Prices.Retrieve(ctx, price.ID)
 			require.NoError(t, err)
 			require.True(t, byID.Archived, "archived obligations keep an addressable price identity")
 			checkClientDeclaredAccess(t, ctx, h, d)
@@ -185,12 +185,12 @@ func checkClientDeclaredAccess(t *testing.T, ctx context.Context, h *integration
 	require.False(t, again.LastSeenAt.Before(first.LastSeenAt))
 	_, err = client.EnsureCustomer(ctx, openrails.CustomerID{})
 	require.ErrorIs(t, err, openrails.ErrInvalid)
-	product, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: "access-" + uuid.NewString(), DisplayName: "Membership", EntitlementsSpec: map[string]*int{"premium": nil}})
+	product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: "access-" + uuid.NewString(), DisplayName: "Membership", EntitlementsSpec: map[string]*int{"premium": nil}})
 	require.NoError(t, err)
-	bare, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: "bare-" + uuid.NewString(), DisplayName: "No spec"})
+	bare, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: "bare-" + uuid.NewString(), DisplayName: "No spec"})
 	require.NoError(t, err)
 	duration := 720
-	price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: "access-" + uuid.NewString(), UnitAmount: 0, Currency: "USD", AccessDurationHours: &duration})
+	price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: "access-" + uuid.NewString(), UnitAmount: 0, Currency: "USD", AccessDurationHours: &duration})
 	require.NoError(t, err)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	end := now.Add(48 * time.Hour)
@@ -199,10 +199,10 @@ func checkClientDeclaredAccess(t *testing.T, ctx context.Context, h *integration
 	book := openrails.DeclaredBilling{
 		AsOf: now, DefaultPSP: openrails.PSPRef{Key: "ccbill"},
 		Customers:     []openrails.DeclaredCustomer{{Customer: subscriber}},
-		Subscriptions: []openrails.DeclaredSubscription{{SourceID: trial, Customer: subscriber, Price: price.ID, Rail: "ccbill", RailSubscriptionID: trial, StartedAt: now.Add(-time.Hour), PaidThrough: &end}},
+		Subscriptions: []openrails.DeclaredSubscription{{SourceID: trial, Customer: subscriber, Price: sdkPriceID(t, price.ID), Rail: "ccbill", RailSubscriptionID: trial, StartedAt: now.Add(-time.Hour), PaidThrough: &end}},
 		AdminGrants: []openrails.DeclaredAdminGrant{
-			{Customer: comped, Product: product.ID, SourceID: source, StartsAt: now.Add(-time.Hour), EndsAt: &end},
-			{Customer: comped, Product: bare.ID, SourceID: source + "-nospec", StartsAt: now},
+			{Customer: comped, Product: sdkProductID(t, product.ID), SourceID: source, StartsAt: now.Add(-time.Hour), EndsAt: &end},
+			{Customer: comped, Product: sdkProductID(t, bare.ID), SourceID: source + "-nospec", StartsAt: now},
 		},
 	}
 	result, err := client.ImportBilling(ctx, book)
@@ -216,7 +216,7 @@ func checkClientDeclaredAccess(t *testing.T, ctx context.Context, h *integration
 	subscriptions, err := client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: subscriber})
 	require.NoError(t, err)
 	require.Len(t, subscriptions.Data, 1)
-	require.Equal(t, price.ID, subscriptions.Data[0].Price.ID)
+	require.Equal(t, price.ID, subscriptions.Data[0].Price.ID.String())
 	replay, err := client.ImportBilling(ctx, book)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{source, trial}, replay.Skipped)
@@ -267,27 +267,27 @@ func checkClientDeclaredAccess(t *testing.T, ctx context.Context, h *integration
 	// Product ownership and named entitlements are separate facts. Seed the
 	// former through its real service, as the original conformance proof did.
 	_, _, err = productaccess.NewService(h.MerchantDB(d.mid.UUID())).GrantProductAccess(merchant.WithID(ctx, d.mid), productaccess.GrantParams{
-		UserID: comped.String(), ProductID: product.ID.UUID(), SourceType: models.ProductAccessSourceAdmin, SourceID: source,
+		UserID: comped.String(), ProductID: sdkProductID(t, product.ID).UUID(), SourceType: models.ProductAccessSourceAdmin, SourceID: source,
 	})
 	require.NoError(t, err)
 	page, err := client.ProductAccess.List(ctx, &openrails.ProductAccessListParams{CustomerID: comped.String()})
 	require.NoError(t, err)
 	grants := page.Data
 	require.Len(t, grants, 1)
-	require.Equal(t, product.ID.String(), grants[0].ProductID)
+	require.Equal(t, product.ID, grants[0].ProductID)
 	require.Equal(t, comped.String(), grants[0].CustomerID)
 	require.Equal(t, product.Key, grants[0].ProductKey)
 	require.Equal(t, "admin", grants[0].SourceType)
 	require.Equal(t, "active", grants[0].Status)
 	require.Nil(t, grants[0].PaymentID)
-	decisions, err := client.ProductAccess.CheckMany(ctx, &openrails.ProductAccessCheckManyParams{CustomerID: comped.String(), ProductIDs: []string{product.ID.String(), product.ID.String(), openrails.ProductID(uuid.New()).String()}})
+	decisions, err := client.ProductAccess.CheckMany(ctx, &openrails.ProductAccessCheckManyParams{CustomerID: comped.String(), ProductIDs: []string{product.ID, product.ID, openrails.ProductID(uuid.New()).String()}})
 	require.NoError(t, err)
 	require.Len(t, decisions, 2)
-	require.True(t, decisions[product.ID.String()])
+	require.True(t, decisions[product.ID])
 	require.False(t, page.HasMore)
 	require.Empty(t, page.NextCursor)
 
-	access, err := client.ProductAccess.Check(ctx, &openrails.ProductAccessCheckParams{CustomerID: comped.String(), ProductID: product.ID.String()})
+	access, err := client.ProductAccess.Check(ctx, &openrails.ProductAccessCheckParams{CustomerID: comped.String(), ProductID: product.ID})
 	require.NoError(t, err)
 	require.True(t, access.HasAccess)
 	access, err = client.ProductAccess.Check(ctx, &openrails.ProductAccessCheckParams{CustomerID: comped.String(), ProductID: openrails.ProductID(uuid.New()).String()})
@@ -299,19 +299,19 @@ func checkClientPlanMigration(t *testing.T, ctx context.Context, h *integrationh
 	t.Helper()
 	client, mid := d.client, d.mid
 	key := "operations-" + uuid.NewString()
-	source, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: key + "-a", DisplayName: "Plan A"})
+	source, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: key + "-a", DisplayName: "Plan A"})
 	require.NoError(t, err)
-	target, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: key + "-b", DisplayName: "Plan B"})
+	target, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: key + "-b", DisplayName: "Plan B"})
 	require.NoError(t, err)
 	duration := 720
-	sourcePrice, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: source.ID, Key: key + "-a-monthly", UnitAmount: 1_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
+	sourcePrice, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: source.ID, Key: key + "-a-monthly", UnitAmount: 1_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 	require.NoError(t, err)
-	targetPrice, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: target.ID, Key: key + "-b-monthly", UnitAmount: 1_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
+	targetPrice, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: target.ID, Key: key + "-b-monthly", UnitAmount: 1_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 	require.NoError(t, err)
-	renamed, err := client.SetPriceKey(ctx, sourcePrice.ID, key+"-legacy")
+	renamed, err := client.Prices.SetKey(ctx, sourcePrice.ID, key+"-legacy")
 	require.NoError(t, err)
 	require.Equal(t, sourcePrice.ID, renamed.ID)
-	byKey, err := client.GetPriceByKey(ctx, key+"-legacy")
+	byKey, err := client.Prices.RetrieveByKey(ctx, key+"-legacy")
 	require.NoError(t, err)
 	require.Equal(t, sourcePrice.ID, byKey.ID)
 
@@ -321,8 +321,8 @@ func checkClientPlanMigration(t *testing.T, ctx context.Context, h *integrationh
 	exec(`INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), subscriber)
 	now := time.Now().UTC()
 	exec(`INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,'ccbill','active',$7,$8,$9)`,
-		subscription, mid.UUID(), subscriber, source.ID, sourcePrice.ID, psp, subscription.String(), now, now.Add(720*time.Hour))
-	migration := openrails.PlanMigrationRequest{SourcePrice: key + "-legacy", TargetPrice: targetPrice.ID.String(), FallbackPolicy: "keep_grandfathered"}
+		subscription, mid.UUID(), subscriber, sdkProductID(t, source.ID).UUID(), sdkPriceID(t, sourcePrice.ID).UUID(), psp, subscription.String(), now, now.Add(720*time.Hour))
+	migration := openrails.PlanMigrationRequest{SourcePrice: key + "-legacy", TargetPrice: targetPrice.ID, FallbackPolicy: "keep_grandfathered"}
 	preview, err := client.PreviewPlanMigration(ctx, migration)
 	require.NoError(t, err)
 	require.Nil(t, preview.BatchID)
@@ -336,7 +336,7 @@ func checkClientPlanMigration(t *testing.T, ctx context.Context, h *integrationh
 	canceled, err := client.CancelPlanMigration(ctx, *created.BatchID)
 	require.NoError(t, err)
 	require.Empty(t, canceled.RailReleaseRequired)
-	_, err = client.PreviewPlanMigration(ctx, openrails.PlanMigrationRequest{SourcePrice: sourcePrice.ID.String(), TargetPrice: uuid.NewString()})
+	_, err = client.PreviewPlanMigration(ctx, openrails.PlanMigrationRequest{SourcePrice: sourcePrice.ID, TargetPrice: uuid.NewString()})
 	require.ErrorIs(t, err, openrails.ErrNotFound)
 }
 
@@ -350,20 +350,20 @@ func checkClientCheckout(t *testing.T, ctx context.Context, h *integrationharnes
 	require.Equal(t, "ccbill", checkout.PSPs[0].Key)
 	require.Equal(t, "redirect", checkout.PSPs[0].Flow)
 	require.Empty(t, checkout.PSPs[0].Config)
-	product, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: "checkout-" + uuid.NewString(), DisplayName: "Hosted fixture"})
+	product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: "checkout-" + uuid.NewString(), DisplayName: "Hosted fixture"})
 	require.NoError(t, err)
 	duration := 720
-	prices := make([]*openrails.CatalogPrice, 0, 2)
+	prices := make([]*openrails.Price, 0, 2)
 	for _, amount := range []int64{10_000_000, 9_007_199_254_740_993} {
-		price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: "checkout-" + uuid.NewString(), UnitAmount: amount, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
+		price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: "checkout-" + uuid.NewString(), UnitAmount: amount, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 		require.NoError(t, err)
 		psp := dbtest.EnsureTestPSP(ctx, t, h.MerchantPool(d.mid.UUID()), d.mid.UUID(), "ccbill")
-		_, err = h.MerchantPool(d.mid.UUID()).Exec(ctx, `INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,flex_id,configuration) VALUES($1,$2,$3,$4,'{"form_name":"test-form"}')`, d.mid.UUID(), price.ID.UUID(), psp, uuid.NewString())
+		_, err = h.MerchantPool(d.mid.UUID()).Exec(ctx, `INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,flex_id,configuration) VALUES($1,$2,$3,$4,'{"form_name":"test-form"}')`, d.mid.UUID(), sdkPriceID(t, price.ID).UUID(), psp, uuid.NewString())
 		require.NoError(t, err)
 		prices = append(prices, price)
 	}
 	user := openrails.CustomerID(uuid.New())
-	request := openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: user.String(), VerifiedEmail: "checkout@example.test", Username: "checkout-" + uuid.NewString()[:8]}, PriceID: prices[0].ID.String(), IdempotencyKey: uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "ccbill", NameOnCard: "Test Buyer", Zip: "90210", Country: "US"}}
+	request := openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: user.String(), VerifiedEmail: "checkout@example.test", Username: "checkout-" + uuid.NewString()[:8]}, PriceID: prices[0].ID, IdempotencyKey: uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "ccbill", NameOnCard: "Test Buyer", Zip: "90210", Country: "US"}}
 	options, err := client.ListCheckoutRailOptions(ctx, prices[0].ID)
 	require.NoError(t, err)
 	require.NotEmpty(t, options)
@@ -392,14 +392,14 @@ func checkClientCheckout(t *testing.T, ctx context.Context, h *integrationharnes
 	require.Nil(t, tier, "a redirect has not bought access")
 	var documentReference []byte
 	for _, reader := range []*openrails.Client{client, d.peer} {
-		price, err := reader.GetPriceByKey(ctx, prices[1].Key)
+		price, err := reader.Prices.RetrieveByKey(ctx, prices[1].Key)
 		require.NoError(t, err)
 		require.EqualValues(t, 9_007_199_254_740_993, price.UnitAmount)
-		product, err := reader.GetProduct(ctx, price.ProductID)
+		product, err := reader.Products.Retrieve(ctx, price.ProductID)
 		require.NoError(t, err)
 		plan, err := openrails.NewHostedCheckoutPlan(product, price)
 		require.NoError(t, err)
-		rails, err := reader.ListCheckoutRailOptions(ctx, price.ID)
+		rails, err := reader.ListCheckoutRailOptions(ctx, sdkPriceID(t, price.ID))
 		require.NoError(t, err)
 		require.NotEmpty(t, rails)
 		document := openrails.HostedCheckoutSession{ID: "ocs_parity", Status: "created", Merchant: openrails.HostedCheckoutMerchant{DisplayName: "Parity"}, Plan: plan, ExpiresAt: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)}

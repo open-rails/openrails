@@ -71,9 +71,9 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 	for _, recurring := range []bool{false, true} {
 		customer, token := f.actor(t, []string{permissions.CustomerAll})
 		amount := (100 + time.Now().UnixNano()%400) * 10_000
-		product, err := f.client.CreateProduct(t.Context(), openrails.CreateProductRequest{Key: "live-" + uuid.NewString(), DisplayName: "NMI sandbox qualification"})
+		product, err := f.client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "live-" + uuid.NewString(), DisplayName: "NMI sandbox qualification"})
 		require.NoError(t, err)
-		request := openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: amount, Currency: "USD", PSPLinks: map[string]map[string]string{"nmi": {"rail": "nmi"}}}
+		request := openrails.PriceCreateParams{ProductID: product.ID, UnitAmount: amount, Currency: "USD", PSPLinks: map[string]map[string]string{"nmi": {"rail": "nmi"}}}
 		mode := "one_off"
 		if recurring {
 			mode = "subscription"
@@ -84,7 +84,7 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 			ensureNMISandboxPlan(t, provider, key, plan, amount, 30)
 			request.PSPLinks["nmi"]["plan_id"] = plan
 		}
-		price, err := f.client.CreatePrice(t.Context(), request)
+		price, err := f.client.Prices.Create(t.Context(), &request)
 		require.NoError(t, err)
 		vault := createNMISandboxVault(t, provider, key)
 		method := uuid.New()
@@ -94,7 +94,7 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 			_, err := q.Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,rail_customer_ref,initial_transaction_id,last_four,card_type,expiry_date) VALUES($1,$2,$3,$4,'nmi','psp',$5,'','1111','Visa','12/28')`, method, f.merchant.MerchantID.UUID(), customer.UUID(), psp, vault)
 			return err
 		}))
-		status, raw := requestWorkflowJSON(t, http.MethodPost, f.hostURL+"/v1/me/checkout", token, map[string]any{"price_id": price.ID.String(), "mode": mode, "metadata": map[string]string{"e2e_run_id": run}, "payment": map[string]any{"rail": "nmi", "payment_method_id": openrails.PaymentMethodID(method).String()}})
+		status, raw := requestWorkflowJSON(t, http.MethodPost, f.hostURL+"/v1/me/checkout", token, map[string]any{"price_id": price.ID, "mode": mode, "metadata": map[string]string{"e2e_run_id": run}, "payment": map[string]any{"rail": "nmi", "payment_method_id": openrails.PaymentMethodID(method).String()}})
 		require.Equal(t, http.StatusOK, status, string(raw))
 		var response struct {
 			Status         string `json:"status"`

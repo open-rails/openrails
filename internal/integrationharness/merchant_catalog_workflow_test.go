@@ -62,7 +62,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.Nil(t, planned.Result)
 		require.Equal(t, 1, countProductActions(planned.Plan, openrails.CatalogProductCreate))
 		require.Equal(t, 1, countPriceActions(planned.Plan, openrails.CatalogPriceCreate))
-		page, err := f.client.ListProducts(ctx, openrails.ProductFilter{})
+		page, err := f.client.Products.List(ctx, &openrails.ProductListParams{})
 		require.NoError(t, err)
 		require.Empty(t, page.Items)
 		applied := f.publish(t, manifest(10_000_000), openrails.CatalogPublishRequest{Insert: true})
@@ -76,13 +76,13 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		changed.Products[0].Entitlements = []string{"premium", "feature"}
 		unchanged := f.publish(t, changed, openrails.CatalogPublishRequest{Insert: true})
 		require.Zero(t, unchanged.Result.ProductsUpdated)
-		product, err := f.client.GetProductByKey(ctx, "premium")
+		product, err := f.client.Products.RetrieveByKey(ctx, "premium")
 		require.NoError(t, err)
 		require.Equal(t, "Premium", product.DisplayName)
 		updated := f.publish(t, changed, openrails.CatalogPublishRequest{Overwrite: true})
 		require.Equal(t, 1, updated.Result.ProductsUpdated)
 		require.Zero(t, updated.Result.PricesCreated)
-		product, err = f.client.GetProductByKey(ctx, "premium")
+		product, err = f.client.Products.RetrieveByKey(ctx, "premium")
 		require.NoError(t, err)
 		require.Equal(t, "Premium updated", product.DisplayName)
 		require.Equal(t, 2, product.TierRank)
@@ -90,7 +90,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.Equal(t, map[string]*int{"premium": nil, "feature": nil}, product.EntitlementsSpec)
 	})
 	t.Run("price_versions", func(t *testing.T) {
-		original, err := f.client.GetPriceByKey(ctx, "premium-monthly")
+		original, err := f.client.Prices.RetrieveByKey(ctx, "premium-monthly")
 		require.NoError(t, err)
 		// Historical subscriber seed: publication must never repin its accepted price.
 		pool := h.MerchantPool(f.merchant.MerchantID.UUID())
@@ -121,16 +121,16 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		result := f.publish(t, manifest(12_000_000), all)
 		require.Equal(t, 1, result.Result.PricesCreated)
 		require.Equal(t, 1, result.Result.PricesArchived)
-		bumped, err := f.client.GetPriceByKey(ctx, "premium-monthly")
+		bumped, err := f.client.Prices.RetrieveByKey(ctx, "premium-monthly")
 		require.NoError(t, err)
 		require.NotEqual(t, original.ID, bumped.ID)
-		old, err := f.client.GetPrice(ctx, original.ID)
+		old, err := f.client.Prices.Retrieve(ctx, original.ID)
 		require.NoError(t, err)
 		require.True(t, old.Archived)
 		require.Equal(t, "premium-monthly", old.Key)
 		var pinned uuid.UUID
 		require.NoError(t, pool.QueryRow(ctx, `SELECT price_id FROM billing.subscriptions WHERE merchant_id=$1 AND id=$2`, f.merchant.MerchantID.UUID(), subscription).Scan(&pinned))
-		require.Equal(t, original.ID.UUID(), pinned)
+		require.Equal(t, sdkPriceID(t, original.ID).UUID(), pinned)
 		require.EqualValues(t, 10_000_000, old.UnitAmount)
 		require.Len(t, history(), 2, "initial binding and version bump are recorded")
 		for _, amount := range []int64{10_000_000, 12_000_000} {
@@ -138,7 +138,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 			require.Zero(t, replay.Result.PricesCreated)
 			require.Equal(t, 1, replay.Result.PricesActivated)
 			require.Equal(t, 1, replay.Result.PricesArchived)
-			price, err := f.client.GetPriceByKey(ctx, "premium-monthly")
+			price, err := f.client.Prices.RetrieveByKey(ctx, "premium-monthly")
 			require.NoError(t, err)
 			want := original.ID
 			if amount == 12_000_000 {
@@ -146,12 +146,12 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 			}
 			require.Equal(t, want, price.ID)
 		}
-		prices, err := f.client.ListPrices(ctx, openrails.PriceFilter{ProductID: original.ProductID})
+		prices, err := f.client.Prices.List(ctx, &openrails.PriceListParams{ProductID: original.ProductID})
 		require.NoError(t, err)
 		require.Len(t, prices.Items, 2)
 		require.Len(t, history(), 4, "each real flip records one pointer movement")
 		live := false
-		prices, err = f.client.ListPrices(ctx, openrails.PriceFilter{ProductID: original.ProductID, Archived: &live})
+		prices, err = f.client.Prices.List(ctx, &openrails.PriceListParams{ProductID: original.ProductID, Archived: &live})
 		require.NoError(t, err)
 		require.Len(t, prices.Items, 1)
 		require.Equal(t, bumped.ID, prices.Items[0].ID)
@@ -169,10 +169,10 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 			status, raw := requestJSON(t, row.method, path, row.token, map[string]any{"key": "denied", "display_name": "Denied"})
 			require.Equal(t, row.want, status, string(raw))
 		}
-		product, err := f.client.GetProductByKey(ctx, "premium")
+		product, err := f.client.Products.RetrieveByKey(ctx, "premium")
 		require.NoError(t, err)
 		for _, field := range []string{"credits_spec", "set_credits"} {
-			status, raw := requestJSON(t, http.MethodPatch, path+"/"+product.ID.String(), f.token, map[string]any{field: true})
+			status, raw := requestJSON(t, http.MethodPatch, path+"/"+product.ID, f.token, map[string]any{field: true})
 			assertCatalogUnknownField(t, status, raw, field)
 		}
 		for _, field := range []string{"credits", "includes", "usage_limits"} {
@@ -183,7 +183,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		}
 		status, raw := requestJSON(t, http.MethodPost, f.surface.BaseURL+"/v1/merchant/catalog/publish", f.token, map[string]any{"catalog": manifest(12_000_000), "plan_only": true})
 		assertCatalogUnknownField(t, status, raw, "plan_only")
-		status, raw = requestJSON(t, http.MethodPatch, path+"/"+product.ID.String(), f.token, map[string]any{"display_name": 7})
+		status, raw = requestJSON(t, http.MethodPatch, path+"/"+product.ID, f.token, map[string]any{"display_name": 7})
 		require.Equal(t, http.StatusBadRequest, status, string(raw))
 		require.Contains(t, string(raw), `"code":"invalid_param"`)
 		require.Contains(t, string(raw), `"param":"display_name"`)
@@ -192,14 +192,14 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.Equal(t, http.StatusForbidden, status, string(raw))
 	})
 	t.Run("mutation_classes", func(t *testing.T) {
-		premium, err := f.client.GetProductByKey(ctx, "premium")
+		premium, err := f.client.Products.RetrieveByKey(ctx, "premium")
 		require.NoError(t, err)
 		group := "memberships"
-		extra, err := f.client.CreateProduct(ctx, openrails.CreateProductRequest{Key: "omitted", DisplayName: "Omitted", TierGroup: &group})
+		extra, err := f.client.Products.Create(ctx, &openrails.ProductCreateParams{Key: "omitted", DisplayName: "Omitted", TierGroup: &group})
 		require.NoError(t, err)
-		extraPrice, err := f.client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: premium.ID, Key: "premium-oneoff", UnitAmount: 3_000_000, Currency: "USD"})
+		extraPrice, err := f.client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: premium.ID, Key: "premium-oneoff", UnitAmount: 3_000_000, Currency: "USD"})
 		require.NoError(t, err)
-		yearly, err := f.client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: premium.ID, Key: "premium-yearly", UnitAmount: 100_000_000, Currency: "USD", AccessDurationHours: intPtr(365 * 24), AutoRenew: true, Archived: true})
+		yearly, err := f.client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: premium.ID, Key: "premium-yearly", UnitAmount: 100_000_000, Currency: "USD", AccessDurationHours: intPtr(365 * 24), AutoRenew: true, Archived: true})
 		require.NoError(t, err)
 		desired := manifest(12_000_000)
 		desired.Products[0].DisplayName = "Overwrite applies"
@@ -216,12 +216,12 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.Zero(t, result.ProductsCreated)
 		require.Zero(t, result.PricesArchived)
 		require.Zero(t, result.ProductsArchived)
-		_, err = f.client.GetProductByKey(ctx, "new-plan")
+		_, err = f.client.Products.RetrieveByKey(ctx, "new-plan")
 		require.ErrorIs(t, err, openrails.ErrNotFound)
-		stillLive, err := f.client.GetPrice(ctx, extraPrice.ID)
+		stillLive, err := f.client.Prices.Retrieve(ctx, extraPrice.ID)
 		require.NoError(t, err)
 		require.False(t, stillLive.Archived)
-		activeYear, err := f.client.GetPrice(ctx, yearly.ID)
+		activeYear, err := f.client.Prices.Retrieve(ctx, yearly.ID)
 		require.NoError(t, err)
 		require.False(t, activeYear.Archived)
 		desired.Products[0].DisplayName = "Insert and prune cannot overwrite"
@@ -230,13 +230,13 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.Equal(t, 1, result.PricesArchived)
 		require.Zero(t, result.ProductsCreated)
 		require.Zero(t, result.ProductsUpdated)
-		retired, err := f.client.GetProduct(ctx, extra.ID)
+		retired, err := f.client.Products.Retrieve(ctx, extra.ID)
 		require.NoError(t, err)
 		require.True(t, retired.Archived)
-		retiredPrice, err := f.client.GetPrice(ctx, extraPrice.ID)
+		retiredPrice, err := f.client.Prices.Retrieve(ctx, extraPrice.ID)
 		require.NoError(t, err)
 		require.True(t, retiredPrice.Archived)
-		_, err = f.client.GetProductByKey(ctx, "new-plan")
+		_, err = f.client.Products.RetrieveByKey(ctx, "new-plan")
 		require.ErrorIs(t, err, openrails.ErrNotFound)
 		result = f.publish(t, desired, openrails.CatalogPublishRequest{Insert: true}).Result
 		require.Equal(t, 1, result.ProductsCreated)
@@ -244,7 +244,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.Zero(t, result.ProductsUpdated)
 		require.Zero(t, result.PricesActivated)
 		require.Zero(t, result.PricesArchived)
-		premium, err = f.client.GetProduct(ctx, premium.ID)
+		premium, err = f.client.Products.Retrieve(ctx, premium.ID)
 		require.NoError(t, err)
 		require.Equal(t, "Overwrite applies", premium.DisplayName)
 	})
@@ -270,7 +270,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.Len(t, product.Prices, 1)
 		require.Equal(t, openrails.CatalogPriceCreate, product.Prices[0].Action)
 		require.Equal(t, []string{"stripe", "ccbill"}, product.Prices[0].CreateReq.PSPs)
-		_, err := f.client.GetProductByKey(ctx, "provider-plan")
+		_, err := f.client.Products.RetrieveByKey(ctx, "provider-plan")
 		require.ErrorIs(t, err, openrails.ErrNotFound)
 	})
 
@@ -291,7 +291,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 			require.Equal(t, "invalid_param", response.Error.Code)
 			require.NotNil(t, response.Error.Param)
 			require.Equal(t, "key", *response.Error.Param)
-			_, err := f.client.GetProductByKey(ctx, "ambiguous")
+			_, err := f.client.Products.RetrieveByKey(ctx, "ambiguous")
 			require.ErrorIs(t, err, openrails.ErrNotFound, "colliding keys refuse before product creation")
 		})
 
@@ -309,9 +309,9 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		}{
 			{"intro-step", ptrI64(19_950_000), ptrI64(30 * 24)}, {"intro-free", ptrI64(0), ptrI64(7 * 24)}, {"intro-flat", nil, nil},
 		} {
-			price, err := f.client.GetPriceByKey(ctx, tc.key)
+			price, err := f.client.Prices.RetrieveByKey(ctx, tc.key)
 			require.NoError(t, err)
-			ids[tc.key] = price.ID
+			ids[tc.key] = sdkPriceID(t, price.ID)
 			require.Equal(t, tc.amount, price.TrialUnitAmount)
 			if tc.hours == nil {
 				require.Nil(t, price.TrialDurationHours)
@@ -326,20 +326,20 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.Equal(t, 3, countPriceActions(planned, openrails.CatalogPriceUnchanged))
 		require.True(t, planned.HasChanges(), "relabel is a change without new substance")
 		f.publish(t, m, openrails.CatalogPublishRequest{Overwrite: true})
-		renamed, err := f.client.GetPriceByKey(ctx, "intro-renamed")
+		renamed, err := f.client.Prices.RetrieveByKey(ctx, "intro-renamed")
 		require.NoError(t, err)
 		require.Equal(t, ids["intro-flat"], renamed.ID)
-		_, err = f.client.GetPriceByKey(ctx, "intro-flat")
+		_, err = f.client.Prices.RetrieveByKey(ctx, "intro-flat")
 		require.ErrorIs(t, err, openrails.ErrNotFound)
 		require.False(t, f.publish(t, m, openrails.CatalogPublishRequest{}).Plan.HasChanges())
 	})
 	t.Run("archived_declarations", func(t *testing.T) {
 		m := catalog.Manifest{Version: catalog.SupportedVersion, Products: []catalog.Product{{Key: "historical", DisplayName: "Historical", TierGroup: "history", Archived: true, Prices: []catalog.Price{{Currency: "USD", UnitAmount: 1_000_000, Duration: "30d", AutoRenew: true, Archived: true}}}}}
 		f.publish(t, m, openrails.CatalogPublishRequest{Insert: true})
-		product, err := f.client.GetProductByKey(ctx, "historical")
+		product, err := f.client.Products.RetrieveByKey(ctx, "historical")
 		require.NoError(t, err)
 		require.True(t, product.Archived)
-		prices, err := f.client.ListPrices(ctx, openrails.PriceFilter{ProductID: product.ID})
+		prices, err := f.client.Prices.List(ctx, &openrails.PriceListParams{ProductID: product.ID})
 		require.NoError(t, err)
 		require.Len(t, prices.Items, 1)
 		price := prices.Items[0]
@@ -351,7 +351,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.Equal(t, 1, result.ProductsUpdated)
 		require.Equal(t, 1, result.PricesActivated)
 		require.Zero(t, result.PricesCreated)
-		active, err := f.client.GetPriceByKey(ctx, "historical-monthly")
+		active, err := f.client.Prices.RetrieveByKey(ctx, "historical-monthly")
 		require.NoError(t, err)
 		require.Equal(t, price.ID, active.ID)
 		require.False(t, active.Archived)

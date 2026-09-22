@@ -47,10 +47,10 @@ func TestDeclineLifecyclePreservesCustomerInstruments(t *testing.T) {
 	}))
 	owned := surface.ProvisionOwnedMerchant("decline-" + uuid.NewString()[:8])
 	client := surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID))
-	product, err := client.CreateProduct(t.Context(), openrails.CreateProductRequest{Key: "decline", DisplayName: "Recurring access", EntitlementsSpec: map[string]*int{"decline_access": nil}})
+	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "decline", DisplayName: "Recurring access", EntitlementsSpec: map[string]*int{"decline_access": nil}})
 	require.NoError(t, err)
 	hours := 720
-	price, err := client.CreatePrice(t.Context(), openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 	require.NoError(t, err)
 	rt := surface.App().Runtime
 	SeedPSPs(t.Context(), t, rt, owned.MerchantID, config.PSPSet{"nmi": {Rail: "nmi", AccountID: "decline-" + uuid.NewString(), NMI: &config.NMIRailConfig{SecurityKey: "synthetic", WebhookSigningSecret: "synthetic"}}})
@@ -82,7 +82,7 @@ func TestDeclineLifecyclePreservesCustomerInstruments(t *testing.T) {
 		_, err = pool.Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,rail_customer_ref,initial_transaction_id) VALUES($1,$2,$3,$4,'nmi','psp',$5,'')`, s.method, owned.MerchantID.UUID(), s.customer, psp, "vault-"+s.method.String())
 		require.NoError(t, err)
 		end := now.Add(-48 * time.Hour)
-		_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,payment_method_id,rail,rail_subscription_id,status,current_period_starts_at,current_period_ends_at,next_retry_at,retry_attempts) VALUES($1,$2,$3,$4,$5,$6,$7,'nmi',$8,'past_due',$9,$10,$11,$12)`, s.subscription, owned.MerchantID.UUID(), s.customer, product.ID.UUID(), price.ID.UUID(), psp, s.method, "provider-"+s.subscription.String(), end.Add(-720*time.Hour), end, now.Add(-time.Hour), retries)
+		_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,payment_method_id,rail,rail_subscription_id,status,current_period_starts_at,current_period_ends_at,next_retry_at,retry_attempts) VALUES($1,$2,$3,$4,$5,$6,$7,'nmi',$8,'past_due',$9,$10,$11,$12)`, s.subscription, owned.MerchantID.UUID(), s.customer, sdkProductID(t, product.ID).UUID(), sdkPriceID(t, price.ID).UUID(), psp, s.method, "provider-"+s.subscription.String(), end.Add(-720*time.Hour), end, now.Add(-time.Hour), retries)
 		require.NoError(t, err)
 		_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: customer.String(), Entitlement: "decline_access", Indefinite: true, SourceType: models.EntitlementSourceSubscription, SourceID: s.subscription})
 		require.NoError(t, err)

@@ -132,7 +132,7 @@ func (s *Service) createPriceWithProduct(ctx context.Context, req CreatePriceReq
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if existing != nil && existing.ID != uuid.Nil && existing.Key != key {
+		if existing != nil && existing.ID != uuid.Nil && (existing.Key != key || existing.Archived != req.Archived) {
 			return ErrCatalogConflict
 		}
 		out, err = scoped.CreatePrice(ctx, req)

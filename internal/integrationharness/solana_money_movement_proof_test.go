@@ -217,7 +217,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	assertNoMetadataInTx(t, built.TransactionBase64, productKey, displayName, description, entitlement, creditKey)
 
 	// --- (b) Granted benefits + invoice/payment state live in the OpenRails DB. -
-	proveDBSourceOfTruth(t, h, surface, product.ID.UUID(), priceID.UUID(), reference, entitlement)
+	proveDBSourceOfTruth(t, h, surface, product.ID.UUID(), sdkPriceID(t, priceID).UUID(), reference, entitlement)
 
 	// --- Optional real on-chain leg: a funded devnet USDC transfer. -------------
 	maybeRunOnChainLeg(t, ctx, rpcClient, priv, merchantPub,

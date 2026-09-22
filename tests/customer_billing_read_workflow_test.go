@@ -59,10 +59,10 @@ func TestCustomerBillingReadWorkflow(t *testing.T) {
 		require.Empty(t, status["entitlements"])
 	}
 	empty(token)
-	product, err := f.client.CreateProduct(t.Context(), openrails.CreateProductRequest{Key: "account", DisplayName: "Account access", EntitlementsSpec: map[string]*int{"premium": nil}})
+	product, err := f.client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "account", DisplayName: "Account access", EntitlementsSpec: map[string]*int{"premium": nil}})
 	require.NoError(t, err)
 	duration := 720
-	price, err := f.client.CreatePrice(t.Context(), openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
+	price, err := f.client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 	require.NoError(t, err)
 	active, cancelled := uuid.New(), uuid.New()
 	first, second := uuid.New(), uuid.New()
@@ -77,12 +77,12 @@ func TestCustomerBillingReadWorkflow(t *testing.T) {
 			id    uuid.UUID
 			state string
 		}{{active, "active"}, {cancelled, "cancelled"}} {
-			if _, err := q.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,psp_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type) VALUES($1,$2,$3,$4,$5,$6::text::billing.subscription_status,'ccbill',$7,$8,$9,$9,$10,CASE WHEN $6::text='cancelled' THEN $9::timestamptz END,CASE WHEN $6::text='cancelled' THEN $11::text END)`, row.id, mid, customer.UUID(), product.ID.UUID(), price.ID.UUID(), row.state, "account-"+row.id.String(), psp, now, end, string(models.CancelTypeUser)); err != nil {
+			if _, err := q.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,psp_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type) VALUES($1,$2,$3,$4,$5,$6::text::billing.subscription_status,'ccbill',$7,$8,$9,$9,$10,CASE WHEN $6::text='cancelled' THEN $9::timestamptz END,CASE WHEN $6::text='cancelled' THEN $11::text END)`, row.id, mid, customer.UUID(), sdkProductID(t, product.ID).UUID(), sdkPriceID(t, price.ID).UUID(), row.state, "account-"+row.id.String(), psp, now, end, string(models.CancelTypeUser)); err != nil {
 				return err
 			}
 		}
 		for _, id := range []uuid.UUID{first, second} {
-			if _, err := q.Exec(ctx, `INSERT INTO billing.payments(id,merchant_id,customer_id,price_id,subscription_id,rail,transaction_id,amount,list_amount,currency,status,money_movement,psp_id) VALUES($1,$2,$3,$4,$5,'ccbill',$6,9990000,9990000,'USD','completed','rail',$7)`, id, mid, customer.UUID(), price.ID.UUID(), active, "account-"+id.String(), psp); err != nil {
+			if _, err := q.Exec(ctx, `INSERT INTO billing.payments(id,merchant_id,customer_id,price_id,subscription_id,rail,transaction_id,amount,list_amount,currency,status,money_movement,psp_id) VALUES($1,$2,$3,$4,$5,'ccbill',$6,9990000,9990000,'USD','completed','rail',$7)`, id, mid, customer.UUID(), sdkPriceID(t, price.ID).UUID(), active, "account-"+id.String(), psp); err != nil {
 				return err
 			}
 		}
@@ -95,7 +95,7 @@ func TestCustomerBillingReadWorkflow(t *testing.T) {
 	require.Equal(t, openrails.SubscriptionID(active).String(), current[0]["id"])
 	require.Equal(t, "active", current[0]["status"])
 	nested := current[0]["price"].(map[string]any)
-	require.Equal(t, price.ID.String(), nested["id"])
+	require.Equal(t, price.ID, nested["id"])
 	require.Equal(t, "9990000", nested["unit_amount"])
 	require.NotContains(t, nested, "amount")
 	history := list("/v1/me/subscriptions?status=all", token)

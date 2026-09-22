@@ -40,7 +40,7 @@ func TestCatalogClientScopeCannotExpand(t *testing.T) {
 	require.NoError(t, err)
 	owner, err := admin.ForCatalogOwner(subject)
 	require.NoError(t, err)
-	_, err = owner.GetProduct(t.Context(), product)
+	_, err = owner.Products.Retrieve(t.Context(), product.String())
 	require.NoError(t, err)
 	_, err = owner.ProductAccess.Check(t.Context(), &openrails.ProductAccessCheckParams{CustomerID: uuid.NewString(), ProductID: product.String()})
 	require.ErrorIs(t, err, openrails.ErrDenied, "resource handles must bind to the attenuated clone")

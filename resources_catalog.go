@@ -164,3 +164,38 @@ func resourcePriceID(id string) (string, error) {
 	}
 	return requireTypedID("price_id", parsed)
 }
+
+// SetKey moves a price onto a merchant-unique lookup key.
+func (p *PriceClient) SetKey(ctx context.Context, id, key string) (*Price, error) {
+	id, err := resourcePriceID(id)
+	if err != nil {
+		return nil, err
+	}
+	key, err = requireID("key", key)
+	if err != nil {
+		return nil, err
+	}
+	var out Price
+	if err = p.client.do(ctx, http.MethodPost, p.client.catalogPath()+"/prices/"+id+"/key", struct {
+		Key string `json:"key"`
+	}{key}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Ensure returns the product for key, creating it with name only if absent.
+// Existing labels are preserved. The server owns concurrency and catalog scope.
+func (p *ProductClient) Ensure(ctx context.Context, key, name string) (*Product, error) {
+	key, err := pathID("key", key)
+	if err != nil {
+		return nil, err
+	}
+	var out Product
+	if err = p.client.do(ctx, http.MethodPut, p.client.catalogPath()+"/products/by-key/"+key, struct {
+		DisplayName string `json:"display_name"`
+	}{name}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

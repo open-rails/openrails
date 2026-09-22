@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
@@ -19,16 +20,22 @@ import (
 
 func TestCatalogResourceAtomicOffers(t *testing.T) {
 	ctx := t.Context()
-	owner, pool, dsn := scopeWithoutRLSDatabase(t)
-	_ = owner
+	_, initialPool, dsn := scopeWithoutRLSDatabase(t)
+	poolConfig := initialPool.Config()
+	poolConfig.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
 	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{
 		Env: "development", TestMode: config.CredentialPostureSandbox,
 		MerchantConfigSource: config.MerchantConfigSourceManifest, CatalogSource: config.CatalogSourceAPI,
-		ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{URL: dsn},
-	}, PGXPool: pool, River: embed.RiverManagedByOpenRails()})
+		ProviderWriteMode: config.ProviderWriteModeFull, NewSubscriptionCollectionPolicy: "engine", DB: &config.DBConfig{URL: dsn},
+	}, PGXPool: pool, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
-	mid, err := rt.UpsertMerchantConfig(ctx, "inline-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Inline catalog"})
+	mid, err := rt.UpsertMerchantConfig(ctx, "inline-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Inline catalog", PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {
+		AccountID: "acct_inline_fixture", Secrets: map[string]string{"secret_key": "sk_test_inline_fixture", "webhook_signing_secret": "whsec_inline_fixture"},
+	}}}})
 	require.NoError(t, err)
 	local, err := rt.Client()
 	require.NoError(t, err)
@@ -62,6 +69,13 @@ func TestCatalogResourceAtomicOffers(t *testing.T) {
 			product, err := alice.Products.Retrieve(ctx, offer.ProductID)
 			require.NoError(t, err)
 			require.Equal(t, "Original title", product.DisplayName)
+			ensured, err := alice.Products.Ensure(ctx, params.ProductData.Key, "Uncommitted title")
+			require.NoError(t, err)
+			require.Equal(t, product.ID, ensured.ID)
+			require.Equal(t, "Original title", ensured.DisplayName)
+			_, err = transport.client.Products.Ensure(ctx, params.ProductData.Key, "Wrong catalog")
+			require.ErrorIs(t, err, openrails.ErrConflict)
+
 			_, err = bob.Products.Retrieve(ctx, offer.ProductID)
 			require.ErrorIs(t, err, openrails.ErrNotFound, "resource clone must retain owner attenuation")
 			_, err = bob.Prices.Create(ctx, &params)
@@ -112,7 +126,7 @@ func TestCatalogResourceAtomicOffers(t *testing.T) {
 		})
 	}
 	t.Run("legacy provider inline refused without orphan", func(t *testing.T) {
-		params := &openrails.PriceCreateParams{ProductData: &openrails.PriceCreateProductDataParams{Key: "legacy-inline", DisplayName: "Not a provider transaction"}, Key: "legacy-offer", UnitAmount: 1_000_000, Currency: "USD", PSPs: []string{"stripe"}}
+		params := &openrails.PriceCreateParams{ProductData: &openrails.PriceCreateProductDataParams{Key: "legacy-inline", DisplayName: "Not a provider transaction"}, Key: "legacy-offer", UnitAmount: 1_000_000, Currency: "USD", PSPs: []string{"ccbill"}}
 		_, err := local.Prices.Create(ctx, params)
 		require.ErrorIs(t, err, openrails.ErrInvalid, fmt.Sprint(err))
 		_, err = local.Products.RetrieveByKey(ctx, "legacy-inline")

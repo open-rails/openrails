@@ -63,20 +63,20 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 			require.NotContains(t, keys, declaredKey, "a declared, unarmed PSP is not advertised to browsers")
 
 			key := "declared-" + uuid.NewString()[:8]
-			product, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: key, DisplayName: "Declared PSP"})
+			product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: key, DisplayName: "Declared PSP"})
 			require.NoError(t, err)
 			duration := 720
-			price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: key + "-price", UnitAmount: 1_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
+			price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: key + "-price", UnitAmount: 1_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 			require.NoError(t, err)
 
-			options, err := client.ListCheckoutRailOptions(ctx, openrails.PriceID(price.ID))
+			options, err := client.ListCheckoutRailOptions(ctx, sdkPriceID(t, price.ID))
 			require.NoError(t, err)
 			for _, option := range options {
 				require.NotEqual(t, declaredKey, option.Selector, "an unarmed PSP is never a checkout option")
 			}
 			_, err = client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
 				Customer:       openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()).String(), VerifiedEmail: "buyer@example.test", Username: "buyer"},
-				PriceID:        openrails.PriceID(price.ID).String(),
+				PriceID:        price.ID,
 				IdempotencyKey: uuid.NewString(),
 				PaymentOptions: openrails.CheckoutPaymentOptions{Rail: declaredKey, NameOnCard: "Test Buyer", Zip: "90210", Country: "US"},
 			})
@@ -84,7 +84,7 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 
 			// The link is attribution: stored as operator-owned without a
 			// provider round trip, reported linked with sync disabled.
-			linked, err := client.UpdatePrice(ctx, price.ID, openrails.UpdatePriceRequest{PSPLinks: map[string]map[string]string{declaredKey: {"price_id": "price_declared_" + key}}})
+			linked, err := client.Prices.Update(ctx, price.ID, &openrails.PriceUpdateParams{PSPLinks: map[string]map[string]string{declaredKey: {"price_id": "price_declared_" + key}}})
 			require.NoError(t, err)
 			require.Equal(t, openrails.ProviderStatusLinked, linked.Providers[declaredKey].Status)
 			require.Equal(t, "price_declared_"+key, linked.Providers[declaredKey].IDs["price_id"])
