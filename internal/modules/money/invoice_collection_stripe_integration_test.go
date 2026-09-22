@@ -5,9 +5,9 @@ package money_test
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 // fakeStripe models the part of Stripe Invoicing the collection sequence
@@ -34,6 +35,8 @@ import (
 // idempotency keys replay the stored response of a completed request (a 5xx
 // stores nothing).
 type fakeStripe struct {
+	requests    []stripeRequest
+	payDecline  bool
 	chargeFacts func(map[string]any)
 	mu          sync.Mutex
 	responses   map[string][]byte
@@ -53,6 +56,17 @@ type fakeStripe struct {
 	keys    []string
 	charged []int64
 	deleted []string
+}
+
+type stripeRequest struct {
+	path, authorization string
+	form                url.Values
+}
+
+func (f *fakeStripe) requestSequence() []stripeRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]stripeRequest(nil), f.requests...)
 }
 
 type stripeItem struct {
@@ -77,6 +91,9 @@ func (f *fakeStripe) fail(w http.ResponseWriter, code int) {
 // a replay returns the same refusal, as Stripe does. A 5xx stores nothing.
 func (f *fakeStripe) failKeyed(w http.ResponseWriter, code int, key string) {
 	body := []byte(`{"error":{"message":"The payment method must be attached to the customer","code":"resource_missing"}}`)
+	if code == http.StatusPaymentRequired && f.payDecline {
+		body = []byte(`{"error":{"message":"Your card was declined.","code":"card_declined","decline_code":"do_not_honor"}}`)
+	}
 	if code >= 500 {
 		body = []byte(`{"error":{"message":"upstream failure"}}`)
 	} else if key != "" {
@@ -99,6 +116,7 @@ func (f *fakeStripe) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = r.ParseForm()
+	f.requests = append(f.requests, stripeRequest{r.URL.Path, r.Header.Get("Authorization"), r.Form})
 	key := r.Header.Get("Idempotency-Key")
 	f.keys = append(f.keys, key)
 	if stored, ok := f.responses[key]; ok {
@@ -357,6 +375,39 @@ func TestInvoiceCollection_StripeReplaysProviderIdempotencyKey(t *testing.T) {
 	e.requireSettledOnce(t)
 	inv := e.invoiceRow(t)
 	require.Equal(t, "in_1", *inv.ExternalInvoiceID)
+
+	requests := stripe.requestSequence()
+	require.Len(t, requests, 8)
+	var method string
+	require.NoError(t, e.pool.QueryRow(e.ctx, "SELECT rail_method_ref FROM billing.payment_methods WHERE id = $1", e.method).Scan(&method))
+	sfx := strings.TrimPrefix(method, "pm_replay_")
+	for i, path := range []string{"/v1/invoices", "/v1/invoiceitems", "/v1/invoices/in_1/finalize", "/v1/invoices/in_1/pay"} {
+		require.Equal(t, path, requests[i].path)
+		require.Equal(t, "Bearer sk_test_replay_"+sfx, requests[i].authorization)
+		require.Equal(t, requests[i], requests[i+4], "replay preserves the complete provider request")
+	}
+	create, item, pay := requests[0].form, requests[1].form, requests[3].form
+	require.Equal(t, "cus_replay_"+sfx, create.Get("customer"))
+	require.Equal(t, method, create.Get("default_payment_method"))
+	require.Equal(t, "charge_automatically", create.Get("collection_method"))
+	require.Equal(t, "exclude", create.Get("pending_invoice_items_behavior"))
+	require.Equal(t, op.ID.String(), create.Get("metadata[openrails_collection_key]"))
+	require.Equal(t, "cus_replay_"+sfx, item.Get("customer"))
+	require.Equal(t, "in_1", item.Get("invoice"))
+	require.Equal(t, "5", item.Get("amount"), "50,000 micros converts to five cents")
+	require.Equal(t, "usd", item.Get("currency"))
+	require.Equal(t, e.invoice.String(), item.Get("metadata[openrails_invoice_id]"))
+	require.Equal(t, op.ID.String(), item.Get("metadata[openrails_collection_key]"))
+	require.Equal(t, method, pay.Get("payment_method"))
+	require.Equal(t, int64(50_000), inv.AmountPaid)
+	var rail, receipt string
+	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail, rail_payment_id FROM billing.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&rail, &receipt))
+	require.Equal(t, string(models.RailStripe), rail)
+	require.Equal(t, "ch_in_1", receipt)
+	n, err = e.svc.ChargeOutstanding(e.ctx, runner, 0)
+	require.NoError(t, err)
+	require.Zero(t, n)
+	require.Equal(t, requests, stripe.requestSequence(), "paid invoice generates no further POST")
 }
 
 // TestInvoiceCollection_StripeWindowElapsedRequiresExactReceipt: past Stripe's
@@ -415,6 +466,8 @@ func TestInvoiceCollection_StripeRefusalAtInvoiceCreateChargesExactlyOnce(t *tes
 	require.Equal(t, intents.StatusFailedTerminal, op.Status)
 	inv := e.invoiceRow(t)
 	require.Nil(t, inv.CollectionIntentID)
+	require.Equal(t, int32(1), inv.CollectionFailureCount)
+	require.Equal(t, []string{"failed"}, e.attemptStatuses(t))
 	require.Equal(t, "resource_missing", *inv.LastCollectionFailureCode)
 	require.Zero(t, stripe.pendingCount(), "no invoice item is parked on the customer before its invoice exists")
 	require.Zero(t, stripe.created)
@@ -434,6 +487,7 @@ func TestInvoiceCollection_StripeRefusalAtInvoiceCreateChargesExactlyOnce(t *tes
 func TestInvoiceCollection_StripeRefusalAfterInvoiceCreateVoidsTheInvoice(t *testing.T) {
 	stripe, server := newFakeStripe(t)
 	stripe.failNext["pay"] = http.StatusPaymentRequired
+	stripe.payDecline = true
 	e, plane, charger := stripeCollectionEnv(t, server)
 	runner := collectionRunner(e.db, charger, plane)
 
@@ -442,7 +496,20 @@ func TestInvoiceCollection_StripeRefusalAfterInvoiceCreateVoidsTheInvoice(t *tes
 	require.Zero(t, n)
 	require.Equal(t, intents.StatusFailedTerminal, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status)
 	require.Equal(t, "void", stripe.invoiceStatus("in_1"), "the refused operation's invoice is voided at Stripe")
-	require.Nil(t, e.invoiceRow(t).CollectionIntentID)
+	stopped := e.invoiceRow(t)
+	require.Nil(t, stopped.CollectionIntentID)
+	// do_not_honor stops automatic collection while preserving the open debt.
+	require.Equal(t, "open", stopped.Status)
+	require.Nil(t, stopped.NextCollectionAttemptAt)
+	require.Equal(t, int64(50_000), stopped.AmountDue)
+	attempts, total, err := e.svc.ListInvoicePaymentAttempts(e.ctx, e.payer, e.invoice, 20, 0)
+	require.NoError(t, err)
+	require.Equal(t, 1, total)
+	require.Len(t, attempts, 1)
+	require.Equal(t, "failed", attempts[0].Status)
+	require.Equal(t, string(models.RailStripe), *attempts[0].Rail)
+	require.Equal(t, "do_not_honor", *attempts[0].FailureCode)
+	require.Contains(t, *attempts[0].FailureMessage, "Your card was declined.")
 
 	e.dueAgain(t)
 	n, err = e.svc.ChargeOutstanding(e.ctx, runner, 0)
@@ -453,61 +520,41 @@ func TestInvoiceCollection_StripeRefusalAfterInvoiceCreateVoidsTheInvoice(t *tes
 	e.requireSettledOnce(t)
 }
 
-// TestInvoiceCollection_StripeNotExecutedCleansPartialExecution: the sequence
-// died after creating its draft invoice (5xx on the item step); after the
-// window, operator non-execution deletes what the operation left at Stripe
-// before the invoice becomes collectible again, so the resend charges once.
+// After the key window, operator nonexecution deletes an abandoned draft or
+// voids an open invoice before releasing collection for a fresh operation.
 func TestInvoiceCollection_StripeNotExecutedCleansPartialExecution(t *testing.T) {
-	stripe, server := newFakeStripe(t)
-	stripe.failNext["invoiceitems"] = http.StatusInternalServerError
-	e, plane, charger := stripeCollectionEnv(t, server)
-	n, err := e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, charger, plane), 0)
-	require.NoError(t, err)
-	require.Zero(t, n)
-	op := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
-	require.Equal(t, intents.StatusUnknownNeedsVerify, op.Status)
-	require.Equal(t, "draft", stripe.invoiceStatus("in_1"))
+	for _, tc := range []struct{ step, before, after string }{
+		{"invoiceitems", "draft", "deleted"},
+		{"pay", "open", "void"},
+	} {
+		t.Run(tc.before, func(t *testing.T) {
+			stripe, server := newFakeStripe(t)
+			stripe.failNext[tc.step] = http.StatusInternalServerError
+			e, plane, charger := stripeCollectionEnv(t, server)
+			n, err := e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, charger, plane), 0)
+			require.NoError(t, err)
+			require.Zero(t, n)
+			op := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, op.Status)
+			require.Equal(t, tc.before, stripe.invoiceStatus("in_1"))
 
-	later := clockwork.NewFakeClockAt(time.Now().UTC().Add(24 * time.Hour))
-	stale := collectionRunnerClock(e.db, charger, plane, later)
-	resolved, err := stale.Resolve(e.ctx, op.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "no paid invoice in the dashboard"})
-	require.NoError(t, err)
-	require.Equal(t, intents.StatusFailedTerminal, resolved.Status)
-	require.Equal(t, "deleted", stripe.invoiceStatus("in_1"), "the abandoned draft is deleted at Stripe")
+			later := clockwork.NewFakeClockAt(time.Now().UTC().Add(24 * time.Hour))
+			stale := collectionRunnerClock(e.db, charger, plane, later)
+			resolved, err := stale.Resolve(e.ctx, op.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "no paid invoice in the dashboard"})
+			require.NoError(t, err)
+			require.Equal(t, intents.StatusFailedTerminal, resolved.Status)
+			require.Equal(t, tc.after, stripe.invoiceStatus("in_1"), "nonexecution removes the abandoned provider invoice")
 
-	e.dueAgain(t)
-	n, err = e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, charger, plane), 0)
-	require.NoError(t, err)
-	require.Equal(t, 1, n)
-	require.Equal(t, []int64{frozenStripeMinor}, stripe.chargedAmounts())
-	e.requireSettledOnce(t)
-}
-
-// TestInvoiceCollection_StripeNotExecutedVoidsOpenInvoice: a 5xx on /pay
-// leaves an OPEN invoice behind; non-execution voids it (it could otherwise be
-// paid out of band later) and the resend charges its own invoice once.
-func TestInvoiceCollection_StripeNotExecutedVoidsOpenInvoice(t *testing.T) {
-	stripe, server := newFakeStripe(t)
-	stripe.failNext["pay"] = http.StatusInternalServerError
-	e, plane, charger := stripeCollectionEnv(t, server)
-	n, err := e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, charger, plane), 0)
-	require.NoError(t, err)
-	require.Zero(t, n)
-	op := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
-	require.Equal(t, "open", stripe.invoiceStatus("in_1"))
-
-	later := clockwork.NewFakeClockAt(time.Now().UTC().Add(24 * time.Hour))
-	resolved, err := collectionRunnerClock(e.db, charger, plane, later).Resolve(e.ctx, op.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "gateway log shows no charge"})
-	require.NoError(t, err)
-	require.Equal(t, intents.StatusFailedTerminal, resolved.Status)
-	require.Equal(t, "void", stripe.invoiceStatus("in_1"))
-
-	e.dueAgain(t)
-	n, err = e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, charger, plane), 0)
-	require.NoError(t, err)
-	require.Equal(t, 1, n)
-	require.Equal(t, []int64{frozenStripeMinor}, stripe.chargedAmounts())
-	e.requireSettledOnce(t)
+			require.Nil(t, e.invoiceRow(t).CollectionIntentID)
+			e.dueAgain(t)
+			n, err = e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, charger, plane), 0)
+			require.NoError(t, err)
+			require.Equal(t, 1, n)
+			require.NotEqual(t, op.ID, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).ID)
+			require.Equal(t, []int64{frozenStripeMinor}, stripe.chargedAmounts())
+			e.requireSettledOnce(t)
+		})
+	}
 }
 
 // TestInvoiceCollection_StripeIgnoresForeignPendingItems: a pending item some
@@ -523,32 +570,6 @@ func TestInvoiceCollection_StripeIgnoresForeignPendingItems(t *testing.T) {
 	require.Equal(t, []int64{frozenStripeMinor}, stripe.chargedAmounts(), "only this operation's own line is charged")
 	require.Equal(t, 1, stripe.pendingCount(), "the foreign pending item is left alone")
 	e.requireSettledOnce(t)
-}
-
-// TestInvoiceCollection_StripeRequestRejectionIsDefinitive: a 4xx from Stripe
-// is a parsed refusal — no money moved — so the attempt fails and the invoice
-// duns on its schedule instead of parking unknown.
-func TestInvoiceCollection_StripeRequestRejectionIsDefinitive(t *testing.T) {
-	rejecting := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			_, _ = w.Write([]byte(`{"data":[],"has_more":false}`))
-			return
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":{"message":"No such customer","code":"resource_missing"}}`))
-	}))
-	t.Cleanup(rejecting.Close)
-	e, plane, charger := stripeCollectionEnv(t, rejecting)
-	n, err := e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, charger, plane), 0)
-	require.NoError(t, err)
-	require.Zero(t, n)
-	op := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
-	require.Equal(t, intents.StatusFailedTerminal, op.Status)
-	inv := e.invoiceRow(t)
-	require.Nil(t, inv.CollectionIntentID)
-	require.Equal(t, int32(1), inv.CollectionFailureCount)
-	require.Equal(t, "resource_missing", *inv.LastCollectionFailureCode)
-	require.Equal(t, []string{"failed"}, e.attemptStatuses(t))
 }
 
 // TestInvoiceCollection_StripeRefusalWithFailedCleanupStaysUnknown: a refusal
