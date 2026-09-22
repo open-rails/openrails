@@ -140,10 +140,10 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	r.CheckoutRails = len(options)
 	buyer := openrails.CustomerID(uuid.New())
 	request := openrails.CreateCheckoutSessionRequest{
-		Customer:       openrails.CheckoutCustomerIdentity{ID: buyer, VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer.String()[:8]},
-		PriceID:        price.ID,
+		Customer:       openrails.CheckoutCustomerIdentity{ID: buyer.String(), VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer.String()[:8]},
+		PriceID:        price.ID.String(),
 		IdempotencyKey: in.Run + ":checkout",
-		Payment:        openrails.CheckoutPayment{Rail: in.CheckoutRail, NameOnCard: "Example Buyer", Zip: "90210", Country: "US"},
+		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: in.CheckoutRail, NameOnCard: "Example Buyer", Zip: "90210", Country: "US"},
 	}
 	session, err := client.CreateCheckoutSession(ctx, request)
 	if err != nil {
@@ -153,7 +153,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	if err != nil {
 		return r, fmt.Errorf("replay checkout: %w", err)
 	}
-	read, err := client.GetCheckoutSession(ctx, buyer, session.ID)
+	read, err := client.GetCheckoutSession(ctx, buyer.String(), session.ID)
 	if err != nil {
 		return r, fmt.Errorf("read checkout: %w", err)
 	}

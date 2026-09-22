@@ -86,12 +86,12 @@ func TestQualifiedOneTimeSaleClientAcrossEmbeddedAndHTTP(t *testing.T) {
 					_, err = dbtest.Queries(h.sharedPool()).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{ID: method, MerchantID: owned.MerchantID.UUID(), CustomerID: customer, PspID: psp, Rail: "nmi", RailCustomerRef: "vault-" + method.String(), RailMethodRef: "billing-" + method.String()})
 					require.NoError(t, err)
 				}
-				request := openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(customer), VerifiedEmail: "sale@example.test", Username: "sale-buyer"}, PriceID: price.ID, IdempotencyKey: uuid.NewString(), Payment: openrails.CheckoutPayment{Rail: "loopback", PaymentMethodID: openrails.PaymentMethodID(method)}}
+				request := openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(customer).String(), VerifiedEmail: "sale@example.test", Username: "sale-buyer"}, PriceID: price.ID.String(), IdempotencyKey: uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "loopback", PaymentMethodID: openrails.PaymentMethodID(method).String()}}
 				before := gateway.SaleAttempts()
 				var result *openrails.CheckoutSession
 				if token {
-					request.Payment.PaymentMethodID = openrails.PaymentMethodID{}
-					request.Payment.PaymentToken = "token-" + uuid.NewString()
+					request.PaymentOptions.PaymentMethodID = openrails.PaymentMethodID{}
+					request.PaymentOptions.PaymentToken = "token-" + uuid.NewString()
 					beforeVaults := vaultCreates.Load()
 					type completion struct {
 						result *openrails.CheckoutSession
@@ -129,7 +129,7 @@ func TestQualifiedOneTimeSaleClientAcrossEmbeddedAndHTTP(t *testing.T) {
 				require.Equal(t, result.PaymentID, replay.PaymentID)
 				require.Equal(t, before+1, gateway.SaleAttempts(), "replay ignores changed catalog and never charges again")
 				changed := request
-				changed.Customer.ID = openrails.CustomerID(uuid.New())
+				changed.Customer.ID = uuid.NewString()
 				_, err = client.CreateCheckoutSession(ctx, changed)
 				require.Error(t, err)
 				require.Equal(t, before+1, gateway.SaleAttempts())

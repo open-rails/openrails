@@ -127,10 +127,10 @@ func TestClientRefusesEmptyIdentifiersBeforeIO(t *testing.T) {
 		"ListPaymentMethods":           func() error { _, err := c.ListPaymentMethods(ctx, CustomerID{}, PageOptions{}); return err },
 		"DeletePaymentMethod customer": func() error { _, err := c.DeletePaymentMethod(ctx, CustomerID{}, method); return err },
 		"DeletePaymentMethod method":   func() error { _, err := c.DeletePaymentMethod(ctx, customer, PaymentMethodID{}); return err },
-		"GetCheckoutSession customer":  func() error { _, err := c.GetCheckoutSession(ctx, CustomerID{}, session); return err },
-		"GetCheckoutSession session":   func() error { _, err := c.GetCheckoutSession(ctx, customer, CheckoutSessionID{}); return err },
+		"GetCheckoutSession customer":  func() error { _, err := c.GetCheckoutSession(ctx, "", session.String()); return err },
+		"GetCheckoutSession session":   func() error { _, err := c.GetCheckoutSession(ctx, customer.String(), ""); return err },
 		"ConfirmCheckoutSession": func() error {
-			_, err := c.ConfirmCheckoutSession(ctx, CheckoutSessionID{}, ConfirmCheckoutSessionRequest{})
+			_, err := c.ConfirmCheckoutSession(ctx, "", ConfirmCheckoutSessionRequest{})
 			return err
 		},
 		"ListCheckoutRailOptions":   func() error { _, err := c.ListCheckoutRailOptions(ctx, PriceID{}); return err },

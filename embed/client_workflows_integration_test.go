@@ -363,7 +363,7 @@ func checkClientCheckout(t *testing.T, ctx context.Context, h *integrationharnes
 		prices = append(prices, price)
 	}
 	user := openrails.CustomerID(uuid.New())
-	request := openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: user, VerifiedEmail: "checkout@example.test", Username: "checkout-" + uuid.NewString()[:8]}, PriceID: prices[0].ID, IdempotencyKey: uuid.NewString(), Payment: openrails.CheckoutPayment{Rail: "ccbill", NameOnCard: "Test Buyer", Zip: "90210", Country: "US"}}
+	request := openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: user.String(), VerifiedEmail: "checkout@example.test", Username: "checkout-" + uuid.NewString()[:8]}, PriceID: prices[0].ID.String(), IdempotencyKey: uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "ccbill", NameOnCard: "Test Buyer", Zip: "90210", Country: "US"}}
 	options, err := client.ListCheckoutRailOptions(ctx, prices[0].ID)
 	require.NoError(t, err)
 	require.NotEmpty(t, options)
@@ -378,13 +378,13 @@ func checkClientCheckout(t *testing.T, ctx context.Context, h *integrationharnes
 	again, err := client.CreateCheckoutSession(ctx, request)
 	require.NoError(t, err)
 	require.Equal(t, first.ID, again.ID)
-	read, err := client.GetCheckoutSession(ctx, user, first.ID)
+	read, err := client.GetCheckoutSession(ctx, user.String(), first.ID)
 	require.NoError(t, err)
 	require.Equal(t, first.ID, read.ID)
 	require.Equal(t, first.Amount, read.Amount)
-	_, err = client.GetCheckoutSession(ctx, openrails.CustomerID(uuid.New()), first.ID)
+	_, err = client.GetCheckoutSession(ctx, uuid.NewString(), first.ID)
 	require.ErrorIs(t, err, openrails.ErrDenied)
-	_, err = client.ConfirmCheckoutSession(ctx, first.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: openrails.CustomerID(uuid.New()), Payment: openrails.ConfirmPayment{Rail: "solana"}})
+	_, err = client.ConfirmCheckoutSession(ctx, first.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: uuid.NewString(), Payment: openrails.ConfirmPayment{Rail: "solana"}})
 	require.ErrorIs(t, err, openrails.ErrDenied)
 	require.NoError(t, client.Verify(ctx))
 	tier, err := client.ResolveEffectiveTier(ctx, user, "membership")

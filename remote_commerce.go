@@ -14,12 +14,44 @@ func (c *Client) CreateCheckoutSession(ctx context.Context, request CreateChecko
 	return &out, nil
 }
 
-func (c *Client) GetCheckoutSession(ctx context.Context, customerID CustomerID, sessionID CheckoutSessionID) (*CheckoutSession, error) {
-	customer, err := requireTypedID("customer_id", customerID)
+func (c *Client) CreatePaymentMethodSession(ctx context.Context, request CreatePaymentMethodSessionRequest) (*CheckoutSession, error) {
+	var out CheckoutSession
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/payment-method-sessions", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) CreateSolanaCancelSession(ctx context.Context, request CreateSolanaCancelSessionRequest) (*CheckoutSession, error) {
+	var out CheckoutSession
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/solana-cancel-sessions", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) CreateSolanaTierChangeSession(ctx context.Context, request CreateSolanaTierChangeSessionRequest) (*CheckoutSession, error) {
+	var out CheckoutSession
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/solana-tier-change-sessions", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) GetCheckoutSession(ctx context.Context, customerID string, sessionID string) (*CheckoutSession, error) {
+	typedCustomer, err := ParseCustomerID(customerID)
+	if err != nil {
+		return nil, invalidErr("invalid customer_id")
+	}
+	customer, err := requireTypedID("customer_id", typedCustomer)
 	if err != nil {
 		return nil, err
 	}
-	session, err := requireTypedID("session_id", sessionID)
+	typedSession, err := ParseCheckoutSessionID(sessionID)
+	if err != nil {
+		return nil, invalidErr("invalid session_id")
+	}
+	session, err := requireTypedID("session_id", typedSession)
 	if err != nil {
 		return nil, err
 	}
@@ -31,8 +63,12 @@ func (c *Client) GetCheckoutSession(ctx context.Context, customerID CustomerID, 
 	return &out, nil
 }
 
-func (c *Client) ConfirmCheckoutSession(ctx context.Context, sessionID CheckoutSessionID, request ConfirmCheckoutSessionRequest) (*CheckoutSession, error) {
-	session, err := requireTypedID("session_id", sessionID)
+func (c *Client) ConfirmCheckoutSession(ctx context.Context, sessionID string, request ConfirmCheckoutSessionRequest) (*CheckoutSession, error) {
+	typedSession, err := ParseCheckoutSessionID(sessionID)
+	if err != nil {
+		return nil, invalidErr("invalid session_id")
+	}
+	session, err := requireTypedID("session_id", typedSession)
 	if err != nil {
 		return nil, err
 	}

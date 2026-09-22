@@ -57,12 +57,13 @@ type CheckoutPSPConfig struct {
 }
 
 type CheckoutCustomerIdentity struct {
-	ID            CustomerID `json:"id"`
-	VerifiedEmail string     `json:"verified_email"`
-	Username      string     `json:"username"`
+	ID            string `json:"id"`
+	VerifiedEmail string `json:"verified_email"`
+	Username      string `json:"username"`
 }
 
 // CreateCheckoutSessionRequest creates a purchase for a merchant-owned customer.
+// The server derives one-off versus recurring behavior from the selected price.
 // IdempotencyKey must identify this checkout attempt across retries.
 // The merchant endpoint trusts the host to invoke checkout for a real customer
 // action. Merchant credentials authorize the host; they do not prove customer
@@ -70,22 +71,47 @@ type CheckoutCustomerIdentity struct {
 // customer-initiated stored-card agreement.
 type CreateCheckoutSessionRequest struct {
 	Customer       CheckoutCustomerIdentity `json:"customer"`
-	SubscriptionID SubscriptionID           `json:"subscription_id,omitzero"`
-	NewPriceID     PriceID                  `json:"new_price_id,omitzero"`
-	PriceID        PriceID                  `json:"price_id,omitzero"`
-	Mode           string                   `json:"mode"` // "one_off" or "subscription" (optional, inferred from price)
-	Payment        CheckoutPayment          `json:"payment"`
+	PriceID        string                   `json:"price_id,omitzero"`
+	PaymentOptions CheckoutPaymentOptions   `json:"payment"`
 	Metadata       map[string]string        `json:"metadata"`
 	IdempotencyKey string                   `json:"-"`
 	SuccessURL     string                   `json:"success_url"` // Required for Stripe hosted checkout
 	CancelURL      string                   `json:"cancel_url"`  // Required for Stripe hosted checkout
 }
 
-type CheckoutPayment struct {
-	PSPID           uuid.UUID       `json:"psp_id,omitzero"`
-	Rail            string          `json:"rail"`                       // "nmi", "ccbill", "solana", "stripe"
-	PaymentMethodID PaymentMethodID `json:"payment_method_id,omitzero"` // For returning customers with saved payment methods
-	PaymentToken    string          `json:"payment_token"`              // For new card tokenization (NMI Collect.js)
+// CreatePaymentMethodSessionRequest authorizes a nonmonetary card setup.
+// It cannot carry a price or select a purchase/subscription mode.
+type CreatePaymentMethodSessionRequest struct {
+	Customer       CheckoutCustomerIdentity `json:"customer"`
+	PaymentOptions CheckoutPaymentOptions   `json:"payment"`
+	Metadata       map[string]string        `json:"metadata,omitempty"`
+	IdempotencyKey string                   `json:"-"`
+}
+
+// CreateSolanaCancelSessionRequest prepares an existing subscription cancellation.
+type CreateSolanaCancelSessionRequest struct {
+	Customer       CheckoutCustomerIdentity `json:"customer"`
+	SubscriptionID string                   `json:"subscription_id"`
+	PaymentOptions CheckoutPaymentOptions   `json:"payment"`
+	Metadata       map[string]string        `json:"metadata,omitempty"`
+	IdempotencyKey string                   `json:"-"`
+}
+
+// CreateSolanaTierChangeSessionRequest prepares a change to an existing subscription.
+type CreateSolanaTierChangeSessionRequest struct {
+	Customer       CheckoutCustomerIdentity `json:"customer"`
+	SubscriptionID string                   `json:"subscription_id"`
+	NewPriceID     string                   `json:"new_price_id"`
+	PaymentOptions CheckoutPaymentOptions   `json:"payment"`
+	Metadata       map[string]string        `json:"metadata,omitempty"`
+	IdempotencyKey string                   `json:"-"`
+}
+
+type CheckoutPaymentOptions struct {
+	PSPID           string `json:"psp_id,omitzero"`
+	Rail            string `json:"rail"`                       // "nmi", "ccbill", "solana", "stripe"
+	PaymentMethodID string `json:"payment_method_id,omitzero"` // For returning customers with saved payment methods
+	PaymentToken    string `json:"payment_token"`              // For new card tokenization (NMI Collect.js)
 
 	// Solana-specific
 	TokenSymbol string `json:"token_symbol"` // e.g., "USDC", "SOL"
@@ -116,18 +142,18 @@ type CheckoutPayment struct {
 // timestamps are RFC3339 instants.
 type CheckoutSession struct {
 	Capture         *CustodianCaptureAction `json:"capture,omitempty"`
-	PaymentMethodID *PaymentMethodID        `json:"payment_method_id,omitempty"`
-	ID              CheckoutSessionID       `json:"id"`
+	PaymentMethodID *string                 `json:"payment_method_id,omitempty"`
+	ID              string                  `json:"id"`
 	Status          string                  `json:"status"` // "created", "requires_action", "succeeded", "failed", "expired", "canceled"
 	Mode            string                  `json:"mode"`   // "subscription", "one_off"
-	PriceID         *PriceID                `json:"price_id"`
+	PriceID         *string                 `json:"price_id"`
 	Amount          *int64                  `json:"amount,string"`
 	Currency        *string                 `json:"currency"`
 	PaymentStatus   string                  `json:"payment_status"` // "unpaid", "paid", "no_payment_required"
 	ClientSecret    *string                 `json:"client_secret"`
 	URL             *string                 `json:"url"` // Redirect URL for CCBill/Stripe
-	SubscriptionID  *SubscriptionID         `json:"subscription_id"`
-	PaymentID       *PaymentID              `json:"payment_id"`
+	SubscriptionID  *string                 `json:"subscription_id"`
+	PaymentID       *string                 `json:"payment_id"`
 	ExpiresAt       *time.Time              `json:"expires_at,omitempty"`
 	CreatedAt       time.Time               `json:"created_at"`
 	Metadata        map[string]string       `json:"metadata"`
@@ -135,7 +161,7 @@ type CheckoutSession struct {
 }
 
 type ConfirmCheckoutSessionRequest struct {
-	CustomerID CustomerID     `json:"customer_id"`
+	CustomerID string         `json:"customer_id"`
 	Payment    ConfirmPayment `json:"payment"`
 }
 

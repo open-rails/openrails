@@ -236,15 +236,15 @@ func runProviderArchiveLifecycle(t *testing.T, ctx context.Context, s providerAr
 	// #655 invariant: new checkout resolves only to the non-archived account.
 	require.Equal(t, []string{b.ID.String()}, ccbillOptionPSPs(t, ctx, s.client, price))
 	session, err := s.client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-		Customer:       openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()), VerifiedEmail: "buyer-" + uuid.NewString()[:8] + "@example.test", Username: "buyer" + uuid.NewString()[:8]},
-		PriceID:        price,
+		Customer:       openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()).String(), VerifiedEmail: "buyer-" + uuid.NewString()[:8] + "@example.test", Username: "buyer" + uuid.NewString()[:8]},
+		PriceID:        price.String(),
 		IdempotencyKey: uuid.NewString(),
-		Payment:        openrails.CheckoutPayment{Rail: "ccbill", NameOnCard: "Archive Buyer", Zip: "90210", Country: "US"},
+		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "ccbill", NameOnCard: "Archive Buyer", Zip: "90210", Country: "US"},
 	})
 	require.NoError(t, err)
 	var sessionPSP uuid.UUID
 	require.NoError(t, dbtest.SharedMerchantPool(t, s.mid.UUID()).QueryRow(ctx,
-		`SELECT psp_id FROM billing.checkout_sessions WHERE merchant_id = $1 AND id = $2`, s.mid.UUID(), session.ID.UUID()).Scan(&sessionPSP))
+		`SELECT psp_id FROM billing.checkout_sessions WHERE merchant_id = $1 AND id = $2`, s.mid.UUID(), uuid.MustParse(strings.TrimPrefix(session.ID, "cs_"))).Scan(&sessionPSP))
 	require.Equal(t, b.ID, sessionPSP, "the new session is pinned to the active account")
 
 	// B is now the rail's only active account: refused without the override.

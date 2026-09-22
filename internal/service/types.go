@@ -41,7 +41,7 @@ type CheckoutCustomerIdentity = openrails.CheckoutCustomerIdentity
 type CreateCheckoutSessionRequest = openrails.CreateCheckoutSessionRequest
 
 // CheckoutPayment specifies payment details for checkout.
-type CheckoutPayment = openrails.CheckoutPayment
+type CheckoutPaymentOptions = openrails.CheckoutPaymentOptions
 
 // CheckoutSession represents a checkout session.
 type CheckoutSession = openrails.CheckoutSession

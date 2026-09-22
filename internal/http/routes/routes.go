@@ -274,6 +274,10 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 
 	checkoutWriteMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCheckoutCreate)}, dbMW...)
 	group.Handle(http.MethodPost, "/checkout-sessions", h(httphandlers.ServiceCreateCheckoutSession), checkoutWriteMW...)
+	group.Handle(http.MethodPost, "/payment-method-sessions", h(httphandlers.ServiceCreatePaymentMethodSession), checkoutWriteMW...)
+	group.Handle(http.MethodPost, "/solana-cancel-sessions", h(httphandlers.ServiceCreateSolanaCancelSession), checkoutWriteMW...)
+	group.Handle(http.MethodPost, "/solana-tier-change-sessions", h(httphandlers.ServiceCreateSolanaTierChangeSession), checkoutWriteMW...)
+
 	group.Handle(http.MethodGet, "/checkout-sessions/:id", h(httphandlers.ServiceGetCheckoutSession), readMW...)
 	group.Handle(http.MethodPost, "/checkout-sessions/:id/confirm", h(httphandlers.ServiceConfirmCheckoutSession), checkoutWriteMW...)
 	group.Handle(http.MethodGet, "/checkout-options", h(httphandlers.ServiceListCheckoutRailOptions), readMW...)

@@ -75,10 +75,10 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 				require.NotEqual(t, declaredKey, option.Selector, "an unarmed PSP is never a checkout option")
 			}
 			_, err = client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-				Customer:       openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()), VerifiedEmail: "buyer@example.test", Username: "buyer"},
-				PriceID:        openrails.PriceID(price.ID),
+				Customer:       openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()).String(), VerifiedEmail: "buyer@example.test", Username: "buyer"},
+				PriceID:        openrails.PriceID(price.ID).String(),
 				IdempotencyKey: uuid.NewString(),
-				Payment:        openrails.CheckoutPayment{Rail: declaredKey, NameOnCard: "Test Buyer", Zip: "90210", Country: "US"},
+				PaymentOptions: openrails.CheckoutPaymentOptions{Rail: declaredKey, NameOnCard: "Test Buyer", Zip: "90210", Country: "US"},
 			})
 			require.ErrorIs(t, err, openrails.ErrInvalid, "a checkout naming the unarmed PSP is refused up front: %v", err)
 

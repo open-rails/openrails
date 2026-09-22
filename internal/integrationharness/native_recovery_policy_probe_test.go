@@ -82,7 +82,7 @@ func TestFreshNativeProviderRecoveryGap(t *testing.T) {
 	pool := h.MerchantPool(owned.MerchantID.UUID())
 	_, err = pool.Exec(t.Context(), `INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,plan_id) VALUES($1,$2,$3,'native-policy-plan')`, owned.MerchantID.UUID(), price.ID.UUID(), psp)
 	require.NoError(t, err)
-	session, err := owner.CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: *user.Email, Username: "native-payer"}, Mode: "subscription", PriceID: price.ID, IdempotencyKey: uuid.NewString(), Payment: openrails.CheckoutPayment{PSPID: psp, PaymentToken: "synthetic-collect-token"}})
+	session, err := owner.CreateCheckoutSession(t.Context(), openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: customer.String(), VerifiedEmail: *user.Email, Username: "native-payer"}, PriceID: price.ID.String(), IdempotencyKey: uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: psp.String(), PaymentToken: "synthetic-collect-token"}})
 	require.NoError(t, err)
 	require.Equal(t, "succeeded", session.Status)
 	require.NotNil(t, session.SubscriptionID)

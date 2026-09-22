@@ -160,17 +160,17 @@ func TestCheckoutRefusalsAreCodedAcrossDeployments(t *testing.T) {
 	type step struct {
 		name         string
 		saleResponse string
-		payment      func(customer openrails.CustomerID) openrails.CheckoutPayment
+		payment      func(customer openrails.CustomerID) openrails.CheckoutPaymentOptions
 	}
-	token := func(openrails.CustomerID) openrails.CheckoutPayment {
-		return openrails.CheckoutPayment{Rail: "nmi", PaymentToken: "tok_" + uuid.NewString()[:8], NameOnCard: "Test Buyer", Zip: "90210", Country: "US", LastFour: "4242", CardType: "visa", ExpiryDate: "1230"}
+	token := func(openrails.CustomerID) openrails.CheckoutPaymentOptions {
+		return openrails.CheckoutPaymentOptions{Rail: "nmi", PaymentToken: "tok_" + uuid.NewString()[:8], NameOnCard: "Test Buyer", Zip: "90210", Country: "US", LastFour: "4242", CardType: "visa", ExpiryDate: "1230"}
 	}
 	steps := []step{
 		{name: "approved", saleResponse: "100", payment: token},
 		{name: "insufficient_funds", saleResponse: "202", payment: token},
 		{name: "gateway_unknown", saleResponse: "300", payment: token},
-		{name: "stale_saved_card", saleResponse: "100", payment: func(openrails.CustomerID) openrails.CheckoutPayment {
-			return openrails.CheckoutPayment{Rail: "nmi", PaymentMethodID: openrails.PaymentMethodID(uuid.New())}
+		{name: "stale_saved_card", saleResponse: "100", payment: func(openrails.CustomerID) openrails.CheckoutPaymentOptions {
+			return openrails.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: openrails.PaymentMethodID(uuid.New()).String()}
 		}},
 	}
 
@@ -181,10 +181,10 @@ func TestCheckoutRefusalsAreCodedAcrossDeployments(t *testing.T) {
 			gateway.saleResponseCode.Store(s.saleResponse)
 			customer := openrails.CustomerID(uuid.New())
 			request := openrails.CreateCheckoutSessionRequest{
-				Customer:       openrails.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "buyer@example.test", Username: "buyer-" + customer.String()[:8]},
-				PriceID:        openrails.PriceID(priceID),
+				Customer:       openrails.CheckoutCustomerIdentity{ID: customer.String(), VerifiedEmail: "buyer@example.test", Username: "buyer-" + customer.String()[:8]},
+				PriceID:        openrails.PriceID(priceID).String(),
 				IdempotencyKey: uuid.NewString(),
-				Payment:        s.payment(customer),
+				PaymentOptions: s.payment(customer),
 			}
 			session, err := client.CreateCheckoutSession(ctx, request)
 			out[s.name] = observeRefusal(t, name+" "+s.name, session, err)
