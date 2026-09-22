@@ -42,12 +42,8 @@ func (r *Runtime) riverProgressMonitor() *riverjobs.ProgressMonitor {
 
 // riverStatsPool returns the pool used to read River's own tables. They live
 // in the SAME database as the billing schema (host-chosen schema, `public` by
-// default, #545), so the app pool reads them directly; a dedicated River pool
-// is used when one exists.
+// default, #545), so the app pool reads them directly.
 func (r *Runtime) riverStatsPool() *pgxpool.Pool {
-	if r.riverPool != nil {
-		return r.riverPool
-	}
 	if r.DB != nil {
 		return r.DB.Pool()
 	}
