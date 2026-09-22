@@ -105,3 +105,19 @@ source used by the final complete run. `git diff --check` passes. Exact-head CI
 and root independent review remain merge gates.
 
 No provider write, merge or release is part of this task.
+
+## Reviewed prerequisite integration
+
+After the source review, this branch merged the exact fetched #617 head
+`273c61cb66958d81feb35866673a263b76aa6eb5` without conflicts. Review the owned
+consolidation against that head. Its money test and LED-15 diff is byte-for-byte
+identical to the approved pre-merge delta against `64eb7bd9`.
+
+The 324-pass race/shuffle evidence above was obtained before this AuthKit 117
+prerequisite merge; the changed test-source files are identical. Post-merge
+`GOWORK=off` integration compilation passed for money and ledger (0.454s/0.138s,
+no tests selected), and `GOWORK=off go run ./scripts/contracts` passed without
+rewriting the snapshot. Logs are `.reports/auth117-money-ledger-compile.log` and
+`.reports/auth117-contract.log`. One combined-head CI run follows. #619 must land after #617 with its ancestry
+preserved and does not gate the current production release. No unrelated SDK
+or checkout draft was absorbed.

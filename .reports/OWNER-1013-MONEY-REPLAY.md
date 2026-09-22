@@ -10,3 +10,6 @@ Root owns independent review, merge and tracker. No merge or tag authorized for 
 Root-approved qualification extension: exact starting-balance delta for the shared clearing account in the retained raw duplicate-coordinate proof, after immutable base reproduction. Update the LED-15 surviving-test pointer in docs/invariants.md. No financial fact cleanup. Consolidation -205 test lines; fixture correction +2; net -203.
 
 Final guarded race/shuffle: money311passes/0fail/3live-opt-in-skips134.914s; ledger13passes/0fail/0skip7.835s; seed1790067505117462480; HTTP unexpected0/background_fx0. Exact old-to-new map and baseline/fixed fixture receipts: .reports/MONEY-REPLAY-ASSERTIONS.md.
+
+Reviewed prerequisite: exact fetched PR617 head273c61cb66958d81feb35866673a263b76aa6eb5 merged without conflicts. Own test/doc diff identical to reviewed delta. Merge619 only after617; no production release dependency on619.
+Post-prerequisite GOWORKoff money/ledger integration compile and plain contract verification passed; complete combined-head CI remains required.
