@@ -248,8 +248,8 @@ github.com/open-rails/authkit v0.113.0 h1:LK6E8F2mds7xeRckQyKP7v+Qd7L6CnvhU45MB7
 github.com/open-rails/authkit v0.113.0/go.mod h1:JgpWAftre06pmJG5OlOqO1u2HK2pfa6FC/kiP1Y6n1w=
 github.com/open-rails/migratekit v1.0.4 h1:i/azuFFLY3Si5nUz3hKAIqngynAGa5TIMUe+GDFS6pU=
 github.com/open-rails/migratekit v1.0.4/go.mod h1:ONDMUycRcwAB+eKlPvho6mnNAZf9gf9+yqwCKDRuO9g=
-github.com/open-rails/openrails v0.147.0 h1:Y/kjNUT3QlPvxz8zgr90cIiYmeMdXFpAIU/yvsKNtRw=
-github.com/open-rails/openrails v0.147.0/go.mod h1:C3HRM72w0DinhAwLpO/bDN9JKaP+G4OGlFIqTyGaTFA=
+github.com/open-rails/openrails v0.147.1-0.20260922045958-b651c6f0fe1e h1:ubLXqMDVMI5KqfF9xkDyqu3Iv9Civ5b3K7OOUCLBDpo=
+github.com/open-rails/openrails v0.147.1-0.20260922045958-b651c6f0fe1e/go.mod h1:e/t42jAnnMjBp5XQMsA83sbm+6dgTa2GC653+W2eAqU=
 github.com/open-rails/riverkit v0.1.0 h1:j79U1wC47ZNA8dMJtsPMUlWvnVnYIuX58TonAk6BH2Q=
 github.com/open-rails/riverkit v0.1.0/go.mod h1:ya9Vwa62QBbh/TW5fGxawYyRwnycw+57Tr2vPOLnBdw=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=

@@ -4,7 +4,8 @@ go 1.26.6
 
 require (
 	github.com/gofiber/fiber/v3 v3.5.0
-	github.com/open-rails/openrails v0.147.0
+	github.com/open-rails/openrails v0.147.1-0.20260922045958-b651c6f0fe1e
+	github.com/stretchr/testify v1.12.1
 )
 
 require (
