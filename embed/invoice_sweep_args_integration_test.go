@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/riverkit"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
@@ -37,10 +38,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	jobs, err := rt.BindRiver(ctx, pool, func(_ context.Context, cfg *river.Config) error {
-		cfg.Queues[embed.QueueBilling] = river.QueueConfig{MaxWorkers: 1}
-		return nil
-	})
+	jobs, err := riverkit.New(ctx, pool, &river.Config{Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 1}}}, rt.RiverJobs())
 	require.NoError(t, err)
 	require.NoError(t, jobs.Start(ctx))
 	t.Cleanup(func() { _ = jobs.Stop(context.Background()) })

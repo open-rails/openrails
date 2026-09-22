@@ -139,7 +139,7 @@ func graph(rt *embed.Runtime) (*app.App, error) {
 // Attach builds the control plane over the runtime's database and Redis and
 // wires it into the runtime's merchant directory. Attach once per runtime;
 // construction failure is fatal for a standalone or hosted process. Attach
-// before Runtime.RunWorkers (managed) or Runtime.BindRiver (host-owned).
+// before Runtime.RunWorkers (managed) or Runtime.RiverJobs (host-owned).
 // Its AuthKit workers, queues and schedules join that same composed fleet.
 func Attach(ctx context.Context, rt *embed.Runtime, opts Options) (*ControlPlane, error) {
 	a, err := graph(rt)

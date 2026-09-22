@@ -154,7 +154,7 @@ defer rt.Close(ctx)
 | `PGXPool` | `*pgxpool.Pool` | Host-supplied pool (pgx/v5). |
 | `Redis` | `*redis.Client` | Optional (rate limits, admission holds). |
 | `Cache` | `cache.Cache` | Optional cache override. |
-| `River` | `embed.RiverOwnership` | Defaults to managed River in `public`. `RiverManagedByOpenRails("jobs")` selects another schema; `RiverFromHost()` declares host ownership; call `BindRiver` after composing components. |
+| `River` | `embed.RiverOwnership` | Defaults to managed River in `public`. `RiverManagedByOpenRails("jobs")` selects another schema; `RiverFromHost()` declares host ownership; pass `RiverJobs()` to `riverkit.New` after attaching components. |
 | `RunWorkers` | `bool` | Managed-only. Runs the River background workers (renewals, dunning, credit/hold expiry, reconciliation) on a Runtime-owned goroutine, detached from the ctx you pass to `New` — `Close` stops them. Leave false to drive `rt.RunWorkers(ctx)` yourself. |
 | `ConsoleAssets` | `fs.FS` | Host-built admin console SPA (see §6). |
 | `StripeTransport` | `http.RoundTripper` | Test seam under the Stripe API choke point; refused with a live posture. |
@@ -194,9 +194,10 @@ provider configuration, fleet aggregates, retirement, `UserAuthenticator`,
 `JWKSHandler`). Hosts that bring their own AuthKit never import it.
 
 **Host-owned River**: declare ownership during migrations and construction, then
-compose every component before creating the one shared client. `BindRiver`
-provides a complete config with billing and attached control-plane workers,
-queues and schedules. Extend that config; replacing required entries is refused.
+attach every component before requesting `RiverJobs()`. The neutral RiverKit
+composer collects billing and attached control-plane workers, queues and schedules,
+then constructs and binds one unstarted client. It rejects removed required
+entries, duplicate workers/schedules, and repeated or closed contributions.
 
 ```go
 ownership := embed.RiverFromHost()
@@ -210,13 +211,12 @@ defer rt.Close(context.WithoutCancel(ctx))
 
 // Attach a control plane here, or construct your own AuthKit client.
 // An attached control plane contributes its AuthKit maintenance automatically.
-jobs, err := rt.BindRiver(ctx, pool, func(ctx context.Context, jobsCfg *river.Config) error {
-    river.AddWorker(jobsCfg.Workers, &MyAppWorker{})
-    jobsCfg.Queues[river.QueueDefault] = river.QueueConfig{MaxWorkers: 10}
-    jobsCfg.Schema = "host_jobs" // host-migrated namespace, never the billing schema
-    // With host-owned AuthKit, call auth.RegisterRiver(jobsCfg) and return its error here.
-    return nil // OpenRails validates this config, then constructs the client
-})
+jobs, err := riverkit.New(ctx, pool, &river.Config{
+    Schema: "host_jobs", // host-migrated; sharing public with billing is supported
+    Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 10}},
+}, rt.RiverJobs())
+// If using your own AuthKit instead of an attached control plane, include
+// auth.RiverJobs() as another contribution to this same call.
 if err != nil { return err }
 defer jobs.StopAndCancel(context.WithoutCancel(ctx))
 // With host-owned AuthKit, check auth.Start(ctx) now.

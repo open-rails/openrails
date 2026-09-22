@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/riverkit"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
@@ -93,15 +94,11 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 		_, err = pool.Exec(ctx, `INSERT INTO profiles.refresh_sessions(id,user_id,issuer,current_token_hash,expires_at) VALUES($1,$2::uuid,$3,$4,$5)`, row.id, user.ID, "https://river-compose.test", hash[:], row.expires)
 		require.NoError(t, err)
 	}
-	client, err = rt.BindRiver(ctx, pool, func(ctx context.Context, cfg *river.Config) error {
+	client, err = riverkit.New(ctx, pool, &river.Config{Schema: schema, Queues: map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: 2}, embed.QueueBilling: {MaxWorkers: 2}}}, rt.RiverJobs(), riverkit.NewContribution("host", func(_ context.Context, cfg *river.Config) error {
 		require.NotNil(t, cfg.Workers)
-		cfg.Schema = schema
 		sawBillingWorkers = true
-		require.NoError(t, river.AddWorkerSafely(cfg.Workers, &noopWorker{}))
-		cfg.Queues[river.QueueDefault] = river.QueueConfig{MaxWorkers: 2}
-		cfg.Queues[embed.QueueBilling] = river.QueueConfig{MaxWorkers: 2}
-		return nil
-	})
+		return river.AddWorkerSafely(cfg.Workers, &noopWorker{})
+	}, nil, nil))
 	require.NoError(t, err)
 	require.NoError(t, cp.Core().Start(ctx), "attached AuthKit maintenance was registered during binding")
 	_, err = controlplane.Attach(ctx, rt, controlplane.Options{})
@@ -200,6 +197,6 @@ func TestRiverFromHost_MissingPoolRefuses(t *testing.T) {
 	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}}, River: embed.RiverFromHost()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	_, err = rt.BindRiver(ctx, nil, nil)
+	_, err = riverkit.New(ctx, nil, nil, rt.RiverJobs())
 	require.ErrorContains(t, err, "pool is required")
 }

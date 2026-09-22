@@ -15,19 +15,8 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
-// buildRiverWorkers constructs the worker registry for River.
-func (r *Runtime) buildRiverWorkers(ctx context.Context) (*river.Workers, error) {
-	workers := river.NewWorkers()
-	// Standalone: per-merchant refresh jobs land on the dedicated bounded queue
-	// (#719) configured in buildRiverClient.
-	if err := r.addBillingWorkersToRegistry(ctx, workers, riverjobs.QueueProviderRefresh); err != nil {
-		return nil, err
-	}
-	return workers, nil
-}
-
 // addBillingWorkersToRegistry adds billing workers to an existing worker registry.
-// This is used both internally (buildRiverWorkers) and externally (AddBillingWorkersTo).
+// Both managed and host-owned RiverJobs contributions use this registry.
 // merchantRefreshQueue routes the #719 per-merchant refresh jobs: the bounded
 // QueueProviderRefresh in standalone, QueueBilling for embedded hosts (whose
 // river clients only configure that queue).
