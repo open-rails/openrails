@@ -299,7 +299,7 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 }
 
 func entitlementRecordFromModel(e *models.Entitlement) openrails.EntitlementRecord {
-	rec := openrails.EntitlementRecord{ID: e.ID.String(), CustomerID: openrails.CustomerID(e.CustomerID), Entitlement: e.Entitlement, StartAt: e.StartAt, EndAt: e.EndAt, SourceType: string(e.SourceType), RevokedAt: e.RevokedAt, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
+	rec := openrails.EntitlementRecord{ID: e.ID.String(), CustomerID: e.CustomerID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, EndAt: e.EndAt, SourceType: string(e.SourceType), RevokedAt: e.RevokedAt, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
 	if e.SourceID != nil {
 		source := openrails.SourceRef(string(e.SourceType), e.SourceID.String())
 		rec.SourceID = &source
@@ -362,7 +362,7 @@ func RevokeAdminEntitlement(r *httprequest.Request) {
 func serviceEntitlementRecordsFromService(entitlements []billingservice.EntitlementRecord) []ServiceEntitlementRecord {
 	result := make([]ServiceEntitlementRecord, 0, len(entitlements))
 	for _, e := range entitlements {
-		rec := ServiceEntitlementRecord{ID: e.ID.String(), CustomerID: openrails.CustomerID(e.CustomerID), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: e.SourceType, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
+		rec := ServiceEntitlementRecord{ID: e.ID.String(), CustomerID: e.CustomerID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: e.SourceType, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
 		if e.EndAt != nil {
 			rec.EndAt = e.EndAt
 		}

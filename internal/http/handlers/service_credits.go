@@ -165,7 +165,7 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(serviceBalanceResponse{
-		CustomerID:            openrails.CustomerID(snap.CustomerID),
+		CustomerID:            snap.CustomerID.String(),
 		Currency:              snap.Currency,
 		BillingMode:           snap.BillingMode,
 		BalanceAmount:         snap.BalanceAmount,
@@ -219,7 +219,7 @@ func ServiceRecordUsage(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "amount must be >= 0")
 		return
 	}
-	payer := servicePayer(req.CustomerID)
+	payer := servicePayer(customerIDParam(req.CustomerID))
 	if payer == nil {
 		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
@@ -361,11 +361,11 @@ func ServiceDepositCredits(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "amount must be > 0")
 		return
 	}
-	if req.CustomerID == nil || req.CustomerID.IsZero() {
+	if req.CustomerID == nil || customerIDParam(*req.CustomerID).IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
-	tenantSubjectID := billingidentity.CustomerID(req.CustomerID.UUID())
+	tenantSubjectID := billingidentity.CustomerID(customerIDParam(*req.CustomerID).UUID())
 	if !requireServiceCustomerScope(r, tenantSubjectID) {
 		return
 	}

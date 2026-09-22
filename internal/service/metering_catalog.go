@@ -109,7 +109,7 @@ func (s *Service) ListUsageMeterOverrides(
 	items := make([]UsageMeterOverrideDTO, 0, len(page.Items))
 	for _, override := range page.Items {
 		items = append(items, UsageMeterOverrideDTO{
-			CustomerID: openrails.CustomerID(override.CustomerID),
+			CustomerID: override.CustomerID.String(),
 			Subject:    override.Subject,
 			Email:      override.Email,
 			Price:      override.Price,
@@ -145,7 +145,7 @@ func usageMeterDTO(meter money.UsageMeter) UsageMeterDTO {
 	if meter.DefaultRateCard != nil {
 		dto.DefaultRateCard = &DefaultUsageRateCardDTO{
 			ID:         meter.DefaultRateCard.ID,
-			ProductID:  openrails.ProductID(meter.DefaultRateCard.ProductID),
+			ProductID:  openrails.ProductID(meter.DefaultRateCard.ProductID).String(),
 			ProductKey: meter.DefaultRateCard.ProductKey,
 			Filter:     meter.DefaultRateCard.Filter,
 			Price:      meter.DefaultRateCard.Price,
