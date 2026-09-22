@@ -64,3 +64,12 @@ func TestInitialReversalMetadataIsNarrowlyTyped(t *testing.T) {
 		}
 	}
 }
+
+func TestInitialSessionBindingIsTyped(t *testing.T) {
+	for _, raw := range []string{`"12345678-1234-4234-8234-123456789012"`, `"checkout_session:12345678-1234-4234-8234-123456789012"`, `"bad"`, `null`, `true`, `{}`} {
+		err := validateJSON("rail_intents.initial_membership.payload", `{"checkout_session_id":`+raw+`}`)
+		if (err == nil) != (raw == `"12345678-1234-4234-8234-123456789012"`) {
+			t.Fatalf("session binding %s: %v", raw, err)
+		}
+	}
+}

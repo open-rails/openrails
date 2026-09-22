@@ -616,7 +616,7 @@ func (s *CheckoutService) processNMISubscription(ctx context.Context, req *Check
 	}
 	fingerprint := saleRequestFingerprint(req, user, price.ID, target)
 	intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(accepted), func(in gen.OpenrailsRailIntent) error {
-		return ownsInitialMembership(in, user.ID, price.ID, fingerprint)
+		return ownsInitialMembership(in, user.ID, price.ID, fingerprint, nil)
 	})
 	if err != nil {
 		return nil, err
