@@ -31,19 +31,19 @@ type ProviderCutover struct {
 	Reason                string          `json:"reason"`
 }
 
-func (c *Client) PreviewProviderCutover(ctx context.Context, subscriptionID SubscriptionID, req ProviderCutoverRequest) (*ProviderCutover, error) {
+func (c *Client) PreviewProviderCutover(ctx context.Context, subscriptionID SubscriptionID, req ProviderCutoverRequest, requestOptions ...RequestOption) (*ProviderCutover, error) {
 	var out ProviderCutover
 	path, err := subscriptionPath(subscriptionID)
 	if err != nil {
 		return nil, err
 	}
-	if err := c.do(ctx, http.MethodPost, path+"/provider-cutover/preview", req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, path+"/provider-cutover/preview", req, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) CutoverProvider(ctx context.Context, subscriptionID SubscriptionID, key string, req ProviderCutoverRequest) (*ProviderCutover, error) {
+func (c *Client) CutoverProvider(ctx context.Context, subscriptionID SubscriptionID, key string, req ProviderCutoverRequest, requestOptions ...RequestOption) (*ProviderCutover, error) {
 	var out ProviderCutover
 	path, err := subscriptionPath(subscriptionID)
 	if err != nil {
@@ -52,13 +52,13 @@ func (c *Client) CutoverProvider(ctx context.Context, subscriptionID Subscriptio
 	if key == "" {
 		return nil, invalidErr("idempotency key required")
 	}
-	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/provider-cutover", req, &out, http.Header{"Idempotency-Key": {key}}); err != nil {
+	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/provider-cutover", req, &out, http.Header{"Idempotency-Key": {key}}, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) GetProviderCutover(ctx context.Context, subscriptionID SubscriptionID, key string) (*ProviderCutover, error) {
+func (c *Client) GetProviderCutover(ctx context.Context, subscriptionID SubscriptionID, key string, requestOptions ...RequestOption) (*ProviderCutover, error) {
 	var out ProviderCutover
 	path, err := subscriptionPath(subscriptionID)
 	if err != nil {
@@ -67,7 +67,7 @@ func (c *Client) GetProviderCutover(ctx context.Context, subscriptionID Subscrip
 	if key == "" {
 		return nil, invalidErr("idempotency key required")
 	}
-	if err := c.do(ctx, http.MethodGet, path+"/provider-cutover?idempotency_key="+url.QueryEscape(key), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, path+"/provider-cutover?idempotency_key="+url.QueryEscape(key), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

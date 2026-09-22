@@ -39,7 +39,7 @@ func TestCheckoutPurchaseAndActionsHaveDistinctRequests(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
-	c, err := NewRemote(server.URL, WithAPIKey("test"))
+	c, err := NewRemote(server.URL, WithAPIKey("test"), WithDefaultMerchant("fixture"))
 	require.NoError(t, err)
 	customer := CheckoutCustomerIdentity{ID: CustomerID(uuid.New()).String()}
 	key := "operation-key"

@@ -52,7 +52,7 @@ func TestClientDeadlineOwnership(t *testing.T) {
 				}
 				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("{}")), Header: http.Header{}}, nil
 			})
-			opts := []ClientOption{WithAPIKey("test-key"), WithHTTPClient(&http.Client{Transport: transport})}
+			opts := []ClientOption{WithAPIKey("test-key"), WithDefaultMerchant("fixture"), WithHTTPClient(&http.Client{Transport: transport})}
 			if mode == "explicit timeout" {
 				opts = append(opts, WithTimeout(20*time.Millisecond))
 			}

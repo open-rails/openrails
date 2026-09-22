@@ -25,6 +25,11 @@ import (
 // acquiring a merchant database connection.
 const BindingHeader = "X-OpenRails-Merchant-ID"
 
+// SlugHeader selects a merchant by public slug. Resolution and authorization
+// happen on the server; the selector grants no authority. It must not be
+// combined with BindingHeader on one request.
+const SlugHeader = "X-OpenRails-Merchant-Slug"
+
 // slugRe is the legal merchant-slug pattern: lowercase alnum + hyphens, no
 // leading/trailing hyphen, <=63 chars. The same slug is also the AuthKit
 // merchant permission-group instance slug in standalone.

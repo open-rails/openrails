@@ -37,7 +37,7 @@ func TestProductAccessStringResourceRequests(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewRemote(server.URL, WithAPIKey("test"))
+	client, err := NewRemote(server.URL, WithAPIKey("test"), WithDefaultMerchant("fixture"))
 	require.NoError(t, err)
 	single, err := client.ProductAccess.Check(t.Context(), &ProductAccessCheckParams{CustomerID: customer, ProductID: product})
 	require.NoError(t, err)

@@ -22,7 +22,7 @@ func TestClientErrorContract(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"type":"invalid_request_error","code":"idempotency_key_reused","message":"These terms differ","param":"amount","metadata":{"original_amount":9223372036854775807,"nested":{"minimum":-9223372036854775808}}}}`))
 	}))
 	defer server.Close()
-	client, err := NewRemote(server.URL, WithAPIKey("contract-test"))
+	client, err := NewRemote(server.URL, WithAPIKey("contract-test"), WithDefaultMerchant("fixture"))
 	require.NoError(t, err)
 	_, err = client.GetMerchantSettings(context.Background())
 	require.ErrorIs(t, err, ErrConflict)
