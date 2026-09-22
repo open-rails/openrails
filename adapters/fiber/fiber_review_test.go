@@ -35,6 +35,9 @@ func TestFiberReviewFullInventoryMountsNatively(t *testing.T) {
 	}
 	engine := fiber.New(fiber.Config{CaseSensitive: true, StrictRouting: true})
 	require.NoError(t, b.Mount(engine.Group("/api/pay")))
+	for _, route := range engine.GetRoutes() {
+		require.True(t, strings.HasPrefix(route.Name, RouteNamePrefix), route.Method+" "+route.Path)
+	}
 	gets := 0
 	for _, r := range b.routes {
 		if r.Method == http.MethodGet {
