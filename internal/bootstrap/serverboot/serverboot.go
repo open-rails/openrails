@@ -119,6 +119,11 @@ func NewServer(ctx context.Context, cfg *config.Config, opts *Options) (*Result,
 		optsValue(opts, func(o *Options) string { return o.NMIProbeV5BaseURL })); err != nil {
 		return nil, err
 	}
+	// Request handlers need durable producers even when another process runs
+	// the workers. Compose after all components attach and before publishing HTTP.
+	if err := application.Runtime.InitRiver(ctx); err != nil {
+		return nil, fmt.Errorf("bind standalone job producers: %w", err)
+	}
 
 	billingServer, err := server.New(server.Dependencies{
 		Config:                 application.Config,

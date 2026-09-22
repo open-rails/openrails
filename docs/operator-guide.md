@@ -100,7 +100,10 @@ OpenRails' workers converge state around that:
 merchant-secret backend, River producer, a locally managed River consumer, and
 auth). K8s aliases `/healthz` / `/readyz`. A standalone
 `run-server --no-workers` process remains live but not ready because it has no
-local job consumer. Embedded hosts wire the dependency checks into their own
+local job consumer. It still binds its request-side River producers before HTTP
+starts; a separate `run-worker` process contributes both billing and AuthKit
+lifecycle workers using the same database, issuer and manifest configuration.
+Embedded hosts wire the dependency checks into their own
 handler via `rt.Ready(ctx)`; a host-owned shared River client is checked
 separately with `CheckJobProgress` because its process state is outside
 OpenRails.

@@ -31,7 +31,7 @@ const trails: [string, { label: string; to?: string }[]][] = [
 
 export function AppLayout() {
   const { ready, bootError, me } = useAuth()
-  const { pathname } = useLocation()
+  const { pathname, hash } = useLocation()
 
   if (!ready) {
     return (
@@ -51,7 +51,12 @@ export function AppLayout() {
     )
   }
   if (!me) {
-    return <Navigate to="/login" replace />
+    // Provider callbacks may land at the console root. Carry the recovery
+    // fragment only until LoginPage consumes it and replaces browser history.
+    const recovery =
+      new URLSearchParams(hash.slice(1)).get("error") ===
+      "account_recovery_required"
+    return <Navigate to={`/login${recovery ? hash : ""}`} replace />
   }
 
   const trail =
