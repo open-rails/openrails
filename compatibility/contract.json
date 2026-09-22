@@ -5058,7 +5058,7 @@
     "internal/migrate/postgres/schema.go": "a399bef4859e1c1f8c1f952d279d8b70718d7aa7e8a1ce116cea49c9d5f6b090",
     "internal/migrate/postgres/schema_tokens.go": "db02b2faeecf3343919ebf74de33c7e72e918a00737d054e86dedb15ed5a8e6d",
     "internal/migrate/postgres/unique_scope_exemptions.go": "50f144594711a439c71aa95954b102a9ea0b423488a3e850dd6853fccf91ccd8",
-    "internal/modules/checkout/initial_membership_confirmation.go": "39c5bedc586fafe71532b8ea3fa19a0d8347da6019e9b1655d5aceaa11d56467",
+    "internal/modules/checkout/initial_membership_confirmation.go": "6dc9eccb014d577c56911710433188265a09e9eb7c0d1b8260ada68ae569777f",
     "internal/modules/checkout/session_service.go": "93ff759dd578fa13bd3c270f7325fa73ef1fe448a83090b63ccda1f26b9b3741",
     "internal/modules/checkout/stripe_engine_authentication.go": "9d29d4932050802be68007b3195885306faa9ce594b606f5e4af7ad7a3d6fe4d",
     "internal/modules/checkout/stripe_method_setup.go": "3e124eb2c1bf3efa59035e20b57be6fe8520009c46f9b817b6b82da1b8ad1748",

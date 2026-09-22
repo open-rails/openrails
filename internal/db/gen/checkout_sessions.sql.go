@@ -683,6 +683,24 @@ func (q *Queries) ListStaleCheckoutSessions(ctx context.Context, arg ListStaleCh
 	return items, nil
 }
 
+const lockCheckoutSessionForShare = `-- name: LockCheckoutSessionForShare :one
+SELECT id FROM openrails.checkout_sessions
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+FOR SHARE
+`
+
+type LockCheckoutSessionForShareParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) LockCheckoutSessionForShare(ctx context.Context, arg LockCheckoutSessionForShareParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockCheckoutSessionForShare, arg.MerchantID, arg.ID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const updateCheckoutSession = `-- name: UpdateCheckoutSession :execrows
 UPDATE openrails.checkout_sessions SET
     customer_id = $2,

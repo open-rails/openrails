@@ -112,8 +112,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 				return ErrCheckoutSessionValidation
 			}
 			// Lock the validated persisted quote while accepting its binding.
-			var locked uuid.UUID
-			if err := d.Qx(ctx).QueryRow(ctx, `SELECT id FROM openrails.checkout_sessions WHERE merchant_id=$1 AND id=$2 FOR SHARE`, mid.UUID(), *sessionID).Scan(&locked); err != nil {
+			if _, err := d.Gen(ctx).LockCheckoutSessionForShare(ctx, gen.LockCheckoutSessionForShareParams{MerchantID: mid.UUID(), ID: *sessionID}); err != nil {
 				return err
 			}
 			session, err := NewCheckoutSessionRepo(d).GetByID(ctx, *sessionID)

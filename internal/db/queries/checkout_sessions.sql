@@ -21,6 +21,11 @@ INSERT INTO openrails.checkout_sessions (
 SELECT * FROM openrails.checkout_sessions WHERE checkout_sessions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
+-- name: LockCheckoutSessionForShare :one
+SELECT id FROM openrails.checkout_sessions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+FOR SHARE;
+
 -- name: UpdateCheckoutSession :execrows
 UPDATE openrails.checkout_sessions SET
     customer_id = $2,
