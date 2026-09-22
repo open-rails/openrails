@@ -1218,6 +1218,7 @@ type OpenrailsSubscription struct {
 	ProductID             uuid.UUID
 	Status                OpenrailsSubscriptionStatus
 	Rail                  string
+	CollectionPolicy      string
 	RailSubscriptionID    string
 	UserEmail             *string
 	PaymentMethodID       *uuid.UUID
@@ -1249,7 +1250,6 @@ type OpenrailsSubscription struct {
 	DeletedAt           *time.Time
 	DestructiveRunID    *uuid.UUID
 	DestructiveRunClass *string
-	CollectionPolicy    string
 }
 
 // #773: a scheduled, applied, or canceled price move for one subscription. Applied at the subscription's first renewal on/after effective_at (v1: no proration/mid-cycle).

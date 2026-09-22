@@ -125,7 +125,7 @@ var profileJSON = object(map[string]jsonRule{"display_name": textValue, "logo_ur
 var contactsJSON = array(object(map[string]jsonRule{"name": textValue, "email": textValue}))
 var operatorResolutionJSON = object(map[string]jsonRule{"actor": textValue, "reason": textValue, "resolved_at": textValue, "step": textValue, "not_executed": booleanValue, "provider_reference": textValue})
 var invoiceLineJSON = array(object(map[string]jsonRule{"event_type": textValue, "amount": integerValue, "count": integerValue, "dimensions": dictionary(integerValue)}))
-var pspSettingsJSON = object(map[string]jsonRule{
+var pspSettingsJSON = object(map[string]jsonRule{"publishable_key": textValue,
 	"nmi_cutover_qualification": cutoverQualificationJSON, "tokenization_key": textValue, "tokenization_url": textValue, "rpc_provider": textValue, "recipient_wallet": textValue, "tokens": dictionary(object(map[string]jsonRule{"mint": textValue, "name": textValue}))})
 var rateJSON = object(map[string]jsonRule{
 	"model": textValue, "currency": textValue,

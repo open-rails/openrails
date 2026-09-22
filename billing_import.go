@@ -116,6 +116,10 @@ type DeclaredTransaction struct {
 
 // DeclaredSubscription is one subscription's facts, not classifications.
 type DeclaredSubscription struct {
+	// CollectionPolicy preserves the source agreement owner. Empty is provider;
+	// provider_dunning is qualified NMI schedule recovery. Engine agreements use
+	// canonical archive restore with their accepted operations, never this import.
+	CollectionPolicy   string     `json:"collection_policy,omitempty"`
 	SourceID           string     `json:"source_id"` // host's stable id: idempotency and audit
 	Customer           CustomerID `json:"customer"`
 	Price              PriceID    `json:"price"`

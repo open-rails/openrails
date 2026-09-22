@@ -445,6 +445,16 @@ func TestEngineCatalogDoesNotCreateProviderMirrors(t *testing.T) {
 	if len(links) != 0 || len(states) != 0 || len(pending) != 0 {
 		t.Fatalf("engine-only terms unexpectedly requested provider catalog work: %v %v %v", links, states, pending)
 	}
+	req.AutoRenew = false
+	req.AccessDurationHours = nil
+	req.PSPs = []string{"stripe"}
+	links, states, pending, err = s.resolveProviders(context.Background(), product, req, uuid.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(links) != 0 || len(states) != 0 || len(pending) != 0 {
+		t.Fatal("one-time engine price requested a Stripe catalog mirror")
+	}
 	req.PSPs = []string{"stripe"}
 	req.PSPLinks = map[string]map[string]string{"stripe": {models.RailKeyStripePriceID: "price_legacy"}}
 	links, _, _, err = s.resolveProviders(context.Background(), product, req, uuid.New())

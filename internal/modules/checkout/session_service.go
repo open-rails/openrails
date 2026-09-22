@@ -1969,11 +1969,9 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 		ExpiryDate:        payment.ExpiryDate,
 	}
 
-	if session.IdempotencyKey != nil {
-		if key := strings.TrimSpace(*session.IdempotencyKey); key != "" {
-			req.IdempotencyKey = fmt.Sprintf("checkout_session:%s", key)
-		}
-	}
+	// The accepted operation belongs to this persisted session. The caller's
+	// replay key resolves the session; it is not a session identity.
+	req.IdempotencyKey = "checkout_session:" + session.ID.String()
 	if session.Rail == models.RailStripe || session.Rail == models.RailCCBill {
 		req.CheckoutSessionID = openrails.CheckoutSessionID(session.ID).String()
 	}

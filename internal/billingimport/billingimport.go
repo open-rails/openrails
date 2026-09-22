@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -228,6 +229,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				return err
 			}
 			f := reconcile.DeclaredSubscriptionFact{
+				CollectionPolicy:   models.CollectionPolicy(s.CollectionPolicy),
 				SourceID:           s.SourceID,
 				Customer:           s.Customer.UUID(),
 				PriceID:            s.Price.UUID(),
