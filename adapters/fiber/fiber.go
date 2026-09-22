@@ -47,7 +47,9 @@ func (b *Bundle) Mount(target fiber.Router) error {
 		if route.Method == http.MethodGet && !heads[route.Path] {
 			methods = append(methods, http.MethodHead)
 		}
-		target.Add(methods, nativePath(route.Path), h).Name(RouteNamePrefix + route.Method + " " + route.Path)
+		for _, method := range methods {
+			target.Add([]string{method}, nativePath(route.Path), h).Name(RouteNamePrefix + method + " " + route.Path)
+		}
 	}
 	return nil
 }

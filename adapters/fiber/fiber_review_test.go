@@ -44,6 +44,7 @@ func TestFiberReviewFullInventoryMountsNatively(t *testing.T) {
 	require.Equal(t, len(b.routes)+gets, len(engine.GetRoutes(true)))
 	for _, route := range engine.GetRoutes(true) {
 		require.NotContains(t, route.Path, "*")
+		require.True(t, strings.HasPrefix(route.Name, RouteNamePrefix), route.Method+" "+route.Path)
 	}
 	for _, path := range []string{"/api/pay/v1/merchant/customers/entitlements:batch", "/api/pay/v1/merchant/customers/entitlementsXYZ"} {
 		req := httptest.NewRequest(http.MethodPost, path, nil)
