@@ -686,6 +686,7 @@ func (q *Queries) ListStaleCheckoutSessions(ctx context.Context, arg ListStaleCh
 const lockCheckoutSessionForShare = `-- name: LockCheckoutSessionForShare :one
 SELECT id FROM openrails.checkout_sessions
 WHERE merchant_id = $1::uuid AND id = $2::uuid
+  AND deleted_at IS NULL
 FOR SHARE
 `
 
