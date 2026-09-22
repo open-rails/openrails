@@ -37,7 +37,7 @@ func (s initialMembershipFixtureSecrets) Get(_ context.Context, owner merchant.I
 }
 
 func TestHyperSwitchInitialMembershipAtomicWorkflow(t *testing.T) {
-	for _, mode := range []string{"paid", "declined", "lost response", "wrong destination", "park before fence", "profile before fence"} {
+	for _, mode := range []string{"unsubmitted verify", "paid", "declined", "lost response", "wrong destination", "park before fence", "profile before fence"} {
 		t.Run(mode, func(t *testing.T) {
 			fx := newSubIntentFixture(t)
 			_, seedErr := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{"initial_engine_access":null}' WHERE id=(SELECT product_id FROM billing.prices WHERE id=$1)`, fx.priceID)
@@ -122,10 +122,35 @@ func TestHyperSwitchInitialMembershipAtomicWorkflow(t *testing.T) {
 			fx.runner.Registry = intents.NewRegistry(NewInitialMembershipIntentHandler(fx.svc, upgradeReceiptResolver{gateway}))
 			principal := billingauth.DelegatedPrincipal{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid.String(), SubjectID: terms.CustomerID.String()}
 			key := "initial-engine-" + uuid.NewString()
+			if mode == "unsubmitted verify" {
+				fx.runner.Config = &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
+			}
 			_, confirmationErr := fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal)
 			t.Logf("confirmation: %v", confirmationErr)
 			in, err := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, InitialMembershipIdempotencyKey(key))
 			require.NoError(t, err)
+			if mode == "unsubmitted verify" {
+				require.Equal(t, intents.StatusPending, in.Status)
+				store := intents.NewStore(fx.db)
+				_, claimed, err := store.ClaimByID(fx.ctx, in.ID, fx.svc.now(), fx.svc.now().Add(intents.DefaultLease))
+				require.NoError(t, err)
+				require.True(t, claimed)
+				require.NoError(t, store.MarkUnknown(fx.ctx, in.ID, fx.svc.now(), "executor stopped before submission", nil))
+				fx.runner.Config = fullModeConfig()
+				in, err = fx.runner.VerifyByID(fx.ctx, in.ID)
+				require.NoError(t, err)
+				t.Logf("HyperSwitch initial Verify writes=%d status=%s", posts.Load(), in.Status)
+				require.Equal(t, intents.StatusFailedRetryable, in.Status)
+				require.Zero(t, posts.Load(), "Verify cannot submit through HyperSwitch")
+				fx.runner.Config = &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
+				in, err = fx.runner.ExecuteByID(fx.ctx, in.ID)
+				require.NoError(t, err)
+				require.Equal(t, intents.StatusPending, in.Status)
+				require.Zero(t, posts.Load())
+				fx.runner.Config = fullModeConfig()
+				in, err = fx.runner.ExecuteByID(fx.ctx, in.ID)
+				require.NoError(t, err)
+			}
 			if mode == "wrong destination" || mode == "park before fence" || mode == "profile before fence" {
 				require.NotEqual(t, intents.StatusSucceeded, in.Status)
 				var progress map[string]any

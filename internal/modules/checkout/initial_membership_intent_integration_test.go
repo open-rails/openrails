@@ -462,3 +462,37 @@ func TestInitialFixtureRejectsRealProviderDestination(t *testing.T) {
 	client.QueryURL = "https://secure.nmi.com/api/query.php"
 	require.Error(t, validateInitialFixtureDestinations(client))
 }
+
+func TestUnsubmittedNMIInitialVerificationDefersToGatedExecute(t *testing.T) {
+	fx := newSubIntentFixture(t)
+	fx.prepare(t)
+	store := intents.NewStore(fx.db)
+	in, err := store.Enqueue(fx.ctx, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", PspID: fx.payload.Terms.PSPID, IntentType: TypeInitialMembership, PriceID: &fx.priceID, Payload: fx.payload, IdempotencyKey: InitialMembershipIdempotencyKey(fx.payload.CheckoutIdempotencyKey), NextAttemptAt: fx.payload.Terms.AcceptedAt, Origin: intents.OriginUser})
+	require.NoError(t, err)
+	_, claimed, err := store.ClaimByID(fx.ctx, in.ID, time.Now(), time.Now().Add(intents.DefaultLease))
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, store.MarkUnknown(fx.ctx, in.ID, time.Now(), "executor stopped before submission", nil))
+	cfg := fullModeConfig()
+	cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly
+	fx.runner.Config = cfg
+	verified, err := fx.runner.VerifyByID(fx.ctx, in.ID)
+	require.NoError(t, err)
+	t.Logf("native initial Verify writes=%d status=%s", fx.gateway.createCalls.Load(), verified.Status)
+	require.Equal(t, intents.StatusFailedRetryable, verified.Status)
+	require.EqualValues(t, 0, fx.gateway.createCalls.Load())
+	require.JSONEq(t, string(in.Payload), string(verified.Payload))
+	blocked, err := fx.runner.ExecuteByID(fx.ctx, in.ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusPending, blocked.Status)
+	require.EqualValues(t, 0, fx.gateway.createCalls.Load())
+	cfg.ProviderWriteMode = config.ProviderWriteModeFull
+	completed := fx.enqueueAndExecute(t)
+	require.Equal(t, in.ID, completed.ID)
+	require.Equal(t, intents.StatusSucceeded, completed.Status)
+	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+	replay := fx.enqueueAndExecute(t)
+	require.Equal(t, in.ID, replay.ID)
+	require.Equal(t, intents.StatusSucceeded, replay.Status)
+	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+}
