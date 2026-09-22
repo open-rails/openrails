@@ -42,6 +42,9 @@ func TestCatalogProductFilteringAndEffectivePagination(t *testing.T) {
  i<=1005 AND i%20=0,CASE WHEN i<=1005 THEN timestamptz '2026-01-01' ELSE timestamptz '2026-02-01' END
  FROM generate_series(1,2105) i`, fx.merchant)
 	foreign := newFindingsFixture(t)
+	foreign.rt.MoneyService = money.NewMoneyService(foreign.dbi, foreign.rt.Clock)
+	foreign.rt.ProductService = catalog.NewProductService(foreign.dbi)
+	foreign.rt.PriceService = catalog.NewPriceService(foreign.dbi)
 	foreign.exec(`INSERT INTO billing.products(id,merchant_id,key,display_name,tier_group) VALUES(uuidv7(),$1,'foreign-target','Foreign','target')`, foreign.merchant)
 	seen := map[uuid.UUID]bool{}
 	for offset := 0; ; {
