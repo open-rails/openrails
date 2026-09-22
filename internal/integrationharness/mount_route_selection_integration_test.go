@@ -75,9 +75,12 @@ func TestMountHandlerRouteSelection(t *testing.T) {
 	require.True(t, caps1.RouteGroups["webhooks"])
 	require.False(t, caps1.RouteGroups["customer"])
 	require.False(t, caps1.RouteGroups["payment_providers"])
-	require.False(t, caps1.Routes["billing_portal"])
-	require.False(t, caps1.Routes["solana"])
-	require.True(t, caps1.Routes["webhooks"])
+	require.Len(t, caps1.Features, 4)
+	require.False(t, caps1.Features["stripe_billing_portal"])
+	require.False(t, caps1.Features["solana_one_time_payments"])
+	require.False(t, caps1.Features["solana_subscription_management"])
+	require.False(t, caps1.Features["provider_credential_writes"])
+	require.NotContains(t, caps1.Features, "webhooks")
 
 	// Case 2: customer included -> /v1/me mounted, capabilities.customer=true.
 	h2, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, Customer: true, Authenticator: authn}, Prefix: "/billing", DelegatedAuthenticator: delegated})
@@ -92,14 +95,14 @@ func TestMountHandlerRouteSelection(t *testing.T) {
 
 func getCapabilities(t *testing.T, h http.Handler) struct {
 	RouteGroups map[string]bool `json:"route_groups"`
-	Routes      map[string]bool `json:"routes"`
+	Features    map[string]bool `json:"features"`
 } {
 	t.Helper()
 	w := doMounted(h, http.MethodGet, "/billing/v1/capabilities", nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var caps struct {
 		RouteGroups map[string]bool `json:"route_groups"`
-		Routes      map[string]bool `json:"routes"`
+		Features    map[string]bool `json:"features"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &caps), w.Body.String())
 	return caps

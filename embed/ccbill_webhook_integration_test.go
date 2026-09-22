@@ -111,12 +111,9 @@ func seedProfileUser(t *testing.T, ctx context.Context, dsn, username string) st
 	core := ccbillIdentity(t, ctx, dsn)
 	user, err := core.CreateUser(ctx, username+"@test.example.com", username)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		deleted, err := core.HardDeleteUsers(context.Background(), []string{user.ID})
-		require.NoError(t, err)
-		require.Len(t, deleted, 1)
-		require.NoError(t, deleted[0].Err)
-	})
+	// Each fixture has a unique username in dbtest's owned scratch database.
+	// Its final database cleanup also removes identities; no lifecycle jobs
+	// or privileged per-user deletion are needed during test teardown.
 	return user.ID
 }
 

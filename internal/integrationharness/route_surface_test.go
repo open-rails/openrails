@@ -19,10 +19,10 @@ import (
 )
 
 // TestStandaloneRouteSurface pins the standalone HTTP route table (#670): the
-// neutral net/http stack must serve EXACTLY the surface the retired gin stack
-// served. testdata/standalone_route_surface.txt is the golden dumped from the
-// last gin build (gin :param syntax converted to ServeMux {param}; the gin
-// exact-match "GET /" root is "GET /{$}"). The /auth/* control-plane routes are
+// neutral net/http stack must serve exactly the configured central surface.
+// testdata/standalone_route_surface.txt records the full configured surface;
+// its encrypted secret backend supports provider keys including Solana signers.
+// The /auth/* control-plane routes are
 // asserted against controlplane.RouteSpecs() dynamically, because that set is
 // owned by AuthKit and moves with its version — the assertion here is that
 // every spec is mounted under /auth, including the explicit HEAD mirrors that
@@ -39,6 +39,7 @@ func TestStandaloneRouteSurface(t *testing.T) {
 		// Pin the complete API-owned provider surface; host-owned mode omits mutations.
 		MerchantConfigSource: config.MerchantConfigSourceAPI,
 		SecretBackend:        config.SecretBackendDB,
+		Encryption:           &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 		ProviderWriteMode:    config.ProviderWriteModeFull,
 		Host:                 "127.0.0.1",
 		Port:                 0,
