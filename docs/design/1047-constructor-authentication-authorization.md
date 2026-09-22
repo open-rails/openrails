@@ -47,6 +47,8 @@ type Integration struct {
 
 The AuthKit adapter keeps the original verified claims in its request-scoped memo, not in a serializable token-claims bag. Authorization must match the supplied identity to that memo and reject absent/inconsistent verification. Do not expose a generic opaque `any` field or globally cache identity by token. Host-provided implementations are trusted application code; request JSON cannot construct an authenticated identity.
 
+Provider webhooks retain their provider signature/account verification, and capability-based checkout retains its own capability validation. The user authentication integration applies only where a route requires an application principal. A webhook-only/headless application does not need a user verifier; configuring user authentication must not put Stripe or other provider callbacks behind a user-JWT gate.
+
 Authentication errors yield401, denied permission403, and an unavailable live authority503. Do not silently grant on lookup failure or downgrade an invalid credential to anonymous access on protected routes.
 
 ### AuthKit integration
