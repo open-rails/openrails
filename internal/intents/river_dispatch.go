@@ -58,8 +58,9 @@ func (s *Store) PrepareDispatch(ctx context.Context, id uuid.UUID, now time.Time
 }
 
 // WakeOperation adds a prompt wakeup after a caller has qualified provider
-// evidence for this already accepted operation. It never changes authorization
-// or financial state. Do not deduplicate against a running/scheduled job: it may
+// evidence for this already accepted operation. Only an unknown result gets an
+// earlier verification time; authorization, financial status, and live leases
+// remain unchanged. Do not deduplicate against a running/scheduled job: it may
 // be completing an earlier terminal state or sleeping until an obsolete time.
 func (s *Store) WakeOperation(ctx context.Context, id uuid.UUID) error {
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -67,9 +68,13 @@ func (s *Store) WakeOperation(ctx context.Context, id uuid.UUID) error {
 		if err != nil {
 			return err
 		}
-		if OperationTerminal(row.Status) {
+		if row.Status != StatusUnknownNeedsVerify && row.Status != StatusInFlight {
 			return nil
 		}
-		return s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: row.MerchantID, IntentID: row.ID}, operationInsertOpts(time.Now()))
+		now := time.Now()
+		if _, err := s.db.NewWithPgxTx(tx).Gen(ctx).AdvanceRailIntentVerification(ctx, gen.AdvanceRailIntentVerificationParams{MerchantID: row.MerchantID, ID: row.ID, Now: now}); err != nil {
+			return err
+		}
+		return s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: row.MerchantID, IntentID: row.ID}, operationInsertOpts(now))
 	})
 }

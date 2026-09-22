@@ -12,6 +12,29 @@ import (
 	"github.com/google/uuid"
 )
 
+const advanceRailIntentVerification = `-- name: AdvanceRailIntentVerification :execrows
+UPDATE openrails.rail_intents
+SET next_attempt_at = LEAST(next_attempt_at, $1::timestamptz), updated_at = now()
+WHERE merchant_id = $2::uuid AND id = $3::uuid
+  AND status = 'unknown_needs_verify'
+`
+
+type AdvanceRailIntentVerificationParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// A qualified provider notification may advance a readback, never a write or
+// another executor's live lease. Admission and retry authorization are untouched.
+func (q *Queries) AdvanceRailIntentVerification(ctx context.Context, arg AdvanceRailIntentVerificationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, advanceRailIntentVerification, arg.Now, arg.MerchantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const claimDueRailIntents = `-- name: ClaimDueRailIntents :many
 
 WITH due AS (

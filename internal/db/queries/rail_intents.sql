@@ -760,3 +760,11 @@ SET status = 'unknown_needs_verify', claimed_until = NULL, next_attempt_at = sql
     last_failure_reason = 'executor lease expired; verify before retry', updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND status = 'in_flight' AND (claimed_until IS NULL OR claimed_until <= sqlc.arg(now)::timestamptz);
+
+-- A qualified provider notification may advance a readback, never a write or
+-- another executor's live lease. Admission and retry authorization are untouched.
+-- name: AdvanceRailIntentVerification :execrows
+UPDATE openrails.rail_intents
+SET next_attempt_at = LEAST(next_attempt_at, sqlc.arg(now)::timestamptz), updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND status = 'unknown_needs_verify';

@@ -43,7 +43,7 @@ func (s transactionAssertingInserter) InsertTx(ctx context.Context, tx pgx.Tx, a
 }
 
 func TestOperationAdmissionAtomicallyEnqueuesRiver(t *testing.T) {
-	for _, schema := range []string{"public", "host_operation_jobs"} {
+	for _, schema := range []string{"public", "host_operation_jobs", "openrails"} {
 		t.Run(schema, func(t *testing.T) {
 			ctx := t.Context()
 			m := seedIntentMerchant(t)
@@ -219,12 +219,42 @@ func TestOperationWakeDoesNotLoseEarlierScheduleOrCrossMerchant(t *testing.T) {
 	require.NoError(t, err)
 	err = store.WakeOperation(merchant.WithID(ctx, merchant.ID(other.id)), row.ID)
 	require.ErrorIs(t, err, pgx.ErrNoRows)
-	m.exec(t, "UPDATE billing.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
+	// Pending work is not accelerated by a notification.
 	require.NoError(t, store.WakeOperation(mctx, row.ID))
+	unchanged, err := store.Get(mctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, row.NextAttemptAt, unchanged.NextAttemptAt)
+	_, claimed, err := store.ClaimByID(mctx, row.ID, time.Now(), time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	require.True(t, claimed)
+	handler := &recordingIntentHandler{intentType: "test_operation"}
+	worker := ProviderOperationWorker{DB: d, Registry: intents.NewRegistry(handler)}
+	wakeErr := worker.Work(ctx, &river.Job[intents.OperationArgs]{Args: intents.OperationArgs{MerchantID: m.id, IntentID: row.ID}})
+	var snooze *river.JobSnoozeError
+	require.ErrorAs(t, wakeErr, &snooze)
+	require.LessOrEqual(t, snooze.Duration, time.Minute, "in-flight recovery follows lease expiry, not the original hour-long admission delay")
+	require.Zero(t, handler.executed)
+	require.Zero(t, handler.verified)
+	require.NoError(t, store.MarkUnknown(mctx, row.ID, time.Now().Add(time.Hour), "waiting for provider truth", nil))
+	before, err := store.Get(mctx, row.ID)
+	require.NoError(t, err)
+	require.True(t, before.NextAttemptAt.After(time.Now()))
+	require.NoError(t, store.WakeOperation(mctx, row.ID))
+	after, err := store.Get(mctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, after.Status)
+	require.False(t, after.NextAttemptAt.After(time.Now()))
 	var total, ready int
 	require.NoError(t, d.Pool().QueryRow(ctx, "SELECT count(*),count(*) FILTER (WHERE scheduled_at<=now()) FROM "+pgx.Identifier{config.RiverSchema, "river_job"}.Sanitize()+" WHERE args->>'intent_id'=$1", row.ID.String()).Scan(&total, &ready))
 	require.Equal(t, 2, total)
 	require.Equal(t, 1, ready, "earlier notification is not deduplicated into the sleeping job")
+	leased, ok, err := store.ClaimUnknownByID(mctx, row.ID, time.Now(), time.Now().Add(time.Minute))
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NoError(t, store.WakeOperation(mctx, row.ID))
+	stillLeased, err := store.Get(mctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, leased.ClaimedUntil, stillLeased.ClaimedUntil, "a webhook cannot steal the verifier's lease")
 }
 
 type pausedCompletionWorker struct {

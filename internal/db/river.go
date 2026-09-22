@@ -46,6 +46,15 @@ func (d *DB) InsertRiverJobTx(ctx context.Context, tx pgx.Tx, args river.JobArgs
 	if inserter == nil {
 		return fmt.Errorf("financial operation requires a bound River producer")
 	}
+	// River owns its SQL namespace. Unwrap only our schema adapter while
+	// retaining the exact host transaction/savepoint and connection.
+	for {
+		scoped, ok := tx.(schemaTx)
+		if !ok {
+			break
+		}
+		tx = scoped.Tx
+	}
 	_, err := inserter.InsertTx(ctx, tx, args, opts)
 	return err
 }

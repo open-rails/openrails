@@ -29,7 +29,8 @@ is being revived, or a scheduled job may be waiting for an obsolete later time.
 Suppressing the new wakeup can strand work. Duplicate wakeups are safe because the
 ledger's claims, provider idempotency, and submission evidence remain authoritative.
 `Store.WakeOperation` adds a prompt wakeup for an already accepted, scoped operation;
-it changes neither authorization nor financial state.
+it advances only an unknown result's verification time. It never changes financial
+status, write authorization, or a live execution lease.
 
 Retry, read-only/kill-switch holds, and operator resolution retain the original
 nonterminal job; it re-evaluates the committed state on its next wakeup. A new due
