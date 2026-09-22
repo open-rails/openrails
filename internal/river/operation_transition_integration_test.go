@@ -24,6 +24,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Worker-stop defers run before this cleanup; remove only this fixture's
+// JSON-addressed jobs before seedIntentMerchant removes its ledger rows.
+func seedTransitionMerchant(t *testing.T) intentMerchant {
+	t.Helper()
+	m := seedIntentMerchant(t)
+	t.Cleanup(func() {
+		_, err := m.pool.Exec(context.Background(), "DELETE FROM "+pgx.Identifier{config.RiverSchema, "river_job"}.Sanitize()+" WHERE args->>'merchant_id'=$1", m.id.String())
+		require.NoError(t, err)
+	})
+	return m
+}
+
 type inlineUnknownTransitionHandler struct{ entered, release chan struct{} }
 
 func (*inlineUnknownTransitionHandler) Type() string { return "test_inline_unknown" }
@@ -46,7 +58,7 @@ func (*inlineUnknownTransitionHandler) Backoff(int32) time.Duration { return tim
 func TestInlineUnknownTransitionRearmsSleepingRiverJob(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	m := seedIntentMerchant(t)
+	m := seedTransitionMerchant(t)
 	d := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
 	h := &inlineUnknownTransitionHandler{entered: make(chan struct{}), release: make(chan struct{})}
 	registry := intents.NewRegistry(h)
@@ -117,7 +129,7 @@ func TestOperationTransitionsAtomicallyCommitTheirWake(t *testing.T) {
 	for _, kind := range []string{"unknown", "retryable", "park", "submitted_park", "release"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
-			m := seedIntentMerchant(t)
+			m := seedTransitionMerchant(t)
 			d := dbtest.OpenOneConnAppDB(t)
 			owner := dbtest.SharedSuperuserPGXPool(t)
 			producer, err := river.NewClient(riverpgxv5.New(owner), &river.Config{Schema: config.RiverSchema})
@@ -130,9 +142,6 @@ func TestOperationTransitionsAtomicallyCommitTheirWake(t *testing.T) {
 			due := now.Add(17 * time.Minute)
 			row, err := store.Enqueue(scoped, intents.EnqueueParams{MerchantID: m.id, Provider: "nmi", PspID: psp, IntentType: "test_transition", Payload: map[string]string{"frozen": "accepted"}, IdempotencyKey: uuid.NewString(), Origin: intents.OriginSystem, NextAttemptAt: now.Add(time.Hour)})
 			require.NoError(t, err)
-			t.Cleanup(func() {
-				_, _ = owner.Exec(context.Background(), `DELETE FROM public.river_job WHERE args->>'intent_id'=$1`, row.ID.String())
-			})
 			if kind == "submitted_park" {
 				m.exec(t, `UPDATE billing.rail_intents SET intent_type='initial_membership',result_evidence='{"initial_submitted":true,"diagnostic":"accepted"}' WHERE id=$1`, row.ID)
 			}
@@ -305,7 +314,7 @@ func (h *rejectedOperatorHandler) Resolve(ctx context.Context, _ gen.OpenrailsRa
 func TestRejectedOperatorReleaseRearmsSleepingRiverJobs(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	m := seedIntentMerchant(t)
+	m := seedTransitionMerchant(t)
 	d := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
 	h := &rejectedOperatorHandler{entered: make(chan struct{}), release: make(chan struct{}), verifyEntered: make(chan struct{}), verifyRelease: make(chan struct{})}
 	registry := intents.NewRegistry(h)
@@ -406,7 +415,7 @@ func (*unresolvedCycleHandler) Backoff(int32) time.Duration { return 0 }
 func TestUnresolvedOperationDoesNotGrowActiveJobsEachCycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	m := seedIntentMerchant(t)
+	m := seedTransitionMerchant(t)
 	d := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
 	h := &unresolvedCycleHandler{fourth: make(chan struct{}), release: make(chan struct{})}
 	workers := river.NewWorkers()
@@ -460,7 +469,7 @@ func (*wakeFailureHandler) Backoff(int32) time.Duration { return time.Second }
 func TestFailedSuccessorInsertRetainsLastRecoverableRiverJob(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	m := seedIntentMerchant(t)
+	m := seedTransitionMerchant(t)
 	d := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
 	h := &wakeFailureHandler{}
 	workers := river.NewWorkers()
