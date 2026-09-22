@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -219,6 +220,11 @@ func (r *ProductAccessGrantRepo) CheckActiveProducts(ctx context.Context, userID
 }
 
 func (r *ProductAccessGrantRepo) ListActivePage(ctx context.Context, userID string, after uuid.UUID, limit int, at time.Time) ([]models.ProductAccessGrant, error) {
+	pageLimit, err := safecast.Convert[int32](limit)
+	if err != nil || pageLimit < 1 {
+		return nil, errors.New("invalid product access page limit")
+	}
+
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -227,7 +233,7 @@ func (r *ProductAccessGrantRepo) ListActivePage(ctx context.Context, userID stri
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListActiveOwnershipGrantsPage(ctx, gen.ListActiveOwnershipGrantsPageParams{MerchantID: mid.UUID(), CustomerID: customer, AfterID: after, PageLimit: int32(limit), AtTime: at})
+	rows, err := r.db.Gen(ctx).ListActiveOwnershipGrantsPage(ctx, gen.ListActiveOwnershipGrantsPageParams{MerchantID: mid.UUID(), CustomerID: customer, AfterID: after, PageLimit: pageLimit, AtTime: at})
 	if err != nil {
 		return nil, err
 	}
