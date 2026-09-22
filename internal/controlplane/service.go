@@ -451,7 +451,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		// its own namespace directly; the flat case needs no cross-namespace grant).
 		RBAC: rbac,
 		// Private standalone posture: no public user self-registration. Embedded
-		// bootstrap/core calls (CreatePermissionGroup/Genesis().AssignGroupRole/MintAPIKey)
+		// privileged Client calls (CreatePermissionGroup/AdminAssignGroupRole/MintAPIKey)
 		// are unaffected. Hosted products opt in with WithHostedPosture; no
 		// config/env knob opens this in standalone.
 		// Verification set EXPLICITLY: authkit v0.76.0 defaults unset to
@@ -469,8 +469,8 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	}
 
 	// Engine dependencies (ak#314 embedded.Deps). Host-owned senders (#738)
-	// and the app's Redis client (#753) are wired here once; authhttp.New
-	// below reuses the same Redis for its OIDC/SIWS caches and rate limiter.
+	// and the app's Redis client (#753) are wired here once; the HTTP
+	// constructor reuses that Redis for its OIDC/SIWS caches and rate limiter.
 	deps := authcore.Deps{
 		River:    authcore.RiverFromHost(),
 		Postgres: pool,
