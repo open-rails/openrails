@@ -209,10 +209,7 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Openr
 		return outcome
 	}
 	if intents.EvidenceString(in, "submitted_at") == "" {
-		if in.Rail == "stripe" {
-			return intents.Retryable("Stripe payment awaits gated execution")
-		}
-		return h.Execute(ctx, in)
+		return intents.Retryable("unsubmitted payment awaits gated execution")
 	}
 	reference := ""
 	if candidate, found, err := intents.LoadCollectionCandidate(in); err != nil {

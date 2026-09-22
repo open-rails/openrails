@@ -278,10 +278,7 @@ func (h *InitialMembershipIntentHandler) Verify(ctx context.Context, in gen.Open
 		return intents.Ambiguous("invalid initial submission fence")
 	}
 	if progress["initial_submitted"] != true {
-		if in.Rail == "stripe" {
-			return intents.Retryable("Stripe payment awaits gated execution")
-		}
-		return h.Execute(ctx, in)
+		return intents.Retryable("unsubmitted payment awaits gated execution")
 	}
 	if in.Rail == "stripe" {
 		return h.verifyStripeInitial(ctx, in, p)

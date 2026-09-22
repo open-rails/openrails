@@ -223,6 +223,37 @@ func TestEngineRecurringCollectionExecution(t *testing.T) {
 				_, err = store.Enqueue(e.ctx, intents.EnqueueParams{MerchantID: mid, Provider: "nmi", IntentType: subscriptions.TypeSubscriptionCollection, SubscriptionID: &sub, PspID: method.PspID, CustodianID: custodian, PriceID: &price, Payload: terms, IdempotencyKey: accepted.IdempotencyKey + ":other", NextAttemptAt: clock.Now(), Origin: intents.OriginSystem})
 				require.Error(t, err)
 			}
+			if mode == "on_time" {
+				store := intents.NewStore(e.db)
+				_, claimed, err := store.ClaimByID(e.ctx, e.op, clock.Now(), clock.Now().Add(intents.DefaultLease))
+				require.NoError(t, err)
+				require.True(t, claimed)
+				require.NoError(t, store.MarkUnknown(e.ctx, e.op, clock.Now(), "executor stopped before submission", nil))
+				e.plane.Config.ProviderWriteMode = config.ProviderWriteModeFull
+				verified, err := runner().VerifyByID(e.ctx, e.op)
+				require.NoError(t, err)
+				mu.Lock()
+				t.Logf("HyperSwitch renewal Verify writes=%d status=%s", len(forms), verified.Status)
+				mu.Unlock()
+				require.Equal(t, intents.StatusFailedRetryable, verified.Status)
+				mu.Lock()
+				require.Empty(t, forms, "Verify cannot submit the unsubmitted HyperSwitch renewal")
+				mu.Unlock()
+				e.plane.Config.ProviderWriteMode = config.ProviderWriteModeReadOnly
+				blocked, err := runner().ExecuteByID(e.ctx, e.op)
+				require.NoError(t, err)
+				require.Equal(t, intents.StatusPending, blocked.Status)
+				mu.Lock()
+				require.Empty(t, forms)
+				mu.Unlock()
+				e.plane.Config.ProviderWriteMode = config.ProviderWriteModeFull
+				completed, err := runner().ExecuteByID(e.ctx, e.op)
+				require.NoError(t, err)
+				require.Equal(t, intents.StatusSucceeded, completed.Status)
+				mu.Lock()
+				require.Len(t, forms, 1, "gated Execute submits exactly once")
+				mu.Unlock()
+			}
 			trigger := ""
 			if mode == "atomic_completion" {
 				trigger = "engine_terminal_" + uuid.NewString()[:8]
@@ -242,7 +273,7 @@ func TestEngineRecurringCollectionExecution(t *testing.T) {
 				require.NoError(t, err)
 				require.True(t, fresh)
 				require.NoError(t, store.Park(e.ctx, e.op, clock.Now(), "stale no-send result"))
-				require.Equal(t, intents.StatusInFlight, get().Status)
+				require.Equal(t, intents.StatusUnknownNeedsVerify, get().Status)
 				require.Error(t, store.MarkFailedRetryable(e.ctx, e.op, clock.Now(), "stale retry"))
 				clock.Advance(intents.DefaultLease + time.Second)
 			}
