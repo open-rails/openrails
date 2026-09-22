@@ -78,6 +78,28 @@ func TestCreatorProviderEnvironmentSurvivesDispatchAndSecondarySync(t *testing.T
 			require.Empty(t, adapter.targets, "read-only posture must suppress primary and secondary provider writes")
 			require.Len(t, pending, 2)
 			require.Equal(t, ProviderStatusPendingManualLink, states["named"].Status)
+
+			svc.rt.Config.ProviderWriteMode = config.ProviderWriteModeFull
+			svc.rt.Config.NewSubscriptionCollectionPolicy = "engine"
+			for _, recurring := range []bool{false, true} {
+				request.AutoRenew = recurring
+				if recurring {
+					hours := 720
+					request.AccessDurationHours = &hours
+				}
+				links, states, pending, err := svc.resolveProvidersWithAdapters(owner, product, request, uuid.New(), map[string]providerAdapter{"stripe": adapter})
+				require.NoError(t, err)
+				require.Empty(t, adapter.targets, "engine prices must skip every primary and secondary Stripe account")
+				require.Empty(t, links)
+				require.Empty(t, states)
+				require.Empty(t, pending)
+			}
+			request.PSPLinks = map[string]map[string]string{"named": {"price_id": "price_legacy"}}
+			links, _, _, err := svc.resolveProvidersWithAdapters(owner, product, request, uuid.New(), map[string]providerAdapter{"stripe": adapter})
+			require.NoError(t, err)
+			require.Equal(t, tc.environment+"-named"+suffix, links["named"]["account_id"])
+			require.Equal(t, []string{tc.environment + "-named" + suffix}, adapter.targets, "explicit legacy attachment must not fan out into new provider objects")
+			svc.rt.Config.NewSubscriptionCollectionPolicy = ""
 		})
 	}
 }
