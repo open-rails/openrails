@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/pgidentity"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -41,11 +42,11 @@ func (d *DB) ValidateRiverJobBinding(ctx context.Context, pool *pgxpool.Pool, sc
 	if schema == "" {
 		return fmt.Errorf("River binding requires its actual schema")
 	}
-	var exists bool
-	if err := pool.QueryRow(ctx, `SELECT pg_catalog.to_regclass($1) IS NOT NULL`, pgx.Identifier{schema, "river_job"}.Sanitize()).Scan(&exists); err != nil {
+	exists, err := gen.New(pool).RiverQueueTableExists(ctx, pgx.Identifier{schema, "river_job"}.Sanitize())
+	if err != nil {
 		return fmt.Errorf("River queue table: %w", err)
 	}
-	if !exists {
+	if exists == nil || !*exists {
 		return fmt.Errorf("River queue table is missing from schema %q", schema)
 	}
 	return nil

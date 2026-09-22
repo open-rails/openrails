@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/internal/db/gen"
 )
 
 var ErrDifferentDatabase = errors.New("PostgreSQL pools do not address the same physical database")
@@ -59,19 +60,20 @@ func RequireSameDatabase(ctx context.Context, first, second *pgxpool.Pool) (err 
 			err = errors.Join(err, fmt.Errorf("release database identity proof: %w", rollbackErr))
 		}
 	}()
-	var pid int32
-	var one, two bool
-	if err := tx.QueryRow(ctx, `SELECT pg_catalog.pg_backend_pid(), pg_catalog.pg_try_advisory_xact_lock($1::integer,$2::integer), pg_catalog.pg_try_advisory_xact_lock($3::integer,$4::integer)`, keys[0], keys[1], keys[2], keys[3]).Scan(&pid, &one, &two); err != nil {
+	// Keep SQLC on the actual witness transaction and observer pool. A
+	// schema-aware application DB wrapper would change this physical proof.
+	witness, err := gen.New(tx).AcquireDatabaseIdentityWitness(ctx, gen.AcquireDatabaseIdentityWitnessParams{
+		FirstClass: keys[0], FirstObject: keys[1], SecondClass: keys[2], SecondObject: keys[3],
+	})
+	if err != nil {
 		return fmt.Errorf("database identity proof: %w", err)
 	}
-	if !one || !two {
+	if !witness.FirstLocked || !witness.SecondLocked {
 		return errors.New("database identity proof keys are already held")
 	}
-	var same bool
-	err = second.QueryRow(ctx, `SELECT pg_catalog.count(*) = 2 FROM pg_catalog.pg_locks
- WHERE locktype='advisory' AND pid=$1 AND granted AND mode='ExclusiveLock' AND objsubid=2
- AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=pg_catalog.current_database())
- AND ((classid=$2::bigint::pg_catalog.oid AND objid=$3::bigint::pg_catalog.oid) OR (classid=$4::bigint::pg_catalog.oid AND objid=$5::bigint::pg_catalog.oid))`, pid, int64(keys[0]), int64(keys[1]), int64(keys[2]), int64(keys[3])).Scan(&same)
+	same, err := gen.New(second).ObserveDatabaseIdentityWitness(ctx, gen.ObserveDatabaseIdentityWitnessParams{
+		BackendPid: witness.BackendPid, FirstClass: int64(keys[0]), FirstObject: int64(keys[1]), SecondClass: int64(keys[2]), SecondObject: int64(keys[3]),
+	})
 	if err != nil {
 		return fmt.Errorf("observe database identity proof: %w", err)
 	}
