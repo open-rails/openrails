@@ -64,6 +64,8 @@ type FakeStripeGateway struct {
 	stored    map[string]storedStripeAnswer
 	requests  []StripeRequest
 	created   int
+
+	heldReadbacks map[string]bool // false until the scripted lost write lands
 }
 
 type storedStripeAnswer struct {
@@ -87,6 +89,24 @@ func (g *FakeStripeGateway) SetMode(mode StripeWriteMode) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.mode = mode
+}
+
+// HoldLostSubscriptionReadback keeps reads available for the initial price-change
+// preflight, then makes this subscription's read-back unavailable once its lost
+// write lands. Workers remain live, but cannot settle before the test observes
+// the pending response and replay. The returned function reveals the receipt.
+func (g *FakeStripeGateway) HoldLostSubscriptionReadback(id string) func() {
+	g.mu.Lock()
+	if g.heldReadbacks == nil {
+		g.heldReadbacks = make(map[string]bool)
+	}
+	g.heldReadbacks[id] = false
+	g.mu.Unlock()
+	return func() {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		delete(g.heldReadbacks, id)
+	}
 }
 
 // DeclareSubscription registers a live subscription billing priceID.
@@ -151,6 +171,10 @@ func (g *FakeStripeGateway) handle(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/v1/subscriptions/"):
 			if s, ok := g.subs[strings.TrimPrefix(r.URL.Path, "/v1/subscriptions/")]; ok {
+				if g.heldReadbacks[s.ID] {
+					stripeAnswer(w, http.StatusServiceUnavailable, map[string]any{"error": map[string]any{"message": "subscription read-back unavailable"}})
+					return
+				}
 				stripeAnswer(w, http.StatusOK, g.subscriptionJSON(s))
 				return
 			}
@@ -249,6 +273,11 @@ func (g *FakeStripeGateway) handle(w http.ResponseWriter, r *http.Request) {
 	body, _ := json.Marshal(answer)
 	g.stored[key] = storedStripeAnswer{status: http.StatusOK, body: body}
 	if mode == StripeWriteLostAfterLanding {
+		if id := strings.TrimPrefix(r.URL.Path, "/v1/subscriptions/"); strings.HasPrefix(r.URL.Path, "/v1/subscriptions/") {
+			if _, held := g.heldReadbacks[id]; held {
+				g.heldReadbacks[id] = true
+			}
+		}
 		stripeAnswer(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"message": "upstream failure after commit"}})
 		return
 	}
