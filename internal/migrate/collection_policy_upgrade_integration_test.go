@@ -70,7 +70,11 @@ func TestCollectionPolicyUpgradePreservesLegacyBook(t *testing.T) {
 	tables := []string{"subscriptions", "payment_methods", "products", "prices", "solana_subscriptions"}
 	before := map[string]json.RawMessage{}
 	for _, table := range tables {
-		before[table] = snapshot("SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM " + schema + "." + table + " t")
+		projection := "to_jsonb(t)"
+		if table == "payment_methods" {
+			projection += "-'rebill_driver'"
+		}
+		before[table] = snapshot("SELECT jsonb_agg(" + projection + " ORDER BY id) FROM " + schema + "." + table + " t")
 	}
 	for range 2 {
 		require.NoError(t, migrate.ApplyPostgresMigrations(ctx, pool, migrate.Options{Schema: schema, HostRiver: true}))
@@ -87,6 +91,9 @@ func TestCollectionPolicyUpgradePreservesLegacyBook(t *testing.T) {
 	require.JSONEq(t, string(ledger), string(afterLedger), "published migration records must never be restamped")
 	var provider, dunning, engine int
 	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FILTER(WHERE collection_policy='provider'),count(*) FILTER(WHERE collection_policy='provider_dunning'),count(*) FILTER(WHERE collection_policy='engine') FROM "+schema+".subscriptions").Scan(&provider, &dunning, &engine))
+	var oldColumns int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema=$1 AND table_name='payment_methods' AND column_name='rebill_driver'`, schema).Scan(&oldColumns))
+	require.Zero(t, oldColumns, "consumed per-card authority must not survive as a second policy")
 	require.Equal(t, 4, provider)
 	require.Equal(t, 1, dunning)
 	require.Equal(t, 1, engine)
