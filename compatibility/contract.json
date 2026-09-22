@@ -5085,7 +5085,7 @@
     "internal/http/handlers/self_spend_limits.go": "2c71d6190e68e50ac4f835f402d2226da5b967f249deec31c9962fad9555342d",
     "internal/http/handlers/self_usage_invoices.go": "e4b49498b7b025b6c5aeaa6a7d939d845a0179562ab4e3309768bd574087f3fd",
     "internal/http/handlers/service_admission.go": "353dcfaebdd8700ffdfcf5c49e4b58bfc02536ed47462d0fab25776dff91e679",
-    "internal/http/handlers/service_commerce.go": "ac4d856de2c74e1169de576e43761e1f832e50706227c98a7c00679848dc9ec4",
+    "internal/http/handlers/service_commerce.go": "28d31737d03cee531a6737ce0af1caaa76991281d974417580b01d7c51ad1bf8",
     "internal/http/handlers/service_credits.go": "61b585e43e7e42edac0bb94b75cf7f6dfb0bbc9aac3f91f9510077ba5d448e93",
     "internal/http/handlers/service_customers.go": "52fa526f1fda3781a294d20af1a304e84d0899e0a27956c90ba82c72e7d21f96",
     "internal/http/handlers/service_delinquency.go": "84f534d3d795b972762e065a42e653136b58da11cb51da911c90ed2b6f9e8788",
