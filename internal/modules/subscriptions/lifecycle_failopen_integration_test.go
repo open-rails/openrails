@@ -206,44 +206,6 @@ func (f *failopenFixture) create(t *testing.T, rail models.Rail) (*models.Subscr
 	return sub, procSubID
 }
 
-func TestResumeMembership_RollsBackStatusWhenAccessReopenFails(t *testing.T) {
-	f := newFailopenFixture(t, 30*24, true)
-	ctx := f.ctx()
-	sub, _ := f.create(t, models.RailStripe)
-	require.NoError(t, f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
-		SubscriptionID: &sub.ID,
-		CancelType:     models.CancelTypeUser,
-		RevokeAccess:   false,
-	}))
-
-	cancelled := f.loadSub(t, sub.ID)
-	require.Equal(t, models.StatusCancelled, cancelled.Status)
-	windows := f.windows(t, sub.ID, string(models.EntitlementSourceSubscription))
-	require.Len(t, windows, 1)
-	require.NotNil(t, windows[0].EndAt)
-	boundedAt := windows[0].EndAt.UTC()
-
-	f.failLifecycleEntitlements(failingLifecycleEntitlements{resumeErr: errors.New("injected resume failure")})
-	_, err := f.lifecycle.ResumeMembership(ctx, &ResumeMembershipParams{SubscriptionID: sub.ID})
-	require.ErrorContains(t, err, "injected resume failure")
-
-	stillCancelled := f.loadSub(t, sub.ID)
-	require.Equal(t, models.StatusCancelled, stillCancelled.Status)
-	require.NotNil(t, stillCancelled.CancelledAt)
-	windows = f.windows(t, sub.ID, string(models.EntitlementSourceSubscription))
-	require.Len(t, windows, 1)
-	require.NotNil(t, windows[0].EndAt)
-	require.Equal(t, boundedAt, windows[0].EndAt.UTC(), "access window must roll back with the status write")
-
-	f.failLifecycleEntitlements(failingLifecycleEntitlements{})
-	resumed, err := f.lifecycle.ResumeMembership(ctx, &ResumeMembershipParams{SubscriptionID: sub.ID})
-	require.NoError(t, err)
-	require.Equal(t, models.StatusActive, resumed.Status)
-	windows = f.windows(t, sub.ID, string(models.EntitlementSourceSubscription))
-	require.Len(t, windows, 1)
-	require.Nil(t, windows[0].EndAt, "a successful retry must restore standing access")
-}
-
 func TestRenewMembership_DowngradeRevokeFailureRollsBack(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
 	ctx := f.ctx()
@@ -335,368 +297,225 @@ func TestRenewMembership_DowngradeRevokeFailureRollsBack(t *testing.T) {
 	require.NotNil(t, windows[0].RevokedAt, "the successful retry must remove the old-tier entitlement")
 }
 
-// TestFailOpen_WebhookSilence: an active auto-renew sub gets ONE standing
-// window (end_at NULL); the period end passing with total webhook silence
-// changes nothing; parking `unknown` (what the converge sweep does) changes
-// nothing; a provider-pull renewal resolution advances paid-through with access
-// continuous throughout. Also covers "converge never runs at all": before any
-// sweep the window is already open-ended, so access holds trivially.
-func TestFailOpen_WebhookSilence(t *testing.T) {
+// One paid lifecycle covers silence, renewal/replay, grant projection and
+// provider reconciliation without repeatedly rebuilding the same merchant.
+func TestSubscriptionAccess_RenewalAndRecovery(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
 	ctx := f.ctx()
-	sub, _ := f.create(t, models.RailNMI)
-
-	paid := f.windows(t, sub.ID, "subscription")
-	require.Len(t, paid, 1)
-	assert.Nil(t, paid[0].EndAt, "auto-renew activation must project a STANDING window (end_at NULL)")
-	assert.Empty(t, f.windows(t, sub.ID, "grace"), "no #368 grace window is pre-appended anymore")
-
-	// The grant ledger stays bounded: the activation grant carries the paid period.
-	var grantEnds *time.Time
-	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT ends_at FROM billing.grants WHERE source_type='subscription' AND source_id=$1 AND event='grant'`,
-		sub.ID.String()).Scan(&grantEnds))
-	require.NotNil(t, grantEnds, "the activation grant is bounded to the paid period")
-
-	// Webhook silence: no renewal arrives, the period end passes (queried via
-	// the at-parameter — no machinery ran). Access is STILL live.
-	farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
-	assert.True(t, f.entitledAt(t, farFuture), "access must survive total webhook silence past period end")
-
-	// The converge sweep parks the sub `unknown` (no revoke on a guess) —
-	// access still live.
+	sub, remoteID := f.create(t, models.RailNMI)
+	farFuture := time.Now().UTC().Add(180 * 24 * time.Hour)
+	standing := func() {
+		t.Helper()
+		windows := f.windows(t, sub.ID, "subscription")
+		require.Len(t, windows, 1, "period grants must project to one standing window")
+		require.Nil(t, windows[0].EndAt)
+		require.Nil(t, windows[0].RevokedAt)
+		require.Nil(t, windows[0].DeletedAt)
+		assert.Empty(t, f.windows(t, sub.ID, "grace"))
+		assert.True(t, f.entitledAt(t, farFuture), "webhook silence cannot terminate paid access")
+	}
+	grantCount := func(want int) {
+		t.Helper()
+		var count int
+		require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM billing.grants
+			WHERE source_type='subscription' AND source_id=$1 AND event='grant' AND ends_at IS NOT NULL`,
+			sub.ID.String()).Scan(&count))
+		assert.Equal(t, want, count, "each paid period records one bounded grant")
+	}
+	standing()
+	grantCount(1)
+	require.NoError(t, f.lifecycle.RenewMembership(ctx, &RenewMembershipParams{
+		Rail: models.RailNMI, RailSubscriptionID: remoteID, TransactionID: "renew_" + uuid.NewString(),
+	}))
+	standing()
+	grantCount(2)
+	renewed := f.loadSub(t, sub.ID)
+	require.NoError(t, f.lifecycle.RenewMembership(ctx, &RenewMembershipParams{
+		Rail: models.RailNMI, RailSubscriptionID: remoteID, TransactionID: "replay_" + uuid.NewString(),
+		CurrentPeriodStartsAt: renewed.CurrentPeriodStartsAt, CurrentPeriodEndsAt: renewed.CurrentPeriodEndsAt,
+	}))
+	grantCount(2)
+	missing, err := f.q.ListLiveGrantsMissingEffects(ctx, gen.ListLiveGrantsMissingEffectsParams{
+		MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: &renewed.CustomerID,
+	})
+	require.NoError(t, err)
+	assert.Empty(t, missing, "derive detection must agree with the standing projection")
+	require.NoError(t, f.dbi.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := dbtest.Queries(tx)
+		all, err := q.ListGrantsByCustomer(ctx, gen.ListGrantsByCustomerParams{
+			MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: renewed.CustomerID,
+		})
+		if err != nil {
+			return err
+		}
+		ledger := grants.New(q, dbtest.TestMerchantID.UUID())
+		for _, grant := range all {
+			if err := ledger.MaterializeGrant(ctx, grant); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	standing()
 	require.NoError(t, f.lifecycle.ApplyLocalUnknown(ctx, f.dbi, f.loadSub(t, sub.ID)))
 	require.Equal(t, models.StatusUnknown, f.loadSub(t, sub.ID).Status)
-	assert.True(t, f.entitledAt(t, farFuture), "parking unknown must not touch access")
-
-	// Provider pull resolves: verified renewal. Paid-through advances; access continuous.
-	newEnd := time.Now().UTC().Add(60 * 24 * time.Hour).Truncate(time.Second)
+	standing()
+	newEnd := time.Now().UTC().Add(120 * 24 * time.Hour).Truncate(time.Second)
 	require.NoError(t, f.lifecycle.ResolveUnknownSubscription(ctx, f.dbi, f.loadSub(t, sub.ID), ResolveRenewed, &newEnd, time.Now().UTC()))
 	resolved := f.loadSub(t, sub.ID)
 	require.Equal(t, models.StatusActive, resolved.Status)
 	require.NotNil(t, resolved.CurrentPeriodEndsAt)
-	assert.WithinDuration(t, newEnd, *resolved.CurrentPeriodEndsAt, time.Second, "paid-through fact advanced")
-	assert.True(t, f.entitledAt(t, farFuture), "access continuous across silence -> unknown -> renewed")
+	assert.WithinDuration(t, newEnd, *resolved.CurrentPeriodEndsAt, time.Second)
+	standing()
+}
 
-	// Still exactly one live subscription window — the standing one.
-	live := 0
-	for _, w := range f.windows(t, sub.ID, "subscription") {
-		if w.RevokedAt == nil && w.DeletedAt == nil {
-			live++
-			assert.Nil(t, w.EndAt)
-		}
+// Cancellation and either resume entrypoint must commit status and access
+// together. Inject failure at the real transaction's entitlement boundary.
+func TestSubscriptionAccess_CancelAndResume(t *testing.T) {
+	for _, rail := range []models.Rail{models.RailNMI, models.RailStripe} {
+		t.Run(string(rail), func(t *testing.T) {
+			f := newFailopenFixture(t, 30*24, true)
+			ctx := f.ctx()
+			sub, remoteID := f.create(t, rail)
+			created := f.loadSub(t, sub.ID)
+			require.NotNil(t, created.CurrentPeriodEndsAt)
+			periodEnd := created.CurrentPeriodEndsAt.UTC()
+			cancel := &CancelMembershipParams{SubscriptionID: &sub.ID, CancelType: models.CancelTypeUser}
+			injected := errors.New("access write failed")
+			f.failLifecycleEntitlements(failingLifecycleEntitlements{boundErr: injected})
+			require.ErrorIs(t, f.lifecycle.CancelMembership(ctx, cancel), injected)
+			require.Equal(t, models.StatusActive, f.loadSub(t, sub.ID).Status)
+			windows := f.windows(t, sub.ID, "subscription")
+			require.Len(t, windows, 1)
+			require.Nil(t, windows[0].EndAt, "failed cancel leaves standing access")
+			f.lifecycle.entitlementServiceFactory = nil
+			require.NoError(t, f.lifecycle.CancelMembership(ctx, cancel))
+			windows = f.windows(t, sub.ID, "subscription")
+			require.Len(t, windows, 1)
+			require.Nil(t, windows[0].RevokedAt)
+			require.NotNil(t, windows[0].EndAt)
+			boundedAt := windows[0].EndAt.UTC()
+			assert.WithinDuration(t, periodEnd, boundedAt, time.Second)
+			assert.True(t, f.entitledAt(t, periodEnd.Add(-time.Minute)))
+			assert.False(t, f.entitledAt(t, periodEnd.Add(time.Minute)))
+			// Provider-owned NMI cancellation is not locally resumable; its
+			// verified-provider reactivation uses the separate entrypoint below.
+			if rail == models.RailStripe {
+				f.failLifecycleEntitlements(failingLifecycleEntitlements{resumeErr: injected})
+				_, err := f.lifecycle.ResumeMembership(ctx, &ResumeMembershipParams{SubscriptionID: sub.ID})
+				require.ErrorIs(t, err, injected)
+				cancelled := f.loadSub(t, sub.ID)
+				require.Equal(t, models.StatusCancelled, cancelled.Status)
+				require.NotNil(t, cancelled.CancelledAt)
+				windows = f.windows(t, sub.ID, "subscription")
+				require.Len(t, windows, 1)
+				require.NotNil(t, windows[0].EndAt)
+				require.Equal(t, boundedAt, windows[0].EndAt.UTC(), "resume failure rolls back the window")
+				f.lifecycle.entitlementServiceFactory = nil
+				resumed, err := f.lifecycle.ResumeMembership(ctx, &ResumeMembershipParams{SubscriptionID: sub.ID})
+				require.NoError(t, err)
+				require.Equal(t, models.StatusActive, resumed.Status)
+				windows = f.windows(t, sub.ID, "subscription")
+				require.Len(t, windows, 1)
+				require.Nil(t, windows[0].EndAt)
+				require.NoError(t, f.lifecycle.CancelMembership(ctx, cancel))
+			}
+			require.Equal(t, models.StatusCancelled, f.loadSub(t, sub.ID).Status)
+			windows = f.windows(t, sub.ID, "subscription")
+			require.Len(t, windows, 1)
+			require.NotNil(t, windows[0].EndAt, "reactivation must reopen a bounded window")
+			assert.Equal(t, boundedAt, windows[0].EndAt.UTC())
+			_, err := f.lifecycle.ReactivateMembership(ctx, &ReactivateMembershipParams{
+				Rail: rail, RailSubscriptionID: remoteID, CurrentPeriodEndsAt: created.CurrentPeriodEndsAt,
+				AllowTerminalReactivation: true,
+			})
+			require.NoError(t, err)
+			windows = f.windows(t, sub.ID, "subscription")
+			require.Len(t, windows, 1)
+			assert.Nil(t, windows[0].EndAt)
+			assert.Nil(t, windows[0].RevokedAt)
+			assert.Nil(t, windows[0].DeletedAt)
+			assert.True(t, f.entitledAt(t, time.Now().UTC().Add(90*24*time.Hour)))
+		})
 	}
-	assert.Equal(t, 1, live, "one standing window, no per-period appends")
 }
 
-// TestFailOpen_RenewalRecordsPeriodGrantNotWindow: a renewal extends the
-// paid-through FACT and appends a bounded per-period grant, but the projection
-// stays one standing window (no per-period window appends, GIST intact).
-// Renewal replay appends nothing (idempotent). The derive-1 missing-effects
-// detection agrees the per-period grants are satisfied by the standing window.
-func TestFailOpen_RenewalRecordsPeriodGrantNotWindow(t *testing.T) {
-	f := newFailopenFixture(t, 30*24, true)
-	ctx := f.ctx()
-	sub, procSubID := f.create(t, models.RailNMI)
-
-	require.NoError(t, f.lifecycle.RenewMembership(ctx, &RenewMembershipParams{
-		Rail:               models.RailNMI,
-		RailSubscriptionID: procSubID,
-		TransactionID:      "txn_renew_" + uuid.New().String(),
-	}))
-
-	var liveWindows []failopenWindow
-	for _, w := range f.windows(t, sub.ID, "subscription") {
-		if w.RevokedAt == nil && w.DeletedAt == nil {
-			liveWindows = append(liveWindows, w)
-		}
+func TestSubscriptionAccess_ImmediateClosureIsAtomic(t *testing.T) {
+	injected := errors.New("access write failed")
+	for _, tc := range []struct {
+		name    string
+		failure failingLifecycleEntitlements
+		close   func(*failopenFixture, uuid.UUID) error
+	}{
+		{"user", failingLifecycleEntitlements{revokeSourcesErr: injected}, func(f *failopenFixture, id uuid.UUID) error {
+			return f.lifecycle.CancelMembership(f.ctx(), &CancelMembershipParams{SubscriptionID: &id, CancelType: models.CancelTypeUser, RevokeAccess: true})
+		}},
+		{"chargeback", failingLifecycleEntitlements{revokeSourcesErr: injected}, func(f *failopenFixture, id uuid.UUID) error {
+			return f.lifecycle.CancelMembership(f.ctx(), &CancelMembershipParams{SubscriptionID: &id, CancelType: models.CancelTypeChargeback, RevokeAccess: true})
+		}},
+		{"expired", failingLifecycleEntitlements{revokeErr: injected}, func(f *failopenFixture, id uuid.UUID) error {
+			return f.lifecycle.ExpireMembership(f.ctx(), id)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFailopenFixture(t, 30*24, true)
+			sub, _ := f.create(t, models.RailNMI)
+			farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
+			f.failLifecycleEntitlements(tc.failure)
+			require.ErrorIs(t, tc.close(f, sub.ID), injected)
+			require.Equal(t, models.StatusActive, f.loadSub(t, sub.ID).Status)
+			assert.True(t, f.entitledAt(t, farFuture))
+			f.lifecycle.entitlementServiceFactory = nil
+			require.NoError(t, tc.close(f, sub.ID))
+			require.Equal(t, models.StatusCancelled, f.loadSub(t, sub.ID).Status)
+			windows := f.windows(t, sub.ID, "subscription")
+			require.NotEmpty(t, windows)
+			for _, w := range windows {
+				assert.True(t, w.RevokedAt != nil || w.DeletedAt != nil)
+			}
+			assert.False(t, f.entitledAt(t, time.Now().UTC().Add(time.Minute)))
+			assert.False(t, f.entitledAt(t, farFuture))
+		})
 	}
-	require.Len(t, liveWindows, 1, "renewal must NOT append a second window")
-	assert.Nil(t, liveWindows[0].EndAt, "the standing window stays open")
-
-	var grantCount int
-	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT count(*) FROM billing.grants WHERE source_type='subscription' AND source_id=$1 AND event='grant' AND ends_at IS NOT NULL`,
-		sub.ID.String()).Scan(&grantCount))
-	assert.Equal(t, 2, grantCount, "activation + renewal each record a bounded per-period grant")
-
-	// Replay the same renewal period: covered branch + grant idempotency.
-	renewed := f.loadSub(t, sub.ID)
-	require.NoError(t, f.lifecycle.RenewMembership(ctx, &RenewMembershipParams{
-		Rail:                  models.RailNMI,
-		RailSubscriptionID:    procSubID,
-		CurrentPeriodStartsAt: renewed.CurrentPeriodStartsAt,
-		CurrentPeriodEndsAt:   renewed.CurrentPeriodEndsAt,
-		TransactionID:         "txn_renew_replay_" + uuid.New().String(),
-	}))
-	require.NoError(t, f.pool.QueryRow(ctx,
-		`SELECT count(*) FROM billing.grants WHERE source_type='subscription' AND source_id=$1 AND event='grant' AND ends_at IS NOT NULL`,
-		sub.ID.String()).Scan(&grantCount))
-	assert.Equal(t, 2, grantCount, "a replayed period appends no grant")
-
-	// DERIVE parity: no per-period grant is reported as missing its effect —
-	// the standing window satisfies them (detection mirrors MaterializeGrant).
-	customerID := f.loadSub(t, sub.ID).CustomerID
-	missing, err := f.q.ListLiveGrantsMissingEffects(f.ctx(), gen.ListLiveGrantsMissingEffectsParams{
-		MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: &customerID,
-	})
-	require.NoError(t, err)
-	assert.Empty(t, missing, "per-period grants are satisfied by the standing window")
 }
 
-// TestFailOpen_UserCancelClosesAtPeriodEnd: a user cancel writes the closure IN
-// ADVANCE at the known period end — the end is already on disk, so a dead
-// system cannot extend a cancelled sub. Access ends exactly at period end.
-func TestFailOpen_UserCancelClosesAtPeriodEnd(t *testing.T) {
-	f := newFailopenFixture(t, 30*24, true)
-	ctx := f.ctx()
-	sub, _ := f.create(t, models.RailNMI)
-	created := f.loadSub(t, sub.ID)
-	require.NotNil(t, created.CurrentPeriodEndsAt)
-	periodEnd := created.CurrentPeriodEndsAt.UTC()
-
-	require.NoError(t, f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
-		SubscriptionID: &sub.ID,
-		CancelType:     models.CancelTypeUser,
-		RevokeAccess:   false,
-	}))
-
-	paid := f.windows(t, sub.ID, "subscription")
-	require.Len(t, paid, 1)
-	require.Nil(t, paid[0].RevokedAt, "period-end cancel keeps the paid runway")
-	require.NotNil(t, paid[0].EndAt, "closure must be written on disk at cancel time")
-	assert.WithinDuration(t, periodEnd, paid[0].EndAt.UTC(), time.Second, "closure = the known period end")
-
-	assert.True(t, f.entitledAt(t, periodEnd.Add(-time.Minute)), "runway access until period end")
-	assert.False(t, f.entitledAt(t, periodEnd.Add(time.Minute)), "access ends exactly at the closure")
-}
-
-// TestFailOpen_ImmediateCancelRevokesNow: an immediate revoke closes access now.
-func TestFailOpen_ImmediateCancelRevokesNow(t *testing.T) {
-	f := newFailopenFixture(t, 30*24, true)
-	ctx := f.ctx()
-	sub, _ := f.create(t, models.RailNMI)
-
-	require.NoError(t, f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
-		SubscriptionID: &sub.ID,
-		CancelType:     models.CancelTypeUser,
-		RevokeAccess:   true,
-	}))
-	for _, w := range f.windows(t, sub.ID, "subscription") {
-		assert.True(t, w.RevokedAt != nil || w.DeletedAt != nil, "immediate cancel revokes the standing window")
+func TestSubscriptionAccess_DunningExhaustion(t *testing.T) {
+	for _, hours := range []int32{24, 30 * 24} {
+		t.Run((time.Duration(hours) * time.Hour).String(), func(t *testing.T) {
+			f := newFailopenFixture(t, hours, true)
+			ctx := f.ctx()
+			sub, _ := f.create(t, models.RailNMI)
+			farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
+			failure := &FailMembershipParams{Rail: models.RailNMI, SubscriptionID: &sub.ID, AttemptRecorded: true}
+			maxFailures := collection.MaxFailures(int(hours))
+			if hours == 24 {
+				require.Equal(t, 1, maxFailures, "daily cycle must not inherit monthly retries")
+			}
+			for i := 1; i < maxFailures; i++ {
+				require.NoError(t, f.lifecycle.FailMembership(ctx, failure))
+				require.Equal(t, models.StatusPastDue, f.loadSub(t, sub.ID).Status)
+				assert.True(t, f.entitledAt(t, farFuture))
+				assert.Empty(t, f.windows(t, sub.ID, "grace"))
+			}
+			before := f.loadSub(t, sub.ID)
+			injected := errors.New("entitlement listing failed")
+			f.failLifecycleEntitlements(failingLifecycleEntitlements{listErr: injected})
+			require.ErrorIs(t, f.lifecycle.FailMembership(ctx, failure), injected)
+			require.Equal(t, before.Status, f.loadSub(t, sub.ID).Status)
+			assert.True(t, f.entitledAt(t, farFuture))
+			f.lifecycle.entitlementServiceFactory = nil
+			require.NoError(t, f.lifecycle.FailMembership(ctx, failure))
+			terminal := f.loadSub(t, sub.ID)
+			require.Equal(t, models.StatusCancelled, terminal.Status)
+			require.NotNil(t, terminal.CancelType)
+			assert.Equal(t, models.CancelTypeExpired, *terminal.CancelType)
+			assert.Nil(t, terminal.NextRetryAt)
+			for _, w := range f.windows(t, sub.ID, "subscription") {
+				assert.True(t, w.RevokedAt != nil || w.DeletedAt != nil || (w.EndAt != nil && !w.EndAt.After(time.Now().UTC())))
+			}
+			assert.False(t, f.entitledAt(t, farFuture))
+		})
 	}
-	assert.False(t, f.entitledAt(t, time.Now().UTC().Add(time.Minute)))
-}
-
-func TestFailOpen_ImmediateCancelRollsBackWhenRevocationFails(t *testing.T) {
-	f := newFailopenFixture(t, 30*24, true)
-	ctx := f.ctx()
-	sub, _ := f.create(t, models.RailNMI)
-	farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
-
-	injected := errors.New("injected entitlement revocation failure")
-	f.failLifecycleEntitlements(failingLifecycleEntitlements{revokeSourcesErr: injected})
-	err := f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
-		SubscriptionID: &sub.ID,
-		CancelType:     models.CancelTypeChargeback,
-		RevokeAccess:   true,
-	})
-	require.ErrorIs(t, err, injected)
-	require.Equal(t, models.StatusActive, f.loadSub(t, sub.ID).Status, "failed access closure must roll the terminal status back")
-	assert.True(t, f.entitledAt(t, farFuture), "failed cancellation must leave the prior access unchanged")
-
-	f.lifecycle.entitlementServiceFactory = nil
-	require.NoError(t, f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
-		SubscriptionID: &sub.ID,
-		CancelType:     models.CancelTypeChargeback,
-		RevokeAccess:   true,
-	}))
-	require.Equal(t, models.StatusCancelled, f.loadSub(t, sub.ID).Status)
-	assert.False(t, f.entitledAt(t, farFuture), "a retry must close access and status together")
-}
-
-func TestFailOpen_PeriodEndCancelRollsBackWhenBoundingFails(t *testing.T) {
-	f := newFailopenFixture(t, 30*24, true)
-	ctx := f.ctx()
-	sub, _ := f.create(t, models.RailNMI)
-
-	injected := errors.New("injected entitlement bound failure")
-	f.failLifecycleEntitlements(failingLifecycleEntitlements{boundErr: injected})
-	err := f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
-		SubscriptionID: &sub.ID,
-		CancelType:     models.CancelTypeUser,
-		RevokeAccess:   false,
-	})
-	require.ErrorIs(t, err, injected)
-	require.Equal(t, models.StatusActive, f.loadSub(t, sub.ID).Status)
-	windows := f.windows(t, sub.ID, string(models.EntitlementSourceSubscription))
-	require.Len(t, windows, 1)
-	assert.Nil(t, windows[0].EndAt, "failed period-end cancellation must not leave a partial closure")
-
-	f.lifecycle.entitlementServiceFactory = nil
-	require.NoError(t, f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
-		SubscriptionID: &sub.ID,
-		CancelType:     models.CancelTypeUser,
-		RevokeAccess:   false,
-	}))
-	require.Equal(t, models.StatusCancelled, f.loadSub(t, sub.ID).Status)
-	windows = f.windows(t, sub.ID, string(models.EntitlementSourceSubscription))
-	require.Len(t, windows, 1)
-	assert.NotNil(t, windows[0].EndAt)
-}
-
-// TestFailOpen_ReactivateRestoresStanding: resuming a period-end cancel re-opens
-// the standing window (the advance-written closure is undone).
-func TestFailOpen_ReactivateRestoresStanding(t *testing.T) {
-	f := newFailopenFixture(t, 30*24, true)
-	ctx := f.ctx()
-	sub, procSubID := f.create(t, models.RailNMI)
-	created := f.loadSub(t, sub.ID)
-
-	require.NoError(t, f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
-		SubscriptionID: &sub.ID,
-		CancelType:     models.CancelTypeUser,
-		RevokeAccess:   false,
-	}))
-	paid := f.windows(t, sub.ID, "subscription")
-	require.Len(t, paid, 1)
-	require.NotNil(t, paid[0].EndAt)
-
-	_, err := f.lifecycle.ReactivateMembership(ctx, &ReactivateMembershipParams{
-		Rail:                      models.RailNMI,
-		RailSubscriptionID:        procSubID,
-		CurrentPeriodEndsAt:       created.CurrentPeriodEndsAt,
-		AllowTerminalReactivation: true,
-	})
-	require.NoError(t, err)
-
-	var live []failopenWindow
-	for _, w := range f.windows(t, sub.ID, "subscription") {
-		if w.RevokedAt == nil && w.DeletedAt == nil {
-			live = append(live, w)
-		}
-	}
-	require.Len(t, live, 1)
-	assert.Nil(t, live[0].EndAt, "resume must restore the STANDING window")
-	assert.True(t, f.entitledAt(t, time.Now().UTC().Add(90*24*time.Hour)))
-}
-
-// TestFailOpen_DunningExhaustionClosesAccess: real recorded attempts through
-// FailMembership; the schedule's terminal failure cancels and revokes as-of the
-// policy instant. Mid-dunning (past_due) access stays live with NO grace
-// windows minted.
-func TestFailOpen_DunningExhaustionClosesAccess(t *testing.T) {
-	f := newFailopenFixture(t, 30*24, true)
-	ctx := f.ctx()
-	sub, _ := f.create(t, models.RailNMI)
-	farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
-
-	maxFailures := collection.MaxFailures(30 * 24) // monthly schedule: 5 recorded failures
-	for i := 1; i < maxFailures; i++ {
-		require.NoError(t, f.lifecycle.FailMembership(ctx, &FailMembershipParams{
-			Rail:           models.RailNMI,
-			SubscriptionID: &sub.ID,
-			// A real declined charge attempt underlies this failure (#840): that is
-			// what lets the schedule's exhaustion count as a certainty leg.
-			AttemptRecorded: true,
-		}))
-		mid := f.loadSub(t, sub.ID)
-		require.Equal(t, models.StatusPastDue, mid.Status, "attempt %d keeps dunning alive", i)
-		assert.True(t, f.entitledAt(t, farFuture), "access intact mid-dunning (attempt %d)", i)
-		assert.Empty(t, f.windows(t, sub.ID, "grace"), "no grace windows are minted during dunning")
-	}
-
-	// The final recorded failure is terminal: cancel + revoke as-of now.
-	require.NoError(t, f.lifecycle.FailMembership(ctx, &FailMembershipParams{
-		Rail:           models.RailNMI,
-		SubscriptionID: &sub.ID,
-		// A real declined charge attempt underlies this failure (#840): that is
-		// what lets the schedule's exhaustion count as a certainty leg.
-		AttemptRecorded: true,
-	}))
-	terminal := f.loadSub(t, sub.ID)
-	require.Equal(t, models.StatusCancelled, terminal.Status)
-	for _, w := range f.windows(t, sub.ID, "subscription") {
-		assert.True(t, w.RevokedAt != nil || w.DeletedAt != nil || (w.EndAt != nil && !w.EndAt.After(time.Now().UTC())),
-			"exhausted dunning must close the standing window")
-	}
-	assert.False(t, f.entitledAt(t, farFuture))
-}
-
-// TestFailOpen_DailyCycleFirstFailureTerminal pins the 0-retry-tier PLUMBING
-// (#359): the price's billing cycle (24h here) actually reaches the failure
-// policy — the FIRST recorded failure is terminal (no retry ever scheduled, no
-// silent monthly fallback) and closes the standing window. The tier tables
-// themselves are unit-pinned in dunning_test.go; this proves cycleHours flows
-// from the price into FailMembership. Ports the essence of the deleted tests/
-// dunning_worker FailMembership cadence tests (#694).
-func TestFailOpen_DailyCycleFirstFailureTerminal(t *testing.T) {
-	f := newFailopenFixture(t, 24, true)
-	ctx := f.ctx()
-	sub, _ := f.create(t, models.RailNMI)
-
-	reason := "rebill declined"
-	require.NoError(t, f.lifecycle.FailMembership(ctx, &FailMembershipParams{
-		Rail:           models.RailNMI,
-		SubscriptionID: &sub.ID,
-		FailureReason:  &reason,
-		// A real declined charge attempt underlies this failure (#840): that is
-		// what lets the schedule's exhaustion count as a certainty leg.
-		AttemptRecorded: true,
-	}))
-
-	terminal := f.loadSub(t, sub.ID)
-	require.Equal(t, models.StatusCancelled, terminal.Status, "first failure on a 1d cycle is terminal (0-retry tier)")
-	require.NotNil(t, terminal.CancelType)
-	assert.Equal(t, models.CancelTypeExpired, *terminal.CancelType)
-	assert.Nil(t, terminal.NextRetryAt, "the 0-retry tier never schedules a retry")
-	assert.False(t, f.entitledAt(t, time.Now().UTC().Add(time.Minute)), "terminal dunning closes the standing window")
-}
-
-func TestFailOpen_DunningExhaustionRollsBackWhenEntitlementListingFails(t *testing.T) {
-	f := newFailopenFixture(t, 24, true)
-	ctx := f.ctx()
-	sub, _ := f.create(t, models.RailNMI)
-	farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
-
-	injected := errors.New("injected entitlement listing failure")
-	f.failLifecycleEntitlements(failingLifecycleEntitlements{listErr: injected})
-	err := f.lifecycle.FailMembership(ctx, &FailMembershipParams{
-		Rail:            models.RailNMI,
-		SubscriptionID:  &sub.ID,
-		AttemptRecorded: true,
-	})
-	require.ErrorIs(t, err, injected)
-	require.Equal(t, models.StatusActive, f.loadSub(t, sub.ID).Status)
-	assert.True(t, f.entitledAt(t, farFuture))
-
-	f.lifecycle.entitlementServiceFactory = nil
-	require.NoError(t, f.lifecycle.FailMembership(ctx, &FailMembershipParams{
-		Rail:            models.RailNMI,
-		SubscriptionID:  &sub.ID,
-		AttemptRecorded: true,
-	}))
-	require.Equal(t, models.StatusCancelled, f.loadSub(t, sub.ID).Status)
-	assert.False(t, f.entitledAt(t, farFuture))
-}
-
-func TestFailOpen_ExpirationRollsBackWhenEntitlementRevocationFails(t *testing.T) {
-	f := newFailopenFixture(t, 30*24, true)
-	ctx := f.ctx()
-	sub, _ := f.create(t, models.RailNMI)
-	farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
-
-	injected := errors.New("injected entitlement revoke failure")
-	f.failLifecycleEntitlements(failingLifecycleEntitlements{revokeErr: injected})
-	err := f.lifecycle.ExpireMembership(ctx, sub.ID)
-	require.ErrorIs(t, err, injected)
-	require.Equal(t, models.StatusActive, f.loadSub(t, sub.ID).Status)
-	assert.True(t, f.entitledAt(t, farFuture))
-
-	f.lifecycle.entitlementServiceFactory = nil
-	require.NoError(t, f.lifecycle.ExpireMembership(ctx, sub.ID))
-	require.Equal(t, models.StatusCancelled, f.loadSub(t, sub.ID).Status)
-	assert.False(t, f.entitledAt(t, farFuture))
 }
 
 // failopenDeferredDelete records ScheduleNMIDelete calls (#679 regression leg).
@@ -748,51 +567,6 @@ func TestFailOpen_BoundedPurchaseKeepsInterval(t *testing.T) {
 	require.NotNil(t, paid[0].EndAt, "bounded purchases keep interval windows")
 	assert.True(t, f.entitledAt(t, time.Now().UTC().Add(time.Hour)))
 	assert.False(t, f.entitledAt(t, paid[0].EndAt.Add(time.Minute)), "the interval window expires on its own")
-}
-
-// TestFailOpen_MaterializeReplayIsIdempotent: re-deriving every recorded grant
-// must not mint overlapping bounded windows next to the standing one.
-func TestFailOpen_MaterializeReplayIsIdempotent(t *testing.T) {
-	f := newFailopenFixture(t, 30*24, true)
-	ctx := f.ctx()
-	sub, procSubID := f.create(t, models.RailNMI)
-	require.NoError(t, f.lifecycle.RenewMembership(ctx, &RenewMembershipParams{
-		Rail:               models.RailNMI,
-		RailSubscriptionID: procSubID,
-		TransactionID:      "txn_renew_" + uuid.New().String(),
-	}))
-
-	countWindows := func() int {
-		n := 0
-		for _, w := range f.windows(t, sub.ID, "subscription") {
-			if w.DeletedAt == nil {
-				n++
-			}
-		}
-		return n
-	}
-	before := countWindows()
-	customerID := f.loadSub(t, sub.ID).CustomerID
-
-	// Replay derive-2 over the full grant log (what a converge repair does).
-	require.NoError(t, f.dbi.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := dbtest.Queries(tx)
-		gl := grants.New(q, dbtest.TestMerchantID.UUID())
-		all, err := q.ListGrantsByCustomer(ctx, gen.ListGrantsByCustomerParams{
-			MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: customerID,
-		})
-		if err != nil {
-			return err
-		}
-		for i := range all {
-			if err := gl.MaterializeGrant(ctx, all[i]); err != nil {
-				return err
-			}
-		}
-		return nil
-	}))
-
-	assert.Equal(t, before, countWindows(), "derive replay must not create windows next to the standing one")
 }
 
 // ctx is the production context shape for a provider-bound write: the
