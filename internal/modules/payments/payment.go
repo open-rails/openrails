@@ -368,3 +368,9 @@ func (s *PaymentService) GetLatestChargeBySubscriptionID(ctx context.Context, su
 func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {
 	return s.repo.MarkFailed(ctx, id)
 }
+
+// GetCustomerPaymentRefundTotals reports completed refunds for the customer's
+// visible charges, including refunds outside the requested history page.
+func (s *PaymentService) GetCustomerPaymentRefundTotals(ctx context.Context, userID string, paymentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	return s.repo.GetCustomerPaymentRefundTotals(ctx, userID, paymentIDs)
+}

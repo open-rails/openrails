@@ -333,6 +333,33 @@ func (r *PaymentRepo) GetRefundTotalByPaymentID(ctx context.Context, paymentID u
 	return effectiveRefundTotalFromLinkedRows(refunds), nil
 }
 
+// GetCustomerPaymentRefundTotals returns completed display totals for a bounded
+// page of original charges. Reservation totals have a different contract.
+func (r *PaymentRepo) GetCustomerPaymentRefundTotals(ctx context.Context, userID string, paymentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	customer, err := db.ResolveCustomerID(userID)
+	if err != nil {
+		return nil, err
+	}
+	totals := make(map[uuid.UUID]int64, len(paymentIDs))
+	if len(paymentIDs) == 0 {
+		return totals, nil
+	}
+	rows, err := r.db.Gen(ctx).GetCustomerPaymentRefundTotals(ctx, gen.GetCustomerPaymentRefundTotalsParams{
+		MerchantID: mid.UUID(), CustomerID: customer, PaymentIds: paymentIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		totals[row.PaymentID] = row.AmountRefunded
+	}
+	return totals, nil
+}
+
 func (r *PaymentRepo) LinkRefundedPayment(ctx context.Context, paymentID, originalPaymentID uuid.UUID) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
