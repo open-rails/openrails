@@ -512,14 +512,24 @@ func (s *Store) ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUn
 	return row, true, nil
 }
 
-// ReleaseUnknownClaim drops a resolver lease without changing the operation.
+// ReleaseUnknownClaim atomically drops a resolver lease and wakes verification
+// at the operation's retained due time, without changing its status or evidence.
 func (s *Store) ReleaseUnknownClaim(ctx context.Context, id uuid.UUID) (bool, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return false, scopeErr
 	}
-	n, err := s.db.Gen(ctx).ReleaseUnknownRailIntentClaim(ctx, gen.ReleaseUnknownRailIntentClaimParams{MerchantID: scopeMerchantID.UUID(), ID: id})
-	return n == 1, err
+	rows, err := s.transitionAndWake(ctx, id, func(ctx context.Context, txs *Store) (int64, time.Time, error) {
+		next, err := txs.db.Gen(ctx).ReleaseUnknownRailIntentClaim(ctx, gen.ReleaseUnknownRailIntentClaimParams{MerchantID: scopeMerchantID.UUID(), ID: id})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, time.Time{}, nil
+		}
+		if err != nil {
+			return 0, time.Time{}, err
+		}
+		return 1, next, nil
+	})
+	return rows == 1 && err == nil, err
 }
 
 // ExpireOverdue expires every live intent whose relevance window elapsed —
@@ -752,10 +762,11 @@ func (s *Store) MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttem
 	if scopeErr != nil {
 		return scopeErr
 	}
-	rows, err := s.transitionAndWake(ctx, id, nextAttemptAt, func(ctx context.Context, txs *Store) (int64, error) {
-		return txs.db.Gen(ctx).MarkRailIntentFailedRetryable(ctx, gen.MarkRailIntentFailedRetryableParams{
+	rows, err := s.transitionAndWake(ctx, id, func(ctx context.Context, txs *Store) (int64, time.Time, error) {
+		rows, err := txs.db.Gen(ctx).MarkRailIntentFailedRetryable(ctx, gen.MarkRailIntentFailedRetryableParams{
 			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 		})
+		return rows, nextAttemptAt, err
 	})
 	if err != nil {
 		return err
@@ -783,10 +794,11 @@ func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt tim
 	if scopeErr != nil {
 		return scopeErr
 	}
-	return one(s.transitionAndWake(ctx, id, nextAttemptAt, func(ctx context.Context, txs *Store) (int64, error) {
-		return txs.db.Gen(ctx).MarkRailIntentUnknown(ctx, gen.MarkRailIntentUnknownParams{
+	return one(s.transitionAndWake(ctx, id, func(ctx context.Context, txs *Store) (int64, time.Time, error) {
+		rows, err := txs.db.Gen(ctx).MarkRailIntentUnknown(ctx, gen.MarkRailIntentUnknownParams{
 			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason, ResultEvidence: raw,
 		})
+		return rows, nextAttemptAt, err
 	}))
 }
 
@@ -821,25 +833,25 @@ func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 	if scopeErr != nil {
 		return scopeErr
 	}
-	return one(s.transitionAndWake(ctx, id, nextAttemptAt, func(ctx context.Context, txs *Store) (int64, error) {
+	return one(s.transitionAndWake(ctx, id, func(ctx context.Context, txs *Store) (int64, time.Time, error) {
 		rows, err := txs.db.Gen(ctx).ParkRailIntent(ctx, gen.ParkRailIntentParams{
 			MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 		})
 		if err != nil || rows != 0 {
-			return rows, err
+			return rows, nextAttemptAt, err
 		}
 		// The SQL fence refuses to return a submitted payment to pending.
 		// Retain it as unknown inside this same transition/wakeup transaction.
 		current, err := txs.Get(ctx, id)
 		if db.IsNotFound(err) {
-			return 0, nil
+			return 0, time.Time{}, nil
 		}
 		if err != nil || current.Status != StatusInFlight {
-			return 0, err
+			return 0, time.Time{}, err
 		}
 		var evidence map[string]json.RawMessage
 		if err := json.Unmarshal(current.ResultEvidence, &evidence); err != nil {
-			return 0, err
+			return 0, time.Time{}, err
 		}
 		key := ""
 		switch current.IntentType {
@@ -852,11 +864,12 @@ func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 		}
 		if _, submitted := evidence[key]; key != "" && submitted {
 			// The live-state predicate still protects a concurrently sealed outcome.
-			return txs.db.Gen(ctx).MarkRailIntentUnknown(ctx, gen.MarkRailIntentUnknownParams{
+			rows, err := txs.db.Gen(ctx).MarkRailIntentUnknown(ctx, gen.MarkRailIntentUnknownParams{
 				MerchantID: scopeMerchantID.UUID(), ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
 			})
+			return rows, nextAttemptAt, err
 		}
-		return 0, nil
+		return 0, time.Time{}, nil
 	}))
 }
 
