@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -125,6 +126,5 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req CreatePriceRequest,
 
 // Every catalog creation path locks the product before a price lookup key.
 func lockCatalogKey(ctx context.Context, tx pgx.Tx, mid merchant.ID, kind, key string) error {
-	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", "catalog-"+kind+":"+mid.String()+":"+key)
-	return err
+	return gen.New(tx).LockCatalogKey(ctx, "catalog-"+kind+":"+mid.String()+":"+key)
 }

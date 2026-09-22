@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -107,11 +108,11 @@ func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID
 		// Serialize provider facts against the original charge. Different webhook
 		// event IDs can describe the same refund; validation and replay lookup must
 		// share the lock so neither duplicate insertion nor double counting races.
-		var locked uuid.UUID
-		if err := tx.QueryRow(ctx, "SELECT id FROM openrails.payments WHERE merchant_id=$1 AND id=$2 FOR UPDATE", mid.UUID(), originalPaymentID).Scan(&locked); err != nil {
+		transactionDB := s.repo.db.NewWithPgxTx(tx)
+		if _, err := transactionDB.Gen(ctx).LockPaymentForRefund(ctx, gen.LockPaymentForRefundParams{MerchantID: mid.UUID(), PaymentID: originalPaymentID}); err != nil {
 			return err
 		}
-		scoped := NewPaymentService(s.repo.db.NewWithPgxTx(tx), s.clock)
+		scoped := NewPaymentService(transactionDB, s.clock)
 		var err error
 		refund, err = scoped.refundLocked(ctx, originalPaymentID, refundTransactionID, amount, reversalKind)
 		return err
