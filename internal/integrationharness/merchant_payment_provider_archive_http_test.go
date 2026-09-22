@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -345,7 +346,9 @@ func (g archiveGate) Authorize(context.Context, *http.Request, string) (billinga
 func TestEmbeddedProviderAccountArchiveLifecycle(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
+	slug := fmt.Sprintf("l22emb%d", time.Now().UnixNano())
 	rt, err := embed.New(ctx, embed.Options{
+		Merchant: &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug}},
 		Config: &config.Config{
 			Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
 			SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
@@ -355,9 +358,9 @@ func TestEmbeddedProviderAccountArchiveLifecycle(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	slug := fmt.Sprintf("l22emb%d", time.Now().UnixNano())
-	mid, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
+	boundClient, err := rt.Client()
 	require.NoError(t, err)
+	mid := boundClient.MerchantID()
 	runtime := app.HostGraph(rt).Runtime
 	require.NoError(t, runtime.EnsureMerchantsService(ctx))
 	probe := newFakeDataLink(t)

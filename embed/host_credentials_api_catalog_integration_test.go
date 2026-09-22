@@ -41,10 +41,8 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	const secret = "sk_test_host_owned_fixture"
 	boot := func(key string) *embed.Runtime {
 		gate := &allowAllGate{}
-		rt, err := embed.New(ctx, embed.Options{HTTP: &embed.HTTPConfig{PaymentProviders: true, Gate: gate}, Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t, key: key}})
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = rt.Close(context.Background()) })
-		_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
+
+		rt, _, err := newDeclaredMerchant(ctx, embed.Options{HTTP: &embed.HTTPConfig{PaymentProviders: true, Gate: gate}, Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t, key: key}}, slug, embed.MerchantConfig{
 			DisplayName: "Host credential catalog",
 			PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {
 				AccountID: accountID,
@@ -52,6 +50,7 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 			}}},
 		})
 		require.NoError(t, err)
+		t.Cleanup(func() { _ = rt.Close(context.Background()) })
 		gate.id = app.HostGraph(rt).Runtime.ConfiguredMerchant()
 		return rt
 	}
@@ -122,11 +121,10 @@ func TestManagedCredentialsWithManifestCatalog(t *testing.T) {
 	slug := "managed-manifest-" + uuid.NewString()
 	account := "acct_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	boot := func() *embed.Runtime {
-		rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t}})
+
+		rt, _, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t}}, slug, embed.MerchantConfig{DisplayName: slug})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
-		_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
-		require.NoError(t, err)
 		return rt
 	}
 	rt := boot()

@@ -76,7 +76,7 @@ func TestReconcileMerchantManifestAPIHostTakenFailsLoudly(t *testing.T) {
 	require.ErrorIs(t, err, merchants.ErrAPIHostTaken)
 }
 
-// The manifest struct path (embedded UpsertMerchantConfig hands structs
+// The manifest struct path (embedded merchant constructor hands structs
 // straight to ProvisionMerchant, skipping the YAML parser) still hits the
 // SetHostConfig format wall.
 func TestReconcileMerchantManifestRejectsInvalidAPIHost(t *testing.T) {

@@ -18,7 +18,7 @@ Deployment shape does not imply mode: embedded and standalone can run either.
 | File | Owns | Loaded by |
 |---|---|---|
 | `config.yaml` | process/infrastructure config (env, DB, Redis, `provider_write_mode`, `test_mode`, `merchant_config_source`, `catalog_source`) | `config.Load` (standalone) / built programmatically (embedded hosts) |
-| merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server --merchant-manifest <path>`) | merchant identity, profile, invoice policy, **PSPs** — rail accounts + secrets (`merchants.<slug>.psps.<key>.<rail>`) | standalone server boot, every boot; embedded hosts pass the same shape to `UpsertMerchantConfig` |
+| merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server --merchant-manifest <path>`) | merchant identity, profile, invoice policy, **PSPs** — rail accounts + secrets (`merchants.<slug>.psps.<key>.<rail>`) | standalone server boot, every boot; embedded hosts pass the same shape to `Options.Merchant.Config` |
 | catalog manifest (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails push-merchant-catalog` (or the embedded push API) |
 
 Manifest anatomy and field semantics:

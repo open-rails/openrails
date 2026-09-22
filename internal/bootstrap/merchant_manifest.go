@@ -846,7 +846,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 	// MODE 1 (#723): the YAML is the truth — it steamrolls the DB projections
 	// and the in-memory secret plane on every apply. Seed-once/plan tiers are
 	// mode-2 (api) semantics; forcing here keeps every mode-1 caller (embedded
-	// UpsertMerchantConfig, standalone boot, CLI) converging identically.
+	// merchant constructor, standalone boot, CLI) converging identically.
 	if req.Config.IsManifestMerchantConfigSource() {
 		req.Options.Insert = true
 		req.Options.Overwrite = true

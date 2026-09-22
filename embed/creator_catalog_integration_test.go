@@ -35,7 +35,8 @@ func TestCreatorCatalogAuthority(t *testing.T) {
 	credentials := owner.Config().ConnConfig
 	ownerURL.User = url.UserPassword(credentials.User, credentials.Password)
 	newRuntime := func() (*embed.Runtime, merchant.ID, *openrails.Client) {
-		rt, err := embed.New(ctx, embed.Options{
+
+		rt, mid, err := newDeclaredMerchant(ctx, embed.Options{
 			Config: &config.Config{
 				Env: "development", TestMode: config.CredentialPostureSandbox,
 				MerchantConfigSource: config.MerchantConfigSourceManifest, CatalogSource: config.CatalogSourceAPI,
@@ -43,11 +44,9 @@ func TestCreatorCatalogAuthority(t *testing.T) {
 				DB:                &config.DBConfig{URL: ownerURL.String()},
 			},
 			PGXPool: owner, River: embed.RiverManagedByOpenRails(),
-		})
+		}, "creator-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Creator platform"})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
-		mid, err := rt.UpsertMerchantConfig(ctx, "creator-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Creator platform"})
-		require.NoError(t, err)
 		admin, err := rt.Client()
 		require.NoError(t, err)
 		return rt, mid, admin

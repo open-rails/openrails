@@ -19,38 +19,21 @@ import (
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
-// TestMountedHandlerResolvesMerchantBoundAfterMount pins the #744 fix: the
-// embedded HTTP surface (Runtime.Handler -> embedhttp.NewHTTPHandler)
-// resolves Runtime.ConfiguredMerchant() PER REQUEST rather than baking a
-// snapshot into the middleware chain at mount time. Before the fix, mounting
-// the handler BEFORE UpsertMerchantConfig bound the merchant pinned the
-// surface to the zero merchant FOREVER (mount-time bake), even though the SDK
-// (embed/transport.go's live read) worked fine — an order-sensitive,
-// unenforced split brain. This test drives that exact order: mount, THEN
-// bind, THEN request.
-func TestMountedHandlerResolvesMerchantBoundAfterMount(t *testing.T) {
+// Constructor declarations bind the merchant before the first mounted request.
+func TestMountedHandlerUsesConstructorMerchant(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 
 	slug := fmt.Sprintf("mount-order-%d", time.Now().UnixNano())
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB}
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), Merchant: &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug}}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	// Mount BEFORE any merchant is bound: Runtime.ConfiguredMerchant() is zero
-	// at this instant. RouteSetCheckout requires an Authenticator (unused by
-	// the public GET /products route below; billingauth.Optional tolerates
-	// its failure and proceeds unauthenticated).
 	noAuth := billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
 		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	})
 	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, Authenticator: noAuth}})
-	require.NoError(t, err)
-
-	// Bind the merchant AFTER the handler is already mounted and could be
-	// serving traffic — the exact order the #744 bug broke.
-	_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
 
 	// The host registers these routes at /v1 with no path rewrite.
@@ -58,10 +41,5 @@ func TestMountedHandlerResolvesMerchantBoundAfterMount(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	// Before the fix this 500s: ResolveMerchantHTTP pinned the zero merchant
-	// into the middleware chain at mount time, so MerchantDBConnMW's
-	// merchant.Require fails on every request forever, regardless of any
-	// later bind. After the fix, ConfiguredMerchant() is resolved live on
-	// every request and reflects the bind — an ordinary (empty) product list.
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }

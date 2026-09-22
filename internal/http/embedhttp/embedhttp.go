@@ -264,14 +264,9 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 		}
 	}
 
-	// Merchant resolution (#223/#336) pins Runtime.ConfiguredMerchant() onto
-	// the request context before any merchant-owned DB access. It is resolved
-	// PER REQUEST, not cached here at handler-construction time (#744): an
-	// embedded host's UpsertMerchantConfig call can bind the merchant AFTER
-	// this handler is already mounted and serving traffic, and
-	// Runtime.ConfiguredMerchant() always reflects the latest bind. Zero
-	// (unbound) is a legal boot state — merchant-owned operations then hard-fail
-	// downstream instead of silently defaulting.
+	// Resolve the configured merchant on each request before merchant-owned
+	// database access. An unbound runtime requires explicit merchant authority;
+	// it never silently selects a default merchant.
 	var rateLimits *config.RateLimitsConfig
 	var captchaCfg *config.CaptchaConfig
 	var resolver *iputil.TrustedProxies

@@ -340,7 +340,7 @@ func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug st
 	require.NoError(h.t, err, "embed.New")
 	h.cleanup(func() { _ = rt.Close(context.Background()) })
 	// Bind the engine to the test merchant — what embed provisioning
-	// (EnsureMerchant/UpsertMerchantConfig) does on a real host. The in-process
+	// (EnsureMerchant/merchant constructor) does on a real host. The in-process
 	// transport (#685) pins this merchant per request.
 	app.HostGraph(rt).Runtime.SetConfiguredMerchant(id)
 

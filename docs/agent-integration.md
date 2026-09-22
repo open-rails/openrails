@@ -48,7 +48,7 @@ milestone order, each verifiable before the next:
 2. **Boot.** Programmatic `config.Config` (explicit `Env`, `TestMode`,
    `ProviderWriteMode`), `embed.New` with the host's pgx pool. Verify: boot succeeds;
    a missing posture field refuses to boot (that is correct behavior, not a bug).
-3. **Merchant + rails.** `rt.UpsertMerchantConfig` with the user's sandbox PSP entries
+3. **Merchant + rails.** set `Options.Merchant.Config` before `embed.New` with the user's sandbox PSP entries
    (per-rail setup: [rails/](rails/)). Verify: boot logs show the rail armed; for NMI
    the sandbox probe passes.
 4. **Catalog.** Author products/prices per [merchant-guide.md](merchant-guide.md);

@@ -279,15 +279,15 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	// Use a fresh merchant so its clearing counter starts at zero, and fund
 	// through an actual balanced deposit instead of rewriting immutable facts.
 	overflowRuntime, err := New(ctx, Options{
-		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
-		Redis:  rdb, River: RiverManagedByOpenRails(),
+		Merchant: &MerchantDeclaration{Slug: "auth-overflow-" + uuid.NewString()},
+		Config:   &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
+		Redis:    rdb, River: RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = overflowRuntime.Close(context.Background()) })
-	overflowMerchant, err := overflowRuntime.UpsertMerchantConfig(ctx, "auth-overflow-"+uuid.NewString(), MerchantConfig{})
-	require.NoError(t, err)
 	overflowClient, err := overflowRuntime.Client()
 	require.NoError(t, err)
+	overflowMerchant := overflowClient.MerchantID()
 	overflowCustomer := openrails.CustomerID(uuid.New())
 	_, err = overflowClient.EnsureCustomer(ctx, overflowCustomer)
 	require.NoError(t, err)

@@ -54,8 +54,13 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 		ownerURL.User = url.UserPassword(credentials.User, credentials.Password)
 		dsn = ownerURL.String()
 	}
-	newRuntime := func() *embed.Runtime {
+	newRuntime := func(slug string) *embed.Runtime {
+		var declaration *embed.MerchantDeclaration
+		if slug != "" {
+			declaration = &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug}}
+		}
 		rt, err := embed.New(ctx, embed.Options{
+			Merchant: declaration,
 			Config: &config.Config{
 				Env: "dev", TestMode: config.CredentialPostureSandbox,
 				MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
@@ -67,9 +72,9 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 		t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 		return rt
 	}
-	a := scopeWithoutRLSSeed(t, newRuntime(), "scope-a")
-	b := scopeWithoutRLSSeed(t, newRuntime(), "scope-b")
-	platform := newRuntime() // The trusted host may explicitly select a merchant.
+	a := scopeWithoutRLSSeed(t, newRuntime("scope-a"), "scope-a")
+	b := scopeWithoutRLSSeed(t, newRuntime("scope-b"), "scope-b")
+	platform := newRuntime("") // The trusted host may explicitly select a merchant.
 
 	rows, err := admin.Query(ctx, `SELECT tablename FROM pg_tables WHERE schemaname = 'billing' AND rowsecurity ORDER BY tablename`)
 	require.NoError(t, err)
@@ -204,10 +209,9 @@ type scopeWithoutRLSMerchant struct {
 func scopeWithoutRLSSeed(t *testing.T, rt *embed.Runtime, slug string) scopeWithoutRLSMerchant {
 	t.Helper()
 	ctx := t.Context()
-	mid, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
-	require.NoError(t, err)
 	client, err := rt.Client()
 	require.NoError(t, err)
+	mid := client.MerchantID()
 	product, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: slug + "-product", DisplayName: slug})
 	require.NoError(t, err)
 	price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: slug + "-price", UnitAmount: 1000, Currency: "USD"})
