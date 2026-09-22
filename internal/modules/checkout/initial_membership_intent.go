@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -704,13 +703,10 @@ func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Cont
 }
 
 func (h *InitialMembershipIntentHandler) projectInitialMembershipSession(ctx context.Context, d *db.DB, in gen.OpenrailsRailIntent, p InitialMembershipPayload, success bool) error {
-	if !strings.HasPrefix(p.CheckoutIdempotencyKey, "checkout_session:") {
+	if p.CheckoutSessionID == nil {
 		return nil
 	}
-	id, err := uuid.Parse(strings.TrimPrefix(p.CheckoutIdempotencyKey, "checkout_session:"))
-	if err != nil || id == uuid.Nil {
-		return errors.New("accepted membership has invalid session identity")
-	}
+	id := *p.CheckoutSessionID
 	params := gen.CompleteInitialMembershipSessionParams{ID: id, MerchantID: in.MerchantID, CustomerID: p.Terms.CustomerID, PriceID: p.Terms.PriceID, PspID: p.Terms.PSPID, Rail: in.Rail, Status: "failed", Now: h.Checkout.now().UTC()}
 	if success {
 		params.Status = "succeeded"

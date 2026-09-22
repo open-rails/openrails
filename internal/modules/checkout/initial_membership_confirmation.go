@@ -37,11 +37,11 @@ func initialMembershipQuoteFingerprint(terms subscriptions.InitialMembershipTerm
 	return fmt.Sprintf("%x", digest)
 }
 
-// ConfirmInitialMembership consumes a priced session's accepted terms and its
-// already-verified interactive payer. The self-session adapter owns quote expiry
-// and display agreement; neither a merchant confirm nor a body can mint this
-// principal. Provider routing/credentials never come from the quoted payload.
-func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted subscriptions.InitialMembershipTerms, key string, principal billingauth.DelegatedPrincipal) (*CheckoutResponse, error) {
+// ConfirmInitialMembership consumes accepted terms and a verified interactive
+// payer. Only the validated self-session adapter supplies sessionID; other
+// callers leave their opaque replay key unbound. Provider routing/credentials
+// never come from the quoted payload.
+func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted subscriptions.InitialMembershipTerms, key string, principal billingauth.DelegatedPrincipal, sessionID *uuid.UUID) (*CheckoutResponse, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -63,11 +63,11 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 	fingerprint := initialMembershipQuoteFingerprint(accepted)
 	prior, err := intents.NewStore(database).GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey(key))
 	if err == nil {
-		if err := ownsInitialMembership(prior, accepted.CustomerID.String(), accepted.PriceID, fingerprint); err != nil {
+		if err := ownsInitialMembership(prior, accepted.CustomerID.String(), accepted.PriceID, fingerprint, sessionID); err != nil {
 			return nil, err
 		}
 		current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(prior), func(in gen.OpenrailsRailIntent) error {
-			return ownsInitialMembership(in, accepted.CustomerID.String(), accepted.PriceID, fingerprint)
+			return ownsInitialMembership(in, accepted.CustomerID.String(), accepted.PriceID, fingerprint, sessionID)
 		})
 		if err != nil {
 			return nil, err
@@ -95,7 +95,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		prior, err := intents.NewStore(d).GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey(key))
 		if err == nil {
 			operation = prior
-			return ownsInitialMembership(prior, accepted.CustomerID.String(), accepted.PriceID, fingerprint)
+			return ownsInitialMembership(prior, accepted.CustomerID.String(), accepted.PriceID, fingerprint, sessionID)
 		}
 		if !db.IsNotFound(err) {
 			return err
@@ -106,6 +106,27 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		}
 		if method.CustomerID != accepted.CustomerID || method.PspID != accepted.PSPID || method.ParkReason != "" {
 			return charge.ErrInstrumentChanged
+		}
+		if sessionID != nil {
+			if *sessionID == uuid.Nil {
+				return ErrCheckoutSessionValidation
+			}
+			// Lock the validated persisted quote while accepting its binding.
+			var locked uuid.UUID
+			if err := d.Qx(ctx).QueryRow(ctx, `SELECT id FROM openrails.checkout_sessions WHERE merchant_id=$1 AND id=$2 FOR SHARE`, mid.UUID(), *sessionID).Scan(&locked); err != nil {
+				return err
+			}
+			session, err := NewCheckoutSessionRepo(d).GetByID(ctx, *sessionID)
+			if err != nil {
+				return err
+			}
+			quote, err := acceptedInitialMembershipQuote(ctx, session, principal, s.now())
+			if err != nil {
+				return err
+			}
+			if session.Rail != models.Rail(method.Rail) || quote.SubscriptionID != accepted.SubscriptionID || quote.PaymentID != accepted.PaymentID || initialMembershipQuoteFingerprint(quote) != fingerprint {
+				return ErrCheckoutSessionConflict
+			}
 		}
 		var binding *charge.HyperSwitchBinding
 		if method.Custodian == models.CustodianHyperSwitch {
@@ -148,7 +169,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		if psp.Key != nil && strings.TrimSpace(*psp.Key) != "" {
 			label = *psp.Key
 		}
-		payload := subscriptions.InitialMembershipPayload{Terms: accepted, Instrument: charge.FreezeInstrument(method), RequestFingerprint: fingerprint, CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: label, Email: principal.Email}
+		payload := subscriptions.InitialMembershipPayload{CheckoutSessionID: sessionID, Terms: accepted, Instrument: charge.FreezeInstrument(method), RequestFingerprint: fingerprint, CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: label, Email: principal.Email}
 		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, PspID: accepted.PSPID, IntentType: subscriptions.TypeInitialMembership, PriceID: &accepted.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: accepted.AcceptedAt, Origin: intents.OriginUser, Actor: principal.SubjectID, OriginReason: "customer confirmed initial membership"})
 		return err
 	})
@@ -156,7 +177,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		return nil, err
 	}
 	current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(operation), func(in gen.OpenrailsRailIntent) error {
-		return ownsInitialMembership(in, accepted.CustomerID.String(), accepted.PriceID, fingerprint)
+		return ownsInitialMembership(in, accepted.CustomerID.String(), accepted.PriceID, fingerprint, sessionID)
 	})
 	if err != nil {
 		return nil, err

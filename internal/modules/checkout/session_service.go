@@ -930,7 +930,7 @@ func (s *CheckoutSessionService) initialMembershipSessionResponse(ctx context.Co
 	if err != nil {
 		return nil, false, err
 	}
-	if err := ownsInitialMembership(operation, session.CustomerID.String(), terms.PriceID, initialMembershipQuoteFingerprint(terms)); err != nil {
+	if err := ownsInitialMembership(operation, session.CustomerID.String(), terms.PriceID, initialMembershipQuoteFingerprint(terms), &session.ID); err != nil {
 		return nil, true, err
 	}
 	projection := *session
@@ -1002,12 +1002,12 @@ func (s *CheckoutSessionService) ConfirmCustomerSession(ctx context.Context, ses
 		return nil, err
 	}
 	confirmer, ok := s.checkoutService.(interface {
-		ConfirmInitialMembership(context.Context, subscriptions.InitialMembershipTerms, string, billingauth.DelegatedPrincipal) (*CheckoutResponse, error)
+		ConfirmInitialMembership(context.Context, subscriptions.InitialMembershipTerms, string, billingauth.DelegatedPrincipal, *uuid.UUID) (*CheckoutResponse, error)
 	})
 	if !ok {
 		return nil, errors.New("initial membership service unavailable")
 	}
-	_, err = confirmer.ConfirmInitialMembership(ctx, terms, key, principal)
+	_, err = confirmer.ConfirmInitialMembership(ctx, terms, key, principal, &session.ID)
 	if err != nil && !errors.Is(err, ErrCheckoutProcessing) {
 		return nil, err
 	}

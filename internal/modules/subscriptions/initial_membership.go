@@ -28,9 +28,10 @@ type NMIInitialScheduleTerms struct {
 }
 
 // InitialMembershipPayload is one accepted operation with mutually exclusive
-// native-schedule and engine-custody legs. Terms and Instrument are the only
-// authorities for identities, money, access and saved-credential references.
+// native-schedule and engine-custody legs. Terms and Instrument own payment and
+// access authority; CheckoutSessionID binds only the terminal session projection.
 type InitialMembershipPayload struct {
+	CheckoutSessionID      *uuid.UUID                 `json:"checkout_session_id,omitempty"`
 	Terms                  InitialMembershipTerms     `json:"terms"`
 	Instrument             charge.FrozenInstrument    `json:"instrument"`
 	RequestFingerprint     string                     `json:"request_fingerprint"`
@@ -61,6 +62,9 @@ func DecodeInitialMembershipPayload(in gen.OpenrailsRailIntent) (InitialMembersh
 		return p, errors.New("initial membership payload has trailing data")
 	}
 
+	if p.CheckoutSessionID != nil && (*p.CheckoutSessionID == uuid.Nil || p.Terms.CollectionPolicy != models.CollectionPolicyEngine) {
+		return p, errors.New("initial membership has invalid quoted-session binding")
+	}
 	if err := p.Terms.Validate(); err != nil {
 		return p, err
 	}
