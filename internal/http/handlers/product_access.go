@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,8 +48,8 @@ func productAccessResponses(r *httprequest.Request, grants []models.ProductAcces
 		g := grants[i]
 		resp := ProductAccessGrantResponse{
 			ID:         g.ID.String(),
-			CustomerID: openrails.CustomerID(g.CustomerID),
-			ProductID:  openrails.ProductID(g.ProductID),
+			CustomerID: openrails.CustomerID(g.CustomerID).String(),
+			ProductID:  openrails.ProductID(g.ProductID).String(),
 			SourceType: string(g.SourceType),
 			SourceID:   openrails.SourceRef(string(g.SourceType), g.SourceID),
 			Status:     string(g.Status),
@@ -59,7 +60,7 @@ func productAccessResponses(r *httprequest.Request, grants []models.ProductAcces
 			UpdatedAt:  g.UpdatedAt,
 		}
 		if g.PaymentID != nil {
-			pid := openrails.PaymentID(*g.PaymentID)
+			pid := openrails.PaymentID(*g.PaymentID).String()
 			resp.PaymentID = &pid
 		}
 		if g.RevokeReason != nil {
@@ -106,12 +107,7 @@ func GetMyProducts(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
 		return
 	}
-	grants, err := svc.ListAccessibleProducts(r.Request.Context(), user.ID)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to list accessible products")
-		return
-	}
-	r.JSON(http.StatusOK, productAccessResponses(r, grants))
+	listAccessibleProductsPage(r, svc, user.ID)
 }
 
 // GetMyProductAccess reports whether the authenticated user has access to a
@@ -146,7 +142,7 @@ func GetMyProductAccess(r *httprequest.Request) {
 }
 
 func newProductAccessCheck(productID uuid.UUID, userID string, has bool) openrails.ProductAccessCheck {
-	return openrails.ProductAccessCheck{CustomerID: openrails.CustomerID(identity.CustomerIDFromString(userID)), ProductID: openrails.ProductID(productID), HasAccess: has}
+	return openrails.ProductAccessCheck{CustomerID: openrails.CustomerID(identity.CustomerIDFromString(userID)).String(), ProductID: openrails.ProductID(productID).String(), HasAccess: has}
 }
 
 // --- API-key service (GET /v1/merchant/customers/:user_id/product-access) ---
@@ -155,11 +151,12 @@ func newProductAccessCheck(productID uuid.UUID, userID string, has bool) openrai
 // server-to-server (API-key) caller. Optional ?product_id=... narrows to a single
 // has-access check.
 func ServiceGetUserProductAccess(r *httprequest.Request) {
-	userID := strings.TrimSpace(r.Param("user_id"))
-	if userID == "" {
-		r.ErrorJSON(http.StatusBadRequest, "user_id is required")
+	user, err := openrails.ParseCustomerID(r.Param("user_id"))
+	if err != nil || user.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return
 	}
+	userID := user.String()
 	svc := productAccessService(r)
 	if svc == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
@@ -180,12 +177,7 @@ func ServiceGetUserProductAccess(r *httprequest.Request) {
 		r.JSON(http.StatusOK, newProductAccessCheck(productID, userID, has))
 		return
 	}
-	grants, err := svc.ListAccessibleProducts(r.Request.Context(), userID)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to list accessible products")
-		return
-	}
-	r.JSON(http.StatusOK, productAccessResponses(r, grants))
+	listAccessibleProductsPage(r, svc, userID)
 }
 
 // GrantAdminProductAccess creates a durable product access grant for a user
@@ -279,4 +271,79 @@ func RevokeAdminProductAccess(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSONMessage("product access revoked")
+}
+
+func listAccessibleProductsPage(r *httprequest.Request, svc *productaccess.Service, userID string) {
+	limit := 25
+	if raw := r.Query("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > openrails.ProductAccessMaxPageSize {
+			r.ErrorJSON(http.StatusBadRequest, "limit must be between 1 and 100")
+			return
+		}
+		limit = parsed
+	}
+	var cursor uuid.UUID
+	if raw := r.Query("cursor"); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil || parsed == uuid.Nil || parsed.String() != raw {
+			r.ErrorJSON(http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		cursor = parsed
+	}
+	grants, more, err := svc.ListAccessibleProductsPage(r.Request.Context(), userID, cursor, limit)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to list accessible products")
+		return
+	}
+	page := openrails.ProductAccessList{Data: productAccessResponses(r, grants), HasMore: more}
+	if more && len(grants) > 0 {
+		page.NextCursor = grants[len(grants)-1].ID.String()
+	}
+	r.JSON(http.StatusOK, page)
+}
+
+func ServiceCheckUserProductAccess(r *httprequest.Request) {
+	user, err := openrails.ParseCustomerID(r.Param("user_id"))
+	if err != nil || user.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
+		return
+	}
+	var body struct {
+		ProductIDs []string `json:"product_ids"`
+	}
+	if !r.BindJSON(&body) {
+		return
+	}
+	if len(body.ProductIDs) > openrails.ProductAccessMaxPageSize {
+		r.ErrorJSON(http.StatusBadRequest, "at most 100 product IDs are allowed")
+		return
+	}
+	products := make([]uuid.UUID, 0, len(body.ProductIDs))
+	for _, raw := range body.ProductIDs {
+		product, err := openrails.ParseProductID(raw)
+		if err != nil || product.IsZero() {
+			r.ErrorJSON(http.StatusBadRequest, "invalid product_id")
+			return
+		}
+		products = append(products, product.UUID())
+	}
+	svc := productAccessService(r)
+	if svc == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
+		return
+	}
+	decisions, err := svc.CheckProducts(r.Request.Context(), user.String(), products)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to check product access")
+		return
+	}
+	access := make(map[string]bool, len(decisions))
+	for id, has := range decisions {
+		access[openrails.ProductID(id).String()] = has
+	}
+	r.JSON(http.StatusOK, struct {
+		Access map[string]bool `json:"access"`
+	}{access})
 }

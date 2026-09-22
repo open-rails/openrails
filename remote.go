@@ -22,13 +22,14 @@ import (
 // Client executes the same typed billing operations over an HTTP or in-process
 // transport. Applications may define narrow interfaces for the methods they use.
 type Client struct {
-	baseURL      string
-	merchantID   MerchantID
-	ownCatalog   bool
-	catalogOwner string
-	currency     string
-	client       *http.Client
-	timeout      time.Duration
+	ProductAccess *ProductAccessService
+	baseURL       string
+	merchantID    MerchantID
+	ownCatalog    bool
+	catalogOwner  string
+	currency      string
+	client        *http.Client
+	timeout       time.Duration
 	// tokenFn mints the per-call Bearer (e.g. a host-signed AuthKit service JWT,
 	// #411, or an OpenRails-issued API key). It is the SOLE credential; a
 	// mint failure errors the call so the problem surfaces instead of being
@@ -138,6 +139,7 @@ func NewRemote(baseURL string, opts ...ClientOption) (*Client, error) {
 	if r.client == nil {
 		r.client = &http.Client{}
 	}
+	r.ProductAccess = &ProductAccessService{client: r}
 	return r, nil
 }
 
@@ -649,41 +651,6 @@ func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement s
 		cursor = out.NextCursor
 	}
 	return all, nil
-}
-
-// ListProductAccess implements Client (handler ServiceGetUserProductAccess).
-func (c *Client) ListProductAccess(ctx context.Context, subject CustomerID) ([]ProductAccessGrant, error) {
-	customer, err := requireTypedID("subject", subject)
-	if err != nil {
-		return nil, err
-	}
-	var out []ProductAccessGrant
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/users/"+customer+"/product-access", nil, &out); err != nil {
-		return nil, err
-	}
-	if out == nil {
-		out = []ProductAccessGrant{}
-	}
-	return out, nil
-}
-
-// HasProductAccess implements Client (handler ServiceGetUserProductAccess with
-// ?product_id=...).
-func (c *Client) HasProductAccess(ctx context.Context, subject CustomerID, productID ProductID) (bool, error) {
-	customer, err := requireTypedID("subject", subject)
-	if err != nil {
-		return false, err
-	}
-	product, err := requireTypedID("product_id", productID)
-	if err != nil {
-		return false, err
-	}
-	path := "/v1/merchant/users/" + customer + "/product-access?product_id=" + url.QueryEscape(product)
-	var out ProductAccessCheck
-	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
-		return false, err
-	}
-	return out.HasAccess, nil
 }
 
 // ResourceRevenueDaily implements Client (handler ServiceResourceRevenue).

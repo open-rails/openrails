@@ -414,13 +414,13 @@ type EntitlementRecord struct {
 // sub_… for subscription, the declared id for admin).
 type ProductAccessGrant struct {
 	ID           string     `json:"id"`
-	CustomerID   CustomerID `json:"customer_id"`
-	ProductID    ProductID  `json:"product_id"`
+	CustomerID   string     `json:"customer_id"`
+	ProductID    string     `json:"product_id"`
 	ProductKey   string     `json:"product_key,omitempty"`
 	ProductName  string     `json:"product_name,omitempty"`
 	SourceType   string     `json:"source_type"`
 	SourceID     string     `json:"source_id,omitempty"`
-	PaymentID    *PaymentID `json:"payment_id,omitempty"`
+	PaymentID    *string    `json:"payment_id,omitempty"`
 	Status       string     `json:"status"`
 	StartsAt     time.Time  `json:"starts_at"`
 	EndsAt       *time.Time `json:"ends_at,omitempty"`
@@ -432,9 +432,9 @@ type ProductAccessGrant struct {
 
 // ProductAccessCheck is the response from a single product-access check.
 type ProductAccessCheck struct {
-	CustomerID CustomerID `json:"customer_id"`
-	ProductID  ProductID  `json:"product_id"`
-	HasAccess  bool       `json:"has_access"`
+	CustomerID string `json:"customer_id"`
+	ProductID  string `json:"product_id"`
+	HasAccess  bool   `json:"has_access"`
 }
 
 // AdmitBatchVerdict is one per-item verdict from POST /v1/merchant/admissions.
