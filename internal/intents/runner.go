@@ -140,7 +140,8 @@ func (s *Stats) Add(o Stats) {
 	s.Expired += o.Expired
 }
 
-// RunExecuteOnce expires overdue intents, claims due ones and executes them
+// RunExecuteOnce is retained for legacy regression fixtures; production uses
+// per-operation River dispatch. It expires overdue intents and executes them
 // through their registered handlers. Intent-level problems are recorded on
 // the intent (never returned); the returned error is reserved for
 // infrastructure failure (claim query failed).
@@ -326,7 +327,8 @@ func (r *Runner) ExecuteByID(ctx context.Context, id uuid.UUID) (gen.OpenrailsRa
 	return r.Store.Get(ctx, row.ID)
 }
 
-// RunVerifyOnce claims due unknown_needs_verify intents and resolves them via
+// RunVerifyOnce is retained for legacy regression fixtures; production uses
+// per-operation River dispatch. It claims unknown_needs_verify intents via
 // the handlers' read-only Verify.
 func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 	var stats Stats

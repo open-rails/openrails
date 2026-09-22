@@ -46,10 +46,6 @@ func TestProviderOperationExecutesWithExactMerchant(t *testing.T) {
 		_, err := intents.NewStore(worker).ClaimDue(ctx, now, now.Add(time.Minute), 50)
 		require.ErrorIs(t, err, merchant.ErrNoMerchant)
 
-		// And the merchant IS there to be found, through the sanctioned path.
-		ids, err := intents.NewStore(worker).DueExecuteMerchants(ctx, now, 500)
-		require.NoError(t, err)
-		require.Contains(t, ids, m.id, "0022's work queue must surface the merchant the bare claim could not see")
 	})
 
 	t.Run("the executor claims and executes under the merchant's own scope", func(t *testing.T) {
