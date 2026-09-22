@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"net/http"
+	"strings"
 
 	authhttp "github.com/open-rails/authkit/authhttp"
 	authcore "github.com/open-rails/authkit/embedded"
@@ -54,6 +55,9 @@ func (c controlPlaneHTTP) BuildHTTP(backend authcore.HTTPBackend) (authcore.HTTP
 		return nil, err
 	}
 	for _, route := range mount.Routes() {
+		if !strings.HasPrefix(route.Path, "/auth/") {
+			continue
+		}
 		surface.routes = append(surface.routes, authcore.HTTPRoute{Method: route.Method, Path: route.Path, Handler: mount})
 	}
 	return surface, nil

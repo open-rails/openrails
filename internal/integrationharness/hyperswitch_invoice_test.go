@@ -166,11 +166,13 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 	rt.CollectionResolver.(*money.MerchantCollectionAdapterBuilder).Endpoints.NMIDirectPostURL = "https://secure.nmi.com/api/transact.php"
 	client := surface.Client(openrails.WithAPIKey(owned.APIKey))
 	customer := openrails.CustomerID(uuid.MustParse(user.ID))
-	setup, err := client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{Mode: "payment_method", IdempotencyKey: uuid.NewString(), Customer: openrails.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: *user.Email, Username: "invoice"}, Payment: openrails.CheckoutPayment{PSPID: psp}})
+	setup, err := client.CreatePaymentMethodSession(ctx, openrails.CreatePaymentMethodSessionRequest{IdempotencyKey: uuid.NewString(), Customer: openrails.CheckoutCustomerIdentity{ID: customer.String(), VerifiedEmail: *user.Email, Username: "invoice"}, PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: psp.String()}})
 	require.NoError(t, err)
-	complete, err := client.ConfirmCheckoutSession(ctx, setup.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: customer, Payment: openrails.ConfirmPayment{Capture: &openrails.CustodianCaptureReference{CustodianID: custodian, SessionID: setup.Capture.SessionID, Token: g.complete(setup.Capture.SessionID)}}})
+	complete, err := client.ConfirmCheckoutSession(ctx, setup.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: customer.String(), Payment: openrails.ConfirmPayment{Capture: &openrails.CustodianCaptureReference{CustodianID: custodian, SessionID: setup.Capture.SessionID, Token: g.complete(setup.Capture.SessionID)}}})
 	require.NoError(t, err)
 	require.NotNil(t, complete.PaymentMethodID)
+	paymentMethodID, err := openrails.ParsePaymentMethodID(*complete.PaymentMethodID)
+	require.NoError(t, err)
 	var financial int
 	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1)+(SELECT count(*) FROM billing.invoices WHERE merchant_id=$1)+(SELECT count(*) FROM billing.ledger_accounts WHERE merchant_id=$1)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1)`, owned.MerchantID.UUID()).Scan(&financial))
 	require.Zero(t, financial)
@@ -192,13 +194,13 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 	}))
 	payerClient, err := openrails.NewRemote(surface.BaseURL, openrails.WithMerchantID(owned.MerchantID), openrails.WithTokenProvider(func(context.Context) (string, error) { return token, nil }))
 	require.NoError(t, err)
-	request := openrails.PayInvoiceNowRequest{InvoiceID: invoice, PaymentMethodID: *complete.PaymentMethodID, IdempotencyKey: uuid.NewString()}
+	request := openrails.PayInvoiceNowRequest{InvoiceID: invoice, PaymentMethodID: paymentMethodID, IdempotencyKey: uuid.NewString()}
 	deleteMethod := func(access string, selected ...openrails.PaymentMethodID) int {
 		method := *complete.PaymentMethodID
 		if len(selected) > 0 {
-			method = selected[0]
+			method = selected[0].String()
 		}
-		wire, err := http.NewRequestWithContext(ctx, http.MethodDelete, surface.BaseURL+"/v1/me/payment-methods/"+method.String(), nil)
+		wire, err := http.NewRequestWithContext(ctx, http.MethodDelete, surface.BaseURL+"/v1/me/payment-methods/"+method, nil)
 		require.NoError(t, err)
 		if access != "" {
 			wire.Header.Set("Authorization", "Bearer "+access)
@@ -261,10 +263,10 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 	aliasPSP := uuid.New()
 	_, err = h.sharedPool().Exec(ctx, `INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,custodian_id) VALUES($1,$2,'nmi','test',$3,$4)`, aliasPSP, owned.MerchantID.UUID(), "capture-alias-"+aliasPSP.String(), custodian)
 	require.NoError(t, err)
-	aliasSetup, err := client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{Mode: "payment_method", IdempotencyKey: uuid.NewString(), Customer: openrails.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: *user.Email, Username: "invoice"}, Payment: openrails.CheckoutPayment{PSPID: aliasPSP}})
+	aliasSetup, err := client.CreatePaymentMethodSession(ctx, openrails.CreatePaymentMethodSessionRequest{IdempotencyKey: uuid.NewString(), Customer: openrails.CheckoutCustomerIdentity{ID: customer.String(), VerifiedEmail: *user.Email, Username: "invoice"}, PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: aliasPSP.String()}})
 	require.NoError(t, err)
 	var sharedHandle string
-	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT rail_method_ref FROM billing.payment_methods WHERE id=$1`, complete.PaymentMethodID.UUID()).Scan(&sharedHandle))
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT rail_method_ref FROM billing.payment_methods WHERE id=$1`, paymentMethodID.UUID()).Scan(&sharedHandle))
 	aliasToken := g.complete(aliasSetup.Capture.SessionID)
 	entered, release := make(chan struct{}), make(chan struct{})
 	t.Cleanup(func() { close(release) })
@@ -274,7 +276,7 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 	g.mu.Unlock()
 	finished := make(chan error, 1)
 	go func() {
-		_, err := client.ConfirmCheckoutSession(ctx, aliasSetup.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: customer, Payment: openrails.ConfirmPayment{Capture: &openrails.CustodianCaptureReference{CustodianID: custodian, SessionID: aliasSetup.Capture.SessionID, Token: aliasToken}}})
+		_, err := client.ConfirmCheckoutSession(ctx, aliasSetup.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: customer.String(), Payment: openrails.ConfirmPayment{Capture: &openrails.CustodianCaptureReference{CustodianID: custodian, SessionID: aliasSetup.Capture.SessionID, Token: aliasToken}}})
 		finished <- err
 	}()
 	select {
@@ -308,14 +310,14 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 		}
 		return err
 	}))
-	_, err = payerClient.PayInvoiceNow(ctx, openrails.PayInvoiceNowRequest{InvoiceID: blockedInvoice, PaymentMethodID: *complete.PaymentMethodID, IdempotencyKey: uuid.NewString()})
+	_, err = payerClient.PayInvoiceNow(ctx, openrails.PayInvoiceNowRequest{InvoiceID: blockedInvoice, PaymentMethodID: paymentMethodID, IdempotencyKey: uuid.NewString()})
 	require.Error(t, err, "accepted deletion prevents a new invoice charge")
 	mu.Lock()
 	require.Len(t, forms, 1, "delete-first ordering sends no new money POST")
 	mu.Unlock()
 
 	var deletion uuid.UUID
-	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT id FROM billing.rail_intents WHERE merchant_id=$1 AND intent_type='hyperswitch_method_delete' AND payload->>'payment_method_id'=$2`, owned.MerchantID.UUID(), complete.PaymentMethodID.UUID().String()).Scan(&deletion))
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT id FROM billing.rail_intents WHERE merchant_id=$1 AND intent_type='hyperswitch_method_delete' AND payload->>'payment_method_id'=$2`, owned.MerchantID.UUID(), paymentMethodID.UUID().String()).Scan(&deletion))
 	mu.Lock()
 	require.Equal(t, 1, deletes)
 	lostDelete = false
@@ -338,7 +340,7 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 	require.Equal(t, http.StatusNotFound, deleteMethod(token))
 	replay, err = payerClient.PayInvoiceNow(ctx, request)
 	require.Error(t, err, "the deliberately changed method remains a key conflict")
-	request.PaymentMethodID = *complete.PaymentMethodID
+	request.PaymentMethodID = paymentMethodID
 	replay, err = payerClient.PayInvoiceNow(ctx, request)
 	require.NoError(t, err)
 	require.True(t, replay.Replayed)
@@ -370,7 +372,7 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.ledger_transfers WHERE customer_id=$1 AND transfer_type='owed_payment'`, customer.UUID()).Scan(&transfers))
 	require.Equal(t, 1, transfers)
 	t.Run("deleted method archive stays deleted", func(t *testing.T) {
-		_, err := client.EnsureCustomer(ctx, openrails.CustomerID(uuid.MustParse(foreign.ID)))
+		_, err := client.EnsureCustomer(ctx, (openrails.CustomerID(uuid.MustParse(foreign.ID))).String())
 		require.NoError(t, err)
 		var original []byte
 		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT to_jsonb(i) FROM billing.rail_intents i WHERE id=$1`, deletion).Scan(&original))
@@ -420,7 +422,7 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 			require.NoError(t, err)
 			method, payer, err := intents.DeletedMethod(restored)
 			require.NoError(t, err)
-			require.Equal(t, complete.PaymentMethodID.UUID(), method)
+			require.Equal(t, paymentMethodID.UUID(), method)
 			require.Equal(t, customer.UUID(), payer)
 			return nil
 		}))
@@ -441,7 +443,7 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 		require.Equal(t, artifact.String(), again.String())
 		require.NoError(t, target.RunInMerchantConn(merchant.WithID(ctx, owned.MerchantID), func(c context.Context) error {
 			var count int
-			require.NoError(t, target.Qx(c).QueryRow(c, `SELECT count(*) FROM openrails.payment_methods WHERE id=$1`, complete.PaymentMethodID.UUID()).Scan(&count))
+			require.NoError(t, target.Qx(c).QueryRow(c, `SELECT count(*) FROM openrails.payment_methods WHERE id=$1`, paymentMethodID.UUID()).Scan(&count))
 			require.Zero(t, count)
 			operation, err := (&intents.Runner{Store: intents.NewStore(target)}).ExecuteByID(c, deletion)
 			require.NoError(t, err)

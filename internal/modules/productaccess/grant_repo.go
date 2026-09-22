@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -189,18 +190,58 @@ func (r *ProductAccessGrantRepo) HasActiveAccess(ctx context.Context, userID str
 	if err != nil {
 		return false, err
 	}
-	live, err := r.db.Gen(ctx).ListLiveGrantsByCustomer(ctx, gen.ListLiveGrantsByCustomerParams{
-		MerchantID: tid.UUID(), CustomerID: tsid,
-	})
+	rows, err := r.db.Gen(ctx).CheckProductAccess(ctx, gen.CheckProductAccessParams{MerchantID: tid.UUID(), CustomerID: tsid, ProductIds: []uuid.UUID{productID}, AtTime: at})
 	if err != nil {
 		return false, err
 	}
-	for i := range live {
-		if ownershipInWindow(live[i], productID, at) {
-			return true, nil
+	return len(rows) == 1 && rows[0].HasAccess, nil
+}
+
+func (r *ProductAccessGrantRepo) CheckActiveProducts(ctx context.Context, userID string, products []uuid.UUID, at time.Time) (map[uuid.UUID]bool, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	customer, err := db.ResolveCustomerID(userID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Gen(ctx).CheckProductAccess(ctx, gen.CheckProductAccessParams{MerchantID: mid.UUID(), CustomerID: customer, ProductIds: products, AtTime: at})
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[uuid.UUID]bool, len(rows))
+	for _, row := range rows {
+		if row.ProductID != nil {
+			result[*row.ProductID] = row.HasAccess
 		}
 	}
-	return false, nil
+	return result, nil
+}
+
+func (r *ProductAccessGrantRepo) ListActivePage(ctx context.Context, userID string, after uuid.UUID, limit int, at time.Time) ([]models.ProductAccessGrant, error) {
+	pageLimit, err := safecast.Convert[int32](limit)
+	if err != nil || pageLimit < 1 {
+		return nil, errors.New("invalid product access page limit")
+	}
+
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	customer, err := db.ResolveCustomerID(userID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Gen(ctx).ListActiveOwnershipGrantsPage(ctx, gen.ListActiveOwnershipGrantsPageParams{MerchantID: mid.UUID(), CustomerID: customer, AfterID: after, PageLimit: pageLimit, AtTime: at})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]models.ProductAccessGrant, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, ownershipModel(row, nil))
+	}
+	return result, nil
 }
 
 // ownershipInWindow reports whether a live grant grants product access at `at`.
@@ -302,21 +343,9 @@ func (r *ProductAccessGrantRepo) RevokeByID(ctx context.Context, id uuid.UUID, n
 	if err != nil {
 		return 0, err
 	}
-	g, err := r.db.Gen(ctx).GetGrant(ctx, gen.GetGrantParams{MerchantID: tid.UUID(), ID: id})
-	if err != nil || g.Kind != string(grants.Ownership) || g.Event != "grant" {
-		return 0, nil
-	}
-	terminated, err := r.db.Gen(ctx).IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: tid.UUID(), GrantID: id})
-	if err != nil {
-		return 0, err
-	}
-	if terminated {
-		return 0, nil // already revoked
-	}
-	if _, err := r.ledger(ctx, tid.UUID()).Revoke(ctx, id, string(reason)); err != nil {
-		return 0, err
-	}
-	return 1, nil
+	return r.db.Gen(ctx).RevokeOwnershipGrantByID(ctx, gen.RevokeOwnershipGrantByIDParams{
+		MerchantID: tid.UUID(), ID: id, RevokedAt: now, Reason: string(reason),
+	})
 }
 
 // RevokeByPayment revokes all live ownership grants tied to a payment (refund /
@@ -326,21 +355,9 @@ func (r *ProductAccessGrantRepo) RevokeByPayment(ctx context.Context, paymentID 
 	if err != nil {
 		return 0, err
 	}
-	ids, err := r.db.Gen(ctx).ListLiveOwnershipGrantIDsByPayment(ctx, gen.ListLiveOwnershipGrantIDsByPaymentParams{
-		MerchantID: tid.UUID(), PaymentID: paymentID,
+	return r.db.Gen(ctx).RevokeOwnershipGrantsByPayment(ctx, gen.RevokeOwnershipGrantsByPaymentParams{
+		MerchantID: tid.UUID(), PaymentID: paymentID, RevokedAt: now, Reason: string(reason),
 	})
-	if err != nil {
-		return 0, err
-	}
-	gl := r.ledger(ctx, tid.UUID())
-	var n int64
-	for _, id := range ids {
-		if _, err := gl.Revoke(ctx, id, string(reason)); err != nil {
-			return n, err
-		}
-		n++
-	}
-	return n, nil
 }
 
 // reverse flips a slice in place (live/all lists come back created_at ASC; the

@@ -195,16 +195,16 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 	accountID = "acct_" + strings.ReplaceAll(owned.MerchantID.String(), "-", "")[:12]
 	mu.Unlock()
 	psp := h.ArmLoopbackStripe(rt, owned.MerchantID)
-	product, err := owner.CreateProduct(t.Context(), openrails.CreateProductRequest{Key: uuid.NewString(), DisplayName: "Engine Stripe", EntitlementsSpec: map[string]*int{"engine_access": nil}})
+	product, err := owner.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: uuid.NewString(), DisplayName: "Engine Stripe", EntitlementsSpec: map[string]*int{"engine_access": nil}})
 	require.NoError(t, err)
 	hours := 720
-	price, err := owner.CreatePrice(t.Context(), openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+	price, err := owner.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 	require.NoError(t, err)
 	user, err := cp.Core().CreateUser(t.Context(), uuid.NewString()+"@example.test", "stripe"+uuid.NewString()[:8])
 	require.NoError(t, err)
 	token, _, err := cp.Core().MintAccessToken(t.Context(), user.ID, nil)
 	require.NoError(t, err)
-	_, err = owner.EnsureCustomer(t.Context(), openrails.CustomerID(uuid.MustParse(user.ID)))
+	_, err = owner.EnsureCustomer(t.Context(), (openrails.CustomerID(uuid.MustParse(user.ID))).String())
 	require.NoError(t, err)
 	call := func(method, path, key string, body any) map[string]any {
 		var data bytes.Buffer

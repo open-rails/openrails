@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -26,15 +27,31 @@ func commerceCustomer(r *httprequest.Request, customerID openrails.CustomerID) (
 
 func ServiceCreateCheckoutSession(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
-	var input openrails.CreateCheckoutSessionRequest
+	var input struct {
+		openrails.CreateCheckoutSessionRequest
+		Mode           json.RawMessage `json:"mode"`
+		SubscriptionID json.RawMessage `json:"subscription_id"`
+		NewPriceID     json.RawMessage `json:"new_price_id"`
+	}
 	if !r.BindJSON(&input) {
 		return
 	}
-	payer, ok := commerceCustomer(r, input.Customer.ID)
+	if raw := input.PaymentOptions.PaymentMethodID; raw != "" {
+		id, err := openrails.ParsePaymentMethodID(raw)
+		if err != nil || id.IsZero() {
+			r.ErrorJSON(http.StatusBadRequest, "invalid payment_method_id")
+			return
+		}
+	}
+	if len(input.Mode) > 0 || len(input.SubscriptionID) > 0 || len(input.NewPriceID) > 0 {
+		r.ErrorJSON(http.StatusBadRequest, "priced checkout derives its operation from the price; use a dedicated setup or subscription action endpoint")
+		return
+	}
+	payer, ok := commerceCustomer(r, customerIDParam(input.Customer.ID))
 	if !ok {
 		return
 	}
-	input.Customer.ID = openrails.CustomerID(payer)
+	input.Customer.ID = payer.String()
 	input.IdempotencyKey = r.Header("Idempotency-Key")
 	if strings.TrimSpace(input.IdempotencyKey) == "" {
 		r.ErrorJSON(http.StatusBadRequest, "Idempotency-Key required")
@@ -45,9 +62,9 @@ func ServiceCreateCheckoutSession(r *httprequest.Request) {
 		r.InternalError("billing service unavailable", err)
 		return
 	}
-	out, err := svc.CreateCheckoutSessionForCustomer(r.Request.Context(), input.Customer, input)
+	out, err := svc.CreateCheckoutSessionForCustomer(r.Request.Context(), input.Customer, input.CreateCheckoutSessionRequest)
 	if err != nil {
-		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{Rail: input.Payment.Rail, Wallet: input.Payment.Wallet})
+		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{Rail: input.PaymentOptions.Rail, Wallet: input.PaymentOptions.Wallet})
 		return
 	}
 	r.SuccessJSON(out)
@@ -84,7 +101,7 @@ func ServiceConfirmCheckoutSession(r *httprequest.Request) {
 	if !r.BindJSON(&input) {
 		return
 	}
-	payer, ok := commerceCustomer(r, input.CustomerID)
+	payer, ok := commerceCustomer(r, customerIDParam(input.CustomerID))
 	if !ok {
 		return
 	}
@@ -147,4 +164,59 @@ func ServiceResolveEffectiveTier(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(out)
+}
+
+func ServiceCreatePaymentMethodSession(r *httprequest.Request) {
+	var input openrails.CreatePaymentMethodSessionRequest
+	if !r.BindJSON(&input) {
+		return
+	}
+	input.IdempotencyKey = r.Header("Idempotency-Key")
+	serviceCreateCheckoutAction(r, input.Customer, input.IdempotencyKey, input.PaymentOptions, func(svc *billingservice.Service) (*openrails.CheckoutSession, error) {
+		return svc.CreatePaymentMethodSessionForCustomer(r.Request.Context(), input)
+	})
+}
+
+func ServiceCreateSolanaCancelSession(r *httprequest.Request) {
+	var input openrails.CreateSolanaCancelSessionRequest
+	if !r.BindJSON(&input) {
+		return
+	}
+	input.IdempotencyKey = r.Header("Idempotency-Key")
+	serviceCreateCheckoutAction(r, input.Customer, input.IdempotencyKey, input.PaymentOptions, func(svc *billingservice.Service) (*openrails.CheckoutSession, error) {
+		return svc.CreateSolanaCancelSessionForCustomer(r.Request.Context(), input)
+	})
+}
+
+func ServiceCreateSolanaTierChangeSession(r *httprequest.Request) {
+	var input openrails.CreateSolanaTierChangeSessionRequest
+	if !r.BindJSON(&input) {
+		return
+	}
+	input.IdempotencyKey = r.Header("Idempotency-Key")
+	serviceCreateCheckoutAction(r, input.Customer, input.IdempotencyKey, input.PaymentOptions, func(svc *billingservice.Service) (*openrails.CheckoutSession, error) {
+		return svc.CreateSolanaTierChangeSessionForCustomer(r.Request.Context(), input)
+	})
+}
+
+func serviceCreateCheckoutAction(r *httprequest.Request, customer openrails.CheckoutCustomerIdentity, key string, payment openrails.CheckoutPaymentOptions, create func(*billingservice.Service) (*openrails.CheckoutSession, error)) {
+	r.SetHeader("Cache-Control", "no-store")
+	if _, ok := commerceCustomer(r, customerIDParam(customer.ID)); !ok {
+		return
+	}
+	if strings.TrimSpace(key) == "" {
+		r.ErrorJSON(http.StatusBadRequest, "Idempotency-Key required")
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.InternalError("billing service unavailable", err)
+		return
+	}
+	result, err := create(svc)
+	if err != nil {
+		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{Rail: payment.Rail, Wallet: payment.Wallet})
+		return
+	}
+	r.SuccessJSON(result)
 }

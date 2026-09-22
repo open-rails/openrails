@@ -1247,6 +1247,25 @@ func (q *Queries) ListRefundsForPayment(ctx context.Context, arg ListRefundsForP
 	return items, nil
 }
 
+const lockPaymentForRefund = `-- name: LockPaymentForRefund :one
+SELECT id FROM openrails.payments
+WHERE merchant_id=$1::uuid AND id=$2::uuid
+  AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type LockPaymentForRefundParams struct {
+	MerchantID uuid.UUID
+	PaymentID  uuid.UUID
+}
+
+func (q *Queries) LockPaymentForRefund(ctx context.Context, arg LockPaymentForRefundParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockPaymentForRefund, arg.MerchantID, arg.PaymentID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const markPaymentFailed = `-- name: MarkPaymentFailed :exec
 UPDATE openrails.payments SET status = 'failed' WHERE payments.merchant_id = $2::uuid AND id = $1
   AND deleted_at IS NULL

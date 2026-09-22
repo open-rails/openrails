@@ -7,18 +7,17 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails"
-	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-func catalogPrices(ctx context.Context, client *openrails.Client, id openrails.ProductID, activeOnly bool) ([]billingservice.CatalogPrice, error) {
-	filter := openrails.PriceFilter{ProductID: id, PageOptions: openrails.PageOptions{Limit: 100}}
+func catalogPrices(ctx context.Context, client *openrails.Client, id openrails.ProductID, activeOnly bool) ([]openrails.Price, error) {
+	filter := openrails.PriceListParams{ProductID: (id).String(), PageOptions: openrails.PageOptions{Limit: 100}}
 	if activeOnly {
 		archived := false
 		filter.Archived = &archived
 	}
-	var out []billingservice.CatalogPrice
+	var out []openrails.Price
 	for {
-		page, err := client.ListPrices(ctx, filter)
+		page, err := client.Prices.List(ctx, &filter)
 		if err != nil {
 			return nil, err
 		}

@@ -25,7 +25,7 @@ type UsageMeterDTO struct {
 
 type DefaultUsageRateCardDTO struct {
 	ID         uuid.UUID           `json:"id"`
-	ProductID  ProductID           `json:"product_id"`
+	ProductID  string              `json:"product_id"`
 	ProductKey string              `json:"product_key"`
 	Filter     map[string][]string `json:"filter"`
 	Price      pricing.RatePrice   `json:"price"`
@@ -35,7 +35,7 @@ type DefaultUsageRateCardDTO struct {
 }
 
 type UsageMeterOverrideDTO struct {
-	CustomerID CustomerID         `json:"customer_id"`
+	CustomerID string             `json:"customer_id"`
 	Subject    string             `json:"subject,omitempty"`
 	Email      string             `json:"email,omitempty"`
 	Price      pricing.RatePrice  `json:"price"`
@@ -62,7 +62,7 @@ type UsageMeterRequest struct {
 }
 
 type DefaultUsageRateCardRequest struct {
-	ProductID ProductID           `json:"product_id"`
+	ProductID string              `json:"product_id"`
 	Filter    map[string][]string `json:"filter"`
 	Price     pricing.RatePrice   `json:"price"`
 	Allowance *pricing.Allowance  `json:"allowance,omitempty"`

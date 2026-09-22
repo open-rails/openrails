@@ -54,16 +54,14 @@ func bootRoutingFixture(
 	// Use the ordinary manifest posture so fake credentials do not trigger
 	// the separate sandbox qualification gate.
 	cfg := manifestModeConfig(dsn)
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
+	rt, id, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()}, slug, embed.MerchantConfig{
 		DisplayName:     slug,
 		PSPs:            psps,
 		CheckoutRouting: routing,
 	})
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	cleanupCCBillWebhookMerchant(t, id)
 	t.Cleanup(func() {
 		appDB := dbtest.OpenMerchantDB(t, id.UUID())

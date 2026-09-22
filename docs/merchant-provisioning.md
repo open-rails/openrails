@@ -58,7 +58,7 @@ persistent stores. Mode comparison:
 MODE 1 walkthrough: [self-hosting-mode1.md](self-hosting-mode1.md).
 
 Embedded hosts provision merchants programmatically
-(`embed.Runtime.UpsertMerchantConfig`, same manifest shape) and pass auth at
+(`embed.Options.Merchant`, same manifest shape) and pass auth at
 HTTP mount time; the issuer-as-owner path below is the standalone mechanism.
 
 ## Merchant identity and names

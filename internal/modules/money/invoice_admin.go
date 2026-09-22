@@ -33,8 +33,11 @@ func (s *MoneyService) ListMerchantInvoices(ctx context.Context, filter Merchant
 	var invoices []models.Invoice
 	var total int64
 	var customerID *uuid.UUID
-	if !filter.CustomerID.IsZero() {
-		id := filter.CustomerID.UUID()
+	if filter.CustomerID != "" {
+		id, err := uuid.Parse(filter.CustomerID)
+		if err != nil || id == uuid.Nil {
+			return nil, 0, fmt.Errorf("invalid customer_id")
+		}
 		customerID = &id
 	}
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {

@@ -389,8 +389,8 @@ func (s *RepriceService) emitScheduledNotification(ctx context.Context, sub *mod
 		EventType:  models.NotificationSubscriptionRepriceScheduled,
 		Data: openrails.NotificationData{
 			SubscriptionID: openrails.SubscriptionID(sub.ID),
-			FromPriceID:    openrails.PriceID(from.ID),
-			ToPriceID:      openrails.PriceID(to.ID),
+			FromPriceID:    (openrails.PriceID(from.ID)).String(),
+			ToPriceID:      (openrails.PriceID(to.ID)).String(),
 			OldAmount:      &from.Amount,
 			NewAmount:      &to.Amount,
 			Currency:       to.Currency,

@@ -62,7 +62,7 @@ func TestHostedMerchantsIsolateOneSubject(t *testing.T) {
 	}
 	for _, s := range sides {
 		remote, engine := s.merchant.Client(), s.merchant.EngineClient()
-		request := openrails.DepositCreditsRequest{CustomerID: &subject, Invoker: subject.String(), Currency: "USD", Amount: s.amount, Source: "shared-subject", SourceID: s.sourceID}
+		request := openrails.DepositCreditsRequest{CustomerID: new(subject.String()), Invoker: subject.String(), Currency: "USD", Amount: s.amount, Source: "shared-subject", SourceID: s.sourceID}
 		first, err := remote.DepositCredits(ctx, request)
 		require.NoError(t, err)
 		require.False(t, first.Replayed)
@@ -75,31 +75,31 @@ func TestHostedMerchantsIsolateOneSubject(t *testing.T) {
 		request.SourceID = uuid.NewString()
 		_, err = engine.DepositCredits(ctx, request)
 		require.NoError(t, err)
-		_, err = remote.GrantEntitlement(ctx, subject, openrails.GrantEntitlementRequest{Entitlement: s.feature})
+		_, err = remote.GrantEntitlement(ctx, (subject).String(), openrails.GrantEntitlementRequest{Entitlement: s.feature})
 		require.NoError(t, err)
 	}
 	// Read only after both merchants have written.
 	for i, s := range sides {
 		other := sides[1-i]
 		for name, client := range map[string]*openrails.Client{"http": s.merchant.Client(), "engine": s.merchant.EngineClient()} {
-			balance, err := client.Balance(ctx, subject)
+			balance, err := client.Balance(ctx, (subject).String())
 			require.NoError(t, err, name)
 			require.Equal(t, 2*s.amount, balance.BalanceAmount, "%s %s", s.merchant.Slug, name)
-			receipt, err := client.GetDeposit(ctx, subject, s.sourceID)
+			receipt, err := client.GetDeposit(ctx, (subject).String(), s.sourceID)
 			require.NoError(t, err)
 			require.Equal(t, s.receipt, receipt.ID)
-			_, err = client.GetDeposit(ctx, subject, other.sourceID)
+			_, err = client.GetDeposit(ctx, (subject).String(), other.sourceID)
 			require.ErrorIs(t, err, openrails.ErrNotFound, "the other merchant's receipt is invisible")
-			own, err := client.HasEntitlement(ctx, subject, s.feature, time.Time{})
+			own, err := client.HasEntitlement(ctx, (subject).String(), s.feature, time.Time{})
 			require.NoError(t, err)
 			require.True(t, own)
-			foreign, err := client.HasEntitlement(ctx, subject, other.feature, time.Time{})
+			foreign, err := client.HasEntitlement(ctx, (subject).String(), other.feature, time.Time{})
 			require.NoError(t, err)
 			require.False(t, foreign)
-			records, err := client.ListActiveEntitlements(ctx, []openrails.CustomerID{subject}, time.Time{})
+			records, err := client.ListActiveEntitlements(ctx, []string{(subject).String()}, time.Time{})
 			require.NoError(t, err)
-			require.Len(t, records[subject], 1)
-			require.Equal(t, s.feature, records[subject][0].Entitlement)
+			require.Len(t, records[(subject).String()], 1)
+			require.Equal(t, s.feature, records[(subject).String()][0].Entitlement)
 		}
 	}
 	// Authority: a credential is bound to its merchant; owners hold no
@@ -113,7 +113,7 @@ func TestHostedMerchantsIsolateOneSubject(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, status, "%v", body)
 	viewer, err := openrails.NewRemote(hosted.BaseURL, openrails.WithAPIKey(a.MintAPIKey("viewer", "viewer")), openrails.WithMerchantID(a.ID))
 	require.NoError(t, err)
-	_, err = viewer.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &subject, Invoker: subject.String(), Currency: "USD", Amount: 1, Source: "shared-subject", SourceID: uuid.NewString()})
+	_, err = viewer.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(subject.String()), Invoker: subject.String(), Currency: "USD", Amount: 1, Source: "shared-subject", SourceID: uuid.NewString()})
 	require.ErrorIs(t, err, openrails.ErrDenied, "an owner-minted viewer key cannot move money")
 }
 
@@ -309,15 +309,15 @@ func TestHostedDelegationSenderBoundClient(t *testing.T) {
 	require.Equal(t, http.StatusOK, statusResp.StatusCode)
 
 	subject := openrails.CustomerID(uuid.New())
-	deposit, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &subject, Invoker: subject.String(), Currency: "USD", Amount: 250_000, Source: "delegated", SourceID: uuid.NewString()})
+	deposit, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(subject.String()), Invoker: subject.String(), Currency: "USD", Amount: 250_000, Source: "delegated", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	require.EqualValues(t, 250_000, deposit.Amount)
-	balance, err := client.Balance(ctx, subject)
+	balance, err := client.Balance(ctx, (subject).String())
 	require.NoError(t, err)
 	require.EqualValues(t, 250_000, balance.BalanceAmount)
-	_, err = client.GrantEntitlement(ctx, subject, openrails.GrantEntitlementRequest{Entitlement: "delegated-access"})
+	_, err = client.GrantEntitlement(ctx, (subject).String(), openrails.GrantEntitlementRequest{Entitlement: "delegated-access"})
 	require.NoError(t, err)
-	allowed, err := client.HasEntitlement(ctx, subject, "delegated-access", time.Time{})
+	allowed, err := client.HasEntitlement(ctx, (subject).String(), "delegated-access", time.Time{})
 	require.NoError(t, err)
 	require.True(t, allowed)
 	invoices, _, err := client.ListMerchantInvoices(ctx, openrails.MerchantInvoiceFilter{}, 5, 0)
@@ -325,10 +325,10 @@ func TestHostedDelegationSenderBoundClient(t *testing.T) {
 	require.NotNil(t, invoices)
 
 	// The other merchant sees none of it, through its own owner key.
-	otherBalance, err := b.Client().Balance(ctx, subject)
+	otherBalance, err := b.Client().Balance(ctx, (subject).String())
 	require.NoError(t, err)
 	require.Zero(t, otherBalance.BalanceAmount)
-	foreign, err := b.Client().HasEntitlement(ctx, subject, "delegated-access", time.Time{})
+	foreign, err := b.Client().HasEntitlement(ctx, (subject).String(), "delegated-access", time.Time{})
 	require.NoError(t, err)
 	require.False(t, foreign)
 

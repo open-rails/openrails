@@ -24,7 +24,7 @@ func TestPolicyStateIntegrity(t *testing.T) {
 	t.Run("replacement_rollback", func(t *testing.T) {
 		payer, token := f.actor(t, []string{permissions.CustomerAll})
 		original := openrails.SpendDelegationInput{Scope: "invoker", ScopeKey: "original", Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 100, Currency: "USD"}}}
-		require.NoError(t, f.client.SetCustomerSpendDelegation(t.Context(), payer, original))
+		require.NoError(t, f.client.SetCustomerSpendDelegation(t.Context(), (payer).String(), original))
 		name := "policy_fail_" + uuid.NewString()[:8]
 		failingKey := "failure-" + uuid.NewString()
 		_, err := pool.Exec(t.Context(), fmt.Sprintf(`CREATE SEQUENCE billing.%s;
@@ -42,7 +42,7 @@ EXECUTE FUNCTION billing.%s()`, name, name, name, name, name, f.merchant.Merchan
 		failed := original
 		failed.ScopeKey = failingKey
 		failed.Windows = []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 999, Currency: "USD"}}
-		failure := f.client.SetCustomerSpendDelegations(t.Context(), payer, []openrails.SpendDelegationInput{failed})
+		failure := f.client.SetCustomerSpendDelegations(t.Context(), (payer).String(), []openrails.SpendDelegationInput{failed})
 		var serverError *openrails.StatusError
 		require.ErrorAs(t, failure, &serverError)
 		require.Equal(t, http.StatusInternalServerError, serverError.Status)
@@ -80,7 +80,7 @@ EXECUTE FUNCTION billing.%s()`, name, name, name, name, name, f.merchant.Merchan
 		singular := openrails.SpendDelegationInput{Scope: "invoker", ScopeKey: "concurrent-worker", Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 300, Currency: "USD"}}}
 		replaceDone, upsertDone := make(chan error, 1), make(chan error, 1)
 		go func() {
-			replaceDone <- f.client.SetCustomerSpendDelegations(ctx, payer, []openrails.SpendDelegationInput{replacement})
+			replaceDone <- f.client.SetCustomerSpendDelegations(ctx, (payer).String(), []openrails.SpendDelegationInput{replacement})
 		}()
 		waiters := func(want int) bool {
 			var count int
@@ -89,7 +89,7 @@ AND wait_event_type='Lock' AND query LIKE '%pg_advisory_xact_lock(hashtextextend
 			return err == nil && count >= want
 		}
 		require.Eventually(t, func() bool { return waiters(1) }, 5*time.Second, 20*time.Millisecond, "replacement must really wait on the payer lock")
-		go func() { upsertDone <- f.client.SetCustomerSpendDelegation(ctx, payer, singular) }()
+		go func() { upsertDone <- f.client.SetCustomerSpendDelegation(ctx, (payer).String(), singular) }()
 		require.Eventually(t, func() bool { return waiters(2) }, 5*time.Second, 20*time.Millisecond, "independent HTTP requests must contend on the same lock")
 		require.NoError(t, tx.Commit(ctx))
 		blocker.Release()
@@ -116,7 +116,7 @@ AND wait_event_type='Lock' AND query LIKE '%pg_advisory_xact_lock(hashtextextend
 		require.NoError(t, err)
 		require.EqualValues(t, 1, changed.RowsAffected())
 		payer, _ := f.actor(t, nil)
-		_, err = f.embedded.ReportWastedSpend(t.Context(), openrails.WastedSpendReport{CustomerID: payer, Invoker: "bad-config", Currency: "USD", Amount: 1, Source: "test", SourceID: uuid.NewString()})
+		_, err = f.embedded.ReportWastedSpend(t.Context(), openrails.WastedSpendReport{CustomerID: (payer).String(), Invoker: "bad-config", Currency: "USD", Amount: 1, Source: "test", SourceID: uuid.NewString()})
 		require.Error(t, err, "malformed persisted windows must not silently fall back to a spending allowance")
 	})
 }

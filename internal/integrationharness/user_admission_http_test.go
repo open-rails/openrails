@@ -24,7 +24,7 @@ func TestHTTPUserAdmissionWorkflow(t *testing.T) {
 	core := cp.Core()
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
 	userID, _ := makeUser(t, core, "admission"+suffix)
-	require.NoError(t, core.AdminAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(userID), controlplane.MerchantRoleOwner))
+	require.NoError(t, core.OperatorAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(userID), controlplane.MerchantRoleOwner))
 	enrollment, _, err := core.MintAccessToken(ctx, userID, map[string]any{"2fa_enrollment": true})
 	require.NoError(t, err)
 	_, email := makeUser(t, core, "invitee"+suffix)
@@ -41,7 +41,7 @@ func TestHTTPUserAdmissionWorkflow(t *testing.T) {
 	token, _, err := core.MintAccessToken(ctx, userID, nil)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusCreated, post(token))
-	require.NoError(t, core.AdminAssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(userID), "owner"))
+	require.NoError(t, core.OperatorAssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(userID), "owner"))
 	platform := surface.BaseURL + "/v1/platform/admin-rate-limit-lockouts/" + userID
 	status, body := requestJSON(t, http.MethodDelete, platform, enrollment, nil)
 	require.Equal(t, http.StatusUnauthorized, status, string(body))
@@ -49,7 +49,7 @@ func TestHTTPUserAdmissionWorkflow(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, string(body))
 	backupID, _ := makeUser(t, core, "backup"+suffix)
 	seedEmailMFA(t, h, backupID)
-	require.NoError(t, core.AdminAssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(backupID), "owner"))
+	require.NoError(t, core.OperatorAssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(backupID), "owner"))
 	reason := "test account admission"
 	require.NoError(t, core.BanUser(ctx, userID, &reason, nil, userID))
 	can, err := core.Can(ctx, authkit.UserSubject(userID), controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.Perm("merchant:members:manage"))

@@ -30,9 +30,9 @@ func TestClientAccountAndUsageWorkflow(t *testing.T) {
 	for _, d := range clientWorkflowDeployments(t, h) {
 		t.Run(d.name, func(t *testing.T) {
 			client := d.client
-			payer := openrails.CustomerID(uuid.New())
-			_, err := client.EnsureCustomer(ctx, payer)
+			customer, err := client.EnsureCustomer(ctx, uuid.NewString())
 			require.NoError(t, err)
+			payer := customer.ID
 			depositRequest := openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "client-contract", Currency: "USD", Amount: 1_000_000, Source: "conformance", SourceID: uuid.NewString(), Description: "seed"}
 			deposit, err := client.DepositCredits(ctx, depositRequest)
 			require.NoError(t, err)
@@ -139,6 +139,10 @@ func TestClientAccountAndUsageWorkflow(t *testing.T) {
 			require.Equal(t, "money", verdicts[1].Result.BlockedBy)
 			require.Equal(t, "insufficient_balance", verdicts[1].Result.DenyCode)
 			require.NoError(t, client.Release(ctx, batchKey))
+			require.NoError(t, client.RecordUsage(ctx, openrails.UsageReport{
+				CustomerID: payer, Invoker: "client-contract", Currency: "USD", EventType: "sdk-reference-proof",
+				Source: "conformance", SourceID: uuid.NewString(),
+			}))
 			checkClientPaymentReads(t, ctx, h, d)
 			t.Run("metering", func(t *testing.T) { checkClientMetering(t, ctx, h, d); checkClientGaugeUsage(t, ctx, h, d) })
 			t.Run("invoice", func(t *testing.T) { checkClientInvoice(t, ctx, h, d) })
@@ -165,7 +169,7 @@ func checkClientMetering(t *testing.T, ctx context.Context, h *integrationharnes
 	again, err := client.GetUsageMeter(ctx, key)
 	require.NoError(t, err)
 	require.True(t, first.UpdatedAt.Equal(again.UpdatedAt))
-	card, err := client.SetDefaultUsageRateCard(ctx, key, openrails.DefaultUsageRateCardRequest{ProductID: openrails.ProductID(product), Price: pricing.RatePrice{Model: pricing.ModelPerUnit, Currency: "USD", PerUnit: &pricing.PerUnitPrice{UnitAmount: 100, DivideBy: 1}}})
+	card, err := client.SetDefaultUsageRateCard(ctx, key, openrails.DefaultUsageRateCardRequest{ProductID: (openrails.ProductID(product)).String(), Price: pricing.RatePrice{Model: pricing.ModelPerUnit, Currency: "USD", PerUnit: &pricing.PerUnitPrice{UnitAmount: 100, DivideBy: 1}}})
 	require.NoError(t, err)
 	require.NotNil(t, card.DefaultRateCard)
 	require.EqualValues(t, 100, card.DefaultRateCard.Price.PerUnit.UnitAmount)
@@ -173,7 +177,7 @@ func checkClientMetering(t *testing.T, ctx context.Context, h *integrationharnes
 	mode := money.BillingModeArrears
 	_, err = ms.UpsertAccountSettings(mctx, identity.CustomerID(payer), "USD", money.AccountSettingsInput{BillingMode: &mode})
 	require.NoError(t, err)
-	event := openrails.UsageReport{CustomerID: openrails.CustomerID(payer), Currency: "USD", Invoker: "host", EventType: key, Dimensions: map[string]int64{"units": 3}, Source: "workflow", SourceID: uuid.NewString()}
+	event := openrails.UsageReport{CustomerID: (openrails.CustomerID(payer)).String(), Currency: "USD", Invoker: "host", EventType: key, Dimensions: map[string]int64{"units": 3}, Source: "workflow", SourceID: uuid.NewString()}
 	require.NoError(t, client.RecordUsage(ctx, event))
 	require.NoError(t, client.RecordUsage(ctx, event))
 	// Drive the same close used by the invoice worker, then read with the client.
@@ -210,19 +214,19 @@ func checkClientInvoice(t *testing.T, ctx context.Context, h *integrationharness
 		return err
 	}))
 	profile := openrails.InvoiceProfileDTO{NetTermsDays: 7, CollectionMethod: "send_invoice", Memo: "defaults"}
-	created, err := client.EnsureCustomerInvoiceProfile(ctx, openrails.CustomerID(payer), profile)
+	created, err := client.EnsureCustomerInvoiceProfile(ctx, (openrails.CustomerID(payer)).String(), profile)
 	require.NoError(t, err)
 	require.True(t, created)
 	profile.Memo = "operator settings"
-	require.NoError(t, client.SetCustomerInvoiceProfile(ctx, openrails.CustomerID(payer), profile))
+	require.NoError(t, client.SetCustomerInvoiceProfile(ctx, (openrails.CustomerID(payer)).String(), profile))
 	// An idempotent ensure that finds the profile is a success for the
 	// caller and must not be logged by the engine as an error.
 	errorLogs.drain()
-	created, err = client.EnsureCustomerInvoiceProfile(ctx, openrails.CustomerID(payer), openrails.InvoiceProfileDTO{NetTermsDays: 30, CollectionMethod: "send_invoice"})
+	created, err = client.EnsureCustomerInvoiceProfile(ctx, (openrails.CustomerID(payer)).String(), openrails.InvoiceProfileDTO{NetTermsDays: 30, CollectionMethod: "send_invoice"})
 	require.NoError(t, err)
 	require.False(t, created)
 	require.Empty(t, errorLogs.drain(), "idempotent EnsureCustomerInvoiceProfile logged an error")
-	got, err := client.GetCustomerInvoiceProfile(ctx, openrails.CustomerID(payer))
+	got, err := client.GetCustomerInvoiceProfile(ctx, (openrails.CustomerID(payer)).String())
 	require.NoError(t, err)
 	require.Equal(t, profile, *got)
 	// Seed a real receivable via the money engine, then exercise the public
@@ -231,7 +235,7 @@ func checkClientInvoice(t *testing.T, ctx context.Context, h *integrationharness
 	require.NoError(t, err)
 	invoice, err := rt.MoneyService.FinalizeInvoice(scoped, payer, "USD", time.Now().Add(-time.Hour), time.Now().Add(time.Minute))
 	require.NoError(t, err)
-	listed, total, err := client.ListMerchantInvoices(ctx, openrails.MerchantInvoiceFilter{CustomerID: openrails.CustomerID(payer)}, 10, 0)
+	listed, total, err := client.ListMerchantInvoices(ctx, openrails.MerchantInvoiceFilter{CustomerID: (openrails.CustomerID(payer)).String()}, 10, 0)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, listed, 1)
@@ -299,7 +303,7 @@ func checkClientGaugeUsage(t *testing.T, ctx context.Context, h *integrationharn
 	// Two gauge segment events via the EMBEDDED unified client; the first is
 	// replayed and must not double-record.
 	report := openrails.UsageReport{
-		CustomerID: openrails.CustomerID(payerID),
+		CustomerID: (openrails.CustomerID(payerID)).String(),
 		Invoker:    "usage-report-test",
 		Currency:   currency,
 		EventType:  meterKey,
@@ -340,10 +344,10 @@ func checkClientGaugeUsage(t *testing.T, ctx context.Context, h *integrationharn
 	}
 	rows.Close()
 	require.Equal(t, []time.Time{occurred}, occurredAt, "both transports keep the sub-second occurred_at")
-	exact, err := client.UsageRollup(ctx, openrails.CustomerID(payerID), currency, occurred, occurred.Add(time.Microsecond), "resource")
+	exact, err := client.UsageRollup(ctx, (openrails.CustomerID(payerID)).String(), currency, occurred, occurred.Add(time.Microsecond), "resource")
 	require.NoError(t, err)
 	require.Len(t, exact, 1)
-	after, err := client.UsageRollup(ctx, openrails.CustomerID(payerID), currency, occurred.Add(time.Microsecond), occurred.Add(time.Second), "resource")
+	after, err := client.UsageRollup(ctx, (openrails.CustomerID(payerID)).String(), currency, occurred.Add(time.Microsecond), occurred.Add(time.Second), "resource")
 	require.NoError(t, err)
 	require.Empty(t, after)
 
@@ -448,13 +452,13 @@ CREATE TRIGGER client_workflow_fail_binding BEFORE INSERT ON billing.billing_pol
 
 	// A second runtime must see both tightening and loosening immediately.
 	payer := openrails.CustomerID(uuid.New())
-	_, err = local.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "issue999", Currency: "USD", Amount: 20_000_000, Source: "issue999", SourceID: uuid.NewString()})
+	_, err = local.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(payer.String()), Invoker: "issue999", Currency: "USD", Amount: 20_000_000, Source: "issue999", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	admit := func(expected bool) {
 		t.Helper()
 		deadline := time.Now().Add(time.Hour)
 		requestID := uuid.NewString()
-		result, err := remote.Admit(ctx, openrails.AdmitRequest{CustomerID: openrails.CustomerID(payer), Invoker: "issue999", InvokerType: "payer", Currency: "USD", Source: "issue999", RequestID: requestID, ExpiresAt: &deadline, AccrualRateDeltaPerHour: 11_000_000, EstimatedAmount: 1000})
+		result, err := remote.Admit(ctx, openrails.AdmitRequest{CustomerID: (openrails.CustomerID(payer)).String(), Invoker: "issue999", InvokerType: "payer", Currency: "USD", Source: "issue999", RequestID: requestID, ExpiresAt: &deadline, AccrualRateDeltaPerHour: 11_000_000, EstimatedAmount: 1000})
 		require.NoError(t, err)
 		require.Equal(t, expected, result.Allowed)
 		if result.Allowed {
@@ -484,11 +488,11 @@ func checkClientSpendDelegations(t *testing.T, ctx context.Context, h *integrati
 	t.Helper()
 	client := d.client
 	customerID := uuid.New()
-	_, err := client.EnsureCustomer(ctx, openrails.CustomerID(customerID))
+	_, err := client.EnsureCustomer(ctx, (openrails.CustomerID(customerID)).String())
 	require.NoError(t, err)
 	svc, err := service.New(d.runtime)
 	require.NoError(t, err)
-	err = client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID), []openrails.SpendDelegationInput{
+	err = client.SetCustomerSpendDelegations(ctx, (openrails.CustomerID(customerID)).String(), []openrails.SpendDelegationInput{
 		{
 			Scope:    "invoker",
 			ScopeKey: "test-invoker",
@@ -504,7 +508,7 @@ func checkClientSpendDelegations(t *testing.T, ctx context.Context, h *integrati
 	})
 	require.NoError(t, err, "embedded SetCustomerSpendDelegations must pin the bound merchant itself")
 
-	require.NoError(t, client.SetCustomerSpendDelegation(ctx, openrails.CustomerID(customerID), openrails.SpendDelegationInput{
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, (openrails.CustomerID(customerID)).String(), openrails.SpendDelegationInput{
 		Scope:    "invoker",
 		ScopeKey: "test-invoker",
 		// Currency is intentionally omitted: spend limits are also valid for
@@ -521,7 +525,7 @@ func checkClientSpendDelegations(t *testing.T, ctx context.Context, h *integrati
 	require.EqualValues(t, 123, limits["invoker\x00test-invoker"])
 	require.EqualValues(t, 9_000_000, limits["role\x00test-role"])
 
-	err = client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID), []openrails.SpendDelegationInput{
+	err = client.SetCustomerSpendDelegations(ctx, (openrails.CustomerID(customerID)).String(), []openrails.SpendDelegationInput{
 		{
 			Scope: " role ", ScopeKey: " test-role ",
 			Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 1}},
@@ -541,7 +545,7 @@ func checkClientSpendDelegations(t *testing.T, ctx context.Context, h *integrati
 	require.Len(t, stored, 2, "rejected embedded duplicate document must not mutate policy")
 
 	// Replace-with-empty exercises the delete lane through the same ctx path.
-	require.NoError(t, client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID), nil))
+	require.NoError(t, client.SetCustomerSpendDelegations(ctx, (openrails.CustomerID(customerID)).String(), nil))
 }
 
 func checkClientAdmissionFields(t *testing.T, ctx context.Context, h *integrationharness.Harness, d clientWorkflowDeployment) {
@@ -558,13 +562,13 @@ func checkClientAdmissionFields(t *testing.T, ctx context.Context, h *integratio
 	require.NoError(t, err)
 	id := openrails.CustomerID(payer)
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
-		CustomerID: &id, Invoker: "client-fields", Currency: "USD", Amount: 1_000_000,
+		CustomerID: new(id.String()), Invoker: "client-fields", Currency: "USD", Amount: 1_000_000,
 		Source: "client-fields", SourceID: uuid.NewString(),
 	})
 	require.NoError(t, err)
 	expires := time.Now().Add(time.Hour)
 	req := openrails.AdmitRequest{
-		CustomerID: openrails.CustomerID(payer), Invoker: "client-fields", InvokerType: "payer", Currency: "USD",
+		CustomerID: (openrails.CustomerID(payer)).String(), Invoker: "client-fields", InvokerType: "payer", Currency: "USD",
 		EstimatedAmount: 1000, ExpiresAt: &expires, AccrualRateDeltaPerHour: 11_000_000,
 		RequestID: uuid.NewString(), Source: "client-fields", Resource: "compute", TrustLevel: "standard",
 	}
@@ -599,10 +603,10 @@ func checkClientAdmissionFields(t *testing.T, ctx context.Context, h *integratio
 			d.mid.UUID(), payer, grant.Scope, grant.ScopeKey).Scan(&value))
 		return value
 	}
-	require.NoError(t, client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(payer), []openrails.SpendDelegationInput{grant}))
+	require.NoError(t, client.SetCustomerSpendDelegations(ctx, (openrails.CustomerID(payer)).String(), []openrails.SpendDelegationInput{grant}))
 	require.Equal(t, grant.Provenance, readProvenance())
 	grant.Provenance = "updated-policy"
-	require.NoError(t, client.SetCustomerSpendDelegation(ctx, openrails.CustomerID(payer), grant))
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, (openrails.CustomerID(payer)).String(), grant))
 	require.Equal(t, grant.Provenance, readProvenance())
 }
 
@@ -630,19 +634,19 @@ func checkClientPaymentReads(t *testing.T, ctx context.Context, h *integrationha
 	require.EqualValues(t, math.MaxInt64, got.Amount, "the full int64 range survives the wire")
 	require.EqualValues(t, 1, got.AmountRefunded)
 	require.Equal(t, "USD", got.Currency)
-	require.Equal(t, openrails.CustomerID(payer), got.CustomerID)
+	require.Equal(t, payer.String(), got.CustomerID)
 	require.NotNil(t, got.Price)
-	require.Equal(t, openrails.PriceID(price), got.Price.ID)
+	require.Equal(t, openrails.PriceID(price).String(), got.Price.ID)
 	require.EqualValues(t, math.MaxInt64, got.Price.UnitAmount)
 	require.NotNil(t, got.Refunds)
 	require.Len(t, got.Refunds.Data, 1)
 	require.EqualValues(t, -1, got.Refunds.Data[0].Amount)
 
-	page, err := client.ListPayments(ctx, openrails.PaymentFilter{CustomerID: openrails.CustomerID(payer), PriceID: openrails.PriceID(price)})
+	page, err := client.ListPayments(ctx, openrails.PaymentFilter{CustomerID: (openrails.CustomerID(payer)).String(), PriceID: (openrails.PriceID(price)).String()})
 	require.NoError(t, err)
 	require.EqualValues(t, 2, page.Total, "the payer's payment and its refund")
 	for _, item := range page.Data {
-		require.Equal(t, openrails.CustomerID(payer), item.CustomerID)
+		require.Equal(t, payer.String(), item.CustomerID)
 	}
 	all, err := client.ListPayments(ctx, openrails.PaymentFilter{PageOptions: openrails.PageOptions{Limit: 1}})
 	require.NoError(t, err)

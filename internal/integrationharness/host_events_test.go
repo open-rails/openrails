@@ -37,7 +37,7 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	require.NoError(t, err)
 	psp := dbtest.EnsureTestPSP(ctx, t, pool, a.MerchantID.UUID(), "nmi")
 	for _, client := range []*openrails.Client{remote, local} {
-		settled, err := client.HasSettledPayment(ctx, openrails.CustomerID(payer), openrails.PriceID(price))
+		settled, err := client.HasSettledPayment(ctx, (openrails.CustomerID(payer)).String(), (openrails.PriceID(price)).String())
 		require.NoError(t, err)
 		require.False(t, settled)
 	}
@@ -63,8 +63,8 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	require.Len(t, first, 1)
 	require.Equal(t, openrails.PaymentID(payment), first[0].Payment.PaymentID)
 	require.EqualValues(t, 7000000, first[0].Payment.Amount)
-	require.Equal(t, openrails.CustomerID(payer), first[0].Payment.CustomerID, "the settled event names its payer")
-	require.Equal(t, openrails.PriceID(price), first[0].Payment.PriceID, "the settled event names its price")
+	require.Equal(t, openrails.CustomerID(payer).String(), first[0].Payment.CustomerID, "the settled event names its payer")
+	require.Equal(t, openrails.PriceID(price).String(), first[0].Payment.PriceID, "the settled event names its price")
 	require.Nil(t, first[0].Payment.SubscriptionID)
 	status, body := requestJSON(t, http.MethodGet, server.BaseURL+"/v1/merchant/host-events?type=payment.settled", token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
@@ -111,7 +111,7 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	require.Len(t, lifecycle, 1, "payment acknowledgment must not consume lifecycle events")
 	require.Equal(t, lifecycleID, lifecycle[0].ID)
 	require.Nil(t, lifecycle[0].Payment)
-	require.Equal(t, openrails.CustomerID(payer), lifecycle[0].Delinquency.CustomerID)
+	require.Equal(t, openrails.CustomerID(payer).String(), lifecycle[0].Delinquency.CustomerID)
 	require.Equal(t, "delinquent", lifecycle[0].Delinquency.ToState)
 	require.EqualValues(t, 12000000, lifecycle[0].Delinquency.OverdueAmount)
 	// SQL visibility is unrestricted by session scope; the public API still
@@ -131,18 +131,18 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	require.EqualValues(t, 1, deleted)
 	// Eligibility comes from durable payments, never acknowledged event history.
 	for _, client := range []*openrails.Client{remote, local} {
-		settled, err := client.HasSettledPayment(ctx, openrails.CustomerID(payer), openrails.PriceID(price))
+		settled, err := client.HasSettledPayment(ctx, (openrails.CustomerID(payer)).String(), (openrails.PriceID(price)).String())
 		require.NoError(t, err)
 		require.True(t, settled, "settlement proof must survive event retention")
 		for _, pair := range [][2]uuid.UUID{{uuid.New(), price}, {payer, uuid.New()}} {
-			settled, err = client.HasSettledPayment(ctx, openrails.CustomerID(pair[0]), openrails.PriceID(pair[1]))
+			settled, err = client.HasSettledPayment(ctx, (openrails.CustomerID(pair[0])).String(), (openrails.PriceID(pair[1])).String())
 			require.NoError(t, err)
 			require.False(t, settled)
 		}
-		_, err = client.HasSettledPayment(ctx, openrails.CustomerID(payer), openrails.PriceID{})
+		_, err = client.HasSettledPayment(ctx, (openrails.CustomerID(payer)).String(), (openrails.PriceID{}).String())
 		require.Error(t, err)
 	}
-	settled, err := other.HasSettledPayment(ctx, openrails.CustomerID(payer), openrails.PriceID(price))
+	settled, err := other.HasSettledPayment(ctx, (openrails.CustomerID(payer)).String(), (openrails.PriceID(price)).String())
 	require.NoError(t, err)
 	require.False(t, settled, "another merchant must not observe the payment")
 	issuer := server.RegisterDelegatedIssuer("settlement-reader-"+uuid.NewString(), a.MerchantSlug)
@@ -151,12 +151,12 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, status, "host-event permission alone must not grant payment reads: %s", body)
 	_, err = pool.Exec(ctx, `UPDATE billing.payments SET status='refunded' WHERE id=$1`, payment)
 	require.NoError(t, err)
-	settled, err = remote.HasSettledPayment(ctx, openrails.CustomerID(payer), openrails.PriceID(price))
+	settled, err = remote.HasSettledPayment(ctx, (openrails.CustomerID(payer)).String(), (openrails.PriceID(price)).String())
 	require.NoError(t, err)
 	require.True(t, settled, "a refund cannot recreate first-payment eligibility")
 	_, err = pool.Exec(ctx, `UPDATE billing.payments SET deleted_at=now() WHERE id=$1`, payment)
 	require.NoError(t, err)
-	settled, err = local.HasSettledPayment(ctx, openrails.CustomerID(payer), openrails.PriceID(price))
+	settled, err = local.HasSettledPayment(ctx, (openrails.CustomerID(payer)).String(), (openrails.PriceID(price)).String())
 	require.NoError(t, err)
 	require.True(t, settled, "archiving a real payment must not grant another first-payment trial")
 	for _, test := range []struct {
@@ -168,7 +168,7 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	} {
 		_, err = pool.Exec(ctx, `UPDATE billing.payments SET status=$2,money_movement=$3,amount=$4 WHERE id=$1`, payment, test.status, test.movement, test.amount)
 		require.NoError(t, err)
-		settled, err = local.HasSettledPayment(ctx, openrails.CustomerID(payer), openrails.PriceID(price))
+		settled, err = local.HasSettledPayment(ctx, (openrails.CustomerID(payer)).String(), (openrails.PriceID(price)).String())
 		require.NoError(t, err)
 		require.False(t, settled, "only a positive completed rail payment establishes eligibility")
 	}

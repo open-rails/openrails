@@ -29,5 +29,5 @@ func (s *Service) EnsureCustomer(ctx context.Context, id uuid.UUID) (*openrails.
 	if err != nil {
 		return nil, err
 	}
-	return &openrails.Customer{ID: openrails.CustomerID(row.ID), CreatedAt: row.CreatedAt, LastSeenAt: row.LastSeenAt}, nil
+	return &openrails.Customer{ID: (openrails.CustomerID(row.ID)).String(), CreatedAt: row.CreatedAt, LastSeenAt: row.LastSeenAt}, nil
 }

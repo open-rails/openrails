@@ -47,10 +47,10 @@ func TestDeclineLifecyclePreservesCustomerInstruments(t *testing.T) {
 	}))
 	owned := surface.ProvisionOwnedMerchant("decline-" + uuid.NewString()[:8])
 	client := surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID))
-	product, err := client.CreateProduct(t.Context(), openrails.CreateProductRequest{Key: "decline", DisplayName: "Recurring access", EntitlementsSpec: map[string]*int{"decline_access": nil}})
+	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "decline", DisplayName: "Recurring access", EntitlementsSpec: map[string]*int{"decline_access": nil}})
 	require.NoError(t, err)
 	hours := 720
-	price, err := client.CreatePrice(t.Context(), openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 	require.NoError(t, err)
 	rt := surface.App().Runtime
 	SeedPSPs(t.Context(), t, rt, owned.MerchantID, config.PSPSet{"nmi": {Rail: "nmi", AccountID: "decline-" + uuid.NewString(), NMI: &config.NMIRailConfig{SecurityKey: "synthetic", WebhookSigningSecret: "synthetic"}}})
@@ -76,17 +76,17 @@ func TestDeclineLifecyclePreservesCustomerInstruments(t *testing.T) {
 		user, err := embcp.Get(surface.App()).Core().CreateUser(t.Context(), suffix+"@example.test", "decline"+suffix)
 		require.NoError(t, err)
 		customer := openrails.CustomerID(uuid.MustParse(user.ID))
-		_, err = client.EnsureCustomer(t.Context(), customer)
+		_, err = client.EnsureCustomer(t.Context(), (customer).String())
 		require.NoError(t, err)
 		s := subject{customer.UUID(), uuid.New(), uuid.New()}
 		_, err = pool.Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,rail_customer_ref,initial_transaction_id) VALUES($1,$2,$3,$4,'nmi','psp',$5,'')`, s.method, owned.MerchantID.UUID(), s.customer, psp, "vault-"+s.method.String())
 		require.NoError(t, err)
 		end := now.Add(-48 * time.Hour)
-		_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,payment_method_id,rail,rail_subscription_id,status,current_period_starts_at,current_period_ends_at,next_retry_at,retry_attempts) VALUES($1,$2,$3,$4,$5,$6,$7,'nmi',$8,'past_due',$9,$10,$11,$12)`, s.subscription, owned.MerchantID.UUID(), s.customer, product.ID.UUID(), price.ID.UUID(), psp, s.method, "provider-"+s.subscription.String(), end.Add(-720*time.Hour), end, now.Add(-time.Hour), retries)
+		_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,payment_method_id,rail,rail_subscription_id,status,current_period_starts_at,current_period_ends_at,next_retry_at,retry_attempts) VALUES($1,$2,$3,$4,$5,$6,$7,'nmi',$8,'past_due',$9,$10,$11,$12)`, s.subscription, owned.MerchantID.UUID(), s.customer, sdkProductID(t, product.ID).UUID(), sdkPriceID(t, price.ID).UUID(), psp, s.method, "provider-"+s.subscription.String(), end.Add(-720*time.Hour), end, now.Add(-time.Hour), retries)
 		require.NoError(t, err)
 		_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: customer.String(), Entitlement: "decline_access", Indefinite: true, SourceType: models.EntitlementSourceSubscription, SourceID: s.subscription})
 		require.NoError(t, err)
-		active, err := client.HasEntitlement(t.Context(), customer, "decline_access", now)
+		active, err := client.HasEntitlement(t.Context(), (customer).String(), "decline_access", now)
 		require.NoError(t, err)
 		require.True(t, active, "the seeded subscription begins with standing access")
 		return s
@@ -148,7 +148,7 @@ func TestDeclineLifecyclePreservesCustomerInstruments(t *testing.T) {
 			require.NoError(t, pool.QueryRow(ctx, `SELECT origin FROM billing.rail_intents WHERE intent_type='nmi_delete_subscription' AND subscription_id=$1`, s.subscription).Scan(&origin))
 			require.Equal(t, string(intents.OriginSystem), origin)
 		}
-		entitled, err := client.HasEntitlement(t.Context(), openrails.CustomerID(s.customer), "decline_access", now)
+		entitled, err := client.HasEntitlement(t.Context(), (openrails.CustomerID(s.customer)).String(), "decline_access", now)
 		require.NoError(t, err)
 		require.Equal(t, want != "cancelled", entitled)
 	}
@@ -197,7 +197,7 @@ func TestDeclineLifecyclePreservesCustomerInstruments(t *testing.T) {
 		require.Nil(t, deleted)
 		require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM billing.rail_intents WHERE subscription_id=$1 AND intent_type='nmi_delete_subscription'`, s.subscription).Scan(&status))
 		require.Equal(t, intents.StatusSuperseded, status)
-		entitled, err := client.HasEntitlement(t.Context(), openrails.CustomerID(s.customer), "decline_access", now)
+		entitled, err := client.HasEntitlement(t.Context(), (openrails.CustomerID(s.customer)).String(), "decline_access", now)
 		require.NoError(t, err)
 		require.True(t, entitled)
 		// Invisible requested work must fail, rather than reporting a completed job.

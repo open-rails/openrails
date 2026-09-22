@@ -23,8 +23,8 @@ func checkPolicyBudgetEffects(t *testing.T, f treasuryWorkflow) {
 	payer := func() openrails.CustomerID {
 		t.Helper()
 		id, _ := f.actor(t, nil)
-		require.NoError(t, f.client.SetCreditLimit(ctx, id, "USD", 100_000_000_000))
-		account, err := f.client.Balance(ctx, id)
+		require.NoError(t, f.client.SetCreditLimit(ctx, (id).String(), "USD", 100_000_000_000))
+		account, err := f.client.Balance(ctx, (id).String())
 		require.NoError(t, err)
 		require.Equal(t, "arrears", account.BillingMode)
 		return id
@@ -32,7 +32,7 @@ func checkPolicyBudgetEffects(t *testing.T, f treasuryWorkflow) {
 	check := func(who openrails.CustomerID, amount, rate int64, tier string) *openrails.AdmitResponse {
 		t.Helper()
 		deadline, key := time.Now().Add(time.Hour), uuid.NewString()
-		result, err := f.client.Admit(ctx, openrails.AdmitRequest{CustomerID: who, Invoker: who.String(), InvokerType: openrails.InvokerTypePayer,
+		result, err := f.client.Admit(ctx, openrails.AdmitRequest{CustomerID: (who).String(), Invoker: who.String(), InvokerType: openrails.InvokerTypePayer,
 			Currency: "USD", EstimatedAmount: amount, AccrualRateDeltaPerHour: rate, TrustLevel: tier, RequestID: key, Source: "budget", ExpiresAt: &deadline})
 		require.NoError(t, err)
 		if result.Allowed {
@@ -42,7 +42,7 @@ func checkPolicyBudgetEffects(t *testing.T, f treasuryWorkflow) {
 	}
 	report := func(who openrails.CustomerID, amount int64) {
 		t.Helper()
-		require.NoError(t, f.client.RecordUsage(ctx, openrails.UsageReport{CustomerID: who, Invoker: who.String(), Currency: "USD", EventType: "compute", Amount: amount, Source: "budget", SourceID: uuid.NewString()}))
+		require.NoError(t, f.client.RecordUsage(ctx, openrails.UsageReport{CustomerID: (who).String(), Invoker: who.String(), Currency: "USD", EventType: "compute", Amount: amount, Source: "budget", SourceID: uuid.NewString()}))
 	}
 	previous, err := f.client.GetMerchantSettings(ctx)
 	require.NoError(t, err)
@@ -68,7 +68,7 @@ func checkPolicyBudgetEffects(t *testing.T, f treasuryWorkflow) {
 	require.False(t, check(busy, 1000, 2_000_000, "").Allowed, "tier override must not lift unrelated requests")
 
 	debtPayer := payer()
-	require.NoError(t, f.client.SetCreditLimit(ctx, debtPayer, "USD", 100_000_000))
+	require.NoError(t, f.client.SetCreditLimit(ctx, (debtPayer).String(), "USD", 100_000_000))
 	_, err = ledger.AccrueOwed(ctx, identity.CustomerID(debtPayer), "USD", "usage", uuid.NewString(), 500_000_000)
 	require.NoError(t, err)
 	require.True(t, check(debtPayer, 1000, 1_000_000, "large").Allowed, "prior debt does not gate a rate cap")
@@ -78,13 +78,13 @@ func checkPolicyBudgetEffects(t *testing.T, f treasuryWorkflow) {
 	window.BillingPolicies = append(previous.BillingPolicies, window.BillingPolicies...)
 	require.NoError(t, f.client.SetMerchantSettings(ctx, window))
 	cloud := payer()
-	require.NoError(t, f.client.SetCreditLimit(ctx, cloud, "USD", 2_500_000_000))
+	require.NoError(t, f.client.SetCreditLimit(ctx, (cloud).String(), "USD", 2_500_000_000))
 	_, err = ledger.AccrueOwed(ctx, identity.CustomerID(cloud), "USD", "usage", uuid.NewString(), 3_000_000_000)
 	require.NoError(t, err)
 	require.True(t, check(cloud, 10_000_000, 0, "").Allowed, "prior debt is a separate delinquency signal, not new window spend")
 	key := uuid.NewString()
 	deadline := time.Now().Add(time.Hour)
-	first, err := f.client.Admit(ctx, openrails.AdmitRequest{CustomerID: cloud, Invoker: cloud.String(), InvokerType: openrails.InvokerTypePayer,
+	first, err := f.client.Admit(ctx, openrails.AdmitRequest{CustomerID: (cloud).String(), Invoker: cloud.String(), InvokerType: openrails.InvokerTypePayer,
 		Currency: "USD", EstimatedAmount: 10_000_000, RequestID: key, Source: "budget", ExpiresAt: &deadline})
 	require.NoError(t, err)
 	require.True(t, first.Allowed)

@@ -45,11 +45,11 @@ func TestMerchantArchiveRealAuthKitHTTPAndEmbeddedParity(t *testing.T) {
 	// created by the ordinary owner Client, rather than inserted as fixture rows.
 	payer := openrails.CustomerID(uuid.New())
 	const amount int64 = 9_007_199_254_740_993
-	depositRequest := openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "archive-qualification", Currency: "USD", Amount: amount, Source: "archive-qualification", SourceID: uuid.NewString()}
+	depositRequest := openrails.DepositCreditsRequest{CustomerID: new(payer.String()), Invoker: "archive-qualification", Currency: "USD", Amount: amount, Source: "archive-qualification", SourceID: uuid.NewString()}
 	deposit, err := sourceOwner.DepositCredits(ctx, depositRequest)
 	require.NoError(t, err)
 	require.False(t, deposit.Replayed)
-	before, err := sourceOwner.Balance(ctx, payer)
+	before, err := sourceOwner.Balance(ctx, (payer).String())
 	require.NoError(t, err)
 	require.Equal(t, amount, before.BalanceAmount)
 
@@ -132,10 +132,10 @@ func TestMerchantArchiveRealAuthKitHTTPAndEmbeddedParity(t *testing.T) {
 	require.True(t, embeddedReplay.AlreadyImported)
 	require.Equal(t, receipt.Digest, embeddedReplay.Digest)
 	for _, client := range []*openrails.Client{targetOwner, targetEmbedded} {
-		balance, err := client.Balance(ctx, payer)
+		balance, err := client.Balance(ctx, (payer).String())
 		require.NoError(t, err)
 		require.Equal(t, before.BalanceAmount, balance.BalanceAmount)
-		restored, err := client.GetDeposit(ctx, payer, depositRequest.SourceID)
+		restored, err := client.GetDeposit(ctx, (payer).String(), depositRequest.SourceID)
 		require.NoError(t, err)
 		require.Equal(t, deposit.ID, restored.ID)
 		require.Equal(t, deposit.Amount, restored.Amount)

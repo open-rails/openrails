@@ -18,8 +18,8 @@ func pageQuery(options PageOptions) url.Values {
 
 func (c *Client) ListSubscriptions(ctx context.Context, filter SubscriptionFilter) (*Page[Subscription], error) {
 	q := pageQuery(filter.PageOptions)
-	if !filter.CustomerID.IsZero() {
-		q.Set("customer_id", filter.CustomerID.String())
+	if filter.CustomerID != "" {
+		q.Set("customer_id", filter.CustomerID)
 	}
 	if filter.Status != "" {
 		q.Set("status", filter.Status)
@@ -42,8 +42,8 @@ func subscriptionPath(id SubscriptionID) (string, error) {
 	return "/v1/merchant/subscriptions/" + subscription, nil
 }
 
-func customerPath(customerID CustomerID) (string, error) {
-	customer, err := requireTypedID("customer_id", customerID)
+func customerPath(customerID string) (string, error) {
+	customer, err := requireCustomerID(customerID)
 	if err != nil {
 		return "", err
 	}
@@ -96,8 +96,8 @@ func (c *Client) PreviewTierChange(ctx context.Context, id SubscriptionID, reque
 	if err != nil {
 		return nil, err
 	}
-	if request.PriceID.IsZero() {
-		return nil, invalidErr("price_id is required")
+	if _, err := resourcePriceID(request.PriceID); err != nil {
+		return nil, err
 	}
 	var out TierChangePreviewResponse
 	if err := c.do(ctx, http.MethodPost, path+"/change-tier/preview", request, &out); err != nil {
@@ -111,8 +111,8 @@ func (c *Client) ChangeTier(ctx context.Context, id SubscriptionID, key string, 
 	if err != nil {
 		return nil, err
 	}
-	if request.PriceID.IsZero() {
-		return nil, invalidErr("price_id is required")
+	if _, err := resourcePriceID(request.PriceID); err != nil {
+		return nil, err
 	}
 	var out TierChangeResponse
 	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/change-tier", request, &out, http.Header{"Idempotency-Key": {key}}); err != nil {
@@ -121,7 +121,7 @@ func (c *Client) ChangeTier(ctx context.Context, id SubscriptionID, key string, 
 	return &out, nil
 }
 
-func (c *Client) ListPaymentMethods(ctx context.Context, customerID CustomerID, options PageOptions) (*Page[PaymentMethod], error) {
+func (c *Client) ListPaymentMethods(ctx context.Context, customerID string, options PageOptions) (*Page[PaymentMethod], error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func (c *Client) ListPaymentMethods(ctx context.Context, customerID CustomerID, 
 // operation awaiting provider reconciliation. Pending is never reported deleted.
 type PaymentMethodDeletion struct{ Pending bool }
 
-func (c *Client) DeletePaymentMethod(ctx context.Context, customerID CustomerID, methodID PaymentMethodID) (*PaymentMethodDeletion, error) {
+func (c *Client) DeletePaymentMethod(ctx context.Context, customerID string, methodID PaymentMethodID) (*PaymentMethodDeletion, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err

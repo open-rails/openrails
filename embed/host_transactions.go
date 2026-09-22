@@ -22,8 +22,10 @@ import (
 // not a substitute for this atomicity.
 type HostTransactions struct{ rt *Runtime }
 
-// HostTransactions returns the host transaction extension for this runtime.
-func (r *Runtime) HostTransactions() *HostTransactions { return &HostTransactions{rt: r} }
+// NewHostTransactions constructs the explicit local transaction extension.
+// The host must own runtime and the transaction pool. Ordinary operations use
+// openrails.Client; this extension is only for commits shared with host rows.
+func NewHostTransactions(runtime *Runtime) *HostTransactions { return &HostTransactions{rt: runtime} }
 
 // OpenOperationAuthorization reserves capacity; commit it with the host's
 // provider obligation before calling the provider.

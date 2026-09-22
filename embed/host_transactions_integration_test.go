@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -30,7 +31,7 @@ func TestHostTransactionsCommitAndRollBackWithHostRows(t *testing.T) {
 	runtime := newProviderObligationRuntime(t, ctx, h)
 	client, err := runtime.Client()
 	require.NoError(t, err)
-	hostTx := runtime.HostTransactions()
+	hostTx := embed.NewHostTransactions(runtime)
 	pool := app.HostGraph(runtime).Runtime.DB.Pool()
 
 	_, err = h.Pool().Exec(ctx, `

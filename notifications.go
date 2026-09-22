@@ -11,7 +11,7 @@ import (
 // system_alert rows).
 type Notification struct {
 	ID         uuid.UUID        `json:"id"`
-	CustomerID CustomerID       `json:"customer_id"`
+	CustomerID string           `json:"customer_id"`
 	EventType  string           `json:"event_type"`
 	Data       NotificationData `json:"data"`
 	Seen       bool             `json:"seen"`
@@ -39,9 +39,9 @@ type NotificationData struct {
 	// Scheduled reprice / plan change (subscription_reprice_scheduled,
 	// subscription_plan_change_scheduled).
 	SubscriptionID SubscriptionID `json:"subscription_id,omitzero"`
-	FromPriceID    PriceID        `json:"from_price_id,omitzero"`
-	ToPriceID      PriceID        `json:"to_price_id,omitzero"`
-	ToProductID    ProductID      `json:"to_product_id,omitzero"`
+	FromPriceID    string         `json:"from_price_id,omitzero"`
+	ToPriceID      string         `json:"to_price_id,omitzero"`
+	ToProductID    string         `json:"to_product_id,omitzero"`
 	ToProductName  string         `json:"to_product_name,omitempty"`
 	OldAmount      *int64         `json:"old_amount,omitempty,string"`
 	NewAmount      *int64         `json:"new_amount,omitempty,string"`
@@ -86,7 +86,7 @@ type NotificationData struct {
 	Kind               string         `json:"kind,omitempty"`
 	Provider           string         `json:"provider,omitempty"`
 	Operation          string         `json:"operation,omitempty"`
-	AffectedCustomerID CustomerID     `json:"affected_customer_id,omitzero"`
+	AffectedCustomerID string         `json:"affected_customer_id,omitzero"`
 	OriginalPaymentID  PaymentID      `json:"original_payment_id,omitzero"`
 	Error              string         `json:"error,omitempty"`
 	Metadata           map[string]any `json:"metadata,omitempty"`

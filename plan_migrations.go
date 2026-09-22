@@ -52,8 +52,8 @@ type PlanMigrationRailCounts struct {
 // and create.
 type PlanMigrationResult struct {
 	BatchID        *uuid.UUID                          `json:"batch_id,omitempty"`
-	SourcePriceID  PriceID                             `json:"source_price_id"`
-	TargetPriceID  PriceID                             `json:"target_price_id"`
+	SourcePriceID  string                              `json:"source_price_id"`
+	TargetPriceID  string                              `json:"target_price_id"`
 	EffectiveAt    time.Time                           `json:"effective_at"`
 	FallbackPolicy string                              `json:"fallback_policy"`
 	Matched        int                                 `json:"matched"`

@@ -40,8 +40,9 @@ func TestBillingApplicationRunsUnchangedAcrossDeployments(t *testing.T) {
 	tenant := standalone.ProvisionOwnedMerchant("billingapp-tenant")
 	integrationharness.SeedPSPs(ctx, t, standalone.App().Runtime, tenant.MerchantID, ccbill("999981-0001"))
 
-	newRuntime := func() *embed.Runtime {
+	newRuntime := func(declaration *embed.MerchantDeclaration) *embed.Runtime {
 		rt, err := embed.New(ctx, embed.Options{
+			Merchant: declaration,
 			Config: &config.Config{
 				Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
 				SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
@@ -53,14 +54,15 @@ func TestBillingApplicationRunsUnchangedAcrossDeployments(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 		return rt
 	}
-	bound := newRuntime()
+	bound := newRuntime(&embed.MerchantDeclaration{Slug: "billingapp-embedded"})
 	// An AuthKit-free embedded host owns an unbound merchant identity.
-	embeddedMerchant, err := bound.UpsertMerchantConfig(ctx, "billingapp-embedded", embed.MerchantConfig{})
+	boundClient, err := bound.Client()
 	require.NoError(t, err)
+	embeddedMerchant := boundClient.MerchantID()
 	integrationharness.SeedPSPs(ctx, t, standalone.App().Runtime, embeddedMerchant, ccbill("999981-0002"))
 	embeddedClient, err := bound.Client(openrails.WithCurrency("USD"))
 	require.NoError(t, err)
-	unbound := newRuntime()
+	unbound := newRuntime(nil)
 	sharedEngineClient, err := unbound.Client(openrails.WithMerchantID(dbtest.TestMerchantID), openrails.WithCurrency("USD"))
 	require.NoError(t, err)
 	// SaaS: two merchants provisioned by registered owners on one shared

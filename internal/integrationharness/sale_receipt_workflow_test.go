@@ -76,22 +76,22 @@ func TestQualifiedOneTimeSaleClientAcrossEmbeddedAndHTTP(t *testing.T) {
 			}
 			t.Run(name+"/"+mode, func(t *testing.T) {
 				customer, method := uuid.New(), uuid.New()
-				_, err := client.EnsureCustomer(ctx, openrails.CustomerID(customer))
+				_, err := client.EnsureCustomer(ctx, (openrails.CustomerID(customer)).String())
 				require.NoError(t, err)
-				product, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: "sale-" + uuid.NewString(), DisplayName: "Accepted purchase", EntitlementsSpec: map[string]*int{"sale_qualified_access": nil}})
+				product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: "sale-" + uuid.NewString(), DisplayName: "Accepted purchase", EntitlementsSpec: map[string]*int{"sale_qualified_access": nil}})
 				require.NoError(t, err)
-				price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: 5_000_000, Currency: "USD"})
+				price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, UnitAmount: 5_000_000, Currency: "USD"})
 				require.NoError(t, err)
 				if !token {
 					_, err = dbtest.Queries(h.sharedPool()).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{ID: method, MerchantID: owned.MerchantID.UUID(), CustomerID: customer, PspID: psp, Rail: "nmi", RailCustomerRef: "vault-" + method.String(), RailMethodRef: "billing-" + method.String()})
 					require.NoError(t, err)
 				}
-				request := openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(customer), VerifiedEmail: "sale@example.test", Username: "sale-buyer"}, PriceID: price.ID, IdempotencyKey: uuid.NewString(), Payment: openrails.CheckoutPayment{Rail: "loopback", PaymentMethodID: openrails.PaymentMethodID(method)}}
+				request := openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(customer).String(), VerifiedEmail: "sale@example.test", Username: "sale-buyer"}, PriceID: price.ID, IdempotencyKey: uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "loopback", PaymentMethodID: openrails.PaymentMethodID(method).String()}}
 				before := gateway.SaleAttempts()
 				var result *openrails.CheckoutSession
 				if token {
-					request.Payment.PaymentMethodID = openrails.PaymentMethodID{}
-					request.Payment.PaymentToken = "token-" + uuid.NewString()
+					request.PaymentOptions.PaymentMethodID = ""
+					request.PaymentOptions.PaymentToken = "token-" + uuid.NewString()
 					beforeVaults := vaultCreates.Load()
 					type completion struct {
 						result *openrails.CheckoutSession
@@ -121,7 +121,7 @@ func TestQualifiedOneTimeSaleClientAcrossEmbeddedAndHTTP(t *testing.T) {
 				require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT stored_credential_unscheduled_ref FROM billing.payment_methods WHERE merchant_id=$1 AND id=$2`, owned.MerchantID.UUID(), method).Scan(&anchor))
 				require.Equal(t, last.TransactionID, anchor)
 				archived := true
-				_, err = client.UpdateProduct(ctx, product.ID, openrails.UpdateProductRequest{Archived: &archived, SkipRailSync: true})
+				_, err = client.Products.Update(ctx, product.ID, &openrails.ProductUpdateParams{Archived: &archived, SkipRailSync: true})
 				require.NoError(t, err)
 				replay, err := client.CreateCheckoutSession(ctx, request)
 				require.NoError(t, err)
@@ -129,7 +129,7 @@ func TestQualifiedOneTimeSaleClientAcrossEmbeddedAndHTTP(t *testing.T) {
 				require.Equal(t, result.PaymentID, replay.PaymentID)
 				require.Equal(t, before+1, gateway.SaleAttempts(), "replay ignores changed catalog and never charges again")
 				changed := request
-				changed.Customer.ID = openrails.CustomerID(uuid.New())
+				changed.Customer.ID = uuid.NewString()
 				_, err = client.CreateCheckoutSession(ctx, changed)
 				require.Error(t, err)
 				require.Equal(t, before+1, gateway.SaleAttempts())

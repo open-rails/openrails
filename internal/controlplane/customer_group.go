@@ -44,7 +44,7 @@ func (c *ControlPlane) EnsureCustomerPermissionGroup(ctx context.Context, custom
 	} else if err != nil {
 		return "", fmt.Errorf("controlplane: resolve customer group %q: %w", customerID, err)
 	} else if ownerSubject != "" {
-		if err := core.AdminAssignGroupRole(ctx, CustomerGroup(customerID), authkit.UserSubject(ownerSubject), CustomerRoleOwner); err != nil {
+		if err := core.OperatorAssignGroupRole(ctx, CustomerGroup(customerID), authkit.UserSubject(ownerSubject), CustomerRoleOwner); err != nil {
 			return "", fmt.Errorf("controlplane: assign customer owner: %w", err)
 		}
 	}

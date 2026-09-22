@@ -7,7 +7,7 @@ type TierChangeResponse struct {
 	Status         string                         `json:"status"`                    // succeeded, processing, requires_action, blocked
 	Mode           string                         `json:"mode"`                      // "tier_change"
 	Action         string                         `json:"action,omitempty"`          // upgrade, downgrade
-	PriceID        PriceID                        `json:"price_id"`                  // Target price ID
+	PriceID        string                         `json:"price_id"`                  // Target price ID
 	URL            string                         `json:"url,omitempty"`             // Hosted redirect URL when required
 	Payment        CheckoutSessionPaymentResponse `json:"payment"`                   // Rail info
 	SubscriptionID *SubscriptionID                `json:"subscription_id,omitempty"` // Affected subscription
@@ -48,7 +48,7 @@ const (
 type TierChangePreviewResponse struct {
 	Object           string     `json:"object"` // "tier_change_preview"
 	Action           string     `json:"action"` // upgrade | downgrade
-	PriceID          PriceID    `json:"price_id"`
+	PriceID          string     `json:"price_id"`
 	Rail             string     `json:"rail"`
 	Currency         string     `json:"currency"`
 	AmountDueNow     int64      `json:"amount_due_now,string"`     // native units charged immediately (0 for downgrade)
@@ -84,5 +84,5 @@ type CheckoutSessionPaymentResponse struct {
 }
 
 type ChangeTierRequest struct {
-	PriceID PriceID `json:"price_id"`
+	PriceID string `json:"price_id"`
 }

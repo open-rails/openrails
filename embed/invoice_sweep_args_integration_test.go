@@ -57,13 +57,13 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	suffix := uuid.NewString()[:8]
 	meter := "payment-volume-" + suffix
 	eventType := "platform.payment_volume." + suffix
-	productID, err := client.EnsureUsageProduct(ctx, "volume-"+suffix, "Payment volume")
+	productID, err := client.Products.Ensure(ctx, &openrails.ProductCreateParams{Key: "volume-" + suffix, DisplayName: "Payment volume"})
 	require.NoError(t, err)
 	require.NoError(t, client.EnsureUsageMeter(ctx, openrails.UsageMeterSpec{
 		Key: meter, EventType: eventType, ValueProperty: "amount_micros", Aggregation: "sum", Unit: "currency_micros",
 	}))
 	_, err = client.SetDefaultUsageRateCard(ctx, meter, openrails.DefaultUsageRateCardRequest{
-		ProductID: productID,
+		ProductID: (sdkProductID(t, productID.ID)).String(),
 		Price: pricing.RatePrice{Model: pricing.ModelPerUnit, Currency: "USD",
 			PerUnit: &pricing.PerUnitPrice{UnitAmount: 100, DivideBy: 10_000}},
 	})
@@ -77,7 +77,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	for _, occurred := range []time.Time{periodFrom.Add(3 * 24 * time.Hour), periodTo.Add(-time.Hour)} {
 		occurred := occurred
 		require.NoError(t, client.RecordUsage(ctx, openrails.UsageReport{
-			CustomerID: openrails.CustomerID(payer), Invoker: payer.String(), Currency: "USD", EventType: eventType,
+			CustomerID: (openrails.CustomerID(payer)).String(), Invoker: payer.String(), Currency: "USD", EventType: eventType,
 			Dimensions: map[string]int64{"amount_micros": settled},
 			Source:     "host-settlement", SourceID: uuid.NewString(), OccurredAt: &occurred,
 		}))
@@ -100,7 +100,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	}
 	listInvoices := func() []openrails.MerchantInvoiceDTO {
 		t.Helper()
-		invoices, total, err := client.ListMerchantInvoices(ctx, openrails.MerchantInvoiceFilter{CustomerID: openrails.CustomerID(payer)}, 10, 0)
+		invoices, total, err := client.ListMerchantInvoices(ctx, openrails.MerchantInvoiceFilter{CustomerID: (openrails.CustomerID(payer)).String()}, 10, 0)
 		require.NoError(t, err)
 		require.EqualValues(t, len(invoices), total)
 		return invoices

@@ -64,7 +64,7 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 	} else if object == "charge" && status != "failed" && amountRefunded > 0 {
 		status = "partially_refunded"
 	}
-	payment := api.PaymentObject{ID: openrails.PaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, CustomerID: openrails.CustomerID(p.CustomerID), SubscriptionID: subID, Rail: string(p.Rail), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, FailureCode: p.FailureCode, FailureReason: p.FailureReason, CreatedAt: p.CreatedAt}
+	payment := api.PaymentObject{ID: openrails.PaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, CustomerID: (openrails.CustomerID(p.CustomerID)).String(), SubscriptionID: subID, Rail: string(p.Rail), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, FailureCode: p.FailureCode, FailureReason: p.FailureReason, CreatedAt: p.CreatedAt}
 	if refunds != nil {
 		if refundObjects == nil {
 			refundObjects = []api.PaymentObject{}
@@ -85,7 +85,7 @@ type userPaymentObject struct {
 	Amount         int64                     `json:"amount,string"`
 	AmountRefunded int64                     `json:"amount_refunded,string"`
 	Currency       string                    `json:"currency"`
-	CustomerID     openrails.CustomerID      `json:"customer_id"`
+	CustomerID     string                    `json:"customer_id"`
 	SubscriptionID *openrails.SubscriptionID `json:"subscription_id,omitempty"`
 	Rail           string                    `json:"rail"`
 	Refunded       bool                      `json:"refunded"`
@@ -177,5 +177,5 @@ func PriceToAPI(p *models.Price) api.PriceObject {
 		}
 		sort.Strings(providers)
 	}
-	return api.PriceObject{ID: openrails.PriceID(p.ID), Key: p.Key, Object: "price", UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: openrails.ProductID(p.ProductID), Active: p.IsPurchasable(), Providers: providers, Metadata: map[string]string{}, CreatedAt: p.CreatedAt}
+	return api.PriceObject{ID: (openrails.PriceID(p.ID)).String(), Key: p.Key, Object: "price", UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: (openrails.ProductID(p.ProductID)).String(), Active: p.IsPurchasable(), Providers: providers, Metadata: map[string]string{}, CreatedAt: p.CreatedAt}
 }

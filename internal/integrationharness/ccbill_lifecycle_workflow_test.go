@@ -39,10 +39,10 @@ func TestCCBillCallbacksUseRuntimeClock(t *testing.T) {
 	account, subaccount := fmt.Sprintf("%06d", 100000+uuid.New().ID()%900000), fmt.Sprintf("%04d", uuid.New().ID()%10000)
 	rt := surface.App().Runtime
 	SeedPSPs(t.Context(), t, rt, owned.MerchantID, config.PSPSet{"ccbill": {Rail: "ccbill", AccountID: account + "-" + subaccount, CCBill: &config.CCBillRailConfig{Salt: "synthetic", DataLinkUsername: "synthetic", DataLinkPassword: "synthetic"}}})
-	product, err := client.CreateProduct(t.Context(), openrails.CreateProductRequest{Key: "callback", DisplayName: "Callback access", EntitlementsSpec: map[string]*int{"callback_access": nil}})
+	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "callback", DisplayName: "Callback access", EntitlementsSpec: map[string]*int{"callback_access": nil}})
 	require.NoError(t, err)
 	hours := 720
-	_, err = client.CreatePrice(t.Context(), openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours, PSPLinks: map[string]map[string]string{"ccbill": {models.RailKeyCCBillFormName: "workflow", models.RailKeyCCBillFlexID: "workflow-flex", models.RailKeyCCBillRecurringBillingOption: "workflow-recurring"}}})
+	_, err = client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours, PSPLinks: map[string]map[string]string{"ccbill": {models.RailKeyCCBillFormName: "workflow", models.RailKeyCCBillFlexID: "workflow-flex", models.RailKeyCCBillRecurringBillingOption: "workflow-recurring"}}})
 	require.NoError(t, err)
 	username := "callback" + uuid.NewString()[:8]
 	user, err := embcp.Get(surface.App()).Core().CreateUser(t.Context(), username+"@example.test", username)
@@ -84,7 +84,7 @@ func TestCCBillCallbacksUseRuntimeClock(t *testing.T) {
 	}
 	access := func(at time.Time, want bool) {
 		t.Helper()
-		got, err := client.HasEntitlement(t.Context(), customer, "callback_access", at)
+		got, err := client.HasEntitlement(t.Context(), (customer).String(), "callback_access", at)
 		require.NoError(t, err)
 		require.Equal(t, want, got)
 	}

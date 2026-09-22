@@ -340,7 +340,7 @@ func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug st
 	require.NoError(h.t, err, "embed.New")
 	h.cleanup(func() { _ = rt.Close(context.Background()) })
 	// Bind the engine to the test merchant — what embed provisioning
-	// (EnsureMerchant/UpsertMerchantConfig) does on a real host. The in-process
+	// (EnsureMerchant/merchant constructor) does on a real host. The in-process
 	// transport (#685) pins this merchant per request.
 	app.HostGraph(rt).Runtime.SetConfiguredMerchant(id)
 
@@ -755,7 +755,7 @@ func (s *Surface) registerRemoteApplication(slug, ownerMerchantSlug string, role
 	require.NoError(h.t, err, "register remote_application")
 
 	if role != "" {
-		require.NoError(h.t, core.AdminAssignGroupRole(h.ctx, controlplane.MerchantGroup(ownerMerchantSlug), authkit.RemoteAppSubject(ra.ID), role),
+		require.NoError(h.t, core.OperatorAssignGroupRole(h.ctx, controlplane.MerchantGroup(ownerMerchantSlug), authkit.RemoteAppSubject(ra.ID), role),
 			"assign merchant role to remote_application")
 	}
 
@@ -814,7 +814,7 @@ func (s *Surface) RegisterDelegatedIssuer(slug, ownerMerchantSlug string) *Deleg
 		Enabled:           true,
 	})
 	require.NoError(h.t, err, "register delegated issuer")
-	require.NoError(h.t, core.AdminAssignGroupRole(h.ctx, controlplane.MerchantGroup(ownerMerchantSlug), authkit.RemoteAppSubject(ra.ID), controlplane.MerchantRoleOwner),
+	require.NoError(h.t, core.OperatorAssignGroupRole(h.ctx, controlplane.MerchantGroup(ownerMerchantSlug), authkit.RemoteAppSubject(ra.ID), controlplane.MerchantRoleOwner),
 		"assign merchant owner role to delegated issuer")
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
@@ -887,7 +887,7 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerMerchantSlug, subject strin
 		// #567: merchant groups have fixed catalog roles (no custom roles). Grant
 		// the merchant `owner` role (= merchant:*); the delegated token's claim is
 		// then bounded down to its requested subset at verify/gate time.
-		require.NoError(h.t, core.AdminAssignGroupRole(h.ctx, controlplane.MerchantGroup(ownerMerchantSlug), authkit.RemoteAppSubject(ra.ID), controlplane.MerchantRoleOwner),
+		require.NoError(h.t, core.OperatorAssignGroupRole(h.ctx, controlplane.MerchantGroup(ownerMerchantSlug), authkit.RemoteAppSubject(ra.ID), controlplane.MerchantRoleOwner),
 			"assign merchant owner role to delegated remote_application")
 	}
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
@@ -937,7 +937,7 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerMerchantSlug string, permi
 	require.NoError(h.t, err, "register service-JWT issuer")
 	// #567: assign the merchant `owner` role (= merchant:*); the service JWT's
 	// claimed permissions are bounded down to its requested subset at verify time.
-	require.NoError(h.t, core.AdminAssignGroupRole(h.ctx, controlplane.MerchantGroup(ownerMerchantSlug), authkit.RemoteAppSubject(ra.ID), controlplane.MerchantRoleOwner),
+	require.NoError(h.t, core.OperatorAssignGroupRole(h.ctx, controlplane.MerchantGroup(ownerMerchantSlug), authkit.RemoteAppSubject(ra.ID), controlplane.MerchantRoleOwner),
 		"assign merchant owner role to service-JWT remote_application")
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
@@ -1064,7 +1064,7 @@ func (h *Harness) ensureAPIKeyActor(cp *controlplane.ControlPlane, merchantSlug 
 		user, err = cp.Core().CreateUser(h.ctx, email, username)
 	}
 	require.NoError(h.t, err, "ensure API-key actor")
-	require.NoError(h.t, cp.Core().AdminAssignGroupRole(h.ctx, controlplane.MerchantGroup(merchantSlug), authkit.UserSubject(user.ID), controlplane.MerchantRoleOwner),
+	require.NoError(h.t, cp.Core().OperatorAssignGroupRole(h.ctx, controlplane.MerchantGroup(merchantSlug), authkit.UserSubject(user.ID), controlplane.MerchantRoleOwner),
 		"assign API-key actor merchant owner")
 	return user.ID
 }

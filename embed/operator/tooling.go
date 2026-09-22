@@ -1,10 +1,11 @@
-package embed
+package operator
 
 import (
 	"context"
 	"fmt"
 	"io"
 
+	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/hosttools"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -28,7 +29,7 @@ type PushCatalogOptions struct {
 // PushCatalog converges the declared catalog (products, prices by explicit
 // key, meters, tier groups) into the runtime's merchant, using its armed PSPs
 // and signers. A mutating push runs the full converge for manifest catalogs.
-func (r *Runtime) PushCatalog(ctx context.Context, opts PushCatalogOptions) error {
+func (r *Operator) PushCatalog(ctx context.Context, opts PushCatalogOptions) error {
 	if err := r.initialized(); err != nil {
 		return err
 	}
@@ -44,7 +45,7 @@ type ConvergeResult = hosttools.ConvergeMerchantResult
 // Converge runs one merchant-wide convergence pass on demand: the same
 // idempotent engine the scheduled sweep uses, so grants and entitlements derive
 // immediately after an import instead of at the next sweep.
-func (r *Runtime) Converge(ctx context.Context, merchantID merchant.ID) (ConvergeResult, error) {
+func (r *Operator) Converge(ctx context.Context, merchantID merchant.ID) (ConvergeResult, error) {
 	if err := r.initialized(); err != nil {
 		return ConvergeResult{}, err
 	}
@@ -72,14 +73,14 @@ type PullProviderOptions struct {
 	Out             io.Writer
 	// MerchantManifest is the MODE 1 manifest the host boots from; nil reads
 	// MerchantManifestPath (or the conventional path). Ignored for API hosts.
-	MerchantManifest     *BillingConfig
+	MerchantManifest     *embed.BillingConfig
 	MerchantManifestPath string
 	// Endpoints overrides provider base URLs (a test seam for fake providers).
 	Endpoints reconcile.ProviderEndpoints
 }
 
 // PullProvider pulls provider-observed state into the merchant's local mirror.
-func (r *Runtime) PullProvider(ctx context.Context, opts PullProviderOptions) error {
+func (r *Operator) PullProvider(ctx context.Context, opts PullProviderOptions) error {
 	if err := r.initialized(); err != nil {
 		return err
 	}
@@ -93,7 +94,7 @@ func (r *Runtime) PullProvider(ctx context.Context, opts PullProviderOptions) er
 }
 
 // PullProviderReport renders one recorded pull run.
-func (r *Runtime) PullProviderReport(ctx context.Context, merchantID merchant.ID, runID, format string, out io.Writer) error {
+func (r *Operator) PullProviderReport(ctx context.Context, merchantID merchant.ID, runID, format string, out io.Writer) error {
 	if err := r.initialized(); err != nil {
 		return err
 	}
@@ -104,7 +105,7 @@ func (r *Runtime) PullProviderReport(ctx context.Context, merchantID merchant.ID
 
 // ResolveMerchant captures the immutable merchant id and current public name
 // behind a public name. Carry the id, never the name, into later operations.
-func (r *Runtime) ResolveMerchant(ctx context.Context, name string) (merchant.ID, string, error) {
+func (r *Operator) ResolveMerchant(ctx context.Context, name string) (merchant.ID, string, error) {
 	if err := r.initialized(); err != nil {
 		return merchant.ID{}, "", err
 	}
@@ -119,7 +120,7 @@ func (r *Runtime) ResolveMerchant(ctx context.Context, name string) (merchant.ID
 	return selected.ID, selected.Slug, nil
 }
 
-func (r *Runtime) initialized() error {
+func (r *Operator) initialized() error {
 	if r == nil || r.app == nil || r.app.Runtime == nil || r.app.Runtime.DB == nil {
 		return fmt.Errorf("openrails embed: runtime is not initialized")
 	}

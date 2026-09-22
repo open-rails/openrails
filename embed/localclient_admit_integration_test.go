@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
@@ -38,8 +39,12 @@ func TestInProcessClientBindingIsImmutable(t *testing.T) {
 	require.NoError(t, err)
 
 	slug := fmt.Sprintf("embed-merchant-binding-%d", time.Now().UnixNano())
-	boundID, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
+	bound, boundID, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()}, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = bound.Close(context.Background()) })
+	// Simulate an internal binding change to retain the transport mismatch guard.
+	// Public callers can only declare the binding during construction.
+	app.HostGraph(rt).Runtime.SetConfiguredMerchant(boundID)
 	customerID := seedCustomerForBoundMerchant(ctx, t, boundID)
 
 	_, err = rt.Client(openrails.WithMerchantID(otherID))
@@ -48,7 +53,7 @@ func TestInProcessClientBindingIsImmutable(t *testing.T) {
 	for name, call := range map[string]func() error{
 		"read": func() error { _, err := early.GetMerchantSettings(ctx); return err },
 		"write": func() error {
-			return early.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID), []openrails.SpendDelegationInput{{
+			return early.SetCustomerSpendDelegations(ctx, (openrails.CustomerID(customerID)).String(), []openrails.SpendDelegationInput{{
 				Scope: "invoker", ScopeKey: "test-invoker-mismatch",
 				Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 5_000_000, Currency: "USD"}},
 			}})
@@ -69,7 +74,7 @@ func TestInProcessClientBindingIsImmutable(t *testing.T) {
 	require.Equal(t, boundID, client.MerchantID())
 	_, err = client.GetMerchantSettings(ctx)
 	require.NoError(t, err)
-	require.NoError(t, client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID), []openrails.SpendDelegationInput{{
+	require.NoError(t, client.SetCustomerSpendDelegations(ctx, (openrails.CustomerID(customerID)).String(), []openrails.SpendDelegationInput{{
 		Scope: "invoker", ScopeKey: "test-invoker-match",
 		Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 5_000_000, Currency: "USD"}},
 	}}))

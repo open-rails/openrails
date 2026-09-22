@@ -115,36 +115,6 @@ func (s *Service) GetCustomerInvoiceProfile(ctx context.Context, payer identity.
 	}, nil
 }
 
-// EnsureUsageProduct idempotently ensures a catalog product for host-owned
-// usage rate cards, returning its (deterministic) id.
-func (s *Service) EnsureUsageProduct(ctx context.Context, key, displayName string) (uuid.UUID, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return uuid.UUID{}, pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return uuid.Nil, fmt.Errorf("service not initialized")
-	}
-	products, err := s.requireProductService()
-	if err != nil {
-		return uuid.Nil, err
-	}
-	if existing, gerr := products.GetByKey(ctx, key); gerr == nil && existing != nil {
-		return existing.ID, nil
-	}
-	p, err := s.CreateProduct(ctx, CreateProductRequest{Key: key, DisplayName: displayName})
-	if err != nil {
-		// Lost a create race: the row exists now.
-		if existing, gerr := products.GetByKey(ctx, key); gerr == nil && existing != nil {
-			return existing.ID, nil
-		}
-		return uuid.Nil, err
-	}
-	return p.ID.UUID(), nil
-}
-
 // UsageMeterSpec declares a host-owned usage meter (upserted idempotently).
 type UsageMeterSpec = openrails.UsageMeterSpec
 

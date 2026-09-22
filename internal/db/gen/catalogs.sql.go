@@ -128,3 +128,12 @@ func (q *Queries) ListCatalogs(ctx context.Context, arg ListCatalogsParams) ([]O
 	}
 	return items, nil
 }
+
+const lockCatalogKey = `-- name: LockCatalogKey :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+func (q *Queries) LockCatalogKey(ctx context.Context, lockKey string) error {
+	_, err := q.db.Exec(ctx, lockCatalogKey, lockKey)
+	return err
+}

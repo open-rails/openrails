@@ -9,12 +9,12 @@ import (
 // a positive rail payment for the given price. Refunding that payment does not
 // erase the historical fact, nor does archiving it. This reads the payment record and
 // remains true after its acknowledged host event is pruned.
-func (c *Client) HasSettledPayment(ctx context.Context, customerID CustomerID, priceID PriceID) (bool, error) {
-	customer, err := requireTypedID("customer_id", customerID)
+func (c *Client) HasSettledPayment(ctx context.Context, customerID string, priceID string) (bool, error) {
+	customer, err := requireCustomerID(customerID)
 	if err != nil {
 		return false, err
 	}
-	price, err := requireTypedID("price_id", priceID)
+	price, err := requirePriceID(priceID)
 	if err != nil {
 		return false, err
 	}

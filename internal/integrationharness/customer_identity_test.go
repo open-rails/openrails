@@ -58,7 +58,7 @@ func TestOneSubjectHasIndependentMerchantBillingThroughBothClients(t *testing.T)
 			local, err := host.Runtime().Client(openrails.WithCurrency("USD"))
 			require.NoError(t, err)
 			request := openrails.DepositCreditsRequest{
-				CustomerID: &payer, Invoker: subject.String(), Currency: "USD", Amount: side.amount,
+				CustomerID: new(payer.String()), Invoker: subject.String(), Currency: "USD", Amount: side.amount,
 				Source: "shared-subject", SourceID: sourceID,
 			}
 			// The exact external subject and caller key can independently fund
@@ -66,7 +66,7 @@ func TestOneSubjectHasIndependentMerchantBillingThroughBothClients(t *testing.T)
 			first, err := remote.DepositCredits(ctx, request)
 			require.NoError(t, err)
 			require.False(t, first.Replayed)
-			require.Equal(t, openrails.CustomerID(subject), first.CustomerID)
+			require.Equal(t, subject.String(), first.CustomerID)
 			firstReceipts = append(firstReceipts, first.ID)
 			replay, err := local.DepositCredits(ctx, request)
 			require.NoError(t, err)
@@ -95,28 +95,28 @@ func TestOneSubjectHasIndependentMerchantBillingThroughBothClients(t *testing.T)
 	for _, side := range observations {
 		for name, client := range side.clients {
 			t.Run(side.feature+"_"+name, func(t *testing.T) {
-				balance, err := client.Balance(ctx, openrails.CustomerID(subject))
+				balance, err := client.Balance(ctx, (openrails.CustomerID(subject)).String())
 				require.NoError(t, err)
 				require.Equal(t, 2*side.amount, balance.BalanceAmount)
-				receipt, err := client.GetDeposit(ctx, openrails.CustomerID(subject), sourceID)
+				receipt, err := client.GetDeposit(ctx, (openrails.CustomerID(subject)).String(), sourceID)
 				require.NoError(t, err)
 				require.Equal(t, side.receiptID, receipt.ID)
 				require.Equal(t, side.amount, receipt.Amount)
-				allowed, err := client.HasEntitlement(ctx, openrails.CustomerID(subject), side.feature, time.Time{})
+				allowed, err := client.HasEntitlement(ctx, (openrails.CustomerID(subject)).String(), side.feature, time.Time{})
 				require.NoError(t, err)
 				require.True(t, allowed)
 				unknown := openrails.CustomerID(uuid.New())
-				records, err := client.ListActiveEntitlements(ctx, []openrails.CustomerID{openrails.CustomerID(subject), unknown}, time.Time{})
+				records, err := client.ListActiveEntitlements(ctx, []string{(openrails.CustomerID(subject)).String(), (unknown).String()}, time.Time{})
 				require.NoError(t, err)
-				require.Len(t, records[openrails.CustomerID(subject)], 1)
-				require.Empty(t, records[unknown])
-				_, err = client.ListActiveEntitlements(ctx, []openrails.CustomerID{{}}, time.Time{})
+				require.Len(t, records[(openrails.CustomerID(subject)).String()], 1)
+				require.Empty(t, records[(unknown).String()])
+				_, err = client.ListActiveEntitlements(ctx, []string{""}, time.Time{})
 				require.Error(t, err)
 				foreignFeature := "access-a"
 				if side.feature == foreignFeature {
 					foreignFeature = "access-b"
 				}
-				allowed, err = client.HasEntitlement(ctx, openrails.CustomerID(subject), foreignFeature, time.Time{})
+				allowed, err = client.HasEntitlement(ctx, (openrails.CustomerID(subject)).String(), foreignFeature, time.Time{})
 				require.NoError(t, err)
 				require.False(t, allowed)
 			})

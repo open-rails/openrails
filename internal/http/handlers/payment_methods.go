@@ -625,7 +625,7 @@ func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 
 	var subs []subscriptionSummary
 	for _, s := range pm.Subscriptions {
-		summary := subscriptionSummary{ID: openrails.SubscriptionID(s.ID), CreatedAt: s.CreatedAt}
+		summary := subscriptionSummary{ID: openrails.SubscriptionID(s.ID).String(), CreatedAt: s.CreatedAt}
 		if s.Product != nil {
 			summary.DisplayName = s.Product.DisplayName
 			summary.Description = s.Product.Description
@@ -635,7 +635,7 @@ func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 
 	metadata := paymentMethodMetadataToAPI(pm.Metadata)
 	return paymentMethodResponse{
-		ID:             openrails.PaymentMethodID(pm.ID),
+		ID:             openrails.PaymentMethodID(pm.ID).String(),
 		Object:         "payment_method",
 		Type:           "card",
 		Rail:           string(pm.Rail),

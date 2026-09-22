@@ -54,12 +54,12 @@ func TestMerchantRefundAuthorityAndReplayWorkflow(t *testing.T) {
 	}))
 	owned := surface.ProvisionOwnedMerchant("refund-" + uuid.NewString()[:8])
 	client := surface.Client(openrails.WithMerchantID(owned.MerchantID), openrails.WithAPIKey(owned.APIKey))
-	product, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: "refundable", DisplayName: "Refundable access"})
+	product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: "refundable", DisplayName: "Refundable access"})
 	require.NoError(t, err)
-	price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "USD"})
+	price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	duration := 720
-	monthly, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
+	monthly, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, UnitAmount: 10_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 	require.NoError(t, err)
 	ccbillAccount := fmt.Sprintf("%06d-%04d", 100000+uuid.New().ID()%900000, uuid.New().ID()%10000)
 	SeedPSPs(ctx, t, surface.App().Runtime, owned.MerchantID, config.PSPSet{
@@ -74,17 +74,17 @@ func TestMerchantRefundAuthorityAndReplayWorkflow(t *testing.T) {
 	payment := func(rail string) openrails.PaymentID {
 		t.Helper()
 		customer := openrails.CustomerID(uuid.New())
-		_, err := client.EnsureCustomer(ctx, customer)
+		_, err := client.EnsureCustomer(ctx, (customer).String())
 		require.NoError(t, err)
 		id := uuid.New()
 		psp := dbtest.EnsureTestPSP(ctx, t, pool, owned.MerchantID.UUID(), rail)
-		selectedPrice := price.ID.UUID()
+		selectedPrice := sdkPriceID(t, price.ID).UUID()
 		var subscription *uuid.UUID
 		if rail == "ccbill" {
 			sid := uuid.New()
 			subscription = &sid
-			selectedPrice = monthly.ID.UUID()
-			_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,psp_id) VALUES($1,$2,$3,$4,$5,'active','ccbill',$6,$7)`, sid, owned.MerchantID.UUID(), customer.UUID(), product.ID.UUID(), selectedPrice, "ccsub-"+sid.String(), psp)
+			selectedPrice = sdkPriceID(t, monthly.ID).UUID()
+			_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,psp_id) VALUES($1,$2,$3,$4,$5,'active','ccbill',$6,$7)`, sid, owned.MerchantID.UUID(), customer.UUID(), sdkProductID(t, product.ID).UUID(), selectedPrice, "ccsub-"+sid.String(), psp)
 			require.NoError(t, err)
 		}
 		_, err = pool.Exec(ctx, `INSERT INTO billing.payments(id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,money_movement,psp_id,subscription_id) VALUES($1,$2,$3,$4,$5,$6,10000000,10000000,'USD','completed','rail',$7,$8)`, id, owned.MerchantID.UUID(), customer.UUID(), selectedPrice, rail, "original-"+id.String(), psp, subscription)
@@ -115,11 +115,11 @@ func TestMerchantRefundAuthorityAndReplayWorkflow(t *testing.T) {
 	foreign := surface.ProvisionOwnedMerchant("refund-other-" + uuid.NewString()[:8])
 	t.Run("manual access authority and deleted projection", func(t *testing.T) {
 		customer := openrails.CustomerID(uuid.New())
-		_, err := client.EnsureCustomer(ctx, customer)
+		_, err := client.EnsureCustomer(ctx, (customer).String())
 		require.NoError(t, err)
 		admin := surface.RegisterDelegatedIssuer("access-admin-"+uuid.NewString()[:8], owned.MerchantSlug).Mint(uuid.NewString(), "", "", []string{controlplane.PermMerchantCustomerSettingsUpdate})
 		reader := surface.RegisterServiceJWTIssuer("access-read-"+uuid.NewString()[:8], owned.MerchantSlug, []string{controlplane.PermMerchantCustomerSettingsRead}).Token
-		for _, row := range []struct{ path, body string }{{"product-access", fmt.Sprintf(`{"product_id":%q}`, product.ID.String())}, {"entitlements", `{"entitlement":"manual_access","hours":24}`}} {
+		for _, row := range []struct{ path, body string }{{"product-access", fmt.Sprintf(`{"product_id":%q}`, product.ID)}, {"entitlements", `{"entitlement":"manual_access","hours":24}`}} {
 			call := func(token string) (int, []byte) {
 				req, err := http.NewRequestWithContext(ctx, http.MethodPost, surface.BaseURL+"/v1/merchant/customers/"+customer.String()+"/"+row.path, strings.NewReader(row.body))
 				require.NoError(t, err)
@@ -147,12 +147,12 @@ func TestMerchantRefundAuthorityAndReplayWorkflow(t *testing.T) {
 				require.Equal(t, "admin", result.SourceType)
 				require.NotNil(t, result.SourceID)
 				at := time.Now().UTC()
-				active, err := client.HasEntitlement(ctx, customer, "manual_access", at)
+				active, err := client.HasEntitlement(ctx, (customer).String(), "manual_access", at)
 				require.NoError(t, err)
 				require.True(t, active)
 				_, err = pool.Exec(ctx, `UPDATE billing.entitlements SET deleted_at=now() WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='manual_access'`, owned.MerchantID.UUID(), customer.UUID())
 				require.NoError(t, err)
-				active, err = client.HasEntitlement(ctx, customer, "manual_access", at)
+				active, err = client.HasEntitlement(ctx, (customer).String(), "manual_access", at)
 				require.NoError(t, err)
 				require.False(t, active)
 			}

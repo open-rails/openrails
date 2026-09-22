@@ -28,7 +28,7 @@ import (
 )
 
 // #699: a host-one-shaped embedded boot — NO Options.PaymentProviders, provider
-// credentials declared ONLY through the merchant manifest (UpsertMerchantConfig
+// credentials declared ONLY through the merchant manifest (constructor configuration
 // seeds the per-merchant secrets store) — arms the pull plane: worker
 // registration builds the merchants service, and the per-merchant builder
 // yields fetchers + probers for the seeded rails with the seeded credentials.
@@ -44,12 +44,6 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 	securityKey := fmt.Sprintf("sec-key-%d", nano)
 
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
-	rt, err := embed.New(ctx, embed.Options{
-		Config: cfg, River: embed.RiverManagedByOpenRails(), // deliberately NO PaymentProviders
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-
 	m := embed.MerchantConfig{
 		DisplayName: slug,
 		PSPs: map[string]embed.PSPConfig{
@@ -70,8 +64,12 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 			},
 		},
 	}
-	id, err := rt.UpsertMerchantConfig(ctx, slug, m)
+
+	rt, id, err := newDeclaredMerchant(ctx, embed.Options{
+		Config: cfg, River: embed.RiverManagedByOpenRails(), // deliberately NO PaymentProviders
+	}, slug, m)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	require.False(t, id.IsZero())
 	t.Cleanup(func() {
 		for _, stmt := range []string{
@@ -167,16 +165,15 @@ func (f *pullFakeNMI) sawKey(key string) bool {
 }
 
 // pullCLIManifestMerchant provisions one MODE-1 merchant the host-one way
-// (embed.New + UpsertMerchantConfig — DB projections only, secrets in the
+// (embed.New — DB projections only, secrets in the
 // server's memory) and tears the server down, leaving the one-off-CLI shape:
 // rows on disk, NO store secrets, manifest as the only credential source.
 func pullCLIManifestMerchant(t *testing.T, ctx context.Context, dsn, slug string, m embed.MerchantConfig) merchant.ID {
 	t.Helper()
 	appDB := dbtest.OpenAppDB(t, dsn)
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
-	require.NoError(t, err)
-	id, err := rt.UpsertMerchantConfig(ctx, slug, m)
+
+	rt, id, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()}, slug, m)
 	require.NoError(t, err)
 	require.NoError(t, rt.Close(ctx))
 	t.Cleanup(func() {

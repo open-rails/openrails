@@ -68,7 +68,7 @@ func TestAdmissionDeadlineRecoveryAndZeroCapture(t *testing.T) {
 	require.NoError(t, rdb.FlushDB(ctx).Err())
 	first, err := svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{RequestID: in.SourceID, Amount: 400})
 	require.NoError(t, err)
-	require.Equal(t, openrails.CustomerID(payer), first.CustomerID)
+	require.Equal(t, payer.String(), first.CustomerID)
 	require.NotNil(t, first.LedgerTransferID)
 	replay, err := svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{RequestID: in.SourceID, Amount: 400})
 	require.NoError(t, err)

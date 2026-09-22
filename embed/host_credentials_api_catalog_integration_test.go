@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	embedoperator "github.com/open-rails/openrails/embed/operator"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -40,10 +41,8 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	const secret = "sk_test_host_owned_fixture"
 	boot := func(key string) *embed.Runtime {
 		gate := &allowAllGate{}
-		rt, err := embed.New(ctx, embed.Options{HTTP: &embed.HTTPConfig{PaymentProviders: true, Gate: gate}, Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t, key: key}})
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = rt.Close(context.Background()) })
-		_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
+
+		rt, _, err := newDeclaredMerchant(ctx, embed.Options{HTTP: &embed.HTTPConfig{PaymentProviders: true, Gate: gate}, Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t, key: key}}, slug, embed.MerchantConfig{
 			DisplayName: "Host credential catalog",
 			PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {
 				AccountID: accountID,
@@ -51,22 +50,25 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 			}}},
 		})
 		require.NoError(t, err)
+		t.Cleanup(func() { _ = rt.Close(context.Background()) })
 		gate.id = app.HostGraph(rt).Runtime.ConfiguredMerchant()
 		return rt
 	}
 	rt := boot(secret)
+	require.ErrorContains(t, rt.ConfigureHTTP(embed.HTTPConfig{}), "already configured",
+		"constructor-owned HTTP configuration is applied once and cannot be replaced")
 	client, err := rt.Client()
 	require.NoError(t, err)
-	product, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: "post", DisplayName: "First title"})
+	product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: "post", DisplayName: "First title"})
 	require.NoError(t, err)
 	title := "Updated title"
-	_, err = client.UpdateProduct(ctx, product.ID, openrails.UpdateProductRequest{DisplayName: &title})
+	_, err = client.Products.Update(ctx, product.ID, &openrails.ProductUpdateParams{DisplayName: &title})
 	require.NoError(t, err)
-	price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: "post-usd", UnitAmount: 5_000_000, Currency: "USD"})
+	price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: "post-usd", UnitAmount: 5_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	require.Equal(t, product.ID, price.ProductID)
-	require.ErrorContains(t, rt.PushCatalog(ctx, embed.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Insert: true}), "catalog_source=api")
-	require.NoError(t, rt.PushCatalog(ctx, embed.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Out: io.Discard}), "API catalogs still permit a read-only manifest comparison")
+	require.ErrorContains(t, embedoperator.New(rt).PushCatalog(ctx, embedoperator.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Insert: true}), "catalog_source=api")
+	require.NoError(t, embedoperator.New(rt).PushCatalog(ctx, embedoperator.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Out: io.Discard}), "API catalogs still permit a read-only manifest comparison")
 	runtime := app.HostGraph(rt).Runtime
 	mid := runtime.ConfiguredMerchant()
 	name, err := merchants.PSPSecretName("stripe", "test", accountID, "secret_key")
@@ -99,11 +101,11 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	require.Equal(t, "sk_test_rotated_fixture", value.Value)
 	client2, err := rt2.Client()
 	require.NoError(t, err)
-	read, err := client2.GetProduct(ctx, product.ID)
+	read, err := client2.Products.Retrieve(ctx, product.ID)
 	require.NoError(t, err)
 	require.Equal(t, title, read.DisplayName)
 	require.Zero(t, merchantSecretRowCount(t, app.HostGraph(rt2).Runtime.DB.Pool(), ctx, mid))
-	require.NoError(t, rt2.PushCatalog(ctx, embed.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Out: io.Discard}), "provider comparison must use the rotated host credential")
+	require.NoError(t, embedoperator.New(rt2).PushCatalog(ctx, embedoperator.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Out: io.Discard}), "provider comparison must use the rotated host credential")
 }
 
 // The inverse combination keeps provider API custody while catalog mutations
@@ -121,11 +123,10 @@ func TestManagedCredentialsWithManifestCatalog(t *testing.T) {
 	slug := "managed-manifest-" + uuid.NewString()
 	account := "acct_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	boot := func() *embed.Runtime {
-		rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t}})
+
+		rt, _, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t}}, slug, embed.MerchantConfig{DisplayName: slug})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
-		_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
-		require.NoError(t, err)
 		return rt
 	}
 	rt := boot()
@@ -154,13 +155,13 @@ func TestManagedCredentialsWithManifestCatalog(t *testing.T) {
 			require.NotEqual(t, secret, persisted, "managed provider credentials must be encrypted")
 		})
 	}
-	require.NoError(t, rt.PushCatalog(ctx, embed.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 3_000_000), Insert: true, Out: io.Discard}))
+	require.NoError(t, embedoperator.New(rt).PushCatalog(ctx, embedoperator.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 3_000_000), Insert: true, Out: io.Discard}))
 	client, err := rt.Client()
 	require.NoError(t, err)
-	product, err := client.GetProductByKey(ctx, "pro")
+	product, err := client.Products.RetrieveByKey(ctx, "pro")
 	require.NoError(t, err, "manifest catalog reads remain available")
 	title := "API overwrite"
-	_, err = client.UpdateProduct(ctx, product.ID, openrails.UpdateProductRequest{DisplayName: &title})
+	_, err = client.Products.Update(ctx, product.ID, &openrails.ProductUpdateParams{DisplayName: &title})
 	var refusal *openrails.StatusError
 	require.ErrorAs(t, err, &refusal)
 	require.Equal(t, http.StatusMethodNotAllowed, refusal.Status)

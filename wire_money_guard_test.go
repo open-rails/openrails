@@ -31,6 +31,7 @@ var (
 // the HTTP wire. The guard fails when a listed field becomes a decimal string
 // or stops existing, so the list can only shrink.
 var pendingNumericMoney = map[string]string{
+	"internal/http/handlers/service_commerce.go:func ServiceCreateCheckoutSession.NewPriceID new_price_id":                                           "not money: rejected legacy price reference; any presence fails before executing checkout",
 	"internal/intents/nmi_provider_cutover.go:nmiCutoverPayload.Amount amount":                                                                       notHTTPIntentPayload,
 	"internal/modules/subscriptions/stripe_invoice_collection.go:func GetCollectedInvoice.AmountCaptured amount_captured":                            "Stripe-owned inbound integer amount; the retained qualified receipt encodes charged_amount as a decimal string",
 	"internal/operator/fleet_analytics.go:FleetMerchantFunnel.ActiveRevenue active_revenue":                                                          notMoneyCount,

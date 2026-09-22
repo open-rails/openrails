@@ -21,6 +21,10 @@ func ChangeTier(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
+	if id, err := openrails.ParsePriceID(req.PriceID); err != nil || id.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
+		return
+	}
 
 	user := r.GetUser()
 	if user == nil || strings.TrimSpace(user.ID) == "" {
@@ -49,7 +53,7 @@ func ChangeTier(r *httprequest.Request) {
 	idempotencyKey := strings.TrimSpace(r.Header("Idempotency-Key"))
 
 	svcReq := &checkout.TierChangeRequest{
-		PriceID:        req.PriceID.String(),
+		PriceID:        req.PriceID,
 		SubscriptionID: subscriptionID,
 		IdempotencyKey: idempotencyKey,
 	}
@@ -83,6 +87,10 @@ func ChangeTierPreview(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
+	if id, err := openrails.ParsePriceID(req.PriceID); err != nil || id.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
+		return
+	}
 
 	user := r.GetUser()
 	if user == nil || strings.TrimSpace(user.ID) == "" {
@@ -109,7 +117,7 @@ func ChangeTierPreview(r *httprequest.Request) {
 	}
 
 	svcReq := &checkout.TierChangeRequest{
-		PriceID:        req.PriceID.String(),
+		PriceID:        req.PriceID,
 		SubscriptionID: subscriptionID,
 	}
 

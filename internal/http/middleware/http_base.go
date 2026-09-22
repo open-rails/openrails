@@ -273,14 +273,9 @@ func (s *statusWriter) status() int {
 // correct merchant (issue #223/#227). An OpenRails engine is bound to a
 // single merchant — there is NO default merchant (#336).
 //
-// resolve is called ON EVERY REQUEST, never once at construction time
-// (#744): an embedded engine's bound merchant is set post-boot
-// (UpsertMerchantConfig binds after New — embed/provision.go), and an HTTP
-// handler built from the same Runtime may already be mounted and serving
-// requests before that bind happens. Pass a live accessor — typically the
-// Runtime's own method value, e.g. `middleware.ResolveMerchantHTTP(rt.ConfiguredMerchant)`
-// — never a value snapshotted at handler-construction time, or mounting
-// before the bind pins every request to the zero merchant forever.
+// resolve is called on each request. Pass the runtime's ConfiguredMerchant
+// accessor so privileged restore/bootstrap integrations cannot leave a stale
+// merchant snapshot in an already constructed handler.
 //
 // If resolve is nil or returns zero, NOTHING is pinned: downstream
 // merchant.Require fails, so a missing merchant is a hard error rather than a

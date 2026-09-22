@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
@@ -31,6 +30,10 @@ import (
 
 // Options configures the embedded runtime.
 type Options struct {
+	// Merchant declares this runtime's billing merchant and optional PSP identities.
+	// Reconciliation finishes before HTTP configuration and worker startup.
+	Merchant *MerchantDeclaration
+
 	// HTTP configures the externally mounted surface once. Leave nil for a
 	// headless runtime or call ConfigureHTTP after merchant/auth provisioning.
 	HTTP *HTTPConfig
@@ -118,6 +121,9 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
 	}
+	if err := validateMerchantDeclaration(opts.Merchant); err != nil {
+		return nil, err
+	}
 	if err := embedhttp.ValidateHTTPConfig(opts.HTTP, opts.DelegatedAuthenticator); err != nil {
 		return nil, err
 	}
@@ -155,14 +161,18 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	application.ConsoleAssets = opts.ConsoleAssets
 
 	r := &Runtime{app: application, delegatedAuthenticator: opts.DelegatedAuthenticator}
+	if opts.StripeTransport != nil {
+		r.releaseStripeTransport = stripeapi.InstallBaseTransport(opts.StripeTransport)
+	}
+	if err := configureMerchant(ctx, application, opts.Merchant); err != nil {
+		_ = r.Close(ctx)
+		return nil, err
+	}
 	if opts.HTTP != nil {
 		if err := r.ConfigureHTTP(*opts.HTTP); err != nil {
 			_ = r.Close(ctx)
 			return nil, err
 		}
-	}
-	if opts.StripeTransport != nil {
-		r.releaseStripeTransport = stripeapi.InstallBaseTransport(opts.StripeTransport)
 	}
 	if !opts.River.host {
 		if _, err := application.Runtime.GetBillingPeriodicJobs(ctx); err != nil {
@@ -213,35 +223,9 @@ func applyEmbeddedDefaults(cfg *config.Config) error {
 // operation transport. It is bound to the runtime's configured merchant, or to
 // WithMerchantID on a multi-merchant runtime; an unbound client is refused.
 func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, error) {
-	return r.newClient("", options...)
-}
-
-// CatalogClient creates a restricted creator client for a host-authenticated
-// subject. The subject is opaque; never take it from an untrusted request body
-// or impersonate the owner read from a product row. Administrators use Client.
-// Options may select merchant, currency and timeout; this constructor always
-// retains its restricted in-process transport and credential.
-func (r *Runtime) CatalogClient(subject string, options ...openrails.ClientOption) (*openrails.Client, error) {
-	if err := catalogscope.ValidateSubject(subject); err != nil {
-		return nil, err
-	}
-	return r.newClient(subject, append(options, openrails.WithOwnCatalog())...)
-}
-
-func (r *Runtime) newClient(subject string, options ...openrails.ClientOption) (*openrails.Client, error) {
 	rt := r.app.Runtime
 	r.handlerOnce.Do(func() { r.handler = newServiceHandler(rt, r.delegatedAuthenticator) })
-	var transport http.RoundTripper
-	var hostCapability string
-	if subject == "" {
-		transport, hostCapability = inprocess.NewTransport(r.handler, rt.ConfiguredMerchant)
-	} else {
-		var err error
-		transport, hostCapability, err = inprocess.NewCatalogTransport(r.handler, rt.ConfiguredMerchant, subject)
-		if err != nil {
-			return nil, err
-		}
-	}
+	transport, hostCapability := inprocess.NewTransport(r.handler, rt.ConfiguredMerchant)
 	defaults := []openrails.ClientOption{
 		openrails.WithHTTPClient(&http.Client{Transport: transport}),
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return hostCapability, nil }),
@@ -250,15 +234,6 @@ func (r *Runtime) newClient(subject string, options ...openrails.ClientOption) (
 		defaults = append(defaults, openrails.WithMerchantID(id))
 	}
 	clientOptions := append(defaults, options...)
-	if subject != "" {
-		// Options may select a merchant/currency/timeout, but cannot replace the
-		// restricted host transport or inherit an administrator's credential.
-		clientOptions = append(clientOptions,
-			openrails.WithHTTPClient(&http.Client{Transport: transport}),
-			openrails.WithTokenProvider(func(context.Context) (string, error) { return hostCapability, nil }),
-			openrails.WithOwnCatalog(),
-		)
-	}
 	client, err := openrails.NewRemote(inprocessBaseURL, clientOptions...)
 	if err != nil {
 		return nil, err

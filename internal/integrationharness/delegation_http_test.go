@@ -106,7 +106,7 @@ func newDelegationHTTPFixture(t *testing.T, h *Harness) *delegationHTTPFixture {
 		PublicKeys: []authkit.RemoteAppKey{{KID: signer.KID(), PublicKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER}))}},
 	})
 	require.NoError(t, err)
-	require.NoError(t, cp.Core().AdminAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(app.ID), controlplane.MerchantRoleOwner))
+	require.NoError(t, cp.Core().OperatorAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(app.ID), controlplane.MerchantRoleOwner))
 	require.NoError(t, cp.ReloadRemoteApplications(ctx))
 	return &delegationHTTPFixture{surface: surface, issuer: issuer, signer: signer, schema: schema, claimProof: claimProof, application: app, email: email, password: password, access: session.AccessToken, subject: user.ID}
 }
@@ -189,7 +189,7 @@ func TestDelegationHTTPWorkflow(t *testing.T) {
 	require.NoError(t, cp.Core().RemoveGroupSubjectAs(ctx, h.ensureAPIKeyActor(cp, dbtest.TestMerchantSlug), controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(f.application.ID)))
 	status, _, _ = call(path, "DPoP", token.Token, fresh(path, token.Token))
 	require.Equal(t, 401, status)
-	require.NoError(t, cp.Core().AdminAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(f.application.ID), controlplane.MerchantRoleOwner))
+	require.NoError(t, cp.Core().OperatorAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(f.application.ID), controlplane.MerchantRoleOwner))
 	f.application.Enabled = false
 	_, err = cp.Core().UpsertRemoteApplication(ctx, *f.application)
 	require.NoError(t, err)

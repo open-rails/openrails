@@ -18,7 +18,7 @@ func TestCreditTransactionWireContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	balance, zero := int64(math.MinInt64), int64(0)
-	value := CreditTransaction{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), CustomerID: CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), Invoker: "host", Currency: "USD", Amount: math.MaxInt64, BalanceAfter: &balance, TransactionType: "deposit", Status: "completed", Captured: &zero, Source: "bank", CreatedAt: when, UpdatedAt: when}
+	value := CreditTransaction{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), CustomerID: "22222222-2222-2222-2222-222222222222", Invoker: "host", Currency: "USD", Amount: math.MaxInt64, BalanceAfter: &balance, TransactionType: "deposit", Status: "completed", Captured: &zero, Source: "bank", CreatedAt: when, UpdatedAt: when}
 	raw, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestCreditTransactionWireContract(t *testing.T) {
 
 func TestDepositAndBalanceInt64RoundTrip(t *testing.T) {
 	for _, amount := range []int64{math.MinInt64, -9007199254740993, -1, 0, 1, 9007199254740993, math.MaxInt64} {
-		customer := CustomerID(uuid.New())
+		customer := uuid.NewString()
 		request := DepositCreditsRequest{CustomerID: &customer, Invoker: "host", Currency: "USD", Amount: amount, Source: "bank", SourceID: "payment"}
 		raw, err := json.Marshal(request)
 		if err != nil {
@@ -77,7 +77,7 @@ func TestDepositAndBalanceInt64RoundTrip(t *testing.T) {
 		}
 	}
 	var request DepositCreditsRequest
-	for _, raw := range []string{`{"amount":9007199254740993}`, `{"amount":"9223372036854775808"}`, `{"customer_id":"invalid"}`} {
+	for _, raw := range []string{`{"amount":9007199254740993}`, `{"amount":"9223372036854775808"}`, `{"customer_id":123}`} {
 		if err := json.Unmarshal([]byte(raw), &request); err == nil {
 			t.Fatalf("accepted invalid wire value %s", raw)
 		}
@@ -124,7 +124,7 @@ func TestPolicyMoneyAndUsageSummaryAreExact(t *testing.T) {
 		SpendDelegationInput{Scope: "invoker", ScopeKey: "worker", Windows: []SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: max, Currency: "USD"}}},
 		BillingPolicyInput{Name: "credit-line", Kind: "outstanding_cap", OutstandingCapAmount: max, AccrualRateCapPerHour: max, CollectionThresholdAmount: &max, DelinquencyAmountFloor: &max},
 		MerchantSettings{InvoiceCollectionThreshold: &max, InvoiceMonthlyFloor: &max, ArrearsDelinquencyFloor: &max},
-		CreditLimitRequest{CustomerID: CustomerID(uuid.New()), Currency: "USD", CreditLimitAmount: max},
+		CreditLimitRequest{CustomerID: (CustomerID(uuid.New())).String(), Currency: "USD", CreditLimitAmount: max},
 		UsageRollupRow{Key: "api", EventCount: 1, TotalAmount: max, Currency: "USD"},
 		ResourceRevenueResponse{Currency: "USD", RevenueAmount: max, Daily: []ResourceRevenueDailyRow{{Date: "2026-09-16", Currency: "USD", Amount: max}}},
 	} {

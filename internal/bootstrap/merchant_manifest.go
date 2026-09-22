@@ -846,7 +846,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 	// MODE 1 (#723): the YAML is the truth — it steamrolls the DB projections
 	// and the in-memory secret plane on every apply. Seed-once/plan tiers are
 	// mode-2 (api) semantics; forcing here keeps every mode-1 caller (embedded
-	// UpsertMerchantConfig, standalone boot, CLI) converging identically.
+	// merchant constructor, standalone boot, CLI) converging identically.
 	if req.Config.IsManifestMerchantConfigSource() {
 		req.Options.Insert = true
 		req.Options.Overwrite = true
@@ -2180,7 +2180,7 @@ func configureMerchantRemoteApplication(ctx context.Context, cp *controlplane.Co
 	if err != nil {
 		return fmt.Errorf("merchant bootstrap: register remote_application for group %s: %w", groupID, err)
 	}
-	if err := core.AdminAssignGroupRole(ctx, controlplane.MerchantGroup(group.InstanceSlug), authkit.RemoteAppSubject(stored.ID), controlplane.MerchantRoleOwner); err != nil {
+	if err := core.OperatorAssignGroupRole(ctx, controlplane.MerchantGroup(group.InstanceSlug), authkit.RemoteAppSubject(stored.ID), controlplane.MerchantRoleOwner); err != nil {
 		return fmt.Errorf("merchant bootstrap: grant remote_application owner role for group %s: %w", groupID, err)
 	}
 	return nil

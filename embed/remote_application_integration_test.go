@@ -54,7 +54,7 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 		pid := openrails.CustomerID(payer)
 		src := uuid.NewString()
 		dep, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
-			CustomerID:  &pid,
+			CustomerID:  new(pid.String()),
 			Invoker:     "or484-test",
 			Currency:    "USD",
 			Amount:      500_000,
@@ -65,7 +65,7 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 		require.NoError(t, err, "authorized JWKS principal must administer the merchant")
 		require.Equal(t, int64(500_000), dep.Amount)
 
-		bal, err := c.Balance(ctx, openrails.CustomerID(payer))
+		bal, err := c.Balance(ctx, (openrails.CustomerID(payer)).String())
 		require.NoError(t, err, "authorized JWKS principal balance read")
 		require.Equal(t, int64(500_000), bal.BalanceAmount)
 	})
@@ -78,7 +78,7 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 		pid := openrails.CustomerID(payer)
 		src := uuid.NewString()
 		_, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
-			CustomerID:  &pid,
+			CustomerID:  new(pid.String()),
 			Invoker:     "or484-test",
 			Currency:    "USD",
 			Amount:      500_000,
@@ -100,7 +100,7 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 		pid := openrails.CustomerID(payer)
 		src := uuid.NewString()
 		_, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
-			CustomerID:  &pid,
+			CustomerID:  new(pid.String()),
 			Invoker:     "or484-test",
 			Currency:    "USD",
 			Amount:      1_000,

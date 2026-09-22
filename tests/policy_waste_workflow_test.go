@@ -20,19 +20,19 @@ func checkPolicyWasteAndProfiles(t *testing.T, f treasuryWorkflow) {
 	fund := func(c *openrails.Client) openrails.CustomerID {
 		t.Helper()
 		payer := openrails.CustomerID(uuid.New())
-		_, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: payer.String(), Currency: "USD", Amount: 100_000_000, Source: "waste", SourceID: uuid.NewString()})
+		_, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(payer.String()), Invoker: payer.String(), Currency: "USD", Amount: 100_000_000, Source: "waste", SourceID: uuid.NewString()})
 		require.NoError(t, err)
 		return payer
 	}
 	grant := func(c *openrails.Client, payer openrails.CustomerID, invoker string) {
 		t.Helper()
-		require.NoError(t, c.SetCustomerSpendDelegation(ctx, payer, openrails.SpendDelegationInput{Scope: "invoker", ScopeKey: invoker,
+		require.NoError(t, c.SetCustomerSpendDelegation(ctx, (payer).String(), openrails.SpendDelegationInput{Scope: "invoker", ScopeKey: invoker,
 			Windows: []openrails.SpendLimitWindow{{Key: "delegated", WindowSeconds: 3600, Limit: 100_000_000, Currency: "USD"}}}))
 	}
 	admit := func(c *openrails.Client, payer openrails.CustomerID, invoker string) *openrails.AdmitResponse {
 		t.Helper()
 		deadline, key := time.Now().Add(time.Hour), uuid.NewString()
-		result, err := c.Admit(ctx, openrails.AdmitRequest{CustomerID: payer, Invoker: invoker, InvokerType: openrails.InvokerTypeDelegated, TrustLevel: "free",
+		result, err := c.Admit(ctx, openrails.AdmitRequest{CustomerID: (payer).String(), Invoker: invoker, InvokerType: openrails.InvokerTypeDelegated, TrustLevel: "free",
 			Currency: "USD", EstimatedAmount: 100, RequestID: key, Source: "waste", ExpiresAt: &deadline})
 		require.NoError(t, err)
 		if result.Allowed {
@@ -48,7 +48,7 @@ func checkPolicyWasteAndProfiles(t *testing.T, f treasuryWorkflow) {
 		}
 		payer, invoker := fund(other), "default-"+uuid.NewString()
 		grant(other, payer, invoker)
-		_, err := other.ReportWastedSpend(ctx, openrails.WastedSpendReport{CustomerID: payer, Invoker: invoker, Currency: "USD", Amount: 2_000_000, Source: "waste", SourceID: uuid.NewString()})
+		_, err := other.ReportWastedSpend(ctx, openrails.WastedSpendReport{CustomerID: (payer).String(), Invoker: invoker, Currency: "USD", Amount: 2_000_000, Source: "waste", SourceID: uuid.NewString()})
 		require.NoError(t, err)
 		require.True(t, admit(other, payer, invoker).Allowed, "both absent and empty settings keep the $5 default cutoff")
 	}
@@ -84,7 +84,7 @@ func checkPolicyWasteAndProfiles(t *testing.T, f treasuryWorkflow) {
 	invoker := "shared-invoker-" + uuid.NewString()
 	grant(f.client, payerA, invoker)
 	grant(f.client, payerB, invoker)
-	converted, err := f.client.ReportWastedSpend(ctx, openrails.WastedSpendReport{CustomerID: payerA, Invoker: invoker, Currency: "EUR", Amount: 600_000, Source: "waste", SourceID: uuid.NewString()})
+	converted, err := f.client.ReportWastedSpend(ctx, openrails.WastedSpendReport{CustomerID: (payerA).String(), Invoker: invoker, Currency: "EUR", Amount: 600_000, Source: "waste", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	require.Equal(t, "USD", converted.PolicyCurrency)
 	require.EqualValues(t, 1_200_000, converted.PolicyRecordedAmount)
@@ -92,7 +92,7 @@ func checkPolicyWasteAndProfiles(t *testing.T, f treasuryWorkflow) {
 	require.False(t, blocked.Allowed)
 	require.Equal(t, "abuse", blocked.BlockedBy)
 	require.True(t, admit(f.client, payerB, invoker).Allowed, "same invoker label under a different payer has independent usage")
-	_, err = f.client.ReportWastedSpend(ctx, openrails.WastedSpendReport{CustomerID: payerB, Invoker: invoker, Currency: "USD", Amount: 2_000_000, Source: "waste", SourceID: uuid.NewString()})
+	_, err = f.client.ReportWastedSpend(ctx, openrails.WastedSpendReport{CustomerID: (payerB).String(), Invoker: invoker, Currency: "USD", Amount: 2_000_000, Source: "waste", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	require.False(t, admit(f.client, payerB, invoker).Allowed)
 
@@ -103,7 +103,7 @@ func checkPolicyWasteAndProfiles(t *testing.T, f treasuryWorkflow) {
 	own.BillingPolicyBindings = append(own.BillingPolicyBindings, openrails.BillingPolicyBindingInput{PolicyName: "direct_grace", Tier: "free"})
 	require.NoError(t, f.client.SetMerchantSettings(ctx, *own))
 	direct := fund(f.client)
-	under := openrails.WastedSpendReport{CustomerID: direct, Invoker: direct.String(), InvokerType: openrails.InvokerTypePayer, Currency: "USD", Amount: 500_000, Source: "waste", SourceID: uuid.NewString()}
+	under := openrails.WastedSpendReport{CustomerID: (direct).String(), Invoker: direct.String(), InvokerType: openrails.InvokerTypePayer, Currency: "USD", Amount: 500_000, Source: "waste", SourceID: uuid.NewString()}
 	result, err := f.client.ReportWastedSpend(ctx, under)
 	require.NoError(t, err)
 	require.Equal(t, "USD", result.Currency)
@@ -118,7 +118,7 @@ func checkPolicyWasteAndProfiles(t *testing.T, f treasuryWorkflow) {
 	require.EqualValues(t, 1_000_000, result.ChargedAmount)
 	_, err = f.client.ReportWastedSpend(ctx, over)
 	require.NoError(t, err)
-	balance, err := f.client.Balance(ctx, direct)
+	balance, err := f.client.Balance(ctx, (direct).String())
 	require.NoError(t, err)
 	require.EqualValues(t, 99_000_000, balance.BalanceAmount, "only overage is debited, exactly once across retry")
 	pool := dbtest.OpenMerchantDB(t, f.merchant.MerchantID.UUID()).Pool()

@@ -62,6 +62,46 @@ func (s *Service) ListCheckoutRailOptions(ctx context.Context, priceRef string) 
 // CreateCheckoutSessionForCustomer creates a checkout session with host-resolved
 // identity attributes for rails that require them.
 func (s *Service) CreateCheckoutSessionForCustomer(ctx context.Context, customer CheckoutCustomerIdentity, req CreateCheckoutSessionRequest) (*CheckoutSession, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	return s.createCheckoutSessionForCustomer(ctx, customer, req, "", "", "")
+}
+
+func (s *Service) CreatePaymentMethodSessionForCustomer(ctx context.Context, req openrails.CreatePaymentMethodSessionRequest) (*CheckoutSession, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	return s.createCheckoutSessionForCustomer(ctx, req.Customer, CreateCheckoutSessionRequest{PaymentOptions: req.PaymentOptions, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey}, "payment_method", "", "")
+}
+
+func (s *Service) CreateSolanaCancelSessionForCustomer(ctx context.Context, req openrails.CreateSolanaCancelSessionRequest) (*CheckoutSession, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	return s.createCheckoutSessionForCustomer(ctx, req.Customer, CreateCheckoutSessionRequest{PaymentOptions: req.PaymentOptions, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey}, "solana_cancel", req.SubscriptionID, "")
+}
+
+func (s *Service) CreateSolanaTierChangeSessionForCustomer(ctx context.Context, req openrails.CreateSolanaTierChangeSessionRequest) (*CheckoutSession, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	return s.createCheckoutSessionForCustomer(ctx, req.Customer, CreateCheckoutSessionRequest{PaymentOptions: req.PaymentOptions, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey}, "solana_tier_change", req.SubscriptionID, req.NewPriceID)
+}
+
+func (s *Service) createCheckoutSessionForCustomer(ctx context.Context, customer CheckoutCustomerIdentity, req CreateCheckoutSessionRequest, mode string, subscriptionID string, newPriceID string) (*CheckoutSession, error) {
 	checkoutSessions, err := s.requireCheckoutSessionService()
 	if err != nil {
 		return nil, err
@@ -71,35 +111,55 @@ func (s *Service) CreateCheckoutSessionForCustomer(ctx context.Context, customer
 		return nil, err
 	}
 
+	if raw := req.PaymentOptions.PaymentMethodID; raw != "" {
+		id, err := openrails.ParsePaymentMethodID(raw)
+		if err != nil || id.IsZero() {
+			return nil, fmt.Errorf("%w: invalid payment_method_id", checkout.ErrCheckoutSessionValidation)
+		}
+	}
+	var pspID uuid.UUID
+	if req.PaymentOptions.PSPID != "" {
+		pspID, err = uuid.Parse(req.PaymentOptions.PSPID)
+		if err != nil || pspID == uuid.Nil {
+			return nil, fmt.Errorf("%w: invalid psp_id", checkout.ErrCheckoutSessionValidation)
+		}
+	}
+	if mode == "" {
+		priceID, err := openrails.ParsePriceID(req.PriceID)
+		if err != nil || priceID.IsZero() {
+			return nil, fmt.Errorf("%w: invalid price_id", checkout.ErrCheckoutSessionValidation)
+		}
+		req.PriceID = priceID.String()
+	}
 	svcReq := &checkout.CheckoutSessionCreateRequest{
-		PriceID:        req.PriceID.String(),
-		SubscriptionID: req.SubscriptionID.String(),
-		NewPriceID:     req.NewPriceID.String(),
-		Mode:           req.Mode,
+		PriceID:        req.PriceID,
+		SubscriptionID: subscriptionID,
+		NewPriceID:     newPriceID,
+		Mode:           mode,
 		Metadata:       req.Metadata,
 		IdempotencyKey: req.IdempotencyKey,
 		SuccessURL:     req.SuccessURL,
 		CancelURL:      req.CancelURL,
 		Payment: checkout.CheckoutSessionPaymentRequest{
-			PSPID:           req.Payment.PSPID,
-			Rail:            req.Payment.Rail,
-			PaymentMethodID: req.Payment.PaymentMethodID.String(),
-			PaymentToken:    req.Payment.PaymentToken,
-			TokenSymbol:     req.Payment.TokenSymbol,
-			Flow:            req.Payment.Flow,
-			Wallet:          req.Payment.Wallet,
-			Email:           req.Payment.Email,
-			NameOnCard:      req.Payment.NameOnCard,
-			FirstName:       req.Payment.FirstName,
-			LastName:        req.Payment.LastName,
-			Address1:        req.Payment.Address1,
-			City:            req.Payment.City,
-			State:           req.Payment.State,
-			Zip:             req.Payment.Zip,
-			Country:         req.Payment.Country,
-			LastFour:        req.Payment.LastFour,
-			CardType:        req.Payment.CardType,
-			ExpiryDate:      req.Payment.ExpiryDate,
+			PSPID:           pspID,
+			Rail:            req.PaymentOptions.Rail,
+			PaymentMethodID: req.PaymentOptions.PaymentMethodID,
+			PaymentToken:    req.PaymentOptions.PaymentToken,
+			TokenSymbol:     req.PaymentOptions.TokenSymbol,
+			Flow:            req.PaymentOptions.Flow,
+			Wallet:          req.PaymentOptions.Wallet,
+			Email:           req.PaymentOptions.Email,
+			NameOnCard:      req.PaymentOptions.NameOnCard,
+			FirstName:       req.PaymentOptions.FirstName,
+			LastName:        req.PaymentOptions.LastName,
+			Address1:        req.PaymentOptions.Address1,
+			City:            req.PaymentOptions.City,
+			State:           req.PaymentOptions.State,
+			Zip:             req.PaymentOptions.Zip,
+			Country:         req.PaymentOptions.Country,
+			LastFour:        req.PaymentOptions.LastFour,
+			CardType:        req.PaymentOptions.CardType,
+			ExpiryDate:      req.PaymentOptions.ExpiryDate,
 		},
 	}
 
@@ -124,7 +184,8 @@ func (s *Service) CreateCheckoutSessionForCustomer(ctx context.Context, customer
 }
 
 func checkoutUserIdentity(customer CheckoutCustomerIdentity) (*checkout.UserIdentity, error) {
-	if customer.ID.IsZero() {
+	customerID, err := openrails.ParseCustomerID(customer.ID)
+	if err != nil || customerID.IsZero() {
 		return nil, fmt.Errorf("user_id required")
 	}
 
@@ -133,7 +194,7 @@ func checkoutUserIdentity(customer CheckoutCustomerIdentity) (*checkout.UserIden
 		email = &verifiedEmail
 	}
 	return &checkout.UserIdentity{
-		ID:       customer.ID.String(),
+		ID:       customerID.String(),
 		Email:    email,
 		Username: strings.TrimSpace(customer.Username),
 	}, nil
@@ -252,7 +313,7 @@ func (s *Service) ResolveEffectiveTier(ctx context.Context, userID, group string
 		Entitlement: tier.Entitlement,
 		DisplayName: tier.ProductDisplayName,
 		TierRank:    tier.TierRank,
-		ProductID:   openrails.ProductID(tier.ProductID),
+		ProductID:   openrails.ProductID(tier.ProductID).String(),
 		ProductKey:  tier.ProductKey,
 	}, nil
 }
@@ -303,11 +364,11 @@ func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string)
 func checkoutSessionFromResponse(resp *checkout.CheckoutSessionResponse) *CheckoutSession {
 	result := &CheckoutSession{
 		Capture:         resp.Capture,
-		PaymentMethodID: resp.PaymentMethodID,
-		ID:              resp.ID,
+		PaymentMethodID: checkoutResponseID(resp.PaymentMethodID),
+		ID:              resp.ID.String(),
 		Status:          resp.Status,
 		Mode:            resp.Mode,
-		PriceID:         resp.PriceID,
+		PriceID:         checkoutResponseID(resp.PriceID),
 		Amount:          resp.Amount,
 		Currency:        resp.Currency,
 		CreatedAt:       resp.CreatedAt,
@@ -315,10 +376,10 @@ func checkoutSessionFromResponse(resp *checkout.CheckoutSessionResponse) *Checko
 		Metadata:        resp.Metadata,
 	}
 	if resp.PaymentID != nil {
-		result.PaymentID = resp.PaymentID
+		result.PaymentID = checkoutResponseID(resp.PaymentID)
 	}
 	if resp.SubscriptionID != nil {
-		result.SubscriptionID = resp.SubscriptionID
+		result.SubscriptionID = checkoutResponseID(resp.SubscriptionID)
 	}
 	if resp.URL != "" {
 		result.URL = &resp.URL
@@ -339,3 +400,11 @@ func checkoutSessionFromResponse(resp *checkout.CheckoutSessionResponse) *Checko
 // Placeholder for UserIdentity to avoid importing internal package directly in method signatures.
 // The actual UserIdentity lives in internal/modules/checkout.
 var _ = sql.ErrNoRows // Keep sql import
+
+func checkoutResponseID[T interface{ String() string }](id *T) *string {
+	if id == nil {
+		return nil
+	}
+	value := (*id).String()
+	return &value
+}

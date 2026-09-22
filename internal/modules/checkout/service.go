@@ -1711,7 +1711,7 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	now := s.now()
 	resp := &TierChangePreviewResponse{
 		Object:           "tier_change_preview",
-		PriceID:          openrails.PriceID(newPrice.ID),
+		PriceID:          (openrails.PriceID(newPrice.ID)).String(),
 		Rail:             rail,
 		Currency:         newPrice.Currency,
 		NextChargeAmount: newPrice.Amount,
@@ -1865,7 +1865,7 @@ func (s *CheckoutService) processTierChangeStripe(
 	if existingSub.ScheduledPriceID != nil {
 		return &TierChangeResponse{
 			Object: "tier_change", Status: "blocked", Mode: "tier_change", Action: action,
-			PriceID: openrails.PriceID(newPrice.ID), Payment: CheckoutSessionPaymentResponse{Rail: "stripe"},
+			PriceID: (openrails.PriceID(newPrice.ID)).String(), Payment: CheckoutSessionPaymentResponse{Rail: "stripe"},
 			Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
 		}, nil
 	}
@@ -1993,7 +1993,7 @@ func (s *CheckoutService) processTierChangeSolana(
 		Status:         "requires_action",
 		Mode:           "tier_change",
 		Action:         action,
-		PriceID:        openrails.PriceID(newPrice.ID),
+		PriceID:        (openrails.PriceID(newPrice.ID)).String(),
 		Payment:        CheckoutSessionPaymentResponse{Rail: "solana"},
 		SubscriptionID: &subIDStr,
 		Message:        msg,
@@ -2062,7 +2062,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 			Status:  "blocked",
 			Mode:    "tier_change",
 			Action:  action,
-			PriceID: openrails.PriceID(newPrice.ID),
+			PriceID: (openrails.PriceID(newPrice.ID)).String(),
 			Payment: CheckoutSessionPaymentResponse{Rail: "ccbill"},
 			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
 		}, nil
@@ -2081,7 +2081,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 		Status:         "requires_action",
 		Mode:           "tier_change",
 		Action:         action,
-		PriceID:        openrails.PriceID(newPrice.ID),
+		PriceID:        (openrails.PriceID(newPrice.ID)).String(),
 		URL:            checkoutResp.RedirectURL,
 		SubscriptionID: &subID,
 		Payment: CheckoutSessionPaymentResponse{
@@ -2110,7 +2110,7 @@ func (s *CheckoutService) mapCheckoutToTierChangeResponse(resp *CheckoutResponse
 		Object:  "tier_change",
 		Mode:    "tier_change",
 		Action:  action,
-		PriceID: openrails.PriceID(newPrice.ID),
+		PriceID: (openrails.PriceID(newPrice.ID)).String(),
 		Payment: CheckoutSessionPaymentResponse{
 			TransactionID: resp.TransactionID,
 		},

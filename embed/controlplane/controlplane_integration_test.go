@@ -153,7 +153,7 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, settings)
 	customer := openrails.CustomerID(uuid.New())
-	_, err = client.GrantEntitlement(ctx, customer, openrails.GrantEntitlementRequest{Entitlement: "premium"})
+	_, err = client.GrantEntitlement(ctx, (customer).String(), openrails.GrantEntitlementRequest{Entitlement: "premium"})
 	require.NoError(t, err)
 	members, err := cp.ListMerchantsForSubject(ctx, customer.String())
 	require.NoError(t, err)

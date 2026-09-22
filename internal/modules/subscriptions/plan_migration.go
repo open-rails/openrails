@@ -297,8 +297,8 @@ func (s *PlanMigrationService) Preview(ctx context.Context, req PlanMigrationReq
 		return nil, err
 	}
 	res := &PlanMigrationResult{
-		SourcePriceID:  openrails.PriceID(source.ID),
-		TargetPriceID:  openrails.PriceID(target.ID),
+		SourcePriceID:  (openrails.PriceID(source.ID)).String(),
+		TargetPriceID:  (openrails.PriceID(target.ID)).String(),
 		EffectiveAt:    req.EffectiveAt,
 		FallbackPolicy: fallback,
 		Matched:        len(cohort),
@@ -342,8 +342,8 @@ func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationReq
 	}
 
 	res := &PlanMigrationResult{
-		SourcePriceID:  openrails.PriceID(source.ID),
-		TargetPriceID:  openrails.PriceID(target.ID),
+		SourcePriceID:  (openrails.PriceID(source.ID)).String(),
+		TargetPriceID:  (openrails.PriceID(target.ID)).String(),
 		EffectiveAt:    req.EffectiveAt,
 		FallbackPolicy: fallback,
 		Matched:        len(cohort),
@@ -634,9 +634,9 @@ func (s *RepriceService) emitPlanChangeNotification(ctx context.Context, sub *mo
 		EventType:  models.NotificationSubscriptionPlanChangeScheduled,
 		Data: openrails.NotificationData{
 			SubscriptionID: openrails.SubscriptionID(sub.ID),
-			FromPriceID:    openrails.PriceID(from.ID),
-			ToPriceID:      openrails.PriceID(to.ID),
-			ToProductID:    openrails.ProductID(toProduct.ID),
+			FromPriceID:    (openrails.PriceID(from.ID)).String(),
+			ToPriceID:      (openrails.PriceID(to.ID)).String(),
+			ToProductID:    (openrails.ProductID(toProduct.ID)).String(),
 			ToProductName:  toProduct.DisplayName,
 			OldAmount:      &from.Amount,
 			NewAmount:      &to.Amount,

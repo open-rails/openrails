@@ -25,8 +25,8 @@ type HostedCheckoutSession struct {
 	Rails          []HostedCheckoutRail        `json:"rails"`
 	SavedMethods   []HostedCheckoutSavedMethod `json:"saved_methods,omitempty"`
 	TransactionURL string                      `json:"transaction_url,omitempty"` // solana: URL awaiting confirmation
-	PaymentID      PaymentID                   `json:"payment_id,omitzero"`
-	SubscriptionID SubscriptionID              `json:"subscription_id,omitzero"`
+	PaymentID      string                      `json:"payment_id,omitzero"`
+	SubscriptionID string                      `json:"subscription_id,omitzero"`
 	FailureMessage string                      `json:"failure_message,omitempty"`
 	SuccessURL     string                      `json:"success_url,omitempty"`
 	ExpiresAt      time.Time                   `json:"expires_at"`
@@ -66,44 +66,44 @@ type HostedCheckoutRail struct {
 
 // HostedCheckoutSavedMethod is a stored card the buyer may reuse, display data only.
 type HostedCheckoutSavedMethod struct {
-	ID       PaymentMethodID `json:"id"`
-	OptionID string          `json:"option_id"`
-	Rail     string          `json:"rail"`
-	Brand    string          `json:"brand,omitempty"`
-	LastFour string          `json:"last_four,omitempty"`
-	ExpMonth *int            `json:"exp_month,omitempty"`
-	ExpYear  *int            `json:"exp_year,omitempty"`
+	ID       string `json:"id"`
+	OptionID string `json:"option_id"`
+	Rail     string `json:"rail"`
+	Brand    string `json:"brand,omitempty"`
+	LastFour string `json:"last_four,omitempty"`
+	ExpMonth *int   `json:"exp_month,omitempty"`
+	ExpYear  *int   `json:"exp_year,omitempty"`
 }
 
 // HostedCheckoutPayRequest is the browser's POST .../pay body.
 type HostedCheckoutPayRequest struct {
-	OptionID        string          `json:"option_id"`
-	PaymentToken    string          `json:"payment_token,omitempty"`
-	PaymentMethodID PaymentMethodID `json:"payment_method_id,omitzero"`
-	Email           string          `json:"email,omitempty"`
-	NameOnCard      string          `json:"name_on_card,omitempty"`
-	Address1        string          `json:"address1,omitempty"`
-	City            string          `json:"city,omitempty"`
-	State           string          `json:"state,omitempty"`
-	Zip             string          `json:"zip,omitempty"`
-	Country         string          `json:"country,omitempty"`
-	TokenSymbol     string          `json:"token_symbol,omitempty"`
+	OptionID        string `json:"option_id"`
+	PaymentToken    string `json:"payment_token,omitempty"`
+	PaymentMethodID string `json:"payment_method_id,omitzero"`
+	Email           string `json:"email,omitempty"`
+	NameOnCard      string `json:"name_on_card,omitempty"`
+	Address1        string `json:"address1,omitempty"`
+	City            string `json:"city,omitempty"`
+	State           string `json:"state,omitempty"`
+	Zip             string `json:"zip,omitempty"`
+	Country         string `json:"country,omitempty"`
+	TokenSymbol     string `json:"token_symbol,omitempty"`
 }
 
 // HostedCheckoutPayResult is the host's answer to a pay request.
 type HostedCheckoutPayResult struct {
-	Status         string         `json:"status"`
-	RedirectURL    string         `json:"redirect_url,omitempty"`
-	TransactionURL string         `json:"transaction_url,omitempty"`
-	PaymentID      PaymentID      `json:"payment_id,omitzero"`
-	SubscriptionID SubscriptionID `json:"subscription_id,omitzero"`
-	FailureMessage string         `json:"failure_message,omitempty"`
+	Status         string `json:"status"`
+	RedirectURL    string `json:"redirect_url,omitempty"`
+	TransactionURL string `json:"transaction_url,omitempty"`
+	PaymentID      string `json:"payment_id,omitzero"`
+	SubscriptionID string `json:"subscription_id,omitzero"`
+	FailureMessage string `json:"failure_message,omitempty"`
 }
 
 // NewHostedCheckoutPlan derives the plan from a catalog product and price and
 // stamps the price currency's registered scale. An unregistered currency is
 // ErrInvalid: a scale is never guessed.
-func NewHostedCheckoutPlan(product *CatalogProduct, price *CatalogPrice) (HostedCheckoutPlan, error) {
+func NewHostedCheckoutPlan(product *Product, price *Price) (HostedCheckoutPlan, error) {
 	if product == nil || price == nil {
 		return HostedCheckoutPlan{}, fmt.Errorf("%w: hosted checkout plan needs a product and a price", ErrInvalid)
 	}

@@ -86,7 +86,7 @@ func TestHTTPRetriesRecheckMerchantSelector(t *testing.T) {
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
 	actorID, _ := makeUser(t, core, "selector"+suffix)
 	for _, slug := range []string{dbtest.TestMerchantSlug, otherSlug} {
-		require.NoError(t, core.AdminAssignGroupRole(ctx, controlplane.MerchantGroup(slug), authkit.UserSubject(actorID), controlplane.MerchantRoleOwner))
+		require.NoError(t, core.OperatorAssignGroupRole(ctx, controlplane.MerchantGroup(slug), authkit.UserSubject(actorID), controlplane.MerchantRoleOwner))
 	}
 	token, _, err := core.MintAccessToken(ctx, actorID, nil)
 	require.NoError(t, err)

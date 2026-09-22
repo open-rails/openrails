@@ -236,7 +236,7 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	authFirstTx, err := rt.app.Runtime.DB.Pool().Begin(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = authFirstTx.Rollback(context.Background()) })
-	_, err = rt.HostTransactions().OpenOperationAuthorization(ctx, authFirstTx, newAuthorization(authFirstPayer, 6_000))
+	_, err = NewHostTransactions(rt).OpenOperationAuthorization(ctx, authFirstTx, newAuthorization(authFirstPayer, 6_000))
 	require.NoError(t, err)
 	admissionStarted := make(chan struct{})
 	admissionDone := make(chan admissionResult, 1)
@@ -279,20 +279,20 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	// Use a fresh merchant so its clearing counter starts at zero, and fund
 	// through an actual balanced deposit instead of rewriting immutable facts.
 	overflowRuntime, err := New(ctx, Options{
-		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
-		Redis:  rdb, River: RiverManagedByOpenRails(),
+		Merchant: &MerchantDeclaration{Slug: "auth-overflow-" + uuid.NewString()},
+		Config:   &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
+		Redis:    rdb, River: RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = overflowRuntime.Close(context.Background()) })
-	overflowMerchant, err := overflowRuntime.UpsertMerchantConfig(ctx, "auth-overflow-"+uuid.NewString(), MerchantConfig{})
-	require.NoError(t, err)
 	overflowClient, err := overflowRuntime.Client()
 	require.NoError(t, err)
+	overflowMerchant := overflowClient.MerchantID()
 	overflowCustomer := openrails.CustomerID(uuid.New())
-	_, err = overflowClient.EnsureCustomer(ctx, overflowCustomer)
+	_, err = overflowClient.EnsureCustomer(ctx, (overflowCustomer).String())
 	require.NoError(t, err)
 	_, err = overflowClient.DepositCredits(ctx, openrails.DepositCreditsRequest{
-		CustomerID: &overflowCustomer, Invoker: overflowCustomer.String(), Currency: "USD",
+		CustomerID: new(overflowCustomer.String()), Invoker: overflowCustomer.String(), Currency: "USD",
 		Amount: math.MaxInt64, Source: "th-005-overflow", SourceID: uuid.NewString(),
 	})
 	require.NoError(t, err)
@@ -333,7 +333,7 @@ func openOperationAuthorizationInCommittedTx(ctx context.Context, rt *Runtime, r
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	auth, err := rt.HostTransactions().OpenOperationAuthorization(ctx, tx, request)
+	auth, err := NewHostTransactions(rt).OpenOperationAuthorization(ctx, tx, request)
 	if err != nil {
 		return nil, err
 	}

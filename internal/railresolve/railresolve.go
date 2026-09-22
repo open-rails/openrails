@@ -60,7 +60,7 @@ type Source interface {
 type MerchantsSource struct {
 	Config *config.Config
 	// MerchantsFn returns the armed merchants service. Late-bound: manifest
-	// hosts arm it at UpsertMerchantConfig time, after the graph is built.
+	// hosts arm it at constructor reconciliation, after the graph is built.
 	// nil / returning nil resolves nothing (fail closed).
 	MerchantsFn func() *merchants.Service
 }
@@ -89,7 +89,7 @@ func (s *MerchantsSource) testMode() bool {
 }
 
 // Armed is true only when the active account resolves with every required
-// scoped secret: a PSP declared without credentials (Runtime.DeclarePSP, an
+// scoped secret: a PSP declared without credentials (MerchantDeclaration.PSPs, an
 // import attribution) is an identity, not an armed rail.
 func (s *MerchantsSource) Armed(ctx context.Context, rail string) (bool, error) {
 	if _, err := s.RailConfig(ctx, rail, ""); err != nil {

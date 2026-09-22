@@ -8,6 +8,7 @@ import (
 	"github.com/goccy/go-yaml"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/app"
 	boot "github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -36,25 +37,13 @@ type RemoteApplicationConfig = boot.RemoteApplicationConfig
 type StaticJWKSConfig = boot.StaticJWKSConfig
 type StaticJWKConfig = boot.StaticJWKConfig
 
-// UpsertMerchantConfig idempotently creates or updates a billing merchant and its
-// PSPs from the embedded engine. Run it as many times as you like —
-// create-if-missing, reconcile-if-present — so an embedder (e.g. a legacy-data
-// migrate) can just say "here are the payment providers for this merchant" on
-// every run. Billing-only: it touches no AuthKit/control-plane state (the merchant
-// is an ownerless billing bucket). Already-present secrets are left untouched. If
-// the engine is not yet bound to a merchant, it binds to this one; a later call
-// whose name resolves to a different UUID errors (#770 — one embedded engine
-// serves one merchant). Current names and valid forwards for its UUID work.
-// Returns the merchant id.
-func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m MerchantConfig) (merchant.ID, error) {
-	if rt == nil || rt.app == nil {
-		return merchant.ID{}, fmt.Errorf("openrails embed: runtime not initialized")
-	}
-	a := rt.app
+// upsertMerchantConfig reconciles the constructor's merchant declaration before
+// HTTP routes or workers can observe a partially configured runtime.
+func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m MerchantConfig) (merchant.ID, error) {
 	if a == nil || a.Runtime == nil || a.Runtime.DB == nil {
 		return merchant.ID{}, fmt.Errorf("openrails embed: app database not initialized")
 	}
-	conf := rt.app.Config
+	conf := a.Config
 	if conf == nil || conf.DB == nil {
 		return merchant.ID{}, fmt.Errorf("openrails embed: config/db is required")
 	}
@@ -148,7 +137,7 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 	return tn.ID, nil
 }
 
-// merchantConfigDeclaresManifestTruth reports whether an UpsertMerchantConfig
+// merchantConfigDeclaresManifestTruth reports whether a constructor merchant
 // payload carries manifest-owned truth (accounts/secrets, profile, invoice
 // policy, spend windows, remote-application trust) as opposed to a bare
 // identity bind.

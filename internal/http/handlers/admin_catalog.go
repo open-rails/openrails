@@ -51,6 +51,30 @@ func AdminCreateProduct(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, out)
 }
 
+// AdminEnsureProduct preserves a product's first declaration under its key.
+func AdminEnsureProduct(r *httprequest.Request) {
+	var req billingservice.CreateProductRequest
+	if !bindCatalogJSON(r, &req) {
+		return
+	}
+	key := r.Param("key")
+	if req.Key != "" && req.Key != key {
+		r.ErrorJSON(http.StatusBadRequest, "product key in path and body must match")
+		return
+	}
+	req.Key = key
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	out, err := svc.EnsureProduct(r.Request.Context(), req)
+	if err != nil {
+		writeCatalogError(r, err)
+		return
+	}
+	r.JSON(http.StatusOK, out)
+}
+
 func AdminListProducts(r *httprequest.Request) {
 	svc, ok := newAdminBillingService(r)
 	if !ok {

@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -141,7 +142,7 @@ func providerIDs(items []merchants.PaymentProviderConfig) []uuid.UUID {
 // psp ids of every ccbill option it would offer a buyer.
 func ccbillOptionPSPs(t *testing.T, ctx context.Context, client *openrails.Client, price openrails.PriceID) []string {
 	t.Helper()
-	options, err := client.ListCheckoutRailOptions(ctx, price)
+	options, err := client.ListCheckoutRailOptions(ctx, (price).String())
 	require.NoError(t, err)
 	var out []string
 	for _, option := range options {
@@ -155,12 +156,12 @@ func ccbillOptionPSPs(t *testing.T, ctx context.Context, client *openrails.Clien
 func seedCCBillPrice(t *testing.T, ctx context.Context, client *openrails.Client) openrails.PriceID {
 	t.Helper()
 	key := "archive-" + uuid.NewString()[:8]
-	product, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: key, DisplayName: "Archive lifecycle"})
+	product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: key, DisplayName: "Archive lifecycle"})
 	require.NoError(t, err)
 	duration := 720
-	price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: key + "-monthly", UnitAmount: 5_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
+	price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: key + "-monthly", UnitAmount: 5_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 	require.NoError(t, err)
-	return price.ID
+	return sdkPriceID(t, price.ID)
 }
 
 func ccbillPriceBinder(h *Harness, mid merchant.ID) func(t *testing.T, price openrails.PriceID, flexID string, accounts ...uuid.UUID) {
@@ -236,15 +237,15 @@ func runProviderArchiveLifecycle(t *testing.T, ctx context.Context, s providerAr
 	// #655 invariant: new checkout resolves only to the non-archived account.
 	require.Equal(t, []string{b.ID.String()}, ccbillOptionPSPs(t, ctx, s.client, price))
 	session, err := s.client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-		Customer:       openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()), VerifiedEmail: "buyer-" + uuid.NewString()[:8] + "@example.test", Username: "buyer" + uuid.NewString()[:8]},
-		PriceID:        price,
+		Customer:       openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()).String(), VerifiedEmail: "buyer-" + uuid.NewString()[:8] + "@example.test", Username: "buyer" + uuid.NewString()[:8]},
+		PriceID:        price.String(),
 		IdempotencyKey: uuid.NewString(),
-		Payment:        openrails.CheckoutPayment{Rail: "ccbill", NameOnCard: "Archive Buyer", Zip: "90210", Country: "US"},
+		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "ccbill", NameOnCard: "Archive Buyer", Zip: "90210", Country: "US"},
 	})
 	require.NoError(t, err)
 	var sessionPSP uuid.UUID
 	require.NoError(t, dbtest.SharedMerchantPool(t, s.mid.UUID()).QueryRow(ctx,
-		`SELECT psp_id FROM billing.checkout_sessions WHERE merchant_id = $1 AND id = $2`, s.mid.UUID(), session.ID.UUID()).Scan(&sessionPSP))
+		`SELECT psp_id FROM billing.checkout_sessions WHERE merchant_id = $1 AND id = $2`, s.mid.UUID(), uuid.MustParse(strings.TrimPrefix(session.ID, "cs_"))).Scan(&sessionPSP))
 	require.Equal(t, b.ID, sessionPSP, "the new session is pinned to the active account")
 
 	// B is now the rail's only active account: refused without the override.
@@ -345,7 +346,9 @@ func (g archiveGate) Authorize(context.Context, *http.Request, string) (billinga
 func TestEmbeddedProviderAccountArchiveLifecycle(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
+	slug := fmt.Sprintf("l22emb%d", time.Now().UnixNano())
 	rt, err := embed.New(ctx, embed.Options{
+		Merchant: &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug}},
 		Config: &config.Config{
 			Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
 			SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
@@ -355,9 +358,9 @@ func TestEmbeddedProviderAccountArchiveLifecycle(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	slug := fmt.Sprintf("l22emb%d", time.Now().UnixNano())
-	mid, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
+	boundClient, err := rt.Client()
 	require.NoError(t, err)
+	mid := boundClient.MerchantID()
 	runtime := app.HostGraph(rt).Runtime
 	require.NoError(t, runtime.EnsureMerchantsService(ctx))
 	probe := newFakeDataLink(t)

@@ -123,10 +123,10 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 	require.NoError(t, err)
 	owner := surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID))
 	psp := h.ArmLoopbackNMI(rt, owned.MerchantID)
-	product, err := owner.CreateProduct(t.Context(), openrails.CreateProductRequest{Key: uuid.NewString(), DisplayName: "Lifecycle", EntitlementsSpec: map[string]*int{"engine_access": nil}})
+	product, err := owner.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: uuid.NewString(), DisplayName: "Lifecycle", EntitlementsSpec: map[string]*int{"engine_access": nil}})
 	require.NoError(t, err)
 	hours := 720
-	price, err := owner.CreatePrice(t.Context(), openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+	price, err := owner.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 	require.NoError(t, err)
 	pool := h.MerchantPool(owned.MerchantID.UUID())
 	ctx := merchant.WithID(t.Context(), owned.MerchantID)
@@ -155,7 +155,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 		token, _, err := cp.Core().MintAccessToken(t.Context(), user.ID, nil)
 		require.NoError(t, err)
 		customer := uuid.MustParse(user.ID)
-		_, err = owner.EnsureCustomer(t.Context(), openrails.CustomerID(customer))
+		_, err = owner.EnsureCustomer(t.Context(), (openrails.CustomerID(customer)).String())
 		require.NoError(t, err)
 		c, err := openrails.NewRemote(surface.BaseURL, openrails.WithMerchantID(owned.MerchantID), openrails.WithTokenProvider(func(context.Context) (string, error) { return token, nil }))
 		require.NoError(t, err)
@@ -202,11 +202,11 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 			require.NoError(t, err)
 			if pastDue || maintenance {
 				require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(c context.Context) error {
-					testfixture.EngineMembership(t, c, rt.DB, subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: id, PaymentID: uuid.New(), CustomerID: user, PSPID: psp, ProductID: product.ID.UUID(), PriceID: price.ID.UUID(), PaymentMethodID: method, ProductName: "Lifecycle", Amount: 9_990_000, RecurringAmount: 9_990_000, Currency: "USD", AcceptedAt: end.Add(-720 * time.Hour), PeriodStart: end.Add(-720 * time.Hour), PeriodEnd: end, Entitlements: map[string]*int{"engine_access": nil}})
+					testfixture.EngineMembership(t, c, rt.DB, subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: id, PaymentID: uuid.New(), CustomerID: user, PSPID: psp, ProductID: sdkProductID(t, product.ID).UUID(), PriceID: sdkPriceID(t, price.ID).UUID(), PaymentMethodID: method, ProductName: "Lifecycle", Amount: 9_990_000, RecurringAmount: 9_990_000, Currency: "USD", AcceptedAt: end.Add(-720 * time.Hour), PeriodStart: end.Add(-720 * time.Hour), PeriodEnd: end, Entitlements: map[string]*int{"engine_access": nil}})
 					return nil
 				}))
 			} else {
-				_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,collection_policy,rail_subscription_id,status,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot,payment_method_id) VALUES($1,$2,$3,$4,$5,$6,'nmi',$7,$8,'active',$9,$10,'{"engine_access":null}',$11)`, id, owned.MerchantID.UUID(), user, product.ID.UUID(), price.ID.UUID(), psp, policy, remote, end.Add(-720*time.Hour), end, method)
+				_, err = pool.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,collection_policy,rail_subscription_id,status,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot,payment_method_id) VALUES($1,$2,$3,$4,$5,$6,'nmi',$7,$8,'active',$9,$10,'{"engine_access":null}',$11)`, id, owned.MerchantID.UUID(), user, sdkProductID(t, product.ID).UUID(), sdkPriceID(t, price.ID).UUID(), psp, policy, remote, end.Add(-720*time.Hour), end, method)
 				require.NoError(t, err)
 				_, err = rt.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: user.String(), Entitlement: "engine_access", Indefinite: true, SourceType: models.EntitlementSourceSubscription, SourceID: id})
 				require.NoError(t, err)
@@ -295,7 +295,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 					t.Cleanup(releaseDelete)
 					done := make(chan error, 1)
 					go func() {
-						result, err := owner.DeletePaymentMethod(t.Context(), openrails.CustomerID(user), openrails.PaymentMethodID(method))
+						result, err := owner.DeletePaymentMethod(t.Context(), (openrails.CustomerID(user)).String(), openrails.PaymentMethodID(method))
 						if err == nil && result.Pending {
 							err = fmt.Errorf("deletion remains pending")
 						}
@@ -320,7 +320,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 					releaseDelete()
 					require.NoError(t, <-done)
 				} else {
-					result, err := owner.DeletePaymentMethod(t.Context(), openrails.CustomerID(user), openrails.PaymentMethodID(method))
+					result, err := owner.DeletePaymentMethod(t.Context(), (openrails.CustomerID(user)).String(), openrails.PaymentMethodID(method))
 					require.NoError(t, err)
 					require.False(t, result.Pending)
 				}
@@ -361,7 +361,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 				require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.rail_intents WHERE subscription_id=$1`, id).Scan(&count))
 				require.Equal(t, 1, count)
 			}
-			access, err := owner.HasEntitlement(t.Context(), openrails.CustomerID(user), "engine_access", end)
+			access, err := owner.HasEntitlement(t.Context(), (openrails.CustomerID(user)).String(), "engine_access", end)
 			require.NoError(t, err)
 			require.False(t, access)
 			if scenario == "engine_expired" || scenario == "engine_chargeback" || pastDue {
@@ -369,7 +369,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 				require.Equal(t, 400, status, string(raw))
 				_, err = rt.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{SubscriptionID: id})
 				require.Error(t, err)
-				access, err = owner.HasEntitlement(t.Context(), openrails.CustomerID(user), "engine_access", now)
+				access, err = owner.HasEntitlement(t.Context(), (openrails.CustomerID(user)).String(), "engine_access", now)
 				require.NoError(t, err)
 				require.False(t, access)
 				return
@@ -384,12 +384,12 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 			require.NoError(t, pool.QueryRow(ctx, `SELECT status,deletion_scheduled_at FROM billing.subscriptions WHERE id=$1`, id).Scan(&state, &marker))
 			require.Equal(t, "active", state)
 			require.Nil(t, marker)
-			access, err = owner.HasEntitlement(t.Context(), openrails.CustomerID(user), "engine_access", now)
+			access, err = owner.HasEntitlement(t.Context(), (openrails.CustomerID(user)).String(), "engine_access", now)
 			require.NoError(t, err)
 			require.True(t, access)
 			if scenario == "engine_resume_then_delete" {
 				before := deleteCalls.Load()
-				_, err := owner.DeletePaymentMethod(t.Context(), openrails.CustomerID(user), openrails.PaymentMethodID(method))
+				_, err := owner.DeletePaymentMethod(t.Context(), (openrails.CustomerID(user)).String(), openrails.PaymentMethodID(method))
 				require.Error(t, err)
 				require.Equal(t, before, deleteCalls.Load())
 				return
@@ -406,7 +406,7 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 				require.Equal(t, 400, apiErr.Status)
 				require.NoError(t, pool.QueryRow(ctx, `SELECT status FROM billing.subscriptions WHERE id=$1`, id).Scan(&state))
 				require.Equal(t, "cancelled", state)
-				access, err = owner.HasEntitlement(t.Context(), openrails.CustomerID(user), "engine_access", now)
+				access, err = owner.HasEntitlement(t.Context(), (openrails.CustomerID(user)).String(), "engine_access", now)
 				require.NoError(t, err)
 				require.False(t, access)
 			}

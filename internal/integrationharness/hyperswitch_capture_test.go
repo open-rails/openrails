@@ -210,14 +210,14 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		return rt, client
 	}
 	_, embedded := newEmbedded()
-	request := func() openrails.CreateCheckoutSessionRequest {
-		return openrails.CreateCheckoutSessionRequest{Mode: "payment_method", IdempotencyKey: uuid.NewString(), Customer: openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()), VerifiedEmail: "capture@example.test", Username: "capture"}, Payment: openrails.CheckoutPayment{PSPID: psp}}
+	request := func() openrails.CreatePaymentMethodSessionRequest {
+		return openrails.CreatePaymentMethodSessionRequest{IdempotencyKey: uuid.NewString(), Customer: openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()).String(), VerifiedEmail: "capture@example.test", Username: "capture"}, PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: psp.String()}}
 	}
-	completedMethods := map[openrails.CheckoutSessionID]openrails.PaymentMethodID{}
+	completedMethods := map[string]string{}
 	for label, client := range map[string]*openrails.Client{"remote": remote, "embedded": embedded} {
 		t.Run(label, func(t *testing.T) {
 			req := request()
-			created, err := client.CreateCheckoutSession(ctx, req)
+			created, err := client.CreatePaymentMethodSession(ctx, req)
 			require.NoError(t, err)
 			require.Equal(t, "requires_action", created.Status)
 			require.NotNil(t, created.Capture)
@@ -225,14 +225,14 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			require.Nil(t, created.Amount)
 			require.Nil(t, created.Currency)
 			for _, change := range []string{"mode='one_off'", "amount=0", "currency='USD'", "payment_id='00000000-0000-0000-0000-000000000001'"} {
-				_, err := h.sharedPool().Exec(ctx, "UPDATE billing.checkout_sessions SET "+change+" WHERE merchant_id=$1 AND id=$2", mid.UUID(), created.ID.UUID())
+				_, err := h.sharedPool().Exec(ctx, "UPDATE billing.checkout_sessions SET "+change+" WHERE merchant_id=$1 AND id=$2", mid.UUID(), uuid.MustParse(strings.TrimPrefix(created.ID, "cs_")))
 				var pgErr *pgconn.PgError
 				require.ErrorAs(t, err, &pgErr)
 				require.Equal(t, "checkout_sessions_monetary_terms", pgErr.ConstraintName, "null terms are only valid for nonmonetary setup")
 			}
 			require.NotPanics(t, func() {
 				require.NoError(t, surface.App().Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(scoped context.Context) error {
-					_, err := surface.App().Runtime.CheckoutSessionService.FindOpenCCBillReservation(scoped, created.ID.String(), req.Customer.ID.String(), uuid.New())
+					_, err := surface.App().Runtime.CheckoutSessionService.FindOpenCCBillReservation(scoped, created.ID, req.Customer.ID, uuid.New())
 					require.Error(t, err, "a card-setup session is not a CCBill price reservation")
 					return nil
 				}))
@@ -240,27 +240,27 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			_, err = surface.Client().GetCheckoutSession(ctx, req.Customer.ID, created.ID)
 			require.Error(t, err, "another merchant must not read the action")
 			var state string
-			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT rail_state::text FROM billing.checkout_sessions WHERE merchant_id=$1 AND id=$2`, mid.UUID(), created.ID.UUID()).Scan(&state))
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT rail_state::text FROM billing.checkout_sessions WHERE merchant_id=$1 AND id=$2`, mid.UUID(), uuid.MustParse(strings.TrimPrefix(created.ID, "cs_"))).Scan(&state))
 			require.NotContains(t, state, created.Capture.SDKAuthorization)
 			require.Contains(t, state, "secret_ciphertext")
 			before := g.count()
-			again, err := client.CreateCheckoutSession(ctx, req)
+			again, err := client.CreatePaymentMethodSession(ctx, req)
 			require.NoError(t, err)
 			require.Equal(t, created.Capture, again.Capture)
 			require.Equal(t, before, g.count())
 			changed := req
 			changed.Metadata = map[string]string{"changed": "body"}
-			_, err = client.CreateCheckoutSession(ctx, changed)
+			_, err = client.CreatePaymentMethodSession(ctx, changed)
 			require.Error(t, err)
 			require.Equal(t, before, g.count())
-			_, err = client.GetCheckoutSession(ctx, openrails.CustomerID(uuid.New()), created.ID)
+			_, err = client.GetCheckoutSession(ctx, uuid.NewString(), created.ID)
 			require.Error(t, err)
 			confirm := openrails.ConfirmCheckoutSessionRequest{CustomerID: req.Customer.ID, Payment: openrails.ConfirmPayment{Capture: &openrails.CustodianCaptureReference{CustodianID: custodian, SessionID: created.Capture.SessionID, Token: "not-completed"}}}
 			_, err = client.ConfirmCheckoutSession(ctx, created.ID, confirm)
 			require.Error(t, err)
 			otherRequest := req
 			otherRequest.IdempotencyKey = uuid.NewString()
-			otherSession, err := client.CreateCheckoutSession(ctx, otherRequest)
+			otherSession, err := client.CreatePaymentMethodSession(ctx, otherRequest)
 			require.NoError(t, err)
 			confirm.Payment.Capture.Token = g.complete(otherSession.Capture.SessionID)
 			_, err = client.ConfirmCheckoutSession(ctx, created.ID, confirm)
@@ -279,28 +279,28 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			get, err := client.GetCheckoutSession(ctx, req.Customer.ID, created.ID)
 			require.NoError(t, err)
 			require.Nil(t, get.Capture)
-			replay, err = client.CreateCheckoutSession(ctx, req)
+			replay, err = client.CreatePaymentMethodSession(ctx, req)
 			require.NoError(t, err)
 			require.Nil(t, replay.Capture)
 			require.Equal(t, completed.PaymentMethodID, replay.PaymentMethodID)
-			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT rail_state::text FROM billing.checkout_sessions WHERE merchant_id=$1 AND id=$2`, mid.UUID(), created.ID.UUID()).Scan(&state))
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT rail_state::text FROM billing.checkout_sessions WHERE merchant_id=$1 AND id=$2`, mid.UUID(), uuid.MustParse(strings.TrimPrefix(created.ID, "cs_"))).Scan(&state))
 			require.NotContains(t, state, "secret_ciphertext")
 			require.NotContains(t, state, confirm.Payment.Capture.Token)
 			var methods, financial int
-			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID.UUID()).Scan(&methods))
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID).Scan(&methods))
 			require.Equal(t, 1, methods)
-			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.ledger_accounts WHERE merchant_id=$1 AND customer_id=$2)`, mid.UUID(), req.Customer.ID.UUID()).Scan(&financial))
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.payments WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.subscriptions WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM billing.ledger_accounts WHERE merchant_id=$1 AND customer_id=$2)`, mid.UUID(), req.Customer.ID).Scan(&financial))
 			require.Zero(t, financial)
 			// The local history can outlive a method, e.g. after a qualified
 			// custodian removal/retirement. This is not a live vendor delete.
 			require.NoError(t, surface.App().Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(scoped context.Context) error {
-				return surface.App().Runtime.PaymentMethodService.Delete(scoped, completed.PaymentMethodID.UUID())
+				return surface.App().Runtime.PaymentMethodService.Delete(scoped, uuid.MustParse(strings.TrimPrefix(*completed.PaymentMethodID, "pm_")))
 			}))
 			historical, err := client.ConfirmCheckoutSession(ctx, created.ID, confirm)
 			require.NoError(t, err)
 			require.Equal(t, completed.PaymentMethodID, historical.PaymentMethodID)
 			require.Nil(t, historical.Capture)
-			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID.UUID()).Scan(&methods))
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID).Scan(&methods))
 			require.Zero(t, methods, "terminal replay must not recreate a removed method")
 		})
 	}
@@ -308,11 +308,11 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		req := request()
 		before := g.count()
 		lost := surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithHTTPClient(&http.Client{Transport: loseCaptureReply{http.DefaultTransport, t}}))
-		_, err := lost.CreateCheckoutSession(ctx, req)
+		_, err := lost.CreatePaymentMethodSession(ctx, req)
 		require.Error(t, err)
 		require.Equal(t, before+1, g.count())
 		_, fresh := newEmbedded()
-		recovered, err := fresh.CreateCheckoutSession(ctx, req)
+		recovered, err := fresh.CreatePaymentMethodSession(ctx, req)
 		require.NoError(t, err)
 		require.NotNil(t, recovered.Capture)
 		require.Equal(t, before+1, g.count())
@@ -334,7 +334,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		}
 		results := make(chan result, 2)
 		for _, client := range []*openrails.Client{remote, embedded} {
-			go func() { s, e := client.CreateCheckoutSession(ctx, req); results <- result{s, e} }()
+			go func() { s, e := client.CreatePaymentMethodSession(ctx, req); results <- result{s, e} }()
 		}
 		a, b := <-results, <-results
 		require.NoError(t, a.err)
@@ -352,13 +352,13 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		firstReq := request()
 		firstReq.Customer.VerifiedEmail = ""
 		firstReq.Customer.Username = ""
-		firstReq.Payment.Email = "same-address@example.test"
-		firstReq.Payment.NameOnCard = "First Contact"
-		first, err := remote.CreateCheckoutSession(ctx, firstReq)
+		firstReq.PaymentOptions.Email = "same-address@example.test"
+		firstReq.PaymentOptions.NameOnCard = "First Contact"
+		first, err := remote.CreatePaymentMethodSession(ctx, firstReq)
 		require.NoError(t, err)
 		changed := firstReq
-		changed.Payment.Email = "another-address@example.test"
-		_, err = remote.CreateCheckoutSession(ctx, changed)
+		changed.PaymentOptions.Email = "another-address@example.test"
+		_, err = remote.CreatePaymentMethodSession(ctx, changed)
 		require.ErrorIs(t, err, openrails.ErrConflict)
 		resumed, err := remote.GetCheckoutSession(ctx, firstReq.Customer.ID, first.ID)
 		require.NoError(t, err)
@@ -366,21 +366,21 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		otherReq := request()
 		otherReq.Customer.VerifiedEmail = ""
 		otherReq.Customer.Username = ""
-		otherReq.Payment.Email = firstReq.Payment.Email
-		otherReq.Payment.NameOnCard = "Other Contact"
-		other, err := remote.CreateCheckoutSession(ctx, otherReq)
+		otherReq.PaymentOptions.Email = firstReq.PaymentOptions.Email
+		otherReq.PaymentOptions.NameOnCard = "Other Contact"
+		other, err := remote.CreatePaymentMethodSession(ctx, otherReq)
 		require.NoError(t, err)
 		require.NotEqual(t, first.Capture.CustomerID, other.Capture.CustomerID)
 		_, err = remote.ConfirmCheckoutSession(ctx, other.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: otherReq.Customer.ID, Payment: openrails.ConfirmPayment{Capture: &openrails.CustodianCaptureReference{CustodianID: custodian, SessionID: other.Capture.SessionID, Token: g.complete(first.Capture.SessionID)}}})
 		require.Error(t, err)
 		preferred := request()
-		preferred.Payment.Email = "ignored@example.test"
-		preferred.Payment.NameOnCard = "Ignored Contact"
-		original, err := remote.CreateCheckoutSession(ctx, preferred)
+		preferred.PaymentOptions.Email = "ignored@example.test"
+		preferred.PaymentOptions.NameOnCard = "Ignored Contact"
+		original, err := remote.CreatePaymentMethodSession(ctx, preferred)
 		require.NoError(t, err)
-		preferred.Payment.Email = "other-ignored@example.test"
-		preferred.Payment.NameOnCard = "Also Ignored"
-		replay, err := remote.CreateCheckoutSession(ctx, preferred)
+		preferred.PaymentOptions.Email = "other-ignored@example.test"
+		preferred.PaymentOptions.NameOnCard = "Also Ignored"
+		replay, err := remote.CreatePaymentMethodSession(ctx, preferred)
 		require.NoError(t, err)
 		require.Equal(t, original.Capture, replay.Capture, "verified host contact determines the effective fingerprint")
 	})
@@ -391,7 +391,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			users := len(g.users)
 			g.mu.Unlock()
 			before := g.count()
-			got, err := remote.CreateCheckoutSession(ctx, request())
+			got, err := remote.CreatePaymentMethodSession(ctx, request())
 			require.Error(t, err)
 			require.Nil(t, got)
 			require.Equal(t, before, g.count())
@@ -405,7 +405,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		for _, mode := range []string{"missing", "v1", "disabled"} {
 			t.Run(mode, func(t *testing.T) {
 				req := request()
-				session, err := remote.CreateCheckoutSession(ctx, req)
+				session, err := remote.CreatePaymentMethodSession(ctx, req)
 				require.NoError(t, err)
 				confirm := openrails.ConfirmCheckoutSessionRequest{CustomerID: req.Customer.ID, Payment: openrails.ConfirmPayment{Capture: &openrails.CustodianCaptureReference{CustodianID: custodian, SessionID: session.Capture.SessionID, Token: g.complete(session.Capture.SessionID)}}}
 				setMode := func(value string) { g.mu.Lock(); g.preflight = value; g.mu.Unlock() }
@@ -415,7 +415,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 				require.Error(t, err)
 				require.Nil(t, got)
 				var methods int
-				require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID.UUID()).Scan(&methods))
+				require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID).Scan(&methods))
 				require.Zero(t, methods)
 				setMode("")
 				attached, err := remote.ConfirmCheckoutSession(ctx, session.ID, confirm)
@@ -432,7 +432,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		for _, change := range []string{"psp archive", "custodian archive", "retarget", "profile"} {
 			t.Run(change, func(t *testing.T) {
 				req := request()
-				session, err := remote.CreateCheckoutSession(ctx, req)
+				session, err := remote.CreatePaymentMethodSession(ctx, req)
 				require.NoError(t, err)
 				token := g.complete(session.Capture.SessionID)
 				entered, release := make(chan struct{}), make(chan struct{})
@@ -473,14 +473,14 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 				unblock()
 				require.Error(t, <-finished)
 				var methods int
-				require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID.UUID()).Scan(&methods))
+				require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID).Scan(&methods))
 				require.Zero(t, methods)
 			})
 		}
 	})
 	t.Run("two deployments sharing vendor account keep payer identities separate", func(t *testing.T) {
 		req := request()
-		first, err := remote.CreateCheckoutSession(ctx, req)
+		first, err := remote.CreatePaymentMethodSession(ctx, req)
 		require.NoError(t, err)
 		schema := "capture_owner_" + uuid.NewString()[:8]
 		dbtest.ApplyPostgresMigrations(t, h.SuperDSN, h.DSN, schema)
@@ -503,8 +503,8 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		client, err := rt.Client(openrails.WithMerchantID(other))
 		require.NoError(t, err)
 		otherReq := req
-		otherReq.Payment.PSPID = otherPSP
-		second, err := client.CreateCheckoutSession(ctx, otherReq)
+		otherReq.PaymentOptions.PSPID = otherPSP.String()
+		second, err := client.CreatePaymentMethodSession(ctx, otherReq)
 		require.NoError(t, err)
 		require.NotEqual(t, first.Capture.CustomerID, second.Capture.CustomerID)
 		require.NotEqual(t, first.ID, second.ID)
@@ -514,19 +514,19 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 	})
 	t.Run("copied or corrupt ciphertext never reissues a session", func(t *testing.T) {
 		one, two := request(), request()
-		a, err := remote.CreateCheckoutSession(ctx, one)
+		a, err := remote.CreatePaymentMethodSession(ctx, one)
 		require.NoError(t, err)
-		b, err := remote.CreateCheckoutSession(ctx, two)
+		b, err := remote.CreatePaymentMethodSession(ctx, two)
 		require.NoError(t, err)
 		before := g.count()
-		_, err = h.sharedPool().Exec(ctx, `UPDATE billing.checkout_sessions b SET rail_state=jsonb_set(b.rail_state,'{capture,secret_ciphertext}',a.rail_state#>'{capture,secret_ciphertext}') FROM billing.checkout_sessions a WHERE a.merchant_id=$1 AND b.merchant_id=$1 AND a.id=$2 AND b.id=$3`, mid.UUID(), a.ID.UUID(), b.ID.UUID())
+		_, err = h.sharedPool().Exec(ctx, `UPDATE billing.checkout_sessions b SET rail_state=jsonb_set(b.rail_state,'{capture,secret_ciphertext}',a.rail_state#>'{capture,secret_ciphertext}') FROM billing.checkout_sessions a WHERE a.merchant_id=$1 AND b.merchant_id=$1 AND a.id=$2 AND b.id=$3`, mid.UUID(), uuid.MustParse(strings.TrimPrefix(a.ID, "cs_")), uuid.MustParse(strings.TrimPrefix(b.ID, "cs_")))
 		require.NoError(t, err)
 		_, err = remote.GetCheckoutSession(ctx, two.Customer.ID, b.ID)
 		require.Error(t, err)
-		_, err = remote.CreateCheckoutSession(ctx, two)
+		_, err = remote.CreatePaymentMethodSession(ctx, two)
 		require.Error(t, err)
 		require.Equal(t, before, g.count())
-		_, err = h.sharedPool().Exec(ctx, `UPDATE billing.checkout_sessions SET rail_state=jsonb_set(rail_state,'{capture,secret_ciphertext}','"corrupt"') WHERE merchant_id=$1 AND id=$2`, mid.UUID(), b.ID.UUID())
+		_, err = h.sharedPool().Exec(ctx, `UPDATE billing.checkout_sessions SET rail_state=jsonb_set(rail_state,'{capture,secret_ciphertext}','"corrupt"') WHERE merchant_id=$1 AND id=$2`, mid.UUID(), uuid.MustParse(strings.TrimPrefix(b.ID, "cs_")))
 		require.NoError(t, err)
 		_, err = remote.GetCheckoutSession(ctx, two.Customer.ID, b.ID)
 		require.Error(t, err)
@@ -535,7 +535,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 	t.Run("expired session clears ciphertext and never reissues", func(t *testing.T) {
 		req := request()
 		rt, client := newEmbedded()
-		session, err := client.CreateCheckoutSession(ctx, req)
+		session, err := client.CreatePaymentMethodSession(ctx, req)
 		require.NoError(t, err)
 		before := g.count()
 		clock := clockwork.NewFakeClockAt(session.Capture.ExpiresAt.Add(time.Second))
@@ -544,13 +544,13 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "expired", expired.Status)
 		require.Nil(t, expired.Capture)
-		replay, err := client.CreateCheckoutSession(ctx, req)
+		replay, err := client.CreatePaymentMethodSession(ctx, req)
 		require.NoError(t, err)
 		require.Equal(t, "expired", replay.Status)
 		require.Nil(t, replay.Capture)
 		require.Equal(t, before, g.count())
 		var secret bool
-		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (rail_state->'capture')?'secret_ciphertext' FROM billing.checkout_sessions WHERE merchant_id=$1 AND id=$2`, mid.UUID(), session.ID.UUID()).Scan(&secret))
+		require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (rail_state->'capture')?'secret_ciphertext' FROM billing.checkout_sessions WHERE merchant_id=$1 AND id=$2`, mid.UUID(), uuid.MustParse(strings.TrimPrefix(session.ID, "cs_"))).Scan(&secret))
 		require.False(t, secret)
 	})
 	t.Run("active secret refuses archive; terminal bindings restore", func(t *testing.T) {
@@ -609,7 +609,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		require.NotEmpty(t, completedMethods)
 		require.Len(t, rows, len(completedMethods))
 		for _, row := range rows {
-			got, err := client.GetCheckoutSession(ctx, openrails.CustomerID(row.CustomerID), openrails.CheckoutSessionID(row.ID))
+			got, err := client.GetCheckoutSession(ctx, row.CustomerID.String(), openrails.CheckoutSessionID(row.ID).String())
 			require.NoError(t, err)
 			require.Equal(t, "succeeded", got.Status)
 			require.NotNil(t, got.PaymentMethodID)

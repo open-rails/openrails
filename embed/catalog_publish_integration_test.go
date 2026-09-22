@@ -115,20 +115,20 @@ func TestClientCatalogPublishingWorkflow(t *testing.T) {
 			// Overwrite/Prune do not create an omitted product's new billing definition.
 			declaration.Products = append(declaration.Products, catalog.Product{Key: "additional", DisplayName: "Additional", RateCards: []catalog.RateCard{{Price: catalog.RatePrice{Model: catalog.ModelFlat, Currency: "USD", Flat: &catalog.FlatPrice{Amount: 5}}}}})
 			publish(openrails.CatalogPublishRequest{Overwrite: true, Prune: true})
-			_, err = client.GetProductByKey(t.Context(), "additional")
+			_, err = client.Products.RetrieveByKey(t.Context(), "additional")
 			require.ErrorIs(t, err, openrails.ErrNotFound)
 			publish(openrails.CatalogPublishRequest{Insert: true})
 			require.False(t, publish(all).Plan.HasChanges())
 			// Existing negotiated pricing is a fixture, because its operator
 			// setter is internal; the publish and usage paths below are public.
-			customer, err := client.EnsureCustomer(t.Context(), openrails.CustomerID(uuid.New()))
+			customer, err := client.EnsureCustomer(t.Context(), (openrails.CustomerID(uuid.New())).String())
 			require.NoError(t, err)
 			declaration.Meters = append(declaration.Meters, catalog.Meter{Key: "protected-override", Aggregation: catalog.AggCount, GroupBy: map[string]string{"sku": "sku", "region": "region"}}, catalog.Meter{Key: "protected-history", Aggregation: catalog.AggCount})
 			declaration.Products[0].RateCards = append(declaration.Products[0].RateCards, catalog.RateCard{Meter: "protected-override", Filter: map[string][]string{"region": {"west"}}, Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 3}}})
 			publish(all)
 			pool := h.MerchantPool(d.mid.UUID())
 			overrideID := uuid.New()
-			_, err = pool.Exec(t.Context(), `INSERT INTO billing.catalog_rate_cards(id,merchant_id,customer_id,ordinal,meter_key,payment_term,price,allowance) VALUES($1,$2,$3,1,'protected-override','in_arrears','{"model":"per_unit","currency":"USD","per_unit":{"matrix":{"dimension":"sku","cells":{"small":{"unit_amount":"2"}}}}}'::jsonb,'{"included":20}'::jsonb)`, overrideID, d.mid.UUID(), customer.ID.UUID())
+			_, err = pool.Exec(t.Context(), `INSERT INTO billing.catalog_rate_cards(id,merchant_id,customer_id,ordinal,meter_key,payment_term,price,allowance) VALUES($1,$2,$3,1,'protected-override','in_arrears','{"model":"per_unit","currency":"USD","per_unit":{"matrix":{"dimension":"sku","cells":{"small":{"unit_amount":"2"}}}}}'::jsonb,'{"included":20}'::jsonb)`, overrideID, d.mid.UUID(), uuid.MustParse(customer.ID))
 			require.NoError(t, err)
 			override := func() string {
 				t.Helper()
@@ -155,7 +155,7 @@ func TestClientCatalogPublishingWorkflow(t *testing.T) {
 			require.Equal(t, map[string]string{"sku": "sku", "zone": "zone"}, changed.GroupBy)
 			require.Equal(t, map[string][]string{"zone": {"west"}}, changed.DefaultRateCard.Filter)
 			require.Equal(t, originalOverride, override())
-			require.NoError(t, client.RecordUsage(t.Context(), openrails.UsageReport{CustomerID: customer.ID, Invoker: customer.ID.String(), Currency: "USD", EventType: "protected-history", Source: "catalog-prune", SourceID: uuid.NewString()}))
+			require.NoError(t, client.RecordUsage(t.Context(), openrails.UsageReport{CustomerID: (openrails.CustomerID(uuid.MustParse(customer.ID))).String(), Invoker: customer.ID, Currency: "USD", EventType: "protected-history", Source: "catalog-prune", SourceID: uuid.NewString()}))
 			for _, scenario := range []string{"protected-override", "protected-history", "history-edit", "card-only-prune", "override-currency", "override-dimension"} {
 				t.Run(scenario, func(t *testing.T) {
 					key := scenario
@@ -210,7 +210,7 @@ func TestClientCatalogPublishingWorkflow(t *testing.T) {
 					require.ErrorAs(t, err, &apiErr)
 					require.Equal(t, 409, apiErr.Status)
 					require.Equal(t, wantCode, apiErr.Code)
-					product, err := client.GetProductByKey(t.Context(), "usage")
+					product, err := client.Products.RetrieveByKey(t.Context(), "usage")
 					require.NoError(t, err)
 					require.Equal(t, "Usage", product.DisplayName, "predictable refusal precedes product edits")
 					detail, err := client.GetUsageMeter(t.Context(), key)

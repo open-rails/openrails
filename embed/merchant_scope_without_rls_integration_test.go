@@ -54,8 +54,13 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 		ownerURL.User = url.UserPassword(credentials.User, credentials.Password)
 		dsn = ownerURL.String()
 	}
-	newRuntime := func() *embed.Runtime {
+	newRuntime := func(slug string) *embed.Runtime {
+		var declaration *embed.MerchantDeclaration
+		if slug != "" {
+			declaration = &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug}}
+		}
 		rt, err := embed.New(ctx, embed.Options{
+			Merchant: declaration,
 			Config: &config.Config{
 				Env: "dev", TestMode: config.CredentialPostureSandbox,
 				MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
@@ -67,9 +72,9 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 		t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 		return rt
 	}
-	a := scopeWithoutRLSSeed(t, newRuntime(), "scope-a")
-	b := scopeWithoutRLSSeed(t, newRuntime(), "scope-b")
-	platform := newRuntime() // The trusted host may explicitly select a merchant.
+	a := scopeWithoutRLSSeed(t, newRuntime("scope-a"), "scope-a")
+	b := scopeWithoutRLSSeed(t, newRuntime("scope-b"), "scope-b")
+	platform := newRuntime("") // The trusted host may explicitly select a merchant.
 
 	rows, err := admin.Query(ctx, `SELECT tablename FROM pg_tables WHERE schemaname = 'billing' AND rowsecurity ORDER BY tablename`)
 	require.NoError(t, err)
@@ -87,19 +92,19 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 	require.Equal(t, 2, visible, "runtime login must really see both merchants without a SQL predicate")
 
 	t.Run("authorized_A_cannot_read_B_known_product_or_price_ID", func(t *testing.T) {
-		_, err := a.client.GetProduct(ctx, b.product.ID)
+		_, err := a.client.Products.Retrieve(ctx, b.product.ID)
 		assert.ErrorIs(t, err, openrails.ErrNotFound)
-		_, err = a.client.GetPrice(ctx, b.price.ID)
+		_, err = a.client.Prices.Retrieve(ctx, b.price.ID)
 		assert.ErrorIs(t, err, openrails.ErrNotFound)
 	})
 	t.Run("lists_and_counts_include_only_A", func(t *testing.T) {
-		products, err := a.client.ListProducts(ctx, openrails.ProductFilter{})
+		products, err := a.client.Products.List(ctx, &openrails.ProductListParams{})
 		require.NoError(t, err)
 		assert.EqualValues(t, 1, products.Total)
 		if assert.Len(t, products.Items, 1) {
 			assert.Equal(t, a.product.ID, products.Items[0].ID)
 		}
-		prices, err := a.client.ListPrices(ctx, openrails.PriceFilter{})
+		prices, err := a.client.Prices.List(ctx, &openrails.PriceListParams{})
 		require.NoError(t, err)
 		assert.EqualValues(t, 1, prices.Total)
 		if assert.Len(t, prices.Items, 1) {
@@ -108,24 +113,24 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 	})
 	t.Run("authorized_A_cannot_update_B_product", func(t *testing.T) {
 		title := "cross-merchant overwrite"
-		_, err := a.client.UpdateProduct(ctx, b.product.ID, openrails.UpdateProductRequest{DisplayName: &title})
+		_, err := a.client.Products.Update(ctx, b.product.ID, &openrails.ProductUpdateParams{DisplayName: &title})
 		assert.ErrorIs(t, err, openrails.ErrNotFound)
-		got, err := b.client.GetProduct(ctx, b.product.ID)
+		got, err := b.client.Products.Retrieve(ctx, b.product.ID)
 		require.NoError(t, err)
 		assert.Equal(t, b.product.DisplayName, got.DisplayName, "B's actual row must remain unchanged")
 	})
 	t.Run("authorized_A_cannot_write_a_key_for_B_price", func(t *testing.T) {
-		_, err := a.client.SetPriceKey(ctx, b.price.ID, "cross-merchant-price-key")
+		_, err := a.client.Prices.SetKey(ctx, b.price.ID, "cross-merchant-price-key")
 		assert.ErrorIs(t, err, openrails.ErrNotFound)
-		got, err := b.client.GetPrice(ctx, b.price.ID)
+		got, err := b.client.Prices.Retrieve(ctx, b.price.ID)
 		require.NoError(t, err)
 		assert.Equal(t, b.price.Key, got.Key)
 	})
 	t.Run("A_price_cannot_reference_B_product", func(t *testing.T) {
-		_, err := a.client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: b.product.ID, Key: "foreign-product-reference", UnitAmount: 123, Currency: "USD"})
+		_, err := a.client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: b.product.ID, Key: "foreign-product-reference", UnitAmount: 123, Currency: "USD"})
 		assert.ErrorIs(t, err, openrails.ErrNotFound, "foreign products must be rejected before a composite FK violation")
 		var count int
-		require.NoError(t, admin.QueryRow(ctx, `SELECT count(*) FROM billing.prices WHERE merchant_id=$1 AND product_id=$2`, a.mid.UUID(), b.product.ID.UUID()).Scan(&count))
+		require.NoError(t, admin.QueryRow(ctx, `SELECT count(*) FROM billing.prices WHERE merchant_id=$1 AND product_id=$2`, a.mid.UUID(), sdkProductID(t, b.product.ID).UUID()).Scan(&count))
 		assert.Zero(t, count, "rejection must leave no cross-merchant reference")
 	})
 	t.Run("A_cannot_read_or_pay_B_invoice", func(t *testing.T) {
@@ -146,14 +151,14 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 	t.Run("A_cannot_reference_B_only_customer", func(t *testing.T) {
 		// This API explicitly does not create customers. EnsureCustomer is a
 		// different contract: the same host subject can exist under both merchants.
-		_, err := a.client.SetCustomerBillingPolicy(ctx, b.customer, nil)
+		_, err := a.client.SetCustomerBillingPolicy(ctx, (b.customer).String(), nil)
 		assert.ErrorIs(t, err, openrails.ErrNotFound)
 		var count int
 		require.NoError(t, admin.QueryRow(ctx, `SELECT count(*) FROM billing.customers WHERE merchant_id=$1 AND id=$2`, a.mid.UUID(), b.customer.UUID()).Scan(&count))
 		assert.Zero(t, count)
 	})
 	t.Run("A_cannot_delete_B_customer_delegation", func(t *testing.T) {
-		err := a.client.DeleteCustomerSpendDelegation(ctx, b.customer, "invoker", "scope-worker")
+		err := a.client.DeleteCustomerSpendDelegation(ctx, (b.customer).String(), "invoker", "scope-worker")
 		assert.ErrorIs(t, err, openrails.ErrNotFound)
 		var count int
 		require.NoError(t, admin.QueryRow(ctx, `SELECT count(*) FROM billing.invoker_spend_limits WHERE merchant_id=$1 AND customer_id=$2 AND scope_key='scope-worker'`, b.mid.UUID(), b.customer.UUID()).Scan(&count))
@@ -163,29 +168,29 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 		handler, err := httptesthost.Handler(a.runtime, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, Gate: scopeWithoutRLSGate{mid: a.mid}}})
 		require.NoError(t, err)
 		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/merchant/catalog/products/"+b.product.ID.String(), nil))
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/merchant/catalog/products/"+b.product.ID, nil))
 		assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
 	})
 	t.Run("missing_merchant_fails_closed", func(t *testing.T) {
 		_, err := platform.Client()
 		assert.Error(t, err)
-		_, err = app.HostGraph(platform).Runtime.ProductService.GetByID(ctx, b.product.ID.UUID())
+		_, err = app.HostGraph(platform).Runtime.ProductService.GetByID(ctx, sdkProductID(t, b.product.ID).UUID())
 		assert.Error(t, err, "service access without a merchant must fail before unscoped SQL")
 		handler, err := httptesthost.Handler(platform, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, Gate: scopeWithoutRLSGate{}}})
 		require.NoError(t, err)
 		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/merchant/catalog/products/"+b.product.ID.String(), nil))
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/merchant/catalog/products/"+b.product.ID, nil))
 		assert.GreaterOrEqual(t, response.Code, 400, "a gate result without merchant identity cannot authorize data access")
 		assert.NotContains(t, response.Body.String(), b.product.Key)
 	})
 	t.Run("trusted_platform_selection_can_act_for_B", func(t *testing.T) {
 		client, err := platform.Client(openrails.WithMerchantID(b.mid))
 		require.NoError(t, err)
-		got, err := client.GetProduct(ctx, b.product.ID)
+		got, err := client.Products.Retrieve(ctx, b.product.ID)
 		require.NoError(t, err)
 		assert.Equal(t, b.product.ID, got.ID)
 		name := "authorized B update"
-		updated, err := client.UpdateProduct(ctx, b.product.ID, openrails.UpdateProductRequest{DisplayName: &name})
+		updated, err := client.Products.Update(ctx, b.product.ID, &openrails.ProductUpdateParams{DisplayName: &name})
 		require.NoError(t, err)
 		assert.Equal(t, name, updated.DisplayName)
 	})
@@ -195,8 +200,8 @@ type scopeWithoutRLSMerchant struct {
 	runtime  *embed.Runtime
 	client   *openrails.Client
 	mid      merchant.ID
-	product  *openrails.CatalogProduct
-	price    *openrails.CatalogPrice
+	product  *openrails.Product
+	price    *openrails.Price
 	customer openrails.CustomerID
 	invoice  uuid.UUID
 }
@@ -204,18 +209,17 @@ type scopeWithoutRLSMerchant struct {
 func scopeWithoutRLSSeed(t *testing.T, rt *embed.Runtime, slug string) scopeWithoutRLSMerchant {
 	t.Helper()
 	ctx := t.Context()
-	mid, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
-	require.NoError(t, err)
 	client, err := rt.Client()
 	require.NoError(t, err)
-	product, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: slug + "-product", DisplayName: slug})
+	mid := client.MerchantID()
+	product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: slug + "-product", DisplayName: slug})
 	require.NoError(t, err)
-	price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: slug + "-price", UnitAmount: 1000, Currency: "USD"})
+	price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: slug + "-price", UnitAmount: 1000, Currency: "USD"})
 	require.NoError(t, err)
 	customer := openrails.CustomerID(uuid.New())
-	_, err = client.EnsureCustomer(ctx, customer)
+	_, err = client.EnsureCustomer(ctx, (customer).String())
 	require.NoError(t, err)
-	require.NoError(t, client.SetCustomerSpendDelegations(ctx, customer, []openrails.SpendDelegationInput{{Scope: "invoker", ScopeKey: "scope-worker", Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 1000000, Currency: "USD"}}}}))
+	require.NoError(t, client.SetCustomerSpendDelegations(ctx, (customer).String(), []openrails.SpendDelegationInput{{Scope: "invoker", ScopeKey: "scope-worker", Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 1000000, Currency: "USD"}}}}))
 	scoped := merchant.WithID(ctx, mid)
 	graph := app.HostGraph(rt).Runtime
 	mode := money.BillingModeArrears
@@ -223,7 +227,7 @@ func scopeWithoutRLSSeed(t *testing.T, rt *embed.Runtime, slug string) scopeWith
 		_, err := graph.MoneyService.UpsertAccountSettings(c, identity.CustomerID(customer), "USD", money.AccountSettingsInput{BillingMode: &mode})
 		return err
 	}))
-	_, err = client.EnsureCustomerInvoiceProfile(ctx, customer, openrails.InvoiceProfileDTO{NetTermsDays: 7, CollectionMethod: "send_invoice"})
+	_, err = client.EnsureCustomerInvoiceProfile(ctx, (customer).String(), openrails.InvoiceProfileDTO{NetTermsDays: 7, CollectionMethod: "send_invoice"})
 	require.NoError(t, err)
 	_, err = graph.MoneyService.AccrueOwed(scoped, identity.CustomerID(customer), "USD", "scope-test", uuid.NewString(), 500)
 	require.NoError(t, err)

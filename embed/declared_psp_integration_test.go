@@ -19,7 +19,7 @@ import (
 )
 
 // TestDeclaredPSPIsAttributableButNeverArmed settles the credential-less
-// Runtime.DeclarePSP semantics: the account is an identity for attribution
+// constructor PSP declaration semantics: the account is an identity for attribution
 // and links, never an armed rail. Checkout discovery does not advertise it,
 // a checkout that names it is refused up front as unroutable, and a price link
 // to it is stored without a provider round trip — identically through the
@@ -30,6 +30,7 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 	remote := h.StartStandalone("USD", integrationharness.WithRails(config.PSPSet{
 		"ccbill": {AccountID: "999981-0000", CCBill: &config.CCBillRailConfig{Salt: "operations-local-fixture"}},
 	}))
+	declaredKey := "stripe-declared-" + uuid.NewString()[:8]
 	runtime, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
 		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
@@ -40,9 +41,12 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 	require.NoError(t, err)
 	mid := dbtest.TestMerchantID
 
-	declaredKey := "stripe-declared-" + uuid.NewString()[:8]
-	pspID, err := runtime.DeclarePSP(ctx, mid, embed.PSPDeclaration{Key: declaredKey, Rail: "stripe", AccountID: "acct_declared_" + uuid.NewString()[:8]})
-	require.NoError(t, err)
+	// This compatibility fixture uses the existing AuthKit-owned standalone
+	// merchant. Constructor declaration identity/restarts are covered separately;
+	// seed an attribution-only row through the shared provider fixture here.
+	integrationharness.SeedPSPs(ctx, t, app.HostGraph(runtime).Runtime, mid, config.PSPSet{declaredKey: {Rail: "stripe", AccountID: "acct_declared_" + uuid.NewString()[:8]}})
+	var pspID uuid.UUID
+	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT id FROM billing.psps WHERE merchant_id=$1 AND key=$2`, mid.UUID(), declaredKey).Scan(&pspID))
 	require.NotEqual(t, uuid.Nil, pspID)
 	t.Cleanup(func() {
 		_, _ = h.Pool().Exec(context.Background(), `DELETE FROM billing.psps WHERE id = $1`, pspID)
@@ -63,28 +67,28 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 			require.NotContains(t, keys, declaredKey, "a declared, unarmed PSP is not advertised to browsers")
 
 			key := "declared-" + uuid.NewString()[:8]
-			product, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: key, DisplayName: "Declared PSP"})
+			product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: key, DisplayName: "Declared PSP"})
 			require.NoError(t, err)
 			duration := 720
-			price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: key + "-price", UnitAmount: 1_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
+			price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: key + "-price", UnitAmount: 1_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 			require.NoError(t, err)
 
-			options, err := client.ListCheckoutRailOptions(ctx, openrails.PriceID(price.ID))
+			options, err := client.ListCheckoutRailOptions(ctx, (sdkPriceID(t, price.ID)).String())
 			require.NoError(t, err)
 			for _, option := range options {
 				require.NotEqual(t, declaredKey, option.Selector, "an unarmed PSP is never a checkout option")
 			}
 			_, err = client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-				Customer:       openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()), VerifiedEmail: "buyer@example.test", Username: "buyer"},
-				PriceID:        openrails.PriceID(price.ID),
+				Customer:       openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()).String(), VerifiedEmail: "buyer@example.test", Username: "buyer"},
+				PriceID:        price.ID,
 				IdempotencyKey: uuid.NewString(),
-				Payment:        openrails.CheckoutPayment{Rail: declaredKey, NameOnCard: "Test Buyer", Zip: "90210", Country: "US"},
+				PaymentOptions: openrails.CheckoutPaymentOptions{Rail: declaredKey, NameOnCard: "Test Buyer", Zip: "90210", Country: "US"},
 			})
 			require.ErrorIs(t, err, openrails.ErrInvalid, "a checkout naming the unarmed PSP is refused up front: %v", err)
 
 			// The link is attribution: stored as operator-owned without a
 			// provider round trip, reported linked with sync disabled.
-			linked, err := client.UpdatePrice(ctx, price.ID, openrails.UpdatePriceRequest{PSPLinks: map[string]map[string]string{declaredKey: {"price_id": "price_declared_" + key}}})
+			linked, err := client.Prices.Update(ctx, price.ID, &openrails.PriceUpdateParams{PSPLinks: map[string]map[string]string{declaredKey: {"price_id": "price_declared_" + key}}})
 			require.NoError(t, err)
 			require.Equal(t, openrails.ProviderStatusLinked, linked.Providers[declaredKey].Status)
 			require.Equal(t, "price_declared_"+key, linked.Providers[declaredKey].IDs["price_id"])

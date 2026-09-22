@@ -60,7 +60,9 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	var client *river.Client[pgx.Tx]
 	var sawBillingWorkers bool
 
+	slug := "river-billing-" + uuid.NewString()[:8]
 	rt, err := embed.New(ctx, embed.Options{
+		Merchant: &embed.MerchantDeclaration{Slug: slug, PSPs: []embed.PSPDeclaration{{Key: "solana", Rail: "solana", AccountID: "11111111111111111111111111111111"}}},
 		Config: &config.Config{
 			Env:                  "dev",
 			TestMode:             config.CredentialPostureSandbox,
@@ -84,8 +86,9 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	suffix := uuid.NewString()[:8]
 	user, err := cp.Core().CreateUser(ctx, "river-"+suffix+"@example.test", "river"+suffix)
 	require.NoError(t, err)
-	provisioned, err := cp.ProvisionMerchant(ctx, controlplane.ProvisionMerchantRequest{Slug: "river-" + suffix, OwnerUserID: user.ID})
+	billingClient, err := rt.Client()
 	require.NoError(t, err)
+	merchantID := billingClient.MerchantID()
 	expired, alive := uuid.New(), uuid.New()
 	for _, row := range []struct {
 		id      uuid.UUID
@@ -135,10 +138,8 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	}))
 	t.Cleanup(rpc.Close)
 	graph.SolanaRPCResolver.Endpoint = rpc.URL
-	_, err = rt.DeclarePSP(ctx, provisioned.MerchantID, embed.PSPDeclaration{Key: "solana", Rail: "solana", AccountID: "11111111111111111111111111111111"})
-	require.NoError(t, err)
 	reference := solanago.NewWallet().PublicKey().String()
-	mctx := merchant.WithID(ctx, provisioned.MerchantID)
+	mctx := merchant.WithID(ctx, merchantID)
 	require.NoError(t, graph.SolanaPayService.RegisterPendingReference(mctx, reference))
 	loopCtx, cancelLoops := context.WithCancel(ctx)
 	loopDone := make(chan error, 1)
@@ -148,7 +149,7 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	t.Cleanup(stopLoops)
 	require.Eventually(t, func() bool {
 		pending, e := graph.SolanaPayService.PendingReferencesByMerchant(ctx)
-		return e == nil && len(pending[provisioned.MerchantID]) == 0
+		return e == nil && len(pending[merchantID]) == 0
 	}, 30*time.Second, 100*time.Millisecond, "core non-River polling must run after explicit binding")
 	require.Eventually(t, func() bool {
 		var dead, live int

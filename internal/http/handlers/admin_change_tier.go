@@ -68,6 +68,10 @@ func adminTierChangeRequest(
 	if !r.BindJSON(&body) {
 		return nil, nil, nil, false
 	}
+	if id, err := openrails.ParsePriceID(body.PriceID); err != nil || id.IsZero() {
+		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
+		return nil, nil, nil, false
+	}
 
 	typedSubscriptionID, err := openrails.ParseSubscriptionID(r.Param("id"))
 	if err != nil || typedSubscriptionID.IsZero() {
@@ -96,7 +100,7 @@ func adminTierChangeRequest(
 		return nil, nil, nil, false
 	}
 	return &checkout.TierChangeRequest{
-			PriceID:        body.PriceID.String(),
+			PriceID:        body.PriceID,
 			SubscriptionID: subscriptionID,
 		}, &checkout.UserIdentity{
 			ID:    subscription.CustomerID.String(),

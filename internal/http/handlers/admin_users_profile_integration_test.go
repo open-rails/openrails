@@ -91,7 +91,7 @@ func TestAdminUserBillingProfile_DegradesWhenCollectionDefaultsFail(t *testing.T
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &profile), rec.Body.String())
 	require.Equal(t, openrails.CustomerID(fx.customer), profile.CustomerID)
 	require.Len(t, profile.PaymentMethods, 1)
-	require.Equal(t, openrails.PaymentMethodID(pm.ID), profile.PaymentMethods[0].ID)
+	require.Equal(t, openrails.PaymentMethodID(pm.ID).String(), profile.PaymentMethods[0].ID)
 	require.Empty(t, profile.PaymentMethods[0].CollectionDefaultCurrencies, "defaults are dropped, not invented")
 	require.Len(t, profile.Subscriptions, 1, "subscriptions section survives the defaults failure")
 	require.Len(t, profile.CreditBalance, 1, "credit balance section survives the defaults failure")

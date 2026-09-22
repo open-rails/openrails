@@ -53,6 +53,41 @@ func (q *Queries) CountPSPsForRailEnvironment(ctx context.Context, arg CountPSPs
 	return column_1, err
 }
 
+const declarePSPIdentity = `-- name: DeclarePSPIdentity :one
+INSERT INTO openrails.psps (id, merchant_id, rail, environment, account_id, key)
+VALUES ($1::uuid, $2::uuid, $3::text,
+        $4::text, $5::text, $6::text)
+ON CONFLICT (rail, environment, account_id) DO UPDATE SET id=openrails.psps.id
+WHERE openrails.psps.merchant_id=EXCLUDED.merchant_id
+  AND openrails.psps.key IS NOT DISTINCT FROM EXCLUDED.key
+RETURNING id
+`
+
+type DeclarePSPIdentityParams struct {
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	Rail        string
+	Environment string
+	AccountID   string
+	Key         string
+}
+
+// Declaration supplies attribution only. A matching existing account retains
+// its original ID, alias, archive state, custody and credential evidence.
+func (q *Queries) DeclarePSPIdentity(ctx context.Context, arg DeclarePSPIdentityParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, declarePSPIdentity,
+		arg.ID,
+		arg.MerchantID,
+		arg.Rail,
+		arg.Environment,
+		arg.AccountID,
+		arg.Key,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getActivePSPForNewWork = `-- name: GetActivePSPForNewWork :one
 SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
 WHERE merchant_id = $1::uuid

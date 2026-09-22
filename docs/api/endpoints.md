@@ -89,7 +89,7 @@ handlers are also mounted under `/v1/me/checkout/*` (delegated token) and
 `POST /v1/checkout` body:
 
 - `price_id` (required)
-- `mode` (optional) — `one_off` or `subscription`; resolved from the price if omitted
+- The price determines one-time versus recurring billing; a caller-supplied `mode` is rejected
 - `payment` (required):
   - `rail` (optional) — a configured PSP key (e.g. `mobius`) or reserved rail (`ccbill`, `solana`, `stripe`). Naming one pins it (never silently switched); omitting it hands the choice to the merchant's routing policy, which falls through unavailable PSPs and records the decision on the session's `routing_reason` (or#288)
   - `payment_method_id` or `payment_token` for NMI-backed rails / Stripe
@@ -275,8 +275,12 @@ Server-to-server billing operations. Every route is gated on the listed
 | DELETE | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | `merchant:customer-settings:update` | Revoke exactly one delegation (or#911); siblings untouched; 404 when nothing exists at the key |
 | GET | `/v1/merchant/entitlements/{entitlement}/customers` | `merchant:customer-settings:read` | Customers currently holding an entitlement |
 | GET | `/v1/merchant/users/{user_id}/product-access` | `merchant:customer-settings:read` | A user's product access |
+| POST | `/v1/merchant/users/{user_id}/product-access/check` | `merchant:customer-settings:read` | Check access for at most 100 product IDs without loading the customer's purchase history |
 | GET | `/v1/merchant/invokers/{invoker}/credits` | `merchant:customer-settings:read` | Invoker credit summary `{ currency, balance, held_balance }`. Query: `customer_id`, `currency` |
 | POST | `/v1/merchant/checkout-sessions` | `merchant:checkout:create` | Create a checkout for the supplied customer identity; required Idempotency-Key header |
+| POST | `/v1/merchant/payment-method-sessions` | `merchant:checkout:create` | Create a nonmonetary saved-payment-method setup session for the supplied customer |
+| POST | `/v1/merchant/solana-cancel-sessions` | `merchant:checkout:create` | Create a customer-authorized Solana subscription cancellation session |
+| POST | `/v1/merchant/solana-tier-change-sessions` | `merchant:checkout:create` | Create a customer-authorized Solana subscription tier-change session |
 | GET | `/v1/merchant/checkout-sessions/{id}` | `merchant:customer-settings:read` | Read a checkout owned by query customer_id |
 | POST | `/v1/merchant/checkout-sessions/{id}/confirm` | `merchant:checkout:create` | Confirm the checkout for the supplied customer_id |
 | GET | `/v1/merchant/checkout-options` | `merchant:customer-settings:read` | Locally ready providers for query price_id; no provider request |
@@ -428,6 +432,7 @@ not supported. Catalog reads stay live.
 | GET | `/v1/catalog/products` | List products in the caller's catalog |
 | GET | `/v1/catalog/products/{id}` | Read an owned product |
 | GET | `/v1/catalog/products/by-key/{key}` | Read an owned product by key |
+| PUT | `/v1/catalog/products/by-key/{key}` | Ensure a product in the caller's catalog; existing definitions remain unchanged |
 | POST | `/v1/catalog/products` | Create a product in the caller's catalog |
 | PATCH | `/v1/catalog/products/{id}` | Update an owned product |
 | POST | `/v1/catalog/products/{id}/activate` | Activate an owned product |
@@ -448,6 +453,7 @@ not supported. Catalog reads stay live.
 | GET | `/v1/merchant/catalog/products` | Paginated products; `tier_group` and `archived` (`false` live only, `true` archived only, absent both) filter before count/pagination |
 | GET | `/v1/merchant/catalog/products/{id}` | One product |
 | GET | `/v1/merchant/catalog/products/by-key/{key}` | Product by catalog key |
+| PUT | `/v1/merchant/catalog/products/by-key/{key}` | Ensure a product in the selected catalog; existing definitions remain unchanged |
 | PATCH | `/v1/merchant/catalog/products/{id}` | Update definition fields |
 | POST | `/v1/merchant/catalog/products/{id}/activate` | Activate |
 | POST | `/v1/merchant/catalog/products/{id}/deactivate` | Deactivate |

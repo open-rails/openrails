@@ -219,6 +219,7 @@ POST /v1/merchant/invoices/{id}/void
 POST /v1/merchant/metrics/ask
 POST /v1/merchant/metrics/query
 POST /v1/merchant/notifications/{id}/read
+POST /v1/merchant/payment-method-sessions
 POST /v1/merchant/payment-providers/routing/dry-run
 POST /v1/merchant/payment-providers/{provider}/accounts/{psp_id}/archive
 POST /v1/merchant/payments/{id}/refunds
@@ -229,6 +230,8 @@ POST /v1/merchant/provider-operations
 POST /v1/merchant/provider-operations/{operation_id}/observations
 POST /v1/merchant/provider-operations/{operation_id}/release
 POST /v1/merchant/reprices/{id}/cancel
+POST /v1/merchant/solana-cancel-sessions
+POST /v1/merchant/solana-tier-change-sessions
 POST /v1/merchant/subscriptions/{id}/cancel
 POST /v1/merchant/subscriptions/{id}/change-tier
 POST /v1/merchant/subscriptions/{id}/change-tier/preview
@@ -240,6 +243,7 @@ POST /v1/merchant/team/invites
 POST /v1/merchant/usage/report
 POST /v1/merchant/usage/resource-revenue
 POST /v1/merchant/usage/rollup
+POST /v1/merchant/users/{user_id}/product-access/check
 POST /v1/merchant/wasted-spend
 POST /v1/merchant/webhooks
 POST /v1/platform/merchants/{id}/restore
@@ -247,6 +251,7 @@ POST /v1/solana/recurring/enroll
 POST /v1/webhooks/{provider}
 POST /v1/webhooks/{provider}/{account_id}
 PUT /v1/catalog
+PUT /v1/catalog/products/by-key/{key}
 PUT /v1/customers/{customer_id}/collection-payment-method
 PUT /v1/customers/{customer_id}/payment-methods/{id}
 PUT /v1/customers/{customer_id}/spend-delegations
@@ -257,6 +262,7 @@ PUT /v1/me/subscriptions/{id}/payment-method
 PUT /v1/merchant/api-host
 PUT /v1/merchant/catalog/meters/{key}
 PUT /v1/merchant/catalog/meters/{key}/rate-card
+PUT /v1/merchant/catalog/products/by-key/{key}
 PUT /v1/merchant/credit-limit
 PUT /v1/merchant/customers/{customer_id}
 PUT /v1/merchant/customers/{customer_id}/billing-policy

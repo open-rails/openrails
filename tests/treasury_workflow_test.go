@@ -145,7 +145,7 @@ func (f treasuryWorkflow) actor(t *testing.T, grants []string) (openrails.Custom
 	token, _, err := core.MintAccessToken(t.Context(), user.ID, nil)
 	require.NoError(t, err)
 	id := openrails.CustomerID(uuid.MustParse(user.ID))
-	_, err = f.client.EnsureCustomer(t.Context(), id)
+	_, err = f.client.EnsureCustomer(t.Context(), (id).String())
 	require.NoError(t, err)
 	f.hostPolicy.Store(user.ID, append([]string(nil), grants...))
 	return id, token
@@ -154,7 +154,7 @@ func (f treasuryWorkflow) actor(t *testing.T, grants []string) (openrails.Custom
 func TestTreasuryAuthorityAndMoneyWorkflow(t *testing.T) {
 	f := newTreasuryWorkflow(t)
 	customer := openrails.CustomerID(uuid.New())
-	_, err := f.client.EnsureCustomer(t.Context(), customer)
+	_, err := f.client.EnsureCustomer(t.Context(), (customer).String())
 	require.NoError(t, err)
 	token := f.issuer.Mint(customer.String(), "", "", []string{permissions.CustomerAll})
 	status, raw := requestWorkflowJSON(t, http.MethodGet, f.surface.BaseURL+"/v1/customers/"+customer.String()+"/balance?currency=USD", token, nil)
@@ -197,13 +197,13 @@ func checkTreasuryScopes(t *testing.T, f treasuryWorkflow) {
 	ctx := t.Context()
 	payer, customerToken := f.actor(t, []string{permissions.CustomerAll})
 	merchantPayer := openrails.CustomerID(f.merchant.MerchantID.UUID())
-	_, err := f.client.EnsureCustomer(ctx, merchantPayer)
+	_, err := f.client.EnsureCustomer(ctx, (merchantPayer).String())
 	require.NoError(t, err)
 	for _, seed := range []struct {
 		payer  openrails.CustomerID
 		amount int64
 	}{{payer, 3_300_000}, {merchantPayer, 4_200_000}} {
-		_, err := f.client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &seed.payer, Invoker: seed.payer.String(), Currency: "EUR", Amount: seed.amount, Source: "treasury", SourceID: uuid.NewString()})
+		_, err := f.client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(seed.payer.String()), Invoker: seed.payer.String(), Currency: "EUR", Amount: seed.amount, Source: "treasury", SourceID: uuid.NewString()})
 		require.NoError(t, err)
 	}
 	_, adminToken := f.actor(t, []string{permissions.MerchantAll, permissions.CustomerAll})

@@ -124,11 +124,11 @@ func TestSelfSubscriptionWireParity(t *testing.T) {
 			}
 			// The engine's own ids, in their one wire spelling.
 			require.Equal(t, openrails.SubscriptionID(activeID), active.ID)
-			require.Equal(t, openrails.CustomerID(s.customer), active.CustomerID)
-			require.Equal(t, openrails.ProductID(productID), active.ProductID)
-			require.Equal(t, openrails.PriceID(priceID), active.PriceID)
+			require.Equal(t, s.customer.String(), active.CustomerID)
+			require.Equal(t, openrails.ProductID(productID).String(), active.ProductID)
+			require.Equal(t, openrails.PriceID(priceID).String(), active.PriceID)
 			require.NotNil(t, active.ScheduledPriceID)
-			require.Equal(t, openrails.PriceID(scheduledPriceID), *active.ScheduledPriceID)
+			require.Equal(t, openrails.PriceID(scheduledPriceID).String(), *active.ScheduledPriceID)
 			require.NotNil(t, active.PaymentMethodID)
 			require.Equal(t, openrails.PaymentMethodID(methodID), *active.PaymentMethodID)
 			require.NotNil(t, active.Price)

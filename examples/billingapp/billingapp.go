@@ -53,7 +53,11 @@ type Report struct {
 // Run executes the workflow with the given client.
 func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, error) {
 	var r Report
-	payer := openrails.CustomerID(uuid.New())
+	customer, err := client.EnsureCustomer(ctx, uuid.NewString())
+	if err != nil {
+		return r, fmt.Errorf("ensure customer: %w", err)
+	}
+	payer := customer.ID
 	invoker := "app:" + in.Run
 
 	if err := client.SetMerchantSettings(ctx, openrails.MerchantSettings{
@@ -129,21 +133,25 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 		r.UsageEvents += row.EventCount
 	}
 
-	price, err := client.GetPriceByKey(ctx, in.CheckoutPriceKey)
+	price, err := client.Prices.RetrieveByKey(ctx, in.CheckoutPriceKey)
 	if err != nil {
 		return r, fmt.Errorf("resolve checkout price: %w", err)
 	}
-	options, err := client.ListCheckoutRailOptions(ctx, price.ID)
+	priceID, err := openrails.ParsePriceID(price.ID)
+	if err != nil {
+		return r, fmt.Errorf("checkout price ID: %w", err)
+	}
+	options, err := client.ListCheckoutRailOptions(ctx, (priceID).String())
 	if err != nil {
 		return r, fmt.Errorf("checkout options: %w", err)
 	}
 	r.CheckoutRails = len(options)
 	buyer := openrails.CustomerID(uuid.New())
 	request := openrails.CreateCheckoutSessionRequest{
-		Customer:       openrails.CheckoutCustomerIdentity{ID: buyer, VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer.String()[:8]},
+		Customer:       openrails.CheckoutCustomerIdentity{ID: buyer.String(), VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer.String()[:8]},
 		PriceID:        price.ID,
 		IdempotencyKey: in.Run + ":checkout",
-		Payment:        openrails.CheckoutPayment{Rail: in.CheckoutRail, NameOnCard: "Example Buyer", Zip: "90210", Country: "US"},
+		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: in.CheckoutRail, NameOnCard: "Example Buyer", Zip: "90210", Country: "US"},
 	}
 	session, err := client.CreateCheckoutSession(ctx, request)
 	if err != nil {
@@ -153,7 +161,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	if err != nil {
 		return r, fmt.Errorf("replay checkout: %w", err)
 	}
-	read, err := client.GetCheckoutSession(ctx, buyer, session.ID)
+	read, err := client.GetCheckoutSession(ctx, buyer.String(), session.ID)
 	if err != nil {
 		return r, fmt.Errorf("read checkout: %w", err)
 	}
@@ -166,7 +174,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	if err := client.CancelSubscription(ctx, in.SubscriptionID, openrails.CancelSubscriptionRequest{Reason: "customer request"}); err != nil {
 		return r, fmt.Errorf("cancel subscription: %w", err)
 	}
-	page, err := client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: in.SubscriberID, PageOptions: openrails.PageOptions{Limit: 10}})
+	page, err := client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: (in.SubscriberID).String(), PageOptions: openrails.PageOptions{Limit: 10}})
 	if err != nil {
 		return r, fmt.Errorf("list subscriptions: %w", err)
 	}

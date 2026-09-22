@@ -45,7 +45,7 @@ func TestDefaultUsageRateCardInput(t *testing.T) {
 		Key:     "storage-gb",
 		GroupBy: map[string]string{"region": "metadata.region"},
 	}, adminDefaultUsageRateCardRequest{
-		ProductID: openrails.ProductID(productID),
+		ProductID: (openrails.ProductID(productID)).String(),
 		Filter:    map[string][]string{" region ": {" eu ", "eu"}},
 		Price: pricing.RatePrice{
 			Model:    pricing.ModelPerUnit,
@@ -63,7 +63,7 @@ func TestDefaultUsageRateCardInput(t *testing.T) {
 		Key:     "storage-gb",
 		GroupBy: map[string]string{},
 	}, adminDefaultUsageRateCardRequest{
-		ProductID: openrails.ProductID(productID),
+		ProductID: (openrails.ProductID(productID)).String(),
 		Filter:    map[string][]string{},
 		Price: pricing.RatePrice{
 			Model:    pricing.ModelPerUnit,

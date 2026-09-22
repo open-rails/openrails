@@ -260,6 +260,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	)
 
 	users := group.Group("/users/:user_id")
+	users.Handle(http.MethodPost, "/product-access/check", h(httphandlers.ServiceCheckUserProductAccess), readMW...)
 	users.Handle(http.MethodGet, "/product-access",
 		h(httphandlers.ServiceGetUserProductAccess),
 		readMW...,
@@ -273,6 +274,10 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 
 	checkoutWriteMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCheckoutCreate)}, dbMW...)
 	group.Handle(http.MethodPost, "/checkout-sessions", h(httphandlers.ServiceCreateCheckoutSession), checkoutWriteMW...)
+	group.Handle(http.MethodPost, "/payment-method-sessions", h(httphandlers.ServiceCreatePaymentMethodSession), checkoutWriteMW...)
+	group.Handle(http.MethodPost, "/solana-cancel-sessions", h(httphandlers.ServiceCreateSolanaCancelSession), checkoutWriteMW...)
+	group.Handle(http.MethodPost, "/solana-tier-change-sessions", h(httphandlers.ServiceCreateSolanaTierChangeSession), checkoutWriteMW...)
+
 	group.Handle(http.MethodGet, "/checkout-sessions/:id", h(httphandlers.ServiceGetCheckoutSession), readMW...)
 	group.Handle(http.MethodPost, "/checkout-sessions/:id/confirm", h(httphandlers.ServiceConfirmCheckoutSession), checkoutWriteMW...)
 	group.Handle(http.MethodGet, "/checkout-options", h(httphandlers.ServiceListCheckoutRailOptions), readMW...)
@@ -664,6 +669,7 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 	products.Handle(http.MethodGet, "", h(httphandlers.AdminListProducts), readMW...)
 	products.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetProduct), readMW...)
 	products.Handle(http.MethodGet, "/by-key/:key", h(httphandlers.AdminGetProductByKey), readMW...)
+	products.Handle(http.MethodPut, "/by-key/:key", h(httphandlers.AdminEnsureProduct), writeMW...)
 	products.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdateProduct), writeMW...)
 	products.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivateProduct), writeMW...)
 	products.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivateProduct), writeMW...)

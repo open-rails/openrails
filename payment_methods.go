@@ -3,19 +3,19 @@ package openrails
 import "time"
 
 type PaymentMethodSubscription struct {
-	ID          SubscriptionID `json:"id"`
-	DisplayName string         `json:"display_name"`
-	Description string         `json:"description"`
-	CreatedAt   time.Time      `json:"created_at"`
+	ID          string    `json:"id"`
+	DisplayName string    `json:"display_name"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type PaymentMethod struct {
 	PSPID                       string                      `json:"psp_id"`
-	ID                          PaymentMethodID             `json:"id"`
+	ID                          string                      `json:"id"`
 	Object                      string                      `json:"object"`
 	Type                        string                      `json:"type"`
 	Rail                        string                      `json:"rail"`
-	Customer                    *CustomerID                 `json:"customer,omitempty"`
+	Customer                    *string                     `json:"customer,omitempty"`
 	BillingDetails              *BillingDetails             `json:"billing_details,omitempty"`
 	Card                        *CardDetails                `json:"card,omitempty"`
 	Metadata                    map[string]string           `json:"metadata,omitempty"`

@@ -1483,7 +1483,7 @@ func validateSourceCIDRs(cidrs []string) error {
 //
 // The manifest-mode rows (manifest file expected but unresolvable; api mode
 // with a merchants.yaml on disk) are enforced where manifests load: serverboot
-// (standalone) and embed.UpsertMerchantConfig (embedded).
+// (standalone) and embed.Options.Merchant (embedded).
 func validateMerchantConfigSource(cfg *Config, isDev bool) error {
 	switch strings.ToLower(strings.TrimSpace(cfg.CatalogSource)) {
 	case "", CatalogSourceManifest, CatalogSourceAPI:

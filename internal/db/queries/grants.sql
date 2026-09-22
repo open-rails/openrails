@@ -297,16 +297,43 @@ ORDER BY g.created_at;
 
 -- #511 ownership-on-grants: live (un-terminated) ownership grant ids backing a
 -- payment, so a refund/chargeback can revoke product access for that payment.
--- name: ListLiveOwnershipGrantIDsByPayment :many
-SELECT g.id FROM openrails.grants g
+-- RevokeOwnershipGrantByID atomically terminates ownership once, including overlapping
+-- provider refund notifications. Other insert errors still fail the transaction.
+-- name: RevokeOwnershipGrantByID :execrows
+INSERT INTO openrails.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
+)
+SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
+       'revoke', g.id, g.spec_snapshot, sqlc.arg(revoked_at)::timestamptz, NULL,
+       g.amount, g.currency, sqlc.arg(reason)::text
+FROM openrails.grants g
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND g.id = sqlc.arg(id)::uuid
+  AND g.kind = 'ownership' AND g.event = 'grant'
+ORDER BY g.id
+ON CONFLICT (supersedes_id)
+WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
+DO NOTHING;
+
+-- RevokeOwnershipGrantsByPayment atomically terminates ownership once, including overlapping
+-- provider refund notifications. Other insert errors still fail the transaction.
+-- name: RevokeOwnershipGrantsByPayment :execrows
+INSERT INTO openrails.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
+)
+SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
+       'revoke', g.id, g.spec_snapshot, sqlc.arg(revoked_at)::timestamptz, NULL,
+       g.amount, g.currency, sqlc.arg(reason)::text
+FROM openrails.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.payment_id = sqlc.arg(payment_id)::uuid
-  AND g.kind = 'ownership'
-  AND g.event = 'grant'
-  AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants t
-      WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
-  );
+  AND g.kind = 'ownership' AND g.event = 'grant'
+ORDER BY g.id
+ON CONFLICT (supersedes_id)
+WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
+DO NOTHING;
 
 -- #511 ownership-on-grants: every ownership grant-event for a customer with its
 -- derived status (the termination event, if any) — so the legacy
@@ -484,3 +511,35 @@ WHERE g.merchant_id=sqlc.arg(merchant_id)::uuid AND g.source_type='subscription'
       AND i.subscription_id::text=g.source_id AND i.status='succeeded'
       AND g.starts_at=(i.payload->'renewal'->>'period_start')::timestamptz
       AND g.ends_at=(i.payload->'renewal'->>'period_end')::timestamptz);
+
+-- CheckProductAccess: one bounded lookup for the page's candidate products.
+-- name: CheckProductAccess :many
+SELECT candidate.product_id, EXISTS (
+ SELECT 1 FROM openrails.grants g
+ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+   AND g.customer_id = sqlc.arg(customer_id)::uuid
+   AND g.product_id = candidate.product_id
+   AND g.kind = 'ownership' AND g.event = 'grant'
+   AND g.starts_at <= sqlc.arg(at_time)::timestamptz
+   AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(at_time)::timestamptz)
+   AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+    WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+      AND t.event IN ('revoke','expire','supersede'))
+) AS has_access
+FROM unnest(sqlc.arg(product_ids)::uuid[]) AS candidate(product_id);
+
+-- ListActiveOwnershipGrantsPage returns a bounded, stable ID-ordered page.
+-- name: ListActiveOwnershipGrantsPage :many
+SELECT g.* FROM openrails.grants g
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND g.customer_id = sqlc.arg(customer_id)::uuid
+  AND g.kind = 'ownership' AND g.event = 'grant'
+  AND g.product_id IS NOT NULL
+  AND g.starts_at <= sqlc.arg(at_time)::timestamptz
+  AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(at_time)::timestamptz)
+  AND g.id > sqlc.arg(after_id)::uuid
+  AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+   WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+    AND t.event IN ('revoke','expire','supersede'))
+ORDER BY g.id
+LIMIT sqlc.arg(page_limit)::int;

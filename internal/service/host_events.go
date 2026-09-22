@@ -59,8 +59,8 @@ func (s *Service) ListHostEvents(ctx context.Context, options openrails.HostEven
 			if row.PaymentID == nil || row.Amount == nil || row.PaymentCustomerID == nil || row.PaymentPriceID == nil {
 				return nil, fmt.Errorf("host event %s has incomplete payment payload", row.ID)
 			}
-			event.Payment = &openrails.PaymentSettledEvent{PaymentID: openrails.PaymentID(*row.PaymentID), CustomerID: openrails.CustomerID(*row.PaymentCustomerID),
-				PriceID: openrails.PriceID(*row.PaymentPriceID), Amount: *row.Amount, Currency: row.Currency}
+			event.Payment = &openrails.PaymentSettledEvent{PaymentID: openrails.PaymentID(*row.PaymentID), CustomerID: openrails.CustomerID(*row.PaymentCustomerID).String(),
+				PriceID: openrails.PriceID(*row.PaymentPriceID).String(), Amount: *row.Amount, Currency: row.Currency}
 			if row.PaymentSubscriptionID != nil {
 				subscriptionID := openrails.SubscriptionID(*row.PaymentSubscriptionID)
 				event.Payment.SubscriptionID = &subscriptionID
@@ -77,7 +77,7 @@ func (s *Service) ListHostEvents(ctx context.Context, options openrails.HostEven
 			if err := json.Unmarshal(row.Data, &payload); err != nil {
 				return nil, fmt.Errorf("decode host event %s: %w", row.ID, err)
 			}
-			payload.CustomerID = openrails.CustomerID(row.SubjectID)
+			payload.CustomerID = (openrails.CustomerID(row.SubjectID)).String()
 			payload.Currency = row.Currency
 			payload.DelinquencyHostEvent.OverdueAmount = payload.OverdueAmount
 			payload.DelinquencyHostEvent.AmountFloor = payload.AmountFloor
