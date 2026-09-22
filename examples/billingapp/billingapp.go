@@ -192,7 +192,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	if err != nil {
 		return r, fmt.Errorf("read invoice: %w", err)
 	}
-	if r.InvoiceProfileSet, err = client.EnsureCustomerInvoiceProfile(ctx, (invoice.CustomerID).String(), openrails.InvoiceProfileDTO{
+	if r.InvoiceProfileSet, err = client.EnsureCustomerInvoiceProfile(ctx, invoice.CustomerID, openrails.InvoiceProfileDTO{
 		NetTermsDays: 14, CollectionMethod: "send_invoice",
 	}); err != nil {
 		return r, fmt.Errorf("invoice profile: %w", err)

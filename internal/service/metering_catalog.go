@@ -109,7 +109,7 @@ func (s *Service) ListUsageMeterOverrides(
 	items := make([]UsageMeterOverrideDTO, 0, len(page.Items))
 	for _, override := range page.Items {
 		items = append(items, UsageMeterOverrideDTO{
-			CustomerID: override.CustomerID.String(),
+			CustomerID: openrails.CustomerID(override.CustomerID).String(),
 			Subject:    override.Subject,
 			Email:      override.Email,
 			Price:      override.Price,

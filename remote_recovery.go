@@ -96,8 +96,8 @@ func (c *Client) PreviewTierChange(ctx context.Context, id SubscriptionID, reque
 	if err != nil {
 		return nil, err
 	}
-	if request.PriceID.IsZero() {
-		return nil, invalidErr("price_id is required")
+	if _, err := resourcePriceID(request.PriceID); err != nil {
+		return nil, err
 	}
 	var out TierChangePreviewResponse
 	if err := c.do(ctx, http.MethodPost, path+"/change-tier/preview", request, &out); err != nil {
@@ -111,8 +111,8 @@ func (c *Client) ChangeTier(ctx context.Context, id SubscriptionID, key string, 
 	if err != nil {
 		return nil, err
 	}
-	if request.PriceID.IsZero() {
-		return nil, invalidErr("price_id is required")
+	if _, err := resourcePriceID(request.PriceID); err != nil {
+		return nil, err
 	}
 	var out TierChangeResponse
 	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/change-tier", request, &out, http.Header{"Idempotency-Key": {key}}); err != nil {

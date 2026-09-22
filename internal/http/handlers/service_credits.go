@@ -165,7 +165,7 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(serviceBalanceResponse{
-		CustomerID:            snap.CustomerID.String(),
+		CustomerID:            openrails.CustomerID(snap.CustomerID).String(),
 		Currency:              snap.Currency,
 		BillingMode:           snap.BillingMode,
 		BalanceAmount:         snap.BalanceAmount,

@@ -30,7 +30,7 @@ func merchantInvoiceDTO(invoice *models.Invoice) (MerchantInvoiceDTO, error) {
 	if !ok {
 		return MerchantInvoiceDTO{}, fmt.Errorf("invoice currency is not registered")
 	}
-	return MerchantInvoiceDTO{InvoiceDTO: invoiceToDTO(invoice), CustomerID: openrails.CustomerID(invoice.CustomerID), UnitDecimals: decimals, AvailableActions: money.InvoiceAdminActions(invoice)}, nil
+	return MerchantInvoiceDTO{InvoiceDTO: invoiceToDTO(invoice), CustomerID: (openrails.CustomerID(invoice.CustomerID)).String(), UnitDecimals: decimals, AvailableActions: money.InvoiceAdminActions(invoice)}, nil
 }
 
 func (s *Service) ListMerchantInvoices(ctx context.Context, filter MerchantInvoiceFilter, limit, offset int) ([]MerchantInvoiceDTO, int64, error) {

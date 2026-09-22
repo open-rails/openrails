@@ -153,7 +153,7 @@ func GetAdminInvoice(gate billingauth.Gate) func(*httprequest.Request) {
 		permittedInvoiceActions(invoice, invoicePermission(r, gate, permissions.MerchantInvoicesUpdate), canCollect)
 		methods := make([]invoicePaymentMethodOption, 0)
 		if canCollect && r.State.PaymentMethodService != nil {
-			rows, err := r.State.PaymentMethodService.GetByUserID(r.Request.Context(), invoice.CustomerID.String())
+			rows, err := r.State.PaymentMethodService.GetByUserID(r.Request.Context(), invoice.CustomerID)
 			if err != nil {
 				writeInvoiceAdminError(r, err)
 				return
@@ -177,7 +177,12 @@ func ListAdminInvoicePayments(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	items, total, err := svc.ListInvoicePaymentAttempts(r.Request.Context(), identity.CustomerID(invoice.CustomerID), invoice.ID, limit, offset)
+	payer, err := parseServiceCustomerID(invoice.CustomerID)
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "invoice customer identity unavailable")
+		return
+	}
+	items, total, err := svc.ListInvoicePaymentAttempts(r.Request.Context(), *payer, invoice.ID, limit, offset)
 	if err != nil {
 		writeInvoiceAdminError(r, err)
 		return
@@ -214,7 +219,12 @@ func MutateAdminInvoice(action billingservice.InvoiceAdminAction) func(*httprequ
 				return
 			}
 		}
-		result, err := svc.ApplyMerchantInvoiceMutation(r.Request.Context(), identity.CustomerID(invoice.CustomerID), invoice.ID, billingservice.InvoiceAdminMutation{Action: action, Amount: body.Amount, Reference: body.Reference})
+		payer, err := parseServiceCustomerID(invoice.CustomerID)
+		if err != nil || payer == nil {
+			r.ErrorJSON(http.StatusInternalServerError, "invoice customer identity unavailable")
+			return
+		}
+		result, err := svc.ApplyMerchantInvoiceMutation(r.Request.Context(), *payer, invoice.ID, billingservice.InvoiceAdminMutation{Action: action, Amount: body.Amount, Reference: body.Reference})
 		if err != nil {
 			writeInvoiceAdminError(r, err)
 			return
@@ -243,7 +253,12 @@ func RetryAdminInvoiceCollection(r *httprequest.Request) {
 	}
 	// Do not gate on the read snapshot: a successful retry replay is valid even
 	// after the invoice becomes paid. The existing durable claim owns eligibility.
-	result, err := svc.RetryInvoiceCollectionIdempotent(r.Request.Context(), identity.CustomerID(invoice.CustomerID), billingservice.InvoiceCollectionRetryRequest{InvoiceID: invoice.ID, PaymentMethodID: body.PaymentMethodID, IdempotencyKey: key})
+	payer, err := parseServiceCustomerID(invoice.CustomerID)
+	if err != nil || payer == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "invoice customer identity unavailable")
+		return
+	}
+	result, err := svc.RetryInvoiceCollectionIdempotent(r.Request.Context(), *payer, billingservice.InvoiceCollectionRetryRequest{InvoiceID: invoice.ID, PaymentMethodID: body.PaymentMethodID, IdempotencyKey: key})
 	if err != nil {
 		writeInvoiceAdminError(r, err)
 		return

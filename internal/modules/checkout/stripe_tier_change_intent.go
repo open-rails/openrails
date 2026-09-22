@@ -759,7 +759,7 @@ func stripeTierChangeResponse(in gen.OpenrailsRailIntent) (*TierChangeResponse, 
 	subID := openrails.SubscriptionID(p.SubscriptionID)
 	end := p.PeriodEnd
 	resp := &TierChangeResponse{
-		Object: "tier_change", Mode: "tier_change", Action: p.Action, PriceID: openrails.PriceID(p.PriceID),
+		Object: "tier_change", Mode: "tier_change", Action: p.Action, PriceID: (openrails.PriceID(p.PriceID)).String(),
 		Payment: CheckoutSessionPaymentResponse{Rail: string(models.RailStripe)}, SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.AmountDueNow, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
 		OperationID: in.ID.String(),

@@ -56,7 +56,7 @@ func recordLedgerRepairAlert(ctx context.Context, notificationService *subscript
 		if err != nil {
 			return fmt.Errorf("ledger repair alert: affected customer: %w", err)
 		}
-		data.AffectedCustomerID = affected
+		data.AffectedCustomerID = affected.String()
 	}
 	if alert.Err != nil {
 		data.Error = alert.Err.Error()
