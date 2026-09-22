@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	orauthkit "github.com/open-rails/openrails/embed/authkit"
@@ -28,6 +29,8 @@ import (
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,11 +42,17 @@ func TestStripeEngineSignupSelfHTTP(t *testing.T) {
 		if name == "" {
 			name = "authentication"
 		}
-		t.Run(name, func(t *testing.T) { stripeEngineSignupSelfHTTP(t, reversal, false) })
+		t.Run(name, func(t *testing.T) { stripeEngineSignupSelfHTTP(t, reversal, false, false) })
 	}
 }
-func TestStripeEngineCustomerRetrySelfHTTP(t *testing.T) { stripeEngineSignupSelfHTTP(t, "", true) }
-func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry bool) {
+func TestStripeEngineCustomerRetrySelfHTTP(t *testing.T) {
+	stripeEngineSignupSelfHTTP(t, "", true, false)
+}
+func TestStripeEnginePaymentIntentWebhookQueuesVerification(t *testing.T) {
+	stripeEngineSignupSelfHTTP(t, "", false, true)
+}
+
+func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, webhookCompletion bool) {
 	clock := clockwork.NewFakeClockAt(time.Now().UTC().Add(-720*time.Hour - time.Minute).Truncate(time.Second))
 	h := New(t, t.Context())
 	var mu sync.Mutex
@@ -253,6 +262,45 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 		require.NoError(t, err)
 		require.Error(t, deliverReversal(), "out-of-order reversal waits for the original payment")
 	}
+	if webhookCompletion {
+		queue := "stripe_notification_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		workers := river.NewWorkers()
+		river.AddWorker(workers, &riverjobs.ProviderOperationWorker{DB: rt.DB, Config: rt.Config, Clock: clock, Registry: rt.IntentRunner().Registry})
+		jobs, err := river.NewClient(riverpgxv5.New(pool), &river.Config{Schema: "public", Workers: workers, Queues: map[string]river.QueueConfig{queue: {MaxWorkers: 2}}, FetchCooldown: time.Millisecond, FetchPollInterval: 10 * time.Millisecond})
+		require.NoError(t, err)
+		// Isolate this test's actual worker queue while retaining InsertTx on
+		// the real runtime connection and the production operation worker.
+		rt.DB.SetRiverJobInserter(stripeNotificationQueue{jobs, queue})
+		defer rt.DB.SetRiverJobInserter(rt.RiverProducer)
+		mu.Lock()
+		payment["status"], payment["amount_received"] = "succeeded", 999
+		bad, err := json.Marshal(map[string]any{"id": "evt_payment_wrong", "type": "payment_intent.succeeded", "data": map[string]any{"object": payment}})
+		require.NoError(t, err)
+		mu.Unlock()
+		var corrupted map[string]any
+		require.NoError(t, json.Unmarshal(bad, &corrupted))
+		corrupted["data"].(map[string]any)["object"].(map[string]any)["amount"] = 1000
+		bad, err = json.Marshal(corrupted)
+		require.NoError(t, err)
+		scope := db.WithPSPID(merchant.WithID(t.Context(), owned.MerchantID), psp)
+		require.Error(t, rt.DB.RunInMerchantConn(scope, func(ctx context.Context) error { return webhookService.HandleStripeWebhook(ctx, bad) }))
+		mu.Lock()
+		notice, err := json.Marshal(map[string]any{"id": "evt_payment_paid", "type": "payment_intent.succeeded", "data": map[string]any{"object": payment}})
+		mu.Unlock()
+		require.NoError(t, err)
+		for range 2 {
+			require.NoError(t, rt.DB.RunInMerchantConn(scope, func(ctx context.Context) error { return webhookService.HandleStripeWebhook(ctx, notice) }))
+		}
+		require.NoError(t, pool.QueryRow(t.Context(), `SELECT count(*) FROM billing.payments WHERE customer_id=$1`, user.ID).Scan(&paid))
+		require.Zero(t, paid, "notification alone must not record payment")
+		require.NoError(t, jobs.Start(t.Context()))
+		defer func() { require.NoError(t, jobs.Stop(context.WithoutCancel(t.Context()))) }()
+		require.Eventually(t, func() bool {
+			var state string
+			err := pool.QueryRow(t.Context(), `SELECT status FROM billing.rail_intents WHERE id=$1`, operation["id"]).Scan(&state)
+			return err == nil && state == intents.StatusSucceeded
+		}, 15*time.Second, 10*time.Millisecond, "queued provider verification settles the original operation")
+	}
 	result := call("POST", fmt.Sprintf("/payment-operations/%s/authentication/confirm", operation["id"]), "", nil)
 	require.Equal(t, "succeeded", result["status"])
 	completed := call("GET", fmt.Sprintf("/checkout/%s", quote["id"]), "", nil)
@@ -376,4 +424,17 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 		require.Equal(t, 1, paymentCreates)
 	}
 	mu.Unlock()
+}
+
+// stripeNotificationQueue changes only test routing; River still inserts the
+// actual job through the same transaction as the production wake boundary.
+type stripeNotificationQueue struct {
+	client *river.Client[pgx.Tx]
+	queue  string
+}
+
+func (q stripeNotificationQueue) InsertTx(ctx context.Context, tx pgx.Tx, args river.JobArgs, opts *river.InsertOpts) (*rivertype.JobInsertResult, error) {
+	copy := *opts
+	copy.Queue = q.queue
+	return q.client.InsertTx(ctx, tx, args, &copy)
 }
