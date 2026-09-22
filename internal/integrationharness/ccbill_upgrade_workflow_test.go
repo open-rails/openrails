@@ -56,7 +56,7 @@ func TestCCBillUpgradeBilledPriceAndDuplicateCallback(t *testing.T) {
 		t.Helper()
 		raw, err := json.Marshal(body)
 		require.NoError(t, err)
-		res, err := http.Post(surface.BaseURL+"/v1/webhooks/ccbill?eventType="+event, "application/json", bytes.NewReader(raw))
+		res, err := http.Post(surface.BaseURL+"/v1/webhooks/ccbill/"+account+"-"+subaccount+"?eventType="+event, "application/json", bytes.NewReader(raw))
 		require.NoError(t, err)
 		data, err := io.ReadAll(res.Body)
 		require.NoError(t, err)

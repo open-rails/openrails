@@ -54,6 +54,7 @@
       "func (c *Client) ExtendHold(ctx context.Context, requestID string, expiresAt time.Time) error",
       "func (c *Client) ForCatalogOwner(subject string) (*Client, error)",
       "func (c *Client) GetCatalog(ctx context.Context, id CatalogID) (*Catalog, error)",
+      "func (c *Client) GetCatalogForOwner(ctx context.Context, subject string) (*Catalog, error)",
       "func (c *Client) GetCheckoutConfig(ctx context.Context) (*CheckoutConfig, error)",
       "func (c *Client) GetCheckoutSession(ctx context.Context, customerID string, sessionID string) (*CheckoutSession, error)",
       "func (c *Client) GetCreditAccount(ctx context.Context, customerID string, currency string) (*CreditAccount, error)",
@@ -577,7 +578,7 @@
       "var ValidProviderWriteModes = map[string]bool{\n\t\"\":                        true,\n\tProviderWriteModeFull:     true,\n\tProviderWriteModeLimited:  true,\n\tProviderWriteModeReadOnly: true,\n}"
     ],
     "embed": [
-      "const (\n\tCustomerSelfService            = embedhttp.CustomerSelfService\n\tCustomerSubscriptionManagement = embedhttp.CustomerSubscriptionManagement\n)",
+      "const (\n\tCustomerSelfService            = embedhttp.CustomerSelfService\n\tCustomerSubscriptionManagement = embedhttp.CustomerSubscriptionManagement\n\tCustomerBillingManagement      = embedhttp.CustomerBillingManagement\n)",
       "const QueueBilling = riverjobs.QueueBilling",
       "func (InvoiceSweepArgs) InsertOpts() river.InsertOpts",
       "func (InvoiceSweepArgs) Kind() string",
@@ -1153,7 +1154,7 @@
       "type pullProviderConvergeLog struct {\n\tRunID             *uuid.UUID\n\tFindings          int\n\tAutoFixed         int\n\tReconcileRequired int\n\tRequiresReview    int `json:\"requires_review\"`\n\tAdminRequired     int `json:\"-\"`\n}"
     ],
     "internal/http/embedhttp": [
-      "type Capabilities struct {\n\tRouteGroups map[RouteSet]bool `json:\"route_groups\"`\n\n\tRoutes map[string]bool `json:\"routes\"`\n}"
+      "type Capabilities struct {\n\tRouteGroups map[RouteSet]bool `json:\"route_groups\"`\n\n\tFeatures map[string]bool `json:\"features\"`\n}"
     ],
     "internal/http/handlers": [
       "func (body *customerBillingPolicyWrite) UnmarshalJSON(raw []byte) error {\n\ttype declared customerBillingPolicyWrite\n\tdecoder := json.NewDecoder(bytes.NewReader(raw))\n\tdecoder.DisallowUnknownFields()\n\treturn decoder.Decode((*declared)(body))\n}",
@@ -2236,7 +2237,8 @@
       "billingauth": "github.com/open-rails/openrails/pkg/billingauth",
       "context": "context",
       "fmt": "fmt",
-      "router": "github.com/open-rails/openrails/internal/http/router"
+      "router": "github.com/open-rails/openrails/internal/http/router",
+      "routesurface": "github.com/open-rails/openrails/internal/http/routesurface"
     },
     "internal/http/embedhttp/customer_exposures.go": {
       "app": "github.com/open-rails/openrails/internal/app",
@@ -4951,6 +4953,7 @@
       "context": "context",
       "http": "net/http",
       "strings": "strings",
+      "url": "net/url",
       "utf8": "unicode/utf8"
     },
     "remote_commerce.go": {
@@ -5038,14 +5041,14 @@
     "internal/controlplane/merchant_team.go": "b457fe798ad2b67f5be3b17f0222ff5bbd6b048a8e59940cbd6a869aae09680f",
     "internal/controlplane/remote_application.go": "2c0097d0d8bc1063c255b66c75c25d633bd6b6aca69bdaecc2edafaade03fdd3",
     "internal/controlplane/routes.go": "500efe0011ab1a68f6daea30113a02f84590d4f272ad1a14be3d2ea2a1754966",
-    "internal/controlplane/service.go": "b70c60d8077f985d266970552e62d7b9904136131d751af4d232c9a68b774145",
+    "internal/controlplane/service.go": "2475d521e09840c621590fc8f73dec2326f5e4a507f5e633df6d7c3944003581",
     "internal/controlplane/service_jwt.go": "0c7497b227447df4caa5ef1effb1649ddf8ac139d077f7a18e153d5e051a4dbe",
-    "internal/http/embedhttp/capabilities.go": "7d53acb8e9ba6205b658b5e0e28afe1dbf0a8950176fadb82c4bd1986342d842",
-    "internal/http/embedhttp/configured.go": "38760578e418581a3407d9652760e581695fe86bd041bb2d04a9a6b109136942",
-    "internal/http/embedhttp/customer_exposures.go": "acf14da51642f368533ace36505d37dc0d55c61eb2f63d7bd687b0dfef911541",
-    "internal/http/embedhttp/embedhttp.go": "772ff5b945fe8618dd16736128d4fadd933b9d9a1d4fc1211fe51f1e2ec7399a",
+    "internal/http/embedhttp/capabilities.go": "b92d2dc4c40f4dd6979eab3bcb964cef7f0ac21bdf8e36a6281823b676472fb1",
+    "internal/http/embedhttp/configured.go": "f1be3abca02237ed91cbf295ee27de58d95f09a03b10d88e8166b797c8eb6d9b",
+    "internal/http/embedhttp/customer_exposures.go": "ac7bd6766203d3713562f1df0db21304246ed04482cdb5c4131318f30250808c",
+    "internal/http/embedhttp/embedhttp.go": "12bc6910baab3e19e3f5af7b92c2288accb519a4b40641fa0bc401f6495bd13d",
     "internal/http/embedhttp/route_set.go": "969f2f510a55479d674367881f5dc6c18491e310a51a8aeb62bca0c139e045de",
-    "internal/http/embedhttp/self.go": "73c2cabd6c1bf03c85a22f6e5033f21075fc7a183a1965f5dc26b087fc31acdc",
+    "internal/http/embedhttp/self.go": "637a8c088c1c1b17b259c9600b31cf6373b1dbb410c0343e369fecb39b6f79b7",
     "internal/http/handlers/admin_catalog.go": "b897d49a4dba9757fac687c07a0180147bc92d88955f1758603d2347ba5776f6",
     "internal/http/handlers/admin_catalog_drift.go": "fce9fd694763d9f6707773c6b33759364c4951553930c3df2f5edcba396a4804",
     "internal/http/handlers/admin_change_tier.go": "7528dfb867fd6df3df92ddd772140c9f72fa6110cf839ade1e696810689140d1",
@@ -5067,7 +5070,7 @@
     "internal/http/handlers/card_error.go": "74dc09332b00291b3aeeb147f37502cb3343c0d19a454ab768b3351d08678d20",
     "internal/http/handlers/catalog.go": "53faf186a4a1840f8d2007f2162829b42bb8fe6e86a4ed996784b084421fc6d2",
     "internal/http/handlers/catalog_decode.go": "7b9c82dfb71df389a61ce6aee99c95f15e970bdc0e1de4825497ec65987e825e",
-    "internal/http/handlers/catalogs.go": "26b54ca9e64d53334914f1df38867b46b908911aaebc47e49fed814713d9bf4e",
+    "internal/http/handlers/catalogs.go": "a550a72ccf1995c8a3668755889c5e59c1551aa8bbd3766999cf7794a84f5b7a",
     "internal/http/handlers/change_tier.go": "cddfb9fbbb3d30a864230b0ab895bdc06a317085e5b2a2b64e26804e19db4a11",
     "internal/http/handlers/checkout_config.go": "e2d91a53e38c9c5a504a67787c73a0a57c8f0e6975bf7d3277035dae130fd5e6",
     "internal/http/handlers/checkout_session.go": "ac707ffe0d6cf5c0ae3c469a8718f70d49e066b32bd24d63cd9dffa55f639be4",
@@ -5118,8 +5121,8 @@
     "internal/http/handlers/update_subscription_payment_method.go": "c277211f17f6d322d511d8238a9033a3b9c3a1d2809fc09ab0d51c0831889a80",
     "internal/http/handlers/user_payments.go": "0ecaca5883e5176b240dc03a513f2dc4afa483ea2200cf31e7bd6844cab21063",
     "internal/http/handlers/user_subscriptions.go": "f4d7dd869eedcc3e40fc49841e42daf654f2a60fe51874cda2ea12caa8920850",
-    "internal/http/handlers/webhook.go": "d12149faa9d5790daee49f255eeea6a8d3c94af16e82c1d65253ccccca5cfed8",
-    "internal/http/handlers/webhook_basistheory.go": "8ed2020e96c7ecfebc7932c446d72f257581a4e09904c75fe054cbeed0ff5d57",
+    "internal/http/handlers/webhook.go": "3ac673887917c093f0f4e495f89fa94dbaf50979667cc182e17a783680043ef5",
+    "internal/http/handlers/webhook_basistheory.go": "27daaa6b6486938af447b644163f499d59bc0e6d89da8ffc56c29df88abc5a21",
     "internal/http/handlers/webhook_stripe_thin.go": "ec424e5fa4c1e286c048f44aa63a84b75c381fbd33d5f8d84e644e4d018ba4d4",
     "internal/http/inprocess/stream_transport.go": "2c1a977df25c9e055f74984425aab7cabd891bee6a417b4e43b373eada5d44f8",
     "internal/http/inprocess/transport.go": "9adbd555762b141d8d11bae580fc7441d2f2b9f70f80b96dfa042fed673a71c5",
@@ -5138,17 +5141,17 @@
     "internal/http/router/mux.go": "580b315df02c66c7568c01af0806f8a6149bc7c2b812c04b5ad177f989273d56",
     "internal/http/router/router.go": "30ddebbb8d3b25bfcaf1c33d9fc62537599e50f965bd063e7f577a3fadf225b9",
     "internal/http/router/table.go": "454a793572fd27b8da4eadd64d8dcbb120ac021920a6ed2403a065381ce6b642",
-    "internal/http/routes/owner_catalog.go": "c7d95cc871583f685ebd6ee87ea7b37fd820cc1ea19cfdfdc6cbf77d5c4e4cda",
+    "internal/http/routes/owner_catalog.go": "4d79d3152ca9a2b9ee6925f24737ef9e5446d0905f8ccb1c7bf61e45127f07e8",
     "internal/http/routes/platform.go": "91ee70c261cd3c5a0685f996a7c225e771263405ede2267fed07dc08bab263f3",
-    "internal/http/routes/routes.go": "445b0d78e340cda1c2a1119446cec08cca4817b5940c36fa5b5c094e1eece318",
-    "internal/http/routes/self.go": "4a4c0b08bce4a6755ec9b3829cdafe047c3c97ab64b0cbe6017df9c8faa1c463",
+    "internal/http/routes/routes.go": "f3991449701e4033be93da4d2490d94ac73a548e2200446b12d3330465dabed6",
+    "internal/http/routes/self.go": "ef639f442560cbee8e061ad8500d7e2955714a74f474e55cee8a4abeb0e42769",
     "internal/http/routes_admin.go": "f26f62b5abaac2df15a562f3c028f1ebb1cb92978eaec4ae890d843ccafaed39",
     "internal/http/routes_admin_console.go": "49ef2a933c0603c774ffaa567fe79fdf2576a19f9f9a5e80d2e5e6980300ef50",
     "internal/http/routes_controlplane.go": "2ad52099584ea836cb9007739f335f241824bf07d9757a4def2be6a66d55c412",
     "internal/http/routes_platform.go": "342d3927eacfa12c8c8d1b8a7876c151e4815cdc30698d6baaf8685f5746e848",
     "internal/http/routes_public.go": "42a1ace7050cf297e5924d464802aa630c17f3f0d83ca084385fa119ee2d5f89",
     "internal/http/routes_self.go": "7034160e9b7dc5dd85d3f98d410901efd191987cda20e69979596d058c872652",
-    "internal/http/routesurface/provider_routes.go": "6a49245b179c577ea3d0d997234eb7314c19827b152931efd581625d54aab909",
+    "internal/http/routesurface/provider_routes.go": "701c581ca4b351845111d24bbc972f05af3f779e58271b3e644d7cb43cba6b30",
     "internal/http/server.go": "05b4f3a0d23248e104458adb36bf688f174cc914e61193474f50840748304271",
     "internal/httptesthost/routes.go": "8d7f26ea4f3647c7f81e5e7c462e293ec8d04b2368384e55739d49ceb0ae60ff",
     "internal/intents/payment_method_delete_authority.go": "edc67d168ceae15e148a920c5bacf5f3cfcb10c82f549265f61f8e9ff4855e7b",

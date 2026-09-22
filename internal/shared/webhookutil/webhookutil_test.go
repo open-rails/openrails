@@ -36,15 +36,15 @@ func TestCanonicalRailRefusesRetiredSegments(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{
 			"mobius",
-			"retired webhook rail segment: /webhooks/mobius was removed (or#893) — post to /webhooks/nmi; a PSP is named by the account_id path segment or the payload's account identity, not by the rail segment",
+			"retired webhook rail segment: /webhooks/mobius was removed (or#893) — post to /webhooks/nmi/{account_id}; a provider account is named by the required account_id path segment, not by the rail segment",
 		},
 		{
 			" MOBIUS/",
-			"retired webhook rail segment: /webhooks/mobius was removed (or#893) — post to /webhooks/nmi; a PSP is named by the account_id path segment or the payload's account identity, not by the rail segment",
+			"retired webhook rail segment: /webhooks/mobius was removed (or#893) — post to /webhooks/nmi/{account_id}; a provider account is named by the required account_id path segment, not by the rail segment",
 		},
 		{
 			"basis_theory",
-			"retired webhook rail segment: /webhooks/basis_theory was removed (or#893) — post to /webhooks/basistheory; a PSP is named by the account_id path segment or the payload's account identity, not by the rail segment",
+			"retired webhook rail segment: /webhooks/basis_theory was removed (or#893) — post to /webhooks/basistheory/{account_id}; a provider account is named by the required account_id path segment, not by the rail segment",
 		},
 	} {
 		got, err := CanonicalRail(tc.in)

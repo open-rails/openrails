@@ -38,6 +38,7 @@ func TestStripeRefundDeliveriesConcurrentlyRevokeOnePurchase(t *testing.T) {
 	dsn := dbtest.SharedSuperuserDSN(t)
 	slug := "refund-race-" + uuid.NewString()
 	secret := "whsec_refund_concurrency"
+	accountID := "acct_" + uuid.NewString()
 
 	rt, mid, err := newDeclaredMerchant(ctx, embed.Options{Config: &config.Config{
 		Env: "development", TestMode: config.CredentialPostureSandbox,
@@ -46,7 +47,7 @@ func TestStripeRefundDeliveriesConcurrentlyRevokeOnePurchase(t *testing.T) {
 		ProviderWriteMode:    config.ProviderWriteModeReadOnly,
 		DB:                   &config.DBConfig{URL: dsn},
 	}}, slug, embed.MerchantConfig{PSPs: map[string]embed.PSPConfig{
-		"stripe": {"stripe": {AccountID: "acct_" + uuid.NewString(), Secrets: map[string]string{"secret_key": "sk_test_fixture", "webhook_signing_secret": secret}}},
+		"stripe": {"stripe": {AccountID: accountID, Secrets: map[string]string{"secret_key": "sk_test_fixture", "webhook_signing_secret": secret}}},
 	}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
@@ -90,7 +91,7 @@ func TestStripeRefundDeliveriesConcurrentlyRevokeOnePurchase(t *testing.T) {
 		require.NoError(t, err)
 		go func() {
 			<-start
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/v1/merchants/"+slug+"/webhooks/stripe", bytes.NewReader(payload))
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/v1/merchants/"+slug+"/webhooks/stripe/"+accountID, bytes.NewReader(payload))
 			if err != nil {
 				results <- response{err: err}
 				return

@@ -59,7 +59,7 @@ admin responses are never replayed by global middleware.
 | GET | `/` | none | JSON service banner `{"service":"billing","status":"ok",...}` |
 | GET | `/health/live` (alias `/healthz`) | none | Unconditional liveness probe |
 | GET | `/health/ready` (alias `/readyz`) | none | Readiness: Postgres, configured Redis, merchant-secret backend, River producer/local consumer, auth verifier. 200 or 503 `not_ready`; `?verbose=1` adds per-dependency detail. `run-server --no-workers` remains not-ready |
-| GET | `/v1/capabilities` | none | Static capability document: `route_groups` (which route sets are mounted) + `routes` (provider-specific toggles: `billing_portal`, `solana`, `solana_signing`, `webhooks`, `secret_write`). ETagged, `Cache-Control: public, max-age=300` |
+| GET | `/v1/capabilities` | none | Static capability document: `route_groups` (which route sets are mounted) + `features` (`stripe_billing_portal`, `solana_one_time_payments`, `solana_subscription_management`, `provider_credential_writes`). Features require both an exposed HTTP action and provider support; webhooks appear only in route groups. ETagged, `Cache-Control: public, max-age=300` |
 | GET | `/v1/captcha/status` | none | Captcha challenge status for the browser tier |
 | GET | `/v1/captcha/client.js` | none | Captcha client script |
 | GET | `/v1/products` | optional | List products with embedded active prices. Query: `limit` (1-100, default 20), `offset` |
@@ -447,6 +447,7 @@ not supported. Catalog reads stay live.
 | POST | `/v1/catalog/prices/{id}/deactivate` | Deactivate an owned price |
 | POST | `/v1/catalog/prices/{id}/key` | Relabel an owned price's key |
 | GET | `/v1/merchant/catalogs` | List the merchant's catalogs (`merchant:catalog:read`) |
+| GET | `/v1/merchant/catalogs/by-owner` | Read an existing catalog by exact `owner_subject` query parameter without creating it (`merchant:catalog:read`); missing catalogs return 404 |
 | GET | `/v1/merchant/catalogs/{id}` | Read one merchant catalog (`merchant:catalog:read`) |
 | POST | `/v1/merchant/catalogs` | Ensure a catalog for an explicit `owner_subject` (`merchant:catalog:update`) |
 | POST | `/v1/merchant/catalog/products` | Create a product: at least `{ key, display_name }`, optionally `entitlements_spec` |
@@ -576,23 +577,21 @@ boundary). Success returns `200 { "status": "accepted" }`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/v1/webhooks/{provider}` | The standalone surface: NMI-backed rails / CCBill; the merchant is derived from the payload's account identity |
-| POST | `/v1/webhooks/{provider}/{account_id}` | Same, with the receiving PSP account pinned in the path (direct Stripe; multi-account rails) |
-| POST | `/billing/v1/merchants/{merchant}/webhooks/{provider}` | Embedded only: the host pins one merchant, so the `{merchant}` slug resolves it and THAT merchant's signing secret verifies the payload |
-| POST | `/billing/v1/merchants/{merchant}/webhooks/{provider}/{account_id}` | Embedded only, per-account (e.g. multiple NMI accounts) |
+| POST | `/v1/webhooks/{provider}/{account_id}` | Standalone: the receiving PSP account is explicitly pinned in the path and its credentials verify the callback |
+| POST | `/billing/v1/merchants/{merchant}/webhooks/{provider}/{account_id}` | Embedded: the host pins the merchant and receiving PSP account; that account's credentials verify the callback |
 
 `{provider}` is the gateway KIND — `nmi`, `ccbill`, `stripe`, `solana`,
 `basistheory`. It is never a PSP key: `mobius` and `paykings` both post to
-`/v1/webhooks/nmi` and are told apart by `{account_id}` or the payload's own
-account identity.
+`/v1/webhooks/nmi/{account_id}` and are distinguished by the explicit receiving
+account. Callback account information must agree with that selected account.
 
 Deployments using per-merchant hostnames (`api.<slug>.<domain>`) additionally
-serve `/v1/webhooks/{provider}[/{account_id}]` with the merchant resolved from
-the Host header.
+serve account-explicit webhook routes with the merchant resolved from the Host
+header. Accountless routes are not mounted.
 
 Verification per rail:
 
-- **NMI** (`/v1/webhooks/nmi`): JSON body; `Webhook-Signature`
+- **NMI** (`/v1/webhooks/nmi/{account_id}`): JSON body; `Webhook-Signature`
   (`t=...,s=...`) — the one header NMI sends, and the only one read.
   Test mode (config) bypasses the check.
 - **CCBill**: form-encoded; verified via CCBill's published source-IP ranges

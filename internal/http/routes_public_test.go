@@ -82,7 +82,7 @@ func TestStandaloneCapabilitiesCredentialAuthority(t *testing.T) {
 			var caps embedhttp.Capabilities
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &caps))
 			want := source == config.MerchantConfigSourceAPI && writable
-			require.Equal(t, want, caps.Routes["secret_write"], "source=%s writable=%v", source, writable)
+			require.Equal(t, want, caps.Features["provider_credential_writes"], "source=%s writable=%v", source, writable)
 		}
 	}
 }

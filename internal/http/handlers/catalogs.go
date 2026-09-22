@@ -74,6 +74,24 @@ func GetCatalog(r *request.Request) {
 	r.JSON(http.StatusOK, catalogView(row))
 }
 
+func GetCatalogForOwner(r *request.Request) {
+	owner := r.Query("owner_subject")
+	if err := catalogscope.ValidateSubject(owner); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, "invalid owner_subject")
+		return
+	}
+	row, err := catalog.NewCatalogRepo(r.State.DB).GetByOwner(r.Request.Context(), owner)
+	if errors.Is(err, pgx.ErrNoRows) {
+		r.ErrorJSON(http.StatusNotFound, "catalog not found")
+		return
+	}
+	if err != nil {
+		writeCatalogError(r, err)
+		return
+	}
+	r.JSON(http.StatusOK, catalogView(row))
+}
+
 func ListCatalogs(r *request.Request) {
 	limit, offset := parseIntDefault(r.Query("limit"), 50), parseIntDefault(r.Query("offset"), 0)
 	if limit < 1 || limit > 100 || offset < 0 || offset > math.MaxInt32 {

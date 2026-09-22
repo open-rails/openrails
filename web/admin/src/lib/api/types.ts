@@ -705,7 +705,7 @@ export interface TeamInviteResult {
 // --- Auth (AuthKit authhttp) ---
 
 export interface AuthCapabilities {
-  providers: {
+  external_login_providers: {
     id: string
     name: string
     kind: string

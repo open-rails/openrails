@@ -959,36 +959,33 @@ func (opts Options) merchantAdminOperationMW(perm string, operation middleware.A
 	return append(mw, trailing...)
 }
 
-// RegisterWebhookRoutes mounts the ONE standalone webhook surface (#650,
-// or#893): POST /webhooks/:provider (NMI/CCBill; the merchant is derived from
-// the payload's account identity, not the path) and
-// /webhooks/:provider/:account_id (direct Stripe). :provider is a RAIL —
+// RegisterWebhookRoutes mounts the standalone account-specific surface:
+// POST /webhooks/:provider/:account_id. The configured account resolves its
+// merchant; any payload account identity must agree. :provider is a RAIL —
 // nmi/ccbill/stripe/solana/basistheory — never a PSP key. This is the live
 // production entry point for inbound NMI/CCBill webhooks. Embedded hosts use
 // RegisterMerchantWebhookRoutes instead, since they pin one merchant in context
 // and have no payload-derived merchant to resolve.
 func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	rr.Handle(http.MethodPost, "/:provider/:account_id", h(httphandlers.Webhook))
-	rr.Handle(http.MethodPost, "/:provider", h(httphandlers.Webhook))
 }
 
 // RegisterMerchantWebhookRoutes mounts the merchant-scoped webhook surface
-// (POST /merchants/:merchant/webhooks/:provider, issue #529): the merchant is
-// resolved from the URL slug, then THAT merchant's signing secret verifies the
+// (POST /merchants/:merchant/webhooks/:provider/:account_id): the merchant is
+// resolved from the URL slug, then that account's signing secret verifies the
 // payload. This is the EMBEDDED surface only — a host that pins one merchant
 // has no payload-derived identity to resolve. or#893 removed the standalone
 // mount: there the canonical RegisterWebhookRoutes surface derives the merchant
 // from PSP identity, and a URL slug was a second way to say the
 // same thing.
 func RegisterMerchantWebhookRoutes(rr router.Router, rt *app.Runtime) {
-	rr.Handle(http.MethodPost, "/merchants/:merchant/webhooks/:provider", h(httphandlers.MerchantWebhook))
 	// #641: per-account endpoint — account_id in the path selects which account the
 	// event is for (verify with its secret). For multi-account rails like NMI.
 	rr.Handle(http.MethodPost, "/merchants/:merchant/webhooks/:provider/:account_id", h(httphandlers.MerchantWebhook))
 }
 
 // RegisterHostWebhookRoutes mounts the Host-routed webhook surface (#734):
-// POST /webhooks/:provider[/:account_id], merchant resolved from the request's
+// POST /webhooks/:provider/:account_id, merchant resolved from the request's
 // Host header via resolve — the SAME resolver merchant-scoped route
 // resolution and the issuer-consistency check use — rather than a URL slug
 // (RegisterMerchantWebhookRoutes) or payload account identity
@@ -1000,7 +997,6 @@ func RegisterMerchantWebhookRoutes(rr router.Router, rt *app.Runtime) {
 // is available (an attached control plane).
 func RegisterHostWebhookRoutes(rr router.Router, rt *app.Runtime, resolve merchant.HostResolver) {
 	handler := h(httphandlers.HostWebhook(resolve))
-	rr.Handle(http.MethodPost, "/webhooks/:provider", handler)
 	rr.Handle(http.MethodPost, "/webhooks/:provider/:account_id", handler)
 }
 

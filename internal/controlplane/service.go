@@ -590,10 +590,11 @@ func (c *ControlPlane) UserAuthenticator() billingauth.Authenticator {
 	if c == nil || c.authSvc == nil || c.authSvc.Verifier() == nil {
 		return nil
 	}
-	// Privileged routes need current account admission, not merely a valid
-	// unexpired signature. AuthKit also retains enrollment-only restrictions.
+	// Native identity follows the accepted access-token lifetime. Permission
+	// gates still consult current group authority; machine/delegated credential
+	// validation remains the verifier's responsibility.
 	return auth.NewAuthenticator(auth.AuthenticatorConfig{
-		Verifier:       auth.RequestVerifierFunc(c.authSvc.Verifier().VerifyRequestLive),
+		Verifier:       auth.RequestVerifierFunc(c.authSvc.Verifier().VerifyRequest),
 		OmitTokenRoles: true,
 	})
 }

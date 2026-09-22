@@ -52,14 +52,14 @@ func TestCapabilitiesHandler(t *testing.T) {
 			t.Errorf("route_groups[%s] = %v, want %v", rs, caps.RouteGroups[rs], w)
 		}
 	}
-	if caps.Routes["solana"] != true {
-		t.Errorf("routes.solana = %v, want true", caps.Routes["solana"])
+	if caps.Features["solana_one_time_payments"] != true {
+		t.Errorf("features.solana_one_time_payments = %v, want true", caps.Features["solana_one_time_payments"])
 	}
-	if caps.Routes["billing_portal"] != false {
-		t.Errorf("routes.billing_portal = %v, want false", caps.Routes["billing_portal"])
+	if caps.Features["stripe_billing_portal"] != false {
+		t.Errorf("features.stripe_billing_portal = %v, want false", caps.Features["stripe_billing_portal"])
 	}
-	if caps.Routes["webhooks"] != false {
-		t.Errorf("routes.webhooks = %v, want false", caps.Routes["webhooks"])
+	if _, exists := caps.Features["webhooks"]; exists {
+		t.Error("webhooks must be represented only in route_groups")
 	}
 }
 

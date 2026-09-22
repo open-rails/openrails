@@ -23,6 +23,9 @@ const (
 	// CustomerSubscriptionManagement exposes cancellation, resumption, subscription
 	// payment-method changes and invoice collection-method selection only.
 	CustomerSubscriptionManagement
+	// CustomerBillingManagement adds existing billing history, purchased access,
+	// saved methods and payment recovery without checkout or plan purchases.
+	CustomerBillingManagement
 )
 
 // CustomerHTTPConfig exposes a customer profile with its own explicit authority.
@@ -41,7 +44,7 @@ func validateCustomerExposures(exposures []CustomerHTTPConfig) error {
 		if e.DelegatedAuthenticator == nil {
 			return fmt.Errorf("openrails HTTP: customer exposure %q requires its own authenticator", e.Prefix)
 		}
-		if e.Scope != CustomerSelfService && e.Scope != CustomerSubscriptionManagement {
+		if e.Scope != CustomerSelfService && e.Scope != CustomerSubscriptionManagement && e.Scope != CustomerBillingManagement {
 			return fmt.Errorf("openrails HTTP: invalid customer scope %d", e.Scope)
 		}
 		if e.Prefix == "" || e.Prefix == "/" || !strings.HasPrefix(e.Prefix, "/") || path.Clean(e.Prefix) != e.Prefix || strings.ContainsAny(e.Prefix, "*+?#%\\ \t\r\n") {
@@ -75,9 +78,12 @@ func CustomerExposureRoutes(a *app.App, exposures []CustomerHTTPConfig) (*router
 		table := &router.Table{}
 		rr := router.NewMux(table, e.Prefix, a.Runtime)
 		delegated := middleware.DelegatedPrincipalRequired(e.DelegatedAuthenticator)
-		if e.Scope == CustomerSubscriptionManagement {
+		switch e.Scope {
+		case CustomerSubscriptionManagement:
 			httproutes.RegisterCustomerSubscriptionManagementRoutes(rr, a.Runtime, delegated)
-		} else {
+		case CustomerBillingManagement:
+			httproutes.RegisterCustomerBillingManagementRoutes(rr, a.Runtime, delegated, providers)
+		default:
 			httproutes.RegisterSelfServiceRoutes(rr, a.Runtime, delegated, providers)
 		}
 		wrapped := wrapCustomerRoutes(a.Runtime, table, host, e.Prefix)

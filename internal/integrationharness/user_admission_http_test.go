@@ -54,10 +54,16 @@ func TestHTTPUserAdmissionWorkflow(t *testing.T) {
 	require.NoError(t, core.BanUser(ctx, userID, &reason, nil, userID))
 	can, err := core.Can(ctx, authkit.UserSubject(userID), controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.Perm("merchant:members:manage"))
 	require.NoError(t, err)
-	require.True(t, can, "the role persists; the live account gate must veto it")
-	require.Equal(t, http.StatusUnauthorized, post(token))
+	require.True(t, can, "the current role remains usable through the accepted token lifetime")
+	require.Equal(t, http.StatusCreated, post(token))
 	status, body = requestJSON(t, http.MethodDelete, platform, token, nil)
-	require.Equal(t, http.StatusUnauthorized, status, string(body))
+	require.Equal(t, http.StatusOK, status, string(body))
+	// Identity stays stateless, but both merchant and platform authority are live.
+	require.NoError(t, core.OperatorUnassignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(userID), controlplane.MerchantRoleOwner))
+	require.NoError(t, core.OperatorUnassignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(userID), "owner"))
+	require.Equal(t, http.StatusForbidden, post(token))
+	status, body = requestJSON(t, http.MethodDelete, platform, token, nil)
+	require.Equal(t, http.StatusForbidden, status, string(body))
 }
 
 // This admission test starts with completed MFA; the actual enrollment workflow

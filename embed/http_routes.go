@@ -19,6 +19,7 @@ type CustomerHTTPScope = embedhttp.CustomerHTTPScope
 const (
 	CustomerSelfService            = embedhttp.CustomerSelfService
 	CustomerSubscriptionManagement = embedhttp.CustomerSubscriptionManagement
+	CustomerBillingManagement      = embedhttp.CustomerBillingManagement
 )
 
 // HTTPRoute is one native registration. Path uses net/http whole-segment

@@ -111,12 +111,9 @@ func seedProfileUser(t *testing.T, ctx context.Context, dsn, username string) st
 	core := ccbillIdentity(t, ctx, dsn)
 	user, err := core.CreateUser(ctx, username+"@test.example.com", username)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		deleted, err := core.HardDeleteUsers(context.Background(), []string{user.ID})
-		require.NoError(t, err)
-		require.Len(t, deleted, 1)
-		require.NoError(t, deleted[0].Err)
-	})
+	// Each fixture has a unique username in dbtest's owned scratch database.
+	// Its final database cleanup also removes identities; no lifecycle jobs
+	// or privileged per-user deletion are needed during test teardown.
 	return user.ID
 }
 
@@ -160,7 +157,7 @@ func postCCBillMerchantWebhook(t *testing.T, serverURL, slug string, payload map
 	body, err := json.Marshal(payload)
 	require.NoError(t, err)
 	req, err := http.NewRequest(http.MethodPost,
-		serverURL+"/v1/merchants/"+slug+"/webhooks/ccbill?eventType="+payload["eventType"].(string),
+		serverURL+"/v1/merchants/"+slug+"/webhooks/ccbill/"+payload["clientAccnum"].(string)+"-"+payload["clientSubacc"].(string)+"?eventType="+payload["eventType"].(string),
 		strings.NewReader(string(body)))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -353,8 +350,8 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 }
 
 // TestCCBillWebhookUnarmedRailFailsClosed (#788): a merchant with NO armed
-// ccbill account must REJECT the webhook (5xx — the provider redelivers once
-// armed), never ack-and-drop and never default-allow processing.
+// ccbill account must REJECT the explicitly addressed unknown account (404),
+// never ack-and-drop and never default-allow processing.
 func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
@@ -373,8 +370,8 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 	username := "ccbill_off_" + uuid.NewString()[:8]
 	seedProfileUser(t, ctx, dsn, username)
 
-	// Force the webhook route mounted (the armed-account derivation would
-	// drop it) so the DISPATCHER's fail-closed rejection is what answers.
+	// The callback route exists independently of accounts, but its account
+	// lookup must refuse this unknown account before invoking the dispatcher.
 	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{}})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
@@ -382,7 +379,7 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 
 	payload := ccbillNewSalePayload("945299-0000", uuid.NewString(), "test-form", username, "", "0999", "1999")
 	status, body := postCCBillMerchantWebhook(t, server.URL, slug, payload)
-	require.Equal(t, http.StatusInternalServerError, status, "unarmed rail must reject, never accept: %s", body)
+	require.Equal(t, http.StatusNotFound, status, "unknown account must reject, never accept: %s", body)
 	require.NotContains(t, body, "accepted")
 
 	// Fail closed means NOTHING was processed.

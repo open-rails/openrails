@@ -2,6 +2,7 @@ package embed
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -85,4 +86,38 @@ func TestCustomerExposureValidationRefusesAmbiguityAndFallbackAuthority(t *testi
 	require.NoError(t, standalone.ConfigureHTTP(HTTPConfig{Standalone: true}))
 	_, err = standalone.HTTPRoutes()
 	require.ErrorContains(t, err, "no control plane")
+}
+
+func TestCustomerBillingManagementRoutesAndCapabilities(t *testing.T) {
+	runtime := reviewRuntime(nil, nil)
+	require.NoError(t, runtime.ConfigureHTTP(HTTPConfig{CustomerExposures: []CustomerHTTPConfig{{
+		Prefix: "/v1/me", Scope: CustomerBillingManagement,
+		DelegatedAuthenticator: billingauth.DelegatedAuthenticatorFunc(reviewReject),
+	}}}))
+	mux := reviewMount(t, runtime)
+	for _, path := range []string{"/products", "/payments", "/invoices", "/subscriptions", "/payment-methods"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pay/v1/me"+path, nil))
+		require.Equal(t, http.StatusUnauthorized, rec.Code, path)
+	}
+	for _, path := range []string{"/checkout", "/subscriptions/x/change-tier", "/subscriptions/x/provider-cutover", "/billing-portal", "/subscriptions/x/solana-tier-change"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/pay/v1/me"+path, nil))
+		require.Equal(t, http.StatusNotFound, rec.Code, path)
+	}
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pay/v1/capabilities", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var capabilities struct {
+		RouteGroups map[string]bool `json:"route_groups"`
+		Features    map[string]bool `json:"features"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &capabilities))
+	require.True(t, capabilities.RouteGroups["customer"])
+	require.False(t, capabilities.RouteGroups["checkout"])
+	require.False(t, capabilities.Features["stripe_billing_portal"])
+	require.False(t, capabilities.Features["solana_one_time_payments"])
+	require.False(t, capabilities.Features["provider_credential_writes"])
+	require.NotContains(t, capabilities.Features, "webhooks")
+	require.NotContains(t, rec.Body.String(), `"routes"`)
 }

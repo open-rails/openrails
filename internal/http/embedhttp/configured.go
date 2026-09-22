@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
@@ -13,7 +14,7 @@ import (
 // disables HTTP entirely. A non-nil configuration includes capability discovery
 // and provider callbacks; accepting a callback still requires an armed account
 // and valid provider verification. Management and buyer surfaces are opt-in and
-// independent of in-process Client or CatalogClient access.
+// independent of in-process Client access and its catalog-scoped views.
 type HTTPConfig struct {
 	// Standalone selects the attached control plane's billing, identity and console
 	// surface. Health endpoints remain the host's responsibility.
@@ -94,17 +95,34 @@ func ConfiguredRoutes(a *app.App, policy *HTTPConfig, delegated billingauth.Dele
 	asm.Authenticator = cfg.Authenticator
 	asm.Gate = cfg.Gate
 	active := cfg.routeSets()
-	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime, cfg.Checkout || cfg.Customer)
+	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime, cfg.Checkout || cfg.Customer || len(cfg.CustomerExposures) > 0)
 	if err != nil {
 		return nil, err
 	}
 	// Generic callbacks remain registered as API-owned accounts are added after
 	// startup. Request-time account/signature verification is authoritative.
 	providers.Webhooks = true
-	table := asm.NewRoutes(Options{RouteSets: withoutRouteSet(active, RouteSetCustomer), AdvertiseRouteSets: active, ProviderRoutes: &providers})
+	capabilities := configuredCapabilities(cfg, providers)
+	table := asm.NewRoutes(Options{RouteSets: withoutRouteSet(active, RouteSetCustomer), AdvertiseRouteSets: active, ProviderRoutes: &providers, Capabilities: &capabilities})
 	if cfg.Customer {
 		self := NewSelfRoutes(a.Runtime, delegated, &providers, asm.HostResolve)
 		table.Entries = append(table.Entries, self.Entries...)
 	}
 	return table, nil
+}
+
+func configuredCapabilities(cfg HTTPConfig, providers routesurface.ProviderRoutes) Capabilities {
+	active := cfg.routeSets()
+	fullCustomer, solanaManagement := cfg.Customer, cfg.Customer
+	for _, exposure := range cfg.CustomerExposures {
+		fullCustomer = fullCustomer || exposure.Scope == CustomerSelfService
+		solanaManagement = solanaManagement || exposure.Scope == CustomerSelfService || exposure.Scope == CustomerBillingManagement
+	}
+	if len(cfg.CustomerExposures) > 0 && !cfg.Customer {
+		active = append(active, RouteSetCustomer)
+	}
+	caps := buildCapabilities(active, providers)
+	caps.Features["stripe_billing_portal"] = fullCustomer && providers.StripePortal
+	caps.Features["solana_subscription_management"] = solanaManagement && providers.SolanaSigning
+	return caps
 }

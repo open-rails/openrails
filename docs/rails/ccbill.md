@@ -110,8 +110,10 @@ webhook arrives.
 
 Point CCBill's Webhooks admin at:
 
-- `POST /v1/webhooks/ccbill` (standalone; the merchant is resolved from the payload's account), or
-- `POST <prefix>/v1/merchants/{merchant}/webhooks/ccbill` (embedded, e.g. `/billing/v1/...`)
+- `POST /v1/webhooks/ccbill/{account_id}` (standalone; the configured account resolves its merchant), or
+- `POST <prefix>/v1/merchants/{merchant}/webhooks/ccbill/{account_id}` (embedded, e.g. `/billing/v1/...`)
+
+`account_id` is the configured `clientAccnum-clientSubacc` identity and must match the payload. Accountless webhook URLs are not registered.
 
 The `eventType` must arrive as a query parameter and, when the body also
 carries one, the two must match. Payloads may be form-encoded or JSON.

@@ -56,9 +56,10 @@ func newCCBillWebhookRequest(t *testing.T, testMode bool, remoteAddr string) (*h
 	t.Helper()
 	w := httptest.NewRecorder()
 	body := `{"eventType":"NewSaleSuccess","clientAccnum":"900000","clientSubacc":"0000","transactionId":"1"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill?eventType=NewSaleSuccess", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill/900000-0000?eventType=NewSaleSuccess", strings.NewReader(body))
 	req.RemoteAddr = remoteAddr
 	req.SetPathValue("provider", "ccbill")
+	req.SetPathValue("account_id", "900000-0000")
 	req = req.WithContext(merchant.WithID(req.Context(), merchant.ID(uuid.New())))
 	rt := &app.Runtime{Config: &config.Config{
 		TestMode:                 credentialPostureFromBool(testMode),
@@ -90,7 +91,7 @@ func TestCCBillWebhookSandboxPostureHonorsDeclaredAllowlist(t *testing.T) {
 	Webhook(r)
 
 	require.NotEqual(t, http.StatusForbidden, w.Code)
-	require.Equal(t, http.StatusInternalServerError, w.Code) // enqueue fails: no River producer in test runtime
+	require.Equal(t, http.StatusServiceUnavailable, w.Code) // account resolution requires the omitted merchants service
 }
 
 // SEC-19: an UNPROVEN probe (the shape the pre-fix code produced structurally —
@@ -123,7 +124,7 @@ func TestCCBillWebhookUnprovenLiveProbeFailsClosed(t *testing.T) {
 
 func TestCCBillWebhookIPAllowedMatrix(t *testing.T) {
 	newReq := func(testMode bool, allowlist []string) *httprequest.Request {
-		req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill", nil)
+		req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill/900000-0000", nil)
 		return httprequest.NewHTTP(httptest.NewRecorder(), req, &app.Runtime{Config: &config.Config{
 			TestMode:                 credentialPostureFromBool(testMode),
 			CCBillWebhookIPAllowlist: allowlist,
@@ -151,7 +152,7 @@ func TestCCBillWebhookIPAllowedMatrix(t *testing.T) {
 	require.True(t, ccbillWebhookIPAllowed(newReq(true, devAllowlist), "203.0.113.5"))
 
 	// Nil config / nil state never bypass.
-	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill", nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill/900000-0000", nil)
 	require.False(t, ccbillWebhookIPAllowed(httprequest.NewHTTP(httptest.NewRecorder(), req, nil), "203.0.113.5"))
 }
 
@@ -190,12 +191,13 @@ func newCCBillWebhookRequestBehindProxy(t *testing.T, remoteAddr, forwardedFor s
 	t.Helper()
 	w := httptest.NewRecorder()
 	body := `{"eventType":"NewSaleSuccess","clientAccnum":"900000","clientSubacc":"0000","transactionId":"1"}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill?eventType=NewSaleSuccess", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill/900000-0000?eventType=NewSaleSuccess", strings.NewReader(body))
 	req.RemoteAddr = remoteAddr
 	if forwardedFor != "" {
 		req.Header.Set("X-Forwarded-For", forwardedFor)
 	}
 	req.SetPathValue("provider", "ccbill")
+	req.SetPathValue("account_id", "900000-0000")
 	req = req.WithContext(merchant.WithID(req.Context(), merchant.ID(uuid.New())))
 	rt := &app.Runtime{
 		Config:         &config.Config{TestMode: config.CredentialPostureLive, TrustedProxies: trustedProxies},
@@ -220,7 +222,7 @@ func TestCCBillWebhookAllowsRequestBehindTrustedProxy(t *testing.T) {
 	// wired in this test runtime) instead of 403ing at the IP allowlist —
 	// proof the resolved client IP (from XFF, since the proxy is trusted) was
 	// evaluated, not the load balancer's own address.
-	require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+	require.Equal(t, http.StatusServiceUnavailable, w.Code, w.Body.String())
 }
 
 // #746: without trusted_proxies configured, a spoofed X-Forwarded-For

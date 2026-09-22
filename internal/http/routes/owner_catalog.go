@@ -117,5 +117,6 @@ func RegisterCatalogCollectionRoutes(rr router.Router, rt *app.Runtime, opts Opt
 	write := append([]router.Middleware{catalogModeWriteGuardMW(rt), opts.merchantActionPermissionMW(permissions.MerchantCatalogUpdate)}, dbMW...)
 	rr.Handle(http.MethodGet, "", h(handlers.ListCatalogs), read...)
 	rr.Handle(http.MethodPost, "", h(handlers.EnsureCatalogForOwner), write...)
+	rr.Handle(http.MethodGet, "/by-owner", h(handlers.GetCatalogForOwner), read...)
 	rr.Handle(http.MethodGet, "/:id", h(handlers.GetCatalog), read...)
 }

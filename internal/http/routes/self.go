@@ -30,9 +30,20 @@ const CustomerRoutePrefix = "/customers"
 // end-user and their merchant. No `:user_id` in any path: a browser token can
 // only act on its own subject.
 func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW router.Middleware, providerRoutes routesurface.ProviderRoutes) {
+	registerSelfServiceRoutes(rr, rt, delegatedMW, providerRoutes, false)
+}
+
+// RegisterCustomerBillingManagementRoutes exposes the customer's existing
+// billing history, access, payment methods and agreement management. Creating a
+// checkout or selecting a different product/price remains with the host.
+func RegisterCustomerBillingManagementRoutes(rr router.Router, rt *app.Runtime, delegatedMW router.Middleware, providerRoutes routesurface.ProviderRoutes) {
+	registerSelfServiceRoutes(rr, rt, delegatedMW, providerRoutes, true)
+}
+
+func registerSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW router.Middleware, providerRoutes routesurface.ProviderRoutes, managementOnly bool) {
 	mw := []router.Middleware{delegatedMW}
-	// Pin a merchant-scoped DB connection AFTER the delegated token resolves the
-	// merchant, so RLS constrains every merchant-owned query (#227).
+	// Pin the request's merchant-scoped DB connection after the verified
+	// principal resolves the merchant used by repository predicates.
 	if rt != nil && rt.DB != nil {
 		mw = append(mw, middleware.MerchantDBConnMW(rt.DB))
 	}
@@ -82,18 +93,22 @@ func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	subs.Handle(http.MethodGet, "", h(httphandlers.GetMySubscriptions))
 	subs.Handle(http.MethodGet, "/:id", h(httphandlers.GetSubscription))
 	subs.Handle(http.MethodPost, "/:id/retry-now", h(httphandlers.RetryMySubscriptionNow))
-	subs.Handle(http.MethodPost, "/:id/change-tier", h(httphandlers.ChangeTier))
-	subs.Handle(http.MethodPost, "/:id/change-tier/preview", h(httphandlers.ChangeTierPreview))
-	subs.Handle(http.MethodPost, "/:id/provider-cutover", h(httphandlers.MyProviderCutover))
-	subs.Handle(http.MethodGet, "/:id/provider-cutover", h(httphandlers.MyProviderCutover))
-	subs.Handle(http.MethodPost, "/:id/provider-cutover/preview", h(httphandlers.PreviewMyProviderCutover))
+	if !managementOnly {
+		subs.Handle(http.MethodPost, "/:id/change-tier", h(httphandlers.ChangeTier))
+		subs.Handle(http.MethodPost, "/:id/change-tier/preview", h(httphandlers.ChangeTierPreview))
+		subs.Handle(http.MethodPost, "/:id/provider-cutover", h(httphandlers.MyProviderCutover))
+		subs.Handle(http.MethodGet, "/:id/provider-cutover", h(httphandlers.MyProviderCutover))
+		subs.Handle(http.MethodPost, "/:id/provider-cutover/preview", h(httphandlers.PreviewMyProviderCutover))
+	}
 	if providerRoutes.SolanaSigning {
 		// App-driven on-chain cancel (#266/#271) and tier change (#272): the
 		// prepare -> sign -> confirm -> mirror loops. Need an OpenRails signer (#661).
 		subs.Handle(http.MethodPost, "/:id/solana-cancel-tx", h(httphandlers.PrepareSolanaCancelTx))
 		subs.Handle(http.MethodPost, "/:id/solana-cancel", h(httphandlers.ConfirmSolanaCancel))
-		subs.Handle(http.MethodPost, "/:id/solana-tier-change", h(httphandlers.PrepareSolanaTierChange))
-		subs.Handle(http.MethodPost, "/:id/solana-tier-change/confirm", h(httphandlers.ConfirmSolanaTierChange))
+		if !managementOnly {
+			subs.Handle(http.MethodPost, "/:id/solana-tier-change", h(httphandlers.PrepareSolanaTierChange))
+			subs.Handle(http.MethodPost, "/:id/solana-tier-change/confirm", h(httphandlers.ConfirmSolanaTierChange))
+		}
 	}
 
 	// Payment methods.
@@ -107,12 +122,14 @@ func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	pm.Handle(http.MethodDelete, "/:id", h(httphandlers.DeletePaymentMethod))
 
 	// Checkout: create a session and read/confirm it (browser self-checkout).
-	checkout := group.Group("/checkout")
-	checkout.Handle(http.MethodPost, "", h(httphandlers.CreateCheckoutSession))
-	checkout.Handle(http.MethodGet, "/:id", h(httphandlers.GetCheckoutSession))
-	checkout.Handle(http.MethodPost, "/:id/confirm", h(httphandlers.ConfirmCheckoutSession))
+	if !managementOnly {
+		checkout := group.Group("/checkout")
+		checkout.Handle(http.MethodPost, "", h(httphandlers.CreateCheckoutSession))
+		checkout.Handle(http.MethodGet, "/:id", h(httphandlers.GetCheckoutSession))
+		checkout.Handle(http.MethodPost, "/:id/confirm", h(httphandlers.ConfirmCheckoutSession))
+	}
 
-	if providerRoutes.StripePortal {
+	if providerRoutes.StripePortal && !managementOnly {
 		group.Handle(http.MethodPost, "/billing-portal", h(httphandlers.CreatePortalSession))
 	}
 }

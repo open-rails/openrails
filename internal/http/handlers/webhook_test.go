@@ -13,7 +13,7 @@ import (
 func newTestWebhookRequest(t *testing.T, body string) (*httprequest.Request, *httptest.ResponseRecorder) {
 	t.Helper()
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/webhooks/ccbill/900000-0000", strings.NewReader(body))
 	return httprequest.NewHTTP(w, req, nil), w
 }
 

@@ -329,8 +329,7 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 	// delegated-token verifier (#339).
 	s.registerSelfServiceRoutes(mux)
 
-	// Canonical provider-only webhook surface (#650): /v1/webhooks/:provider for NMI/CCBill
-	// (their payloads carry account identity) and /v1/webhooks/:provider/:account_id for
+	// Canonical account-specific webhook surface: /v1/webhooks/:provider/:account_id for
 	// direct Stripe. The handler resolves the PSP from the payload/route, derives
 	// the owning merchant from that globally-unique account row, and verifies the signature
 	// with THAT account's secret. This is the canonical multi-merchant shape.

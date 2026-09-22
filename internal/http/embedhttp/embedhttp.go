@@ -51,6 +51,8 @@ type Options struct {
 	// Empty → falls back to RouteSets.
 	AdvertiseRouteSets []RouteSet
 	ProviderRoutes     *routesurface.ProviderRoutes
+	// Capabilities includes separately mounted customer exposure profiles.
+	Capabilities *Capabilities
 }
 
 // Assembler builds the gin-free embedded billing surface from the gin-free
@@ -201,7 +203,11 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	if !providerRoutes.Webhooks {
 		advertise = withoutRouteSet(advertise, RouteSetWebhooks)
 	}
-	mux.Handle(http.MethodGet+" "+EmbeddedV1Prefix+"/capabilities", CapabilitiesHandler(advertise, providerRoutes))
+	capabilities := buildCapabilities(advertise, providerRoutes)
+	if opts.Capabilities != nil {
+		capabilities = *opts.Capabilities
+	}
+	mux.Handle(http.MethodGet+" "+EmbeddedV1Prefix+"/capabilities", capabilitiesHandler(capabilities))
 
 	// browserTier tracks the checkout patterns mounted below (#765): the ONLY
 	// route set on this combined handler that belongs to the permissive-CORS
