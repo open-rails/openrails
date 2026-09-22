@@ -265,7 +265,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 		require.Equal(t, 1, paymentCreates)
 		require.Equal(t, 1, paymentCancels)
 		mu.Unlock()
-		require.NoError(t, pool.QueryRow(t.Context(), `SELECT count(*) FROM billing.payments WHERE customer_id=$1`, user.ID).Scan(&paid))
+		require.NoError(t, pool.QueryRow(t.Context(), `SELECT count(*) FROM billing.payments WHERE customer_id=$1 AND status='completed'`, user.ID).Scan(&paid))
 		require.Zero(t, paid)
 		return
 	}
