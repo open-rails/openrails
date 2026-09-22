@@ -13,7 +13,7 @@ SET xmloption = content;
 SET client_min_messages = warning;
 
 -- btree_gist backs the EXCLUDE constraints on uuid+tstzrange
-CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 
 CREATE SCHEMA IF NOT EXISTS openrails;
