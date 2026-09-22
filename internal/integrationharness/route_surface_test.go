@@ -4,6 +4,7 @@ package integrationharness
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -24,7 +25,8 @@ import (
 // exact-match "GET /" root is "GET /{$}"). The /auth/* control-plane routes are
 // asserted against controlplane.RouteSpecs() dynamically, because that set is
 // owned by AuthKit and moves with its version — the assertion here is that
-// every spec is mounted, verbatim, under /auth.
+// every spec is mounted under /auth, including the explicit HEAD mirrors that
+// AuthKit's mount supplies for GET routes.
 func TestStandaloneRouteSurface(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
@@ -80,14 +82,23 @@ func TestStandaloneRouteSurface(t *testing.T) {
 	sort.Strings(want)
 	require.Equal(t, want, gotBilling, "standalone billing route surface drifted from the #670 golden")
 
-	// Control-plane surface == the mounted AuthKit RouteSpecs, verbatim.
+	// Control-plane surface == the AuthKit specs plus their HEAD mirrors.
 	cp := embcp.Get(assembled.App)
 	require.NotNil(t, cp)
 	var wantAuth []string
+	explicitHeads := map[string]bool{}
+	for _, spec := range cp.RouteSpecs() {
+		if spec.Method == http.MethodHead {
+			explicitHeads[spec.Path] = true
+		}
+	}
 	for _, spec := range cp.RouteSpecs() {
 		wantAuth = append(wantAuth, spec.Method+" /auth"+spec.Path)
+		if spec.Method == http.MethodGet && !explicitHeads[spec.Path] {
+			wantAuth = append(wantAuth, http.MethodHead+" /auth"+spec.Path)
+		}
 	}
 	sort.Strings(wantAuth)
-	require.Equal(t, wantAuth, gotAuth, "mounted /auth surface must equal controlplane.RouteSpecs()")
+	require.Equal(t, wantAuth, gotAuth, "mounted /auth surface must equal controlplane.RouteSpecs() with HEAD mirrors")
 	require.NotEmpty(t, wantAuth)
 }
