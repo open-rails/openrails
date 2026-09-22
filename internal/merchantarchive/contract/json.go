@@ -254,7 +254,8 @@ var jsonRules = map[string]jsonRule{
 	})),
 	// Engine-authored payment correlation, not an arbitrary provider body.
 	"payments.metadata": nullable(object(map[string]jsonRule{
-		"order_id": textValue, "provider_transaction_id": textValue, "e2e_run_id": textValue, "stripe_invoice_id": textValue,
+		"initial_payment_reversal": func(v any) bool { return v == "refund" || v == "dispute" },
+		"order_id":                 textValue, "provider_transaction_id": textValue, "e2e_run_id": textValue, "stripe_invoice_id": textValue,
 		"refund_review": func(v any) bool { return v == "confirmed charge on a cancelled subscription" },
 	})),
 	"invoice_items.metadata": nullable(object(map[string]jsonRule{
@@ -297,7 +298,8 @@ var jsonRules = map[string]jsonRule{
 	// ordinary subscription updates add notes and supersession markers.
 	// Superseding a NULL response wraps it as previous_gateway_response:null.
 	"subscriptions.gateway_response": nullable(object(map[string]jsonRule{
-		"order_id": textValue, "provider_transaction_id": textValue,
+		"initial_payment_reversal": func(v any) bool { return v == "refund" || v == "dispute" },
+		"order_id":                 textValue, "provider_transaction_id": textValue,
 		"delayed_start": textValue, "e2e_run_id": textValue, "admin_notes": textValue,
 		"superseded_at": textValue, "superseded_by_subscription_id": nullable(textValue),
 		"previous_gateway_response": func(v any) bool { return v == nil },
