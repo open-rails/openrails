@@ -260,6 +260,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	)
 
 	users := group.Group("/users/:user_id")
+	users.Handle(http.MethodPost, "/product-access/check", h(httphandlers.ServiceCheckUserProductAccess), readMW...)
 	users.Handle(http.MethodGet, "/product-access",
 		h(httphandlers.ServiceGetUserProductAccess),
 		readMW...,

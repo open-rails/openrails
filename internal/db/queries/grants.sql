@@ -484,3 +484,35 @@ WHERE g.merchant_id=sqlc.arg(merchant_id)::uuid AND g.source_type='subscription'
       AND i.subscription_id::text=g.source_id AND i.status='succeeded'
       AND g.starts_at=(i.payload->'renewal'->>'period_start')::timestamptz
       AND g.ends_at=(i.payload->'renewal'->>'period_end')::timestamptz);
+
+-- CheckProductAccess: one bounded lookup for the page's candidate products.
+-- name: CheckProductAccess :many
+SELECT candidate.product_id, EXISTS (
+ SELECT 1 FROM openrails.grants g
+ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+   AND g.customer_id = sqlc.arg(customer_id)::uuid
+   AND g.product_id = candidate.product_id
+   AND g.kind = 'ownership' AND g.event = 'grant'
+   AND g.starts_at <= sqlc.arg(at_time)::timestamptz
+   AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(at_time)::timestamptz)
+   AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+    WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+      AND t.event IN ('revoke','expire','supersede'))
+) AS has_access
+FROM unnest(sqlc.arg(product_ids)::uuid[]) AS candidate(product_id);
+
+-- ListActiveOwnershipGrantsPage returns a bounded, stable ID-ordered page.
+-- name: ListActiveOwnershipGrantsPage :many
+SELECT g.* FROM openrails.grants g
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND g.customer_id = sqlc.arg(customer_id)::uuid
+  AND g.kind = 'ownership' AND g.event = 'grant'
+  AND g.product_id IS NOT NULL
+  AND g.starts_at <= sqlc.arg(at_time)::timestamptz
+  AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(at_time)::timestamptz)
+  AND g.id > sqlc.arg(after_id)::uuid
+  AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+   WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+    AND t.event IN ('revoke','expire','supersede'))
+ORDER BY g.id
+LIMIT sqlc.arg(page_limit)::int;

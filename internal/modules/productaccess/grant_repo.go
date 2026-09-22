@@ -189,18 +189,51 @@ func (r *ProductAccessGrantRepo) HasActiveAccess(ctx context.Context, userID str
 	if err != nil {
 		return false, err
 	}
-	live, err := r.db.Gen(ctx).ListLiveGrantsByCustomer(ctx, gen.ListLiveGrantsByCustomerParams{
-		MerchantID: tid.UUID(), CustomerID: tsid,
-	})
+	rows, err := r.db.Gen(ctx).CheckProductAccess(ctx, gen.CheckProductAccessParams{MerchantID: tid.UUID(), CustomerID: tsid, ProductIds: []uuid.UUID{productID}, AtTime: at})
 	if err != nil {
 		return false, err
 	}
-	for i := range live {
-		if ownershipInWindow(live[i], productID, at) {
-			return true, nil
-		}
+	return len(rows) == 1 && rows[0].HasAccess, nil
+}
+
+func (r *ProductAccessGrantRepo) CheckActiveProducts(ctx context.Context, userID string, products []uuid.UUID, at time.Time) (map[uuid.UUID]bool, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return false, nil
+	customer, err := db.ResolveCustomerID(userID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Gen(ctx).CheckProductAccess(ctx, gen.CheckProductAccessParams{MerchantID: mid.UUID(), CustomerID: customer, ProductIds: products, AtTime: at})
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[uuid.UUID]bool, len(rows))
+	for _, row := range rows {
+		result[row.ProductID] = row.HasAccess
+	}
+	return result, nil
+}
+
+func (r *ProductAccessGrantRepo) ListActivePage(ctx context.Context, userID string, after uuid.UUID, limit int, at time.Time) ([]models.ProductAccessGrant, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	customer, err := db.ResolveCustomerID(userID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Gen(ctx).ListActiveOwnershipGrantsPage(ctx, gen.ListActiveOwnershipGrantsPageParams{MerchantID: mid.UUID(), CustomerID: customer, AfterID: after, PageLimit: int32(limit), AtTime: at})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]models.ProductAccessGrant, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, ownershipModel(row, nil))
+	}
+	return result, nil
 }
 
 // ownershipInWindow reports whether a live grant grants product access at `at`.

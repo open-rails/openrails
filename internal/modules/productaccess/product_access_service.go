@@ -232,3 +232,48 @@ func (s *Service) ListAllGrantsByUser(ctx context.Context, userID string) ([]mod
 	})
 	return grants, err
 }
+
+// CheckProducts computes one bounded set of current access decisions.
+func (s *Service) CheckProducts(ctx context.Context, userID string, products []uuid.UUID) (map[uuid.UUID]bool, error) {
+	if len(products) > 100 {
+		return nil, errors.New("at most 100 product IDs are allowed")
+	}
+	for _, id := range products {
+		if id == uuid.Nil {
+			return nil, errors.New("product ID is required")
+		}
+	}
+	if len(products) == 0 {
+		return map[uuid.UUID]bool{}, nil
+	}
+	var result map[uuid.UUID]bool
+	at := s.now().UTC()
+	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
+		var err error
+		result, err = r.CheckActiveProducts(ctx, userID, products, at)
+		return err
+	})
+	return result, err
+}
+
+// ListAccessibleProductsPage returns current ownership grants in stable ID order.
+func (s *Service) ListAccessibleProductsPage(ctx context.Context, userID string, after uuid.UUID, limit int) ([]models.ProductAccessGrant, bool, error) {
+	if limit < 1 || limit > 100 {
+		return nil, false, errors.New("limit must be between 1 and 100")
+	}
+	var result []models.ProductAccessGrant
+	at := s.now().UTC()
+	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
+		var err error
+		result, err = r.ListActivePage(ctx, userID, after, limit+1, at)
+		return err
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	hasMore := len(result) > limit
+	if hasMore {
+		result = result[:limit]
+	}
+	return result, hasMore, nil
+}
