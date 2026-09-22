@@ -5,8 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/url"
-	"strconv"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -115,14 +113,12 @@ func (s *Store) RetainInitialMembershipDecline(ctx context.Context, in gen.Openr
 	if rejection == nil {
 		return errors.New("initial decline requires a provider rejection")
 	}
-	fields, err := url.ParseQuery(rejection.RawResponse)
-	if err != nil {
-		return err
-	}
-	code, err := strconv.Atoi(fields.Get("response_code"))
-	if err != nil || fields.Get("response") != "2" || code != rejection.ResponseCode {
+	_, err := nmi.ParseSaleResponse(rejection.RawResponse)
+	var parsed *nmi.CustomerVaultError
+	if !errors.As(err, &parsed) || nmi.RequiresVerification(err) || parsed.ResponseCode != rejection.ResponseCode {
 		return errors.New("initial rejection is not a qualified provider decline")
 	}
+	code := parsed.ResponseCode
 	expected, err := collectionBinding(in)
 	if err != nil {
 		return err
@@ -138,7 +134,7 @@ func (s *Store) RetainInitialMembershipDecline(ctx context.Context, in gen.Openr
 	if binding != expected {
 		return errors.New("initial decline envelope differs from canonical accepted operation")
 	}
-	fact := InitialMembershipRefusal{initialMembershipRefusal{Binding: binding, Kind: "provider_declined", ResponseCode: code, LocalizationID: rejection.LocalizationID}}
+	fact := InitialMembershipRefusal{initialMembershipRefusal{Binding: binding, Kind: "provider_declined", ResponseCode: code, LocalizationID: parsed.LocalizationID}}
 	if err := fact.Validate(current); err != nil {
 		return err
 	}

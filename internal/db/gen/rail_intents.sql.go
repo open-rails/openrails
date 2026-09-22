@@ -36,7 +36,6 @@ func (q *Queries) AdvanceRailIntentVerification(ctx context.Context, arg Advance
 }
 
 const claimDueRailIntents = `-- name: ClaimDueRailIntents :many
-
 WITH due AS (
     SELECT id FROM openrails.rail_intents
     WHERE rail_intents.merchant_id = $2::uuid AND (
@@ -562,7 +561,6 @@ func (q *Queries) CountDestructiveIntentsForMerchantSince(ctx context.Context, a
 }
 
 const countDestructiveRailIntentsExecutedSince = `-- name: CountDestructiveRailIntentsExecutedSince :one
-
 SELECT count(*) FROM openrails.rail_intents
 WHERE merchant_id = $1::uuid
   AND intent_type = ANY ($2::text[])
@@ -624,7 +622,6 @@ func (q *Queries) CountRailIntents(ctx context.Context, arg CountRailIntentsPara
 }
 
 const enqueueRailIntent = `-- name: EnqueueRailIntent :one
-
 
 INSERT INTO openrails.rail_intents (
     merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
@@ -701,14 +698,10 @@ type EnqueueRailIntentParams struct {
 	CustodianID    *uuid.UUID
 }
 
-// #358 phase A: provider intent ledger queries — idempotent enqueue, the
-// executor's SKIP LOCKED lease claim, status transitions, supersede-by-subject
-// and relevance-window expiry. merchant_id is stamped explicitly by the
-// producers (request paths run on a merchant-pinned connection, so RLS
-// double-checks the stamp). The executor/verifier workers do NOT sweep
-// cross-merchant: there is no privileged pool, so they fan out over the
-// merchants a 0022 SECURITY DEFINER work queue names and run each pass inside
-// that merchant's own pinned scope (or#862).
+// Financial operation ledger: accepted authorization, submission claims,
+// provider evidence and terminal accounting are always merchant scoped.
+// Production dispatch is one typed River job per accepted operation; legacy
+// batch claims remain only for the existing financial regression harness.
 // =====================================================================
 // Enqueue (effectively-once per logical intent)
 // =====================================================================
@@ -1012,7 +1005,6 @@ func (q *Queries) GetLiveTierChangeRailIntent(ctx context.Context, arg GetLiveTi
 }
 
 const getRailIntent = `-- name: GetRailIntent :one
-
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents WHERE rail_intents.merchant_id = $2::uuid AND id = $1
 `
 
@@ -1941,7 +1933,6 @@ func (q *Queries) ListRetainedSubscriptionCollectionsForArchive(ctx context.Cont
 }
 
 const listStuckRailIntents = `-- name: ListStuckRailIntents :many
-
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
 WHERE rail_intents.merchant_id = $1::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= $2::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $3::timestamptz)
@@ -2270,7 +2261,6 @@ func (q *Queries) MarkRailIntentFailedTerminal(ctx context.Context, arg MarkRail
 }
 
 const markRailIntentSucceeded = `-- name: MarkRailIntentSucceeded :execrows
-
 UPDATE openrails.rail_intents
 SET status = 'succeeded',
     executed_at = $1::timestamptz,
@@ -2687,7 +2677,6 @@ func (q *Queries) SupersedePendingNMIDelete(ctx context.Context, arg SupersedePe
 }
 
 const supersedeRailIntentsBySubject = `-- name: SupersedeRailIntentsBySubject :execrows
-
 UPDATE openrails.rail_intents
 SET status = 'superseded',
     last_failure_reason = $1,

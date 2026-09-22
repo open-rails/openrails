@@ -329,19 +329,23 @@ func (c *NMIClient) AttemptManualRebill(ctx context.Context, params ManualRebill
 	if isDirectResponseApproved(output) {
 		transactionID := strings.TrimSpace(output.Get("transactionid"))
 		if transactionID == "" {
-			err := errors.New("approved manual rebill missing transaction id")
+			err := ambiguous(errors.New("approved manual rebill missing transaction id"))
 			return &ManualRebillResponse{Success: false, ErrorMessage: err.Error()}, err
 		}
 		return &ManualRebillResponse{Success: true, TransactionID: transactionID}, nil
 	}
 
-	errorMessage := responseText(output, "Unknown error")
-	return &ManualRebillResponse{
+	rejection := newSaleError(response, output)
+	result := &ManualRebillResponse{
 		Success:      false,
-		Declined:     strings.TrimSpace(output.Get("response")) == "2",
-		ErrorMessage: errorMessage,
+		Declined:     !RequiresVerification(rejection),
+		ErrorMessage: rejection.Error(),
 		ResponseCode: parseMobiusResponseCode(output),
-	}, nil
+	}
+	if RequiresVerification(rejection) {
+		return result, rejection
+	}
+	return result, nil
 }
 
 // AddRecurringPlan creates a new NMI Recurring Plan via POST /v5/plans. NMI

@@ -33,6 +33,7 @@ type fakeNMICheckoutGateway struct {
 	*httptest.Server
 	saleResponseCode atomic.Value // string: NMI response_code for type=sale
 	vaults           atomic.Int64
+	sales            atomic.Int64
 }
 
 func newFakeNMICheckoutGateway(t *testing.T) *fakeNMICheckoutGateway {
@@ -60,6 +61,7 @@ func newFakeNMICheckoutGateway(t *testing.T) *fakeNMICheckoutGateway {
 		}
 		_ = r.ParseForm()
 		if r.Form.Get("type") == "sale" {
+			f.sales.Add(1)
 			code := f.saleResponseCode.Load().(string)
 			if code == "100" {
 				id := "txn_" + uuid.NewString()[:8]
@@ -124,7 +126,7 @@ func observeRefusal(t *testing.T, label string, session *openrails.CheckoutSessi
 
 // TestCheckoutRefusalsAreCodedAcrossDeployments drives NMI one-off checkouts
 // through the shared Client against a loopback gateway: an approved sale, an
-// issuer decline, a gateway rejection and a saved payment method that no
+// issuer decline, a contradictory gateway reply and a saved payment method that no
 // longer exists. Embedded and standalone must classify each identically, with
 // the stable refusal codes rather than an opaque 500.
 func TestCheckoutRefusalsAreCodedAcrossDeployments(t *testing.T) {
@@ -166,7 +168,7 @@ func TestCheckoutRefusalsAreCodedAcrossDeployments(t *testing.T) {
 	steps := []step{
 		{name: "approved", saleResponse: "100", payment: token},
 		{name: "insufficient_funds", saleResponse: "202", payment: token},
-		{name: "gateway_rejected", saleResponse: "300", payment: token},
+		{name: "gateway_unknown", saleResponse: "300", payment: token},
 		{name: "stale_saved_card", saleResponse: "100", payment: func(openrails.CustomerID) openrails.CheckoutPayment {
 			return openrails.CheckoutPayment{Rail: "nmi", PaymentMethodID: openrails.PaymentMethodID(uuid.New())}
 		}},
@@ -178,13 +180,21 @@ func TestCheckoutRefusalsAreCodedAcrossDeployments(t *testing.T) {
 		for _, s := range steps {
 			gateway.saleResponseCode.Store(s.saleResponse)
 			customer := openrails.CustomerID(uuid.New())
-			session, err := client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
+			request := openrails.CreateCheckoutSessionRequest{
 				Customer:       openrails.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "buyer@example.test", Username: "buyer-" + customer.String()[:8]},
 				PriceID:        openrails.PriceID(priceID),
 				IdempotencyKey: uuid.NewString(),
 				Payment:        s.payment(customer),
-			})
+			}
+			session, err := client.CreateCheckoutSession(ctx, request)
 			out[s.name] = observeRefusal(t, name+" "+s.name, session, err)
+			if s.name == "gateway_unknown" {
+				submissions, vaults := gateway.sales.Load(), gateway.vaults.Load()
+				replay, replayErr := client.CreateCheckoutSession(ctx, request)
+				require.Equal(t, out[s.name], observeRefusal(t, name+" same operation replay", replay, replayErr))
+				require.Equal(t, submissions, gateway.sales.Load(), "same accepted operation cannot submit again after an uncertain reply")
+				require.Equal(t, vaults, gateway.vaults.Load(), "replay reuses the operation's payment method")
+			}
 		}
 		observed[name] = out
 	}
@@ -196,9 +206,8 @@ func TestCheckoutRefusalsAreCodedAcrossDeployments(t *testing.T) {
 		Refused: true, CardDeclined: true,
 	}, want["insufficient_funds"])
 	require.Equal(t, refusalObservation{
-		Status: 502, Type: "api_error", Code: "payment_provider_rejected", DeclineReason: "processor_error", FailureCode: "transaction_was_rejected_by_gateway",
-		ProviderRej: true, Internal: true,
-	}, want["gateway_rejected"])
+		Status: 409, Type: "invalid_request_error", Code: "resource_conflict",
+	}, want["gateway_unknown"])
 	require.Equal(t, refusalObservation{
 		Status: 402, Type: "card_error", Code: "payment_method_stale", Refused: true, Stale: true,
 	}, want["stale_saved_card"])

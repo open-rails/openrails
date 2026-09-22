@@ -350,7 +350,7 @@ func TestCCBillRefundReservationsAndReceiptsRemainUnresolved(t *testing.T) {
 func TestNMIRefundDeclineReleasesReservation(t *testing.T) {
 	fx := seedRefundablePayment(t, 500)
 	fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
-	fake.refundBody.Store(`{"object":"transaction","id":"txn_refund_1","response":"2","response_text":"DECLINED","response_code":"300"}`)
+	fake.refundBody.Store(`{"object":"transaction","id":"txn_refund_1","response":"2","response_text":"DECLINED","response_code":"200"}`)
 
 	row, err := fx.refundRunner(client, fullModeConfig()).EnqueueAndExecute(dbtest.WithTestMerchant(context.Background()), fx.enqueueParams(500))
 	require.NoError(t, err)

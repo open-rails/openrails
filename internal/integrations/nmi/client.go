@@ -285,45 +285,39 @@ func (c *NMIClient) checkConfiguration() error {
 }
 
 func newAddSubscriptionError(rawResponse string, output url.Values) error {
-	message := output.Get("response_message")
-	if message == "" {
-		message = output.Get("responsetext")
-	}
-	if message == "" {
-		message = rawResponse
-	}
-	message = fmt.Sprintf("failed to add subscription: %s", message)
+	message := "failed to add subscription"
 
 	responseCode := parseMobiusResponseCode(output)
 
-	return &CustomerVaultError{
+	rejection := &CustomerVaultError{
 		Message:        message,
 		ResponseCode:   responseCode,
 		LocalizationID: nmiLocalizationID(responseCode),
 		Detail:         nmiResponseDetail(responseCode),
 		RawResponse:    rawResponse,
 	}
+	if strings.TrimSpace(output.Get("response")) != "2" {
+		return ambiguous(fmt.Errorf("NMI outcome requires verification (response code %d)", responseCode))
+	}
+	return rejection
 }
 
 func newSaleError(rawResponse string, output url.Values) error {
-	message := output.Get("response_message")
-	if message == "" {
-		message = output.Get("responsetext")
-	}
-	if message == "" {
-		message = rawResponse
-	}
-	message = fmt.Sprintf("sale failed: %s", message)
+	message := "sale failed"
 
 	responseCode := parseMobiusResponseCode(output)
 
-	return &CustomerVaultError{
+	rejection := &CustomerVaultError{
 		Message:        message,
 		ResponseCode:   responseCode,
 		LocalizationID: nmiLocalizationID(responseCode),
 		Detail:         nmiResponseDetail(responseCode),
 		RawResponse:    rawResponse,
 	}
+	if strings.TrimSpace(output.Get("response")) != "2" {
+		return ambiguous(fmt.Errorf("NMI outcome requires verification (response code %d)", responseCode))
+	}
+	return rejection
 }
 
 func parseMobiusResponseCode(output url.Values) int {
@@ -339,22 +333,44 @@ func parseMobiusResponseCode(output url.Values) int {
 	return code
 }
 
+// parseDirectResponse validates the single, coherent facts in a classic NMI
+// mutation reply. Repeated facts (even equal values) cannot qualify an outcome.
+// Callers retaining raw refusal proof must use this same guard when reparsing it.
 func parseDirectResponse(response string) (url.Values, error) {
 	output, err := url.ParseQuery(response)
 	if err != nil {
-		// A 200 body arrived but is unreadable: the mutation likely executed.
-		return nil, ambiguous(fmt.Errorf("failed to parse response: %s", response))
+		return nil, ambiguous(fmt.Errorf("invalid direct response encoding"))
 	}
-	// url.ParseQuery accepts arbitrary text as a key, so parsing alone does not
-	// prove that NMI returned a usable mutation result. Without the gateway's
-	// response discriminator, the charge may have executed and must be verified
-	// rather than treated as a clean decline.
-	switch strings.TrimSpace(output.Get("response")) {
-	case "1", "2", "3":
+	for _, values := range output {
+		if len(values) != 1 {
+			return nil, ambiguous(fmt.Errorf("direct response contains repeated fields"))
+		}
+	}
+	result := strings.TrimSpace(output.Get("response"))
+	// Some classic plan-management replies omit the processor code. An absent
+	// code does not contradict approval; financial callers still require a receipt.
+	if result == "1" && len(output["response_code"]) == 0 {
 		return output, nil
-	default:
-		return nil, ambiguous(fmt.Errorf("direct response carried no valid response code"))
 	}
+	code, err := strconv.Atoi(strings.TrimSpace(output.Get("response_code")))
+	if err != nil {
+		return nil, ambiguous(fmt.Errorf("direct response contains no valid processor code"))
+	}
+	switch result {
+	case "1":
+		if code == 100 {
+			return output, nil
+		}
+	case "2":
+		if code >= 200 && code < 300 {
+			return output, nil
+		}
+	case "3":
+		if code >= 300 && code < 500 {
+			return output, nil
+		}
+	}
+	return nil, ambiguous(fmt.Errorf("direct response contains contradictory outcome facts"))
 }
 
 func isDirectResponseApproved(output url.Values) bool {

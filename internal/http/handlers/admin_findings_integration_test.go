@@ -533,7 +533,7 @@ func TestFindingsQueueApprovePartialFailureLeavesOpen(t *testing.T) {
 			Action: recommend.ActionCancelAndRefund,
 			Params: map[string]any{"subscription_id": openrails.SubscriptionID(subID).String(), "refund_payment_id": openrails.PaymentID(payID).String()},
 		})
-	fx.fake.refundStatus.Store(`{"object":"transaction","id":"txn_refund_1","response":"2","response_text":"DECLINED","response_code":"300"}`)
+	fx.fake.refundStatus.Store(`{"object":"transaction","id":"txn_refund_1","response":"2","response_text":"DECLINED","response_code":"200"}`)
 
 	rec := fx.do(AdminResolveFinding, http.MethodPost, "/findings/"+findingID.String()+"/resolve",
 		map[string]any{"outcome": "approve", "notes": "dup"}, findingID.String())

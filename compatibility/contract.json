@@ -1236,7 +1236,6 @@
       "type cutoverVaultRef struct {\n\tID        string `json:\"id\"`\n\tBillingID string `json:\"billing_id,omitempty\"`\n}",
       "type v5CustomerBillingRequest struct {\n\tID             string            `json:\"id,omitempty\"`\n\tCurrency       string            `json:\"currency,omitempty\"`\n\tPaymentDetails *v5PaymentDetails `json:\"payment_details,omitempty\"`\n\tFirstName      string            `json:\"first_name,omitempty\"`\n\tLastName       string            `json:\"last_name,omitempty\"`\n\tCompany        string            `json:\"company,omitempty\"`\n\tAddress1       string            `json:\"address1,omitempty\"`\n\tAddress2       string            `json:\"address2,omitempty\"`\n\tCity           string            `json:\"city,omitempty\"`\n\tState          string            `json:\"state,omitempty\"`\n\tZip            string            `json:\"zip,omitempty\"`\n\tCountry        string            `json:\"country,omitempty\"`\n\tPhone          string            `json:\"phone,omitempty\"`\n\tEmail          string            `json:\"email,omitempty\"`\n}",
       "type v5CustomerVaultRef struct {\n\tID string `json:\"id\"`\n}",
-      "type v5Error struct {\n\tType      string `json:\"type\"`\n\tErrorCode string `json:\"error_code\"`\n\tMessage   string `json:\"message\"`\n\tRefID     string `json:\"ref_id\"`\n}",
       "type v5OrderDetails struct {\n\tID               string `json:\"id,omitempty\"`\n\tOrderDescription string `json:\"order_description,omitempty\"`\n}",
       "type v5PaymentDetails struct {\n\tCardNumber   string `json:\"card_number,omitempty\"`\n\tCardExp      string `json:\"card_exp,omitempty\"`\n\tPaymentToken string `json:\"payment_token,omitempty\"`\n}",
       "type v5PaymentRequest struct {\n\tAmount         json.RawMessage     `json:\"amount,omitempty\"`\n\tCurrency       string              `json:\"currency,omitempty\"`\n\tPaymentDetails *v5PaymentDetails   `json:\"payment_details,omitempty\"`\n\tCustomerVault  *v5CustomerVaultRef `json:\"customer_vault,omitempty\"`\n\tOrderDetails   *v5OrderDetails     `json:\"order_details,omitempty\"`\n}",
@@ -2844,9 +2843,7 @@
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",
       "nmi": "github.com/open-rails/openrails/internal/integrations/nmi",
-      "strconv": "strconv",
-      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
-      "url": "net/url"
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions"
     },
     "internal/intents/manual_rebill_completion.go": {
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
