@@ -307,7 +307,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 			SET status='deleted', deleted_at=now(), updated_at=now() WHERE id=$1::uuid`,
 			res.MerchantID.String())
 		require.NoError(t, err)
-		require.NoError(t, cp.Core().DeletePermissionGroup(ctx, embcp.MerchantGroup(gone),
+		require.NoError(t, cp.Core().DeleteGroupInstanceByID(ctx, res.GroupID,
 			authkit.DeletePermissionGroupOptions{ReleaseSlug: true}))
 
 		res2, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{
