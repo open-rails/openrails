@@ -32,9 +32,8 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 	}))
 	declaredKey := "stripe-declared-" + uuid.NewString()[:8]
 	runtime, err := embed.New(ctx, embed.Options{
-		Merchant: &embed.MerchantDeclaration{Slug: dbtest.TestMerchantSlug, PSPs: []embed.PSPDeclaration{{Key: declaredKey, Rail: "stripe", AccountID: "acct_declared_" + uuid.NewString()[:8]}}},
-		Config:   &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
-		Redis:    h.Redis, River: embed.RiverManagedByOpenRails(),
+		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
+		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
@@ -42,6 +41,10 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 	require.NoError(t, err)
 	mid := dbtest.TestMerchantID
 
+	// This compatibility fixture uses the existing AuthKit-owned standalone
+	// merchant. Constructor declaration identity/restarts are covered separately;
+	// seed an attribution-only row through the shared provider fixture here.
+	integrationharness.SeedPSPs(ctx, t, app.HostGraph(runtime).Runtime, mid, config.PSPSet{declaredKey: {Rail: "stripe", AccountID: "acct_declared_" + uuid.NewString()[:8]}})
 	var pspID uuid.UUID
 	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT id FROM billing.psps WHERE merchant_id=$1 AND key=$2`, mid.UUID(), declaredKey).Scan(&pspID))
 	require.NotEqual(t, uuid.Nil, pspID)
