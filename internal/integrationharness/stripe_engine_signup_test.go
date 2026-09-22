@@ -39,11 +39,17 @@ func TestStripeEngineSignupSelfHTTP(t *testing.T) {
 		if name == "" {
 			name = "authentication"
 		}
-		t.Run(name, func(t *testing.T) { stripeEngineSignupSelfHTTP(t, reversal, false) })
+		t.Run(name, func(t *testing.T) { stripeEngineSignupSelfHTTP(t, reversal, "") })
 	}
 }
-func TestStripeEngineCustomerRetrySelfHTTP(t *testing.T) { stripeEngineSignupSelfHTTP(t, "", true) }
-func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry bool) {
+func TestStripeEngineCustomerRetrySelfHTTP(t *testing.T) {
+	stripeEngineSignupSelfHTTP(t, "", "current")
+}
+func TestStripeEngineReplacementSelfHTTP(t *testing.T) {
+	stripeEngineSignupSelfHTTP(t, "", "replacement")
+}
+func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, retryMode string) {
+	customerRetry := retryMode != ""
 	clock := clockwork.NewFakeClockAt(time.Now().UTC().Add(-720*time.Hour - time.Minute).Truncate(time.Second))
 	h := New(t, t.Context())
 	var mu sync.Mutex
@@ -78,15 +84,20 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 			setupCreates++
 			meta := metadata()
 			require.Equal(t, "off_session", r.PostForm.Get("usage"))
-			setup = map[string]any{"id": "seti_signup", "status": "requires_payment_method", "customer": "cus_signup", "payment_method": "pm_signup", "usage": "off_session", "payment_method_types": []string{"card"}, "livemode": false, "metadata": meta, "client_secret": "seti_signup_secret_private"}
+			setupID, methodID := "seti_signup", "pm_signup"
+			if setupCreates > 1 {
+				setupID, methodID = "seti_replacement", "pm_replacement"
+			}
+			setup = map[string]any{"id": setupID, "status": "requires_payment_method", "customer": "cus_signup", "payment_method": methodID, "usage": "off_session", "payment_method_types": []string{"card"}, "livemode": false, "metadata": meta, "client_secret": setupID + "_secret_private"}
 			write(setup)
-		case r.Method == "GET" && r.URL.Path == "/v1/setup_intents/seti_signup":
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/setup_intents/"):
+			require.Equal(t, "/v1/setup_intents/"+setup["id"].(string), r.URL.Path)
 			if setupPaid {
 				setup["status"] = "succeeded"
 			}
 			write(setup)
-		case r.Method == "GET" && r.URL.Path == "/v1/payment_methods/pm_signup":
-			write(map[string]any{"id": "pm_signup", "type": "card", "customer": "cus_signup", "livemode": false, "card": map[string]any{"last4": "4242", "brand": "visa", "exp_month": 12, "exp_year": 2035}})
+		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/payment_methods/"):
+			write(map[string]any{"id": strings.TrimPrefix(r.URL.Path, "/v1/payment_methods/"), "type": "card", "customer": "cus_signup", "livemode": false, "card": map[string]any{"last4": "4242", "brand": "visa", "exp_month": 12, "exp_year": 2035}})
 		case r.Method == "POST" && r.URL.Path == "/v1/payment_intents":
 			paymentCreates++
 			meta := metadata()
@@ -102,7 +113,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 					require.Equal(t, "true", r.PostForm.Get("off_session"))
 				}
 			}
-			payment = map[string]any{"id": "pi_signup", "status": "requires_action", "customer": "cus_signup", "payment_method": "pm_signup", "amount": 999, "amount_received": 0, "currency": "usd", "setup_future_usage": "off_session", "capture_method": "automatic", "confirmation_method": "automatic", "livemode": false, "metadata": meta, "client_secret": "pi_signup_secret_private", "latest_charge": "ch_signup"}
+			payment = map[string]any{"id": "pi_signup", "status": "requires_action", "customer": "cus_signup", "payment_method": r.PostForm.Get("payment_method"), "amount": 999, "amount_received": 0, "currency": "usd", "setup_future_usage": "off_session", "capture_method": "automatic", "confirmation_method": "automatic", "livemode": false, "metadata": meta, "client_secret": "pi_signup_secret_private", "latest_charge": "ch_signup"}
 			if customerRetry && paymentCreates > 1 {
 				id, charge := "pi_renewal", "ch_renewal"
 				if paymentCreates > 2 {
@@ -135,7 +146,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 			}
 			write(payment)
 		case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/v1/charges/"):
-			ch := map[string]any{"id": payment["latest_charge"], "payment_intent": payment["id"], "customer": "cus_signup", "payment_method": "pm_signup", "amount": 999, "amount_captured": 999, "currency": "usd", "status": "succeeded", "paid": true, "captured": true}
+			ch := map[string]any{"id": payment["latest_charge"], "payment_intent": payment["id"], "customer": "cus_signup", "payment_method": payment["payment_method"], "amount": 999, "amount_captured": 999, "currency": "usd", "status": "succeeded", "paid": true, "captured": true}
 			if reversal == "refund" {
 				ch["refunded"] = true
 				ch["amount_refunded"] = 999
@@ -171,6 +182,8 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 	require.NoError(t, err)
 	owner := surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID))
 	psp := h.ArmLoopbackStripe(rt, owned.MerchantID)
+	_, err = h.MerchantPool(owned.MerchantID.UUID()).Exec(t.Context(), `UPDATE billing.psps SET evidence=jsonb_set(coalesce(evidence,'{}'::jsonb),'{public_config}','{"publishable_key":"pk_test_loopback"}') WHERE id=$1`, psp)
+	require.NoError(t, err)
 	product, err := owner.CreateProduct(t.Context(), openrails.CreateProductRequest{Key: uuid.NewString(), DisplayName: "Engine Stripe", EntitlementsSpec: map[string]*int{"engine_access": nil}})
 	require.NoError(t, err)
 	hours := 720
@@ -210,6 +223,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 	key := "setup-" + uuid.NewString()
 	action := call("POST", "/payment-methods/stripe-setup", key, map[string]any{"psp_id": psp, "consent": true})
 	require.Equal(t, "seti_signup_secret_private", action["client_secret"])
+	require.Equal(t, "pk_test_loopback", action["publishable_key"])
 	replay := call("POST", "/payment-methods/stripe-setup", key, map[string]any{"psp_id": psp, "consent": true})
 	require.Equal(t, action["id"], replay["id"])
 	mu.Lock()
@@ -234,6 +248,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 	if reversal == "" {
 		recovery := call("GET", fmt.Sprintf("/payment-operations/%s/authentication", operation["id"]), "", nil)
 		require.Equal(t, "pi_signup_secret_private", recovery["client_secret"])
+		require.Equal(t, "pk_test_loopback", recovery["publishable_key"])
 		require.Equal(t, "pm_signup", recovery["provider_payment_method_id"])
 		mu.Lock()
 		paymentPaid = true
@@ -333,6 +348,24 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 		replacement := openrails.PaymentMethodID(uuid.New())
 		_, err = customer.RetrySubscriptionNow(t.Context(), openrails.RetrySubscriptionNowRequest{SubscriptionID: subscription, IdempotencyKey: "wrong-method-" + uuid.NewString(), PaymentMethodID: &replacement})
 		require.Error(t, err)
+		if retryMode == "replacement" {
+			mu.Lock()
+			setupPaid = false
+			mu.Unlock()
+			replacementAction := call("POST", "/payment-methods/stripe-setup", "new-card-"+uuid.NewString(), map[string]any{"psp_id": psp, "consent": true})
+			require.Equal(t, "seti_replacement_secret_private", replacementAction["client_secret"])
+			mu.Lock()
+			setupPaid = true
+			mu.Unlock()
+			replacementSaved := call("POST", fmt.Sprintf("/payment-methods/stripe-setup/%s/confirm", replacementAction["id"]), "", nil)
+			newMethod, err := openrails.ParsePaymentMethodID(replacementSaved["payment_method_id"].(string))
+			require.NoError(t, err)
+			var anchor string
+			require.NoError(t, pool.QueryRow(t.Context(), `SELECT stored_credential_recurring_ref FROM billing.payment_methods WHERE id=$1`, newMethod.UUID()).Scan(&anchor))
+			require.Equal(t, "seti_replacement", anchor)
+			_ = call("PUT", "/subscriptions/"+subscription.String()+"/payment-method", "", map[string]any{"payment_method_id": newMethod})
+			localMethod = newMethod
+		}
 		rt.Config.NewSubscriptionCollectionPolicy = "provider" // stored engine ownership survives a new-enrollment default change
 		retryRequest := openrails.RetrySubscriptionNowRequest{SubscriptionID: subscription, IdempotencyKey: "retry-" + uuid.NewString(), PaymentMethodID: &localMethod}
 		retried, err := customer.RetrySubscriptionNow(t.Context(), retryRequest)
@@ -351,6 +384,9 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 		require.Equal(t, "authentication_required", recoveryView["blocked_reason"])
 		recovery := call("GET", fmt.Sprintf("/payment-operations/%s/authentication", retried.Operation.ID), "", nil)
 		require.Equal(t, "pi_customerretry_secret_private", recovery["client_secret"])
+		if retryMode == "replacement" {
+			require.Equal(t, "pm_replacement", recovery["provider_payment_method_id"])
+		}
 		mu.Lock()
 		paymentPaid = true
 		mu.Unlock()
@@ -369,7 +405,11 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry boo
 		require.Equal(t, 2, paid, "initial and recovered period settle once")
 	}
 	mu.Lock()
-	require.Equal(t, 1, setupCreates)
+	if retryMode == "replacement" {
+		require.Equal(t, 2, setupCreates)
+	} else {
+		require.Equal(t, 1, setupCreates)
+	}
 	if customerRetry {
 		require.Equal(t, 3, paymentCreates)
 	} else {

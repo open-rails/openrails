@@ -177,7 +177,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 			if err != nil {
 				return err
 			}
-			if sub.PaymentMethodID == nil || method.ID != *sub.PaymentMethodID || method.CustomerID != engineCustomer || method.ParkReason != "" {
+			if !payload.MatchesSubscriptionMethod(sub.PaymentMethodID) || method.CustomerID != engineCustomer || method.ParkReason != "" {
 				return errors.New("engine admission payment method changed")
 			}
 			if err := payload.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
@@ -247,7 +247,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 			if decodeErr != nil {
 				return decodeErr
 			}
-			if accepted.Renewal.CustomerID != sub.CustomerID || sub.PaymentMethodID == nil || accepted.PaymentMethodID != *sub.PaymentMethodID || accepted.Instrument.PSPID != sub.PspID {
+			if accepted.Renewal.CustomerID != sub.CustomerID || !accepted.MatchesSubscriptionMethod(sub.PaymentMethodID) || accepted.Instrument.PSPID != sub.PspID {
 				return errors.New("engine admission contradicts locked subscription")
 			}
 		}

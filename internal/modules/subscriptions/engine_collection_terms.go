@@ -18,6 +18,11 @@ const TypeSubscriptionCollection = "subscription_collection"
 // SubscriptionCollectionPayload is one accepted engine renewal. PreviousPeriodEnd
 // fences the old obligation even when the purchased period starts after a gap.
 type SubscriptionCollectionPayload struct {
+	// Replacement is an accepted customer CIT. The old nullable method is a
+	// lifecycle fence; only a qualified successful receipt installs the new card.
+	ReplacePaymentMethod    bool       `json:"replace_payment_method,omitempty"`
+	PreviousPaymentMethodID *uuid.UUID `json:"previous_payment_method_id,omitempty"`
+
 	Initiator                charge.Initiator          `json:"initiator,omitempty"`
 	RequestedPaymentMethodID *uuid.UUID                `json:"requested_payment_method_id,omitempty"`
 	Renewal                  RenewalTerms              `json:"renewal"`
@@ -69,7 +74,15 @@ func DecodeSubscriptionCollectionPayload(in gen.OpenrailsRailIntent) (Subscripti
 	if p.HyperSwitch != (charge.HyperSwitchBinding{}) {
 		binding = &p.HyperSwitch
 	}
-	if err := charge.ValidateEngineInstrument(in.Rail, p.Instrument, binding, true); err != nil {
+	if p.ReplacePaymentMethod {
+		if p.Initiator != charge.InitiatorCustomer || p.RequestedPaymentMethodID == nil || *p.RequestedPaymentMethodID != p.PaymentMethodID || (p.PreviousPaymentMethodID != nil && (*p.PreviousPaymentMethodID == uuid.Nil || *p.PreviousPaymentMethodID == p.PaymentMethodID)) {
+			return p, errors.New("engine replacement lacks its accepted customer instrument change")
+		}
+	} else if p.PreviousPaymentMethodID != nil {
+		return p, errors.New("nonreplacement operation carries a previous instrument")
+	}
+	initialReplacement := p.ReplacePaymentMethod && p.Initiator == charge.InitiatorCustomer && in.Rail == "nmi" && p.Instrument.Custodian == "psp" && p.Instrument.StoredCredentialRecurringRef == ""
+	if err := charge.ValidateEngineInstrument(in.Rail, p.Instrument, binding, !initialReplacement); err != nil {
 		return p, err
 	}
 	sameCustodian := (in.CustodianID == nil && p.Instrument.CustodianID == nil) ||
@@ -101,7 +114,7 @@ func DecodeSubscriptionCollectionPayload(in gen.OpenrailsRailIntent) (Subscripti
 		if p.RequestedPaymentMethodID != nil && *p.RequestedPaymentMethodID != p.PaymentMethodID {
 			return p, errors.New("engine customer retry substituted its method")
 		}
-	} else if p.Initiator != charge.InitiatorMerchant || in.Origin != "system" || p.RequestedPaymentMethodID != nil {
+	} else if p.Initiator != charge.InitiatorMerchant || in.Origin != "system" || p.RequestedPaymentMethodID != nil || p.ReplacePaymentMethod {
 		return p, errors.New("engine renewal initiation is invalid")
 	}
 	if in.IdempotencyKey != key || p.OrderReference != RebillOrderReference(key) {
@@ -112,4 +125,13 @@ func DecodeSubscriptionCollectionPayload(in gen.OpenrailsRailIntent) (Subscripti
 		return p, errors.New("engine renewal amount contradicts accepted terms")
 	}
 	return p, nil
+}
+
+// MatchesSubscriptionMethod checks the accepted old binding, including an absent
+// card, without installing an unconfirmed customer replacement.
+func (p SubscriptionCollectionPayload) MatchesSubscriptionMethod(current *uuid.UUID) bool {
+	if p.ReplacePaymentMethod {
+		return current == nil && p.PreviousPaymentMethodID == nil || current != nil && p.PreviousPaymentMethodID != nil && *current == *p.PreviousPaymentMethodID
+	}
+	return current != nil && *current == p.PaymentMethodID
 }

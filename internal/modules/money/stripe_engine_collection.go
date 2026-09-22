@@ -81,6 +81,9 @@ func (h *SubscriptionCollectionHandler) verifyStripeEngine(ctx context.Context, 
 			return intents.Ambiguous(err.Error())
 		}
 	}
+	if err := intents.NewStore(h.DB).RecordProgress(ctx, in.ID, map[string]any{"stripe_payment_intent_id": result.PaymentIntentID, "authentication_required": result.State == subscriptions.StripeEngineAuthenticationRequired}); err != nil {
+		return intents.Ambiguous(err.Error())
+	}
 	switch result.State {
 	case subscriptions.StripeEngineSucceeded:
 		receipt, found, err := intents.ReadStripeEngineReceipt(ctx, in, service, result.PaymentIntentID)

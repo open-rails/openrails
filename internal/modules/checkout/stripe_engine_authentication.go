@@ -14,6 +14,7 @@ import (
 )
 
 type StripeEngineAuthentication struct {
+	PublishableKey          string                     `json:"publishable_key,omitempty"`
 	Operation               openrails.PaymentOperation `json:"operation"`
 	PaymentIntentID         string                     `json:"payment_intent_id,omitempty"`
 	ClientSecret            string                     `json:"client_secret,omitempty"`
@@ -83,6 +84,10 @@ func (s *CheckoutService) StripePaymentAuthentication(ctx context.Context, id uu
 	secret, err := service.EngineAuthenticationSecret(ctx, params, reference, params.CustomerID)
 	if err != nil {
 		return out, apperr.Conflictf("payment does not require customer authentication")
+	}
+	out.PublishableKey, err = s.stripeBrowserKey(ctx, params.PSPID)
+	if err != nil {
+		return StripeEngineAuthentication{}, err
 	}
 	out.PaymentIntentID = reference
 	out.ClientSecret = secret

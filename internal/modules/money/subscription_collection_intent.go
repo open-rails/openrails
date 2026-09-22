@@ -104,6 +104,9 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 	execute := charger.ChargeRecurringMIT
 	if p.Initiator == charge.InitiatorCustomer {
 		chargeContext = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
+		if p.ReplacePaymentMethod && p.Instrument.StoredCredentialRecurringRef == "" {
+			chargeContext = charge.InitialRecurring()
+		}
 		execute = charger.ChargeInitialRecurring
 	}
 	result, refusal, err := execute(ctx, charge.Request{
@@ -154,7 +157,7 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		if sub.RetryAttempts != nil {
 			failures = *sub.RetryAttempts
 		}
-		if sub.CollectionPolicy != models.CollectionPolicyEngine || string(sub.Rail) != in.Rail || sub.RailSubscriptionID != "" || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) || sub.PriceID != p.Renewal.FromPriceID || sub.ProductID != p.Renewal.FromProductID || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) || sub.CancelledAt != nil || failures != p.FailureCount {
+		if sub.CollectionPolicy != models.CollectionPolicyEngine || string(sub.Rail) != in.Rail || sub.RailSubscriptionID != "" || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || !p.MatchesSubscriptionMethod(sub.PaymentMethodID) || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) || sub.PriceID != p.Renewal.FromPriceID || sub.ProductID != p.Renewal.FromProductID || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) || sub.CancelledAt != nil || failures != p.FailureCount {
 			return errEngineObligationChanged
 		}
 		if p.Instrument.CustodianID != nil {
@@ -313,6 +316,35 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 			params.PaymentMetadata = map[string]any{"refund_review": "accepted engine charge completed after lifecycle changed"}
 			return h.lifecycle(d).RecordConfirmedChargeWithoutRenewal(ctx, params)
 		}
+		if p.ReplacePaymentMethod {
+			if !p.MatchesSubscriptionMethod(sub.PaymentMethodID) {
+				params.PaymentMetadata = map[string]any{"refund_review": "accepted engine charge completed after lifecycle changed"}
+				return h.lifecycle(d).RecordConfirmedChargeWithoutRenewal(ctx, params)
+			}
+			method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID})
+			if err != nil {
+				return err
+			}
+			// Another accepted agreement may already have anchored this same card.
+			// Only the anchor's first capture may differ; account/card custody cannot.
+			comparison := p.Instrument
+			comparison.StoredCredentialRecurringRef = method.StoredCredentialRecurringRef
+			if method.CustomerID != p.Renewal.CustomerID || comparison.Matches(method, charge.AgreementRecurring) != nil {
+				return charge.ErrInstrumentChanged
+			}
+			anchor := retained.TransactionID()
+			if in.Rail == "stripe" {
+				anchor = retained.StripeEnginePaymentIntentID()
+			}
+			if _, err := d.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID, Agreement: "recurring", Ref: anchor}); err != nil {
+				return err
+			}
+			id := p.PaymentMethodID
+			sub.PaymentMethodID = &id
+			if err := subscriptions.NewSubscriptionRepo(d).UpdateAt(ctx, sub, h.now()); err != nil {
+				return err
+			}
+		}
 		return h.lifecycle(d).RenewMembership(ctx, params)
 	})
 }
@@ -334,6 +366,9 @@ func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in 
 		}
 		if (sub.Status == models.StatusActive || sub.Status == models.StatusPastDue) && sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) && failures == p.FailureCount {
 			verdict := collection.ClassifyDeclineDetail(in.Rail, code)
+			if p.ReplacePaymentMethod {
+				verdict.Outcome = collection.DeclineFixPaymentMethod
+			}
 			if in.Rail == "stripe" && code == "canceled" {
 				verdict.Outcome = collection.DeclineFixPaymentMethod
 			}

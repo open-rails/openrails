@@ -34,10 +34,16 @@ Stripe for the owned resource and never stored in checkout state or payment evid
 1. Display explicit consent to save a card for future agreed payments, then POST
    `/v1/me/payment-methods/stripe-setup` with `{"psp_id":"<uuid>","consent":true}`
    and a stable `Idempotency-Key` header. The response carries an existing checkout
-   session `id`, `setup_intent_id` and an ephemeral `client_secret`. Repeating the
+   session `id`, `setup_intent_id` and an ephemeral `client_secret` plus that exact account's `publishable_key`.
+   Configure `publishable_key` in existing provider `public_config` (API mode)
+   or the account's manifest `settings` (config mode); missing or
+   environment-mismatched keys refuse new setup/enrollment before provider writes. Repeating the
    key preserves the accepted account/customer; changing the account conflicts.
-2. Use Stripe.js Elements with the merchant's publishable key to confirm that
-   SetupIntent. Card data goes directly to Stripe. GET
+2. Use `Stripe(response.publishable_key)` and Stripe.js Card Element with
+   `stripe.confirmCardSetup(response.client_secret, {payment_method: {card: cardElement}})`
+   to confirm that SetupIntent. This card-only flow handles SCA inline; no server
+   redirect URL is accepted. A host choosing navigation must keep its return URL
+   on its own origin and re-read the owned resource after return. Card data goes directly to Stripe. GET
    `/v1/me/payment-methods/stripe-setup/:id` recovers the same setup; POST its
    `/confirm` endpoint reads Stripe truth and returns the local `payment_method_id`.
    Confirmation accepts no browser-supplied Stripe/customer/card identity. Setup

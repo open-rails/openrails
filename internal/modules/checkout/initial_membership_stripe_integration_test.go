@@ -61,7 +61,7 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 			mid, err := merchant.Require(fx.ctx)
 			require.NoError(t, err)
 			terms.PSPID = uuid.New()
-			_, err = fx.db.Pool().Exec(fx.ctx, `INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,key) VALUES($1,$2,'stripe','test',$3,$3)`, terms.PSPID, mid.UUID(), "stripe-"+uuid.NewString())
+			_, err = fx.db.Pool().Exec(fx.ctx, `INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,key,evidence) VALUES($1,$2,'stripe','test',$3,$3,'{"public_config":{"publishable_key":"pk_test_initial"}}')`, terms.PSPID, mid.UUID(), "stripe-"+uuid.NewString())
 			require.NoError(t, err)
 			_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.payment_methods SET rail='stripe',psp_id=$2,rail_customer_ref='cus_initial',rail_method_ref='pm_initial' WHERE id=$1`, terms.PaymentMethodID, terms.PSPID)
 			require.NoError(t, err)

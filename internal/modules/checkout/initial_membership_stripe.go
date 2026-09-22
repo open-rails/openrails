@@ -53,7 +53,7 @@ func (h *InitialMembershipIntentHandler) executeStripeInitial(ctx context.Contex
 	if result.PaymentIntentID == "" {
 		return intents.Ambiguous("Stripe initial payment has no retained identity")
 	}
-	if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, map[string]any{"stripe_payment_intent_id": result.PaymentIntentID}); err != nil {
+	if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, map[string]any{"stripe_payment_intent_id": result.PaymentIntentID, "authentication_required": result.State == subscriptions.StripeEngineAuthenticationRequired}); err != nil {
 		return intents.Ambiguous(err.Error())
 	}
 	return h.Verify(ctx, in)
@@ -74,7 +74,7 @@ func (h *InitialMembershipIntentHandler) verifyStripeInitial(ctx context.Context
 	if !found {
 		return intents.Ambiguous("Stripe initial payment is unresolved; no automatic resend")
 	}
-	if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, map[string]any{"stripe_payment_intent_id": result.PaymentIntentID}); err != nil {
+	if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, map[string]any{"stripe_payment_intent_id": result.PaymentIntentID, "authentication_required": result.State == subscriptions.StripeEngineAuthenticationRequired}); err != nil {
 		return intents.Ambiguous(err.Error())
 	}
 	switch result.State {

@@ -26,6 +26,7 @@ import (
 // StripeMethodSetupResponse is an owned setup resource. No payment, subscription
 // or entitlement exists until a separate priced agreement is confirmed and paid.
 type StripeMethodSetupResponse struct {
+	PublishableKey  string                      `json:"publishable_key,omitempty"`
 	ID              openrails.CheckoutSessionID `json:"id"`
 	Status          string                      `json:"status"`
 	SetupIntentID   string                      `json:"setup_intent_id,omitempty"`
@@ -74,6 +75,9 @@ func (s *CheckoutService) CreateStripeMethodSetup(ctx context.Context, psp uuid.
 	account, err := d.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: psp})
 	if err != nil || account.Archived || account.Rail != "stripe" || account.Environment != config.ExpectedProviderEnvironment(s.Config.IsTestMode()) {
 		return StripeMethodSetupResponse{}, ErrCheckoutSessionValidation
+	}
+	if _, err := stripeBrowserKey(account); err != nil {
+		return StripeMethodSetupResponse{}, err
 	}
 	service, found, err := resolver.ResolveStripeEngineService(ctx, mid.UUID(), &psp)
 	if err != nil {
@@ -202,6 +206,12 @@ func (s *CheckoutService) StripeMethodSetup(ctx context.Context, id uuid.UUID, p
 	}
 	out.SetupIntentID = result.ID
 	out.ClientSecret = result.ClientSecret
+	if result.ClientSecret != "" {
+		out.PublishableKey, err = s.stripeBrowserKey(ctx, p.PSPID)
+		if err != nil {
+			return StripeMethodSetupResponse{}, err
+		}
+	}
 	out.Status = result.Status
 	return out, nil
 }

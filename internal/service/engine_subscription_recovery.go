@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
@@ -34,7 +35,15 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 		}
 		out.Operation = &openrails.PaymentOperation{ID: current.ID, Status: current.Status}
 		out.BlockedReason = "payment_in_progress"
-		if intents.EvidenceString(current, "stripe_payment_intent_id") != "" {
+		var state struct {
+			AuthenticationRequired bool `json:"authentication_required"`
+		}
+		if len(current.ResultEvidence) > 0 {
+			if err := json.Unmarshal(current.ResultEvidence, &state); err != nil {
+				return nil, err
+			}
+		}
+		if state.AuthenticationRequired && intents.EvidenceString(current, "stripe_payment_intent_id") != "" {
 			out.BlockedReason = "authentication_required"
 		}
 		return out, nil
@@ -86,8 +95,13 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 	} else if err != nil && !errors.Is(err, intents.ErrRebillNotRetryable) {
 		return nil, err
 	}
-	if sub.PaymentMethodID == nil || (sub.Rail != models.RailStripe && sub.Rail != models.RailNMI) {
+	if sub.Rail != models.RailStripe && sub.Rail != models.RailNMI {
 		out.BlockedReason = "customer_payment_unsupported"
+		return out, nil
+	}
+	if sub.PaymentMethodID == nil {
+		out.Retryable = true
+		out.BlockedReason = "payment_method_required"
 		return out, nil
 	}
 	method, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: *sub.PaymentMethodID})
@@ -95,7 +109,8 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 		return nil, err
 	}
 	if method.CustomerID != sub.CustomerID || method.PspID != sub.PspID || method.Rail != string(sub.Rail) || method.ParkReason != "" || method.StoredCredentialRecurringRef == "" || method.RailCustomerRef == "" || method.RailMethodRef == "" || (method.Custodian != models.CustodianPSP && !(method.Custodian == models.CustodianHyperSwitch && sub.Rail == models.RailNMI)) {
-		out.BlockedReason = "customer_payment_unsupported"
+		out.Retryable = true
+		out.BlockedReason = "payment_method_required"
 		return out, nil
 	}
 	out.Retryable = true

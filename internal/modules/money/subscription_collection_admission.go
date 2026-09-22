@@ -134,13 +134,20 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 		} else if payer != uuid.Nil {
 			return intents.ErrRebillNotRetryable
 		}
-		if requestedMethod != nil && (sub.PaymentMethodID == nil || *requestedMethod != *sub.PaymentMethodID) {
-			return intents.ErrRebillUnsupported
+		replacing := requestedMethod != nil && (sub.PaymentMethodID == nil || *requestedMethod != *sub.PaymentMethodID)
+		selected := sub.PaymentMethodID
+		var previousMethod *uuid.UUID
+		if replacing {
+			if payer == uuid.Nil {
+				return intents.ErrRebillUnsupported
+			}
+			selected = requestedMethod
+			previousMethod = sub.PaymentMethodID
 		}
-		if sub.PaymentMethodID == nil {
+		if selected == nil {
 			return errors.New("engine subscription has no saved method")
 		}
-		observedMethod, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: *sub.PaymentMethodID})
+		observedMethod, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: *selected})
 		if err != nil {
 			return err
 		}
@@ -153,7 +160,7 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 				return err
 			}
 		}
-		method, err := q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: mid.UUID(), ID: *sub.PaymentMethodID})
+		method, err := q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: mid.UUID(), ID: *selected})
 		if err != nil {
 			return err
 		}
@@ -183,7 +190,8 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 				return errors.New("archived custodian cannot admit a new engine renewal")
 			}
 		}
-		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method), engineHyperSwitchPointer(method.Custodian, binding), true); err != nil {
+		initialReplacement := replacing && payer != uuid.Nil && method.Rail == "nmi" && method.Custodian == models.CustodianPSP && method.StoredCredentialRecurringRef == ""
+		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method), engineHyperSwitchPointer(method.Custodian, binding), !initialReplacement); err != nil {
 			return err
 		}
 		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, admittedAt)
@@ -210,7 +218,7 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 			origin = intents.OriginUser
 			actor = payer.String()
 		}
-		payload := subscriptions.SubscriptionCollectionPayload{Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Attempt: attempt, FailureCount: failures, Renewal: terms, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC(), AcceptedAt: admittedAt, PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method), HyperSwitch: binding, AmountMinor: minor, OrderReference: subscriptions.RebillOrderReference(key)}
+		payload := subscriptions.SubscriptionCollectionPayload{ReplacePaymentMethod: replacing, PreviousPaymentMethodID: previousMethod, Initiator: initiator, RequestedPaymentMethodID: requestedMethod, Attempt: attempt, FailureCount: failures, Renewal: terms, PreviousPeriodEnd: sub.CurrentPeriodEndsAt.UTC(), AcceptedAt: admittedAt, PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method), HyperSwitch: binding, AmountMinor: minor, OrderReference: subscriptions.RebillOrderReference(key)}
 		accepted, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, IntentType: subscriptions.TypeSubscriptionCollection, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, PspID: method.PspID, CustodianID: engineCustodianID(method.CustodianID), Payload: payload, IdempotencyKey: key, NextAttemptAt: admittedAt, Origin: origin, Actor: actor, OriginReason: "accepted engine renewal"})
 		if err != nil {
 			return err

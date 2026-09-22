@@ -144,6 +144,11 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 				return errors.New("new membership custodian is archived")
 			}
 		}
+		if method.Rail == "stripe" {
+			if _, err := stripeBrowserKey(psp); err != nil {
+				return err
+			}
+		}
 		label := psp.ID.String()
 		if psp.Key != nil && strings.TrimSpace(*psp.Key) != "" {
 			label = *psp.Key

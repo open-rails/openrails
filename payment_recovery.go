@@ -49,7 +49,9 @@ type InvoicePayNowResult struct {
 type RetrySubscriptionNowRequest struct {
 	SubscriptionID SubscriptionID `json:"-"`
 	IdempotencyKey string         `json:"-"`
-	// If supplied, the method must be the subscription's current saved method.
+	// Provider-managed recovery requires the current saved method. An engine
+	// retry may select another owned card on the same PSP; it is installed only
+	// after a verified successful charge establishes the recurring agreement.
 	PaymentMethodID *PaymentMethodID `json:"payment_method_id,omitempty"`
 }
 
