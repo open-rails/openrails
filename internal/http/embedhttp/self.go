@@ -87,9 +87,8 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant
 			middleware.PermissiveCORSHTTP(middleware.AllRequests),
 			middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
 			middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
-			// Resolved PER REQUEST off the Runtime (#744) — never a value snapshotted
-			// here at construction time, so a mount that races UpsertMerchantConfig's
-			// post-boot bind still resolves correctly on every request.
+			// Resolve current authority on each request, including privileged
+			// restore/bootstrap integrations that bind after graph construction.
 			middleware.ResolveMerchantHTTP(rt.ConfiguredMerchant),
 			// #734: a no-op when hostResolve is nil (no control plane attached).
 			middleware.ResolveMerchantFromHostHTTP(hostResolve),

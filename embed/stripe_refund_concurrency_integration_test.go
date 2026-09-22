@@ -36,20 +36,20 @@ import (
 func TestStripeRefundDeliveriesConcurrentlyRevokeOnePurchase(t *testing.T) {
 	ctx := t.Context()
 	dsn := dbtest.SharedSuperuserDSN(t)
-	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{
+	slug := "refund-race-" + uuid.NewString()
+	secret := "whsec_refund_concurrency"
+
+	rt, mid, err := newDeclaredMerchant(ctx, embed.Options{Config: &config.Config{
 		Env: "development", TestMode: config.CredentialPostureSandbox,
 		MerchantConfigSource: config.MerchantConfigSourceManifest,
 		CatalogSource:        config.CatalogSourceAPI,
 		ProviderWriteMode:    config.ProviderWriteModeReadOnly,
 		DB:                   &config.DBConfig{URL: dsn},
+	}}, slug, embed.MerchantConfig{PSPs: map[string]embed.PSPConfig{
+		"stripe": {"stripe": {AccountID: "acct_" + uuid.NewString(), Secrets: map[string]string{"secret_key": "sk_test_fixture", "webhook_signing_secret": secret}}},
 	}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
-	slug := "refund-race-" + uuid.NewString()
-	secret := "whsec_refund_concurrency"
-	mid, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{PSPs: map[string]embed.PSPConfig{
-		"stripe": {"stripe": {AccountID: "acct_" + uuid.NewString(), Secrets: map[string]string{"secret_key": "sk_test_fixture", "webhook_signing_secret": secret}}},
-	}})
 	require.NoError(t, err)
 	ctx = merchant.WithID(ctx, mid)
 	database := app.HostGraph(rt).Runtime.DB

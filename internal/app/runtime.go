@@ -57,16 +57,10 @@ type Runtime struct {
 	redisOwned bool
 	Config     *config.Config
 
-	// configuredMerchant scopes this engine instance to one merchant — set by
-	// embedded hosts that run one engine per merchant (zero in standalone,
-	// where the merchant is resolved per-credential). It is an atomic because
-	// UpsertMerchantConfig may bind it AFTER New (embed/provision.go) while an
-	// HTTP handler built from this Runtime may already be mounted and serving
-	// requests (#744): every reader MUST go through ConfiguredMerchant() and
-	// re-resolve live (mirroring embed/transport.go's in-process live read) —
-	// never cache the value at handler-construction time, or mount order
-	// relative to the bind silently determines which merchant a request lands
-	// on. Use SetConfiguredMerchant to write it.
+	// configuredMerchant scopes single-merchant embedded runtimes. Constructor
+	// declarations bind before HTTP and worker startup; standalone remains zero.
+	// Atomic reads also protect privileged restore/bootstrap integration. Readers
+	// use ConfiguredMerchant rather than caching a construction-time snapshot.
 	configuredMerchant atomic.Pointer[merchant.ID]
 
 	// TrustedProxies is the boot-configured proxy-aware client-IP resolver
@@ -258,11 +252,8 @@ type Runtime struct {
 	DeferredDeletes subscriptions.DeferredDeleteScheduler
 }
 
-// ConfiguredMerchant returns the merchant this engine instance is scoped to,
-// resolved fresh on every call — NEVER cache this at handler-construction
-// time (#744: UpsertMerchantConfig can bind it after New, after a handler
-// built from this Runtime is already mounted and serving requests). Zero in
-// standalone, or before any bind.
+// ConfiguredMerchant returns the current single-merchant binding. Zero means
+// the caller must explicitly select a merchant through its authority.
 func (r *Runtime) ConfiguredMerchant() merchant.ID {
 	if r == nil {
 		return merchant.ID{}
@@ -273,10 +264,8 @@ func (r *Runtime) ConfiguredMerchant() merchant.ID {
 	return merchant.ID{}
 }
 
-// SetConfiguredMerchant binds this engine instance to a merchant. Safe to
-// call post-boot (embed.UpsertMerchantConfig) concurrently with in-flight
-// requests calling ConfiguredMerchant() — that concurrency safety is the
-// entire point of #744's fix.
+// SetConfiguredMerchant binds constructor and privileged restore/bootstrap
+// integrations atomically with respect to request readers.
 func (r *Runtime) SetConfiguredMerchant(id merchant.ID) {
 	if r == nil {
 		return

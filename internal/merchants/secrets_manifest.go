@@ -45,6 +45,6 @@ func (s *ManifestSecretStore) Delete(_ context.Context, _ merchant.ID, name stri
 }
 
 // Seeder returns the write-capable facet for the manifest provisioning path
-// ONLY (boot / UpsertMerchantConfig re-runs). Runtime code consumes the store
+// ONLY (boot / constructor restarts). Runtime code consumes the store
 // itself and is read-only.
 func (s *ManifestSecretStore) Seeder() MerchantSecretStore { return s.mem }

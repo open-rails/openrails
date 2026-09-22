@@ -88,11 +88,10 @@ func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug, nmiV5Base
 	cfg := manifestModeConfig(dsn)
 	manifest, err := embed.LoadMerchantConfigManifestWithOverlays(manifestRaw, overlays...)
 	require.NoError(t, err)
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
+
+	rt, id, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()}, slug, manifest.Merchants[slug])
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	id, err := rt.UpsertMerchantConfig(ctx, slug, manifest.Merchants[slug])
-	require.NoError(t, err)
 	require.False(t, id.IsZero())
 	runtime := app.HostGraph(rt).Runtime
 	require.NotNil(t, runtime.SolanaPlanService,
@@ -183,7 +182,7 @@ func fakeNMI(t *testing.T) (*httptest.Server, *[]string) {
 func chargeViaStorePlane(t *testing.T, ctx context.Context, rt *embed.Runtime, id merchant.ID, baseURL string) error {
 	t.Helper()
 	runtime := app.HostGraph(rt).Runtime
-	require.NotNil(t, runtime.Merchants, "mode 1 arms Runtime.Merchants at UpsertMerchantConfig")
+	require.NotNil(t, runtime.Merchants, "mode 1 arms Runtime.Merchants during construction")
 	builder := &money.MerchantCollectionAdapterBuilder{
 		Config:      runtime.Config,
 		DB:          runtime.DB,
@@ -334,11 +333,10 @@ func TestManifestMode_MutationRoutesOmitted(t *testing.T) {
 	nano := time.Now().UnixNano()
 	slug := fmt.Sprintf("m405%d", nano)
 	cfg := manifestModeConfig(dsn)
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
+
+	rt, id, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()}, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
-	require.NoError(t, err)
 
 	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, PaymentProviders: true, Gate: allowAllGate{id: id}}})
 	require.NoError(t, err)
@@ -409,12 +407,11 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 		ProviderWriteMode:    config.ProviderWriteModeFull,
 		DB:                   &config.DBConfig{URL: dsn},
 	}
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
+	// API mode still allows the bare identity bind.
+
+	rt, id, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()}, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	// API mode still allows the bare identity bind.
-	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
-	require.NoError(t, err)
 	// Arm the store-backed merchants service the way worker registration does.
 	app.HostGraph(rt).Runtime.EnsureMerchantsService(ctx)
 	require.NotNil(t, app.HostGraph(rt).Runtime.Merchants)
@@ -468,13 +465,11 @@ func TestManifestMode_MissingSecretFailsClosed(t *testing.T) {
 
 	manifest, err := embed.LoadMerchantConfigManifestWithOverlays(manifestModeManifestYAML(slug, gatewayID))
 	require.NoError(t, err)
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
+	// Boot proceeds: the account row reconciles with NO secret anywhere.
+
+	rt, id, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()}, slug, manifest.Merchants[slug])
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-
-	// Boot proceeds: the account row reconciles with NO secret anywhere.
-	id, err := rt.UpsertMerchantConfig(ctx, slug, manifest.Merchants[slug])
-	require.NoError(t, err)
 	t.Cleanup(func() {
 		for _, stmt := range []string{
 			`DELETE FROM billing.psps WHERE merchant_id = $1`,
@@ -513,28 +508,26 @@ func TestManifestMode_ReadSideBindKeepsWorking(t *testing.T) {
 
 	// Writer host (host-one shape) declares the merchant.
 	writerCfg := manifestModeConfig(dsn)
-	writer, err := embed.New(ctx, embed.Options{Config: writerCfg, River: embed.RiverManagedByOpenRails()})
+
+	writer, id, err := newDeclaredMerchant(ctx, embed.Options{Config: writerCfg, River: embed.RiverManagedByOpenRails()}, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = writer.Close(context.Background()) })
-	id, err := writer.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
-	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = appDB.Pool().Exec(context.Background(), `DELETE FROM billing.merchants WHERE id = $1`, id.UUID())
 	})
 
 	// Reader host (host-two shape): empty MerchantConfig — pure bind.
 	readerCfg := manifestModeConfig(dsn)
-	reader, err := embed.New(ctx, embed.Options{Config: readerCfg, River: embed.RiverManagedByOpenRails()})
+
+	reader, boundID, err := newDeclaredMerchant(ctx, embed.Options{Config: readerCfg, River: embed.RiverManagedByOpenRails()}, slug, embed.MerchantConfig{})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = reader.Close(context.Background()) })
-	boundID, err := reader.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{})
-	require.NoError(t, err)
 	require.Equal(t, id, boundID, "the empty upsert binds to the same merchant")
 	require.Equal(t, boundID, app.HostGraph(reader).Runtime.ConfiguredMerchant())
 }
 
 // bootManifestRuntimeWithRailAccounts boots a MODE-1 runtime declaring
-// railAccounts through UpsertMerchantConfig directly (no manifest bytes/YAML,
+// railAccounts through constructor options directly (no manifest bytes/YAML,
 // no catalog) — the same host-one/host-two shape as
 // TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders. Options.PaymentProviders
 // is deliberately unset, so Runtime.Rails (the legacy boot-config bridge) stays
@@ -543,14 +536,13 @@ func bootManifestRuntimeWithRailAccounts(t *testing.T, ctx context.Context, dsn,
 	t.Helper()
 	appDB := dbtest.OpenAppDB(t, dsn)
 	cfg := manifestModeConfig(dsn)
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
+
+	rt, id, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()}, slug, embed.MerchantConfig{
 		DisplayName: slug,
 		PSPs:        railAccounts,
 	})
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	require.False(t, id.IsZero())
 	t.Cleanup(func() {
 		for _, stmt := range []string{

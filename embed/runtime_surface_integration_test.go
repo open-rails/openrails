@@ -27,10 +27,12 @@ func TestRuntimeOwnsReadinessAndRiverChecks(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
+	declaration := embed.PSPDeclaration{Key: "legacy", Rail: "ccbill", AccountID: fmt.Sprintf("9%d", time.Now().UnixNano()%1e9)}
 	rt, err := embed.New(ctx, embed.Options{
-		Config:  &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}},
-		PGXPool: pool,
-		River:   embed.RiverFromHost(),
+		Merchant: &embed.MerchantDeclaration{Slug: fmt.Sprintf("runtime-surface-%d", time.Now().UnixNano()), PSPs: []embed.PSPDeclaration{declaration, declaration}},
+		Config:   &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}},
+		PGXPool:  pool,
+		River:    embed.RiverFromHost(),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
@@ -40,15 +42,6 @@ func TestRuntimeOwnsReadinessAndRiverChecks(t *testing.T) {
 	require.NoError(t, rt.Ready(ctx))
 	_, err = rt.CheckJobProgress(ctx)
 	require.NoError(t, err)
-
-	merchantID, err := rt.UpsertMerchantConfig(ctx, fmt.Sprintf("runtime-surface-%d", time.Now().UnixNano()), embed.MerchantConfig{})
-	require.NoError(t, err)
-	declaration := embed.PSPDeclaration{Key: "legacy", Rail: "ccbill", AccountID: fmt.Sprintf("9%d", time.Now().UnixNano()%1e9)}
-	first, err := rt.DeclarePSP(ctx, merchantID, declaration)
-	require.NoError(t, err)
-	again, err := rt.DeclarePSP(ctx, merchantID, declaration)
-	require.NoError(t, err)
-	require.Equal(t, first, again, "declaration is idempotent")
 
 	_, err = embed.New(ctx, embed.Options{Config: &config.Config{}, HTTP: &embed.HTTPConfig{Customer: true}})
 	require.ErrorContains(t, err, "DelegatedAuthenticator", "the self surface never mounts without authentication")

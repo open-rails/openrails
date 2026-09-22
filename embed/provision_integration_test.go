@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -15,12 +18,12 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
-// TestUpsertMerchantConfig_SeedsPSPs verifies the #593 public
+// TestMerchantConstructorSeedsPSPs verifies the #593 public
 // provisioning API: an embedded host declares its merchant's PSPs
-// via rt.UpsertMerchantConfig (no raw SQL, no control plane), the rows
+// at construction (no raw SQL, no control plane), the rows
 // land bound to the merchant, and re-running it is idempotent. This is the call
 // host-one #426 makes from `migrate legacy`.
-func TestUpsertMerchantConfig_SeedsPSPs(t *testing.T) {
+func TestMerchantConstructorSeedsPSPs(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 	appDB := dbtest.OpenAppDB(t, dsn)
@@ -28,12 +31,6 @@ func TestUpsertMerchantConfig_SeedsPSPs(t *testing.T) {
 
 	slug := fmt.Sprintf("embed-provision-%d", time.Now().UnixNano())
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
-	rt, err := embed.New(ctx, embed.Options{
-		Config: cfg, River: embed.RiverManagedByOpenRails(),
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-
 	m := embed.MerchantConfig{
 		DisplayName: slug,
 		PSPs: map[string]embed.PSPConfig{
@@ -45,8 +42,12 @@ func TestUpsertMerchantConfig_SeedsPSPs(t *testing.T) {
 			},
 		},
 	}
-	id, err := rt.UpsertMerchantConfig(ctx, slug, m)
+
+	rt, id, err := newDeclaredMerchant(ctx, embed.Options{
+		Config: cfg, River: embed.RiverManagedByOpenRails(),
+	}, slug, m)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	require.False(t, id.IsZero())
 	cleanupCCBillWebhookMerchant(t, id)
 
@@ -61,19 +62,14 @@ func TestUpsertMerchantConfig_SeedsPSPs(t *testing.T) {
 	}
 	require.Equal(t, 2, countPSPs(), "both declared PSPs are seeded")
 
-	// Re-running is idempotent — no error, no duplicate rows.
-	_, err = rt.UpsertMerchantConfig(ctx, slug, m)
+	// Reconstructing the runtime reconciles the same merchant and PSP identities.
+	require.NoError(t, rt.Close(ctx))
+	restarted, again, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()}, slug, m)
 	require.NoError(t, err)
-	require.Equal(t, 2, countPSPs(), "re-run does not duplicate PSPs")
-
-	// #770: the engine is bound to `slug` now — upserting a DIFFERENT merchant
-	// into the same engine must fail loudly (one embedded engine, one merchant),
-	// and must fail BEFORE writing anything: no second merchant row appears.
-	otherSlug := slug + "-second"
-	_, err = rt.UpsertMerchantConfig(ctx, otherSlug, embed.MerchantConfig{DisplayName: otherSlug})
-	require.ErrorContains(t, err, "already bound to merchant")
-	var n int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM billing.merchants WHERE slug = $1`, otherSlug).Scan(&n))
-	require.Zero(t, n, "refused second merchant must not be provisioned")
+	t.Cleanup(func() { _ = restarted.Close(context.Background()) })
+	require.Equal(t, id, again)
+	require.Equal(t, 2, countPSPs(), "restart does not duplicate PSPs")
+	// The one-merchant binding cannot be overridden by a client selector.
+	_, err = restarted.Client(openrails.WithMerchantID(merchant.ID(uuid.New())))
+	require.ErrorContains(t, err, id.String())
 }

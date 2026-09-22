@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
-	embcp "github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/internal/merchants"
 )
 
 func TestEmbedded_DeclarePSP(t *testing.T) {
@@ -33,45 +33,45 @@ func TestEmbedded_DeclarePSP(t *testing.T) {
 		DB:                   &config.DBConfig{URL: appDSN},
 		Auth:                 &config.AuthConfig{Issuer: "https://declare-psp-" + suffix + ".openrails.test"},
 	}
-	engine, err := New(context.Background(), Options{Config: cfg, PGXPool: pool, River: RiverManagedByOpenRails()})
+	ctx := context.Background()
+	declaration := PSPDeclaration{Key: " Platform ", Rail: " PLATFORM ", AccountID: " internal-platform-" + suffix}
+	opts := Options{Config: cfg, PGXPool: pool, River: RiverManagedByOpenRails(), Merchant: &MerchantDeclaration{Slug: "declare-psp-" + suffix, PSPs: []PSPDeclaration{declaration}}}
+	engine, err := New(ctx, opts)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = engine.Close(context.Background()) })
-
-	ctx := context.Background()
-	require.NoError(t, embcp.Attach(ctx, engine.app, cfg, pool))
-	merchantResult, err := embcp.ProvisionMerchant(ctx, engine.app, embcp.ProvisionMerchantRequest{Slug: "declare-psp-" + suffix})
+	client, err := engine.Client()
 	require.NoError(t, err)
-
-	declaration := PSPDeclaration{
-		Key:       " Platform ",
-		Rail:      " PLATFORM ",
-		AccountID: " internal-platform-" + suffix,
-	}
-	firstID, err := engine.DeclarePSP(ctx, merchantResult.MerchantID, declaration)
-	require.NoError(t, err)
-	require.NotEqual(t, uuid.Nil, firstID)
-	secondID, err := engine.DeclarePSP(ctx, merchantResult.MerchantID, declaration)
-	require.NoError(t, err)
-	require.Equal(t, firstID, secondID, "re-declaration must preserve the natural-key identity")
-
-	err = engine.app.Runtime.DB.RunInMerchantScope(ctx, merchantResult.MerchantID, "inspect declared PSP", func(ctx context.Context) error {
-		rows, queryErr := engine.app.Runtime.DB.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
-			MerchantID: merchantResult.MerchantID.UUID(),
+	merchantID := client.MerchantID()
+	readID := func(runtime *Runtime) uuid.UUID {
+		t.Helper()
+		var id uuid.UUID
+		err := runtime.app.Runtime.DB.RunInMerchantScope(ctx, merchantID, "inspect declared PSP", func(ctx context.Context) error {
+			rows, err := runtime.app.Runtime.DB.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: merchantID.UUID()})
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			require.Equal(t, "platform", rows[0].Rail)
+			require.Equal(t, config.ProviderEnvironmentTest, rows[0].Environment)
+			require.Equal(t, strings.TrimSpace(declaration.AccountID), rows[0].AccountID)
+			require.Equal(t, "platform", *rows[0].Key)
+			id = rows[0].ID
+			return nil
 		})
-		require.NoError(t, queryErr)
-		require.Len(t, rows, 1, "re-declaration must not create a duplicate")
-		require.Equal(t, firstID, rows[0].ID)
-		require.Equal(t, "platform", rows[0].Rail)
-		require.Equal(t, config.ProviderEnvironmentTest, rows[0].Environment)
-		require.Equal(t, strings.TrimSpace(declaration.AccountID), rows[0].AccountID)
-		require.NotNil(t, rows[0].Key)
-		require.Equal(t, "platform", *rows[0].Key)
-		return nil
-	})
+		require.NoError(t, err)
+		return id
+	}
+	firstID := readID(engine)
+	require.NotEqual(t, uuid.Nil, firstID)
+	require.NoError(t, engine.Close(ctx))
+	second, err := New(ctx, opts)
 	require.NoError(t, err)
-
-	otherMerchant, err := embcp.ProvisionMerchant(ctx, engine.app, embcp.ProvisionMerchantRequest{Slug: "declare-psp-other-" + suffix})
-	require.NoError(t, err)
-	_, err = engine.DeclarePSP(ctx, otherMerchant.MerchantID, declaration)
+	t.Cleanup(func() { _ = second.Close(context.Background()) })
+	require.Equal(t, firstID, readID(second), "constructor restart preserves natural-key identity")
+	// A constructor cannot attribute an existing provider account to another merchant.
+	opts.Merchant = &MerchantDeclaration{Slug: "declare-psp-other-" + suffix, PSPs: []PSPDeclaration{declaration}}
+	rejected, err := New(ctx, opts)
 	require.ErrorContains(t, err, "owned by another merchant")
+	require.Nil(t, rejected)
+	require.NoError(t, pool.Ping(ctx), "failed construction must preserve the borrowed pool")
+	_, lookupErr := second.app.Runtime.Merchants.GetBySlug(ctx, opts.Merchant.Slug)
+	require.ErrorIs(t, lookupErr, merchants.ErrMerchantNotFound, "foreign account preflight must not provision a merchant")
 }

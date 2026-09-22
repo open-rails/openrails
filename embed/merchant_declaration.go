@@ -2,10 +2,16 @@ package embed
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchants"
 )
 
 // MerchantDeclaration configures the one merchant served by an embedded runtime.
@@ -36,6 +42,24 @@ func validateMerchantDeclaration(declaration *MerchantDeclaration) error {
 func configureMerchant(ctx context.Context, application *app.App, declaration *MerchantDeclaration) error {
 	if declaration == nil {
 		return nil
+	}
+	// Reject a provider identity owned by another merchant before provisioning
+	// the new directory entry. The write boundary repeats this check for races.
+	if len(declaration.PSPs) != 0 {
+		var selectedID uuid.UUID
+		selected, err := application.Runtime.Merchants.GetBySlug(ctx, declaration.Slug)
+		switch {
+		case err == nil:
+			selectedID = selected.ID.UUID()
+		case !errors.Is(err, merchants.ErrMerchantNotFound):
+			return err
+		}
+		environment := config.ExpectedProviderEnvironment(application.Runtime.Config.IsTestMode())
+		for _, psp := range declaration.PSPs {
+			if err := merchants.AssertPSPUnowned(ctx, gen.New(application.Runtime.DB.DataPool()), selectedID, psp.Rail, environment, psp.AccountID); err != nil {
+				return err
+			}
+		}
 	}
 	id, err := upsertMerchantConfig(ctx, application, declaration.Slug, declaration.Config)
 	if err != nil {

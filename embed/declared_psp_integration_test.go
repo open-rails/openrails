@@ -19,7 +19,7 @@ import (
 )
 
 // TestDeclaredPSPIsAttributableButNeverArmed settles the credential-less
-// Runtime.DeclarePSP semantics: the account is an identity for attribution
+// constructor PSP declaration semantics: the account is an identity for attribution
 // and links, never an armed rail. Checkout discovery does not advertise it,
 // a checkout that names it is refused up front as unroutable, and a price link
 // to it is stored without a provider round trip — identically through the
@@ -30,9 +30,11 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 	remote := h.StartStandalone("USD", integrationharness.WithRails(config.PSPSet{
 		"ccbill": {AccountID: "999981-0000", CCBill: &config.CCBillRailConfig{Salt: "operations-local-fixture"}},
 	}))
+	declaredKey := "stripe-declared-" + uuid.NewString()[:8]
 	runtime, err := embed.New(ctx, embed.Options{
-		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
-		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
+		Merchant: &embed.MerchantDeclaration{Slug: dbtest.TestMerchantSlug, PSPs: []embed.PSPDeclaration{{Key: declaredKey, Rail: "stripe", AccountID: "acct_declared_" + uuid.NewString()[:8]}}},
+		Config:   &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
+		Redis:    h.Redis, River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
@@ -40,9 +42,8 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 	require.NoError(t, err)
 	mid := dbtest.TestMerchantID
 
-	declaredKey := "stripe-declared-" + uuid.NewString()[:8]
-	pspID, err := runtime.DeclarePSP(ctx, mid, embed.PSPDeclaration{Key: declaredKey, Rail: "stripe", AccountID: "acct_declared_" + uuid.NewString()[:8]})
-	require.NoError(t, err)
+	var pspID uuid.UUID
+	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT id FROM billing.psps WHERE merchant_id=$1 AND key=$2`, mid.UUID(), declaredKey).Scan(&pspID))
 	require.NotEqual(t, uuid.Nil, pspID)
 	t.Cleanup(func() {
 		_, _ = h.Pool().Exec(context.Background(), `DELETE FROM billing.psps WHERE id = $1`, pspID)

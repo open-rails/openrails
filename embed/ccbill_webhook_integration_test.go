@@ -215,10 +215,8 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	ccbillAccount := fmt.Sprintf("94%04d-0001", nano%10_000)
 
 	cfg := sandboxModeConfig(dsn, config.MerchantConfigSourceManifest)
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
+
+	rt, id, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))}, slug, embed.MerchantConfig{
 		DisplayName: slug,
 		PSPs: map[string]embed.PSPConfig{
 			"ccbill": {
@@ -230,6 +228,7 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	cleanupCCBillWebhookMerchant(t, id)
 
 	flexID, formName := seedCCBillWebhookCatalog(t, ctx, cfg, slug)
@@ -286,12 +285,11 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	ccbillAccount := fmt.Sprintf("95%04d-0002", nano%10_000)
 
 	cfg := sandboxModeConfig(dsn, config.MerchantConfigSourceAPI)
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))})
+	// API mode: bare identity bind; rail truth arrives over the HTTP API.
+
+	rt, id, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))}, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	// API mode: bare identity bind; rail truth arrives over the HTTP API.
-	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
-	require.NoError(t, err)
 	require.NoError(t, app.HostGraph(rt).Runtime.EnsureMerchantsService(ctx))
 	cleanupCCBillWebhookMerchant(t, id)
 
@@ -365,12 +363,11 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 	slug := fmt.Sprintf("mwhoff%d", nano)
 
 	cfg := sandboxModeConfig(dsn, config.MerchantConfigSourceManifest)
-	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))})
+	// Merchant exists but declares NO rail accounts at all.
+
+	rt, id, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))}, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	// Merchant exists but declares NO rail accounts at all.
-	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
-	require.NoError(t, err)
 	cleanupCCBillWebhookMerchant(t, id)
 
 	username := "ccbill_off_" + uuid.NewString()[:8]

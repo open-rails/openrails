@@ -55,7 +55,9 @@ func TestRuntimeRegistersRestoreDestinationBeforeClient(t *testing.T) {
 	require.NoError(t, err)
 	_, err = client.GetMerchantSettings(ctx)
 	require.NoError(t, err, "the runtime's client is bound to the registered UUID")
-	bound, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{})
+	require.NoError(t, rt.Close(ctx))
+	restarted, bound, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()}, slug, embed.MerchantConfig{})
 	require.NoError(t, err)
-	require.Equal(t, id, bound, "subsequent ordinary manifest configuration preserves identity")
+	t.Cleanup(func() { _ = restarted.Close(context.Background()) })
+	require.Equal(t, id, bound, "constructor configuration preserves restored identity")
 }
