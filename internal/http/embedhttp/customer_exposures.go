@@ -96,12 +96,27 @@ func ValidateRouteTable(table *router.Table) (err error) {
 	}()
 	mux := http.NewServeMux()
 	wildcards := make(map[string]string)
+	subtrees := make(map[string]string)
+	descendants := make(map[string]string)
 	for _, entry := range table.Entries {
 		// Gin shares one wildcard name at each method/path-tree position, even
 		// when the routes diverge later. Validate this before any host mutation;
 		// ServeMux alone permits names that Gin cannot register together.
 		prefix := entry.Method
 		for _, part := range strings.Split(entry.Path, "/") {
+			// Native catch-all routes own every descendant for their method.
+			// ServeMux instead allows more-specific routes below that subtree.
+			if previous, ok := subtrees[prefix]; ok {
+				return fmt.Errorf("openrails HTTP: conflicting native subtree routes %q and %q", previous, entry.Path)
+			}
+			if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "...}") {
+				if previous, ok := descendants[prefix]; ok {
+					return fmt.Errorf("openrails HTTP: conflicting native subtree routes %q and %q", previous, entry.Path)
+				}
+				subtrees[prefix] = entry.Path
+			} else {
+				descendants[prefix] = entry.Path
+			}
 			if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
 				prefix += "/{}"
 				if previous, ok := wildcards[prefix]; ok && previous != part {
