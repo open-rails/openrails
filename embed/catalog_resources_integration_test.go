@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 )
 
 func TestCatalogResourceAtomicOffers(t *testing.T) {
@@ -55,25 +54,19 @@ func TestCatalogResourceAtomicOffers(t *testing.T) {
 			bob, err := transport.client.ForCatalogOwner("bob-" + transport.name)
 			require.NoError(t, err)
 			params := openrails.PriceCreateParams{ProductData: &openrails.PriceCreateProductDataParams{Key: "post-" + transport.name, DisplayName: "Original title"}, Key: "offer-" + transport.name, UnitAmount: 1_000_000, Currency: "usd"}
-			var group errgroup.Group
-			offers := make([]*openrails.Price, 12)
-			for i := range offers {
-				group.Go(func() error { var err error; offers[i], err = alice.Prices.Create(ctx, &params); return err })
-			}
-			require.NoError(t, group.Wait())
-			for _, offer := range offers {
-				require.Equal(t, offers[0].ID, offer.ID)
-				require.Equal(t, offers[0].ProductID, offer.ProductID)
-			}
-			offer := offers[0]
+			// A single connection proves nested catalog transactions reuse their
+			// pin. Parallel creation is covered by TestCatalogPriceKeyTransactions;
+			// queueing twelve calls behind one connection tests the pool deadline.
+			offer, err := alice.Prices.Create(ctx, &params)
+			require.NoError(t, err)
 			product, err := alice.Products.Retrieve(ctx, offer.ProductID)
 			require.NoError(t, err)
 			require.Equal(t, "Original title", product.DisplayName)
-			ensured, err := alice.Products.Ensure(ctx, params.ProductData.Key, "Uncommitted title")
+			ensured, err := alice.Products.Ensure(ctx, &openrails.ProductCreateParams{Key: params.ProductData.Key, DisplayName: "Uncommitted title"})
 			require.NoError(t, err)
 			require.Equal(t, product.ID, ensured.ID)
 			require.Equal(t, "Original title", ensured.DisplayName)
-			_, err = transport.client.Products.Ensure(ctx, params.ProductData.Key, "Wrong catalog")
+			_, err = transport.client.Products.Ensure(ctx, &openrails.ProductCreateParams{Key: params.ProductData.Key, DisplayName: "Wrong catalog"})
 			require.ErrorIs(t, err, openrails.ErrConflict)
 
 			_, err = bob.Products.Retrieve(ctx, offer.ProductID)

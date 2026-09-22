@@ -53,22 +53,21 @@ func AdminCreateProduct(r *httprequest.Request) {
 
 // AdminEnsureProduct preserves a product's first declaration under its key.
 func AdminEnsureProduct(r *httprequest.Request) {
-	var req struct {
-		DisplayName string `json:"display_name"`
-	}
+	var req billingservice.CreateProductRequest
 	if !bindCatalogJSON(r, &req) {
 		return
 	}
+	key := r.Param("key")
+	if req.Key != "" && req.Key != key {
+		r.ErrorJSON(http.StatusBadRequest, "product key in path and body must match")
+		return
+	}
+	req.Key = key
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
 	}
-	id, err := svc.EnsureUsageProduct(r.Request.Context(), r.Param("key"), req.DisplayName)
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	out, err := svc.GetProduct(r.Request.Context(), openrails.ProductID(id))
+	out, err := svc.EnsureProduct(r.Request.Context(), req)
 	if err != nil {
 		writeCatalogError(r, err)
 		return

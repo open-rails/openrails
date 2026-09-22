@@ -8,9 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -44,13 +42,6 @@ func (s *Service) createPriceWithProduct(ctx context.Context, req CreatePriceReq
 			return nil, apperr.Invalidf("invalid product_data.catalog_id")
 		}
 	}
-	owned, err := catalogOwnerRequest(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if owned && !requested.IsZero() && requested.UUID() != *catalogscope.QueryID(ctx) {
-		return nil, catalog.ErrOwnerScope
-	}
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -65,43 +56,9 @@ func (s *Service) createPriceWithProduct(ctx context.Context, req CreatePriceReq
 		scoped := *s
 		scoped.catalogTx = s.catalogDatabase().NewWithPgxTx(tx)
 		scoped.localCatalogOnly = true
-		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", "catalog-product:"+mid.String()+":"+data.Key); err != nil {
-			return err
-		}
-		if requested.IsZero() {
-			if owned {
-				requested = openrails.CatalogID(*catalogscope.QueryID(ctx))
-			} else {
-				row, err := catalog.NewCatalogRepo(scoped.catalogTx).Ensure(ctx, nil)
-				if err != nil {
-					return err
-				}
-				requested = openrails.CatalogID(row.ID)
-			}
-		}
-		product, err := scoped.GetProductByKey(ctx, data.Key)
-		if errors.Is(err, openrails.ErrNotFound) {
-			// A concurrent ordinary Products.Create may win despite our advisory lock.
-			// Isolate its unique conflict in a savepoint, then read the committed owner.
-			err = scoped.catalogTx.MerchantTx(ctx, func(ctx context.Context, productTx pgx.Tx) error {
-				creating := scoped
-				creating.catalogTx = scoped.catalogTx.NewWithPgxTx(productTx)
-				var err error
-				product, err = creating.CreateProduct(ctx, CreateProductRequest{CatalogID: requested, Key: data.Key, DisplayName: data.DisplayName, Description: data.Description})
-				return err
-			})
-			if errors.Is(err, openrails.ErrConflict) {
-				product, err = scoped.GetProductByKey(ctx, data.Key)
-				if errors.Is(err, openrails.ErrNotFound) {
-					return ErrCatalogConflict
-				}
-			}
-		}
+		product, err := scoped.EnsureProduct(ctx, CreateProductRequest{CatalogID: requested, Key: data.Key, DisplayName: data.DisplayName, Description: data.Description})
 		if err != nil {
 			return err
-		}
-		if product.CatalogID != requested {
-			return ErrCatalogConflict
 		}
 		req.ProductID = product.ID
 		req.ProductData = nil
@@ -115,7 +72,7 @@ func (s *Service) createPriceWithProduct(ctx context.Context, req CreatePriceReq
 			return err
 		}
 		key := resolvePriceKey(model, req)
-		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", "catalog-price-key:"+mid.String()+":"+key); err != nil {
+		if err := lockCatalogKey(ctx, tx, mid, "price-key", key); err != nil {
 			return err
 		}
 		current, err := prices.GetCurrentByKey(ctx, mid.UUID(), key)

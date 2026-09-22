@@ -96,7 +96,7 @@ func TestClientCatalogAndAccessWorkflow(t *testing.T) {
 			group := "client-catalog-" + uuid.NewString()
 			product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: group, DisplayName: "Initial", TierGroup: &group, EntitlementsSpec: map[string]*int{"access": nil}})
 			require.NoError(t, err)
-			id, err := client.Products.Ensure(ctx, group, "Must not overwrite existing")
+			id, err := client.Products.Ensure(ctx, &openrails.ProductCreateParams{Key: group, DisplayName: "Must not overwrite existing"})
 			require.NoError(t, err)
 			require.Equal(t, product.ID, id.ID)
 			read, err := client.Products.RetrieveByKey(ctx, group)
