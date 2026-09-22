@@ -176,7 +176,7 @@ func checkClientDeclaredAccess(t *testing.T, ctx context.Context, h *integration
 	customer := openrails.CustomerID(uuid.New())
 	first, err := client.EnsureCustomer(ctx, (customer).String())
 	require.NoError(t, err)
-	require.Equal(t, customer, first.ID)
+	require.Equal(t, customer.String(), first.ID)
 	require.False(t, first.CreatedAt.IsZero())
 	again, err := client.EnsureCustomer(ctx, (customer).String())
 	require.NoError(t, err)

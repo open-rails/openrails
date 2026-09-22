@@ -2,7 +2,8 @@
 
 The same `*openrails.Client` is returned by embedded runtime construction or
 `openrails.NewRemote`. Applications use its `Products` and `Prices` resources;
-the runtime provides lifecycle and HTTP composition. Resource IDs are strings.
+the runtime provides lifecycle and HTTP composition. Product, price and customer
+references in ordinary SDK operations are strings.
 The server validates their kind, merchant and catalog before applying changes.
 
 ```go
@@ -50,3 +51,50 @@ See Stripe's [client migration guide](https://github.com/stripe/stripe-go/wiki/M
 [product creation](https://docs.stripe.com/api/products/create?lang=go), and
 [price creation](https://docs.stripe.com/api/prices/create?lang=go). OpenRails keeps
 its own money precision, catalog ownership and immutable pricing rules.
+
+## Access and checkout
+
+Check only the products already selected for a host page. `CheckMany` returns a
+map for that bounded input; it does not load the customer's complete purchase
+history. Use `ProductAccess.List` with its cursor only when displaying purchase
+history itself.
+
+```go
+access, err := client.ProductAccess.CheckMany(ctx, &openrails.ProductAccessCheckManyParams{
+    CustomerID: customerID,
+    ProductIDs: pageProductIDs,
+})
+if err != nil { return err }
+_ = access[productID]
+
+session, err := client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
+    Customer: openrails.CheckoutCustomerIdentity{ID: customerID},
+    PriceID: price.ID,
+    PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"},
+    IdempotencyKey: checkoutAttemptKey,
+    SuccessURL: successURL,
+    CancelURL: cancelURL,
+})
+```
+
+The server derives one-off or recurring checkout from the selected price.
+`PaymentOptions` selects the payment rail and carries its applicable collection
+inputs. It does not set the price's product or merchant. Browser return URLs
+provide navigation; verified provider events establish payment and access.
+
+The typed ID utilities remain available for advanced declared billing imports,
+provider-obligation and host-transaction contracts. They are not required to
+pass ordinary customer, product or price references between SDK resources.
+
+## Runtime ownership
+
+Declare the local merchant through `embed.Options.Merchant`, and HTTP policy
+through `Options.HTTP` when it is known at construction. Obtain one client from
+`runtime.Client()` and use it for application operations, including creator
+catalog scoping through `client.ForCatalogOwner(subject)`.
+
+Filesystem manifests, provider reconciliation and preserved-identity restoration
+are explicit local maintenance tools in `embed/operator`. They are outside the
+ordinary HTTP client contract. Shared host database commits use the explicit
+`embed.NewHostTransactions(runtime)` extension. Neither exposes a database
+handle or adds domain methods to Runtime.
