@@ -290,7 +290,7 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 		return fmt.Errorf("build control plane: %w", err)
 	}
 
-	if err := a.Runtime.AddRiverContribution(cp.Core().RiverJobs()); err != nil {
+	if err := a.Runtime.AddRiverContribution(cp.RiverJobs()); err != nil {
 		cp.Close()
 		if ownedPool {
 			pool.Close()

@@ -2,10 +2,7 @@ package server
 
 import (
 	"github.com/open-rails/openrails/internal/http/router"
-	"net/http"
-	"strings"
 
-	authhttp "github.com/open-rails/authkit/authhttp"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -26,29 +23,17 @@ func (s *Server) registerControlPlaneAuthRoutes(mux router.Registrar) error {
 	if cp == nil || cp.AuthService() == nil {
 		return nil
 	}
-	groups := cp.MountedRouteGroups()
-	if len(groups) == 0 {
-		// Fail closed: an empty allow-list mounts nothing, never the default surface.
-		return nil
-	}
-	mount, err := authhttp.NewMount(cp.AuthService(), authhttp.MountOptions{
-		Groups:        groups,
-		APIPrefix:     ControlPlaneAuthPrefix,
-		ExcludeRoutes: []authhttp.RouteRef{{Method: http.MethodGet, Path: authhttp.JWKSPath}},
-		Wrap:          cp.WrapAuthRoute,
-	})
+	routes, err := cp.AuthRoutes()
 	if err != nil {
 		return err
 	}
-	specs := mount.Routes()
-	for _, spec := range specs {
-		if strings.HasPrefix(spec.Path, ControlPlaneAuthPrefix+"/") {
-			s.handle(mux, spec.Method+" "+spec.Path, mount)
-		}
+	for _, route := range routes {
+		s.handle(mux, route.Method+" "+route.Path, route.Handler)
 	}
+
 	log.WithFields(log.Fields{
 		"prefix":      ControlPlaneAuthPrefix,
-		"routes":      len(specs),
+		"routes":      len(routes),
 		"self_hosted": cp.SelfHostedPosture(),
 	}).Info("control plane: mounted selective AuthKit route groups")
 	return nil

@@ -7,7 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	authcore "github.com/open-rails/authkit/embedded"
+	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/verify"
 )
 
 // waitRefreshIdle waits for the single-flighted background refresh to release
@@ -55,12 +56,12 @@ func TestRefreshIssuerRegistryIfStale_NoCoreClientDoesNotPanic(t *testing.T) {
 
 // The load-bearing half of or#854: whatever future nil appears inside the
 // refresh, the background goroutine must recover rather than tear down the
-// binary. A zero-value *authcore.Runtime is a non-nil source whose backing
-// service is nil, so the load panics deep inside authkit — past every guard we
-// could write here. The process must survive it.
+// binary. An explicitly panicking issuer source raises an unexpected
+// failure inside AuthKit, past the ordinary backend error contract. The process must survive it.
 func TestRefreshIssuerRegistryIfStale_RecoversPanic(t *testing.T) {
 	v, _ := newTestDelegatedVerifier(t)
-	cp := &ControlPlane{delegatedVerifier: v, authClient: &authcore.Runtime{}}
+	v.WithService(panickingIssuerSource{})
+	cp := &ControlPlane{delegatedVerifier: v, client: struct{ authkit.Client }{}}
 	cp.SetIssuerRegistryTTL(time.Nanosecond)
 
 	cp.refreshIssuerRegistryIfStale()
@@ -72,4 +73,10 @@ func TestRefreshIssuerRegistryIfStale_RecoversPanic(t *testing.T) {
 	// And it must still be re-armable: a second kick also survives.
 	cp.refreshIssuerRegistryIfStale()
 	waitRefreshIdle(t, cp)
+}
+
+type panickingIssuerSource struct{ verify.Enricher }
+
+func (panickingIssuerSource) ListEnabledRemoteApplications(context.Context) ([]authkit.RemoteApplication, error) {
+	panic("fixture issuer failure")
 }

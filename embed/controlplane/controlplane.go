@@ -13,7 +13,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
 
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
@@ -186,10 +185,8 @@ func (c *ControlPlane) Handler() (http.Handler, error) {
 	return srv.Handler(), nil
 }
 
-// Core returns the local AuthKit Runtime owned by this control plane. Hosts use
-// it for local bootstrap and configuration, and Core().Client() for portable
-// application operations.
-func (c *ControlPlane) Core() *authcore.Runtime { return c.cp.Core() }
+// Core returns the control plane's portable AuthKit operation Client.
+func (c *ControlPlane) Core() authkit.Client { return c.cp.Core() }
 
 // UserAuthenticator verifies control-plane session tokens in process.
 func (c *ControlPlane) UserAuthenticator() billingauth.Authenticator { return c.cp.UserAuthenticator() }

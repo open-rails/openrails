@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
 	billingauthkit "github.com/open-rails/openrails/embed/authkit"
 	"github.com/stretchr/testify/require"
@@ -92,7 +93,7 @@ catalogs:
 }
 
 // ccbillIdentity explicitly selects AuthKit as this host's identity provider.
-func ccbillIdentity(t *testing.T, ctx context.Context, dsn string) *authcore.Runtime {
+func ccbillIdentity(t *testing.T, ctx context.Context, dsn string) authkit.Client {
 	t.Helper()
 	appDB := dbtest.OpenAppDB(t, dsn)
 	core, err := authcore.New(authcore.Config{
@@ -102,7 +103,7 @@ func ccbillIdentity(t *testing.T, ctx context.Context, dsn string) *authcore.Run
 	}, authcore.Deps{Postgres: appDB.Pool()})
 	require.NoError(t, err)
 	t.Cleanup(core.Close)
-	return core
+	return core.Client()
 }
 
 func seedProfileUser(t *testing.T, ctx context.Context, dsn, username string) string {
@@ -110,7 +111,12 @@ func seedProfileUser(t *testing.T, ctx context.Context, dsn, username string) st
 	core := ccbillIdentity(t, ctx, dsn)
 	user, err := core.CreateUser(ctx, username+"@test.example.com", username)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, core.HardDeleteUser(context.Background(), user.ID)) })
+	t.Cleanup(func() {
+		deleted, err := core.HardDeleteUsers(context.Background(), []string{user.ID})
+		require.NoError(t, err)
+		require.Len(t, deleted, 1)
+		require.NoError(t, deleted[0].Err)
+	})
 	return user.ID
 }
 
