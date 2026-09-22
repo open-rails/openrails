@@ -9,10 +9,10 @@ env: development # REQUIRED (SEC-18); no default — an undeclared environment r
 provider_write_mode: full # full | limited | readonly; UNSET fail-closes to readonly (no provider writes) — set full/limited explicitly; required outside development
 test_mode: sandbox        # sandbox | live; allowed in every environment (#762) — rail-credential validation, not env, keeps it honest. REQUIRED outside development (or#915): the credential posture is never inherited by omission
 
-merchant_source: manifest # host-declared merchant/provider config; credentials stay in memory
-catalog_source: ""        # manifest | api; empty follows merchant_source
+merchant_config_source: manifest # host-declared merchant/provider config; credentials stay in memory
+catalog_source: ""        # manifest | api; empty follows merchant_config_source
 # Set catalog_source: api for dynamic products/prices with host-owned credentials.
-# merchant_source: api instead uses managed provider credentials and requires
+# merchant_config_source: api instead uses managed provider credentials and requires
 # secret_backend: db | vault; DB credentials need an encryption key outside dev.
 
 host: 0.0.0.0

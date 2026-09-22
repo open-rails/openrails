@@ -67,7 +67,7 @@ func TestStandaloneMerchantMeteringRoutesHTTP(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(body, &created))
 	require.Equal(t, strings.ReplaceAll(meterKey, ".", "-"), created.Key)
-	require.Equal(t, config.MerchantSourceAPI, created.ConfigurationSource)
+	require.Equal(t, config.MerchantConfigSourceAPI, created.ConfigurationSource)
 	require.True(t, created.WritesAllowed)
 
 	status, body = requestJSON(t, http.MethodPut, meterURL, token, meterRequest)

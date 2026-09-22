@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	neturl "net/url"
-	"path"
 	"strings"
 	"time"
 
@@ -16,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -300,12 +297,17 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	// Stripe "thin" event destinations deliver a minimal payload without the
 	// object. Hydrate it with the MERCHANT's secret key into the classic
 	// {data:{object}} shape so dispatch only ever sees snapshot-style events.
-	if hydrated, herr := hydrateThinStripeEvent(r.Request.Context(), strings.TrimSpace(creds.SecretKey), prepared.Body); herr != nil {
+	if hydrated, herr := hydrateThinStripeEvent(r.Request.Context(), strings.TrimSpace(creds.SecretKey), creds.AccountID, prepared.Body); herr != nil {
 		log.WithError(herr).Error("failed to hydrate thin stripe event")
 		r.ErrorJSON(http.StatusBadGateway, "Failed to hydrate thin event")
 		return
 	} else if hydrated != nil {
 		prepared.Body = hydrated
+		prepared.EventID, prepared.EventType, err = webhookutil.ParseStripeEventMeta(hydrated)
+		if err != nil {
+			r.ErrorJSON(http.StatusBadGateway, "Invalid hydrated event")
+			return
+		}
 	}
 	if r.State.WebhookDispatcher == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
@@ -711,115 +713,6 @@ func prepareStripeMultiSecret(body []byte, secrets []string, header string, tole
 		}
 	}
 	return webhookutil.Prepared{}, lastErr
-}
-
-// hydrateThinStripeEvent converts a Stripe "thin" event payload (minimal, with a
-// related_object reference but no embedded object) into the classic
-// {id,type,data:{object}} shape by fetching the referenced resource. Returns
-// (nil, nil) when the payload is already a snapshot event (object present) or is
-// not a hydratable thin event, so the caller passes the body through unchanged.
-func hydrateThinStripeEvent(ctx context.Context, stripeSecretKey string, body []byte) ([]byte, error) {
-	var envelope struct {
-		ID   string `json:"id"`
-		Type string `json:"type"`
-		Data *struct {
-			Object json.RawMessage `json:"object"`
-		} `json:"data"`
-		RelatedObject *struct {
-			ID   string `json:"id"`
-			Type string `json:"type"`
-			URL  string `json:"url"`
-		} `json:"related_object"`
-	}
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		return nil, nil // let downstream parsing surface the malformed payload
-	}
-	if envelope.Data != nil && len(envelope.Data.Object) > 0 {
-		return nil, nil // snapshot event: object already present
-	}
-	if envelope.RelatedObject == nil || strings.TrimSpace(envelope.RelatedObject.URL) == "" {
-		return nil, nil // not a hydratable thin event
-	}
-	if strings.TrimSpace(stripeSecretKey) == "" {
-		return nil, fmt.Errorf("stripe secret key not configured for thin event hydration")
-	}
-
-	// SEC-24 item 5. The payload-supplied value is ALWAYS a path, never a URL.
-	// The previous `if !strings.HasPrefix(url, "http")` was the inverse of a
-	// guard: an absolute URL was accepted verbatim and then handed
-	// `Authorization: Bearer sk_live_…`, so a leaked webhook secret escalated
-	// into live-API-key exfiltration. The host is ours and is not negotiable.
-	url, err := stripeRelatedObjectURL(envelope.RelatedObject.URL)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+stripeSecretKey)
-	// Thin-event hydration is a pure read (GET of the related object); the
-	// unconditionally write-blocked choke client works in every mode and makes
-	// any future mutation on this path fail loudly.
-	resp, err := stripeapi.ReadOnlyClient(15 * time.Second).Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	object, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("fetch related object failed (%d)", resp.StatusCode)
-	}
-
-	synthesized := struct {
-		ID   string `json:"id"`
-		Type string `json:"type"`
-		Data struct {
-			Object json.RawMessage `json:"object"`
-		} `json:"data"`
-	}{ID: envelope.ID, Type: envelope.Type}
-	synthesized.Data.Object = object
-	return json.Marshal(synthesized)
-}
-
-// stripeAPIBase is the ONE host thin-event hydration may reach. Not derived
-// from the payload, not configurable per request.
-const stripeAPIBase = "https://api.stripe.com"
-
-// stripeRelatedObjectURL treats the payload's related-object value strictly as a
-// PATH under the Stripe API host. Anything that could redirect the request
-// elsewhere — a scheme, a protocol-relative "//host", a backslash, a control
-// character — is refused rather than normalised, because a normaliser is
-// something to be outwitted and a refusal is not.
-func stripeRelatedObjectURL(raw string) (string, error) {
-	p := strings.TrimSpace(raw)
-	if p == "" {
-		return "", fmt.Errorf("thin event related object has no url")
-	}
-	if strings.ContainsAny(p, "\\\x00") || strings.ContainsRune(p, '\n') || strings.ContainsRune(p, '\r') {
-		return "", fmt.Errorf("thin event related object url is not a plain path")
-	}
-	if strings.Contains(p, "://") || strings.HasPrefix(p, "//") {
-		return "", fmt.Errorf("thin event related object url must be a path, not an absolute or protocol-relative url")
-	}
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
-	}
-	// A parsed path must stay a path: no host, no scheme, no ".." escape.
-	u, err := neturl.Parse(p)
-	if err != nil {
-		return "", fmt.Errorf("thin event related object url is unparseable: %w", err)
-	}
-	if u.Scheme != "" || u.Host != "" || u.User != nil {
-		return "", fmt.Errorf("thin event related object url must be a path, not an absolute url")
-	}
-	if u.Path != path.Clean(u.Path) {
-		return "", fmt.Errorf("thin event related object path is not canonical")
-	}
-	return stripeAPIBase + u.String(), nil
 }
 
 func nmiWebhookAccountID(body []byte) string {

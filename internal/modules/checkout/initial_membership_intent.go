@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -107,13 +108,25 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Ope
 	} else if refused {
 		return h.Verify(ctx, current)
 	}
-	if progress["initial_submitted"] == true || current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
+	if current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
+		return h.Verify(ctx, current)
+	}
+	if progress["initial_submitted"] == true {
+		if current.Rail == "stripe" {
+			return h.executeStripeInitialDecline(ctx, current)
+		}
 		return h.Verify(ctx, current)
 	}
 	in = current
 	p, err := decodeInitialMembershipPayload(in)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
+	}
+	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine && h.Checkout.Config != nil && h.Checkout.Config.EngineAdmissionHold {
+		return intents.Parked("engine payment admission is held")
+	}
+	if in.Rail == "stripe" {
+		return h.executeStripeInitial(ctx, in, p)
 	}
 	client, err := h.client(ctx, in, p)
 	if err != nil {
@@ -123,7 +136,7 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Ope
 		return intents.Parked("native enrollment account is read-only")
 	}
 	var proxy *hscharge.Charger
-	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
+	if p.HyperSwitch != nil {
 		proxy, err = h.hyperSwitchCharger(ctx, in, p, client)
 		if err != nil {
 			return intents.Parked(err.Error())
@@ -131,34 +144,7 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Ope
 	} else if _, err = client.ReadSingleCardVaultBilling(ctx, p.Instrument.RailCustomerRef, p.Instrument.RailMethodRef); err != nil {
 		return intents.Parked("enrollment instrument readback unavailable or unqualified")
 	}
-	submitted := false
-	err = h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		d := h.database().NewWithPgxTx(tx)
-		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: p.Terms.CustomerID}); err != nil {
-			return err
-		}
-		method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: in.MerchantID, ID: p.Terms.PaymentMethodID})
-		if err != nil {
-			return err
-		}
-		if method.CustomerID != p.Terms.CustomerID || method.ParkReason != "" {
-			return charge.ErrInstrumentChanged
-		}
-		if err = p.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
-			return err
-		}
-		if p.HyperSwitch != nil {
-			binding, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, h.Checkout.Config.HyperSwitch.APIBaseURL)
-			if err != nil {
-				return err
-			}
-			if binding != *p.HyperSwitch {
-				return charge.ErrInstrumentChanged
-			}
-		}
-		submitted, err = intents.NewStore(d).RecordProgressIfAbsent(ctx, in.ID, "initial_submitted", true)
-		return err
-	})
+	proof, submitted, err := h.fenceInitialMembership(ctx, in, p)
 	if err != nil {
 		return intents.Ambiguous("enrollment could not retain its submission fence: " + err.Error())
 	}
@@ -175,6 +161,9 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Ope
 			mode = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
 		}
 		result, refusal, err := proxy.ChargeInitialRecurring(ctx, charge.Request{Instrument: charge.Instrument{Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef}, AmountMinor: minor, Currency: p.Terms.Currency, OrderRef: intents.NMIEnrollmentOrder(in), Context: mode})
+		if errors.Is(err, charge.ErrNotDispatched) {
+			return h.completeInitialNonexecution(ctx, in, proof)
+		}
 		if err != nil {
 			return intents.Ambiguous("initial membership charge requires provider verification")
 		}
@@ -185,6 +174,32 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Ope
 		} else {
 			if result.TransactionID == "" || result.Declined {
 				return intents.Ambiguous("initial membership has no qualified charge candidate")
+			}
+			if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, map[string]any{"transaction_id": result.TransactionID}); err != nil {
+				return intents.Ambiguous(err.Error())
+			}
+		}
+		return h.Verify(ctx, in)
+	}
+	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
+		mode := charge.InitialRecurring()
+		if p.Instrument.StoredCredentialRecurringRef != "" {
+			mode = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
+		}
+		result, refusal, err := nmidirect.New(client).ChargeInitialRecurring(ctx, charge.Request{Instrument: charge.Instrument{Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef}, AmountMinor: minor, Currency: p.Terms.Currency, OrderRef: intents.NMIEnrollmentOrder(in), Context: mode})
+		if errors.Is(err, charge.ErrNotDispatched) {
+			return h.completeInitialNonexecution(ctx, in, proof)
+		}
+		if err != nil {
+			return intents.Ambiguous("initial native charge requires verification")
+		}
+		if refusal != nil {
+			if err := intents.NewStore(h.database()).RetainInitialMembershipDecline(ctx, in, refusal); err != nil {
+				return intents.Ambiguous(err.Error())
+			}
+		} else {
+			if result.TransactionID == "" || result.Declined {
+				return intents.Ambiguous("initial native payment has no qualified candidate")
 			}
 			if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, map[string]any{"transaction_id": result.TransactionID}); err != nil {
 				return intents.Ambiguous(err.Error())
@@ -263,7 +278,10 @@ func (h *InitialMembershipIntentHandler) Verify(ctx context.Context, in gen.Open
 		return intents.Ambiguous("invalid initial submission fence")
 	}
 	if progress["initial_submitted"] != true {
-		return h.Execute(ctx, in)
+		return intents.Retryable("unsubmitted payment awaits gated execution")
+	}
+	if in.Rail == "stripe" {
+		return h.verifyStripeInitial(ctx, in, p)
 	}
 	client, err := h.client(ctx, in, p)
 	if err != nil {
@@ -360,6 +378,20 @@ func (h *InitialMembershipIntentHandler) Resolve(ctx context.Context, in gen.Ope
 		return intents.Outcome{}, intents.RejectResolution("exact schedule reference required")
 	}
 	p, _ := decodeInitialMembershipPayload(in)
+	if in.Rail == "stripe" {
+		service, err := h.stripeEngineService(ctx, in)
+		if err != nil {
+			return intents.Outcome{}, err
+		}
+		receipt, found, err := intents.ReadStripeEngineReceipt(ctx, in, service, resolution.ProviderReference)
+		if err != nil || !found {
+			return intents.Outcome{}, intents.RejectResolution("payment does not prove accepted membership")
+		}
+		if _, err := intents.NewStore(h.database()).RetainCollectedReceipt(ctx, in, receipt); err != nil {
+			return intents.Outcome{}, err
+		}
+		return h.Verify(ctx, in), nil
+	}
 	client, err := h.client(ctx, in, p)
 	if err != nil {
 		return intents.Outcome{}, err
@@ -452,7 +484,7 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 		}
 		// Generic diagnostic progress is not financial authority. Only the
 		// validated private refusal above may populate terminal refusal fields.
-		for _, key := range []string{"declined", "not_executed", "request_refused", "response_code", "localization_id"} {
+		for _, key := range []string{"authentication_required", "declined", "not_executed", "request_refused", "response_code", "localization_id"} {
 			delete(evidence, key)
 		}
 
@@ -465,7 +497,8 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 				return errors.New("initial terminal replay conflicts")
 			}
 			outcome.Evidence = saleResultEvidence(evidence)
-			return nil
+			return h.projectInitialMembershipSession(ctx, d, current, p, success)
+
 		}
 		if success {
 			providerSub := schedule.SubscriptionID()
@@ -474,6 +507,9 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 				transaction = receipt.TransactionID()
 			}
 			metadata := map[string]any{"order_id": intents.NMIEnrollmentOrder(in), "provider_transaction_id": transaction}
+			if reversal := receipt.ReversalKind(); reversal != "" {
+				metadata["initial_payment_reversal"] = reversal
+			}
 			if p.DelayedStart() != nil {
 				metadata["delayed_start"] = p.DelayedStart().UTC().Format(time.RFC3339Nano)
 			}
@@ -481,15 +517,22 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 			if p.Email != "" {
 				email = &p.Email
 			}
-			if _, _, err := h.Checkout.Lifecycle.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &p.Terms, UserID: p.Terms.CustomerID.String(), PriceID: p.Terms.PriceID, Rail: "nmi", RailSubscriptionID: &providerSub, UserEmail: email, TransactionID: transaction, Amount: p.Terms.Amount, AmountProvided: true, Currency: p.Terms.Currency, PurchasedAt: &p.Terms.AcceptedAt, PaymentMetadata: metadata}); err != nil {
+			if _, _, err := h.Checkout.Lifecycle.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &p.Terms, PaymentCustodian: p.Instrument.Custodian, InitialPaymentReversal: receipt.ReversalKind(), UserID: p.Terms.CustomerID.String(), PriceID: p.Terms.PriceID, Rail: models.Rail(in.Rail), RailSubscriptionID: &providerSub, UserEmail: email, TransactionID: transaction, Amount: p.Terms.Amount, AmountProvided: true, Currency: p.Terms.Currency, PurchasedAt: &p.Terms.AcceptedAt, PaymentMetadata: metadata}); err != nil {
 				return err
 			}
 			if paid {
-				if _, err := d.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: in.MerchantID, ID: p.Terms.PaymentMethodID, Agreement: "recurring", Ref: transaction}); err != nil {
+				agreementRef := transaction
+				if in.Rail == "stripe" {
+					agreementRef = receipt.StripeEnginePaymentIntentID()
+				}
+				if _, err := d.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: in.MerchantID, ID: p.Terms.PaymentMethodID, Agreement: "recurring", Ref: agreementRef}); err != nil {
 					return err
 				}
 			}
 			evidence["subscription_id"], evidence["provider_subscription_id"], evidence["transaction_id"], evidence["status"], evidence["message"] = p.Terms.SubscriptionID.String(), providerSub, transaction, "success", "Subscription created successfully"
+			if receipt.ReversalKind() != "" {
+				evidence["message"] = "Payment recorded; enrollment canceled after provider reversal"
+			}
 			if p.Terms.Pending {
 				evidence["status"] = "pending"
 				evidence["message"] = "Subscription scheduled for its accepted start date"
@@ -500,12 +543,15 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 		} else {
 			if outcome.Evidence["declined"] == true && p.Terms.Amount > 0 {
 				code := fmt.Sprint(outcome.Evidence["response_code"])
-				reason := payments.NormalizeFailureReason("nmi", code)
+				if in.Rail == "stripe" {
+					code = fmt.Sprint(outcome.Evidence["failure_code"])
+				}
+				reason := payments.NormalizeFailureReason(in.Rail, code)
 				kind, token := payments.AttemptInitial, charge.TokenTypePSPToken
-				if p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
+				if p.Instrument.CustodianHeld() {
 					token = charge.TokenTypePANViaProxy
 				}
-				if err := payments.NewPaymentService(d, h.Checkout.Clock()).Create(ctx, &models.Payment{ID: p.Terms.PaymentID, CustomerID: p.Terms.CustomerID, PriceID: p.Terms.PriceID, PspID: in.PspID, Rail: "nmi", TransactionID: "nmi_sub_declined:" + in.ID.String(), Amount: p.Terms.Amount, ListAmount: p.Terms.RecurringAmount, Currency: p.Terms.Currency, Status: payments.PaymentStatusFailedValue, AttemptKind: &kind, TokenType: &token, FailureCode: &code, FailureReason: &reason, MoneyMovement: models.MoneyMovementNone, PurchasedAt: p.Terms.AcceptedAt, CreatedAt: p.Terms.AcceptedAt}); err != nil {
+				if err := payments.NewPaymentService(d, h.Checkout.Clock()).Create(ctx, &models.Payment{ID: p.Terms.PaymentID, CustomerID: p.Terms.CustomerID, PriceID: p.Terms.PriceID, PspID: in.PspID, Rail: models.Rail(in.Rail), TransactionID: in.Rail + "_sub_declined:" + in.ID.String(), Amount: p.Terms.Amount, ListAmount: p.Terms.RecurringAmount, Currency: p.Terms.Currency, Status: payments.PaymentStatusFailedValue, AttemptKind: &kind, TokenType: &token, FailureCode: &code, FailureReason: &reason, MoneyMovement: models.MoneyMovementNone, PurchasedAt: p.Terms.AcceptedAt, CreatedAt: p.Terms.AcceptedAt}); err != nil {
 					return err
 				}
 			}
@@ -515,6 +561,9 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Op
 		}
 		if record := intents.OperatorResolutionRecord(ctx); record != nil {
 			evidence["operator_resolution"] = record
+		}
+		if err := h.projectInitialMembershipSession(ctx, d, current, p, success); err != nil {
+			return err
 		}
 		raw, err := json.Marshal(evidence)
 		if err != nil {
@@ -617,3 +666,81 @@ func subscriptionMetadataString(raw json.RawMessage, key string) string {
 // standard registration path (idempotent: existing rows are activated /
 // answered, not duplicated) and completes the request-level idempotency
 // record so client replays get the cached response.
+
+func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Context, in gen.OpenrailsRailIntent, p InitialMembershipPayload) (intents.InitialMembershipNonexecutionProof, bool, error) {
+	var proof intents.InitialMembershipNonexecutionProof
+	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine && h.Checkout.Config != nil && h.Checkout.Config.EngineAdmissionHold {
+		return proof, false, errors.New("engine payment admission is held")
+	}
+	submitted := false
+	err := h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := h.database().NewWithPgxTx(tx)
+		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: p.Terms.CustomerID}); err != nil {
+			return err
+		}
+		method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: in.MerchantID, ID: p.Terms.PaymentMethodID})
+		if err != nil {
+			return err
+		}
+		if method.CustomerID != p.Terms.CustomerID || method.ParkReason != "" {
+			return charge.ErrInstrumentChanged
+		}
+		if err = p.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
+			return err
+		}
+		if p.HyperSwitch != nil {
+			binding, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, h.Checkout.Config.HyperSwitch.APIBaseURL)
+			if err != nil {
+				return err
+			}
+			if binding != *p.HyperSwitch {
+				return charge.ErrInstrumentChanged
+			}
+		}
+		proof, submitted, err = intents.NewStore(d).BeginInitialMembershipPayment(ctx, in)
+		return err
+	})
+	return proof, submitted, err
+}
+
+func (h *InitialMembershipIntentHandler) projectInitialMembershipSession(ctx context.Context, d *db.DB, in gen.OpenrailsRailIntent, p InitialMembershipPayload, success bool) error {
+	if !strings.HasPrefix(p.CheckoutIdempotencyKey, "checkout_session:") {
+		return nil
+	}
+	id, err := uuid.Parse(strings.TrimPrefix(p.CheckoutIdempotencyKey, "checkout_session:"))
+	if err != nil || id == uuid.Nil {
+		return errors.New("accepted membership has invalid session identity")
+	}
+	params := gen.CompleteInitialMembershipSessionParams{ID: id, MerchantID: in.MerchantID, CustomerID: p.Terms.CustomerID, PriceID: p.Terms.PriceID, PspID: p.Terms.PSPID, Rail: in.Rail, Status: "failed", Now: h.Checkout.now().UTC()}
+	if success {
+		params.Status = "succeeded"
+		params.SubscriptionID = &p.Terms.SubscriptionID
+		if p.Terms.Amount > 0 {
+			receipt, paid, err := intents.LoadCollectedReceipt(in)
+			if err != nil {
+				return err
+			}
+			if !paid {
+				return errors.New("initial checkout projection has no paid receipt")
+			}
+			params.PaymentID = &p.Terms.PaymentID
+			transaction := receipt.TransactionID()
+			params.TransactionID = &transaction
+		}
+	}
+	rows, err := d.Gen(ctx).CompleteInitialMembershipSession(ctx, params)
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return errors.New("initial checkout projection differs from accepted session")
+	}
+	return nil
+}
+
+func (h *InitialMembershipIntentHandler) completeInitialNonexecution(ctx context.Context, in gen.OpenrailsRailIntent, proof intents.InitialMembershipNonexecutionProof) intents.Outcome {
+	if err := intents.NewStore(h.database()).RetainInitialMembershipNonexecution(ctx, in, proof); err != nil {
+		return intents.Ambiguous(err.Error())
+	}
+	return h.Verify(ctx, in)
+}

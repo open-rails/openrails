@@ -112,12 +112,18 @@ func TestReconcileUnknownCohort_StaleDeclineQueuesDeferredDelete(t *testing.T) {
 		require.Contains(t, *feedback, "declined beyond dunning window")
 
 		var intentStatus, origin, intentType string
+		var intentID uuid.UUID
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status, origin, intent_type FROM billing.rail_intents WHERE subscription_id=$1`, subStale).
-			Scan(&intentStatus, &origin, &intentType))
+			`SELECT id, status, origin, intent_type FROM billing.rail_intents WHERE subscription_id=$1`, subStale).
+			Scan(&intentID, &intentStatus, &origin, &intentType))
 		require.Equal(t, "pending", intentStatus)
 		require.Equal(t, "system", origin)
 		require.Equal(t, intents.TypeNMIDeleteSubscription, intentType)
+		var jobs int
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM public.river_job WHERE kind=$1 AND args->>'merchant_id'=$2 AND args->>'intent_id'=$3`,
+			intents.OperationJobKind, merchantID.String(), intentID.String()).Scan(&jobs))
+		require.Equal(t, 1, jobs, "the deferred delete must have a committed River wakeup, not only a ledger row")
 
 		// Roster-confirmed gone: cancelled, NO marker, NO intent.
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,

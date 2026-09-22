@@ -243,6 +243,22 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 		}).Warn("stripe webhook api_version differs from pinned version; pin the webhook endpoint in the Stripe dashboard to match")
 	}
 
+	// The signed envelope has already been verified at ingestion. A PI wakeup
+	// needs identity and accepted terms, never the browser's client credential.
+	// Strip it before ProcessWebhook serializes its completed replay-cache value.
+	if strings.HasPrefix(eventType, "payment_intent.") {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(evt.Data.Object, &object); err != nil {
+			return fmt.Errorf("parse Stripe payment notification: %w", err)
+		}
+		delete(object, "client_secret")
+		redacted, err := json.Marshal(object)
+		if err != nil {
+			return err
+		}
+		evt.Data.Object = redacted
+	}
+
 	if s.DeduplicationService != nil {
 		return s.DeduplicationService.ProcessWebhook(ctx, eventID, eventType, models.RailStripe.EventSource(), evt, func(ctx context.Context) error {
 			return s.handleEvent(ctx, eventType, evt)
@@ -256,6 +272,9 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 // subscribe to (#590 auto-registration reads this for enabled_events). KEEP IN
 // SYNC with the handleEvent switch below.
 var HandledStripeEventTypes = []string{
+	"payment_intent.succeeded",
+	"payment_intent.payment_failed",
+	"payment_intent.requires_action",
 	"invoice.paid",
 	"invoice.payment_failed",
 	"invoice_payment.paid",
@@ -279,6 +298,8 @@ var HandledStripeEventTypes = []string{
 func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string, evt stripeEvent) error {
 	obj := evt.Data.Object
 	switch eventType {
+	case "payment_intent.succeeded", "payment_intent.payment_failed", "payment_intent.requires_action":
+		return s.wakeStripeEngineOperation(ctx, obj)
 	// #684: subscription-state events are WAKE-UP SIGNALS. The handler parses
 	// ONLY the dirty object's identity, then enqueues the coalesced fetch-and-
 	// converge job; FETCHED provider truth (never the payload) decides the
@@ -1094,6 +1115,12 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 	sub, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
 	if err != nil {
 		return fmt.Errorf("load stripe subscription for won dispute recovery: %w", err)
+	}
+	// Returning disputed funds restores accounting, not permission to restart an
+	// engine-owned agreement. It has no native Stripe schedule to reactivate and
+	// terminal customer/merchant/chargeback decisions must remain preserved.
+	if sub.CollectionPolicy == models.CollectionPolicyEngine {
+		return nil
 	}
 	if sub.Status != models.StatusCancelled {
 		return nil

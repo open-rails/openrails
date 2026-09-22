@@ -25,8 +25,8 @@ import (
 
 var errEngineObligationChanged = errors.New("accepted engine obligation changed before submission")
 
-// SubscriptionCollectionHandler uses the existing collected-payment custody
-// protocol and renewal writer in the shared Runtime intent registry.
+// SubscriptionCollectionHandler uses the collected-payment custody protocol
+// and shared renewal writer for qualified engine card obligations.
 type SubscriptionCollectionHandler struct {
 	DB       *db.DB
 	Resolver CollectionPlane
@@ -62,10 +62,16 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 		return outcome
 	}
 	if intents.EvidenceString(in, "submitted_at") != "" {
+		if in.Rail == "stripe" {
+			return h.executeStripeEngineDecline(ctx, in)
+		}
 		return h.Verify(ctx, in)
 	}
 	if h.Config == nil {
 		return intents.Parked("engine execution mode is not configured")
+	}
+	if h.Config.EngineAdmissionHold {
+		return intents.Parked("new engine payment submission is held")
 	}
 	if blocked, reason := intents.GateExecution(h.Config, intents.Origin(in.Origin)); blocked {
 		return intents.Parked(reason)
@@ -80,7 +86,10 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 		}
 		return intents.Parked(err.Error())
 	}
-	charger, err := PrepareHyperSwitchCharge(ctx, h.Resolver, method, p.HyperSwitch)
+	if in.Rail == "stripe" {
+		return h.executeStripeEngine(ctx, in, p)
+	}
+	charger, err := prepareEngineNMICharge(ctx, h.Resolver, method, p.HyperSwitch)
 	if err != nil {
 		return intents.Parked("arm accepted recurring charge: " + err.Error())
 	}
@@ -94,9 +103,15 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 	if !first {
 		return h.Verify(ctx, in)
 	}
-	result, refusal, err := charger.ChargeRecurringMIT(ctx, charge.Request{
+	chargeContext := charge.RecurringMIT(p.Instrument.StoredCredentialRecurringRef)
+	execute := charger.ChargeRecurringMIT
+	if p.Initiator == charge.InitiatorCustomer {
+		chargeContext = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
+		execute = charger.ChargeInitialRecurring
+	}
+	result, refusal, err := execute(ctx, charge.Request{
 		Instrument:  charge.Instrument{PaymentMethodID: p.PaymentMethodID, Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef},
-		AmountMinor: p.AmountMinor, Currency: p.Renewal.Currency, OrderRef: p.OrderReference, Description: "OpenRails subscription renewal", Context: charge.RecurringMIT(p.Instrument.StoredCredentialRecurringRef),
+		AmountMinor: p.AmountMinor, Currency: p.Renewal.Currency, OrderRef: p.OrderReference, Description: "OpenRails subscription renewal", Context: chargeContext,
 	})
 	if errors.Is(err, charge.ErrNotDispatched) {
 		return h.completeNotExecuted(ctx, in, p, "not_dispatched", charge.ErrNotDispatched.Error(), proof)
@@ -142,15 +157,17 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		if sub.RetryAttempts != nil {
 			failures = *sub.RetryAttempts
 		}
-		if sub.CollectionPolicy != models.CollectionPolicyEngine || sub.Rail != models.RailNMI || sub.RailSubscriptionID != "" || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) || sub.PriceID != p.Renewal.FromPriceID || sub.ProductID != p.Renewal.FromProductID || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) || sub.CancelledAt != nil || failures != p.FailureCount {
+		if sub.CollectionPolicy != models.CollectionPolicyEngine || string(sub.Rail) != in.Rail || sub.RailSubscriptionID != "" || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) || sub.PriceID != p.Renewal.FromPriceID || sub.ProductID != p.Renewal.FromProductID || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue) || sub.CancelledAt != nil || sub.DeletionScheduledAt != nil || failures != p.FailureCount {
 			return errEngineObligationChanged
 		}
-		handle := paymentmethods.CustodianHandle{Custodian: *p.Instrument.CustodianID, Method: p.Instrument.RailMethodRef}
-		if err := paymentmethods.LockCustodianHandles(ctx, q, in.MerchantID, handle); err != nil {
-			return err
-		}
-		if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, in.MerchantID, handle); err != nil {
-			return errors.Join(charge.ErrInstrumentChanged, err)
+		if p.Instrument.CustodianID != nil {
+			handle := paymentmethods.CustodianHandle{Custodian: *p.Instrument.CustodianID, Method: p.Instrument.RailMethodRef}
+			if err := paymentmethods.LockCustodianHandles(ctx, q, in.MerchantID, handle); err != nil {
+				return err
+			}
+			if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, in.MerchantID, handle); err != nil {
+				return errors.Join(charge.ErrInstrumentChanged, err)
+			}
 		}
 		method, err = q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID})
 		if err != nil {
@@ -162,7 +179,7 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		if err := p.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
 			return err
 		}
-		binding, err := collectionHyperSwitchBinding(ctx, q, method, p.HyperSwitch.APIBaseURL)
+		binding, err := engineCollectionBinding(ctx, q, method, p.HyperSwitch.APIBaseURL)
 		if err != nil {
 			return err
 		}
@@ -192,13 +209,16 @@ func (h *SubscriptionCollectionHandler) Verify(ctx context.Context, in gen.Openr
 		return outcome
 	}
 	if intents.EvidenceString(in, "submitted_at") == "" {
-		return h.Execute(ctx, in)
+		return intents.Retryable("unsubmitted payment awaits gated execution")
 	}
 	reference := ""
 	if candidate, found, err := intents.LoadCollectionCandidate(in); err != nil {
 		return intents.Ambiguous(err.Error())
 	} else if found {
 		reference = candidate.TransactionID
+	}
+	if in.Rail == "stripe" {
+		return h.verifyStripeEngine(ctx, in, p, reference)
 	}
 	receipt, found, err := intents.ReadNMICollectionReceipt(ctx, in, h.Resolver, reference)
 	if err != nil {
@@ -214,6 +234,12 @@ func (h *SubscriptionCollectionHandler) completeEvidence(ctx context.Context, in
 		return intents.Ambiguous(err.Error()), true
 	} else if found {
 		return h.completePaid(ctx, in, p, receipt), true
+	}
+	if code, reference, found, err := intents.LoadStripeRecurringDecline(in); err != nil {
+		return intents.Ambiguous(err.Error()), true
+	} else if found {
+		outcome := intents.TerminalWithEvidence("engine renewal declined", map[string]any{"declined": true, "failure_code": code, "stripe_payment_intent_id": reference})
+		return h.completeDecline(ctx, in, p, code, outcome), true
 	}
 	if code, reference, found, err := intents.LoadRecurringDecline(in); err != nil {
 		return intents.Ambiguous(err.Error()), true
@@ -266,11 +292,26 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
-	outcome := intents.Succeeded(map[string]any{"transaction_id": retained.TransactionID(), "rail": "nmi", "verified_existing": true})
+	outcome := intents.Succeeded(map[string]any{"transaction_id": retained.TransactionID(), "rail": in.Rail, "verified_existing": true})
 	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
-		params := &subscriptions.RenewMembershipParams{Prepared: &p.Renewal, PreviousPeriodEnd: &p.PreviousPeriodEnd, PaymentCustodian: models.CustodianHyperSwitch, Rail: models.RailNMI, TransactionID: retained.TransactionID(), Amount: p.Renewal.Amount, AmountProvided: true, Currency: p.Renewal.Currency}
+		params := &subscriptions.RenewMembershipParams{Prepared: &p.Renewal, PreviousPeriodEnd: &p.PreviousPeriodEnd, PaymentCustodian: p.Instrument.Custodian, Rail: models.Rail(in.Rail), TransactionID: retained.TransactionID(), Amount: p.Renewal.Amount, AmountProvided: true, Currency: p.Renewal.Currency}
 		current := sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) && sub.PriceID == p.Renewal.FromPriceID && sub.ProductID == p.Renewal.FromProductID
 		replay := sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodEnd) && sub.PriceID == p.Renewal.PriceID && sub.ProductID == p.Renewal.ProductID
+		if reversal := retained.ReversalKind(); reversal != "" {
+			params.PaymentMetadata = map[string]any{"refund_review": "confirmed charge on a cancelled subscription"}
+			if err := h.lifecycle(d).RecordConfirmedChargeWithoutRenewal(ctx, params); err != nil {
+				return err
+			}
+			if sub.Status != models.StatusCancelled {
+				kind := models.CancelTypeMerchant
+				if reversal == "dispute" {
+					kind = models.CancelTypeChargeback
+				}
+				_, err := h.lifecycle(d).CancelMembershipTx(ctx, d, &subscriptions.CancelMembershipParams{SubscriptionID: &sub.ID, CancelType: kind, RevokeAccess: true})
+				return err
+			}
+			return nil
+		}
 		if sub.Status == models.StatusCancelled || (!current && !replay) {
 			params.PaymentMetadata = map[string]any{"refund_review": "accepted engine charge completed after lifecycle changed"}
 			return h.lifecycle(d).RecordConfirmedChargeWithoutRenewal(ctx, params)
@@ -280,11 +321,13 @@ func (h *SubscriptionCollectionHandler) completePaid(ctx context.Context, in gen
 }
 func (h *SubscriptionCollectionHandler) completeDeclined(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, response int, reference string) intents.Outcome {
 	outcome := intents.TerminalWithEvidence("engine renewal declined", map[string]any{"declined": true, "response_code": response})
+	return h.completeDecline(ctx, in, p, strconv.Itoa(response), outcome)
+}
+func (h *SubscriptionCollectionHandler) completeDecline(ctx context.Context, in gen.OpenrailsRailIntent, p subscriptions.SubscriptionCollectionPayload, code string, outcome intents.Outcome) intents.Outcome {
 	return h.completion(ctx, in, p, outcome, func(ctx context.Context, d *db.DB, sub *models.Subscription) error {
-		code := strconv.Itoa(response)
-		reason := payments.NormalizeFailureReason("nmi", code)
+		reason := payments.NormalizeFailureReason(in.Rail, code)
 		kind := payments.AttemptRenewal
-		failed := &models.Payment{ID: uuid.NewSHA1(in.ID, []byte("decline")), CustomerID: p.Renewal.CustomerID, PriceID: p.Renewal.PriceID, SubscriptionID: &p.Renewal.SubscriptionID, Rail: models.RailNMI, PspID: &p.Instrument.PSPID, TransactionID: "engine_declined:" + in.ID.String(), Amount: p.Renewal.Amount, ListAmount: p.Renewal.Amount, Currency: p.Renewal.Currency, Status: payments.PaymentStatusFailedValue, FailureCode: &code, FailureReason: &reason, AttemptKind: &kind, MoneyMovement: models.MoneyMovementNone, EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(p.Renewal.Entitlements), PurchasedAt: h.now(), CreatedAt: h.now()}
+		failed := &models.Payment{ID: uuid.NewSHA1(in.ID, []byte("decline")), CustomerID: p.Renewal.CustomerID, PriceID: p.Renewal.PriceID, SubscriptionID: &p.Renewal.SubscriptionID, Rail: models.Rail(in.Rail), PspID: &p.Instrument.PSPID, TransactionID: "engine_declined:" + in.ID.String(), Amount: p.Renewal.Amount, ListAmount: p.Renewal.Amount, Currency: p.Renewal.Currency, Status: payments.PaymentStatusFailedValue, FailureCode: &code, FailureReason: &reason, AttemptKind: &kind, MoneyMovement: models.MoneyMovementNone, EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(p.Renewal.Entitlements), PurchasedAt: h.now(), CreatedAt: h.now()}
 		if _, err := payments.NewPaymentService(d, h.Clock).CreateIfNotExists(ctx, failed); err != nil {
 			return err
 		}
@@ -293,7 +336,10 @@ func (h *SubscriptionCollectionHandler) completeDeclined(ctx context.Context, in
 			failures = *sub.RetryAttempts
 		}
 		if (sub.Status == models.StatusActive || sub.Status == models.StatusPastDue) && sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) && failures == p.FailureCount {
-			verdict := collection.ClassifyDeclineDetail("nmi", code)
+			verdict := collection.ClassifyDeclineDetail(in.Rail, code)
+			if in.Rail == "stripe" && code == "canceled" {
+				verdict.Outcome = collection.DeclineFixPaymentMethod
+			}
 			certainty := ""
 			if verdict.Outcome == collection.DeclineNonRecoverable {
 				certainty = collection.CertaintyNonRetryableDecline
@@ -302,7 +348,7 @@ func (h *SubscriptionCollectionHandler) completeDeclined(ctx context.Context, in
 			if gate := destructive.New(d).Check(ctx, in.MerchantID); !gate.Allowed {
 				blocked = gate.Reason
 			}
-			return h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Prepared: &p.Renewal, Rail: models.RailNMI, SubscriptionID: &p.Renewal.SubscriptionID, FailureCode: &code, FailureReason: &reason, Decline: verdict.Outcome, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked})
+			return h.lifecycle(d).FailMembership(ctx, &subscriptions.FailMembershipParams{Prepared: &p.Renewal, Rail: models.Rail(in.Rail), SubscriptionID: &p.Renewal.SubscriptionID, FailureCode: &code, FailureReason: &reason, Decline: verdict.Outcome, AttemptRecorded: true, TerminalCertainty: certainty, TerminalBlocked: blocked})
 		}
 		return nil
 	})

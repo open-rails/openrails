@@ -41,8 +41,7 @@ func ImportDeclaredBilling(r *httprequest.Request) {
 		return
 	}
 	res, err := billingimport.Import(r.Request.Context(), billingimport.Options{
-		Config:     r.State.Config,
-		PGXPool:    r.State.DB.Pool(),
+		DB:         r.State.DB,
 		MerchantID: mid,
 		Book:       book,
 	})

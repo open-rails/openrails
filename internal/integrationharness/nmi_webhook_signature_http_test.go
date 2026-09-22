@@ -34,7 +34,7 @@ func signNMIWebhook(secret string, body []byte) string {
 func TestNMIMerchantWebhookSignatureHTTP(t *testing.T) {
 	h := New(t, t.Context())
 	surface := h.StartStandalone("USD", WithConfig(func(cfg *config.Config) {
-		cfg.MerchantSource = config.MerchantSourceAPI
+		cfg.MerchantConfigSource = config.MerchantConfigSourceAPI
 		cfg.SecretBackend = config.SecretBackendDB
 	}))
 	owned := surface.ProvisionOwnedMerchant("nmi-signature-" + uuid.NewString()[:8])

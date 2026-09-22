@@ -49,6 +49,7 @@ type fakeNMIReceiptGateway struct {
 	// a custodian-proxied sale, which carries card data instead).
 	saleVaults     []string
 	saleBillingIDs []string
+	saleInitiators []string
 }
 
 func newFakeNMIReceiptGateway(t *testing.T) (*fakeNMIReceiptGateway, *httptest.Server) {
@@ -57,6 +58,10 @@ func newFakeNMIReceiptGateway(t *testing.T) (*fakeNMIReceiptGateway, *httptest.S
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/customers/") {
+			fmt.Fprintf(w, `{"object":"customer","id":%q,"billing":[{"id":"engine-billing"}]}`, strings.TrimPrefix(r.URL.Path, "/customers/"))
+			return
+		}
 		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/payments/") {
 			txn, ok := f.payments[strings.TrimPrefix(r.URL.Path, "/payments/")]
 			if !ok {
@@ -75,6 +80,7 @@ func newFakeNMIReceiptGateway(t *testing.T) (*fakeNMIReceiptGateway, *httptest.S
 			f.saleCurrencies = append(f.saleCurrencies, r.Form.Get("currency"))
 			f.saleVaults = append(f.saleVaults, r.Form.Get("customer_vault_id"))
 			f.saleBillingIDs = append(f.saleBillingIDs, r.Form.Get("billing_id"))
+			f.saleInitiators = append(f.saleInitiators, r.Form.Get("initiated_by"))
 			if r.URL.Path == "/proxy" {
 				// The custodian's detokenizing proxy forwarded the sale and the
 				// gateway's answer was lost on the way back (or#879 transport).

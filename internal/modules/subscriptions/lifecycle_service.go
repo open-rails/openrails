@@ -220,6 +220,9 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 	if txDB == nil {
 		return nil, nil, errors.New("transaction DB is required")
 	}
+	if params == nil || (params.InitialPaymentReversal != "" && params.Prepared == nil) {
+		return nil, nil, errors.New("initial reversal requires accepted terms")
+	}
 	if params.Prepared != nil {
 		terms := params.Prepared
 		if txDB.Pool() != nil {
@@ -227,6 +230,9 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 		}
 		if err := terms.Validate(); err != nil {
 			return nil, nil, err
+		}
+		if params.InitialPaymentReversal != "" && (terms.CollectionPolicy != models.CollectionPolicyEngine || terms.Amount <= 0 || params.Rail != models.RailStripe || (params.InitialPaymentReversal != "refund" && params.InitialPaymentReversal != "dispute")) {
+			return nil, nil, errors.New("invalid accepted initial payment reversal")
 		}
 		if (terms.Amount > 0 && s.PaymentService == nil) || params.UserID != terms.CustomerID.String() || params.PriceID != terms.PriceID || db.PSPIDFromContext(ctx) != terms.PSPID || (terms.Amount > 0) != (strings.TrimSpace(params.TransactionID) != "") || (terms.CollectionPolicy != models.CollectionPolicyEngine && (params.RailSubscriptionID == nil || strings.TrimSpace(*params.RailSubscriptionID) == "")) || (terms.CollectionPolicy == models.CollectionPolicyEngine && params.RailSubscriptionID != nil && strings.TrimSpace(*params.RailSubscriptionID) != "") {
 			return nil, nil, errors.New("membership completion contradicts accepted terms")
@@ -273,7 +279,14 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 				if err != nil {
 					return nil, nil, err
 				}
-				if err := ValidateInitialMembershipHistory(mid.UUID(), *terms, rows); err != nil {
+				historyTerms := *terms
+				if params.InitialPaymentReversal != "" {
+					if sub.Status != models.StatusCancelled || len(rows) != 0 {
+						return nil, nil, errors.New("reversed initial payment has active membership or grants")
+					}
+					historyTerms.Entitlements = map[string]*int{}
+				}
+				if err := ValidateInitialMembershipHistory(mid.UUID(), historyTerms, rows); err != nil {
 					return nil, nil, err
 				}
 				return sub, nil, nil
@@ -558,6 +571,22 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 				subscription.CurrentPeriodStartsAt, subscription.CurrentPeriodEndsAt = nil, nil
 			}
 		}
+		if params.InitialPaymentReversal != "" {
+			at := s.now().UTC()
+			kind := models.CancelTypeMerchant
+			if params.InitialPaymentReversal == "dispute" {
+				kind = models.CancelTypeChargeback
+			}
+			subscription.Status = models.StatusCancelled
+			subscription.CancelType = &kind
+			subscription.CancelledAt = &at
+			subscription.EndedAt = &at
+			subscription.CurrentPeriodEndsAt = &at
+			if subscription.CurrentPeriodStartsAt != nil && !subscription.CurrentPeriodStartsAt.Before(at) {
+				start := at.Add(-time.Microsecond)
+				subscription.CurrentPeriodStartsAt = &start
+			}
+		}
 		if err := subService.Create(ctx, subscription); err != nil {
 			return nil, nil, fmt.Errorf("failed to create subscription: %w", err)
 		}
@@ -578,7 +607,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	notifications := make([]*models.NotificationQueue, 0, 1)
 
-	if entitlementService != nil {
+	if entitlementService != nil && params.InitialPaymentReversal == "" {
 		entNames := make([]string, 0, 4)
 		entitlementsSpec := subscription.EntitlementsSpecSnapshot
 		if len(entitlementsSpec) == 0 {
@@ -666,18 +695,21 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	}
 
-	notification := &models.NotificationQueue{
-		ID:         uuidutil.NewV7(),
-		CustomerID: subscription.CustomerID,
-		EventType:  models.NotificationPremiumStarted,
-	}
-	if err := notificationRepo.Create(ctx, notification); err != nil {
-		if params.Prepared != nil {
-			return nil, nil, fmt.Errorf("accepted membership notification: %w", err)
+	if params.InitialPaymentReversal == "" {
+		notification := &models.NotificationQueue{
+			ID:         uuidutil.NewV7(),
+			CustomerID: subscription.CustomerID,
+			EventType:  models.NotificationPremiumStarted,
 		}
-		log.WithContext(ctx).WithError(err).Error("failed to create membership started notification")
-	} else {
-		notifications = append(notifications, notification)
+		if err := notificationRepo.Create(ctx, notification); err != nil {
+			if params.Prepared != nil {
+				return nil, nil, fmt.Errorf("accepted membership notification: %w", err)
+			}
+			log.WithContext(ctx).WithError(err).Error("failed to create membership started notification")
+		} else {
+			notifications = append(notifications, notification)
+		}
+
 	}
 
 	// Create Payment record if payment info is provided
@@ -729,8 +761,8 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		if params.Prepared != nil {
 			payment.ID = params.Prepared.PaymentID
 			token := charge.TokenTypePSPToken
-			if params.Prepared.CollectionPolicy == models.CollectionPolicyEngine {
-				token = charge.TokenTypePANViaProxy
+			if params.PaymentCustodian != "" {
+				token = payments.DefaultTokenType(string(params.Rail), params.PaymentCustodian)
 			}
 			payment.TokenType = &token
 		}
@@ -1210,21 +1242,21 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 			if err != nil {
 				return err
 			}
-			if method.CustodianID == nil || method.Custodian != models.CustodianHyperSwitch {
-				return fmt.Errorf("resume engine: payment method custody is unavailable")
-			}
-			handle := paymentmethods.CustodianHandle{Custodian: *method.CustodianID, Method: method.RailMethodRef}
-			if err := paymentmethods.LockCustodianHandles(ctx, q, subscription.MerchantID, handle); err != nil {
-				return err
-			}
-			if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, subscription.MerchantID, handle); err != nil {
-				return fmt.Errorf("resume engine: %w", err)
+			observedInstrument := charge.FreezeInstrument(method)
+			if method.CustodianID != nil {
+				handle := paymentmethods.CustodianHandle{Custodian: *method.CustodianID, Method: method.RailMethodRef}
+				if err := paymentmethods.LockCustodianHandles(ctx, q, subscription.MerchantID, handle); err != nil {
+					return err
+				}
+				if err := paymentmethods.RequireCustodianHandleAvailable(ctx, q, subscription.MerchantID, handle); err != nil {
+					return err
+				}
 			}
 			method, err = q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: subscription.MerchantID, ID: *subscription.PaymentMethodID})
 			if err != nil {
 				return err
 			}
-			if method.CustomerID != subscription.CustomerID || method.PspID != subscription.PspID || method.ParkReason != "" || method.StoredCredentialRecurringRef == "" || method.CustodianID == nil || *method.CustodianID != handle.Custodian || method.RailMethodRef != handle.Method {
+			if method.CustomerID != subscription.CustomerID || method.PspID != subscription.PspID || method.ParkReason != "" || method.StoredCredentialRecurringRef == "" || method.Rail != string(subscription.Rail) || method.RailCustomerRef == "" || method.RailMethodRef == "" || (method.Custodian != models.CustodianHyperSwitch && method.Custodian != models.CustodianPSP) || observedInstrument.Matches(method, charge.AgreementRecurring) != nil {
 				return fmt.Errorf("resume engine: payment method is unavailable")
 			}
 		}
@@ -1466,6 +1498,12 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	}
 	// A late event must preserve the existing cancellation and its terminal reason.
 	if subscription.Status == models.StatusCancelled && NormalizeCancelType(subscription.CancelType) == string(models.CancelTypeChargeback) {
+		return result, nil
+	}
+
+	// A repeated refund/merchant reversal cannot reactivate an already revoked
+	// engine agreement or move its terminal dates. No paid/grace interval remains.
+	if subscription.CollectionPolicy == models.CollectionPolicyEngine && subscription.Status == models.StatusCancelled && NormalizeCancelType(subscription.CancelType) == string(models.CancelTypeMerchant) && params.CancelType == models.CancelTypeMerchant && subscription.EndedAt != nil && !subscription.EndedAt.After(s.now()) && subscription.CurrentPeriodEndsAt != nil && !subscription.CurrentPeriodEndsAt.After(s.now()) {
 		return result, nil
 	}
 

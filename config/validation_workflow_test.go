@@ -94,10 +94,10 @@ func TestConfigurationPostureValidation(t *testing.T) {
 
 func TestConfigurationStorageAndSecrets(t *testing.T) {
 	var nilCfg *Config
-	require.True(t, nilCfg.IsManifestMerchantSource())
-	require.True(t, (&Config{}).IsManifestMerchantSource())
-	require.Equal(t, MerchantSourceManifest, (&Config{}).MerchantSourceMode())
-	require.ErrorContains(t, Validate(&Config{Env: "development", MerchantSource: "yaml", DB: &DBConfig{URL: "postgres://u:p@localhost/x"}}), "merchant_source")
+	require.True(t, nilCfg.IsManifestMerchantConfigSource())
+	require.True(t, (&Config{}).IsManifestMerchantConfigSource())
+	require.Equal(t, MerchantConfigSourceManifest, (&Config{}).MerchantConfigSourceMode())
+	require.ErrorContains(t, Validate(&Config{Env: "development", MerchantConfigSource: "yaml", DB: &DBConfig{URL: "postgres://u:p@localhost/x"}}), "merchant_config_source")
 	for _, row := range []struct {
 		cfg     *Config
 		backend string
@@ -119,9 +119,9 @@ func TestConfigurationStorageAndSecrets(t *testing.T) {
 	for _, env := range []string{"production", "development"} {
 		for _, vault := range []bool{false, true} {
 			cfg := validationConfig(env)
-			cfg.MerchantSource = MerchantSourceAPI
+			cfg.MerchantConfigSource = MerchantConfigSourceAPI
 			cfg.Vault = &VaultConfig{Enabled: vault}
-			require.ErrorContains(t, Validate(cfg), "merchant_source=api requires an explicit secret_backend")
+			require.ErrorContains(t, Validate(cfg), "merchant_config_source=api requires an explicit secret_backend")
 		}
 	}
 	for _, row := range []struct {
@@ -129,15 +129,15 @@ func TestConfigurationStorageAndSecrets(t *testing.T) {
 		vault, encrypted           bool
 		message                    string
 	}{
-		{"vault declaration", MerchantSourceAPI, SecretBackendVault, "production", true, false, ""},
-		{"unencrypted database", MerchantSourceAPI, SecretBackendDB, "production", false, false, "requires ENCRYPTION_MASTER_KEY outside development"},
-		{"encrypted database", MerchantSourceAPI, SecretBackendDB, "production", false, true, ""},
-		{"development database", MerchantSourceAPI, SecretBackendDB, "development", false, false, ""},
-		{"manifest stores no secrets", MerchantSourceManifest, "", "production", false, false, ""},
+		{"vault declaration", MerchantConfigSourceAPI, SecretBackendVault, "production", true, false, ""},
+		{"unencrypted database", MerchantConfigSourceAPI, SecretBackendDB, "production", false, false, "requires ENCRYPTION_MASTER_KEY outside development"},
+		{"encrypted database", MerchantConfigSourceAPI, SecretBackendDB, "production", false, true, ""},
+		{"development database", MerchantConfigSourceAPI, SecretBackendDB, "development", false, false, ""},
+		{"manifest stores no secrets", MerchantConfigSourceManifest, "", "production", false, false, ""},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			cfg := validationConfig(row.env)
-			cfg.MerchantSource, cfg.SecretBackend = row.source, row.backend
+			cfg.MerchantConfigSource, cfg.SecretBackend = row.source, row.backend
 			cfg.Vault = &VaultConfig{Enabled: row.vault}
 			if row.encrypted {
 				cfg.Encryption = &EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}

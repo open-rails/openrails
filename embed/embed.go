@@ -109,7 +109,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		return nil, fmt.Errorf("openrails embed: config is required")
 	}
 	if opts.River.host && opts.RunWorkers {
-		return nil, fmt.Errorf("openrails embed: host-owned River must BindRiver before host startup; Options.RunWorkers is managed-only")
+		return nil, fmt.Errorf("openrails embed: host-owned River must compose RiverJobs with riverkit.New before host startup; Options.RunWorkers is managed-only")
 	}
 	riverSchema, err := opts.River.managedSchema(opts.Config.DB.SchemaName())
 	if err != nil {

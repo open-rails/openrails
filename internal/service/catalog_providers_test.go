@@ -432,3 +432,36 @@ func TestResolveProviders_TrialRefusedOnRailsWithoutFirstPhase(t *testing.T) {
 		}
 	}
 }
+
+func TestEngineCatalogDoesNotCreateProviderMirrors(t *testing.T) {
+	s := &Service{rt: &app.Runtime{Config: &config.Config{NewSubscriptionCollectionPolicy: "engine"}}}
+	product := &models.Product{ID: uuid.New(), Key: "engine-local"}
+	hours := 720
+	req := CreatePriceRequest{ProductID: openrails.ProductID(product.ID), UnitAmount: 9990000, Currency: "USD", AccessDurationHours: &hours, AutoRenew: true, PSPs: []string{"stripe", "nmi"}}
+	links, states, pending, err := s.resolveProviders(context.Background(), product, req, uuid.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(links) != 0 || len(states) != 0 || len(pending) != 0 {
+		t.Fatalf("engine-only terms unexpectedly requested provider catalog work: %v %v %v", links, states, pending)
+	}
+	req.AutoRenew = false
+	req.AccessDurationHours = nil
+	req.PSPs = []string{"stripe"}
+	links, states, pending, err = s.resolveProviders(context.Background(), product, req, uuid.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(links) != 0 || len(states) != 0 || len(pending) != 0 {
+		t.Fatal("one-time engine price requested a Stripe catalog mirror")
+	}
+	req.PSPs = []string{"stripe"}
+	req.PSPLinks = map[string]map[string]string{"stripe": {models.RailKeyStripePriceID: "price_legacy"}}
+	links, _, _, err = s.resolveProviders(context.Background(), product, req, uuid.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if links["stripe"][models.RailKeyStripePriceID] != "price_legacy" {
+		t.Fatal("explicit legacy reference was lost")
+	}
+}

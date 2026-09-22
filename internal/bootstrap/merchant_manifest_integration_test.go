@@ -37,7 +37,7 @@ func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{
+	cfg := &config.Config{Env: "development", MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{
 		MasterKey: base64.StdEncoding.EncodeToString(key),
 	}}
 	manifest := hostThreeMerchantManifest()
@@ -215,12 +215,12 @@ func TestMerchantManifestDatabaseDSNIsOwned(t *testing.T) {
 }
 
 // apiModeReconcileConfig pins these store-semantics tests to MODE 2 (#723
-// merchant_source=api): they assert persistent-backend side effects (seed-once,
+// merchant_config_source=api): they assert persistent-backend side effects (seed-once,
 // merchant_secrets rows, Vault KV) that mode 1 deliberately does not produce.
 // SEC-18: Env is declared, never inferred — an empty Env is no longer
 // development, and the DB secret store refuses a plaintext posture outside it.
 func apiModeReconcileConfig() *config.Config {
-	return &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI}
+	return &config.Config{Env: "development", MerchantConfigSource: config.MerchantConfigSourceAPI}
 }
 
 // sandboxModeReconcileConfig is apiModeReconcileConfig under test_mode=sandbox.

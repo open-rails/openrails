@@ -5,6 +5,7 @@ package intents
 import (
 	"context"
 	"encoding/json"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"testing"
 	"time"
 
@@ -39,7 +40,7 @@ func TestRecurringReceiptCustodyRefusesContradictions(t *testing.T) {
 					instrument.Custodian = models.CustodianHyperSwitch
 					instrument.CustodianID = &custody
 					key := subscriptions.SubscriptionCollectionKey(fx.subID, native.Renewal.PeriodStart, 0)
-					p := subscriptions.SubscriptionCollectionPayload{Renewal: native.Renewal, PreviousPeriodEnd: native.Renewal.PeriodStart, AcceptedAt: native.Renewal.PeriodStart, PaymentMethodID: native.PaymentMethodID, Instrument: instrument, AmountMinor: native.AmountMinor, OrderReference: subscriptions.RebillOrderReference(key)}
+					p := subscriptions.SubscriptionCollectionPayload{Initiator: charge.InitiatorMerchant, Renewal: native.Renewal, PreviousPeriodEnd: native.Renewal.PeriodStart, AcceptedAt: native.Renewal.PeriodStart, PaymentMethodID: native.PaymentMethodID, Instrument: instrument, AmountMinor: native.AmountMinor, OrderReference: subscriptions.RebillOrderReference(key)}
 					p.HyperSwitch.AccountID, p.HyperSwitch.ProfileID, p.HyperSwitch.APIBaseURL = "fixture", "fixture", "http://127.0.0.1:1"
 					raw, err := json.Marshal(p)
 					require.NoError(t, err)

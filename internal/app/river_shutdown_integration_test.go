@@ -38,10 +38,8 @@ func (w *shutdownWorker) Work(ctx context.Context, _ *river.Job[shutdownArgs]) e
 }
 
 func TestRuntimeCloseJoinsCanceledRiverBeforeClosingPools(t *testing.T) {
-	appDB, dsn := testRuntimeDB(t)
-	pool, err := pgxpool.New(t.Context(), dsn)
-	require.NoError(t, err)
-	t.Cleanup(pool.Close)
+	appDB, _ := testRuntimeDB(t)
+	pool := appDB.Pool()
 	worker := &shutdownWorker{pool: pool, started: make(chan struct{}), canceled: make(chan struct{}), release: make(chan struct{}), cleanup: make(chan error, 1)}
 	release := sync.OnceFunc(func() { close(worker.release) })
 	defer release()
@@ -58,7 +56,7 @@ func TestRuntimeCloseJoinsCanceledRiverBeforeClosingPools(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("worker did not start")
 	}
-	rt := &Runtime{DB: appDB, RiverClient: client, riverPool: pool, riverStarted: true}
+	rt := &Runtime{DB: appDB, RiverClient: client, riverStarted: true}
 	canceledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 	closed := make(chan error, 1)

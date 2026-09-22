@@ -11,12 +11,13 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
+	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Every billing-schema table has an explicit decision. These are deployment/operations
+// Every OpenRails-owned table has an explicit decision. These are deployment/operations
 // data or unsupported opaque evidence, not additional archive row profiles.
 var excludedTables = map[string]string{
 	"merchants":                 "destination identity and host authority are explicitly provisioned",
@@ -85,7 +86,7 @@ func checkSchema(ctx context.Context, tx pgx.Tx) error {
 		known[t] = true
 	}
 	rows, err := tx.Query(ctx, `SELECT c.relname,a.attname IS NOT NULL FROM pg_class c LEFT JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped
-		WHERE c.relnamespace=(SELECT relnamespace FROM pg_class WHERE oid='openrails.merchants'::regclass) AND c.relkind IN ('r','p') ORDER BY c.relname`)
+		WHERE c.relnamespace=(SELECT relnamespace FROM pg_class WHERE oid='openrails.merchants'::regclass) AND c.relkind IN ('r','p') AND c.relname=ANY($1) ORDER BY c.relname`, postgresmigrations.OwnedTables)
 	if err != nil {
 		return err
 	}
@@ -264,6 +265,20 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 	}
 	if err := validateSaleReferences(ctx, tx, id); err != nil {
 		return err
+	}
+	quoteInvalid, quoteErr := gen.New(tx).CountInvalidEngineCheckoutReferences(ctx, id.UUID())
+	if quoteErr != nil {
+		return quoteErr
+	}
+	if quoteInvalid != 0 {
+		return &Error{Code: "unsupported_state", Table: "checkout_sessions", Count: quoteInvalid}
+	}
+	stripeInvalid, stripeErr := gen.New(tx).CountInvalidStripeSetupReferences(ctx, id.UUID())
+	if stripeErr != nil {
+		return stripeErr
+	}
+	if stripeInvalid != 0 {
+		return &Error{Code: "unsupported_state", Table: "checkout_sessions", Count: stripeInvalid}
 	}
 	invalid, err := gen.New(tx).CountInvalidCheckoutCaptureReferences(ctx, id.UUID())
 	if err != nil {

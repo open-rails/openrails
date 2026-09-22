@@ -725,6 +725,10 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 				t.Cleanup(pool.Close)
 				database, err = db.NewWithPGXPool(pool, "billing")
 				require.NoError(t, err)
+				// Replacing the pool preserves the runtime's real enqueue capability;
+				// InsertTx still uses this one-connection fixture's transaction.
+				require.NotNil(t, rt.RiverProducer)
+				database.SetRiverJobInserter(rt.RiverProducer)
 				clients := cutoverScopedClients{}
 				for id, key := range map[uuid.UUID]string{p.Source: p.SourceKey, p.Target: p.TargetKey} {
 					client, err := nmi.NewAccountClient(owner.MerchantID.UUID(), id, key, &config.NMIProviderSettings{SecurityKey: key}, true)

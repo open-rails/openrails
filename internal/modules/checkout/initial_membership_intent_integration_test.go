@@ -193,23 +193,26 @@ type subIntentFixture struct {
 
 func newSubIntentFixture(t *testing.T) *subIntentFixture {
 	t.Helper()
-	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	return newSubIntentFixtureForMerchant(t, dbtest.TestMerchantID)
+}
+
+func newSubIntentFixtureForMerchant(t *testing.T, mid merchant.ID) *subIntentFixture {
+	t.Helper()
+	dbi := dbtest.OpenMerchantDB(t, mid.UUID())
 	pool := dbi.Pool()
-	dbtest.EnsureTestMerchant(context.Background(), t, pool)
-	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	_, err := pool.Exec(t.Context(), `INSERT INTO billing.merchants(id,slug,status) VALUES($1,$2,'active') ON CONFLICT DO NOTHING`, mid.UUID(), "fixture-"+mid.String())
+	require.NoError(t, err)
+	ctx := merchant.WithID(context.Background(), mid)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
-	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	customerID := dbtest.EnsureCustomerIDPgxFor(ctx, t, pool, mid.UUID(), userID)
 	productID, priceID := uuid.New(), uuid.New()
-	insertProductAndPrice(ctx, t, pool, &models.Product{
-		ID: productID, Key: "sub-intent-" + uuid.NewString()[:8], DisplayName: "Sub Intent Test",
-		Archived: false, CreatedAt: now, UpdatedAt: now,
-	}, &models.Price{
-		ID: priceID, ProductID: productID, Archived: false,
-		Amount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: intPtr(720),
-		CreatedAt: now, UpdatedAt: now,
-	})
+	_, err = pool.Exec(ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name,created_at,updated_at) VALUES($1,$2,$3,'Sub Intent Test',$4,$4)`, productID, mid.UUID(), "sub-intent-"+uuid.NewString()[:8], now)
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency,auto_renew,access_duration_hours,created_at,updated_at) VALUES($1,$2,$3,9990000,'USD',true,720,$4,$4)`, priceID, mid.UUID(), productID, now)
+	require.NoError(t, err)
+
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE intent_type = 'initial_membership' AND price_id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", customerID)
@@ -252,7 +255,9 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 
 func (fx *subIntentFixture) prepare(t *testing.T) {
 	t.Helper()
-	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
+	mid, err := merchant.Require(fx.ctx)
+	require.NoError(t, err)
+	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), mid.UUID(), "mobius")
 	if !fx.prepared {
 		price, err := fx.svc.PriceService.GetByID(fx.ctx, fx.priceID)
 		require.NoError(t, err)
@@ -460,4 +465,38 @@ func TestInitialFixtureRejectsRealProviderDestination(t *testing.T) {
 	_, client := newFakeNMISubGateway(t, "vault", "plan")
 	client.QueryURL = "https://secure.nmi.com/api/query.php"
 	require.Error(t, validateInitialFixtureDestinations(client))
+}
+
+func TestUnsubmittedNMIInitialVerificationDefersToGatedExecute(t *testing.T) {
+	fx := newSubIntentFixture(t)
+	fx.prepare(t)
+	store := intents.NewStore(fx.db)
+	in, err := store.Enqueue(fx.ctx, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", PspID: fx.payload.Terms.PSPID, IntentType: TypeInitialMembership, PriceID: &fx.priceID, Payload: fx.payload, IdempotencyKey: InitialMembershipIdempotencyKey(fx.payload.CheckoutIdempotencyKey), NextAttemptAt: fx.payload.Terms.AcceptedAt, Origin: intents.OriginUser})
+	require.NoError(t, err)
+	_, claimed, err := store.ClaimByID(fx.ctx, in.ID, time.Now(), time.Now().Add(intents.DefaultLease))
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, store.MarkUnknown(fx.ctx, in.ID, time.Now(), "executor stopped before submission", nil))
+	cfg := fullModeConfig()
+	cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly
+	fx.runner.Config = cfg
+	verified, err := fx.runner.VerifyByID(fx.ctx, in.ID)
+	require.NoError(t, err)
+	t.Logf("native initial Verify writes=%d status=%s", fx.gateway.createCalls.Load(), verified.Status)
+	require.Equal(t, intents.StatusFailedRetryable, verified.Status)
+	require.EqualValues(t, 0, fx.gateway.createCalls.Load())
+	require.JSONEq(t, string(in.Payload), string(verified.Payload))
+	blocked, err := fx.runner.ExecuteByID(fx.ctx, in.ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusPending, blocked.Status)
+	require.EqualValues(t, 0, fx.gateway.createCalls.Load())
+	cfg.ProviderWriteMode = config.ProviderWriteModeFull
+	completed := fx.enqueueAndExecute(t)
+	require.Equal(t, in.ID, completed.ID)
+	require.Equal(t, intents.StatusSucceeded, completed.Status)
+	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+	replay := fx.enqueueAndExecute(t)
+	require.Equal(t, in.ID, replay.ID)
+	require.Equal(t, intents.StatusSucceeded, replay.Status)
+	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
 }

@@ -279,11 +279,11 @@ func TestVaultCapabilityGating_RealPolicies(t *testing.T) {
 	t.Run("transit-only token + secret_backend=db degrades to DB store", func(t *testing.T) {
 		toToken := vaulttest.TokenWithPolicy(t, "or-ms-transit-only", vaulttest.PolicyTransitOnly)
 		cfg := &config.Config{
-			Env:            "production",
-			MerchantSource: config.MerchantSourceAPI,
-			SecretBackend:  config.SecretBackendDB,
-			Encryption:     &config.EncryptionConfig{MasterKey: testMasterKey(t)},
-			Vault:          &config.VaultConfig{Enabled: true, Address: addr, AuthMethod: "token", Token: toToken},
+			Env:                  "production",
+			MerchantConfigSource: config.MerchantConfigSourceAPI,
+			SecretBackend:        config.SecretBackendDB,
+			Encryption:           &config.EncryptionConfig{MasterKey: testMasterKey(t)},
+			Vault:                &config.VaultConfig{Enabled: true, Address: addr, AuthMethod: "token", Token: toToken},
 		}
 		store, err := Build(ctx, cfg, pool)
 		require.NoError(t, err)
@@ -416,10 +416,10 @@ func TestBackendParity_CycleRotationIsolation(t *testing.T) {
 		}},
 		{"db-encrypted", func(t *testing.T) *Store {
 			store, err := Build(ctx, &config.Config{
-				Env:            "production",
-				MerchantSource: config.MerchantSourceAPI,
-				SecretBackend:  config.SecretBackendDB,
-				Encryption:     &config.EncryptionConfig{MasterKey: testMasterKey(t)},
+				Env:                  "production",
+				MerchantConfigSource: config.MerchantConfigSourceAPI,
+				SecretBackend:        config.SecretBackendDB,
+				Encryption:           &config.EncryptionConfig{MasterKey: testMasterKey(t)},
 			}, pool)
 			require.NoError(t, err)
 			return store

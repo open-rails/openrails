@@ -80,10 +80,10 @@ func hostedTestConfig(t *testing.T, dsn, issuer string) *config.Config {
 		TestMode: config.CredentialPostureSandbox,
 		// MODE 2 (#723): the hosted-embedder shape — merchants are created over
 		// code paths (ProvisionMerchant), not a manifest.
-		MerchantSource: config.MerchantSourceAPI,
-		SecretBackend:  config.SecretBackendDB,
-		DB:             &config.DBConfig{URL: dsn},
-		Auth:           &config.AuthConfig{Issuer: issuer, KeysPath: t.TempDir()},
+		MerchantConfigSource: config.MerchantConfigSourceAPI,
+		SecretBackend:        config.SecretBackendDB,
+		DB:                   &config.DBConfig{URL: dsn},
+		Auth:                 &config.AuthConfig{Issuer: issuer, KeysPath: t.TempDir()},
 	}
 }
 

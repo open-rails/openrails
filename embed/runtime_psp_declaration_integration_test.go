@@ -25,13 +25,13 @@ func TestEmbedded_DeclarePSP(t *testing.T) {
 
 	suffix := strings.ToLower(uuid.NewString()[:8])
 	cfg := &config.Config{
-		Env:               "development",
-		TestMode:          config.CredentialPostureSandbox,
-		ProviderWriteMode: config.ProviderWriteModeReadOnly,
-		MerchantSource:    config.MerchantSourceAPI,
-		SecretBackend:     config.SecretBackendDB,
-		DB:                &config.DBConfig{URL: appDSN},
-		Auth:              &config.AuthConfig{Issuer: "https://declare-psp-" + suffix + ".openrails.test"},
+		Env:                  "development",
+		TestMode:             config.CredentialPostureSandbox,
+		ProviderWriteMode:    config.ProviderWriteModeReadOnly,
+		MerchantConfigSource: config.MerchantConfigSourceAPI,
+		SecretBackend:        config.SecretBackendDB,
+		DB:                   &config.DBConfig{URL: appDSN},
+		Auth:                 &config.AuthConfig{Issuer: "https://declare-psp-" + suffix + ".openrails.test"},
 	}
 	engine, err := New(context.Background(), Options{Config: cfg, PGXPool: pool, River: RiverManagedByOpenRails()})
 	require.NoError(t, err)

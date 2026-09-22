@@ -12,8 +12,30 @@ import (
 	"github.com/google/uuid"
 )
 
-const claimDueRailIntents = `-- name: ClaimDueRailIntents :many
+const advanceRailIntentVerification = `-- name: AdvanceRailIntentVerification :execrows
+UPDATE openrails.rail_intents
+SET next_attempt_at = LEAST(next_attempt_at, $1::timestamptz), updated_at = now()
+WHERE merchant_id = $2::uuid AND id = $3::uuid
+  AND status = 'unknown_needs_verify'
+`
 
+type AdvanceRailIntentVerificationParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// A qualified provider notification may advance a readback, never a write or
+// another executor's live lease. Admission and retry authorization are untouched.
+func (q *Queries) AdvanceRailIntentVerification(ctx context.Context, arg AdvanceRailIntentVerificationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, advanceRailIntentVerification, arg.Now, arg.MerchantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const claimDueRailIntents = `-- name: ClaimDueRailIntents :many
 WITH due AS (
     SELECT id FROM openrails.rail_intents
     WHERE rail_intents.merchant_id = $2::uuid AND (
@@ -539,7 +561,6 @@ func (q *Queries) CountDestructiveIntentsForMerchantSince(ctx context.Context, a
 }
 
 const countDestructiveRailIntentsExecutedSince = `-- name: CountDestructiveRailIntentsExecutedSince :one
-
 SELECT count(*) FROM openrails.rail_intents
 WHERE merchant_id = $1::uuid
   AND intent_type = ANY ($2::text[])
@@ -601,7 +622,6 @@ func (q *Queries) CountRailIntents(ctx context.Context, arg CountRailIntentsPara
 }
 
 const enqueueRailIntent = `-- name: EnqueueRailIntent :one
-
 
 INSERT INTO openrails.rail_intents (
     merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
@@ -678,14 +698,10 @@ type EnqueueRailIntentParams struct {
 	CustodianID    *uuid.UUID
 }
 
-// #358 phase A: provider intent ledger queries — idempotent enqueue, the
-// executor's SKIP LOCKED lease claim, status transitions, supersede-by-subject
-// and relevance-window expiry. merchant_id is stamped explicitly by the
-// producers (request paths run on a merchant-pinned connection, so RLS
-// double-checks the stamp). The executor/verifier workers do NOT sweep
-// cross-merchant: there is no privileged pool, so they fan out over the
-// merchants a 0022 SECURITY DEFINER work queue names and run each pass inside
-// that merchant's own pinned scope (or#862).
+// Financial operation ledger: accepted authorization, submission claims,
+// provider evidence and terminal accounting are always merchant scoped.
+// Production dispatch is one typed River job per accepted operation; legacy
+// batch claims remain only for the existing financial regression harness.
 // =====================================================================
 // Enqueue (effectively-once per logical intent)
 // =====================================================================
@@ -789,6 +805,50 @@ type ExpireOverdueRailIntentsParams struct {
 // of the ledger while held — the operator's resolution decides their fate.
 func (q *Queries) ExpireOverdueRailIntents(ctx context.Context, arg ExpireOverdueRailIntentsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, expireOverdueRailIntents, arg.MerchantID, arg.Now, arg.BreakerHeldTypes)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const expireRailIntentByID = `-- name: ExpireRailIntentByID :execrows
+UPDATE openrails.rail_intents pi
+SET status = 'expired',
+    last_failure_reason = 'relevance window elapsed before execution',
+    claimed_until = NULL,
+    updated_at = now()
+WHERE pi.id = $1::uuid AND pi.merchant_id = $2::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
+  AND NOT (pi.intent_type IN ('invoice_collection','subscription_collection') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
+  AND NOT (pi.intent_type='initial_membership' AND coalesce(pi.result_evidence,'{}'::jsonb) ? 'initial_submitted')
+  AND pi.expires_at IS NOT NULL
+  AND pi.expires_at <= $3::timestamptz
+  AND NOT (
+        pi.intent_type = ANY ($4::text[])
+        AND EXISTS (
+            SELECT 1 FROM openrails.reconciliation_findings f
+            WHERE f.merchant_id = $2::uuid AND f.merchant_id = pi.merchant_id
+              AND f.finding_type = 'life.provider_intent.held_bulk'
+              AND f.status IN ('reconcile_required', 'requires_review')
+        )
+      )
+  AND pi.intent_type <> 'subscription_collection'
+`
+
+type ExpireRailIntentByIDParams struct {
+	ID               uuid.UUID
+	MerchantID       uuid.UUID
+	Now              time.Time
+	BreakerHeldTypes []string
+}
+
+func (q *Queries) ExpireRailIntentByID(ctx context.Context, arg ExpireRailIntentByIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, expireRailIntentByID,
+		arg.ID,
+		arg.MerchantID,
+		arg.Now,
+		arg.BreakerHeldTypes,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -945,7 +1005,6 @@ func (q *Queries) GetLiveTierChangeRailIntent(ctx context.Context, arg GetLiveTi
 }
 
 const getRailIntent = `-- name: GetRailIntent :one
-
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents WHERE rail_intents.merchant_id = $2::uuid AND id = $1
 `
 
@@ -1416,81 +1475,6 @@ func (q *Queries) ListCompletedManualRebillPaymentCoverage(ctx context.Context, 
 	return items, nil
 }
 
-const listDueRailIntentMerchants = `-- name: ListDueRailIntentMerchants :many
-
-SELECT merchant_id FROM openrails.due_rail_intent_merchant_ids(
-    $1::timestamptz,
-    $2::int)
-`
-
-type ListDueRailIntentMerchantsParams struct {
-	Now           time.Time
-	MerchantLimit int32
-}
-
-// =====================================================================
-// or#862: deployment-wide executor / verifier fan-out
-// =====================================================================
-// CROSS-MERCHANT: the merchants the executor pass must visit, through migration
-// 0022's SECURITY DEFINER reader. The executor used to run ClaimDue on a bare
-// River job context; rail_intents FORCEs RLS, so with no app.merchant_id the
-// claim matched `merchant_id = NULL` and leased ZERO intents — the whole
-// outbound provider-mutation plane was inert, and the #836 kill switch and #679
-// volume breaker (which only run on a claimed intent) never executed. Ids only:
-// the claim, the gates and the execution run per-merchant under
-// RunInMerchantConn, where these same predicates re-apply.
-func (q *Queries) ListDueRailIntentMerchants(ctx context.Context, arg ListDueRailIntentMerchantsParams) ([]*uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listDueRailIntentMerchants, arg.Now, arg.MerchantLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []*uuid.UUID
-	for rows.Next() {
-		var merchant_id *uuid.UUID
-		if err := rows.Scan(&merchant_id); err != nil {
-			return nil, err
-		}
-		items = append(items, merchant_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listDueVerifyRailIntentMerchants = `-- name: ListDueVerifyRailIntentMerchants :many
-SELECT merchant_id FROM openrails.due_verify_rail_intent_merchant_ids(
-    $1::timestamptz,
-    $2::int)
-`
-
-type ListDueVerifyRailIntentMerchantsParams struct {
-	Now           time.Time
-	MerchantLimit int32
-}
-
-// CROSS-MERCHANT: the verifier's fan-out list, same posture (or#862).
-func (q *Queries) ListDueVerifyRailIntentMerchants(ctx context.Context, arg ListDueVerifyRailIntentMerchantsParams) ([]*uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listDueVerifyRailIntentMerchants, arg.Now, arg.MerchantLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []*uuid.UUID
-	for rows.Next() {
-		var merchant_id *uuid.UUID
-		if err := rows.Scan(&merchant_id); err != nil {
-			return nil, err
-		}
-		items = append(items, merchant_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listInitialEnrollmentsForMembership = `-- name: ListInitialEnrollmentsForMembership :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
 WHERE merchant_id=$1::uuid AND intent_type='initial_membership'
@@ -1949,7 +1933,6 @@ func (q *Queries) ListRetainedSubscriptionCollectionsForArchive(ctx context.Cont
 }
 
 const listStuckRailIntents = `-- name: ListStuckRailIntents :many
-
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
 WHERE rail_intents.merchant_id = $1::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= $2::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= $3::timestamptz)
@@ -2213,7 +2196,7 @@ SET status = 'failed_retryable',
 WHERE rail_intents.merchant_id = $3::uuid AND id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
   AND NOT (intent_type IN ('invoice_collection','subscription_collection') AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
   AND NOT (intent_type = 'nmi_sale' AND coalesce(result_evidence, '{}'::jsonb) ? 'sale_submitted')
-  AND NOT (intent_type = 'initial_membership' AND coalesce(result_evidence, '{}'::jsonb) ? 'initial_submitted')
+  AND NOT (intent_type = 'initial_membership' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'initial_submitted')
 `
 
 type MarkRailIntentFailedRetryableParams struct {
@@ -2278,7 +2261,6 @@ func (q *Queries) MarkRailIntentFailedTerminal(ctx context.Context, arg MarkRail
 }
 
 const markRailIntentSucceeded = `-- name: MarkRailIntentSucceeded :execrows
-
 UPDATE openrails.rail_intents
 SET status = 'succeeded',
     executed_at = $1::timestamptz,
@@ -2423,6 +2405,28 @@ func (q *Queries) ParkRailIntent(ctx context.Context, arg ParkRailIntentParams) 
 	return result.RowsAffected(), nil
 }
 
+const recoverAbandonedRailIntentByID = `-- name: RecoverAbandonedRailIntentByID :execrows
+UPDATE openrails.rail_intents
+SET status = 'unknown_needs_verify', claimed_until = NULL, next_attempt_at = $1::timestamptz,
+    last_failure_reason = 'executor lease expired; verify before retry', updated_at = now()
+WHERE merchant_id = $2::uuid AND id = $3::uuid
+  AND status = 'in_flight' AND (claimed_until IS NULL OR claimed_until <= $1::timestamptz)
+`
+
+type RecoverAbandonedRailIntentByIDParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) RecoverAbandonedRailIntentByID(ctx context.Context, arg RecoverAbandonedRailIntentByIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recoverAbandonedRailIntentByID, arg.Now, arg.MerchantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const releaseUnknownRailIntentClaim = `-- name: ReleaseUnknownRailIntentClaim :execrows
 UPDATE openrails.rail_intents
 SET claimed_until = NULL,
@@ -2531,13 +2535,17 @@ WHERE id = $3::uuid
   AND intent_type = $6::text
   AND payload = $7::jsonb
   AND (($1::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale','initial_membership', 'subscription_collection')
-           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['rebill_decline','qualified_invoice_nonexecution','qualified_initial_refusal']))
+           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['rebill_decline','stripe_recurring_decline','qualified_invoice_nonexecution','qualified_initial_refusal']))
        OR ($1::text = 'qualified_enrollment' AND intent_type IN ('nmi_upgrade','initial_membership')
            AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_initial_refusal'))
        OR ($1::text='qualified_initial_refusal' AND intent_type='initial_membership'
            AND NOT (coalesce(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','qualified_enrollment'])
            AND (($2::jsonb->>'kind'='not_submitted' AND NOT (coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted'))
-             OR ($2::jsonb->>'kind'='provider_declined' AND result_evidence->>'initial_submitted'='true')))
+             OR ($2::jsonb->>'kind' IN ('provider_declined','stripe_canceled','not_dispatched') AND result_evidence->>'initial_submitted'='true')))
+       OR ($1::text='stripe_recurring_decline' AND intent_type='subscription_collection' AND rail='stripe'
+           AND COALESCE(result_evidence->>'submitted_at','') <> ''
+           AND $2::jsonb->>'failure_code'='canceled'
+           AND NOT (COALESCE(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','rebill_decline','qualified_invoice_nonexecution']))
        OR ($1::text = 'qualified_invoice_nonexecution' AND intent_type IN ('invoice_collection','subscription_collection')
            AND COALESCE(result_evidence->>'submitted_at', '') = $2::jsonb->>'submitted_at'
            AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')))
@@ -2669,7 +2677,6 @@ func (q *Queries) SupersedePendingNMIDelete(ctx context.Context, arg SupersedePe
 }
 
 const supersedeRailIntentsBySubject = `-- name: SupersedeRailIntentsBySubject :execrows
-
 UPDATE openrails.rail_intents
 SET status = 'superseded',
     last_failure_reason = $1,

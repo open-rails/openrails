@@ -141,7 +141,7 @@ func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 	h := integrationharness.New(t, t.Context())
 	surface := h.StartStandalone("USD", integrationharness.WithConfig(func(cfg *config.Config) {
 		cfg.APIURL = "https://api.openrails-e2e.example.com"
-		cfg.MerchantSource = config.MerchantSourceAPI
+		cfg.MerchantConfigSource = config.MerchantConfigSourceAPI
 		cfg.SecretBackend = config.SecretBackendDB
 	}))
 	owned := surface.ProvisionOwnedMerchant("rollover-" + uuid.NewString()[:8])

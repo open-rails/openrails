@@ -80,7 +80,7 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 		d.start()
 		client = d.client()
 		h.MakeOperationDue(op.ID)
-		h.FireProviderIntentVerify(h.Pool())
+		h.FireProviderIntentVerify(h.Pool(), op.ID)
 		require.Eventually(t, func() bool {
 			return h.LatestTierChangeOperation(lost.SubscriptionID).Status == "succeeded"
 		}, 90*time.Second, 500*time.Millisecond, "the restarted deployment's verifier settles from the exact read-back")

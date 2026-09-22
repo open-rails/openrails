@@ -12,6 +12,8 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 )
 
 // OpenAppDB returns a pool-backed *db.DB on the given DSN, closed on test
@@ -21,6 +23,7 @@ func OpenAppDB(t *testing.T, dsn string) *db.DB {
 	d, err := db.NewDB(t.Context(), &config.DBConfig{URL: dsn})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
+	BindRiver(t, d)
 	return d
 }
 
@@ -36,6 +39,7 @@ func OpenMerchantDB(t *testing.T, merchantID uuid.UUID) *db.DB {
 	t.Helper()
 	d, err := db.NewWithPGXPool(SharedMerchantPool(t, merchantID), config.DefaultSchema)
 	require.NoError(t, err)
+	BindRiver(t, d)
 	return d
 }
 
@@ -54,5 +58,15 @@ func OpenOneConnAppDB(t *testing.T) *db.DB {
 	t.Cleanup(pool.Close)
 	d, err := db.NewWithPGXPool(pool, config.DefaultSchema)
 	require.NoError(t, err)
+	BindRiver(t, d)
 	return d
+}
+
+// BindRiver supplies the real insert-only client in module-level fixtures. Tests
+// do not run background workers unless explicitly requested.
+func BindRiver(t *testing.T, d *db.DB) {
+	t.Helper()
+	client, err := river.NewClient(riverpgxv5.New(d.Pool()), &river.Config{Schema: config.RiverSchema})
+	require.NoError(t, err)
+	d.SetRiverJobInserter(client)
 }

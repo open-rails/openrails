@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -47,7 +48,7 @@ func (s *Service) PayInvoiceNow(ctx context.Context, payer identity.CustomerID, 
 	return out, err
 }
 
-func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.CustomerID, request openrails.RetrySubscriptionNowRequest) (*openrails.SubscriptionRetryNowResult, error) {
+func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.CustomerID, request openrails.RetrySubscriptionNowRequest, principal billingauth.DelegatedPrincipal) (*openrails.SubscriptionRetryNowResult, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -59,13 +60,28 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 			id := request.PaymentMethodID.UUID()
 			method = &id
 		}
-		h := intents.NewManualRebillHandler(rt.DB, rt.Config, rt.CollectionResolver, rt.Clock)
-		h.DeferDelete = rt.DeferredDeletes
-		accepted, replayed, err := h.EnqueueCustomer(ctx, request.SubscriptionID.UUID(), payer.UUID(), request.IdempotencyKey, method)
+		owned, err := rt.UserSubscriptionService.GetUserSubscriptionByID(ctx, payer.UUID().String(), request.SubscriptionID.UUID())
 		if err != nil {
 			return err
 		}
-		result, err := rt.IntentRunner().ExecuteByID(ctx, accepted.ID)
+		var accepted gen.OpenrailsRailIntent
+		var replayed bool
+		if owned.CollectionPolicy == models.CollectionPolicyEngine {
+			accepted, replayed, err = s.moneyService().AdmitCustomerSubscriptionCollection(ctx, owned.ID, payer.UUID(), request.IdempotencyKey, method, principal)
+		} else {
+			h := intents.NewManualRebillHandler(rt.DB, rt.Config, rt.CollectionResolver, rt.Clock)
+			h.DeferDelete = rt.DeferredDeletes
+			accepted, replayed, err = h.EnqueueCustomer(ctx, request.SubscriptionID.UUID(), payer.UUID(), request.IdempotencyKey, method)
+		}
+		if err != nil {
+			return err
+		}
+		var result gen.OpenrailsRailIntent
+		if accepted.Status == intents.StatusUnknownNeedsVerify {
+			result, err = rt.IntentRunner().VerifyByID(ctx, accepted.ID)
+		} else {
+			result, err = rt.IntentRunner().ExecuteByID(ctx, accepted.ID)
+		}
 		if err != nil {
 			return err
 		}
@@ -134,6 +150,9 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 	}
 	if sub.CustomerID != payer.UUID() {
 		return nil, pgx.ErrNoRows
+	}
+	if sub.CollectionPolicy == models.CollectionPolicyEngine {
+		return s.engineSubscriptionRecovery(ctx, sub)
 	}
 	out := &openrails.PaymentRecovery{}
 	mid, err := merchant.Require(ctx)
@@ -231,6 +250,16 @@ func customerPaymentRefusal(row gen.OpenrailsRailIntent) error {
 		return err
 	}
 	switch row.IntentType {
+	case subscriptions.TypeSubscriptionCollection:
+		if err := intents.ValidateSubscriptionCollectionTerminal(row); err != nil {
+			return err
+		}
+		if !evidence.Declined {
+			return intents.ErrRebillNotRetryable
+		}
+		if row.Rail != "stripe" {
+			evidence.FailureCode = strconv.Itoa(evidence.ResponseCode)
+		}
 	case subscriptions.TypeManualRebill:
 		if err := intents.ValidateManualRebillTerminal(row); err != nil {
 			return err

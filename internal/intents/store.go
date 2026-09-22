@@ -161,15 +161,17 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 				return err
 			}
 			payload, ok := p.Payload.(subscriptions.SubscriptionCollectionPayload)
-			if !ok || p.Origin != OriginSystem || p.PspID == uuid.Nil || p.CustodianID == uuid.Nil {
+			if !ok || p.PspID == uuid.Nil || ((p.Origin != OriginSystem || payload.Initiator != charge.InitiatorMerchant) && (p.Origin != OriginUser || payload.Initiator != charge.InitiatorCustomer || p.Actor != engineCustomer.String())) {
 				return errors.New("engine admission requires typed system-owned terms")
 			}
-			handle := paymentmethods.CustodianHandle{Custodian: p.CustodianID, Method: payload.Instrument.RailMethodRef}
-			if err := paymentmethods.LockCustodianHandles(ctx, d.Gen(ctx), p.MerchantID, handle); err != nil {
-				return err
-			}
-			if err := paymentmethods.RequireCustodianHandleAvailable(ctx, d.Gen(ctx), p.MerchantID, handle); err != nil {
-				return err
+			if p.CustodianID != uuid.Nil {
+				handle := paymentmethods.CustodianHandle{Custodian: p.CustodianID, Method: payload.Instrument.RailMethodRef}
+				if err := paymentmethods.LockCustodianHandles(ctx, d.Gen(ctx), p.MerchantID, handle); err != nil {
+					return err
+				}
+				if err := paymentmethods.RequireCustodianHandleAvailable(ctx, d.Gen(ctx), p.MerchantID, handle); err != nil {
+					return err
+				}
 			}
 			method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: p.MerchantID, ID: payload.PaymentMethodID})
 			if err != nil {
@@ -181,7 +183,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 			if err := payload.Instrument.Matches(method, charge.AgreementRecurring); err != nil {
 				return err
 			}
-			if sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(payload.PreviousPeriodEnd) || (sub.Status != "active" && sub.Status != "past_due") || (sub.Status == "past_due" && (sub.NextRetryAt == nil || sub.NextRetryAt.After(payload.AcceptedAt))) {
+			if !subscriptions.EngineCollectionDue(sub, payload.AcceptedAt, p.Origin == OriginUser) || !sub.CurrentPeriodEndsAt.Equal(payload.PreviousPeriodEnd) {
 				return errors.New("engine admission is not a due obligation")
 			}
 			failures := 0
@@ -218,6 +220,9 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 				ordinal = previous.Attempt + 1
 			} else if !errors.Is(err, pgx.ErrNoRows) {
 				return err
+			}
+			if p.Origin == OriginUser && ordinal == 0 {
+				return ErrRebillNotRetryable
 			}
 			if payload.Attempt != ordinal {
 				return errors.New("engine admission changed its accepted attempt ordinal")
@@ -344,23 +349,35 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	}
 	// psp_id is stamped only when the producer already has observed
 	// provenance (for example an existing subscription pinned to an account).
-	return s.db.Gen(ctx).EnqueueRailIntent(ctx, gen.EnqueueRailIntentParams{
-		MerchantID:     p.MerchantID,
-		Rail:           p.Provider,
-		IntentType:     p.IntentType,
-		SubscriptionID: p.SubscriptionID,
-		PaymentID:      p.PaymentID,
-		PriceID:        p.PriceID,
-		Payload:        payload,
-		IdempotencyKey: p.IdempotencyKey,
-		NextAttemptAt:  p.NextAttemptAt.UTC(),
-		Origin:         string(p.Origin),
-		OriginReason:   originReason,
-		Actor:          actorPtr,
-		ExpiresAt:      p.ExpiresAt,
-		PspID:          uuidPtrOrNil(p.PspID),
-		CustodianID:    uuidPtrOrNil(p.CustodianID),
+	var row gen.OpenrailsRailIntent
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		row, err = s.db.NewWithPgxTx(tx).Gen(ctx).EnqueueRailIntent(ctx, gen.EnqueueRailIntentParams{
+			MerchantID:     p.MerchantID,
+			Rail:           p.Provider,
+			IntentType:     p.IntentType,
+			SubscriptionID: p.SubscriptionID,
+			PaymentID:      p.PaymentID,
+			PriceID:        p.PriceID,
+			Payload:        payload,
+			IdempotencyKey: p.IdempotencyKey,
+			NextAttemptAt:  p.NextAttemptAt.UTC(),
+			Origin:         string(p.Origin),
+			OriginReason:   originReason,
+			Actor:          actorPtr,
+			ExpiresAt:      p.ExpiresAt,
+			PspID:          uuidPtrOrNil(p.PspID),
+			CustodianID:    uuidPtrOrNil(p.CustodianID),
+		})
+		if err != nil {
+			return err
+		}
+		if OperationTerminal(row.Status) {
+			return nil
+		}
+		return s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: row.MerchantID, IntentID: row.ID}, operationInsertOpts(row.NextAttemptAt))
 	})
+	return row, err
 }
 
 // SupersedeBySubject marks every live (pending / failed_retryable /
@@ -410,38 +427,6 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent,
 		return gen.OpenrailsRailIntent{}, scopeErr
 	}
 	return s.db.Gen(ctx).GetRailIntent(ctx, gen.GetRailIntentParams{MerchantID: scopeMerchantID.UUID(), ID: id})
-}
-
-// DueExecuteMerchants lists the merchants with executor work (claimable or
-// expirable intents) through migration 0022's SECURITY DEFINER work queue —
-// the executor's fan-out list. Ids only; each merchant's pass then runs under
-// its own pinned connection (or#862).
-func (s *Store) DueExecuteMerchants(ctx context.Context, now time.Time, limit int32) ([]uuid.UUID, error) {
-	rows, err := s.db.GenDirectory().ListDueRailIntentMerchants(ctx, gen.ListDueRailIntentMerchantsParams{
-		Now: now.UTC(), MerchantLimit: limit,
-	})
-	return derefIDs(rows), err
-}
-
-// DueVerifyMerchants is DueExecuteMerchants for the verifier pass (or#862).
-func (s *Store) DueVerifyMerchants(ctx context.Context, now time.Time, limit int32) ([]uuid.UUID, error) {
-	rows, err := s.db.GenDirectory().ListDueVerifyRailIntentMerchants(ctx, gen.ListDueVerifyRailIntentMerchantsParams{
-		Now: now.UTC(), MerchantLimit: limit,
-	})
-	return derefIDs(rows), err
-}
-
-// derefIDs drops the pointer indirection sqlc emits for a set-returning
-// function's column. The definer bodies select a NOT NULL column, so a nil
-// here is impossible; it is skipped rather than dereferenced.
-func derefIDs(rows []*uuid.UUID) []uuid.UUID {
-	out := make([]uuid.UUID, 0, len(rows))
-	for _, id := range rows {
-		if id != nil {
-			out = append(out, *id)
-		}
-	}
-	return out
 }
 
 // ClaimDue leases up to batch due executable intents (SKIP LOCKED).
@@ -834,10 +819,42 @@ func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 	if scopeErr != nil {
 		return scopeErr
 	}
-	return one(s.db.Gen(ctx).ParkRailIntent(ctx, gen.ParkRailIntentParams{
+	rows, err := s.db.Gen(ctx).ParkRailIntent(ctx, gen.ParkRailIntentParams{
 		MerchantID: scopeMerchantID.UUID(),
 		ID:         id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
-	}))
+	})
+	if err != nil || rows != 0 {
+		return err
+	}
+	// Park deliberately cannot clear a payment submission fence. A blocked
+	// executor still owns that payment: retain it for read-only verification,
+	// rather than leaving its claim in flight until lease expiry.
+	current, err := s.Get(ctx, id)
+	if db.IsNotFound(err) {
+		return nil
+	}
+	if err != nil || current.Status != StatusInFlight {
+		return err
+	}
+	var evidence map[string]json.RawMessage
+	if err := json.Unmarshal(current.ResultEvidence, &evidence); err != nil {
+		return err
+	}
+	key := ""
+	switch current.IntentType {
+	case "invoice_collection", "subscription_collection":
+		key = "submitted_at"
+	case "nmi_sale":
+		key = "sale_submitted"
+	case "initial_membership":
+		key = "initial_submitted"
+	}
+	if _, submitted := evidence[key]; key != "" && submitted {
+		// MarkUnknown's SQL accepts only live states, so a concurrent sealed
+		// completion is never overwritten by this stale blocked outcome.
+		return s.MarkUnknown(ctx, id, nextAttemptAt, reason, nil)
+	}
+	return nil
 }
 
 func (s *Store) MarkSuperseded(ctx context.Context, id uuid.UUID, reason string) error {

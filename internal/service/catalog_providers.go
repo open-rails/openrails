@@ -421,6 +421,11 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 			}
 			continue
 		}
+		// New engine card prices are local terms. Explicit historical links above
+		// remain supported for provider-owned cohorts sharing the catalog.
+		if s.localEnginePrice(t.rail, reqCycle) {
+			continue
+		}
 		// Otherwise dispatch AutoCreate to mint (or find-or-attach) the object.
 		// Blocked outright when the operating mode disables provider writes —
 		// the find-half of find-or-create is not worth a special case here; the
@@ -459,6 +464,13 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 		}
 	}
 	return rails, states, pending, nil
+}
+
+// localEnginePrice identifies terms executed without a provider catalog object.
+// Apply the same decision to primary creation and secondary account fanout.
+func (s *Service) localEnginePrice(rail string, cycle *int) bool {
+	return s.rt != nil && s.rt.Config != nil && s.rt.Config.NewSubscriptionCollectionPolicy == "engine" &&
+		(rail == "stripe" || (rail == "nmi" && cycle != nil))
 }
 
 // railAccountRef is one declared merchant account: its rail plus the
@@ -514,7 +526,7 @@ func (s *Service) merchantAccountRails(ctx context.Context) map[string]railAccou
 // armed psps state, never a boot artifact). No links
 // stored; find-or-create re-discovers by content key and failures are logged.
 func (s *Service) syncSecondaryCatalogAccounts(ctx context.Context, rail string, pctx autoCreateContext, adapter providerAdapter) {
-	if s.rt == nil || s.rt.DB == nil {
+	if s.rt == nil || s.rt.DB == nil || s.localEnginePrice(rail, pctx.BillingCycleDays) {
 		return
 	}
 	mid, err := merchant.Require(ctx)

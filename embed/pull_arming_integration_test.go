@@ -15,7 +15,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 
-	"github.com/riverqueue/river"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -87,10 +86,9 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 	runtime := app.HostGraph(rt).Runtime
 	require.NotNil(t, runtime)
 
-	// Worker registration is where hosts fold OpenRails' workers into their
-	// River client (host-one RegisterRiverWorkers) — it must arm the merchants
-	// service even though no standalone HTTP server ever runs.
-	require.NoError(t, runtime.AddBillingWorkersTo(ctx, river.NewWorkers()))
+	// Managed composition registers the same workers as host-owned RiverJobs.
+	// It must arm the merchants service without a standalone HTTP server.
+	require.NoError(t, runtime.InitRiver(ctx))
 	require.NotNil(t, runtime.Merchants, "#699: worker registration builds the merchants service from the store")
 
 	// The per-merchant pull plane the refresh job builds inside the merchant

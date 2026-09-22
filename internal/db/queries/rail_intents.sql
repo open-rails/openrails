@@ -1,16 +1,11 @@
--- #358 phase A: provider intent ledger queries — idempotent enqueue, the
--- executor's SKIP LOCKED lease claim, status transitions, supersede-by-subject
--- and relevance-window expiry. merchant_id is stamped explicitly by the
--- producers (request paths run on a merchant-pinned connection, so RLS
--- double-checks the stamp). The executor/verifier workers do NOT sweep
--- cross-merchant: there is no privileged pool, so they fan out over the
--- merchants a 0022 SECURITY DEFINER work queue names and run each pass inside
--- that merchant's own pinned scope (or#862).
+-- Financial operation ledger: accepted authorization, submission claims,
+-- provider evidence and terminal accounting are always merchant scoped.
+-- Production dispatch is one typed River job per accepted operation; legacy
+-- batch claims remain only for the existing financial regression harness.
 
 -- =====================================================================
 -- Enqueue (effectively-once per logical intent)
 -- =====================================================================
-
 -- Idempotent on (merchant_id, idempotency_key). Conflict semantics by current
 -- status:
 --   pending, attempts=0  -> refresh schedule/payload (no possible submission)
@@ -84,7 +79,6 @@ RETURNING *;
 -- =====================================================================
 -- Executor / verifier claims (single-executor lease, SKIP LOCKED)
 -- =====================================================================
-
 -- Claims due executable intents: pending/failed_retryable whose
 -- next_attempt_at arrived, plus orphaned in_flight rows whose lease elapsed
 -- (crashed executor; per-type semantics make the reclaim safe). Never claims
@@ -189,7 +183,6 @@ WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(i
 -- =====================================================================
 -- Outcome transitions (always release the lease)
 -- =====================================================================
-
 -- name: MarkRailIntentSucceeded :execrows
 UPDATE openrails.rail_intents
 SET status = 'succeeded',
@@ -221,7 +214,7 @@ SET status = 'failed_retryable',
 WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
   AND NOT (intent_type IN ('invoice_collection','subscription_collection') AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'submitted_at')
   AND NOT (intent_type = 'nmi_sale' AND coalesce(result_evidence, '{}'::jsonb) ? 'sale_submitted')
-  AND NOT (intent_type = 'initial_membership' AND coalesce(result_evidence, '{}'::jsonb) ? 'initial_submitted');
+  AND NOT (intent_type = 'initial_membership' AND rail <> 'stripe' AND coalesce(result_evidence, '{}'::jsonb) ? 'initial_submitted');
 
 -- Ambiguous outcome (or a verify that stayed inconclusive): park for the
 -- verifier, scheduled at next_attempt_at.
@@ -287,7 +280,6 @@ WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(i
 -- =====================================================================
 -- Supersede-by-subject + relevance-window expiry
 -- =====================================================================
-
 -- Supersedes every live intent of one type for one subscription (e.g. a
 -- resume superseding the pending deferred delete). in_flight rows are left to
 -- their executor: its per-type relevance check re-verifies before acting, so
@@ -332,7 +324,6 @@ WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND (pi.status = 'failed_retr
 -- =====================================================================
 -- Reconcile (#107 PS-10): stuck-intent detection
 -- =====================================================================
-
 -- Non-terminal intents that have sat in the ledger beyond the reconcile
 -- engine's hardcoded stuck thresholds: pending/failed_retryable older than the
 -- action cutoff (24h), in_flight/unknown_needs_verify older than the verify
@@ -348,7 +339,6 @@ WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND ( (status IN ('
 -- =====================================================================
 -- Reads
 -- =====================================================================
-
 -- name: GetRailIntent :one
 SELECT * FROM openrails.rail_intents WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
@@ -371,7 +361,6 @@ LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 -- =====================================================================
 -- #679 destructive-volume circuit breaker
 -- =====================================================================
-
 -- Destructive intents that REACHED the provider in the rolling window:
 -- succeeded rows count by executed_at; unresolved attempt outcomes
 -- (unknown_needs_verify / failed_*) count by their last transition. in_flight
@@ -441,29 +430,6 @@ SELECT openrails.count_destructive_intents_for_merchant_since(
     sqlc.arg(intent_types)::text[],
     sqlc.arg(since)::timestamptz);
 
--- =====================================================================
--- or#862: deployment-wide executor / verifier fan-out
--- =====================================================================
-
--- CROSS-MERCHANT: the merchants the executor pass must visit, through migration
--- 0022's SECURITY DEFINER reader. The executor used to run ClaimDue on a bare
--- River job context; rail_intents FORCEs RLS, so with no app.merchant_id the
--- claim matched `merchant_id = NULL` and leased ZERO intents — the whole
--- outbound provider-mutation plane was inert, and the #836 kill switch and #679
--- volume breaker (which only run on a claimed intent) never executed. Ids only:
--- the claim, the gates and the execution run per-merchant under
--- RunInMerchantConn, where these same predicates re-apply.
--- name: ListDueRailIntentMerchants :many
-SELECT merchant_id FROM openrails.due_rail_intent_merchant_ids(
-    sqlc.arg(now)::timestamptz,
-    sqlc.arg(merchant_limit)::int);
-
--- CROSS-MERCHANT: the verifier's fan-out list, same posture (or#862).
--- name: ListDueVerifyRailIntentMerchants :many
-SELECT merchant_id FROM openrails.due_verify_rail_intent_merchant_ids(
-    sqlc.arg(now)::timestamptz,
-    sqlc.arg(merchant_limit)::int);
-
 -- name: GetRailIntentByIdempotencyKey :one
 SELECT * FROM openrails.rail_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND idempotency_key = sqlc.arg(idempotency_key)::text;
@@ -510,13 +476,17 @@ WHERE id = sqlc.arg(id)::uuid
   AND intent_type = sqlc.arg(intent_type)::text
   AND payload = sqlc.arg(payload)::jsonb
   AND ((sqlc.arg(evidence_key)::text = 'qualified_receipt' AND intent_type IN ('invoice_collection','manual_rebill','nmi_upgrade','nmi_sale','initial_membership', 'subscription_collection')
-           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['rebill_decline','qualified_invoice_nonexecution','qualified_initial_refusal']))
+           AND NOT (COALESCE(result_evidence, '{}'::jsonb) ?| ARRAY['rebill_decline','stripe_recurring_decline','qualified_invoice_nonexecution','qualified_initial_refusal']))
        OR (sqlc.arg(evidence_key)::text = 'qualified_enrollment' AND intent_type IN ('nmi_upgrade','initial_membership')
            AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_initial_refusal'))
        OR (sqlc.arg(evidence_key)::text='qualified_initial_refusal' AND intent_type='initial_membership'
            AND NOT (coalesce(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','qualified_enrollment'])
            AND ((sqlc.arg(receipt)::jsonb->>'kind'='not_submitted' AND NOT (coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted'))
-             OR (sqlc.arg(receipt)::jsonb->>'kind'='provider_declined' AND result_evidence->>'initial_submitted'='true')))
+             OR (sqlc.arg(receipt)::jsonb->>'kind' IN ('provider_declined','stripe_canceled','not_dispatched') AND result_evidence->>'initial_submitted'='true')))
+       OR (sqlc.arg(evidence_key)::text='stripe_recurring_decline' AND intent_type='subscription_collection' AND rail='stripe'
+           AND COALESCE(result_evidence->>'submitted_at','') <> ''
+           AND sqlc.arg(receipt)::jsonb->>'failure_code'='canceled'
+           AND NOT (COALESCE(result_evidence,'{}'::jsonb) ?| ARRAY['qualified_receipt','rebill_decline','qualified_invoice_nonexecution']))
        OR (sqlc.arg(evidence_key)::text = 'qualified_invoice_nonexecution' AND intent_type IN ('invoice_collection','subscription_collection')
            AND COALESCE(result_evidence->>'submitted_at', '') = sqlc.arg(receipt)::jsonb->>'submitted_at'
            AND NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')))
@@ -765,3 +735,41 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND status='succeeded'
         AND subscription_id=sqlc.arg(subscription_id)::uuid
         AND (payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz))
 ORDER BY id LIMIT 2;
+-- name: ExpireRailIntentByID :execrows
+UPDATE openrails.rail_intents pi
+SET status = 'expired',
+    last_failure_reason = 'relevance window elapsed before execution',
+    claimed_until = NULL,
+    updated_at = now()
+WHERE pi.id = sqlc.arg(id)::uuid AND pi.merchant_id = sqlc.arg(merchant_id)::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
+  AND NOT (pi.intent_type IN ('invoice_collection','subscription_collection') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
+  AND NOT (pi.intent_type='initial_membership' AND coalesce(pi.result_evidence,'{}'::jsonb) ? 'initial_submitted')
+  AND pi.expires_at IS NOT NULL
+  AND pi.expires_at <= sqlc.arg(now)::timestamptz
+  AND NOT (
+        pi.intent_type = ANY (sqlc.arg(breaker_held_types)::text[])
+        AND EXISTS (
+            SELECT 1 FROM openrails.reconciliation_findings f
+            WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.merchant_id = pi.merchant_id
+              AND f.finding_type = 'life.provider_intent.held_bulk'
+              AND f.status IN ('reconcile_required', 'requires_review')
+        )
+      )
+  AND pi.intent_type <> 'subscription_collection';
+
+
+-- name: RecoverAbandonedRailIntentByID :execrows
+UPDATE openrails.rail_intents
+SET status = 'unknown_needs_verify', claimed_until = NULL, next_attempt_at = sqlc.arg(now)::timestamptz,
+    last_failure_reason = 'executor lease expired; verify before retry', updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND status = 'in_flight' AND (claimed_until IS NULL OR claimed_until <= sqlc.arg(now)::timestamptz);
+
+-- A qualified provider notification may advance a readback, never a write or
+-- another executor's live lease. Admission and retry authorization are untouched.
+-- name: AdvanceRailIntentVerification :execrows
+UPDATE openrails.rail_intents
+SET next_attempt_at = LEAST(next_attempt_at, sqlc.arg(now)::timestamptz), updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND status = 'unknown_needs_verify';

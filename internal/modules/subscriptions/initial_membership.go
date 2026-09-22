@@ -67,7 +67,7 @@ func DecodeInitialMembershipPayload(in gen.OpenrailsRailIntent) (InitialMembersh
 	if err := p.Instrument.Validate(); err != nil {
 		return p, err
 	}
-	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeInitialMembership || in.Rail != "nmi" || in.PspID == nil || *in.PspID != p.Instrument.PSPID || p.Instrument.PSPID != p.Terms.PSPID || in.PriceID == nil || *in.PriceID != p.Terms.PriceID || strings.TrimSpace(p.PSP) == "" || p.CheckoutIdempotencyKey == "" || in.IdempotencyKey != TypeInitialMembership+":"+strings.TrimSpace(p.CheckoutIdempotencyKey) {
+	if in.ID == uuid.Nil || in.MerchantID == uuid.Nil || in.IntentType != TypeInitialMembership || in.PspID == nil || *in.PspID != p.Instrument.PSPID || p.Instrument.PSPID != p.Terms.PSPID || in.PriceID == nil || *in.PriceID != p.Terms.PriceID || strings.TrimSpace(p.PSP) == "" || p.CheckoutIdempotencyKey == "" || in.IdempotencyKey != TypeInitialMembership+":"+strings.TrimSpace(p.CheckoutIdempotencyKey) {
 		return p, errors.New("initial membership contradicts its canonical accepted scope")
 	}
 	if len(p.RequestFingerprint) != 64 || p.RequestFingerprint != strings.ToLower(p.RequestFingerprint) {
@@ -77,13 +77,13 @@ func DecodeInitialMembershipPayload(in gen.OpenrailsRailIntent) (InitialMembersh
 		return p, err
 	}
 	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
-		if p.NativeSchedule != nil || p.HyperSwitch == nil || p.Instrument.Custodian != models.CustodianHyperSwitch || p.Instrument.CustodianID == nil || in.CustodianID != nil || p.Instrument.RailMethodRef == "" || p.Terms.Pending || p.Terms.Amount <= 0 || p.Terms.Amount != p.Terms.RecurringAmount || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt) {
+		if p.NativeSchedule != nil || in.CustodianID != nil || p.Terms.Pending || p.Terms.Amount <= 0 || p.Terms.Amount != p.Terms.RecurringAmount || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt) {
 			return p, errors.New("engine initial membership requires its positive customer charge and permanent custody, without a native schedule")
 		}
-		return p, p.HyperSwitch.Validate()
+		return p, charge.ValidateEngineInstrument(in.Rail, p.Instrument, p.HyperSwitch, false)
 	}
 	schedule := p.NativeSchedule
-	if schedule == nil || p.HyperSwitch != nil || in.CustodianID != nil || p.Instrument.CustodianHeld() || p.Instrument.RailCustomerRef == "" || strings.TrimSpace(schedule.PlanID) == "" || schedule.DayFrequency <= 0 || schedule.PlanPayments < 0 {
+	if in.Rail != "nmi" || schedule == nil || p.HyperSwitch != nil || in.CustodianID != nil || p.Instrument.CustodianHeld() || p.Instrument.RailCustomerRef == "" || strings.TrimSpace(schedule.PlanID) == "" || schedule.DayFrequency <= 0 || schedule.PlanPayments < 0 {
 		return p, errors.New("native initial membership requires its accepted provider schedule and instrument")
 	}
 	if int64(schedule.DayFrequency) > math.MaxInt64/int64(24*time.Hour) || p.Terms.PeriodEnd.Sub(p.Terms.PeriodStart) != time.Duration(schedule.DayFrequency)*24*time.Hour || (!p.Terms.Pending && (p.Terms.Amount != p.Terms.RecurringAmount || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt))) {

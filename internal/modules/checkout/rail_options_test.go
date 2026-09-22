@@ -352,3 +352,17 @@ func railOptionPrice(autoRenew bool, provider string, link map[string]string) *m
 		PSPLinks:  map[string]map[string]string{provider: link},
 	}
 }
+
+func TestEngineRoutingUsesLocalTermsAndRejectsUnsupportedRoutes(t *testing.T) {
+	hours := 720
+	price := &models.Price{Amount: 9990000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours}
+	service := &CheckoutSessionService{config: &config.Config{NewSubscriptionCollectionPolicy: "engine"}}
+	for _, rail := range []string{"nmi", "stripe"} {
+		cfg := &config.PSPConfig{NMI: &config.NMIRailConfig{SecurityKey: "synthetic"}, Stripe: &config.StripeRailConfig{SecretKey: "synthetic"}}
+		require.Empty(t, service.checkoutRailSkipReason(price, railTarget{Rail: rail}, cfg, models.CheckoutSessionModeSubscription), "engine needs no provider catalog binding")
+	}
+	require.Equal(t, models.CheckoutRoutingSkipModeUnsupported, service.checkoutRailSkipReason(price, railTarget{Rail: "ccbill"}, &config.PSPConfig{}, models.CheckoutSessionModeSubscription))
+	trial := int64(0)
+	price.TrialUnitAmount = &trial
+	require.Equal(t, models.CheckoutRoutingSkipModeUnsupported, service.checkoutRailSkipReason(price, railTarget{Rail: "stripe"}, &config.PSPConfig{}, models.CheckoutSessionModeSubscription))
+}
