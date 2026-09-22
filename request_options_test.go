@@ -261,3 +261,44 @@ func TestClientExtraHeadersCannotDuplicateMerchantSelection(t *testing.T) {
 		})
 	}
 }
+
+// Old servers execute a v1 operation using only the credential's merchant and
+// ignore an unknown slug header. The new path must refuse before that write.
+func TestClientSlugSelectionCannotWriteThroughOldServer(t *testing.T) {
+	var writes atomic.Int64
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/merchant/catalog/products", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer merchant-alpha-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		writes.Add(1)
+		_, _ = w.Write([]byte(`{}`))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	client, err := NewRemote(server.URL, WithAPIKey("merchant-alpha-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Products.Create(t.Context(), &ProductCreateParams{Key: "bravo-post", DisplayName: "Bravo"}, WithMerchant("bravo"))
+	if !errors.Is(err, ErrNotFound) || writes.Load() != 0 {
+		t.Fatalf("unsupported server mutated credential merchant: writes=%d, error=%v", writes.Load(), err)
+	}
+	// Positive control: the old route really accepts this credential and does
+	// not understand the slug header; the new SDK must never fall back here.
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/v1/merchant/catalog/products", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer merchant-alpha-key")
+	request.Header.Set(merchant.SlugHeader, "bravo")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK || writes.Load() != 1 {
+		t.Fatal("old-server positive control did not exercise the unsafe behavior")
+	}
+}

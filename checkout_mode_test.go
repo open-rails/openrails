@@ -19,18 +19,18 @@ func TestCheckoutPurchaseAndActionsHaveDistinctRequests(t *testing.T) {
 		require.NotContains(t, input, "mode", "the operation is selected by the endpoint or canonical price")
 		require.NotEmpty(t, r.Header.Get("Idempotency-Key"))
 		switch r.URL.Path {
-		case "/v1/merchant/checkout-sessions":
+		case "/v2/merchant/checkout-sessions":
 			require.Contains(t, input, "price_id")
 			require.NotContains(t, input, "subscription_id")
 			require.NotContains(t, input, "new_price_id")
-		case "/v1/merchant/payment-method-sessions":
+		case "/v2/merchant/payment-method-sessions":
 			require.NotContains(t, input, "price_id")
 			require.NotContains(t, input, "subscription_id")
-		case "/v1/merchant/solana-cancel-sessions":
+		case "/v2/merchant/solana-cancel-sessions":
 			require.Contains(t, input, "subscription_id")
 			require.NotContains(t, input, "price_id")
 			require.NotContains(t, input, "new_price_id")
-		case "/v1/merchant/solana-tier-change-sessions":
+		case "/v2/merchant/solana-tier-change-sessions":
 			require.Contains(t, input, "subscription_id")
 			require.Contains(t, input, "new_price_id")
 		default:

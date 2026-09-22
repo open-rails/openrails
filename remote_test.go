@@ -22,17 +22,17 @@ func TestRemoteTrustLevelWireNames(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/v1/merchant/settings":
+		case "/v2/merchant/settings":
 			if err := json.NewDecoder(r.Body).Decode(&settingsBody); err != nil {
 				t.Fatalf("decode settings body: %v", err)
 			}
 			_, _ = w.Write([]byte(`{}`))
-		case "/v1/merchant/admissions":
+		case "/v2/merchant/admissions":
 			if err := json.NewDecoder(r.Body).Decode(&admissionsBody); err != nil {
 				t.Fatalf("decode admissions body: %v", err)
 			}
 			_, _ = w.Write([]byte(`{"items":[{"status":200,"result":{"allowed":true}}]}`))
-		case "/v1/merchant/trust-level":
+		case "/v2/merchant/trust-level":
 			_, _ = w.Write([]byte(`{"currency":"USD","trust_level":"gold"}`))
 		default:
 			http.NotFound(w, r)
@@ -104,7 +104,7 @@ func TestRemoteSetCustomerSpendDelegation(t *testing.T) {
 		if r.Method != http.MethodPut {
 			t.Errorf("method = %s, want PUT", r.Method)
 		}
-		if r.URL.Path != "/v1/merchant/customers/"+testCustomer.String()+"/spend-delegations:upsert" {
+		if r.URL.Path != "/v2/merchant/customers/"+testCustomer.String()+"/spend-delegations:upsert" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
@@ -139,7 +139,7 @@ func TestRemoteSetCustomerSpendDelegationsUsesMerchantMachineRoute(t *testing.T)
 		if r.Method != http.MethodPut {
 			t.Errorf("method = %s, want PUT", r.Method)
 		}
-		if r.URL.Path != "/v1/merchant/customers/"+testCustomer.String()+"/spend-delegations" {
+		if r.URL.Path != "/v2/merchant/customers/"+testCustomer.String()+"/spend-delegations" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
@@ -190,7 +190,7 @@ func TestRemoteDeleteCustomerSpendDelegation(t *testing.T) {
 	if gotMethod != http.MethodDelete {
 		t.Fatalf("method = %s, want DELETE", gotMethod)
 	}
-	if gotPath != "/v1/merchant/customers/"+testCustomer.String()+"/spend-delegations/invoker/user:11111111-1111-1111-1111-111111111111" {
+	if gotPath != "/v2/merchant/customers/"+testCustomer.String()+"/spend-delegations/invoker/user:11111111-1111-1111-1111-111111111111" {
 		t.Fatalf("path = %s", gotPath)
 	}
 }
@@ -318,7 +318,7 @@ func TestWithAPIKeyAndVerify(t *testing.T) {
 	if gotAuth != "Bearer sk-test" {
 		t.Fatalf("WithAPIKey bearer = %q", gotAuth)
 	}
-	if gotPath != "/v1/merchant/settings" {
+	if gotPath != "/v2/merchant/settings" {
 		t.Fatalf("Verify path = %q", gotPath)
 	}
 }

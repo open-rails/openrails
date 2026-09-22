@@ -49,6 +49,13 @@ The SDK emits exactly one target header: `X-OpenRails-Merchant-Slug` or
 selector. An ambient ID must match an explicit/default ID; combining it with a
 slug is refused because the SDK cannot resolve that equality locally.
 
+Slug-selected operations use the distinct `/v2/merchant`, `/v2/catalog`, `/v2/me`
+and `/v2/import` operation paths. A pre-selector server must refuse these paths
+before any mutation; it must not ignore an unknown header and execute against the
+credential's merchant. There is no retry or fallback to v1. UUID-selected calls
+retain v1's already enforced binding. The actual request path is chosen before
+request construction/signing and is preserved through server verification.
+
 ## Operation classification and migration
 
 The existing billing, catalog, customer, product-access, import and archive SDK

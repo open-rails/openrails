@@ -20,7 +20,7 @@ func TestProductAccessStringResourceRequests(t *testing.T) {
 		require.Equal(t, "Bearer test", r.Header.Get("Authorization"))
 		switch {
 		case r.Method == http.MethodPost:
-			require.Equal(t, "/v1/merchant/users/"+customer+"/product-access/check", r.URL.Path)
+			require.Equal(t, "/v2/merchant/users/"+customer+"/product-access/check", r.URL.Path)
 			var body struct {
 				ProductIDs []string `json:"product_ids"`
 			}
