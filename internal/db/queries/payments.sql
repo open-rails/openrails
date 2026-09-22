@@ -102,8 +102,7 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND refunded_payment_id
   AND deleted_at IS NULL;
 
 -- Customer history needs completed display totals, not pending refund reservations.
--- Scope ownership through the original charge: imported linked refund rows may
--- carry a different legacy customer identifier.
+-- Scope ownership through the original charge before aggregating linked refunds.
 -- name: GetCustomerPaymentRefundTotals :many
 SELECT original.id AS payment_id, sum(abs(refund.amount::numeric))::bigint AS amount_refunded
 FROM openrails.payments original

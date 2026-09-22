@@ -419,8 +419,7 @@ type GetCustomerPaymentRefundTotalsRow struct {
 }
 
 // Customer history needs completed display totals, not pending refund reservations.
-// Scope ownership through the original charge: imported linked refund rows may
-// carry a different legacy customer identifier.
+// Scope ownership through the original charge before aggregating linked refunds.
 func (q *Queries) GetCustomerPaymentRefundTotals(ctx context.Context, arg GetCustomerPaymentRefundTotalsParams) ([]GetCustomerPaymentRefundTotalsRow, error) {
 	rows, err := q.db.Query(ctx, getCustomerPaymentRefundTotals, arg.MerchantID, arg.CustomerID, arg.PaymentIds)
 	if err != nil {
