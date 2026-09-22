@@ -243,6 +243,22 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 		}).Warn("stripe webhook api_version differs from pinned version; pin the webhook endpoint in the Stripe dashboard to match")
 	}
 
+	// The signed envelope has already been verified at ingestion. A PI wakeup
+	// needs identity and accepted terms, never the browser's client credential.
+	// Strip it before ProcessWebhook serializes its completed replay-cache value.
+	if strings.HasPrefix(eventType, "payment_intent.") {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(evt.Data.Object, &object); err != nil {
+			return fmt.Errorf("parse Stripe payment notification: %w", err)
+		}
+		delete(object, "client_secret")
+		redacted, err := json.Marshal(object)
+		if err != nil {
+			return err
+		}
+		evt.Data.Object = redacted
+	}
+
 	if s.DeduplicationService != nil {
 		return s.DeduplicationService.ProcessWebhook(ctx, eventID, eventType, models.RailStripe.EventSource(), evt, func(ctx context.Context) error {
 			return s.handleEvent(ctx, eventType, evt)

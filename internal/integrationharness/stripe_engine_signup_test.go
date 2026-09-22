@@ -52,11 +52,18 @@ func TestStripeEnginePaymentIntentWebhookQueuesVerification(t *testing.T) {
 	stripeEngineSignupSelfHTTP(t, "", false, true)
 }
 
-func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, webhookCompletion bool) {
+func TestStripeEngineThinWebhookLostPaymentResponse(t *testing.T) {
+	stripeEngineSignupSelfHTTP(t, "", false, true, true)
+}
+
+func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, webhookCompletion bool, lostResponse ...bool) {
+	lostPIResponse := len(lostResponse) > 0 && lostResponse[0]
 	clock := clockwork.NewFakeClockAt(time.Now().UTC().Add(-720*time.Hour - time.Minute).Truncate(time.Second))
 	h := New(t, t.Context())
 	var mu sync.Mutex
 	var setup, payment map[string]any
+	webhookResponses := map[string]map[string]any{}
+	accountID := "acct_fixture"
 	setupPaid, paymentPaid := false, false
 	setupCreates, paymentCreates, paymentCancels := 0, 0, 0
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -74,11 +81,15 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 			}
 			return out
 		}
+		if response, ok := webhookResponses[r.URL.Path]; ok {
+			write(response)
+			return
+		}
 		switch {
 		case r.URL.Path == "/v1/balance":
 			write(map[string]any{"object": "balance", "available": []any{}, "pending": []any{}})
 		case r.URL.Path == "/v1/account":
-			write(map[string]any{"id": "acct_fixture", "object": "account", "charges_enabled": true})
+			write(map[string]any{"id": accountID, "object": "account", "charges_enabled": true})
 		case r.Method == "GET" && r.URL.Path == "/v1/customers/search":
 			write(map[string]any{"data": []any{}})
 		case r.Method == "POST" && r.URL.Path == "/v1/customers":
@@ -111,7 +122,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 					require.Equal(t, "true", r.PostForm.Get("off_session"))
 				}
 			}
-			payment = map[string]any{"id": "pi_signup", "status": "requires_action", "customer": "cus_signup", "payment_method": "pm_signup", "amount": 999, "amount_received": 0, "currency": "usd", "setup_future_usage": "off_session", "capture_method": "automatic", "confirmation_method": "automatic", "livemode": false, "metadata": meta, "client_secret": "pi_signup_secret_private", "latest_charge": "ch_signup"}
+			payment = map[string]any{"object": "payment_intent", "id": "pi_signup", "status": "requires_action", "customer": "cus_signup", "payment_method": "pm_signup", "amount": 999, "amount_received": 0, "currency": "usd", "setup_future_usage": "off_session", "capture_method": "automatic", "confirmation_method": "automatic", "livemode": false, "metadata": meta, "client_secret": "pi_signup_secret_private", "latest_charge": "ch_signup"}
 			if customerRetry && paymentCreates > 1 {
 				id, charge := "pi_renewal", "ch_renewal"
 				if paymentCreates > 2 {
@@ -123,7 +134,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 					payment["last_payment_error"] = map[string]any{"code": "card_declined", "decline_code": "insufficient_funds"}
 				}
 			}
-			if reversal != "" && reversal != "decline" {
+			if (reversal != "" && reversal != "decline") || lostPIResponse {
 				paymentPaid = true
 				w.WriteHeader(http.StatusBadGateway)
 				write(map[string]any{"error": "simulated accepted payment with lost response"})
@@ -180,6 +191,9 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 	host, err = orauthkit.NewDelegatedAuthenticator(cp.AuthService().Verifier(), owned.MerchantID.String())
 	require.NoError(t, err)
 	owner := surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID))
+	mu.Lock()
+	accountID = "acct_" + strings.ReplaceAll(owned.MerchantID.String(), "-", "")[:12]
+	mu.Unlock()
 	psp := h.ArmLoopbackStripe(rt, owned.MerchantID)
 	product, err := owner.CreateProduct(t.Context(), openrails.CreateProductRequest{Key: uuid.NewString(), DisplayName: "Engine Stripe", EntitlementsSpec: map[string]*int{"engine_access": nil}})
 	require.NoError(t, err)
@@ -275,9 +289,11 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 		return rt.DB.RunInMerchantConn(db.WithPSPID(merchant.WithID(t.Context(), owned.MerchantID), psp), func(ctx context.Context) error { return webhookService.HandleStripeWebhook(ctx, reversalEvent) })
 	}
 	if reversal == "" {
-		recovery := call("GET", fmt.Sprintf("/payment-operations/%s/authentication", operation["id"]), "", nil)
-		require.Equal(t, "pi_signup_secret_private", recovery["client_secret"])
-		require.Equal(t, "pm_signup", recovery["provider_payment_method_id"])
+		if !lostPIResponse {
+			recovery := call("GET", fmt.Sprintf("/payment-operations/%s/authentication", operation["id"]), "", nil)
+			require.Equal(t, "pi_signup_secret_private", recovery["client_secret"])
+			require.Equal(t, "pm_signup", recovery["provider_payment_method_id"])
+		}
 		mu.Lock()
 		paymentPaid = true
 		mu.Unlock()
@@ -296,6 +312,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 		require.NoError(t, err)
 		require.Error(t, deliverReversal(), "out-of-order reversal waits for the original payment")
 	}
+	var afterNotificationCompletion func()
 	if webhookCompletion {
 		queue := "stripe_notification_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 		workers := river.NewWorkers()
@@ -308,23 +325,9 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 		defer rt.DB.SetRiverJobInserter(rt.RiverProducer)
 		mu.Lock()
 		payment["status"], payment["amount_received"] = "succeeded", 999
-		bad, err := json.Marshal(map[string]any{"id": "evt_payment_wrong", "type": "payment_intent.succeeded", "data": map[string]any{"object": payment}})
-		require.NoError(t, err)
+		providerPayment := cloneStripeNotification(t, payment)
 		mu.Unlock()
-		var corrupted map[string]any
-		require.NoError(t, json.Unmarshal(bad, &corrupted))
-		corrupted["data"].(map[string]any)["object"].(map[string]any)["amount"] = 1000
-		bad, err = json.Marshal(corrupted)
-		require.NoError(t, err)
-		scope := db.WithPSPID(merchant.WithID(t.Context(), owned.MerchantID), psp)
-		require.Error(t, rt.DB.RunInMerchantConn(scope, func(ctx context.Context) error { return webhookService.HandleStripeWebhook(ctx, bad) }))
-		mu.Lock()
-		notice, err := json.Marshal(map[string]any{"id": "evt_payment_paid", "type": "payment_intent.succeeded", "data": map[string]any{"object": payment}})
-		mu.Unlock()
-		require.NoError(t, err)
-		for range 2 {
-			require.NoError(t, rt.DB.RunInMerchantConn(scope, func(ctx context.Context) error { return webhookService.HandleStripeWebhook(ctx, notice) }))
-		}
+		lateCheck := reviewStripeEngineHTTPNotifications(t, h, surface, owned, psp, uuid.MustParse(operation["id"].(string)), clock.Now(), queue, providerPayment, !lostPIResponse, func(responses map[string]map[string]any) { mu.Lock(); webhookResponses = responses; mu.Unlock() })
 		require.NoError(t, pool.QueryRow(t.Context(), `SELECT count(*) FROM billing.payments WHERE customer_id=$1`, user.ID).Scan(&paid))
 		require.Zero(t, paid, "notification alone must not record payment")
 		require.NoError(t, jobs.Start(t.Context()))
@@ -334,6 +337,8 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 			err := pool.QueryRow(t.Context(), `SELECT status FROM billing.rail_intents WHERE id=$1`, operation["id"]).Scan(&state)
 			return err == nil && state == intents.StatusSucceeded
 		}, 15*time.Second, 10*time.Millisecond, "queued provider verification settles the original operation")
+		lateCheck()
+		afterNotificationCompletion = lateCheck
 	}
 	result := call("POST", fmt.Sprintf("/payment-operations/%s/authentication/confirm", operation["id"]), "", nil)
 	require.Equal(t, "succeeded", result["status"])
@@ -449,6 +454,15 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 		rt.MoneyService.EngineAdmissionHold = false
 		require.NoError(t, pool.QueryRow(t.Context(), `SELECT count(*) FROM billing.payments WHERE customer_id=$1 AND status='completed'`, user.ID).Scan(&paid))
 		require.Equal(t, 2, paid, "initial and recovered period settle once")
+	}
+	if afterNotificationCompletion != nil {
+		var subID uuid.UUID
+		require.NoError(t, pool.QueryRow(t.Context(), `SELECT id FROM billing.subscriptions WHERE customer_id=$1`, user.ID).Scan(&subID))
+		require.NoError(t, owner.CancelSubscription(t.Context(), openrails.SubscriptionID(subID), openrails.CancelSubscriptionRequest{Reason: "independent late notification review", RevokeAccess: true}))
+		afterNotificationCompletion()
+		var status string
+		require.NoError(t, pool.QueryRow(t.Context(), `SELECT status FROM billing.subscriptions WHERE id=$1`, subID).Scan(&status))
+		require.Equal(t, "cancelled", status, "late successful PI notification cannot restore revoked membership")
 	}
 	mu.Lock()
 	require.Equal(t, 1, setupCreates)

@@ -169,6 +169,7 @@ func (s *StripeService) CreateEnginePayment(ctx context.Context, p StripeEngineP
 }
 
 type stripeEngineIntent struct {
+	Object             string            `json:"object"`
 	LiveMode           *bool             `json:"livemode"`
 	ID                 string            `json:"id"`
 	Status             string            `json:"status"`
@@ -214,6 +215,9 @@ func ValidateStripeEnginePaymentNotification(raw []byte, params StripeEnginePaym
 	var pi stripeEngineIntent
 	if err := json.Unmarshal(raw, &pi); err != nil {
 		return err
+	}
+	if pi.Object != "payment_intent" {
+		return errors.New("Stripe notification resource is not a PaymentIntent")
 	}
 	if environment != "live" && environment != "test" {
 		return errors.New("Stripe notification account environment is unknown")
