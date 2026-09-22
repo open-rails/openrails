@@ -378,3 +378,138 @@ func TestRejectedOperatorReleaseRearmsSleepingRiverJobs(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond)
 	require.EqualValues(t, 1, h.verified.Load())
 }
+
+type unresolvedCycleHandler struct {
+	reads           atomic.Int32
+	fourth, release chan struct{}
+}
+
+func (*unresolvedCycleHandler) Type() string { return "test_unresolved_cycles" }
+func (*unresolvedCycleHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (intents.Relevance, error) {
+	return intents.StillRelevant(), nil
+}
+func (*unresolvedCycleHandler) Execute(context.Context, gen.OpenrailsRailIntent) intents.Outcome {
+	return intents.Ambiguous("unexpected send")
+}
+func (h *unresolvedCycleHandler) Verify(ctx context.Context, _ gen.OpenrailsRailIntent) intents.Outcome {
+	if h.reads.Add(1) == 4 {
+		close(h.fourth)
+		select {
+		case <-h.release:
+		case <-ctx.Done():
+		}
+	}
+	return intents.Ambiguous("provider remains unresolved")
+}
+func (*unresolvedCycleHandler) Backoff(int32) time.Duration { return 0 }
+
+func TestUnresolvedOperationDoesNotGrowActiveJobsEachCycle(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	m := seedIntentMerchant(t)
+	d := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	h := &unresolvedCycleHandler{fourth: make(chan struct{}), release: make(chan struct{})}
+	workers := river.NewWorkers()
+	river.AddWorker(workers, &ProviderOperationWorker{DB: d, Registry: intents.NewRegistry(h), Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}})
+	client, err := river.NewClient(riverpgxv5.New(d.Pool()), &river.Config{Schema: config.RiverSchema, Workers: workers, Queues: map[string]river.QueueConfig{QueueBilling: {MaxWorkers: 1}}, FetchCooldown: 10 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond})
+	require.NoError(t, err)
+	d.SetRiverJobInserter(client)
+	mctx := merchant.WithID(ctx, merchant.ID(m.id))
+	store := intents.NewStore(d)
+	psp := dbtest.EnsureTestPSP(ctx, t, m.pool, m.id, "nmi")
+	now := time.Now()
+	row, err := store.Enqueue(mctx, intents.EnqueueParams{MerchantID: m.id, Provider: "nmi", PspID: psp, IntentType: h.Type(), IdempotencyKey: uuid.NewString(), Origin: intents.OriginSystem, NextAttemptAt: now})
+	require.NoError(t, err)
+	_, claimed, err := store.ClaimByID(mctx, row.ID, now, now.Add(time.Minute))
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, store.MarkUnknown(mctx, row.ID, now, "initial uncertainty", nil))
+	active := func() int {
+		var n int
+		require.NoError(t, d.Pool().QueryRow(ctx, `SELECT count(*) FROM public.river_job WHERE args->>'intent_id'=$1 AND state NOT IN ('completed','cancelled','discarded')`, row.ID.String()).Scan(&n))
+		return n
+	}
+	initial := active()
+	require.NoError(t, client.Start(ctx))
+	defer func() { close(h.release); cancel(); require.NoError(t, client.Stop(context.Background())) }()
+	select {
+	case <-h.fourth:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	t.Logf("active jobs before=%d after three unresolved transitions=%d", initial, active())
+	require.Eventually(t, func() bool { return active() <= initial+1 }, 2*time.Second, 10*time.Millisecond, "consumed wakeups must retire after committing a durable successor")
+}
+
+type wakeFailureHandler struct{ executed, verified atomic.Int32 }
+
+func (*wakeFailureHandler) Type() string { return "test_wake_insert_failure" }
+func (*wakeFailureHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (intents.Relevance, error) {
+	return intents.StillRelevant(), nil
+}
+func (h *wakeFailureHandler) Execute(context.Context, gen.OpenrailsRailIntent) intents.Outcome {
+	h.executed.Add(1)
+	return intents.Ambiguous("synthetic uncertain response")
+}
+func (h *wakeFailureHandler) Verify(context.Context, gen.OpenrailsRailIntent) intents.Outcome {
+	h.verified.Add(1)
+	return intents.Succeeded(nil)
+}
+func (*wakeFailureHandler) Backoff(int32) time.Duration { return time.Second }
+
+func TestFailedSuccessorInsertRetainsLastRecoverableRiverJob(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	m := seedIntentMerchant(t)
+	d := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	h := &wakeFailureHandler{}
+	workers := river.NewWorkers()
+	river.AddWorker(workers, &ProviderOperationWorker{DB: d, Registry: intents.NewRegistry(h), Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}})
+	client, err := river.NewClient(riverpgxv5.New(d.Pool()), &river.Config{Schema: config.RiverSchema, Workers: workers, Queues: map[string]river.QueueConfig{QueueBilling: {MaxWorkers: 1}}, FetchCooldown: 10 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond})
+	require.NoError(t, err)
+	d.SetRiverJobInserter(client)
+	mctx := merchant.WithID(ctx, merchant.ID(m.id))
+	psp := dbtest.EnsureTestPSP(ctx, t, m.pool, m.id, "nmi")
+	store := intents.NewStore(d)
+	row, err := store.Enqueue(mctx, intents.EnqueueParams{MerchantID: m.id, Provider: "nmi", PspID: psp, IntentType: h.Type(), IdempotencyKey: uuid.NewString(), Origin: intents.OriginSystem, NextAttemptAt: time.Now()})
+	require.NoError(t, err)
+	var jobID int64
+	require.NoError(t, d.Pool().QueryRow(ctx, `SELECT id FROM public.river_job WHERE args->>'intent_id'=$1`, row.ID.String()).Scan(&jobID))
+	control := &transitionInsertControl{client: client, t: t}
+	control.fail.Store(true)
+	d.SetRiverJobInserter(control)
+	events, unsub := client.Subscribe(river.EventKindJobSnoozed, river.EventKindJobCompleted)
+	defer unsub()
+	require.NoError(t, client.Start(ctx))
+	defer func() { cancel(); require.NoError(t, client.Stop(context.Background())) }()
+	wait := func(kind river.EventKind) {
+		for {
+			select {
+			case event := <-events:
+				if event.Job.ID == jobID && event.Kind == kind {
+					return
+				}
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+		}
+	}
+	wait(river.EventKindJobSnoozed)
+	retained, err := store.Get(mctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusInFlight, retained.Status)
+	require.NotNil(t, retained.ClaimedUntil)
+	var active int
+	require.NoError(t, d.Pool().QueryRow(ctx, `SELECT count(*) FROM public.river_job WHERE args->>'intent_id'=$1 AND state NOT IN ('completed','cancelled','discarded')`, row.ID.String()).Scan(&active))
+	require.Equal(t, 1, active, "failed successor must not retire the last existing job")
+	require.EqualValues(t, 1, h.executed.Load())
+	control.fail.Store(false)
+	// Model the failed executor's expired lease, using the existing River retry API.
+	m.exec(t, `UPDATE billing.rail_intents SET claimed_until=now()-interval '1 second' WHERE id=$1`, row.ID)
+	_, err = client.JobRetry(ctx, jobID)
+	require.NoError(t, err)
+	wait(river.EventKindJobCompleted)
+	require.Equal(t, intents.StatusSucceeded, m.statusOf(t, row.ID))
+	require.EqualValues(t, 1, h.executed.Load(), "recovery cannot blindly execute again")
+	require.EqualValues(t, 1, h.verified.Load())
+}
