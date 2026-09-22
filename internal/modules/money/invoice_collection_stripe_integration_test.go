@@ -35,11 +35,12 @@ import (
 // idempotency keys replay the stored response of a completed request (a 5xx
 // stores nothing).
 type fakeStripe struct {
-	requests    []stripeRequest
-	payDecline  bool
-	chargeFacts func(map[string]any)
-	mu          sync.Mutex
-	responses   map[string][]byte
+	authorizations []string
+	requests       []stripeRequest
+	payDecline     bool
+	chargeFacts    func(map[string]any)
+	mu             sync.Mutex
+	responses      map[string][]byte
 	// statuses records a stored 4xx answer for a key (Stripe replays those).
 	statuses map[string]int
 	pending  []stripeItem
@@ -59,8 +60,14 @@ type fakeStripe struct {
 }
 
 type stripeRequest struct {
-	path, authorization string
-	form                url.Values
+	path string
+	form url.Values
+}
+
+func (f *fakeStripe) authorizationSequence() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.authorizations...)
 }
 
 func (f *fakeStripe) requestSequence() []stripeRequest {
@@ -107,6 +114,7 @@ func (f *fakeStripe) failKeyed(w http.ResponseWriter, code int, key string) {
 func (f *fakeStripe) handle(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.authorizations = append(f.authorizations, r.Header.Get("Authorization"))
 	switch r.Method {
 	case http.MethodGet:
 		f.handleGet(w, r)
@@ -116,7 +124,7 @@ func (f *fakeStripe) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = r.ParseForm()
-	f.requests = append(f.requests, stripeRequest{r.URL.Path, r.Header.Get("Authorization"), r.Form})
+	f.requests = append(f.requests, stripeRequest{r.URL.Path, r.Form})
 	key := r.Header.Get("Idempotency-Key")
 	f.keys = append(f.keys, key)
 	if stored, ok := f.responses[key]; ok {
@@ -381,9 +389,11 @@ func TestInvoiceCollection_StripeReplaysProviderIdempotencyKey(t *testing.T) {
 	var method string
 	require.NoError(t, e.pool.QueryRow(e.ctx, "SELECT rail_method_ref FROM billing.payment_methods WHERE id = $1", e.method).Scan(&method))
 	sfx := strings.TrimPrefix(method, "pm_replay_")
+	for _, authorization := range stripe.authorizationSequence() {
+		require.Equal(t, "Bearer sk_test_replay_"+sfx, authorization, "receipt reads and writes use the armed account")
+	}
 	for i, path := range []string{"/v1/invoices", "/v1/invoiceitems", "/v1/invoices/in_1/finalize", "/v1/invoices/in_1/pay"} {
 		require.Equal(t, path, requests[i].path)
-		require.Equal(t, "Bearer sk_test_replay_"+sfx, requests[i].authorization)
 		require.Equal(t, requests[i], requests[i+4], "replay preserves the complete provider request")
 	}
 	create, item, pay := requests[0].form, requests[1].form, requests[3].form
