@@ -57,7 +57,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	suffix := uuid.NewString()[:8]
 	meter := "payment-volume-" + suffix
 	eventType := "platform.payment_volume." + suffix
-	productID, err := client.Products.Ensure(ctx, "volume-"+suffix, "Payment volume")
+	productID, err := client.Products.Ensure(ctx, &openrails.ProductCreateParams{Key: "volume-" + suffix, DisplayName: "Payment volume"})
 	require.NoError(t, err)
 	require.NoError(t, client.EnsureUsageMeter(ctx, openrails.UsageMeterSpec{
 		Key: meter, EventType: eventType, ValueProperty: "amount_micros", Aggregation: "sum", Unit: "currency_micros",
