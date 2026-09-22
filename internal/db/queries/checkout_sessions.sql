@@ -24,6 +24,7 @@ SELECT * FROM openrails.checkout_sessions WHERE checkout_sessions.merchant_id = 
 -- name: LockCheckoutSessionForShare :one
 SELECT id FROM openrails.checkout_sessions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND deleted_at IS NULL
 FOR SHARE;
 
 -- name: UpdateCheckoutSession :execrows
