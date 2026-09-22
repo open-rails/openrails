@@ -1,10 +1,12 @@
 package webhooks
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -218,7 +220,43 @@ type stripeDispute struct {
 	Reason        string `json:"reason"`
 }
 
+// redactStripeClientSecrets preserves JSON numbers exactly while removing only
+// Stripe's client_secret field, including expanded objects and previous values.
+func redactStripeClientSecrets(payload []byte) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var event any
+	if err := decoder.Decode(&event); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return nil, errors.New("Stripe event has trailing data")
+	}
+	var scrub func(any)
+	scrub = func(value any) {
+		switch value := value.(type) {
+		case map[string]any:
+			delete(value, "client_secret")
+			for _, child := range value {
+				scrub(child)
+			}
+		case []any:
+			for _, child := range value {
+				scrub(child)
+			}
+		}
+	}
+	scrub(event)
+	return json.Marshal(event)
+}
+
 func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload []byte) error {
+	// Ingestion authenticates the original bytes before this service runs.
+	// Browser credentials are never needed by handlers or completed replay.
+	payload, err := redactStripeClientSecrets(payload)
+	if err != nil {
+		return fmt.Errorf("parse stripe event: %w", err)
+	}
 	var evt stripeEvent
 	if err := json.Unmarshal(payload, &evt); err != nil {
 		return fmt.Errorf("parse stripe event: %w", err)

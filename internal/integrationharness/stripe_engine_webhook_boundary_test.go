@@ -195,6 +195,55 @@ func reviewStripeEngineHTTPNotifications(t *testing.T, h *Harness, surface *Surf
 		require.NotContains(t, evidence, "pi_unretained", "webhook must not install an unqualified recovery candidate")
 	}
 
+	for _, location := range []string{"previous_attributes", "nested_payment_intent", "array", "ignored_setup_intent"} {
+		t.Run("credential_redaction_"+location, func(t *testing.T) {
+			object := cloneStripeNotification(t, payment)
+			event := snapshot(object)
+			kind := "payment_intent.created"
+			object["amount"] = json.Number("9007199254740993")
+			object["client_secret_hint"] = "public hint"
+			object["description"] = "literal client_secret documentation"
+			secretObject := map[string]any{"client_secret": "pi_nested_secret_private", "amount": json.Number("9007199254740993")}
+			switch location {
+			case "previous_attributes":
+				event["data"].(map[string]any)["previous_attributes"] = secretObject
+			case "nested_payment_intent":
+				object["last_payment_error"] = map[string]any{"payment_intent": secretObject}
+			case "array":
+				object["expanded"] = []any{secretObject, []any{secretObject}}
+			case "ignored_setup_intent":
+				kind = "setup_intent.succeeded"
+				object["id"] = "seti_boundary"
+				object["object"] = "setup_intent"
+				object["client_secret"] = "seti_boundary_secret_private"
+			}
+			event["type"] = kind
+			before := jobCount()
+			var first []byte
+			for attempt := 0; attempt < 2; attempt++ {
+				status, body := post(event, path, secret)
+				require.Equal(t, http.StatusOK, status, body)
+				unchanged(before)
+				cached, err := rt.IdempotencyService.Get(ctx, "webhook.stripe."+kind+".psp."+psp.String(), event["id"].(string))
+				require.NoError(t, err)
+				require.NotNil(t, cached)
+				for _, credential := range []string{"pi_signup_secret_private", "pi_nested_secret_private", "seti_boundary_secret_private"} {
+					require.NotContains(t, string(cached.Result), credential)
+				}
+				require.NotContains(t, string(cached.Result), `"client_secret":`)
+				require.Contains(t, string(cached.Result), `"amount":9007199254740993`, "neighbor money must not round through float64")
+				require.Contains(t, string(cached.Result), operation.String(), "preserve accepted-operation correlation")
+				require.Contains(t, string(cached.Result), `"client_secret_hint":"public hint"`)
+				require.Contains(t, string(cached.Result), "literal client_secret documentation")
+				if attempt == 0 {
+					first = append([]byte(nil), cached.Result...)
+				} else {
+					require.Equal(t, first, []byte(cached.Result), "actual completed-cache replay remains scrubbed")
+				}
+			}
+		})
+	}
+
 	t.Run("ignored_pi_event_is_redacted", func(t *testing.T) {
 		event := snapshot(payment)
 		event["type"] = "payment_intent.created"
