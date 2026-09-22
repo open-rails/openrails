@@ -94,7 +94,7 @@ func testStandaloneAccountRecovery(t *testing.T, workers bool) {
 			DB: &config.DBConfig{URL: h.DSN}, Redis: &config.RedisConfig{Addr: h.Redis.Options().Addr},
 			Auth:                 &config.AuthConfig{Issuer: surface.App().Config.Auth.Issuer, KeysPath: surface.App().Config.Auth.KeysPath, DirectPeerIP: true},
 			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
-		})
+		}, nil)
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, worker.Close(context.Background())) })
 		ctx, cancel := context.WithCancel(t.Context())

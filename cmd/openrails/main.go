@@ -94,6 +94,7 @@ func newRootCmd() *cobra.Command {
 		RunE:  runWorker,
 		Short: "Start OpenRails background workers",
 	}
+	workerCmd.Flags().String("merchant-manifest", "", "Merchant manifest converged before starting workers (default: the conventional "+bootstrap.DefaultMerchantConfigManifestPath+" when present; an explicit path must exist)")
 
 	// migrate is the ONE deliberately RLS-posture-EXEMPT command (or#888): DDL
 	// requires the privileged owner role — it creates the merchant_isolation
@@ -342,7 +343,11 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	// xs-007 row 40: see runServer — the database wait ends on a stop signal.
 	bootCtx, stopBoot := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopBoot()
-	application, err := serverboot.NewWorker(bootCtx, cfg)
+	manifestPath, err := cmd.Flags().GetString("merchant-manifest")
+	if err != nil {
+		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
+	}
+	application, err := serverboot.NewWorker(bootCtx, cfg, &serverboot.Options{MerchantManifestPath: manifestPath, NMIProbeV5BaseURL: bootNMIProbeV5BaseURL})
 	if err != nil {
 		if bootCtx.Err() != nil {
 			log.WithError(err).Info("Shutdown requested while booting; exiting")
