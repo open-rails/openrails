@@ -18,9 +18,9 @@ type Capabilities struct {
 	// this deployment, so a client can ask `route_groups.payment_providers`
 	// without knowing the closed-world set.
 	RouteGroups map[RouteSet]bool `json:"route_groups"`
-	// Routes reports notable provider-specific public routes as on/off for this
-	// deployment.
-	Routes map[string]bool `json:"routes"`
+	// Features reports provider-specific actions available on the mounted HTTP
+	// surface. Provider support alone does not expose an action.
+	Features map[string]bool `json:"features"`
 }
 
 // buildCapabilities reports each known route group as on/off against the resolved
@@ -35,7 +35,12 @@ func buildCapabilities(active []RouteSet, providerRoutes routesurface.ProviderRo
 	for _, rs := range AllRouteSets {
 		groups[rs] = on[rs]
 	}
-	return Capabilities{RouteGroups: groups, Routes: providerRoutes.Map()}
+	return Capabilities{RouteGroups: groups, Features: map[string]bool{
+		"stripe_billing_portal":          groups[RouteSetCustomer] && providerRoutes.StripePortal,
+		"solana_one_time_payments":       groups[RouteSetCheckout] && providerRoutes.Solana,
+		"solana_subscription_management": groups[RouteSetCustomer] && providerRoutes.SolanaSigning,
+		"provider_credential_writes":     groups[RouteSetPaymentProviders] && providerRoutes.SecretWrite,
+	}}
 }
 
 // CapabilitiesHandler returns the public GET handler for the capability document.
@@ -47,7 +52,11 @@ func CapabilitiesHandler(active []RouteSet, providerRouteOpts ...routesurface.Pr
 	if len(providerRouteOpts) > 0 {
 		providerRoutes = providerRouteOpts[0]
 	}
-	body, _ := json.Marshal(buildCapabilities(active, providerRoutes))
+	return capabilitiesHandler(buildCapabilities(active, providerRoutes))
+}
+
+func capabilitiesHandler(capabilities Capabilities) http.Handler {
+	body, _ := json.Marshal(capabilities)
 	etag := `"` + hex.EncodeToString(sha256Sum(body)) + `"`
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

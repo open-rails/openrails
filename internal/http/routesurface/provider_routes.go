@@ -25,13 +25,3 @@ type RuntimeCapabilities struct {
 func AllProviderRoutes() ProviderRoutes {
 	return ProviderRoutes{StripePortal: true, Solana: true, SolanaSigning: true, Webhooks: true, SecretWrite: true}
 }
-
-func (r ProviderRoutes) Map() map[string]bool {
-	return map[string]bool{
-		"billing_portal": r.StripePortal,
-		"solana":         r.Solana,
-		"solana_signing": r.SolanaSigning,
-		"webhooks":       r.Webhooks,
-		"secret_write":   r.SecretWrite,
-	}
-}

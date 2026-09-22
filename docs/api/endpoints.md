@@ -59,7 +59,7 @@ admin responses are never replayed by global middleware.
 | GET | `/` | none | JSON service banner `{"service":"billing","status":"ok",...}` |
 | GET | `/health/live` (alias `/healthz`) | none | Unconditional liveness probe |
 | GET | `/health/ready` (alias `/readyz`) | none | Readiness: Postgres, configured Redis, merchant-secret backend, River producer/local consumer, auth verifier. 200 or 503 `not_ready`; `?verbose=1` adds per-dependency detail. `run-server --no-workers` remains not-ready |
-| GET | `/v1/capabilities` | none | Static capability document: `route_groups` (which route sets are mounted) + `routes` (provider-specific toggles: `billing_portal`, `solana`, `solana_signing`, `webhooks`, `secret_write`). ETagged, `Cache-Control: public, max-age=300` |
+| GET | `/v1/capabilities` | none | Static capability document: `route_groups` (which route sets are mounted) + `features` (`stripe_billing_portal`, `solana_one_time_payments`, `solana_subscription_management`, `provider_credential_writes`). Features require both an exposed HTTP action and provider support; webhooks appear only in route groups. ETagged, `Cache-Control: public, max-age=300` |
 | GET | `/v1/captcha/status` | none | Captcha challenge status for the browser tier |
 | GET | `/v1/captcha/client.js` | none | Captcha client script |
 | GET | `/v1/products` | optional | List products with embedded active prices. Query: `limit` (1-100, default 20), `offset` |
