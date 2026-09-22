@@ -1,0 +1,43 @@
+// Package openrailsgin registers the runtime's configured routes natively in Gin.
+package openrailsgin
+
+import (
+	"fmt"
+	"github.com/gin-gonic/gin"
+	"github.com/open-rails/openrails/embed"
+	"strings"
+)
+
+type Bundle struct{ routes []embed.HTTPRoute }
+
+func Routes(runtime *embed.Runtime) (*Bundle, error) {
+	routes, err := runtime.HTTPRoutes()
+	if err != nil {
+		return nil, err
+	}
+	return &Bundle{routes: routes}, nil
+}
+
+// Mount registers one route per method/path under the host's router group.
+// Gin owns its usual 404/405 and redirect policy (HandleMethodNotAllowed, etc.).
+func (b *Bundle) Mount(target gin.IRoutes) error {
+	if b == nil || target == nil {
+		return fmt.Errorf("openrails Gin: bundle and router are required")
+	}
+	for _, route := range b.routes {
+		target.Handle(route.Method, nativePath(route.Path), gin.WrapH(route.Handler))
+	}
+	return nil
+}
+
+func nativePath(path string) string {
+	parts := strings.Split(path, "/")
+	for i, part := range parts {
+		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
+			parts[i] = ":" + part[1:len(part)-1]
+		} else {
+			parts[i] = strings.ReplaceAll(part, ":", `\:`)
+		}
+	}
+	return strings.Join(parts, "/")
+}

@@ -31,6 +31,9 @@ import (
 
 // Options configures the embedded runtime.
 type Options struct {
+	// HTTP configures the externally mounted surface once. Nil disables HTTP.
+	HTTP *HTTPConfig
+
 	// DelegatedAuthenticator verifies explicit customer credentials for Client
 	// self-service calls and is the default verifier for customer HTTP mounts.
 	// Use the existing embed/authkit bridge; ambient host sessions confer no authority.
@@ -71,6 +74,8 @@ type Options struct {
 // Runtime is the in-process engine: Client() for the shared client, Handler()
 // to mount the billing HTTP surface, RunWorkers/Close for lifecycle.
 type Runtime struct {
+	httpConfig *HTTPConfig
+
 	delegatedAuthenticator billingauth.DelegatedAuthenticator
 	app                    *app.App
 	svc                    *service.Service
@@ -108,6 +113,9 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
 	}
+	if err := validateHTTPConfig(opts.HTTP, opts.DelegatedAuthenticator); err != nil {
+		return nil, err
+	}
 	if opts.River.host && opts.RunWorkers {
 		return nil, fmt.Errorf("openrails embed: host-owned River must compose RiverJobs with riverkit.New before host startup; Options.RunWorkers is managed-only")
 	}
@@ -142,6 +150,10 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	application.ConsoleAssets = opts.ConsoleAssets
 
 	r := &Runtime{app: application, delegatedAuthenticator: opts.DelegatedAuthenticator}
+	if opts.HTTP != nil {
+		cfg := *opts.HTTP
+		r.httpConfig = &cfg
+	}
 	if opts.StripeTransport != nil {
 		r.releaseStripeTransport = stripeapi.InstallBaseTransport(opts.StripeTransport)
 	}

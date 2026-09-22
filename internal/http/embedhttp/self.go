@@ -38,7 +38,11 @@ import (
 // gets the #765 static permissive CORS policy unconditionally — no
 // control-plane/source dependency, unlike hostResolve.
 func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes, hostResolve merchant.HostResolver) http.Handler {
-	mux := http.NewServeMux()
+	return NewSelfRoutes(rt, authn, providerRouteOverride, hostResolve).Handler()
+}
+
+func NewSelfRoutes(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes, hostResolve merchant.HostResolver) *router.Table {
+	mux := &router.Table{}
 	delegatedMW := middleware.DelegatedPrincipalRequired(authn)
 	providerRoutes := ProviderRoutesForRuntime(rt, providerRouteOverride)
 	httproutes.RegisterSelfServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+httproutes.SelfRoutePrefix, rt), rt, delegatedMW, providerRoutes)
@@ -59,22 +63,30 @@ func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, p
 			captchaCfg = rt.Config.Captcha
 		}
 	}
-	return middleware.ChainHTTP(mux,
-		middleware.RecoverHTTP(),
-		middleware.SecurityHeadersHTTP(),
-		// #765: this handler's entire surface is browser tier — always the
-		// static permissive `*` grant, no per-request source.
-		middleware.PermissiveCORSHTTP(middleware.AllRequests),
-		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
-		middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
-		// Resolved PER REQUEST off the Runtime (#744) — never a value snapshotted
-		// here at construction time, so a mount that races UpsertMerchantConfig's
-		// post-boot bind still resolves correctly on every request.
-		middleware.ResolveMerchantHTTP(rt.ConfiguredMerchant),
-		// #734: a no-op when hostResolve is nil (no control plane attached).
-		middleware.ResolveMerchantFromHostHTTP(hostResolve),
-		middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, captcha.NewChallengeStore(rdb), resolver),
-	)
+	for i := range mux.Entries {
+		mux.Entries[i].Browser = true
+	}
+	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, captcha.NewChallengeStore(rdb), resolver)
+	mux.Wrap(func(entry router.Entry) http.Handler {
+		return middleware.ChainHTTP(entry.Handler,
+			middleware.WithRoutePath(entry.Path),
+			middleware.RecoverHTTP(),
+			middleware.SecurityHeadersHTTP(),
+			// #765: this handler's entire surface is browser tier — always the
+			// static permissive `*` grant, no per-request source.
+			middleware.PermissiveCORSHTTP(middleware.AllRequests),
+			middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
+			middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
+			// Resolved PER REQUEST off the Runtime (#744) — never a value snapshotted
+			// here at construction time, so a mount that races UpsertMerchantConfig's
+			// post-boot bind still resolves correctly on every request.
+			middleware.ResolveMerchantHTTP(rt.ConfiguredMerchant),
+			// #734: a no-op when hostResolve is nil (no control plane attached).
+			middleware.ResolveMerchantFromHostHTTP(hostResolve),
+			limiter,
+		)
+	})
+	return mux
 }
 
 // ProviderRoutesForRuntime derives provider-specific route gating from the
