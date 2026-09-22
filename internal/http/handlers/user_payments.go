@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/google/uuid"
+
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/pkg/query"
@@ -48,9 +50,21 @@ func GetUserPayments(r *httprequest.Request) {
 		return
 	}
 
+	chargeIDs := make([]uuid.UUID, 0, len(payments))
+	for _, payment := range payments {
+		if payment.Amount > 0 && payment.RefundedPaymentID == nil {
+			chargeIDs = append(chargeIDs, payment.ID)
+		}
+	}
+	refundTotals, err := r.State.PaymentService.GetCustomerPaymentRefundTotals(r.Request.Context(), user.ID, chargeIDs)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve payment refunds")
+		return
+	}
+
 	data := make([]userPaymentObject, len(payments))
 	for i, payment := range payments {
-		data[i] = PaymentToUserAPI(payment)
+		data[i] = PaymentToUserAPI(payment, refundTotals[payment.ID])
 	}
 
 	r.SuccessJSONPaginated(data, queryOpts.TotalItems, limit, offset)

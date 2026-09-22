@@ -120,3 +120,26 @@ func TestPaymentToAPIAmountRefundedCountsOnlyCompletedRefunds(t *testing.T) {
 	require.Equal(t, "pending", got.Refunds.Data[1].Status)
 	require.Equal(t, "failed", got.Refunds.Data[2].Status)
 }
+
+func TestPaymentToUserAPIRefundSummaryMatchesDetailedPayment(t *testing.T) {
+	payment := &models.Payment{ID: uuid.New(), Amount: 1000, Status: "completed", Currency: "USD"}
+	for _, tt := range []struct {
+		name    string
+		refunds []*models.Payment
+		total   int64
+	}{
+		{"none", nil, 0},
+		{"partial", []*models.Payment{{Amount: -300, Status: "completed"}, {Amount: -500, Status: "pending"}, {Amount: -500, Status: "failed"}}, 300},
+		{"multiple full", []*models.Payment{{Amount: -300, Status: "completed"}, {Amount: -700, Status: "completed"}}, 1000},
+		{"legacy positive amount", []*models.Payment{{Amount: 300, Status: "completed"}}, 300},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			detail := PaymentToAPI(payment, tt.refunds)
+			history := PaymentToUserAPI(payment, tt.total)
+			require.Equal(t, detail.AmountRefunded, history.AmountRefunded)
+			require.Equal(t, detail.Status, history.Status)
+			require.Equal(t, detail.Refunded, history.Refunded)
+			require.Equal(t, detail.Captured, history.Captured)
+		})
+	}
+}
