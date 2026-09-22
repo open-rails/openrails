@@ -103,7 +103,8 @@ func (r schemaRewriter) wrapDBTX(inner gen.DBTX) gen.DBTX {
 // Conn delegate unchanged; only the SQL-carrying methods are intercepted.
 type schemaTx struct {
 	pgx.Tx
-	rw schemaRewriter
+	rw    schemaRewriter
+	river *riverBinding
 }
 
 func (t schemaTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -127,7 +128,7 @@ func (t schemaTx) Begin(ctx context.Context) (pgx.Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return schemaTx{Tx: inner, rw: t.rw}, nil
+	return schemaTx{Tx: inner, rw: t.rw, river: t.river}, nil
 }
 
 // wrapTx retains the configured schema even when it is canonical and needs no
@@ -136,6 +137,9 @@ func (t schemaTx) Begin(ctx context.Context) (pgx.Tx, error) {
 func (r schemaRewriter) wrapTx(tx pgx.Tx) pgx.Tx {
 	if tx == nil {
 		return tx
+	}
+	if existing, ok := tx.(schemaTx); ok {
+		return schemaTx{Tx: tx, rw: r, river: existing.river}
 	}
 	return schemaTx{Tx: tx, rw: r}
 }
@@ -151,6 +155,7 @@ type Pool struct {
 	raw    *pgxpool.Pool
 	rw     schemaRewriter
 	schema string
+	river  *riverBinding
 }
 
 // WrapPool wraps a raw pool with schema rewriting for the configured schema. The
@@ -200,7 +205,7 @@ func (p *Pool) Begin(ctx context.Context) (pgx.Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return p.rw.wrapTx(tx), nil
+	return schemaTx{Tx: tx, rw: p.rw, river: p.river}, nil
 }
 
 // MerchantTx runs hand-written pool queries inside a transaction whose

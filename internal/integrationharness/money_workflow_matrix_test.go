@@ -279,7 +279,7 @@ func TestRestartConvergesCollectionExactlyOnce(t *testing.T) {
 		require.Equal(t, sales+1, gateway.SaleCount(), "the restarted deployment does not resend")
 
 		h.MakeOperationDue(op.ID)
-		h.FireProviderIntentVerify(h.Pool())
+		h.FireProviderIntentVerify(h.Pool(), op.ID)
 		require.Eventually(t, func() bool {
 			invoice, err := client.GetMerchantInvoice(ctx, fixture.Invoice)
 			return err == nil && invoice.Status == "paid"

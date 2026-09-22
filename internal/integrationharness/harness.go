@@ -195,6 +195,7 @@ func (h *Harness) MerchantDB(merchantID uuid.UUID) *db.DB {
 	}
 	d, err := db.NewWithPGXPool(h.MerchantPool(merchantID), config.DefaultSchema)
 	require.NoError(h.t, err, "open merchant-pinned db")
+	dbtest.BindRiver(h.t, d)
 	if h.merchantDBs == nil {
 		h.merchantDBs = map[uuid.UUID]*db.DB{}
 	}

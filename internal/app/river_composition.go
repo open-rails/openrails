@@ -96,6 +96,7 @@ func (r *Runtime) riverJobs(host bool) riverkit.Contribution {
 		}
 		r.SetRiverSchema(client.Schema())
 		r.RiverClient = client
+		r.DB.SetRiverJobInserter(client)
 		if host {
 			r.RiverProducer = client
 			r.externalRiverClient = true
@@ -116,6 +117,7 @@ func (r *Runtime) riverJobs(host bool) riverkit.Contribution {
 		}
 		r.riverCompositionFailed = true
 		r.RiverClient = nil
+		r.DB.SetRiverJobInserter(nil)
 		if host {
 			r.RiverProducer = nil
 			r.externalRiverClient = false

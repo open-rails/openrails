@@ -7,10 +7,8 @@
 -- merchants a 0022 SECURITY DEFINER work queue names and run each pass inside
 -- that merchant's own pinned scope (or#862).
 
--- =====================================================================
--- Enqueue (effectively-once per logical intent)
--- =====================================================================
-
+-- ==============================================================-- Enqueue (effectively-once per logical intent)
+-- ==============================================================
 -- Idempotent on (merchant_id, idempotency_key). Conflict semantics by current
 -- status:
 --   pending, attempts=0  -> refresh schedule/payload (no possible submission)
@@ -81,10 +79,8 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     updated_at = now()
 RETURNING *;
 
--- =====================================================================
--- Executor / verifier claims (single-executor lease, SKIP LOCKED)
--- =====================================================================
-
+-- ==============================================================-- Executor / verifier claims (single-executor lease, SKIP LOCKED)
+-- ==============================================================
 -- Claims due executable intents: pending/failed_retryable whose
 -- next_attempt_at arrived, plus orphaned in_flight rows whose lease elapsed
 -- (crashed executor; per-type semantics make the reclaim safe). Never claims
@@ -186,10 +182,8 @@ WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(i
   AND claimed_until IS NOT NULL
   AND claimed_until > sqlc.arg(now)::timestamptz;
 
--- =====================================================================
--- Outcome transitions (always release the lease)
--- =====================================================================
-
+-- ==============================================================-- Outcome transitions (always release the lease)
+-- ==============================================================
 -- name: MarkRailIntentSucceeded :execrows
 UPDATE openrails.rail_intents
 SET status = 'succeeded',
@@ -284,10 +278,8 @@ WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(i
   AND NOT (intent_type='initial_membership' AND coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted')
   AND intent_type <> 'subscription_collection';
 
--- =====================================================================
--- Supersede-by-subject + relevance-window expiry
--- =====================================================================
-
+-- ==============================================================-- Supersede-by-subject + relevance-window expiry
+-- ==============================================================
 -- Supersedes every live intent of one type for one subscription (e.g. a
 -- resume superseding the pending deferred delete). in_flight rows are left to
 -- their executor: its per-type relevance check re-verifies before acting, so
@@ -329,10 +321,8 @@ WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND (pi.status = 'failed_retr
       )
   AND pi.intent_type <> 'subscription_collection';
 
--- =====================================================================
--- Reconcile (#107 PS-10): stuck-intent detection
--- =====================================================================
-
+-- ==============================================================-- Reconcile (#107 PS-10): stuck-intent detection
+-- ==============================================================
 -- Non-terminal intents that have sat in the ledger beyond the reconcile
 -- engine's hardcoded stuck thresholds: pending/failed_retryable older than the
 -- action cutoff (24h), in_flight/unknown_needs_verify older than the verify
@@ -345,10 +335,8 @@ WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND ( (status IN ('
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= sqlc.arg(verify_cutoff)::timestamptz)
 ) ORDER BY created_at, id;
 
--- =====================================================================
--- Reads
--- =====================================================================
-
+-- ==============================================================-- Reads
+-- ==============================================================
 -- name: GetRailIntent :one
 SELECT * FROM openrails.rail_intents WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
@@ -368,10 +356,8 @@ WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(stat
 ORDER BY created_at DESC, id
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
--- =====================================================================
--- #679 destructive-volume circuit breaker
--- =====================================================================
-
+-- ==============================================================-- #679 destructive-volume circuit breaker
+-- ==============================================================
 -- Destructive intents that REACHED the provider in the rolling window:
 -- succeeded rows count by executed_at; unresolved attempt outcomes
 -- (unknown_needs_verify / failed_*) count by their last transition. in_flight
@@ -401,10 +387,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND finding_type = sqlc.arg(finding_type)
   AND subject_key = sqlc.arg(subject_key);
 
--- =====================================================================
--- #732 anti-credential-compromise rate ceiling (per-actor + per-merchant)
--- =====================================================================
--- The durable rail_intents ledger IS the counter (#674): every destructive
+-- ==============================================================-- #732 anti-credential-compromise rate ceiling (per-actor + per-merchant)
+-- ==============================================================-- The durable rail_intents ledger IS the counter (#674): every destructive
 -- user/admin op posts a row BEFORE it executes, so a rolling-hour COUNT over
 -- created_at is the burst gauge. Counts by CREATION (created_at), not execution:
 -- the ceiling stops the burst at the producer chokepoint, before the write-ahead
@@ -441,10 +425,8 @@ SELECT openrails.count_destructive_intents_for_merchant_since(
     sqlc.arg(intent_types)::text[],
     sqlc.arg(since)::timestamptz);
 
--- =====================================================================
--- or#862: deployment-wide executor / verifier fan-out
--- =====================================================================
-
+-- ==============================================================-- or#862: deployment-wide executor / verifier fan-out
+-- ==============================================================
 -- CROSS-MERCHANT: the merchants the executor pass must visit, through migration
 -- 0022's SECURITY DEFINER reader. The executor used to run ClaimDue on a bare
 -- River job context; rail_intents FORCEs RLS, so with no app.merchant_id the
@@ -769,3 +751,33 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND status='succeeded'
         AND subscription_id=sqlc.arg(subscription_id)::uuid
         AND (payload->'renewal'->>'period_end')::timestamptz=sqlc.arg(period_end)::timestamptz))
 ORDER BY id LIMIT 2;
+-- name: ExpireRailIntentByID :execrows
+UPDATE openrails.rail_intents pi
+SET status = 'expired',
+    last_failure_reason = 'relevance window elapsed before execution',
+    claimed_until = NULL,
+    updated_at = now()
+WHERE pi.id = sqlc.arg(id)::uuid AND pi.merchant_id = sqlc.arg(merchant_id)::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
+  AND NOT (pi.intent_type IN ('invoice_collection','subscription_collection') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
+  AND NOT (pi.intent_type='initial_membership' AND coalesce(pi.result_evidence,'{}'::jsonb) ? 'initial_submitted')
+  AND pi.expires_at IS NOT NULL
+  AND pi.expires_at <= sqlc.arg(now)::timestamptz
+  AND NOT (
+        pi.intent_type = ANY (sqlc.arg(breaker_held_types)::text[])
+        AND EXISTS (
+            SELECT 1 FROM openrails.reconciliation_findings f
+            WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.merchant_id = pi.merchant_id
+              AND f.finding_type = 'life.provider_intent.held_bulk'
+              AND f.status IN ('reconcile_required', 'requires_review')
+        )
+      )
+  AND pi.intent_type <> 'subscription_collection';
+
+
+-- name: RecoverAbandonedRailIntentByID :execrows
+UPDATE openrails.rail_intents
+SET status = 'unknown_needs_verify', claimed_until = NULL, next_attempt_at = sqlc.arg(now)::timestamptz,
+    last_failure_reason = 'executor lease expired; verify before retry', updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND status = 'in_flight' AND (claimed_until IS NULL OR claimed_until <= sqlc.arg(now)::timestamptz);
