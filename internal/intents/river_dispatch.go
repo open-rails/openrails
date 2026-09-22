@@ -79,6 +79,11 @@ func (s *Store) WakeOperation(ctx context.Context, id uuid.UUID, now time.Time) 
 	})
 }
 
+// The worker installs this only around the Runner's own post-handler transitions.
+// It is never inherited by handler transactions or unrelated inline requests.
+type successorCommitHook func(merchantID, intentID uuid.UUID)
+type successorCommitContextKey struct{}
+
 // transitionAndWake commits a nonterminal ledger transition and its scheduled
 // wakeup together. A running job may already have snoozed against an older lease;
 // canonical claims, not active-job uniqueness, make duplicate wakeups harmless.
@@ -88,7 +93,7 @@ func (s *Store) transitionAndWake(ctx context.Context, id uuid.UUID, transition 
 		return 0, err
 	}
 	var rows int64
-	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	transitionTx := func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		var at time.Time
 		rows, at, err = transition(ctx, s.withTxDB(s.db.NewWithPgxTx(tx)))
@@ -99,6 +104,19 @@ func (s *Store) transitionAndWake(ctx context.Context, id uuid.UUID, transition 
 			return fmt.Errorf("operation transition affected %d rows", rows)
 		}
 		return s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: mid.UUID(), IntentID: id}, operationInsertOpts(at.UTC()))
-	})
+	}
+	hook, _ := ctx.Value(successorCommitContextKey{}).(successorCommitHook)
+	if pool := s.db.DataPool(); hook != nil && pool != nil {
+		// Unlike a savepoint release, this explicitly verifies an independent
+		// top-level commit before the consumed worker job may retire.
+		err = pool.CommittedMerchantTx(ctx, mid, transitionTx)
+		if err == nil && rows == 1 {
+			hook(mid.UUID(), id)
+		}
+	} else {
+		// Host transactions keep their existing rollback domain. They never
+		// acknowledge a successor before the host's eventual commit.
+		err = s.db.MerchantTx(ctx, transitionTx)
+	}
 	return rows, err
 }
