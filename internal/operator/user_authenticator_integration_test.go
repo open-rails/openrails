@@ -75,7 +75,10 @@ func TestUserAuthenticator_InProcess(t *testing.T) {
 	require.NoError(t, cp.Core().UnbanUser(ctx, user.ID))
 	_, err = authn.Authenticate(ctx, req)
 	require.NoError(t, err)
-	require.NoError(t, cp.Core().HardDeleteUser(ctx, user.ID))
+	deleted, err := cp.Core().HardDeleteUsers(ctx, []string{user.ID})
+	require.NoError(t, err)
+	require.Len(t, deleted, 1)
+	require.NoError(t, deleted[0].Err)
 	_, err = authn.Authenticate(ctx, req)
 	require.Error(t, err)
 
