@@ -18,6 +18,9 @@ import (
 func TestAdminConsoleAccountRecoveryBrowser(t *testing.T) {
 	_, err := os.Stat("../../web/admin/dist/index.html")
 	require.NoError(t, err, "build web/admin before the browser contract")
+	if runStandaloneInIsolatedProcess(t) {
+		return
+	}
 	h := New(t, t.Context())
 	surface := h.StartStandalone("USD", WithWorkers(), WithConsoleAssets(os.DirFS("../../web/admin/dist")), WithConfig(func(cfg *config.Config) {
 		cfg.AdminConsole = &config.AdminConsoleConfig{Enabled: true}
