@@ -1,13 +1,11 @@
 package server
 
 import (
-	"net/http"
-
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
 
-func (s *Server) registerMerchantActionRoutesAt(mux *http.ServeMux, apiPrefix string) {
+func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix string) {
 	prefix := apiPrefix + "/merchant"
 	opts := httproutes.Options{
 		Gate: httproutes.NewGate(httproutes.GateOptions{
@@ -37,6 +35,6 @@ func (s *Server) registerMerchantActionRoutesAt(mux *http.ServeMux, apiPrefix st
 	httproutes.RegisterImportRoutes(router.NewMuxRecorded(mux, apiPrefix+"/import", s.runtime, s.recordRoute), s.runtime, opts)
 }
 
-func (s *Server) registerMerchantActionRoutes(mux *http.ServeMux) {
+func (s *Server) registerMerchantActionRoutes(mux router.Registrar) {
 	s.registerMerchantActionRoutesAt(mux, StandaloneV1Prefix)
 }

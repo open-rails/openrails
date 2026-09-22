@@ -50,9 +50,9 @@ func (b *Bundle) Mount(target any, prefix ...string) error {
 			}
 		}
 		for _, route := range b.routes {
-			r.Method(route.Method, base+route.Path, route.Handler)
+			r.Method(route.Method, chiPath(base+route.Path), route.Handler)
 			if route.Method == http.MethodGet && !heads[route.Path] {
-				r.Method(http.MethodHead, base+route.Path, route.Handler)
+				r.Method(http.MethodHead, chiPath(base+route.Path), route.Handler)
 			}
 		}
 	case interface{ Handle(string, http.Handler) }:
@@ -63,4 +63,14 @@ func (b *Bundle) Mount(target any, prefix ...string) error {
 		return fmt.Errorf("openrails HTTP: router must implement Handle or Method")
 	}
 	return nil
+}
+
+func chiPath(path string) string {
+	parts := strings.Split(path, "/")
+	for i, part := range parts {
+		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "...}") {
+			parts[i] = "*"
+		}
+	}
+	return strings.Join(parts, "/")
 }

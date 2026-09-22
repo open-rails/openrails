@@ -56,7 +56,12 @@ func nativePath(path string) string {
 	parts := strings.Split(path, "/")
 	for i, part := range parts {
 		if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
-			parts[i] = ":" + part[1:len(part)-1]
+			name := part[1 : len(part)-1]
+			if strings.HasSuffix(name, "...") {
+				parts[i] = "*" + strings.TrimSuffix(name, "...")
+			} else {
+				parts[i] = ":" + name
+			}
 		} else {
 			parts[i] = strings.ReplaceAll(part, ":", `\:`)
 		}
