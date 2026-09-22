@@ -302,21 +302,9 @@ func (r *ProductAccessGrantRepo) RevokeByID(ctx context.Context, id uuid.UUID, n
 	if err != nil {
 		return 0, err
 	}
-	g, err := r.db.Gen(ctx).GetGrant(ctx, gen.GetGrantParams{MerchantID: tid.UUID(), ID: id})
-	if err != nil || g.Kind != string(grants.Ownership) || g.Event != "grant" {
-		return 0, nil
-	}
-	terminated, err := r.db.Gen(ctx).IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: tid.UUID(), GrantID: id})
-	if err != nil {
-		return 0, err
-	}
-	if terminated {
-		return 0, nil // already revoked
-	}
-	if _, err := r.ledger(ctx, tid.UUID()).Revoke(ctx, id, string(reason)); err != nil {
-		return 0, err
-	}
-	return 1, nil
+	return r.db.Gen(ctx).RevokeOwnershipGrantByID(ctx, gen.RevokeOwnershipGrantByIDParams{
+		MerchantID: tid.UUID(), ID: id, RevokedAt: now, Reason: string(reason),
+	})
 }
 
 // RevokeByPayment revokes all live ownership grants tied to a payment (refund /
@@ -326,21 +314,9 @@ func (r *ProductAccessGrantRepo) RevokeByPayment(ctx context.Context, paymentID 
 	if err != nil {
 		return 0, err
 	}
-	ids, err := r.db.Gen(ctx).ListLiveOwnershipGrantIDsByPayment(ctx, gen.ListLiveOwnershipGrantIDsByPaymentParams{
-		MerchantID: tid.UUID(), PaymentID: paymentID,
+	return r.db.Gen(ctx).RevokeOwnershipGrantsByPayment(ctx, gen.RevokeOwnershipGrantsByPaymentParams{
+		MerchantID: tid.UUID(), PaymentID: paymentID, RevokedAt: now, Reason: string(reason),
 	})
-	if err != nil {
-		return 0, err
-	}
-	gl := r.ledger(ctx, tid.UUID())
-	var n int64
-	for _, id := range ids {
-		if _, err := gl.Revoke(ctx, id, string(reason)); err != nil {
-			return n, err
-		}
-		n++
-	}
-	return n, nil
 }
 
 // reverse flips a slice in place (live/all lists come back created_at ASC; the

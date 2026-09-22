@@ -297,16 +297,43 @@ ORDER BY g.created_at;
 
 -- #511 ownership-on-grants: live (un-terminated) ownership grant ids backing a
 -- payment, so a refund/chargeback can revoke product access for that payment.
--- name: ListLiveOwnershipGrantIDsByPayment :many
-SELECT g.id FROM openrails.grants g
+-- RevokeOwnershipGrantByID atomically terminates ownership once, including overlapping
+-- provider refund notifications. Other insert errors still fail the transaction.
+-- name: RevokeOwnershipGrantByID :execrows
+INSERT INTO openrails.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
+)
+SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
+       'revoke', g.id, g.spec_snapshot, sqlc.arg(revoked_at)::timestamptz, NULL,
+       g.amount, g.currency, sqlc.arg(reason)::text
+FROM openrails.grants g
+WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND g.id = sqlc.arg(id)::uuid
+  AND g.kind = 'ownership' AND g.event = 'grant'
+ORDER BY g.id
+ON CONFLICT (supersedes_id)
+WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
+DO NOTHING;
+
+-- RevokeOwnershipGrantsByPayment atomically terminates ownership once, including overlapping
+-- provider refund notifications. Other insert errors still fail the transaction.
+-- name: RevokeOwnershipGrantsByPayment :execrows
+INSERT INTO openrails.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
+)
+SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
+       'revoke', g.id, g.spec_snapshot, sqlc.arg(revoked_at)::timestamptz, NULL,
+       g.amount, g.currency, sqlc.arg(reason)::text
+FROM openrails.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.payment_id = sqlc.arg(payment_id)::uuid
-  AND g.kind = 'ownership'
-  AND g.event = 'grant'
-  AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants t
-      WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
-  );
+  AND g.kind = 'ownership' AND g.event = 'grant'
+ORDER BY g.id
+ON CONFLICT (supersedes_id)
+WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
+DO NOTHING;
 
 -- #511 ownership-on-grants: every ownership grant-event for a customer with its
 -- derived status (the termination event, if any) — so the legacy

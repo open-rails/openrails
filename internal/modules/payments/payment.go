@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/query"
 )
 
@@ -96,11 +98,46 @@ const (
 // ID. reversalKind says WHAT the reversal is (refund vs chargeback); the rails
 // handle the actual money movement, this persists the event. amount is micros.
 func (s *PaymentService) Refund(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string) (*models.Payment, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var refund *models.Payment
+	err = s.repo.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		// Serialize provider facts against the original charge. Different webhook
+		// event IDs can describe the same refund; validation and replay lookup must
+		// share the lock so neither duplicate insertion nor double counting races.
+		var locked uuid.UUID
+		if err := tx.QueryRow(ctx, "SELECT id FROM openrails.payments WHERE merchant_id=$1 AND id=$2 FOR UPDATE", mid.UUID(), originalPaymentID).Scan(&locked); err != nil {
+			return err
+		}
+		scoped := NewPaymentService(s.repo.db.NewWithPgxTx(tx), s.clock)
+		var err error
+		refund, err = scoped.refundLocked(ctx, originalPaymentID, refundTransactionID, amount, reversalKind)
+		return err
+	})
+	return refund, err
+}
+
+func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uuid.UUID, refundTransactionID string, amount int64, reversalKind string) (*models.Payment, error) {
 	if reversalKind != ReversalRefund && reversalKind != ReversalChargeback && reversalKind != ReversalDisputeReversal {
 		return nil, fmt.Errorf("invalid reversal kind %q", reversalKind)
 	}
 	orig, err := s.GetByID(ctx, originalPaymentID)
 	if err != nil {
+		return nil, err
+	}
+	if orig.PspID != nil {
+		ctx = db.WithPSPID(ctx, *orig.PspID)
+	}
+	existing, err := s.GetByPSPTransactionID(ctx, orig.Rail, refundTransactionID)
+	if err == nil {
+		if existing.RefundedPaymentID == nil || *existing.RefundedPaymentID != orig.ID || existing.Amount != -amount || existing.ReversalKind == nil || *existing.ReversalKind != reversalKind || !PaymentStatusCompleted(existing.Status) {
+			return nil, errors.New("refund transaction id is already bound to different payment facts")
+		}
+		return existing, nil
+	}
+	if !db.IsNotFound(err) {
 		return nil, err
 	}
 	if err := s.ValidateRefund(ctx, orig, amount); err != nil {

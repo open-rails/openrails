@@ -828,45 +828,6 @@ func (q *Queries) ListLiveGrantsWithRefundedPayment(ctx context.Context, arg Lis
 	return items, nil
 }
 
-const listLiveOwnershipGrantIDsByPayment = `-- name: ListLiveOwnershipGrantIDsByPayment :many
-SELECT g.id FROM openrails.grants g
-WHERE g.merchant_id = $1::uuid
-  AND g.payment_id = $2::uuid
-  AND g.kind = 'ownership'
-  AND g.event = 'grant'
-  AND NOT EXISTS (
-      SELECT 1 FROM openrails.grants t
-      WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
-  )
-`
-
-type ListLiveOwnershipGrantIDsByPaymentParams struct {
-	MerchantID uuid.UUID
-	PaymentID  uuid.UUID
-}
-
-// #511 ownership-on-grants: live (un-terminated) ownership grant ids backing a
-// payment, so a refund/chargeback can revoke product access for that payment.
-func (q *Queries) ListLiveOwnershipGrantIDsByPayment(ctx context.Context, arg ListLiveOwnershipGrantIDsByPaymentParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listLiveOwnershipGrantIDsByPayment, arg.MerchantID, arg.PaymentID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		items = append(items, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listOriginalPurchaseGrants = `-- name: ListOriginalPurchaseGrants :many
 SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM openrails.grants
 WHERE merchant_id=$1::uuid AND source_type='purchase'
@@ -1444,6 +1405,88 @@ func (q *Queries) RevokeEntitlementsByGrant(ctx context.Context, arg RevokeEntit
 		arg.RevokeReason,
 		arg.MerchantID,
 		arg.GrantID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const revokeOwnershipGrantByID = `-- name: RevokeOwnershipGrantByID :execrows
+INSERT INTO openrails.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
+)
+SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
+       'revoke', g.id, g.spec_snapshot, $1::timestamptz, NULL,
+       g.amount, g.currency, $2::text
+FROM openrails.grants g
+WHERE g.merchant_id = $3::uuid
+  AND g.id = $4::uuid
+  AND g.kind = 'ownership' AND g.event = 'grant'
+ORDER BY g.id
+ON CONFLICT (supersedes_id)
+WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
+DO NOTHING
+`
+
+type RevokeOwnershipGrantByIDParams struct {
+	RevokedAt  time.Time
+	Reason     string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// #511 ownership-on-grants: live (un-terminated) ownership grant ids backing a
+// payment, so a refund/chargeback can revoke product access for that payment.
+// RevokeOwnershipGrantByID atomically terminates ownership once, including overlapping
+// provider refund notifications. Other insert errors still fail the transaction.
+func (q *Queries) RevokeOwnershipGrantByID(ctx context.Context, arg RevokeOwnershipGrantByIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeOwnershipGrantByID,
+		arg.RevokedAt,
+		arg.Reason,
+		arg.MerchantID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const revokeOwnershipGrantsByPayment = `-- name: RevokeOwnershipGrantsByPayment :execrows
+INSERT INTO openrails.grants (
+    merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id,
+    event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason
+)
+SELECT g.merchant_id, g.customer_id, g.product_id, g.kind, g.source_type, g.source_id, g.payment_id,
+       'revoke', g.id, g.spec_snapshot, $1::timestamptz, NULL,
+       g.amount, g.currency, $2::text
+FROM openrails.grants g
+WHERE g.merchant_id = $3::uuid
+  AND g.payment_id = $4::uuid
+  AND g.kind = 'ownership' AND g.event = 'grant'
+ORDER BY g.id
+ON CONFLICT (supersedes_id)
+WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
+DO NOTHING
+`
+
+type RevokeOwnershipGrantsByPaymentParams struct {
+	RevokedAt  time.Time
+	Reason     string
+	MerchantID uuid.UUID
+	PaymentID  uuid.UUID
+}
+
+// RevokeOwnershipGrantsByPayment atomically terminates ownership once, including overlapping
+// provider refund notifications. Other insert errors still fail the transaction.
+func (q *Queries) RevokeOwnershipGrantsByPayment(ctx context.Context, arg RevokeOwnershipGrantsByPaymentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeOwnershipGrantsByPayment,
+		arg.RevokedAt,
+		arg.Reason,
+		arg.MerchantID,
+		arg.PaymentID,
 	)
 	if err != nil {
 		return 0, err

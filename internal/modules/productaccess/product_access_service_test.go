@@ -136,9 +136,29 @@ func TestRevokeProductAccessByPayment_OnRefund(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	n, err := svc.RevokeProductAccessByPayment(ctx, paymentID, models.ProductAccessRevokeRefund)
-	require.NoError(t, err)
-	require.Equal(t, int64(1), n, "refund must revoke the grant tied to the payment")
+	// Provider refund.created and refund.updated may revoke the same purchase
+	// concurrently. Every delivery succeeds and exactly one appends termination.
+	type result struct {
+		count int64
+		err   error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 16)
+	for range 16 {
+		go func() {
+			<-start
+			n, err := svc.RevokeProductAccessByPayment(ctx, paymentID, models.ProductAccessRevokeRefund)
+			results <- result{n, err}
+		}()
+	}
+	close(start)
+	var revoked int64
+	for range 16 {
+		got := <-results
+		require.NoError(t, got.err)
+		revoked += got.count
+	}
+	require.Equal(t, int64(1), revoked, "one termination across overlapping refund deliveries")
 
 	has, err := svc.HasProductAccess(ctx, userID, productID)
 	require.NoError(t, err)
