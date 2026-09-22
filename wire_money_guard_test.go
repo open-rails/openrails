@@ -105,6 +105,7 @@ var pendingNumericMoney = map[string]string{
 	"internal/modules/solana/pay.go:PendingSolanaPayment.Amount amount":                                                                              notHTTPInternalRow,
 	"internal/modules/solana/pay.go:PendingSolanaPayment.TokenAmount token_amount":                                                                   notHTTPInternalRow,
 	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.Amount amount":                                                       notHTTPProviderWire,
+	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.AmountRefunded amount_refunded":                                      notHTTPProviderWire,
 	"internal/modules/subscriptions/stripe_engine_payment.go:func engineReceipt.AmountCaptured amount_captured":                                      notHTTPProviderWire,
 	"internal/modules/subscriptions/stripe_engine_payment.go:stripeEngineIntent.Amount amount":                                                       notHTTPProviderWire,
 	"internal/modules/subscriptions/stripe_engine_payment.go:stripeEngineIntent.AmountReceived amount_received":                                      notHTTPProviderWire,

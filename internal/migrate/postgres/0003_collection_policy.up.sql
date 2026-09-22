@@ -3,14 +3,15 @@ SET LOCAL lock_timeout = '10s';
 SET LOCAL statement_timeout = '300s';
 
 -- Adopt authority without transferring any existing provider agreement. The
--- legacy card flag remains stored for archive fidelity and staged deployment;
--- current workers use only the immutable subscription policy.
+-- legacy card flag is consumed before removal; coordinated deployment stops
+-- all old binaries before applying this schema. Runtime authority is the policy.
 ALTER TABLE openrails.subscriptions ADD COLUMN collection_policy text NOT NULL DEFAULT 'provider';
 UPDATE openrails.subscriptions s SET collection_policy = 'provider_dunning'
 FROM openrails.payment_methods pm
 WHERE s.payment_method_id=pm.id AND s.merchant_id=pm.merchant_id
   AND s.customer_id=pm.customer_id AND s.psp_id=pm.psp_id
   AND s.rail='nmi' AND pm.rail='nmi' AND pm.rebill_driver='openrails';
+ALTER TABLE openrails.payment_methods DROP COLUMN rebill_driver;
 -- Solana's established delegated-pull sidecar is proof of engine ownership;
 -- its external PDA is an execution binding, not a provider card schedule.
 UPDATE openrails.subscriptions s SET collection_policy = 'engine'
@@ -40,17 +41,8 @@ $$;
 CREATE TRIGGER subscriptions_collection_policy_immutable BEFORE UPDATE OF collection_policy
  ON openrails.subscriptions FOR EACH ROW EXECUTE FUNCTION openrails.preserve_subscription_collection_policy();
 
--- The legacy 3-argument entry remains usable only by policy-aware workers:
--- never hand an engine obligation to the old dunning dispatcher.
-CREATE OR REPLACE FUNCTION openrails.due_dunning_merchant_ids(p_rails text[],p_now timestamp with time zone,p_limit integer) RETURNS TABLE(merchant_id uuid)
- LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path TO 'openrails','pg_catalog' AS $$
-BEGIN
- RETURN QUERY SELECT s.merchant_id FROM openrails.subscriptions s
- WHERE s.rail=ANY(p_rails) AND s.collection_policy<>'engine' AND s.status='past_due'
- AND s.next_retry_at IS NOT NULL AND s.next_retry_at<=p_now AND s.deleted_at IS NULL
- GROUP BY s.merchant_id ORDER BY MIN(s.next_retry_at) LIMIT p_limit;
-END;
-$$;
+-- All executing workers must be policy-aware before this coordinated cut.
+DROP FUNCTION openrails.due_dunning_merchant_ids(text[], timestamp with time zone, integer);
 
 CREATE FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer, p_include_engine boolean) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
