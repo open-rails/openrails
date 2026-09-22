@@ -71,7 +71,7 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 			return nil
 		}
 		wake := row.NextAttemptAt
-		if row.ClaimedUntil != nil && row.ClaimedUntil.After(wake) {
+		if row.ClaimedUntil != nil && (row.Status == intents.StatusInFlight || row.ClaimedUntil.After(wake)) {
 			wake = *row.ClaimedUntil
 		}
 		if wake.After(now) {
@@ -98,7 +98,7 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 			return nil
 		}
 		wake = row.NextAttemptAt
-		if row.ClaimedUntil != nil && row.ClaimedUntil.After(wake) {
+		if row.ClaimedUntil != nil && (row.Status == intents.StatusInFlight || row.ClaimedUntil.After(wake)) {
 			wake = *row.ClaimedUntil
 		}
 		delay = wake.Sub(workerNow(w.Clock))
