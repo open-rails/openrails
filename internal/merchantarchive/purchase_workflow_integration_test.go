@@ -319,9 +319,9 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 		subscriptionID = first.SubscriptionID.UUID()
 	}
 	require.NotEqual(t, firstRequest.IdempotencyKey, sessionID.String(), "caller replay key is distinct from persisted session identity")
-	operationKey := checkout.NMISaleIdempotencyKey("checkout_session:" + sessionID.String())
+	operationKey := checkout.NMISaleIdempotencyKey("checkout_native_session:" + sessionID.String())
 	if recurring {
-		operationKey = checkout.InitialMembershipIdempotencyKey("checkout_session:" + sessionID.String())
+		operationKey = checkout.InitialMembershipIdempotencyKey("checkout_native_session:" + sessionID.String())
 	}
 	operation, err := intents.NewStore(source).GetByIdempotencyKey(ctx, operationKey)
 	require.NoError(t, err)

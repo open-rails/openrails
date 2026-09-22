@@ -401,7 +401,7 @@ func TestEngineRecurringCollectionExecution(t *testing.T) {
 			}
 			entitled, err := entitlements.NewEntitlementService(e.db, clock).IsEntitled(e.ctx, e.payer.String(), "engine", clock.Now())
 			require.NoError(t, err)
-			require.Equal(t, !terminal, entitled)
+			require.Equal(t, !terminal && clock.Now().Before(terms.Renewal.PeriodEnd), entitled, "late receipt records money without extending an expired accepted access period")
 			mu.Lock()
 			want := 1
 			if mode == "declined" {
