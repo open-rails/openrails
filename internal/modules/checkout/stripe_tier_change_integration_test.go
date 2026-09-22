@@ -554,7 +554,8 @@ func TestStripeTierChangeUpgradeReceiptAndRecovery(t *testing.T) {
 			require.Equal(t, landed.period, done.NextChargeDate.Unix())
 			var payload StripeTierChangePayload
 			require.NoError(t, json.Unmarshal(op.Payload, &payload))
-			require.EqualValues(t, 30_000_000-ceilCredit(10_000_000, 25*24, 720), payload.AmountDueNow)
+			// $10 × 25/30 credit rounds up to $8.34; the $30 upgrade owes $21.66.
+			require.EqualValues(t, 21_660_000, payload.AmountDueNow)
 			require.Equal(t, payload.AmountDueNow, done.AmountDueNow)
 			if mode == "webhook_first" {
 				require.NotEqual(t, landed.period, payload.PeriodEnd.Unix(), "Stripe executes on its own clock")
@@ -583,16 +584,6 @@ func TestStripeTierChangeUpgradeReceiptAndRecovery(t *testing.T) {
 			require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 1)
 		})
 	}
-}
-
-// ceilCredit mirrors CalculateModelBUpgradeCharge's customer-favored credit
-// for whole-hour periods.
-func ceilCredit(oldFull int64, hoursRemaining, cycleHours int) int64 {
-	credit := oldFull * int64(hoursRemaining) / int64(cycleHours)
-	if credit%10_000 != 0 {
-		credit += 10_000 - credit%10_000
-	}
-	return credit
 }
 
 func TestStripeTierChangeUnconfirmedRequestReplaysFrozenWrite(t *testing.T) {
