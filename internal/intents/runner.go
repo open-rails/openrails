@@ -73,6 +73,10 @@ func LedgerWriteContext(ctx context.Context) (context.Context, context.CancelFun
 // Runner applies financial claims and provider evidence. Production River
 // dispatch calls ExecuteByID/VerifyByID for one accepted operation.
 type Runner struct {
+	// OnSuccessorCommitted is an internal worker handoff, not handler context.
+	// Only a top-level transition+wakeup commit can acknowledge this operation.
+	OnSuccessorCommitted successorCommitHook
+
 	Store    ledger
 	Logger   MutationLogger
 	Registry *Registry
@@ -92,6 +96,13 @@ type Runner struct {
 	Clock       clockwork.Clock
 	Lease       time.Duration
 	Batch       int64
+}
+
+func (r *Runner) transitionContext(ctx context.Context) context.Context {
+	if r.OnSuccessorCommitted == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, successorCommitContextKey{}, r.OnSuccessorCommitted)
 }
 
 func (r *Runner) now() time.Time {
@@ -428,6 +439,7 @@ type terminalCommitter interface{ CommitsTerminalOutcome() bool }
 func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.OpenrailsRailIntent, outcome Outcome, verifying bool) {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
+	ctx = r.transitionContext(ctx)
 	now := r.now()
 	terminalOwned := false
 	if owner, ok := handler.(terminalCommitter); ok && owner.CommitsTerminalOutcome() && (outcome.Class == OutcomeSucceeded || outcome.Class == OutcomeTerminal) {
@@ -547,6 +559,7 @@ func pruneTerminalPayloadFor(handler Handler) bool {
 func (r *Runner) park(ctx context.Context, logEntry *log.Entry, stats *Stats, id uuid.UUID, now time.Time, reason string) {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
+	ctx = r.transitionContext(ctx)
 	if err := r.Store.Park(ctx, id, now.Add(ParkRetryInterval), reason); err != nil {
 		logEntry.WithError(err).Error("intent ledger: park failed; lease expiry will re-surface the intent")
 		return
