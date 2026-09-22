@@ -2,6 +2,7 @@ package intents
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 
@@ -76,4 +77,27 @@ func (s *Store) WakeOperation(ctx context.Context, id uuid.UUID, now time.Time) 
 		}
 		return s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: row.MerchantID, IntentID: row.ID}, operationInsertOpts(now))
 	})
+}
+
+// transitionAndWake commits a nonterminal ledger transition and its scheduled
+// wakeup together. A running job may already have snoozed against an older lease;
+// canonical claims, not active-job uniqueness, make duplicate wakeups harmless.
+func (s *Store) transitionAndWake(ctx context.Context, id uuid.UUID, at time.Time, transition func(context.Context, *Store) (int64, error)) (int64, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var rows int64
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		rows, err = transition(ctx, s.withTxDB(s.db.NewWithPgxTx(tx)))
+		if err != nil || rows == 0 {
+			return err
+		}
+		if rows != 1 {
+			return fmt.Errorf("operation transition affected %d rows", rows)
+		}
+		return s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: mid.UUID(), IntentID: id}, operationInsertOpts(at.UTC()))
+	})
+	return rows, err
 }
