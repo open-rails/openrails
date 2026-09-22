@@ -17,8 +17,8 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 )
 
-// StripeWriteMode scripts how the loopback Stripe answers the next mutating
-// request.
+// StripeWriteMode scripts how the loopback Stripe answers the next update
+// for a selected subscription.
 type StripeWriteMode string
 
 const (
@@ -58,7 +58,7 @@ type FakeStripeGateway struct {
 
 	server    *httptest.Server
 	mu        sync.Mutex
-	mode      StripeWriteMode
+	modes     map[string]StripeWriteMode
 	subs      map[string]*StripeSubscription
 	schedules map[string]map[string]any
 	stored    map[string]storedStripeAnswer
@@ -77,18 +77,19 @@ type storedStripeAnswer struct {
 // it with config.ProviderSandbox{StripeAPIURL: g.URL}.
 func NewFakeStripeGateway(t testing.TB) *FakeStripeGateway {
 	t.Helper()
-	g := &FakeStripeGateway{mode: StripeWriteApply, subs: map[string]*StripeSubscription{}, schedules: map[string]map[string]any{}, stored: map[string]storedStripeAnswer{}}
+	g := &FakeStripeGateway{modes: map[string]StripeWriteMode{}, subs: map[string]*StripeSubscription{}, schedules: map[string]map[string]any{}, stored: map[string]storedStripeAnswer{}}
 	g.server = httptest.NewServer(http.HandlerFunc(g.handle))
 	g.URL = g.server.URL
 	t.Cleanup(g.server.Close)
 	return g
 }
 
-// SetMode scripts the next mutating request.
-func (g *FakeStripeGateway) SetMode(mode StripeWriteMode) {
+// SetSubscriptionMode scripts the next accepted update for id. Other objects,
+// unsupported routes and stored idempotent replays cannot consume the fault.
+func (g *FakeStripeGateway) SetSubscriptionMode(id string, mode StripeWriteMode) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.mode = mode
+	g.modes[id] = mode
 }
 
 // HoldLostSubscriptionReadback keeps reads available for the initial price-change
@@ -197,20 +198,7 @@ func (g *FakeStripeGateway) handle(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(stored.body)
 		return
 	}
-	mode := g.mode
-	g.mode = StripeWriteApply
-	switch mode {
-	case StripeWriteLostBeforeLanding:
-		stripeAnswer(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"message": "upstream failure"}})
-		return
-	case StripeWriteDecline:
-		body, _ := json.Marshal(map[string]any{"error": map[string]any{"type": "card_error", "code": "card_declined", "decline_code": "insufficient_funds", "message": "Your card has insufficient funds."}})
-		g.stored[key] = storedStripeAnswer{status: http.StatusPaymentRequired, body: body}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusPaymentRequired)
-		_, _ = w.Write(body)
-		return
-	}
+	mode := StripeWriteApply
 	var answer map[string]any
 	switch {
 	case strings.HasPrefix(r.URL.Path, "/v1/subscriptions/"):
@@ -221,6 +209,22 @@ func (g *FakeStripeGateway) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.ScheduleID != "" {
 			stripeError(w, http.StatusBadRequest, "This subscription is managed by a subscription schedule")
+			return
+		}
+		if scripted, ok := g.modes[s.ID]; ok {
+			mode = scripted
+			delete(g.modes, s.ID)
+		}
+		switch mode {
+		case StripeWriteLostBeforeLanding:
+			stripeAnswer(w, http.StatusBadGateway, map[string]any{"error": map[string]any{"message": "upstream failure"}})
+			return
+		case StripeWriteDecline:
+			body, _ := json.Marshal(map[string]any{"error": map[string]any{"type": "card_error", "code": "card_declined", "decline_code": "insufficient_funds", "message": "Your card has insufficient funds."}})
+			g.stored[key] = storedStripeAnswer{status: http.StatusPaymentRequired, body: body}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusPaymentRequired)
+			_, _ = w.Write(body)
 			return
 		}
 		s.PriceID = r.PostForm.Get("items[0][price]")
