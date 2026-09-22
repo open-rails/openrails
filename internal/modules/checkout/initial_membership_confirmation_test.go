@@ -32,7 +32,7 @@ func TestInitialMembershipRequiresVerifiedInteractivePayer(t *testing.T) {
 			case "other_customer":
 				p.SubjectID = uuid.NewString()
 			}
-			_, err := (&CheckoutService{}).ConfirmInitialMembership(ctx, subscriptions.InitialMembershipTerms{CustomerID: customer}, "session-key", p)
+			_, err := (&CheckoutService{}).ConfirmInitialMembership(ctx, subscriptions.InitialMembershipTerms{CustomerID: customer}, "session-key", p, nil)
 			var refusal *apperr.Error
 			require.ErrorAs(t, err, &refusal)
 			require.Equal(t, 403, refusal.Status)

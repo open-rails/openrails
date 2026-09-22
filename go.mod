@@ -25,7 +25,7 @@ require (
 	github.com/knadh/koanf/v2 v2.2.2
 	github.com/moby/moby/api v1.54.2
 	github.com/moby/moby/client v0.4.1
-	github.com/open-rails/authkit v0.113.0
+	github.com/open-rails/authkit v0.114.0
 	github.com/open-rails/migratekit v1.0.4
 	github.com/pganalyze/pg_query_go/v6 v6.2.2
 	github.com/redis/go-redis/v9 v9.22.0
@@ -132,7 +132,7 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/mostynb/zstdpool-freelist v0.0.0-20201229113212-927304c0c3b1 // indirect
 	github.com/mr-tron/base58 v1.3.0 // indirect
-	github.com/open-rails/riverkit v0.1.0
+	github.com/open-rails/riverkit v0.2.0
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect

@@ -21,6 +21,12 @@ INSERT INTO openrails.checkout_sessions (
 SELECT * FROM openrails.checkout_sessions WHERE checkout_sessions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
+-- name: LockCheckoutSessionForShare :one
+SELECT id FROM openrails.checkout_sessions
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND deleted_at IS NULL
+FOR SHARE;
+
 -- name: UpdateCheckoutSession :execrows
 UPDATE openrails.checkout_sessions SET
     customer_id = $2,
@@ -181,7 +187,7 @@ AND EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.me
 -- name: CountInvalidEngineCheckoutReferences :one
 SELECT count(*) FROM openrails.checkout_sessions cs
 LEFT JOIN openrails.rail_intents i ON i.merchant_id=cs.merchant_id
- AND i.idempotency_key='initial_membership:checkout_session:'||cs.id::text AND i.intent_type='initial_membership'
+ AND i.payload->>'checkout_session_id'=cs.id::text AND i.intent_type='initial_membership'
 WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.rail_state ? 'initial_membership_quote'
 AND ((cs.status='succeeded' AND (i.id IS NULL OR i.status<>'succeeded'))
  OR (i.id IS NOT NULL AND (

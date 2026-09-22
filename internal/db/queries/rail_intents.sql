@@ -160,11 +160,13 @@ RETURNING *;
 
 -- Releases a resolver lease after rejected evidence, leaving the operation
 -- exactly as it was.
--- name: ReleaseUnknownRailIntentClaim :execrows
+-- name: ReleaseUnknownRailIntentClaim :one
 UPDATE openrails.rail_intents
 SET claimed_until = NULL,
     updated_at = now()
-WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'unknown_needs_verify';
+WHERE rail_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'unknown_needs_verify'
+  AND claimed_until IS NOT NULL
+RETURNING next_attempt_at;
 
 -- Renews a live claim while its handler runs (xs-007 row 32): the executor
 -- beats this every lease/4, so claimed_until measures SILENCE from a dead

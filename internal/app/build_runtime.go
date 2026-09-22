@@ -372,6 +372,10 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		if producer, pool, err := buildRiverProducer(ctx, cfg, runtime.riverSchemaOrDefault()); err != nil {
 			return nil, fmt.Errorf("init river producer: %w", err)
 		} else {
+			if err := runtime.DB.ValidateRiverJobBinding(ctx, pool, producer.Schema()); err != nil {
+				pool.Close() // This producer pool was created internally above.
+				return nil, fmt.Errorf("init River producer binding: %w", err)
+			}
 			runtime.RiverProducer = producer
 			runtime.DB.SetRiverJobInserter(producer)
 			runtime.riverProducerPool = pool

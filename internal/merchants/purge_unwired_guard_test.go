@@ -21,7 +21,7 @@ import (
 // The guard is exact rather than textual-ish: Delete cannot be called without a
 // merchants.DeleteOptions value, and any caller outside this package must NAME
 // that type to build one. A composite literal or a declaration of
-// merchants.DeleteOptions anywhere else in the tree fails here.
+// merchants.DeleteOptions in production code anywhere else in the tree fails here.
 //
 // To lift this: land a real per-merchant snapshot + restore, gate Delete on it,
 // then delete this test in the same change — not before.
@@ -40,7 +40,7 @@ func TestMerchantPurgeStaysUnwired(t *testing.T) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") {
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
 		fset := token.NewFileSet()

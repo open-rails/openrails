@@ -6,6 +6,9 @@ import (
 	"sync"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/pgidentity"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
@@ -21,7 +24,36 @@ type riverBinding struct {
 	inserter RiverJobInserter
 }
 
-// SetRiverJobInserter is called by the runtime composer, never by a producer.
+// ValidateRiverJobBinding must succeed before the runtime enables a producer.
+// Validate during composition, before requests hold any transaction or pool pin.
+func (d *DB) ValidateRiverJobBinding(ctx context.Context, pool *pgxpool.Pool, schema string) error {
+	if d == nil || ctx == nil {
+		return fmt.Errorf("River binding requires the billing database and context")
+	}
+	if marked, _ := ctx.Value(transactionContextKey{}).(bool); marked || d.pgtx != nil {
+		return fmt.Errorf("River binding must precede caller transactions: %w", ErrCallerTransaction)
+	}
+	if pin, _ := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn); pin != nil {
+		return fmt.Errorf("River binding must precede merchant connection pins: %w", ErrCallerTransaction)
+	}
+	if err := pgidentity.RequireSameDatabase(ctx, d.pool, pool); err != nil {
+		return fmt.Errorf("River queue database: %w", err)
+	}
+	if schema == "" {
+		return fmt.Errorf("River binding requires its actual schema")
+	}
+	exists, err := gen.New(pool).RiverQueueTableExists(ctx, pgx.Identifier{schema, "river_job"}.Sanitize())
+	if err != nil {
+		return fmt.Errorf("River queue table: %w", err)
+	}
+	if exists == nil || !*exists {
+		return fmt.Errorf("River queue table is missing from schema %q", schema)
+	}
+	return nil
+}
+
+// SetRiverJobInserter is called by the runtime composer after binding validation,
+// never by a producer. Nil invalidates a previously composed producer.
 // Tx-scoped DBs retain this binding so composition/abort cannot leave a stale
 // separately constructed producer behind.
 func (d *DB) SetRiverJobInserter(inserter RiverJobInserter) {

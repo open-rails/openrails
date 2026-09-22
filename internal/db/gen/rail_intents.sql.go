@@ -2427,11 +2427,13 @@ func (q *Queries) RecoverAbandonedRailIntentByID(ctx context.Context, arg Recove
 	return result.RowsAffected(), nil
 }
 
-const releaseUnknownRailIntentClaim = `-- name: ReleaseUnknownRailIntentClaim :execrows
+const releaseUnknownRailIntentClaim = `-- name: ReleaseUnknownRailIntentClaim :one
 UPDATE openrails.rail_intents
 SET claimed_until = NULL,
     updated_at = now()
 WHERE rail_intents.merchant_id = $1::uuid AND id = $2 AND status = 'unknown_needs_verify'
+  AND claimed_until IS NOT NULL
+RETURNING next_attempt_at
 `
 
 type ReleaseUnknownRailIntentClaimParams struct {
@@ -2441,12 +2443,11 @@ type ReleaseUnknownRailIntentClaimParams struct {
 
 // Releases a resolver lease after rejected evidence, leaving the operation
 // exactly as it was.
-func (q *Queries) ReleaseUnknownRailIntentClaim(ctx context.Context, arg ReleaseUnknownRailIntentClaimParams) (int64, error) {
-	result, err := q.db.Exec(ctx, releaseUnknownRailIntentClaim, arg.MerchantID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+func (q *Queries) ReleaseUnknownRailIntentClaim(ctx context.Context, arg ReleaseUnknownRailIntentClaimParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, releaseUnknownRailIntentClaim, arg.MerchantID, arg.ID)
+	var next_attempt_at time.Time
+	err := row.Scan(&next_attempt_at)
+	return next_attempt_at, err
 }
 
 const renewRailIntentClaim = `-- name: RenewRailIntentClaim :execrows

@@ -11,6 +11,7 @@ checks() {
   bash scripts/check_business_time_test.sh
   bash scripts/check_business_time.sh
   bash scripts/go-test-gate_test.sh
+  bash scripts/test_integration_test.sh
   bash scripts/scan-injected-code.sh --all
   unformatted="$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
   if [[ -n "$unformatted" ]]; then
@@ -22,7 +23,15 @@ checks() {
   # Integration-tagged files are a separate compilation universe; keep the
   # compile/vet guard that catches dependency drift before the E2E runner.
   go vet -tags=integration ./...
-  go test -race -count=1 ./...
+  # Integration packages run once, with race coverage, in E2E. Retain whole
+  # packages here when E2E tags exclude a default source or test file.
+  local selected package
+  local -a unit_packages=()
+  selected="$(bash scripts/test_integration.sh --list-checks-packages)"
+  while IFS= read -r package; do
+    [[ -n "$package" ]] && unit_packages+=("$package")
+  done <<< "$selected"
+  go test -race -count=1 "${unit_packages[@]}"
   bash scripts/check-adapters.sh
   bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
   pnpm --dir web/admin run lint
