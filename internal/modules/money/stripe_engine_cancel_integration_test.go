@@ -14,9 +14,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/testfixture"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,8 +41,7 @@ func TestStripeEngineCancellationUsesExecuteGates(t *testing.T) {
 			require.NoError(t, err)
 			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency,auto_renew,access_duration_hours) VALUES($1,$2,$3,9990000,'USD',true,720)`, price, mid, product)
 			require.NoError(t, err)
-			_, err = e.pool.Exec(e.ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,payment_method_id,rail,collection_policy,status,current_period_starts_at,current_period_ends_at,entitlements_spec_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7,'stripe','engine','active',$8,$9,'{"engine_access":null}')`, sub, mid, e.payer.UUID(), product, price, psp, e.method, now.Add(-30*24*time.Hour), now)
-			require.NoError(t, err)
+			testfixture.StripeEngineMembership(t, e.ctx, e.db, subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: sub, PaymentID: uuid.New(), CustomerID: e.payer.UUID(), PSPID: psp, ProductID: product, PriceID: price, PaymentMethodID: e.method, ProductName: "Engine Stripe", Amount: 9990000, RecurringAmount: 9990000, Currency: "USD", AcceptedAt: now.Add(-30 * 24 * time.Hour), PeriodStart: now.Add(-30 * 24 * time.Hour), PeriodEnd: now, Entitlements: map[string]*int{"engine_access": nil}})
 			var mu sync.Mutex
 			var pi map[string]any
 			posts, cancels := 0, 0
