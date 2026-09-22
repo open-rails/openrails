@@ -40,7 +40,7 @@ func (s *Service) GetCustomerBillingPolicy(ctx context.Context, customerID openr
 	if err != nil {
 		return nil, err
 	}
-	return &openrails.CustomerBillingPolicyAssignment{CustomerID: openrails.CustomerID(row.CustomerID), PolicyName: row.PolicyName}, nil
+	return &openrails.CustomerBillingPolicyAssignment{CustomerID: row.CustomerID.String(), PolicyName: row.PolicyName}, nil
 }
 
 // SetCustomerBillingPolicy sets or clears one assignment, preserving every
@@ -96,5 +96,5 @@ func (s *Service) SetCustomerBillingPolicy(ctx context.Context, customerID openr
 	if err != nil {
 		return nil, err
 	}
-	return &openrails.CustomerBillingPolicyAssignment{CustomerID: customerID, PolicyName: normalized}, nil
+	return &openrails.CustomerBillingPolicyAssignment{CustomerID: customerID.String(), PolicyName: normalized}, nil
 }

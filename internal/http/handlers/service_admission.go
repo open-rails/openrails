@@ -102,7 +102,7 @@ func serviceAdmitBatchVerdicts(
 			out[i] = admitFailure(http.StatusBadRequest, "estimated_amount must be >= 0", "estimated_amount")
 			continue
 		}
-		payer := servicePayer(item.CustomerID)
+		payer := servicePayer(customerIDParam(item.CustomerID))
 		if payer == nil {
 			out[i] = admitFailure(http.StatusBadRequest, "customer_id required", "customer_id")
 			continue
@@ -241,7 +241,7 @@ func ServiceReportWastedSpend(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "amount must be >= 0")
 		return
 	}
-	payer := servicePayer(req.CustomerID)
+	payer := servicePayer(customerIDParam(req.CustomerID))
 	if payer == nil {
 		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return

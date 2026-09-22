@@ -73,7 +73,7 @@ func TestRemoteTrustLevelWireNames(t *testing.T) {
 	}
 
 	if _, err := client.AdmitBatch(context.Background(), []AdmitRequest{{
-		CustomerID: testCustomer, TrustLevel: "gold", EstimatedAmount: 1, ExpiresAt: holdDeadline(), RequestID: "req_1", AccrualRateDeltaPerHour: 42,
+		CustomerID: testCustomer.String(), TrustLevel: "gold", EstimatedAmount: 1, ExpiresAt: holdDeadline(), RequestID: "req_1", AccrualRateDeltaPerHour: 42,
 	}}); err != nil {
 		t.Fatalf("AdmitBatch: %v", err)
 	}

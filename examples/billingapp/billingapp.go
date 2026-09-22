@@ -53,7 +53,11 @@ type Report struct {
 // Run executes the workflow with the given client.
 func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, error) {
 	var r Report
-	payer := openrails.CustomerID(uuid.New())
+	customer, err := client.EnsureCustomer(ctx, uuid.NewString())
+	if err != nil {
+		return r, fmt.Errorf("ensure customer: %w", err)
+	}
+	payer := customer.ID
 	invoker := "app:" + in.Run
 
 	if err := client.SetMerchantSettings(ctx, openrails.MerchantSettings{
@@ -74,10 +78,10 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 			r.PolicyWindows = len(policy.SpendWindows)
 		}
 	}
-	if err := client.SetCreditLimit(ctx, (payer).String(), in.Currency, 0); err != nil {
+	if err := client.SetCreditLimit(ctx, payer, in.Currency, 0); err != nil {
 		return r, fmt.Errorf("set credit limit: %w", err)
 	}
-	if r.CreditLimit, err = client.GetCreditLimit(ctx, (payer).String(), in.Currency); err != nil {
+	if r.CreditLimit, err = client.GetCreditLimit(ctx, payer, in.Currency); err != nil {
 		return r, fmt.Errorf("read credit limit: %w", err)
 	}
 
@@ -116,12 +120,12 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	}
 	r.DeniedBy = denied.BlockedBy
 	r.UnknownRelease = errors.Is(client.Release(ctx, uuid.NewString()), openrails.ErrNotFound)
-	balance, err := client.Balance(ctx, (payer).String())
+	balance, err := client.Balance(ctx, payer)
 	if err != nil {
 		return r, fmt.Errorf("balance: %w", err)
 	}
 	r.Balance = balance.BalanceAmount
-	rows, err := client.UsageRollup(ctx, (payer).String(), in.Currency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "resource")
+	rows, err := client.UsageRollup(ctx, payer, in.Currency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "resource")
 	if err != nil {
 		return r, fmt.Errorf("usage rollup: %w", err)
 	}

@@ -29,13 +29,13 @@ func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 	scopedOutPayer := openrails.CustomerID(uuid.New())
 
 	items := []serviceAdmitRequest{
-		{CustomerID: allowedPayer, Invoker: "user:a", EstimatedAmount: 100, ExpiresAt: holdDeadline(), RequestID: "r1"},
-		{CustomerID: brokePayer, Invoker: "user:b", EstimatedAmount: 100, ExpiresAt: holdDeadline(), RequestID: "r2"},
+		{CustomerID: allowedPayer.String(), Invoker: "user:a", EstimatedAmount: 100, ExpiresAt: holdDeadline(), RequestID: "r1"},
+		{CustomerID: brokePayer.String(), Invoker: "user:b", EstimatedAmount: 100, ExpiresAt: holdDeadline(), RequestID: "r2"},
 		{Invoker: "user:c", RequestID: "r3"},
-		{CustomerID: abuseLimitedPayer, Invoker: "user:d", RequestID: "r4"},
-		{CustomerID: erroringPayer, Invoker: "user:e", RequestID: "r5"},
-		{CustomerID: scopedOutPayer, Invoker: "user:f", RequestID: "r6"},
-		{CustomerID: allowedPayer, Invoker: "user:g", EstimatedAmount: -1, RequestID: "r7"},
+		{CustomerID: abuseLimitedPayer.String(), Invoker: "user:d", RequestID: "r4"},
+		{CustomerID: erroringPayer.String(), Invoker: "user:e", RequestID: "r5"},
+		{CustomerID: scopedOutPayer.String(), Invoker: "user:f", RequestID: "r6"},
+		{CustomerID: allowedPayer.String(), Invoker: "user:g", EstimatedAmount: -1, RequestID: "r7"},
 	}
 
 	allows := func(ts billingidentity.CustomerID) bool {
@@ -112,7 +112,7 @@ func TestServiceAdmitBatchVerdicts_LogsTheCause(t *testing.T) {
 
 	payer := openrails.CustomerID(uuid.New())
 	out := serviceAdmitBatchVerdicts(context.Background(),
-		[]serviceAdmitRequest{{CustomerID: payer, Invoker: "user:a", RequestID: "r1", Source: "host-four"}},
+		[]serviceAdmitRequest{{CustomerID: payer.String(), Invoker: "user:a", RequestID: "r1", Source: "host-four"}},
 		func(billingidentity.CustomerID) bool { return true },
 		func(context.Context, billingservice.AdmitInput) (*billingservice.AdmitResult, error) {
 			return nil, cause

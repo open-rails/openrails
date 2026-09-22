@@ -18,7 +18,7 @@ func TestCreditTransactionWireContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	balance, zero := int64(math.MinInt64), int64(0)
-	value := CreditTransaction{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), CustomerID: CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), Invoker: "host", Currency: "USD", Amount: math.MaxInt64, BalanceAfter: &balance, TransactionType: "deposit", Status: "completed", Captured: &zero, Source: "bank", CreatedAt: when, UpdatedAt: when}
+	value := CreditTransaction{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), CustomerID: "22222222-2222-2222-2222-222222222222", Invoker: "host", Currency: "USD", Amount: math.MaxInt64, BalanceAfter: &balance, TransactionType: "deposit", Status: "completed", Captured: &zero, Source: "bank", CreatedAt: when, UpdatedAt: when}
 	raw, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestCreditTransactionWireContract(t *testing.T) {
 
 func TestDepositAndBalanceInt64RoundTrip(t *testing.T) {
 	for _, amount := range []int64{math.MinInt64, -9007199254740993, -1, 0, 1, 9007199254740993, math.MaxInt64} {
-		customer := CustomerID(uuid.New())
+		customer := uuid.NewString()
 		request := DepositCreditsRequest{CustomerID: &customer, Invoker: "host", Currency: "USD", Amount: amount, Source: "bank", SourceID: "payment"}
 		raw, err := json.Marshal(request)
 		if err != nil {
