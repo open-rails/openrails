@@ -834,12 +834,15 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 		return fmt.Errorf("openrails: build request: %w", rerr)
 	}
 	for name, values := range headers {
-		req.Header[name] = append([]string(nil), values...)
+		// Extra metadata cannot provide another spelling of a target header.
+		// Canonicalize all remaining names before replacing Authorization below.
+		if strings.EqualFold(name, merchant.BindingHeader) || strings.EqualFold(name, merchant.SlugHeader) {
+			continue
+		}
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
 	}
-	// Target headers belong to the validated request options, never a payload
-	// helper's extra headers. Emit exactly one form in both transports.
-	req.Header.Del(merchant.BindingHeader)
-	req.Header.Del(merchant.SlugHeader)
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	if c.catalogOwner != "" {
 		req.Header.Set("OpenRails-Catalog-Owner", base64.RawURLEncoding.EncodeToString([]byte(c.catalogOwner)))
