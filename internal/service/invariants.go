@@ -37,6 +37,9 @@ func (s *Service) runtime() (*app.Runtime, error) {
 }
 
 func (s *Service) requireProductService() (*catalog.ProductService, error) {
+	if s.catalogTx != nil {
+		return catalog.NewProductService(s.catalogTx), nil
+	}
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -48,6 +51,9 @@ func (s *Service) requireProductService() (*catalog.ProductService, error) {
 }
 
 func (s *Service) requireCatalogServices() (*catalog.ProductService, *catalog.PriceService, error) {
+	if s.catalogTx != nil {
+		return catalog.NewProductService(s.catalogTx), catalog.NewPriceService(s.catalogTx), nil
+	}
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, nil, err
@@ -59,6 +65,9 @@ func (s *Service) requireCatalogServices() (*catalog.ProductService, *catalog.Pr
 }
 
 func (s *Service) requirePriceService() (*catalog.PriceService, error) {
+	if s.catalogTx != nil {
+		return catalog.NewPriceService(s.catalogTx), nil
+	}
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err

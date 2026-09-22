@@ -30,5 +30,8 @@ func (s *Service) pin(ctx context.Context) (context.Context, func(), error) {
 	if s == nil || s.rt == nil || s.rt.DB == nil {
 		return ctx, func() {}, fmt.Errorf("billing service: not initialized")
 	}
+	if s.catalogTx != nil {
+		return s.catalogTx.WithMerchantConn(ctx)
+	}
 	return s.rt.DB.WithMerchantConn(ctx)
 }

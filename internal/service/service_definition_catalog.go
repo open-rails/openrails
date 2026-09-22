@@ -342,6 +342,9 @@ func priceRequestCycleDays(req CreatePriceRequest) *int {
 }
 
 func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*CatalogPrice, error) {
+	if req.ProductData != nil {
+		return s.createPriceWithProduct(ctx, req)
+	}
 	owned, err := catalogOwnerRequest(ctx)
 	if err != nil {
 		return nil, err
