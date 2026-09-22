@@ -84,11 +84,11 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 		_, err = riverhelpers.New(t.Context(), pool, nil, jobs)
 		require.NoError(t, err)
 	})
-	t.Run("attached AuthKit cannot be registered twice", func(t *testing.T) {
+	t.Run("same runtime cannot be registered twice", func(t *testing.T) {
 		rt, pool := newRuntime(t)
-		cp, err := controlplane.Attach(t.Context(), rt, controlplane.Options{})
+		_, err := controlplane.Attach(t.Context(), rt, controlplane.Options{})
 		require.NoError(t, err)
-		_, err = riverhelpers.New(t.Context(), pool, nil, rt.RiverJobs(), cp.Core().RiverJobs())
+		_, err = riverhelpers.New(t.Context(), pool, nil, rt.RiverJobs(), rt.RiverJobs())
 		require.ErrorContains(t, err, "duplicate contribution")
 		require.False(t, rt.HasExternalRiverClient())
 	})

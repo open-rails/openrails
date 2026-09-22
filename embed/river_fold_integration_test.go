@@ -101,7 +101,6 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 		return river.AddWorkerSafely(cfg.Workers, &noopWorker{})
 	}, nil, nil))
 	require.NoError(t, err)
-	require.NoError(t, cp.Core().Start(ctx), "attached AuthKit maintenance was registered during binding")
 	_, err = controlplane.Attach(ctx, rt, controlplane.Options{})
 	require.Error(t, err, "components cannot attach after binding")
 

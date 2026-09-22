@@ -16,7 +16,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/authkit/authhttp"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	embedauth "github.com/open-rails/openrails/embed/authkit"
@@ -140,10 +139,8 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT enabled FROM billing.destructive_action_switch`).Scan(&maintenanceEnabled))
 	require.False(t, maintenanceEnabled, "self-service deletion uses default maintenance settings")
 	core := operator.Get(surface.App()).Core()
-	auth, err := authhttp.New(core, authhttp.Config{DirectPeerIP: true})
-	require.NoError(t, err)
-	t.Cleanup(auth.Close)
-	delegated, err = embedauth.NewDelegatedAuthenticator(auth.Verifier(), owned.MerchantID.String())
+	auth := operator.Get(surface.App()).AuthService()
+	delegated, err := embedauth.NewDelegatedAuthenticator(auth.Verifier(), owned.MerchantID.String())
 	require.NoError(t, err)
 	user, err := core.CreateUser(ctx, "invoice-"+uuid.NewString()+"@example.test", "invoice"+uuid.NewString()[:8])
 	require.NoError(t, err)

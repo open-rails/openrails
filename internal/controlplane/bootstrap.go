@@ -11,7 +11,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -78,7 +77,7 @@ type BootstrapOptions struct {
 // optionally minted under the merchant group when none exists.
 //
 // It runs AFTER migrations / at startup, exclusively through in-process AuthKit
-// CORE calls (EnsureRootGroup / CreatePermissionGroup / Genesis().AssignGroupRole /
+// Client calls (CreatePermissionGroup / AdminAssignGroupRole /
 // MintAPIKeyWithOptions) — never raw AuthKit SQL or a private HTTP route.
 // Re-running it is safe: group creation and owner assignment are idempotent; the
 // API key is minted only when none already exists.
@@ -98,12 +97,6 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	}
 
 	res := &BootstrapResult{BootstrapMerchantSlug: slug}
-
-	// 0. Ensure the singleton root group exists and the declared containment is
-	//    seeded (idempotent, concurrent-boot tolerant) before creating typed groups.
-	if err := EnsureRootContainment(ctx, core); err != nil {
-		return nil, fmt.Errorf("controlplane: %w", err)
-	}
 
 	// 1. Ensure the merchant permission-group exists (idempotent: resolve, else
 	//    create). The merchant IS the group — `type=merchant`, `resourceRef=slug`,
@@ -137,7 +130,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 		if adminID := strings.TrimSpace(opts.InitialAdminUserID); adminID != "" {
 			// Group already existed (or was adopted from a race winner): ensure
 			// the admin holds the owner role (idempotent).
-			if aerr := core.Genesis().AssignGroupRole(ctx, MerchantGroup(slug), authkit.UserSubject(adminID), MerchantRoleOwner); aerr != nil {
+			if aerr := core.AdminAssignGroupRole(ctx, MerchantGroup(slug), authkit.UserSubject(adminID), MerchantRoleOwner); aerr != nil {
 				return nil, fmt.Errorf("controlplane: assign merchant owner to initial admin: %w", aerr)
 			}
 			log.WithFields(log.Fields{"merchant": slug, "user_id": adminID}).
@@ -177,7 +170,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 				if err != nil {
 					return nil, err
 				}
-				if aerr := core.Genesis().AssignGroupRole(ctx, MerchantGroup(slug), authkit.UserSubject(createdBy), MerchantRoleOwner); aerr != nil {
+				if aerr := core.AdminAssignGroupRole(ctx, MerchantGroup(slug), authkit.UserSubject(createdBy), MerchantRoleOwner); aerr != nil {
 					return nil, fmt.Errorf("controlplane: assign bootstrap api-key actor owner: %w", aerr)
 				}
 			}
@@ -200,19 +193,6 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	}
 
 	return res, nil
-}
-
-// EnsureRootContainment ensures the singleton root group exists and the
-// declared containment schema is seeded (idempotent; authkit's EnsureRootGroup
-// is create-or-adopt, ak#258, so concurrent cold boots need no retry).
-func EnsureRootContainment(ctx context.Context, core *authcore.Runtime) error {
-	if _, err := core.EnsureRootGroup(ctx); err != nil {
-		return fmt.Errorf("ensure root group: %w", err)
-	}
-	if err := core.SeedPermissionGroupContainment(ctx); err != nil {
-		return fmt.Errorf("seed permission-group containment: %w", err)
-	}
-	return nil
 }
 
 func (c *ControlPlane) ensureBootstrapAPIKeyActor(ctx context.Context) (string, error) {
@@ -248,7 +228,7 @@ func (c *ControlPlane) ensureMerchantAPIKeyActor(ctx context.Context, merchantSl
 	if err != nil {
 		return "", err
 	}
-	if err := c.Core().Genesis().AssignGroupRole(ctx, MerchantGroup(merchantSlug), authkit.UserSubject(createdBy), MerchantRoleOwner); err != nil {
+	if err := c.Core().AdminAssignGroupRole(ctx, MerchantGroup(merchantSlug), authkit.UserSubject(createdBy), MerchantRoleOwner); err != nil {
 		return "", fmt.Errorf("controlplane: assign api-key actor merchant owner: %w", err)
 	}
 	return createdBy, nil

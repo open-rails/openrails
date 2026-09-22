@@ -57,14 +57,11 @@ func (c *ControlPlane) loadRemoteApplications(ctx context.Context) error {
 	if c == nil || c.delegatedVerifier == nil {
 		return ErrDelegatedNotConfigured
 	}
-	// Core() is CONCRETE (*authcore.Runtime): a nil one boxed into the verifier's
-	// RemoteApplicationSource interface is a non-nil interface, so authkit's own
-	// `src == nil` fallback never fires and the load nil-derefs. The core client
-	// IS the remote_application store — without it there is nothing to load.
+	// A partial control plane has no installed local issuer source.
 	if c.Core() == nil {
 		return ErrRemoteApplicationSourceUnavailable
 	}
-	if err := c.delegatedVerifier.LoadRemoteApplications(ctx, c.Core(), c.delegatedAudiences); err != nil {
+	if err := c.delegatedVerifier.LoadRemoteApplications(ctx, nil, c.delegatedAudiences); err != nil {
 		return err
 	}
 	c.issuerRefresh.lastLoad.Store(time.Now().UnixNano())

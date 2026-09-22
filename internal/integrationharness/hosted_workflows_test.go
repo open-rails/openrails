@@ -138,6 +138,7 @@ func newHostedIssuer(t *testing.T, h *Harness) *hostedIssuer {
 	require.NoError(t, err)
 	engine, err := authcore.New(authcore.Config{
 		Schema:       schema,
+		HTTP:         authhttp.Config{DirectPeerIP: true, DisableRateLimiting: true, Mount: authhttp.MountOptions{APIPrefix: "/auth"}},
 		Keys:         authcore.KeysConfig{Source: jwtkit.StaticKeySource{Active: signer, Pubs: map[string]crypto.PublicKey{signer.KID(): signer.PublicKey()}}},
 		Token:        authcore.TokenConfig{Issuer: issuerURL, IssuedAudiences: []string{"merchant"}, ExpectedAudiences: []string{"merchant"}},
 		Registration: authcore.RegistrationConfig{Verification: authkit.RegistrationVerificationNone},
@@ -147,18 +148,19 @@ func newHostedIssuer(t *testing.T, h *Harness) *hostedIssuer {
 	}})
 	require.NoError(t, err)
 	t.Cleanup(engine.Close)
-	svc, err := authhttp.New(engine, authhttp.Config{DirectPeerIP: true, DisableRateLimiting: true})
+	routes, err := engine.HTTPRoutes()
 	require.NoError(t, err)
-	t.Cleanup(svc.Close)
-	handler, err := authhttp.MountHandler(svc, authhttp.MountOptions{APIPrefix: "/auth"})
-	require.NoError(t, err)
+	handler := http.NewServeMux()
+	for _, route := range routes {
+		handler.Handle(route.Method+" "+route.Path, route.Handler)
+	}
 	issuer.Config.Handler = handler
 	issuer.Start()
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
 	email, password := "member"+suffix+"@example.test", "Member-proof-2026!"
-	user, err := engine.CreateUser(ctx, email, "member"+suffix)
+	user, err := engine.Client().CreateUser(ctx, email, "member"+suffix)
 	require.NoError(t, err)
-	require.NoError(t, engine.AdminSetPassword(ctx, user.ID, password))
+	require.NoError(t, engine.Client().AdminSetPassword(ctx, user.ID, password))
 	response, err := issuer.Client().Post(issuer.URL+"/auth/password/login", "application/json", strings.NewReader(`{"identifier":"`+email+`","password":"`+password+`"}`))
 	require.NoError(t, err)
 	var session authkit.TokenSet
