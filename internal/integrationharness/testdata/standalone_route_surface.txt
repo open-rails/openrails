@@ -51,6 +51,8 @@ GET /v1/me/invoices/{id}
 GET /v1/me/notifications
 GET /v1/me/notifications/unread-count
 GET /v1/me/payment-methods
+GET /v1/me/payment-methods/stripe-setup/{id}
+GET /v1/me/payment-operations/{id}/authentication
 GET /v1/me/payments
 GET /v1/me/products
 GET /v1/me/products/{product_id}/access
@@ -166,6 +168,9 @@ POST /v1/me/checkout/{id}/confirm
 POST /v1/me/invoices/{id}/pay-now
 POST /v1/me/notifications/{id}/read
 POST /v1/me/payment-methods
+POST /v1/me/payment-methods/stripe-setup
+POST /v1/me/payment-methods/stripe-setup/{id}/confirm
+POST /v1/me/payment-operations/{id}/authentication/confirm
 POST /v1/me/subscriptions/{id}/cancel
 POST /v1/me/subscriptions/{id}/change-tier
 POST /v1/me/subscriptions/{id}/change-tier/preview

@@ -130,6 +130,20 @@ scoped to the token's subject — no `:user_id` appears in any path.
 | POST | `/v1/me/notifications/{id}/read` | Mark one notification read |
 | POST | `/v1/me/billing-portal` | Provider billing-portal session `{ url }` (mounted only when a Stripe rail is configured) |
 
+### Stripe engine payment setup and authentication
+
+These self-service resources are scoped to the verified customer. Setup saves a
+payment method; it does not create a subscription or grant paid access. Secret
+responses are non-cacheable. Confirmation verifies the existing provider object.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/v1/me/payment-methods/stripe-setup` | Accept recurring consent and create/replay saved-card setup for a selected PSP; requires Idempotency-Key |
+| GET | `/v1/me/payment-methods/stripe-setup/{id}` | Read the caller's setup action and client secret |
+| POST | `/v1/me/payment-methods/stripe-setup/{id}/confirm` | Verify successful setup and link the caller's reusable payment method |
+| GET | `/v1/me/payment-operations/{id}/authentication` | Read the original accepted Stripe payment's authentication action |
+| POST | `/v1/me/payment-operations/{id}/authentication/confirm` | Verify the original payment after authentication; never create a replacement charge |
+
 ### Subscriptions
 
 | Method | Path | Purpose |
@@ -140,7 +154,7 @@ scoped to the token's subject — no `:user_id` appears in any path.
 | POST | `/v1/me/subscriptions/{id}/provider-cutover` | Durable account cutover; Idempotency-Key plus target_payment_method_id and expected source/target PSP IDs |
 | GET | `/v1/me/subscriptions/{id}/provider-cutover` | Read one cutover using idempotency_key; 404 for another customer's subscription |
 | POST | `/v1/me/subscriptions/{id}/cancel` | Cancel. Body `{ "feedback": "..." }` (4-500 chars, required). Returns `202 { "status": "queued" }` on EVERY rail — the cancel is recorded locally and the remote cancel executes as a durable intent (CCBill included; the old portal-only 422 is retired) |
-| POST | `/v1/me/subscriptions/{id}/retry-now` | Verified customer retry of a past-due NMI subscription through the shared durable operation. Requires Idempotency-Key; optional payment_method_id must match its current method. 200 complete, 202 unresolved, coded 402 card refusal. |
+| POST | `/v1/me/subscriptions/{id}/retry-now` | Verified customer retry of a past-due supported native NMI or engine NMI/Stripe agreement through its shared durable operation. Requires Idempotency-Key; optional payment_method_id must match its current method. 200 complete, 202 unresolved, coded 402 card refusal. |
 | POST | `/v1/me/subscriptions/{id}/resume` | Resume a cancelled subscription on a reversible rail before period end. `202 { "status": "queued" }`; 400 with a specific reason otherwise |
 | POST | `/v1/me/subscriptions/{id}/change-tier` | Unified upgrade/downgrade. Body `{ "price_id": "..." }` (same tier group). See below |
 | POST | `/v1/me/subscriptions/{id}/change-tier/preview` | Dry-run of the tier change (proration/effect preview), no mutation |

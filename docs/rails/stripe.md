@@ -129,9 +129,16 @@ overlap remain unqualified by local transport tests.
 References: [Stripe event destinations](https://docs.stripe.com/event-destinations)
 and [Stripe snapshot-to-thin migration](https://docs.stripe.com/webhooks/migrate-snapshot-to-thin-events).
 
-### Catalog sync
+### Catalog ownership
 
-The Stripe catalog adapter pushes OpenRails catalog definitions into your Stripe
+With `new_subscription_collection_policy: engine`, new Stripe products and
+prices stay in OpenRails, including creator catalogs and secondary provider
+accounts. Recurring setup uses saved Customer/PaymentMethod references and
+PaymentIntents; it creates no Stripe Subscription. One-time hosted checkout uses
+inline accepted product/price presentation without a maintained remote catalog.
+Existing explicit Stripe links remain available for provider-owned agreements.
+
+For provider-managed catalog configuration, the Stripe catalog adapter pushes OpenRails catalog definitions into your Stripe
 account with **find-or-create** semantics — identity is content-based, so re-syncing
 (even after a database rebuild) reattaches to the same Stripe objects instead of
 duplicating them:
