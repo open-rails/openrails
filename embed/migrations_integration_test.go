@@ -23,6 +23,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/pgidentity"
 )
 
 // Fresh databases prove the consumer entrypoint owns its catalog and grants only
@@ -103,7 +104,7 @@ func TestApplyMigrationsFreshOwnershipAndSchemas(t *testing.T) {
 			if tc.name == "defaults" {
 				mismatched := opts
 				mismatched.RuntimePool = admin
-				require.ErrorContains(t, ApplyMigrations(ctx, pool, mismatched), "differs from migration database")
+				require.ErrorIs(t, ApplyMigrations(ctx, pool, mismatched), pgidentity.ErrDifferentDatabase)
 				var exists bool
 				require.NoError(t, pool.QueryRow(ctx, "SELECT to_regnamespace($1) IS NOT NULL", tc.billing).Scan(&exists))
 				require.False(t, exists, "runtime preflight must happen before schema DDL")
