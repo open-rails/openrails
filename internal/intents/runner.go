@@ -70,9 +70,8 @@ func LedgerWriteContext(ctx context.Context) (context.Context, context.CancelFun
 	return db.DetachedWriteContext(ctx, ledgerWriteTimeout)
 }
 
-// Runner drains the intent ledger: RunExecuteOnce is the executor pass,
-// RunVerifyOnce the verifier pass. Both are single steps — scheduling is the
-// River periodic jobs' concern.
+// Runner applies financial claims and provider evidence. Production River
+// dispatch calls ExecuteByID/VerifyByID for one accepted operation.
 type Runner struct {
 	Store    ledger
 	Logger   MutationLogger
@@ -242,6 +241,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 		return
 	}
 	stopBeat := r.renewClaimWhile(ctx, logEntry, intent.ID)
+	defer stopBeat() // A panic must not keep an abandoned claim alive.
 	outcome := handler.Execute(ctx, intent)
 	stopBeat()
 	r.record(ctx, logEntry, stats, handler, intent, outcome, outcome.Reason, false)
@@ -664,6 +664,7 @@ func (r *Runner) VerifyByID(ctx context.Context, id uuid.UUID) (gen.OpenrailsRai
 	out := Ambiguous("no verifier registered")
 	logger := log.WithContext(ctx).WithField("intent_id", in.ID)
 	stop := r.renewClaimWhile(ctx, logger, in.ID)
+	defer stop()
 	if h != nil {
 		out = h.Verify(ctx, in)
 	}

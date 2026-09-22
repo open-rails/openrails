@@ -795,6 +795,50 @@ func (q *Queries) ExpireOverdueRailIntents(ctx context.Context, arg ExpireOverdu
 	return result.RowsAffected(), nil
 }
 
+const expireRailIntentByID = `-- name: ExpireRailIntentByID :execrows
+UPDATE openrails.rail_intents pi
+SET status = 'expired',
+    last_failure_reason = 'relevance window elapsed before execution',
+    claimed_until = NULL,
+    updated_at = now()
+WHERE pi.id = $1::uuid AND pi.merchant_id = $2::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
+  AND NOT (pi.intent_type IN ('invoice_collection','subscription_collection') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
+  AND NOT (pi.intent_type='initial_membership' AND coalesce(pi.result_evidence,'{}'::jsonb) ? 'initial_submitted')
+  AND pi.expires_at IS NOT NULL
+  AND pi.expires_at <= $3::timestamptz
+  AND NOT (
+        pi.intent_type = ANY ($4::text[])
+        AND EXISTS (
+            SELECT 1 FROM openrails.reconciliation_findings f
+            WHERE f.merchant_id = $2::uuid AND f.merchant_id = pi.merchant_id
+              AND f.finding_type = 'life.provider_intent.held_bulk'
+              AND f.status IN ('reconcile_required', 'requires_review')
+        )
+      )
+  AND pi.intent_type <> 'subscription_collection'
+`
+
+type ExpireRailIntentByIDParams struct {
+	ID               uuid.UUID
+	MerchantID       uuid.UUID
+	Now              time.Time
+	BreakerHeldTypes []string
+}
+
+func (q *Queries) ExpireRailIntentByID(ctx context.Context, arg ExpireRailIntentByIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, expireRailIntentByID,
+		arg.ID,
+		arg.MerchantID,
+		arg.Now,
+		arg.BreakerHeldTypes,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getLatestManualRebillForPeriod = `-- name: GetLatestManualRebillForPeriod :one
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
 WHERE merchant_id = $1::uuid
@@ -2350,6 +2394,28 @@ func (q *Queries) ParkRailIntent(ctx context.Context, arg ParkRailIntentParams) 
 		arg.MerchantID,
 		arg.ID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const recoverAbandonedRailIntentByID = `-- name: RecoverAbandonedRailIntentByID :execrows
+UPDATE openrails.rail_intents
+SET status = 'unknown_needs_verify', claimed_until = NULL, next_attempt_at = $1::timestamptz,
+    last_failure_reason = 'executor lease expired; verify before retry', updated_at = now()
+WHERE merchant_id = $2::uuid AND id = $3::uuid
+  AND status = 'in_flight' AND (claimed_until IS NULL OR claimed_until <= $1::timestamptz)
+`
+
+type RecoverAbandonedRailIntentByIDParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) RecoverAbandonedRailIntentByID(ctx context.Context, arg RecoverAbandonedRailIntentByIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recoverAbandonedRailIntentByID, arg.Now, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}

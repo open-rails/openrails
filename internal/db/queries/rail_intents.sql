@@ -756,3 +756,34 @@ SELECT * FROM openrails.rail_intents
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND intent_type='subscription_collection'
   AND (sqlc.narg(after_id)::uuid IS NULL OR id>sqlc.narg(after_id)::uuid)
 ORDER BY id LIMIT sqlc.arg(page_size)::int;
+
+-- name: ExpireRailIntentByID :execrows
+UPDATE openrails.rail_intents pi
+SET status = 'expired',
+    last_failure_reason = 'relevance window elapsed before execution',
+    claimed_until = NULL,
+    updated_at = now()
+WHERE pi.id = sqlc.arg(id)::uuid AND pi.merchant_id = sqlc.arg(merchant_id)::uuid AND (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
+  AND NOT (pi.intent_type IN ('invoice_collection','subscription_collection') AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'submitted_at')
+  AND NOT (pi.intent_type = 'nmi_sale' AND coalesce(pi.result_evidence, '{}'::jsonb) ? 'sale_submitted')
+  AND NOT (pi.intent_type='initial_membership' AND coalesce(pi.result_evidence,'{}'::jsonb) ? 'initial_submitted')
+  AND pi.expires_at IS NOT NULL
+  AND pi.expires_at <= sqlc.arg(now)::timestamptz
+  AND NOT (
+        pi.intent_type = ANY (sqlc.arg(breaker_held_types)::text[])
+        AND EXISTS (
+            SELECT 1 FROM openrails.reconciliation_findings f
+            WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.merchant_id = pi.merchant_id
+              AND f.finding_type = 'life.provider_intent.held_bulk'
+              AND f.status IN ('reconcile_required', 'requires_review')
+        )
+      )
+  AND pi.intent_type <> 'subscription_collection';
+
+
+-- name: RecoverAbandonedRailIntentByID :execrows
+UPDATE openrails.rail_intents
+SET status = 'unknown_needs_verify', claimed_until = NULL, next_attempt_at = sqlc.arg(now)::timestamptz,
+    last_failure_reason = 'executor lease expired; verify before retry', updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+  AND status = 'in_flight' AND (claimed_until IS NULL OR claimed_until <= sqlc.arg(now)::timestamptz);

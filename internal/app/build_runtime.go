@@ -374,13 +374,14 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 			return nil, fmt.Errorf("init river producer: %w", err)
 		} else {
 			runtime.RiverProducer = producer
+			runtime.DB.SetRiverJobInserter(producer)
 			runtime.riverProducerPool = pool
 		}
 	}
 
 	// Wire the deferred NMI delete schedulers (issue 216). Since #358 phase A
 	// scheduling enqueues a durable nmi_delete_subscription intent on the
-	// provider intent ledger (no River producer involved); the scheduled
+	// provider intent ledger and River transactionally; the operation
 	// intent executor drains it. Two instances of the one mechanism,
 	// differing only in origin:
 	//   - user-origin for user-asked cancellations (UserSubscriptionService):

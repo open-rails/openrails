@@ -1,12 +1,8 @@
-// Package intents implements the provider intent ledger (#358 phase A): the
-// durable, effectively-once outbox for ALL outbound provider mutations.
-//
-// Every action OpenRails wants to perform against an external payment provider
-// is enqueued as a openrails.rail_intents row (idempotent per merchant on
-// idempotency_key). A scheduled executor (the Runner, driven by a River
-// worker) claims due intents under a SKIP LOCKED lease, checks per-type
-// relevance, gates execution on operating mode x origin, executes via the
-// type's registered handler and classifies the outcome:
+// Package intents implements the financial authorization and evidence ledger.
+// Every accepted provider mutation records immutable terms in rail_intents and
+// atomically inserts its own River job. Inline attempts and River dispatch use
+// the same claim/submission fences. River wakes one operation at a time; the
+// ledger classifies its outcome:
 //
 //   - succeeded:            done; result_evidence records how
 //   - retryable failure:    re-scheduled with the type's backoff

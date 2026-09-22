@@ -523,6 +523,7 @@ func (r *Runtime) BindHostRiverClient(ctx context.Context, client *river.Client[
 	r.SetRiverSchema(schema)
 	r.RiverClient = client
 	r.RiverProducer = client
+	r.DB.SetRiverJobInserter(client)
 	r.externalRiverClient = true
 	r.hostRiverBound.Store(true)
 	r.StartRiverProgressMonitor(ctx)

@@ -177,25 +177,11 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add plan migration redrive worker: %w", err)
 	}
-	// Provider intent ledger (#358): the executor drains due outbound provider
-	// mutations (deferred NMI deletes, refunds, manual rebills), the verifier
-	// resolves ambiguous outcomes via provider reads. These replaced the
-	// NMIDeleteSubscription worker + boot rescan.
-	if err := addTrackedWorker(r, workers, &riverjobs.ProviderIntentExecuteWorker{
-		DB:       r.DB,
-		Config:   r.Config,
-		Clock:    clock,
-		Registry: intentRegistry,
+	// Accepted operations carry their own durable River lifecycle job.
+	if err := addTrackedWorker(r, workers, &riverjobs.ProviderOperationWorker{
+		DB: r.DB, Config: r.Config, Clock: clock, Registry: intentRegistry,
 	}); err != nil {
-		return fmt.Errorf("add provider intent execute worker: %w", err)
-	}
-	if err := addTrackedWorker(r, workers, &riverjobs.ProviderIntentVerifyWorker{
-		DB:       r.DB,
-		Config:   r.Config,
-		Clock:    clock,
-		Registry: intentRegistry,
-	}); err != nil {
-		return fmt.Errorf("add provider intent verify worker: %w", err)
+		return fmt.Errorf("add provider operation worker: %w", err)
 	}
 	// #684: webhook wake-ups — the coalesced per-subscription fetch-and-converge
 	// job the slimmed Stripe/NMI subscription-state handlers enqueue.
@@ -488,22 +474,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 	// Webhook retry job removed - webhooks are now processed synchronously only.
 	// Payment rails (CCBill, NMI) will retry failed webhooks from their end.
 
-	// Every minute: drain due provider intents (#358 — the ACTION pipeline;
-	// deliberately scheduled, unlike reconcile runs which stay manual).
-	// RunOnStart drains parked/overdue intents right after boot — when a mode
-	// change, kill-switch flip or restart is exactly what unblocked them —
-	// replacing the retired #344 boot rescan.
-	jobs = append(jobs, r.healthPeriodic(
-		time.Minute,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.ProviderIntentExecuteArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Minute},
-			}
-		},
-		&river.PeriodicJobOpts{RunOnStart: true},
-	))
-
 	// Hourly: plan-migration re-drive (#816). Period granularity is days, so
 	// hourly can never miss a subscription's final pre-effective period.
 	// RunOnStart=true: a reboot after downtime is exactly when deferred rows
@@ -517,19 +487,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: true},
-	))
-
-	// Every 5 minutes: resolve unknown_needs_verify intents via provider
-	// reads (#358 verifier) before any retry.
-	jobs = append(jobs, r.healthPeriodic(
-		5*time.Minute,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.ProviderIntentVerifyArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute},
-			}
-		},
-		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
 	// Every 6 hours: the batch account-updater cadence (or#795). The window it

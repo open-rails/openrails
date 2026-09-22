@@ -108,14 +108,14 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 		if err != nil {
 			return nil, err
 		}
-		return d.rw.wrapTx(tx), nil
+		return schemaTx{Tx: tx, rw: d.rw, river: d.river}, nil
 	}
 	if d.pool != nil {
 		tx, err := d.pool.Begin(ctx)
 		if err != nil {
 			return nil, err
 		}
-		return d.rw.wrapTx(tx), nil
+		return schemaTx{Tx: tx, rw: d.rw, river: d.river}, nil
 	}
 	return nil, fmt.Errorf("db: no pgx handle available to begin transaction (issue #334)")
 }

@@ -349,23 +349,35 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 	}
 	// psp_id is stamped only when the producer already has observed
 	// provenance (for example an existing subscription pinned to an account).
-	return s.db.Gen(ctx).EnqueueRailIntent(ctx, gen.EnqueueRailIntentParams{
-		MerchantID:     p.MerchantID,
-		Rail:           p.Provider,
-		IntentType:     p.IntentType,
-		SubscriptionID: p.SubscriptionID,
-		PaymentID:      p.PaymentID,
-		PriceID:        p.PriceID,
-		Payload:        payload,
-		IdempotencyKey: p.IdempotencyKey,
-		NextAttemptAt:  p.NextAttemptAt.UTC(),
-		Origin:         string(p.Origin),
-		OriginReason:   originReason,
-		Actor:          actorPtr,
-		ExpiresAt:      p.ExpiresAt,
-		PspID:          uuidPtrOrNil(p.PspID),
-		CustodianID:    uuidPtrOrNil(p.CustodianID),
+	var row gen.OpenrailsRailIntent
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		row, err = s.db.NewWithPgxTx(tx).Gen(ctx).EnqueueRailIntent(ctx, gen.EnqueueRailIntentParams{
+			MerchantID:     p.MerchantID,
+			Rail:           p.Provider,
+			IntentType:     p.IntentType,
+			SubscriptionID: p.SubscriptionID,
+			PaymentID:      p.PaymentID,
+			PriceID:        p.PriceID,
+			Payload:        payload,
+			IdempotencyKey: p.IdempotencyKey,
+			NextAttemptAt:  p.NextAttemptAt.UTC(),
+			Origin:         string(p.Origin),
+			OriginReason:   originReason,
+			Actor:          actorPtr,
+			ExpiresAt:      p.ExpiresAt,
+			PspID:          uuidPtrOrNil(p.PspID),
+			CustodianID:    uuidPtrOrNil(p.CustodianID),
+		})
+		if err != nil {
+			return err
+		}
+		if OperationTerminal(row.Status) {
+			return nil
+		}
+		return s.db.InsertRiverJobTx(ctx, tx, OperationArgs{MerchantID: row.MerchantID, IntentID: row.ID}, operationInsertOpts(row.NextAttemptAt))
 	})
+	return row, err
 }
 
 // SupersedeBySubject marks every live (pending / failed_retryable /
