@@ -94,7 +94,7 @@ func StripeEngineMembership(t testing.TB, ctx context.Context, d *db.DB, terms s
 	runner := &intents.Runner{Store: intents.NewStore(d), Registry: intents.NewRegistry(checkout.NewInitialMembershipIntentHandler(service, stripeInitialReader{stripe})), Config: cfg, Clock: clock}
 	service.Intents = runner
 	key := "stripe-engine-fixture-" + terms.SubscriptionID.String()
-	_, err = service.ConfirmInitialMembership(ctx, terms, key, billingauth.DelegatedPrincipal{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid.String(), SubjectID: terms.CustomerID.String()})
+	_, err = service.ConfirmInitialMembership(ctx, terms, key, billingauth.DelegatedPrincipal{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid.String(), SubjectID: terms.CustomerID.String()}, nil)
 	require.NoError(t, err)
 	op, err := intents.NewStore(d).GetByIdempotencyKey(ctx, checkout.InitialMembershipIdempotencyKey(key))
 	require.NoError(t, err)

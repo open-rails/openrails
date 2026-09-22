@@ -22,10 +22,13 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-func ownsInitialMembership(in gen.OpenrailsRailIntent, user string, price uuid.UUID, fingerprint string) error {
+func ownsInitialMembership(in gen.OpenrailsRailIntent, user string, price uuid.UUID, fingerprint string, sessionID *uuid.UUID) error {
 	p, err := subscriptions.DecodeInitialMembershipPayload(in)
 	if err != nil {
 		return err
+	}
+	if (p.CheckoutSessionID == nil) != (sessionID == nil) || (sessionID != nil && *p.CheckoutSessionID != *sessionID) {
+		return apperr.Conflictf("checkout key belongs to another session binding")
 	}
 	if p.Terms.CustomerID.String() != user || p.Terms.PriceID != price || p.RequestFingerprint != fingerprint {
 		return apperr.Conflictf("checkout key belongs to another accepted enrollment")
@@ -54,14 +57,14 @@ func (s *CheckoutService) replayInitialMembership(ctx context.Context, req *Chec
 	}
 	target := railTarget{PSP: p.PSP, Rail: "nmi"}
 	fingerprint := saleRequestFingerprint(req, user, p.Terms.PriceID, target)
-	if err := ownsInitialMembership(prior, user.ID, p.Terms.PriceID, fingerprint); err != nil {
+	if err := ownsInitialMembership(prior, user.ID, p.Terms.PriceID, fingerprint, nil); err != nil {
 		return nil, true, err
 	}
 	if s.Intents == nil {
 		return nil, true, errors.New("enrollment executor unavailable")
 	}
 	current, err := s.Intents.EnqueueOwnedAndExecute(ctx, initialMembershipReplayParams(prior), func(in gen.OpenrailsRailIntent) error {
-		return ownsInitialMembership(in, user.ID, p.Terms.PriceID, fingerprint)
+		return ownsInitialMembership(in, user.ID, p.Terms.PriceID, fingerprint, nil)
 	})
 	if err != nil {
 		return nil, true, err
@@ -106,7 +109,7 @@ func (s *CheckoutService) admitInitialMembership(ctx context.Context, req *Check
 		prior, err := intents.NewStore(d).GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey(key))
 		if err == nil {
 			in = prior
-			return ownsInitialMembership(prior, user.ID, priceID, fingerprint)
+			return ownsInitialMembership(prior, user.ID, priceID, fingerprint, nil)
 		}
 		if !db.IsNotFound(err) {
 			return err
@@ -174,7 +177,7 @@ func (s *CheckoutService) admitInitialMembership(ctx context.Context, req *Check
 		if err != nil {
 			return err
 		}
-		return ownsInitialMembership(in, user.ID, priceID, fingerprint)
+		return ownsInitialMembership(in, user.ID, priceID, fingerprint, nil)
 	})
 	return in, err
 }
