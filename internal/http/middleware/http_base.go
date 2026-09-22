@@ -162,7 +162,7 @@ func AllRequests(*http.Request) bool { return true }
 // cookies, and a wildcard origin with credentials is invalid CORS besides.
 func PermissiveCORSHTTP(match func(*http.Request) bool) HTTPMiddleware {
 	const (
-		allowHeaders  = "Origin,Content-Length,Content-Type,Authorization,DPoP,X-Request-ID,X-Forwarded-For,X-Real-IP,Idempotency-Key,X-E2E-Run-ID,X-Captcha-Token,Accept-Language"
+		allowHeaders  = "Origin,Content-Length,Content-Type,Authorization,DPoP,X-OpenRails-Merchant,X-Request-ID,X-Forwarded-For,X-Real-IP,Idempotency-Key,X-E2E-Run-ID,X-Captcha-Token,Accept-Language"
 		allowMethods  = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
 		exposeHeaders = "WWW-Authenticate,X-Request-ID,X-RateLimit-Remaining,X-RateLimit-Reset,X-Captcha-Required"
 	)

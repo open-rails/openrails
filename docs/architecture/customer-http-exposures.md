@@ -39,3 +39,11 @@ are available through `Request.PathValue` before authentication. Original URL,
 RawPath, RequestURI and body remain available for signature and sender-proof
 checks. Runtime configuration copies exposure declarations and freezes before
 mounting; conflicting method/path patterns fail before router mutation.
+
+Standalone bundles contain issuer-anchored AuthKit and console URLs and therefore
+mount at the application root. Gin requires the root Engine; Fiber requires the
+root App. The net/http adapter accepts a root ServeMux without a prefix. For Chi,
+use `routes.MountRoot(rootRouter)`: this is an explicit caller assertion, because
+Chi's public router API cannot distinguish a root Mux from a nested subrouter.
+Group mounts are refused before registration. Embedded-only bundles remain
+mountable under arbitrary host prefixes.
