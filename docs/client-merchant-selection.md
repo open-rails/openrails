@@ -12,6 +12,9 @@ Use `ForMerchantID(id)` when the caller already stores the stable merchant UUID.
 Slugs are lookup names; the server resolves them before authorization and never
 uses them as durable identities in tokens, jobs or foreign keys. A call accepts
 one selector, not both slug and UUID or several competing options.
+`WithMerchant` always means slug, even when the slug is UUID-shaped;
+`ForMerchantID` always means stable ID. Neither form auto-detects or falls back
+to the other, which could select a different merchant.
 
 `WithDefaultMerchant("alpha")` is a Client constructor option for a host that
 usually calls one merchant. Existing `WithMerchantID(id)` supplies a UUID default.

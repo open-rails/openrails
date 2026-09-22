@@ -111,6 +111,51 @@ func TestClientCredentialFailureNeverFallsBack(t *testing.T) {
 	}
 }
 
+func TestClientUUIDShapedSlugRemainsASlug(t *testing.T) {
+	id := MerchantID(uuid.New())
+	for _, byID := range []bool{false, true} {
+		t.Run(fmt.Sprint(byID), func(t *testing.T) {
+			want := CredentialTarget{Scope: CredentialScopeMerchant, MerchantSlug: id.String()}
+			option, path := WithMerchant(id.String()), "/v2/merchant/settings"
+			if byID {
+				want = CredentialTarget{Scope: CredentialScopeMerchant, MerchantID: id}
+				option, path = ForMerchantID(id), "/v1/merchant/settings"
+			}
+			var calls atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.URL.Path != path || r.Header.Get(merchant.SlugHeader) != want.MerchantSlug {
+					t.Errorf("selector was inferred from spelling: path=%s headers=%v", r.URL.Path, r.Header)
+				}
+				wantID := ""
+				if byID {
+					wantID = id.String()
+				}
+				if r.Header.Get(merchant.BindingHeader) != wantID {
+					t.Errorf("incorrect ID assertion: %v", r.Header)
+				}
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			t.Cleanup(server.Close)
+			client, err := NewRemote(server.URL, WithCredentialProvider(func(_ context.Context, target CredentialTarget) (string, error) {
+				if target != want {
+					t.Errorf("credential provider target=%+v, want %+v", target, want)
+				}
+				return "selected-key", nil
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := client.Verify(t.Context(), option); err != nil {
+				t.Fatal(err)
+			}
+			if calls.Load() != 1 {
+				t.Fatal("selector did not issue exactly one operation")
+			}
+		})
+	}
+}
+
 func TestClientRequestSelectionReachesResourceAndScopedOperations(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
