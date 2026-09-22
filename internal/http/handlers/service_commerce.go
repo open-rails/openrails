@@ -36,6 +36,13 @@ func ServiceCreateCheckoutSession(r *httprequest.Request) {
 	if !r.BindJSON(&input) {
 		return
 	}
+	if raw := input.PaymentOptions.PaymentMethodID; raw != "" {
+		id, err := openrails.ParsePaymentMethodID(raw)
+		if err != nil || id.IsZero() {
+			r.ErrorJSON(http.StatusBadRequest, "invalid payment_method_id")
+			return
+		}
+	}
 	if len(input.Mode) > 0 || len(input.SubscriptionID) > 0 || len(input.NewPriceID) > 0 {
 		r.ErrorJSON(http.StatusBadRequest, "priced checkout derives its operation from the price; use a dedicated setup or subscription action endpoint")
 		return

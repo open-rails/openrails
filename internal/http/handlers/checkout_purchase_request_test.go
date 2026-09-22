@@ -22,3 +22,13 @@ func TestPricedCheckoutRejectsOperationSelectors(t *testing.T) {
 		})
 	}
 }
+
+func TestPricedCheckoutRejectsInvalidSavedMethodBeforeEngine(t *testing.T) {
+	for _, id := range []string{"550e8400-e29b-41d4-a716-446655440000", "price_550e8400-e29b-41d4-a716-446655440000", "pm_00000000-0000-0000-0000-000000000000"} {
+		req := httptest.NewRequest(http.MethodPost, "/v1/merchant/checkout-sessions", strings.NewReader(fmt.Sprintf(`{"payment":{"payment_method_id":%q}}`, id)))
+		recorder := httptest.NewRecorder()
+		ServiceCreateCheckoutSession(httprequest.NewHTTP(recorder, req, nil))
+		require.Equal(t, http.StatusBadRequest, recorder.Code)
+		require.Contains(t, recorder.Body.String(), "invalid payment_method_id")
+	}
+}
