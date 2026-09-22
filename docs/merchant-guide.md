@@ -260,7 +260,7 @@ mount details: `docs/admin-console.md`.
 Pages: **Customers** (search → profile with grant/revoke and off-channel payment),
 **Subscriptions** (status filters, cancel with typed confirmation, resume, payment-
 method change), **Payments** (filters, detail, rail-aware refund), **Catalog**
-(products/prices CRUD, activate/deactivate, manifest publish with plan preview, drift
+(products/prices CRUD, activate/deactivate, durable catalog batch application, drift
 view), **Ops** (findings queue, repair alerts, worker health), **Settings** (profile,
 team, payment providers, API keys, credit limit, trust level), **Dashboard**.
 
