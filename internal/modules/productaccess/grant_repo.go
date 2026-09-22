@@ -211,7 +211,9 @@ func (r *ProductAccessGrantRepo) CheckActiveProducts(ctx context.Context, userID
 	}
 	result := make(map[uuid.UUID]bool, len(rows))
 	for _, row := range rows {
-		result[row.ProductID] = row.HasAccess
+		if row.ProductID != nil {
+			result[*row.ProductID] = row.HasAccess
+		}
 	}
 	return result, nil
 }

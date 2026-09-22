@@ -270,21 +270,29 @@ func checkClientDeclaredAccess(t *testing.T, ctx context.Context, h *integration
 		UserID: comped.String(), ProductID: product.ID.UUID(), SourceType: models.ProductAccessSourceAdmin, SourceID: source,
 	})
 	require.NoError(t, err)
-	grants, err := client.ListProductAccess(ctx, comped)
+	page, err := client.ProductAccess.List(ctx, &openrails.ProductAccessListParams{CustomerID: comped.String()})
 	require.NoError(t, err)
+	grants := page.Data
 	require.Len(t, grants, 1)
-	require.Equal(t, product.ID, grants[0].ProductID)
-	require.Equal(t, comped, grants[0].CustomerID)
+	require.Equal(t, product.ID.String(), grants[0].ProductID)
+	require.Equal(t, comped.String(), grants[0].CustomerID)
 	require.Equal(t, product.Key, grants[0].ProductKey)
 	require.Equal(t, "admin", grants[0].SourceType)
 	require.Equal(t, "active", grants[0].Status)
 	require.Nil(t, grants[0].PaymentID)
-	has, err = client.HasProductAccess(ctx, comped, product.ID)
+	decisions, err := client.ProductAccess.CheckMany(ctx, &openrails.ProductAccessCheckManyParams{CustomerID: comped.String(), ProductIDs: []string{product.ID.String(), product.ID.String(), openrails.ProductID(uuid.New()).String()}})
 	require.NoError(t, err)
-	require.True(t, has)
-	has, err = client.HasProductAccess(ctx, comped, openrails.ProductID(uuid.New()))
+	require.Len(t, decisions, 2)
+	require.True(t, decisions[product.ID.String()])
+	require.False(t, page.HasMore)
+	require.Empty(t, page.NextCursor)
+
+	access, err := client.ProductAccess.Check(ctx, &openrails.ProductAccessCheckParams{CustomerID: comped.String(), ProductID: product.ID.String()})
 	require.NoError(t, err)
-	require.False(t, has)
+	require.True(t, access.HasAccess)
+	access, err = client.ProductAccess.Check(ctx, &openrails.ProductAccessCheckParams{CustomerID: comped.String(), ProductID: openrails.ProductID(uuid.New()).String()})
+	require.NoError(t, err)
+	require.False(t, access.HasAccess)
 }
 
 func checkClientPlanMigration(t *testing.T, ctx context.Context, h *integrationharness.Harness, d clientWorkflowDeployment) {
