@@ -12,7 +12,7 @@ import (
 )
 
 // IdentityClient is the public AuthKit directory surface this adapter needs.
-// Both authkit.Client and *embedded.Client satisfy it; no database access is
+// Both authkit.Client and *embedded.Runtime satisfy it; no database access is
 // borrowed from the billing engine.
 type IdentityClient interface {
 	AdminGetUser(context.Context, string) (*authkit.AdminUser, error)

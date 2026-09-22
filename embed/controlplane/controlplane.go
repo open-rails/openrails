@@ -186,8 +186,10 @@ func (c *ControlPlane) Handler() (http.Handler, error) {
 	return srv.Handler(), nil
 }
 
-// Core is the control plane's AuthKit engine client.
-func (c *ControlPlane) Core() *authcore.Client { return c.cp.Core() }
+// Core returns the local AuthKit Runtime owned by this control plane. Hosts use
+// it for local bootstrap and configuration, and Core().Client() for portable
+// application operations.
+func (c *ControlPlane) Core() *authcore.Runtime { return c.cp.Core() }
 
 // UserAuthenticator verifies control-plane session tokens in process.
 func (c *ControlPlane) UserAuthenticator() billingauth.Authenticator { return c.cp.UserAuthenticator() }

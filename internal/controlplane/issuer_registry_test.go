@@ -26,7 +26,7 @@ func waitRefreshIdle(t *testing.T, c *ControlPlane) {
 
 // or#854: a ControlPlane with a delegated verifier but NO core client (the state
 // every controlplane unit test builds: &ControlPlane{delegatedVerifier: v}) used
-// to pass a typed-nil *authcore.Client into the verifier's
+// to pass a typed-nil *authcore.Runtime into the verifier's
 // RemoteApplicationSource interface. The boxed nil is a non-NIL interface, so
 // authkit's own `src == nil` fallback never fired and ListRemoteApplications
 // nil-dereffed — inside an unrecovered background goroutine, i.e. process death.
@@ -55,12 +55,12 @@ func TestRefreshIssuerRegistryIfStale_NoCoreClientDoesNotPanic(t *testing.T) {
 
 // The load-bearing half of or#854: whatever future nil appears inside the
 // refresh, the background goroutine must recover rather than tear down the
-// binary. A zero-value *authcore.Client is a non-nil source whose backing
+// binary. A zero-value *authcore.Runtime is a non-nil source whose backing
 // service is nil, so the load panics deep inside authkit — past every guard we
 // could write here. The process must survive it.
 func TestRefreshIssuerRegistryIfStale_RecoversPanic(t *testing.T) {
 	v, _ := newTestDelegatedVerifier(t)
-	cp := &ControlPlane{delegatedVerifier: v, authClient: &authcore.Client{}}
+	cp := &ControlPlane{delegatedVerifier: v, authClient: &authcore.Runtime{}}
 	cp.SetIssuerRegistryTTL(time.Nanosecond)
 
 	cp.refreshIssuerRegistryIfStale()

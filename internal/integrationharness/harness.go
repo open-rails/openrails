@@ -611,7 +611,7 @@ type ServiceJWTCaller struct {
 
 // ensureMerchantGroup idempotently ensures the root + merchant permission-group
 // for slug exist (#567) and returns the merchant group's internal id.
-func (h *Harness) ensureMerchantGroup(core authkit.Client, slug string) string {
+func (h *Harness) ensureMerchantGroup(core *authcore.Runtime, slug string) string {
 	h.t.Helper()
 	_, err := core.EnsureRootGroup(h.ctx)
 	require.NoError(h.t, err, "ensure root group")
