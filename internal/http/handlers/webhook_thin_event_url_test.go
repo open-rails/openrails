@@ -59,6 +59,9 @@ func installThinTransport(t *testing.T, responses map[string]string, inspect fun
 func TestThinStripeSupportedFinancialAndLegacyNotifications(t *testing.T) {
 	for _, tc := range []struct{ eventType, kind, id, collection string }{
 		{"invoice.paid", "invoice", "in_test", "invoices"},
+		{"payment_intent.succeeded", "payment_intent", "pi_test", "payment_intents"},
+		{"payment_intent.payment_failed", "payment_intent", "pi_test", "payment_intents"},
+		{"payment_intent.requires_action", "payment_intent", "pi_test", "payment_intents"},
 		{"refund.created", "refund", "re_test", "refunds"},
 		{"charge.dispute.created", "dispute", "dp_test", "disputes"},
 		{"customer.subscription.updated", "subscription", "sub_test", "subscriptions"},
@@ -130,7 +133,7 @@ func TestThinStripeRejectsBeforeFetching(t *testing.T) {
 		name   string
 		mutate func(map[string]any)
 	}{
-		{"unsupported payment intent", func(n map[string]any) { n["type"] = "v1.payment_intent.succeeded" }},
+		{"unsupported payment intent event", func(n map[string]any) { n["type"] = "v1.payment_intent.created" }},
 		{"unsupported v2", func(n map[string]any) { n["type"] = "v2.core.account.updated" }},
 		{"missing object", func(n map[string]any) { delete(n, "related_object") }},
 		{"wrong context", func(n map[string]any) { n["context"] = "acct_other" }},

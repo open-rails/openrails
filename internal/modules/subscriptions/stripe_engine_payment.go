@@ -207,6 +207,23 @@ func (pi stripeEngineIntent) matches(p StripeEnginePaymentParams) error {
 	return nil
 }
 
+// ValidateStripeEnginePaymentNotification uses the receipt parser's exact
+// accepted-term binding for a wake-up signal. It grants no payment authority;
+// the operation worker still fetches and qualifies the current provider state.
+func ValidateStripeEnginePaymentNotification(raw []byte, params StripeEnginePaymentParams, environment string) error {
+	var pi stripeEngineIntent
+	if err := json.Unmarshal(raw, &pi); err != nil {
+		return err
+	}
+	if environment != "live" && environment != "test" {
+		return errors.New("Stripe notification account environment is unknown")
+	}
+	if pi.LiveMode == nil || *pi.LiveMode != (environment == "live") {
+		return errors.New("Stripe notification environment differs from routed account")
+	}
+	return pi.matches(params)
+}
+
 // ReadEnginePayment never writes. A missing candidate triggers a fully paginated
 // customer list, not Stripe's eventually consistent Search API. Absence remains
 // unknown; even an empty list cannot authorize a second financial submission.

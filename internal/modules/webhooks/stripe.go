@@ -256,6 +256,9 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 // subscribe to (#590 auto-registration reads this for enabled_events). KEEP IN
 // SYNC with the handleEvent switch below.
 var HandledStripeEventTypes = []string{
+	"payment_intent.succeeded",
+	"payment_intent.payment_failed",
+	"payment_intent.requires_action",
 	"invoice.paid",
 	"invoice.payment_failed",
 	"invoice_payment.paid",
@@ -279,6 +282,8 @@ var HandledStripeEventTypes = []string{
 func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string, evt stripeEvent) error {
 	obj := evt.Data.Object
 	switch eventType {
+	case "payment_intent.succeeded", "payment_intent.payment_failed", "payment_intent.requires_action":
+		return s.wakeStripeEngineOperation(ctx, obj)
 	// #684: subscription-state events are WAKE-UP SIGNALS. The handler parses
 	// ONLY the dirty object's identity, then enqueues the coalesced fetch-and-
 	// converge job; FETCHED provider truth (never the payload) decides the

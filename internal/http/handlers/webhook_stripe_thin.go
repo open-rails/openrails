@@ -180,6 +180,8 @@ func stripeIdentifier(id, prefix string) bool {
 func thinStripeResource(event stripeThinEnvelope, eventType string) (string, string, error) {
 	var kind, collection, prefix string
 	switch {
+	case strings.HasPrefix(eventType, "payment_intent."):
+		kind, collection, prefix = "payment_intent", "payment_intents", "pi_"
 	case strings.HasPrefix(eventType, "invoice."):
 		kind, collection, prefix = "invoice", "invoices", "in_"
 	case eventType == "invoice_payment.paid":

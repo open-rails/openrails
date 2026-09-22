@@ -108,19 +108,23 @@ fetches the related resource with OpenRails' regular pinned resource API version
 Only the canonical resource endpoint for that event type can be fetched. The
 original context and event metadata survive normalization; `snapshot_event`, when
 present, becomes the same deduplication key used by the snapshot destination.
-Processing remains inline before acknowledgement, except the existing subscription
-convergence work. This does not make all webhook effects atomically exactly-once.
+Processing remains inline before acknowledgement except subscription convergence
+and accepted engine-payment verification, which are durably enqueued. This does not make all webhook effects atomically exactly-once.
 
 Unknown or malformed thin events, scope mismatches, and hydration failures return
-an error so that delivery is not silently acknowledged. In particular,
+an error so that delivery is not silently acknowledged. The supported
 `v1.payment_intent.succeeded`, `v1.payment_intent.payment_failed`, and
-`v1.payment_intent.requires_action` are **not yet supported** by the webhook
-consumer. Do not configure these destinations as the sole completion mechanism.
-The followup acceptance gate is to resolve the exact accepted operation from the
-account and immutable provider metadata, then enqueue that operation's existing
-receipt verification through River; the webhook must not invent a financial
-outcome from the notification alone. Real account preview access, provider event
-fixtures, and live destination overlap remain unqualified by local transport tests.
+`v1.payment_intent.requires_action` notifications resolve an existing accepted
+engine operation from its merchant/account and immutable provider metadata,
+then enqueue its receipt verification through River. Customer, payment method,
+amount, currency, environment and retained payment identity must match. A
+notification cannot admit a new charge, release a hold, or declare payment
+success; the operation worker reads current Stripe truth and qualifies its
+receipt. Native invoice payments without OpenRails engine metadata continue
+through their existing handlers.
+
+Real account preview access, provider event fixtures, and live destination
+overlap remain unqualified by local transport tests.
 
 References: [Stripe event destinations](https://docs.stripe.com/event-destinations)
 and [Stripe snapshot-to-thin migration](https://docs.stripe.com/webhooks/migrate-snapshot-to-thin-events).

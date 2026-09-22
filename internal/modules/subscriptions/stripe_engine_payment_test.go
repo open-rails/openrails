@@ -359,3 +359,45 @@ func TestStripeEngineCustomerRetryKeepsRecurringAgreement(t *testing.T) {
 		t.Fatal("customer retry receipt accepted for a merchant instruction")
 	}
 }
+
+func TestStripeEngineNotificationQualifiesAcceptedTermsWithoutPaymentAuthority(t *testing.T) {
+	_, params := engineFixture()
+	for _, status := range []string{"succeeded", "requires_payment_method", "requires_action"} {
+		t.Run(status, func(t *testing.T) {
+			pi := enginePI(params)
+			pi["status"] = status
+			if status == "requires_payment_method" {
+				pi["payment_method"] = nil
+				pi["last_payment_error"] = map[string]any{"payment_method": map[string]any{"id": params.Instrument.RailMethodRef}}
+			}
+			body, _ := json.Marshal(pi)
+			if err := ValidateStripeEnginePaymentNotification(body, params, "test"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for _, mutate := range []struct {
+		name   string
+		change func(map[string]any)
+	}{
+		{"customer", func(p map[string]any) { p["customer"] = "cus_other" }},
+		{"method", func(p map[string]any) { p["payment_method"] = "pm_other" }},
+		{"amount", func(p map[string]any) { p["amount"] = 999 }},
+		{"currency", func(p map[string]any) { p["currency"] = "eur" }},
+		{"mode", func(p map[string]any) { p["livemode"] = true }},
+		{"missing mode", func(p map[string]any) { delete(p, "livemode") }},
+		{"operation", func(p map[string]any) {
+			p["metadata"].(map[string]string)["openrails_engine_operation"] = uuid.NewString()
+		}},
+		{"account", func(p map[string]any) { p["metadata"].(map[string]string)["openrails_psp"] = uuid.NewString() }},
+	} {
+		t.Run(mutate.name, func(t *testing.T) {
+			pi := enginePI(params)
+			mutate.change(pi)
+			raw, _ := json.Marshal(pi)
+			if err := ValidateStripeEnginePaymentNotification(raw, params, "test"); err == nil {
+				t.Fatal("unbound notification accepted")
+			}
+		})
+	}
+}
