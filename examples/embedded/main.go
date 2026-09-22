@@ -51,6 +51,7 @@ func run(ctx context.Context, getenv func(string) string) (runErr error) {
 	// River is mandatory: renewals, dunning, invoices and reconciliation run
 	// there. Compose components before binding; extend the supplied config.
 	runtime, err := embed.New(ctx, embed.Options{
+		Merchant: &embed.MerchantDeclaration{Slug: slug},
 		HTTP: &embed.HTTPConfig{Checkout: true, Authenticator: billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
 			return billingauth.UserContext{}, fmt.Errorf("sign in required")
 		})},
@@ -66,10 +67,6 @@ func run(ctx context.Context, getenv func(string) string) (runErr error) {
 		return err
 	}
 	defer runtime.Close(context.WithoutCancel(ctx))
-	merchantID, err := runtime.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{})
-	if err != nil {
-		return err
-	}
 	jobs, err := riverhelpers.New(ctx, pool, &river.Config{Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 4}}}, runtime.RiverJobs())
 	if err != nil {
 		return err
@@ -104,7 +101,7 @@ func run(ctx context.Context, getenv func(string) string) (runErr error) {
 	if _, err := client.GetMerchantSettings(ctx); err != nil {
 		return err
 	}
-	log.Printf("embedded OpenRails ready for merchant %s", merchantID)
+	log.Printf("embedded OpenRails ready for merchant %s", client.MerchantID())
 
 	addr := getenv("OPENRAILS_EXAMPLE_ADDR")
 	if addr == "" {

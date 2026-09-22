@@ -30,6 +30,10 @@ import (
 
 // Options configures the embedded runtime.
 type Options struct {
+	// Merchant declares this runtime's billing merchant and optional PSP identities.
+	// Reconciliation finishes before HTTP configuration and worker startup.
+	Merchant *MerchantDeclaration
+
 	// HTTP configures the externally mounted surface once. Leave nil for a
 	// headless runtime or call ConfigureHTTP after merchant/auth provisioning.
 	HTTP *HTTPConfig
@@ -117,6 +121,9 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
 	}
+	if err := validateMerchantDeclaration(opts.Merchant); err != nil {
+		return nil, err
+	}
 	if err := embedhttp.ValidateHTTPConfig(opts.HTTP, opts.DelegatedAuthenticator); err != nil {
 		return nil, err
 	}
@@ -154,6 +161,10 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	application.ConsoleAssets = opts.ConsoleAssets
 
 	r := &Runtime{app: application, delegatedAuthenticator: opts.DelegatedAuthenticator}
+	if err := configureMerchant(ctx, application, opts.Merchant); err != nil {
+		_ = r.Close(ctx)
+		return nil, err
+	}
 	if opts.HTTP != nil {
 		if err := r.ConfigureHTTP(*opts.HTTP); err != nil {
 			_ = r.Close(ctx)

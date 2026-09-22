@@ -8,13 +8,14 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // PSPDeclaration identifies a payment-service-provider account without
-// configuring credentials. Embedded hosts use this before importing billing
+// configuring credentials. Hosts declare these in MerchantDeclaration before importing billing
 // facts that came from a host-owned or synthetic provider.
 type PSPDeclaration struct {
 	Key       string
@@ -22,7 +23,7 @@ type PSPDeclaration struct {
 	AccountID string
 }
 
-// DeclarePSP idempotently records a PSP identity for an embedded host. It does
+// declarePSP idempotently records a PSP identity for an embedded host. It does
 // not write secrets or arm the PSP for checkout; those remain the payment-
 // provider configuration boundary's responsibility.
 //
@@ -30,8 +31,8 @@ type PSPDeclaration struct {
 // the row receives the same deterministic natural-key ID as every other PSP
 // writer. This is the public precursor to ImportBilling when the declared book
 // attributes its rows with a PSPRef.
-func (r *Runtime) DeclarePSP(ctx context.Context, merchantID merchant.ID, declaration PSPDeclaration) (uuid.UUID, error) {
-	if r == nil || r.app == nil || r.app.Runtime == nil || r.app.Runtime.DB == nil {
+func declarePSP(ctx context.Context, application *app.App, merchantID merchant.ID, declaration PSPDeclaration) (uuid.UUID, error) {
+	if application == nil || application.Runtime == nil || application.Runtime.DB == nil {
 		return uuid.Nil, fmt.Errorf("embedded billing: runtime not initialized")
 	}
 	if merchantID.IsZero() {
@@ -50,8 +51,8 @@ func (r *Runtime) DeclarePSP(ctx context.Context, merchantID merchant.ID, declar
 		return uuid.Nil, fmt.Errorf("embedded billing: DeclarePSP requires an account ID")
 	}
 
-	environment := config.ExpectedProviderEnvironment(r.app.Runtime.Config.IsTestMode())
-	database := r.app.Runtime.DB
+	environment := config.ExpectedProviderEnvironment(application.Runtime.Config.IsTestMode())
+	database := application.Runtime.DB
 	if err := merchants.AssertPSPUnowned(
 		ctx,
 		gen.New(database.DataPool()),
