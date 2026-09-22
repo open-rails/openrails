@@ -155,12 +155,12 @@ func ccbillOptionPSPs(t *testing.T, ctx context.Context, client *openrails.Clien
 func seedCCBillPrice(t *testing.T, ctx context.Context, client *openrails.Client) openrails.PriceID {
 	t.Helper()
 	key := "archive-" + uuid.NewString()[:8]
-	product, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: key, DisplayName: "Archive lifecycle"})
+	product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: key, DisplayName: "Archive lifecycle"})
 	require.NoError(t, err)
 	duration := 720
-	price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: key + "-monthly", UnitAmount: 5_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
+	price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: key + "-monthly", UnitAmount: 5_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 	require.NoError(t, err)
-	return price.ID
+	return sdkPriceID(t, price.ID)
 }
 
 func ccbillPriceBinder(h *Harness, mid merchant.ID) func(t *testing.T, price openrails.PriceID, flexID string, accounts ...uuid.UUID) {

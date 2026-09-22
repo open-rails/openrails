@@ -59,9 +59,9 @@ func TestClientRefusesEmptyIdentifiersBeforeIO(t *testing.T) {
 	// Free-form host strings: keys, entitlement names, request ids and plan
 	// migration references. Blank and dot segments are refused.
 	calls := map[string]func(id string) error{
-		"GetProductByKey":  func(id string) error { _, err := c.GetProductByKey(ctx, id); return err },
-		"GetPriceByKey":    func(id string) error { _, err := c.GetPriceByKey(ctx, id); return err },
-		"SetPriceKey key":  func(id string) error { _, err := c.SetPriceKey(ctx, price, id); return err },
+		"GetProductByKey":  func(id string) error { _, err := c.Products.RetrieveByKey(ctx, id); return err },
+		"GetPriceByKey":    func(id string) error { _, err := c.Prices.RetrieveByKey(ctx, id); return err },
+		"SetPriceKey key":  func(id string) error { _, err := c.Prices.SetKey(ctx, (price).String(), id); return err },
 		"GetUsageMeter":    func(id string) error { _, err := c.GetUsageMeter(ctx, id); return err },
 		"EnsureUsageMeter": func(id string) error { return c.EnsureUsageMeter(ctx, UsageMeterSpec{Key: id}) },
 		"SetDefaultUsageRateCard": func(id string) error {
@@ -141,7 +141,7 @@ func TestClientRefusesEmptyIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.EnsureCustomerInvoiceProfile(ctx, CustomerID{}, InvoiceProfileDTO{})
 			return err
 		},
-		"SetPriceKey id": func() error { _, err := c.SetPriceKey(ctx, PriceID{}, "key"); return err },
+		"SetPriceKey id": func() error { _, err := c.Prices.SetKey(ctx, "", "key"); return err },
 		"GrantEntitlement customer": func() error {
 			_, err := c.GrantEntitlement(ctx, CustomerID{}, GrantEntitlementRequest{Entitlement: "pro"})
 			return err
@@ -162,10 +162,10 @@ func TestClientRefusesEmptyIdentifiersBeforeIO(t *testing.T) {
 		"SetCustomerBillingPolicy":    func() error { _, err := c.SetCustomerBillingPolicy(ctx, CustomerID{}, nil); return err },
 		"SetCustomerSpendDelegations": func() error { return c.SetCustomerSpendDelegations(ctx, CustomerID{}, nil) },
 		"EnsureCustomer":              func() error { _, err := c.EnsureCustomer(ctx, CustomerID{}); return err },
-		"GetProduct":                  func() error { _, err := c.GetProduct(ctx, ProductID{}); return err },
-		"UpdateProduct":               func() error { _, err := c.UpdateProduct(ctx, ProductID{}, UpdateProductRequest{}); return err },
-		"GetPrice":                    func() error { _, err := c.GetPrice(ctx, PriceID{}); return err },
-		"UpdatePrice":                 func() error { _, err := c.UpdatePrice(ctx, PriceID{}, UpdatePriceRequest{}); return err },
+		"GetProduct":                  func() error { _, err := c.Products.Retrieve(ctx, ""); return err },
+		"UpdateProduct":               func() error { _, err := c.Products.Update(ctx, "", &ProductUpdateParams{}); return err },
+		"GetPrice":                    func() error { _, err := c.Prices.Retrieve(ctx, ""); return err },
+		"UpdatePrice":                 func() error { _, err := c.Prices.Update(ctx, "", &PriceUpdateParams{}); return err },
 		"GetPayment":                  func() error { _, err := c.GetPayment(ctx, PaymentID{}); return err },
 		"HasSettledPayment customer":  func() error { _, err := c.HasSettledPayment(ctx, CustomerID{}, price); return err },
 		"HasSettledPayment price":     func() error { _, err := c.HasSettledPayment(ctx, customer, PriceID{}); return err },

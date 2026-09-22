@@ -37,14 +37,14 @@ func TestCCBillUpgradeBilledPriceAndDuplicateCallback(t *testing.T) {
 		_, err := pool.Exec(context.Background(), `UPDATE billing.psps SET archived=true WHERE merchant_id=$1`, owned.MerchantID.UUID())
 		require.NoError(t, err)
 	})
-	product, err := client.CreateProduct(t.Context(), openrails.CreateProductRequest{Key: "upgrade", DisplayName: "CCBill upgrade", EntitlementsSpec: map[string]*int{"upgrade_access": nil}})
+	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "upgrade", DisplayName: "CCBill upgrade", EntitlementsSpec: map[string]*int{"upgrade_access": nil}})
 	require.NoError(t, err)
 	var prices []openrails.PriceID
 	for i, amount := range []int64{9_990_000, 24_990_000} {
 		hours := 720 * (i + 1)
-		price, err := client.CreatePrice(t.Context(), openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: amount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours, PSPLinks: map[string]map[string]string{"ccbill": {"flex_id": fmt.Sprintf("upgrade-flex-%d", i), "form_name": "workflow"}}})
+		price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, UnitAmount: amount, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours, PSPLinks: map[string]map[string]string{"ccbill": {"flex_id": fmt.Sprintf("upgrade-flex-%d", i), "form_name": "workflow"}}})
 		require.NoError(t, err)
-		prices = append(prices, price.ID)
+		prices = append(prices, sdkPriceID(t, price.ID))
 	}
 	username := "upgrade" + uuid.NewString()[:8]
 	user, err := embcp.Get(surface.App()).Core().CreateUser(t.Context(), username+"@example.test", username)

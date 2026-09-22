@@ -332,7 +332,7 @@ placeholders and the host supplies real secrets from its own config tree).
 **Catalog authoring**: `CatalogSource` selects `manifest` or `api`; when omitted
 it follows `MerchantConfigSource`, preserving existing behavior. Manifest catalogs use
 `rt.PushCatalog`; catalog API writes return 405 `manifest_driven`. API catalogs
-use the Client (`CreateProduct`, `CreatePrice`, `SetPriceKey`, ...); mutating
+use the Client (`Products.Create`, `Prices.Create`, `Prices.SetKey`, ...); mutating
 manifest pushes are refused, while plan-only comparisons remain available.
 
 For dynamic products with host-owned Stripe credentials, construct the runtime
@@ -370,17 +370,15 @@ merchant-wide derive pass on demand after an import. The manifest is
 
 One merchant may have a default catalog and catalogs owned by opaque host
 subjects. Ordinary `rt.Client()` calls continue to create products in the default
-catalog unless an authorized administrator supplies `CreateProductRequest.CatalogID`.
+catalog unless an authorized administrator supplies `ProductCreateParams.CatalogID`.
 Product and price keys remain unique within the merchant.
 
 For a creator, pass an identity obtained from your authenticated user:
 
 ```go
-author, err := rt.CatalogClient(verifiedSubject)
+author, err := client.ForCatalogOwner(verifiedSubject)
 if err != nil { return err }
-catalog, err := author.EnsureOwnCatalog(ctx)
-if err != nil { return err }
-product, err := author.CreateProduct(ctx, openrails.CreateProductRequest{
+product, err := author.Products.Create(ctx, &openrails.ProductCreateParams{
     Key: "post-" + postID, DisplayName: title,
 })
 ```
@@ -391,9 +389,9 @@ reads, lists, edits, archive actions and price-key history. Prices inherit their
 catalog from the product, and a purchased product cannot be moved to another
 catalog through an ordinary update. Content ACLs and authentication remain yours.
 
-`CatalogClient` captures only `merchant:catalog:read-own` and
-`merchant:catalog:update-own`; its options
-cannot replace that transport/credential with a merchant administrator's. It
+`ForCatalogOwner` returns a catalog-only client. The server verifies its credential
+and requires administrator authority to select a different subject; a scoped
+client cannot switch owner or invoke merchant-wide operations. It
 supports product display/archive and price terms, not entitlement/tier definitions,
 raw provider bindings, provider selection, meters or bulk publishing. The engine
 selects applicable configured providers for creator prices. It does not create
@@ -609,7 +607,7 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Policy | `GetMerchantSettings`, `SetMerchantSettings`, `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation`, `DeleteCustomerSpendDelegation` |
 | Funding / reporting | `DepositCredits`, `GetDeposit`, `SetCreditLimit`, `GetCreditLimit`, `UsageRollup`, `ResourceRevenueDaily` |
 | Customers / entitlements | `EnsureCustomer`, `Balance`, `GetCreditAccount`, `ListActiveEntitlements`, `ListEntitlements`, `HasEntitlement`, `ListCustomersWithEntitlement`, `GrantEntitlement`, `RevokeEntitlement`, `ListProductAccess`, `HasProductAccess` |
-| Catalog (API hosts) | `CreateProduct`, `UpdateProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `CreatePrice`, `UpdatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `SetPriceKey`, `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `EnsureUsageProduct`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` |
+| Catalog (API hosts) | `Products.Create`, `Products.Update`, `Products.Retrieve`, `Products.RetrieveByKey`, `Products.List`, `Products.Ensure`, `Prices.Create`, `Prices.Update`, `Prices.Retrieve`, `Prices.RetrieveByKey`, `Prices.List`, `Prices.SetKey`, `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` |
 | Checkout | `CreateCheckoutSession`, `GetCheckoutSession`, `ConfirmCheckoutSession`, `ListCheckoutRailOptions`, `GetCheckoutConfig`, `ResolveEffectiveTier` |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `UpdateSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CancelPlanMigration` |
 | Payments | `GetPayment`, `ListPayments`, `HasSettledPayment`, `ListPaymentMethods`, `DeletePaymentMethod` |

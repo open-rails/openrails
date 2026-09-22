@@ -52,14 +52,14 @@ func TestCustomerPaymentMethodAuthorityAndSavedSourceUpdate(t *testing.T) {
 	other, otherToken := f.actor(t, []string{permissions.CustomerAll})
 	rt := f.surface.App().Runtime
 	integrationharness.SeedPSPs(t.Context(), t, rt, f.merchant.MerchantID, config.PSPSet{"nmi": {Rail: "nmi", AccountID: "source-" + uuid.NewString(), NMI: &config.NMIRailConfig{SecurityKey: "synthetic", WebhookSigningSecret: "synthetic"}}})
-	product, err := f.client.CreateProduct(t.Context(), openrails.CreateProductRequest{Key: "source", DisplayName: "Saved source"})
+	product, err := f.client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "source", DisplayName: "Saved source"})
 	require.NoError(t, err)
 	hours := 720
-	price, err := f.client.CreatePrice(t.Context(), openrails.CreatePriceRequest{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+	price, err := f.client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: product.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 	require.NoError(t, err)
-	otherProduct, err := f.client.CreateProduct(t.Context(), openrails.CreateProductRequest{Key: "unsupported", DisplayName: "Provider managed"})
+	otherProduct, err := f.client.Products.Create(t.Context(), &openrails.ProductCreateParams{Key: "unsupported", DisplayName: "Provider managed"})
 	require.NoError(t, err)
-	otherPrice, err := f.client.CreatePrice(t.Context(), openrails.CreatePriceRequest{ProductID: otherProduct.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
+	otherPrice, err := f.client.Prices.Create(t.Context(), &openrails.PriceCreateParams{ProductID: otherProduct.ID, UnitAmount: 9_990_000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours})
 	require.NoError(t, err)
 	old, newMethod, foreign, cross, custodial := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	sub, unsupported := uuid.New(), uuid.New()
@@ -94,7 +94,7 @@ func TestCustomerPaymentMethodAuthorityAndSavedSourceUpdate(t *testing.T) {
 		for _, row := range []struct {
 			id, psp, product, price uuid.UUID
 			rail, provider          string
-		}{{sub, psp, product.ID.UUID(), price.ID.UUID(), "nmi", railSub}, {unsupported, ccbill, otherProduct.ID.UUID(), otherPrice.ID.UUID(), "ccbill", "unsupported-" + uuid.NewString()}} {
+		}{{sub, psp, sdkProductID(t, product.ID).UUID(), sdkPriceID(t, price.ID).UUID(), "nmi", railSub}, {unsupported, ccbill, sdkProductID(t, otherProduct.ID).UUID(), sdkPriceID(t, otherPrice.ID).UUID(), "ccbill", "unsupported-" + uuid.NewString()}} {
 			_, err = q.Exec(ctx, `INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,payment_method_id,rail,rail_subscription_id,status,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10,$11)`, row.id, mid, customer.UUID(), row.product, row.price, row.psp, old, row.rail, row.provider, time.Now().Add(-time.Hour), time.Now().Add(720*time.Hour))
 			if err != nil {
 				return err

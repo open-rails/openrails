@@ -433,9 +433,9 @@ WHERE g.merchant_id = $1
 	return n
 }
 
-func mustCatalogProduct(t *testing.T, ctx context.Context, applier *openrails.Client, key string) billingservice.CatalogProduct {
+func mustCatalogProduct(t *testing.T, ctx context.Context, applier *openrails.Client, key string) openrails.Product {
 	t.Helper()
-	product, err := applier.GetProductByKey(ctx, key)
+	product, err := applier.Products.RetrieveByKey(ctx, key)
 	require.NoError(t, err)
 	return *product
 }
@@ -565,7 +565,7 @@ type httpCatalogApplier struct {
 
 // The external Solana proof uses this one convenience method. Its requests
 // now go through the shared Client, not another HTTP implementation.
-func (a httpCatalogApplier) ListPricesByProduct(ctx context.Context, id openrails.ProductID, activeOnly bool) ([]billingservice.CatalogPrice, error) {
+func (a httpCatalogApplier) ListPricesByProduct(ctx context.Context, id openrails.ProductID, activeOnly bool) ([]openrails.Price, error) {
 	client, err := openrails.NewRemote(a.baseURL, openrails.WithAPIKey(a.token), openrails.WithMerchantID(dbtest.TestMerchantID), openrails.WithCurrency("USD"))
 	if err != nil {
 		return nil, err
@@ -744,7 +744,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	require.Equal(t, tierGroup, *pro.TierGroup)
 	require.Equal(t, 2, pro.TierRank)
 
-	proPrices, err := catalogPrices(ctx, applier, pro.ID, true)
+	proPrices, err := catalogPrices(ctx, applier, sdkProductID(t, pro.ID), true)
 	require.NoError(t, err)
 	require.Len(t, proPrices, 1)
 	require.True(t, proPrices[0].AutoRenew)
@@ -755,7 +755,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	require.NotNil(t, proPrices[0].TrialDurationHours)
 	require.Equal(t, 168, *proPrices[0].TrialDurationHours)
 
-	moviePrices, err := catalogPrices(ctx, applier, movie.ID, true)
+	moviePrices, err := catalogPrices(ctx, applier, sdkProductID(t, movie.ID), true)
 	require.NoError(t, err)
 	require.Len(t, moviePrices, 1)
 	require.Nil(t, moviePrices[0].AccessDurationHours)
@@ -773,7 +773,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	grantLedger := grants.New(dbtest.Queries(pool), dbtest.TestMerchantID.UUID())
 
 	pastEnd := time.Now().Add(-24 * time.Hour)
-	premiumProduct := premium.ID.UUID()
+	premiumProduct := sdkProductID(t, premium.ID).UUID()
 	firstSub, err := grantLedger.Grant(ctx, grants.GrantInput{
 		Customer: customerID,
 		Product:  &premiumProduct,
@@ -808,7 +808,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	require.Len(t, entitlementRows, 1)
 	require.Equal(t, "premium", entitlementRows[0].Entitlement)
 
-	movieProduct := movie.ID.UUID()
+	movieProduct := sdkProductID(t, movie.ID).UUID()
 	ownership, err := grantLedger.Grant(ctx, grants.GrantInput{
 		Customer: customerID,
 		Product:  &movieProduct,
@@ -818,5 +818,5 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, grantLedger.MaterializeGrant(ctx, ownership))
-	require.Equal(t, 1, liveOwnershipGrantCount(t, ctx, pool, customerID, movie.ID.UUID()))
+	require.Equal(t, 1, liveOwnershipGrantCount(t, ctx, pool, customerID, sdkProductID(t, movie.ID).UUID()))
 }

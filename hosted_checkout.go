@@ -103,7 +103,7 @@ type HostedCheckoutPayResult struct {
 // NewHostedCheckoutPlan derives the plan from a catalog product and price and
 // stamps the price currency's registered scale. An unregistered currency is
 // ErrInvalid: a scale is never guessed.
-func NewHostedCheckoutPlan(product *CatalogProduct, price *CatalogPrice) (HostedCheckoutPlan, error) {
+func NewHostedCheckoutPlan(product *Product, price *Price) (HostedCheckoutPlan, error) {
 	if product == nil || price == nil {
 		return HostedCheckoutPlan{}, fmt.Errorf("%w: hosted checkout plan needs a product and a price", ErrInvalid)
 	}

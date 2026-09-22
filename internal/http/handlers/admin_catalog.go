@@ -51,6 +51,31 @@ func AdminCreateProduct(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, out)
 }
 
+// AdminEnsureProduct preserves a product's first declaration under its key.
+func AdminEnsureProduct(r *httprequest.Request) {
+	var req struct {
+		DisplayName string `json:"display_name"`
+	}
+	if !bindCatalogJSON(r, &req) {
+		return
+	}
+	svc, ok := newAdminBillingService(r)
+	if !ok {
+		return
+	}
+	id, err := svc.EnsureUsageProduct(r.Request.Context(), r.Param("key"), req.DisplayName)
+	if err != nil {
+		writeCatalogError(r, err)
+		return
+	}
+	out, err := svc.GetProduct(r.Request.Context(), openrails.ProductID(id))
+	if err != nil {
+		writeCatalogError(r, err)
+		return
+	}
+	r.JSON(http.StatusOK, out)
+}
+
 func AdminListProducts(r *httprequest.Request) {
 	svc, ok := newAdminBillingService(r)
 	if !ok {

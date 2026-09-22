@@ -49,7 +49,7 @@ func TestClientBoundaryWorkflow(t *testing.T) {
 					return err
 				}},
 				{"nil migration batch", false, func() error { _, err := client.CancelPlanMigration(ctx, uuid.Nil); return err }},
-				{"nil price key", false, func() error { _, err := client.SetPriceKey(ctx, openrails.PriceID{}, "key"); return err }},
+				{"nil price key", false, func() error { _, err := client.Prices.SetKey(ctx, "", "key"); return err }},
 				{"nil invoice", false, func() error { _, err := client.GetMerchantInvoice(ctx, uuid.Nil); return err }},
 				{"zero balance customer", false, func() error { _, err := client.Balance(ctx, openrails.CustomerID{}); return err }},
 				{"dot operation", false, func() error { _, err := client.GetOperationAuthorization(ctx, ".."); return err }},
@@ -126,7 +126,7 @@ func clientBoundaryErrors(t *testing.T, ctx context.Context, h *integrationharne
 	out["subscription_not_found"] = observeClientError(t, "subscription not found", err)
 	_, err = client.ListPaymentMethods(ctx, openrails.CustomerID(customer), openrails.PageOptions{Limit: 101})
 	out["page_limit"] = observeClientError(t, "page limit", err)
-	_, err = client.GetProduct(ctx, openrails.ProductID(uuid.New()))
+	_, err = client.Products.Retrieve(ctx, (openrails.ProductID(uuid.New())).String())
 	require.Equal(t, errorObservation{StatusError: true, Status: 404, Type: "invalid_request_error", Code: "product_not_found", NotFound: true, HasRequestID: true}, observeClientError(t, "product not found", err))
 	err = client.CancelSubscription(ctx, openrails.SubscriptionID(uuid.New()), openrails.CancelSubscriptionRequest{Reason: "parity"})
 	require.Equal(t, errorObservation{StatusError: true, Status: 404, Type: "invalid_request_error", Code: "subscription_not_found", NotFound: true, HasRequestID: true}, observeClientError(t, "subscription not found", err))
@@ -178,14 +178,14 @@ func checkClientDTOShapes(t *testing.T, ctx context.Context, h *integrationharne
 		subscription openrails.SubscriptionID
 		method       openrails.PaymentMethodID
 		payment      openrails.PaymentID
-		product      *openrails.CatalogProduct
-		price        *openrails.CatalogPrice
+		product      *openrails.Product
+		price        *openrails.Price
 	}
 	key := "shape-" + uuid.NewString()[:8]
-	product, err := client.CreateProduct(ctx, openrails.CreateProductRequest{Key: key, DisplayName: "Shape"})
+	product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: key, DisplayName: "Shape"})
 	require.NoError(t, err)
 	duration := 720
-	price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: key + "-monthly", UnitAmount: 1_000_000, Currency: "usd", AccessDurationHours: &duration, AutoRenew: true})
+	price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: key + "-monthly", UnitAmount: 1_000_000, Currency: "usd", AccessDurationHours: &duration, AutoRenew: true})
 	require.NoError(t, err)
 	require.Equal(t, product.ID, price.ProductID)
 
@@ -200,9 +200,9 @@ func checkClientDTOShapes(t *testing.T, ctx context.Context, h *integrationharne
 	exec(`INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,last_four,card_type,created_at,updated_at) VALUES($1,$2,$3,$4,'nmi',$5::text,$5::text,$5::text,'4242','visa',$6,$6)`,
 		f.method.UUID(), mid, f.customer.UUID(), psp, "shape-"+f.method.UUID().String(), now)
 	exec(`INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,'nmi','active',$7,$8,$9,$10)`,
-		f.subscription.UUID(), mid, f.customer.UUID(), product.ID.UUID(), price.ID.UUID(), psp, f.subscription.UUID().String(), f.method.UUID(), now, now.Add(720*time.Hour))
+		f.subscription.UUID(), mid, f.customer.UUID(), sdkProductID(t, product.ID).UUID(), sdkPriceID(t, price.ID).UUID(), psp, f.subscription.UUID().String(), f.method.UUID(), now, now.Add(720*time.Hour))
 	exec(`INSERT INTO billing.payments(id,merchant_id,customer_id,price_id,subscription_id,psp_id,rail,transaction_id,amount,list_amount,currency,status,money_movement,purchased_at) VALUES($1,$2,$3,$4,$5,$6,'nmi',$7,1000000,1000000,'USD','completed','rail',$8)`,
-		f.payment.UUID(), mid, f.customer.UUID(), price.ID.UUID(), f.subscription.UUID(), psp, "shape-txn-"+f.payment.UUID().String(), now)
+		f.payment.UUID(), mid, f.customer.UUID(), sdkPriceID(t, price.ID).UUID(), f.subscription.UUID(), psp, "shape-txn-"+f.payment.UUID().String(), now)
 
 	var o dtoShapeObservation
 	sub, err := client.GetSubscription(ctx, f.subscription)
@@ -227,12 +227,12 @@ func checkClientDTOShapes(t *testing.T, ctx context.Context, h *integrationharne
 	require.True(t, methods.Data[0].CreatedAt.Equal(now))
 	require.Len(t, methods.Data[0].Subscriptions, 1)
 	o.MethodSubscriptionID = methods.Data[0].Subscriptions[0].ID
-	catalogPrice, err := client.GetPrice(ctx, sub.PriceID)
+	catalogPrice, err := client.Prices.Retrieve(ctx, (sub.PriceID).String())
 	require.NoError(t, err)
-	o.CatalogPriceID = catalogPrice.ID
+	o.CatalogPriceID = sdkPriceID(t, catalogPrice.ID)
 	o.HasPayment, err = client.HasSettledPayment(ctx, f.customer, sub.PriceID)
 	require.NoError(t, err)
-	payments, err := client.ListPayments(ctx, openrails.PaymentFilter{CustomerID: f.customer, PriceID: price.ID})
+	payments, err := client.ListPayments(ctx, openrails.PaymentFilter{CustomerID: f.customer, PriceID: sdkPriceID(t, price.ID)})
 	require.NoError(t, err)
 	require.Len(t, payments.Data, 1)
 	require.Equal(t, f.payment, payments.Data[0].ID)
@@ -241,7 +241,7 @@ func checkClientDTOShapes(t *testing.T, ctx context.Context, h *integrationharne
 	require.Equal(t, f.subscription, *payments.Data[0].SubscriptionID)
 	payment, err := client.GetPayment(ctx, f.payment)
 	require.NoError(t, err)
-	require.Equal(t, price.ID, payment.Price.ID)
+	require.Equal(t, price.ID, payment.Price.ID.String())
 
 	deposit, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &f.customer, Invoker: "shape", Currency: "usd", Amount: 1_000, Source: "shape", SourceID: uuid.NewString()})
 	require.NoError(t, err)
@@ -263,8 +263,8 @@ func checkClientDTOShapes(t *testing.T, ctx context.Context, h *integrationharne
 	want := dtoShapeObservation{
 		SubscriptionID: f.subscription, ListedSubscriptionID: f.subscription, MethodSubscriptionID: f.subscription,
 		CustomerID: f.customer,
-		ProductID:  product.ID, PriceProductID: product.ID, ProductOwnID: product.ID,
-		PriceID: price.ID, PriceOwnID: price.ID, CatalogPriceID: price.ID,
+		ProductID:  sdkProductID(t, product.ID), PriceProductID: sdkProductID(t, product.ID), ProductOwnID: sdkProductID(t, product.ID),
+		PriceID: sdkPriceID(t, price.ID), PriceOwnID: sdkPriceID(t, price.ID), CatalogPriceID: sdkPriceID(t, price.ID),
 		PaymentMethodID: f.method, MethodID: f.method, PaymentID: f.payment,
 		ReadByID: true, HasPayment: true,
 		DepositCurrency: "USD", BalanceCurrency: "USD", PriceCurrency: "USD", RuleCurrency: "USD",
@@ -273,25 +273,25 @@ func checkClientDTOShapes(t *testing.T, ctx context.Context, h *integrationharne
 	raw := getRawJSON(t, d.url+"/v1/merchant/subscriptions/"+openrails.SubscriptionID(f.subscription).String(), d.token)
 	require.Equal(t, f.subscription.String(), raw["id"])
 	require.Equal(t, f.customer.String(), raw["customer_id"])
-	require.Equal(t, f.product.ID.String(), raw["product_id"])
-	require.Equal(t, f.price.ID.String(), raw["price_id"])
+	require.Equal(t, f.product.ID, raw["product_id"])
+	require.Equal(t, f.price.ID, raw["price_id"])
 	require.Equal(t, f.method.String(), raw["payment_method_id"])
 	require.Equal(t, f.payment.String(), raw["payments"].([]any)[0].(map[string]any)["id"])
 	require.True(t, strings.HasPrefix(raw["id"].(string), openrails.SubscriptionIDPrefix))
-	for _, bare := range []string{f.subscription.UUID().String(), f.product.ID.UUID().String(), f.price.ID.UUID().String(), f.method.UUID().String(), f.payment.UUID().String()} {
+	for _, bare := range []string{f.subscription.UUID().String(), sdkProductID(t, f.product.ID).UUID().String(), sdkPriceID(t, f.price.ID).UUID().String(), f.method.UUID().String(), f.payment.UUID().String()} {
 		for key, value := range raw {
 			if s, ok := value.(string); ok && key != "rail_subscription_id" {
 				require.NotEqual(t, bare, s, "bare uuid leaked at %s", key)
 			}
 		}
 	}
-	catalog := getRawJSON(t, d.url+"/v1/merchant/catalog/prices/"+openrails.PriceID(f.price.ID).String(), d.token)
-	require.Equal(t, f.price.ID.String(), catalog["id"])
-	require.Equal(t, f.product.ID.String(), catalog["product_id"])
+	catalog := getRawJSON(t, d.url+"/v1/merchant/catalog/prices/"+sdkPriceID(t, f.price.ID).String(), d.token)
+	require.Equal(t, f.price.ID, catalog["id"])
+	require.Equal(t, f.product.ID, catalog["product_id"])
 	// A bare UUID, or another kind's prefix, is not an id of this kind.
 	for _, path := range []string{
-		"/v1/merchant/catalog/prices/" + f.price.ID.UUID().String(),
-		"/v1/merchant/catalog/prices/" + openrails.ProductID(f.price.ID.UUID()).String(),
+		"/v1/merchant/catalog/prices/" + sdkPriceID(t, f.price.ID).UUID().String(),
+		"/v1/merchant/catalog/prices/" + openrails.ProductID(sdkPriceID(t, f.price.ID).UUID()).String(),
 		"/v1/merchant/subscriptions/" + f.subscription.UUID().String(),
 	} {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.url+path, nil)

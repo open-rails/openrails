@@ -115,7 +115,7 @@ func TestClientCatalogPublishingWorkflow(t *testing.T) {
 			// Overwrite/Prune do not create an omitted product's new billing definition.
 			declaration.Products = append(declaration.Products, catalog.Product{Key: "additional", DisplayName: "Additional", RateCards: []catalog.RateCard{{Price: catalog.RatePrice{Model: catalog.ModelFlat, Currency: "USD", Flat: &catalog.FlatPrice{Amount: 5}}}}})
 			publish(openrails.CatalogPublishRequest{Overwrite: true, Prune: true})
-			_, err = client.GetProductByKey(t.Context(), "additional")
+			_, err = client.Products.RetrieveByKey(t.Context(), "additional")
 			require.ErrorIs(t, err, openrails.ErrNotFound)
 			publish(openrails.CatalogPublishRequest{Insert: true})
 			require.False(t, publish(all).Plan.HasChanges())
@@ -210,7 +210,7 @@ func TestClientCatalogPublishingWorkflow(t *testing.T) {
 					require.ErrorAs(t, err, &apiErr)
 					require.Equal(t, 409, apiErr.Status)
 					require.Equal(t, wantCode, apiErr.Code)
-					product, err := client.GetProductByKey(t.Context(), "usage")
+					product, err := client.Products.RetrieveByKey(t.Context(), "usage")
 					require.NoError(t, err)
 					require.Equal(t, "Usage", product.DisplayName, "predictable refusal precedes product edits")
 					detail, err := client.GetUsageMeter(t.Context(), key)

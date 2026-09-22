@@ -664,6 +664,7 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 	products.Handle(http.MethodGet, "", h(httphandlers.AdminListProducts), readMW...)
 	products.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetProduct), readMW...)
 	products.Handle(http.MethodGet, "/by-key/:key", h(httphandlers.AdminGetProductByKey), readMW...)
+	products.Handle(http.MethodPut, "/by-key/:key", h(httphandlers.AdminEnsureProduct), writeMW...)
 	products.Handle(http.MethodPatch, "/:id", h(httphandlers.AdminUpdateProduct), writeMW...)
 	products.Handle(http.MethodPost, "/:id/activate", h(httphandlers.AdminActivateProduct), writeMW...)
 	products.Handle(http.MethodPost, "/:id/deactivate", h(httphandlers.AdminDeactivateProduct), writeMW...)

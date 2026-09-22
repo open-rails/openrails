@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/open-rails/openrails"
@@ -10,8 +12,11 @@ import (
 	"github.com/google/uuid"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/pricing"
 )
 
@@ -127,22 +132,41 @@ func (s *Service) EnsureUsageProduct(ctx context.Context, key, displayName strin
 	if s == nil || s.rt == nil {
 		return uuid.Nil, fmt.Errorf("service not initialized")
 	}
-	products, err := s.requireProductService()
+	key, displayName = strings.TrimSpace(key), strings.TrimSpace(displayName)
+	if key == "" || displayName == "" {
+		return uuid.Nil, apperr.Invalidf("key and display_name required")
+	}
+	owned, err := catalogOwnerRequest(ctx)
 	if err != nil {
 		return uuid.Nil, err
 	}
-	if existing, gerr := products.GetByKey(ctx, key); gerr == nil && existing != nil {
-		return existing.ID, nil
-	}
-	p, err := s.CreateProduct(ctx, CreateProductRequest{Key: key, DisplayName: displayName})
-	if err != nil {
-		// Lost a create race: the row exists now.
-		if existing, gerr := products.GetByKey(ctx, key); gerr == nil && existing != nil {
-			return existing.ID, nil
+	var catalogID uuid.UUID
+	if owned {
+		catalogID = *catalogscope.QueryID(ctx)
+	} else {
+		row, err := catalog.NewCatalogRepo(s.catalogDatabase()).Ensure(ctx, nil)
+		if err != nil {
+			return uuid.Nil, err
 		}
+		catalogID = row.ID
+	}
+	product, err := s.GetProductByKey(ctx, key)
+	if errors.Is(err, openrails.ErrNotFound) {
+		product, err = s.CreateProduct(ctx, CreateProductRequest{CatalogID: openrails.CatalogID(catalogID), Key: key, DisplayName: displayName})
+		if errors.Is(err, openrails.ErrConflict) {
+			product, err = s.GetProductByKey(ctx, key)
+			if errors.Is(err, openrails.ErrNotFound) {
+				return uuid.Nil, ErrCatalogConflict
+			}
+		}
+	}
+	if err != nil {
 		return uuid.Nil, err
 	}
-	return p.ID.UUID(), nil
+	if product.CatalogID.UUID() != catalogID {
+		return uuid.Nil, ErrCatalogConflict
+	}
+	return product.ID.UUID(), nil
 }
 
 // UsageMeterSpec declares a host-owned usage meter (upserted idempotently).
