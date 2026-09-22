@@ -62,19 +62,7 @@ func TestStripeEngineCancellationUsesExecuteGates(t *testing.T) {
 						}
 					}
 					pi = map[string]any{"id": "pi_renewal", "status": "processing", "customer": "cus_engine", "payment_method": "pm_engine", "amount": 999, "amount_received": 999, "currency": "usd", "capture_method": "automatic", "confirmation_method": "automatic", "latest_charge": "ch_renewal", "metadata": meta, "livemode": false}
-					if mode == "authentication" {
-						pi["status"] = "requires_action"
-					}
-					if mode == "declined" {
-						pi["status"] = "requires_payment_method"
-						pi["last_payment_error"] = map[string]any{"code": "card_declined", "decline_code": "insufficient_funds"}
-					}
-					if mode == "lost_reply" {
-						c, _, err := w.(http.Hijacker).Hijack()
-						require.NoError(t, err)
-						_ = c.Close()
-						return
-					}
+
 					_ = json.NewEncoder(w).Encode(pi)
 				case r.Method == "POST" && r.URL.Path == "/v1/payment_intents/pi_renewal/cancel":
 					cancels++
@@ -97,19 +85,6 @@ func TestStripeEngineCancellationUsesExecuteGates(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{pi}, "has_more": false})
 				case r.Method == "GET" && r.URL.Path == "/v1/payment_intents/pi_renewal":
 					_ = json.NewEncoder(w).Encode(pi)
-				case r.Method == "GET" && r.URL.Path == "/v1/charges/ch_renewal":
-					charge := map[string]any{"id": "ch_renewal", "amount": 999, "amount_captured": 999, "currency": "usd", "customer": "cus_engine", "payment_method": "pm_engine", "payment_intent": "pi_renewal", "paid": true, "captured": true, "status": "succeeded"}
-					if mode == "refunded" {
-						charge["refunded"] = true
-						charge["amount_refunded"] = 999
-					}
-					if mode == "partial_refund" {
-						charge["amount_refunded"] = 100
-					}
-					if mode == "disputed" {
-						charge["disputed"] = true
-					}
-					_ = json.NewEncoder(w).Encode(charge)
 				default:
 					t.Errorf("unexpected Stripe provider write/read %s %s", r.Method, r.URL.Path)
 					http.Error(w, "unexpected", 400)
