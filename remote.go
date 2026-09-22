@@ -797,6 +797,15 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 	if err != nil {
 		return err
 	}
+	if target.MerchantSlug != "" {
+		// A pre-selector server ignores the new slug header. A distinct route
+		// prevents it from executing the operation under the credential's
+		// merchant instead. Never retry this request on the v1 route.
+		if !strings.HasPrefix(path, "/v1/") {
+			return invalidErr("merchant operation path must start with /v1/")
+		}
+		path = "/v2/" + strings.TrimPrefix(path, "/v1/")
+	}
 	expectedMerchant := target.MerchantID
 	if pinned, ok := merchant.FromContext(ctx); ok && !pinned.IsZero() {
 		// A caller context may assert an ID, but never select a merchant. A
