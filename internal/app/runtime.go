@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/riverkit"
+	riverhelpers "github.com/open-rails/helpers/river"
 	redis "github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -231,7 +231,7 @@ type Runtime struct {
 	riverClosed            atomic.Bool
 	hostRiver              bool
 	hostRiverBound         atomic.Bool
-	riverContributions     []riverkit.Contribution
+	riverContributions     []riverhelpers.Contribution
 	riverCompositionFailed bool
 	riverStarted           bool
 	workerConsumerRunning  atomic.Bool
@@ -369,8 +369,8 @@ func (r *Runtime) Close(ctx context.Context) error {
 }
 
 // AddRiverContribution attaches optional component jobs before RiverJobs seals
-// the component set. RiverKit performs registration and binding together.
-func (r *Runtime) AddRiverContribution(jobs riverkit.Contribution) error {
+// the component set. The shared River composer performs registration and binding together.
+func (r *Runtime) AddRiverContribution(jobs riverhelpers.Contribution) error {
 	if r == nil {
 		return fmt.Errorf("runtime is nil")
 	}
@@ -395,7 +395,7 @@ func (r *Runtime) InitRiver(ctx context.Context) error {
 		bound := r.hostRiverBound.Load()
 		r.riverCompositionMu.Unlock()
 		if !bound {
-			return fmt.Errorf("compose RiverJobs with riverkit.New before starting the host fleet")
+			return fmt.Errorf("compose RiverJobs with riverhelpers.New before starting the host fleet")
 		}
 		return nil
 	}
@@ -407,7 +407,7 @@ func (r *Runtime) InitRiver(ctx context.Context) error {
 	if r.DB == nil || r.DB.Pool() == nil {
 		return fmt.Errorf("River requires the runtime PostgreSQL pool")
 	}
-	_, err := riverkit.New(ctx, r.DB.Pool(), &river.Config{Schema: r.riverSchemaOrDefault()}, r.riverJobs(false))
+	_, err := riverhelpers.New(ctx, r.DB.Pool(), &river.Config{Schema: r.riverSchemaOrDefault()}, r.riverJobs(false))
 	return err
 }
 
@@ -425,7 +425,7 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 		return fmt.Errorf("runtime is closed")
 	}
 	if r.hostRiver && !r.hostRiverBound.Load() {
-		return fmt.Errorf("host-owned River is not bound; compose RiverJobs with riverkit.New")
+		return fmt.Errorf("host-owned River is not bound; compose RiverJobs with riverhelpers.New")
 	}
 
 	// Join core-owned non-River work before RunWorkers returns. The host can

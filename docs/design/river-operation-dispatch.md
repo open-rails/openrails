@@ -14,7 +14,7 @@ identity evidence. The proof transaction is rolled back and borrowed connections
 are released even on cancellation; host pools remain host-owned. The same check
 qualifies a separately supplied runtime pool before migrations grant access.
 
-RiverKit supplies an explicit Binding containing its actual client and pool. It
+The `helpers/river` composer supplies an explicit Binding containing its actual client and pool. It
 pins an omitted schema to `public`; custom schemas remain explicit. Binding checks
 that the qualified queue table exists before exposing the producer. Composition
 must precede caller transactions or merchant connection pins; attempts inside

@@ -362,7 +362,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	}
 
 	// Managed HTTP processes need a producer even when their workers run
-	// elsewhere. A host-owned fleet publishes its one producer only after RiverKit composition;
+	// elsewhere. A host-owned fleet publishes its one producer only after shared River composition;
 	// construction must never target an undeclared public queue in the meantime.
 	if overrides != nil {
 		runtime.SetRiverSchema(overrides.RiverSchema)
@@ -429,7 +429,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 	// #684: fetch-and-converge wake-ups. Late-bound to the runtime so it works
 	// whether the producer came from config or an embedded host's external
-	// River client (RiverKit composition).
+	// River client (shared River composition).
 	runtime.WebhookDispatcher.ConvergeEnqueuer = &runtimeConvergeEnqueuer{runtime: runtime}
 
 	// #674: write-through provider intents. Producers post a durable intent and

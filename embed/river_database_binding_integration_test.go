@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
@@ -20,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/pgidentity"
-	"github.com/open-rails/riverkit"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
@@ -87,7 +87,7 @@ func TestPhysicalRiverPoolBinding(t *testing.T) {
 				if mode == "caller search path differs" {
 					options = nil
 				}
-				client, err = riverkit.New(ctx, queuePool, options, rt.RiverJobs())
+				client, err = riverhelpers.New(ctx, queuePool, options, rt.RiverJobs())
 				return err
 			}
 			if mode == "ambient transaction" {
@@ -242,10 +242,10 @@ func TestPhysicalBindingWorkerAndInsertTxShareExplicitSchema(t *testing.T) {
 			d, err := db.NewWithPGXPool(ledgerPool, config.DefaultSchema)
 			require.NoError(t, err)
 			seen := make(chan string, 1)
-			jobs := riverkit.NewContribution("physical-proof", func(_ context.Context, cfg *river.Config) error {
+			jobs := riverhelpers.NewContribution("physical-proof", func(_ context.Context, cfg *river.Config) error {
 				cfg.Queues["physical_proof"] = river.QueueConfig{MaxWorkers: 1}
 				return river.AddWorkerSafely(cfg.Workers, &physicalBindingWorker{seen: seen})
-			}, func(ctx context.Context, binding riverkit.Binding) error {
+			}, func(ctx context.Context, binding riverhelpers.Binding) error {
 				require.Same(t, queuePool, binding.Pool)
 				if err := d.ValidateRiverJobBinding(ctx, binding.Pool, binding.Client.Schema()); err != nil {
 					return err
@@ -256,8 +256,8 @@ func TestPhysicalBindingWorkerAndInsertTxShareExplicitSchema(t *testing.T) {
 			configuredSchema := schema
 			if schema == "public" {
 				configuredSchema = ""
-			} // RiverKit must pin its public default.
-			client, err := riverkit.New(ctx, queuePool, &river.Config{Schema: configuredSchema, FetchCooldown: 10 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond}, jobs)
+			} // The shared River composer must pin its public default.
+			client, err := riverhelpers.New(ctx, queuePool, &river.Config{Schema: configuredSchema, FetchCooldown: 10 * time.Millisecond, FetchPollInterval: 20 * time.Millisecond}, jobs)
 			require.NoError(t, err)
 			require.Equal(t, schema, client.Schema())
 			id := uuid.NewString()

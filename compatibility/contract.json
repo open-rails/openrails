@@ -573,7 +573,7 @@
       "func (r *Runtime) Ready(ctx context.Context) error",
       "func (r *Runtime) RegisterMerchantForRestore(ctx context.Context, id merchant.ID, slug string) (merchant.ID, error)",
       "func (r *Runtime) ResolveMerchant(ctx context.Context, name string) (merchant.ID, string, error)",
-      "func (r *Runtime) RiverJobs() riverkit.Contribution",
+      "func (r *Runtime) RiverJobs() riverhelpers.Contribution",
       "func (r *Runtime) RunWorkers(ctx context.Context) error",
       "func (r *Runtime) SelfHandler(authn billingauth.DelegatedAuthenticator) (http.Handler, error)",
       "func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m MerchantConfig) (merchant.ID, error)",
@@ -1869,8 +1869,8 @@
       "errors": "errors",
       "fmt": "fmt",
       "river": "github.com/riverqueue/river",
+      "riverhelpers": "github.com/open-rails/helpers/river",
       "riverjobs": "github.com/open-rails/openrails/internal/river",
-      "riverkit": "github.com/open-rails/riverkit",
       "strings": "strings"
     },
     "embed/tooling.go": {
@@ -4912,11 +4912,11 @@
   "boundary_sources_sha256": {
     "embed/authkit/authkit.go": "05aeab359a5540dc96f204a0c72cc993023817c2a66af6dd0b362bb002026944",
     "embed/controlplane/controlplane.go": "b553cff0f76cf85074ac3ef5cbb3314877e99b21a4f3fe64f0e70a74ea1b215c",
-    "embed/embed.go": "e96a6e257940ecd5d04d587e34bbd63752ee3b2f660098d302ee214734de5dc8",
+    "embed/embed.go": "852143e04322d0f6e50be34bee7a3178423ee739b40d7659b189af412f470a53",
     "embed/mount.go": "d1030f96f9c5324d5da440b176f7c0950266a7a03446ef84e928fac5f7df373d",
     "embed/transport.go": "899bb2d32b56308257d971595770fa73aace5054d280d0b7143f286bc63cb3b1",
     "errors.go": "bea224812329fcb558d6b087b3a524107ce5d939d16b303b99354d35a6397d55",
-    "examples/embedded/main.go": "6006a5528fcf2af149ae96f0f25c6fba2bfcb264bb6554da615c4e544ec6c311",
+    "examples/embedded/main.go": "1b32270189c7a632691617536a6d8894a30b192516bc7f014a77af3a563b09c9",
     "internal/auth/delegated.go": "d0cc54d53043dbf70fca244031bf96921a7e737175f513f0a50747b36525725f",
     "internal/auth/policy/admin.go": "f8b7328b4c87926097aa07a72a97ddafd62290db764bb0d2b9f9cc3626f4769c",
     "internal/auth/provider.go": "bca5b1e71635a8ac9d0f7fdb3324de353a6eea81d35815384ba49e9e2aeca915",

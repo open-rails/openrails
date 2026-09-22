@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/riverkit"
+	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
@@ -57,22 +57,22 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 	t.Run("nil pool does not consume a retained descriptor", func(t *testing.T) {
 		rt, pool := newRuntime(t)
 		jobs := rt.RiverJobs()
-		_, err := riverkit.New(t.Context(), nil, nil, jobs)
+		_, err := riverhelpers.New(t.Context(), nil, nil, jobs)
 		require.ErrorContains(t, err, "pool is required")
-		client, err := riverkit.New(t.Context(), pool, nil, jobs)
+		client, err := riverhelpers.New(t.Context(), pool, nil, jobs)
 		require.NoError(t, err)
 		require.Nil(t, client.Stopped())
 	})
 	t.Run("closed and duplicate runtimes", func(t *testing.T) {
 		rt, pool := newRuntime(t)
-		_, err := riverkit.New(t.Context(), pool, nil, rt.RiverJobs())
+		_, err := riverhelpers.New(t.Context(), pool, nil, rt.RiverJobs())
 		require.NoError(t, err)
-		_, err = riverkit.New(t.Context(), pool, nil, rt.RiverJobs())
+		_, err = riverhelpers.New(t.Context(), pool, nil, rt.RiverJobs())
 		require.ErrorContains(t, err, "already sealed")
 		require.True(t, rt.HasExternalRiverClient(), "refused new descriptor cannot abort the previously bound runtime")
 		require.NoError(t, rt.Ready(t.Context()))
 		require.NoError(t, rt.Close(t.Context()))
-		_, err = riverkit.New(t.Context(), pool, nil, rt.RiverJobs())
+		_, err = riverhelpers.New(t.Context(), pool, nil, rt.RiverJobs())
 		require.ErrorContains(t, err, "closed")
 		require.NoError(t, pool.Ping(t.Context()))
 	})
@@ -81,27 +81,27 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 		jobs := rt.RiverJobs()
 		_, err := controlplane.Attach(t.Context(), rt, controlplane.Options{})
 		require.ErrorContains(t, err, "attach before")
-		_, err = riverkit.New(t.Context(), pool, nil, jobs)
+		_, err = riverhelpers.New(t.Context(), pool, nil, jobs)
 		require.NoError(t, err)
 	})
 	t.Run("attached AuthKit cannot be registered twice", func(t *testing.T) {
 		rt, pool := newRuntime(t)
 		cp, err := controlplane.Attach(t.Context(), rt, controlplane.Options{})
 		require.NoError(t, err)
-		_, err = riverkit.New(t.Context(), pool, nil, rt.RiverJobs(), cp.Core().RiverJobs())
+		_, err = riverhelpers.New(t.Context(), pool, nil, rt.RiverJobs(), cp.Core().RiverJobs())
 		require.ErrorContains(t, err, "duplicate contribution")
 		require.False(t, rt.HasExternalRiverClient())
 	})
 	t.Run("late binding failure invalidates partial producer", func(t *testing.T) {
 		rt, pool := newRuntime(t)
 		cause := errors.New("bind failure")
-		bad := riverkit.NewContribution("bad", func(context.Context, *river.Config) error { return nil }, func(context.Context, riverkit.Binding) error { return cause }, func() error { return nil })
-		client, err := riverkit.New(t.Context(), pool, nil, rt.RiverJobs(), bad)
+		bad := riverhelpers.NewContribution("bad", func(context.Context, *river.Config) error { return nil }, func(context.Context, riverhelpers.Binding) error { return cause }, func() error { return nil })
+		client, err := riverhelpers.New(t.Context(), pool, nil, rt.RiverJobs(), bad)
 		require.ErrorIs(t, err, cause)
 		require.Nil(t, client)
 		require.False(t, rt.HasExternalRiverClient())
 		require.Error(t, rt.Ready(t.Context()))
-		_, err = riverkit.New(t.Context(), pool, nil, rt.RiverJobs())
+		_, err = riverhelpers.New(t.Context(), pool, nil, rt.RiverJobs())
 		require.ErrorContains(t, err, "sealed")
 		require.NoError(t, pool.Ping(t.Context()))
 	})
@@ -117,8 +117,8 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 	} {
 		t.Run(entry.name, func(t *testing.T) {
 			rt, pool := newRuntime(t)
-			bad := riverkit.NewContribution("bad", func(_ context.Context, cfg *river.Config) error { entry.mutate(cfg); return nil }, nil, nil)
-			client, err := riverkit.New(t.Context(), pool, nil, rt.RiverJobs(), bad)
+			bad := riverhelpers.NewContribution("bad", func(_ context.Context, cfg *river.Config) error { entry.mutate(cfg); return nil }, nil, nil)
+			client, err := riverhelpers.New(t.Context(), pool, nil, rt.RiverJobs(), bad)
 			require.ErrorContains(t, err, entry.want)
 			require.Nil(t, client)
 			require.False(t, rt.HasExternalRiverClient())
