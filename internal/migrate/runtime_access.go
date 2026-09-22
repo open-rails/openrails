@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
+	"github.com/open-rails/openrails/internal/pgidentity"
 )
 
 //go:embed runtime_access.sql
@@ -16,16 +17,14 @@ var runtimeAccessSQL string
 
 // runtimeLogin validates the supplied connection before schema mutation.
 func runtimeLogin(ctx context.Context, owner, runtime *pgxpool.Pool) (string, error) {
-	var user, runtimeDB, ownerDB string
-	if err := runtime.QueryRow(ctx, "SELECT current_user, current_database()").Scan(&user, &runtimeDB); err != nil {
-		return "", fmt.Errorf("identify runtime login: %w", err)
-	}
-	if err := owner.QueryRow(ctx, "SELECT current_database()").Scan(&ownerDB); err != nil {
+	if err := pgidentity.RequireSameDatabase(ctx, owner, runtime); err != nil {
 		return "", err
 	}
-	if runtimeDB != ownerDB {
-		return "", fmt.Errorf("runtime database %q differs from migration database %q", runtimeDB, ownerDB)
+	var user string
+	if err := runtime.QueryRow(ctx, "SELECT current_user").Scan(&user); err != nil {
+		return "", fmt.Errorf("identify runtime login: %w", err)
 	}
+
 	return user, nil
 }
 
