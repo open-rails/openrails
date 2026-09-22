@@ -34,7 +34,7 @@ import (
 func TestProviderOperationExecutesWithExactMerchant(t *testing.T) {
 	ctx := context.Background()
 	worker := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t)) // UNPINNED, like a real River job
-	m := seedIntentMerchant(t)
+	m := seedTransitionMerchant(t)
 	seedDueIntent(t, m, intents.TypeNMIDeleteSubscription)
 
 	// The #836 switch is INSTANCE-wide state; restore it or the rest of the
@@ -71,12 +71,24 @@ func TestProviderOperationExecutesWithExactMerchant(t *testing.T) {
 
 		id := seedDueIntent(t, m, intents.TypeNMIDeleteSubscription)
 		h := &recordingIntentHandler{intentType: intents.TypeNMIDeleteSubscription}
-		require.ErrorAs(t, ProviderOperationWorker{
+		require.NoError(t, ProviderOperationWorker{
 			DB:       worker,
 			Config:   &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
 			Registry: intents.NewRegistry(h),
-		}.Work(ctx, &river.Job[intents.OperationArgs]{Args: intents.OperationArgs{MerchantID: m.id, IntentID: id}}), new(*river.JobSnoozeError))
+		}.Work(ctx, &river.Job[intents.OperationArgs]{Args: intents.OperationArgs{MerchantID: m.id, IntentID: id}}))
 
+		// Returning nil retires the consumed job only after this exact operation's
+		// replacement has committed. The kill switch must retain a durable wake.
+		var state string
+		var scheduledAt, due time.Time
+		require.NoError(t, m.pool.QueryRow(ctx, `SELECT j.state::text, j.scheduled_at, i.next_attempt_at
+			FROM public.river_job j JOIN billing.rail_intents i ON i.id = $1
+			WHERE j.kind = 'openrails.provider_operation'
+			AND j.args->>'merchant_id' = $2 AND j.args->>'intent_id' = $3`,
+			id, m.id.String(), id.String()).Scan(&state, &scheduledAt, &due))
+		require.Contains(t, []string{"available", "scheduled"}, state)
+		require.True(t, scheduledAt.Equal(due), "replacement wake must use the committed ledger deadline")
+		require.True(t, due.After(time.Now()), "disabled destructive writes remain parked")
 		require.Zero(t, h.executed, "the kill switch must stop the provider write BEFORE the handler")
 		require.Equal(t, intents.StatusPending, m.statusOf(t, id),
 			"a switched-off destructive intent parks (stays pending), it does not fail")
