@@ -133,7 +133,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		CustomerID:      trx.CustomerID.String(),
+		CustomerID:      openrails.CustomerID(trx.CustomerID).String(),
 		Invoker:         trx.Invoker,
 		Currency:        trx.Currency,
 		Amount:          trx.Amount,
@@ -227,7 +227,7 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		CustomerID:      trx.CustomerID.String(),
+		CustomerID:      openrails.CustomerID(trx.CustomerID).String(),
 		Invoker:         trx.Invoker,
 		Currency:        trx.Currency,
 		Amount:          trx.Amount,
@@ -271,7 +271,7 @@ func (s *Service) GetDeposit(ctx context.Context, customerID identity.CustomerID
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		CustomerID:      trx.CustomerID.String(),
+		CustomerID:      openrails.CustomerID(trx.CustomerID).String(),
 		Invoker:         trx.Invoker,
 		Currency:        trx.Currency,
 		Amount:          trx.Amount,

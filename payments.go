@@ -10,7 +10,7 @@ import (
 // PublicPrice is the price object public catalog and payment responses embed.
 // Amounts are native units at the currency's registered scale.
 type PublicPrice struct {
-	ID PriceID `json:"id"`
+	ID string `json:"id"`
 	// Key is the durable, merchant-unique handle for this price's version
 	// chain, usable anywhere id is accepted.
 	Key        string            `json:"key,omitempty"`
@@ -19,7 +19,7 @@ type PublicPrice struct {
 	Currency   string            `json:"currency"`
 	Type       string            `json:"type,omitempty"` // one_time or recurring
 	Recurring  *PriceRecurrence  `json:"recurring,omitempty"`
-	Product    ProductID         `json:"product"`
+	Product    string            `json:"product"`
 	Active     bool              `json:"active"`
 	Providers  []string          `json:"providers,omitempty"`
 	Metadata   map[string]string `json:"metadata,omitempty"`
@@ -41,7 +41,7 @@ type Payment struct {
 	Amount         int64           `json:"amount,string"`
 	AmountRefunded int64           `json:"amount_refunded,string"`
 	Currency       string          `json:"currency"`
-	CustomerID     CustomerID      `json:"customer_id"`
+	CustomerID     string          `json:"customer_id"`
 	SubscriptionID *SubscriptionID `json:"subscription_id,omitempty"`
 	Rail           string          `json:"rail"`
 	TransactionID  string          `json:"transaction_id"`

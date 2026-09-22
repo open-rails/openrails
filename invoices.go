@@ -123,7 +123,7 @@ type InvoiceProfileDTO struct {
 type MerchantInvoiceDTO struct {
 	InvoiceDTO
 	UnitDecimals     int                  `json:"unit_decimals"`
-	CustomerID       CustomerID           `json:"customer_id"`
+	CustomerID       string               `json:"customer_id"`
 	AvailableActions []InvoiceAdminAction `json:"available_actions"`
 }
 
