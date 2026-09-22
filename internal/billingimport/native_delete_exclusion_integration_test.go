@@ -30,7 +30,7 @@ func TestDeclaredImportCannotAttachBehindAcceptedNativeVaultDeletion(t *testing.
 	out, err := (&intents.PaymentMethodDeleteThrough{Runner: runner}).ExecutePaymentMethodDelete(ctx, pm)
 	require.NoError(t, err)
 	require.False(t, out.Done)
-	_, err = billingimport.Import(ctx, billingimport.Options{PGXPool: d.Pool(), MerchantID: dbtest.TestMerchantID, Book: billingimport.DeclaredBilling{AsOf: time.Now().UTC(), DefaultPSP: billingimport.PSPRef{Key: "nmi"}, Customers: []billingimport.DeclaredCustomer{{Customer: openrails.CustomerID(customer)}}, PaymentMethods: []billingimport.DeclaredPaymentMethod{{Customer: openrails.CustomerID(customer), Rail: "nmi", RailCustomerRef: pm.RailCustomerRef, RailMethodRef: "late-entry"}}}})
+	_, err = billingimport.Import(ctx, billingimport.Options{DB: d, MerchantID: dbtest.TestMerchantID, Book: billingimport.DeclaredBilling{AsOf: time.Now().UTC(), DefaultPSP: billingimport.PSPRef{Key: "nmi"}, Customers: []billingimport.DeclaredCustomer{{Customer: openrails.CustomerID(customer)}}, PaymentMethods: []billingimport.DeclaredPaymentMethod{{Customer: openrails.CustomerID(customer), Rail: "nmi", RailCustomerRef: pm.RailCustomerRef, RailMethodRef: "late-entry"}}}})
 	require.ErrorIs(t, err, paymentmethods.ErrPaymentMethodDeleteProcessing)
 	var aliases int
 	require.NoError(t, d.Pool().QueryRow(ctx, `SELECT count(*) FROM billing.payment_methods WHERE merchant_id=$1 AND psp_id=$2 AND rail_customer_ref=$3`, dbtest.TestMerchantID.UUID(), psp, pm.RailCustomerRef).Scan(&aliases))
