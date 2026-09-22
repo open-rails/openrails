@@ -2,13 +2,67 @@
 set -euo pipefail
 
 # Packages containing files (test or non-test) that carry the `integration`
-# build tag. Running `./...` verbatim would serially re-run every untagged
-# unit test the build job already ran in parallel, so `./...` (and no args)
-# expands to only the tagged packages. Explicit flags/packages pass through.
+# build tag. These packages run their unit and integration tests together;
+# Checks selects the remaining packages, preserving default-only variants.
+# `./...` (and no args) expands to this set; explicit arguments pass through.
 integration_packages() {
   grep -rl --include='*.go' -E '^//go:build (.*[^a-zA-Z0-9_])?integration([^a-zA-Z0-9_].*)?$' . |
     xargs -n1 dirname | sed -e 's|^\./||' -e 's|^|./|' | sort -u
 }
+
+selected_integration_packages() {
+  local packages
+  if ! packages="$(integration_packages)" || [[ -z "$packages" ]]; then
+    echo "test_integration.sh: no packages carry the 'integration' build tag; refusing to test nothing" >&2
+    return 1
+  fi
+  printf '%s\n' "$packages"
+}
+
+# Use Go's selected file lists, not test-name patterns. A package stays in
+# Checks when the E2E build omits any default source or test file, including
+# future !integration variants. Such packages intentionally run in both builds.
+checks_packages() {
+  local packages package template field default_files e2e_files selected
+  local -a targets=()
+  packages="$(selected_integration_packages)"
+  while IFS= read -r package; do
+    [[ -n "$package" ]] && targets+=("$package")
+  done <<< "$packages"
+  template='{{.ImportPath}}'
+  for field in GoFiles CgoFiles CFiles CXXFiles MFiles HFiles FFiles SFiles SwigFiles SwigCXXFiles SysoFiles TestGoFiles XTestGoFiles; do
+    template+="{{range .$field}} {{.}}{{end}}"
+  done
+  default_files="$(go list -race -f "$template" ./...)"
+  e2e_files="$(go list -race -tags=integration,browser -f "$template" "${targets[@]}")"
+  if [[ -z "$default_files" || -z "$e2e_files" ]]; then
+    echo "test_integration.sh: empty Go package metadata; refusing an incomplete partition" >&2
+    return 1
+  fi
+  selected="$(awk '
+    NR == FNR {
+      covered[$1] = 1
+      for (i = 2; i <= NF; i++) files[$1 SUBSEP $i] = 1
+      next
+    }
+    NF {
+      keep = !covered[$1]
+      for (i = 2; i <= NF; i++) if (!(($1 SUBSEP $i) in files)) keep = 1
+      if (keep) print $1
+    }
+  ' <(printf '%s\n' "$e2e_files") <(printf '%s\n' "$default_files") | sort -u)"
+  if [[ -z "$selected" ]]; then
+    echo "test_integration.sh: no Checks packages remain; refusing to test nothing" >&2
+    return 1
+  fi
+  printf '%s\n' "$selected"
+}
+
+# These modes only inspect source/Go metadata, before any dependency setup.
+case "${1:-}" in
+  --list-integration-packages) selected_integration_packages; exit ;;
+  --list-checks-packages) checks_packages; exit ;;
+esac
 
 if [ "$#" -eq 0 ]; then
   set -- ./...
@@ -18,13 +72,10 @@ args=()
 for arg in "$@"; do
   if [ "$arg" = "./..." ]; then
     pkgs=()
+    package_list="$(selected_integration_packages)"
     while IFS= read -r pkg; do
       [ -n "$pkg" ] && pkgs+=("$pkg")
-    done < <(integration_packages)
-    if [ "${#pkgs[@]}" -eq 0 ]; then
-      echo "test_integration.sh: no packages carry the 'integration' build tag; refusing to test nothing" >&2
-      exit 1
-    fi
+    done <<< "$package_list"
     echo "test_integration.sh: ./... -> ${#pkgs[@]} integration-tagged packages" >&2
     args+=("${pkgs[@]}")
   else
@@ -92,4 +143,4 @@ export OPENRAILS_TEST_REDIS_ADDR="${OPENRAILS_TEST_REDIS_ADDR:-127.0.0.1:${GARNE
 # re-earned against the current schema and data. Observed live (or#855): with a
 # warm GOCACHE, whole integration packages came back `ok … (cached)` without a
 # single query running.
-go test -count=1 -p 1 -parallel 1 -tags=integration -timeout "${OPENRAILS_INTEGRATION_TIMEOUT:-25m}" "${args[@]}"
+go test -race -count=1 -p 1 -parallel 1 -tags=integration -timeout "${OPENRAILS_INTEGRATION_TIMEOUT:-25m}" "${args[@]}"

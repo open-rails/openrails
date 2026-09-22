@@ -11,6 +11,7 @@ touch "$fixture/docker-compose.yaml"
 
 log="$fixture/integration.log"
 export INTEGRATION_TEST_LOG="$log"
+export INTEGRATION_REAL_GO="$(command -v go)"
 printf '%s\n' '#!/bin/sh' '
 echo "docker $*" >> "$INTEGRATION_TEST_LOG"
 if [ "$1 $2 $3 $4 $5 $6 $7" = "compose -f docker-compose.yaml ps --status running -q" ]; then
@@ -18,7 +19,16 @@ if [ "$1 $2 $3 $4 $5 $6 $7" = "compose -f docker-compose.yaml ps --status runnin
     case " ${FAKE_RUNNING_SERVICES:-} " in *" $service "*) echo "container-$service" ;; esac
 fi
 ' >"$fixture/bin/docker"
-printf '%s\n' '#!/bin/sh' 'echo "go $*" >> "$INTEGRATION_TEST_LOG"' 'exit "${FAKE_GO_STATUS:-0}"' >"$fixture/bin/go"
+cat >"$fixture/bin/go" <<'GO'
+#!/bin/sh
+echo "go $*" >> "$INTEGRATION_TEST_LOG"
+if [ "$1" = "list" ]; then
+    [ "${FAKE_GO_LIST_FAIL:-0}" != 1 ] || exit 17
+    [ "${FAKE_GO_LIST_EMPTY:-0}" != 1 ] || exit 0
+    exec "$INTEGRATION_REAL_GO" "$@"
+fi
+exit "${FAKE_GO_STATUS:-0}"
+GO
 chmod +x "$fixture/bin/docker" "$fixture/bin/go"
 
 run_fixture() {
@@ -37,6 +47,7 @@ unset FAKE_RUNNING_SERVICES FAKE_GO_STATUS
 run_fixture
 grep -Fq 'docker compose -f docker-compose.yaml up -d --wait postgres garnet' "$log"
 grep -Fq 'docker compose -f docker-compose.yaml stop postgres garnet' "$log"
+grep -Fq 'go test -race -count=1 -p 1 -parallel 1 -tags=integration' "$log"
 
 export FAKE_RUNNING_SERVICES='postgres garnet'
 run_fixture
@@ -82,3 +93,58 @@ set -e
 grep -Fq 'docker compose -f docker-compose.yaml stop postgres garnet' "$log"
 
 echo "integration teardown regression tests passed"
+
+# Inspect real Go build metadata without running tests or starting services.
+# Default-only test AND production variants must keep their entire package in
+# Checks; an ordinary mixed package must move to E2E with its unit tests intact.
+unset FAKE_GO_STATUS FAKE_GO_LIST_FAIL FAKE_GO_LIST_EMPTY
+printf 'module example.test/partition\n\ngo 1.26.0\n' >"$fixture/go.mod"
+for package in ordinary mixed defaulttest defaultprod; do
+    mkdir -p "$fixture/$package"
+    printf 'package %s\n' "$package" >"$fixture/$package/source.go"
+    printf 'package %s\nimport "testing"\nfunc TestUnit(t *testing.T) {}\n' "$package" >"$fixture/$package/unit_test.go"
+done
+for package in mixed defaulttest defaultprod integrationonly; do
+    mkdir -p "$fixture/$package"
+    printf '//go:build integration\n\npackage %s\n' "$package" >"$fixture/$package/integration.go"
+done
+printf '//go:build !integration\n\npackage defaulttest\nimport "testing"\nfunc TestDefaultOnly(t *testing.T) {}\n' >"$fixture/defaulttest/default_test.go"
+printf '//go:build !integration\n\npackage defaultprod\nconst DefaultOnly = true\n' >"$fixture/defaultprod/default.go"
+
+run_selection() {
+    : >"$log"
+    (cd "$fixture"; PATH="$fixture/bin:$PATH" GOWORK=off bash scripts/test_integration.sh "$1")
+}
+
+selected="$(run_selection --list-checks-packages)"
+expected="$(printf '%s\n' example.test/partition/defaultprod example.test/partition/defaulttest example.test/partition/ordinary)"
+[[ "$selected" == "$expected" ]] || { echo "wrong Checks partition: $selected" >&2; exit 1; }
+if grep -Eq '^docker |^go test ' "$log"; then
+    echo "test_integration_test: selecting packages started services or tests" >&2
+    exit 1
+fi
+grep -Fq 'go list -race -tags=integration,browser' "$log"
+
+selected="$(run_selection --list-integration-packages)"
+expected="$(printf '%s\n' ./defaultprod ./defaulttest ./integrationonly ./mixed)"
+[[ "$selected" == "$expected" ]] || { echo "wrong E2E partition: $selected" >&2; exit 1; }
+[[ ! -s "$log" ]] || { echo "integration selection unexpectedly invoked Go or Docker" >&2; exit 1; }
+
+export FAKE_GO_LIST_FAIL=1
+if run_selection --list-checks-packages >"$fixture/failure" 2>&1; then
+    echo "test_integration_test: failed metadata was accepted" >&2; exit 1
+fi
+unset FAKE_GO_LIST_FAIL
+export FAKE_GO_LIST_EMPTY=1
+if run_selection --list-checks-packages >"$fixture/failure" 2>&1; then
+    echo "test_integration_test: empty metadata was accepted" >&2; exit 1
+fi
+grep -Fq 'empty Go package metadata' "$fixture/failure"
+unset FAKE_GO_LIST_EMPTY
+
+rm -rf "$fixture/mixed" "$fixture/defaulttest" "$fixture/defaultprod" "$fixture/integrationonly"
+if run_selection --list-checks-packages >"$fixture/failure" 2>&1; then
+    echo "test_integration_test: absent integration packages were accepted" >&2; exit 1
+fi
+grep -Fq 'no packages carry' "$fixture/failure"
+echo "integration package partition regression tests passed"
