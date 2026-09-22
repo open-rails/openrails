@@ -91,7 +91,7 @@ func (r *Runtime) RiverProgress(ctx context.Context) (riverjobs.ProgressReport, 
 		return riverjobs.ProgressReport{}, fmt.Errorf("runtime is closed")
 	}
 	if r != nil && r.hostRiver && !r.hostRiverBound.Load() {
-		return riverjobs.ProgressReport{}, fmt.Errorf("host-owned River is not bound; compose RiverJobs with riverkit.New")
+		return riverjobs.ProgressReport{}, fmt.Errorf("host-owned River is not bound; compose RiverJobs with riverhelpers.New")
 	}
 	if r == nil || r.DB == nil {
 		return riverjobs.ProgressReport{}, fmt.Errorf("river progress: runtime not initialized")

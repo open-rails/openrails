@@ -121,7 +121,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		return nil, err
 	}
 	if opts.River.host && opts.RunWorkers {
-		return nil, fmt.Errorf("openrails embed: host-owned River must compose RiverJobs with riverkit.New before host startup; Options.RunWorkers is managed-only")
+		return nil, fmt.Errorf("openrails embed: host-owned River must compose RiverJobs with riverhelpers.New before host startup; Options.RunWorkers is managed-only")
 	}
 	riverSchema, err := opts.River.managedSchema(opts.Config.DB.SchemaName())
 	if err != nil {

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"slices"
 
+	riverhelpers "github.com/open-rails/helpers/river"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/riverkit"
 	"github.com/riverqueue/river"
 )
 
@@ -31,10 +31,10 @@ func (r *Runtime) CheckRiverConfigurable() error {
 // RiverJobs seals the attached component set before handing it to the host.
 // Request it only after optional control-plane attachment. No client is built
 // and no job starts until the host composes and starts the returned group.
-func (r *Runtime) RiverJobs() riverkit.Contribution { return r.riverJobs(true) }
-func (r *Runtime) riverJobs(host bool) riverkit.Contribution {
-	refuse := func(err error) riverkit.Contribution {
-		return riverkit.NewContribution("openrails", func(context.Context, *river.Config) error { return err }, nil, nil)
+func (r *Runtime) RiverJobs() riverhelpers.Contribution { return r.riverJobs(true) }
+func (r *Runtime) riverJobs(host bool) riverhelpers.Contribution {
+	refuse := func(err error) riverhelpers.Contribution {
+		return riverhelpers.NewContribution("openrails", func(context.Context, *river.Config) error { return err }, nil, nil)
 	}
 	if r == nil {
 		return refuse(fmt.Errorf("runtime is nil"))
@@ -52,7 +52,7 @@ func (r *Runtime) riverJobs(host bool) riverkit.Contribution {
 	components := slices.Clone(r.riverContributions)
 	r.riverCompositionMu.Unlock()
 	claimed := false
-	own := riverkit.NewContribution("openrails", func(ctx context.Context, cfg *river.Config) error {
+	own := riverhelpers.NewContribution("openrails", func(ctx context.Context, cfg *river.Config) error {
 		r.riverCompositionMu.Lock()
 		if r.riverClosed.Load() || r.riverCompositionFailed {
 			r.riverCompositionMu.Unlock()
@@ -87,7 +87,7 @@ func (r *Runtime) riverJobs(host bool) riverkit.Contribution {
 		}
 		cfg.PeriodicJobs = append(cfg.PeriodicJobs, periodic...)
 		return nil
-	}, func(ctx context.Context, binding riverkit.Binding) error {
+	}, func(ctx context.Context, binding riverhelpers.Binding) error {
 		client := binding.Client
 		if err := r.DB.ValidateRiverJobBinding(ctx, binding.Pool, client.Schema()); err != nil {
 			return err
@@ -130,5 +130,5 @@ func (r *Runtime) riverJobs(host bool) riverkit.Contribution {
 		r.stopRiverProgressMonitor()
 		return nil
 	})
-	return riverkit.Group(append([]riverkit.Contribution{own}, components...)...)
+	return riverhelpers.Group(append([]riverhelpers.Contribution{own}, components...)...)
 }

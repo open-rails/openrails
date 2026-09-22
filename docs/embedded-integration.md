@@ -155,7 +155,7 @@ defer rt.Close(ctx)
 | `PGXPool` | `*pgxpool.Pool` | Host-supplied pool (pgx/v5). |
 | `Redis` | `*redis.Client` | Optional (rate limits, admission holds). |
 | `Cache` | `cache.Cache` | Optional cache override. |
-| `River` | `embed.RiverOwnership` | Defaults to managed River in `public`. `RiverManagedByOpenRails("jobs")` selects another schema; `RiverFromHost()` declares host ownership; pass `RiverJobs()` to `riverkit.New` after attaching components. |
+| `River` | `embed.RiverOwnership` | Defaults to managed River in `public`. `RiverManagedByOpenRails("jobs")` selects another schema; `RiverFromHost()` declares host ownership; pass `RiverJobs()` to `riverhelpers.New` after attaching components. |
 | `RunWorkers` | `bool` | Managed-only. Runs the River background workers (renewals, dunning, credit/hold expiry, reconciliation) on a Runtime-owned goroutine, detached from the ctx you pass to `New` — `Close` stops them. Leave false to drive `rt.RunWorkers(ctx)` yourself. |
 | `ConsoleAssets` | `fs.FS` | Host-built admin console SPA (see §6). |
 | `StripeTransport` | `http.RoundTripper` | Test seam under the Stripe API choke point; refused with a live posture. |
@@ -195,12 +195,17 @@ provider configuration, fleet aggregates, retirement, `UserAuthenticator`,
 `JWKSHandler`). Hosts that bring their own AuthKit never import it.
 
 **Host-owned River**: declare ownership during migrations and construction, then
-attach every component before requesting `RiverJobs()`. The neutral RiverKit
+attach every component before requesting `RiverJobs()`. The neutral `helpers/river`
 composer collects billing and attached control-plane workers, queues and schedules,
 then constructs and binds one unstarted client. It rejects removed required
 entries, duplicate workers/schedules, and repeated or closed contributions.
 
 ```go
+import (
+    riverhelpers "github.com/open-rails/helpers/river"
+    "github.com/riverqueue/river"
+)
+
 ownership := embed.RiverFromHost()
 // The host migrates and grants access to its River schema separately.
 if err := embed.ApplyMigrations(ctx, adminPool, embed.MigrationOptions{River: ownership, RuntimePool: appPool}); err != nil {
@@ -212,7 +217,7 @@ defer rt.Close(context.WithoutCancel(ctx))
 
 // Attach a control plane here, or construct your own AuthKit client.
 // An attached control plane contributes its AuthKit maintenance automatically.
-jobs, err := riverkit.New(ctx, pool, &river.Config{
+jobs, err := riverhelpers.New(ctx, pool, &river.Config{
     Schema: "host_jobs", // host-migrated; sharing public with billing is supported
     Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 10}},
 }, rt.RiverJobs())

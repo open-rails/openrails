@@ -609,7 +609,7 @@ type ServiceJWTCaller struct {
 
 // ensureMerchantGroup idempotently ensures the root + merchant permission-group
 // for slug exist (#567) and returns the merchant group's internal id.
-func (h *Harness) ensureMerchantGroup(core authkit.Client, slug string) string {
+func (h *Harness) ensureMerchantGroup(core *authcore.Runtime, slug string) string {
 	h.t.Helper()
 	gid, err := core.ResolveGroupIDForSlug(h.ctx, controlplane.MerchantGroup(slug))
 	if errors.Is(err, authkit.ErrGroupNotFound) {

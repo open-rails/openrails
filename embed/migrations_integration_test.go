@@ -12,7 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/riverkit"
+	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivermigrate"
@@ -174,7 +174,7 @@ func TestApplyMigrationsFreshOwnershipAndSchemas(t *testing.T) {
 			t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 			require.False(t, binderCalled, "New must leave composition open")
 			if tc.host {
-				hostClient, err = riverkit.New(ctx, pool, &river.Config{Schema: tc.jobs, Queues: map[string]river.QueueConfig{QueueBilling: {MaxWorkers: 1}}}, rt.RiverJobs(), riverkit.NewContribution("host", func(context.Context, *river.Config) error { binderCalled = true; return nil }, nil, nil))
+				hostClient, err = riverhelpers.New(ctx, pool, &river.Config{Schema: tc.jobs, Queues: map[string]river.QueueConfig{QueueBilling: {MaxWorkers: 1}}}, rt.RiverJobs(), riverhelpers.NewContribution("host", func(context.Context, *river.Config) error { binderCalled = true; return nil }, nil, nil))
 				require.NoError(t, err)
 			}
 			require.Equal(t, tc.host, rt.HasExternalRiverClient())
