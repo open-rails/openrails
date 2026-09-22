@@ -95,6 +95,7 @@ func TestEmbeddedResetIsTransactionalAndLedgerScoped(t *testing.T) {
 
 	for _, foreign := range []struct{ name, create, drop string }{
 		{"sequence", "CREATE SEQUENCE billing.host_sequence", "DROP SEQUENCE billing.host_sequence"},
+		{"collation", `CREATE COLLATION billing.host_collation FROM pg_catalog."C"`, "DROP COLLATION billing.host_collation"},
 		{"function overload", "CREATE FUNCTION billing.current_merchant_id(text) RETURNS text LANGUAGE sql AS 'SELECT $1'", "DROP FUNCTION billing.current_merchant_id(text)"},
 		{"external view", "CREATE VIEW public.host_billing_view AS SELECT id FROM billing.merchants", "DROP VIEW public.host_billing_view"},
 	} {

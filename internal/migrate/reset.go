@@ -98,6 +98,11 @@ func ApplyEmbeddedReset(ctx context.Context, dsn, allowedTargets, confirmation s
  WHERE n.nspname=$1 AND t.typrelid=0 AND t.typelem=0 AND NOT (t.typtype='e' AND t.typname=ANY($5::text[]))
  UNION ALL
  SELECT 1 FROM pg_catalog.pg_depend d
+ WHERE d.refclassid='pg_namespace'::regclass
+ AND d.refobjid=(SELECT oid FROM pg_catalog.pg_namespace WHERE nspname=$1)
+ AND d.classid NOT IN ('pg_class'::regclass,'pg_proc'::regclass,'pg_type'::regclass,'pg_constraint'::regclass)
+ UNION ALL
+ SELECT 1 FROM pg_catalog.pg_depend d
  CROSS JOIN LATERAL pg_catalog.pg_identify_object(d.refclassid,d.refobjid,d.refobjsubid) referenced
  CROSS JOIN LATERAL pg_catalog.pg_identify_object(d.classid,d.objid,d.objsubid) dependent
  LEFT JOIN pg_catalog.pg_rewrite rw ON d.classid='pg_rewrite'::regclass AND rw.oid=d.objid
