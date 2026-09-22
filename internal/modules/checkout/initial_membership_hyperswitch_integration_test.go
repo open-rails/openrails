@@ -125,7 +125,7 @@ func TestHyperSwitchInitialMembershipAtomicWorkflow(t *testing.T) {
 			if mode == "unsubmitted verify" {
 				fx.runner.Config = &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
 			}
-			_, confirmationErr := fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal)
+			_, confirmationErr := fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal, nil)
 			t.Logf("confirmation: %v", confirmationErr)
 			in, err := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, InitialMembershipIdempotencyKey(key))
 			require.NoError(t, err)
@@ -208,7 +208,7 @@ func TestHyperSwitchInitialMembershipAtomicWorkflow(t *testing.T) {
 				require.Equal(t, fx.gateway.txnID, method.StoredCredentialRecurringRef)
 			}
 			require.Empty(t, method.StoredCredentialUnscheduledRef)
-			_, _ = fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal)
+			_, _ = fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal, nil)
 			require.EqualValues(t, 1, posts.Load())
 			require.Zero(t, fx.gateway.createCalls.Load())
 		})

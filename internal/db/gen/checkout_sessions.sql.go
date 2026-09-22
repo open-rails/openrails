@@ -208,7 +208,7 @@ func (q *Queries) CountInvalidCheckoutCaptureReferences(ctx context.Context, mer
 const countInvalidEngineCheckoutReferences = `-- name: CountInvalidEngineCheckoutReferences :one
 SELECT count(*) FROM openrails.checkout_sessions cs
 LEFT JOIN openrails.rail_intents i ON i.merchant_id=cs.merchant_id
- AND i.idempotency_key='initial_membership:checkout_session:'||cs.id::text AND i.intent_type='initial_membership'
+ AND i.payload->>'checkout_session_id'=cs.id::text AND i.intent_type='initial_membership'
 WHERE cs.merchant_id=$1::uuid AND cs.rail_state ? 'initial_membership_quote'
 AND ((cs.status='succeeded' AND (i.id IS NULL OR i.status<>'succeeded'))
  OR (i.id IS NOT NULL AND (
