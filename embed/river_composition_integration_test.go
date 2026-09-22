@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/riverkit"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
@@ -48,103 +49,81 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 		pool, err := pgxpool.New(t.Context(), dsn)
 		require.NoError(t, err)
 		t.Cleanup(pool.Close)
-		rt, err := embed.New(t.Context(), embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}}, River: embed.RiverFromHost()})
+		rt, err := embed.New(t.Context(), embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}, Auth: &config.AuthConfig{Issuer: "https://compose.test", KeysPath: t.TempDir()}}, PGXPool: pool, River: embed.RiverFromHost()})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 		return rt, pool
 	}
-	t.Run("nil pool and closed runtime", func(t *testing.T) {
+	t.Run("nil pool does not consume a retained descriptor", func(t *testing.T) {
 		rt, pool := newRuntime(t)
-		_, err := rt.BindRiver(t.Context(), nil, nil)
+		jobs := rt.RiverJobs()
+		_, err := riverkit.New(t.Context(), nil, nil, jobs)
 		require.ErrorContains(t, err, "pool is required")
-		require.NoError(t, rt.Close(t.Context()))
-		called := false
-		_, err = rt.BindRiver(t.Context(), pool, func(context.Context, *river.Config) error { called = true; return nil })
-		require.ErrorContains(t, err, "closed")
-		require.False(t, called)
-		require.Error(t, rt.Ready(t.Context()))
-		require.ErrorContains(t, rt.RunWorkers(t.Context()), "closed")
-	})
-	t.Run("double binding never repeats construction", func(t *testing.T) {
-		rt, pool := newRuntime(t)
-		calls := 0
-		bind := func(_ context.Context, cfg *river.Config) error {
-			calls++
-			return nil
-		}
-		_, err := rt.BindRiver(t.Context(), pool, bind)
+		client, err := riverkit.New(t.Context(), pool, nil, jobs)
 		require.NoError(t, err)
-		_, err = rt.BindRiver(t.Context(), pool, bind)
-		require.ErrorContains(t, err, "already bound")
-		require.Equal(t, 1, calls)
+		require.Nil(t, client.Stopped())
 	})
-	t.Run("concurrent binding claims one composition", func(t *testing.T) {
+	t.Run("closed and duplicate runtimes", func(t *testing.T) {
 		rt, pool := newRuntime(t)
-		entered, release := make(chan struct{}), make(chan struct{})
-		done := make(chan error, 1)
-		go func() {
-			_, err := rt.BindRiver(t.Context(), pool, func(_ context.Context, cfg *river.Config) error {
-				close(entered)
-				<-release
-				return nil
-			})
-			done <- err
-		}()
-		<-entered
-		secondCalled := false
-		_, err := rt.BindRiver(t.Context(), pool, func(context.Context, *river.Config) error {
-			secondCalled = true
-			return nil
-		})
-		close(release)
-		require.ErrorContains(t, err, "already bound")
-		require.False(t, secondCalled)
-		require.NoError(t, <-done)
+		_, err := riverkit.New(t.Context(), pool, nil, rt.RiverJobs())
+		require.NoError(t, err)
+		_, err = riverkit.New(t.Context(), pool, nil, rt.RiverJobs())
+		require.ErrorContains(t, err, "already sealed")
+		require.True(t, rt.HasExternalRiverClient(), "refused new descriptor cannot abort the previously bound runtime")
+		require.NoError(t, rt.Ready(t.Context()))
+		require.NoError(t, rt.Close(t.Context()))
+		_, err = riverkit.New(t.Context(), pool, nil, rt.RiverJobs())
+		require.ErrorContains(t, err, "closed")
+		require.NoError(t, pool.Ping(t.Context()))
 	})
-	t.Run("failed registration is fatal setup", func(t *testing.T) {
+	t.Run("requesting jobs seals component attachment", func(t *testing.T) {
 		rt, pool := newRuntime(t)
-		cause := errors.New("host construction refused")
-		_, err := rt.BindRiver(t.Context(), pool, func(context.Context, *river.Config) error { return cause })
+		jobs := rt.RiverJobs()
+		_, err := controlplane.Attach(t.Context(), rt, controlplane.Options{})
+		require.ErrorContains(t, err, "attach before")
+		_, err = riverkit.New(t.Context(), pool, nil, jobs)
+		require.NoError(t, err)
+	})
+	t.Run("attached AuthKit cannot be registered twice", func(t *testing.T) {
+		rt, pool := newRuntime(t)
+		cp, err := controlplane.Attach(t.Context(), rt, controlplane.Options{})
+		require.NoError(t, err)
+		_, err = riverkit.New(t.Context(), pool, nil, rt.RiverJobs(), cp.Core().RiverJobs())
+		require.ErrorContains(t, err, "duplicate contribution")
+		require.False(t, rt.HasExternalRiverClient())
+	})
+	t.Run("late binding failure invalidates partial producer", func(t *testing.T) {
+		rt, pool := newRuntime(t)
+		cause := errors.New("bind failure")
+		bad := riverkit.NewContribution("bad", func(context.Context, *river.Config) error { return nil }, func(context.Context, *river.Client[pgx.Tx]) error { return cause }, func() error { return nil })
+		client, err := riverkit.New(t.Context(), pool, nil, rt.RiverJobs(), bad)
 		require.ErrorIs(t, err, cause)
-		require.ErrorContains(t, rt.Ready(t.Context()), "not bound")
-		_, err = rt.BindRiver(t.Context(), pool, func(context.Context, *river.Config) error {
-			t.Fatal("partial registration must not retry")
-			return nil
-		})
-		require.ErrorContains(t, err, "already bound")
+		require.Nil(t, client)
+		require.False(t, rt.HasExternalRiverClient())
+		require.Error(t, rt.Ready(t.Context()))
+		_, err = riverkit.New(t.Context(), pool, nil, rt.RiverJobs())
+		require.ErrorContains(t, err, "sealed")
+		require.NoError(t, pool.Ping(t.Context()))
 	})
 	for _, entry := range []struct {
 		name   string
 		mutate func(*river.Config)
 		want   string
 	}{
-		{"worker registry", func(cfg *river.Config) { cfg.Workers = river.NewWorkers(); river.AddWorker(cfg.Workers, &noopWorker{}) }, "worker registry"},
-		{"required queue", func(cfg *river.Config) {
-			delete(cfg.Queues, embed.QueueBilling)
-			cfg.Queues[river.QueueDefault] = river.QueueConfig{MaxWorkers: 1}
-		}, "required River queue"},
-		{"periodic jobs", func(cfg *river.Config) { cfg.PeriodicJobs = nil }, "periodic jobs"},
+		{"registry", func(cfg *river.Config) { cfg.Workers = river.NewWorkers() }, "worker registry"},
+		{"queue", func(cfg *river.Config) { delete(cfg.Queues, embed.QueueBilling) }, "queue"},
+		{"periodics", func(cfg *river.Config) { cfg.PeriodicJobs = nil }, "periodic"},
+		{"schema", func(cfg *river.Config) { cfg.Schema = "other" }, "schema"},
 	} {
 		t.Run(entry.name, func(t *testing.T) {
 			rt, pool := newRuntime(t)
-			returned, err := rt.BindRiver(t.Context(), pool, func(_ context.Context, cfg *river.Config) error {
-				entry.mutate(cfg)
-				return nil
-			})
+			bad := riverkit.NewContribution("bad", func(_ context.Context, cfg *river.Config) error { entry.mutate(cfg); return nil }, nil, nil)
+			client, err := riverkit.New(t.Context(), pool, nil, rt.RiverJobs(), bad)
 			require.ErrorContains(t, err, entry.want)
-			require.Nil(t, returned, "invalid configuration is refused before client construction")
+			require.Nil(t, client)
 			require.False(t, rt.HasExternalRiverClient())
 		})
 	}
-	t.Run("default configuration constructs an unstarted host client", func(t *testing.T) {
-		rt, pool := newRuntime(t)
-		client, err := rt.BindRiver(t.Context(), pool, nil)
-		require.NoError(t, err)
-		require.NotNil(t, client)
-		require.Nil(t, client.Stopped(), "construction cannot return a separately started client")
-		require.NoError(t, rt.Close(t.Context()))
-		require.NoError(t, pool.Ping(t.Context()), "the supplied pool remains host-owned")
-	})
 }
 
 func TestManagedRiverStillComposesControlPlaneBeforeRunWorkers(t *testing.T) {

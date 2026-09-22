@@ -193,7 +193,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 			if payload.FailureCount != failures {
 				return errors.New("engine admission changed the accepted failure count")
 			}
-			terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, payload.AcceptedAt)
+			terms, err := PrepareEngineRenewalTerms(ctx, d, sub, payload.AcceptedAt)
 			if err != nil {
 				return err
 			}
@@ -202,7 +202,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.OpenrailsRail
 				return err
 			}
 			if !reflect.DeepEqual(terms, payload.Renewal) {
-				return errors.New("engine admission differs from current accepted catalog terms")
+				return errors.New("engine admission differs from the accepted recurring agreement")
 			}
 			latest, err := d.Gen(ctx).GetLatestSubscriptionCollectionForPeriod(ctx, gen.GetLatestSubscriptionCollectionForPeriodParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID, PreviousPeriodEnd: payload.PreviousPeriodEnd})
 			ordinal := 0

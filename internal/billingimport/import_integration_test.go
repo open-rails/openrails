@@ -104,7 +104,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 				RailSubscriptionID: "sub-runway-" + sfx, StartedAt: asOf.Add(-100 * day), PaidThrough: &paidRunway,
 			},
 			{
-				SourceID: "dunning", Customer: openrails.CustomerID(cDunning), Price: openrails.PriceID(price), Rail: "nmi",
+				SourceID: "dunning", CollectionPolicy: "provider_dunning", Customer: openrails.CustomerID(cDunning), Price: openrails.PriceID(price), Rail: "nmi",
 				RailSubscriptionID: "sub-dunning-" + sfx, StartedAt: asOf.Add(-200 * day), PaidThrough: &paidDunning,
 				Dunning:       &billingimport.DunningEvidence{Retries: 2, LastRetryAt: &lastRetryAt, ScheduleLive: true},
 				PaymentMethod: &billingimport.PaymentMethodRef{Rail: "nmi", RailCustomerRef: "vault-" + sfx, RailMethodRef: ""},
@@ -164,7 +164,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	require.ElementsMatch(t, []string{"runway", "dunning", "lapsed", "usercancel", "usercancel-nmi-live", "chargeback", "parked", "incremental"}, res.Imported)
 
 	type subRow struct {
-		status, cancelType             string
+		status, cancelType, policy     string
 		cancelledAt, endedAt, graceEnd *time.Time
 		periodStart, periodEnd         *time.Time
 		pmLinked                       bool
@@ -175,9 +175,9 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		var ct *string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT status::text, COALESCE(cancel_type::text,''), cancelled_at, ended_at, grace_ends_at,
-			        current_period_starts_at, current_period_ends_at, payment_method_id IS NOT NULL, deletion_scheduled_at
+			        current_period_starts_at, current_period_ends_at, payment_method_id IS NOT NULL, deletion_scheduled_at, collection_policy
 			 FROM billing.subscriptions WHERE rail_subscription_id=$1`, railSubID).
-			Scan(&r.status, &ct, &r.cancelledAt, &r.endedAt, &r.graceEnd, &r.periodStart, &r.periodEnd, &r.pmLinked, &r.deletionScheduledAt))
+			Scan(&r.status, &ct, &r.cancelledAt, &r.endedAt, &r.graceEnd, &r.periodStart, &r.periodEnd, &r.pmLinked, &r.deletionScheduledAt, &r.policy))
 		if ct != nil {
 			r.cancelType = *ct
 		}
@@ -187,12 +187,14 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		// 1) Active with runway: adopted at the declared paid-through.
 		r := load(ctx, "sub-runway-"+sfx)
+		require.Equal(t, "provider", r.policy)
 		require.Equal(t, "active", r.status)
 		require.NotNil(t, r.periodEnd)
 		require.True(t, r.periodEnd.Equal(paidRunway), "period end = declared paid-through")
 
 		// 2) Mid-dunning: past_due with grace = period end + 48h.
 		r = load(ctx, "sub-dunning-"+sfx)
+		require.Equal(t, "provider_dunning", r.policy)
 		require.Equal(t, "past_due", r.status)
 		require.NotNil(t, r.graceEnd)
 		require.True(t, r.graceEnd.Equal(paidDunning.Add(48*time.Hour)), "grace = missed period end + PeriodGrace")
@@ -411,6 +413,18 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		require.NotNil(t, revokedAt, "entitlement window closed on a PROVEN terminal cancel")
 		return nil
 	}))
+	book.Subscriptions[0].CollectionPolicy = "engine"
+	book.Subscriptions[1].CollectionPolicy = "provider"
+	refused, err := billingimport.Import(context.Background(), billingimport.Options{PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: book})
+	require.NoError(t, err)
+	require.Contains(t, refused.Blocked, "runway", "provider import cannot turn a live provider agreement into engine ownership")
+	require.Contains(t, refused.Blocked, "dunning", "repeat import cannot change existing recovery authority")
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		require.Equal(t, "provider", load(ctx, "sub-runway-"+sfx).policy)
+		require.Equal(t, "provider_dunning", load(ctx, "sub-dunning-"+sfx).policy)
+		return nil
+	}))
+
 }
 
 func TestImportBilling_RollsBackWholeBookOnInfrastructureError(t *testing.T) {

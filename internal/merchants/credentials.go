@@ -27,6 +27,8 @@ var ErrNoActivePSP = errors.New("merchants: no non-archived PSP available for ne
 // StripeCredentials are a merchant's rail credentials, loaded by merchant id at
 // request time (NOT injected process-wide). Empty fields mean "not configured".
 type StripeCredentials struct {
+	// AccountID is the exact account resolved with these secrets.
+	AccountID            string
 	SecretKey            string
 	WebhookSigningSecret string
 	WebhookSigningThin   string
@@ -77,7 +79,9 @@ func (s *Service) LoadStripeCredentials(ctx context.Context, id merchant.ID) (St
 	if err != nil {
 		return creds, err
 	}
-	return s.loadStripeCredentialsByRef(ctx, id, secretKeyRef, webhookRef, thinRef, previousRef)
+	creds, err = s.loadStripeCredentialsByRef(ctx, id, secretKeyRef, webhookRef, thinRef, previousRef)
+	creds.AccountID = scope.accountID
+	return creds, err
 }
 
 func (s *Service) LoadNMIWebhookSigningSecret(ctx context.Context, id merchant.ID, provider string) (string, error) {
@@ -656,6 +660,7 @@ func (s *Service) LoadStripeCredentialsForAccount(ctx context.Context, id mercha
 		return creds, false, err
 	}
 	c, err := s.loadStripeCredentialsByRef(ctx, id, secretKeyRef, webhookRef, thinRef, previousRef)
+	c.AccountID = scope.accountID
 	return c, true, err
 }
 

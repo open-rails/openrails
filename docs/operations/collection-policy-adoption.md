@@ -1,51 +1,47 @@
-# Adopting subscription collection policy
+# Subscription ownership in a fresh OpenRails database
 
-The supported additive lineage is the published `0001_schema` and
-`0002_creator_catalogs` from source `0b560bbf4`, followed by
-`0003_collection_policy`. Applied migrations and their tracking records are not
-rewritten. A different deployed lineage requires a reviewed upgrade before
-activation; do not reset the book or restamp migration checksums.
+This release initializes a fresh OpenRails database. It is a hard cut from the
+previous database schema, not an in-place upgrade. Keep any source database
+needed for import verification; never alter or cancel the external provider
+schedules as part of initialization. No old-binary compatibility or provider-to-
+engine ownership migration is supplied.
 
-The upgrade labels existing NMI subscriptions whose retained card explicitly
-had `rebill_driver=openrails` as `provider_dunning`. Their provider schedule,
-periods and payment history stay intact. Existing Stripe/CCBill and ordinary
-NMI agreements remain `provider`. Existing Solana delegated-pull sidecars
-establish `engine` authority while retaining their on-chain execution reference.
-Other rows remain provider-owned for review, without enabling engine charges.
-The old payment-method column is consumed by classification and then removed.
-Current runtime authority is the immutable subscription policy. Sharing or
-replacing a card cannot change it.
+Each subscription has an immutable collection policy. Existing Stripe, CCBill
+and ordinary NMI schedules import as `provider`. A reviewed NMI agreement where
+OpenRails already manages retry recovery imports explicitly as
+`provider_dunning`; it still has a provider-owned recurring schedule. Do not
+infer engine ownership from a saved card or from the old card-level
+`rebill_driver=openrails` flag.
 
-Card-engine subscriptions use the existing non-null string representation:
-`rail_subscription_id=''` means no remote recurring schedule. JSON/archive
-round trips preserve the empty string. Their payment method may be NULL while
-awaiting replacement; that condition blocks new money admission and does not
-cancel the agreement. Solana references are retained and remain serviced by
-its delegated-pull worker.
+The declared provider-book import accepts `provider` and NMI
+`provider_dunning`, preserves remote schedule references and declared financial
+history, and rejects a repeat import that changes ownership. It cannot invent
+engine authority. Existing proven engine/noncard history requires a compatible
+canonical archive with its accepted operations and execution references, rather
+than a provider-book declaration. Missing or contradictory source evidence must
+be reviewed before enrollment is enabled. Synthetic repository fixtures are
+not a production census of the existing provider book.
 
-Stop old binaries and workers before the coordinated schema upgrade, then deploy
-policy-aware workers and binaries with new engine enrollment held.
-Do not overlap pre-policy workers with engine admission: an old worker can
-still query subscriptions directly. The removed card flag and old three-argument fan-out function are not a rolling
-compatibility path.
-After any engine agreement exists, rollback must retain policy-aware servicing
-and receipt reconciliation; disabling new enrollment alone must not strand it.
-Do not run an older migration loader against the extended ledger.
+Card-engine subscriptions use `rail_subscription_id=''` to mean no remote
+recurring schedule. JSON/archive round trips preserve that representation.
+Their payment method may be NULL while awaiting replacement; this blocks new
+money admission without canceling the agreement. Solana delegated-pull
+references are retained and remain serviced by its existing worker.
 
-Before activation, apply the upgrade to an operator-controlled restored book
-with provider egress disabled. Compare all preexisting subscription fields
-apart from the new policy, payment methods, balances, grants, price/provider
-identities, accepted operations and the prior migration ledger. Review missing
-schedule references, NMI recovery rows with missing/contradictory card scope,
-and Solana rows without sidecar proof. No production census or customer data
-classification is claimed by the repository's synthetic regression tests.
+Canonical archives from the current schema preserve policy and reject
+contradictory policy/binding records. Historical archives with different table
+shapes are rejected, not silently reinterpreted or upgraded. Provider history
+must be mapped and verified through the supported import boundary before the
+fresh deployment serves it. Compare source and imported ownership, provider
+identities, terms, paid-through/access and financial history with provider
+egress disabled. No source records or schedules may be discarded before that
+verification.
 
-Canonical archives produced after adoption retain the subscription policy,
-reject unsupported policy/binding combinations, and restore the same
-policy. For an archive produced by the previous schema, first restore it using
-the matching published binary into an isolated database, then run the additive
-upgrade and export with this version. A width-mismatched historical archive is
-not silently reinterpreted as the new schema.
+Deploy policy-aware workers with new engine enrollment held until import and
+provider-account qualification pass. After an engine agreement exists,
+disabling new enrollment must retain servicing and receipt reconciliation for
+that agreement. Sharing or replacing a card cannot change a subscription's
+owner.
 
 The trusted process setting `new_subscription_collection_policy: engine` opts
 new supported enrollments into owned agreement confirmation. The default empty

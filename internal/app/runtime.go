@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/riverkit"
 	redis "github.com/redis/go-redis/v9"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -83,11 +84,11 @@ type Runtime struct {
 	RouteCapabilities *routesurface.RuntimeCapabilities
 
 	Clock clockwork.Clock
-	// RiverProducer is an enqueue-only River client. It should never be started.
+	// RiverProducer inserts jobs. Host mode uses the composed worker client;
+	// managed HTTP-only processes use an unstarted producer client.
 	RiverProducer     *river.Client[pgx.Tx]
 	riverProducerPool *pgxpool.Pool
 	RiverClient       *river.Client[pgx.Tx]
-	riverPool         *pgxpool.Pool
 
 	SubscriptionService      *subscriptions.SubscriptionService
 	ProductService           *catalog.ProductService
@@ -230,7 +231,8 @@ type Runtime struct {
 	riverClosed            atomic.Bool
 	hostRiver              bool
 	hostRiverBound         atomic.Bool
-	riverConfigurers       []func(context.Context, *river.Config) error
+	riverContributions     []riverkit.Contribution
+	riverCompositionFailed bool
 	riverStarted           bool
 	workerConsumerRunning  atomic.Bool
 	externalRiverClient    bool
@@ -340,10 +342,6 @@ func (r *Runtime) Close(ctx context.Context) error {
 		}
 		r.riverStarted = false
 	}
-	if r.riverPool != nil {
-		r.riverPool.Close()
-		r.riverPool = nil
-	}
 	if r.riverProducerPool != nil {
 		r.riverProducerPool.Close()
 		r.riverProducerPool = nil
@@ -370,57 +368,47 @@ func (r *Runtime) Close(ctx context.Context) error {
 	return fmt.Errorf("failed to close some resources: %v", errs)
 }
 
-// AddRiverConfigurer composes an optional component's workers and schedules into
-// the fleet before river.NewClient fixes the worker registry. Call only
-// during startup, before InitRiver or host binding.
-func (r *Runtime) AddRiverConfigurer(configure func(context.Context, *river.Config) error) error {
+// AddRiverContribution attaches optional component jobs before RiverJobs seals
+// the component set. RiverKit performs registration and binding together.
+func (r *Runtime) AddRiverContribution(jobs riverkit.Contribution) error {
 	if r == nil {
 		return fmt.Errorf("runtime is nil")
-	}
-	if configure == nil {
-		return fmt.Errorf("River configurer is required")
 	}
 	r.riverCompositionMu.Lock()
 	defer r.riverCompositionMu.Unlock()
 	if err := r.riverConfigurableLocked(); err != nil {
 		return err
 	}
-	r.riverConfigurers = append(r.riverConfigurers, configure)
+	r.riverContributions = append(r.riverContributions, jobs)
 	return nil
 }
 
-// InitRiver initialises the River client for background workers.
-// If a host client was bound, this is a no-op.
+// InitRiver uses the same contribution composer as hosts. Managed queues use
+// the runtime's pool; the runtime already owns or borrows that pool explicitly.
 func (r *Runtime) InitRiver(ctx context.Context) error {
 	r.riverCompositionMu.Lock()
-	defer r.riverCompositionMu.Unlock()
-	if r.riverClosed.Load() {
-		return fmt.Errorf("runtime is closed")
+	if r.riverClosed.Load() || r.riverCompositionFailed {
+		r.riverCompositionMu.Unlock()
+		return fmt.Errorf("runtime is closed or River composition failed")
 	}
-	if r.hostRiver && !r.hostRiverBound.Load() {
-		return fmt.Errorf("host-owned River is not bound; call BindRiver after composition")
+	if r.hostRiver {
+		bound := r.hostRiverBound.Load()
+		r.riverCompositionMu.Unlock()
+		if !bound {
+			return fmt.Errorf("compose RiverJobs with riverkit.New before starting the host fleet")
+		}
+		return nil
 	}
 	if r.RiverClient != nil {
+		r.riverCompositionMu.Unlock()
 		return nil
 	}
-	// If external client was set, we don't create our own
-	if r.externalRiverClient {
-		return nil
+	r.riverCompositionMu.Unlock()
+	if r.DB == nil || r.DB.Pool() == nil {
+		return fmt.Errorf("River requires the runtime PostgreSQL pool")
 	}
-	r.riverCompositionSealed = true
-	workers, err := r.buildRiverWorkers(ctx)
-	if err != nil {
-		return fmt.Errorf("build river workers: %w", err)
-	}
-	// #895: health bookkeeping rides on each worker (addTrackedWorker), not on
-	// the client, so it cannot be omitted by whoever builds the client.
-	client, pool, err := buildRiverClient(ctx, r.Config, r.riverSchemaOrDefault(), workers, nil, r.riverConfigurers)
-	if err != nil {
-		return err
-	}
-	r.RiverClient = client
-	r.riverPool = pool
-	return nil
+	_, err := riverkit.New(ctx, r.DB.Pool(), &river.Config{Schema: r.riverSchemaOrDefault()}, r.riverJobs(false))
+	return err
 }
 
 // RunWorkers starts River workers (and other background loops) and blocks until ctx is done.
@@ -437,7 +425,7 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 		return fmt.Errorf("runtime is closed")
 	}
 	if r.hostRiver && !r.hostRiverBound.Load() {
-		return fmt.Errorf("host-owned River is not bound; call BindRiver after composition")
+		return fmt.Errorf("host-owned River is not bound; compose RiverJobs with riverkit.New")
 	}
 
 	// Join core-owned non-River work before RunWorkers returns. The host can
@@ -470,14 +458,6 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 		return fmt.Errorf("river client not initialized")
 	}
 
-	periodicJobs, err := r.buildRiverPeriodicJobs(ctx)
-	if err != nil {
-		return fmt.Errorf("configure periodic jobs: %w", err)
-	}
-	for _, job := range periodicJobs {
-		r.RiverClient.PeriodicJobs().Add(job)
-	}
-
 	r.riverStarted = true
 	log.Info("Starting River background workers")
 	if err := r.RiverClient.Start(ctx); err != nil {
@@ -491,42 +471,10 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// AddBillingWorkersTo adds billing's River workers to the provided worker registry.
-// This is used by embedded hosts who want to share their River client with openrails.
-func (r *Runtime) AddBillingWorkersTo(ctx context.Context, workers *river.Workers) error {
-	if r == nil {
-		return fmt.Errorf("runtime is nil")
-	}
-	// #719: embedded hosts configure only QueueBilling on their client
-	// (pkg/embedded contract), so per-merchant refresh jobs ride that queue —
-	// no host changes; a single embedded merchant is one job per tick anyway.
-	return r.addBillingWorkersToRegistry(ctx, workers, riverjobs.QueueBilling)
-}
-
 // GetBillingPeriodicJobs returns billing's periodic jobs for external River client setup.
 // This is used by embedded hosts who want to add billing's periodic jobs to their client.
 func (r *Runtime) GetBillingPeriodicJobs(ctx context.Context) ([]*river.PeriodicJob, error) {
 	return r.buildRiverPeriodicJobs(ctx)
-}
-
-// BindHostRiverClient adopts a constructed client after the one composition
-// attempt. The host owns Start/Stop; construction has not started any workers.
-func (r *Runtime) BindHostRiverClient(ctx context.Context, client *river.Client[pgx.Tx], schema string) error {
-	r.riverCompositionMu.Lock()
-	defer r.riverCompositionMu.Unlock()
-	if r.riverClosed.Load() {
-		return fmt.Errorf("runtime is closed")
-	}
-	if !r.hostRiver || !r.riverCompositionSealed || r.hostRiverBound.Load() {
-		return fmt.Errorf("host River binding is not pending")
-	}
-	r.SetRiverSchema(schema)
-	r.RiverClient = client
-	r.RiverProducer = client
-	r.externalRiverClient = true
-	r.hostRiverBound.Store(true)
-	r.StartRiverProgressMonitor(ctx)
-	return nil
 }
 
 // SetRiverSchema records the schema the bound River client keeps its tables

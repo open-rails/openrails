@@ -3,6 +3,7 @@ package postgresmigrations
 import (
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -22,16 +23,38 @@ func TestOwnedTablesMatchMigrationsAndRestoreScope(t *testing.T) {
 	if len(tables) < 50 || len(tables) != len(OwnedTables) {
 		t.Fatalf("owned table inventory drift: schema=%d inventory=%d", len(tables), len(OwnedTables))
 	}
-	migration, err := FS.ReadFile("0004_shared_schema_restore_scope.up.sql")
-	if err != nil {
-		t.Fatal(err)
+	definitions := regexp.MustCompile(`(?m)^CREATE(?: OR REPLACE)? FUNCTION openrails.guard_billing_restore_receipt\(\)`).FindAllStringIndex(sql, -1)
+	if len(definitions) == 0 {
+		t.Fatal("restore guard definition is missing")
 	}
+	start := definitions[len(definitions)-1][0]
+	end := strings.Index(sql[start:], "\n$$;")
+	if end < 0 {
+		t.Fatal("restore guard body is incomplete")
+	}
+	migration := []byte(sql[start : start+end])
 	for name := range tables {
 		if !slices.Contains(OwnedTables, name) {
 			t.Errorf("new OpenRails table %s needs an explicit ownership/archive decision", name)
 		}
 		if !regexp.MustCompile(`'` + regexp.QuoteMeta(name) + `'`).Match(migration) {
 			t.Errorf("restore scope lacks owned table %s", name)
+		}
+	}
+}
+
+func TestOwnedViewsMatchMigrations(t *testing.T) {
+	sql, err := FS.ReadFile(BaselineName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	views := regexp.MustCompile(`(?m)^CREATE VIEW openrails\.([a-z_]+)`).FindAllStringSubmatch(string(sql), -1)
+	if len(views) != len(OwnedViews) {
+		t.Fatalf("owned view inventory drift: schema=%d inventory=%d", len(views), len(OwnedViews))
+	}
+	for _, view := range views {
+		if !slices.Contains(OwnedViews, view[1]) {
+			t.Errorf("view %s lacks ownership decision", view[1])
 		}
 	}
 }

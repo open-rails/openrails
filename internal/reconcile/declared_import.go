@@ -47,6 +47,7 @@ const (
 
 // DeclaredSubscriptionFact is one subscription's host-declared facts.
 type DeclaredSubscriptionFact struct {
+	CollectionPolicy   models.CollectionPolicy
 	SourceID           string // host's stable id (result reporting)
 	Customer           uuid.UUID
 	PriceID            uuid.UUID
@@ -200,6 +201,13 @@ func ImportDeclaredSubscriptions(
 			block("duplicate SourceID in batch")
 			continue
 		}
+		if f.CollectionPolicy == "" {
+			f.CollectionPolicy = models.CollectionPolicyProvider
+		}
+		if f.CollectionPolicy != models.CollectionPolicyProvider && !(f.CollectionPolicy == models.CollectionPolicyProviderDunning && f.Rail == "nmi") {
+			block("declared provider book has unsupported collection policy; engine history requires canonical archive restore")
+			continue
+		}
 		if f.RailSubscriptionID == "" || f.Rail == "" {
 			block("rail and rail_subscription_id are required (synthesize a stable id for rail-less legacy rows)")
 			continue
@@ -264,6 +272,10 @@ func ImportDeclaredSubscriptions(
 				// The rail key belongs to someone else locally — never silently
 				// adopt or converge another customer's row.
 				block("rail subscription id already belongs to a different customer")
+				continue
+			}
+			if existing.CollectionPolicy != string(f.CollectionPolicy) {
+				block("existing agreement has a different immutable collection policy")
 				continue
 			}
 			subID = existing.ID
@@ -419,6 +431,7 @@ func insertDeclaredCancelled(
 	id := uuid.New()
 	priceID := f.PriceID
 	if _, err := q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
+		CollectionPolicy:         string(f.CollectionPolicy),
 		ID:                       id,
 		MerchantID:               merchantID,
 		CustomerID:               f.Customer,
@@ -459,6 +472,7 @@ func materializeDeclaredUnknown(
 ) (uuid.UUID, error) {
 	started := f.StartedAt.UTC()
 	rows, err := q.ReconcileMaterializeSubscription(ctx, gen.ReconcileMaterializeSubscriptionParams{
+		CollectionPolicy:   string(f.CollectionPolicy),
 		MerchantID:         merchantID,
 		Status:             gen.OpenrailsSubscriptionStatus(models.StatusUnknown),
 		Rail:               f.Rail,
@@ -483,6 +497,9 @@ func materializeDeclaredUnknown(
 		})
 		if err != nil {
 			return uuid.Nil, fmt.Errorf("materialize raced but row not found: %w", err)
+		}
+		if existing.CollectionPolicy != string(f.CollectionPolicy) {
+			return uuid.Nil, errors.New("raced agreement has a different immutable collection policy")
 		}
 		return existing.ID, nil
 	}

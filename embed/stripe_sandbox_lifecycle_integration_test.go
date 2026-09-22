@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/riverkit"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -85,9 +86,7 @@ func TestStripeSandboxRuntimeTransportLifetime(t *testing.T) {
 	failed.River = RiverFromHost()
 	failedRuntime, err := New(t.Context(), failed)
 	require.NoError(t, err)
-	_, err = failedRuntime.BindRiver(t.Context(), pool, func(context.Context, *river.Config) error {
-		return errors.New("deliberate host bind failure")
-	})
+	_, err = riverkit.New(t.Context(), pool, nil, failedRuntime.RiverJobs(), riverkit.NewContribution("fail", func(context.Context, *river.Config) error { return errors.New("deliberate host bind failure") }, nil, nil))
 	require.ErrorContains(t, err, "deliberate host bind failure")
 	require.NoError(t, failedRuntime.Close(context.Background()), "failed startup explicitly closes its runtime")
 	read()

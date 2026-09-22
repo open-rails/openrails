@@ -61,7 +61,7 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 
 	var riverErr error
 	if r.hostRiver && !r.hostRiverBound.Load() {
-		riverErr = fmt.Errorf("host-owned River is not bound; call BindRiver after composition")
+		riverErr = fmt.Errorf("host-owned River is not bound; compose RiverJobs with riverkit.New")
 	} else if r.RiverProducer == nil {
 		riverErr = fmt.Errorf("river producer not initialized")
 	}

@@ -1550,6 +1550,73 @@ func (q *Queries) ListInitialEnrollmentsForMembership(ctx context.Context, arg L
 	return items, nil
 }
 
+const listPaidEngineAgreementsAtBoundary = `-- name: ListPaidEngineAgreementsAtBoundary :many
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id=$1::uuid AND status='succeeded'
+  AND ((intent_type='initial_membership'
+        AND payload->'terms'->>'subscription_id'=$2::uuid::text
+        AND (payload->'terms'->>'period_end')::timestamptz=$3::timestamptz)
+    OR (intent_type='subscription_collection'
+        AND subscription_id=$2::uuid
+        AND (payload->'renewal'->>'period_end')::timestamptz=$3::timestamptz))
+ORDER BY id LIMIT 2
+`
+
+type ListPaidEngineAgreementsAtBoundaryParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	PeriodEnd      time.Time
+}
+
+// Select by obligation identity and boundary, not mutable catalog/account
+// filters: an ambiguous or mismatched retained owner must fail qualification.
+func (q *Queries) ListPaidEngineAgreementsAtBoundary(ctx context.Context, arg ListPaidEngineAgreementsAtBoundaryParams) ([]OpenrailsRailIntent, error) {
+	rows, err := q.db.Query(ctx, listPaidEngineAgreementsAtBoundary, arg.MerchantID, arg.SubscriptionID, arg.PeriodEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsRailIntent
+	for rows.Next() {
+		var i OpenrailsRailIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ClaimedUntil,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRailIntents = `-- name: ListRailIntents :many
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
 WHERE rail_intents.merchant_id = $1::uuid AND ($2::text IS NULL OR status = $2::text)

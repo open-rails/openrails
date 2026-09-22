@@ -127,6 +127,9 @@ type CancelMembershipParams struct {
 }
 
 type FailMembershipParams struct {
+	// Prepared preserves the accepted engine charge cadence for retry policy.
+	// Native provider failures leave this nil.
+	Prepared       *RenewalTerms
 	Rail           models.Rail
 	SubscriptionID *uuid.UUID
 	FailureReason  *string

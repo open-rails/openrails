@@ -186,7 +186,7 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method), engineHyperSwitchPointer(method.Custodian, binding), true); err != nil {
 			return err
 		}
-		terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, admittedAt)
+		terms, err := intents.PrepareEngineRenewalTerms(ctx, d, sub, admittedAt)
 		if err != nil {
 			return err
 		}

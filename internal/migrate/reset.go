@@ -87,11 +87,31 @@ func ApplyEmbeddedReset(ctx context.Context, dsn, allowedTargets, confirmation s
 	var shared bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS (
  SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
- WHERE n.nspname=$1 AND c.relkind IN ('r','p','v','m','f') AND NOT c.relname=ANY($2::text[]))`, embeddedResetSchema, postgresmigrations.OwnedTables).Scan(&shared); err != nil {
+ WHERE n.nspname=$1 AND c.relkind IN ('r','p','v','m','f','S','c')
+ AND NOT (c.relkind IN ('r','p') AND c.relname=ANY($2::text[]) OR c.relkind='v' AND c.relname=ANY($3::text[]))
+ UNION ALL
+ SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+ WHERE n.nspname=$1 AND NOT EXISTS (
+ SELECT 1 FROM unnest($4::text[]) f WHERE p.oid=to_regprocedure(format('%I.%s',$1,f)))
+ UNION ALL
+ SELECT 1 FROM pg_catalog.pg_type t JOIN pg_catalog.pg_namespace n ON n.oid=t.typnamespace
+ WHERE n.nspname=$1 AND t.typrelid=0 AND t.typelem=0 AND NOT (t.typtype='e' AND t.typname=ANY($5::text[]))
+ UNION ALL
+ SELECT 1 FROM pg_catalog.pg_depend d
+ CROSS JOIN LATERAL pg_catalog.pg_identify_object(d.refclassid,d.refobjid,d.refobjsubid) referenced
+ CROSS JOIN LATERAL pg_catalog.pg_identify_object(d.classid,d.objid,d.objsubid) dependent
+ LEFT JOIN pg_catalog.pg_rewrite rw ON d.classid='pg_rewrite'::regclass AND rw.oid=d.objid
+ LEFT JOIN pg_catalog.pg_trigger tr ON d.classid='pg_trigger'::regclass AND tr.oid=d.objid
+ LEFT JOIN pg_catalog.pg_attrdef ad ON d.classid='pg_attrdef'::regclass AND ad.oid=d.objid
+ LEFT JOIN pg_catalog.pg_class relation ON relation.oid=COALESCE(rw.ev_class,tr.tgrelid,ad.adrelid)
+ LEFT JOIN pg_catalog.pg_namespace relation_schema ON relation_schema.oid=relation.relnamespace
+ WHERE d.deptype='n' AND referenced.schema=$1 AND COALESCE(dependent.schema,relation_schema.nspname,'')<>$1
+ )`, embeddedResetSchema, postgresmigrations.OwnedTables, postgresmigrations.OwnedViews,
+		postgresmigrations.OwnedFunctions, postgresmigrations.OwnedTypes).Scan(&shared); err != nil {
 		return result, err
 	}
 	if shared {
-		return result, errors.New("embedded reset refuses a shared schema containing host-owned relations")
+		return result, errors.New("embedded reset refuses a shared schema containing host-owned objects or external dependencies")
 	}
 	if _, err = tx.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{embeddedResetSchema}.Sanitize()+" CASCADE"); err != nil {
 		return result, fmt.Errorf("drop openrails schema: %w", err)

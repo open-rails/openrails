@@ -147,6 +147,9 @@ func (s *CheckoutSessionService) checkoutRailSkipReason(price *models.Price, tar
 		if providerConfig.Stripe == nil || strings.TrimSpace(providerConfig.Stripe.SecretKey) == "" {
 			return models.CheckoutRoutingSkipCredentialsMissing
 		}
+		if mode == models.CheckoutSessionModeOneOff && s.config != nil && s.config.NewSubscriptionCollectionPolicy == "engine" {
+			return ""
+		}
 		if stripePaidIntroUnsupported(price) {
 			return models.CheckoutRoutingSkipModeUnsupported
 		}

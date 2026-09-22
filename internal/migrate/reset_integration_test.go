@@ -93,6 +93,23 @@ func TestEmbeddedResetIsTransactionalAndLedgerScoped(t *testing.T) {
 	require.NoError(t, target.QueryRow(ctx, `SELECT to_regnamespace('billing') IS NOT NULL`).Scan(&schemaExists))
 	require.True(t, schemaExists, "a refused reset must not mutate the target")
 
+	for _, foreign := range []struct{ name, create, drop string }{
+		{"sequence", "CREATE SEQUENCE billing.host_sequence", "DROP SEQUENCE billing.host_sequence"},
+		{"function overload", "CREATE FUNCTION billing.current_merchant_id(text) RETURNS text LANGUAGE sql AS 'SELECT $1'", "DROP FUNCTION billing.current_merchant_id(text)"},
+		{"external view", "CREATE VIEW public.host_billing_view AS SELECT id FROM billing.merchants", "DROP VIEW public.host_billing_view"},
+	} {
+		t.Run(foreign.name, func(t *testing.T) {
+			_, err := target.Exec(ctx, foreign.create)
+			require.NoError(t, err)
+			_, err = migrate.ApplyEmbeddedReset(ctx, targetDSN, plan.Target, migrate.EmbeddedResetConfirmation(plan.Target))
+			require.ErrorContains(t, err, "host-owned objects or external dependencies")
+			require.NoError(t, target.QueryRow(ctx, `SELECT to_regclass('billing.merchants') IS NOT NULL`).Scan(&schemaExists))
+			require.True(t, schemaExists, "refused reset leaves the billing tables intact")
+			_, err = target.Exec(ctx, foreign.drop)
+			require.NoError(t, err, "refused reset leaves the host object intact")
+		})
+	}
+
 	_, err = target.Exec(ctx, `ALTER TABLE public.migrations RENAME COLUMN schema TO migration_schema`)
 	require.NoError(t, err)
 	_, err = migrate.ApplyEmbeddedReset(ctx, targetDSN, plan.Target,

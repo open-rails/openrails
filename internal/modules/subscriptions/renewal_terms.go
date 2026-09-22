@@ -58,7 +58,7 @@ func (t RenewalTerms) Validate() error {
 // PrepareRenewalTerms must run under the admission transaction's subscription
 // lock. It does not mutate the subscription or mark a scheduled change applied:
 // those effects belong to settlement of the accepted charge.
-func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription, now time.Time) (RenewalTerms, error) {
+func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription, now time.Time, agreement *RenewalTerms) (RenewalTerms, error) {
 	var terms RenewalTerms
 	if d == nil || d.Pool() != nil || sub == nil || sub.CurrentPeriodEndsAt == nil {
 		return terms, errors.New("renewal preparation requires a locked subscription and transaction")
@@ -69,6 +69,25 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		Entitlements:         models.CloneEntitlementsSpec(sub.EntitlementsSpecSnapshot),
 		PreviousEntitlements: models.CloneEntitlementsSpec(sub.EntitlementsSpecSnapshot),
 	}
+	if sub.CollectionPolicy == models.CollectionPolicyEngine {
+		if agreement == nil {
+			return terms, errors.New("engine renewal requires its qualified paid agreement")
+		}
+		if err := agreement.Validate(); err != nil {
+			return terms, err
+		}
+		duration := agreement.PeriodEnd.Sub(agreement.PeriodStart)
+		if agreement.SubscriptionID != sub.ID || agreement.CustomerID != sub.CustomerID || agreement.PSPID != sub.PspID || agreement.PriceID != sub.PriceID || agreement.ProductID != sub.ProductID || !agreement.PeriodEnd.Equal(*sub.CurrentPeriodEndsAt) || sub.CurrentPeriodStartsAt == nil || !agreement.PeriodStart.Equal(*sub.CurrentPeriodStartsAt) || !agreement.PeriodStart.Add(duration).Equal(agreement.PeriodEnd) {
+			return terms, errors.New("engine paid agreement no longer matches the current obligation")
+		}
+		terms.Amount, terms.Currency, terms.ProductName = agreement.Amount, agreement.Currency, agreement.ProductName
+		terms.PeriodEnd = terms.PeriodStart.Add(duration)
+		terms.Entitlements = models.CloneEntitlementsSpec(agreement.Entitlements)
+		terms.PreviousEntitlements = models.CloneEntitlementsSpec(agreement.Entitlements)
+	} else if agreement != nil {
+		return terms, errors.New("native renewal cannot substitute an engine agreement")
+	}
+
 	reprice, err := NewRepriceRepo(d).GetScheduledForSubscription(ctx, sub.ID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return terms, fmt.Errorf("prepare renewal scheduled change: %w", err)
@@ -83,6 +102,9 @@ func PrepareRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscription
 		id := *sub.ScheduledPriceID
 		terms.ScheduledPriceID = &id
 		terms.PriceID = id
+	}
+	if sub.CollectionPolicy == models.CollectionPolicyEngine && terms.RepriceID == nil && terms.ScheduledPriceID == nil {
+		return terms, terms.Validate()
 	}
 	price, err := catalog.NewPriceService(d).GetByID(ctx, terms.PriceID)
 	if err != nil {
