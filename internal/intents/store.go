@@ -839,10 +839,42 @@ func (s *Store) Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time,
 	if scopeErr != nil {
 		return scopeErr
 	}
-	return one(s.db.Gen(ctx).ParkRailIntent(ctx, gen.ParkRailIntentParams{
+	rows, err := s.db.Gen(ctx).ParkRailIntent(ctx, gen.ParkRailIntentParams{
 		MerchantID: scopeMerchantID.UUID(),
 		ID:         id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
-	}))
+	})
+	if err != nil || rows != 0 {
+		return err
+	}
+	// Park deliberately cannot clear a payment submission fence. A blocked
+	// executor still owns that payment: retain it for read-only verification,
+	// rather than leaving its claim in flight until lease expiry.
+	current, err := s.Get(ctx, id)
+	if db.IsNotFound(err) {
+		return nil
+	}
+	if err != nil || current.Status != StatusInFlight {
+		return err
+	}
+	var evidence map[string]json.RawMessage
+	if err := json.Unmarshal(current.ResultEvidence, &evidence); err != nil {
+		return err
+	}
+	key := ""
+	switch current.IntentType {
+	case "invoice_collection", "subscription_collection":
+		key = "submitted_at"
+	case "nmi_sale":
+		key = "sale_submitted"
+	case "initial_membership":
+		key = "initial_submitted"
+	}
+	if _, submitted := evidence[key]; key != "" && submitted {
+		// MarkUnknown's SQL accepts only live states, so a concurrent sealed
+		// completion is never overwritten by this stale blocked outcome.
+		return s.MarkUnknown(ctx, id, nextAttemptAt, reason, nil)
+	}
+	return nil
 }
 
 func (s *Store) MarkSuperseded(ctx context.Context, id uuid.UUID, reason string) error {
