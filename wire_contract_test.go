@@ -77,7 +77,7 @@ func TestDepositAndBalanceInt64RoundTrip(t *testing.T) {
 		}
 	}
 	var request DepositCreditsRequest
-	for _, raw := range []string{`{"amount":9007199254740993}`, `{"amount":"9223372036854775808"}`, `{"customer_id":"invalid"}`} {
+	for _, raw := range []string{`{"amount":9007199254740993}`, `{"amount":"9223372036854775808"}`, `{"customer_id":123}`} {
 		if err := json.Unmarshal([]byte(raw), &request); err == nil {
 			t.Fatalf("accepted invalid wire value %s", raw)
 		}

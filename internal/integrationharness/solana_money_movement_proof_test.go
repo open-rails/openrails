@@ -264,7 +264,7 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 	client := surface.Client()
 	depositSourceID := uuid.NewString()
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
-		CustomerID: &payer,
+		CustomerID: new(payer.String()),
 		Invoker:    payerID.String(),
 		Currency:   "USD",
 		Amount:     50_000,
@@ -275,7 +275,7 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 
 	requestID := "solana-proof-" + uuid.NewString()
 	verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
-		CustomerID:      openrails.CustomerID(payerID),
+		CustomerID:      (openrails.CustomerID(payerID)).String(),
 		Invoker:         payerID.String(),
 		InvokerType:     string(identity.InvokerTypePayer),
 		Resource:        "vm-small",

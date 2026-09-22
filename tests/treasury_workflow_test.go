@@ -203,7 +203,7 @@ func checkTreasuryScopes(t *testing.T, f treasuryWorkflow) {
 		payer  openrails.CustomerID
 		amount int64
 	}{{payer, 3_300_000}, {merchantPayer, 4_200_000}} {
-		_, err := f.client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &seed.payer, Invoker: seed.payer.String(), Currency: "EUR", Amount: seed.amount, Source: "treasury", SourceID: uuid.NewString()})
+		_, err := f.client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(seed.payer.String()), Invoker: seed.payer.String(), Currency: "EUR", Amount: seed.amount, Source: "treasury", SourceID: uuid.NewString()})
 		require.NoError(t, err)
 	}
 	_, adminToken := f.actor(t, []string{permissions.MerchantAll, permissions.CustomerAll})

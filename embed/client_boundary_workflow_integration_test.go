@@ -58,6 +58,14 @@ func TestClientBoundaryWorkflow(t *testing.T) {
 					return err
 				}},
 				{"malformed grant", true, func() error { return client.RevokeEntitlement(ctx, (valid).String(), "not-a-uuid") }},
+				{"wrong customer kind deposit", true, func() error {
+					wrong := "price_" + uuid.NewString()
+					_, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &wrong, Invoker: "contract", Currency: "USD", Amount: 1, Source: "contract", SourceID: uuid.NewString()})
+					return err
+				}},
+				{"wrong customer kind usage", true, func() error {
+					return client.RecordUsage(ctx, openrails.UsageReport{CustomerID: "price_" + uuid.NewString(), Currency: "USD", EventType: "contract", Source: "contract", SourceID: uuid.NewString()})
+				}},
 				{"empty admission batch", true, func() error { _, err := client.AdmitBatch(ctx, nil); return err }},
 				{"zero entitlement subjects", true, func() error {
 					_, err := client.ListActiveEntitlements(ctx, []string{"", ""}, time.Time{})
@@ -143,13 +151,13 @@ func clientBoundaryErrors(t *testing.T, ctx context.Context, h *integrationharne
 	out["admit_missing_customer"] = observeClientError(t, "admit missing customer", err)
 
 	payer := openrails.CustomerID(customer)
-	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "parity", Currency: "conformance_missing_currency", Amount: 1, Source: "parity", SourceID: uuid.NewString()})
+	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(payer.String()), Invoker: "parity", Currency: "conformance_missing_currency", Amount: 1, Source: "parity", SourceID: uuid.NewString()})
 	require.Equal(t, errorObservation{StatusError: true, Status: 400, Type: "invalid_request_error", Code: "currency_unsupported", Param: "currency", HasRequestID: true, Invalid: true}, observeClientError(t, "unsupported currency", err))
 	_, err = client.UsageRollup(ctx, (payer).String(), "USD", time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "bogus")
 	require.Equal(t, errorObservation{StatusError: true, Status: 400, Type: "invalid_request_error", Code: "invalid_param", HasRequestID: true, Invalid: true}, observeClientError(t, "unknown rollup grouping", err))
-	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "parity", Currency: "USD", Amount: 1_000_000, Source: "parity", SourceID: uuid.NewString()})
+	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(payer.String()), Invoker: "parity", Currency: "USD", Amount: 1_000_000, Source: "parity", SourceID: uuid.NewString()})
 	require.NoError(t, err)
-	usage := openrails.UsageReport{CustomerID: openrails.CustomerID(customer), Invoker: "parity", Currency: "USD", EventType: "parity", Amount: 50_000, Source: "parity", SourceID: uuid.NewString()}
+	usage := openrails.UsageReport{CustomerID: (openrails.CustomerID(customer)).String(), Invoker: "parity", Currency: "USD", EventType: "parity", Amount: 50_000, Source: "parity", SourceID: uuid.NewString()}
 	require.NoError(t, client.RecordUsage(ctx, usage))
 	usage.Amount = 90_000
 	conflict := client.RecordUsage(ctx, usage)
@@ -244,20 +252,20 @@ func checkClientDTOShapes(t *testing.T, ctx context.Context, h *integrationharne
 	require.NoError(t, err)
 	require.Len(t, payments.Data, 1)
 	require.Equal(t, f.payment, payments.Data[0].ID)
-	require.Equal(t, f.customer, payments.Data[0].CustomerID)
+	require.Equal(t, f.customer.String(), payments.Data[0].CustomerID)
 	require.NotNil(t, payments.Data[0].SubscriptionID)
 	require.Equal(t, f.subscription, *payments.Data[0].SubscriptionID)
 	payment, err := client.GetPayment(ctx, f.payment)
 	require.NoError(t, err)
-	require.Equal(t, price.ID, payment.Price.ID.String())
+	require.Equal(t, price.ID, payment.Price.ID)
 
-	deposit, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &f.customer, Invoker: "shape", Currency: "usd", Amount: 1_000, Source: "shape", SourceID: uuid.NewString()})
+	deposit, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(f.customer.String()), Invoker: "shape", Currency: "usd", Amount: 1_000, Source: "shape", SourceID: uuid.NewString()})
 	require.NoError(t, err)
-	require.Equal(t, f.customer, deposit.CustomerID)
+	require.Equal(t, f.customer.String(), deposit.CustomerID)
 	o.DepositCurrency = deposit.Currency
 	balance, err := client.Balance(ctx, (f.customer).String())
 	require.NoError(t, err)
-	require.Equal(t, f.customer, balance.CustomerID)
+	require.Equal(t, f.customer.String(), balance.CustomerID)
 	o.BalanceCurrency = balance.Currency
 	o.PriceCurrency = price.Currency
 	rules := []openrails.CheckoutRoutingRule{{Match: openrails.CheckoutRoutingMatch{Currency: "usd"}, Prefer: []string{"nmi"}}, {Prefer: []string{"nmi"}}}
@@ -271,8 +279,8 @@ func checkClientDTOShapes(t *testing.T, ctx context.Context, h *integrationharne
 	want := dtoShapeObservation{
 		SubscriptionID: f.subscription, ListedSubscriptionID: f.subscription, MethodSubscriptionID: f.subscription,
 		CustomerID: (f.customer).String(),
-		ProductID:  (sdkProductID(t, product.ID)).String(), PriceProductID: sdkProductID(t, product.ID), ProductOwnID: sdkProductID(t, product.ID),
-		PriceID: (sdkPriceID(t, price.ID)).String(), PriceOwnID: sdkPriceID(t, price.ID), CatalogPriceID: sdkPriceID(t, price.ID),
+		ProductID:  product.ID, PriceProductID: product.ID, ProductOwnID: product.ID,
+		PriceID: price.ID, PriceOwnID: price.ID, CatalogPriceID: price.ID,
 		PaymentMethodID: f.method, MethodID: f.method, PaymentID: f.payment,
 		ReadByID: true, HasPayment: true,
 		DepositCurrency: "USD", BalanceCurrency: "USD", PriceCurrency: "USD", RuleCurrency: "USD",

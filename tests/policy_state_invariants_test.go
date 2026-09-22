@@ -116,7 +116,7 @@ AND wait_event_type='Lock' AND query LIKE '%pg_advisory_xact_lock(hashtextextend
 		require.NoError(t, err)
 		require.EqualValues(t, 1, changed.RowsAffected())
 		payer, _ := f.actor(t, nil)
-		_, err = f.embedded.ReportWastedSpend(t.Context(), openrails.WastedSpendReport{CustomerID: payer, Invoker: "bad-config", Currency: "USD", Amount: 1, Source: "test", SourceID: uuid.NewString()})
+		_, err = f.embedded.ReportWastedSpend(t.Context(), openrails.WastedSpendReport{CustomerID: (payer).String(), Invoker: "bad-config", Currency: "USD", Amount: 1, Source: "test", SourceID: uuid.NewString()})
 		require.Error(t, err, "malformed persisted windows must not silently fall back to a spending allowance")
 	})
 }

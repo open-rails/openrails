@@ -83,7 +83,7 @@ func checkCustomerPolicyBoundary(t *testing.T, f treasuryWorkflow) {
 	requirePolicyNotFound(t, err, "customer_not_found")
 	assignment, err := f.client.GetCustomerBillingPolicy(ctx, (payer).String())
 	require.NoError(t, err)
-	require.Equal(t, &openrails.CustomerBillingPolicyAssignment{CustomerID: payer, PolicyName: &large}, assignment, "every refused write preserves the assignment")
+	require.Equal(t, &openrails.CustomerBillingPolicyAssignment{CustomerID: (payer).String(), PolicyName: &large}, assignment, "every refused write preserves the assignment")
 	untouched, err := otherClient.GetCustomerBillingPolicy(ctx, (foreignCustomer).String())
 	require.NoError(t, err)
 	require.Nil(t, untouched.PolicyName)

@@ -30,9 +30,9 @@ func TestClientAccountAndUsageWorkflow(t *testing.T) {
 	for _, d := range clientWorkflowDeployments(t, h) {
 		t.Run(d.name, func(t *testing.T) {
 			client := d.client
-			payer := openrails.CustomerID(uuid.New())
-			_, err := client.EnsureCustomer(ctx, (payer).String())
+			customer, err := client.EnsureCustomer(ctx, uuid.NewString())
 			require.NoError(t, err)
+			payer := customer.ID
 			depositRequest := openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "client-contract", Currency: "USD", Amount: 1_000_000, Source: "conformance", SourceID: uuid.NewString(), Description: "seed"}
 			deposit, err := client.DepositCredits(ctx, depositRequest)
 			require.NoError(t, err)
@@ -83,9 +83,9 @@ func TestClientAccountAndUsageWorkflow(t *testing.T) {
 			require.Zero(t, denied.RetryAfterSeconds)
 			require.Nil(t, denied.HoldExpiresAt)
 
-			balance, err := client.Balance(ctx, (payer).String())
+			balance, err := client.Balance(ctx, payer)
 			require.NoError(t, err)
-			account, err := client.GetCreditAccount(ctx, (payer).String(), "USD")
+			account, err := client.GetCreditAccount(ctx, payer, "USD")
 			require.NoError(t, err)
 			for _, got := range []*openrails.CreditAccount{balance, account} {
 				require.Equal(t, payer, got.CustomerID)
@@ -97,7 +97,7 @@ func TestClientAccountAndUsageWorkflow(t *testing.T) {
 				require.Zero(t, got.OutstandingOwedAmount)
 			}
 			from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
-			usage, err := client.UsageRollup(ctx, (payer).String(), "USD", from, to, "resource")
+			usage, err := client.UsageRollup(ctx, payer, "USD", from, to, "resource")
 			require.NoError(t, err)
 			require.Equal(t, []openrails.UsageRollupRow{{Key: resource, Currency: "USD", EventCount: 1, TotalAmount: 8_000}}, usage)
 			revenue, err := client.ResourceRevenueDaily(ctx, resource, "USD", from, to)
@@ -139,6 +139,10 @@ func TestClientAccountAndUsageWorkflow(t *testing.T) {
 			require.Equal(t, "money", verdicts[1].Result.BlockedBy)
 			require.Equal(t, "insufficient_balance", verdicts[1].Result.DenyCode)
 			require.NoError(t, client.Release(ctx, batchKey))
+			require.NoError(t, client.RecordUsage(ctx, openrails.UsageReport{
+				CustomerID: payer, Invoker: "client-contract", Currency: "USD", EventType: "sdk-reference-proof",
+				Source: "conformance", SourceID: uuid.NewString(),
+			}))
 			checkClientPaymentReads(t, ctx, h, d)
 			t.Run("metering", func(t *testing.T) { checkClientMetering(t, ctx, h, d); checkClientGaugeUsage(t, ctx, h, d) })
 			t.Run("invoice", func(t *testing.T) { checkClientInvoice(t, ctx, h, d) })
@@ -173,7 +177,7 @@ func checkClientMetering(t *testing.T, ctx context.Context, h *integrationharnes
 	mode := money.BillingModeArrears
 	_, err = ms.UpsertAccountSettings(mctx, identity.CustomerID(payer), "USD", money.AccountSettingsInput{BillingMode: &mode})
 	require.NoError(t, err)
-	event := openrails.UsageReport{CustomerID: openrails.CustomerID(payer), Currency: "USD", Invoker: "host", EventType: key, Dimensions: map[string]int64{"units": 3}, Source: "workflow", SourceID: uuid.NewString()}
+	event := openrails.UsageReport{CustomerID: (openrails.CustomerID(payer)).String(), Currency: "USD", Invoker: "host", EventType: key, Dimensions: map[string]int64{"units": 3}, Source: "workflow", SourceID: uuid.NewString()}
 	require.NoError(t, client.RecordUsage(ctx, event))
 	require.NoError(t, client.RecordUsage(ctx, event))
 	// Drive the same close used by the invoice worker, then read with the client.
@@ -299,7 +303,7 @@ func checkClientGaugeUsage(t *testing.T, ctx context.Context, h *integrationharn
 	// Two gauge segment events via the EMBEDDED unified client; the first is
 	// replayed and must not double-record.
 	report := openrails.UsageReport{
-		CustomerID: openrails.CustomerID(payerID),
+		CustomerID: (openrails.CustomerID(payerID)).String(),
 		Invoker:    "usage-report-test",
 		Currency:   currency,
 		EventType:  meterKey,
@@ -448,13 +452,13 @@ CREATE TRIGGER client_workflow_fail_binding BEFORE INSERT ON billing.billing_pol
 
 	// A second runtime must see both tightening and loosening immediately.
 	payer := openrails.CustomerID(uuid.New())
-	_, err = local.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "issue999", Currency: "USD", Amount: 20_000_000, Source: "issue999", SourceID: uuid.NewString()})
+	_, err = local.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(payer.String()), Invoker: "issue999", Currency: "USD", Amount: 20_000_000, Source: "issue999", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	admit := func(expected bool) {
 		t.Helper()
 		deadline := time.Now().Add(time.Hour)
 		requestID := uuid.NewString()
-		result, err := remote.Admit(ctx, openrails.AdmitRequest{CustomerID: openrails.CustomerID(payer), Invoker: "issue999", InvokerType: "payer", Currency: "USD", Source: "issue999", RequestID: requestID, ExpiresAt: &deadline, AccrualRateDeltaPerHour: 11_000_000, EstimatedAmount: 1000})
+		result, err := remote.Admit(ctx, openrails.AdmitRequest{CustomerID: (openrails.CustomerID(payer)).String(), Invoker: "issue999", InvokerType: "payer", Currency: "USD", Source: "issue999", RequestID: requestID, ExpiresAt: &deadline, AccrualRateDeltaPerHour: 11_000_000, EstimatedAmount: 1000})
 		require.NoError(t, err)
 		require.Equal(t, expected, result.Allowed)
 		if result.Allowed {
@@ -558,13 +562,13 @@ func checkClientAdmissionFields(t *testing.T, ctx context.Context, h *integratio
 	require.NoError(t, err)
 	id := openrails.CustomerID(payer)
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
-		CustomerID: &id, Invoker: "client-fields", Currency: "USD", Amount: 1_000_000,
+		CustomerID: new(id.String()), Invoker: "client-fields", Currency: "USD", Amount: 1_000_000,
 		Source: "client-fields", SourceID: uuid.NewString(),
 	})
 	require.NoError(t, err)
 	expires := time.Now().Add(time.Hour)
 	req := openrails.AdmitRequest{
-		CustomerID: openrails.CustomerID(payer), Invoker: "client-fields", InvokerType: "payer", Currency: "USD",
+		CustomerID: (openrails.CustomerID(payer)).String(), Invoker: "client-fields", InvokerType: "payer", Currency: "USD",
 		EstimatedAmount: 1000, ExpiresAt: &expires, AccrualRateDeltaPerHour: 11_000_000,
 		RequestID: uuid.NewString(), Source: "client-fields", Resource: "compute", TrustLevel: "standard",
 	}
@@ -630,9 +634,9 @@ func checkClientPaymentReads(t *testing.T, ctx context.Context, h *integrationha
 	require.EqualValues(t, math.MaxInt64, got.Amount, "the full int64 range survives the wire")
 	require.EqualValues(t, 1, got.AmountRefunded)
 	require.Equal(t, "USD", got.Currency)
-	require.Equal(t, openrails.CustomerID(payer), got.CustomerID)
+	require.Equal(t, payer.String(), got.CustomerID)
 	require.NotNil(t, got.Price)
-	require.Equal(t, openrails.PriceID(price), got.Price.ID)
+	require.Equal(t, openrails.PriceID(price).String(), got.Price.ID)
 	require.EqualValues(t, math.MaxInt64, got.Price.UnitAmount)
 	require.NotNil(t, got.Refunds)
 	require.Len(t, got.Refunds.Data, 1)
@@ -642,7 +646,7 @@ func checkClientPaymentReads(t *testing.T, ctx context.Context, h *integrationha
 	require.NoError(t, err)
 	require.EqualValues(t, 2, page.Total, "the payer's payment and its refund")
 	for _, item := range page.Data {
-		require.Equal(t, openrails.CustomerID(payer), item.CustomerID)
+		require.Equal(t, payer.String(), item.CustomerID)
 	}
 	all, err := client.ListPayments(ctx, openrails.PaymentFilter{PageOptions: openrails.PageOptions{Limit: 1}})
 	require.NoError(t, err)

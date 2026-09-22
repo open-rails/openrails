@@ -24,7 +24,7 @@ import (
 func checkPolicyInvokerWindows(t *testing.T, f treasuryWorkflow) {
 	ctx := t.Context()
 	payer, payerToken := f.actor(t, []string{permissions.CustomerAll})
-	_, err := f.client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: payer.String(), Currency: "USD", Amount: 1_000_000_000, Source: "window", SourceID: uuid.NewString()})
+	_, err := f.client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(payer.String()), Invoker: payer.String(), Currency: "USD", Amount: 1_000_000_000, Source: "window", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	a, tokenA := f.actor(t, nil)
 	b, tokenB := f.actor(t, nil)
@@ -41,7 +41,7 @@ func checkPolicyInvokerWindows(t *testing.T, f treasuryWorkflow) {
 	admit := func(invoker string, amount int64, requestID string) openrails.AdmitBatchVerdict {
 		t.Helper()
 		deadline := time.Now().Add(time.Hour)
-		items, err := f.client.AdmitBatch(ctx, []openrails.AdmitRequest{{CustomerID: payer, Invoker: invoker, InvokerType: openrails.InvokerTypeDelegated,
+		items, err := f.client.AdmitBatch(ctx, []openrails.AdmitRequest{{CustomerID: (payer).String(), Invoker: invoker, InvokerType: openrails.InvokerTypeDelegated,
 			Currency: "USD", EstimatedAmount: amount, RequestID: requestID, Source: "window", ExpiresAt: &deadline}})
 		require.NoError(t, err)
 		require.Len(t, items, 1)

@@ -77,7 +77,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	for _, occurred := range []time.Time{periodFrom.Add(3 * 24 * time.Hour), periodTo.Add(-time.Hour)} {
 		occurred := occurred
 		require.NoError(t, client.RecordUsage(ctx, openrails.UsageReport{
-			CustomerID: openrails.CustomerID(payer), Invoker: payer.String(), Currency: "USD", EventType: eventType,
+			CustomerID: (openrails.CustomerID(payer)).String(), Invoker: payer.String(), Currency: "USD", EventType: eventType,
 			Dimensions: map[string]int64{"amount_micros": settled},
 			Source:     "host-settlement", SourceID: uuid.NewString(), OccurredAt: &occurred,
 		}))

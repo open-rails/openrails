@@ -147,7 +147,7 @@ func checkPolicyPrecedence(t *testing.T, f treasuryWorkflow) {
 		t.Helper()
 		deadline := time.Now().Add(time.Hour)
 		key := uuid.NewString()
-		result, err := f.client.Admit(ctx, openrails.AdmitRequest{CustomerID: payer, Invoker: payer.String(), InvokerType: openrails.InvokerTypePayer, TrustLevel: "gold", Currency: "USD", EstimatedAmount: amount, RequestID: key, Source: "policy", ExpiresAt: &deadline})
+		result, err := f.client.Admit(ctx, openrails.AdmitRequest{CustomerID: (payer).String(), Invoker: payer.String(), InvokerType: openrails.InvokerTypePayer, TrustLevel: "gold", Currency: "USD", EstimatedAmount: amount, RequestID: key, Source: "policy", ExpiresAt: &deadline})
 		require.NoError(t, err)
 		if result.Allowed {
 			require.NoError(t, f.client.Release(ctx, key))
@@ -170,11 +170,11 @@ func checkPolicyPrecedence(t *testing.T, f treasuryWorkflow) {
 	for _, client := range []*openrails.Client{f.client, f.embedded} {
 		assignment, err := client.GetCustomerBillingPolicy(ctx, (payer).String())
 		require.NoError(t, err)
-		require.Equal(t, &openrails.CustomerBillingPolicyAssignment{CustomerID: payer}, assignment)
+		require.Equal(t, &openrails.CustomerBillingPolicyAssignment{CustomerID: (payer).String()}, assignment)
 		large, tiny := "large", "tiny"
 		assignment, err = client.SetCustomerBillingPolicy(ctx, (payer).String(), &large)
 		require.NoError(t, err)
-		require.Equal(t, &openrails.CustomerBillingPolicyAssignment{CustomerID: payer, PolicyName: &large}, assignment)
+		require.Equal(t, &openrails.CustomerBillingPolicyAssignment{CustomerID: (payer).String(), PolicyName: &large}, assignment)
 		require.True(t, allows(100_000_000))
 		require.NoError(t, client.SetMerchantSettings(ctx, doc))
 		require.True(t, allows(100_000_000), "declaration replacement preserves customer assignments")

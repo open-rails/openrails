@@ -155,7 +155,7 @@ func TestClientCatalogPublishingWorkflow(t *testing.T) {
 			require.Equal(t, map[string]string{"sku": "sku", "zone": "zone"}, changed.GroupBy)
 			require.Equal(t, map[string][]string{"zone": {"west"}}, changed.DefaultRateCard.Filter)
 			require.Equal(t, originalOverride, override())
-			require.NoError(t, client.RecordUsage(t.Context(), openrails.UsageReport{CustomerID: openrails.CustomerID(uuid.MustParse(customer.ID)), Invoker: customer.ID, Currency: "USD", EventType: "protected-history", Source: "catalog-prune", SourceID: uuid.NewString()}))
+			require.NoError(t, client.RecordUsage(t.Context(), openrails.UsageReport{CustomerID: (openrails.CustomerID(uuid.MustParse(customer.ID))).String(), Invoker: customer.ID, Currency: "USD", EventType: "protected-history", Source: "catalog-prune", SourceID: uuid.NewString()}))
 			for _, scenario := range []string{"protected-override", "protected-history", "history-edit", "card-only-prune", "override-currency", "override-dimension"} {
 				t.Run(scenario, func(t *testing.T) {
 					key := scenario

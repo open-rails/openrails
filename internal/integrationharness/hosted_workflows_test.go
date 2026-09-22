@@ -62,7 +62,7 @@ func TestHostedMerchantsIsolateOneSubject(t *testing.T) {
 	}
 	for _, s := range sides {
 		remote, engine := s.merchant.Client(), s.merchant.EngineClient()
-		request := openrails.DepositCreditsRequest{CustomerID: &subject, Invoker: subject.String(), Currency: "USD", Amount: s.amount, Source: "shared-subject", SourceID: s.sourceID}
+		request := openrails.DepositCreditsRequest{CustomerID: new(subject.String()), Invoker: subject.String(), Currency: "USD", Amount: s.amount, Source: "shared-subject", SourceID: s.sourceID}
 		first, err := remote.DepositCredits(ctx, request)
 		require.NoError(t, err)
 		require.False(t, first.Replayed)
@@ -113,7 +113,7 @@ func TestHostedMerchantsIsolateOneSubject(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, status, "%v", body)
 	viewer, err := openrails.NewRemote(hosted.BaseURL, openrails.WithAPIKey(a.MintAPIKey("viewer", "viewer")), openrails.WithMerchantID(a.ID))
 	require.NoError(t, err)
-	_, err = viewer.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &subject, Invoker: subject.String(), Currency: "USD", Amount: 1, Source: "shared-subject", SourceID: uuid.NewString()})
+	_, err = viewer.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(subject.String()), Invoker: subject.String(), Currency: "USD", Amount: 1, Source: "shared-subject", SourceID: uuid.NewString()})
 	require.ErrorIs(t, err, openrails.ErrDenied, "an owner-minted viewer key cannot move money")
 }
 
@@ -309,7 +309,7 @@ func TestHostedDelegationSenderBoundClient(t *testing.T) {
 	require.Equal(t, http.StatusOK, statusResp.StatusCode)
 
 	subject := openrails.CustomerID(uuid.New())
-	deposit, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &subject, Invoker: subject.String(), Currency: "USD", Amount: 250_000, Source: "delegated", SourceID: uuid.NewString()})
+	deposit, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: new(subject.String()), Invoker: subject.String(), Currency: "USD", Amount: 250_000, Source: "delegated", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	require.EqualValues(t, 250_000, deposit.Amount)
 	balance, err := client.Balance(ctx, (subject).String())

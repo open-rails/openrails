@@ -45,7 +45,7 @@ func TestOversizedRequestsAreRefusedIdenticallyAcrossDeployments(t *testing.T) {
 		_, err := h.Pool().Exec(ctx, `INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, mid, customer)
 		require.NoError(t, err)
 		payer := openrails.CustomerID(customer)
-		deposit := openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "body-limit", Currency: "USD", Amount: 1, Source: "body-limit", SourceID: uuid.NewString()}
+		deposit := openrails.DepositCreditsRequest{CustomerID: new(payer.String()), Invoker: "body-limit", Currency: "USD", Amount: 1, Source: "body-limit", SourceID: uuid.NewString()}
 		deposit.Description = oversized
 		_, err = client.DepositCredits(ctx, deposit)
 		require.Error(t, err, name)
