@@ -51,11 +51,12 @@ type fakeNMISaleGateway struct {
 	saleForm    atomic.Value // url.Values: last classic sale form
 	vault       atomic.Value // string: customer vault reported by the exact transaction read
 	txnID       string
+	accepted    chan struct{}
 }
 
 func newFakeNMISaleGateway(t *testing.T, pspID uuid.UUID) (*fakeNMISaleGateway, *nmi.NMIClient) {
 	t.Helper()
-	f := &fakeNMISaleGateway{txnID: "txn-sale-" + uuid.NewString()[:8]}
+	f := &fakeNMISaleGateway{txnID: "txn-sale-" + uuid.NewString()[:8], accepted: make(chan struct{}, 1)}
 	f.saleMode.Store("approve")
 	f.lastOrder.Store("")
 
@@ -84,6 +85,10 @@ func newFakeNMISaleGateway(t *testing.T, pspID uuid.UUID) (*fakeNMISaleGateway, 
 				fmt.Fprintf(w, `{"id":"%s","response":"2","response_code":"200","response_text":"DECLINED"}`, f.txnID)
 			case "hold-response":
 				f.charged.Store(true)
+				select {
+				case f.accepted <- struct{}{}:
+				default:
+				}
 				<-r.Context().Done()
 			case "timeout-after-accept":
 				f.charged.Store(true)
@@ -111,6 +116,10 @@ func newFakeNMISaleGateway(t *testing.T, pspID uuid.UUID) (*fakeNMISaleGateway, 
 				fmt.Fprint(w, "response=3&responsetext=Communication+error&response_code=420")
 			case "hold-response":
 				f.charged.Store(true)
+				select {
+				case f.accepted <- struct{}{}:
+				default:
+				}
 				<-r.Context().Done()
 			case "timeout-after-accept":
 				f.charged.Store(true)
@@ -535,19 +544,33 @@ func TestNMISaleIntent_ExpiredClaimReconcilesButUnsentQueueExpires(t *testing.T)
 	require.Equal(t, intents.StatusExpired, expired.Status)
 }
 
-// A caller deadline interrupts the provider response but never the ledger
+// Caller cancellation after observed acceptance interrupts the provider response
+// but never the ledger
 // write: the sale is durably unknown the moment the call returns, the executor
 // has nothing to re-run, and the verifier resolves it from provider truth.
-func TestNMISaleIntent_DeadlineAfterAcceptanceReconcilesClaim(t *testing.T) {
+func TestNMISaleIntent_CancellationAfterAcceptanceReconcilesClaim(t *testing.T) {
 	fx := newSaleIntentFixture(t)
 	fx.gateway.saleMode.Store("hold-response")
 	fx.gateway.hidden.Store(true)
 	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
 	key := NMISaleIdempotencyKey("deadline-" + uuid.NewString())
-	deadline, cancel := context.WithTimeout(fx.ctx, time.Second)
+	requestCtx, cancel := context.WithCancel(fx.ctx)
 	defer cancel()
-	_, err := fx.runner.EnqueueAndExecute(deadline, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", IntentType: payments.TypeNMISale, PriceID: &fx.priceID, PspID: pspID, Payload: fx.payload, IdempotencyKey: key, NextAttemptAt: time.Now(), Origin: intents.OriginUser})
-	require.ErrorIs(t, err, context.DeadlineExceeded)
+	finishedRequest := make(chan error, 1)
+	go func() {
+		_, err := fx.runner.EnqueueAndExecute(requestCtx, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", IntentType: payments.TypeNMISale, PriceID: &fx.priceID, PspID: pspID, Payload: fx.payload, IdempotencyKey: key, NextAttemptAt: time.Now(), Origin: intents.OriginUser})
+		finishedRequest <- err
+	}()
+	// Start the interruption at the event this regression is about. A one-second
+	// timer can expire during database admission and never exercise submission.
+	select {
+	case <-fx.gateway.accepted:
+		cancel()
+	case err := <-finishedRequest:
+		t.Fatalf("request ended before provider acceptance: %v", err)
+	}
+	err := <-finishedRequest
+	require.ErrorIs(t, err, context.Canceled)
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 	require.True(t, fx.gateway.charged.Load())
 	var id uuid.UUID
