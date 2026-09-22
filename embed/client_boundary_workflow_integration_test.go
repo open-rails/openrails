@@ -229,10 +229,12 @@ func checkClientDTOShapes(t *testing.T, ctx context.Context, h *integrationharne
 	methods, err := client.ListPaymentMethods(ctx, (f.customer).String(), openrails.PageOptions{Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, methods.Data, 1)
-	o.MethodID = methods.Data[0].ID
+	o.MethodID, err = openrails.ParsePaymentMethodID(methods.Data[0].ID)
+	require.NoError(t, err)
 	require.True(t, methods.Data[0].CreatedAt.Equal(now))
 	require.Len(t, methods.Data[0].Subscriptions, 1)
-	o.MethodSubscriptionID = methods.Data[0].Subscriptions[0].ID
+	o.MethodSubscriptionID, err = openrails.ParseSubscriptionID(methods.Data[0].Subscriptions[0].ID)
+	require.NoError(t, err)
 	catalogPrice, err := client.Prices.Retrieve(ctx, sub.PriceID)
 	require.NoError(t, err)
 	o.CatalogPriceID = catalogPrice.ID
