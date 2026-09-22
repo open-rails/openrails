@@ -32,7 +32,7 @@ func (s *Service) creatorProviderKeys(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("merchant database is required for creator collection policy")
 	}
 	environment := s.catalogProviderEnvironment()
-	rows, err := s.rt.DB.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: mid.UUID()})
+	rows, err := s.catalogDatabase().Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: mid.UUID()})
 	if err != nil {
 		return nil, fmt.Errorf("load creator collection policy: %w", err)
 	}

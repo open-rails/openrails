@@ -311,6 +311,16 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 		targets = append(targets, t)
 	}
 
+	// Inline products are one local transaction. Never start provider I/O under
+	// that transaction, even when limited mode might defer the write itself.
+	if s.localCatalogOnly {
+		for _, target := range targets {
+			if len(req.PSPLinks[target.declared]) > 0 || !s.localEnginePrice(target.rail, priceRequestCycleDays(req)) {
+				return nil, nil, nil, apperr.Invalidf("inline product_data requires local engine catalog terms; create and link legacy provider prices separately")
+			}
+		}
+	}
+
 	// or#896: a `trial:` first phase is only executable where the rail has a
 	// first-phase concept (rails.SupportsCatalogTrial). NMI's add_subscription
 	// and Solana's on-chain plan carry one price for every period, so a trial
@@ -497,7 +507,7 @@ func (s *Service) merchantAccountRails(ctx context.Context) map[string]railAccou
 	if err != nil {
 		return out
 	}
-	rows, err := s.rt.DB.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
+	rows, err := s.catalogDatabase().Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
 		MerchantID: mid.UUID(),
 	})
 	if err != nil {
@@ -534,7 +544,7 @@ func (s *Service) syncSecondaryCatalogAccounts(ctx context.Context, rail string,
 		return
 	}
 	railName := strings.ToLower(strings.TrimSpace(rail))
-	rows, err := s.rt.DB.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
+	rows, err := s.catalogDatabase().Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
 		MerchantID: mid.UUID(),
 		Rail:       &railName,
 	})

@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
@@ -22,7 +23,9 @@ import (
 // through the HTTP handlers. The standalone HTTP server should treat its routes as thin
 // adapters over this API.
 type Service struct {
-	rt *app.Runtime
+	rt               *app.Runtime
+	catalogTx        *db.DB
+	localCatalogOnly bool
 }
 
 func New(rt *app.Runtime) (*Service, error) {

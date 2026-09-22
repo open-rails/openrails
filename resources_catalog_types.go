@@ -2,19 +2,9 @@ package openrails
 
 import "time"
 
-// Catalog is a subdivision of one merchant's products. A nil OwnerSubject is
-// the ordinary merchant-owned default; creators have an opaque host subject.
-type Catalog struct {
-	ID           CatalogID  `json:"id"`
-	MerchantID   MerchantID `json:"merchant_id"`
-	OwnerSubject *string    `json:"owner_subject"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-}
-
-type CatalogProduct struct {
-	ID               ProductID       `json:"id"`
-	CatalogID        CatalogID       `json:"catalog_id"`
+type Product struct {
+	ID               string          `json:"id"`
+	CatalogID        string          `json:"catalog_id"`
 	Key              string          `json:"key"`
 	DisplayName      string          `json:"display_name"`
 	Description      string          `json:"description"`
@@ -26,10 +16,10 @@ type CatalogProduct struct {
 	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
-type CreateProductRequest struct {
+type ProductCreateParams struct {
 	// CatalogID selects a catalog for authorized merchant administrators. An
 	// owner client derives its catalog from its verified subject.
-	CatalogID        CatalogID       `json:"catalog_id,omitzero"`
+	CatalogID        string          `json:"catalog_id,omitzero"`
 	Key              string          `json:"key"`
 	DisplayName      string          `json:"display_name"`
 	Description      string          `json:"description"`
@@ -41,7 +31,7 @@ type CreateProductRequest struct {
 	Archived bool `json:"archived,omitempty"`
 }
 
-type UpdateProductRequest struct {
+type ProductUpdateParams struct {
 	DisplayName      *string         `json:"display_name,omitempty"`
 	Description      *string         `json:"description,omitempty"`
 	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
@@ -59,29 +49,14 @@ type UpdateProductRequest struct {
 	SkipRailSync bool `json:"skip_rail_sync,omitempty"`
 }
 
-type ProviderState struct {
-	Status     ProviderStatus    `json:"status"`
-	IDs        map[string]string `json:"ids,omitempty"`
-	LookupKey  string            `json:"lookup_key,omitempty"`
-	SyncStatus SyncStatus        `json:"sync_status,omitempty"`
-	Drift      []DriftField      `json:"drift,omitempty"`
-	Message    string            `json:"message,omitempty"`
-}
-
-type DriftField struct {
-	Field          string `json:"field"`
-	OpenRailsValue string `json:"openrails_value"`
-	RemoteValue    string `json:"remote_value"`
-}
-
-type CatalogPrice struct {
-	ID PriceID `json:"id"`
+type Price struct {
+	ID string `json:"id"`
 	// Key (#774) is the durable, per-merchant-unique movable-pointer handle for
 	// this price's substance-version chain — the stable name to check out
 	// against, reprice by, or reference in support conversations. ID stays the
 	// #662 immutable substance UUID.
 	Key                 string    `json:"key"`
-	ProductID           ProductID `json:"product_id"`
+	ProductID           string    `json:"product_id"`
 	Archived            bool      `json:"archived"`
 	UnitAmount          int64     `json:"unit_amount,string"`
 	Currency            string    `json:"currency"`
@@ -105,15 +80,19 @@ type CatalogPrice struct {
 	PendingManualActions []PendingAction `json:"pending_manual_actions,omitempty"`
 }
 
-type CreatePriceRequest struct {
-	ProductID   ProductID                     `json:"product_id"`
+type PriceCreateParams struct {
+	ProductID string `json:"product_id,omitempty"`
+	// ProductData creates or reuses a product by key within the authorized catalog.
+	// Existing product labels remain unchanged. Exactly one of ProductID and ProductData is required.
 	ProductData *PriceCreateProductDataParams `json:"product_data,omitempty"`
 
 	// Key (#774) is the durable, per-merchant-unique MOVABLE POINTER handle for
 	// this price's substance-version chain — distinct from ID, which stays the
 	// #662 immutable substance UUID. Optional: auto-defaults to
 	// "<product-key>-<interval>" when omitted (see PriceIntervalLabel).
-	// Declaring the SAME key with a DIFFERENT financial substance is a version
+	// With ProductData, a different financial substance under the same key is
+	// a conflict: use a new key for a new immutable offer. With ProductID,
+	// declaring the SAME key with a DIFFERENT financial substance is a version
 	// bump: the new/reactivated substance row becomes the key's current
 	// target and the previously-current row is archived (grandfathered).
 	Key string `json:"key,omitempty"`
@@ -123,6 +102,7 @@ type CreatePriceRequest struct {
 	// provider keys are derived from (product_key, currency, unit_amount,
 	// access duration, renewal flag, and trial terms), so they are stable across
 	// DB rebuilds and a different amount is, by construction, a different price.
+	// UnitAmount uses OpenRails currency precision: USD micros, not cents.
 	UnitAmount int64  `json:"unit_amount,string"`
 	Currency   string `json:"currency"`
 
@@ -162,7 +142,7 @@ type CreatePriceRequest struct {
 	Archived bool `json:"archived,omitempty"`
 }
 
-type UpdatePriceRequest struct {
+type PriceUpdateParams struct {
 	// PSPLinks merges per-PSP link maps into the existing psp_links map.
 	// Supply only the PSPs you want to add or rotate. Each map's values are
 	// validated through the matching rail adapter's Attach.
@@ -178,33 +158,16 @@ type UpdatePriceRequest struct {
 	// active=false; unarchived as active=true.
 	Archived *bool `json:"archived,omitempty"`
 
-	// See UpdateProductRequest.SkipRailSync.
+	// See ProductUpdateParams.SkipRailSync.
 	SkipRailSync bool `json:"skip_rail_sync,omitempty"`
 }
 
-const (
-	ProviderStatusLinked            ProviderStatus = "linked"
-	ProviderStatusPendingManualLink ProviderStatus = "pending_manual_link"
-	ProviderStatusSyncDisabled      ProviderStatus = "sync_disabled"
-	ProviderStatusError             ProviderStatus = "error"
-)
-
-type ProviderStatus string
-
-const (
-	SyncStatusUnknown      SyncStatus = "unknown"
-	SyncStatusInSync       SyncStatus = "in_sync"
-	SyncStatusDrifted      SyncStatus = "drifted"
-	SyncStatusMissing      SyncStatus = "missing"
-	SyncStatusNeverSynced  SyncStatus = "never_synced"
-	SyncStatusSyncDisabled SyncStatus = "sync_disabled"
-)
-
-type SyncStatus string
-
-type PendingAction struct {
-	Provider      string                                  `json:"provider"`
-	Action        string                                  `json:"action"`
-	Hint          string                                  `json:"hint"`
-	PatchRequired map[string]map[string]map[string]string `json:"patch_required,omitempty"`
+// PriceCreateProductDataParams creates a product only when its key is absent.
+// Reuse requires the same merchant and catalog. Labels are creation defaults;
+// update existing product labels explicitly with Products.Update.
+type PriceCreateProductDataParams struct {
+	CatalogID   string `json:"catalog_id,omitempty"`
+	Key         string `json:"key"`
+	DisplayName string `json:"display_name"`
+	Description string `json:"description,omitempty"`
 }
