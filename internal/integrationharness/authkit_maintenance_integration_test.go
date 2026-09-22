@@ -4,6 +4,8 @@ package integrationharness
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -14,13 +16,23 @@ import (
 // constructing its one River client. This runs with the normal unprivileged
 // runtime role; privileged schema initialization happened separately.
 func TestStandaloneAuthKitMaintenanceSharesBillingRiver(t *testing.T) {
+	const childEnv = "OPENRAILS_AUTHKIT_MAINTENANCE_CHILD"
+	if os.Getenv(childEnv) != "1" {
+		// dbtest owns one database per process. Run this normal worker fleet
+		// separately so it cannot drain another workflow's queued provider work.
+		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestStandaloneAuthKitMaintenanceSharesBillingRiver$", "-test.v")
+		if deadline, ok := t.Deadline(); ok {
+			cmd.Args = append(cmd.Args, "-test.timeout="+time.Until(deadline).String())
+		}
+		cmd.Env = append(os.Environ(), childEnv+"=1")
+		output, err := cmd.CombinedOutput()
+		t.Log(string(output))
+		require.NoError(t, err, "isolated standalone maintenance workflow")
+		require.Contains(t, string(output), "\n--- PASS: "+t.Name()+" (", "isolated workflow must execute and pass")
+		return
+	}
 	ctx := context.Background()
 	h := New(t, ctx)
-	// The package shares its database across workflows. An earlier lifecycle
-	// test may have completed this hour's unique cleanup job; isolate this
-	// fixture instead of expecting RunOnStart to defeat hourly deduplication.
-	_, err := h.Pool().Exec(ctx, "DELETE FROM public.river_job WHERE kind='authkit_cleanup_expired_auth_state' AND state='completed'")
-	require.NoError(t, err)
 	var eventID int64
 	require.NoError(t, h.Pool().QueryRow(ctx, `
  INSERT INTO profiles.session_events(occurred_at,issuer,user_id,session_id,event)
