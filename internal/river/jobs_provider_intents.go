@@ -2,10 +2,12 @@ package riverjobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -73,6 +75,12 @@ func (w ProviderOperationWorker) Work(ctx context.Context, job *river.Job[intent
 	err := w.DB.RunInMerchantScope(ctx, merchant.ID(args.MerchantID), "provider operation", func(ctx context.Context) error {
 		now := workerNow(w.Clock)
 		row, err := store.PrepareDispatch(ctx, args.IntentID, now)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The scoped ledger is authoritative. An old JSON-addressed wake
+			// can outlive an authorized purge; there is no operation to run.
+			terminal = true
+			return nil
+		}
 		if err != nil {
 			return err
 		}
