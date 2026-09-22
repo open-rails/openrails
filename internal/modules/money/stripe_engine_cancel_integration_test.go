@@ -21,7 +21,7 @@ import (
 )
 
 func TestStripeEngineCancellationUsesExecuteGates(t *testing.T) {
-	for _, mode := range []string{"readonly", "limited", "full", "lost cancel"} {
+	for _, mode := range []string{"readonly", "limited", "full", "lost cancel", "lost cancel EOF"} {
 		t.Run(mode, func(t *testing.T) {
 			e := newNMIReceiptEnv(t)
 			now := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
@@ -43,6 +43,7 @@ func TestStripeEngineCancellationUsesExecuteGates(t *testing.T) {
 			var mu sync.Mutex
 			var pi map[string]any
 			posts, cancels := 0, 0
+			var cancelKeys []string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				mu.Lock()
 				defer mu.Unlock()
@@ -77,7 +78,14 @@ func TestStripeEngineCancellationUsesExecuteGates(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(pi)
 				case r.Method == "POST" && r.URL.Path == "/v1/payment_intents/pi_renewal/cancel":
 					cancels++
+					cancelKeys = append(cancelKeys, r.Header.Get("Idempotency-Key"))
 					pi["status"] = "canceled"
+					if mode == "lost cancel EOF" {
+						c, _, err := w.(http.Hijacker).Hijack()
+						require.NoError(t, err)
+						_ = c.Close()
+						return
+					}
 					if mode == "lost cancel" {
 						// Cancellation committed; its successful acknowledgement was lost.
 						w.WriteHeader(http.StatusBadGateway)
@@ -149,12 +157,13 @@ func TestStripeEngineCancellationUsesExecuteGates(t *testing.T) {
 			if mode == "full" {
 				require.Equal(t, 1, cancels)
 				require.Equal(t, intents.StatusFailedTerminal, op.Status)
-			} else if mode == "lost cancel" {
-				require.Equal(t, 1, cancels)
+			} else if strings.HasPrefix(mode, "lost cancel") {
+				require.GreaterOrEqual(t, cancels, 1)
 				require.Equal(t, intents.StatusUnknownNeedsVerify, op.Status)
 			} else {
 				require.Zero(t, cancels, "Execute obeys blocked mode/origin")
 			}
+			cancelsBeforeReadback := cancels
 			mu.Unlock()
 			e.plane.Config.ProviderWriteMode = config.ProviderWriteModeFull
 			op, err = runner.VerifyByID(e.ctx, op.ID)
@@ -168,7 +177,15 @@ func TestStripeEngineCancellationUsesExecuteGates(t *testing.T) {
 			require.NoError(t, err)
 			mu.Lock()
 			require.Equal(t, 1, posts)
-			require.Equal(t, 1, cancels, "terminal replay cannot cancel again")
+			if mode == "lost cancel EOF" {
+				require.Equal(t, cancelsBeforeReadback, cancels, "readback/replay cannot cancel again")
+				t.Logf("EOF transport sent %d identical same-PI cancellations before readback", cancels)
+			} else {
+				require.Equal(t, 1, cancels, "terminal replay cannot cancel again")
+			}
+			for _, key := range cancelKeys {
+				require.Equal(t, "engine:"+op.ID.String()+":cancel", key)
+			}
 			mu.Unlock()
 		})
 	}
