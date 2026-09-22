@@ -22,8 +22,12 @@ func reviewRuntime(cfg *HTTPConfig, delegated billingauth.DelegatedAuthenticator
 			}
 		}
 	}
+	var auth *billingauth.Integration
+	if cfg != nil && (cfg.Checkout || cfg.Catalog || cfg.MerchantAdmin || cfg.MerchantAPI || cfg.PaymentProviders) {
+		auth = rejectingIntegration()
+	}
 	c := &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI, CatalogSource: config.CatalogSourceAPI}
-	return &Runtime{httpConfig: cfg, delegatedAuthenticator: delegated, app: &app.App{Config: c, Runtime: &app.Runtime{Config: c}}}
+	return &Runtime{httpConfig: cfg, delegatedAuthenticator: delegated, app: &app.App{Config: c, Runtime: &app.Runtime{Config: c, Auth: auth}}}
 }
 func reviewReject(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 	return nil, billingauth.ErrUnauthenticated
@@ -53,7 +57,7 @@ func TestConfiguredRoutesReviewExposureAndCredentialOwnership(t *testing.T) {
 		require.NotContains(t, r.Path, "/me/")
 		require.NotContains(t, r.Path, "/merchant/")
 	}
-	rt = reviewRuntime(&HTTPConfig{PaymentProviders: true, Gate: billingauth.NewDelegatedGate(delegated)}, delegated)
+	rt = reviewRuntime(&HTTPConfig{PaymentProviders: true}, delegated)
 	rt.app.Config.MerchantConfigSource = config.MerchantConfigSourceManifest
 	routes, err = rt.HTTPRoutes()
 	require.NoError(t, err)
@@ -63,10 +67,7 @@ func TestConfiguredRoutesReviewExposureAndCredentialOwnership(t *testing.T) {
 			require.False(t, r.Method == http.MethodPost && strings.HasSuffix(r.Path, "/archive"))
 		}
 	}
-	rt = reviewRuntime(&HTTPConfig{Checkout: true, CustomerRoutes: []CustomerRoutesConfig{{Treasury: true}}, MerchantAdmin: true, Catalog: true, PaymentProviders: true, MerchantAPI: true,
-		Authenticator: billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
-			return billingauth.UserContext{}, billingauth.ErrUnauthenticated
-		}), Gate: billingauth.NewDelegatedGate(delegated)}, delegated)
+	rt = reviewRuntime(&HTTPConfig{Checkout: true, CustomerRoutes: []CustomerRoutesConfig{{Treasury: true}}, MerchantAdmin: true, Catalog: true, PaymentProviders: true, MerchantAPI: true}, delegated)
 	routes, err = rt.HTTPRoutes()
 	require.NoError(t, err)
 	require.NotEmpty(t, routes)
@@ -158,4 +159,12 @@ func TestConfiguredRoutesReviewInvalidAuthFailsBeforeDatabase(t *testing.T) {
 		_, err := New(context.Background(), Options{Config: &config.Config{}, HTTP: &tc.cfg})
 		require.ErrorContains(t, err, tc.message)
 	}
+}
+
+func rejectingIntegration() *billingauth.Integration {
+	return &billingauth.Integration{Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
+		return billingauth.Identity{}, billingauth.ErrUnauthenticated
+	}), Authorization: billingauth.AuthorizationFunc(func(context.Context, *http.Request, billingauth.Identity, billingauth.Requirement) error {
+		return billingauth.ErrUnauthenticated
+	})}
 }

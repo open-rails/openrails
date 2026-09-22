@@ -10,9 +10,11 @@ provider-account routing.
 A host can additionally expose a customer audience with its own authenticator:
 
 ```go
-runtime.ConfigureHTTP(embed.HTTPConfig{
+runtime, err := embed.New(ctx, embed.Options{
+  Config: cfg,
+  HTTP: &embed.HTTPConfig{
     Standalone: true,
-    CustomerExposures: []embed.CustomerHTTPConfig{
+    CustomerRoutes: []embed.CustomerRoutesConfig{
         {Prefix: "/billing/v1/me", DelegatedAuthenticator: portalIdentity},
         {
             Prefix: "/api/v1/merchants/{slug}/billing/me",
@@ -20,7 +22,9 @@ runtime.ConfigureHTTP(embed.HTTPConfig{
             DelegatedAuthenticator: platformCustomerIdentity,
         },
     },
+  },
 })
+if err != nil { return err }
 routes, err := openrailsgin.Routes(runtime)
 // Handle err, then mount once on the host router.
 err = routes.Mount(router)
@@ -32,7 +36,7 @@ subscription payment-method changes and invoice collection-method selection.
 Both profiles reuse the same route registration and payer ownership checks.
 Neither exposes merchant administration, credentials, treasury or callbacks.
 
-Each audience must supply its own authenticator. The authenticator verifies the
+An ordinary native audience uses constructor `Options.Auth` and an explicit merchant slug. Each advanced delegated audience supplies its own authenticator. The authenticator verifies the
 actual credential and derives its merchant and payer from trusted host policy;
 a URL parameter or request-body merchant field is not authority. Route parameters
 are available through `Request.PathValue` before authentication. Original URL,
@@ -53,3 +57,9 @@ use `routes.MountRoot(rootRouter)`: this is an explicit caller assertion, becaus
 Chi's public router API cannot distinguish a root Mux from a nested subrouter.
 Group mounts are refused before registration. Embedded-only bundles remain
 mountable under arbitrary host prefixes.
+
+For the SaaS platform-billing audience, `{slug}` selects the hosted merchant
+payer, not the billing merchant. Its verifier/resolver must check current hosted
+merchant ownership, return that captured hosted merchant UUID as the canonical
+payer, and bind the principal to the PLATFORM billing merchant. A stale owner or
+an unrelated hosted merchant must fail before any of the four mutations.

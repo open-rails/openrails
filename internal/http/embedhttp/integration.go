@@ -5,10 +5,13 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type integrationAuthenticator struct{ auth *billingauth.Integration }
@@ -17,14 +20,14 @@ func (a integrationAuthenticator) Authenticate(ctx context.Context, r *http.Requ
 	if a.auth == nil || a.auth.Authentication == nil {
 		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	}
-	identity, err := a.auth.Authentication.AuthenticateRequest(ctx, r)
+	identity, err := authenticateIntegration(ctx, r, a.auth)
 	if err != nil {
 		return billingauth.UserContext{}, err
 	}
-	if identity.Kind != billingauth.NativeUser || identity.CredentialClass != billingauth.CredentialClassUserSession || identity.Invoker != "" {
+	if identity.Kind != billingauth.NativeUser || identity.CustomerID == "" || identity.CredentialClass != billingauth.CredentialClassUserSession || identity.Invoker != "" {
 		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	}
-	return billingauth.UserContext{UserID: identity.SubjectID, Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username, SessionID: identity.SessionID}, nil
+	return billingauth.UserContext{UserID: identity.CustomerID, Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username, SessionID: identity.SessionID}, nil
 }
 
 type integrationGate struct {
@@ -46,7 +49,7 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 	if g.auth == nil || g.auth.Authentication == nil || g.auth.Authorization == nil {
 		return billingauth.Principal{}, billingauth.GateError{Status: 503, Message: "authorization unavailable"}
 	}
-	identity, err := g.auth.Authentication.AuthenticateRequest(ctx, r)
+	identity, err := authenticateIntegration(ctx, r, g.auth)
 	if err != nil {
 		return billingauth.Principal{}, billingauth.GateError{Status: 401, Message: billingauth.UnauthenticatedMessage(err)}
 	}
@@ -59,13 +62,16 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 	if strings.HasPrefix(permission, "root:") {
 		scope = billingauth.PlatformScope
 	}
+	if identity.Kind != billingauth.NativeUser && !billingauth.HasPermission(identity.Permissions, permission) {
+		return billingauth.Principal{}, billingauth.GateError{Status: 403, Message: "credential permission ceiling"}
+	}
 	required := billingauth.Requirement{Permission: permission, Scope: scope, Target: target}
 	if err := g.auth.Authorization.Authorize(ctx, r, identity, required); err != nil {
 		return billingauth.Principal{}, err
 	}
 	principal := billingauth.Principal{MerchantID: target.MerchantID, Subject: identity.SubjectID}
 	if identity.Kind == billingauth.NativeUser {
-		principal.UserContext = billingauth.UserContext{UserID: identity.SubjectID, Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username, Merchant: target.MerchantSlug}
+		principal.UserContext = billingauth.UserContext{UserID: identity.CustomerID, Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username, Merchant: target.MerchantSlug}
 	} else {
 		principal.Permissions = append([]string(nil), identity.Permissions...)
 	}
@@ -77,17 +83,29 @@ func nativeCustomer(auth *billingauth.Integration, target billingauth.Target) bi
 		if auth == nil || auth.Authentication == nil {
 			return nil, billingauth.ErrUnauthenticated
 		}
-		identity, err := auth.Authentication.AuthenticateRequest(ctx, r)
+		identity, err := authenticateIntegration(ctx, r, auth)
 		if err != nil {
 			return nil, err
 		}
-		if identity.Kind != billingauth.NativeUser || identity.SubjectID == "" || identity.CredentialClass != billingauth.CredentialClassUserSession || identity.Invoker != "" {
+		if identity.Kind != billingauth.NativeUser || identity.CustomerID == "" || identity.CredentialClass != billingauth.CredentialClassUserSession || identity.Invoker != "" {
 			return nil, billingauth.ErrUnauthenticated
 		}
-		if err := merchanttarget.Assert(r, target); err != nil {
+		requestTarget := target
+		if resolved, ok := merchanttarget.FromContext(r.Context()); ok {
+			// The v2 protocol resolved this request before authentication. A
+			// renamed slug may still name this fixed book; a reused slug may not.
+			if resolved.MerchantID != target.MerchantID {
+				return nil, billingauth.GateError{Status: 409, Message: "customer merchant binding mismatch"}
+			}
+			requestTarget = resolved
+		} else if strings.TrimSpace(r.Header.Get(merchant.SlugHeader)) != "" {
+			return nil, billingauth.GateError{Status: 400, Message: "merchant slug selection requires v2"}
+		}
+		if err := merchanttarget.Assert(r, requestTarget); err != nil {
 			return nil, err
 		}
-		return &billingauth.DelegatedPrincipal{MerchantID: target.MerchantID.String(), MerchantSlug: target.MerchantSlug, SubjectID: identity.SubjectID, Issuer: identity.Issuer, CredentialClass: identity.CredentialClass, Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username}, nil
+		*r = *r.WithContext(merchanttarget.WithResolved(r.Context(), requestTarget))
+		return &billingauth.DelegatedPrincipal{MerchantID: requestTarget.MerchantID.String(), MerchantSlug: requestTarget.MerchantSlug, SubjectID: identity.CustomerID, Issuer: identity.Issuer, CredentialClass: identity.CredentialClass, Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username}, nil
 	})
 }
 
@@ -105,5 +123,31 @@ func RuntimeCustomerAuthentication(rt *app.Runtime) billingauth.DelegatedAuthent
 			return nil, err
 		}
 		return nativeCustomer(rt.Auth, target).AuthenticateDelegated(ctx, r)
+	})
+}
+
+func authenticateIntegration(ctx context.Context, r *http.Request, auth *billingauth.Integration) (billingauth.Identity, error) {
+	return requestauth.Once(ctx, auth, func() (billingauth.Identity, error) {
+		identity, err := auth.Authentication.AuthenticateRequest(ctx, r)
+		if err != nil {
+			return billingauth.Identity{}, err
+		}
+		if strings.TrimSpace(identity.SubjectID) == "" || strings.TrimSpace(identity.Issuer) == "" {
+			return billingauth.Identity{}, billingauth.ErrUnauthenticated
+		}
+		switch identity.Kind {
+		case billingauth.NativeUser:
+			id, err := uuid.Parse(identity.CustomerID)
+			if (identity.CustomerID != "" && (err != nil || id == uuid.Nil || id.String() != identity.CustomerID)) || identity.CredentialClass != billingauth.CredentialClassUserSession || identity.Invoker != "" {
+				return billingauth.Identity{}, billingauth.ErrUnauthenticated
+			}
+		case billingauth.Machine, billingauth.DelegatedUser:
+			if identity.CredentialClass == billingauth.CredentialClassUserSession {
+				return billingauth.Identity{}, billingauth.ErrUnauthenticated
+			}
+		default:
+			return billingauth.Identity{}, billingauth.ErrUnauthenticated
+		}
+		return identity, nil
 	})
 }

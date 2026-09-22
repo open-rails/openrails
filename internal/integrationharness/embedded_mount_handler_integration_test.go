@@ -57,7 +57,7 @@ func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
 
 	app.HostGraph(rt).Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantAPI: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury:true}}, Gate: httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn})}, Prefix: "/api/openrails", DelegatedAuthenticator: authn})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantAPI: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}}, Prefix: "/api/openrails", DelegatedAuthenticator: authn, Gate: httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn})})
 	require.NoError(t, err)
 
 	sourceID := uuid.New()

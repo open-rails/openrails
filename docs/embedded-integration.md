@@ -152,7 +152,7 @@ defer rt.Close(ctx)
 |---|---|---|
 | `Config` | `*config.Config` | Required. |
 | `Merchant` | `*embed.MerchantDeclaration` | Optional single-merchant declaration: `Slug`, `Config`, and attribution-only `PSPs`. Reconciled before HTTP and worker startup. Obtain its ID from `Client().MerchantID()`. |
-| `HTTP` | `*embed.HTTPConfig` | Leave nil for headless mode or configure once later with `rt.ConfigureHTTP`. A non-nil policy exposes discovery and verified provider callbacks; buyer and management capabilities are opt-in. |
+| `HTTP` | `*embed.HTTPConfig` | Leave nil for headless mode; HTTP policy is declared only at construction. A non-nil policy exposes discovery and verified provider callbacks; buyer and management capabilities are opt-in. |
 | `PGXPool` | `*pgxpool.Pool` | Host-supplied pool (pgx/v5). |
 | `Redis` | `*redis.Client` | Optional (rate limits, admission holds). |
 | `Cache` | `cache.Cache` | Optional cache override. |
@@ -162,7 +162,7 @@ defer rt.Close(ctx)
 | `StripeTransport` | `http.RoundTripper` | Test seam under the Stripe API choke point; refused with a live posture. |
 
 **Runtime surface**: `rt.Client()` provides the shared application client;
-`rt.ConfigureHTTP`, `rt.HTTPRoutes()`, `rt.RiverJobs()`, readiness/progress checks,
+`rt.HTTPRoutes()`, `rt.RiverJobs()`, readiness/progress checks,
 `rt.RunWorkers(ctx)` and `rt.Close(ctx)` own process infrastructure. Merchant
 and PSP declarations belong in `Options.Merchant`. One-off manifest and restore
 tooling belongs to `embed/operator.New(rt)`; the host transaction extension is
@@ -499,43 +499,40 @@ actually exposes; in-process `Client` and `CatalogClient` access never enables
 HTTP management endpoints.
 
 ```go
+auth, err := orauthkit.New(orauthkit.Config{Verifier: authRuntime.Verifier()})
+if err != nil { return err }
 rt, err := embed.New(ctx, embed.Options{
     Config: cfg,
-    DelegatedAuthenticator: myDelegatedAuth,
+    Auth: auth,
     HTTP: &embed.HTTPConfig{
-        Checkout: true, Customer: true,
-        Authenticator: myAuth,
-        // Catalog: true, MerchantAdmin: true, // opt in if the host needs these
-        // Gate: myGate, // required for any management capability
+        CustomerRoutes: []embed.CustomerRoutesConfig{{
+            Merchant: "my-store",
+            Scope: embed.CustomerBillingManagement,
+        }},
     },
 })
 if err != nil { return err }
-// Declare merchant/provider configuration and compose River before serving.
+// Bootstrap the named merchant with the Client and compose River before serving.
 ```
 
-When your AuthKit bridge needs the merchant ID returned by provisioning, leave
-`Options.HTTP` nil and configure the runtime once afterward:
+`Options.Auth` supplies provider-neutral authentication and live operation
+ authorization independently of HTTP. AuthKit is an optional adapter; native
+JWT roles never confer privileges. Checkout needs authentication; management
+capabilities also require live authorization through the host's Client and an
+explicit operation-to-group permission mapping.
 
-```go
-rt, err := embed.New(ctx, embed.Options{Config: cfg, Merchant: &embed.MerchantDeclaration{Slug: slug, Config: merchantConfig}})
-if err != nil { return err }
-client, err := rt.Client()
-if err != nil { return err }
-merchantID := client.MerchantID()
-authn, err := orauthkit.NewDelegatedAuthenticator(verifier, merchantID.String())
-if err != nil { return err }
-if err := rt.ConfigureHTTP(embed.HTTPConfig{
-    Customer: true,
-    DelegatedAuthenticator: authn,
-}); err != nil { return err }
-```
+HTTP policy is copied at construction. There is no late HTTP setter. Route
+materialization resolves each configured merchant slug to its immutable ID after
+explicit bootstrap and refuses missing or conflicting bindings. Native identity
+contains issuer/subject; customer operations also require an explicitly mapped canonical customer UUID;
+AuthKit maps its verified local user UUID. Other providers must supply their own
+issuer-aware mapping. OpenRails does not hash or guess external subjects.
 
-`Options.HTTP` and `ConfigureHTTP` share the same validation and copy semantics.
-A second configuration attempt is rejected, and requesting routes freezes the
-policy. Configuration and route construction after `Close` are also rejected.
-Invalid configuration leaves HTTP disabled. `HTTP.DelegatedAuthenticator` can
-select the customer HTTP verifier; otherwise the runtime's
-`Options.DelegatedAuthenticator` is used, matching in-process customer calls.
+Ordinary customer routes default to `/v1/me`; a host supplies only the outer mount.
+`CustomerBillingManagement` includes existing billing management and recovery,
+without generic checkout, plan purchases, or Stripe portal. Advanced audience
+mounts can use an explicit `CustomerRoutesConfig.DelegatedAuthenticator` for
+co-managed payers, preserving live admission and credential ceilings.
 
 Use the adapter for your host. The Gin and Fiber adapters are separate Go modules;
 net/http and Chi use the core module's `adapters/http` package.
@@ -571,12 +568,12 @@ remain host-owned (Fiber defaults are case-insensitive and non-strict).
 | HTTP capability | Exposed surface |
 |---|---|
 | non-nil `HTTP` | Capability discovery and generic merchant-scoped verified provider callbacks |
-| `Checkout` | Buyer products, prices, checkout/config; requires `Authenticator` |
-| `Customer` | `/v1/me/*` and customer treasury; requires `HTTP.DelegatedAuthenticator` or the runtime verifier |
-| `MerchantAdmin` | Customer/support management; requires `Gate` |
-| `Catalog` | Merchant and creator catalog HTTP; requires `Gate` |
-| `PaymentProviders` | Provider configuration reads and supported writes; requires `Gate` |
-| `MerchantAPI` | Service/API-key routes; requires `Gate` (most embedded hosts use `Client` instead) |
+| `Checkout` | Buyer products, prices, checkout/config; requires `Options.Auth.Authentication` |
+| `CustomerRoutes` | Defaults to `/v1/me/*`; native entries use `Auth` plus `Merchant`; advanced delegated entries supply their own verifier |
+| `MerchantAdmin` | Customer/support management; requires `Options.Auth.Authorization` |
+| `Catalog` | Merchant and creator catalog HTTP; requires `Options.Auth.Authorization` |
+| `PaymentProviders` | Provider configuration reads and supported writes; requires `Options.Auth.Authorization` |
+| `MerchantAPI` | Service/API-key routes; requires `Options.Auth.Authorization` (most embedded hosts use `Client` instead) |
 
 Host-owned credentials omit mutation routes regardless of catalog ownership.
 Callbacks are registered generically so adding an API-managed provider account
@@ -586,8 +583,7 @@ retain optional provider paths; account readiness remains a request-time guard.
 Manifest-owned buyer surfaces must be materialized after merchant/provider
 configuration; provider discovery errors are returned rather than hiding routes.
 An unconfigured runtime refuses `Routes` with an explicit disabled error.
-Configure HTTP before requesting routes, including when using the late provisioning
-form. The runtime materializes the inventory once, so remounting cannot reset its
+Declare HTTP at construction and provision configured merchants before requesting routes. The runtime materializes the inventory once, so remounting cannot reset its
 rate limits. Invalid constructor HTTP configuration fails before opening resources.
 
 Migration is a pre-v1 API change: `Runtime.Handler(MountOptions)`, `SelfHandler`,

@@ -7,7 +7,9 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"net/http"
 )
 
 // HTTPConfig declares externally accessible HTTP capabilities. Nil Options.HTTP
@@ -21,19 +23,14 @@ type HTTPConfig struct {
 	Standalone     bool
 	CustomerRoutes []CustomerRoutesConfig
 
-	// DelegatedAuthenticator verifies customer HTTP credentials. When nil, the
-	// embedded runtime's Options.DelegatedAuthenticator is used.
-	DelegatedAuthenticator billingauth.DelegatedAuthenticator
-	Checkout               bool
-	MerchantAdmin          bool
-	Catalog                bool
-	PaymentProviders       bool
-	MerchantAPI            bool
-	Authenticator          billingauth.Authenticator
-	Gate                   billingauth.Gate
+	Checkout         bool
+	MerchantAdmin    bool
+	Catalog          bool
+	PaymentProviders bool
+	MerchantAPI      bool
 }
 
-func ValidateHTTPConfig(cfg *HTTPConfig, delegated billingauth.DelegatedAuthenticator, auth *billingauth.Integration) error {
+func ValidateHTTPConfig(cfg *HTTPConfig, auth *billingauth.Integration) error {
 	if cfg == nil {
 		return nil
 	}
@@ -41,16 +38,16 @@ func ValidateHTTPConfig(cfg *HTTPConfig, delegated billingauth.DelegatedAuthenti
 		return err
 	}
 	if cfg.Standalone {
-		if cfg.Checkout || cfg.MerchantAdmin || cfg.Catalog || cfg.PaymentProviders || cfg.MerchantAPI || cfg.Authenticator != nil || cfg.Gate != nil || cfg.DelegatedAuthenticator != nil {
+		if cfg.Checkout || cfg.MerchantAdmin || cfg.Catalog || cfg.PaymentProviders || cfg.MerchantAPI {
 			return fmt.Errorf("openrails HTTP: Standalone cannot be combined with embedded surface options")
 		}
 		return nil
 	}
-	if cfg.Checkout && cfg.Authenticator == nil && (auth == nil || auth.Authentication == nil) {
-		return fmt.Errorf("openrails HTTP: Checkout requires HTTP.Authenticator")
+	if cfg.Checkout && (auth == nil || auth.Authentication == nil) {
+		return fmt.Errorf("openrails HTTP: Checkout requires Options.Auth.Authentication")
 	}
-	if (cfg.MerchantAdmin || cfg.Catalog || cfg.PaymentProviders || cfg.MerchantAPI) && cfg.Gate == nil && (auth == nil || auth.Authentication == nil || auth.Authorization == nil) {
-		return fmt.Errorf("openrails HTTP: management surfaces require HTTP.Gate")
+	if (cfg.MerchantAdmin || cfg.Catalog || cfg.PaymentProviders || cfg.MerchantAPI) && (auth == nil || auth.Authentication == nil || auth.Authorization == nil) {
+		return fmt.Errorf("openrails HTTP: management surfaces require Options.Auth authentication and authorization")
 	}
 	return nil
 }
@@ -73,7 +70,7 @@ func (cfg HTTPConfig) routeSets() []RouteSet {
 }
 
 // ConfiguredRoutes is the shared configured HTTP assembly used by native adapters.
-func ConfiguredRoutes(a *app.App, policy *HTTPConfig, delegated billingauth.DelegatedAuthenticator) (*router.Table, error) {
+func ConfiguredRoutes(a *app.App, policy *HTTPConfig) (*router.Table, error) {
 	if a == nil || a.Runtime == nil {
 		return nil, fmt.Errorf("openrails HTTP: runtime is not initialized")
 	}
@@ -81,19 +78,18 @@ func ConfiguredRoutes(a *app.App, policy *HTTPConfig, delegated billingauth.Dele
 		return &router.Table{}, nil
 	}
 	cfg := *policy
-	if cfg.DelegatedAuthenticator != nil {
-		delegated = cfg.DelegatedAuthenticator
-	}
-	if err := ValidateHTTPConfig(&cfg, delegated, a.Runtime.Auth); err != nil {
+	if err := ValidateHTTPConfig(&cfg, a.Runtime.Auth); err != nil {
 		return nil, err
 	}
 	asm := FromApp(a)
-	asm.Authenticator = cfg.Authenticator
-	asm.Gate = cfg.Gate
 	if a.Runtime.Auth != nil {
 		asm.Authenticator = integrationAuthenticator{auth: a.Runtime.Auth}
 		asm.Gate = integrationGate{auth: a.Runtime.Auth, runtime: a.Runtime}
 	}
+	return buildConfiguredRoutes(a, cfg, asm)
+}
+
+func buildConfiguredRoutes(a *app.App, cfg HTTPConfig, asm *Assembler) (*router.Table, error) {
 	active := cfg.routeSets()
 	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime, cfg.Checkout || len(cfg.CustomerRoutes) > 0)
 	if err != nil {
@@ -112,6 +108,9 @@ func ConfiguredRoutes(a *app.App, policy *HTTPConfig, delegated billingauth.Dele
 		entry.Path = "/billing" + entry.Path
 		table.Entries = append(table.Entries, entry)
 	}
+	router.AddMerchantSelectorRoutes(table, "/billing", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
+		return merchanttarget.Resolve(ctx, r, a.Runtime.Merchants, a.Runtime.ConfiguredMerchant(), "")
+	})
 	return table, nil
 }
 

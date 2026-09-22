@@ -128,7 +128,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if err := validateMerchantDeclaration(opts.Merchant); err != nil {
 		return nil, err
 	}
-	if err := embedhttp.ValidateHTTPConfig(opts.HTTP, opts.DelegatedAuthenticator, opts.Auth); err != nil {
+	if err := embedhttp.ValidateHTTPConfig(opts.HTTP, opts.Auth); err != nil {
 		return nil, err
 	}
 	if opts.River.host && opts.RunWorkers {

@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/httptesthost"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
 func TestHostCredentialsWithAPICatalog(t *testing.T) {
@@ -43,7 +44,7 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	boot := func(key string) *embed.Runtime {
 		gate := &allowAllGate{}
 
-		rt, _, err := newDeclaredMerchant(ctx, embed.Options{HTTP: &embed.HTTPConfig{PaymentProviders: true, Gate: gate}, Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t, key: key}}, slug, embed.MerchantConfig{
+		rt, _, err := newDeclaredMerchant(ctx, embed.Options{Auth: providerFixtureIntegration(gate), HTTP: &embed.HTTPConfig{PaymentProviders: true}, Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t, key: key}}, slug, embed.MerchantConfig{
 			DisplayName: "Host credential catalog",
 			PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {
 				AccountID: accountID,
@@ -133,7 +134,7 @@ func TestManagedCredentialsWithManifestCatalog(t *testing.T) {
 	runtime := app.HostGraph(rt).Runtime
 	mid := runtime.ConfiguredMerchant()
 	require.Nil(t, runtime.ManifestSecrets, "managed credentials must not acquire a host fallback")
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, Gate: allowAllGate{id: mid}}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true}, Gate: allowAllGate{id: mid}})
 	require.NoError(t, err)
 	for _, secret := range []string{"whsec_managed_catalog_v1", "whsec_managed_catalog_v2"} {
 		payload, err := json.Marshal(map[string]any{"account_id": account, "credentials": map[string]string{"webhook_signing_secret": secret}})
@@ -188,4 +189,23 @@ func (n catalogAuthorityTransport) RoundTrip(req *http.Request) (*http.Response,
 	}
 	n.t.Errorf("unexpected provider request: %s %s", req.Method, req.URL.Path)
 	return nil, fmt.Errorf("provider network is disabled in catalog authority tests")
+}
+
+// This fixture exercises the real constructor-owned Auth policy.
+func providerFixtureIntegration(gate billingauth.Gate) *billingauth.Integration {
+	return &billingauth.Integration{
+		Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
+			return billingauth.Identity{Kind: billingauth.NativeUser, SubjectID: "provider-fixture", Issuer: "fixture", CustomerID: "11111111-1111-4111-8111-111111111111", CredentialClass: billingauth.CredentialClassUserSession}, nil
+		}),
+		Authorization: billingauth.AuthorizationFunc(func(ctx context.Context, r *http.Request, _ billingauth.Identity, q billingauth.Requirement) error {
+			p, err := gate.Authorize(ctx, r, q.Permission)
+			if err != nil {
+				return err
+			}
+			if p.MerchantID != q.Target.MerchantID {
+				return billingauth.GateError{Status: 403, Message: "merchant mismatch"}
+			}
+			return nil
+		}),
+	}
 }

@@ -338,7 +338,7 @@ func TestManifestMode_MutationRoutesOmitted(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, PaymentProviders: true, Gate: allowAllGate{id: id}}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, PaymentProviders: true}, Gate: allowAllGate{id: id}})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -425,7 +425,7 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 		}
 	})
 
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, Gate: allowAllGate{id: id}}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true}, Gate: allowAllGate{id: id}})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)

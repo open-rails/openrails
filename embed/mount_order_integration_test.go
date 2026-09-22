@@ -33,7 +33,7 @@ func TestMountedHandlerUsesConstructorMerchant(t *testing.T) {
 	noAuth := billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
 		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	})
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, Authenticator: noAuth}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true}, Authenticator: noAuth})
 	require.NoError(t, err)
 
 	// The host registers these routes at /v1 with no path rewrite.

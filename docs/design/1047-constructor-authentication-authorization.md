@@ -41,7 +41,7 @@ type Integration struct {
 }
 ```
 
-`Identity` contains the stable subject, issuer, verified principal kind and interaction provenance. It is not a role or permission snapshot. Distinguish native user, machine/API key, delegated customer and trusted in-process host; retain invoker and credential restrictions. A string `UserID` being populated is not proof of a native user session.
+`Identity` contains the stable subject, issuer, an explicit canonical CustomerID, verified principal kind and interaction provenance. It is not a role or permission snapshot. Distinguish native user, machine/API key, delegated customer and trusted in-process host; retain invoker and credential restrictions. A string `UserID` being populated is not proof of a native user session.
 
 `Requirement` identifies an OpenRails operation and its already resolved target: platform, merchant, or customer account, including immutable IDs and canonical slugs for context. The host authorizer does not choose another merchant while granting the operation. The engine checks that the authorized target is the one the handler executes against.
 
@@ -85,8 +85,8 @@ One `CustomerRoutes` model replaces `Customer bool` and `CustomerExposures`. The
 
 ```go
 // Intended ordinary shape; final singular/list spelling is implementation work.
+Auth: auth,
 HTTP: &embed.HTTPConfig{
-    Auth: auth,
     CustomerRoutes: []embed.CustomerRoutesConfig{{
         Merchant: "openrails-demo", // explicit slug, resolved inside OpenRails
         Scope:    embed.CustomerBillingManagement,
@@ -96,7 +96,7 @@ HTTP: &embed.HTTPConfig{
 
 No prefix or empty role mapper is needed for the built-in entry. `CustomerBillingManagement` retains history/access/payment-method/recovery and existing agreement management; it does not mount generic product checkout, change-tier or Stripe portal. The app continues to validate a selected post price and create its checkout through the Client.
 
-Personal customer ownership is `target.CustomerID == verified.SubjectID` in the selected merchant. It requires no artificial customer role and no per-request group lookup. Resource queries still include both merchant and customer predicates. Co-managed treasury, a merchant paying as a customer, and delegated spend are different cases: they require an explicit payer resolver plus current authorization, not an equality shortcut.
+Personal customer ownership is `target.CustomerID == verified.CustomerID` in the selected merchant. It requires no artificial customer role and no per-request group lookup. Resource queries still include both merchant and customer predicates. Co-managed treasury, a merchant paying as a customer, and delegated spend are different cases: they require an explicit payer resolver plus current authorization, not an equality shortcut.
 
 An optional additional audience mount is justified by SaaS and uses the same route model/registrations. Its trusted resolver may map the verified actor to a different payer only after the appropriate live owner/account permission check. The resolver cannot silently alter the selected billing merchant. Additional prefixes are an advanced audience-mount feature, not required syntax for the ordinary built-in customer surface.
 
@@ -124,3 +124,16 @@ Remove `Runtime.ConfigureHTTP`, old `Customer` boolean, `CustomerExposures`, rol
 6. Migrate current source consumers on coherent public versions, including standalone and all native adapter submodules. Keep refund631 release independent. Qualify the demo against the existing real sandbox transaction read-only; no duplicate provider charge/refund.
 
 This design intentionally does not change reusable Client merchant-scoping semantics, credential storage/backend ownership, merchant configuration bootstrap, payment state ownership, or public stable IDs. Those are adjacent owner lanes. The small customer-auth prototype in the task worktree is exploratory and is not the final full integration API.
+
+### Canonical customer identity
+
+Neutral native identity requires `SubjectID` and `Issuer`. Customer and checkout
+operations additionally require an explicit canonical UUID `CustomerID`; merchant
+staff need no payable customer mapping. Hosts map `(Issuer, SubjectID)` to their payable customer UUID;
+OpenRails has no issuer/opaque-subject mapping table and never hashes, guesses,
+or rewrites an external subject. The optional AuthKit adapter sets `CustomerID`
+from its verified local `UserID`. Two issuers with the same opaque subject can
+therefore represent different payable customers. Missing mapping on a customer operation, or a supplied invalid mapping, is401.
+The original subject and issuer remain the inputs for privileged authorization;
+personal payer predicates use the canonical customer ID. Ownership does not grant
+merchant refund or administration permission.

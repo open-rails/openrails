@@ -19,8 +19,12 @@ const (
 // Identity is authentication output. Native users carry no role/permission
 // snapshot. Permissions belongs only to verified non-user credential ceilings.
 type Identity struct {
-	Kind            PrincipalKind
-	SubjectID       string
+	Kind      PrincipalKind
+	SubjectID string
+	// CustomerID is the canonical payable UUID explicitly mapped by the host
+	// from (Issuer, SubjectID). Required for customer/checkout operations, optional
+	// for merchant staff. OpenRails never guesses or hashes this mapping.
+	CustomerID      string
 	Issuer          string
 	CredentialClass CredentialClass
 	Invoker         string
@@ -77,7 +81,7 @@ func (f AuthorizationFunc) Authorize(ctx context.Context, r *http.Request, i Ide
 
 // Integration is supplied at construction. Authorization can be omitted only
 // when no privileged route is published. Personal customer ownership is checked
-// by OpenRails against the authenticated native subject and selected merchant.
+// by OpenRails against the explicitly mapped canonical customer and selected merchant.
 type Integration struct {
 	Authentication Authentication
 	Authorization  Authorization

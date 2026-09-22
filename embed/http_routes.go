@@ -1,7 +1,10 @@
 package embed
 
 import (
+	"context"
 	"fmt"
+	"github.com/open-rails/openrails/internal/merchanttarget"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"net/http"
 	"net/url"
 	"strings"
@@ -50,7 +53,7 @@ func (r *Runtime) configureHTTP(cfg HTTPConfig) error {
 	if r.httpConfig != nil {
 		return fmt.Errorf("openrails HTTP: already configured")
 	}
-	if err := embedhttp.ValidateHTTPConfig(&cfg, r.delegatedAuthenticator, r.app.Runtime.Auth); err != nil {
+	if err := embedhttp.ValidateHTTPConfig(&cfg, r.app.Runtime.Auth); err != nil {
 		return err
 	}
 	cfg.CustomerRoutes = append([]CustomerRoutesConfig(nil), cfg.CustomerRoutes...)
@@ -87,7 +90,7 @@ func (r *Runtime) HTTPRoutes() ([]HTTPRoute, error) {
 			table = standalone
 			trimPrefix = ""
 		} else {
-			table, err = embedhttp.ConfiguredRoutes(r.app, r.httpConfig, r.delegatedAuthenticator)
+			table, err = embedhttp.ConfiguredRoutes(r.app, r.httpConfig)
 			if err != nil {
 				return nil, err
 			}
@@ -101,6 +104,11 @@ func (r *Runtime) HTTPRoutes() ([]HTTPRoute, error) {
 				return nil, err
 			}
 			table.Entries = append(table.Entries, extra.Entries...)
+		}
+		if r.httpConfig.Standalone {
+			router.AddMerchantSelectorRoutes(table, "", func(ctx context.Context, request *http.Request) (billingauth.Target, error) {
+				return merchanttarget.Resolve(ctx, request, r.app.Runtime.Merchants, r.app.Runtime.ConfiguredMerchant(), "")
+			})
 		}
 		if err := embedhttp.ValidateRouteTable(table); err != nil {
 			return nil, err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	coreauth "github.com/open-rails/authkit"
@@ -28,6 +29,9 @@ type Config struct {
 	Verifier  Verifier
 	Client    coreauth.Client
 	Authority AuthorityResolver
+	// PlatformAuthority is an explicit operation-specific root override. It is
+	// never inferred from a role name or a generic directory-read permission.
+	PlatformAuthority AuthorityResolver
 	// AuthorityIssuer fences machine group ownership. It is the receiving AuthKit
 	// deployment's issuer, not an issuer copied from the incoming credential.
 	AuthorityIssuer string
@@ -42,7 +46,7 @@ func New(cfg Config) (*billingauth.Integration, error) {
 	if cfg.Verifier == nil {
 		return nil, fmt.Errorf("authkit integration: verifier is required")
 	}
-	if (cfg.Client == nil) != (cfg.Authority == nil) {
+	if (cfg.Client == nil) != (cfg.Authority == nil && cfg.PlatformAuthority == nil) {
 		return nil, fmt.Errorf("authkit integration: privileged authority requires both Client and Authority")
 	}
 	p := &integration{cfg: cfg}
@@ -80,6 +84,7 @@ func identityFromClaims(cl verify.Claims) (billingauth.Identity, error) {
 		}
 		out.Kind = billingauth.NativeUser
 		out.SubjectID = cl.UserID
+		out.CustomerID = cl.UserID
 		out.CredentialClass = billingauth.CredentialClassUserSession
 	case coreauth.PrincipalKindAPIKey, coreauth.PrincipalKindRemoteApplication:
 		out.Kind = billingauth.Machine
@@ -115,41 +120,61 @@ func (p *integration) Authorize(ctx context.Context, r *http.Request, identity b
 		return billingauth.GateError{Status: 401, Message: billingauth.UnauthenticatedMessage(err)}
 	}
 	verified, err := identityFromClaims(cl)
-	if err != nil || identity.Kind != verified.Kind || identity.SubjectID != verified.SubjectID || identity.Issuer != verified.Issuer {
+	if err != nil || identity.Kind != verified.Kind || identity.SubjectID != verified.SubjectID || identity.Issuer != verified.Issuer || identity.CustomerID != verified.CustomerID || identity.CredentialClass != verified.CredentialClass || identity.Invoker != verified.Invoker || !slices.Equal(identity.Permissions, verified.Permissions) {
 		return billingauth.GateError{Status: 401, Message: "credential identity mismatch"}
 	}
-	if p.cfg.Client == nil || p.cfg.Authority == nil {
+	if p.cfg.Client == nil {
 		return billingauth.GateError{Status: 503, Message: "authorization unavailable"}
 	}
 	if strings.TrimSpace(required.Permission) == "" {
 		return billingauth.GateError{Status: 403, Message: "permission_required"}
 	}
-	mapping, err := p.cfg.Authority(ctx, required)
+	allowed, err := p.checkAuthority(ctx, cl, required, p.cfg.Authority, false)
 	if err != nil {
-		return billingauth.GateError{Status: 503, Message: "authorization unavailable"}
+		return err
 	}
-	if mapping.Permission == "" || mapping.Group.Persona == "" {
-		return billingauth.GateError{Status: 403, Message: "permission_required"}
-	}
-	group, err := p.cfg.Client.GroupInstanceForSlug(ctx, mapping.Group)
-	if err != nil {
-		return billingauth.GateError{Status: 503, Message: "authorization unavailable"}
-	}
-	if required.Target.AuthorityGroupID != "" && required.Scope != billingauth.PlatformScope && group.ID != required.Target.AuthorityGroupID {
-		return billingauth.GateError{Status: 403, Message: "permission group mismatch"}
-	}
-	scope := verify.PermissionScope{GroupID: group.ID, AuthorityIssuer: p.cfg.AuthorityIssuer, Persona: group.Persona, Instance: group.InstanceSlug}
-	// A missing machine group binding is not a grant of global authority. Existing
-	// explicitly trusted platform delegation uses its own configured audience path.
-	if verified.Kind != billingauth.NativeUser && !cl.BoundToPermissionGroup() {
-		return billingauth.GateError{Status: 403, Message: "credential scope required"}
-	}
-	allowed, err := verify.Allow(ctx, p.cfg.Client, cl, mapping.Permission, scope)
-	if err != nil {
-		return billingauth.GateError{Status: 503, Message: "authorization unavailable"}
+	if !allowed && p.cfg.PlatformAuthority != nil {
+		platform := required
+		platform.Scope = billingauth.PlatformScope
+		allowed, err = p.checkAuthority(ctx, cl, platform, p.cfg.PlatformAuthority, true)
+		if err != nil {
+			return err
+		}
 	}
 	if !allowed {
 		return billingauth.GateError{Status: 403, Message: "permission_required"}
 	}
 	return nil
+}
+
+func (p *integration) checkAuthority(ctx context.Context, cl verify.Claims, required billingauth.Requirement, resolve AuthorityResolver, platform bool) (bool, error) {
+	if resolve == nil {
+		return false, nil
+	}
+	mapping, err := resolve(ctx, required)
+	if err != nil {
+		return false, billingauth.GateError{Status: 503, Message: "authorization unavailable"}
+	}
+	if mapping.Permission == "" || mapping.Group.Persona == "" {
+		return false, nil
+	}
+	if mapping.Permission.Persona() != mapping.Group.Persona || (platform && !mapping.Group.IsRoot()) {
+		return false, nil
+	}
+	group, err := p.cfg.Client.GroupInstanceForSlug(ctx, mapping.Group)
+	if err != nil {
+		return false, billingauth.GateError{Status: 503, Message: "authorization unavailable"}
+	}
+	if required.Target.AuthorityGroupID != "" && !platform && group.ID != required.Target.AuthorityGroupID {
+		return false, nil
+	}
+	scope := verify.PermissionScope{GroupID: group.ID, AuthorityIssuer: p.cfg.AuthorityIssuer, Persona: group.Persona, Instance: group.InstanceSlug}
+	if cl.PrincipalKind() != coreauth.PrincipalKindUser && !cl.BoundToPermissionGroup() {
+		return false, nil
+	}
+	allowed, err := verify.Allow(ctx, p.cfg.Client, cl, mapping.Permission, scope)
+	if err != nil {
+		return false, billingauth.GateError{Status: 503, Message: "authorization unavailable"}
+	}
+	return allowed, nil
 }

@@ -344,9 +344,9 @@ func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug st
 	// transport (#685) pins this merchant per request.
 	app.HostGraph(rt).Runtime.SetConfiguredMerchant(id)
 
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantAPI: true, Catalog: true, MerchantAdmin: true, Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantAPI: true, Catalog: true, MerchantAdmin: true}, Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
 		merchantID: id, merchantSlug: slug,
-	}})}})
+	}})})
 	require.NoError(h.t, err, "mount production embedded merchant surface")
 	srv := httptest.NewServer(handler)
 	h.cleanup(srv.Close)

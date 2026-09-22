@@ -366,7 +366,7 @@ func TestEmbeddedProviderAccountArchiveLifecycle(t *testing.T) {
 	probe := newFakeDataLink(t)
 	runtime.Merchants.SetCredentialProbeEndpointsForIntegration("", probe.URL)
 
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, Gate: archiveGate{id: mid}}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true}, Gate: archiveGate{id: mid}})
 	require.NoError(t, err)
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)

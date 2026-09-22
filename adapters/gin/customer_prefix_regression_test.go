@@ -39,7 +39,7 @@ func TestReviewCustomerPrefixNativeCompatibility(t *testing.T) {
 				policy.CustomerRoutes = append(policy.CustomerRoutes, embed.CustomerRoutesConfig{Prefix: prefix, Scope: embed.CustomerSubscriptionManagement, DelegatedAuthenticator: reject})
 			}
 			engine := gin.New()
-			err := embedhttp.ValidateHTTPConfig(policy, nil, nil)
+			err := embedhttp.ValidateHTTPConfig(policy, nil)
 			if err != nil {
 				require.False(t, tc.valid, err)
 				require.Empty(t, engine.Routes())

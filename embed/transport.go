@@ -1,7 +1,9 @@
 package embed
 
 import (
+	"context"
 	"fmt"
+	"github.com/open-rails/openrails/internal/merchanttarget"
 	"net/http"
 
 	"github.com/open-rails/openrails/internal/app"
@@ -24,7 +26,7 @@ const inprocessBaseURL = "http://openrails.invalid"
 // owner authority; explicit credentials go through the configured verifier.
 // Ambient host context is stripped before either path.
 func newServiceHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator) http.Handler {
-	mux := http.NewServeMux()
+	mux := &router.Table{}
 	opts := httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn})}
 	if rt.Auth != nil {
 		opts.Gate = embedhttp.IntegrationGate(rt)
@@ -44,7 +46,10 @@ func newServiceHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator
 	}
 	// The same request body cap the HTTP mounts apply, so an oversized request
 	// is refused with the same 413 envelope in every deployment.
-	return middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes)(mux)
+	router.AddMerchantSelectorRoutes(mux, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
+		return merchanttarget.Resolve(ctx, r, rt.Merchants, rt.ConfiguredMerchant(), "")
+	})
+	return withVerificationMemo(middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes)(mux.Handler()))
 }
 
 // hostPermissions is the owner grant used by embedded host assertions.

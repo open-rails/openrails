@@ -47,7 +47,7 @@ func TestCatalogPriceKeyTransactions(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 	local, err := rt.Client()
 	require.NoError(t, err)
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, Gate: creatorAdminTestGate{mid: mid}}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true}, Gate: creatorAdminTestGate{mid: mid}})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)

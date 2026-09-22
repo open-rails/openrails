@@ -101,7 +101,7 @@ func TestFreshNativeProviderRecoveryGap(t *testing.T) {
 	require.NoError(t, err)
 	defer customerRuntime.Close(context.Background())
 	app.HostGraph(customerRuntime).Runtime.SetConfiguredMerchant(owned.MerchantID)
-	handler, err := httptesthost.Handler(customerRuntime, httptesthost.Options{HTTP: embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury:true}}}, DelegatedAuthenticator: authn})
+	handler, err := httptesthost.Handler(customerRuntime, httptesthost.Options{HTTP: embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}}, DelegatedAuthenticator: authn})
 	require.NoError(t, err)
 	mounted := httptest.NewServer(handler)
 	defer mounted.Close()

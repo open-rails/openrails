@@ -101,12 +101,12 @@ func bootRoutingFixture(
 	delegated := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: userID, Email: email, EmailVerified: true, Username: username}, nil
 	})
-	buyerHandler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}, Authenticator: userAuthn}, DelegatedAuthenticator: delegated})
+	buyerHandler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}}, DelegatedAuthenticator: delegated, Authenticator: userAuthn})
 	require.NoError(t, err)
 	buyerServer := httptest.NewServer(buyerHandler)
 	t.Cleanup(buyerServer.Close)
 
-	merchantHandler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, MerchantAPI: true, Gate: allowAllGate{id: id}}})
+	merchantHandler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, MerchantAPI: true}, Gate: allowAllGate{id: id}})
 	require.NoError(t, err)
 	merchantServer := httptest.NewServer(merchantHandler)
 	t.Cleanup(merchantServer.Close)

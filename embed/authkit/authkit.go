@@ -163,7 +163,7 @@ func WithIssuer(issuer string) DelegatedOption {
 // NewAuthenticator builds a framework-neutral billingauth.Authenticator over
 // the HOST's own verifier: the credential is checked exactly the way the host
 // checks every other request. Pass the result as
-// embed.HTTPConfig.Authenticator or a host Gate input.
+// a standalone host Gate input. Embedded constructors use New(Config) with Options.Auth.
 func NewAuthenticator(v Verifier, opts ...Option) (billingauth.Authenticator, error) {
 	if v == nil {
 		return nil, fmt.Errorf("authenticator: verifier is required (pass the host's own verifier, or use NewVerifierAuthenticator for remote JWKS issuers)")

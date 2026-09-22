@@ -19,13 +19,20 @@ type Directory interface {
 }
 
 type contextKey struct{}
+type resolvedSelection struct {
+	Target billingauth.Target
+	slug   string
+}
 
 func WithResolved(ctx context.Context, target billingauth.Target) context.Context {
-	return context.WithValue(ctx, contextKey{}, target)
+	if captured, ok := ctx.Value(contextKey{}).(resolvedSelection); ok && captured.Target == target {
+		return ctx
+	}
+	return context.WithValue(ctx, contextKey{}, resolvedSelection{Target: target})
 }
 func FromContext(ctx context.Context) (billingauth.Target, bool) {
-	target, ok := ctx.Value(contextKey{}).(billingauth.Target)
-	return target, ok
+	selection, ok := ctx.Value(contextKey{}).(resolvedSelection)
+	return selection.Target, ok
 }
 
 func Resolve(ctx context.Context, r *http.Request, directory Directory, bound merchant.ID, defaultSlug string) (billingauth.Target, error) {
@@ -94,7 +101,13 @@ func Resolve(ctx context.Context, r *http.Request, directory Directory, bound me
 	if !bound.IsZero() && selected.ID != bound {
 		return billingauth.Target{}, billingauth.GateError{Status: 409, Message: "configured merchant binding mismatch"}
 	}
-	return billingauth.Target{MerchantID: selected.ID, MerchantSlug: selected.Slug, AuthorityGroupID: selected.PermissionGroupID}, nil
+	target := billingauth.Target{MerchantID: selected.ID, MerchantSlug: selected.Slug, AuthorityGroupID: selected.PermissionGroupID}
+	if r != nil {
+		// Preserve the actually resolved name separately from the canonical name.
+		// Active aliases may differ; changing the header later cannot widen it.
+		*r = *r.WithContext(context.WithValue(r.Context(), contextKey{}, resolvedSelection{Target: target, slug: merchant.NormalizeSlug(slug)}))
+	}
+	return target, nil
 }
 
 // Assert compares untrusted optional selectors to a previously resolved target.
@@ -116,7 +129,11 @@ func Assert(r *http.Request, target billingauth.Target) error {
 			return billingauth.GateError{Status: 409, Message: "merchant binding mismatch"}
 		}
 	}
-	if rawSlug != "" && merchant.NormalizeSlug(rawSlug) != target.MerchantSlug {
+	expectedSlug := target.MerchantSlug
+	if captured, ok := r.Context().Value(contextKey{}).(resolvedSelection); ok && captured.Target == target && captured.slug != "" {
+		expectedSlug = captured.slug
+	}
+	if rawSlug != "" && merchant.NormalizeSlug(rawSlug) != expectedSlug {
 		return billingauth.GateError{Status: 409, Message: "merchant binding mismatch"}
 	}
 	return nil

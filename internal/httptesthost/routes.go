@@ -17,6 +17,8 @@ import (
 
 type Options struct {
 	HTTP                   embed.HTTPConfig
+	Authenticator          billingauth.Authenticator
+	Gate                   billingauth.Gate
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	Prefix                 string
 }
@@ -27,7 +29,7 @@ func Handler(runtime *embed.Runtime, opts Options) (http.Handler, error) {
 			opts.HTTP.CustomerRoutes[i].DelegatedAuthenticator = opts.DelegatedAuthenticator
 		}
 	}
-	table, err := embedhttp.ConfiguredRoutes(app.HostGraph(runtime), &opts.HTTP, opts.DelegatedAuthenticator)
+	table, err := embedhttp.FixtureRoutes(app.HostGraph(runtime), &opts.HTTP, opts.DelegatedAuthenticator, opts.Authenticator, opts.Gate)
 	if err != nil {
 		return nil, err
 	}
