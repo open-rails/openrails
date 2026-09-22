@@ -77,7 +77,7 @@ type BootstrapOptions struct {
 // optionally minted under the merchant group when none exists.
 //
 // It runs AFTER migrations / at startup, exclusively through in-process AuthKit
-// CORE calls (EnsureRootGroup / CreatePermissionGroup / Genesis().AssignGroupRole /
+// Client calls (CreatePermissionGroup / AdminAssignGroupRole /
 // MintAPIKeyWithOptions) — never raw AuthKit SQL or a private HTTP route.
 // Re-running it is safe: group creation and owner assignment are idempotent; the
 // API key is minted only when none already exists.
@@ -97,9 +97,6 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 	}
 
 	res := &BootstrapResult{BootstrapMerchantSlug: slug}
-
-	// 0. Ensure the singleton root group exists and the declared containment is
-	//    seeded (idempotent, concurrent-boot tolerant) before creating typed groups.
 
 	// 1. Ensure the merchant permission-group exists (idempotent: resolve, else
 	//    create). The merchant IS the group — `type=merchant`, `resourceRef=slug`,

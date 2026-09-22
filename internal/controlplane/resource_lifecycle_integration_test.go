@@ -52,4 +52,23 @@ func TestControlPlaneClosesOwnedAuthKitPools(t *testing.T) {
 	require.NoError(t, host.Ping(ctx), "the caller still owns the source pool")
 	require.Eventually(t, func() bool { return count() == int(host.Stat().TotalConns()) },
 		5*time.Second, 10*time.Millisecond, "closing the control plane must leave only caller-owned connections")
+
+	// Empty route selection must stay closed even though AuthKit's own mount
+	// treats an empty selection as its default surface.
+	groups := IntentionalRouteGroups
+	IntentionalRouteGroups = nil
+	t.Cleanup(func() { IntentionalRouteGroups = groups })
+	closed, err := New(ctx, &config.Config{
+		Env: "dev", DB: &config.DBConfig{},
+		Auth: &config.AuthConfig{Issuer: "https://ownership.test", MintDisabled: true, DirectPeerIP: true},
+	}, host, WithRedis(rdb))
+	require.NoError(t, err)
+	t.Cleanup(closed.Close)
+	routes, err := closed.AuthRoutes()
+	require.NoError(t, err)
+	require.Empty(t, routes, "an empty OpenRails allow-list must not mount AuthKit defaults")
+	closed.Close()
+	require.NoError(t, host.Ping(ctx))
+	require.Eventually(t, func() bool { return count() == int(host.Stat().TotalConns()) },
+		5*time.Second, 10*time.Millisecond, "the zero-route HTTP surface is also runtime-owned")
 }

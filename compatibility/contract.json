@@ -5029,7 +5029,7 @@
     "internal/controlplane/fleet_timeseries.go": "9b1255b19e870f28a34be82a15330312a22bef03416e18fd1fa545627ac606c9",
     "internal/controlplane/group_scope.go": "d9c110f7553c863b60719690d06d005dbdd0e2367f50eaca14040154473ffd72",
     "internal/controlplane/host_registry.go": "1d86fc0e1106370ead8e6a7aba0f2a2c80185938d2170814d3b4d75040b1e113",
-    "internal/controlplane/http_construction.go": "dcf83afdd757123541f8a968555bdc152d69ee1b679ae8258182a482fd4ec2d2",
+    "internal/controlplane/http_construction.go": "233110b4adc110edf6e82011ccb1ccea6fac299e5ac6294ef6851d168e68cf78",
     "internal/controlplane/issuer_registry.go": "67b5f95f0b27bc0fafee64d2e0f3362f04a21a6ed26969a629d156c2b30818be",
     "internal/controlplane/merchant_api_keys.go": "57e3f54efaf887f43b3d5a5526b1781d770a59bc52c38da71f635ea4f8c2ec84",
     "internal/controlplane/merchant_creation.go": "b86877f0d58cc8a9280db895d525c4141d5aaf1e317c4ee51e933df1bf4ed44c",

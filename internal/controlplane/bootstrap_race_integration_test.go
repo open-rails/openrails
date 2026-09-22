@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
@@ -26,9 +27,19 @@ func TestBootstrap_ConcurrentColdBoot(t *testing.T) {
 	const n = 4
 	// One ControlPlane per simulated node, all over the same empty DB.
 	cps := make([]*ControlPlane, n)
-	for i := range cps {
-		cps[i] = newTestControlPlane(t, pool)
+	configs := make([]*config.Config, n)
+	for i := range configs {
+		configs[i] = &config.Config{Env: "dev", Auth: &config.AuthConfig{
+			Issuer: "https://openrails.test", KeysPath: t.TempDir(),
+		}}
 	}
+	t.Cleanup(func() {
+		for _, cp := range cps {
+			if cp != nil {
+				cp.Close()
+			}
+		}
+	})
 
 	start := make(chan struct{})
 	results := make([]*BootstrapResult, n)
@@ -39,6 +50,12 @@ func TestBootstrap_ConcurrentColdBoot(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
+			// AuthKit now initializes root during construction, so the
+			// constructor belongs inside the cold-boot barrier too.
+			cps[i], errs[i] = New(ctx, configs[i], pool)
+			if errs[i] != nil {
+				return
+			}
 			results[i], errs[i] = cps[i].Bootstrap(ctx, BootstrapOptions{
 				BootstrapMerchantSlug: dbtest.TestMerchantSlug,
 			})
@@ -93,11 +110,15 @@ func TestBootstrap_ConcurrentColdBoot(t *testing.T) {
 func TestBootstrap_RootGroupRaceLoserAdopts(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
-	cp := newTestControlPlane(t, pool)
+	cfg := &config.Config{Env: "dev", Auth: &config.AuthConfig{
+		Issuer: "https://openrails.test", KeysPath: t.TempDir(),
+	}}
 
 	tx, err := pool.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback(ctx) //nolint:errcheck
+	var winnerPID int
+	require.NoError(t, tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&winnerPID))
 	_, err = tx.Exec(ctx, `INSERT INTO profiles.permission_groups (persona) VALUES ('root')`)
 	require.NoError(t, err)
 
@@ -105,20 +126,25 @@ func TestBootstrap_RootGroupRaceLoserAdopts(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		var berr error
+		defer func() { done <- berr }()
+		cp, berr := New(ctx, cfg, pool)
+		if berr != nil {
+			return
+		}
+		defer cp.Close()
 		res, berr = cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug})
-		done <- berr
 	}()
 
-	// Commit the winner only once the bootstrap's root insert is lock-waiting
+	// Commit the winner only once the constructor's root insert is lock-waiting
 	// on it, so the loss is guaranteed, not timing-dependent.
 	require.Eventually(t, func() bool {
 		var waiting int
 		if qerr := pool.QueryRow(ctx,
-			`SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'`).Scan(&waiting); qerr != nil {
+			`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))`, winnerPID).Scan(&waiting); qerr != nil {
 			return false
 		}
 		return waiting > 0
-	}, 15*time.Second, 20*time.Millisecond, "bootstrap root insert should block on the uncommitted winner row")
+	}, 15*time.Second, 20*time.Millisecond, "constructor root insert should block on the uncommitted winner row")
 	require.NoError(t, tx.Commit(ctx))
 
 	require.NoError(t, <-done, "race loser must adopt the winner's root row, not die on the singleton index")
