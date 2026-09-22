@@ -8,18 +8,18 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/stretchr/testify/require"
 )
 
 func saleAdmissionParams(fx *saleIntentFixture, key string) intents.EnqueueParams {
-	return intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", PspID: fx.payload.Instrument.PSPID, IntentType: payments.TypeNMISale, PriceID: &fx.priceID, Payload: fx.payload, IdempotencyKey: NMISaleIdempotencyKey(key), Origin: intents.OriginUser}
+	return intents.EnqueueParams{MerchantID: fx.merchantID.UUID(), Provider: "nmi", PspID: fx.payload.Instrument.PSPID, IntentType: payments.TypeNMISale, PriceID: &fx.priceID, Payload: fx.payload, IdempotencyKey: NMISaleIdempotencyKey(key), Origin: intents.OriginUser}
 }
 
 func TestSaleCrossCustomerKeyRaceKeepsOnlyCanonicalOwner(t *testing.T) {
-	a, b := newSaleIntentFixture(t), newSaleIntentFixture(t)
+	a := newSaleIntentFixture(t)
+	b := newSaleIntentFixtureForMerchant(t, a.merchantID) // Same merchant, different customers competing for one key.
 	gate, err := a.db.Pool().Begin(a.ctx)
 	require.NoError(t, err)
 	defer func() { _ = gate.Rollback(a.ctx) }()

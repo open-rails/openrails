@@ -54,7 +54,7 @@ type fakeNMISaleGateway struct {
 	accepted    chan struct{}
 }
 
-func newFakeNMISaleGateway(t *testing.T, pspID uuid.UUID) (*fakeNMISaleGateway, *nmi.NMIClient) {
+func newFakeNMISaleGateway(t *testing.T, merchantID, pspID uuid.UUID) (*fakeNMISaleGateway, *nmi.NMIClient) {
 	t.Helper()
 	f := &fakeNMISaleGateway{txnID: "txn-sale-" + uuid.NewString()[:8], accepted: make(chan struct{}, 1)}
 	f.saleMode.Store("approve")
@@ -148,7 +148,7 @@ func newFakeNMISaleGateway(t *testing.T, pspID uuid.UUID) (*fakeNMISaleGateway, 
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := nmi.NewAccountClient(dbtest.TestMerchantID.UUID(), pspID, "mobius", &config.NMIProviderSettings{
+	client, err := nmi.NewAccountClient(merchantID, pspID, "mobius", &config.NMIProviderSettings{
 		SecurityKey: "test_security_key", WebhookSecret: "test_secret",
 	}, true)
 	require.NoError(t, err)
@@ -163,6 +163,7 @@ func jsonDecode(r *http.Request, out any) error {
 }
 
 type saleIntentFixture struct {
+	merchantID merchant.ID
 	db         *db.DB
 	runner     *intents.Runner
 	gateway    *fakeNMISaleGateway
@@ -177,36 +178,33 @@ type saleIntentFixture struct {
 
 func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 	t.Helper()
-	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	return newSaleIntentFixtureForMerchant(t, merchant.ID(uuid.New()))
+}
+
+func newSaleIntentFixtureForMerchant(t *testing.T, mid merchant.ID) *saleIntentFixture {
+	t.Helper()
+	dbi := dbtest.OpenMerchantDB(t, mid.UUID())
 	pool := dbi.Pool()
-	dbtest.EnsureTestMerchant(context.Background(), t, pool)
-	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	ctx := merchant.WithID(context.Background(), mid)
+	_, err := pool.Exec(ctx, `INSERT INTO billing.merchants(id,slug,status) VALUES($1,$2,'active') ON CONFLICT (id) DO NOTHING`, mid.UUID(), "sale-fixture-"+mid.String())
+	require.NoError(t, err)
 
 	now := time.Now().UTC().Truncate(time.Second)
 	userID := uuid.New().String()
-	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	customerID := dbtest.EnsureCustomerIDPgxFor(ctx, t, pool, mid.UUID(), userID)
 	productID, priceID := uuid.New(), uuid.New()
-	insertProductAndPrice(ctx, t, pool, &models.Product{
-		ID: productID, Key: "sale-intent-" + uuid.NewString()[:8], DisplayName: "Sale Intent Test",
-		Archived: false, CreatedAt: now, UpdatedAt: now,
-	}, &models.Price{
-		ID: priceID, ProductID: productID, Archived: false,
-		Amount: 5_000_000, Currency: "USD", CreatedAt: now, UpdatedAt: now,
-	})
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.rail_intents WHERE intent_type = 'nmi_sale' AND price_id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.entitlements WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.ledger_transfers WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.grants WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.payments WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.prices WHERE id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM billing.products WHERE id = $1", productID)
-	})
+	q := dbtest.Queries(pool)
+	_, err = q.CreateProduct(ctx, gen.CreateProductParams{MerchantID: mid.UUID(), ID: productID, Key: "sale-intent-" + uuid.NewString()[:8], DisplayName: "Sale Intent Test", Description: new(string), CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
+	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{MerchantID: mid.UUID(), ID: priceID, ProductID: productID, Amount: 5_000_000, Currency: "USD", CreatedAt: now, UpdatedAt: now})
+	require.NoError(t, err)
+	// Merchant isolation keeps batch claims local to this fixture. The owned
+	// package database teardown removes its immutable payment and grant facts.
 
-	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "mobius")
-	gateway, client := newFakeNMISaleGateway(t, pspID)
-	method := gen.OpenrailsPaymentMethod{ID: uuid.New(), MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: customerID, PspID: pspID, Rail: "nmi", Custodian: "psp", RailCustomerRef: "vault-" + uuid.NewString()[:8]}
-	_, err := pool.Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'')`, method.ID, method.MerchantID, method.CustomerID, method.PspID, method.Rail, method.Custodian, method.RailCustomerRef, method.RailMethodRef)
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, mid.UUID(), "mobius")
+	gateway, client := newFakeNMISaleGateway(t, mid.UUID(), pspID)
+	method := gen.OpenrailsPaymentMethod{ID: uuid.New(), MerchantID: mid.UUID(), CustomerID: customerID, PspID: pspID, Rail: "nmi", Custodian: "psp", RailCustomerRef: "vault-" + uuid.NewString()[:8]}
+	_, err = pool.Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'')`, method.ID, method.MerchantID, method.CustomerID, method.PspID, method.Rail, method.Custodian, method.RailCustomerRef, method.RailMethodRef)
 	require.NoError(t, err)
 	gateway.vault.Store(method.RailCustomerRef)
 	clock := clockwork.NewRealClock()
@@ -233,7 +231,7 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 		Config: fullModeConfig(),
 	}
 	return &saleIntentFixture{
-		db: dbi, runner: runner, gateway: gateway, purchase: purchaseService,
+		merchantID: mid, db: dbi, runner: runner, gateway: gateway, purchase: purchaseService,
 		payload: payments.NMISalePayload{RequestFingerprint: strings.Repeat("a", 64), PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method), PaymentID: uuid.New(), ProductID: productID, ListAmount: 5_000_000, AcceptedAt: now, Entitlements: map[string]*int{}, EntitlementStart: now, OwnershipStart: now, Eligibility: "allowed",
 			Provider: string(models.RailNMI),
 			PSP:      "mobius",
@@ -250,9 +248,9 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 
 func (fx *saleIntentFixture) enqueueAndExecute(t *testing.T, key string) gen.OpenrailsRailIntent {
 	t.Helper()
-	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
+	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), fx.merchantID.UUID(), "mobius")
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
-		MerchantID:     dbtest.TestMerchantID.UUID(),
+		MerchantID:     fx.merchantID.UUID(),
 		Provider:       string(models.RailNMI),
 		IntentType:     payments.TypeNMISale,
 		PriceID:        &fx.priceID,
@@ -409,8 +407,8 @@ func TestNMISaleIntent_AmbiguousTimeoutVerifiedCharged(t *testing.T) {
 func TestNMISaleIntent_ContradictoryPriceRefusesBeforeCharge(t *testing.T) {
 	fx := newSaleIntentFixture(t)
 	fx.payload.PriceID = uuid.New()
-	psp := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
-	_, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", PspID: psp, IntentType: payments.TypeNMISale, PriceID: &fx.priceID, Payload: fx.payload, IdempotencyKey: NMISaleIdempotencyKey(uuid.NewString()), Origin: intents.OriginUser})
+	psp := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), fx.merchantID.UUID(), "mobius")
+	_, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{MerchantID: fx.merchantID.UUID(), Provider: "nmi", PspID: psp, IntentType: payments.TypeNMISale, PriceID: &fx.priceID, Payload: fx.payload, IdempotencyKey: NMISaleIdempotencyKey(uuid.NewString()), Origin: intents.OriginUser})
 	require.Error(t, err)
 	require.Zero(t, fx.gateway.saleCalls.Load())
 	require.Zero(t, fx.paymentCount(t))
@@ -552,13 +550,13 @@ func TestNMISaleIntent_CancellationAfterAcceptanceReconcilesClaim(t *testing.T) 
 	fx := newSaleIntentFixture(t)
 	fx.gateway.saleMode.Store("hold-response")
 	fx.gateway.hidden.Store(true)
-	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
+	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), fx.merchantID.UUID(), "mobius")
 	key := NMISaleIdempotencyKey("deadline-" + uuid.NewString())
 	requestCtx, cancel := context.WithCancel(fx.ctx)
 	defer cancel()
 	finishedRequest := make(chan error, 1)
 	go func() {
-		_, err := fx.runner.EnqueueAndExecute(requestCtx, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", IntentType: payments.TypeNMISale, PriceID: &fx.priceID, PspID: pspID, Payload: fx.payload, IdempotencyKey: key, NextAttemptAt: time.Now(), Origin: intents.OriginUser})
+		_, err := fx.runner.EnqueueAndExecute(requestCtx, intents.EnqueueParams{MerchantID: fx.merchantID.UUID(), Provider: "nmi", IntentType: payments.TypeNMISale, PriceID: &fx.priceID, PspID: pspID, Payload: fx.payload, IdempotencyKey: key, NextAttemptAt: time.Now(), Origin: intents.OriginUser})
 		finishedRequest <- err
 	}()
 	// Start the interruption at the event this regression is about. A one-second
@@ -574,7 +572,7 @@ func TestNMISaleIntent_CancellationAfterAcceptanceReconcilesClaim(t *testing.T) 
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 	require.True(t, fx.gateway.charged.Load())
 	var id uuid.UUID
-	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT id FROM billing.rail_intents WHERE merchant_id=$1 AND idempotency_key=$2`, dbtest.TestMerchantID.UUID(), key).Scan(&id))
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT id FROM billing.rail_intents WHERE merchant_id=$1 AND idempotency_key=$2`, fx.merchantID.UUID(), key).Scan(&id))
 	pending, err := intents.NewStore(fx.db).Get(fx.ctx, id)
 	require.NoError(t, err)
 	require.Equal(t, intents.StatusUnknownNeedsVerify, pending.Status, "unknown mark must be durable despite the caller deadline")

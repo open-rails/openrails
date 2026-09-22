@@ -41,6 +41,14 @@ func TestInitialEnrollmentRefusesExistingAndUncertainTierObligations(t *testing.
 				otherParams.IdempotencyKey = InitialMembershipIdempotencyKey(otherPayload.CheckoutIdempotencyKey)
 				accepted, err := intents.NewStore(fx.db).Enqueue(fx.ctx, otherParams)
 				require.NoError(t, err)
+				t.Cleanup(func() {
+					_, err := fx.db.Pool().Exec(fx.ctx, `DELETE FROM billing.rail_intents WHERE id=$1`, accepted.ID)
+					require.NoError(t, err)
+					_, err = fx.db.Pool().Exec(fx.ctx, `DELETE FROM billing.prices WHERE id=$1`, otherPrice)
+					require.NoError(t, err)
+					_, err = fx.db.Pool().Exec(fx.ctx, `DELETE FROM billing.products WHERE id=$1`, other)
+					require.NoError(t, err)
+				})
 				_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.rail_intents SET status='unknown_needs_verify' WHERE id=$1`, accepted.ID)
 				require.NoError(t, err)
 			} else {

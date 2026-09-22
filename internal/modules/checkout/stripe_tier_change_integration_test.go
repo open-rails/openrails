@@ -472,153 +472,144 @@ func (fx *stripeTierFixture) operations(t *testing.T) int {
 	return count
 }
 
-func TestStripeTierChangeUpgradeReplaysStoredReceipt(t *testing.T) {
-	fx := newStripeTierFixture(t)
-	key := "upg-" + uuid.NewString()[:8]
-	first, err := fx.change(key, fx.pro)
-	require.NoError(t, err)
-	require.Equal(t, "succeeded", first.Status)
-	require.Equal(t, "upgrade", first.Action)
-	require.NotEmpty(t, first.OperationID)
-	op := fx.operation(key)
-	require.Equal(t, intents.StatusSucceeded, op.Status)
-	require.Equal(t, op.ID.String(), first.OperationID)
-	require.Equal(t, "in_"+fx.sub.RailSubscriptionID, first.Payment.TransactionID)
+// The same upgrade contract must survive an immediate receipt, a lost response,
+// and a webhook that applies the provider state before the restarted verifier.
+func TestStripeTierChangeUpgradeReceiptAndRecovery(t *testing.T) {
+	for _, mode := range []string{"immediate", "lost_response", "webhook_first"} {
+		t.Run(mode, func(t *testing.T) {
+			fx := newStripeTierFixture(t)
+			if mode != "immediate" {
+				fx.stripe.setMode("lostAfterLanding")
+			}
+			if mode == "webhook_first" {
+				fx.stripe.mu.Lock()
+				fx.stripe.executionLag = 90 * time.Second
+				fx.stripe.mu.Unlock()
+			}
+			key := "upgrade-" + uuid.NewString()[:8]
+			first, err := fx.change(key, fx.pro)
+			require.NoError(t, err)
+			require.NotEmpty(t, first.OperationID)
+			op := fx.operation(key)
+			require.Equal(t, op.ID.String(), first.OperationID)
+			if mode != "immediate" {
+				require.Equal(t, "processing", first.Status)
+				require.Equal(t, intents.StatusUnknownNeedsVerify, op.Status)
+				require.Equal(t, fx.basic.ID, fx.local(t).PriceID, "nothing commits without a receipt")
+				again, err := fx.change(key, fx.pro)
+				require.NoError(t, err)
+				require.Equal(t, first, again, "the same key answers the live operation")
+				_, err = fx.change("new-"+uuid.NewString()[:8], fx.pro)
+				var inFlight *TierChangeInFlightError
+				require.ErrorAs(t, err, &inFlight)
+				require.Equal(t, op.ID, inFlight.OperationID)
+				require.ErrorIs(t, err, ErrTierChangePending)
+				require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 1, "unknown outcomes are never resent")
+				require.Equal(t, 1, fx.operations(t))
+				if mode == "webhook_first" {
+					entSvc := entitlements.NewEntitlementService(fx.db, fx.clock)
+					paymentSvc := payments.NewPaymentService(fx.db, fx.clock)
+					notifications := subscriptions.NewNotificationService(fx.db, nil)
+					converger := &webhooks.StripeConvergeService{
+						DB: fx.db, Clock: fx.clock, Prober: &subscriptions.HTTPStripeLivenessProber{SecretKey: "sk_test_converge"},
+						PriceService: fx.svc.PriceService, ProductService: fx.svc.ProductService, SubscriptionService: fx.svc.SubscriptionService,
+						SubscriptionLifecycleService: subscriptions.NewSubscriptionLifecycleService(fx.db, fx.svc.ProductService, fx.svc.PriceService, entSvc, notifications, paymentSvc, fx.clock),
+						PaymentService:               paymentSvc, NotificationService: notifications,
+					}
+					_, err = converger.Converge(fx.ctx, fx.sub.RailSubscriptionID)
+					require.NoError(t, err)
+					require.Equal(t, fx.pro.ID, fx.local(t).PriceID, "the webhook applied the target price first")
+				}
+				require.Equal(t, intents.StatusSucceeded, fx.verifyOnce(t, key).Status, "restart recovers from the exact provider receipt")
+			} else {
+				require.Equal(t, "succeeded", first.Status)
+				require.Equal(t, intents.StatusSucceeded, op.Status)
+			}
+			done, err := fx.change(key, fx.pro)
+			require.NoError(t, err)
+			require.Equal(t, "succeeded", done.Status)
+			if mode == "immediate" {
+				require.Equal(t, first, done)
+			}
+			require.Equal(t, "upgrade", done.Action)
+			require.Equal(t, first.OperationID, done.OperationID)
+			require.Equal(t, first.AmountDueNow, done.AmountDueNow)
+			require.Equal(t, "in_"+fx.sub.RailSubscriptionID, done.Payment.TransactionID)
+			posts := fx.stripe.posts("/v1/subscriptions/")
+			require.Len(t, posts, 1)
+			require.Equal(t, op.ID.String()+":update", posts[0].key)
+			for field, want := range map[string]string{
+				"items[0][id]":    "si_" + strings.TrimPrefix(fx.sub.RailSubscriptionID, "sub_"),
+				"items[0][price]": fx.proRef, "metadata[internal_price_id]": fx.pro.ID.String(),
+				"metadata[openrails_tier_change]": op.ID.String(), "proration_behavior": "always_invoice",
+				"billing_cycle_anchor": "now", "payment_behavior": "error_if_incomplete",
+			} {
+				require.Equal(t, want, posts[0].form.Get(field), field)
+			}
+			local, landed := fx.local(t), fx.stripe.sub(fx.sub.RailSubscriptionID)
+			require.Equal(t, fx.pro.ID, local.PriceID)
+			require.Equal(t, fx.proRef, landed.priceID)
+			require.Equal(t, landed.periodStart, local.CurrentPeriodStartsAt.Unix())
+			require.Equal(t, landed.period, local.CurrentPeriodEndsAt.Unix())
+			require.Equal(t, landed.period, done.NextChargeDate.Unix())
+			var payload StripeTierChangePayload
+			require.NoError(t, json.Unmarshal(op.Payload, &payload))
+			// $10 × 25/30 credit rounds up to $8.34; the $30 upgrade owes $21.66.
+			require.EqualValues(t, 21_660_000, payload.AmountDueNow)
+			require.Equal(t, payload.AmountDueNow, done.AmountDueNow)
+			if mode == "webhook_first" {
+				require.NotEqual(t, landed.period, payload.PeriodEnd.Unix(), "Stripe executes on its own clock")
+			}
 
-	// Wire pinning: one update, under the operation's key, stamped with it.
-	posts := fx.stripe.posts("/v1/subscriptions/")
-	require.Len(t, posts, 1)
-	require.Equal(t, op.ID.String()+":update", posts[0].key)
-	require.Equal(t, "si_"+strings.TrimPrefix(fx.sub.RailSubscriptionID, "sub_"), posts[0].form.Get("items[0][id]"))
-	require.Equal(t, fx.proRef, posts[0].form.Get("items[0][price]"))
-	require.Equal(t, fx.pro.ID.String(), posts[0].form.Get("metadata[internal_price_id]"))
-	require.Equal(t, op.ID.String(), posts[0].form.Get("metadata[openrails_tier_change]"))
-	require.Equal(t, "always_invoice", posts[0].form.Get("proration_behavior"))
-	require.Equal(t, "now", posts[0].form.Get("billing_cycle_anchor"))
-	require.Equal(t, "error_if_incomplete", posts[0].form.Get("payment_behavior"), "a declined payment refuses the update instead of leaving an unpaid invoice")
-
-	// Local effects once: the subscription rides the new price for the
-	// period Stripe opened (the receipt), not the enqueue-time estimate.
-	local := fx.local(t)
-	require.Equal(t, fx.pro.ID, local.PriceID)
-	landed := fx.stripe.sub(fx.sub.RailSubscriptionID)
-	require.Equal(t, landed.periodStart, local.CurrentPeriodStartsAt.Unix())
-	require.Equal(t, landed.period, local.CurrentPeriodEndsAt.Unix())
-	require.Equal(t, landed.period, first.NextChargeDate.Unix())
-	var payload StripeTierChangePayload
-	require.NoError(t, json.Unmarshal(op.Payload, &payload))
-	require.EqualValues(t, 30_000_000-ceilCredit(10_000_000, 25*24, 720), payload.AmountDueNow)
-	require.Equal(t, payload.AmountDueNow, first.AmountDueNow)
-
-	// The catalog moves on; the replay is the stored receipt, byte for byte.
-	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.prices SET amount = 99_000_000 WHERE id = $1`, fx.pro.ID)
-	require.NoError(t, err)
-	again, err := fx.change(key, fx.pro)
-	require.NoError(t, err)
-	require.Equal(t, first, again)
-	require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 1, "a replay never pushes Stripe again")
-	require.Equal(t, 1, fx.operations(t))
-
-	// The key binds its request coordinates.
-	_, err = fx.change(key, fx.basic)
-	var tierErr *TierChangeError
-	require.ErrorAs(t, err, &tierErr)
-	require.Equal(t, http.StatusConflict, tierErr.HTTPStatus)
-	require.Equal(t, openrails.CodeTierChangeIdempotencyConflict, tierErr.Code)
-	// Another user cannot read the operation through the key.
-	_, err = fx.svc.TierChange(fx.ctx, &TierChangeRequest{PriceID: openrails.PriceID(fx.pro.ID).String(), SubscriptionID: fx.sub.ID, IdempotencyKey: key}, &UserIdentity{ID: uuid.NewString()})
-	require.ErrorAs(t, err, &tierErr)
-	require.Equal(t, openrails.CodeTierChangeIdempotencyConflict, tierErr.Code)
-	require.NotContains(t, tierErr.Message, first.OperationID)
-	// A new key against the plan the subscription is already on is refused
-	// before Stripe is consulted.
-	_, err = fx.change("other-"+uuid.NewString()[:8], fx.pro)
-	require.ErrorIs(t, err, ErrTierChangeSameProduct)
-	require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 1)
-}
-
-// ceilCredit mirrors CalculateModelBUpgradeCharge's customer-favored credit
-// for whole-hour periods.
-func ceilCredit(oldFull int64, hoursRemaining, cycleHours int) int64 {
-	credit := oldFull * int64(hoursRemaining) / int64(cycleHours)
-	if credit%10_000 != 0 {
-		credit += 10_000 - credit%10_000
+			// Catalog edits cannot change the stored receipt or trigger another write.
+			_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.prices SET amount = 99_000_000 WHERE id = $1`, fx.pro.ID)
+			require.NoError(t, err)
+			again, err := fx.change(key, fx.pro)
+			require.NoError(t, err)
+			require.Equal(t, done, again)
+			require.Equal(t, intents.StatusSucceeded, fx.verifyOnce(t, key).Status)
+			require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 1)
+			require.Equal(t, 1, fx.operations(t))
+			_, err = fx.change(key, fx.basic)
+			var tierErr *TierChangeError
+			require.ErrorAs(t, err, &tierErr)
+			require.Equal(t, http.StatusConflict, tierErr.HTTPStatus)
+			require.Equal(t, openrails.CodeTierChangeIdempotencyConflict, tierErr.Code)
+			_, err = fx.svc.TierChange(fx.ctx, &TierChangeRequest{PriceID: openrails.PriceID(fx.pro.ID).String(), SubscriptionID: fx.sub.ID, IdempotencyKey: key}, &UserIdentity{ID: uuid.NewString()})
+			require.ErrorAs(t, err, &tierErr)
+			require.Equal(t, openrails.CodeTierChangeIdempotencyConflict, tierErr.Code)
+			require.NotContains(t, tierErr.Message, done.OperationID)
+			_, err = fx.change("other-"+uuid.NewString()[:8], fx.pro)
+			require.ErrorIs(t, err, ErrTierChangeSameProduct)
+			require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 1)
+		})
 	}
-	return credit
 }
 
-func TestStripeTierChangeLostResponseConvergesAcrossRestart(t *testing.T) {
-	fx := newStripeTierFixture(t)
-	fx.stripe.setMode("lostAfterLanding")
-	key := "lost-" + uuid.NewString()[:8]
-	first, err := fx.change(key, fx.pro)
-	require.NoError(t, err)
-	require.Equal(t, "processing", first.Status)
-	require.NotEmpty(t, first.OperationID)
-	op := fx.operation(key)
-	require.Equal(t, intents.StatusUnknownNeedsVerify, op.Status)
-	require.Equal(t, fx.basic.ID, fx.local(t).PriceID, "nothing commits without a receipt")
-	require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 1)
-
-	again, err := fx.change(key, fx.pro)
-	require.NoError(t, err)
-	require.Equal(t, first, again, "the same key answers the live operation")
-	var inFlight *TierChangeInFlightError
-	_, err = fx.change("new-"+uuid.NewString()[:8], fx.pro)
-	require.ErrorAs(t, err, &inFlight)
-	require.Equal(t, op.ID, inFlight.OperationID)
-	require.ErrorIs(t, err, ErrTierChangePending)
-	require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 1, "nothing is resent while the outcome is unknown")
-	require.Equal(t, 1, fx.operations(t))
-
-	// Restart: the verifier reads the exact object back and commits once.
-	resolved := fx.verifyOnce(t, key)
-	require.Equal(t, intents.StatusSucceeded, resolved.Status)
-	require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 1)
-	require.Equal(t, fx.pro.ID, fx.local(t).PriceID)
-	done, err := fx.change(key, fx.pro)
-	require.NoError(t, err)
-	require.Equal(t, "succeeded", done.Status)
-	require.Equal(t, first.OperationID, done.OperationID)
-	require.Equal(t, first.AmountDueNow, done.AmountDueNow)
-	require.Equal(t, 1, fx.operations(t))
-}
-
-func TestStripeTierChangeLostRequestReplaysProviderIdempotencyKey(t *testing.T) {
-	fx := newStripeTierFixture(t)
-	fx.stripe.setMode("lostBeforeLanding")
-	key := "unsent-" + uuid.NewString()[:8]
-	first, err := fx.change(key, fx.pro)
-	require.NoError(t, err)
-	require.Equal(t, "processing", first.Status)
-	require.Equal(t, intents.StatusUnknownNeedsVerify, fx.operation(key).Status)
-
-	// The read-back shows the old price: not proof of non-execution, so the
-	// verifier hands the identical request back to the executor.
-	require.Equal(t, intents.StatusFailedRetryable, fx.verifyOnce(t, key).Status)
-	require.Equal(t, fx.basic.ID, fx.local(t).PriceID)
-	done, err := fx.change(key, fx.pro)
-	require.NoError(t, err)
-	require.Equal(t, "succeeded", done.Status)
-	posts := fx.stripe.posts("/v1/subscriptions/")
-	require.Len(t, posts, 2)
-	require.Equal(t, posts[0].key, posts[1].key, "the replay carries the same provider idempotency key")
-	require.Equal(t, posts[0].form, posts[1].form, "and the identical frozen request")
-	require.Equal(t, fx.pro.ID, fx.local(t).PriceID)
-	require.Equal(t, 1, fx.operations(t))
-
-	// Stripe's key-in-use answer is neither a receipt nor a refusal.
-	fx2 := newStripeTierFixture(t)
-	fx2.stripe.setMode("inUse")
-	key2 := "inuse-" + uuid.NewString()[:8]
-	resp, err := fx2.change(key2, fx2.pro)
-	require.NoError(t, err)
-	require.Equal(t, "processing", resp.Status)
-	require.Equal(t, intents.StatusUnknownNeedsVerify, fx2.operation(key2).Status)
-	require.Equal(t, intents.StatusFailedRetryable, fx2.verifyOnce(t, key2).Status)
-	resp, err = fx2.change(key2, fx2.pro)
-	require.NoError(t, err)
-	require.Equal(t, "succeeded", resp.Status)
+func TestStripeTierChangeUnconfirmedRequestReplaysFrozenWrite(t *testing.T) {
+	for _, mode := range []string{"lostBeforeLanding", "inUse"} {
+		t.Run(mode, func(t *testing.T) {
+			fx := newStripeTierFixture(t)
+			fx.stripe.setMode(mode)
+			key := "unsent-" + uuid.NewString()[:8]
+			first, err := fx.change(key, fx.pro)
+			require.NoError(t, err)
+			require.Equal(t, "processing", first.Status)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, fx.operation(key).Status)
+			// Neither old provider state nor key-in-use proves non-execution.
+			require.Equal(t, intents.StatusFailedRetryable, fx.verifyOnce(t, key).Status)
+			require.Equal(t, fx.basic.ID, fx.local(t).PriceID)
+			done, err := fx.change(key, fx.pro)
+			require.NoError(t, err)
+			require.Equal(t, "succeeded", done.Status)
+			posts := fx.stripe.posts("/v1/subscriptions/")
+			require.Len(t, posts, 2)
+			require.Equal(t, posts[0].key, posts[1].key, "same provider idempotency key")
+			require.Equal(t, posts[0].form, posts[1].form, "identical frozen request")
+			require.Equal(t, fx.pro.ID, fx.local(t).PriceID)
+			require.Equal(t, 1, fx.operations(t))
+		})
+	}
 }
 
 func TestStripeTierChangeWindowElapsedNeedsOperator(t *testing.T) {
@@ -682,31 +673,6 @@ func TestStripeTierChangeWindowElapsedNeedsOperator(t *testing.T) {
 	require.Equal(t, intents.StatusSucceeded, resolved.Status)
 	require.Equal(t, fx2.pro.ID, fx2.local(t).PriceID)
 	require.Len(t, fx2.stripe.posts("/v1/subscriptions/"), 1)
-}
-
-func TestStripeTierChangeDefinitiveRefusalIsCoded(t *testing.T) {
-	fx := newStripeTierFixture(t)
-	fx.stripe.setMode("decline")
-	key := "decl-" + uuid.NewString()[:8]
-	_, err := fx.change(key, fx.pro)
-	var tierErr *TierChangeError
-	require.ErrorAs(t, err, &tierErr)
-	require.Equal(t, http.StatusPaymentRequired, tierErr.HTTPStatus)
-	require.Equal(t, "insufficient_funds", tierErr.Code)
-	require.Contains(t, tierErr.Message, "insufficient funds")
-	require.Equal(t, intents.StatusFailedTerminal, fx.operation(key).Status)
-	require.Equal(t, fx.basic.ID, fx.local(t).PriceID)
-
-	_, err = fx.change(key, fx.pro)
-	require.ErrorAs(t, err, &tierErr)
-	require.Equal(t, http.StatusPaymentRequired, tierErr.HTTPStatus)
-	require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 1, "a refused operation is never resent")
-
-	// A definitive refusal releases the subscription: a new key is a new attempt.
-	fresh, err := fx.change("retry-"+uuid.NewString()[:8], fx.pro)
-	require.NoError(t, err)
-	require.Equal(t, "succeeded", fresh.Status)
-	require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 2)
 }
 
 func TestStripeTierChangeRefusesDivergentProviderState(t *testing.T) {
@@ -901,59 +867,6 @@ func TestStripeTierChangeKeyReuseDuringPreflightIsRefused(t *testing.T) {
 	require.Equal(t, a, again)
 }
 
-// The webhook converger can apply the upgrade first: after a lost response it
-// mirrors Stripe's subscription (target price, the period Stripe opened at
-// execution). The verifier then commits from the exact read-back receipt —
-// Stripe's period, not the enqueue-time estimate — exactly once.
-func TestStripeTierChangeWebhookFirstConvergesOnce(t *testing.T) {
-	fx := newStripeTierFixture(t)
-	fx.stripe.setMode("lostAfterLanding")
-	fx.stripe.mu.Lock()
-	fx.stripe.executionLag = 90 * time.Second
-	fx.stripe.mu.Unlock()
-	key := "hook-" + uuid.NewString()[:8]
-	pending, err := fx.change(key, fx.pro)
-	require.NoError(t, err)
-	require.Equal(t, "processing", pending.Status)
-	railSub := fx.sub.RailSubscriptionID
-	landed := fx.stripe.sub(railSub)
-	require.Equal(t, fx.proRef, landed.priceID, "the update landed at Stripe")
-
-	entSvc := entitlements.NewEntitlementService(fx.db, fx.clock)
-	paymentSvc := payments.NewPaymentService(fx.db, fx.clock)
-	notifications := subscriptions.NewNotificationService(fx.db, nil)
-	converger := &webhooks.StripeConvergeService{
-		DB: fx.db, Clock: fx.clock, Prober: &subscriptions.HTTPStripeLivenessProber{SecretKey: "sk_test_converge"},
-		PriceService: fx.svc.PriceService, ProductService: fx.svc.ProductService, SubscriptionService: fx.svc.SubscriptionService,
-		SubscriptionLifecycleService: subscriptions.NewSubscriptionLifecycleService(fx.db, fx.svc.ProductService, fx.svc.PriceService, entSvc, notifications, paymentSvc, fx.clock),
-		PaymentService:               paymentSvc, NotificationService: notifications,
-	}
-	_, err = converger.Converge(fx.ctx, railSub)
-	require.NoError(t, err)
-	require.Equal(t, fx.pro.ID, fx.local(t).PriceID, "the webhook converger applied the target price first")
-	var payload StripeTierChangePayload
-	require.NoError(t, json.Unmarshal(fx.operation(key).Payload, &payload))
-	require.NotEqual(t, landed.period, payload.PeriodEnd.Unix(), "Stripe opened its own period at execution")
-
-	resolved := fx.verifyOnce(t, key)
-	require.Equal(t, intents.StatusSucceeded, resolved.Status, "a webhook-first commit never strands the operation")
-	local := fx.local(t)
-	require.Equal(t, fx.pro.ID, local.PriceID)
-	require.Equal(t, landed.periodStart, local.CurrentPeriodStartsAt.Unix(), "the local period is the receipt's")
-	require.Equal(t, landed.period, local.CurrentPeriodEndsAt.Unix())
-	require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 1)
-	done, err := fx.change(key, fx.pro)
-	require.NoError(t, err)
-	require.Equal(t, "succeeded", done.Status)
-	require.Equal(t, pending.OperationID, done.OperationID)
-	require.Equal(t, landed.period, done.NextChargeDate.Unix(), "the answer carries Stripe's next charge date")
-	again, err := fx.change(key, fx.pro)
-	require.NoError(t, err)
-	require.Equal(t, done, again)
-	require.Equal(t, intents.StatusSucceeded, fx.verifyOnce(t, key).Status)
-	require.Equal(t, 1, fx.operations(t))
-}
-
 // Stripe's default payment_behavior (allow_incomplete) applies a price change
 // whose invoice cannot be paid and leaves the subscription past_due; the
 // upgrade therefore sends error_if_incomplete, under which the same declined
@@ -977,12 +890,22 @@ func TestStripeTierChangePaymentBehaviorRefusesUnpaidUpgrade(t *testing.T) {
 	require.ErrorAs(t, err, &refused)
 	require.Equal(t, http.StatusPaymentRequired, refused.HTTPStatus)
 	require.Equal(t, "insufficient_funds", refused.Code)
+	require.Contains(t, refused.Message, "insufficient funds")
 	posts := fx.stripe.posts("/v1/subscriptions/")
 	require.Equal(t, "error_if_incomplete", posts[len(posts)-1].form.Get("payment_behavior"))
 	require.Equal(t, fx.basicRef, fx.stripe.sub(railSub).priceID, "the refused update changed nothing at Stripe")
 	require.Empty(t, fx.stripe.sub(railSub).status)
 	require.Equal(t, fx.basic.ID, fx.local(t).PriceID)
 	require.Equal(t, intents.StatusFailedTerminal, fx.operation(key).Status)
+	require.Len(t, posts, 2, "default behavior probe then refused tier change")
+	_, err = fx.change(key, fx.pro)
+	require.ErrorAs(t, err, &refused)
+	require.Equal(t, http.StatusPaymentRequired, refused.HTTPStatus)
+	require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 2, "a refused operation is never resent")
+	fresh, err := fx.change("retry-"+uuid.NewString()[:8], fx.pro)
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", fresh.Status)
+	require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 3, "a fresh key is a new attempt")
 }
 
 // A tier change needs a client Idempotency-Key: without one it is refused
