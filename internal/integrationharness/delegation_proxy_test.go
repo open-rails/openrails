@@ -5,7 +5,6 @@ package integrationharness
 import (
 	"context"
 	"encoding/base64"
-	"github.com/open-rails/authkit/authhttp"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/authhttp"
 	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/authkit/verify"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -32,7 +32,7 @@ func TestDelegationProxyStorageAndMerchantAdmission(t *testing.T) {
 	cp := embcp.Get(f.surface.App())
 	sender, err := testauth.NewSender()
 	require.NoError(t, err)
-	token, err := testauth.MintDelegated(ctx, f.signer, authkit.DelegatedAccessParams{
+	token, err := authcore.MintDelegatedAccessToken(ctx, f.signer, authkit.DelegatedAccessParams{
 		Issuer:    f.issuer.URL,
 		Audiences: []string{"openrails"}, DelegatedSubject: f.subject, Permissions: []string{permissions.MerchantAll}, ConfirmationJWKThumbprintSHA256: &sender.Thumbprint,
 	})
