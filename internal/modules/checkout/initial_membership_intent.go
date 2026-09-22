@@ -108,7 +108,13 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Ope
 	} else if refused {
 		return h.Verify(ctx, current)
 	}
-	if progress["initial_submitted"] == true || current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
+	if current.Status == intents.StatusSucceeded || current.Status == intents.StatusFailedTerminal {
+		return h.Verify(ctx, current)
+	}
+	if progress["initial_submitted"] == true {
+		if current.Rail == "stripe" {
+			return h.executeStripeInitialDecline(ctx, current)
+		}
 		return h.Verify(ctx, current)
 	}
 	in = current
@@ -272,6 +278,9 @@ func (h *InitialMembershipIntentHandler) Verify(ctx context.Context, in gen.Open
 		return intents.Ambiguous("invalid initial submission fence")
 	}
 	if progress["initial_submitted"] != true {
+		if in.Rail == "stripe" {
+			return intents.Retryable("Stripe payment awaits gated execution")
+		}
 		return h.Execute(ctx, in)
 	}
 	if in.Rail == "stripe" {

@@ -161,7 +161,7 @@ func (s *Store) RetainUnsubmittedInitialMembership(ctx context.Context, in gen.O
 	return err
 }
 
-// RetainInitialStripeDecline reads/cancels the exact accepted PI before sealing
+// RetainInitialStripeDecline reads the canceled exact accepted PI before sealing
 // terminal refusal. A recoverable PI with a client secret cannot release the
 // enrollment duplicate fence until Stripe confirms it can no longer be paid.
 func (s *Store) RetainInitialStripeDecline(ctx context.Context, in gen.OpenrailsRailIntent, service *subscriptions.StripeService, reference string) error {
@@ -172,11 +172,11 @@ func (s *Store) RetainInitialStripeDecline(ctx context.Context, in gen.Openrails
 	if err != nil {
 		return err
 	}
-	result, err := service.FinalizeEngineDecline(ctx, params, reference)
+	result, found, err := service.ReadEnginePayment(ctx, params, reference)
 	if err != nil {
 		return err
 	}
-	if result.State != subscriptions.StripeEngineDeclined || result.FailureCode != "canceled" {
+	if !found || result.State != subscriptions.StripeEngineDeclined || result.FailureCode != "canceled" {
 		return errors.New("Stripe decline is still executable")
 	}
 	binding, err := collectionBinding(in)

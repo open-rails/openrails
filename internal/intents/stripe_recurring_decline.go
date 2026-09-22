@@ -69,11 +69,11 @@ func (s *Store) RetainStripeRecurringDecline(ctx context.Context, in gen.Openrai
 	if service == nil {
 		return errors.New("Stripe recurring reader unavailable")
 	}
-	result, err := service.FinalizeEngineDecline(ctx, params, reference)
+	result, found, err := service.ReadEnginePayment(ctx, params, reference)
 	if err != nil {
 		return err
 	}
-	if result.State != subscriptions.StripeEngineDeclined || result.FailureCode != "canceled" {
+	if !found || result.State != subscriptions.StripeEngineDeclined || result.FailureCode != "canceled" {
 		return errors.New("Stripe recurring decline is still executable")
 	}
 	binding, err := collectionBinding(in)
