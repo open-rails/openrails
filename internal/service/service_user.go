@@ -111,6 +111,12 @@ func (s *Service) createCheckoutSessionForCustomer(ctx context.Context, customer
 		return nil, err
 	}
 
+	if raw := req.PaymentOptions.PaymentMethodID; raw != "" {
+		id, err := openrails.ParsePaymentMethodID(raw)
+		if err != nil || id.IsZero() {
+			return nil, fmt.Errorf("%w: invalid payment_method_id", checkout.ErrCheckoutSessionValidation)
+		}
+	}
 	var pspID uuid.UUID
 	if req.PaymentOptions.PSPID != "" {
 		pspID, err = uuid.Parse(req.PaymentOptions.PSPID)
