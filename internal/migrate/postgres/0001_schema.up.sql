@@ -271,55 +271,7 @@ COMMENT ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now tim
 REVOKE ALL ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer, p_include_engine boolean) FROM PUBLIC;
 
 
-CREATE FUNCTION openrails.due_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
-    LANGUAGE plpgsql STABLE SECURITY DEFINER
-    SET search_path TO 'openrails', 'pg_catalog'
-    AS $$
-BEGIN
-    RETURN QUERY
-    SELECT DISTINCT i.merchant_id
-      FROM openrails.rail_intents i
-     WHERE (
-             -- claimable now
-             (
-               (
-                 (i.status IN ('pending', 'failed_retryable') AND i.next_attempt_at <= p_now)
-                 OR (i.status = 'in_flight' AND i.claimed_until IS NOT NULL AND i.claimed_until <= p_now)
-               )
-               AND (i.expires_at IS NULL OR i.expires_at > p_now)
-             )
-             -- or expirable by the same pass's ExpireOverdue leg
-             OR (
-               i.status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
-               AND i.expires_at IS NOT NULL AND i.expires_at <= p_now
-             )
-           )
-     LIMIT p_limit;
-END;
-$$;
 
-COMMENT ON FUNCTION openrails.due_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) IS 'Merchants with provider-intent executor work due — the fan-out list for ProviderIntentExecuteWorker. Ids only; the claim, the gates and the execution all run per-merchant under RunInMerchantConn. Replaces a bare-context ClaimDue that claimed zero intents, disarming the #836 kill switch and the #679 volume breaker with it (or#862).';
-
-REVOKE ALL ON FUNCTION openrails.due_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
-
-CREATE FUNCTION openrails.due_verify_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
-    LANGUAGE plpgsql STABLE SECURITY DEFINER
-    SET search_path TO 'openrails', 'pg_catalog'
-    AS $$
-BEGIN
-    RETURN QUERY
-    SELECT DISTINCT i.merchant_id
-      FROM openrails.rail_intents i
-     WHERE i.status = 'unknown_needs_verify'
-       AND i.next_attempt_at <= p_now
-       AND (i.claimed_until IS NULL OR i.claimed_until <= p_now)
-     LIMIT p_limit;
-END;
-$$;
-
-COMMENT ON FUNCTION openrails.due_verify_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) IS 'Merchants with ambiguous intents due for provider-read verification — the fan-out list for ProviderIntentVerifyWorker. Ids only (or#862).';
-
-REVOKE ALL ON FUNCTION openrails.due_verify_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
 
 CREATE FUNCTION openrails.billing_restore_active(p_merchant uuid) RETURNS boolean
     LANGUAGE plpgsql STABLE SECURITY DEFINER

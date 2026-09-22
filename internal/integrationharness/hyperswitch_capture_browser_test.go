@@ -675,6 +675,13 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 		runJob := func(args river.JobArgs) {
 			job, err := rt.RiverClient.Insert(ctx, args, &river.InsertOpts{Queue: queue, MaxAttempts: 1})
 			require.NoError(t, err)
+			if args.Kind() == intents.OperationJobKind {
+				require.Eventually(t, func() bool {
+					row, err := rt.RiverClient.JobGet(ctx, job.Job.ID)
+					return err == nil && row.Attempt > 0 && (string(row.State) == "scheduled" || string(row.State) == "completed")
+				}, 20*time.Second, 20*time.Millisecond, "operation worker must retain unknown work for verification")
+				return
+			}
 			require.Eventually(t, func() bool {
 				row, err := rt.RiverClient.JobGet(ctx, job.Job.ID)
 				return err == nil && (string(row.State) == "completed" || string(row.State) == "discarded")
@@ -709,7 +716,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, http.StatusNoContent, control.StatusCode)
 		control.Body.Close()
-		runJob(riverjobs.ProviderIntentExecuteArgs{})
+		runJob(intents.OperationArgs{MerchantID: owned.MerchantID.UUID(), IntentID: renewal.ID})
 		loadRenewal := func() gen.OpenrailsRailIntent {
 			var row gen.OpenrailsRailIntent
 			require.NoError(t, rt.DB.RunInMerchantConn(ownerCtx, func(c context.Context) error {

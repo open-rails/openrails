@@ -59,7 +59,7 @@ func (s *StripeWebhookService) wakeStripeEngineOperation(ctx context.Context, ra
 	}
 	switch operation.Status {
 	case intents.StatusInFlight, intents.StatusUnknownNeedsVerify:
-		return store.WakeOperation(ctx, operation.ID)
+		return store.WakeOperation(ctx, operation.ID, s.now().UTC())
 	case intents.StatusSucceeded, intents.StatusFailedTerminal, intents.StatusSuperseded, intents.StatusExpired:
 		return nil
 	default:

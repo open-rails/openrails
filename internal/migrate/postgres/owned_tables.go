@@ -86,8 +86,6 @@ var OwnedFunctions = []string{
 	"customer_merchant_ids_for_subject(uuid)",
 	"delinquency_work_merchant_ids(timestamp with time zone, integer)",
 	"due_dunning_merchant_ids(text[], timestamp with time zone, integer, boolean)",
-	"due_rail_intent_merchant_ids(timestamp with time zone, integer)",
-	"due_verify_rail_intent_merchant_ids(timestamp with time zone, integer)",
 	"enqueue_payment_settlement_event()",
 	"ensure_default_catalog(uuid)",
 	"financial_held_amount(uuid, uuid, text, timestamptz)",
