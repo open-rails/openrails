@@ -246,7 +246,7 @@ func TestOperationWakeDoesNotLoseEarlierScheduleOrCrossMerchant(t *testing.T) {
 	require.False(t, after.NextAttemptAt.After(time.Now()))
 	var total, ready int
 	require.NoError(t, d.Pool().QueryRow(ctx, "SELECT count(*),count(*) FILTER (WHERE scheduled_at<=now()) FROM "+pgx.Identifier{config.RiverSchema, "river_job"}.Sanitize()+" WHERE args->>'intent_id'=$1", row.ID.String()).Scan(&total, &ready))
-	require.Equal(t, 2, total)
+	require.Equal(t, 3, total, "admission, unknown transition, and explicit notification each retain a wake")
 	require.Equal(t, 1, ready, "earlier notification is not deduplicated into the sleeping job")
 	leased, ok, err := store.ClaimUnknownByID(mctx, row.ID, time.Now(), time.Now().Add(time.Minute))
 	require.NoError(t, err)
