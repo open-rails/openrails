@@ -652,7 +652,7 @@ Checkout creation/read/confirmation, checkout provider options and effective-tie
 resolution use the shared client too. See [the commerce client](api/commerce.md).
 
 A host that must commit its own provider obligation atomically with the OpenRails
-authorization, release or settlement uses `rt.HostTransactions()` with a transaction
+authorization, release or settlement uses `embed.NewHostTransactions(rt)` with a transaction
 from its pool. See [provider obligations](architecture/provider-obligation-contract.md).
 
 The in-process Client pins the runtime's bound merchant on every call, so

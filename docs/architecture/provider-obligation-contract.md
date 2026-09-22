@@ -32,7 +32,7 @@ No request type has a rated, settlement or charge field. The routes decode stric
 
 ## Host transaction extension
 
-`embed.Runtime.HostTransactions()` is for an embedding host that must commit its own provider obligation, absence fact or billing fact atomically with OpenRails. It has the same five commands, taking a `pgx.Tx` from the host's pool on the runtime database. The extension binds the runtime merchant to that transaction. A transaction bound to another merchant is refused. OpenRails never commits or rolls back. Tx reads observe the transaction's uncommitted work. After any error the host rolls back.
+`embed.NewHostTransactions(runtime)` is for an embedding host that must commit its own provider obligation, absence fact or billing fact atomically with OpenRails. It has the same five commands, taking a `pgx.Tx` from the host's pool on the runtime database. The extension binds the runtime merchant to that transaction. A transaction bound to another merchant is refused. OpenRails never commits or rolls back. Tx reads observe the transaction's uncommitted work. After any error the host rolls back.
 
 The remote Client cannot join a host database transaction and does not pretend to. A compensating outbox is not a substitute for this extension. Real PostgreSQL tests prove that open, release and settlement roll back and commit together with a host row.
 
