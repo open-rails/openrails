@@ -101,14 +101,19 @@ func (r *Runtime) riverJobs(host bool) riverkit.Contribution {
 			r.externalRiverClient = true
 			r.hostRiverBound.Store(true)
 		}
-		r.riverCompositionMu.Unlock()
+		// Close must not consume the monitor's stop-once before its start hook.
 		r.StartRiverProgressMonitor(ctx)
+		r.riverCompositionMu.Unlock()
 		return nil
 	}, func() error {
 		if !claimed {
 			return nil
 		}
 		r.riverCompositionMu.Lock()
+		if r.riverClosed.Load() {
+			r.riverCompositionMu.Unlock()
+			return nil
+		}
 		r.riverCompositionFailed = true
 		r.RiverClient = nil
 		if host {

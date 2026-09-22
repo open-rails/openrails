@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/riverkit"
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails"
@@ -61,15 +62,11 @@ func run(ctx context.Context, getenv func(string) string) (runErr error) {
 		return err
 	}
 	defer runtime.Close(context.WithoutCancel(ctx))
-	jobs, err := runtime.BindRiver(ctx, pool, func(_ context.Context, cfg *river.Config) error {
-		cfg.Queues[river.QueueDefault] = river.QueueConfig{MaxWorkers: 4}
-		cfg.Queues[embed.QueueBilling] = river.QueueConfig{MaxWorkers: 4}
-		return nil
-	})
+	merchantID, err := runtime.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{})
 	if err != nil {
 		return err
 	}
-	merchantID, err := runtime.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{})
+	jobs, err := riverkit.New(ctx, pool, &river.Config{Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 4}}}, runtime.RiverJobs())
 	if err != nil {
 		return err
 	}

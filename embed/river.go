@@ -11,8 +11,8 @@
 // There is no degraded mode worth having, so River is not optional.
 //
 // Options.River defaults to OpenRails ownership. RiverFromHost() gives the
-// host ownership; BindRiver receives a fully composed config and constructs one
-// unstarted client after components attach. Otherwise OpenRails constructs its client and the caller runs
+// host ownership; pass RiverJobs to riverkit.New after optional components attach.
+// The composer returns one unstarted client with request-side producers bound. Otherwise OpenRails constructs its client and the caller runs
 // RunWorkers (or sets Options.RunWorkers).
 //
 // # Schema contract (issues #165, #545)
@@ -63,8 +63,8 @@ import (
 // ErrNotInitialized is returned when operations are attempted on an uninitialized Embedded instance.
 var ErrNotInitialized = errors.New("embedded billing: not initialized")
 
-// QueueBilling is the billing queue already present in BindRiver's composed
-// config. Hosts may adjust its concurrency; at least one worker is required.
+// QueueBilling is the billing queue contributed by RiverJobs. Hosts may set its
+// concurrency in the RiverKit config; at least one worker is required.
 const QueueBilling = riverjobs.QueueBilling
 
 // InvoiceSweepArgs is the invoice job OpenRails schedules on the billing queue
@@ -106,7 +106,7 @@ type RiverOwnership struct {
 }
 
 // RiverFromHost gives the host ownership of River's migrations and client
-// lifecycle. Call Runtime.BindRiver after attaching every component.
+// lifecycle. Pass Runtime.RiverJobs to riverkit.New after attaching components.
 func RiverFromHost() RiverOwnership { return RiverOwnership{host: true} }
 
 // RiverManagedByOpenRails selects OpenRails ownership, optionally in a separate
@@ -149,7 +149,7 @@ func (r *Runtime) RiverJobs() riverkit.Contribution {
 	return r.app.Runtime.RiverJobs()
 }
 
-// HasExternalRiverClient reports whether BindRiver has successfully bound the
+// HasExternalRiverClient reports whether RiverKit has successfully bound the
 // host-owned client. Ownership declaration alone returns false.
 func (r *Runtime) HasExternalRiverClient() bool {
 	if r == nil || r.app == nil || r.app.Runtime == nil {
@@ -179,14 +179,4 @@ func (r *Runtime) CheckJobProgress(ctx context.Context) (JobProgress, error) {
 		return JobProgress{}, ErrNotInitialized
 	}
 	return r.app.Runtime.RiverProgress(ctx)
-}
-
-// resolveHostRiverSchema adopts the host queue namespace. Billing and River
-// own disjoint tables and may share it; portability is an explicit table contract.
-func resolveHostRiverSchema(clientSchema, _ string) (string, error) {
-	schema := strings.TrimSpace(clientSchema)
-	if schema == "" {
-		schema = config.RiverSchema
-	}
-	return schema, nil
 }

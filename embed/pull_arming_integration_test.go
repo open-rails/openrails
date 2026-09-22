@@ -88,7 +88,7 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 	require.NotNil(t, runtime)
 
 	// Worker registration is where hosts fold OpenRails' workers into their
-	// River client (host-one RegisterRiverWorkers) — it must arm the merchants
+	// River client (host-owned RiverJobs) — it must arm the merchants
 	// service even though no standalone HTTP server ever runs.
 	require.NoError(t, runtime.AddBillingWorkersTo(ctx, river.NewWorkers()))
 	require.NotNil(t, runtime.Merchants, "#699: worker registration builds the merchants service from the store")

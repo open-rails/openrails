@@ -475,18 +475,6 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 	return ctx.Err()
 }
 
-// AddBillingWorkersTo adds billing's River workers to the provided worker registry.
-// This is used by embedded hosts who want to share their River client with openrails.
-func (r *Runtime) AddBillingWorkersTo(ctx context.Context, workers *river.Workers) error {
-	if r == nil {
-		return fmt.Errorf("runtime is nil")
-	}
-	// #719: embedded hosts configure only QueueBilling on their client
-	// (pkg/embedded contract), so per-merchant refresh jobs ride that queue —
-	// no host changes; a single embedded merchant is one job per tick anyway.
-	return r.addBillingWorkersToRegistry(ctx, workers, riverjobs.QueueBilling)
-}
-
 // GetBillingPeriodicJobs returns billing's periodic jobs for external River client setup.
 // This is used by embedded hosts who want to add billing's periodic jobs to their client.
 func (r *Runtime) GetBillingPeriodicJobs(ctx context.Context) ([]*river.PeriodicJob, error) {
