@@ -31,6 +31,7 @@ func archiveDB(t *testing.T, schema string) *db.DB {
 	d, err := db.NewDB(t.Context(), &config.DBConfig{URL: app, Schema: schema})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
+	dbtest.BindRiver(t, d)
 	return d
 }
 
