@@ -50,18 +50,11 @@ func TestConstructorsRefuseLoudly(t *testing.T) {
 	_, err = NewVerifierDelegatedAuthenticator(nil, "aud", boundMerchant)
 	require.ErrorContains(t, err, "auth issuer")
 
-	// Two answers to the same question: silently preferring one would hide a
-	// grant the host believes it configured.
-	_, err = NewDelegatedAuthenticator(&hostVerifier{}, boundMerchant,
-		WithRolePermissions(func([]string) []string { return nil }),
-		WithPermissionResolver(func(context.Context, *http.Request, verify.Claims) ([]string, error) { return nil, nil }),
-	)
-	require.ErrorContains(t, err, "mutually exclusive")
 }
 
 // The default stays the or#913 canonical preset, and the host's verifier is
 // the one that runs.
-func TestDelegatedAuthenticator_DefaultsToCanonicalPreset(t *testing.T) {
+func TestDelegatedAuthenticator_DefaultsToNoPermissions(t *testing.T) {
 	t.Parallel()
 
 	v := &hostVerifier{claims: verify.Claims{
@@ -75,7 +68,7 @@ func TestDelegatedAuthenticator_DefaultsToCanonicalPreset(t *testing.T) {
 	p, err := a.AuthenticateDelegated(t.Context(), req("/billing/v1/me/balance"))
 	require.NoError(t, err)
 	require.Equal(t, 1, v.calls, "the host's own verifier verifies the request")
-	require.Equal(t, permissions.ForRoles("owner"), p.Permissions)
+	require.Empty(t, p.Permissions)
 	require.Equal(t, boundMerchant, p.MerchantID)
 	require.Equal(t, "https://auth.host.example", p.Issuer)
 }

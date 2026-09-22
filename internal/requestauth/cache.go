@@ -18,6 +18,9 @@ type cache struct{ values sync.Map }
 
 // Begin establishes the verification lifetime before HTTP authentication.
 func Begin(r *http.Request) *http.Request {
+	if _, ok := r.Context().Value(contextKey{}).(*cache); ok {
+		return r
+	}
 	return r.WithContext(context.WithValue(r.Context(), contextKey{}, &cache{}))
 }
 

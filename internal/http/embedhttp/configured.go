@@ -18,14 +18,13 @@ import (
 type HTTPConfig struct {
 	// Standalone selects the attached control plane's billing, identity and console
 	// surface. Health endpoints remain the host's responsibility.
-	Standalone        bool
-	CustomerExposures []CustomerHTTPConfig
+	Standalone     bool
+	CustomerRoutes []CustomerRoutesConfig
 
 	// DelegatedAuthenticator verifies customer HTTP credentials. When nil, the
 	// embedded runtime's Options.DelegatedAuthenticator is used.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	Checkout               bool
-	Customer               bool
 	MerchantAdmin          bool
 	Catalog                bool
 	PaymentProviders       bool
@@ -34,26 +33,23 @@ type HTTPConfig struct {
 	Gate                   billingauth.Gate
 }
 
-func ValidateHTTPConfig(cfg *HTTPConfig, delegated billingauth.DelegatedAuthenticator) error {
+func ValidateHTTPConfig(cfg *HTTPConfig, delegated billingauth.DelegatedAuthenticator, auth *billingauth.Integration) error {
 	if cfg == nil {
 		return nil
 	}
-	if err := validateCustomerExposures(cfg.CustomerExposures); err != nil {
+	if err := validateCustomerRoutes(cfg.CustomerRoutes, auth); err != nil {
 		return err
 	}
 	if cfg.Standalone {
-		if cfg.Checkout || cfg.Customer || cfg.MerchantAdmin || cfg.Catalog || cfg.PaymentProviders || cfg.MerchantAPI || cfg.Authenticator != nil || cfg.Gate != nil || cfg.DelegatedAuthenticator != nil {
+		if cfg.Checkout || cfg.MerchantAdmin || cfg.Catalog || cfg.PaymentProviders || cfg.MerchantAPI || cfg.Authenticator != nil || cfg.Gate != nil || cfg.DelegatedAuthenticator != nil {
 			return fmt.Errorf("openrails HTTP: Standalone cannot be combined with embedded surface options")
 		}
 		return nil
 	}
-	if cfg.Checkout && cfg.Authenticator == nil {
+	if cfg.Checkout && cfg.Authenticator == nil && (auth == nil || auth.Authentication == nil) {
 		return fmt.Errorf("openrails HTTP: Checkout requires HTTP.Authenticator")
 	}
-	if cfg.Customer && cfg.DelegatedAuthenticator == nil && delegated == nil {
-		return fmt.Errorf("openrails HTTP: Customer requires HTTP.DelegatedAuthenticator or Options.DelegatedAuthenticator")
-	}
-	if (cfg.MerchantAdmin || cfg.Catalog || cfg.PaymentProviders || cfg.MerchantAPI) && cfg.Gate == nil {
+	if (cfg.MerchantAdmin || cfg.Catalog || cfg.PaymentProviders || cfg.MerchantAPI) && cfg.Gate == nil && (auth == nil || auth.Authentication == nil || auth.Authorization == nil) {
 		return fmt.Errorf("openrails HTTP: management surfaces require HTTP.Gate")
 	}
 	return nil
@@ -65,7 +61,7 @@ func (cfg HTTPConfig) routeSets() []RouteSet {
 		enabled bool
 		set     RouteSet
 	}{
-		{cfg.Checkout, RouteSetCheckout}, {cfg.Customer, RouteSetCustomer},
+		{cfg.Checkout, RouteSetCheckout},
 		{cfg.MerchantAdmin, RouteSetMerchantAdmin}, {cfg.Catalog, RouteSetCatalog},
 		{cfg.PaymentProviders, RouteSetPaymentProviders}, {cfg.MerchantAPI, RouteSetMerchantAPI},
 	} {
@@ -88,14 +84,18 @@ func ConfiguredRoutes(a *app.App, policy *HTTPConfig, delegated billingauth.Dele
 	if cfg.DelegatedAuthenticator != nil {
 		delegated = cfg.DelegatedAuthenticator
 	}
-	if err := ValidateHTTPConfig(&cfg, delegated); err != nil {
+	if err := ValidateHTTPConfig(&cfg, delegated, a.Runtime.Auth); err != nil {
 		return nil, err
 	}
 	asm := FromApp(a)
 	asm.Authenticator = cfg.Authenticator
 	asm.Gate = cfg.Gate
+	if a.Runtime.Auth != nil {
+		asm.Authenticator = integrationAuthenticator{auth: a.Runtime.Auth}
+		asm.Gate = integrationGate{auth: a.Runtime.Auth, runtime: a.Runtime}
+	}
 	active := cfg.routeSets()
-	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime, cfg.Checkout || cfg.Customer || len(cfg.CustomerExposures) > 0)
+	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime, cfg.Checkout || len(cfg.CustomerRoutes) > 0)
 	if err != nil {
 		return nil, err
 	}
@@ -104,21 +104,25 @@ func ConfiguredRoutes(a *app.App, policy *HTTPConfig, delegated billingauth.Dele
 	providers.Webhooks = true
 	capabilities := configuredCapabilities(cfg, providers)
 	table := asm.NewRoutes(Options{RouteSets: withoutRouteSet(active, RouteSetCustomer), AdvertiseRouteSets: active, ProviderRoutes: &providers, Capabilities: &capabilities})
-	if cfg.Customer {
-		self := NewSelfRoutes(a.Runtime, delegated, &providers, asm.HostResolve)
-		table.Entries = append(table.Entries, self.Entries...)
+	extra, err := BuildCustomerRoutes(a, cfg.CustomerRoutes, a.Runtime.Auth)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range extra.Entries {
+		entry.Path = "/billing" + entry.Path
+		table.Entries = append(table.Entries, entry)
 	}
 	return table, nil
 }
 
 func configuredCapabilities(cfg HTTPConfig, providers routesurface.ProviderRoutes) Capabilities {
 	active := cfg.routeSets()
-	fullCustomer, solanaManagement := cfg.Customer, cfg.Customer
-	for _, exposure := range cfg.CustomerExposures {
+	fullCustomer, solanaManagement := false, false
+	for _, exposure := range cfg.CustomerRoutes {
 		fullCustomer = fullCustomer || exposure.Scope == CustomerSelfService
 		solanaManagement = solanaManagement || exposure.Scope == CustomerSelfService || exposure.Scope == CustomerBillingManagement
 	}
-	if len(cfg.CustomerExposures) > 0 && !cfg.Customer {
+	if len(cfg.CustomerRoutes) > 0 {
 		active = append(active, RouteSetCustomer)
 	}
 	caps := buildCapabilities(active, providers)

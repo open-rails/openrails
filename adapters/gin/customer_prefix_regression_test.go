@@ -36,16 +36,16 @@ func TestReviewCustomerPrefixNativeCompatibility(t *testing.T) {
 			graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg}}
 			policy := &embed.HTTPConfig{}
 			for _, prefix := range tc.prefixes {
-				policy.CustomerExposures = append(policy.CustomerExposures, embed.CustomerHTTPConfig{Prefix: prefix, Scope: embed.CustomerSubscriptionManagement, DelegatedAuthenticator: reject})
+				policy.CustomerRoutes = append(policy.CustomerRoutes, embed.CustomerRoutesConfig{Prefix: prefix, Scope: embed.CustomerSubscriptionManagement, DelegatedAuthenticator: reject})
 			}
 			engine := gin.New()
-			err := embedhttp.ValidateHTTPConfig(policy, nil)
+			err := embedhttp.ValidateHTTPConfig(policy, nil, nil)
 			if err != nil {
 				require.False(t, tc.valid, err)
 				require.Empty(t, engine.Routes())
 				return
 			}
-			table, err := embedhttp.CustomerExposureRoutes(graph, policy.CustomerExposures)
+			table, err := embedhttp.BuildCustomerRoutes(graph, policy.CustomerRoutes, nil)
 			require.NoError(t, err)
 			err = embedhttp.ValidateRouteTable(table)
 			if !tc.valid {

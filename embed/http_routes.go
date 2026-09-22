@@ -9,11 +9,12 @@ import (
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/internal/requestauth"
 )
 
 // HTTPConfig configures the external runtime surface once at construction.
 type HTTPConfig = embedhttp.HTTPConfig
-type CustomerHTTPConfig = embedhttp.CustomerHTTPConfig
+type CustomerRoutesConfig = embedhttp.CustomerRoutesConfig
 type CustomerHTTPScope = embedhttp.CustomerHTTPScope
 
 const (
@@ -31,11 +32,10 @@ type HTTPRoute struct {
 	Handler http.Handler
 }
 
-// ConfigureHTTP declares the runtime's HTTP policy once, after host identity and
-// merchant provisioning if needed. Options.HTTP is the constructor convenience.
+// configureHTTP copies the constructor-owned HTTP policy once.
 // Invalid policy leaves the runtime unconfigured. Routes freezes configuration;
 // subsequent configuration or configuration after Close is refused.
-func (r *Runtime) ConfigureHTTP(cfg HTTPConfig) error {
+func (r *Runtime) configureHTTP(cfg HTTPConfig) error {
 	if r == nil || r.app == nil || r.app.Runtime == nil {
 		return fmt.Errorf("openrails HTTP: runtime is not initialized")
 	}
@@ -50,10 +50,11 @@ func (r *Runtime) ConfigureHTTP(cfg HTTPConfig) error {
 	if r.httpConfig != nil {
 		return fmt.Errorf("openrails HTTP: already configured")
 	}
-	if err := embedhttp.ValidateHTTPConfig(&cfg, r.delegatedAuthenticator); err != nil {
+	if err := embedhttp.ValidateHTTPConfig(&cfg, r.delegatedAuthenticator, r.app.Runtime.Auth); err != nil {
 		return err
 	}
-	cfg.CustomerExposures = append([]CustomerHTTPConfig(nil), cfg.CustomerExposures...)
+	cfg.CustomerRoutes = append([]CustomerRoutesConfig(nil), cfg.CustomerRoutes...)
+
 	r.httpConfig = &cfg
 	return nil
 }
@@ -72,7 +73,7 @@ func (r *Runtime) HTTPRoutes() ([]HTTPRoute, error) {
 	}
 	r.httpFrozen = true
 	if r.httpConfig == nil {
-		return nil, fmt.Errorf("openrails HTTP: disabled; configure Options.HTTP or call ConfigureHTTP before Routes")
+		return nil, fmt.Errorf("openrails HTTP: disabled; supply Options.HTTP at construction")
 	}
 	if !r.httpBuilt {
 		var table *router.Table
@@ -94,11 +95,13 @@ func (r *Runtime) HTTPRoutes() ([]HTTPRoute, error) {
 		for i := range table.Entries {
 			table.Entries[i].Path = strings.TrimPrefix(table.Entries[i].Path, trimPrefix)
 		}
-		extra, err := embedhttp.CustomerExposureRoutes(r.app, r.httpConfig.CustomerExposures)
-		if err != nil {
-			return nil, err
+		if r.httpConfig.Standalone {
+			extra, err := embedhttp.BuildCustomerRoutes(r.app, r.httpConfig.CustomerRoutes, r.app.Runtime.Auth)
+			if err != nil {
+				return nil, err
+			}
+			table.Entries = append(table.Entries, extra.Entries...)
 		}
-		table.Entries = append(table.Entries, extra.Entries...)
 		if err := embedhttp.ValidateRouteTable(table); err != nil {
 			return nil, err
 		}
@@ -111,7 +114,7 @@ func (r *Runtime) HTTPRoutes() ([]HTTPRoute, error) {
 func publicHTTPRoutes(table *router.Table) []HTTPRoute {
 	routes := make([]HTTPRoute, 0, len(table.Entries))
 	for _, entry := range table.Entries {
-		routes = append(routes, HTTPRoute{Method: entry.Method, Path: entry.Path, Handler: bindHTTPPathValues(entry.Path, entry.Handler)})
+		routes = append(routes, HTTPRoute{Method: entry.Method, Path: entry.Path, Handler: withVerificationMemo(bindHTTPPathValues(entry.Path, entry.Handler))})
 	}
 	return routes
 }
@@ -154,4 +157,8 @@ func (r *Runtime) HTTPRequiresRoot() bool {
 	r.httpMu.Lock()
 	defer r.httpMu.Unlock()
 	return r.httpConfig != nil && r.httpConfig.Standalone
+}
+
+func withVerificationMemo(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { next.ServeHTTP(w, requestauth.Begin(r)) })
 }

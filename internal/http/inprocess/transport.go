@@ -5,15 +5,18 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 
+	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -31,6 +34,15 @@ func NewTransport(handler http.Handler, configuredMerchant func() merchant.ID) (
 	return newTransport(handler, configuredMerchant, "", hostPermissions())
 }
 
+// NewTransportWithResolver supports explicit per-operation merchant selectors.
+// Resolution does not grant authority; only the private capability creates a
+// host principal, and all other credentials retain normal verification.
+func NewTransportWithResolver(handler http.Handler, configuredMerchant func() merchant.ID, resolve func(context.Context, *http.Request) (billingauth.Target, error)) (http.RoundTripper, string) {
+	transport, capability := newTransport(handler, configuredMerchant, "", hostPermissions())
+	transport.(*inprocessTransport).resolveTarget = resolve
+	return transport, capability
+}
+
 func newTransport(handler http.Handler, configuredMerchant func() merchant.ID, subject string, grants []string) (http.RoundTripper, string) {
 	// Only the constructor's private default token provider receives this
 	// per-client capability. A forwarded caller credential cannot name a mode.
@@ -44,6 +56,7 @@ func newTransport(handler http.Handler, configuredMerchant func() merchant.ID, s
 // only for the internal default host credential. Explicit customer credentials
 // use normal verification. Network mounts never use this transport.
 type inprocessTransport struct {
+	resolveTarget      func(context.Context, *http.Request) (billingauth.Target, error)
 	handler            http.Handler
 	configuredMerchant func() merchant.ID
 	hostCredential     string
@@ -73,6 +86,20 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 		}
 		return conflictResponse(req, message), nil
 	}
+	var slug string
+	var resolvedTarget *billingauth.Target
+	if t.resolveTarget != nil {
+		target, err := t.resolveTarget(engineContext(ctx), req)
+		if err != nil {
+			var gate billingauth.GateError
+			if errors.As(err, &gate) {
+				return selectionErrorResponse(req, gate), nil
+			}
+			return refuse(err.Error())
+		}
+		mid, slug = target.MerchantID, target.MerchantSlug
+		resolvedTarget = &target
+	}
 	if mid.IsZero() {
 		return refuse("openrails: in-process client is not bound to a merchant")
 	}
@@ -83,18 +110,21 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// Only the caller's cancellation and deadline reach the engine; every host
 	// context value is dropped (engineContext).
 	ctx = engineContext(ctx)
+	if resolvedTarget != nil {
+		ctx = merchanttarget.WithResolved(ctx, *resolvedTarget)
+	}
 	if req.Header.Get("Authorization") == "Bearer "+t.hostCredential {
-		ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: mid, Subject: t.subject, Permissions: append([]string(nil), t.permissions...)})
+		ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: mid, MerchantSlug: slug, Subject: t.subject, Permissions: append([]string(nil), t.permissions...)})
 	}
 
 	// The in-process analogue of middleware.ResolveMerchantHTTP: pin the
 	// bound merchant before any merchant-owned DB access.
 	ctx = merchant.WithID(ctx, mid)
 	if stream {
-		return streamInprocessResponse(t.handler, req.Clone(ctx))
+		return streamInprocessResponse(t.handler, requestauth.Begin(req.Clone(ctx)))
 	}
 	w := &bufferedResponse{header: make(http.Header)}
-	t.handler.ServeHTTP(w, req.Clone(ctx))
+	t.handler.ServeHTTP(w, requestauth.Begin(req.Clone(ctx)))
 	return w.response(req), nil
 }
 
@@ -180,3 +210,10 @@ func engineContext(host context.Context) context.Context {
 type detachedValues struct{ context.Context }
 
 func (detachedValues) Value(any) any { return nil }
+
+func selectionErrorResponse(req *http.Request, failure billingauth.GateError) *http.Response {
+	body, _ := json.Marshal(api.NewAPIError(failure.Status, api.ErrorTypeForStatus(failure.Status), "merchant_selection_invalid", failure.Message).ToResponse())
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+	return &http.Response{StatusCode: failure.Status, Status: http.StatusText(failure.Status), Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1, Header: header, Body: io.NopCloser(bytes.NewReader(body)), ContentLength: int64(len(body)), Request: req}
+}

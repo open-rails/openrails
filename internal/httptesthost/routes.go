@@ -22,6 +22,11 @@ type Options struct {
 }
 
 func Handler(runtime *embed.Runtime, opts Options) (http.Handler, error) {
+	for i := range opts.HTTP.CustomerRoutes {
+		if opts.HTTP.CustomerRoutes[i].DelegatedAuthenticator == nil {
+			opts.HTTP.CustomerRoutes[i].DelegatedAuthenticator = opts.DelegatedAuthenticator
+		}
+	}
 	table, err := embedhttp.ConfiguredRoutes(app.HostGraph(runtime), &opts.HTTP, opts.DelegatedAuthenticator)
 	if err != nil {
 		return nil, err

@@ -239,7 +239,7 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	delegated := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: userID, Email: email, EmailVerified: true, Username: username}, nil
 	})
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, Customer: true, Authenticator: userAuthn}, DelegatedAuthenticator: delegated})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}, Authenticator: userAuthn}, DelegatedAuthenticator: delegated})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)

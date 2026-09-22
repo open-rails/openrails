@@ -23,7 +23,7 @@ func TestFiberReviewFullInventoryMountsNatively(t *testing.T) {
 		return nil, billingauth.ErrUnauthenticated
 	})
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg}}
-	policy := &embed.HTTPConfig{Checkout: true, Customer: true, MerchantAdmin: true, Catalog: true, PaymentProviders: true, MerchantAPI: true,
+	policy := &embed.HTTPConfig{Checkout: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true, DelegatedAuthenticator: delegated}}, MerchantAdmin: true, Catalog: true, PaymentProviders: true, MerchantAPI: true,
 		Authenticator: billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
 			return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 		}), Gate: billingauth.NewDelegatedGate(delegated)}

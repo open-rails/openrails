@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/verify"
 	orauthkit "github.com/open-rails/openrails/embed/authkit"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -37,7 +38,9 @@ func TestCustomerTreasuryWritesDoNotCreatePortalAuthority(t *testing.T) {
 	require.NoError(t, err)
 	_, err = cp.TouchCustomer(ctx, dbtest.TestMerchantID, "https://controlplane.openrails.test", user.ID)
 	require.NoError(t, err)
-	host, err = orauthkit.NewDelegatedAuthenticator(cp.AuthService().Verifier(), dbtest.TestMerchantID.String(), orauthkit.WithRolePermissions(func([]string) []string { return []string{permissions.CustomerAll} }))
+	host, err = orauthkit.NewDelegatedAuthenticator(cp.AuthService().Verifier(), dbtest.TestMerchantID.String(), orauthkit.WithPermissionResolver(func(context.Context, *http.Request, verify.Claims) ([]string, error) {
+		return []string{permissions.CustomerAll}, nil
+	}))
 	require.NoError(t, err)
 	path := surface.BaseURL + "/v1/customers/" + user.ID + "/spend-delegations"
 	delegate := "worker-" + uuid.NewString()

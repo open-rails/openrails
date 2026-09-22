@@ -83,7 +83,7 @@ func TestMountHandlerRouteSelection(t *testing.T) {
 	require.NotContains(t, caps1.Features, "webhooks")
 
 	// Case 2: customer included -> /v1/me mounted, capabilities.customer=true.
-	h2, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, Customer: true, Authenticator: authn}, Prefix: "/billing", DelegatedAuthenticator: delegated})
+	h2, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury:true}}, Authenticator: authn}, Prefix: "/billing", DelegatedAuthenticator: delegated})
 	require.NoError(t, err)
 
 	caps2 := getCapabilities(t, h2)

@@ -101,7 +101,7 @@ func bootRoutingFixture(
 	delegated := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: userID, Email: email, EmailVerified: true, Username: username}, nil
 	})
-	buyerHandler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, Customer: true, Authenticator: userAuthn}, DelegatedAuthenticator: delegated})
+	buyerHandler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}, Authenticator: userAuthn}, DelegatedAuthenticator: delegated})
 	require.NoError(t, err)
 	buyerServer := httptest.NewServer(buyerHandler)
 	t.Cleanup(buyerServer.Close)

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -55,8 +56,8 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 		return rt
 	}
 	rt := boot(secret)
-	require.ErrorContains(t, rt.ConfigureHTTP(embed.HTTPConfig{}), "already configured",
-		"constructor-owned HTTP configuration is applied once and cannot be replaced")
+	_, hasLateConfig := reflect.TypeOf(rt).MethodByName("ConfigureHTTP")
+	require.False(t, hasLateConfig, "HTTP policy is constructor-only")
 	client, err := rt.Client()
 	require.NoError(t, err)
 	product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: "post", DisplayName: "First title"})
@@ -92,7 +93,6 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	// Rotation follows the host configuration/restart contract, while dynamic
 	// catalog state survives that restart and is not overwritten by a manifest.
 	require.NoError(t, rt.Close(ctx))
-	require.ErrorContains(t, rt.ConfigureHTTP(embed.HTTPConfig{}), "closed")
 	_, closedErr := rt.HTTPRoutes()
 	require.ErrorContains(t, closedErr, "closed")
 	rt2 := boot("sk_test_rotated_fixture")

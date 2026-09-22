@@ -21,7 +21,7 @@ func TestReviewCustomerExposureCookieAdmission(t *testing.T) {
 		return &billingauth.DelegatedPrincipal{MerchantID: "11111111-1111-4111-8111-111111111111", SubjectID: "22222222-2222-4222-8222-222222222222"}, nil
 	})
 	runtime := reviewRuntime(nil, nil)
-	require.NoError(t, runtime.ConfigureHTTP(HTTPConfig{CustomerExposures: []CustomerHTTPConfig{{Prefix: "/portal", Scope: CustomerSubscriptionManagement, DelegatedAuthenticator: authn}}}))
+	require.NoError(t, runtime.configureHTTP(HTTPConfig{CustomerRoutes: []CustomerRoutesConfig{{Prefix: "/portal", Scope: CustomerSubscriptionManagement, DelegatedAuthenticator: authn}}}))
 	mux := reviewMount(t, runtime)
 	admission, err := billingauth.CookieAuthentication("https://portal.example")
 	require.NoError(t, err)

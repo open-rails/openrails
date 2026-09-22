@@ -26,6 +26,12 @@ const inprocessBaseURL = "http://openrails.invalid"
 func newServiceHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator) http.Handler {
 	mux := http.NewServeMux()
 	opts := httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn})}
+	if rt.Auth != nil {
+		opts.Gate = embedhttp.IntegrationGate(rt)
+		if authn == nil {
+			authn = embedhttp.RuntimeCustomerAuthentication(rt)
+		}
+	}
 	httproutes.RegisterServiceRoutes(router.NewMux(mux, "/v1/merchant", rt), rt, opts)
 	httproutes.RegisterMerchantActionRoutes(router.NewMux(mux, "/v1/merchant", rt), rt, opts)
 	httproutes.RegisterCatalogRoutes(router.NewMux(mux, "/v1/merchant/catalog", rt), rt, opts)

@@ -19,20 +19,14 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCustomerBillingManagementOwnHistoryAndPagination(t *testing.T) {
 	ctx := t.Context()
 	_, pool, dsn := scopeWithoutRLSDatabase(t)
-	runtime, mid, err := newDeclaredMerchant(ctx, embed.Options{
-		Config: &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox,
-			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
-			ProviderWriteMode: config.ProviderWriteModeReadOnly, NewSubscriptionCollectionPolicy: "engine", DB: &config.DBConfig{URL: dsn}},
-		PGXPool: pool, River: embed.RiverFromHost(),
-	}, "customer-management-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Customer management"})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
+	var mid merchant.ID
 	alice, bob, foreignInvoice, foreignSubscription := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	authn := billingauth.DelegatedAuthenticatorFunc(func(_ context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		var subject uuid.UUID
@@ -46,9 +40,15 @@ func TestCustomerBillingManagementOwnHistoryAndPagination(t *testing.T) {
 		}
 		return &billingauth.DelegatedPrincipal{MerchantID: mid.String(), SubjectID: subject.String(), CredentialClass: billingauth.CredentialClassUserSession}, nil
 	})
-	require.NoError(t, runtime.ConfigureHTTP(embed.HTTPConfig{CustomerExposures: []embed.CustomerHTTPConfig{{
-		Prefix: "/v1/me", Scope: embed.CustomerBillingManagement, DelegatedAuthenticator: authn,
-	}}}))
+	runtime, mid, err := newDeclaredMerchant(ctx, embed.Options{
+		HTTP: &embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Scope: embed.CustomerBillingManagement, DelegatedAuthenticator: authn}}},
+		Config: &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox,
+			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
+			ProviderWriteMode: config.ProviderWriteModeReadOnly, NewSubscriptionCollectionPolicy: "engine", DB: &config.DBConfig{URL: dsn}},
+		PGXPool: pool, River: embed.RiverFromHost(),
+	}, "customer-management-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Customer management"})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
 	routes, err := openrailshttp.Routes(runtime)
 	require.NoError(t, err)
 	mux := http.NewServeMux()
