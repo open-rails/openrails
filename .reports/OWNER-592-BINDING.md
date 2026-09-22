@@ -4,3 +4,5 @@ Repository: openrails
 Base: 1856841ef5b8e7e0443a82375a1fa2008a84c2d7
 Scope: RiverKit actual bind-pool context and OpenRails binding/migration identity checks; no Store wakeup edits.
 Root owns review, releases and merges. No live providers.
+Branch: fix/592-physical-queue-binding-20260922
+Worktree: /home/fidika/cozy/.worktrees/openrails/592-physical-queue-binding-20260922
