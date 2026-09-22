@@ -47,6 +47,12 @@ func TestCatalogResourceAtomicOffers(t *testing.T) {
 		client *openrails.Client
 	}{{"embedded", local}, {"remote", remote}} {
 		t.Run(transport.name, func(t *testing.T) {
+			missingOwner := "missing owner/" + transport.name + "?" + uuid.NewString()
+			_, err := transport.client.GetCatalogForOwner(ctx, missingOwner)
+			require.ErrorIs(t, err, openrails.ErrNotFound)
+			var manufactured int
+			require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.catalogs WHERE merchant_id=$1 AND owner_subject=$2`, mid.UUID(), missingOwner).Scan(&manufactured))
+			require.Zero(t, manufactured, "an exact owner lookup must not create a catalog")
 			alice, err := transport.client.ForCatalogOwner("alice-" + transport.name)
 			require.NoError(t, err)
 			bob, err := transport.client.ForCatalogOwner("bob-" + transport.name)
@@ -59,6 +65,11 @@ func TestCatalogResourceAtomicOffers(t *testing.T) {
 			require.NoError(t, err)
 			product, err := alice.Products.Retrieve(ctx, offer.ProductID)
 			require.NoError(t, err)
+			ownerCatalog, err := transport.client.GetCatalogForOwner(ctx, "alice-"+transport.name)
+			require.NoError(t, err)
+			require.Equal(t, product.CatalogID, ownerCatalog.ID.String())
+			_, err = alice.GetCatalogForOwner(ctx, "bob-"+transport.name)
+			require.Error(t, err, "a catalog-scoped client cannot read the merchant catalog directory")
 			require.Equal(t, "Original title", product.DisplayName)
 			ensured, err := alice.Products.Ensure(ctx, &openrails.ProductCreateParams{Key: params.ProductData.Key, DisplayName: "Uncommitted title"})
 			require.NoError(t, err)

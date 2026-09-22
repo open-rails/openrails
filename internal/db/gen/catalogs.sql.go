@@ -83,6 +83,31 @@ func (q *Queries) GetCatalog(ctx context.Context, arg GetCatalogParams) (Openrai
 	return i, err
 }
 
+const getCatalogByOwner = `-- name: GetCatalogByOwner :one
+SELECT id, merchant_id, owner_subject, created_at, updated_at FROM openrails.catalogs
+WHERE merchant_id=$1::uuid AND owner_subject=$2::text
+  AND ($3::uuid IS NULL OR id=$3::uuid)
+`
+
+type GetCatalogByOwnerParams struct {
+	MerchantID   uuid.UUID
+	OwnerSubject string
+	CatalogID    *uuid.UUID
+}
+
+func (q *Queries) GetCatalogByOwner(ctx context.Context, arg GetCatalogByOwnerParams) (OpenrailsCatalog, error) {
+	row := q.db.QueryRow(ctx, getCatalogByOwner, arg.MerchantID, arg.OwnerSubject, arg.CatalogID)
+	var i OpenrailsCatalog
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.OwnerSubject,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listCatalogs = `-- name: ListCatalogs :many
 SELECT id, merchant_id, owner_subject, created_at, updated_at FROM openrails.catalogs
 WHERE merchant_id=$1::uuid

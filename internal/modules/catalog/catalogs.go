@@ -80,3 +80,17 @@ func (r *CatalogRepo) List(ctx context.Context, limit, offset int32) ([]gen.Open
 	}
 	return r.db.Gen(ctx).ListCatalogs(ctx, gen.ListCatalogsParams{MerchantID: mid.UUID(), CatalogID: catalogscope.QueryID(ctx), PageLimit: limit, PageOffset: offset})
 }
+
+// GetByOwner is an exact, side-effect-free lookup in the authorized merchant.
+func (r *CatalogRepo) GetByOwner(ctx context.Context, subject string) (gen.OpenrailsCatalog, error) {
+	mid, err := catalogMerchant(ctx)
+	if err != nil {
+		return gen.OpenrailsCatalog{}, err
+	}
+	if err := catalogscope.ValidateSubject(subject); err != nil {
+		return gen.OpenrailsCatalog{}, err
+	}
+	return r.db.Gen(ctx).GetCatalogByOwner(ctx, gen.GetCatalogByOwnerParams{
+		MerchantID: mid.UUID(), OwnerSubject: subject, CatalogID: catalogscope.QueryID(ctx),
+	})
+}

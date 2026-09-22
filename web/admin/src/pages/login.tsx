@@ -99,9 +99,9 @@ export function LoginPage() {
   }
   if (me) return <Navigate to="/" replace />
 
-  // OIDC buttons only when the issuer actually advertises login-capable
+  // External login buttons only when the issuer advertises login-capable
   // providers; otherwise password-only.
-  const oidcProviders = (capabilities?.providers ?? []).filter(
+  const externalLoginProviders = (capabilities?.external_login_providers ?? []).filter(
     (p) => p.supports_login
   )
   const passwordEnabled = capabilities?.password?.login !== false
@@ -313,7 +313,7 @@ export function LoginPage() {
               </Button>
             </form>
           )}
-          {!challenge && oidcProviders.length > 0 && (
+          {!challenge && externalLoginProviders.length > 0 && (
             <>
               {passwordEnabled && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -322,7 +322,7 @@ export function LoginPage() {
                 </div>
               )}
               <div className="grid gap-2">
-                {oidcProviders.map((p) => (
+                {externalLoginProviders.map((p) => (
                   <Button
                     key={p.id}
                     variant="outline"
@@ -336,7 +336,7 @@ export function LoginPage() {
           )}
           {!challenge &&
             !passwordEnabled &&
-            oidcProviders.length === 0 &&
+            externalLoginProviders.length === 0 &&
             !bootError && (
               <p className="text-sm text-muted-foreground">
                 The auth issuer advertises no browser login methods. Check the

@@ -3,6 +3,7 @@ package openrails
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"unicode/utf8"
 )
@@ -62,6 +63,19 @@ func (c *Client) GetCatalog(ctx context.Context, id CatalogID) (*Catalog, error)
 	}
 	var out Catalog
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalogs/"+key, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetCatalogForOwner retrieves an existing catalog using merchant-administrator
+// authority. It returns ErrNotFound without creating anything when absent.
+func (c *Client) GetCatalogForOwner(ctx context.Context, subject string) (*Catalog, error) {
+	if subject == "" || !utf8.ValidString(subject) || strings.ContainsRune(subject, 0) {
+		return nil, invalidErr("catalog owner subject must be nonempty UTF-8 text without NUL")
+	}
+	var out Catalog
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalogs/by-owner?owner_subject="+url.QueryEscape(subject), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

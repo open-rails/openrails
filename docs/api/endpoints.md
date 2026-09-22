@@ -447,6 +447,7 @@ not supported. Catalog reads stay live.
 | POST | `/v1/catalog/prices/{id}/deactivate` | Deactivate an owned price |
 | POST | `/v1/catalog/prices/{id}/key` | Relabel an owned price's key |
 | GET | `/v1/merchant/catalogs` | List the merchant's catalogs (`merchant:catalog:read`) |
+| GET | `/v1/merchant/catalogs/by-owner` | Read an existing catalog by exact `owner_subject` query parameter without creating it (`merchant:catalog:read`); missing catalogs return 404 |
 | GET | `/v1/merchant/catalogs/{id}` | Read one merchant catalog (`merchant:catalog:read`) |
 | POST | `/v1/merchant/catalogs` | Ensure a catalog for an explicit `owner_subject` (`merchant:catalog:update`) |
 | POST | `/v1/merchant/catalog/products` | Create a product: at least `{ key, display_name }`, optionally `entitlements_spec` |
