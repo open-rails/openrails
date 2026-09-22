@@ -81,6 +81,7 @@ func TestCustomerEngineRetryEligibilityReadback(t *testing.T) {
 		unsupported bool
 	}{
 		{"nil retry schedule", `UPDATE billing.subscriptions SET next_retry_at=NULL WHERE id=$1`, false},
+		{"changed paid boundary", `UPDATE billing.subscriptions SET current_period_starts_at=current_period_starts_at-interval '1 second' WHERE id=$1`, false},
 		{"cancellation marker", `UPDATE billing.subscriptions SET cancelled_at=now() WHERE id=$1`, false},
 		{"deletion marker", `UPDATE billing.subscriptions SET deletion_scheduled_at=now() WHERE id=$1`, false},
 		{"archived PSP", `UPDATE billing.psps SET archived=true WHERE id=(SELECT psp_id FROM billing.subscriptions WHERE id=$1)`, true},

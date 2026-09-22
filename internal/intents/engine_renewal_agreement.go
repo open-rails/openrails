@@ -104,5 +104,9 @@ func PrepareEngineRenewalTerms(ctx context.Context, d *db.DB, sub *models.Subscr
 	if err := subscriptions.ValidateInitialMembershipPayment(accepted, observed, models.Rail(op.Rail), receipt.TransactionID()); err != nil {
 		return agreement, fmt.Errorf("%w: %w", ErrRebillNotRetryable, err)
 	}
-	return subscriptions.PrepareRenewalTerms(ctx, d, sub, now, &agreement)
+	terms, err := subscriptions.PrepareRenewalTerms(ctx, d, sub, now, &agreement)
+	if errors.Is(err, subscriptions.ErrEngineAgreementMismatch) {
+		return terms, fmt.Errorf("%w: %w", ErrRebillNotRetryable, err)
+	}
+	return terms, err
 }
