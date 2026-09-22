@@ -82,7 +82,7 @@ func (s *Store) WakeOperation(ctx context.Context, id uuid.UUID, now time.Time) 
 // transitionAndWake commits a nonterminal ledger transition and its scheduled
 // wakeup together. A running job may already have snoozed against an older lease;
 // canonical claims, not active-job uniqueness, make duplicate wakeups harmless.
-func (s *Store) transitionAndWake(ctx context.Context, id uuid.UUID, at time.Time, transition func(context.Context, *Store) (int64, error)) (int64, error) {
+func (s *Store) transitionAndWake(ctx context.Context, id uuid.UUID, transition func(context.Context, *Store) (int64, time.Time, error)) (int64, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
@@ -90,7 +90,8 @@ func (s *Store) transitionAndWake(ctx context.Context, id uuid.UUID, at time.Tim
 	var rows int64
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		rows, err = transition(ctx, s.withTxDB(s.db.NewWithPgxTx(tx)))
+		var at time.Time
+		rows, at, err = transition(ctx, s.withTxDB(s.db.NewWithPgxTx(tx)))
 		if err != nil || rows == 0 {
 			return err
 		}
