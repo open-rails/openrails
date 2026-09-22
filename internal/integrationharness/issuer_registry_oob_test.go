@@ -53,7 +53,7 @@ func TestDelegatedIssuerOutOfBandRegistrationNoRestart(t *testing.T) {
 		Enabled:           true,
 	})
 	require.NoError(t, err, "register issuer out of band")
-	require.NoError(t, core.AdminAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(raA.ID), controlplane.MerchantRoleOwner))
+	require.NoError(t, core.OperatorAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(raA.ID), controlplane.MerchantRoleOwner))
 	// Deliberately NO cp.ReloadRemoteApplications: the CLI runs in another process.
 
 	tokenA, err := mintDelegatedAccessToken(ctx, issuerA.Signer(), authkit.DelegatedAccessParams{
@@ -88,7 +88,7 @@ func TestDelegatedIssuerOutOfBandRegistrationNoRestart(t *testing.T) {
 		Enabled:           true,
 	})
 	require.NoError(t, err)
-	require.NoError(t, core.AdminAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(raB.ID), controlplane.MerchantRoleOwner))
+	require.NoError(t, core.OperatorAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(raB.ID), controlplane.MerchantRoleOwner))
 	// Deterministically load the OLD key into the live verifier (the long-running
 	// server already trusts it).
 	require.NoError(t, cp.ReloadRemoteApplications(ctx))

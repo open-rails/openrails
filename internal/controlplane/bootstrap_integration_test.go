@@ -378,7 +378,7 @@ func TestRootOperatorBoundary_ReachNotMerchantCapability(t *testing.T) {
 	// authkit v0.84.0 #49: assigning an MFA-required root role fails closed
 	// unless the subject already has 2FA enrolled.
 	enrollTestMFA(ctx, t, pool, rootOperator.ID)
-	require.NoError(t, cp.Core().AdminAssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(rootOperator.ID), authkit.OwnerRole))
+	require.NoError(t, cp.Core().OperatorAssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(rootOperator.ID), authkit.OwnerRole))
 
 	canModerateMerchant, err := cp.Core().Can(ctx, authkit.UserSubject(rootOperator.ID), authkit.RootGroup(), "root:merchants:delete")
 	require.NoError(t, err)

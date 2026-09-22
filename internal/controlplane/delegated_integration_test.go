@@ -43,7 +43,7 @@ func TestDelegatedStoredAuthorityWorkflow(t *testing.T) {
 		PublicKeys:        []authkit.RemoteAppKey{{KID: signer.KID(), PublicKeyPEM: testPublicKeyPEM(t, signer.PublicKey())}},
 	})
 	require.NoError(t, err)
-	require.NoError(t, cp.Core().AdminAssignGroupRole(ctx, MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(app.ID), "owner"))
+	require.NoError(t, cp.Core().OperatorAssignGroupRole(ctx, MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(app.ID), "owner"))
 	require.NoError(t, cp.ReloadRemoteApplications(ctx))
 	for _, permissions := range [][]string{nil, {PermMerchantAdmissionsCreate}} {
 		token := mint(authkit.DelegatedAccessParams{Permissions: permissions})

@@ -25,7 +25,7 @@ type ProvisionMerchantRequest struct {
 	// user-chosen slug and branch on Created; a slug squatter cannot be granted
 	// ownership of someone else's merchant). Re-runs stay idempotent: the
 	// creating call already seeded the owner. Later owner changes go through
-	// Core().AdminAssignGroupRole explicitly.
+	// Core().OperatorAssignGroupRole explicitly.
 	OwnerUserID string
 	// ExistingGroupID carries a group already selected for owner repair. This
 	// path checks live ownership and never resolves or creates another group.

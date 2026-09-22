@@ -271,7 +271,7 @@ func TestStandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP(t *testing.T)
 		email := username + "@example.com"
 		user, err := core.CreateUser(ctx, email, username)
 		require.NoError(t, err, "create user")
-		require.NoError(t, core.AdminAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(user.ID), authkit.Role(roleForPerms(perms))), "assign merchant role")
+		require.NoError(t, core.OperatorAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(user.ID), authkit.Role(roleForPerms(perms))), "assign merchant role")
 		token, _, err := core.MintAccessToken(ctx, user.ID, nil)
 		require.NoError(t, err, "issue access token")
 		return token
@@ -405,7 +405,7 @@ func TestCoreDoesNotMountPlatformAdminRoutesHTTP(t *testing.T) {
 	require.NoError(t, err, "create merchant admin user")
 	// #567: assign the merchant `owner` role directly in the merchant group (no
 	// separate group membership step).
-	require.NoError(t, core.AdminAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(user.ID), controlplane.MerchantRoleOwner), "assign merchant admin role")
+	require.NoError(t, core.OperatorAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(user.ID), controlplane.MerchantRoleOwner), "assign merchant admin role")
 	token, _, err := core.MintAccessToken(ctx, user.ID, nil)
 	require.NoError(t, err, "issue merchant admin user access token")
 

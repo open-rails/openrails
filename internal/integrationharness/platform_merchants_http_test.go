@@ -56,7 +56,7 @@ func mintPlatformOperatorToken(t *testing.T, ctx context.Context, s *Surface, ro
 	require.NoError(t, err, "create platform operator user")
 	if role != "" {
 		require.NoError(t,
-			core.AdminAssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(user.ID), authkit.Role(role)),
+			core.OperatorAssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(user.ID), authkit.Role(role)),
 			"assign root role %s", role)
 	}
 	token, _, err := core.MintAccessToken(ctx, user.ID, nil)

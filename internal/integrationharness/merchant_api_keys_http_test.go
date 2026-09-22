@@ -191,7 +191,7 @@ func TestMerchantSelfServeAPIKeys(t *testing.T) {
 			name := "apikeyuser" + strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
 			user, err := core.CreateUser(ctx, name+"@example.com", name)
 			require.NoError(t, err)
-			require.NoError(t, core.AdminAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(user.ID), authkit.Role(role)))
+			require.NoError(t, core.OperatorAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(user.ID), authkit.Role(role)))
 			token, _, err := core.MintAccessToken(ctx, user.ID, nil)
 			require.NoError(t, err)
 			return token

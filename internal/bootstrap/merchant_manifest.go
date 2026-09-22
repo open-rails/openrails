@@ -2180,7 +2180,7 @@ func configureMerchantRemoteApplication(ctx context.Context, cp *controlplane.Co
 	if err != nil {
 		return fmt.Errorf("merchant bootstrap: register remote_application for group %s: %w", groupID, err)
 	}
-	if err := core.AdminAssignGroupRole(ctx, controlplane.MerchantGroup(group.InstanceSlug), authkit.RemoteAppSubject(stored.ID), controlplane.MerchantRoleOwner); err != nil {
+	if err := core.OperatorAssignGroupRole(ctx, controlplane.MerchantGroup(group.InstanceSlug), authkit.RemoteAppSubject(stored.ID), controlplane.MerchantRoleOwner); err != nil {
 		return fmt.Errorf("merchant bootstrap: grant remote_application owner role for group %s: %w", groupID, err)
 	}
 	return nil

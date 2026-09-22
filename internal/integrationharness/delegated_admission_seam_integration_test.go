@@ -96,7 +96,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	// co-owner is this test's own fixture: AuthKit refuses to ban a group's last
 	// usable owner, so step (3) must not depend on owners left by other tests.
 	for _, owner := range []string{adminID, coOwnerID} {
-		require.NoError(t, core.AdminAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(owner), controlplane.MerchantRoleOwner), "grant merchant owner")
+		require.NoError(t, core.OperatorAssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(owner), controlplane.MerchantRoleOwner), "grant merchant owner")
 	}
 
 	// --- the seam, wired the way host-one would wire it -------------------
