@@ -3,9 +3,13 @@
 package checkout
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/merchantarchive"
 	"io"
 	"net/http"
 	"net/url"
@@ -50,9 +54,9 @@ func initialStripeResponse(v any) *http.Response {
 }
 
 func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
-	for _, mode := range []string{"paid", "lost response", "authentication", "declined", "wrong method", "setup", "not dispatched", "refunded", "disputed"} {
+	for _, mode := range []string{"paid", "lost response", "authentication", "declined", "wrong method", "setup", "not dispatched", "refunded", "disputed", "verify readonly", "verify limited", "verify full", "verify lost cancel"} {
 		t.Run(mode, func(t *testing.T) {
-			fx := newSubIntentFixture(t)
+			fx := newSubIntentFixtureForMerchant(t, merchant.ID(uuid.New()))
 			_, seedErr := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{"stripe_engine_access":null}' WHERE id=(SELECT product_id FROM billing.prices WHERE id=$1)`, fx.priceID)
 			require.NoError(t, seedErr)
 			fx.prepare(t)
@@ -124,6 +128,9 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 						}
 					}
 					pi = map[string]any{"id": "pi_initial", "status": "succeeded", "customer": v.Get("customer"), "payment_method": v.Get("payment_method"), "amount": 999, "amount_received": 999, "currency": "usd", "setup_future_usage": "off_session", "capture_method": "automatic", "confirmation_method": "automatic", "latest_charge": "ch_initial", "metadata": metadata, "livemode": false, "client_secret": "pi_initial_secret_sensitive"}
+					if strings.HasPrefix(mode, "verify ") {
+						pi["status"] = "processing"
+					}
 					if mode == "authentication" {
 						pi["status"] = "requires_action"
 					}
@@ -138,6 +145,9 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 				case r.Method == "POST" && r.URL.Path == "/v1/payment_intents/pi_initial/cancel":
 					cancels++
 					pi["status"] = "canceled"
+					if mode == "verify lost cancel" {
+						return nil, errors.New("lost cancellation response")
+					}
 					return initialStripeResponse(pi), nil
 				case r.Method == "GET" && r.URL.Path == "/v1/payment_intents":
 					return initialStripeResponse(map[string]any{"data": []any{pi}, "has_more": false}), nil
@@ -209,6 +219,49 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 			_, confirmErr := fx.svc.ConfirmInitialMembership(fx.ctx, terms, key, principal)
 			op, err := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, InitialMembershipIdempotencyKey(key))
 			require.NoError(t, err)
+			if strings.HasPrefix(mode, "verify ") {
+				require.ErrorIs(t, confirmErr, ErrCheckoutProcessing)
+				mu.Lock()
+				pi["status"] = "requires_payment_method"
+				pi["last_payment_error"] = map[string]any{"code": "card_declined", "decline_code": "insufficient_funds"}
+				mu.Unlock()
+				if mode == "verify readonly" {
+					cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly
+				}
+				if mode == "verify limited" {
+					cfg.ProviderWriteMode = config.ProviderWriteModeLimited
+				}
+				op, err = fx.runner.VerifyByID(fx.ctx, op.ID)
+				require.NoError(t, err)
+				require.Equal(t, intents.StatusFailedRetryable, op.Status)
+				require.Zero(t, cancels, "Verify never cancels")
+				require.Equal(t, 1, posts)
+				op, err = fx.runner.ExecuteByID(fx.ctx, op.ID)
+				require.NoError(t, err)
+				if mode == "verify readonly" {
+					require.Zero(t, cancels)
+					cfg.ProviderWriteMode = config.ProviderWriteModeFull
+					op, err = fx.runner.VerifyByID(fx.ctx, op.ID)
+					require.NoError(t, err)
+					op, err = fx.runner.ExecuteByID(fx.ctx, op.ID)
+					require.NoError(t, err)
+				}
+				if mode == "verify lost cancel" {
+					require.Equal(t, intents.StatusUnknownNeedsVerify, op.Status)
+					op, err = fx.runner.VerifyByID(fx.ctx, op.ID)
+					require.NoError(t, err)
+				}
+				require.Equal(t, 1, posts, "cancellation recovery cannot create another PI")
+				require.Equal(t, intents.StatusFailedTerminal, op.Status)
+				_, err = fx.runner.ExecuteByID(fx.ctx, op.ID)
+				require.NoError(t, err)
+				_, err = fx.runner.VerifyByID(fx.ctx, op.ID)
+				require.NoError(t, err)
+				require.Equal(t, 1, cancels)
+				require.Equal(t, 1, posts, "same original PI throughout cancellation")
+				require.NoError(t, intents.ValidateInitialMembershipTerminal(op))
+				return
+			}
 			if mode == "lost response" || mode == "refunded" || mode == "disputed" {
 				cfg.EngineAdmissionHold = true // reconciliation survives an admission hold
 				require.ErrorIs(t, confirmErr, ErrCheckoutProcessing)
@@ -268,6 +321,26 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 					require.NoError(t, err)
 					require.True(t, paid)
 					require.NotEmpty(t, receipt.ReversalKind())
+					// Drain acknowledged host effects, then move the actual authored book.
+					_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.host_outbox SET delivered_at=now() WHERE merchant_id=$1`, mid.UUID())
+					require.NoError(t, err)
+					var artifact bytes.Buffer
+					err = merchantarchive.Export(t.Context(), fx.db, mid, &artifact)
+					require.NoError(t, err, "%+v", err)
+					super, app := dbtest.SharedRLSPostgres(t)
+					schema := "reversal_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+					dbtest.ApplyPostgresMigrations(t, super, app, schema)
+					target, err := db.NewDB(t.Context(), &config.DBConfig{URL: app, Schema: schema})
+					require.NoError(t, err)
+					t.Cleanup(func() { _ = target.Close() })
+					_, err = target.Qx(t.Context()).Exec(t.Context(), `INSERT INTO openrails.merchants(id,slug) VALUES($1,$2)`, mid.UUID(), mid.String())
+					require.NoError(t, err)
+					_, err = merchantarchive.Restore(t.Context(), target, mid, bytes.NewReader(artifact.Bytes()))
+					require.NoError(t, err, "%+v", err)
+					var restored bytes.Buffer
+					require.NoError(t, merchantarchive.Export(t.Context(), target, mid, &restored))
+					require.Equal(t, artifact.Bytes(), restored.Bytes(), "actual initial reversal book survives restore")
+
 				}
 			}
 			var successCount int
