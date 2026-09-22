@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -47,7 +48,7 @@ func (s *Service) PayInvoiceNow(ctx context.Context, payer identity.CustomerID, 
 	return out, err
 }
 
-func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.CustomerID, request openrails.RetrySubscriptionNowRequest) (*openrails.SubscriptionRetryNowResult, error) {
+func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.CustomerID, request openrails.RetrySubscriptionNowRequest, principal billingauth.DelegatedPrincipal) (*openrails.SubscriptionRetryNowResult, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -66,7 +67,7 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 		var accepted gen.OpenrailsRailIntent
 		var replayed bool
 		if owned.CollectionPolicy == models.CollectionPolicyEngine {
-			accepted, replayed, err = s.moneyService().AdmitCustomerSubscriptionCollection(ctx, owned.ID, payer.UUID(), request.IdempotencyKey, method)
+			accepted, replayed, err = s.moneyService().AdmitCustomerSubscriptionCollection(ctx, owned.ID, payer.UUID(), request.IdempotencyKey, method, principal)
 		} else {
 			h := intents.NewManualRebillHandler(rt.DB, rt.Config, rt.CollectionResolver, rt.Clock)
 			h.DeferDelete = rt.DeferredDeletes

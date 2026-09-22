@@ -42,7 +42,7 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	if sub.Status != models.StatusPastDue || sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.After(s.now().UTC()) {
+	if !subscriptions.EngineCollectionDue(sub, s.now().UTC(), true) {
 		out.BlockedReason = "subscription_not_retryable"
 		return out, nil
 	}
@@ -86,16 +86,15 @@ func (s *Service) engineSubscriptionRecovery(ctx context.Context, sub *models.Su
 	} else if err != nil && !errors.Is(err, intents.ErrRebillNotRetryable) {
 		return nil, err
 	}
-	if sub.PaymentMethodID == nil || (sub.Rail != models.RailStripe && sub.Rail != models.RailNMI) {
-		out.BlockedReason = "customer_payment_unsupported"
-		return out, nil
-	}
-	method, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: *sub.PaymentMethodID})
-	if err != nil {
-		return nil, err
-	}
-	if method.CustomerID != sub.CustomerID || method.PspID != sub.PspID || method.Rail != string(sub.Rail) || method.ParkReason != "" || method.StoredCredentialRecurringRef == "" || method.RailCustomerRef == "" || method.RailMethodRef == "" || (method.Custodian != models.CustodianPSP && !(method.Custodian == models.CustodianHyperSwitch && sub.Rail == models.RailNMI)) {
-		out.BlockedReason = "customer_payment_unsupported"
+	if err := s.moneyService().EngineCustomerRetryEligibility(ctx, sub); err != nil {
+		switch {
+		case errors.Is(err, intents.ErrRebillUnsupported):
+			out.BlockedReason = "customer_payment_unsupported"
+		case errors.Is(err, intents.ErrRebillNotRetryable):
+			out.BlockedReason = "subscription_not_retryable"
+		default:
+			return nil, err
+		}
 		return out, nil
 	}
 	out.Retryable = true

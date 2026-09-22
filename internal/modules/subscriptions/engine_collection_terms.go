@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -18,7 +19,7 @@ const TypeSubscriptionCollection = "subscription_collection"
 // SubscriptionCollectionPayload is one accepted engine renewal. PreviousPeriodEnd
 // fences the old obligation even when the purchased period starts after a gap.
 type SubscriptionCollectionPayload struct {
-	Initiator                charge.Initiator          `json:"initiator,omitempty"`
+	Initiator                charge.Initiator          `json:"initiator"`
 	RequestedPaymentMethodID *uuid.UUID                `json:"requested_payment_method_id,omitempty"`
 	Renewal                  RenewalTerms              `json:"renewal"`
 	PreviousPeriodEnd        time.Time                 `json:"previous_period_end"`
@@ -89,12 +90,9 @@ func DecodeSubscriptionCollectionPayload(in gen.OpenrailsRailIntent) (Subscripti
 		return p, errors.New("engine renewal period is not the accepted ordinary or recovery period")
 	}
 
-	if p.Initiator == "" && in.Origin == "system" {
-		p.Initiator = charge.InitiatorMerchant
-	}
 	key := SubscriptionCollectionKey(p.Renewal.SubscriptionID, p.PreviousPeriodEnd, p.Attempt)
 	if p.Initiator == charge.InitiatorCustomer {
-		if in.Origin != "user" || in.Actor == nil || *in.Actor != p.Renewal.CustomerID.String() || !charge.CustomerPaymentKeyValid(TypeSubscriptionCollection, p.Renewal.CustomerID, in.IdempotencyKey) {
+		if in.Origin != "user" || in.Actor == nil || *in.Actor != p.Renewal.CustomerID.String() || !charge.CustomerPaymentKeyValid(TypeManualRebill, p.Renewal.CustomerID, in.IdempotencyKey) {
 			return p, errors.New("engine customer retry lacks its accepted payer action")
 		}
 		key = in.IdempotencyKey
@@ -112,4 +110,16 @@ func DecodeSubscriptionCollectionPayload(in gen.OpenrailsRailIntent) (Subscripti
 		return p, errors.New("engine renewal amount contradicts accepted terms")
 	}
 	return p, nil
+}
+
+// EngineCollectionDue checks current scheduling eligibility for a fresh attempt.
+// Customer retries bypass a future backoff, never the absence of a retry schedule.
+func EngineCollectionDue(sub *models.Subscription, at time.Time, customer bool) bool {
+	if sub == nil || sub.CancelledAt != nil || sub.DeletionScheduledAt != nil || sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.After(at) {
+		return false
+	}
+	if customer {
+		return sub.Status == models.StatusPastDue && sub.NextRetryAt != nil
+	}
+	return sub.Status == models.StatusActive || (sub.Status == models.StatusPastDue && sub.NextRetryAt != nil && !sub.NextRetryAt.After(at))
 }

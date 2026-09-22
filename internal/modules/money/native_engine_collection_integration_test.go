@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/testfixture"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,6 +26,7 @@ func TestNativeEngineRecurringCollectionOwnsOnlyNewAgreement(t *testing.T) {
 			clock := clockwork.NewFakeClockAt(now)
 			e.svc.SetClock(clock)
 			mid := dbtest.TestMerchantID.UUID()
+			principal := billingauth.DelegatedPrincipal{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid.String(), SubjectID: e.payer.UUID().String()}
 			product, price, sub, legacy := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 			_, err := e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET rail_method_ref='engine-billing',stored_credential_recurring_ref='' WHERE id=$1`, e.method)
 			require.NoError(t, err)
@@ -90,10 +92,10 @@ func TestNativeEngineRecurringCollectionOwnsOnlyNewAgreement(t *testing.T) {
 				require.Equal(t, intents.OutcomeTerminal, outcome.Class, outcome.Reason)
 				_, err = e.svc.AdmitDueSubscriptionCollection(e.ctx, sub, now)
 				require.Error(t, err)
-				_, _, err = e.svc.AdmitCustomerSubscriptionCollection(e.ctx, sub, e.payer.UUID(), "retry-key", &e.method)
+				_, _, err = e.svc.AdmitCustomerSubscriptionCollection(e.ctx, sub, e.payer.UUID(), "retry-key", &e.method, principal)
 				require.ErrorContains(t, err, "held")
 				e.svc.EngineAdmissionHold = false
-				retry, replayed, err := e.svc.AdmitCustomerSubscriptionCollection(e.ctx, sub, e.payer.UUID(), "retry-key", &e.method)
+				retry, replayed, err := e.svc.AdmitCustomerSubscriptionCollection(e.ctx, sub, e.payer.UUID(), "retry-key", &e.method, principal)
 				require.NoError(t, err)
 				require.False(t, replayed)
 				terms, err := subscriptions.DecodeSubscriptionCollectionPayload(retry)
@@ -110,7 +112,7 @@ func TestNativeEngineRecurringCollectionOwnsOnlyNewAgreement(t *testing.T) {
 				outcome = handler.Execute(e.ctx, retry)
 				require.Equal(t, intents.OutcomeSucceeded, outcome.Class, outcome.Reason)
 				e.svc.EngineAdmissionHold = true
-				again, replayed, err := e.svc.AdmitCustomerSubscriptionCollection(e.ctx, sub, e.payer.UUID(), "retry-key", &e.method)
+				again, replayed, err := e.svc.AdmitCustomerSubscriptionCollection(e.ctx, sub, e.payer.UUID(), "retry-key", &e.method, principal)
 				require.NoError(t, err)
 				require.True(t, replayed)
 				require.Equal(t, retry.ID, again.ID)
@@ -123,7 +125,7 @@ func TestNativeEngineRecurringCollectionOwnsOnlyNewAgreement(t *testing.T) {
 			}
 			if mode != "paid" {
 				require.Equal(t, intents.OutcomeAmbiguous, outcome.Class, outcome.Reason)
-				_, _, err = e.svc.AdmitCustomerSubscriptionCollection(e.ctx, sub, e.payer.UUID(), "not-accepted-while-uncertain", nil)
+				_, _, err = e.svc.AdmitCustomerSubscriptionCollection(e.ctx, sub, e.payer.UUID(), "not-accepted-while-uncertain", nil, principal)
 				require.ErrorIs(t, err, intents.ErrRebillInProgress)
 				e.plane.Config.EngineAdmissionHold = true
 				outcome = handler.Verify(e.ctx, op)
