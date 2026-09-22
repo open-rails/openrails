@@ -15,6 +15,11 @@ import (
 // and valid provider verification. Management and buyer surfaces are opt-in and
 // independent of in-process Client or CatalogClient access.
 type HTTPConfig struct {
+	// Standalone selects the attached control plane's billing, identity and console
+	// surface. Health endpoints remain the host's responsibility.
+	Standalone        bool
+	CustomerExposures []CustomerHTTPConfig
+
 	// DelegatedAuthenticator verifies customer HTTP credentials. When nil, the
 	// embedded runtime's Options.DelegatedAuthenticator is used.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
@@ -30,6 +35,15 @@ type HTTPConfig struct {
 
 func ValidateHTTPConfig(cfg *HTTPConfig, delegated billingauth.DelegatedAuthenticator) error {
 	if cfg == nil {
+		return nil
+	}
+	if err := validateCustomerExposures(cfg.CustomerExposures); err != nil {
+		return err
+	}
+	if cfg.Standalone {
+		if cfg.Checkout || cfg.Customer || cfg.MerchantAdmin || cfg.Catalog || cfg.PaymentProviders || cfg.MerchantAPI || cfg.Authenticator != nil || cfg.Gate != nil || cfg.DelegatedAuthenticator != nil {
+			return fmt.Errorf("openrails HTTP: Standalone cannot be combined with embedded surface options")
+		}
 		return nil
 	}
 	if cfg.Checkout && cfg.Authenticator == nil {

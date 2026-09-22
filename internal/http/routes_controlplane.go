@@ -1,7 +1,7 @@
 package server
 
 import (
-	"net/http"
+	"github.com/open-rails/openrails/internal/http/router"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -18,7 +18,7 @@ const ControlPlaneAuthPrefix = "/auth"
 // expose AuthKit's JWKS on this surface) and browser OIDC is in no mounted
 // group list. Hosted merchant creation's directory attachment rides
 // MountOptions.Wrap; other requests never create portal groups.
-func (s *Server) registerControlPlaneAuthRoutes(mux *http.ServeMux) error {
+func (s *Server) registerControlPlaneAuthRoutes(mux router.Registrar) error {
 	cp := s.controlPlane
 	if cp == nil || cp.AuthService() == nil {
 		return nil
@@ -28,8 +28,7 @@ func (s *Server) registerControlPlaneAuthRoutes(mux *http.ServeMux) error {
 		return err
 	}
 	for _, route := range routes {
-		s.recordRoute(route.Method + " " + route.Path)
-		mux.Handle(route.Method+" "+route.Path, route.Handler)
+		s.handle(mux, route.Method+" "+route.Path, route.Handler)
 	}
 
 	log.WithFields(log.Fields{

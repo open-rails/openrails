@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"github.com/open-rails/openrails/internal/http/router"
 	"net/http"
 
 	"github.com/open-rails/openrails/pkg/adminconsole"
@@ -12,7 +13,7 @@ import (
 // admin_console.enabled. Enabled without assets is a boot error (explicit
 // operator intent we cannot satisfy — fail closed); disabled means /admin/*
 // 404s like any unknown path, assets or not.
-func (s *Server) registerAdminConsoleRoutes(mux *http.ServeMux) error {
+func (s *Server) registerAdminConsoleRoutes(mux router.Registrar) error {
 	if s.cfg == nil || !s.cfg.AdminConsole.IsEnabled() {
 		return nil
 	}
@@ -37,6 +38,6 @@ func (s *Server) registerAdminConsoleRoutes(mux *http.ServeMux) error {
 		cfg.APIBaseURL = StandaloneV1Prefix
 	}
 	s.handle(mux, http.MethodGet+" /admin", http.RedirectHandler("/admin/", http.StatusMovedPermanently))
-	s.handle(mux, http.MethodGet+" /admin/", adminconsole.Handler(cfg, s.consoleAssets))
+	s.handle(mux, http.MethodGet+" /admin/{asset...}", adminconsole.Handler(cfg, s.consoleAssets))
 	return nil
 }

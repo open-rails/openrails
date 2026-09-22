@@ -48,11 +48,11 @@ func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	payerMW = append(payerMW, mw...)
 	payerMW = append(payerMW, middleware.PayerScopedRequired())
 	group := rr.Group("", payerMW...)
+	registerCustomerSubscriptionManagement(group)
 
 	// Customer money self-service.
 	group.Handle(http.MethodGet, "/balance", h(httphandlers.GetMyBalance))
 	group.Handle(http.MethodGet, "/transactions", h(httphandlers.GetMyAccountTransactions))
-	group.Handle(http.MethodPut, "/collection-payment-method", h(httphandlers.SetMyCollectionPaymentMethod))
 	group.Handle(http.MethodGet, "/status", h(httphandlers.GetMyBillingStatus))
 
 	// Usage breakdown (#289) + invoices (#303), scoped to the token's subject.
@@ -81,12 +81,9 @@ func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	subs := group.Group("/subscriptions")
 	subs.Handle(http.MethodGet, "", h(httphandlers.GetMySubscriptions))
 	subs.Handle(http.MethodGet, "/:id", h(httphandlers.GetSubscription))
-	subs.Handle(http.MethodPost, "/:id/cancel", h(httphandlers.CancelSubscription))
-	subs.Handle(http.MethodPost, "/:id/resume", h(httphandlers.ResumeSubscription))
 	subs.Handle(http.MethodPost, "/:id/retry-now", h(httphandlers.RetryMySubscriptionNow))
 	subs.Handle(http.MethodPost, "/:id/change-tier", h(httphandlers.ChangeTier))
 	subs.Handle(http.MethodPost, "/:id/change-tier/preview", h(httphandlers.ChangeTierPreview))
-	subs.Handle(http.MethodPut, "/:id/payment-method", h(httphandlers.UpdateSubscriptionPaymentMethod))
 	subs.Handle(http.MethodPost, "/:id/provider-cutover", h(httphandlers.MyProviderCutover))
 	subs.Handle(http.MethodGet, "/:id/provider-cutover", h(httphandlers.MyProviderCutover))
 	subs.Handle(http.MethodPost, "/:id/provider-cutover/preview", h(httphandlers.PreviewMyProviderCutover))
@@ -192,4 +189,22 @@ func RegisterCustomerTreasuryRoutes(rr router.Router, rt *app.Runtime, delegated
 	group.Handle(http.MethodPost, "/:customer_id/checkout", h(httphandlers.CreateCheckoutSession), checkoutPerm)
 	group.Handle(http.MethodGet, "/:customer_id/checkout/:id", h(httphandlers.GetCheckoutSession), checkoutPerm)
 	group.Handle(http.MethodPost, "/:customer_id/checkout/:id/confirm", h(httphandlers.ConfirmCheckoutSession), checkoutPerm)
+}
+
+// RegisterCustomerSubscriptionManagementRoutes exposes only customer-owned
+// cancellation, resumption and payment-method selection. It shares the full
+// self-service route implementations and payer ownership gates.
+func RegisterCustomerSubscriptionManagementRoutes(rr router.Router, rt *app.Runtime, delegatedMW router.Middleware) {
+	mw := []router.Middleware{delegatedMW, middleware.PayerScopedRequired()}
+	if rt != nil && rt.DB != nil {
+		mw = append(mw, middleware.MerchantDBConnMW(rt.DB))
+	}
+	registerCustomerSubscriptionManagement(rr.Group("", mw...))
+}
+
+func registerCustomerSubscriptionManagement(group router.Router) {
+	group.Handle(http.MethodPut, "/collection-payment-method", h(httphandlers.SetMyCollectionPaymentMethod))
+	group.Handle(http.MethodPost, "/subscriptions/:id/cancel", h(httphandlers.CancelSubscription))
+	group.Handle(http.MethodPost, "/subscriptions/:id/resume", h(httphandlers.ResumeSubscription))
+	group.Handle(http.MethodPut, "/subscriptions/:id/payment-method", h(httphandlers.UpdateSubscriptionPaymentMethod))
 }

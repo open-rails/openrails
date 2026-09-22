@@ -8,10 +8,18 @@ import (
 
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/operator"
 )
 
 // HTTPConfig configures the external runtime surface once at construction.
 type HTTPConfig = embedhttp.HTTPConfig
+type CustomerHTTPConfig = embedhttp.CustomerHTTPConfig
+type CustomerHTTPScope = embedhttp.CustomerHTTPScope
+
+const (
+	CustomerSelfService            = embedhttp.CustomerSelfService
+	CustomerSubscriptionManagement = embedhttp.CustomerSubscriptionManagement
+)
 
 // HTTPRoute is one native registration. Path uses net/http whole-segment
 // wildcards, relative to the mount (for example /v1/me/{id}). Handler binds
@@ -44,6 +52,7 @@ func (r *Runtime) ConfigureHTTP(cfg HTTPConfig) error {
 	if err := embedhttp.ValidateHTTPConfig(&cfg, r.delegatedAuthenticator); err != nil {
 		return err
 	}
+	cfg.CustomerExposures = append([]CustomerHTTPConfig(nil), cfg.CustomerExposures...)
 	r.httpConfig = &cfg
 	return nil
 }
@@ -65,8 +74,31 @@ func (r *Runtime) HTTPRoutes() ([]HTTPRoute, error) {
 		return nil, fmt.Errorf("openrails HTTP: disabled; configure Options.HTTP or call ConfigureHTTP before Routes")
 	}
 	if !r.httpBuilt {
-		table, err := embedhttp.ConfiguredRoutes(r.app, r.httpConfig, r.delegatedAuthenticator)
+		var table *router.Table
+		var err error
+		trimPrefix := "/billing"
+		if r.httpConfig.Standalone {
+			srv, buildErr := operator.StandaloneServer(r.app)
+			if buildErr != nil {
+				return nil, buildErr
+			}
+			table = srv.HTTPRoutes()
+			trimPrefix = ""
+		} else {
+			table, err = embedhttp.ConfiguredRoutes(r.app, r.httpConfig, r.delegatedAuthenticator)
+			if err != nil {
+				return nil, err
+			}
+		}
+		for i := range table.Entries {
+			table.Entries[i].Path = strings.TrimPrefix(table.Entries[i].Path, trimPrefix)
+		}
+		extra, err := embedhttp.CustomerExposureRoutes(r.app, r.httpConfig.CustomerExposures)
 		if err != nil {
+			return nil, err
+		}
+		table.Entries = append(table.Entries, extra.Entries...)
+		if err := embedhttp.ValidateRouteTable(table); err != nil {
 			return nil, err
 		}
 		r.httpRoutes = publicHTTPRoutes(table)
@@ -78,13 +110,16 @@ func (r *Runtime) HTTPRoutes() ([]HTTPRoute, error) {
 func publicHTTPRoutes(table *router.Table) []HTTPRoute {
 	routes := make([]HTTPRoute, 0, len(table.Entries))
 	for _, entry := range table.Entries {
-		routes = append(routes, HTTPRoute{Method: entry.Method, Path: strings.TrimPrefix(entry.Path, "/billing"), Handler: bindHTTPPathValues(strings.TrimPrefix(entry.Path, "/billing"), entry.Handler)})
+		routes = append(routes, HTTPRoute{Method: entry.Method, Path: entry.Path, Handler: bindHTTPPathValues(entry.Path, entry.Handler)})
 	}
 	return routes
 }
 
 func bindHTTPPathValues(pattern string, next http.Handler) http.Handler {
 	parts := strings.Split(strings.TrimPrefix(pattern, "/"), "/")
+	if strings.HasSuffix(pattern, "...}") {
+		return next
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Mount groups add leading segments; route patterns describe the suffix.
 		path := strings.Split(strings.Trim(r.URL.EscapedPath(), "/"), "/")

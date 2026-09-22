@@ -1,8 +1,6 @@
 package server
 
 import (
-	"net/http"
-
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/http/embedhttp"
@@ -25,7 +23,7 @@ import (
 // plane is the default delegated-token verifier. IDENTITY IS HOST-PLUGGABLE
 // (issue #339): a host-supplied billingauth.DelegatedAuthenticator overrides
 // the control-plane verifier.
-func (s *Server) registerSelfServiceRoutes(mux *http.ServeMux) {
+func (s *Server) registerSelfServiceRoutes(mux router.Registrar) {
 	delegatedMW := s.delegatedMiddleware()
 	providerRoutes := embedhttp.ProviderRoutesForRuntime(s.runtime, nil)
 

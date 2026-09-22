@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	redis "github.com/redis/go-redis/v9"
 
@@ -49,6 +50,10 @@ func NewSelfRoutes(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, pr
 	httproutes.RegisterSelfServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+httproutes.SelfRoutePrefix, rt), rt, delegatedMW, providerRoutes)
 	httproutes.RegisterCustomerTreasuryRoutes(router.NewMux(mux, EmbeddedV1Prefix+httproutes.CustomerRoutePrefix, rt), rt, delegatedMW, providerRoutes)
 
+	return wrapCustomerRoutes(rt, mux, hostResolve, "")
+}
+
+func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant.HostResolver, selfPrefix string) *router.Table {
 	// OpenRails-native rate-limiting + captcha, matching the base NewHTTPHandler
 	// chain. IP-keyed: the delegated principal is pinned per-route inside the mux,
 	// after this outer chain — exactly like the standalone self surface.
@@ -69,8 +74,12 @@ func NewSelfRoutes(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, pr
 	}
 	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, captcha.NewChallengeStore(rdb), resolver)
 	mux.Wrap(func(entry router.Entry) http.Handler {
+		canonical := entry.Path
+		if selfPrefix != "" {
+			canonical = EmbeddedV1Prefix + "/me" + strings.TrimPrefix(entry.Path, selfPrefix)
+		}
 		return middleware.ChainHTTP(entry.Handler,
-			middleware.WithRoutePath(entry.Path),
+			middleware.WithRoutePath(canonical),
 			middleware.RecoverHTTP(),
 			middleware.SecurityHeadersHTTP(),
 			// #765: this handler's entire surface is browser tier — always the
