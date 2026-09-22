@@ -39,7 +39,7 @@ type ControlPlane struct {
 	// authClient is the in-process AuthKit engine the host built (client-first,
 	// #142); authSvc adapts it for HTTP, Core()/the delegated verifier use it
 	// directly. The server no longer vends it (.Client() was dropped).
-	authClient *authcore.Client
+	authClient *authcore.Runtime
 	hosted     bool
 	// merchantCreation is the WithMerchantCreation config when the merchant
 	// persona is opted into authkit's generated creation path (or#914); nil
@@ -599,20 +599,11 @@ func (c *ControlPlane) Close() {
 	}
 }
 
-// Core returns the underlying AuthKit core service used for in-process
-// group/role/API key operations. The return type is the concrete
-// *authcore.Client (not the authkit.Client interface): it satisfies
-// authkit.Client in full (every existing Core()-based call site keeps
-// compiling unchanged) AND additionally exposes .Genesis() (authkit v0.79.0,
-// #241) — the unchecked bootstrap/migration mutators (AssignGroupRole,
-// AssignRoleBySlug, RemoveRoleBySlug, RemoveGroupSubject) that authkit
-// deliberately dropped from the swappable Client interface. Bootstrap/seed/
-// lazy-materialization code (internal/controlplane/bootstrap.go,
-// customer_group.go, internal/bootstrap/merchant_manifest.go, the integration
-// harness) calls Core().Genesis().AssignGroupRole(...) etc.; runtime request
-// handlers must use the actor-checked *As methods on the Client interface
-// instead (never Genesis()).
-func (c *ControlPlane) Core() *authcore.Client {
+// Core returns the local AuthKit Runtime owned by this control plane. It exposes
+// local configuration, bootstrap and lifecycle operations. Application callers
+// use Core().Client() for the portable operation interface; request handlers must
+// use actor-checked operations, never the unchecked Genesis bootstrap methods.
+func (c *ControlPlane) Core() *authcore.Runtime {
 	if c == nil {
 		return nil
 	}

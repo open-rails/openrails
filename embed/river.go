@@ -11,7 +11,7 @@
 // There is no degraded mode worth having, so River is not optional.
 //
 // Options.River defaults to OpenRails ownership. RiverFromHost() gives the
-// host ownership; pass RiverJobs to riverkit.New after optional components attach.
+// host ownership; pass RiverJobs to riverhelpers.New after optional components attach.
 // The composer returns one unstarted client with request-side producers bound. Otherwise OpenRails constructs its client and the caller runs
 // RunWorkers (or sets Options.RunWorkers).
 //
@@ -53,7 +53,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-rails/riverkit"
+	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/config"
@@ -64,7 +64,7 @@ import (
 var ErrNotInitialized = errors.New("embedded billing: not initialized")
 
 // QueueBilling is the billing queue contributed by RiverJobs. Hosts may set its
-// concurrency in the RiverKit config; at least one worker is required.
+// concurrency in the shared River composer config; at least one worker is required.
 const QueueBilling = riverjobs.QueueBilling
 
 // InvoiceSweepArgs is the invoice job OpenRails schedules on the billing queue
@@ -106,7 +106,7 @@ type RiverOwnership struct {
 }
 
 // RiverFromHost gives the host ownership of River's migrations and client
-// lifecycle. Pass Runtime.RiverJobs to riverkit.New after attaching components.
+// lifecycle. Pass Runtime.RiverJobs to riverhelpers.New after attaching components.
 func RiverFromHost() RiverOwnership { return RiverOwnership{host: true} }
 
 // RiverManagedByOpenRails selects OpenRails ownership, optionally in a separate
@@ -140,16 +140,16 @@ func (o RiverOwnership) managedSchema(_ string) (string, error) {
 }
 
 // RiverJobs contributes billing and any already attached control-plane jobs.
-// Attach components first, then pass this contribution to riverkit.New alongside
+// Attach components first, then pass this contribution to riverhelpers.New alongside
 // other libraries. The host owns the returned client's Start/Stop lifecycle.
-func (r *Runtime) RiverJobs() riverkit.Contribution {
+func (r *Runtime) RiverJobs() riverhelpers.Contribution {
 	if r == nil || r.app == nil || r.app.Runtime == nil {
-		return riverkit.NewContribution("openrails", func(context.Context, *river.Config) error { return ErrNotInitialized }, nil, nil)
+		return riverhelpers.NewContribution("openrails", func(context.Context, *river.Config) error { return ErrNotInitialized }, nil, nil)
 	}
 	return r.app.Runtime.RiverJobs()
 }
 
-// HasExternalRiverClient reports whether RiverKit has successfully bound the
+// HasExternalRiverClient reports whether the shared River composer has successfully bound the
 // host-owned client. Ownership declaration alone returns false.
 func (r *Runtime) HasExternalRiverClient() bool {
 	if r == nil || r.app == nil || r.app.Runtime == nil {

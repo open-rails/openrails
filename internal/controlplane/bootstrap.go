@@ -205,7 +205,7 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 // EnsureRootContainment ensures the singleton root group exists and the
 // declared containment schema is seeded (idempotent; authkit's EnsureRootGroup
 // is create-or-adopt, ak#258, so concurrent cold boots need no retry).
-func EnsureRootContainment(ctx context.Context, core *authcore.Client) error {
+func EnsureRootContainment(ctx context.Context, core *authcore.Runtime) error {
 	if _, err := core.EnsureRootGroup(ctx); err != nil {
 		return fmt.Errorf("ensure root group: %w", err)
 	}

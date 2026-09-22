@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/open-rails/riverkit"
+	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails"
@@ -66,7 +66,7 @@ func run(ctx context.Context, getenv func(string) string) (runErr error) {
 	if err != nil {
 		return err
 	}
-	jobs, err := riverkit.New(ctx, pool, &river.Config{Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 4}}}, runtime.RiverJobs())
+	jobs, err := riverhelpers.New(ctx, pool, &river.Config{Queues: map[string]river.QueueConfig{embed.QueueBilling: {MaxWorkers: 4}}}, runtime.RiverJobs())
 	if err != nil {
 		return err
 	}

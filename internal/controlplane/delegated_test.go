@@ -154,7 +154,7 @@ func TestDelegatedVerifier_SSRFGuardBlocksLoopbackJWKS(t *testing.T) {
 	jwks := httptest.NewServer(mux) // binds to 127.0.0.1 — a private/reserved address
 	defer jwks.Close()
 
-	v, err := newDelegatedVerifier(&authcore.Client{}, "", nil)
+	v, err := newDelegatedVerifier(&authcore.Runtime{}, "", nil)
 	require.NoError(t, err)
 	require.NoError(t, v.AddIssuer(testDelegatedIssuer, []string{canonicalAudience}, verify.IssuerOptions{
 		JWKSURI: jwks.URL + "/.well-known/jwks.json",
