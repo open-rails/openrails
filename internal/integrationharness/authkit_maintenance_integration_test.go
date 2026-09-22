@@ -16,6 +16,11 @@ import (
 func TestStandaloneAuthKitMaintenanceSharesBillingRiver(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
+	// The package shares its database across workflows. An earlier lifecycle
+	// test may have completed this hour's unique cleanup job; isolate this
+	// fixture instead of expecting RunOnStart to defeat hourly deduplication.
+	_, err := h.Pool().Exec(ctx, "DELETE FROM public.river_job WHERE kind='authkit_cleanup_expired_auth_state' AND state='completed'")
+	require.NoError(t, err)
 	var eventID int64
 	require.NoError(t, h.Pool().QueryRow(ctx, `
  INSERT INTO profiles.session_events(occurred_at,issuer,user_id,session_id,event)

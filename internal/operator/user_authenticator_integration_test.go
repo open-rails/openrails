@@ -102,6 +102,8 @@ func TestUserAuthenticator_InProcess(t *testing.T) {
 	_, err = cp.Core().UpdateImportedUser(ctx, user.ID, authkit.ImportUserInput{Email: email, Username: "authee" + sfx, EmailVerified: true, Metadata: map[string]any{"reserved": false}})
 	require.NoError(t, err)
 	permissionAllowed(true)
+	// The host composes all attached workers before accepting lifecycle writes.
+	require.NoError(t, e.App().Runtime.InitRiver(ctx))
 	deleted, err := cp.Core().SoftDeleteUsers(ctx, []string{user.ID})
 	require.NoError(t, err)
 	require.Len(t, deleted, 1)

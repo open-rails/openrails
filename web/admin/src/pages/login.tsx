@@ -22,6 +22,13 @@ import {
   type TwoFactorVerificationMode,
 } from "@/lib/auth"
 import { authMutations } from "@/lib/auth-mutations"
+import {
+  clearRecoveryFragment,
+  confirmAccountRecovery,
+  readRecoveryFragment,
+  takeAccountRecovery,
+  type RecoveryState,
+} from "@/lib/account-recovery"
 
 function factorLabel(method: string, phoneNumber?: string) {
   switch (method) {
@@ -67,6 +74,23 @@ export function LoginPage() {
   const navigate = useNavigate()
   const [login, setLogin] = React.useState("")
   const [password, setPassword] = React.useState("")
+  const [recoveryState, setRecoveryState] = React.useState<RecoveryState>(
+    () => readRecoveryFragment() ?? {}
+  )
+  const { recovery, notice, pending: restoring } = recoveryState
+  React.useEffect(clearRecoveryFragment, [])
+  React.useEffect(() => {
+    if (!recovery) return
+    const timeout = setTimeout(
+      () => {
+        setRecoveryState({
+          notice: "This recovery confirmation expired. Sign in again.",
+        })
+      },
+      Math.min(Date.parse(recovery.expires_at) - Date.now(), 2_147_483_647)
+    )
+    return () => clearTimeout(timeout)
+  }, [recovery])
   // Set once the password step succeeds but the account needs a second factor.
   // Its presence is what swaps the form for the code step.
   const [challenge, setChallenge] = React.useState<TwoFactorChallenge | null>(
@@ -75,10 +99,14 @@ export function LoginPage() {
   const [code, setCode] = React.useState("")
   const [verificationMode, setVerificationMode] =
     React.useState<TwoFactorVerificationMode>("factor")
-  const passwordLogin = useMutation(authMutations.login(loginWithPassword))
-  const verifyTwoFactor = useMutation(
-    authMutations.verifyTwoFactor(completeTwoFactor)
-  )
+  const passwordLogin = useMutation({
+    ...authMutations.login(loginWithPassword),
+    onError: acceptRecovery,
+  })
+  const verifyTwoFactor = useMutation({
+    ...authMutations.verifyTwoFactor(completeTwoFactor),
+    onError: acceptRecovery,
+  })
   const factorSelection = useMutation(
     authMutations.selectTwoFactor(selectTwoFactor)
   )
@@ -89,6 +117,37 @@ export function LoginPage() {
       ? failure.message
       : String(failure)
     : undefined
+
+  function acceptRecovery(error: unknown) {
+    const next = takeAccountRecovery(error)
+    if (!next) return
+    setRecoveryState(next)
+    setChallenge(null)
+    setCode("")
+    setPassword("")
+    passwordLogin.reset()
+    verifyTwoFactor.reset()
+    factorSelection.reset()
+  }
+
+  async function restoreAccount() {
+    if (!recovery || restoring) return
+    const token = recovery.token
+    // Remove the proof before awaiting the request. A failed or uncertain
+    // confirmation requires fresh sign-in proof, never an automatic retry.
+    setRecoveryState({ pending: true })
+    try {
+      await confirmAccountRecovery(token)
+      setRecoveryState({
+        notice: "Your account has been restored. Sign in to continue.",
+      })
+    } catch {
+      setRecoveryState({
+        notice:
+          "Recovery could not be confirmed. Sign in again to check your account.",
+      })
+    }
+  }
 
   if (!ready) {
     return (
@@ -101,9 +160,9 @@ export function LoginPage() {
 
   // External login buttons only when the issuer advertises login-capable
   // providers; otherwise password-only.
-  const externalLoginProviders = (capabilities?.external_login_providers ?? []).filter(
-    (p) => p.supports_login
-  )
+  const externalLoginProviders = (
+    capabilities?.external_login_providers ?? []
+  ).filter((p) => p.supports_login)
   const passwordEnabled = capabilities?.password?.login !== false
 
   const submit = (e: React.FormEvent) => {
@@ -162,26 +221,52 @@ export function LoginPage() {
         {/* the real lockup, in place of the placeholder glyph that stood here */}
         <LogoLockup className="h-4" />
         <h1 className="mt-8 text-2xl font-semibold tracking-tight text-balance">
-          {challenge
-            ? verificationMode === "backup_code"
-              ? "Enter a backup code"
-              : "Enter your verification code"
-            : "Sign in to your console"}
+          {recovery || restoring
+            ? "Restore your account?"
+            : challenge
+              ? verificationMode === "backup_code"
+                ? "Enter a backup code"
+                : "Enter your verification code"
+              : "Sign in to your console"}
         </h1>
         <p className="mt-2 text-sm text-pretty text-muted-foreground">
-          {challenge
-            ? verificationMode === "backup_code"
-              ? "Enter one of the backup codes you saved when setting up two-factor authentication."
-              : verificationPrompt(challenge)
-            : "The merchant console for your OpenRails deployment."}
+          {recovery || restoring
+            ? "Your account is scheduled for deletion. Restore it only if you want to keep it."
+            : challenge
+              ? verificationMode === "backup_code"
+                ? "Enter one of the backup codes you saved when setting up two-factor authentication."
+                : verificationPrompt(challenge)
+              : "The merchant console for your OpenRails deployment."}
         </p>
         <div className="mt-8 grid gap-4">
+          {notice && (
+            <p className="text-sm" role="status">
+              {notice}
+            </p>
+          )}
+          {restoring && (
+            <p className="text-sm" role="status">
+              Restoring your account…
+            </p>
+          )}
+          {recovery && (
+            <div className="grid gap-3">
+              <p className="text-sm text-muted-foreground">
+                You can recover this account until{" "}
+                {new Date(recovery.purge_at).toLocaleString()}.
+              </p>
+              <Button onClick={restoreAccount}>Restore account</Button>
+              <Button variant="outline" onClick={() => setRecoveryState({})}>
+                Cancel
+              </Button>
+            </div>
+          )}
           {bootError && (
             <p className="text-sm text-destructive" role="alert">
               Console bootstrap failed: {bootError}
             </p>
           )}
-          {challenge && (
+          {!recovery && !restoring && challenge && (
             <form onSubmit={submitCode} className="grid gap-3">
               {verificationMode === "factor" &&
                 challenge.factors.length > 1 && (
@@ -279,7 +364,7 @@ export function LoginPage() {
               </Button>
             </form>
           )}
-          {!challenge && passwordEnabled && (
+          {!recovery && !restoring && !challenge && passwordEnabled && (
             <form onSubmit={submit} className="grid gap-3">
               <div className="grid gap-1.5">
                 <Label htmlFor="login">Email or username</Label>
@@ -313,28 +398,33 @@ export function LoginPage() {
               </Button>
             </form>
           )}
-          {!challenge && externalLoginProviders.length > 0 && (
-            <>
-              {passwordEnabled && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Separator className="flex-1" /> or{" "}
-                  <Separator className="flex-1" />
+          {!recovery &&
+            !restoring &&
+            !challenge &&
+            externalLoginProviders.length > 0 && (
+              <>
+                {passwordEnabled && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Separator className="flex-1" /> or{" "}
+                    <Separator className="flex-1" />
+                  </div>
+                )}
+                <div className="grid gap-2">
+                  {externalLoginProviders.map((p) => (
+                    <Button
+                      key={p.id}
+                      variant="outline"
+                      onClick={() => startOIDC(p.id)}
+                    >
+                      Continue with {p.name || p.id}
+                    </Button>
+                  ))}
                 </div>
-              )}
-              <div className="grid gap-2">
-                {externalLoginProviders.map((p) => (
-                  <Button
-                    key={p.id}
-                    variant="outline"
-                    onClick={() => startOIDC(p.id)}
-                  >
-                    Continue with {p.name || p.id}
-                  </Button>
-                ))}
-              </div>
-            </>
-          )}
-          {!challenge &&
+              </>
+            )}
+          {!recovery &&
+            !restoring &&
+            !challenge &&
             !passwordEnabled &&
             externalLoginProviders.length === 0 &&
             !bootError && (

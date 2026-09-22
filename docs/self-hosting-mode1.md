@@ -18,7 +18,7 @@ Deployment shape does not imply mode: embedded and standalone can run either.
 | File | Owns | Loaded by |
 |---|---|---|
 | `config.yaml` | process/infrastructure config (env, DB, Redis, `provider_write_mode`, `test_mode`, `merchant_config_source`, `catalog_source`) | `config.Load` (standalone) / built programmatically (embedded hosts) |
-| merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server --merchant-manifest <path>`) | merchant identity, profile, invoice policy, **PSPs** — rail accounts + secrets (`merchants.<slug>.psps.<key>.<rail>`) | standalone server boot, every boot; embedded hosts pass the same shape to `Options.Merchant.Config` |
+| merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server` / `run-worker --merchant-manifest <path>`) | merchant identity, profile, invoice policy, **PSPs** — rail accounts + secrets (`merchants.<slug>.psps.<key>.<rail>`) | standalone server and worker boot, every boot; embedded hosts pass the same shape to `Options.Merchant.Config` |
 | catalog manifest (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails push-merchant-catalog` (or the embedded push API) |
 
 Manifest anatomy and field semantics:
@@ -59,6 +59,11 @@ The conventional file is optional: absent, the server boots control-plane-only
 (bind merchants later). An explicit `--merchant-manifest` path must exist —
 boot refuses otherwise. `merchant_config_source: api` (MODE 2) refuses a present
 manifest outright: two truths.
+
+Separate worker processes load the same manifest and overlays as API processes;
+in-memory provider credentials are not shared through PostgreSQL. Both commands
+accept `--merchant-manifest`. Each process must receive the same configured
+manifest and secret files before it can use those providers.
 
 1. The manifest and its overlays parse strictly. Unknown fields and retired
    key names (the old `accounts:` key — renamed to `psps:`) refuse boot — never

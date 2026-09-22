@@ -284,6 +284,7 @@ export async function authApi<T>(
     false
   )
   if (!res.ok) throw await parseError(res)
+  if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
 
