@@ -609,6 +609,7 @@
       "func ValidateRailSet(cfg *Config, rails PSPSet) error",
       "func ValidateSolanaAccountSettings(settings map[string]any) error",
       "func ValidateStripeCredentialPosture(cfg *Config, secretKey string) error",
+      "func ValidateStripePublishableKeyPosture(cfg *Config, key string) error",
       "func ValidateTokenDecimals(mintOrSymbol string, decimals int) error",
       "type AdminConsoleConfig struct {\n\tEnabled bool `koanf:\"enabled,omitempty\"`\n\n\tAuthBaseURL string `koanf:\"auth_base_url,omitempty\"`\n\n\tAPIBaseURL string `koanf:\"api_base_url,omitempty\"`\n}",
       "type CCBillConfig struct {\n\tSalt         string\n\tClientSubAcc string\n\tClientAccNum string\n\tTestMode     bool\n\n\tDataLinkUsername string\n\tDataLinkPassword string\n}",
@@ -666,6 +667,7 @@
       "func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*BillingConfig, error)",
       "func New(ctx context.Context, opts Options) (*Runtime, error)",
       "func NewHostTransactions(runtime *Runtime) *HostTransactions",
+      "func PSPFromEnv(key string, lookup func(string) (string, bool)) (PSPConfig, error)",
       "func ParseMerchantConfig(raw []byte) (MerchantConfig, error)",
       "func ParseMerchantConfigManifest(raw []byte) (*BillingConfig, error)",
       "func RiverFromHost() RiverOwnership",
@@ -2017,6 +2019,12 @@
     },
     "embed/psp_declaration.go": {
       "hosttools": "github.com/open-rails/openrails/internal/hosttools"
+    },
+    "embed/psp_env.go": {
+      "fmt": "fmt",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
+      "strings": "strings"
     },
     "embed/ready.go": {
       "context": "context",
