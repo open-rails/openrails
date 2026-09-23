@@ -278,7 +278,7 @@ tasks:
         bash scripts/go-test-gate.sh ./internal/db/querytest TestQueryContracts -tags=integration
 
   test-query-perf:
-    desc: Run large-seed query plan/perf checks against a migrated Postgres
+    desc: Run bounded query access-plan checks against a migrated Postgres
     cmds:
       - |
         if [ -n "${QUERY_TEST_DATABASE_URL:-}" ]; then

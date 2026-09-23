@@ -22,6 +22,9 @@ fi
 cat >"$fixture/bin/go" <<'GO'
 #!/bin/sh
 echo "go $*" >> "$INTEGRATION_TEST_LOG"
+if [ "$1" = "test" ]; then
+    echo "redis ${OPENRAILS_TEST_REDIS_ADDR-unset}" >> "$INTEGRATION_TEST_LOG"
+fi
 if [ "$1" = "list" ]; then
     [ "${FAKE_GO_LIST_FAIL:-0}" != 1 ] || exit 17
     [ "${FAKE_GO_LIST_EMPTY:-0}" != 1 ] || exit 0
@@ -42,12 +45,12 @@ run_fixture() {
     ) >/dev/null 2>&1
 }
 
-unset OPENRAILS_TEST_DB_DSN OPENRAILS_TEST_DB_URL OPENRAILS_TEST_REDIS_ADDR OPENRAILS_KEEP_STACK
+unset OPENRAILS_TEST_DB_DSN OPENRAILS_TEST_DB_URL OPENRAILS_TEST_REDIS_ADDR OPENRAILS_KEEP_STACK OPENRAILS_TEST_PACKAGES
 unset FAKE_RUNNING_SERVICES FAKE_GO_STATUS
 run_fixture
 grep -Fq 'docker compose -f docker-compose.yaml up -d --wait postgres garnet' "$log"
 grep -Fq 'docker compose -f docker-compose.yaml stop postgres garnet' "$log"
-grep -Fq 'go test -race -count=1 -p 1 -parallel 1 -tags=integration' "$log"
+grep -Fq 'go test -vet=all -race -count=1 -p 1 -parallel 1 -tags=integration' "$log"
 
 export FAKE_RUNNING_SERVICES='postgres garnet'
 run_fixture
@@ -91,6 +94,35 @@ status=$?
 set -e
 [ "$status" -eq 17 ]
 grep -Fq 'docker compose -f docker-compose.yaml stop postgres garnet' "$log"
+
+# Independent package processes may run concurrently only with private Redis.
+unset FAKE_GO_STATUS
+export OPENRAILS_TEST_PACKAGES=3
+export OPENRAILS_TEST_DB_DSN='postgresql://external/db'
+unset OPENRAILS_TEST_REDIS_ADDR
+run_fixture
+grep -Fq 'go test -vet=all -race -count=1 -p 3 -parallel 1' "$log"
+grep -Fxq 'redis unset' "$log"
+if grep -Fq 'docker compose' "$log"; then
+    echo "test_integration_test: parallel mode started unused shared services" >&2; exit 1
+fi
+unset OPENRAILS_TEST_DB_DSN
+run_fixture
+grep -Fqx 'docker compose -f docker-compose.yaml up -d --wait postgres' "$log"
+grep -Fqx 'docker compose -f docker-compose.yaml stop postgres' "$log"
+
+export OPENRAILS_TEST_REDIS_ADDR='external:6379'
+if run_fixture; then
+    echo "test_integration_test: parallel packages accepted shared Redis" >&2; exit 1
+fi
+[[ ! -s "$log" ]] || { echo "unsafe parallel mode touched services" >&2; exit 1; }
+unset OPENRAILS_TEST_REDIS_ADDR
+export OPENRAILS_TEST_PACKAGES=zero
+if run_fixture; then
+    echo "test_integration_test: invalid package count accepted" >&2; exit 1
+fi
+[[ ! -s "$log" ]] || { echo "invalid count touched services" >&2; exit 1; }
+unset OPENRAILS_TEST_PACKAGES
 
 echo "integration teardown regression tests passed"
 
