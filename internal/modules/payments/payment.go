@@ -66,6 +66,11 @@ func (s *PaymentService) GetByID(ctx context.Context, id uuid.UUID) (*models.Pay
 }
 
 // GetByIDWithDetails returns a payment with all related entities and any refund entries
+// AttachRelations loads each payment's price, product and subscription.
+func (s *PaymentService) AttachRelations(ctx context.Context, payments ...*models.Payment) error {
+	return s.repo.AttachRelations(ctx, payments...)
+}
+
 func (s *PaymentService) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*models.Payment, []*models.Payment, error) {
 	return s.repo.GetByIDWithDetails(ctx, id)
 }

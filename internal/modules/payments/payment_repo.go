@@ -252,7 +252,15 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := r.attachPaymentRelations(ctx, refunds); err != nil {
+		return nil, nil, err
+	}
 	return payment, refunds, nil
+}
+
+// AttachRelations loads each payment's price, product and subscription.
+func (r *PaymentRepo) AttachRelations(ctx context.Context, payments ...*models.Payment) error {
+	return r.attachPaymentRelations(ctx, payments)
 }
 
 func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models.Payment, error) {
