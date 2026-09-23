@@ -58,4 +58,9 @@ func TestBaselineAppliesWithoutProfilesSchema(t *testing.T) {
 		WithSchema(config.CanonicalSchema).
 		ApplyMigrations(ctx, migrations)
 	require.NoError(t, err)
+	var merchants, riverTables int
+	require.NoError(t, targetDB.QueryRowContext(ctx, "SELECT count(*) FROM openrails.merchants").Scan(&merchants))
+	require.Zero(t, merchants, "initialization must not invent a default merchant")
+	require.NoError(t, targetDB.QueryRowContext(ctx, "SELECT count(*) FROM pg_class WHERE relnamespace='openrails'::regnamespace AND relname LIKE 'river_%'").Scan(&riverTables))
+	require.Zero(t, riverTables, "River owns its migrations outside the portable billing schema")
 }
