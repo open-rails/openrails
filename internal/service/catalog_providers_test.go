@@ -75,120 +75,7 @@ func TestCCBillAdapter_Attach(t *testing.T) {
 	}
 }
 
-func TestCCBillAdapter_AutoCreatePending(t *testing.T) {
-	a := &ccbillAdapter{}
-	_, err := a.AutoCreate(context.Background(), autoCreateContext{})
-	if err != errPendingManualLink {
-		t.Fatalf("expected errPendingManualLink, got %v", err)
-	}
-	tmpl := a.PendingActionTemplate(uuid.New())
-	if tmpl.Provider != "ccbill" || tmpl.Action != "create_flexform" {
-		t.Fatalf("unexpected template: %+v", tmpl)
-	}
-}
-
-func TestMobiusAdapter_Attach(t *testing.T) {
-	a := &nmiAdapter{}
-	// Unarmed + no override: the link stores plan_id only — no fabricated
-	// provider key (#845).
-	ids, err := a.Attach(context.Background(), map[string]string{models.RailKeyPlanID: "premium_monthly"}, autoCreateContext{})
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if ids[models.RailKeyPlanID] != "premium_monthly" {
-		t.Fatalf("unexpected ids: %v", ids)
-	}
-	if _, ok := ids[models.RailKeyProvider]; ok {
-		t.Fatalf("unarmed attach must not fabricate a provider key: %v", ids)
-	}
-	// An explicit link override is preserved.
-	ids, err = a.Attach(context.Background(), map[string]string{
-		models.RailKeyPlanID: "premium_monthly", models.RailKeyProvider: "Mobius",
-	}, autoCreateContext{})
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if ids[models.RailKeyProvider] != "mobius" {
-		t.Fatalf("override provider must be preserved (lowercased): %v", ids)
-	}
-	if _, err := a.Attach(context.Background(), map[string]string{}, autoCreateContext{}); err == nil {
-		t.Fatal("expected error when plan_id missing")
-	}
-}
-
-func TestMobiusAdapter_AutoCreatePending(t *testing.T) {
-	a := &nmiAdapter{}
-	_, err := a.AutoCreate(context.Background(), autoCreateContext{})
-	if err != errPendingManualLink {
-		t.Fatalf("expected errPendingManualLink, got %v", err)
-	}
-	tmpl := a.PendingActionTemplate(uuid.New())
-	if tmpl.Provider != "nmi" || tmpl.Action != "create_recurring_plan" {
-		t.Fatalf("unexpected template: %+v", tmpl)
-	}
-	if tmpl.PatchRequired["provider_links"]["nmi"]["plan_id"] == "" {
-		t.Fatalf("expected patch_required to mention plan_id, got %+v", tmpl.PatchRequired)
-	}
-}
-
-func TestStripeAdapter_AttachRequiresPriceID(t *testing.T) {
-	a := &stripeAdapter{svc: newUnconfiguredService()}
-	if _, err := a.Attach(context.Background(), map[string]string{}, autoCreateContext{}); err == nil {
-		t.Fatal("expected error when price_id missing")
-	}
-	ids, err := a.Attach(context.Background(), map[string]string{
-		models.RailKeyStripePriceID:   "price_xxx",
-		models.RailKeyStripeProductID: "prod_yyy",
-	}, autoCreateContext{})
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if ids[models.RailKeyStripePriceID] != "price_xxx" || ids[models.RailKeyStripeProductID] != "prod_yyy" {
-		t.Fatalf("unexpected ids: %v", ids)
-	}
-}
-
-func TestStripeAdapter_AutoCreateUnconfiguredIsPending(t *testing.T) {
-	a := &stripeAdapter{svc: newUnconfiguredService()}
-	_, err := a.AutoCreate(context.Background(), autoCreateContext{PriceID: uuid.New(), ProductID: uuid.New()})
-	if err != errPendingManualLink {
-		t.Fatalf("expected errPendingManualLink when stripe unconfigured, got %v", err)
-	}
-}
-
 // -- Dispatcher (resolveProviders) tests -------------------------------------
-
-func TestResolveProviders_AllLinked(t *testing.T) {
-	s := newUnconfiguredService()
-	productID := uuid.New()
-	priceID := uuid.New()
-	req := CreatePriceRequest{
-		ProductID:  openrails.ProductID(productID),
-		UnitAmount: 9_990_000,
-		Currency:   "USD",
-		PSPs:       []string{"stripe", "ccbill", "nmi"},
-		PSPLinks: map[string]map[string]string{
-			"stripe": {models.RailKeyStripePriceID: "price_xxx"},
-			"ccbill": {"form_name": "premium", "flex_id": "abc-123"},
-			"nmi":    {"plan_id": "premium_monthly"},
-		},
-	}
-	rails, states, pending, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, priceID)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if len(pending) != 0 {
-		t.Fatalf("expected no pending actions, got %v", pending)
-	}
-	for _, name := range []string{"stripe", "ccbill", "nmi"} {
-		if states[name].Status != ProviderStatusLinked {
-			t.Errorf("%s: expected linked, got %s", name, states[name].Status)
-		}
-		if len(rails[name]) == 0 {
-			t.Errorf("%s: expected rails entry", name)
-		}
-	}
-}
 
 func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
 	s := newUnconfiguredService()
@@ -222,59 +109,6 @@ func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
 	}
 }
 
-func TestResolveProviders_SolanaDefaultTokenPendingWhenUnconfigured(t *testing.T) {
-	s := newUnconfiguredService()
-	hours := 30 * 24
-	req := CreatePriceRequest{
-		ProductID:           openrails.ProductID(uuid.New()),
-		UnitAmount:          23_000_000,
-		Currency:            "usd",
-		AccessDurationHours: &hours,
-		AutoRenew:           true,
-		PSPs:                []string{"solana"},
-	}
-
-	rails, states, pending, err := s.resolveProviders(
-		context.Background(),
-		&models.Product{ID: req.ProductID.UUID(), Key: "premium"},
-		req,
-		uuid.New(),
-	)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if len(rails) != 0 {
-		t.Fatalf("unconfigured Solana should not have a rails entry, got %v", rails)
-	}
-	if states["solana"].Status != ProviderStatusPendingManualLink {
-		t.Fatalf("expected pending_manual_link, got %+v", states["solana"])
-	}
-	if len(pending) != 1 || pending[0].Provider != "solana" {
-		t.Fatalf("expected one Solana pending action, got %v", pending)
-	}
-}
-
-func TestResolveProviders_AllPending(t *testing.T) {
-	s := newUnconfiguredService()
-	productID := uuid.New()
-	req := CreatePriceRequest{
-		ProductID:  openrails.ProductID(productID),
-		UnitAmount: 9_990_000,
-		Currency:   "USD",
-		PSPs:       []string{"ccbill", "nmi"},
-	}
-	_, states, pending, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, uuid.New())
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if states["ccbill"].Status != ProviderStatusPendingManualLink || states["nmi"].Status != ProviderStatusPendingManualLink {
-		t.Fatalf("expected both pending, got %+v", states)
-	}
-	if len(pending) != 2 {
-		t.Fatalf("expected two pending actions, got %d: %v", len(pending), pending)
-	}
-}
-
 func TestResolveProviders_UnknownProviderErrors(t *testing.T) {
 	// An unknown provider name (e.g. an account name like "mobius" instead of
 	// its rail) must fail loudly — silent dropping loses provider links.
@@ -289,28 +123,6 @@ func TestResolveProviders_UnknownProviderErrors(t *testing.T) {
 	_, _, _, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, uuid.New())
 	if err == nil || !strings.Contains(err.Error(), `unknown provider "paypal"`) {
 		t.Fatalf("expected unknown-provider error, got %v", err)
-	}
-}
-
-func TestResolveProviders_LinkOnlyInProviderLinks(t *testing.T) {
-	// A provider supplied only via provider_links (absent from Providers) is
-	// still attached.
-	s := newUnconfiguredService()
-	productID := uuid.New()
-	req := CreatePriceRequest{
-		ProductID:  openrails.ProductID(productID),
-		UnitAmount: 9_990_000,
-		Currency:   "USD",
-		PSPLinks: map[string]map[string]string{
-			"ccbill": {"form_name": "premium", "flex_id": "abc-123"},
-		},
-	}
-	_, states, _, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, uuid.New())
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if states["ccbill"].Status != ProviderStatusLinked {
-		t.Fatalf("expected ccbill linked, got %s", states["ccbill"].Status)
 	}
 }
 

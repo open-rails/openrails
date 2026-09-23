@@ -32,8 +32,7 @@ func (f *cannedFetcher) Fetch(ctx context.Context, params reconcile.FetchParams)
 // which the planes run (LIFE sweep first vs unknown-resolution first) yields
 // the SAME terminal state. Two fixtures — a provider-billed renewal and a
 // provider-confirmed-dead sub — each seeded twice, driven through opposite
-// plane orderings, then compared. Complements the pure property test
-// (reconcile/decider_property_test.go), which sweeps all interleavings.
+// plane orderings, then compared using persisted subscription and access state.
 func TestDeciderPlaneInterleaving_SameTerminalState(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()

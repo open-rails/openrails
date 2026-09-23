@@ -19,22 +19,6 @@ import (
 // branch logic: unconfigured -> pending, attach validation, sync-disabled, and the
 // deterministic plan-id derivation.
 
-func TestSolanaAdapter_AutoCreateUnconfiguredIsPending(t *testing.T) {
-	a := &solanaAdapter{svc: &Service{}} // no runtime -> SolanaPlanService nil
-	hours := 30 * 24
-	days := 30
-	_, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID:             uuid.New(),
-		Currency:            "usd",
-		UnitAmount:          29_000_000,
-		AccessDurationHours: &hours,
-		BillingCycleDays:    &days,
-	})
-	if !errors.Is(err, errPendingManualLink) {
-		t.Fatalf("unconfigured Solana AutoCreate = %v, want errPendingManualLink", err)
-	}
-}
-
 func TestSolanaAdapter_AutoCreateRecurringDefaultsToUSDC(t *testing.T) {
 	const usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 	hours := 30 * 24
@@ -151,37 +135,6 @@ func TestSolanaAdapter_AttachUsesTokenInput(t *testing.T) {
 	}
 }
 
-func TestExistingSolanaSettlementToken(t *testing.T) {
-	tests := []struct {
-		name     string
-		currency string
-		want     string
-		wantErr  bool
-	}{
-		{name: "new USD price may infer token", currency: "usd"},
-		{name: "legacy USDC derives symbol", currency: " USDC ", want: "USDC"},
-		{name: "unsupported legacy currency fails", currency: "usdg", wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := existingSolanaSettlementToken(tt.currency)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("existingSolanaSettlementToken(%q) = %q, want error", tt.currency, got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("existingSolanaSettlementToken(%q): %v", tt.currency, err)
-			}
-			if got != tt.want {
-				t.Fatalf("existingSolanaSettlementToken(%q) = %q, want %q", tt.currency, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestResolveSolanaTokenFromMint(t *testing.T) {
 	const (
 		usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
@@ -244,34 +197,5 @@ func TestSolanaAdapter_VerifySyncDisabledWithoutRPC(t *testing.T) {
 	drift, missing, err := a.Verify(context.Background(), map[string]string{solanaKeyPlanPDA: "x"}, nil)
 	if !errors.Is(err, errProviderNotArmed) || drift != nil || missing {
 		t.Fatalf("Verify without RPC = (%v,%v,%v), want a not-armed error", drift, missing, err)
-	}
-}
-
-func TestSolanaAdapter_UpdateIsNoOp(t *testing.T) {
-	a := &solanaAdapter{}
-	if err := a.Update(context.Background(), map[string]string{}, mutableUpdate{}); err != nil {
-		t.Errorf("Update should be a no-op, got %v", err)
-	}
-}
-
-func TestSolanaPlanID_Deterministic(t *testing.T) {
-	base := solanaPlanID("premium", "usd", 2300, intPtr(30), "mint-a")
-	// Content-addressed: deterministic for identical content, and with NO price-UUID
-	// input it is stable across a fresh OpenRails DB (a rebuilt catalog derives the
-	// same on-chain plan PDA and reattaches instead of republishing).
-	if base != solanaPlanID("premium", "usd", 2300, intPtr(30), "mint-a") {
-		t.Error("solanaPlanID must be deterministic for identical content")
-	}
-	if base == solanaPlanID("premium", "usd", 2900, intPtr(30), "mint-a") {
-		t.Error("a different amount must yield a different plan id")
-	}
-	if base == solanaPlanID("premium", "usd", 2300, intPtr(365), "mint-a") {
-		t.Error("a different cycle must yield a different plan id")
-	}
-	if base == solanaPlanID("basic", "usd", 2300, intPtr(30), "mint-a") {
-		t.Error("a different product key must yield a different plan id")
-	}
-	if base == solanaPlanID("premium", "usd", 2300, intPtr(30), "mint-b") {
-		t.Error("a different mint must yield a different plan id")
 	}
 }

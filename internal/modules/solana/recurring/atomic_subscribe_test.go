@@ -72,7 +72,7 @@ func newSubscribeInput(t *testing.T) PrepareSubscribeInput {
 // The subscribe step yields a 2-instruction co-signed bundle (subscribe+transfer)
 // with two required signers, exactly one (the cranker) pre-signed.
 func TestPrepareSubscribe_AtomicCosignedBundle(t *testing.T) {
-	svc, _ := newSubscribeSvc(t, subFakeRPC{initID: 42, balance: 50_000_000})
+	svc, _ := newSubscribeSvc(t, subFakeRPC{initID: 42, balance: 10_000_000})
 	res, err := svc.Prepare(context.Background(), newSubscribeInput(t))
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
@@ -84,6 +84,10 @@ func TestPrepareSubscribe_AtomicCosignedBundle(t *testing.T) {
 		t.Fatalf("want a single tx, got %d", len(res.Transactions))
 	}
 	tx := decodeTx(t, res.Transactions[0])
+	subscribe := tx.Message.Instructions[0]
+	if got := int64(binary.LittleEndian.Uint64(subscribe.Data[len(subscribe.Data)-8:])); got != 42 {
+		t.Fatalf("subscribe init ID = %d, want stored 42", got)
+	}
 	if len(tx.Message.Instructions) != 2 {
 		t.Fatalf("subscribe bundle should have 2 instructions (subscribe+transfer), got %d", len(tx.Message.Instructions))
 	}
@@ -148,23 +152,6 @@ func TestPrepareSubscribe_FirstTimerGetsOneStepBundle(t *testing.T) {
 	}
 }
 
-// A returning subscriber echoes the authority's REAL init id, never the sentinel.
-func TestPrepareSubscribe_ReturningSubscriberEchoesRealInitID(t *testing.T) {
-	svc, _ := newSubscribeSvc(t, subFakeRPC{initID: 42, balance: 50_000_000})
-	res, err := svc.Prepare(context.Background(), newSubscribeInput(t))
-	if err != nil {
-		t.Fatalf("Prepare: %v", err)
-	}
-	tx := decodeTx(t, res.Transactions[0])
-	subscribe := tx.Message.Instructions[0]
-	if subscribe.Data[0] != 11 {
-		t.Fatalf("instruction 0 must be subscribe for a returning subscriber, got disc=%d", subscribe.Data[0])
-	}
-	if got := int64(binary.LittleEndian.Uint64(subscribe.Data[len(subscribe.Data)-8:])); got != 42 {
-		t.Fatalf("subscribe init id = %d, want the stored 42", got)
-	}
-}
-
 // Pre-flight applies to first-timers too: the bundle pulls the first period, so
 // an underfunded wallet is refused before anything is built.
 func TestPrepareSubscribe_FirstTimerPreflightInsufficient(t *testing.T) {
@@ -193,18 +180,6 @@ func TestPrepareSubscribe_PreflightInsufficient(t *testing.T) {
 	}
 	if ie.HaveBaseUnits != 1_000_000 || ie.NeedBaseUnits != 10_000_000 {
 		t.Fatalf("have/need = %d/%d, want 1000000/10000000", ie.HaveBaseUnits, ie.NeedBaseUnits)
-	}
-}
-
-// Pre-flight: balance >= amount proceeds (builds the co-signed bundle).
-func TestPrepareSubscribe_PreflightSufficientProceeds(t *testing.T) {
-	svc, _ := newSubscribeSvc(t, subFakeRPC{initID: 42, balance: 10_000_000}) // == amount
-	res, err := svc.Prepare(context.Background(), newSubscribeInput(t))
-	if err != nil {
-		t.Fatalf("Prepare: %v", err)
-	}
-	if len(res.Transactions) != 1 {
-		t.Fatalf("want a single co-signed tx, got %d", len(res.Transactions))
 	}
 }
 

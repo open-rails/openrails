@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -402,4 +404,73 @@ func TestDunning_KillSwitchHaltsTerminalCollectionOutcomes(t *testing.T) {
 	assert.NotNil(t, s.cancelledAt)
 	assert.Equal(t, 1, s.deleteIntents,
 		"and only then is the remote NMI schedule stopped through the deferred-delete mechanism")
+}
+
+// Drive only the five due instants through the real charge/intent/lifecycle
+// path. The clock follows the persisted schedule; there is no second scheduler.
+func TestDunning_RecordedDeclinesExhaustWithoutFurtherCharges(t *testing.T) {
+	f := newDunningCertaintyFixture(t, 720, 20*24*time.Hour+time.Minute, true)
+	armDestructive(t, f)
+	t.Cleanup(func() { disarmDestructive(t, f) })
+	clock := clockwork.NewFakeClockAt(time.Now().UTC().Add(-20 * 24 * time.Hour))
+	f.worker.Clock = clock
+	access := entitlements.NewEntitlementService(f.dbi, clock)
+	f.lifecycle = subscriptions.NewSubscriptionLifecycleService(f.dbi,
+		catalog.NewProductService(f.dbi), f.priceSvc, access,
+		subscriptions.NewNotificationService(f.dbi, nil), payments.NewPaymentService(f.dbi, clock), clock)
+	f.lifecycle.SetDeferredDeleteScheduler(intents.NewNMIDeleteScheduler(f.dbi, nil, intents.OriginSystem, "dunning exhaustion"))
+	f.nmiRespond = func(w http.ResponseWriter) {
+		fmt.Fprint(w, "response=2&response_code=202&responsetext=Insufficient Funds")
+	}
+	entitlementID := uuid.New()
+	require.NoError(t, f.dbi.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
+		_, err := f.dbi.Qx(ctx).Exec(ctx, `UPDATE billing.subscriptions SET next_retry_at=$2 WHERE id=$1`, f.subID, clock.Now())
+		require.NoError(t, err)
+		_, err = f.dbi.Qx(ctx).Exec(ctx, `INSERT INTO billing.entitlements
+   (id, customer_id, entitlement, start_at, source_id, source_type, merchant_id)
+   SELECT $1, customer_id, 'dunning_exhaustion', current_period_starts_at, id, 'subscription', merchant_id
+   FROM billing.subscriptions WHERE id = $2`, entitlementID, f.subID)
+		return err
+	}))
+	t.Cleanup(func() {
+		_ = f.dbi.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
+			_, err := f.dbi.Qx(ctx).Exec(ctx, `DELETE FROM billing.entitlements WHERE id=$1`, entitlementID)
+			return err
+		})
+	})
+	for attempt := 1; attempt <= 5; attempt++ {
+		require.Equal(t, dunningOutcomeFailed, f.run(t))
+		require.Equal(t, int64(attempt), f.nmiWrites.Load())
+		state := f.state(t)
+		require.NoError(t, f.dbi.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
+			var failed int
+			require.NoError(t, f.dbi.Qx(ctx).QueryRow(ctx,
+				`SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND status='failed'`, f.subID).Scan(&failed))
+			require.Equal(t, attempt, failed, "every exhaustion step needs a recorded provider decline")
+			var active bool
+			require.NoError(t, f.dbi.Qx(ctx).QueryRow(ctx,
+				`SELECT revoked_at IS NULL AND deleted_at IS NULL AND (end_at IS NULL OR end_at > $2)
+     FROM billing.entitlements WHERE id=$1`, entitlementID, clock.Now()).Scan(&active))
+			require.Equal(t, attempt < 5, active, "access survives retries and closes only on exhaustion")
+			return nil
+		}))
+		if attempt < 5 {
+			require.Equal(t, "past_due", state.status)
+			require.NotNil(t, state.nextRetryAt)
+			clock.Advance(state.nextRetryAt.Sub(clock.Now()))
+		} else {
+			require.Equal(t, "cancelled", state.status)
+			require.Nil(t, state.nextRetryAt)
+		}
+	}
+	require.NoError(t, f.dbi.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
+		sub, err := f.subSvc.GetByID(ctx, f.subID)
+		require.NoError(t, err)
+		require.NotNil(t, sub.CancelType)
+		require.Equal(t, models.CancelTypeExpired, *sub.CancelType)
+		return nil
+	}))
+	// A subsequent worker pass must not revive the exhausted charge schedule.
+	require.NoError(t, f.worker.Work(context.Background(), &river.Job[DunningArgs]{}))
+	require.Equal(t, int64(5), f.nmiWrites.Load())
 }

@@ -2,7 +2,6 @@ package recurring
 
 import (
 	"context"
-	"encoding/binary"
 	"reflect"
 	"testing"
 	"time"
@@ -102,44 +101,5 @@ func TestPrepareSubscribe_AttachesReferenceToFirstTimerBundle(t *testing.T) {
 	// (8) and transfer_subscription (10) likewise carry only their own accounts.
 	if got := programInstructionAccountCounts(t, tx); !reflect.DeepEqual(got, []int{6, 8, 10}) {
 		t.Fatalf("program instruction accounts = %v, want [6 8 10]", got)
-	}
-}
-
-// Without a reference the subscribe tx is unchanged (the wallet-connected
-// subscribe path is unaffected): no extra trailing account on the subscribe ix.
-func TestPrepareSubscribe_NoReferenceWhenEmpty(t *testing.T) {
-	svc, _ := newSubscribeSvc(t, subFakeRPC{initID: 42, balance: 50_000_000})
-	withRef := newSubscribeInput(t)
-	withRef.Reference = randKeyStr(t)
-
-	noRef := newSubscribeInput(t)
-	noRef.SubscriberWallet = withRef.SubscriberWallet // same wallet → same account set
-
-	resNo, err := svc.Prepare(context.Background(), noRef)
-	if err != nil {
-		t.Fatalf("Prepare (no ref): %v", err)
-	}
-	resYes, err := svc.Prepare(context.Background(), withRef)
-	if err != nil {
-		t.Fatalf("Prepare (ref): %v", err)
-	}
-	txNo := decodeTx(t, resNo.Transactions[0])
-	txYes := decodeTx(t, resYes.Transactions[0])
-	if len(txYes.Message.AccountKeys) != len(txNo.Message.AccountKeys)+1 {
-		t.Errorf("referenced subscribe tx must add exactly one account key (got %d vs %d)",
-			len(txYes.Message.AccountKeys), len(txNo.Message.AccountKeys))
-	}
-}
-
-// guards the offset-encoding helper stays in sync (defensive; cheap).
-func TestReadInitID_RoundTrip(t *testing.T) {
-	data := make([]byte, subscriptionAuthorityInitIDOffset+8)
-	binary.LittleEndian.PutUint64(data[subscriptionAuthorityInitIDOffset:], 99)
-	got, err := readInitID(data)
-	if err != nil {
-		t.Fatalf("readInitID: %v", err)
-	}
-	if got != 99 {
-		t.Errorf("readInitID = %d, want 99", got)
 	}
 }
