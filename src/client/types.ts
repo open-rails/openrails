@@ -156,8 +156,18 @@ export const paymentSchema = z.object({
   refunded: z.boolean().nullish(),
   created_at: time,
   price: z
-    .object({ id: z.string().nullish(), product: z.string().nullish() })
+    .object({
+      id: z.string().nullish(),
+      key: z.string().nullish(),
+      product: z.string().nullish(),
+      /** `one_time | recurring` */
+      type: z.string().nullish(),
+      /** Exact hours, e.g. `"720h"`. */
+      recurring: z.object({ interval: z.string().nullish() }).nullish(),
+    })
     .nullish(),
+  /** What was bought; OpenRails newer than v0.160.0. */
+  product: subscriptionProductSchema.nullish(),
   card: cardSummarySchema.nullish(),
 })
 export type Payment = z.infer<typeof paymentSchema>

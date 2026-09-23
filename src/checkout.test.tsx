@@ -67,6 +67,10 @@ describe("Checkout", () => {
     expect(screen.getAllByText("Card").length).toBeGreaterThan(0)
     expect(screen.getByText("Stripe")).toBeInTheDocument()
     expect(screen.getByText("Crypto")).toBeInTheDocument()
+    // 720h is 30 days in OpenRails, not a calendar month.
+    expect(screen.getAllByText("/ 30 days").length).toBeGreaterThan(0)
+    expect(document.body).toHaveTextContent("Renews every 30 days")
+    expect(document.body).not.toHaveTextContent(/month/i)
   })
 
   it("renders exact money at the plan's registered scale", async () => {

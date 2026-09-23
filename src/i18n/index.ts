@@ -10,5 +10,7 @@ export {
   type BillingUiTranslate,
   type MessageKey,
   type MessageVars,
+  type PluralKey,
+  type PluralMessage,
   type Translator,
 } from "./messages.ts"

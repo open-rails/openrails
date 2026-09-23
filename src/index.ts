@@ -44,6 +44,8 @@ export {
   type BillingUiMessages,
   type BillingUiTranslate,
   type MessageKey,
+  type PluralKey,
+  type PluralMessage,
   type MessageVars,
   type Translator,
 } from "./i18n"

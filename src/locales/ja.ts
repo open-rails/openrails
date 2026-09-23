@@ -27,12 +27,21 @@ export const ja: BillingUiMessageBundle = {
     default: "既定",
   },
   interval: {
-    day: "毎日",
-    week: "毎週",
-    month: "毎月",
-    year: "毎年",
-    days: "{count}日ごと",
-    hours: "{count}時間ごと",
+    every: {
+      hour: { "1": "毎時", other: "{count}時間ごと" },
+      day: { "1": "毎日", other: "{count}日ごと" },
+      week: { "1": "毎週", other: "{count}週間ごと" },
+    },
+    per: {
+      hour: { "1": "/時間", other: "/{count}時間" },
+      day: { "1": "/日", other: "/{count}日" },
+      week: { "1": "/週", other: "/{count}週間" },
+    },
+    access: {
+      hour: { other: "{count}時間のアクセス" },
+      day: { other: "{count}日間のアクセス" },
+      week: { other: "{count}週間のアクセス" },
+    },
     once: "買い切り",
   },
   subscriptions: {
@@ -114,12 +123,18 @@ export const ja: BillingUiMessageBundle = {
     inUse:
       "このカードは有効なサブスクリプションの支払いに使われています。先に別のカードへ切り替えてください。",
   },
+  checkout: {
+    renews: "更新：{period}",
+  },
   history: {
     title: "支払い履歴",
     description: "アカウントの請求と返金です。",
     empty: "支払いはまだありません",
     emptyDescription: "完了した支払いがここに表示されます。",
     date: "日付",
+    item: "内容",
+    subscription: "サブスクリプション",
+    purchase: "購入",
     method: "支払い方法",
     status: "状態",
     amount: "金額",

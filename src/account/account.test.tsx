@@ -26,6 +26,7 @@ import {
   type FakeBilling,
 } from "../test/billing-server"
 import { AccountBilling } from "./account-billing"
+import { PaymentHistory } from "./payment-history"
 import { BillingStatusBadge } from "./status-badge"
 import { SubscriptionsPanel } from "./subscriptions-panel"
 
@@ -54,7 +55,11 @@ describe("AccountBilling", () => {
         }),
       ],
       payments: [
-        payment(),
+        payment({
+          subscription_id: "sub_1",
+          price: { type: "recurring", recurring: { interval: "720h" } },
+          product: { id: "prod_1", display_name: "Pro" },
+        }),
         payment({
           id: "pay_2",
           object: "refund",
@@ -68,7 +73,7 @@ describe("AccountBilling", () => {
     const sub = await screen.findByTestId("subscription-row")
     expect(sub).toHaveTextContent("Pro")
     expect(sub).toHaveTextContent("Active")
-    await waitFor(() => expect(sub).toHaveTextContent("$9.99 every month"))
+    await waitFor(() => expect(sub).toHaveTextContent("$9.99 every 30 days"))
     expect(sub).toHaveTextContent("Renews Sep 16, 2036")
     expect(sub).toHaveTextContent("Visa •••• 4242")
 
@@ -78,6 +83,8 @@ describe("AccountBilling", () => {
     expect(card).toHaveTextContent("Default for USD")
 
     const rows = await screen.findAllByTestId("payment-row")
+    expect(rows[0]).toHaveTextContent("Pro")
+    expect(rows[0]).toHaveTextContent("every 30 days")
     expect(rows[0]).toHaveTextContent("Paid")
     expect(rows[0]).toHaveTextContent("$9.99")
     expect(rows[1]).toHaveTextContent("Refund")
@@ -273,6 +280,66 @@ describe("SubscriptionsPanel", () => {
   })
 })
 
+describe("PaymentHistory", () => {
+  it("names what was bought, falling back before OpenRails sends product", async () => {
+    const server = fakeBilling({
+      payments: [
+        payment({
+          price: { type: "recurring", recurring: { interval: "168h" } },
+          product: { id: "prod_1", display_name: "Weekly pass" },
+        }),
+        payment({
+          id: "pay_2",
+          subscription_id: "sub_1",
+          price: { type: "recurring", recurring: { interval: "720h" } },
+        }),
+        payment({ id: "pay_3", price: { type: "one_time" } }),
+        payment({
+          id: "pay_4",
+          price: { type: "one_time" },
+          product: { id: "prod_2", display_name: "Post purchase" },
+        }),
+      ],
+    })
+    mount(<PaymentHistory />, server)
+    const rows = await screen.findAllByTestId("payment-row")
+    const item = (i: number) => within(rows[i]).getByTestId("payment-item")
+    const period = (i: number) =>
+      within(rows[i]).queryByTestId("payment-period")?.textContent ?? null
+    expect(rows.map((_, i) => item(i).textContent)).toEqual([
+      "Weekly pass",
+      "Subscription",
+      "Purchase",
+      "Post purchase",
+    ])
+    expect(rows.map((_, i) => period(i))).toEqual([
+      "every week",
+      "every 30 days",
+      null,
+      null,
+    ])
+  })
+
+  it("localizes the fallback name and period", async () => {
+    const server = fakeBilling({
+      payments: [
+        payment({
+          subscription_id: "sub_1",
+          price: { type: "recurring", recurring: { interval: "720h" } },
+        }),
+      ],
+    })
+    mount(<PaymentHistory />, server, { locale: "ja-JP", messages: ja })
+    const row = await screen.findByTestId("payment-row")
+    expect(within(row).getByTestId("payment-item")).toHaveTextContent(
+      "サブスクリプション"
+    )
+    expect(within(row).getByTestId("payment-period")).toHaveTextContent(
+      "30日ごと"
+    )
+  })
+})
+
 describe("PaymentMethodsPanel", () => {
   it("explains an in-use card and removes a free one", async () => {
     const server = fakeBilling({
@@ -320,20 +387,40 @@ describe("PaymentMethodsPanel", () => {
 
 describe("messages", () => {
   type Tree = { [key: string]: string | Tree }
+  const plural = (v: Tree) => typeof v.other === "string"
+  // Plural nodes count as one key; their forms are checked per locale below.
   const keys = (tree: Tree, prefix = ""): string[] =>
     Object.entries(tree).flatMap(([k, v]) =>
-      typeof v === "string" ? [`${prefix}${k}`] : keys(v, `${prefix}${k}.`)
+      typeof v === "string" || plural(v)
+        ? [`${prefix}${k}`]
+        : keys(v, `${prefix}${k}.`)
+    )
+  const plurals = (tree: Tree): Tree[] =>
+    Object.values(tree).flatMap((v) =>
+      typeof v === "string" ? [] : plural(v) ? [v] : plurals(v)
     )
   const english = keys(en).sort()
-
-  it.each([
+  const bundles = [
+    ["en", en],
     ["de", de],
     ["es", es],
     ["ja", ja],
     ["ko", ko],
     ["zh", zh],
-  ])("%s covers every English key", (_, bundle) => {
+  ] as const
+
+  it.each(bundles)("%s covers every English key", (_, bundle) => {
     expect(keys(bundle as Tree).sort()).toEqual(english)
+  })
+
+  // A form English has but the locale lacks would fall back to English.
+  it.each(bundles)("%s spells each plural form it uses", (locale, bundle) => {
+    const categories = new Intl.PluralRules(locale).resolvedOptions()
+      .pluralCategories
+    for (const node of plurals(bundle as Tree)) {
+      expect(node.other).toContain("{count}")
+      expect("one" in node).toBe(categories.includes("one"))
+    }
   })
 
   it("renders a locale bundle and the host override", async () => {
@@ -345,7 +432,7 @@ describe("messages", () => {
     expect(await screen.findByText("Mitgliedschaft")).toBeInTheDocument()
     const row = await screen.findByTestId("subscription-row")
     expect(row).toHaveTextContent("Aktiv")
-    await waitFor(() => expect(row).toHaveTextContent("monatlich"))
+    await waitFor(() => expect(row).toHaveTextContent("alle 30 Tage"))
   })
 
   it("labels unknown statuses readably", () => {

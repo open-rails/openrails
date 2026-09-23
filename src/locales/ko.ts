@@ -27,12 +27,21 @@ export const ko: BillingUiMessageBundle = {
     default: "기본",
   },
   interval: {
-    day: "매일",
-    week: "매주",
-    month: "매월",
-    year: "매년",
-    days: "{count}일마다",
-    hours: "{count}시간마다",
+    every: {
+      hour: { "1": "매시간", other: "{count}시간마다" },
+      day: { "1": "매일", other: "{count}일마다" },
+      week: { "1": "매주", other: "{count}주마다" },
+    },
+    per: {
+      hour: { "1": "/시간", other: "/{count}시간" },
+      day: { "1": "/일", other: "/{count}일" },
+      week: { "1": "/주", other: "/{count}주" },
+    },
+    access: {
+      hour: { other: "{count}시간 이용" },
+      day: { other: "{count}일 이용" },
+      week: { other: "{count}주 이용" },
+    },
     once: "일회성",
   },
   subscriptions: {
@@ -113,12 +122,18 @@ export const ko: BillingUiMessageBundle = {
     inUse:
       "이 카드는 활성 구독의 결제에 사용 중입니다. 먼저 해당 구독을 다른 카드로 변경하세요.",
   },
+  checkout: {
+    renews: "{period} 갱신",
+  },
   history: {
     title: "결제 내역",
     description: "계정의 청구 및 환불 내역입니다.",
     empty: "아직 결제 내역이 없습니다",
     emptyDescription: "완료된 결제가 여기에 표시됩니다.",
     date: "날짜",
+    item: "항목",
+    subscription: "구독",
+    purchase: "구매",
     method: "결제 수단",
     status: "상태",
     amount: "금액",

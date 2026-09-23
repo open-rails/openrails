@@ -26,12 +26,21 @@ export const en = {
     default: "Default",
   },
   interval: {
-    day: "every day",
-    week: "every week",
-    month: "every month",
-    year: "every year",
-    days: "every {count} days",
-    hours: "every {count} hours",
+    every: {
+      hour: { one: "every hour", other: "every {count} hours" },
+      day: { one: "every day", other: "every {count} days" },
+      week: { one: "every week", other: "every {count} weeks" },
+    },
+    per: {
+      hour: { one: "/ hour", other: "/ {count} hours" },
+      day: { one: "/ day", other: "/ {count} days" },
+      week: { one: "/ week", other: "/ {count} weeks" },
+    },
+    access: {
+      hour: { one: "1 hour of access", other: "{count} hours of access" },
+      day: { one: "1 day of access", other: "{count} days of access" },
+      week: { one: "1 week of access", other: "{count} weeks of access" },
+    },
     once: "one-time",
   },
   subscriptions: {
@@ -112,12 +121,18 @@ export const en = {
     inUse:
       "This card pays for an active subscription. Switch that subscription to another card first.",
   },
+  checkout: {
+    renews: "Renews {period}",
+  },
   history: {
     title: "Payment history",
     description: "Charges and refunds on your account.",
     empty: "No payments yet",
     emptyDescription: "Completed payments will appear here.",
     date: "Date",
+    item: "Item",
+    subscription: "Subscription",
+    purchase: "Purchase",
     method: "Method",
     status: "Status",
     amount: "Amount",

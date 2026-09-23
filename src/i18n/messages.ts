@@ -1,14 +1,31 @@
 import { en } from "../locales/en.ts"
 
+/**
+ * A count-dependent message: CLDR plural categories for the locale, with
+ * `other` required. An exact-count key (`"1"`) wins over the category, like
+ * ICU's `=1`, for locales whose single form differs from `{count}` (毎日).
+ */
+export type PluralMessage = {
+  [K in Intl.LDMLPluralRule | "1"]?: string
+} & { other: string }
+
 type Widen<T> = {
-  [K in keyof T]: T[K] extends string ? string : Widen<T[K]>
+  [K in keyof T]: T[K] extends string
+    ? string
+    : T[K] extends PluralMessage
+      ? PluralMessage
+      : Widen<T[K]>
 }
 
 /** The complete message tree; English is the reference shape. */
 export type BillingUiMessages = Widen<typeof en>
 
 type DeepPartial<T> = {
-  [K in keyof T]?: T[K] extends string ? string : DeepPartial<T[K]>
+  [K in keyof T]?: T[K] extends string
+    ? string
+    : T[K] extends PluralMessage
+      ? Partial<PluralMessage>
+      : DeepPartial<T[K]>
 }
 
 /** A locale bundle or host override: any subset of the tree. */
@@ -17,11 +34,24 @@ export type BillingUiMessageBundle = DeepPartial<BillingUiMessages>
 type Paths<T, P extends string = ""> = {
   [K in keyof T & string]: T[K] extends string
     ? `${P}${K}`
-    : Paths<T[K], `${P}${K}.`>
+    : T[K] extends PluralMessage
+      ? never
+      : Paths<T[K], `${P}${K}.`>
+}[keyof T & string]
+
+type PluralPaths<T, P extends string = ""> = {
+  [K in keyof T & string]: T[K] extends string
+    ? never
+    : T[K] extends PluralMessage
+      ? `${P}${K}`
+      : PluralPaths<T[K], `${P}${K}.`>
 }[keyof T & string]
 
 /** Dotted key of any message, e.g. `subscriptions.title`. */
 export type MessageKey = Paths<BillingUiMessages>
+
+/** Dotted key of a count-dependent message, e.g. `interval.every.day`. */
+export type PluralKey = PluralPaths<BillingUiMessages>
 
 export type MessageVars = Record<string, string | number>
 
@@ -89,7 +119,14 @@ function lookup(messages: BillingUiMessages, key: string): string | undefined {
 
 export interface Translator {
   messages: BillingUiMessages
+  /** BCP 47 tag used for plural rules and numbers; the runtime's when unset. */
+  locale?: string
   t(key: MessageKey, vars?: MessageVars): string
+  /**
+   * Count-dependent message: tries `<key>.<count>`, then the locale's plural
+   * category, then `<key>.other`. `{count}` is locale-formatted.
+   */
+  plural(key: PluralKey, count: number, vars?: MessageVars): string
   /** Message for an billing error, error code, or thrown value. */
   error(error: unknown, vars?: MessageVars): string
 }
@@ -107,10 +144,28 @@ function isNetworkError(error: unknown): boolean {
   return error instanceof TypeError && /fetch|network/i.test(error.message)
 }
 
+function pluralRules(locale?: string): Intl.PluralRules {
+  try {
+    return new Intl.PluralRules(locale)
+  } catch {
+    return new Intl.PluralRules("en")
+  }
+}
+
+function formatCount(count: number, locale?: string): string {
+  try {
+    return new Intl.NumberFormat(locale).format(count)
+  } catch {
+    return String(count)
+  }
+}
+
 export function createTranslator(
   messages: BillingUiMessages,
-  hostT?: BillingUiTranslate
+  hostT?: BillingUiTranslate,
+  locale?: string
 ): Translator {
+  const rules = pluralRules(locale)
   const translate = (key: string, vars?: MessageVars): string | undefined => {
     const hosted = hostT?.(key, vars)
     if (hosted && hosted !== key) return hosted
@@ -119,7 +174,17 @@ export function createTranslator(
   }
   return {
     messages,
+    locale,
     t: (key, vars) => translate(key, vars) ?? key,
+    plural(key, count, vars) {
+      const all = { ...vars, count: formatCount(count, locale) }
+      return (
+        translate(`${key}.${count}`, all) ??
+        translate(`${key}.${rules.select(count)}`, all) ??
+        translate(`${key}.other`, all) ??
+        key
+      )
+    },
     error(error, vars) {
       const code = errorCode(error)
       if (code && code !== "generic" && code !== "network") {

@@ -113,21 +113,3 @@ export function formatAmount(
     return `${decimal} ${code}`
   }
 }
-
-export function formatPeriod(hours?: number | null): string {
-  if (!hours) return ""
-  const days = Math.round(hours / 24)
-  if (days >= 28 && days <= 31) return "/ month"
-  if (days >= 360 && days <= 366) return "/ year"
-  if (days >= 6 && days <= 8) return "/ week"
-  return `/ ${days} days`
-}
-
-export function periodNoun(hours?: number | null): string {
-  if (!hours) return ""
-  const days = Math.round(hours / 24)
-  if (days >= 28 && days <= 31) return "monthly"
-  if (days >= 360 && days <= 366) return "yearly"
-  if (days >= 6 && days <= 8) return "weekly"
-  return `every ${days} days`
-}

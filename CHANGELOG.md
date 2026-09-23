@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.0 (unreleased)
+
+- Periods are exact. OpenRails windows are hours, so a 720h price reads
+  "every 30 days" (was "every month") and 8760h "every 365 days"; only exact
+  weeks, days or hours are named, in the account panels and the checkout
+  summary, in all six locales.
+- Plural messages: `interval.every|per|access.<hour|day|week>` are CLDR plural
+  nodes (`{ one, other }`, exact `"1"` for 毎日-style forms) chosen by the
+  provider's `locale`; `Translator.plural(key, count)`. Breaking for hosts
+  overriding the removed `interval.day|week|month|year|days|hours` keys.
+- Payment history names what was bought: the product's `display_name` from
+  OpenRails (`payment.product`, OpenRails after v0.160.0) and the renewal
+  period; older servers fall back to "Subscription"/"Purchase".
+- Checkout summary copy ("Renews {period}") is a message: `checkout.renews`.
+- The e2e harness and route contract pin OpenRails master `78039ea` (first
+  commit serving `payment.product`; untagged, after v0.160.0).
+
 ## 0.6.0
 
 - "Add card" works against real OpenRails, which requires the PSP that

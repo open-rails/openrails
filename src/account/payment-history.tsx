@@ -9,7 +9,7 @@ import type { MessageKey, Translator } from "#orck/i18n/messages"
 import { usePayments, type PaymentsOptions } from "#orck/react/hooks"
 import { useBillingClient } from "#orck/react/context"
 import { useUiSettings } from "#orck/scope-context"
-import { brandName, formatDate, formatMoney } from "./format"
+import { brandName, formatDate, formatMoney, paymentItem } from "./format"
 import { EmptyState, ErrorState, ListSkeleton, Section } from "./section"
 import { BillingStatusBadge } from "./status-badge"
 
@@ -63,8 +63,14 @@ export function PaymentHistory({
         >
           <thead>
             <tr className="border-b text-left text-xs text-muted-foreground">
-              <th scope="col" className="py-2 pr-3 font-medium">
+              <th
+                scope="col"
+                className="hidden py-2 pr-3 font-medium @md:table-cell"
+              >
                 {t("history.date")}
+              </th>
+              <th scope="col" className="py-2 pr-3 font-medium">
+                {t("history.item")}
               </th>
               <th
                 scope="col"
@@ -89,13 +95,28 @@ export function PaymentHistory({
                 !refund && p.amount_refunded && p.amount_refunded !== "0"
                   ? formatMoney(p.amount_refunded, p.currency, scales, locale)
                   : null
+              const date =
+                formatDate(p.created_at, locale) ?? t("common.notAvailable")
+              const item = paymentItem(p, m)
               return (
                 <tr key={p.id} data-testid="payment-row" data-payment-id={p.id}>
-                  <td className="py-3 pr-3 align-top whitespace-nowrap tabular-nums">
-                    {formatDate(p.created_at, locale) ??
-                      t("common.notAvailable")}
-                    <div className="text-xs text-muted-foreground @md:hidden">
-                      {methodText(p, m)}
+                  <td className="hidden py-3 pr-3 align-top whitespace-nowrap tabular-nums @md:table-cell">
+                    {date}
+                  </td>
+                  <td className="py-3 pr-3 align-top">
+                    <div data-testid="payment-item" className="font-medium">
+                      {item.name}
+                    </div>
+                    {item.detail ? (
+                      <div
+                        data-testid="payment-period"
+                        className="text-xs text-muted-foreground"
+                      >
+                        {item.detail}
+                      </div>
+                    ) : null}
+                    <div className="text-xs text-muted-foreground tabular-nums @md:hidden">
+                      {date} · {methodText(p, m)}
                     </div>
                   </td>
                   <td className="hidden py-3 pr-3 align-top text-muted-foreground tabular-nums @md:table-cell">

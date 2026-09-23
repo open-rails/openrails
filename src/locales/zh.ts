@@ -27,12 +27,21 @@ export const zh: BillingUiMessageBundle = {
     default: "默认",
   },
   interval: {
-    day: "每天",
-    week: "每周",
-    month: "每月",
-    year: "每年",
-    days: "每 {count} 天",
-    hours: "每 {count} 小时",
+    every: {
+      hour: { "1": "每小时", other: "每 {count} 小时" },
+      day: { "1": "每天", other: "每 {count} 天" },
+      week: { "1": "每周", other: "每 {count} 周" },
+    },
+    per: {
+      hour: { "1": "/ 小时", other: "/ {count} 小时" },
+      day: { "1": "/ 天", other: "/ {count} 天" },
+      week: { "1": "/ 周", other: "/ {count} 周" },
+    },
+    access: {
+      hour: { other: "{count} 小时访问权限" },
+      day: { other: "{count} 天访问权限" },
+      week: { other: "{count} 周访问权限" },
+    },
     once: "一次性",
   },
   subscriptions: {
@@ -109,12 +118,18 @@ export const zh: BillingUiMessageBundle = {
     removePending: "正在处理移除。",
     inUse: "这张卡正在为有效订阅付款。请先将该订阅切换到其他银行卡。",
   },
+  checkout: {
+    renews: "{period}续订",
+  },
   history: {
     title: "付款记录",
     description: "你账户的扣款和退款。",
     empty: "还没有付款记录",
     emptyDescription: "已完成的付款会显示在这里。",
     date: "日期",
+    item: "项目",
+    subscription: "订阅",
+    purchase: "购买",
     method: "方式",
     status: "状态",
     amount: "金额",

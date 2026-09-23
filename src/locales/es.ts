@@ -27,12 +27,21 @@ export const es: BillingUiMessageBundle = {
     default: "Predeterminada",
   },
   interval: {
-    day: "cada día",
-    week: "cada semana",
-    month: "cada mes",
-    year: "cada año",
-    days: "cada {count} días",
-    hours: "cada {count} horas",
+    every: {
+      hour: { one: "cada hora", other: "cada {count} horas" },
+      day: { one: "cada día", other: "cada {count} días" },
+      week: { one: "cada semana", other: "cada {count} semanas" },
+    },
+    per: {
+      hour: { one: "/ hora", other: "/ {count} horas" },
+      day: { one: "/ día", other: "/ {count} días" },
+      week: { one: "/ semana", other: "/ {count} semanas" },
+    },
+    access: {
+      hour: { one: "1 hora de acceso", other: "{count} horas de acceso" },
+      day: { one: "1 día de acceso", other: "{count} días de acceso" },
+      week: { one: "1 semana de acceso", other: "{count} semanas de acceso" },
+    },
     once: "pago único",
   },
   subscriptions: {
@@ -114,12 +123,18 @@ export const es: BillingUiMessageBundle = {
     inUse:
       "Esta tarjeta paga una suscripción activa. Cambia primero esa suscripción a otra tarjeta.",
   },
+  checkout: {
+    renews: "Se renueva {period}",
+  },
   history: {
     title: "Historial de pagos",
     description: "Cargos y reembolsos de tu cuenta.",
     empty: "Aún no hay pagos",
     emptyDescription: "Los pagos completados aparecerán aquí.",
     date: "Fecha",
+    item: "Concepto",
+    subscription: "Suscripción",
+    purchase: "Compra",
     method: "Método",
     status: "Estado",
     amount: "Importe",

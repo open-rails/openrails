@@ -16,7 +16,7 @@ export interface BillingUiProviderProps {
   messages?: BillingUiMessageBundle | readonly BillingUiMessageBundle[]
   /** Host translation hook, consulted before the bundles. */
   t?: BillingUiTranslate
-  /** BCP 47 tag for dates and money; defaults to the browser's. */
+  /** BCP 47 tag for dates, money and plurals; defaults to the browser's. */
   locale?: string
   /** Host router for in-app links (e.g. the plans page). */
   navigate?: Navigate
@@ -33,8 +33,8 @@ export function BillingUiProvider({
   children,
 }: BillingUiProviderProps) {
   const translator = useMemo(
-    () => createTranslator(resolveMessages(messages), t),
-    [messages, t]
+    () => createTranslator(resolveMessages(messages), t, locale),
+    [messages, t, locale]
   )
   const ui = useMemo(
     () => ({ appearance, locale, navigate }),

@@ -77,6 +77,10 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
   pinned OpenRails currency registry (`currencies` option to extend it).
 - Messages: English is complete and the fallback; `messages` layers bundles,
   `t` lets the host's i18n win. `useMessages().error(err)` maps error codes.
+  Count-dependent messages are CLDR plural nodes (`{ one, other }`, plus an
+  exact `"1"` like ICU `=1`), selected with `locale`.
+- Periods are exact: OpenRails windows are hours, so 720h reads "every 30
+  days", never "monthly"; only exact weeks, days or hours are named.
 - Styles are scoped under `.orck`; `appearance.theme` is `light`, `dark`,
   `auto` or `inherit`. `inherit` bundles no palette: the host page's shadcn
   tokens (`--background`, `--primary`, ...) and its `.dark` class apply.

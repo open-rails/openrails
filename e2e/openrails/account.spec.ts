@@ -26,6 +26,9 @@ test("customer manages a subscription from the account page", async ({
   await expect(sub).toContainText("Membership")
   await expect(sub).toContainText("Active")
   await expect(sub).toContainText("$9.99")
+  // The seeded price is 720h: 30 days, not a calendar month.
+  await expect(sub).toContainText("every 30 days")
+  await expect(sub).not.toContainText(/month/i)
   await expect(sub).toContainText("Visa •••• 4242")
   await expect(sub).toContainText(/Renews \w{3} \d{1,2}, \d{4}/)
 
@@ -33,6 +36,10 @@ test("customer manages a subscription from the account page", async ({
   await expect(card).toContainText("Visa ending 4242")
 
   const payment = page.getByTestId("payment-row")
+  await expect(payment.getByTestId("payment-item")).toHaveText("Membership")
+  await expect(payment.getByTestId("payment-period")).toHaveText(
+    "every 30 days"
+  )
   await expect(payment).toContainText("Paid")
   await expect(payment).toContainText("$9.99")
 

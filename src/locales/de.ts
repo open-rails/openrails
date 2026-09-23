@@ -27,12 +27,21 @@ export const de: BillingUiMessageBundle = {
     default: "Standard",
   },
   interval: {
-    day: "täglich",
-    week: "wöchentlich",
-    month: "monatlich",
-    year: "jährlich",
-    days: "alle {count} Tage",
-    hours: "alle {count} Stunden",
+    every: {
+      hour: { one: "stündlich", other: "alle {count} Stunden" },
+      day: { one: "täglich", other: "alle {count} Tage" },
+      week: { one: "wöchentlich", other: "alle {count} Wochen" },
+    },
+    per: {
+      hour: { one: "/ Stunde", other: "/ {count} Stunden" },
+      day: { one: "/ Tag", other: "/ {count} Tage" },
+      week: { one: "/ Woche", other: "/ {count} Wochen" },
+    },
+    access: {
+      hour: { one: "1 Stunde Zugang", other: "{count} Stunden Zugang" },
+      day: { one: "1 Tag Zugang", other: "{count} Tage Zugang" },
+      week: { one: "1 Woche Zugang", other: "{count} Wochen Zugang" },
+    },
     once: "einmalig",
   },
   subscriptions: {
@@ -115,12 +124,18 @@ export const de: BillingUiMessageBundle = {
     inUse:
       "Diese Karte bezahlt ein aktives Abonnement. Stelle das Abonnement zuerst auf eine andere Karte um.",
   },
+  checkout: {
+    renews: "Verlängert sich {period}",
+  },
   history: {
     title: "Zahlungsverlauf",
     description: "Belastungen und Erstattungen deines Kontos.",
     empty: "Noch keine Zahlungen",
     emptyDescription: "Abgeschlossene Zahlungen erscheinen hier.",
     date: "Datum",
+    item: "Artikel",
+    subscription: "Abonnement",
+    purchase: "Kauf",
     method: "Methode",
     status: "Status",
     amount: "Betrag",

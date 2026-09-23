@@ -51,6 +51,8 @@ test("seeded customer lists and manages their own billing", async ({
       amount: "9990000",
       currency: "USD",
       subscription_id: sub.id,
+      price: expect.objectContaining({ recurring: { interval: "720h" } }),
+      product: expect.objectContaining({ display_name: "Membership" }),
     }),
   ])
 

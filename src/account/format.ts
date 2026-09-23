@@ -1,11 +1,13 @@
 import type {
   CardSummary,
   CurrencyScales,
+  Payment,
   Subscription,
   SubscriptionPrice,
 } from "../client/types"
 import type { Translator } from "../i18n/messages"
 import { formatAmount } from "../lib/money"
+import { accessLabel, everyLabel, intervalHours } from "../lib/period"
 
 export function formatDate(
   value: string | null | undefined,
@@ -34,21 +36,16 @@ export function formatMoney(
   return formatAmount(amount, currency, decimals, locale)
 }
 
+/** "every 30 days", "30 days of access" or "one-time". */
 export function intervalLabel(
   price: SubscriptionPrice | null | undefined,
-  { t }: Translator
+  m: Translator
 ): string | null {
   if (!price) return null
   const hours = price.access_duration_hours
-  if (!hours) return price.auto_renew === false ? t("interval.once") : null
-  if (price.auto_renew === false) return t("interval.once")
-  if (hours % 24 !== 0) return t("interval.hours", { count: hours })
-  const days = hours / 24
-  if (days === 1) return t("interval.day")
-  if (days === 7) return t("interval.week")
-  if (days >= 28 && days <= 31) return t("interval.month")
-  if (days >= 365 && days <= 366) return t("interval.year")
-  return t("interval.days", { count: days })
+  if (price.auto_renew === false)
+    return accessLabel(hours, m) ?? m.t("interval.once")
+  return everyLabel(hours, m)
 }
 
 export function subscriptionName(s: Subscription, { t }: Translator): string {
@@ -57,6 +54,20 @@ export function subscriptionName(s: Subscription, { t }: Translator): string {
     s.price?.key?.trim() ||
     t("subscriptions.fallbackName")
   )
+}
+
+/** What a payment bought: the product's name, else its kind, plus its cadence. */
+export function paymentItem(
+  p: Payment,
+  m: Translator
+): { name: string; detail: string | null } {
+  const hours = intervalHours(p.price?.recurring?.interval)
+  const recurring =
+    p.price?.type === "recurring" || hours !== null || !!p.subscription_id
+  const name =
+    p.product?.display_name?.trim() ||
+    m.t(recurring ? "history.subscription" : "history.purchase")
+  return { name, detail: recurring ? everyLabel(hours, m) : null }
 }
 
 export function brandName(brand: string | null | undefined, fallback: string) {
