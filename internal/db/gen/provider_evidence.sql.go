@@ -452,7 +452,7 @@ type UpsertProviderEvidenceSubscriptionParams struct {
 	NextBillingAt           *time.Time
 	LastBilledAt            *time.Time
 	AmountCents             int64
-	Currency                *string
+	Currency                string
 	Raw                     []byte
 }
 
@@ -562,7 +562,7 @@ type UpsertProviderEvidenceTransactionParams struct {
 	Type            string
 	Success         bool
 	AmountCents     int64
-	Currency        *string
+	Currency        string
 	OccurredAt      time.Time
 	Source          string
 	CustomerRef     string

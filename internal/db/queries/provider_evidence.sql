@@ -43,7 +43,7 @@ INSERT INTO openrails.provider_evidence_transactions (
     sqlc.arg(type)::text,
     sqlc.arg(success)::boolean,
     sqlc.arg(amount_cents)::bigint,
-    sqlc.narg(currency)::text,
+    sqlc.arg(currency)::text,
     sqlc.arg(occurred_at)::timestamptz,
     sqlc.arg(source)::text,
     sqlc.arg(customer_ref)::text,
@@ -99,7 +99,7 @@ INSERT INTO openrails.provider_evidence_subscriptions (
     sqlc.narg(next_billing_at)::timestamptz,
     sqlc.narg(last_billed_at)::timestamptz,
     sqlc.arg(amount_cents)::bigint,
-    sqlc.narg(currency)::text,
+    sqlc.arg(currency)::text,
     sqlc.arg(raw)::jsonb
 )
 ON CONFLICT (merchant_id, snapshot_id, record_key)

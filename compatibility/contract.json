@@ -5478,7 +5478,7 @@
     "internal/migrate/postgres/0001_schema.up.sql": "454ac14c0ba2dee1a8aadb904a3c3f5ad3b5ffd982d83464a8dc0755d107cc81",
     "internal/migrate/postgres/0002_resource_offer_index.up.sql": "c4d6aeb20190583f6f6e7b27f3e63ed117c1331b20dc8f4b203b8fff5bed0f99",
     "internal/migrate/postgres/0003_product_archive_operations.up.sql": "9a99937d82f75045ac54dcfcf7c0d9592279af7a6f01ac4060f2f86d4ea888ab",
-    "internal/migrate/postgres/0004_provider_evidence.up.sql": "165c13ad28fd0142c8b8434b04fc2f2387a11e30ed58a9632836d677574df9b0",
+    "internal/migrate/postgres/0004_provider_evidence.up.sql": "2ae9fc11d184372c3b51f428615987e7c72ffb9f9e3f00543daae1faf1dc5b51",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
     "internal/migrate/postgres/owned_tables.go": "fac780ccab35e8f09011e8e127fa8b34fd60290047150abdaf1d20e8fced84db",

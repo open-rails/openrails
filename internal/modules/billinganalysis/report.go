@@ -182,10 +182,7 @@ func listEvents(ctx context.Context, database *db.DB, merchantID merchant.ID, op
 	}
 	var out []evidenceEvent
 	for _, row := range rows {
-		currency := ""
-		if row.Currency != nil {
-			currency = *row.Currency
-		}
+		currency := row.Currency
 		out = append(out, evidenceEvent{Provider: row.Provider, PSPID: row.PspID.String(), EventKey: row.EventKey, TransactionID: row.TransactionID, SubscriptionRef: row.SubscriptionRef, Type: row.Type, Success: row.Success, AmountCents: row.AmountCents, Currency: currency, OccurredAt: row.OccurredAt, Source: row.Source, CustomerRef: row.CustomerRef, CustomerEmail: row.CustomerEmail, OrderRef: row.OrderRef, DeclineCode: row.DeclineCode, DeclineReason: row.DeclineReason, Raw: row.Raw})
 	}
 	return out, nil

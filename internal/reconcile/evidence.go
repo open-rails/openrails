@@ -117,7 +117,7 @@ func (s *PGEvidenceStore) StoreEvidence(ctx context.Context, runID uuid.UUID, bi
 				Type:            strings.TrimSpace(string(txn.Type)),
 				Success:         txn.Success,
 				AmountCents:     txn.AmountCents,
-				Currency:        evidenceCurrencyPtr(transactionCurrency(txn)),
+				Currency:        evidenceCurrencyValue(transactionCurrency(txn)),
 				OccurredAt:      occurredAt,
 				Source:          source,
 				CustomerRef:     customerRef,
@@ -149,7 +149,7 @@ func (s *PGEvidenceStore) StoreEvidence(ctx context.Context, runID uuid.UUID, bi
 				NextBillingAt:           sub.NextBillingAt,
 				LastBilledAt:            sub.LastBilledAt,
 				AmountCents:             sub.AmountCents,
-				Currency:                evidenceCurrencyPtr(sub.Currency),
+				Currency:                evidenceCurrencyValue(sub.Currency),
 				Raw:                     evidenceRaw(sub.Raw),
 			}); err != nil {
 				return fmt.Errorf("store provider subscription %s: %w", sub.RailSubscriptionID, err)
@@ -188,12 +188,12 @@ func evidenceCurrency(value string) string {
 	return value
 }
 
-func evidenceCurrencyPtr(value string) *string {
+func evidenceCurrencyValue(value string) string {
 	value = evidenceCurrency(value)
 	if value == "" {
-		return nil
+		value = "UNK"
 	}
-	return &value
+	return value
 }
 
 // evidenceRaw keeps malformed/empty provider payloads queryable without

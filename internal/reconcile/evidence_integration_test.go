@@ -63,7 +63,7 @@ func TestPGEvidenceStore_IdempotentAndScoped(t *testing.T) {
 				Status:             SubscriptionStatusActive,
 				CustomerID:         customer,
 				AmountCents:        999,
-				// NMI's roster omits currency; it must remain SQL NULL.
+				// NMI's roster omits currency; the evidence contract records UNK.
 			}},
 			Transactions: []RemoteTransaction{
 				{
@@ -141,7 +141,7 @@ func TestPGEvidenceStore_IdempotentAndScoped(t *testing.T) {
 		require.Equal(t, 2, count(ctx, `SELECT count(*) FROM openrails.provider_evidence_transactions WHERE merchant_id=openrails.current_merchant_id() AND psp_id=$1`, pspA))
 		require.Equal(t, 2, count(ctx, `SELECT count(*) FROM openrails.provider_evidence_snapshots WHERE merchant_id=openrails.current_merchant_id() AND psp_id=$1`, pspA))
 		require.Equal(t, 2, count(ctx, `SELECT count(*) FROM openrails.provider_evidence_transactions WHERE merchant_id=openrails.current_merchant_id() AND psp_id=$1`, pspA2))
-		require.Equal(t, 2, count(ctx, `SELECT count(*) FROM openrails.provider_evidence_subscriptions WHERE merchant_id=openrails.current_merchant_id() AND psp_id=$1 AND currency IS NULL`, pspA))
+		require.Equal(t, 2, count(ctx, `SELECT count(*) FROM openrails.provider_evidence_subscriptions WHERE merchant_id=openrails.current_merchant_id() AND psp_id=$1 AND currency='UNK'`, pspA))
 		return appDB.Qx(ctx).QueryRow(ctx, `SELECT first_snapshot_id,last_snapshot_id FROM openrails.provider_evidence_transactions WHERE merchant_id=openrails.current_merchant_id() AND psp_id=$1 ORDER BY occurred_at LIMIT 1`, pspA).Scan(&firstSnapshot, &lastSnapshot)
 	}))
 	require.NotEqual(t, uuid.Nil, firstSnapshot)

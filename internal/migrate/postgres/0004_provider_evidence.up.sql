@@ -48,7 +48,7 @@ CREATE TABLE openrails.provider_evidence_transactions (
     type text NOT NULL,
     success boolean NOT NULL,
     amount_cents bigint NOT NULL DEFAULT 0,
-    currency text,
+    currency text NOT NULL DEFAULT 'UNK',
     occurred_at timestamptz NOT NULL,
     source text NOT NULL DEFAULT '',
     customer_ref text NOT NULL DEFAULT '',
@@ -64,7 +64,7 @@ CREATE TABLE openrails.provider_evidence_transactions (
     CONSTRAINT provider_evidence_transactions_provider_nonempty CHECK (btrim(provider) <> ''),
     CONSTRAINT provider_evidence_transactions_event_key_nonempty CHECK (btrim(event_key) <> ''),
     CONSTRAINT provider_evidence_transactions_type_nonempty CHECK (btrim(type) <> ''),
-    CONSTRAINT provider_evidence_transactions_currency_shape CHECK (currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$'),
+    CONSTRAINT provider_evidence_transactions_currency_shape CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
     CONSTRAINT provider_evidence_transactions_raw_object CHECK (jsonb_typeof(raw) IN ('object','array'))
 );
 
@@ -101,11 +101,11 @@ CREATE TABLE openrails.provider_evidence_subscriptions (
     next_billing_at timestamptz,
     last_billed_at timestamptz,
     amount_cents bigint NOT NULL DEFAULT 0,
-    currency text,
+    currency text NOT NULL DEFAULT 'UNK',
     raw jsonb NOT NULL DEFAULT '{}'::jsonb,
     CONSTRAINT provider_evidence_subscriptions_provider_nonempty CHECK (btrim(provider) <> ''),
     CONSTRAINT provider_evidence_subscriptions_record_key_nonempty CHECK (btrim(record_key) <> ''),
-    CONSTRAINT provider_evidence_subscriptions_currency_shape CHECK (currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$'),
+    CONSTRAINT provider_evidence_subscriptions_currency_shape CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
     CONSTRAINT provider_evidence_subscriptions_raw_object CHECK (jsonb_typeof(raw) IN ('object','array'))
 );
 
