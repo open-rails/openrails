@@ -156,6 +156,63 @@ func (q *Queries) BindSolanaCheckoutSession(ctx context.Context, arg BindSolanaC
 	return result.RowsAffected(), nil
 }
 
+const claimHostedPurchaseDispatch = `-- name: ClaimHostedPurchaseDispatch :execrows
+UPDATE openrails.checkout_sessions
+SET rail_state = rail_state || '{"purchase_submitted":true}'::jsonb
+WHERE merchant_id=$1::uuid AND id=$2::uuid
+  AND deleted_at IS NULL AND mode='one_off' AND rail='stripe'
+  AND status IN ('created','failed') AND rail_state ? 'accepted_purchase'
+  AND NOT COALESCE((rail_state->>'purchase_submitted')::boolean, false)
+  AND NOT COALESCE((rail_state->>'provider_closed')::boolean, false)
+`
+
+type ClaimHostedPurchaseDispatchParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// Claim once before sending a hosted purchase to Stripe. A crash or transport
+// failure after this point has an unknown provider outcome; it is not a license
+// to create another payable session after provider idempotency retention ends.
+func (q *Queries) ClaimHostedPurchaseDispatch(ctx context.Context, arg ClaimHostedPurchaseDispatchParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimHostedPurchaseDispatch, arg.MerchantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const closeHostedCheckoutFromProvider = `-- name: CloseHostedCheckoutFromProvider :execrows
+UPDATE openrails.checkout_sessions
+SET status=CASE WHEN status='succeeded' THEN status ELSE $1::text END,
+    rail_state=COALESCE(rail_state, '{}'::jsonb) || '{"provider_closed":true}'::jsonb,
+    updated_at=$2::timestamptz
+WHERE merchant_id=$3::uuid AND id=$4::uuid
+  AND psp_id=$5::uuid AND rail='stripe' AND deleted_at IS NULL
+`
+
+type CloseHostedCheckoutFromProviderParams struct {
+	Status     string
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	PspID      uuid.UUID
+}
+
+func (q *Queries) CloseHostedCheckoutFromProvider(ctx context.Context, arg CloseHostedCheckoutFromProviderParams) (int64, error) {
+	result, err := q.db.Exec(ctx, closeHostedCheckoutFromProvider,
+		arg.Status,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+		arg.PspID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const completePaymentMethodSetupSession = `-- name: CompletePaymentMethodSetupSession :execrows
 UPDATE openrails.checkout_sessions
 SET rail_state=jsonb_set(rail_state,'{capture}',$1::jsonb),
@@ -219,6 +276,28 @@ AND ((cs.status='succeeded' AND (i.id IS NULL OR i.status<>'succeeded'))
 
 func (q *Queries) CountInvalidEngineCheckoutReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countInvalidEngineCheckoutReferences, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countInvalidPurchaseCheckoutReferences = `-- name: CountInvalidPurchaseCheckoutReferences :one
+SELECT count(*) FROM openrails.checkout_sessions s
+LEFT JOIN openrails.prices p ON p.merchant_id=s.merchant_id AND p.id=s.price_id
+WHERE s.merchant_id=$1::uuid AND s.rail_state ? 'accepted_purchase'
+ AND (p.id IS NULL
+   OR s.rail_state->'accepted_purchase'->>'product_id' IS DISTINCT FROM p.product_id::text
+   OR s.rail_state->'accepted_purchase'->>'price_id' IS DISTINCT FROM p.id::text
+   OR s.rail_state->'accepted_purchase'->>'amount' IS DISTINCT FROM p.amount::text
+   OR s.rail_state->'accepted_purchase'->>'currency' IS DISTINCT FROM p.currency
+   OR s.rail_state->'accepted_purchase'->>'access_duration_hours' IS DISTINCT FROM p.access_duration_hours::text
+   OR p.auto_renew)
+`
+
+// Archive integrity includes tombstones and preserves accepted commercial
+// snapshots against their immutable price identity, not current product text.
+func (q *Queries) CountInvalidPurchaseCheckoutReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countInvalidPurchaseCheckoutReferences, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -399,6 +478,39 @@ type ExpireCheckoutSessionsParams struct {
 // or#837: batched — row_limit bounds one statement, the caller loops.
 func (q *Queries) ExpireCheckoutSessions(ctx context.Context, arg ExpireCheckoutSessionsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, expireCheckoutSessions, arg.Now, arg.MerchantID, arg.RowLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const failHostedPurchaseInitialization = `-- name: FailHostedPurchaseInitialization :execrows
+UPDATE openrails.checkout_sessions
+SET status='failed', updated_at=$1::timestamptz,
+    rail_state=rail_state || jsonb_build_object('failure_reason', $2::text)
+      || CASE WHEN NOT COALESCE((rail_state->>'purchase_submitted')::boolean, false)
+              THEN '{"provider_closed":true}'::jsonb ELSE '{}'::jsonb END
+WHERE merchant_id=$3::uuid AND id=$4::uuid
+  AND deleted_at IS NULL AND mode='one_off' AND rail='stripe' AND rail_state ? 'accepted_purchase'
+  AND status<>'succeeded'
+`
+
+type FailHostedPurchaseInitializationParams struct {
+	Now        time.Time
+	Reason     string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// Validation failed before dispatch, or the dispatched request had an unknown
+// outcome. Decide from the persisted claim atomically, never a stale Go copy.
+func (q *Queries) FailHostedPurchaseInitialization(ctx context.Context, arg FailHostedPurchaseInitializationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, failHostedPurchaseInitialization,
+		arg.Now,
+		arg.Reason,
+		arg.MerchantID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -645,6 +757,42 @@ func (q *Queries) GetPaymentMethodSetupSessionForUpdate(ctx context.Context, arg
 	return i, err
 }
 
+const hasUnresolvedProductCheckout = `-- name: HasUnresolvedProductCheckout :one
+SELECT EXISTS (
+ SELECT 1 FROM openrails.checkout_sessions s
+ JOIN openrails.prices p ON p.id=s.price_id AND p.merchant_id=s.merchant_id
+ WHERE s.merchant_id=$1::uuid
+   AND s.customer_id=$2::uuid
+   AND p.product_id=$3::uuid
+   AND s.id<>$4::uuid AND s.mode='one_off'
+   AND s.status<>'succeeded'
+   AND (s.status IN ('created','requires_action')
+     OR (s.rail='stripe' AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean, false)))
+)
+`
+
+type HasUnresolvedProductCheckoutParams struct {
+	MerchantID      uuid.UUID
+	CustomerID      uuid.UUID
+	ProductID       uuid.UUID
+	ExceptSessionID uuid.UUID
+}
+
+// A local expiry or failed HTTP request does not prove a provider cannot charge.
+// Only a completed purchase or authoritative provider cancellation releases a
+// hosted session. NMI's accepted operation owns uncertainty after submission.
+func (q *Queries) HasUnresolvedProductCheckout(ctx context.Context, arg HasUnresolvedProductCheckoutParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasUnresolvedProductCheckout,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.ProductID,
+		arg.ExceptSessionID,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listStaleCheckoutSessions = `-- name: ListStaleCheckoutSessions :many
 SELECT id FROM openrails.checkout_sessions
 WHERE merchant_id = $1::uuid
@@ -702,6 +850,26 @@ func (q *Queries) LockCheckoutSessionForShare(ctx context.Context, arg LockCheck
 	return id, err
 }
 
+const lockPurchasableCheckoutPrice = `-- name: LockPurchasableCheckoutPrice :one
+SELECT p.id FROM openrails.prices p
+JOIN openrails.products product ON product.id=p.product_id AND product.merchant_id=p.merchant_id
+WHERE p.id=$1::uuid AND p.merchant_id=$2::uuid
+  AND NOT p.archived AND NOT product.archived
+FOR SHARE OF p, product
+`
+
+type LockPurchasableCheckoutPriceParams struct {
+	PriceID    uuid.UUID
+	MerchantID uuid.UUID
+}
+
+func (q *Queries) LockPurchasableCheckoutPrice(ctx context.Context, arg LockPurchasableCheckoutPriceParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockPurchasableCheckoutPrice, arg.PriceID, arg.MerchantID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const updateCheckoutSession = `-- name: UpdateCheckoutSession :execrows
 UPDATE openrails.checkout_sessions SET
     customer_id = $2,
@@ -718,11 +886,23 @@ UPDATE openrails.checkout_sessions SET
     subscription_id = $13,
     metadata = $14,
     rail_fields = $15,
-    rail_state = $16,
+    rail_state = COALESCE($16::jsonb, '{}'::jsonb)
+      || CASE WHEN rail_state ? '_openrails_request_fingerprint' THEN jsonb_build_object('_openrails_request_fingerprint', rail_state->'_openrails_request_fingerprint') ELSE '{}'::jsonb END
+      || CASE WHEN rail_state ? 'accepted_purchase' THEN jsonb_build_object('accepted_purchase', rail_state->'accepted_purchase') ELSE '{}'::jsonb END
+      || CASE WHEN rail_state->>'purchase_submitted'='true' THEN '{"purchase_submitted":true}'::jsonb ELSE '{}'::jsonb END
+      || CASE WHEN rail_state->>'provider_closed'='true' THEN '{"provider_closed":true}'::jsonb ELSE '{}'::jsonb END,
     psp_id = $17::uuid,
     updated_at = $18
 WHERE checkout_sessions.merchant_id = $19::uuid AND id = $1
   AND deleted_at IS NULL
+  AND (NOT COALESCE(rail_state ? 'accepted_purchase', false)
+       OR status <> 'succeeded' OR $6 = 'succeeded')
+  AND (NOT COALESCE(rail_state ? 'accepted_purchase', false)
+       OR (customer_id=$2 AND price_id IS NOT DISTINCT FROM $3 AND mode=$4 AND rail=$5
+           AND amount IS NOT DISTINCT FROM $7 AND currency IS NOT DISTINCT FROM $8
+           AND psp_id=$17::uuid))
+  AND (NOT COALESCE((rail_state->>'provider_closed')::boolean, false)
+       OR COALESCE(($16::jsonb->>'provider_closed')::boolean, false))
 `
 
 type UpdateCheckoutSessionParams struct {

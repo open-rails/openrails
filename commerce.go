@@ -43,6 +43,8 @@ type SolanaCheckoutToken struct {
 
 // CheckoutPSPConfig describes one armed PSP for browser checkout.
 type CheckoutPSPConfig struct {
+	// PSPID is the public stable account selector used by saved-method setup.
+	PSPID string `json:"psp_id"`
 	// Key is the checkout payment.rail selector.
 	Key string `json:"key"`
 	// Rail is the gateway kind: nmi, ccbill, stripe or solana.
@@ -70,13 +72,20 @@ type CheckoutCustomerIdentity struct {
 // interaction. Do not use this command as an unattended way to establish a
 // customer-initiated stored-card agreement.
 type CreateCheckoutSessionRequest struct {
-	Customer       CheckoutCustomerIdentity `json:"customer"`
-	PriceID        string                   `json:"price_id,omitzero"`
-	PaymentOptions CheckoutPaymentOptions   `json:"payment"`
-	Metadata       map[string]string        `json:"metadata"`
-	IdempotencyKey string                   `json:"-"`
-	SuccessURL     string                   `json:"success_url"` // Required for Stripe hosted checkout
-	CancelURL      string                   `json:"cancel_url"`  // Required for Stripe hosted checkout
+	Customer CheckoutCustomerIdentity `json:"customer"`
+	// Supply exactly one of PriceID or PriceKey. Keys are always opaque, even
+	// when they resemble UUIDs. Accepted retries retain the original offer.
+	PriceID  string `json:"price_id,omitzero"`
+	PriceKey string `json:"price_key,omitempty"`
+	// Entitlement optionally binds admission to the opaque resource the host
+	// showed. OpenRails verifies the selected product grants this key.
+	Entitlement    string                 `json:"entitlement,omitempty"`
+	OfferKind      OfferKind              `json:"offer_kind,omitempty"`
+	PaymentOptions CheckoutPaymentOptions `json:"payment"`
+	Metadata       map[string]string      `json:"metadata"`
+	IdempotencyKey string                 `json:"-"`
+	SuccessURL     string                 `json:"success_url"` // Required for Stripe hosted checkout
+	CancelURL      string                 `json:"cancel_url"`  // Required for Stripe hosted checkout
 }
 
 // CreatePaymentMethodSessionRequest authorizes a nonmonetary card setup.

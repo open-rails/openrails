@@ -101,6 +101,16 @@ UPDATE openrails.payment_methods SET
     updated_at = sqlc.arg(updated_at)
 WHERE payment_methods.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
+-- Verified Stripe setup/provider readback can complete a historical mirror
+-- missing its customer reference. It cannot rename an existing binding.
+-- name: BindMissingStripeCustomerReference :execrows
+UPDATE openrails.payment_methods
+SET rail_customer_ref=sqlc.arg(rail_customer_ref)::text, updated_at=sqlc.arg(now)::timestamptz
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
+ AND customer_id=sqlc.arg(customer_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
+ AND rail='stripe' AND rail_method_ref=sqlc.arg(rail_method_ref)::text
+ AND rail_customer_ref='' AND custodian='psp' AND custodian_id IS NULL AND park_reason='';
+
 -- name: ListPaymentMethodsByRails :many
 SELECT * FROM openrails.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.rail = ANY(sqlc.arg(rails)::text[])

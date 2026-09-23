@@ -50,7 +50,7 @@ func TestProductAccessStringResourceRequests(t *testing.T) {
 	require.Equal(t, "next", page.NextCursor)
 	require.True(t, page.HasMore)
 	require.Equal(t, 3, calls)
-	empty, err := client.ProductAccess.CheckMany(t.Context(), &ProductAccessCheckManyParams{CustomerID: customer})
+	empty, err := client.ProductAccess.CheckMany(t.Context(), &ProductAccessCheckManyParams{CustomerID: customer, ProductIDs: []string{}})
 	require.NoError(t, err)
 	require.Empty(t, empty)
 	for _, ids := range [][]string{{"not-a-product"}, {PriceID(uuid.New()).String()}, strings.Split(strings.Repeat(product+",", 101), ",")} {

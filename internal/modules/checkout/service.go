@@ -225,8 +225,15 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 			return response, err
 		}
 	}
-	// #774: price_id accepts either a price UUID/opaque id or a price_key.
-	price, err := catalog.ResolveReference(ctx, s.PriceService, req.PriceID)
+	if req.acceptedPurchase != nil {
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return nil, err
+		}
+		price, product := req.acceptedPurchase.catalog(mid.UUID())
+		return s.processOneTimePurchase(ctx, req, user, price, product, &CoverageInfo{}, req.Rail)
+	}
+	price, err := resolveCheckoutPrice(ctx, s.PriceService, req.PriceID, req.PriceKey)
 	if err != nil {
 		return nil, fmt.Errorf("price not found: %w", err)
 	}
@@ -241,6 +248,11 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 	}
 	if !product.IsPurchasable() {
 		return nil, errors.New("product is not available for purchase")
+	}
+	if s.PurchaseService != nil {
+		if err := s.PurchaseService.checkPermanentOwnership(ctx, user.ID, price, product); err != nil {
+			return nil, err
+		}
 	}
 
 	// Normalize rail
@@ -318,7 +330,12 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 	}
 
 	// Check for existing coverage and determine if purchase is allowed
-	coverage, err := s.GetUserProductCoverage(ctx, user.ID, product)
+	var coverage *CoverageInfo
+	if permanentPurchase(price) && s.PurchaseService != nil {
+		coverage, err = s.PurchaseService.purchaseCoverage(ctx, user.ID, price, product)
+	} else {
+		coverage, err = s.GetUserProductCoverage(ctx, user.ID, product)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to check existing coverage: %w", err)
 	}
@@ -836,6 +853,7 @@ func (s *CheckoutService) processStripePayment(
 
 	urlStr, err := s.createStripeCheckoutSession(ctx, stripeCheckoutParams{
 		Mode:              "payment",
+		AcceptedPurchase:  req.acceptedPurchase != nil,
 		InlinePrice:       inline,
 		SuccessURL:        successURL,
 		CancelURL:         cancelURL,
@@ -1079,6 +1097,7 @@ type stripeCheckoutInlinePrice struct {
 }
 
 type stripeCheckoutParams struct {
+	AcceptedPurchase  bool
 	InlinePrice       *stripeCheckoutInlinePrice
 	Mode              string
 	PriceID           string
@@ -1147,6 +1166,26 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	stripeapi.SetIdempotencyKey(req, stripeCheckoutIdempotencyKey(params.IdempotencyKey))
 
 	client := s.StripeClients.Client(s.Config, 0)
+	if params.AcceptedPurchase {
+		if s.PurchaseService == nil || s.PurchaseService.database == nil {
+			return "", errors.New("accepted checkout dispatch database unavailable")
+		}
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return "", err
+		}
+		id, err := openrails.ParseCheckoutSessionID(params.CheckoutSessionID)
+		if err != nil {
+			return "", err
+		}
+		claimed, err := s.PurchaseService.database.Gen(ctx).ClaimHostedPurchaseDispatch(ctx, gen.ClaimHostedPurchaseDispatchParams{MerchantID: mid.UUID(), ID: id.UUID()})
+		if err != nil {
+			return "", err
+		}
+		if claimed == 0 {
+			return "", ErrCheckoutSessionPending
+		}
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("stripe checkout failed: %w", err)

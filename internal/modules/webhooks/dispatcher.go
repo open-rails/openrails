@@ -33,7 +33,7 @@ type webhookCheckoutSessionStore interface {
 	MarkSucceeded(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string) error
 	MarkSucceededWithSubscription(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string, subscriptionID uuid.UUID) error
 	MarkFailed(ctx context.Context, sessionID uuid.UUID, failureMessage, failureCode string) error
-	MarkExpired(ctx context.Context, sessionID uuid.UUID, reason string) error
+	MarkProviderCheckoutClosed(ctx context.Context, sessionID uuid.UUID, status models.CheckoutSessionStatus) error
 }
 
 // WebhookMessage is the runtime representation of a webhook event that needs dispatching.

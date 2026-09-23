@@ -341,6 +341,11 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 	if req.Mode == string(models.CheckoutSessionModePaymentMethod) {
 		return s.createPaymentMethodSetup(ctx, req, user)
 	}
+	if req.Mode != string(models.CheckoutSessionModeSolanaCancel) && req.Mode != string(models.CheckoutSessionModeSolanaTierChange) {
+		if err := validateCheckoutPriceSelector(req.PriceID, req.PriceKey); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.requireProviderWrites(); err != nil {
 		return nil, err
 	}
@@ -366,7 +371,7 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 				if err != nil {
 					return nil, err
 				}
-				if cached.MembershipQuote != nil {
+				if cached.MembershipQuote != nil || cached.Mode == string(models.CheckoutSessionModeOneOff) && s.db != nil {
 					return s.GetSession(ctx, cached.ID.UUID(), user)
 				}
 				return cached, nil
@@ -492,19 +497,25 @@ func checkoutSessionRequestFingerprintForRail(req *CheckoutSessionCreateRequest,
 		}
 	}
 	payload, _ := json.Marshal(struct {
-		PriceID    string
-		Mode       string
-		Payment    CheckoutSessionPaymentRequest
-		Metadata   map[string]string
-		SuccessURL string
-		CancelURL  string
+		PriceID     string
+		PriceKey    string `json:",omitempty"`
+		Mode        string
+		Payment     CheckoutSessionPaymentRequest
+		Metadata    map[string]string
+		SuccessURL  string
+		CancelURL   string
+		Entitlement string              `json:",omitempty"`
+		OfferKind   openrails.OfferKind `json:",omitempty"`
 	}{
-		PriceID:    strings.TrimSpace(req.PriceID),
-		Mode:       strings.TrimSpace(req.Mode),
-		Payment:    payment,
-		Metadata:   normalizeMetadata(req.Metadata),
-		SuccessURL: strings.TrimSpace(req.SuccessURL),
-		CancelURL:  strings.TrimSpace(req.CancelURL),
+		PriceID:     strings.TrimSpace(req.PriceID),
+		PriceKey:    req.PriceKey,
+		Mode:        strings.TrimSpace(req.Mode),
+		Payment:     payment,
+		Metadata:    normalizeMetadata(req.Metadata),
+		SuccessURL:  strings.TrimSpace(req.SuccessURL),
+		CancelURL:   strings.TrimSpace(req.CancelURL),
+		Entitlement: req.Entitlement,
+		OfferKind:   req.OfferKind,
 	})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
@@ -515,7 +526,7 @@ func decodeCheckoutSessionIdempotencyResult(payload json.RawMessage, req *Checko
 	if err := json.Unmarshal(payload, &cached); err == nil && cached.Response != nil {
 		fingerprint := checkoutSessionRequestFingerprintForRail(req, user, cached.Response.Payment.Rail)
 		if cached.RequestFingerprint != "" && fingerprint != "" && cached.RequestFingerprint != fingerprint {
-			return nil, fmt.Errorf("%w: idempotency key reused with different checkout session parameters", ErrCheckoutSessionConflict)
+			return nil, fmt.Errorf("%w: %w", ErrCheckoutSessionConflict, openrails.ErrIdempotencyKeyReused)
 		}
 		return cached.Response, nil
 	}
@@ -533,13 +544,28 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	case models.CheckoutSessionModeSolanaCancel, models.CheckoutSessionModeSolanaTierChange:
 		return s.createSolanaLifecycleSession(ctx, req, user)
 	}
-
-	if strings.TrimSpace(req.PriceID) == "" {
-		return nil, fmt.Errorf("%w: price_id is required", ErrCheckoutSessionValidation)
+	// The durable buyer-bound agreement wins over a moved price key, archived
+	// product, changed routing policy, or a missing replay-cache entry.
+	if s.db != nil && strings.TrimSpace(req.IdempotencyKey) != "" {
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return nil, err
+		}
+		existing, err := s.repo.GetByID(ctx, idempotentCheckoutSessionID(mid.UUID(), req.IdempotencyKey))
+		if err == nil {
+			stored, _ := existing.RailState[checkoutSessionFingerprintKey].(string)
+			if existing.CustomerID.String() != user.ID || stored == "" || stored != checkoutSessionRequestFingerprintForRail(req, user, string(existing.Rail)) {
+				return nil, fmt.Errorf("%w: %w", ErrCheckoutSessionConflict, openrails.ErrIdempotencyKeyReused)
+			}
+			existing.IdempotencyKey = normalize.OptionalString(req.IdempotencyKey)
+			return s.resumeIdempotentSession(db.WithPSPID(ctx, existing.PspID), existing, existing, &req.Payment, req.SuccessURL, req.CancelURL, user)
+		}
+		if !db.IsNotFound(err) {
+			return nil, err
+		}
 	}
 
-	// #774: price_id accepts a price_key too.
-	price, err := catalog.ResolveReference(ctx, s.priceService, req.PriceID)
+	price, err := resolveCheckoutPrice(ctx, s.priceService, req.PriceID, req.PriceKey)
 	if err != nil {
 		return nil, fmt.Errorf("%w: price not found", ErrCheckoutSessionValidation)
 	}
@@ -552,6 +578,9 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	}
 	if !product.IsPurchasable() {
 		return nil, fmt.Errorf("%w: product is not active", ErrCheckoutSessionValidation)
+	}
+	if err := validateOfferAssertion(price, product, req.Entitlement, req.OfferKind); err != nil {
+		return nil, err
 	}
 
 	// or#288 + #848: resolve the processor ONCE, before the session exists.
@@ -623,6 +652,12 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		requestFingerprint = checkoutSessionRequestFingerprintForRail(req, user, rail)
 	}
 	railState := map[string]any{}
+	if req.OfferKind != "" {
+		railState["requested_offer_kind"] = string(req.OfferKind)
+	}
+	if req.Entitlement != "" {
+		railState["requested_entitlement"] = req.Entitlement
+	}
 	if requestFingerprint != "" {
 		railState[checkoutSessionFingerprintKey] = requestFingerprint
 	}
@@ -692,7 +727,11 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		}
 	}
 
-	if err := s.repo.Create(ctx, session); err != nil {
+	create := s.repo.Create
+	if mode == models.CheckoutSessionModeOneOff {
+		create = s.admitPurchaseSession
+	}
+	if err := create(ctx, session); err != nil {
 		if idempotencyKey != "" {
 			existing, getErr := s.repo.GetByID(ctx, session.ID)
 			if getErr == nil {
@@ -707,16 +746,14 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	}
 
 	if err := s.initializeSession(ctx, session, &req.Payment, req.SuccessURL, req.CancelURL, user); err != nil {
-		_ = s.MarkFailed(ctx, session.ID, err.Error(), "")
+		if !errors.Is(err, ErrCheckoutSessionPending) {
+			_ = s.markInitializationFailed(ctx, session, err)
+		}
 		return nil, err
 	}
 
 	session.UpdatedAt = s.now()
-	if err := s.repo.Update(ctx, session); err != nil {
-		return nil, fmt.Errorf("failed to update checkout session: %w", err)
-	}
-
-	return s.sessionToResponse(session), nil
+	return s.saveInitializedSession(ctx, session)
 }
 
 func idempotentCheckoutSessionID(merchantID uuid.UUID, key string) uuid.UUID {
@@ -747,7 +784,7 @@ func (s *CheckoutSessionService) resumeIdempotentSession(
 		storedFingerprint != "" &&
 		storedFingerprint == requestedFingerprint
 	if !parametersMatch {
-		return nil, fmt.Errorf("%w: idempotency key reused with different checkout session parameters", ErrCheckoutSessionConflict)
+		return nil, fmt.Errorf("%w: %w", ErrCheckoutSessionConflict, openrails.ErrIdempotencyKeyReused)
 	}
 
 	if response, found, err := s.initialMembershipSessionResponse(ctx, existing); found || err != nil {
@@ -759,14 +796,13 @@ func (s *CheckoutSessionService) resumeIdempotentSession(
 	case models.CheckoutSessionStatusCreated, models.CheckoutSessionStatusFailed:
 		existing.IdempotencyKey = requested.IdempotencyKey
 		if err := s.initializeSession(ctx, existing, payment, successURL, cancelURL, user); err != nil {
-			_ = s.MarkFailed(ctx, existing.ID, err.Error(), "")
+			if !errors.Is(err, ErrCheckoutSessionPending) {
+				_ = s.markInitializationFailed(ctx, existing, err)
+			}
 			return nil, err
 		}
 		existing.UpdatedAt = s.now()
-		if err := s.repo.Update(ctx, existing); err != nil {
-			return nil, fmt.Errorf("failed to update idempotent checkout session: %w", err)
-		}
-		return s.sessionToResponse(existing), nil
+		return s.saveInitializedSession(ctx, existing)
 	default:
 		return nil, fmt.Errorf("%w: previous checkout session is %s", ErrCheckoutSessionConflict, existing.Status)
 	}
@@ -1177,6 +1213,7 @@ func rejectCheckoutSessionPAN(req *CheckoutSessionCreateRequest) error {
 		"subscription_id":      req.SubscriptionID,
 		"new_price_id":         req.NewPriceID,
 		"price_id":             req.PriceID,
+		"price_key":            req.PriceKey,
 	}
 	if err := RejectPANShapedFields(&CheckoutRequest{Metadata: extraFields}); err != nil {
 		return fmt.Errorf("%w: invalid checkout input: %v", ErrCheckoutSessionValidation, err)
@@ -1970,9 +2007,12 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 	// The accepted operation belongs to this persisted session. The caller's
 	// replay key resolves the session; it is not a session identity.
 	req.IdempotencyKey = "checkout_native_session:" + session.ID.String()
-	if session.Rail == models.RailStripe || session.Rail == models.RailCCBill {
-		req.CheckoutSessionID = openrails.CheckoutSessionID(session.ID).String()
+	req.CheckoutSessionID = openrails.CheckoutSessionID(session.ID).String()
+	terms, err := purchaseTerms(session)
+	if err != nil {
+		return err
 	}
+	req.acceptedPurchase = terms
 
 	resp, err := s.checkoutService.Checkout(ctx, req, user)
 	if err != nil {
@@ -2138,6 +2178,16 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 
 	if terms, err := readInitialMembershipQuote(session); err == nil {
 		resp.MembershipQuote = &CheckoutSessionMembershipQuote{ProductName: terms.ProductName, CycleHours: int64(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour), Entitlements: models.CloneEntitlementsSpec(terms.Entitlements)}
+	}
+	// Local HTTP failure and TTL expiry cannot declare a submitted Stripe
+	// purchase financially failed. Keep callers polling the accepted attempt
+	// until payment or authoritative provider closure resolves it.
+	if _, accepted := session.RailState[acceptedPurchaseTermsKey]; accepted && session.Rail == models.RailStripe && session.RailState["purchase_submitted"] == true && session.RailState["provider_closed"] != true {
+		if session.Status == models.CheckoutSessionStatusCreated || session.Status == models.CheckoutSessionStatusFailed || session.Status == models.CheckoutSessionStatusExpired || session.Status == models.CheckoutSessionStatusCanceled || session.Status == models.CheckoutSessionStatusRequiresAction && s.isExpired(session) {
+			resp.Status = "processing"
+			resp.ExpiresAt = nil
+			resp.Message = "The original payment outcome is being verified. Keep this checkout attempt."
+		}
 	}
 
 	if action := s.buildNextAction(resp); action != nil {
@@ -2381,12 +2431,13 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 	}
 
 	result, err := s.checkoutService.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
-		UserID:        session.CustomerID.String(),
-		PriceID:       *session.PriceID,
-		Rail:          "solana",
-		TransactionID: signature,
-		Amount:        *session.Amount,
-		Currency:      *session.Currency,
+		CheckoutSessionID: session.ID,
+		UserID:            session.CustomerID.String(),
+		PriceID:           *session.PriceID,
+		Rail:              "solana",
+		TransactionID:     signature,
+		Amount:            *session.Amount,
+		Currency:          *session.Currency,
 		Metadata: map[string]any{
 			"solana_reference":    referenceValue,
 			"checkout_session_id": session.ID.String(),

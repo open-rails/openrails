@@ -45,10 +45,13 @@ type checkoutSessionPaymentParams struct {
 }
 
 type checkoutSessionCreateRequest struct {
-	// PriceID is required for purchase/subscribe modes. For solana_cancel /
+	// Exactly one PriceID or PriceKey is required for purchase/subscribe. For solana_cancel /
 	// solana_tier_change it is optional (cancel uses the subscription's current
 	// price; tier-change uses new_price_id).
 	PriceID        string                       `json:"price_id,omitempty" binding:"omitempty"`
+	PriceKey       string                       `json:"price_key,omitempty" binding:"omitempty"`
+	Entitlement    string                       `json:"entitlement,omitempty" binding:"omitempty"`
+	OfferKind      openrails.OfferKind          `json:"offer_kind,omitempty"`
 	Mode           string                       `json:"mode,omitempty" binding:"omitempty,oneof=one_off subscription solana_cancel solana_tier_change payment_method"`
 	Payment        checkoutSessionPaymentParams `json:"payment" binding:"required"`
 	Metadata       map[string]string            `json:"metadata,omitempty"`
@@ -113,7 +116,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 			req.Metadata["e2e_run_id"] = e2eRunID
 		}
 	}
-	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, SuccessURL: req.SuccessURL, CancelURL: req.CancelURL, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{PSPID: req.Payment.PSPID, Rail: req.Payment.Rail, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, NameOnCard: req.Payment.NameOnCard, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
+	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, PriceKey: req.PriceKey, Entitlement: req.Entitlement, OfferKind: req.OfferKind, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, SuccessURL: req.SuccessURL, CancelURL: req.CancelURL, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{PSPID: req.Payment.PSPID, Rail: req.Payment.Rail, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, NameOnCard: req.Payment.NameOnCard, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
 	resp, err := r.State.CheckoutSessionService.CreateSession(r.Request.Context(), svcReq, user)
 	if err != nil {
 		log.WithError(err).WithField("request_id", r.RequestID()).Error("Failed to create checkout session")
@@ -249,6 +252,10 @@ type checkoutSessionErrorContext struct {
 }
 
 func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutSessionErrorContext) {
+	if errors.Is(err, openrails.ErrIdempotencyKeyReused) {
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "idempotency_key_reused", "idempotency key reused with different checkout session parameters"))
+		return
+	}
 	var pmErr *paymentmethods.PaymentMethodError
 	if errors.As(err, &pmErr) {
 		writePaymentMethodError(r, pmErr)

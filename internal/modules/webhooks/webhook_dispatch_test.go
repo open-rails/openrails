@@ -109,8 +109,12 @@ func (s *recordingCheckoutSessionStore) MarkFailed(_ context.Context, id uuid.UU
 	return nil
 }
 
-func (s *recordingCheckoutSessionStore) MarkExpired(_ context.Context, id uuid.UUID, reason string) error {
-	s.expiredID, s.expiredReason = id, reason
+func (s *recordingCheckoutSessionStore) MarkProviderCheckoutClosed(_ context.Context, id uuid.UUID, status models.CheckoutSessionStatus) error {
+	if status == models.CheckoutSessionStatusFailed {
+		s.failedID, s.failedMessage, s.failedCode = id, "stripe async payment failed", "async_payment_failed"
+	} else {
+		s.expiredID, s.expiredReason = id, "checkout expired"
+	}
 	return nil
 }
 

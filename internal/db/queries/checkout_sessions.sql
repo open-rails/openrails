@@ -43,11 +43,23 @@ UPDATE openrails.checkout_sessions SET
     subscription_id = sqlc.narg(subscription_id),
     metadata = sqlc.narg(metadata),
     rail_fields = sqlc.narg(rail_fields),
-    rail_state = sqlc.narg(rail_state),
+    rail_state = COALESCE(sqlc.narg(rail_state)::jsonb, '{}'::jsonb)
+      || CASE WHEN rail_state ? '_openrails_request_fingerprint' THEN jsonb_build_object('_openrails_request_fingerprint', rail_state->'_openrails_request_fingerprint') ELSE '{}'::jsonb END
+      || CASE WHEN rail_state ? 'accepted_purchase' THEN jsonb_build_object('accepted_purchase', rail_state->'accepted_purchase') ELSE '{}'::jsonb END
+      || CASE WHEN rail_state->>'purchase_submitted'='true' THEN '{"purchase_submitted":true}'::jsonb ELSE '{}'::jsonb END
+      || CASE WHEN rail_state->>'provider_closed'='true' THEN '{"provider_closed":true}'::jsonb ELSE '{}'::jsonb END,
     psp_id = sqlc.arg(psp_id)::uuid,
     updated_at = sqlc.arg(updated_at)
 WHERE checkout_sessions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
-  AND deleted_at IS NULL;
+  AND deleted_at IS NULL
+  AND (NOT COALESCE(rail_state ? 'accepted_purchase', false)
+       OR status <> 'succeeded' OR $6 = 'succeeded')
+  AND (NOT COALESCE(rail_state ? 'accepted_purchase', false)
+       OR (customer_id=$2 AND price_id IS NOT DISTINCT FROM $3 AND mode=$4 AND rail=$5
+           AND amount IS NOT DISTINCT FROM $7 AND currency IS NOT DISTINCT FROM $8
+           AND psp_id=sqlc.arg(psp_id)::uuid))
+  AND (NOT COALESCE((rail_state->>'provider_closed')::boolean, false)
+       OR COALESCE((sqlc.narg(rail_state)::jsonb->>'provider_closed')::boolean, false));
 
 -- name: BindSolanaCheckoutSession :execrows
 UPDATE openrails.checkout_sessions SET
@@ -194,3 +206,71 @@ AND ((cs.status='succeeded' AND (i.id IS NULL OR i.status<>'succeeded'))
    i.rail<>cs.rail OR i.psp_id<>cs.psp_id OR i.price_id<>cs.price_id OR i.payload->'terms'->>'customer_id'<>cs.customer_id::text
    OR (i.status='succeeded' AND (cs.status<>'succeeded' OR cs.subscription_id::text IS DISTINCT FROM i.payload->'terms'->>'subscription_id' OR cs.payment_id::text IS DISTINCT FROM i.payload->'terms'->>'payment_id'))
    OR (i.status='failed_terminal' AND cs.status<>'failed'))));
+-- name: LockPurchasableCheckoutPrice :one
+SELECT p.id FROM openrails.prices p
+JOIN openrails.products product ON product.id=p.product_id AND product.merchant_id=p.merchant_id
+WHERE p.id=sqlc.arg(price_id)::uuid AND p.merchant_id=sqlc.arg(merchant_id)::uuid
+  AND NOT p.archived AND NOT product.archived
+FOR SHARE OF p, product;
+
+-- Claim once before sending a hosted purchase to Stripe. A crash or transport
+-- failure after this point has an unknown provider outcome; it is not a license
+-- to create another payable session after provider idempotency retention ends.
+-- name: ClaimHostedPurchaseDispatch :execrows
+UPDATE openrails.checkout_sessions
+SET rail_state = rail_state || '{"purchase_submitted":true}'::jsonb
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
+  AND deleted_at IS NULL AND mode='one_off' AND rail='stripe'
+  AND status IN ('created','failed') AND rail_state ? 'accepted_purchase'
+  AND NOT COALESCE((rail_state->>'purchase_submitted')::boolean, false)
+  AND NOT COALESCE((rail_state->>'provider_closed')::boolean, false);
+
+-- Validation failed before dispatch, or the dispatched request had an unknown
+-- outcome. Decide from the persisted claim atomically, never a stale Go copy.
+-- name: FailHostedPurchaseInitialization :execrows
+UPDATE openrails.checkout_sessions
+SET status='failed', updated_at=sqlc.arg(now)::timestamptz,
+    rail_state=rail_state || jsonb_build_object('failure_reason', sqlc.arg(reason)::text)
+      || CASE WHEN NOT COALESCE((rail_state->>'purchase_submitted')::boolean, false)
+              THEN '{"provider_closed":true}'::jsonb ELSE '{}'::jsonb END
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
+  AND deleted_at IS NULL AND mode='one_off' AND rail='stripe' AND rail_state ? 'accepted_purchase'
+  AND status<>'succeeded';
+
+-- name: CloseHostedCheckoutFromProvider :execrows
+UPDATE openrails.checkout_sessions
+SET status=CASE WHEN status='succeeded' THEN status ELSE sqlc.arg(status)::text END,
+    rail_state=COALESCE(rail_state, '{}'::jsonb) || '{"provider_closed":true}'::jsonb,
+    updated_at=sqlc.arg(now)::timestamptz
+WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
+  AND psp_id=sqlc.arg(psp_id)::uuid AND rail='stripe' AND deleted_at IS NULL;
+
+-- Archive integrity includes tombstones and preserves accepted commercial
+-- snapshots against their immutable price identity, not current product text.
+-- name: CountInvalidPurchaseCheckoutReferences :one
+SELECT count(*) FROM openrails.checkout_sessions s
+LEFT JOIN openrails.prices p ON p.merchant_id=s.merchant_id AND p.id=s.price_id
+WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.rail_state ? 'accepted_purchase'
+ AND (p.id IS NULL
+   OR s.rail_state->'accepted_purchase'->>'product_id' IS DISTINCT FROM p.product_id::text
+   OR s.rail_state->'accepted_purchase'->>'price_id' IS DISTINCT FROM p.id::text
+   OR s.rail_state->'accepted_purchase'->>'amount' IS DISTINCT FROM p.amount::text
+   OR s.rail_state->'accepted_purchase'->>'currency' IS DISTINCT FROM p.currency
+   OR s.rail_state->'accepted_purchase'->>'access_duration_hours' IS DISTINCT FROM p.access_duration_hours::text
+   OR p.auto_renew);
+
+-- A local expiry or failed HTTP request does not prove a provider cannot charge.
+-- Only a completed purchase or authoritative provider cancellation releases a
+-- hosted session. NMI's accepted operation owns uncertainty after submission.
+-- name: HasUnresolvedProductCheckout :one
+SELECT EXISTS (
+ SELECT 1 FROM openrails.checkout_sessions s
+ JOIN openrails.prices p ON p.id=s.price_id AND p.merchant_id=s.merchant_id
+ WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid
+   AND s.customer_id=sqlc.arg(customer_id)::uuid
+   AND p.product_id=sqlc.arg(product_id)::uuid
+   AND s.id<>sqlc.arg(except_session_id)::uuid AND s.mode='one_off'
+   AND s.status<>'succeeded'
+   AND (s.status IN ('created','requires_action')
+     OR (s.rail='stripe' AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean, false)))
+);

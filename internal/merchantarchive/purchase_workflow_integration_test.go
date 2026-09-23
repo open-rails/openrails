@@ -471,6 +471,28 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 	}
 	if !recurring {
 		var payload, evidence map[string]json.RawMessage
+		var checkoutState []byte
+		require.NoError(t, source.MerchantTx(merchant.WithID(t.Context(), id), func(ctx context.Context, tx pgx.Tx) error {
+			row, err := source.NewWithPgxTx(tx).Gen(ctx).GetCheckoutSessionByID(ctx, gen.GetCheckoutSessionByIDParams{MerchantID: id.UUID(), ID: sessionID})
+			checkoutState = row.RailState
+			return err
+		}))
+		t.Run("changed accepted checkout product", func(t *testing.T) {
+			var state map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(checkoutState, &state))
+			var terms map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(state["accepted_purchase"], &terms))
+			terms["product_id"], err = json.Marshal(uuid.NewString())
+			require.NoError(t, err)
+			state["accepted_purchase"], err = json.Marshal(terms)
+			require.NoError(t, err)
+			raw, err := json.Marshal(state)
+			require.NoError(t, err)
+			changed := string(raw)
+			_, err = Restore(t.Context(), target, id, bytes.NewReader(alteredArchive(t, artifact.Bytes(), "checkout_sessions", "rail_state", &changed)))
+			require.Error(t, err)
+			assertEmptyBook(t, target, id)
+		})
 		require.NoError(t, json.Unmarshal(operation.Payload, &payload))
 		require.NoError(t, json.Unmarshal(operation.ResultEvidence, &evidence))
 		payload["amount"] = json.RawMessage(`"2500001"`)

@@ -477,6 +477,28 @@ func (s *StripeWebhookService) handlePaymentMethodDetached(ctx context.Context, 
 		customerID = strings.TrimSpace(prior.Customer)
 	}
 	return s.withStripePaymentStateTx(ctx, customerID, pm.ID, func(txdb *db.DB, tx pgx.Tx) error {
+		if s.StripePaymentState == nil {
+			return errors.New("stripe payment state reader is not configured")
+		}
+		truth, err := s.StripePaymentState.PaymentMethod(ctx, pm.ID)
+		if err != nil && !errors.Is(err, payments.ErrStripeObjectNotFound) {
+			return fmt.Errorf("read current stripe method before detachment: %w", err)
+		}
+		if truth != nil && truth.ID != pm.ID {
+			return errors.New("stripe method read returned another instrument")
+		}
+		if truth != nil && strings.TrimSpace(truth.CustomerID) != "" {
+			// An old detach event cannot override current attached provider
+			// truth. Preserve the method and converge the provider's current
+			// defaults without creating a detached finding.
+			if _, err := payments.UpsertStripeCardForCustomer(ctx, txdb, payments.NewRailCustomerService(txdb), s.Clock, truth.CustomerID, truth.ID, truth.ID, truth.Card); err != nil {
+				return err
+			}
+			if err := s.convergeStripeCustomerPaymentState(ctx, txdb, truth.CustomerID); err != nil {
+				return err
+			}
+			return MarkWebhookProcessedInTx(ctx, tx)
+		}
 		method, err := payments.ParkDetachedStripePaymentMethod(ctx, txdb, pm.ID)
 		if err != nil {
 			return err
@@ -702,12 +724,7 @@ func (s *StripeWebhookService) handleCheckoutSessionExpired(ctx context.Context,
 		return nil
 	}
 
-	if err := s.CheckoutSessionService.MarkExpired(ctx, sessionID, "checkout expired"); err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"checkout_session_id": sessionID,
-		}).Warn("failed to update checkout session from stripe expiration")
-	}
-	return nil
+	return s.CheckoutSessionService.MarkProviderCheckoutClosed(ctx, sessionID, models.CheckoutSessionStatusExpired)
 }
 
 func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Context, obj json.RawMessage) error {
@@ -764,15 +781,16 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	}
 
 	result, err := s.PurchaseRegistrar.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
-		UserID:         userID,
-		PriceID:        priceID,
-		Rail:           string(models.RailStripe),
-		TransactionID:  paymentTransactionID,
-		Amount:         amountMicros,
-		AmountProvided: true,
-		Currency:       sess.Currency,
-		Metadata:       stripeCheckoutPaymentMetadata(sess),
-		AttemptKind:    payments.AttemptInitial,
+		CheckoutSessionID: parseCheckoutSessionID(sess.Metadata),
+		UserID:            userID,
+		PriceID:           priceID,
+		Rail:              string(models.RailStripe),
+		TransactionID:     paymentTransactionID,
+		Amount:            amountMicros,
+		AmountProvided:    true,
+		Currency:          sess.Currency,
+		Metadata:          stripeCheckoutPaymentMetadata(sess),
+		AttemptKind:       payments.AttemptInitial,
 	})
 	if err != nil {
 		return fmt.Errorf("register purchase: %w", err)
@@ -810,7 +828,7 @@ func (s *StripeWebhookService) handleCheckoutSessionAsyncPaymentFailed(ctx conte
 	if sessionID == uuid.Nil {
 		return nil
 	}
-	if err := s.CheckoutSessionService.MarkFailed(ctx, sessionID, "stripe async payment failed", "async_payment_failed"); err != nil {
+	if err := s.CheckoutSessionService.MarkProviderCheckoutClosed(ctx, sessionID, models.CheckoutSessionStatusFailed); err != nil {
 		return fmt.Errorf("mark stripe checkout failed: %w", err)
 	}
 	return nil

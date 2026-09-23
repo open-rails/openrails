@@ -28,10 +28,37 @@ Operator side (you, the merchant):
 - Call one API for admissions, credits, entitlement checks, subscriptions and invoices: the Go `Client` (in-process or over HTTP), or plain HTTP from any stack.
 
 Customer side (your users):
-- Your frontend calls the checkout and `/v1/me/*` self-service routes directly with a short-lived token.
+- Apps with channel/content purchase rules route checkout through their own server: verify those rules, then call `Client.CreateCheckoutSession` once. Catalog-only apps can expose the built-in customer checkout route.
+- Your frontend calls `/v1/me/*` self-service routes with a short-lived token.
 - Processor webhooks land on OpenRails; it updates entitlements in your database and your app reads them.
 
 ---
+
+### Checkout catalog references
+
+Use a stable offer key such as `post-123-usd`. `Catalog.Apply` reprices it by
+creating an immutable price version and retiring its predecessor. Checkout owns
+current availability, amount, permanent ownership eligibility and payment
+idempotency; a host wrapper supplies verified identity and its content policy.
+
+| Operation | Reference contract |
+| --- | --- |
+| `CreateCheckoutSession` | Exactly one `PriceID` or `PriceKey`; optional `Entitlement` and `OfferKind` admission assertions |
+| `LookupCheckoutSession` | Read-only replay lookup with the original complete checkout request |
+| `ListOffersForEntitlement` | Exact opaque resource key, explicit kind, currency preference and cursor |
+| `HasEntitlement` / `CheckEntitlements` | Exact grant-backed access; batch maximum 100 keys |
+| `ProductAccess.Check` / `CheckMany` | Product ID or key; archived purchase access remains readable |
+| `Prices.Create` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
+| `ListCheckoutRailOptions` / `ListCheckoutRailOptionsByKey` | Explicit ID / key methods |
+| Checkout-options HTTP and routing dry-run | Exactly one `price_id` or `price_key` |
+| Catalog retrieval | `Retrieve(id)` or `RetrieveByKey(key)` |
+| Accepted sessions, payments, subscriptions and imports | Immutable IDs |
+| Recurring change-tier/preview and Solana tier-change | Existing ID contract; key selectors tracked separately |
+
+Keys are opaque, including UUID-shaped keys. Move any key previously sent in
+`PriceID` to `PriceKey`; there is no ID/key auto-detection. Accepted retries keep
+the original price and benefit snapshot after a key moves or an offer is
+archived. See the [checkout admission contract](docs/architecture/catalog-checkout-admission.md).
 
 ### Features
 

@@ -1,0 +1,45 @@
+package checkout
+
+import (
+	"context"
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/pkg/merchant"
+	"strings"
+)
+
+// LookupSession finds only a buyer-bound idempotent session and validates the
+// original selector/resource assertion; it never resolves a provider or writes.
+func (s *CheckoutSessionService) LookupSession(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
+	if req == nil || user == nil || strings.TrimSpace(req.IdempotencyKey) == "" {
+		return nil, ErrCheckoutSessionValidation
+	}
+	if err := validateCheckoutPriceSelector(req.PriceID, req.PriceKey); err != nil {
+		return nil, err
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	id := idempotentCheckoutSessionID(mid.UUID(), scopeIdempotencyKey(user.ID, req.IdempotencyKey))
+	session, err := s.repo.GetByID(ctx, id)
+	if db.IsNotFound(err) {
+		return nil, ErrCheckoutSessionNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if session.CustomerID.String() != user.ID {
+		return nil, ErrCheckoutSessionNotFound
+	}
+	canonicalizeCheckoutPaymentName(&req.Payment)
+	stored, _ := session.RailState[checkoutSessionFingerprintKey].(string)
+	fingerprint := checkoutSessionRequestFingerprintForRail(req, user, string(session.Rail))
+	if stored == "" || stored != fingerprint {
+		return nil, openrails.ErrIdempotencyKeyReused
+	}
+	if response, found, err := s.initialMembershipSessionResponse(ctx, session); found || err != nil {
+		return response, err
+	}
+	return s.sessionToResponse(session), nil
+}

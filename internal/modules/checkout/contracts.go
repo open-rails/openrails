@@ -30,9 +30,11 @@ func customerIDFromUser(userID string) (uuid.UUID, error) {
 }
 
 type CheckoutRequest struct {
-	PriceID         string `json:"price_id"`
-	PaymentMethodID string `json:"payment_method_id,omitempty"`
-	PaymentToken    string `json:"payment_token,omitempty"`
+	acceptedPurchase *acceptedPurchaseTerms
+	PriceID          string `json:"price_id"`
+	PriceKey         string `json:"price_key,omitempty"`
+	PaymentMethodID  string `json:"payment_method_id,omitempty"`
+	PaymentToken     string `json:"payment_token,omitempty"`
 	// BTTokenIntentID (#795): the Basis Theory token-intent id from BT Elements
 	// — the ONLY card handle custodian-held-card checkout accepts (PAN firewall).
 	BTTokenIntentID string `json:"bt_token_intent_id,omitempty"`

@@ -217,6 +217,9 @@ func ValidateValues(p Profile, values []*string) error {
 			return ""
 		}
 		var state struct {
+			Purchase        json.RawMessage `json:"accepted_purchase"`
+			Submitted       bool            `json:"purchase_submitted"`
+			Closed          bool            `json:"provider_closed"`
 			Capture         json.RawMessage `json:"capture"`
 			Kind            string          `json:"kind"`
 			CustomerRef     string          `json:"customer_ref"`
@@ -226,6 +229,25 @@ func ValidateValues(p Profile, values []*string) error {
 		}
 		if raw := value(p, values, "rail_state"); raw != nil && json.Unmarshal([]byte(*raw), &state) != nil {
 			return fmt.Errorf("invalid checkout state")
+		}
+		if len(state.Purchase) > 0 {
+			var terms struct {
+				PriceID          uuid.UUID `json:"price_id"`
+				ProductID        uuid.UUID `json:"product_id"`
+				PaymentID        uuid.UUID `json:"payment_id"`
+				Amount           int64     `json:"amount,string"`
+				Currency         string
+				AcceptedAt       time.Time `json:"accepted_at"`
+				EntitlementStart time.Time `json:"entitlement_start"`
+				Duration         *int      `json:"access_duration_hours"`
+			}
+
+			if json.Unmarshal(state.Purchase, &terms) != nil || terms.PriceID.String() != field("price_id") || terms.ProductID == uuid.Nil || terms.PaymentID == uuid.Nil || terms.Amount < 0 || strconv.FormatInt(terms.Amount, 10) != field("amount") || terms.Currency != field("currency") || field("mode") != "one_off" || terms.AcceptedAt.IsZero() || terms.EntitlementStart.Before(terms.AcceptedAt) || terms.Duration != nil && *terms.Duration <= 0 {
+				return fmt.Errorf("invalid retained purchase checkout terms")
+			}
+			if field("rail") == "stripe" && state.Submitted && !state.Closed && field("status") != "succeeded" {
+				return fmt.Errorf("submitted Stripe checkout outcome is unresolved")
+			}
 		}
 		if state.Quote != "" {
 			var quote subscriptions.InitialMembershipTerms

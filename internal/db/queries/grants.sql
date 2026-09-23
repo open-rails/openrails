@@ -513,6 +513,19 @@ WHERE g.merchant_id=sqlc.arg(merchant_id)::uuid AND g.source_type='subscription'
       AND g.ends_at=(i.payload->'renewal'->>'period_end')::timestamptz);
 
 -- CheckProductAccess: one bounded lookup for the page's candidate products.
+-- name: HasPermanentProductOwnership :one
+SELECT EXISTS (
+ SELECT 1 FROM openrails.grants g
+ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
+   AND g.customer_id = sqlc.arg(customer_id)::uuid
+   AND g.product_id = sqlc.arg(product_id)::uuid
+   AND g.kind = 'ownership' AND g.event = 'grant'
+   AND g.starts_at <= sqlc.arg(at_time)::timestamptz AND g.ends_at IS NULL
+   AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+    WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+      AND t.event IN ('revoke','expire','supersede'))
+);
+
 -- name: CheckProductAccess :many
 SELECT candidate.product_id, EXISTS (
  SELECT 1 FROM openrails.grants g

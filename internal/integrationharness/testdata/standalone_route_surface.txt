@@ -23,6 +23,7 @@ GET /v1/capabilities
 GET /v1/captcha/client.js
 GET /v1/captcha/status
 GET /v1/catalog
+GET /v1/catalog/offers
 GET /v1/catalog/prices
 GET /v1/catalog/prices/by-key/{key}
 GET /v1/catalog/prices/by-key/{key}/history
@@ -71,6 +72,7 @@ GET /v1/merchant/catalog/drift
 GET /v1/merchant/catalog/meters
 GET /v1/merchant/catalog/meters/{key}
 GET /v1/merchant/catalog/meters/{key}/overrides
+GET /v1/merchant/catalog/offers
 GET /v1/merchant/catalog/prices
 GET /v1/merchant/catalog/prices/by-key/{key}
 GET /v1/merchant/catalog/prices/by-key/{key}/history
@@ -205,6 +207,7 @@ POST /v1/merchant/catalog/products/{id}/deactivate
 POST /v1/merchant/catalog/reprice-all-prior-versions
 POST /v1/merchant/catalogs
 POST /v1/merchant/checkout-sessions
+POST /v1/merchant/checkout-sessions/lookup
 POST /v1/merchant/checkout-sessions/{id}/confirm
 POST /v1/merchant/configuration/applications
 POST /v1/merchant/credits/deposit
@@ -247,6 +250,7 @@ POST /v1/merchant/team/invites
 POST /v1/merchant/usage/report
 POST /v1/merchant/usage/resource-revenue
 POST /v1/merchant/usage/rollup
+POST /v1/merchant/users/{user_id}/entitlements/check
 POST /v1/merchant/users/{user_id}/product-access/check
 POST /v1/merchant/wasted-spend
 POST /v1/merchant/webhooks

@@ -261,6 +261,13 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 }
 
 func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
+	purchaseInvalid, err := gen.New(tx).CountInvalidPurchaseCheckoutReferences(ctx, id.UUID())
+	if err != nil {
+		return err
+	}
+	if purchaseInvalid != 0 {
+		return &Error{Code: "unsupported_state", Table: "checkout_sessions", Count: purchaseInvalid}
+	}
 	if err := validateSubscriptionCollectionReferences(ctx, tx, id); err != nil {
 		return err
 	}

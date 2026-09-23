@@ -91,11 +91,14 @@ func TestCustomerBillingManagementRoutesAndCapabilities(t *testing.T) {
 		DelegatedAuthenticator: billingauth.DelegatedAuthenticatorFunc(reviewReject),
 	}}}))
 	mux := reviewMount(t, runtime)
-	for _, path := range []string{"/products", "/payments", "/invoices", "/subscriptions", "/payment-methods"} {
+	for _, path := range []string{"/products", "/payments", "/invoices", "/subscriptions", "/payment-methods", "/checkout/cs_existing"} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/pay/v1/me"+path, nil))
 		require.Equal(t, http.StatusUnauthorized, rec.Code, path)
 	}
+	confirm := httptest.NewRecorder()
+	mux.ServeHTTP(confirm, httptest.NewRequest(http.MethodPost, "/api/pay/v1/me/checkout/cs_existing/confirm", nil))
+	require.Equal(t, http.StatusUnauthorized, confirm.Code)
 	for _, path := range []string{"/checkout", "/subscriptions/x/change-tier", "/subscriptions/x/provider-cutover", "/billing-portal", "/subscriptions/x/solana-tier-change"} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/pay/v1/me"+path, nil))

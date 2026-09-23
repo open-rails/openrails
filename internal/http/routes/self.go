@@ -121,13 +121,16 @@ func registerSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	pm.Handle(http.MethodPut, "/:id", h(httphandlers.UpdatePaymentMethod))
 	pm.Handle(http.MethodDelete, "/:id", h(httphandlers.DeletePaymentMethod))
 
-	// Checkout: create a session and read/confirm it (browser self-checkout).
+	// Checkout creation is disabled in management-only scope, but an app-created
+	// session may still be read and confirmed by its signed-in customer. This
+	// preserves the accepted quote and interactive payer proof without exposing a
+	// generic browser purchase route.
+	checkout := group.Group("/checkout")
 	if !managementOnly {
-		checkout := group.Group("/checkout")
 		checkout.Handle(http.MethodPost, "", h(httphandlers.CreateCheckoutSession))
-		checkout.Handle(http.MethodGet, "/:id", h(httphandlers.GetCheckoutSession))
-		checkout.Handle(http.MethodPost, "/:id/confirm", h(httphandlers.ConfirmCheckoutSession))
 	}
+	checkout.Handle(http.MethodGet, "/:id", h(httphandlers.GetCheckoutSession))
+	checkout.Handle(http.MethodPost, "/:id/confirm", h(httphandlers.ConfirmCheckoutSession))
 
 	if providerRoutes.StripePortal && !managementOnly {
 		group.Handle(http.MethodPost, "/billing-portal", h(httphandlers.CreatePortalSession))

@@ -54,7 +54,7 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.Openrails
 			if err != nil {
 				return err
 			}
-			if accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
+			if accepted.CheckoutSessionID != terms.CheckoutSessionID || accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
 				return apperr.Conflictf("checkout key belongs to another accepted purchase")
 			}
 			row = previous
@@ -62,6 +62,32 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.Openrails
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
+		}
+		if terms.AccessDurationHours == nil {
+			keys := make([]string, 0, len(terms.Entitlements))
+			for key, duration := range terms.Entitlements {
+				if duration != nil && *duration > 0 {
+					keys = nil
+					break
+				}
+				keys = append(keys, key)
+			}
+			if len(keys) > 0 {
+				covered, err := d.Gen(ctx).PermanentBenefitsCovered(ctx, gen.PermanentBenefitsCoveredParams{MerchantID: p.MerchantID, CustomerID: customer, Entitlements: keys, AtTime: terms.AcceptedAt, IncludePending: true, ExceptSessionID: terms.CheckoutSessionID})
+				if err != nil {
+					return err
+				}
+				if covered != nil && *covered {
+					return apperr.Conflictf("all permanent benefits are already owned or reserved")
+				}
+			}
+			pending, err := d.Gen(ctx).HasUnresolvedProductCheckout(ctx, gen.HasUnresolvedProductCheckoutParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.ProductID, ExceptSessionID: terms.CheckoutSessionID})
+			if err != nil {
+				return err
+			}
+			if pending {
+				return apperr.Conflictf("another checkout of this product is unresolved")
+			}
 		}
 		_, err = d.Gen(ctx).GetUnresolvedSaleForCustomerProduct(ctx, gen.GetUnresolvedSaleForCustomerProductParams{MerchantID: p.MerchantID, CustomerID: customer.String(), ProductID: terms.ProductID.String()})
 		if err == nil {
@@ -88,7 +114,7 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.Openrails
 		if err != nil {
 			return err
 		}
-		if accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
+		if accepted.CheckoutSessionID != terms.CheckoutSessionID || accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
 			return apperr.Conflictf("checkout key belongs to another accepted purchase")
 		}
 		return nil

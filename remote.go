@@ -612,23 +612,18 @@ func (c *Client) ListEntitlements(ctx context.Context, subject string, at time.T
 	return out[subject], nil
 }
 
-// HasEntitlement implements Client by checking the single-subject entitlement
-// list returned from /v1/merchant/customers/entitlements:batch.
+// HasEntitlement performs one exact resource-key lookup, without enumerating
+// the customer's other grants.
 func (c *Client) HasEntitlement(ctx context.Context, subject string, entitlement string, at time.Time, requestOptions ...RequestOption) (bool, error) {
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
 		return false, invalidErr("entitlement is required")
 	}
-	records, err := c.ListEntitlements(ctx, subject, at, requestOptions...)
+	access, err := c.CheckEntitlements(ctx, subject, []string{entitlement}, at, requestOptions...)
 	if err != nil {
 		return false, err
 	}
-	for _, rec := range records {
-		if rec.Entitlement == entitlement {
-			return true, nil
-		}
-	}
-	return false, nil
+	return access[entitlement], nil
 }
 
 // ListCustomersWithEntitlement implements Client (handler

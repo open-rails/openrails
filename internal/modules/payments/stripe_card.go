@@ -216,6 +216,7 @@ func UpsertStripeCardForCustomer(
 			CustomerID:           identity.CustomerIDFromString(userID).UUID(),
 			Rail:                 models.RailStripe,
 			PspID:                pspID,
+			RailCustomerRef:      customerID,
 			RailMethodRef:        paymentMethodID,
 			InitialTransactionID: strings.TrimSpace(initialTxnID),
 			CardType:             &card.Brand,
@@ -236,6 +237,23 @@ func UpsertStripeCardForCustomer(
 	case err != nil:
 		return nil, fmt.Errorf("lookup stripe payment method: %w", err)
 	default:
+		if pm.CustomerID != identity.CustomerIDFromString(userID).UUID() || pm.RailCustomerRef != "" && pm.RailCustomerRef != customerID {
+			return nil, errors.New("stripe payment method belongs to a different customer")
+		}
+		if pm.RailCustomerRef == "" {
+			mid, err := merchant.Require(ctx)
+			if err != nil {
+				return nil, err
+			}
+			rows, err := database.Gen(ctx).BindMissingStripeCustomerReference(ctx, gen.BindMissingStripeCustomerReferenceParams{MerchantID: mid.UUID(), ID: pm.ID, CustomerID: pm.CustomerID, PspID: pspID, RailMethodRef: paymentMethodID, RailCustomerRef: customerID, Now: now})
+			if err != nil {
+				return nil, err
+			}
+			if rows != 1 {
+				return nil, errors.New("stripe payment method cannot adopt verified customer binding")
+			}
+			pm.RailCustomerRef = customerID
+		}
 		pm.CardType = &card.Brand
 		pm.LastFour = &card.Last4
 		if card.Expiry != "" {

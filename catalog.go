@@ -106,7 +106,9 @@ type CatalogPrice struct {
 }
 
 type CreatePriceRequest struct {
+	// Select exactly one existing ProductID/ProductKey or new ProductData.
 	ProductID   ProductID                     `json:"product_id"`
+	ProductKey  string                        `json:"product_key,omitempty"`
 	ProductData *PriceCreateProductDataParams `json:"product_data,omitempty"`
 
 	// Key (#774) is the durable, per-merchant-unique MOVABLE POINTER handle for

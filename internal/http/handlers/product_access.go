@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -162,7 +163,31 @@ func ServiceGetUserProductAccess(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
 		return
 	}
-	if productIDStr := strings.TrimSpace(r.Query("product_id")); productIDStr != "" {
+	query := r.Request.URL.Query()
+	if query.Has("product_id") && query.Has("product_key") {
+		r.ErrorJSON(http.StatusBadRequest, "exactly one of product_id and product_key is required")
+		return
+	}
+	if query.Has("product_key") {
+		key := r.Query("product_key")
+		if !validProductAccessKey(key) {
+			r.ErrorJSON(http.StatusBadRequest, "product_key is invalid")
+			return
+		}
+		decisions, err := svc.CheckProductKeys(r.Request.Context(), userID, []string{key})
+		if err != nil {
+			r.ErrorJSON(http.StatusInternalServerError, "failed to check product access")
+			return
+		}
+		decision := decisions[key]
+		out := openrails.ProductAccessCheck{CustomerID: userID, ProductKey: key, HasAccess: decision.HasAccess}
+		if decision.ProductID != uuid.Nil {
+			out.ProductID = openrails.ProductID(decision.ProductID).String()
+		}
+		r.JSON(http.StatusOK, out)
+		return
+	}
+	if productIDStr := r.Query("product_id"); query.Has("product_id") {
 		typedProductID, err := openrails.ParseProductID(productIDStr)
 		if err != nil || typedProductID.IsZero() {
 			r.ErrorJSON(http.StatusBadRequest, "invalid product_id format")
@@ -311,14 +336,25 @@ func ServiceCheckUserProductAccess(r *httprequest.Request) {
 		return
 	}
 	var body struct {
-		ProductIDs []string `json:"product_ids"`
+		ProductIDs  []string `json:"product_ids"`
+		ProductKeys []string `json:"product_keys"`
 	}
 	if !r.BindJSON(&body) {
 		return
 	}
-	if len(body.ProductIDs) > openrails.ProductAccessMaxPageSize {
-		r.ErrorJSON(http.StatusBadRequest, "at most 100 product IDs are allowed")
+	if (body.ProductIDs == nil) == (body.ProductKeys == nil) {
+		r.ErrorJSON(http.StatusBadRequest, "exactly one of product_ids and product_keys is required")
 		return
+	}
+	if len(body.ProductIDs)+len(body.ProductKeys) > openrails.ProductAccessMaxPageSize {
+		r.ErrorJSON(http.StatusBadRequest, "at most 100 products are allowed")
+		return
+	}
+	for _, key := range body.ProductKeys {
+		if !validProductAccessKey(key) {
+			r.ErrorJSON(http.StatusBadRequest, "product_key is invalid")
+			return
+		}
 	}
 	products := make([]uuid.UUID, 0, len(body.ProductIDs))
 	for _, raw := range body.ProductIDs {
@@ -334,6 +370,21 @@ func ServiceCheckUserProductAccess(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
 		return
 	}
+	if body.ProductKeys != nil {
+		decisions, err := svc.CheckProductKeys(r.Request.Context(), user.String(), body.ProductKeys)
+		if err != nil {
+			r.ErrorJSON(http.StatusInternalServerError, "failed to check product access")
+			return
+		}
+		access := make(map[string]bool, len(decisions))
+		for key, decision := range decisions {
+			access[key] = decision.HasAccess
+		}
+		r.JSON(http.StatusOK, struct {
+			Access map[string]bool `json:"access"`
+		}{access})
+		return
+	}
 	decisions, err := svc.CheckProducts(r.Request.Context(), user.String(), products)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to check product access")
@@ -346,4 +397,8 @@ func ServiceCheckUserProductAccess(r *httprequest.Request) {
 	r.JSON(http.StatusOK, struct {
 		Access map[string]bool `json:"access"`
 	}{access})
+}
+
+func validProductAccessKey(key string) bool {
+	return strings.TrimSpace(key) != "" && utf8.ValidString(key) && !strings.ContainsRune(key, 0)
 }

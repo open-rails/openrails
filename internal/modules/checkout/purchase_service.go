@@ -58,6 +58,7 @@ func IsNonTerminalSubscriptionStatus(status models.SubscriptionStatus) bool {
 }
 
 type CheckoutPurchaseService struct {
+	database            *db.DB
 	transactionDB       *db.DB
 	PriceService        *catalog.PriceService
 	ProductService      *catalog.ProductService
@@ -88,7 +89,12 @@ func NewCheckoutPurchaseService(
 	subscriptionService checkoutSubscriptionAccess,
 	clocks ...clockwork.Clock,
 ) *CheckoutPurchaseService {
+	var database *db.DB
+	if priceService != nil {
+		database = priceService.Database()
+	}
 	return &CheckoutPurchaseService{
+		database:            database,
 		PriceService:        priceService,
 		ProductService:      productService,
 		PaymentService:      paymentService,
@@ -136,6 +142,12 @@ func (s *CheckoutPurchaseService) CheckPurchaseEligibility(ctx context.Context, 
 	if !product.IsPurchasable() {
 		return &EligibilityResult{Status: EligibilityBlocked, Reason: "product is not available for purchase"}, nil
 	}
+	if err := s.checkPermanentOwnership(ctx, userID, price, product); err != nil {
+		if errors.Is(err, ErrCheckoutSessionConflict) {
+			return &EligibilityResult{Status: EligibilityBlocked, Reason: err.Error()}, nil
+		}
+		return nil, err
+	}
 
 	if product.TierGroup != nil && *product.TierGroup != "" {
 		existingSub, err := s.SubscriptionService.GetActiveOrPendingByUserIDAndTierGroup(ctx, userID, *product.TierGroup)
@@ -161,7 +173,7 @@ func (s *CheckoutPurchaseService) CheckPurchaseEligibility(ctx context.Context, 
 		}
 	}
 
-	coverage, err := s.GetUserProductCoverage(ctx, userID, product)
+	coverage, err := s.purchaseCoverage(ctx, userID, price, product)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check existing coverage: %w", err)
 	}
@@ -386,6 +398,9 @@ func (s *CheckoutPurchaseService) GetUserProductCoverage(ctx context.Context, us
 }
 
 func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
+	if req != nil && req.CheckoutSessionID != uuid.Nil {
+		return s.registerSessionPurchase(ctx, req)
+	}
 	if req.UserID == "" {
 		return nil, errors.New("user_id is required")
 	}

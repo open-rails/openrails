@@ -262,6 +262,20 @@ func (s *CheckoutService) ConfirmStripeMethodSetup(ctx context.Context, id uuid.
 		existing, err := q.GetPaymentMethodByRailMethodRefForPSP(ctx, gen.GetPaymentMethodByRailMethodRefForPSPParams{MerchantID: p.MerchantID, Rail: "stripe", PspID: p.PSPID, RailMethodRef: setup.MethodRef})
 		methodID := uuid.NewSHA1(id, []byte(setup.MethodRef))
 		if err == nil {
+			// ReadEngineSetup already verified both the exact SetupIntent and
+			// attached PaymentMethod against this accepted customer/account.
+			// Older webhook mirrors omitted only this reference; fill an empty
+			// binding conditionally, never replace a different bound customer.
+			if existing.CustomerID == p.CustomerID && existing.RailCustomerRef == "" && existing.ParkReason == "" {
+				rows, err := q.BindMissingStripeCustomerReference(ctx, gen.BindMissingStripeCustomerReferenceParams{MerchantID: p.MerchantID, ID: existing.ID, CustomerID: p.CustomerID, PspID: p.PSPID, RailMethodRef: setup.MethodRef, RailCustomerRef: p.CustomerRef, Now: s.now().UTC()})
+				if err != nil {
+					return err
+				}
+				if rows != 1 {
+					return ErrCheckoutSessionConflict
+				}
+				existing.RailCustomerRef = p.CustomerRef
+			}
 			if existing.CustomerID != p.CustomerID || existing.RailCustomerRef != p.CustomerRef || existing.ParkReason != "" {
 				return ErrCheckoutSessionConflict
 			}

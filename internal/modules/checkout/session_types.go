@@ -43,6 +43,9 @@ type CheckoutSessionPaymentRequest struct {
 
 type CheckoutSessionCreateRequest struct {
 	PriceID        string
+	PriceKey       string
+	Entitlement    string
+	OfferKind      openrails.OfferKind
 	Mode           string
 	Payment        CheckoutSessionPaymentRequest
 	Metadata       map[string]string

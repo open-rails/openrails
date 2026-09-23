@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -308,10 +307,9 @@ func (s *CheckoutSessionService) evaluateCandidate(ctx context.Context, targets 
 // creating anything. It resolves the price/product exactly as checkout does and
 // runs the SAME Route call, so the trace it returns is the decision a real
 // session would record — not a re-implementation that can drift.
-func (s *CheckoutSessionService) DryRunRouting(ctx context.Context, priceRef, country, selector string) (*RoutingDecision, models.CheckoutSessionMode, error) {
-	priceRef = strings.TrimSpace(priceRef)
-	if priceRef == "" {
-		return nil, "", fmt.Errorf("price reference is required")
+func (s *CheckoutSessionService) DryRunRouting(ctx context.Context, priceID, priceKey, country, selector string) (*RoutingDecision, models.CheckoutSessionMode, error) {
+	if err := validateCheckoutPriceSelector(priceID, priceKey); err != nil {
+		return nil, "", err
 	}
 	if s == nil || s.priceService == nil || s.productService == nil {
 		return nil, "", fmt.Errorf("checkout routing unavailable")
@@ -320,7 +318,7 @@ func (s *CheckoutSessionService) DryRunRouting(ctx context.Context, priceRef, co
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve checkout merchant: %w", err)
 	}
-	price, err := catalog.ResolveReference(ctx, s.priceService, priceRef)
+	price, err := resolveCheckoutPrice(ctx, s.priceService, priceID, priceKey)
 	if err != nil {
 		return nil, "", fmt.Errorf("resolve checkout price: %w", err)
 	}
