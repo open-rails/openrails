@@ -38,9 +38,9 @@ func TestCatalogCheckoutCurrentOfferAcrossEmbeddedAndRemote(t *testing.T) {
 	_, pool, dsn := scopeWithoutRLSDatabase(t)
 	provider := &catalogCheckoutProvider{}
 	runtime, mid, err := newDeclaredMerchant(ctx, embed.Options{Config: &config.Config{
-		Env: "development", TestMode: config.CredentialPostureSandbox,
-		MerchantConfigSource: config.MerchantConfigSourceManifest, AllowCatalogUpdates: true,
-		ProviderWriteMode: config.ProviderWriteModeFull, NewSubscriptionCollectionPolicy: "engine", DB: &config.DBConfig{URL: dsn},
+		TestMode:            config.CredentialPostureSandbox,
+		AllowCatalogUpdates: true,
+		ProviderWriteMode:   config.ProviderWriteModeFull, DB: &config.DBConfig{URL: dsn},
 	}, PGXPool: pool, River: embed.RiverManagedByOpenRails(), StripeTransport: provider}, "checkout-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Checkout catalog", PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {AccountID: "acct_checkout_1051", Secrets: map[string]string{"secret_key": "sk_test_checkout_1051", "webhook_signing_secret": "whsec_checkout_1051"}}}}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })

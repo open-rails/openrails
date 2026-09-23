@@ -3,8 +3,11 @@
 package checkout
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,7 +36,7 @@ func purchaseSessionFixture(t *testing.T) (*saleIntentFixture, *CheckoutSessionS
 	t.Helper()
 	fx := newSaleIntentFixture(t)
 	psp := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), fx.merchantID.UUID(), "stripe")
-	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox, NewSubscriptionCollectionPolicy: "engine"}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox}
 	rails := railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: "acct_test", Stripe: &config.StripeRailConfig{SecretKey: "sk_test_checkout_1051"}}}
 	core := &CheckoutService{Config: cfg, Rails: rails, ProviderSecrets: fakePSPCatalog{scopes: []merchants.PSPScope{{ID: psp, Key: "stripe", Rail: "stripe", Environment: "test", AccountID: "acct_test"}}}, PriceService: fx.purchase.PriceService, ProductService: fx.purchase.ProductService, PurchaseService: fx.purchase}
 	sessions := NewCheckoutSessionService(fx.db, core.PriceService, core.ProductService, nil, nil, core, nil, nil, nil, nil, cfg, rails)
@@ -54,7 +57,7 @@ func TestPermanentCheckoutConcurrentKeysCreateOnePayableSession(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	defer once.Do(func() { close(release) })
-	restore := stripeapi.InstallBaseTransport(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) {
+	restore := installPurchaseProvider(service, initialStripeWireUnit(func(r *http.Request) (*http.Response, error) {
 		if calls.Add(1) == 1 {
 			close(entered)
 		}
@@ -105,7 +108,7 @@ func TestPermanentCheckoutConcurrentKeysCreateOnePayableSession(t *testing.T) {
 func TestPurchaseDatabaseReplayKeepsOriginalOfferAfterArchive(t *testing.T) {
 	fx, service, core, _ := purchaseSessionFixture(t)
 	var calls atomic.Int32
-	restore := stripeapi.InstallBaseTransport(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { calls.Add(1); return stripeCheckoutOK(), nil }))
+	restore := installPurchaseProvider(service, initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { calls.Add(1); return stripeCheckoutOK(), nil }))
 	defer restore()
 	key := "post-offer-" + uuid.NewString()
 	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.prices SET key=$1 WHERE id=$2`, key, fx.priceID)
@@ -146,7 +149,7 @@ func TestPurchaseDatabaseReplayKeepsOriginalOfferAfterArchive(t *testing.T) {
 func TestUnknownHostedPurchaseRetainsExclusionUntilProviderClosure(t *testing.T) {
 	fx, service, _, psp := purchaseSessionFixture(t)
 	var calls atomic.Int32
-	restore := stripeapi.InstallBaseTransport(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { calls.Add(1); return nil, io.ErrUnexpectedEOF }))
+	restore := installPurchaseProvider(service, initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { calls.Add(1); return nil, io.ErrUnexpectedEOF }))
 	defer restore()
 	_, err := service.CreateSession(fx.ctx, purchaseSessionRequest(fx, "uncertain"), &UserIdentity{ID: fx.userID})
 	require.Error(t, err)
@@ -171,7 +174,7 @@ func TestSessionSettlementPreservesAcceptedBenefitsAndLatePayment(t *testing.T) 
 	fx, service, _, psp := purchaseSessionFixture(t)
 	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{"accepted_post":null}' WHERE id=$1`, fx.productID)
 	require.NoError(t, err)
-	restore := stripeapi.InstallBaseTransport(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { return stripeCheckoutOK(), nil }))
+	restore := installPurchaseProvider(service, initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { return stripeCheckoutOK(), nil }))
 	defer restore()
 	original, err := service.CreateSession(fx.ctx, purchaseSessionRequest(fx, "accepted"), &UserIdentity{ID: fx.userID})
 	require.NoError(t, err)
@@ -207,7 +210,7 @@ func TestSessionSettlementPreservesAcceptedBenefitsAndLatePayment(t *testing.T) 
 
 func TestOwnershipOnlyPurchaseRefundAndFiniteEligibility(t *testing.T) {
 	fx, service, _, psp := purchaseSessionFixture(t)
-	restore := stripeapi.InstallBaseTransport(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { return stripeCheckoutOK(), nil }))
+	restore := installPurchaseProvider(service, initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { return stripeCheckoutOK(), nil }))
 	defer restore()
 	original, err := service.CreateSession(fx.ctx, purchaseSessionRequest(fx, "buy"), &UserIdentity{ID: fx.userID})
 	require.NoError(t, err)
@@ -242,7 +245,7 @@ func TestHostedPurchaseAndNMIIntentSharePermanentAdmission(t *testing.T) {
 	for _, nmiFirst := range []bool{false, true} {
 		t.Run(map[bool]string{false: "hosted_first", true: "nmi_first"}[nmiFirst], func(t *testing.T) {
 			fx, service, _, _ := purchaseSessionFixture(t)
-			restore := stripeapi.InstallBaseTransport(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { return stripeCheckoutOK(), nil }))
+			restore := installPurchaseProvider(service, initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { return stripeCheckoutOK(), nil }))
 			defer restore()
 			params := saleAdmissionParams(fx, uuid.NewString())
 			store := intents.NewStore(fx.db)
@@ -281,7 +284,7 @@ func TestPurchaseCrashBeforeDispatchResumesFrozenArchivedTerms(t *testing.T) {
 	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.prices SET archived=true WHERE id=$1`, fx.priceID)
 	require.NoError(t, err)
 	calls := 0
-	restore := stripeapi.InstallBaseTransport(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) {
+	restore := installPurchaseProvider(service, initialStripeWireUnit(func(r *http.Request) (*http.Response, error) {
 		calls++
 		require.NoError(t, r.ParseForm())
 		require.Equal(t, "500", r.Form.Get("line_items[0][price_data][unit_amount]"))
@@ -289,7 +292,44 @@ func TestPurchaseCrashBeforeDispatchResumesFrozenArchivedTerms(t *testing.T) {
 		return stripeCheckoutOK(), nil
 	}))
 	defer restore()
-	resumed, err := service.CreateSession(fx.ctx, purchaseSessionRequest(fx, "crash-before-dispatch"), &UserIdentity{ID: fx.userID})
+	// Exercise the wrapper's read-only probe and accepted-attempt continuation
+	// over HTTP. This test endpoint supplies the verified fixture customer; no
+	// caller identity or policy decision is taken from request JSON.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req CheckoutSessionCreateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		var result *CheckoutSessionResponse
+		var err error
+		if r.URL.Path == "/lookup" {
+			result, err = service.LookupSession(fx.ctx, &req, &UserIdentity{ID: fx.userID})
+		} else {
+			result, err = service.CreateSession(fx.ctx, &req, &UserIdentity{ID: fx.userID})
+		}
+		if err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(result)
+	}))
+	defer server.Close()
+	call := func(path string) *CheckoutSessionResponse {
+		raw, err := json.Marshal(purchaseSessionRequest(fx, "crash-before-dispatch"))
+		require.NoError(t, err)
+		response, err := http.Post(server.URL+path, "application/json", bytes.NewReader(raw))
+		require.NoError(t, err)
+		defer response.Body.Close()
+		require.Equal(t, 200, response.StatusCode)
+		var out CheckoutSessionResponse
+		require.NoError(t, json.NewDecoder(response.Body).Decode(&out))
+		return &out
+	}
+	looked := call("/lookup")
+	require.Equal(t, "created", looked.Status)
+	require.Equal(t, 0, calls, "lookup cannot dispatch accepted work")
+	resumed := call("/create")
 	require.NoError(t, err)
 	require.Equal(t, original.ID, resumed.ID.UUID())
 	require.Equal(t, 1, calls)
@@ -325,7 +365,7 @@ func TestPurchaseProgressCannotEraseDispatchOrAcceptedTerms(t *testing.T) {
 func TestPurchasePreflightFailureDoesNotReserveAProduct(t *testing.T) {
 	fx, service, _, _ := purchaseSessionFixture(t)
 	calls := 0
-	restore := stripeapi.InstallBaseTransport(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { calls++; return stripeCheckoutOK(), nil }))
+	restore := installPurchaseProvider(service, initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { calls++; return stripeCheckoutOK(), nil }))
 	defer restore()
 	bad := purchaseSessionRequest(fx, "missing-return-url")
 	bad.SuccessURL = ""
@@ -344,7 +384,7 @@ func TestPurchasePreflightFailureDoesNotReserveAProduct(t *testing.T) {
 
 func TestPurchaseWebhookWinsBeforeCreateHandlerStoresRedirect(t *testing.T) {
 	fx, service, _, psp := purchaseSessionFixture(t)
-	restore := stripeapi.InstallBaseTransport(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) {
+	restore := installPurchaseProvider(service, initialStripeWireUnit(func(r *http.Request) (*http.Response, error) {
 		require.NoError(t, r.ParseForm())
 		id, err := openrails.ParseCheckoutSessionID(r.Form.Get("metadata[checkout_session_id]"))
 		require.NoError(t, err)
@@ -399,7 +439,7 @@ func TestPermanentBundlesAllowPartialOwnershipAndBlockFullyCoveredResources(t *t
 	_, err = access.PushNewEntitlement(fx.ctx, entitlements.PushNewEntitlementParams{UserID: fx.userID, Entitlement: "post:a", Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: uuid.New()})
 	require.NoError(t, err)
 	calls := 0
-	restore := stripeapi.InstallBaseTransport(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { calls++; return stripeCheckoutOK(), nil }))
+	restore := installPurchaseProvider(service, initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { calls++; return stripeCheckoutOK(), nil }))
 	defer restore()
 	req := purchaseSessionRequest(fx, "partial-bundle")
 	req.Entitlement = "post:b"
@@ -451,7 +491,7 @@ func TestPermanentResourceConcurrentDistinctProductsAdmitOne(t *testing.T) {
 	_, err = fx.db.Pool().Exec(fx.ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency) VALUES($1,$2,$3,1000000,'USD')`, price, fx.merchantID.UUID(), product)
 	require.NoError(t, err)
 	var calls atomic.Int32
-	restore := stripeapi.InstallBaseTransport(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { calls.Add(1); return stripeCheckoutOK(), nil }))
+	restore := installPurchaseProvider(service, initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { calls.Add(1); return stripeCheckoutOK(), nil }))
 	defer restore()
 	start := make(chan struct{})
 	results := make(chan error, 2)
@@ -474,4 +514,11 @@ func TestPermanentResourceConcurrentDistinctProductsAdmitOne(t *testing.T) {
 	require.NoError(t, first)
 	require.ErrorIs(t, second, ErrCheckoutSessionConflict)
 	require.EqualValues(t, 1, calls.Load())
+}
+
+func installPurchaseProvider(service *CheckoutSessionService, transport http.RoundTripper) func() {
+	core := service.checkoutService.(*CheckoutService)
+	previous := core.StripeClients
+	core.StripeClients = stripeapi.NewFactory(transport)
+	return func() { core.StripeClients = previous }
 }

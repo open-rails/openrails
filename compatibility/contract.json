@@ -5378,7 +5378,7 @@
     "internal/intents/rate_ceiling.go": "2f14ccb694839b19af499b5346cb052d3296a9346590d15f7f1ed5e4271da962",
     "internal/merchanttarget/target.go": "033ae1e525633686c41b07a530fe1ec57cf54cb0c5b748ddd2f7389adedbe3b3",
     "internal/migrate/postgres/0001_schema.up.sql": "454ac14c0ba2dee1a8aadb904a3c3f5ad3b5ffd982d83464a8dc0755d107cc81",
-    "internal/migrate/postgres/0002_resource_offer_index.up.sql": "34d5ae9868028ccec40b81f187e4046b36e682736969356a29fa072444e20d0e",
+    "internal/migrate/postgres/0002_resource_offer_index.up.sql": "c4d6aeb20190583f6f6e7b27f3e63ed117c1331b20dc8f4b203b8fff5bed0f99",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
     "internal/migrate/postgres/owned_tables.go": "4080f025fea093a535dbb1983edb8366e510255ecf0831b874b8f840e1bf0082",

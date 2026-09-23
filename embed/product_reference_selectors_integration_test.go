@@ -19,7 +19,7 @@ import (
 func TestExplicitProductSelectorsEmbeddedAndRemote(t *testing.T) {
 	ctx := t.Context()
 	_, pool, dsn := scopeWithoutRLSDatabase(t)
-	rt, mid, err := newDeclaredMerchant(ctx, embed.Options{Config: &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceManifest, AllowCatalogUpdates: true, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: dsn}}, PGXPool: pool, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t}}, "selectors-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Product selectors", PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {AccountID: "acct_selectors", Secrets: map[string]string{"secret_key": "sk_test_selectors", "webhook_signing_secret": "whsec_selectors"}}}}})
+	rt, mid, err := newDeclaredMerchant(ctx, embed.Options{Config: &config.Config{TestMode: config.CredentialPostureSandbox, AllowCatalogUpdates: true, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: dsn}}, PGXPool: pool, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t}}, "selectors-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Product selectors", PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {AccountID: "acct_selectors", Secrets: map[string]string{"secret_key": "sk_test_selectors", "webhook_signing_secret": "whsec_selectors"}}}}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 	local, err := rt.Client()
