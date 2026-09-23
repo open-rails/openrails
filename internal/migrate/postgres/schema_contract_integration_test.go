@@ -46,6 +46,7 @@ func TestAppliedBillingSchemaContract(t *testing.T) {
 		WHERE c.relnamespace='billing'::regnamespace AND c.relkind='r'
 			AND a.attname='merchant_id' AND NOT a.attisdropped`)
 	require.NoError(t, err)
+	defer rows.Close()
 	scoped := 0
 	for rows.Next() {
 		var table string
