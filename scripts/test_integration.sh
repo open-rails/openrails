@@ -169,4 +169,115 @@ fi
 # re-earned against the current schema and data. Observed live (or#855): with a
 # warm GOCACHE, whole integration packages came back `ok … (cached)` without a
 # single query running.
-go test -vet=all -race -count=1 -p "$package_parallelism" -parallel 1 -tags=integration -timeout "${OPENRAILS_INTEGRATION_TIMEOUT:-25m}" "${args[@]}"
+run_test_command() {
+  local output="$1"
+  shift
+  if "$@" >"$output" 2>&1; then
+    echo 0 >"$output.status"
+  else
+    echo $? >"$output.status"
+  fi
+}
+
+# The integration harness is intentionally one Go package, but it contains a
+# large collection of independent top-level workflows. Running that package as
+# one process means one stalled provider workflow holds the whole E2E job until
+# the package timeout. When explicitly enabled, run its top-level tests in
+# separate processes. dbtest creates a fresh PostgreSQL database per process
+# when OPENRAILS_TEST_DB_DSN is supplied, and each process gets its own Redis
+# container when OPENRAILS_TEST_REDIS_ADDR is unset. This keeps the existing
+# isolation contract while allowing the workflow to make progress around a
+# single slow/failing scenario.
+run_harness_shards() {
+  local shard_count="${OPENRAILS_TEST_HARNESS_SHARDS:-0}"
+  [[ "$shard_count" =~ ^[1-9][0-9]*$ ]] || return 1
+  (( shard_count > 1 )) || return 1
+
+  local harness="./internal/integrationharness"
+  local json_output=0
+  local -a common_args=()
+  local arg
+  for arg in "${args[@]}"; do
+    case "$arg" in
+      "$harness"|github.com/open-rails/openrails/internal/integrationharness)
+        ;;
+      -json)
+        json_output=1
+        ;;
+      *)
+        common_args+=("$arg")
+        ;;
+    esac
+  done
+
+  local -a names=()
+  while IFS= read -r arg; do
+    [[ "$arg" =~ ^Test[A-Za-z0-9_]+$ ]] && names+=("$arg")
+  done < <(go test -vet=all -race -count=1 -parallel 1 "${common_args[@]}" -list '^Test' "$harness")
+  (( ${#names[@]} > 0 )) || {
+    echo "test_integration.sh: harness sharding found no top-level tests" >&2
+    return 1
+  }
+
+  local shard_dir
+  shard_dir="$(mktemp -d "${TMPDIR:-/tmp}/openrails-integration-shards.XXXXXX")"
+  local -a pids=()
+  local shard regex index
+  for (( shard = 0; shard < shard_count; shard++ )); do
+    regex='^('
+    index=0
+    for arg in "${names[@]}"; do
+      if (( index % shard_count == shard )); then
+        [[ "$regex" == '^(' ]] || regex+='|'
+        regex+="$arg"
+      fi
+      ((index++))
+    done
+    regex+=')$'
+    [[ "$regex" != '^()$' ]] || continue
+    local -a command=(go test -vet=all -race -count=1 -parallel 1 -p 1 "${common_args[@]}" -run "$regex")
+    (( json_output )) && command+=( -json )
+    command+=( "$harness" )
+    run_test_command "$shard_dir/shard-$shard.out" "${command[@]}" &
+    pids+=("$!")
+  done
+
+  local status=0 pid code
+  for pid in "${pids[@]}"; do
+    wait "$pid" || true
+  done
+  for (( shard = 0; shard < shard_count; shard++ )); do
+    [[ -f "$shard_dir/shard-$shard.out" ]] || continue
+    cat "$shard_dir/shard-$shard.out"
+    code="$(cat "$shard_dir/shard-$shard.out.status")"
+    [[ "$code" == 0 ]] || status=1
+  done
+  rm -rf "$shard_dir"
+  return "$status"
+}
+
+harness_shards="${OPENRAILS_TEST_HARNESS_SHARDS:-0}"
+if [[ "$harness_shards" =~ ^[1-9][0-9]*$ ]] && (( harness_shards > 1 )) &&
+   printf '%s\n' "${args[@]}" | grep -Fxq './internal/integrationharness'; then
+  # Keep the ordinary package command free of the sharded package. Its result
+  # and each shard's result are concatenated so -json consumers see one stream.
+  ordinary_args=()
+  for arg in "${args[@]}"; do
+    [[ "$arg" == './internal/integrationharness' || "$arg" == 'github.com/open-rails/openrails/internal/integrationharness' ]] || ordinary_args+=("$arg")
+  done
+  shard_dir="$(mktemp -d "${TMPDIR:-/tmp}/openrails-integration-run.XXXXXX")"
+  run_test_command "$shard_dir/ordinary.out" go test -vet=all -race -count=1 -p "$package_parallelism" -parallel 1 -tags=integration -timeout "${OPENRAILS_INTEGRATION_TIMEOUT:-25m}" "${ordinary_args[@]}" &
+  ordinary_pid=$!
+  if run_harness_shards; then
+    harness_status=0
+  else
+    harness_status=$?
+  fi
+  wait "$ordinary_pid" || true
+  cat "$shard_dir/ordinary.out"
+  ordinary_status="$(cat "$shard_dir/ordinary.out.status")"
+  rm -rf "$shard_dir"
+  [[ "$ordinary_status" == 0 && "$harness_status" == 0 ]]
+else
+  go test -vet=all -race -count=1 -p "$package_parallelism" -parallel 1 -tags=integration -timeout "${OPENRAILS_INTEGRATION_TIMEOUT:-25m}" "${args[@]}"
+fi
