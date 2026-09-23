@@ -293,6 +293,7 @@ func TestClientExtraHeadersCannotDuplicateMerchantSelection(t *testing.T) {
 				merchant.SlugHeader: {"wrong"}, strings.ToLower(merchant.SlugHeader): {"lowercase"},
 				"authorization": {"Bearer broader-key"},
 			}
+			original := extra.Clone()
 			option := WithMerchant("alpha")
 			if byID {
 				option = ForMerchantID(id)
@@ -300,7 +301,7 @@ func TestClientExtraHeadersCannotDuplicateMerchantSelection(t *testing.T) {
 			if err := client.doWithHeaders(t.Context(), http.MethodGet, "/v1/merchant/settings", nil, nil, extra, option); err != nil {
 				t.Fatal(err)
 			}
-			if extra["authorization"][0] != "Bearer broader-key" {
+			if !reflect.DeepEqual(extra, original) {
 				t.Fatal("request mutated the caller's header map")
 			}
 		})
