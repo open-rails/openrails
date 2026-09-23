@@ -199,7 +199,7 @@ run_harness_shards() {
   local arg
   for arg in "${args[@]}"; do
     case "$arg" in
-      "$harness"|github.com/open-rails/openrails/internal/integrationharness)
+      "$harness"|github.com/open-rails/openrails/internal/integrationharness|./*|github.com/open-rails/openrails/*)
         ;;
       -json)
         json_output=1
