@@ -35,7 +35,7 @@ func TestLiveSandboxStoredCredentialCITThenMIT(t *testing.T) {
 		t.Skip("NMI_SANDBOX_SECURITY_KEY not set; skipping live sandbox stored-credential proof (#297)")
 	}
 
-	client, err := NewClient("live-sandbox", &config.NMIProviderSettings{SecurityKey: key}, true)
+	client, err := newClient("live-sandbox", &config.NMIProviderSettings{SecurityKey: key}, true)
 	require.NoError(t, err)
 	require.Equal(t, SandboxDirectPostURL, client.DirectPostURL, "must hit the real sandbox gateway, not a stub")
 

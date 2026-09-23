@@ -77,6 +77,10 @@ type Options struct {
 	// driving rail pushes against a fake Stripe. Refused with a live posture.
 	// Scoped to this runtime; borrowed and never closed by OpenRails.
 	StripeTransport http.RoundTripper
+	// NMITransport is the test seam under the NMI client for driving the real
+	// endpoints against a fake wire. It exempts nothing from sandbox posture.
+	// Refused with a live posture.
+	NMITransport http.RoundTripper
 	// UserDirectory and UsernameResolver are optional host identity adapters.
 	// OpenRails does not assume ownership of AuthKit's profiles schema; hosts
 	// opt in explicitly when they need notification email or CCBill username
@@ -148,6 +152,9 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if opts.StripeTransport != nil && opts.Config.TestMode == config.CredentialPostureLive {
 		return nil, fmt.Errorf("openrails embed: Options.StripeTransport is a test seam and is refused with config.TestMode=live")
 	}
+	if opts.NMITransport != nil && opts.Config.TestMode == config.CredentialPostureLive {
+		return nil, fmt.Errorf("openrails embed: Options.NMITransport is a test seam and is refused with config.TestMode=live")
+	}
 	application, err := app.BootstrapWithOptions(ctx, opts.Config, &app.BootstrapOptions{
 		HostRiver:        opts.River.host,
 		PGXPool:          opts.PGXPool,
@@ -157,6 +164,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		UserDirectory:    opts.UserDirectory,
 		UsernameResolver: opts.UsernameResolver,
 		StripeTransport:  opts.StripeTransport,
+		NMITransport:     opts.NMITransport,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)

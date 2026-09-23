@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -76,7 +77,7 @@ func newChargerAgainst(t *testing.T, handler http.HandlerFunc) *Charger {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	client, err := nmi.NewClient("nmi", &config.NMIProviderSettings{SecurityKey: "k"}, true)
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "k"}, true)
 	require.NoError(t, err)
 	client.LoopbackFixture = true
 	client.DirectPostURL = server.URL

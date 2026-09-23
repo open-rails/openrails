@@ -68,6 +68,7 @@ const (
 
 type runtimeOverrides struct {
 	StripeTransport  http.RoundTripper
+	NMITransport     http.RoundTripper
 	HostRiver        bool
 	RiverSchema      string
 	DB               *db.DB
@@ -203,6 +204,11 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		stripeTransport = overrides.StripeTransport
 	}
 	stripeClients := stripeapi.NewFactory(stripeTransport)
+	// #1055: the ONE PSP-scoped NMI client factory every consumer shares.
+	nmiClients := &railresolve.NMIFactory{Config: cfg}
+	if overrides != nil {
+		nmiClients.Transport = overrides.NMITransport
+	}
 	// #725/#730/#788: the ONE store-armed per-merchant credential builder
 	// (invoice collection adapters, manual-rebill + cancel NMI clients).
 	collectionResolver := &money.MerchantCollectionAdapterBuilder{
@@ -210,6 +216,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		Config:        cfg,
 		DB:            database,
 		MerchantsFn:   merchantsFn,
+		NMIClients:    nmiClients,
 	}
 	// #728/#788: per-merchant Solana RPC (poller, crank, intent verify legs,
 	// request-plane transaction builds).
@@ -351,16 +358,13 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	runtime.CollectionResolver = collectionResolver
 	moneyCharger.SetAdapterResolver(collectionResolver)
 	// A declared loopback NMI gateway (config.ProviderSandbox) reaches every
-	// store-armed NMI client: collection charges and verify reads, checkout
-	// sales, payment-method updates.
-	if gateway := cfg.SandboxNMIGatewayURL(); gateway != "" {
-		collectionResolver.Endpoints = money.CollectionEndpoints{NMIV5BaseURL: gateway, NMIDirectPostURL: gateway, NMIQueryURL: gateway}
-		if serviceInstances.CheckoutService != nil {
-			serviceInstances.CheckoutService.NMIEndpointOverride = gateway
-		}
-		if runtime.RailPaymentMethodService != nil {
-			runtime.RailPaymentMethodService.NMIEndpointOverride = gateway
-		}
+	// NMI client through the shared factory.
+	runtime.NMIClients = nmiClients
+	if serviceInstances.CheckoutService != nil {
+		serviceInstances.CheckoutService.NMIClients = nmiClients
+	}
+	if runtime.RailPaymentMethodService != nil {
+		runtime.RailPaymentMethodService.NMIClients = nmiClients
 	}
 	runtime.SolanaRPCResolver = solanaRPCResolver
 	// #817: decimals come from the SPL mint on-chain, read through the same

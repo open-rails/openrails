@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
+	"github.com/open-rails/openrails/internal/railresolve"
 )
 
 // fakeNMICheckoutGateway is a loopback NMI: vault creation succeeds, and every
@@ -135,8 +136,7 @@ func TestCheckoutRefusalsAreCodedAcrossDeployments(t *testing.T) {
 	gateway := newFakeNMICheckoutGateway(t)
 	rails := config.PSPSet{"nmi": {Rail: models.RailNMI, AccountID: fmt.Sprintf("gw-%d", time.Now().UnixNano()), NMI: &config.NMIRailConfig{SecurityKey: "sk-refusal"}}}
 	standalone := h.StartStandalone("USD", integrationharness.WithRails(rails))
-	standalone.App().Runtime.CheckoutService.NMIEndpointOverride = gateway.URL
-	standalone.App().Runtime.RailPaymentMethodService.NMIEndpointOverride = gateway.URL
+	standalone.App().Runtime.NMIClients.Endpoints = railresolve.LoopbackNMIEndpoints(gateway.URL)
 
 	local, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
@@ -145,8 +145,7 @@ func TestCheckoutRefusalsAreCodedAcrossDeployments(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, local.Close(context.Background())) })
 	app.HostGraph(local).Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
-	app.HostGraph(local).Runtime.CheckoutService.NMIEndpointOverride = gateway.URL
-	app.HostGraph(local).Runtime.RailPaymentMethodService.NMIEndpointOverride = gateway.URL
+	app.HostGraph(local).Runtime.NMIClients.Endpoints = railresolve.LoopbackNMIEndpoints(gateway.URL)
 	inprocess, err := local.Client()
 	require.NoError(t, err)
 

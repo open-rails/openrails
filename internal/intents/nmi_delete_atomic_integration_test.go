@@ -36,7 +36,7 @@ func TestNMIVaultDeleteAtomicRollbackAndProcessRecovery(t *testing.T) {
 		var input recovery
 		require.NoError(t, json.Unmarshal(raw, &input))
 		d := dbtest.OpenAppDB(t, input.DSN)
-		client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test_security_key", WebhookSecret: "test_secret"}, true)
+		client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "mobius", &config.NMIProviderSettings{SecurityKey: "test_security_key", WebhookSecret: "test_secret"}, true)
 		require.NoError(t, err)
 		client.LoopbackFixture = true
 		client.V5BaseURL = input.Gateway

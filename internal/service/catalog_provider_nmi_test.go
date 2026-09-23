@@ -11,7 +11,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/pkg/merchant"
 
 	"github.com/google/uuid"
 
@@ -69,7 +71,7 @@ func TestMobiusAdapter_AutoCreateFreshCreate(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	priceID := uuid.New()
-	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
+	ids, err := a.AutoCreate(nmiCatalogCtx(), autoCreateContext{
 		PriceID: priceID, ProductKey: "pro", Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
 	})
 	if err != nil {
@@ -103,7 +105,7 @@ func TestNMIAdapter_ProviderMetadataIsResolvedPSPKey(t *testing.T) {
 	}}
 	a := &nmiAdapter{svc: svc, testEndpointURL: server.URL}
 
-	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
+	ids, err := a.AutoCreate(nmiCatalogCtx(), autoCreateContext{
 		PriceID: uuid.New(), ProductKey: "pro", Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
 	})
 	if err != nil {
@@ -113,7 +115,7 @@ func TestNMIAdapter_ProviderMetadataIsResolvedPSPKey(t *testing.T) {
 		t.Fatalf("AutoCreate provider must be the resolved PSP key: %v", ids)
 	}
 
-	ids, err = a.Attach(context.Background(),
+	ids, err = a.Attach(nmiCatalogCtx(),
 		map[string]string{models.RailKeyPlanID: "pro-usd-9990000-30"},
 		autoCreateContext{ProductKey: "pro", Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err != nil {
@@ -152,7 +154,7 @@ func TestMobiusAdapter_AutoCreateTargetsSecondaryAccount(t *testing.T) {
 	}}
 	a := &nmiAdapter{svc: svc, testEndpointURL: srv.URL}
 
-	if _, err := a.AutoCreate(context.Background(), autoCreateContext{
+	if _, err := a.AutoCreate(nmiCatalogCtx(), autoCreateContext{
 		PriceID: uuid.New(), ProductKey: "pro", Currency: "USD", UnitAmount: 9_990_000,
 		BillingCycleDays: intPtr(30), TargetAccountID: "100002",
 	}); err != nil {
@@ -183,7 +185,7 @@ func TestMobiusAdapter_AutoCreateAttachNoDuplicate(t *testing.T) {
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
 
-	ids, err := a.AutoCreate(context.Background(), autoCreateContext{
+	ids, err := a.AutoCreate(nmiCatalogCtx(), autoCreateContext{
 		PriceID: priceID, ProductKey: "pro", Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30),
 	})
 	if err != nil {
@@ -226,7 +228,7 @@ func TestMobiusAdapter_AttachCreatesMissingPlanAtOperatorID(t *testing.T) {
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
 
-	ids, err := a.Attach(context.Background(),
+	ids, err := a.Attach(nmiCatalogCtx(),
 		map[string]string{models.RailKeyPlanID: "premium"},
 		autoCreateContext{ProductKey: "premium", Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err != nil {
@@ -256,7 +258,7 @@ func TestMobiusAdapter_AttachMissingPlanRequiresCycleToCreate(t *testing.T) {
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
 
-	_, err := a.Attach(context.Background(),
+	_, err := a.Attach(nmiCatalogCtx(),
 		map[string]string{models.RailKeyPlanID: "premium"},
 		autoCreateContext{Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: nil})
 	if err == nil || !strings.Contains(err.Error(), "recurring day cadence") {
@@ -273,7 +275,7 @@ func TestMobiusAdapter_AttachRejectsAmountMismatch(t *testing.T) {
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
 
-	_, err := a.Attach(context.Background(),
+	_, err := a.Attach(nmiCatalogCtx(),
 		map[string]string{models.RailKeyPlanID: planID},
 		autoCreateContext{Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err == nil || !strings.Contains(err.Error(), "amount") {
@@ -290,7 +292,7 @@ func TestMobiusAdapter_AttachRejectsCycleMismatch(t *testing.T) {
 	t.Cleanup(server.Close)
 	a := newMobiusAdapterWithServer(t, server.URL)
 
-	_, err := a.Attach(context.Background(),
+	_, err := a.Attach(nmiCatalogCtx(),
 		map[string]string{models.RailKeyPlanID: planID},
 		autoCreateContext{Currency: "USD", UnitAmount: 9_990_000, BillingCycleDays: intPtr(30)})
 	if err == nil || !strings.Contains(err.Error(), "billing cycle") {
@@ -306,7 +308,7 @@ func TestMobiusAdapter_VerifyDetectsDrift(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	ids := map[string]string{models.RailKeyPlanID: "p", models.RailKeyProvider: "mobius"}
-	drift, missing, err := a.Verify(context.Background(), ids, &priceVerifyContext{
+	drift, missing, err := a.Verify(nmiCatalogCtx(), ids, &priceVerifyContext{
 		UnitAmount: 9_990_000, Currency: "USD",
 	})
 	if err != nil {
@@ -333,7 +335,7 @@ func TestMobiusAdapter_VerifyMissingPlan(t *testing.T) {
 	a := newMobiusAdapterWithServer(t, server.URL)
 
 	ids := map[string]string{models.RailKeyPlanID: "p", models.RailKeyProvider: "mobius"}
-	_, missing, err := a.Verify(context.Background(), ids, &priceVerifyContext{Currency: "USD"})
+	_, missing, err := a.Verify(nmiCatalogCtx(), ids, &priceVerifyContext{Currency: "USD"})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -346,7 +348,7 @@ func TestMobiusAdapter_VerifyUnconfiguredIsSyncDisabled(t *testing.T) {
 	a := &nmiAdapter{svc: &Service{rt: &app.Runtime{}}}
 	// VerifyPriceSync maps errProviderNotArmed to sync_disabled. A nil error
 	// would be read as in sync and could close drift nothing verified.
-	drift, missing, err := a.Verify(context.Background(), map[string]string{models.RailKeyPlanID: "p"}, &priceVerifyContext{Currency: "USD"})
+	drift, missing, err := a.Verify(nmiCatalogCtx(), map[string]string{models.RailKeyPlanID: "p"}, &priceVerifyContext{Currency: "USD"})
 	if !errors.Is(err, errProviderNotArmed) || missing || drift != nil {
 		t.Fatalf("expected a not-armed error, got drift=%v missing=%v err=%v", drift, missing, err)
 	}
@@ -380,14 +382,14 @@ func TestNMICatalogClientUsesConfiguredSandboxEndpoint(t *testing.T) {
 				adapter.testEndpointURL = gateway.URL
 				adapter.svc.rt.Config.ProviderSandbox.NMIGatewayURL = other.URL
 			}
-			client, _, ok := adapter.nmiClientFor(t.Context(), "mobius")
+			client, _, ok := adapter.nmiClientFor(nmiCatalogCtx(), "mobius")
 			if !ok || client == nil {
 				t.Fatal("NMI client must be armed")
 			}
 			if client.V5BaseURL != gateway.URL || client.QueryURL != gateway.URL || client.DirectPostURL != gateway.URL {
 				t.Fatal("refusing to issue a query outside the configured local fixture")
 			}
-			detail, err := client.GetRecurringPlanDetailByID(t.Context(), "known", "USD")
+			detail, err := client.GetRecurringPlanDetailByID(nmiCatalogCtx(), "known", "USD")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -396,4 +398,9 @@ func TestNMICatalogClientUsesConfiguredSandboxEndpoint(t *testing.T) {
 			}
 		})
 	}
+}
+
+// nmiCatalogCtx carries the merchant every NMI client is bound to (#1055).
+func nmiCatalogCtx() context.Context {
+	return merchant.WithID(context.Background(), dbtest.TestMerchantID)
 }

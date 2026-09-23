@@ -181,13 +181,21 @@ func TestLoopbackFixtureMarkerIsExplicitAndLoopbackOnly(t *testing.T) {
 }
 
 func TestProxyPostureBindsCredentialAndDestination(t *testing.T) {
-	posture, err := ProxyPostureClient("proxy-key", DefaultDirectPostURL, true, false)
+	merchantID, pspID := uuid.New(), uuid.New()
+	posture, err := ProxyPostureClient(merchantID, pspID, "proxy-account", &config.NMIProviderSettings{SecurityKey: "proxy-key", EndpointDeployment: config.NMIEndpointGateway}, "", true)
 	require.NoError(t, err)
 	require.Equal(t, config.NMIEndpointGateway, posture.endpointDeployment)
+	require.Equal(t, DefaultDirectPostURL, posture.DirectPostURL, "the declared deployment selects the destination")
+	owner, psp := posture.AccountIdentity()
+	require.Equal(t, merchantID, owner)
+	require.Equal(t, pspID, psp)
 	require.ErrorIs(t, posture.RequireArmedFor(context.Background(), SandboxDirectPostURL, "proxy-key"), providerposture.ErrDisarmed)
 	require.ErrorIs(t, posture.RequireArmedFor(context.Background(), DefaultDirectPostURL, "other-key"), providerposture.ErrDisarmed)
-	_, err = ProxyPostureClient("proxy-key", "https://example.invalid/transact.php", true, false)
-	require.ErrorIs(t, err, providerposture.ErrDisarmed)
+	sandbox, err := ProxyPostureClient(merchantID, pspID, "proxy-account", &config.NMIProviderSettings{SecurityKey: "proxy-key", EndpointDeployment: config.NMIEndpointSandbox}, "", true)
+	require.NoError(t, err)
+	require.Equal(t, SandboxDirectPostURL, sandbox.DirectPostURL)
+	_, err = ProxyPostureClient(uuid.Nil, pspID, "proxy-account", &config.NMIProviderSettings{SecurityKey: "proxy-key"}, "", true)
+	require.Error(t, err, "a proxy credential without its PSP identity is refused")
 	var none *NMIClient
 	require.ErrorIs(t, none.RequireArmedFor(context.Background(), DefaultDirectPostURL, "proxy-key"), providerposture.ErrDisarmed)
 }

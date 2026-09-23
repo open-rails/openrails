@@ -474,5 +474,10 @@ func (f FixedSet) CustodianConfig(_ context.Context, kind, accountID string) (*c
 func withPSPKey(proc *config.PSPConfig, key string) *config.PSPConfig {
 	out := *proc
 	out.Key = strings.ToLower(strings.TrimSpace(key))
+	if out.ID == uuid.Nil {
+		// A fixture PSP still has a stable identity: provider clients are
+		// never built without one (#1055).
+		out.ID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("openrails:fixed-psp:"+string(out.EffectiveRail(key))+":"+out.EffectiveAccountID()))
+	}
 	return &out
 }

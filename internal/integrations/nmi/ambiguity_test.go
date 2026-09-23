@@ -15,7 +15,7 @@ import (
 
 func testClient(t *testing.T, url string) *NMIClient {
 	t.Helper()
-	c, err := NewClient("mobius", &config.NMIProviderSettings{
+	c, err := newClient("mobius", &config.NMIProviderSettings{
 		SecurityKey:   "test_security_key",
 		WebhookSecret: "test_secret",
 	}, true)

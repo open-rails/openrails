@@ -477,7 +477,7 @@ func TestWebhookWakeUpEndToEnd_NMIRenewal(t *testing.T) {
 	}))
 	t.Cleanup(nmiSrv.Close)
 
-	nmiClient, err := nmi.NewClient("nmi", &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
+	nmiClient, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
 	require.NoError(t, err)
 	nmiClient.LoopbackFixture = true
 	nmiClient.DirectPostURL = nmiSrv.URL
@@ -585,7 +585,7 @@ func TestSubscriptionConverge_SnoozeHandsOffOnObservedPullCoverage(t *testing.T)
 		_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))
 	}))
 	t.Cleanup(nmiSrv.Close)
-	nmiClient, err := nmi.NewClient("nmi", &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
+	nmiClient, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
 	require.NoError(t, err)
 	nmiClient.LoopbackFixture = true
 	nmiClient.DirectPostURL = nmiSrv.URL

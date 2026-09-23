@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/config"
 	provider "github.com/open-rails/openrails/internal/integrations/hyperswitch"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -197,7 +199,7 @@ func TestHyperSwitchNMIChargeBoundary(t *testing.T) {
 			defer server.Close()
 			client, err := provider.New(provider.Config{BaseURL: server.URL, MerchantID: "merchant_A", ProfileID: "profile_A", APIKey: "synthetic-custodian-key", ReadOnly: tc.mode == "readonly"})
 			require.NoError(t, err)
-			posture, err := nmi.ProxyPostureClient(string(gatewayKey), destination, false, false)
+			posture, err := nmi.ProxyPostureClient(uuid.New(), uuid.New(), "gateway-account", &config.NMIProviderSettings{SecurityKey: string(gatewayKey)}, destination, false)
 			require.NoError(t, err)
 			charger := &Charger{Client: client, Destination: destination, SecurityKey: gatewayKey, Posture: posture}
 			require.NotContains(t, fmt.Sprintf("%+v %#v", charger, charger), gatewayKey)

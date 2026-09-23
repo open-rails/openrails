@@ -63,6 +63,19 @@ Store real secret values in Vault (or the encrypted DB store) and overlay them;
 never commit them. A PSP declares no environment (#882): the deployment-level
 `test_mode` decides, and every PSP in the deployment follows it.
 
+### Catalog prices
+
+NMI prices are engine terms: no NMI plan is created or required.
+
+- One-time: a direct gateway sale on the Collect.js token or saved vault
+  card. Declaring the PSP on a one-time price (`psps: [mobius]`) needs no
+  link.
+- Recurring: OpenRails charges each renewal from the vaulted card (manual
+  rebill). An explicit `plan_id` link is accepted only for provider-owned
+  legacy schedules, and must match the price.
+
+A price is offered on NMI when the PSP is armed.
+
 ### Webhook registration
 
 In the NMI dashboard, register a webhook endpoint pointing at your OpenRails
@@ -123,7 +136,10 @@ NMI PSP then declares which NMI deployment its credentials belong to, in
 ```
 
 Verification runs once per loaded credential set (startup, credential
-create/rotate), bound to merchant + PSP + endpoint + credential fingerprint;
+create/rotate), bound to merchant + PSP + endpoint + credential fingerprint.
+Every NMI client (checkout, card save, rebills, refunds, cutover, pulls,
+custodian proxies) is built from that same PSP scope, so all of them share the
+one verdict;
 see `docs/design/provider-sandbox-posture.md`. A false, unknown or unavailable
 verdict disarms the PSP: every NMI mutation is refused with
 `providerposture.ErrDisarmed`, reads still work, and `Ready()` reports

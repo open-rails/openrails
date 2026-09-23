@@ -65,10 +65,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid merchant.ID, pspID u
 	var check providerposture.Check
 	switch scope.Rail {
 	case string(models.RailNMI):
-		armer := &railresolve.NMIArmer{Config: r.Config, DB: r.DB, MerchantsFn: func() *merchants.Service { return svc }}
-		if gateway := r.Config.SandboxNMIGatewayURL(); gateway != "" {
-			armer.Endpoints = railresolve.NMIEndpoints{V5BaseURL: gateway, DirectPostURL: gateway, QueryURL: gateway}
-		}
+		armer := &railresolve.NMIArmer{Config: r.Config, DB: r.DB, MerchantsFn: func() *merchants.Service { return svc }, Factory: r.NMIClients}
 		client, err := armer.NMIClient(ctx, mid, scope)
 		if err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(fields).Error("provider posture: NMI credentials unavailable; PSP disarmed")

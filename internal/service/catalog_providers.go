@@ -481,8 +481,12 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 
 // localEnginePrice identifies terms executed without a provider catalog object.
 // Apply the same decision to primary creation and secondary account fanout.
-func (s *Service) localEnginePrice(rail string, cycle *int) bool {
-	return (rail == "stripe" || (rail == "nmi" && cycle != nil))
+// Stripe and NMI card prices are engine terms, one-time or recurring: a
+// one-time sale is a direct gateway charge and OpenRails drives every renewal
+// from the vaulted card (#1055), so neither needs a provider price or plan.
+// Explicit provider links remain for provider-owned legacy cohorts.
+func (s *Service) localEnginePrice(rail string, _ *int) bool {
+	return rail == "stripe" || rail == "nmi"
 }
 
 // railAccountRef is one declared merchant account: its rail plus the

@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/providerposture"
 )
@@ -147,29 +149,21 @@ func (c *NMIClient) qualifyAccount(ctx context.Context) (TestModeProbeResult, er
 	return c.ProbeTestMode(ctx)
 }
 
-// ProxyPostureClient is the posture identity of a credential that a custodian
-// proxy forwards to destination. The destination selects which official
-// signal applies; it never implies the verdict. A fixture (set only by code
-// seams or the loopback provider_sandbox) skips verification: OpenRails never
-// dials the destination itself, only the custodian.
-func ProxyPostureClient(securityKey, destination string, testMode, loopbackFixture bool) (*NMIClient, error) {
-	deployment := ""
-	switch destination {
-	case DefaultDirectPostURL, GatewayDirectPostURL:
-		deployment = config.NMIEndpointGateway
-	case SandboxDirectPostURL:
-		deployment = config.NMIEndpointSandbox
-	default:
-		if testMode && !loopbackFixture {
-			return nil, fmt.Errorf("%w: unrecognized NMI proxy destination %q", providerposture.ErrDisarmed, destination)
-		}
-	}
-	client, err := NewClient("nmi-proxy", &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, testMode)
+// ProxyPostureClient is the posture identity of a PSP credential that a
+// custodian proxy forwards. The declared endpoint deployment selects the
+// destination (DirectPostURL) and the official signal; it is never inferred
+// from a URL. fixtureDestination (code seams and the loopback
+// provider_sandbox only) replaces the destination and skips verification:
+// OpenRails never dials it itself, only the custodian does.
+func ProxyPostureClient(merchantID, pspID uuid.UUID, accountID string, cfg *config.NMIProviderSettings, fixtureDestination string, testMode bool) (*NMIClient, error) {
+	client, err := NewAccountClient(merchantID, pspID, accountID, cfg, testMode)
 	if err != nil {
 		return nil, err
 	}
-	client.DirectPostURL = destination
-	client.proxyFixture = loopbackFixture
+	if fixtureDestination != "" {
+		client.DirectPostURL = fixtureDestination
+		client.proxyFixture = true
+	}
 	return client, nil
 }
 

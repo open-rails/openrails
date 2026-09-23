@@ -14,8 +14,8 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
@@ -179,16 +179,7 @@ func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T)
 		MerchantSecrets:      store,
 		ProviderSecrets:      vaultStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"},
 		Config:               vaultTestConfig(true),
-		newNMIClient: func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error) {
-			client, err := nmi.NewClient(provider, cfg, testMode)
-			if err != nil {
-				return nil, err
-			}
-			client.LoopbackFixture = true
-			client.DirectPostURL = server.URL
-			client.V5BaseURL = server.URL
-			return client, nil
-		},
+		NMIClients:           &railresolve.NMIFactory{Config: vaultTestConfig(true), Endpoints: railresolve.NMIEndpoints{V5BaseURL: server.URL, DirectPostURL: server.URL}},
 	}
 
 	pm, err := svc.CreatePaymentMethod(ctx, "11111111-1111-1111-1111-111111111111", &CreatePaymentMethodRequest{
@@ -330,7 +321,9 @@ func (r vaultStaticProviderSecretResolver) ActivePSPSecretName(_ context.Context
 }
 
 func (r vaultStaticProviderSecretResolver) ActivePSPScope(context.Context, merchant.ID, string, string) (merchants.PSPScope, bool, error) {
+	id, _, _, _ := merchants.PSPNaturalKey(r.rail, r.environment, r.accountID)
 	return merchants.PSPScope{
+		ID:          id,
 		Rail:        r.rail,
 		Environment: r.environment,
 		AccountID:   r.accountID,
@@ -363,7 +356,8 @@ func (r vaultPerMerchantProviderSecretResolver) ActivePSPScope(_ context.Context
 	if accountID == "" {
 		return merchants.PSPScope{}, false, nil
 	}
-	return merchants.PSPScope{Rail: "nmi", Environment: "live", AccountID: accountID}, true, nil
+	pspID, _, _, _ := merchants.PSPNaturalKey("nmi", "live", accountID)
+	return merchants.PSPScope{ID: pspID, Rail: "nmi", Environment: "live", AccountID: accountID}, true, nil
 }
 
 func vaultTestConfig(testMode bool) *config.Config {

@@ -36,7 +36,7 @@ func TestProbeCredentials(t *testing.T) {
 			}))
 			t.Cleanup(server.Close)
 
-			client, err := NewClient("nmi", &config.NMIProviderSettings{SecurityKey: "security-key"}, true)
+			client, err := newClient("nmi", &config.NMIProviderSettings{SecurityKey: "security-key"}, true)
 			require.NoError(t, err)
 			client.QueryURL = server.URL
 

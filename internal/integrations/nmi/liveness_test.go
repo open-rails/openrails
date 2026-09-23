@@ -16,7 +16,7 @@ func newLivenessTestClient(t *testing.T, handler http.HandlerFunc) *NMIClient {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	client, err := NewClient("mobius", &config.NMIProviderSettings{
+	client, err := newClient("mobius", &config.NMIProviderSettings{
 		SecurityKey: "test_key", WebhookSecret: "s",
 	}, true)
 	require.NoError(t, err)

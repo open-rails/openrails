@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -202,7 +204,7 @@ func TestChargerOutcomes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		posture, err := nmi.ProxyPostureClient("sk", "https://gw.example/transact.php", false, false)
+		posture, err := nmi.ProxyPostureClient(uuid.New(), uuid.New(), "gateway-account", &config.NMIProviderSettings{SecurityKey: "sk"}, "https://gw.example/transact.php", false)
 		if err != nil {
 			t.Fatal(err)
 		}

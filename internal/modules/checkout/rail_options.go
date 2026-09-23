@@ -158,16 +158,10 @@ func (s *CheckoutSessionService) checkoutRailSkipReason(price *models.Price, tar
 		}
 		return ""
 	case string(models.RailNMI):
+		// A one-time NMI sale is a direct gateway charge on the tokenized or
+		// vaulted card: an armed PSP is enough, no provider plan (#1055).
 		if providerConfig.NMI == nil || strings.TrimSpace(providerConfig.NMI.SecurityKey) == "" {
 			return models.CheckoutRoutingSkipCredentialsMissing
-		}
-		if checkoutPSPLinkForTarget(price, target) == nil {
-			return models.CheckoutRoutingSkipLinkMissing
-		}
-		if mode == models.CheckoutSessionModeSubscription {
-			if _, err := requireNMIPlanForTarget(price, target); err != nil {
-				return models.CheckoutRoutingSkipLinkMissing
-			}
 		}
 		return ""
 	case string(models.RailCCBill):

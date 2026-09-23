@@ -22,7 +22,7 @@ func TestNewClient_EndpointSelection(t *testing.T) {
 	}
 
 	t.Run("test mode uses sandbox endpoints", func(t *testing.T) {
-		client, err := NewClient("mobius", baseCfg, true)
+		client, err := newClient("mobius", baseCfg, true)
 		require.NoError(t, err)
 		assert.Equal(t, SandboxDirectPostURL, client.DirectPostURL)
 		assert.Equal(t, SandboxQueryAPIURL, client.QueryURL)
@@ -31,7 +31,7 @@ func TestNewClient_EndpointSelection(t *testing.T) {
 	})
 
 	t.Run("production mode uses default endpoints", func(t *testing.T) {
-		client, err := NewClient("mobius", baseCfg, false)
+		client, err := newClient("mobius", baseCfg, false)
 		require.NoError(t, err)
 		assert.Equal(t, DefaultDirectPostURL, client.DirectPostURL, "should use production direct post URL")
 		assert.Equal(t, DefaultQueryAPIURL, client.QueryURL, "should use production query URL")
@@ -41,14 +41,14 @@ func TestNewClient_EndpointSelection(t *testing.T) {
 
 	t.Run("production mode requires security key", func(t *testing.T) {
 		emptyCfg := &config.NMIProviderSettings{}
-		_, err := NewClient("mobius", emptyCfg, false)
+		_, err := newClient("mobius", emptyCfg, false)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "security key is required")
 	})
 
 	t.Run("test mode allows missing security key", func(t *testing.T) {
 		emptyCfg := &config.NMIProviderSettings{}
-		client, err := NewClient("mobius", emptyCfg, true)
+		client, err := newClient("mobius", emptyCfg, true)
 		require.NoError(t, err)
 		// Client created but SecurityKey is empty (API calls will fail but that's expected)
 		assert.Empty(t, client.SecurityKey)
@@ -66,7 +66,7 @@ func TestAttemptManualRebill_SendsStableOrderReferences(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := NewClient("mobius", &config.NMIProviderSettings{
+	client, err := newClient("mobius", &config.NMIProviderSettings{
 		SecurityKey: "test-security-key",
 	}, false)
 	require.NoError(t, err)
@@ -94,7 +94,7 @@ func TestReadOnlyBlocksAllDirectPostMutations(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient("mobius", &config.NMIProviderSettings{
+	client, err := newClient("mobius", &config.NMIProviderSettings{
 		SecurityKey: "test-security-key",
 	}, false)
 	require.NoError(t, err)
@@ -163,7 +163,7 @@ func probeServer(t *testing.T, authCode string, seen *[]url.Values) *httptest.Se
 
 func probeClient(t *testing.T, serverURL string) *NMIClient {
 	t.Helper()
-	client, err := NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-security-key"}, true)
+	client, err := newClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-security-key"}, true)
 	require.NoError(t, err)
 	client.DirectPostURL = serverURL
 	client.V5BaseURL = serverURL
@@ -242,7 +242,7 @@ func TestUpdateCustomerVault_ResolvesBillingID(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "k"}, false)
+	client, err := newClient("mobius", &config.NMIProviderSettings{SecurityKey: "k"}, false)
 	require.NoError(t, err)
 	client.V5BaseURL = server.URL
 
@@ -268,7 +268,7 @@ func TestUpdateCustomerVault_TargetsKnownBillingIDWithoutLookup(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "k"}, false)
+	client, err := newClient("mobius", &config.NMIProviderSettings{SecurityKey: "k"}, false)
 	require.NoError(t, err)
 	client.V5BaseURL = server.URL
 

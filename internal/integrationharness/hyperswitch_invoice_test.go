@@ -30,6 +30,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
@@ -360,7 +361,7 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 	require.NoError(t, rt.DB.RunInMerchantConn(merchant.WithID(ctx, owned.MerchantID), func(c context.Context) error {
 		return paymentmethods.NewPaymentMethodRepo(rt.DB).Create(c, &models.PaymentMethod{ID: nativeMethod, CustomerID: customer.UUID(), PspID: nativePSP, Rail: models.RailNMI, Custodian: models.CustodianPSP, RailCustomerRef: nativeVault, RailMethodRef: "native-billing"})
 	}))
-	rt.RailPaymentMethodService.NMIEndpointOverride = g.server.URL + "/nmi"
+	rt.RailPaymentMethodService.NMIClients = &railresolve.NMIFactory{Config: rt.Config, Endpoints: railresolve.LoopbackNMIEndpoints(g.server.URL + "/nmi")}
 	require.Equal(t, http.StatusNoContent, deleteMethod(token, openrails.PaymentMethodID(nativeMethod)))
 	mu.Lock()
 	require.True(t, nativeDeleted)

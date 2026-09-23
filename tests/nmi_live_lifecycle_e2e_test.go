@@ -44,7 +44,7 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 	f := newTreasuryWorkflow(t)
 	rt := f.surface.App().Runtime
 	integrationharness.SeedPSPs(t.Context(), t, rt, f.merchant.MerchantID, config.PSPSet{"nmi": {Rail: "nmi", AccountID: "qualification-" + uuid.NewString(), NMI: &config.NMIRailConfig{SecurityKey: key, WebhookSigningSecret: secret}}})
-	provider, err := nmi.NewClient("nmi", &config.NMIProviderSettings{SecurityKey: key, WebhookSecret: secret}, true)
+	provider, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: key, WebhookSecret: secret}, true)
 	require.NoError(t, err)
 	require.Equal(t, nmi.DefaultDirectPostURL, provider.DirectPostURL)
 	require.Equal(t, nmi.DefaultQueryAPIURL, provider.QueryURL)

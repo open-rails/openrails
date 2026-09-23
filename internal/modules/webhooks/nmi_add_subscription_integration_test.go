@@ -124,7 +124,7 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 		require.Zero(t, f.directPostHits.Load(), "fetch-and-converge must never send a provider mutation")
 	})
 
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "mobius", &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
 	require.NoError(t, err)
 	client.LoopbackFixture = true
 	client.DirectPostURL = srv.URL

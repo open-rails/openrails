@@ -476,7 +476,7 @@ func TestScopedCharger_NMIAdapterCollectsThroughGateway(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
 	require.NoError(t, err)
 	client.DirectPostURL = server.URL
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
@@ -512,7 +512,7 @@ func TestScopedCharger_NMIAdapterDeclineReturnsStructuredFailure(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
 	require.NoError(t, err)
 	client.DirectPostURL = server.URL
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{

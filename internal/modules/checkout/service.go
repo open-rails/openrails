@@ -87,9 +87,9 @@ type CheckoutService struct {
 	clock     clockwork.Clock
 	Config    *config.Config
 	Rails     railresolve.Source
-	// NMIEndpointOverride points store-armed NMI clients at a fake gateway
-	// (test seam; empty = real endpoints).
-	NMIEndpointOverride string
+	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
+	// one from Config.
+	NMIClients *railresolve.NMIFactory
 	// ResolveNMIClientOverride replaces the store-armed NMI client resolution
 	// entirely (test seam; nil = the scoped resolution).
 	ResolveNMIClientOverride func(context.Context, string) (*nmi.NMIClient, error)

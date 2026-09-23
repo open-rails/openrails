@@ -35,7 +35,8 @@ func TestEnrollmentReceiptRequiresActualReaderAccount(t *testing.T) {
 			switch kind {
 			case "nil":
 			case "unscoped":
-				client, err = nmi.NewClient("nmi", cfg, true)
+				// No constructor yields one (#1055); a literal still must not qualify.
+				client = &nmi.NMIClient{SecurityKey: cfg.SecurityKey, TestMode: true}
 			default:
 				if kind == "wrong PSP" {
 					pspID = uuid.New()

@@ -87,6 +87,7 @@ var providerWriteSurface = map[string]string{
 	"PrepareRecurringSale":         "read",
 	"ReadRecurringSaleEvidence":    "read",
 	"AccountIdentity":              "read",
+	"UseTransport":                 "read", // test seam; replaces the wire, sends nothing
 	"FindSuccessfulSaleByOrderID":  "read",
 	"GetPayment":                   "read",
 	"GetPaymentActions":            "read",
