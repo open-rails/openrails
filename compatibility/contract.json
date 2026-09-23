@@ -5122,7 +5122,7 @@
     "internal/controlplane/routes.go": "500efe0011ab1a68f6daea30113a02f84590d4f272ad1a14be3d2ea2a1754966",
     "internal/controlplane/service.go": "d7b94ba506220b708668dc72e26ce686db6dedf35340e056682d3345d6706d19",
     "internal/controlplane/service_jwt.go": "0c7497b227447df4caa5ef1effb1649ddf8ac139d077f7a18e153d5e051a4dbe",
-    "internal/credential/resolved.go": "bd4ea541c204b8e1af5c5488f7bfab23f5a9b5148ba8f75082dc80c0bbc16f5e",
+    "internal/credential/resolved.go": "1deb29cdd816321866b7f13105601fb5bbd0d383cd0f20c8fe0df2b2e0c331b9",
     "internal/hostauth/authkit.go": "be74e7b7a009b99ca42d713366cb23534c39feab2ca52b6c169752a604038cd4",
     "internal/http/embedhttp/capabilities.go": "b92d2dc4c40f4dd6979eab3bcb964cef7f0ac21bdf8e36a6281823b676472fb1",
     "internal/http/embedhttp/configured.go": "e936f9383f9624ffc8f7d53231ba51bacd5b3c384ede7320532dec647af505c1",
