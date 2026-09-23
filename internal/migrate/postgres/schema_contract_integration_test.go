@@ -116,3 +116,29 @@ func TestPriceAndRefundAmountConstraints(t *testing.T) {
 		uuid.New(), f.merchant, f.customer, f.price, uuid.NewString(), f.pspA)
 	require.NoError(t, err)
 }
+
+func TestCatalogStorageIdentity(t *testing.T) {
+	f := newPSPFixture(t)
+	ctx := t.Context()
+	for _, sql := range []string{
+		`INSERT INTO billing.products(id,merchant_id,key,display_name)
+		 SELECT gen_random_uuid(),merchant_id,key,display_name FROM billing.products WHERE id=$1`,
+		`INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew)
+		 SELECT gen_random_uuid(),merchant_id,product_id,amount,currency,access_duration_hours,auto_renew
+		 FROM billing.prices WHERE product_id=$1`,
+	} {
+		_, err := f.pool.Exec(ctx, sql, f.product)
+		var violation *pgconn.PgError
+		require.ErrorAs(t, err, &violation)
+		require.Equal(t, "23505", violation.Code, "duplicate catalog identity must be refused")
+	}
+	otherProduct := uuid.New()
+	_, err := f.pool.Exec(ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name)
+		VALUES($1,$2,$3,'Other')`, otherProduct, f.merchant, uuid.NewString())
+	require.NoError(t, err)
+	f.product = otherProduct // Both records exist, but this price belongs to a different product.
+	err = f.insertSubscription(t, uuid.NewString(), f.customer, &f.pspA)
+	var violation *pgconn.PgError
+	require.ErrorAs(t, err, &violation)
+	require.Equal(t, "subscriptions_price_product_merchant_fkey", violation.ConstraintName)
+}
