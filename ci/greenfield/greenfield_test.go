@@ -7,8 +7,12 @@ package greenfield_test
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,6 +29,26 @@ import (
 type fixture struct {
 	pool   *pgxpool.Pool
 	schema string
+}
+
+// greenfieldStripeTransport is a deterministic provider seam. The checkout
+// admission path still exercises the public provider routing and idempotency
+// contract, but the greenfield suite never contacts Stripe or needs provider
+// credentials. The transport intentionally accepts only the one request a
+// hosted Stripe checkout should issue during session creation.
+type greenfieldStripeTransport struct{ checkoutCalls atomic.Int32 }
+
+func (p *greenfieldStripeTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method != http.MethodPost || r.URL.Path != "/v1/checkout/sessions" {
+		return nil, fmt.Errorf("unexpected provider request: %s %s", r.Method, r.URL.Path)
+	}
+	p.checkoutCalls.Add(1)
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"cs_greenfield","url":"https://checkout.greenfield.test/session"}`)),
+		Request:    r,
+	}, nil
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -63,20 +87,39 @@ func newFixture(t *testing.T) *fixture {
 }
 
 func (f *fixture) runtime(t *testing.T, slug string) (*embed.Runtime, *openrails.Client) {
+	return f.runtimeWithStripe(t, slug, nil)
+}
+
+func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.RoundTripper) (*embed.Runtime, *openrails.Client) {
 	t.Helper()
+	providerWriteMode := config.ProviderWriteModeReadOnly
+	var stripeTransport http.RoundTripper
+	var psps map[string]embed.PSPConfig
+	if transport != nil {
+		providerWriteMode = config.ProviderWriteModeFull
+		stripeTransport = transport
+		psps = map[string]embed.PSPConfig{"stripe": {"stripe": {
+			AccountID: "acct_greenfield",
+			Secrets: map[string]string{
+				"secret_key":             "sk_test_greenfield",
+				"webhook_signing_secret": "whsec_greenfield",
+			},
+		}}}
+	}
 	runtime, err := embed.New(t.Context(), embed.Options{
 		Config: &config.Config{
 			TestMode:            config.CredentialPostureSandbox,
 			AllowCatalogUpdates: true,
-			ProviderWriteMode:   config.ProviderWriteModeReadOnly,
+			ProviderWriteMode:   providerWriteMode,
 			DB:                  &config.DBConfig{URL: f.dsn(t), Schema: f.schema},
 		},
 		Merchant: &embed.MerchantDeclaration{
 			Slug:   slug,
-			Config: embed.MerchantConfig{DisplayName: slug},
+			Config: embed.MerchantConfig{DisplayName: slug, PSPs: psps},
 		},
-		PGXPool: f.pool,
-		River:   embed.RiverManagedByOpenRails(f.schema),
+		PGXPool:         f.pool,
+		River:           embed.RiverManagedByOpenRails(f.schema),
+		StripeTransport: stripeTransport,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
@@ -169,4 +212,65 @@ func TestCatalogEnsureIsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, first.ID, read.ID)
 	require.Equal(t, first.DisplayName, read.DisplayName)
+}
+
+func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
+	f := newFixture(t)
+	provider := &greenfieldStripeTransport{}
+	_, client := f.runtimeWithStripe(t, "checkout-"+uuid.NewString()[:8], provider)
+
+	product, err := client.Products.Create(t.Context(), &openrails.ProductCreateParams{
+		Key:              "premium-post-" + uuid.NewString()[:8],
+		DisplayName:      "Premium post",
+		EntitlementsSpec: map[string]*int{"content:premium": nil},
+	})
+	require.NoError(t, err)
+	price, err := client.Prices.Create(t.Context(), &openrails.PriceCreateParams{
+		ProductID:  product.ID,
+		Key:        product.Key + "-usd",
+		UnitAmount: 1_000_000,
+		Currency:   "USD",
+	})
+	require.NoError(t, err)
+
+	customer := uuid.NewString()
+	request := openrails.CreateCheckoutSessionRequest{
+		Customer:       openrails.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "reader@example.test"},
+		PriceKey:       price.Key,
+		Entitlement:    "content:premium",
+		OfferKind:      openrails.OfferPermanent,
+		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"},
+		IdempotencyKey: "checkout-" + uuid.NewString(),
+		SuccessURL:     "https://greenfield.test/success",
+		CancelURL:      "https://greenfield.test/cancel",
+	}
+	first, err := client.CreateCheckoutSession(t.Context(), request)
+	require.NoError(t, err)
+	require.Equal(t, "stripe", first.RailData["rail"])
+	require.NotNil(t, first.PriceID)
+	require.Equal(t, price.ID, *first.PriceID)
+
+	replay, err := client.CreateCheckoutSession(t.Context(), request)
+	require.NoError(t, err)
+	require.Equal(t, first.ID, replay.ID)
+	require.Equal(t, first.Amount, replay.Amount)
+	require.EqualValues(t, 1, provider.checkoutCalls.Load(), "the provider sees one request across an identical replay")
+
+	changed := request
+	changed.SuccessURL = "https://greenfield.test/changed"
+	_, err = client.CreateCheckoutSession(t.Context(), changed)
+	require.ErrorIs(t, err, openrails.ErrIdempotencyKeyReused)
+
+	lookup, err := client.LookupCheckoutSession(t.Context(), request)
+	require.NoError(t, err)
+	require.Equal(t, first.ID, lookup.ID)
+
+	before, err := client.CheckEntitlements(t.Context(), customer, []string{"content:premium"}, time.Time{})
+	require.NoError(t, err)
+	require.False(t, before["content:premium"])
+	_, err = client.GrantEntitlement(t.Context(), customer, openrails.GrantEntitlementRequest{Entitlement: "content:premium"})
+	require.NoError(t, err)
+	after, err := client.CheckEntitlements(t.Context(), customer, []string{"content:premium"}, time.Time{})
+	require.NoError(t, err)
+	require.True(t, after["content:premium"], "the public access check observes the entitlement granted for the product")
 }
