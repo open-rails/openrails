@@ -93,7 +93,7 @@ to boot unless you declare posture explicitly (#745):
 | `TestMode` | yes | `config.CredentialPostureSandbox` or `config.CredentialPostureLive`. The zero value is UNSET and rejected — it can never silently mean "live". |
 | `ProviderWriteMode` | recommended | `config.ProviderWriteModeFull` etc.; unset fail-closes to readonly. |
 | `MerchantConfigSource` | defaults to `config.MerchantConfigSourceManifest` | Mode 1 (manifest-is-truth, secrets in memory, reboot to change) vs `MerchantConfigSourceAPI` (mode 2: provision via HTTP APIs + persistent secret store). |
-| `CatalogSource` | empty follows `MerchantConfigSource` | `CatalogSourceManifest` uses `PushCatalog`; `CatalogSourceAPI` permits authorized product, price and metering APIs independently of provider credentials. |
+| `AllowCatalogUpdates` | false | Enables ordinary product, price, catalog and metering writes and their routes, independently of provider credentials. Trusted local operator application remains available when false. |
 | `DB` | yes | Schema defaults to `billing`. The injected pool can be the same owning connection used for initialization. |
 
 #### Database ownership and optional separate runtime credentials
@@ -339,15 +339,15 @@ merchant, strict — unknown fields rejected) or
 manifest plus the host's mounted YAML secret overlays, so committed files hold
 placeholders and the host supplies real secrets from its own config tree).
 
-**Catalog authoring**: `CatalogSource` selects `manifest` or `api`; when omitted
-it follows `MerchantConfigSource`, preserving existing behavior. Manifest catalogs use
-`embedoperator.New(rt).PushCatalog`; catalog API writes return 405 `manifest_driven`. API catalogs
-use the Client (`Products.Create`, `Prices.Create`, `Prices.SetKey`, ...); mutating
-manifest pushes are refused, while plan-only comparisons remain available.
+**Catalog authoring**: storage is always the database. `AllowCatalogUpdates`
+defaults false and controls ordinary Client mutations and their route inclusion.
+When enabled, use the Client (`Products.Create`, `Prices.Create`, `Prices.SetKey`,
+and merchant batch application). Trusted local operator application remains
+available when ordinary updates are disabled.
 
 For dynamic products with host-owned Stripe credentials, construct the runtime
 with `MerchantConfigSource: config.MerchantConfigSourceManifest` and
-`CatalogSource: config.CatalogSourceAPI`, then pass the host's account and secrets
+`AllowCatalogUpdates: true`, then pass the host's account and secrets
 in `Options.Merchant.Config` as above. OpenRails keeps provider credentials in
 memory and refuses provider-configuration API writes. The host rotates credentials
 by updating its configuration and constructing a new runtime. Existing API catalog
@@ -359,22 +359,22 @@ DB-backed alert-webhook URLs and HyperSwitch SDK capture authorization still
 require encrypted persistence. Managed provider credentials use the explicitly
 selected DB or Vault backend; they never fall back to host credentials on a miss.
 `ProviderWriteMode` remains independent: readonly limits provider network writes,
-and an API-owned catalog can still update local definitions.
+and enabled ordinary catalog writes can still update local definitions.
 
-```go
-err := rt.PushCatalog(ctx, embed.PushCatalogOptions{
-    Manifest: catalogYAML, // or File: "catalog.yaml"
-    Insert:   true,        // zero mutation flags = plan-only
-})
-```
+Catalog application is an ordinary merchant-scoped Client batch operation. YAML
+is decoded into the same typed request as JSON; it is never a second read source.
+Use `AllowCatalogUpdates: true` to expose ordinary catalog writes. A separate
+trusted local operator wrapper can apply bootstrap artifacts while the flag is
+false; Runtime does not expose catalog business operations.
 
-A product may carry several prices (for example two monthly tiers) by giving
-each an explicit `key`; the key is the durable handle repricing and checkout
-refer to. With `catalog_source=manifest`, a mutating push upgrades to full
-converge (insert+overwrite+prune); with `catalog_source=api`, a mutating push
-refuses (plan-only diff stays legal). `rt.Converge(ctx, merchantID)` runs the
-merchant-wide derive pass on demand after an import. The manifest is
-`version: 1` + `catalogs: [{merchant, tier_groups, products, meters}]`.
+Each application has a durable application ID and expected merchant catalog
+revision. Keep both pinned across restarts. Reusing a successfully applied ID and
+payload returns its original receipt without overwriting subsequent API edits.
+Use a new ID and current expected revision for an intentional reapplication.
+Omitted records survive by default; explicit `archived: true` retires a known
+record, and `prune: true` archives omitted products/prices only in the authorized
+target catalog. Price keys name immutable financial-version history; changing a
+price never silently reprices existing subscriptions.
 
 ### Creator-owned catalogs
 

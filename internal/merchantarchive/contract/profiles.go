@@ -1,4 +1,4 @@
-// Fixed v1 profiles. New schema fields require an explicit portability decision.
+// Fixed v2 profiles. New schema fields require an explicit portability decision.
 package contract
 
 import "regexp"
@@ -18,6 +18,7 @@ var Profiles = []Profile{
 	{Name: "customers", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"issuer", "text"}, {"created_at", "timestamp with time zone"}, {"last_seen_at", "timestamp with time zone"}}},
 	{Name: "custodians", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"key", "text"}, {"kind", "text"}, {"environment", "text"}, {"account_id", "text"}, {"settings", "jsonb"}, {"archived", "boolean"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}}},
 	{Name: "catalogs", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"owner_subject", "text"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}}},
+	{Name: "catalog_applications", Columns: []Column{{"merchant_id", "uuid"}, {"application_id", "text"}, {"catalog_id", "uuid"}, {"schema_version", "bigint"}, {"request_sha256", "bytea"}, {"base_revision", "bigint"}, {"applied_revision", "bigint"}, {"result", "jsonb"}, {"applied_at", "timestamp with time zone"}}},
 	{Name: "products", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"catalog_id", "uuid"}, {"key", "text"}, {"display_name", "text"}, {"description", "text"}, {"entitlements_spec", "jsonb"}, {"tier_group", "character varying(100)"}, {"tier_rank", "integer"}, {"archived", "boolean"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}}},
 	{Name: "billing_policies", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"name", "text"}, {"policy", "jsonb"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}}},
 	{Name: "catalog_meters", Columns: []Column{{"merchant_id", "uuid"}, {"key", "text"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}, {"event_type", "text"}, {"value_property", "text"}, {"aggregation", "text"}, {"unit", "text"}, {"group_by", "jsonb"}}},
@@ -27,7 +28,7 @@ var Profiles = []Profile{
 	{Name: "reconciliation_state", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"source_domain", "text"}, {"fully_reconciled", "boolean"}, {"updated_at", "timestamp with time zone"}}},
 	{Name: "rail_refresh_watermarks", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"rail", "text"}, {"psp_id", "uuid"}, {"event_domain", "text"}, {"watermark_at", "timestamp with time zone"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}}},
 	{Name: "prices", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"product_id", "uuid"}, {"amount", "bigint"}, {"currency", "text"}, {"archived", "boolean"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}, {"access_duration_hours", "integer"}, {"auto_renew", "boolean"}, {"trial_unit_amount", "bigint"}, {"trial_duration_hours", "integer"}, {"key", "text"}}},
-	{Name: "price_key_movements", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"key", "text"}, {"price_id", "uuid"}, {"effective_at", "timestamp with time zone"}, {"created_at", "timestamp with time zone"}}},
+	{Name: "price_key_movements", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"key", "text"}, {"price_id", "uuid"}, {"effective_at", "timestamp with time zone"}, {"created_at", "timestamp with time zone"}, {"archived", "boolean"}}},
 	{Name: "price_psp_bindings", Columns: []Column{{"merchant_id", "uuid"}, {"price_id", "uuid"}, {"psp_id", "uuid"}, {"plan_id", "text"}, {"price_ref", "text"}, {"recurring_billing_option_id", "text"}, {"plan_pda", "text"}, {"flex_id", "text"}, {"configuration", "jsonb"}}},
 	{Name: "billing_policy_bindings", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"customer_id", "uuid"}, {"tier", "text"}, {"policy_name", "text"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}}},
 	{Name: "catalog_rate_cards", Columns: []Column{{"merchant_id", "uuid"}, {"id", "uuid"}, {"product_id", "uuid"}, {"ordinal", "integer"}, {"meter_key", "text"}, {"payment_term", "text"}, {"filter", "jsonb"}, {"allowance", "jsonb"}, {"price", "jsonb"}, {"created_at", "timestamp with time zone"}, {"updated_at", "timestamp with time zone"}, {"customer_id", "uuid"}}},

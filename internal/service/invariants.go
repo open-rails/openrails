@@ -156,6 +156,9 @@ func (s *Service) requireVaultAndPaymentMethodServices() (*paymentmethods.RailPa
 }
 
 func (s *Service) requireDB() (*db.DB, error) {
+	if s != nil && s.catalogTx != nil {
+		return s.catalogTx, nil
+	}
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err

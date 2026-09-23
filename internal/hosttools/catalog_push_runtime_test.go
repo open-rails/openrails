@@ -9,14 +9,14 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
-func TestCatalogPushRuntimeReusesProvidedRuntime(t *testing.T) {
+func TestCatalogRuntimeReusesProvidedRuntime(t *testing.T) {
 	hostRuntime := &app.Runtime{
 		MoneyService:       &money.MoneyService{},
 		EntitlementService: &entitlements.EntitlementService{},
 	}
 	host := &app.App{Runtime: hostRuntime}
 
-	rt, svc, cleanup, err := catalogPushRuntime(context.Background(), CatalogPushOptions{App: host})
+	rt, svc, cleanup, err := catalogRuntime(context.Background(), CatalogApplyOptions{App: host})
 	if err != nil {
 		t.Fatalf("catalogPushRuntime: %v", err)
 	}

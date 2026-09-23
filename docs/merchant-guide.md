@@ -13,111 +13,102 @@ just readability — there are no dollar-string amounts in the catalog manifest.
 
 ### The mental model
 
-The catalog is **declarative**. You author products and prices in a YAML manifest (or
-your embedded host defines them via the API), then *push* it. OpenRails computes a
-terraform-style plan and converges its own DB **and** the provider side onto your
-declared state:
+The database is the catalog. Authorized clients can edit individual records when
+`allow_catalog_updates: true`, or submit a JSON/YAML batch of changes. The flag
+defaults false; a trusted local operator can still apply bootstrap documents.
 
-- **Push** creates provider objects: Stripe Products/Prices/Features are auto-created;
-  NMI recurring plans are found-or-created by `plan_id`; CCBill form links are stored
-  as operator-owned identifiers; Solana recurring plans are found-or-created in USDC
-  by default, or attached by `plan_pda`.
-- **Pull** (the scheduled reconciliation job) is **alert-only**: it detects drift and
-  orphans and records events for you to review. It never mutates providers.
-- Identity is content-addressed: a product's identity is its `key`; a price's identity
-  is its financial substance (currency, amount, duration, auto-renew, trial terms).
-  Re-pushing, or even wiping the DB and re-pushing, re-attaches to the same provider
-  objects — never duplicates.
+Each batch has an application ID and an expected merchant catalog revision.
+Reusing an applied ID and identical contents returns the original receipt without
+repeating changes, even after later API edits. A new ID intentionally applies the
+document again against its pinned revision. Omitted records survive unless
+`prune: true`; explicit `archived: true` retires a known record independently.
+
+Products have stable keys. Prices have immutable financial terms; changing terms
+under a stable price key selects a new financial version. Existing subscriptions
+retain their historical price. Provider reconciliation detects drift separately;
+it does not make a startup file continuously authoritative.
 
 Products grant **entitlements** — plain strings (e.g. `premium`, `tier:novice`). Your
 application reads a user's entitlement timeline for access decisions, *not*
 subscription rows. Subscriptions produce entitlement windows; so do one-off purchases,
 admin grants, and grace. See [Entitlements](#entitlements).
 
-### Publishing through the Go Client
+### Applying through the Go Client
 
-Use the same `Client.PublishCatalog(ctx, openrails.CatalogPublishRequest{...})`
-call for an embedded runtime or a remote server. Its `Catalog` is a
-`catalog.Manifest` from `pkg/catalog`; the request carries products, prices,
-meters and rate cards together. The HTTP operation is
-`POST /v1/merchant/catalog/publish`, with the existing catalog-update permission.
+Use `client.Catalog.Apply(ctx, params)` for embedded and remote Clients. Decode
+YAML with `openrails.ParseCatalogApplicationYAML`; both encodings share the same
+validation and authorization as individual writes. The HTTP operation is
+`POST /v1/merchant/catalog/applications`; read the required base revision through
+`client.Catalog.Revision(ctx)` or `GET /v1/merchant/catalog/revision`.
 
-With no mutation flags, publishing only returns a plan. `Insert` adds absent
-entries, `Overwrite` edits existing entries, and `Prune` removes omitted meter
-and rate-card definitions and archives omitted entries in declared product groups.
-The flags compose; preview has no separate wire flag. A merchant declaration
-never replaces customer-specific rate-card overrides. A meter with recorded usage
-or a customer override cannot be pruned; publication returns an actionable
-`409 meter_in_use`. Default-card override and allowance-source protections also
-apply. Predictable refusals are checked before product/provider changes and
-checked again in the billing transaction.
+The server commits local products, prices, related definitions, history and the
+application receipt atomically. Unsupported provider changes fail before mutation;
+supported external work is durable and reported separately. Retry an uncertain
+response with exactly the same ID and contents. A changed revision is a conflict,
+not permission to silently refresh the precondition and overwrite intervening edits.
 
-Catalog publication can make partial progress when a provider call fails or state
-changes after preflight. Product, price and provider operations commit separately. Inspect the next plan and publish again
-after resolving the refusal.
+The default target is the merchant-owned catalog. An explicit catalog ID must be
+inside the authenticated merchant and caller's authority; pruning never implicitly
+includes other creator catalogs. Meter/rate-card dependency checks still apply;
+prune does not delete historical billing definitions or customer rate overrides.
 
-`CatalogPlan.MetersChanged` and `RateCardsChanged` identify differences in those
-billing definitions; `HasChanges()` includes them as well as product/price changes.
-Equivalent defaults and collection ordering are quiet. Rate-card ordinals are
-positions within each product's `rate_cards` list, so changing that order changes
-the declaration's slots. The response plan describes the full difference before
-mutation; the flags choose which parts to apply.
-
-For manifest-owned bootstrap, `Runtime.PushCatalog` uses this same complete
-publishing operation. The catalog parser remains public; planner callbacks and
-execution adapters are internal implementation details.
+For bootstrap, `embed/operator.Operator.ApplyCatalog` uses the same private engine
+with trusted local authority. Runtime has no catalog business methods.
 
 ### Authoring the catalog
 
-The manifest is `catalogs:` → one entry per merchant → `products:` (plus optional
-`meters:`). Full worked examples:
-`config/catalog.example.yaml`.
+One application selects one authorized merchant outside the document and includes
+`schema_version`, `application_id`, `expected_revision`, optional `catalog_id`,
+`prune`, `products` and supported `meters`. See `config/catalog.example.yaml`.
 
 **A tiered subscription** — `tier_group` + `tier_rank` make products an ordered plan
 family, which is what enables upgrade/downgrade between them:
 
 ```yaml
-catalogs:
-  - merchant: your-merchant-slug
-    products:
-      - key: novice
-        display_name: Novice
-        tier_group: membership
-        tier_rank: 1
-        entitlements: [tier:novice]
-        prices:
-          - currency: usd
-            unit_amount: 12_000_000     # $12.00
-            duration: 30d               # access window per charge
-            auto_renew: true            # recurring; requires a finite duration
-            psps: [stripe]              # which of your PSPs sells this price
+schema_version: 1
+application_id: membership-launch-1
+expected_revision: 0
+prune: false
+products:
+  - key: novice
+    display_name: Novice
+    tier_group: membership
+    tier_rank: 1
+    entitlements_spec: {tier:novice: null}
+    prices:
+      - key: novice-monthly
+        currency: USD
+        unit_amount: 12000000
+        access_duration_hours: 720
+        auto_renew: true
 ```
 
 Price fields worth knowing:
 
 | Field | Meaning |
 |---|---|
-| `unit_amount` | integer native units at the currency's registered scale (micros for USD); a JSON manifest (`POST /catalog/publish`) spells it as a decimal string |
-| `duration` | access window: `Nd`/`Nh`, or `indefinite` (default — perpetual ownership) |
-| `auto_renew` | charge again and extend at each period end; rejected with `indefinite` |
-| `trial` | optional first phase: `{unit_amount: 0, duration: 7d}` = free 7-day trial, then the recurring terms; requires `auto_renew` |
-| `key` | optional durable handle; defaults to `<product-key>-<interval>` — two prices at the same interval must each set an explicit key |
-| `archived` | bool; omitted/false = active. This is the whole lifecycle — there is no draft/active enum |
+| `unit_amount` | integer native units at the currency's registered scale (micros for USD); a JSON application (`POST /merchant/catalog/applications`) spells it as a decimal string |
+| `access_duration_hours` | positive hour count, or null for indefinite access |
+| `auto_renew` | charge again and extend at each period end; requires a finite access duration |
+| `trial_unit_amount`, `trial_duration_hours` | first-phase terms; supply both together and enable renewal |
+| `key` | required stable application handle for the price version chain |
+| `archived` | explicit true retires, explicit false reactivates; omission preserves an existing value |
 | `psps` | explicit PSP list; omitted = OpenRails-native only, no provider sync |
 | `psp_links` | pre-supply provider ids, validated on apply (below) |
 
-**A one-time purchase** — omit `auto_renew`; a finite `duration` gives timed
-access, `indefinite` gives permanent ownership:
+**A one-time purchase** — false `auto_renew` with a finite duration gives timed
+access; null `access_duration_hours` gives indefinite access:
 
 ```yaml
       - key: course-101
         display_name: Course 101
-        entitlements: [course:101]
+        entitlements_spec: {course:101: null}
         prices:
-          - currency: usd
-            unit_amount: 20_000_000
-            duration: indefinite
-            psps: [stripe]
+          - key: course-101-usd
+            currency: USD
+            unit_amount: 20000000
+            access_duration_hours: null
+            auto_renew: false
 ```
 
 Prepaid balances are not catalog products: fund them with
@@ -140,7 +131,7 @@ accruable from another meter) and `payment_term` (`in_advance`/`in_arrears`). Us
 products declare no billing cadence — the invoice period is the window: the daily
 period finalize rates reported usage through the cards and invoices every payer with
 ledger or metered activity, including a payer whose only activity is metered usage.
-See the `digital-ocean` example in `config/catalog.example.yaml` for the full pattern.
+See the metering API documentation for complete rate-card contracts.
 
 **psp_links** — supply provider-side ids or declarative provider config per PSP key.
 Supplied links are validated against the provider (object exists + money terms match)
@@ -155,29 +146,29 @@ and never duplicated; a mismatch fails the apply loudly:
               # solana: {plan_pda: "..."}           # alternatively attach and resolve the token on-chain
 ```
 
-### Pushing and verifying
-
-Catalog push is one of the three provisioning surfaces (`push-auth-bootstrap`,
-`push-merchant-config`, `push-merchant-catalog` — see `docs/merchant-provisioning.md`).
-A bare command is **plan-only**; mutation classes are explicit flags that compose:
+### Applying and verifying
 
 ```bash
-openrails push-merchant-catalog -f catalog.yaml                      # plan only, prints the diff
-openrails push-merchant-catalog -f catalog.yaml --insert             # create missing products/prices/provider objects
-openrails push-merchant-catalog -f catalog.yaml --insert --overwrite # + update existing OpenRails-owned rows
-openrails push-merchant-catalog -f catalog.yaml --insert --overwrite --prune  # full convergence; prune archives extras
+openrails apply-catalog --merchant your-merchant --file catalog.yaml
 ```
 
-`--prune` only archives OpenRails-owned objects absent from the manifest — foreign
-provider objects are never touched. Declared prices are a SET: an active price whose
-financial identity is not declared gets archived under `--prune`.
+For host-owned credentials, `--merchant-manifest PATH` loads the same credential
+snapshot and overlays as the provider tools; otherwise the conventional merchant
+manifest path is used. Managed DB/Vault deployments read their configured backend
+and fail if it is unavailable. Recurring Solana references use public account and
+chain reads; catalog application does not construct a signer or submit a plan.
 
-For an embedded host whose billing merchants are not bound to AuthKit merchant groups, add `--unbound-merchants` to both catalog commands. This explicitly selects the host-local unbound merchant namespace. The default resolves AuthKit merchant groups and their active aliases; neither mode falls back to the other namespace. The database role and provider-write checks still apply.
+Application identity, expected revision and prune belong in the document, not
+CLI mutation flags. Keep the same artifact across restarts; review current state
+before authoring a new application ID. The returned receipt proves what committed,
+not that no one has edited the catalog since.
 
-Round-trip check: `openrails dump-merchant-catalog --slug <merchant>` emits the live
-catalog as push-compatible YAML.
+For host-local merchants without AuthKit bindings, add `--unbound-merchants`.
+Name resolution does not fall back between AuthKit and host-local namespaces.
+Catalog exports are inspection snapshots; author explicit application identity and
+revision before applying changes from an export.
 
-Provider side per rail:
+Provider support for individual catalog operations (batch applications reject unsupported external workflows before local mutation):
 
 | Rail | On push |
 |---|---|
@@ -269,7 +260,7 @@ mount details: `docs/admin-console.md`.
 Pages: **Customers** (search → profile with grant/revoke and off-channel payment),
 **Subscriptions** (status filters, cancel with typed confirmation, resume, payment-
 method change), **Payments** (filters, detail, rail-aware refund), **Catalog**
-(products/prices CRUD, activate/deactivate, manifest publish with plan preview, drift
+(products/prices CRUD, activate/deactivate, durable catalog batch application, drift
 view), **Ops** (findings queue, repair alerts, worker health), **Settings** (profile,
 team, payment providers, API keys, credit limit, trust level), **Dashboard**.
 

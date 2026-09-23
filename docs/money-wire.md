@@ -65,7 +65,7 @@ table from the public `GET /v1/currencies` route. The admin UI's
 values beyond JavaScript's safe integer range; numeric money above 2^53 is shown
 as out of range and rejected as input. No compatibility
 parser accepts numeric money on these finalized routes during the pre-v1 cut.
-Catalog publish manifests (`POST /catalog/publish` JSON; YAML files keep plain
+Catalog application documents (`POST /merchant/catalog/applications` JSON; YAML files keep exact
 integers), the admin customer billing profile balances and metrics money cells
 (unit `money`, exact int64 sums; a money-unit ratio such as
 `realized_revenue_per_customer` is the exact rational quotient rounded half

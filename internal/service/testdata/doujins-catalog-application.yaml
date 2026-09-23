@@ -1,0 +1,79 @@
+# Reuse this application ID and expected revision across restarts.
+# A changed artifact needs a new ID and an explicitly captured database revision.
+schema_version: 1
+application_id: doujins-premium-initial-v1
+expected_revision: 0
+products:
+- key: premium
+  display_name: Premium
+  description: Access to members-only content on doujins.com + hentai0.com.
+  prices:
+  - key: premium-monthly
+    currency: usd
+    unit_amount: 23000000
+    auto_renew: true
+    psps:
+    - mobius
+    - ccbill
+    - solana
+    psp_links:
+      mobius:
+        plan_id: premium_new
+      ccbill:
+        flex_id: 681cb38f-afb9-4665-931f-2b896072178a
+        form_name: basic-monthly
+        recurring_billing_option_id: 0000007498
+    access_duration_hours: 720
+  - key: premium-monthly-legacy-19
+    currency: usd
+    unit_amount: 19000000
+    auto_renew: true
+    archived: true
+    psps:
+    - mobius
+    - ccbill
+    psp_links:
+      mobius:
+        plan_id: premium
+      ccbill:
+        recurring_billing_option_id: '0000001412'
+    access_duration_hours: 720
+  - key: premium-onetime-30d-23
+    currency: usd
+    unit_amount: 23000000
+    auto_renew: false
+    archived: true
+    psps:
+    - solana
+    access_duration_hours: 720
+  - key: premium-onetime-30d-19
+    currency: usd
+    unit_amount: 19000000
+    auto_renew: false
+    archived: true
+    psps:
+    - solana
+    access_duration_hours: 720
+  - key: premium-onetime-90d-62
+    currency: usd
+    unit_amount: 62000000
+    auto_renew: false
+    archived: true
+    psps:
+    - solana
+    access_duration_hours: 2160
+  - key: premium-monthly-legacy-1495
+    currency: usd
+    unit_amount: 14950000
+    auto_renew: true
+    archived: true
+    psps:
+    - ccbill
+    psp_links:
+      ccbill:
+        recurring_billing_option_id: 0000000931
+    access_duration_hours: 720
+    trial_unit_amount: 19950000
+    trial_duration_hours: 720
+  entitlements_spec:
+    premium: null

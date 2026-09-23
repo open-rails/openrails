@@ -28,6 +28,14 @@ change counters or recheck an already consumed balance. Creator catalogs, immuta
 product/catalog constraints are included directly in this fresh installation
 target. No catalog backfill or historical upgrade fixture remains.
 
+Catalog application receipts, merchant authoring revisions and price retirement
+history also belong to this baseline. Receipt identity is permanent and immutable;
+billing archive version 2 preserves receipts and revisions with the catalog.
+Authored-write triggers serialize catalog changes with merchant revision checks,
+and restore occupancy includes the receipt ledger. Runtime grants allow receipt
+reads/inserts without allowing receipt updates/deletes. These additions do not
+provide an upgrade path for an earlier pre-v1 database or relabel its ledger.
+
 Apply the baseline to a new database or explicitly disposable task-owned schema.
 Do not relabel an old migration ledger as current. Normal startup migration
 verification remains in place to reject mismatched artifacts. Tests use the

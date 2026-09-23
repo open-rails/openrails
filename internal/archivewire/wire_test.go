@@ -42,7 +42,7 @@ func TestCopyVerifiedAndTruncation(t *testing.T) {
 	}
 	for _, bad := range [][]byte{
 		append(append([]byte{}, good...), []byte("{}\n")...),
-		bytes.Replace(good, []byte(`"version":1`), []byte(`"version":2`), 1),
+		bytes.Replace(good, []byte(`"version":2`), []byte(`"version":1`), 1),
 		bytes.Replace(good, []byte(`"consistency":"repeatable_read"`), []byte(`"consistency":"read_committed"`), 1),
 		bytes.Replace(good, []byte(`"rows":0`), []byte(`"rows":1`), 1),
 		bytes.Replace(good, []byte(`"kind":"header"`), []byte(`"kind":"header","kind":"header"`), 1),

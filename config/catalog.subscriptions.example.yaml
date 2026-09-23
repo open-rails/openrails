@@ -1,0 +1,52 @@
+# Example merchant: anthropic. Select the merchant outside this payload.
+# Amounts are integer USD micros. These are illustrative prices, not current quotes.
+# Reuse ID/revision only for retries; a new intent needs a new ID and current revision.
+schema_version: 1
+application_id: example-anthropic-initial-v1
+expected_revision: 0
+
+products:
+  - key: claude-code-pro
+    display_name: Claude Code Pro
+    description: Monthly plan with Pro API-equivalent Claude Code limits.
+    tier_group: claude-code
+    tier_rank: 1
+    prices:
+      - key: claude-code-pro-offer-1
+        currency: usd
+        unit_amount: "20000000"
+        access_duration_hours: 720
+        auto_renew: true
+        psps: [stripe]
+      - key: claude-code-pro-offer-2
+        currency: usd
+        unit_amount: "200000000"
+        access_duration_hours: 8760
+        auto_renew: true
+        psps: [stripe]
+
+  - key: claude-code-max-5x
+    display_name: Claude Code Max 5x
+    description: Monthly Max 5x plan with API-equivalent Claude Code limits.
+    tier_group: claude-code
+    tier_rank: 2
+    prices:
+      - key: claude-code-max-5x-offer-1
+        currency: usd
+        unit_amount: "100000000"
+        access_duration_hours: 720
+        auto_renew: true
+        psps: [stripe]
+
+  - key: claude-code-max-20x
+    display_name: Claude Code Max 20x
+    description: Monthly Max 20x plan with API-equivalent Claude Code limits.
+    tier_group: claude-code
+    tier_rank: 3
+    prices:
+      - key: claude-code-max-20x-offer-1
+        currency: usd
+        unit_amount: "200000000"
+        access_duration_hours: 720
+        auto_renew: true
+        psps: [stripe]

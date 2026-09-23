@@ -15,11 +15,6 @@ import (
 // EnsureProduct creates the full declaration only if absent. Reuse never
 // updates labels, tier entitlements or lifecycle; those are explicit updates.
 func (s *Service) EnsureProduct(ctx context.Context, req CreateProductRequest) (*CatalogProduct, error) {
-	req.Key = strings.TrimSpace(req.Key)
-	req.DisplayName = strings.TrimSpace(req.DisplayName)
-	if req.Key == "" || req.DisplayName == "" {
-		return nil, apperr.Invalidf("key and display_name required")
-	}
 	owned, err := catalogOwnerRequest(ctx)
 	if err != nil {
 		return nil, err
@@ -29,6 +24,17 @@ func (s *Service) EnsureProduct(ctx context.Context, req CreateProductRequest) (
 	}
 	if owned && !req.CatalogID.IsZero() && req.CatalogID.UUID() != *catalogscope.QueryID(ctx) {
 		return nil, catalog.ErrOwnerScope
+	}
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogProduct, error) {
+		return scoped.ensureProduct(ctx, req, owned)
+	})
+}
+
+func (s *Service) ensureProduct(ctx context.Context, req CreateProductRequest, owned bool) (*CatalogProduct, error) {
+	req.Key = strings.TrimSpace(req.Key)
+	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	if req.Key == "" || req.DisplayName == "" {
+		return nil, apperr.Invalidf("key and display_name required")
 	}
 	ctx, release, err := s.pin(ctx)
 	if err != nil {

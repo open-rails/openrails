@@ -74,78 +74,23 @@ func TestDefaultUsageRateCardInput(t *testing.T) {
 	require.EqualError(t, err, `money: unknown currency "GBP"`)
 }
 
-func TestAdminUsageMeterDTOOwnership(t *testing.T) {
-	meter := billingservice.UsageMeterDTO{Key: "requests"}
-
-	manifest := httprequest.NewHTTP(
-		httptest.NewRecorder(),
-		httptest.NewRequest(http.MethodGet, "/", nil),
-		&app.Runtime{Config: &config.Config{MerchantConfigSource: config.MerchantConfigSourceManifest}},
-	)
-	manifestDTO := adminUsageMeterDTO(manifest, meter)
-	require.Equal(t, config.MerchantConfigSourceManifest, manifestDTO.ConfigurationSource)
-	require.False(t, manifestDTO.WritesAllowed)
-
-	apiDriven := httprequest.NewHTTP(
-		httptest.NewRecorder(),
-		httptest.NewRequest(http.MethodGet, "/", nil),
-		&app.Runtime{Config: &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI}},
-	)
-	apiDTO := adminUsageMeterDTO(apiDriven, meter)
-	require.Equal(t, config.MerchantConfigSourceAPI, apiDTO.ConfigurationSource)
-	require.True(t, apiDTO.WritesAllowed)
-}
-
-func TestAdminUsageMeterPageDTOOwnershipWithoutItems(t *testing.T) {
-	tests := []struct {
-		name           string
-		source         string
-		merchantSource string
-		writesAllowed  bool
-	}{
-		{
-			name:          "api catalog stays writable",
-			source:        config.MerchantConfigSourceAPI,
-			writesAllowed: true,
-		},
-		{
-			name:          "manifest catalog stays read-only",
-			source:        config.MerchantConfigSourceManifest,
-			writesAllowed: false,
-		},
-		{
-			name:           "host credentials permit an API catalog",
-			merchantSource: config.MerchantConfigSourceManifest,
-			source:         config.CatalogSourceAPI,
-			writesAllowed:  true,
-		},
-		{
-			name:           "managed credentials do not make a manifest catalog writable",
-			merchantSource: config.MerchantConfigSourceAPI,
-			source:         config.CatalogSourceManifest,
-			writesAllowed:  false,
-		},
+func TestAdminUsageMeterCatalogCapability(t *testing.T) {
+	for _, source := range []string{config.MerchantConfigSourceManifest, config.MerchantConfigSourceAPI} {
+		for _, allow := range []bool{false, true} {
+			r := httprequest.NewHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil),
+				&app.Runtime{Config: &config.Config{MerchantConfigSource: source, AllowCatalogUpdates: allow}})
+			meter := adminUsageMeterDTO(r, billingservice.UsageMeterDTO{Key: "requests"})
+			page := adminUsageMeterPageDTO(r, []adminUsageMeterResponse{}, 0, 50, 0)
+			require.Equal(t, "database", meter.ConfigurationSource)
+			require.Equal(t, "database", page.ConfigurationSource)
+			require.Equal(t, allow, meter.WritesAllowed)
+			require.Equal(t, allow, page.WritesAllowed)
+		}
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			r := httprequest.NewHTTP(
-				httptest.NewRecorder(),
-				httptest.NewRequest(http.MethodGet, "/", nil),
-				&app.Runtime{Config: &config.Config{MerchantConfigSource: test.merchantSource, CatalogSource: test.source}},
-			)
-			page := adminUsageMeterPageDTO(
-				r,
-				[]adminUsageMeterResponse{},
-				0,
-				50,
-				0,
-			)
-
-			require.Empty(t, page.Items)
-			require.Equal(t, test.source, page.ConfigurationSource)
-			require.Equal(t, test.writesAllowed, page.WritesAllowed)
-		})
-	}
+	r := httprequest.NewHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil), nil)
+	source, allow := adminCatalogOwnership(r)
+	require.Equal(t, "database", source)
+	require.False(t, allow)
 }
 
 func TestWriteMeteringError(t *testing.T) {

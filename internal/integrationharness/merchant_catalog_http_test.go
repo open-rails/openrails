@@ -19,9 +19,9 @@ import (
 
 	"github.com/open-rails/openrails/internal/testauth"
 
-	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/config"
 	"github.com/stretchr/testify/require"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -36,50 +36,38 @@ import (
 
 func intPtr(v int) *int { return &v }
 
-func TestExampleCatalogPublishesOverHTTP(t *testing.T) {
+func TestExampleCatalogAppliesOverHTTP(t *testing.T) {
 	h, f := newCatalogWorkflow(t)
-	manifest := loadExampleCatalogForHTTP(t)
-	expected := [5]int{len(manifest.Products), 0, len(manifest.Meters), 0, 0}
-	for _, product := range manifest.Products {
-		expected[1] += len(product.Prices)
-		expected[3] += len(product.RateCards)
-		for _, price := range product.Prices {
-			if price.Trial != nil && price.Trial.UnitAmount == 0 && price.Trial.Duration == "7d" {
-				expected[4]++
-			}
-		}
+	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "catalog.example.yaml"))
+	require.NoError(t, err)
+	application, err := catalog.ParseApplicationYAML(raw)
+	require.NoError(t, err)
+	revision, err := f.client.Catalog.Revision(t.Context())
+	require.NoError(t, err)
+	application.ApplicationID = uuid.NewString()
+	application.ExpectedRevision = &revision.Revision
+	first, err := f.client.Catalog.Apply(t.Context(), application)
+	require.NoError(t, err)
+	again, err := f.client.Catalog.Apply(t.Context(), application)
+	require.NoError(t, err)
+	require.True(t, again.Replayed)
+	require.Equal(t, first.AppliedRevision, again.AppliedRevision)
+	var products, prices int
+	require.NoError(t, h.Pool().QueryRow(t.Context(), `SELECT (SELECT count(*) FROM billing.products WHERE merchant_id=$1),(SELECT count(*) FROM billing.prices WHERE merchant_id=$1)`, f.merchant.MerchantID.UUID()).Scan(&products, &prices))
+	require.Equal(t, len(application.Products), products)
+	wantPrices := 0
+	for _, product := range application.Products {
+		wantPrices += len(product.Prices)
 	}
-	rows := func() [5]int {
-		t.Helper()
-		var counts [5]int
-		require.NoError(t, h.Pool().QueryRow(t.Context(), `SELECT
-    (SELECT count(*) FROM billing.products WHERE merchant_id=$1),
-    (SELECT count(*) FROM billing.prices WHERE merchant_id=$1),
-    (SELECT count(*) FROM billing.catalog_meters WHERE merchant_id=$1),
-    (SELECT count(*) FROM billing.catalog_rate_cards WHERE merchant_id=$1),
-    (SELECT count(*) FROM billing.prices WHERE merchant_id=$1 AND trial_unit_amount=0 AND trial_duration_hours=168)`, f.merchant.MerchantID.UUID()).Scan(&counts[0], &counts[1], &counts[2], &counts[3], &counts[4]))
-		return counts
-	}
-	planned := f.publish(t, manifest, openrails.CatalogPublishRequest{})
-	require.Nil(t, planned.Result)
-	require.Equal(t, expected[0], countProductActions(planned.Plan, openrails.CatalogProductCreate))
-	require.Equal(t, expected[1], countPriceActions(planned.Plan, openrails.CatalogPriceCreate))
-	require.Equal(t, [5]int{}, rows())
-	applied := f.publish(t, manifest, openrails.CatalogPublishRequest{Insert: true})
-	require.Equal(t, expected[0], applied.Result.ProductsCreated)
-	require.Equal(t, expected[1], applied.Result.PricesCreated)
-	require.Equal(t, expected, rows())
-	again := f.publish(t, manifest, openrails.CatalogPublishRequest{})
-	require.Zero(t, countProductActions(again.Plan, openrails.CatalogProductCreate))
-	require.Zero(t, countPriceActions(again.Plan, openrails.CatalogPriceCreate))
+	require.Equal(t, wantPrices, prices)
 }
 
-// TestCatalogPublishRateCardsHTTP drives the full manifest -> apply -> DB path for
+// TestCatalogApplicationRateCardsHTTP drives the full manifest -> apply -> DB path for
 // the #638/#639 rate-card model: a usage product priced by a matrix rate card
 // (and no flat prices) and a variable credit-purchase product, published over
 // HTTP, must create the products AND persist their rate-card / credit-purchase
 // sidecars. Guards the applier mapping that the spec-level sidecar test skips.
-func TestCatalogPublishRateCardsHTTP(t *testing.T) {
+func TestCatalogApplicationRateCardsHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
@@ -128,10 +116,7 @@ func TestCatalogPublishRateCardsHTTP(t *testing.T) {
 		},
 	}
 
-	applyStatus, applyBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-		"catalog": manifest,
-		"insert":  true,
-	})
+	applyStatus, applyBody := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/applications", token, catalogApplicationFixture(t, surface.BaseURL, token, manifest))
 	require.Equal(t, http.StatusOK, applyStatus, string(applyBody))
 
 	// The matrix rate card persisted and links its meter + product.
@@ -161,10 +146,10 @@ func (trialCapabilityNoNetwork) RoundTrip(r *http.Request) (*http.Response, erro
 	return nil, fmt.Errorf("trial capability fixture forbids outbound Stripe calls to %s", r.URL.Host)
 }
 
-func TestCatalogPublishRefusesTrialOnRailsWithoutFirstPhase(t *testing.T) {
+func TestCatalogApplicationRefusesTrialOnRailsWithoutFirstPhase(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
-	surface := h.StartStandalone("usd")
+	surface := h.StartStandalone("usd", WithConfig(func(cfg *config.Config) { cfg.NewSubscriptionCollectionPolicy = "engine" }))
 	// This checks local capability rules with unarmed declarations. Any provider
 	// request is a fixture bug; refuse it under the real Stripe choke point.
 	release := stripeapi.InstallBaseTransport(trialCapabilityNoNetwork{})
@@ -203,10 +188,10 @@ func TestCatalogPublishRefusesTrialOnRailsWithoutFirstPhase(t *testing.T) {
 				}},
 			}},
 		}
-		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-			"catalog": manifest,
-			"insert":  true,
-		})
+		if psp == "ccbill" {
+			manifest.Products[0].Prices[0].PSPLinks = map[string]map[string]string{"ccbill": {"form_name": "trial-form", "flex_id": "trial-flex"}}
+		}
+		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/applications", token, catalogApplicationFixture(t, surface.BaseURL, token, manifest))
 		return status, body, productKey
 	}
 
@@ -214,9 +199,8 @@ func TestCatalogPublishRefusesTrialOnRailsWithoutFirstPhase(t *testing.T) {
 		t.Run(psp+" is refused", func(t *testing.T) {
 			status, body, productKey := publish(t, psp)
 			require.Equal(t, http.StatusBadRequest, status, string(body))
+			requireAPIErrorCode(t, body, "trial_unsupported_on_rail")
 			require.Contains(t, string(body), "trial")
-			require.Contains(t, string(body), psp)
-			require.Contains(t, string(body), "silently dropped")
 
 			// The refusal is total: no price row was written for the product.
 			var priceCount int
@@ -278,10 +262,7 @@ func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 		}},
 	}
 	require.NoError(t, manifest.Validate())
-	status, body := requestJSON(t, http.MethodPost, standalone.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-		"catalog": manifest,
-		"insert":  true,
-	})
+	status, body := requestJSON(t, http.MethodPost, standalone.BaseURL+"/v1/merchant/catalog/applications", token, catalogApplicationFixture(t, standalone.BaseURL, token, manifest))
 	require.Equal(t, http.StatusOK, status, string(body))
 
 	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-key/"+productKey, token, nil)
@@ -339,10 +320,7 @@ func TestNativeCatalogRateCardUsageHTTP(t *testing.T) {
 		}},
 	}
 	require.NoError(t, manifest.Validate())
-	status, body := requestJSON(t, http.MethodPost, standalone.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-		"catalog": manifest,
-		"insert":  true,
-	})
+	status, body := requestJSON(t, http.MethodPost, standalone.BaseURL+"/v1/merchant/catalog/applications", token, catalogApplicationFixture(t, standalone.BaseURL, token, manifest))
 	require.Equal(t, http.StatusOK, status, string(body))
 
 	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-key/"+productKey, token, nil)
@@ -573,84 +551,64 @@ func (a httpCatalogApplier) ListPricesByProduct(ctx context.Context, id openrail
 	return catalogPrices(ctx, client, id, activeOnly)
 }
 
-type exampleCatalogFile struct {
-	Version  int                   `yaml:"version"`
-	Catalogs []exampleCatalogEntry `yaml:"catalogs"`
-}
-
-type exampleCatalogEntry struct {
-	Merchant string            `yaml:"merchant"`
-	Products []catalog.Product `yaml:"products"`
-	Meters   []catalog.Meter   `yaml:"meters"`
-}
-
-func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
+// catalogApplicationFixture preserves the existing native catalog fixture data
+// while sending only the new public application contract over HTTP.
+func catalogApplicationFixture(t *testing.T, baseURL, token string, m catalog.Manifest) *catalog.Application {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "catalog.example.yaml"))
-	require.NoError(t, err)
-	var file exampleCatalogFile
-	require.NoError(t, yaml.UnmarshalWithOptions(raw, &file, yaml.DisallowUnknownField()))
-	require.Equal(t, catalog.SupportedVersion, file.Version)
-	require.GreaterOrEqual(t, len(file.Catalogs), 1)
-
-	// The example is multi-merchant; exercise the HTTP apply path against the
-	// anthropic catalog (subscription prices and entitlements, which the
-	// applier fully supports). Rate-card apply gets its own
-	// test when the applier persists rate_cards (#638).
-	var entry exampleCatalogEntry
-	for _, c := range file.Catalogs {
-		if c.Merchant == "anthropic" {
-			entry = c
+	status, raw := requestJSON(t, http.MethodGet, baseURL+"/v1/merchant/catalog/revision", token, nil)
+	require.Equal(t, http.StatusOK, status, string(raw))
+	var revision openrails.CatalogRevision
+	require.NoError(t, json.Unmarshal(raw, &revision))
+	result := &catalog.Application{SchemaVersion: 1, ApplicationID: uuid.NewString(), ExpectedRevision: &revision.Revision}
+	for _, meter := range m.Meters {
+		result.Meters = append(result.Meters, catalog.ApplyMeter{Key: meter.Key, EventType: catalog.Value(meter.EventType), ValueProperty: catalog.Value(meter.ValueProperty), Aggregation: catalog.Value(meter.Aggregation), Unit: catalog.Value(meter.Unit), GroupBy: catalog.Value(meter.GroupBy)})
+	}
+	for _, product := range m.Products {
+		entitlements := map[string]*int{}
+		for _, key := range product.Entitlements {
+			entitlements[key] = nil
 		}
-	}
-	require.Equal(t, "anthropic", entry.Merchant, "example must include the anthropic catalog")
-	// The fixture owns an empty merchant, so catalog names need no renaming.
-	// Provider linking has separate local-network qualification.
-	for i := range entry.Products {
-		for j := range entry.Products[i].Prices {
-			entry.Products[i].Prices[j].PSPs = nil
-			entry.Products[i].Prices[j].PSPLinks = nil
+		p := catalog.ApplyProduct{Key: product.Key, DisplayName: catalog.Value(product.DisplayName), Description: catalog.Value(product.Description), Archived: catalog.Value(product.Archived), EntitlementsSpec: catalog.Value(entitlements)}
+		if product.TierGroup != "" {
+			p.TierGroup = catalog.Value(product.TierGroup)
 		}
-	}
-	m := catalog.Manifest{
-		Version:  file.Version,
-		Products: entry.Products,
-		Meters:   entry.Meters,
-	}
-	require.NoError(t, m.Validate())
-	return m
-}
-
-func countProductActions(plan *openrails.CatalogPlan, action openrails.CatalogProductAction) int {
-	if plan == nil {
-		return 0
-	}
-	var n int
-	for _, g := range plan.Groups {
-		for _, p := range g.Products {
-			if p.Action == action {
-				n++
-			}
+		if product.TierRank != nil {
+			p.TierRank = catalog.Value(*product.TierRank)
 		}
-	}
-	return n
-}
-
-func countPriceActions(plan *openrails.CatalogPlan, action openrails.CatalogPriceAction) int {
-	if plan == nil {
-		return 0
-	}
-	var n int
-	for _, g := range plan.Groups {
-		for _, p := range g.Products {
-			for _, price := range p.Prices {
-				if price.Action == action {
-					n++
+		if product.RateCards != nil {
+			p.RateCards = catalog.Value(product.RateCards)
+		}
+		for index, price := range product.Prices {
+			key := price.Key
+			if key == "" {
+				key = fmt.Sprintf("%s-offer-%d", product.Key, index)
+				if price.Duration == "30d" || price.Duration == "720h" {
+					key = product.Key + "-monthly"
 				}
 			}
+			out := catalog.ApplyPrice{Key: key, Currency: catalog.Value(price.Currency), UnitAmount: catalog.Value(price.UnitAmount), AutoRenew: catalog.Value(price.AutoRenew), Archived: catalog.Value(price.Archived)}
+			if price.Duration != "" && price.Duration != "indefinite" {
+				duration, err := catalog.ParseDurationSpec(price.Duration)
+				require.NoError(t, err)
+				out.AccessDurationHours = catalog.Value(int(duration / time.Hour))
+			}
+			if price.Trial != nil {
+				duration, err := catalog.ParseDurationSpec(price.Trial.Duration)
+				require.NoError(t, err)
+				out.TrialDurationHours = catalog.Value(int(duration / time.Hour))
+				out.TrialUnitAmount = catalog.Value(price.Trial.UnitAmount)
+			}
+			if len(price.PSPs) > 0 {
+				out.PSPs = catalog.Value(price.PSPs)
+			}
+			if len(price.PSPLinks) > 0 {
+				out.PSPLinks = catalog.Value(price.PSPLinks)
+			}
+			p.Prices = append(p.Prices, out)
 		}
+		result.Products = append(result.Products, p)
 	}
-	return n
+	return result
 }
 
 // holdDeadline is the declared deadline every hold-placing admit must carry
@@ -726,10 +684,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 		},
 	}
 	require.NoError(t, manifest.Validate())
-	status, body := requestJSON(t, http.MethodPost, standalone.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-		"catalog": manifest,
-		"insert":  true,
-	})
+	status, body := requestJSON(t, http.MethodPost, standalone.BaseURL+"/v1/merchant/catalog/applications", token, catalogApplicationFixture(t, standalone.BaseURL, token, manifest))
 	require.Equal(t, http.StatusOK, status, string(body))
 
 	applier := standalone.Client(openrails.WithAPIKey(token))

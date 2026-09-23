@@ -71,7 +71,7 @@ func TestNativeCatalogOwnerSelectionRequiresCanonicalSelfOrLiveAdmin(t *testing.
 		Config: &config.Config{
 			Env: "development", TestMode: config.CredentialPostureSandbox,
 			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
-			CatalogSource: config.CatalogSourceAPI, ProviderWriteMode: config.ProviderWriteModeReadOnly,
+			AllowCatalogUpdates: true, ProviderWriteMode: config.ProviderWriteModeReadOnly,
 			DB: &config.DBConfig{URL: dsn},
 		},
 		PGXPool: pool, River: embed.RiverFromHost(), Auth: auth, HTTP: &embed.HTTPConfig{Catalog: true},

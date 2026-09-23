@@ -41,7 +41,7 @@ func TestClientRequestMerchantHeadlessAndHTTP(t *testing.T) {
 		return &config.Config{
 			Env: "development", TestMode: config.CredentialPostureSandbox,
 			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
-			CatalogSource: config.CatalogSourceAPI, ProviderWriteMode: config.ProviderWriteModeReadOnly,
+			AllowCatalogUpdates: true, ProviderWriteMode: config.ProviderWriteModeReadOnly,
 			DB: &config.DBConfig{URL: dsn},
 		}
 	}

@@ -26,7 +26,7 @@ func reviewRuntime(cfg *HTTPConfig, delegated billingauth.DelegatedAuthenticator
 	if cfg != nil && (cfg.Checkout || cfg.Catalog || cfg.MerchantAdmin || cfg.MerchantAPI || cfg.PaymentProviders) {
 		auth = rejectingIntegration()
 	}
-	c := &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI, CatalogSource: config.CatalogSourceAPI}
+	c := &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true}
 	return &Runtime{httpConfig: cfg, delegatedAuthenticator: delegated, app: &app.App{Config: c, Runtime: &app.Runtime{Config: c, Auth: auth}}}
 }
 func reviewReject(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
@@ -167,4 +167,27 @@ func rejectingIntegration() *billingauth.Integration {
 	}), Authorization: billingauth.AuthorizationFunc(func(context.Context, *http.Request, billingauth.Identity, billingauth.Requirement) error {
 		return billingauth.ErrUnauthenticated
 	})}
+}
+
+func TestConfiguredRoutesOmitDisabledCatalogMutations(t *testing.T) {
+	delegated := billingauth.DelegatedAuthenticatorFunc(reviewReject)
+	rt := reviewRuntime(&HTTPConfig{Catalog: true, MerchantAdmin: true}, delegated)
+	rt.app.Config.AllowCatalogUpdates = false
+	routes, err := rt.HTTPRoutes()
+	require.NoError(t, err)
+	reads := 0
+	for _, route := range routes {
+		// Subscription repricing changes billing agreements, not catalog definitions.
+		if strings.Contains(route.Path, "/catalog") && !strings.Contains(route.Path, "/catalog/reprice-") {
+			require.Contains(t, []string{http.MethodGet, http.MethodHead, http.MethodOptions}, route.Method, route.Path)
+			reads++
+		}
+	}
+	require.Positive(t, reads)
+	mux := reviewMount(t, rt)
+	for _, path := range []string{"/api/pay/v1/merchant/catalog/products", "/api/pay/v1/catalog/products", "/api/pay/v1/merchant/catalogs"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, nil))
+		require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, rec.Code, path)
+	}
 }

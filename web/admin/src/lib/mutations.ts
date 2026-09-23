@@ -43,7 +43,7 @@ import {
   putUsageMeter,
   previewRepriceAllPriorVersions,
   previewSubscriptionTierChange,
-  publishCatalog,
+  applyCatalog,
   refreshCatalogDrift,
   refundPayment,
   removeTeamMember,
@@ -552,29 +552,12 @@ export const adminMutations = {
       onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
   },
-  publishCatalog: (queryClient: QueryClient) => {
+  applyCatalog: (queryClient: QueryClient) => {
     const keys = merchantQueryKeys()
-    const catalogKey = keys.catalog()
     return mutationOptions({
-      mutationKey: [...catalogKey, "publish"],
-      mutationFn: ({
-        manifest,
-        planOnly,
-      }: {
-        manifest: unknown
-        planOnly: boolean
-      }) =>
-        publishCatalog(
-          manifest,
-          planOnly ? {} : { insert: true, overwrite: true }
-        ),
-      onSuccess: (_result, { planOnly }) => {
-        if (!planOnly) {
-          return queryClient.invalidateQueries({
-            queryKey: catalogKey,
-          })
-        }
-      },
+      mutationKey: [...keys.catalog(), "apply"],
+      mutationFn: (document: string) => applyCatalog(document),
+      onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
   },
   refreshCatalogDrift: (queryClient: QueryClient) => {

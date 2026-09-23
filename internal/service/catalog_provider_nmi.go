@@ -184,10 +184,14 @@ func (a *nmiAdapter) nmiClientFor(ctx context.Context, targetAccountID string) (
 		return nil, "", false
 	}
 	client.ReadOnly = a.svc.rt.Config != nil && a.svc.rt.Config.IsProviderReadOnly()
-	if a.testEndpointURL != "" {
-		client.DirectPostURL = a.testEndpointURL
-		client.QueryURL = a.testEndpointURL
-		client.V5BaseURL = a.testEndpointURL
+	endpoint := a.testEndpointURL
+	if endpoint == "" {
+		endpoint = a.svc.rt.Config.SandboxNMIGatewayURL()
+	}
+	if endpoint != "" {
+		client.DirectPostURL = endpoint
+		client.QueryURL = endpoint
+		client.V5BaseURL = endpoint
 	}
 	return client, proc.Key, true
 }

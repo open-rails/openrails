@@ -37,7 +37,22 @@ func TestCreatorCatalogQueriesAndImmutableOwnership(t *testing.T) {
 	ids := make(chan uuid.UUID, 8)
 	for range 8 {
 		concurrent.Go(func() error {
-			row, err := q.EnsureOwnedCatalog(ctx, gen.EnsureOwnedCatalogParams{MerchantID: mid, OwnerSubject: "concurrent-author"})
+			// Raw authoring queries use the same merchant-first lock order as
+			// the repository; the trigger rejects unordered concurrent writers.
+			tx, err := app.Begin(ctx)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback(ctx)
+			queries := dbtest.Queries(tx)
+			if _, err := queries.LockCatalogRevision(ctx, mid); err != nil {
+				return err
+			}
+			row, err := queries.EnsureOwnedCatalog(ctx, gen.EnsureOwnedCatalogParams{MerchantID: mid, OwnerSubject: "concurrent-author"})
+			if err != nil {
+				return err
+			}
+			err = tx.Commit(ctx)
 			if err == nil {
 				ids <- row.ID
 			}

@@ -40,7 +40,7 @@ func TestCatalogPriceKeyTransactions(t *testing.T) {
 	provider := &catalogFailingProvider{}
 	rt, mid, err := newDeclaredMerchant(ctx, embed.Options{Config: &config.Config{
 		Env: "development", TestMode: config.CredentialPostureSandbox,
-		MerchantConfigSource: config.MerchantConfigSourceManifest, CatalogSource: config.CatalogSourceAPI,
+		MerchantConfigSource: config.MerchantConfigSourceManifest, AllowCatalogUpdates: true,
 		ProviderWriteMode: config.ProviderWriteModeFull, NewSubscriptionCollectionPolicy: "engine", DB: &config.DBConfig{URL: dsn},
 	}, PGXPool: pool, River: embed.RiverManagedByOpenRails(), StripeTransport: provider}, "price-tx-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Price transaction", PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {AccountID: "acct_transaction_fixture", Secrets: map[string]string{"secret_key": "sk_test_transaction_fixture", "webhook_signing_secret": "whsec_transaction_fixture"}}}}})
 	require.NoError(t, err)
@@ -141,7 +141,10 @@ func TestCatalogPriceKeyTransactions(t *testing.T) {
 			}
 			require.Equal(t, 1, live)
 			require.NoError(t, owner.QueryRow(ctx, `SELECT count(*) FROM billing.price_key_movements WHERE merchant_id=$1 AND key=$2`, mid.UUID(), request.Key).Scan(&movements))
-			require.Equal(t, 3, movements, "identical replays do not append movements")
+			require.Equal(t, 5, movements, "three price activations and two retirements are retained; identical replays add nothing")
+			var retirements int
+			require.NoError(t, owner.QueryRow(ctx, `SELECT count(*) FROM billing.price_key_movements WHERE merchant_id=$1 AND key=$2 AND archived`, mid.UUID(), request.Key).Scan(&retirements))
+			require.Equal(t, 2, retirements, "each superseded version records its retirement")
 			// INSERT fails after the helper has archived the previous current row.
 			// The transaction must restore the original pointer and movement history.
 			broken := request

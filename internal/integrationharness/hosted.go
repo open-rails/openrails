@@ -130,7 +130,7 @@ func (s *Hosted) Start() {
 		return
 	}
 	cfg := &config.Config{
-		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
+		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true,
 		SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
 		APIURL: s.BaseURL, CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
 		DB:   &config.DBConfig{URL: h.DSN},

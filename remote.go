@@ -25,6 +25,7 @@ type Client struct {
 	ProductAccess *ProductAccessClient
 	Products      *ProductClient
 	Prices        *PriceClient
+	Catalog       *CatalogClient
 	baseURL       string
 	merchantID    MerchantID
 	merchantSlug  string

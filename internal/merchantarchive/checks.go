@@ -41,7 +41,7 @@ var excludedTables = map[string]string{
 var excludedColumns = map[string]string{
 	"destructive_action_switch":       "id singleton enabled updated_by reason updated_at",
 	"worker_state":                    "worker_kind cursor_merchant_id cursor_version registered_at expected_period_seconds last_success_at last_error_at last_error consecutive_failures last_alerted_at updated_at",
-	"merchants":                       "id slug status permission_group_id created_at updated_at deleted_at display_name api_host retired_at group_release_completed_at",
+	"merchants":                       "id slug status permission_group_id created_at updated_at deleted_at display_name api_host retired_at group_release_completed_at catalog_revision",
 	"webhook_health":                  "merchant_id rail last_accepted_at last_pull_at created_at updated_at",
 	"webhook_health_daily":            "merchant_id rail day_at rejected drift",
 	"admission_denials_hourly":        "merchant_id customer_id denial_reason hour_at denials updated_at",
@@ -152,7 +152,7 @@ func checkColumns(ctx context.Context, tx pgx.Tx) error {
 				return err
 			}
 			if c, ok := wanted[name]; ok {
-				expected := map[string]string{"uuid": "uuid", "text": "text", "text[]": "_text", "bigint": "int8", "integer": "int4", "boolean": "bool", "jsonb": "jsonb", "timestamp with time zone": "timestamptz", "timestamptz": "timestamptz", "openrails.payment_status": "payment_status", "openrails.subscription_status": "subscription_status"}[c.Type]
+				expected := map[string]string{"bytea": "bytea", "uuid": "uuid", "text": "text", "text[]": "_text", "bigint": "int8", "integer": "int4", "boolean": "bool", "jsonb": "jsonb", "timestamp with time zone": "timestamptz", "timestamptz": "timestamptz", "openrails.payment_status": "payment_status", "openrails.subscription_status": "subscription_status"}[c.Type]
 				if strings.HasPrefix(c.Type, "character varying(") {
 					expected = "varchar"
 					n, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(c.Type, "character varying("), ")"), 10, 32)

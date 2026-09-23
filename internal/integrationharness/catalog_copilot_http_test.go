@@ -129,16 +129,13 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 	priceKey := productKey + "-monthly"
 	publish := func(token string, amount int64) {
 		t.Helper()
-		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-			"catalog": catalog.Manifest{
-				Version: catalog.SupportedVersion,
-				Products: []catalog.Product{{
-					Key: productKey, DisplayName: "Copilot Product",
-					Prices: []catalog.Price{{UnitAmount: amount, Currency: "USD", Duration: "30d", AutoRenew: true}},
-				}},
-			},
-			"insert": true, "overwrite": true,
-		})
+		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/applications", token, catalogApplicationFixture(t, surface.BaseURL, token, catalog.Manifest{
+			Version: catalog.SupportedVersion,
+			Products: []catalog.Product{{
+				Key: productKey, DisplayName: "Copilot Product",
+				Prices: []catalog.Price{{UnitAmount: amount, Currency: "USD", Duration: "30d", AutoRenew: true}},
+			}},
+		}))
 		require.Equal(t, http.StatusOK, status, string(body))
 	}
 	getByKey := func(token string) struct {
@@ -309,15 +306,13 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 
 	incKey := "copilot-inc-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	incPriceKey := incKey + "-monthly"
-	status, body := requestJSON(t, http.MethodPost, draftSurface.BaseURL+"/v1/merchant/catalog/publish", draftToken, map[string]any{
-		"catalog": catalog.Manifest{
-			Version: catalog.SupportedVersion,
-			Products: []catalog.Product{{
-				Key: incKey, DisplayName: "Copilot Increase Product",
-				Prices: []catalog.Price{{UnitAmount: 10_000_000, Currency: "USD", Duration: "30d", AutoRenew: true}},
-			}},
-		}, "insert": true, "overwrite": true,
-	})
+	status, body := requestJSON(t, http.MethodPost, draftSurface.BaseURL+"/v1/merchant/catalog/applications", draftToken, catalogApplicationFixture(t, draftSurface.BaseURL, draftToken, catalog.Manifest{
+		Version: catalog.SupportedVersion,
+		Products: []catalog.Product{{
+			Key: incKey, DisplayName: "Copilot Increase Product",
+			Prices: []catalog.Price{{UnitAmount: 10_000_000, Currency: "USD", Duration: "30d", AutoRenew: true}},
+		}},
+	}))
 	require.Equal(t, http.StatusOK, status, string(body))
 
 	t.Run("draft_price_change: increase defaults to grandfather with a real affected-count preview", func(t *testing.T) {
@@ -371,15 +366,13 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 	t.Run("draft_price_change: cross-product migrate_to_price_key is refused with a typed reason and workaround, not a mutation", func(t *testing.T) {
 		otherKey := "copilot-other-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 		otherPriceKey := otherKey + "-monthly"
-		status, body := requestJSON(t, http.MethodPost, draftSurface.BaseURL+"/v1/merchant/catalog/publish", draftToken, map[string]any{
-			"catalog": catalog.Manifest{
-				Version: catalog.SupportedVersion,
-				Products: []catalog.Product{{
-					Key: otherKey, DisplayName: "Copilot Other Product",
-					Prices: []catalog.Price{{UnitAmount: 8_000_000, Currency: "USD", Duration: "30d", AutoRenew: true}},
-				}},
-			}, "insert": true, "overwrite": true,
-		})
+		status, body := requestJSON(t, http.MethodPost, draftSurface.BaseURL+"/v1/merchant/catalog/applications", draftToken, catalogApplicationFixture(t, draftSurface.BaseURL, draftToken, catalog.Manifest{
+			Version: catalog.SupportedVersion,
+			Products: []catalog.Product{{
+				Key: otherKey, DisplayName: "Copilot Other Product",
+				Prices: []catalog.Price{{UnitAmount: 8_000_000, Currency: "USD", Duration: "30d", AutoRenew: true}},
+			}},
+		}))
 		require.Equal(t, http.StatusOK, status, string(body))
 
 		args := `{"price_key":"` + incPriceKey + `","new_amount":1,"migrate_to_price_key":"` + otherPriceKey + `"}`
@@ -549,12 +542,10 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 		bToken := surface.MintAPIKey(b.MerchantSlug, "cp-b-"+uuid.NewString(), []string{controlplane.PermMerchantCatalogRead})
 
 		aKey := "cpiso-a-" + strings.ReplaceAll(uuid.NewString(), "-", "")
-		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", aToken, map[string]any{
-			"catalog": catalog.Manifest{Version: catalog.SupportedVersion, Products: []catalog.Product{{
-				Key: aKey, DisplayName: "A-only product",
-				Prices: []catalog.Price{{UnitAmount: 9_000_000, Currency: "USD", Duration: "30d", AutoRenew: true}},
-			}}}, "insert": true, "overwrite": true,
-		})
+		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/applications", aToken, catalogApplicationFixture(t, surface.BaseURL, aToken, catalog.Manifest{Version: catalog.SupportedVersion, Products: []catalog.Product{{
+			Key: aKey, DisplayName: "A-only product",
+			Prices: []catalog.Price{{UnitAmount: 9_000_000, Currency: "USD", Duration: "30d", AutoRenew: true}},
+		}}}))
 		require.Equal(t, http.StatusOK, status, string(body))
 
 		llmA := &copilotScriptLLM{script: oneToolThenAnswer("list_catalog", `{}`, "a's catalog")}

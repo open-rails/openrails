@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -52,6 +53,7 @@ func sandboxModeConfig(dsn string, source string) *config.Config {
 		TestMode:                 config.CredentialPostureSandbox,
 		CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
 		MerchantConfigSource:     source,
+		AllowCatalogUpdates:      true,
 		// or#893: merchant_config_source=api declares where secrets live. MODE 1 never
 		// consults it, so db is inert there and honest in MODE 2.
 		SecretBackend:     config.SecretBackendDB,
@@ -66,29 +68,28 @@ func seedCCBillWebhookCatalog(t *testing.T, ctx context.Context, cfg *config.Con
 	t.Helper()
 	flexID = uuid.NewString()
 	formName = "test-form"
-	raw := []byte(fmt.Sprintf(`version: 1
-catalogs:
-  - merchant: %s
-    products:
-      - key: pro-%s
-        display_name: Pro
-        entitlements: [pro-access]
-        prices:
-          - currency: usd
-            unit_amount: %d
-            duration: 30d
-            auto_renew: true
-            psps: [ccbill]
-            psp_links:
-              ccbill:
-                flex_id: %q
-                form_name: %q
-`, slug, slug, ccbillWebhookTestPriceMicros, flexID, formName))
-	require.NoError(t, hosttools.PushMerchantCatalog(ctx, hosttools.CatalogPushOptions{
-		Config:   cfg,
-		Manifest: raw,
-		Insert:   true, Overwrite: true, Prune: true,
-	}))
+	raw := []byte(fmt.Sprintf(`schema_version: 1
+application_id: ccbill-webhook-%s
+expected_revision: 0
+products:
+  - key: pro-%s
+    display_name: Pro
+    entitlements_spec: {pro-access: null}
+    prices:
+      - key: pro-%s-monthly
+        currency: USD
+        unit_amount: %d
+        access_duration_hours: 720
+        auto_renew: true
+        psps: [ccbill]
+        psp_links:
+          ccbill:
+            flex_id: %q
+            form_name: %q
+`, slug, slug, slug, ccbillWebhookTestPriceMicros, flexID, formName))
+	_, err := hosttools.ApplyMerchantCatalog(ctx, hosttools.CatalogApplyOptions{Config: cfg, Merchant: slug, Manifest: raw})
+	require.NoError(t, err)
+
 	return flexID, formName
 }
 
@@ -306,20 +307,23 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 
-	// Layer A, MODE 2: the catalog also arrives over the API (a manifest push
-	// is refused as a second truth) — publish a ccbill-linked price.
+	// Catalog authoring uses ordinary item APIs; provider credential custody
+	// remains independent of this writable catalog.
 	flexID := uuid.NewString()
 	formName := "test-form"
-	publish := fmt.Sprintf(`{"insert":true,"overwrite":true,"catalog":{"version":1,"products":[{"key":"pro-%s","display_name":"Pro","entitlements":["pro-access"],"prices":[{"currency":"usd","unit_amount":"%d","duration":"30d","auto_renew":true,"psps":["ccbill"],"psp_links":{"ccbill":{"flex_id":%q,"form_name":%q}}}]}]}}`,
-		slug, ccbillWebhookTestPriceMicros, flexID, formName)
-	req, err = http.NewRequest(http.MethodPost, adminServer.URL+"/v1/merchant/catalog/publish", strings.NewReader(publish))
+	client, err := rt.Client()
 	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err = http.DefaultClient.Do(req)
+	product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{
+		Key: "pro-" + slug, DisplayName: "Pro", EntitlementsSpec: map[string]*int{"pro-access": nil},
+	})
 	require.NoError(t, err)
-	raw, _ = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	duration := 720
+	_, err = client.Prices.Create(ctx, &openrails.PriceCreateParams{
+		ProductID: product.ID, Key: "pro-" + slug + "-monthly", UnitAmount: ccbillWebhookTestPriceMicros, Currency: "USD",
+		AccessDurationHours: &duration, AutoRenew: true, PSPs: []string{"ccbill"},
+		PSPLinks: map[string]map[string]string{"ccbill": {"flex_id": flexID, "form_name": formName}},
+	})
+	require.NoError(t, err)
 
 	// The published price must exist with its ccbill link before the webhook.
 	appDB := dbtest.OpenMerchantDB(t, id.UUID())

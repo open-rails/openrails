@@ -14,7 +14,7 @@ func TestProviderRoutesCredentialAuthority(t *testing.T) {
 		for _, backendWritable := range []bool{false, true} {
 			for _, explicit := range []bool{false, true} {
 				rt := &app.Runtime{
-					Config:            &config.Config{MerchantConfigSource: source, CatalogSource: config.CatalogSourceAPI},
+					Config:            &config.Config{MerchantConfigSource: source, AllowCatalogUpdates: true},
 					RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: backendWritable},
 				}
 				var override *routesurface.ProviderRoutes

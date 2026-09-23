@@ -192,7 +192,7 @@ type Config struct {
 	SecretBackend string `koanf:"secret_backend,omitempty"`
 
 	// MerchantConfigSource selects authority for merchant configuration and provider
-	// credentials. CatalogSource independently selects catalog authority.
+	// credentials. AllowCatalogUpdates independently controls catalog writes.
 	//   - "manifest" (DEFAULT, empty = manifest): MODE 1. The boot YAML (merchant
 	//     manifest + the host's structured secret overlays) IS
 	//     the truth, held in memory. Provider-config mutation APIs are rejected
@@ -204,11 +204,11 @@ type Config struct {
 	// Deployment shape does NOT imply mode — embedded and standalone can run
 	// either. Env: MERCHANT_CONFIG_SOURCE. Unknown values refuse to load.
 	MerchantConfigSource string `koanf:"merchant_config_source,omitempty"`
-	// CatalogSource selects "manifest" or "api" for product, price and metering
-	// definitions. Empty follows MerchantConfigSource. Use "api" with manifest-owned
-	// merchant configuration to allow dynamic catalogs with host-supplied,
-	// read-only provider credentials. Env: CATALOG_SOURCE.
-	CatalogSource string `koanf:"catalog_source,omitempty"`
+	// AllowCatalogUpdates enables ordinary product, price, catalog and metering
+	// definition mutations and their HTTP routes. Defaults to false independently
+	// of provider credential custody. Trusted operator bootstrap remains available.
+	// Env: ALLOW_CATALOG_UPDATES.
+	AllowCatalogUpdates bool `koanf:"allow_catalog_updates,omitempty"`
 	// MerchantManifestOverlays are YAML files in the manifest's own shape
 	// (secrets rendered by Vault Agent / a k8s Secret volume) merged over the
 	// MODE-1 boot manifest in order, later wins. Env: MERCHANT_MANIFEST_OVERLAYS
@@ -405,26 +405,6 @@ const (
 	MerchantConfigSourceManifest = "manifest"
 	MerchantConfigSourceAPI      = "api"
 )
-
-const (
-	CatalogSourceManifest = "manifest"
-	CatalogSourceAPI      = "api"
-)
-
-// CatalogSourceMode returns catalog authority, defaulting to merchant authority.
-// Validate rejects unknown values before the configuration is used.
-func (cfg *Config) CatalogSourceMode() string {
-	if cfg != nil {
-		if source := strings.ToLower(strings.TrimSpace(cfg.CatalogSource)); source != "" {
-			return source
-		}
-	}
-	return cfg.MerchantConfigSourceMode()
-}
-
-func (cfg *Config) IsManifestCatalogSource() bool {
-	return cfg.CatalogSourceMode() == CatalogSourceManifest
-}
 
 // MerchantConfigSourceMode returns the normalized merchant-source mode: "manifest"
 // (MODE 1, the default) or "api" (MODE 2). Unknown values are rejected by
@@ -1475,7 +1455,7 @@ func validateSourceCIDRs(cidrs []string) error {
 
 // validateMerchantConfigSource enforces the #723 boot matrix rows that are pure
 // config posture:
-//   - unknown merchant_config_source/catalog_source values refuse to load (a typo must never
+//   - unknown merchant_config_source values refuse to load (a typo must never
 //     silently pick a truth model);
 //   - api mode outside development requires a merchant-secret backend (Vault,
 //     or ENCRYPTION_MASTER_KEY for the DB store) — extends the #667 posture
@@ -1485,11 +1465,6 @@ func validateSourceCIDRs(cidrs []string) error {
 // with a merchants.yaml on disk) are enforced where manifests load: serverboot
 // (standalone) and embed.Options.Merchant (embedded).
 func validateMerchantConfigSource(cfg *Config, isDev bool) error {
-	switch strings.ToLower(strings.TrimSpace(cfg.CatalogSource)) {
-	case "", CatalogSourceManifest, CatalogSourceAPI:
-	default:
-		return fmt.Errorf("catalog_source must be %q or %q (empty follows merchant_config_source)", CatalogSourceManifest, CatalogSourceAPI)
-	}
 	switch strings.ToLower(strings.TrimSpace(cfg.MerchantConfigSource)) {
 	case "", MerchantConfigSourceManifest, MerchantConfigSourceAPI:
 	default:
@@ -2296,6 +2271,9 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 
 	// Merchant configuration authority is broader than provider secrets. Retired
 	// spellings must fail even if a new spelling is also supplied.
+	if _, present := os.LookupEnv("CATALOG_SOURCE"); k.Exists("catalog_source") || present {
+		return nil, fmt.Errorf("catalog_source / CATALOG_SOURCE was removed: catalogs always use the database; set allow_catalog_updates / ALLOW_CATALOG_UPDATES to enable ordinary catalog mutations")
+	}
 	if _, present := os.LookupEnv("MERCHANT_SOURCE"); k.Exists("merchant_source") || present {
 		return nil, fmt.Errorf("merchant_source / MERCHANT_SOURCE was renamed: use merchant_config_source / MERCHANT_CONFIG_SOURCE (manifest|api)")
 	}

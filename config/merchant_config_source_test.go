@@ -20,11 +20,11 @@ func TestMerchantConfigSourceHardCut(t *testing.T) {
 	})
 	t.Run("new config spelling", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "config.yaml")
-		require.NoError(t, os.WriteFile(path, []byte("env: development\nmerchant_config_source: manifest\ncatalog_source: api\n"), 0600))
+		require.NoError(t, os.WriteFile(path, []byte("env: development\nmerchant_config_source: manifest\nallow_catalog_updates: true\n"), 0600))
 		cfg, err := Load(path)
 		require.NoError(t, err)
 		require.True(t, cfg.IsManifestMerchantConfigSource())
-		require.Equal(t, CatalogSourceAPI, cfg.CatalogSourceMode())
+		require.True(t, cfg.AllowCatalogUpdates)
 	})
 	for _, value := range []string{"", "manifest", "api"} {
 		t.Run("retired env="+value, func(t *testing.T) {

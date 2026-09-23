@@ -114,3 +114,6 @@ GRANT EXECUTE ON FUNCTION openrails.finish_billing_restore(uuid,text,bigint) TO 
 GRANT SELECT, INSERT ON TABLE openrails.catalogs TO :"runtime_user";
 GRANT UPDATE(updated_at) ON TABLE openrails.catalogs TO :"runtime_user";
 GRANT EXECUTE ON FUNCTION openrails.ensure_default_catalog(uuid) TO :"runtime_user";
+
+-- Durable catalog application identities are insert-only.
+GRANT SELECT, INSERT ON TABLE openrails.catalog_applications TO :"runtime_user";

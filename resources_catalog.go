@@ -13,6 +13,7 @@ type ProductClient struct{ client *Client }
 type PriceClient struct{ client *Client }
 
 func (c *Client) initResources() {
+	c.Catalog = &CatalogClient{client: c}
 	c.ProductAccess = &ProductAccessClient{client: c}
 	c.Products = &ProductClient{client: c}
 	c.Prices = &PriceClient{client: c}

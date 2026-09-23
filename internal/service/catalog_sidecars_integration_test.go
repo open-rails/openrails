@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/stretchr/testify/require"
@@ -34,7 +35,7 @@ INSERT INTO billing.products (id, key, display_name, merchant_id)
 VALUES ($1, $2, 'Sidecar Product', $3)`, productID, productKey, merchantID)
 	require.NoError(t, err)
 
-	svc := &Service{rt: &app.Runtime{DB: dbi}}
+	svc := &Service{rt: &app.Runtime{DB: dbi, Config: &config.Config{AllowCatalogUpdates: true}}}
 	require.NoError(t, svc.SyncCatalogSidecars(ctx, SyncCatalogSidecarsRequest{
 		Meters: []CatalogMeterSpec{{
 			Key:           meterKey,

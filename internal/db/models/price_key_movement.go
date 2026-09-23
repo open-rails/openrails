@@ -12,6 +12,7 @@ import (
 // so this log (not row back-references) is the source of "what did key K
 // sell on date D" and #773's "all prior versions of key K".
 type PriceKeyMovement struct {
+	Archived    bool      `json:"archived"`
 	ID          uuid.UUID `json:"id"`
 	MerchantID  uuid.UUID `json:"merchant_id"`
 	Key         string    `json:"key"`

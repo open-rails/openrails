@@ -2,7 +2,11 @@ package routes
 
 import (
 	"encoding/base64"
+	"errors"
 	"net/http"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/catalogscope"
@@ -16,16 +20,17 @@ import (
 )
 
 // RegisterOwnedCatalogRoutes exposes only creator product/price operations.
-// Provider configuration, entitlement grants, meters and bulk publishing retain
+// Provider configuration, entitlement grants, meters and batch application retain
 // their merchant-administrator surfaces and are never mounted in this group.
 func RegisterOwnedCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	rr = withCatalogWritePolicy(rr, rt)
 	scope := []router.Middleware{}
 	if rt != nil && rt.DB != nil {
 		scope = append(scope, middleware.MerchantDBConnMW(rt.DB))
 	}
 	scope = append(scope, ownerCatalogScopeMW(rt, opts.Gate))
 	read := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCatalogOwnRead)}, scope...)
-	write := append([]router.Middleware{catalogModeWriteGuardMW(rt), opts.merchantActionPermissionMW(permissions.MerchantCatalogOwnUpdate)}, scope...)
+	write := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCatalogOwnUpdate)}, scope...)
 	rr.Handle(http.MethodGet, "", h(handlers.OwnCatalog), read...)
 	rr.Handle(http.MethodPut, "", h(handlers.OwnCatalog), write...)
 	rr.Handle(http.MethodGet, "/products", h(handlers.AdminListProducts), read...)
@@ -90,7 +95,18 @@ func ownerCatalogScopeMW(rt *app.Runtime, gate billingauth.Gate) router.Middlewa
 				r.ErrorJSON(http.StatusServiceUnavailable, "catalog unavailable")
 				return
 			}
-			row, err := catalog.NewCatalogRepo(rt.DB).Ensure(r.Request.Context(), &subject)
+			repo := catalog.NewCatalogRepo(rt.DB)
+			var row gen.OpenrailsCatalog
+			var err error
+			if r.Request.Method == http.MethodGet || r.Request.Method == http.MethodHead {
+				row, err = repo.GetByOwner(r.Request.Context(), subject)
+			} else {
+				row, err = repo.Ensure(r.Request.Context(), &subject)
+			}
+			if errors.Is(err, pgx.ErrNoRows) {
+				r.ErrorJSON(http.StatusNotFound, "catalog not found")
+				return
+			}
 			if err != nil || row.MerchantID != principal.MerchantID.UUID() || row.OwnerSubject == nil || *row.OwnerSubject != subject {
 				r.ErrorJSON(http.StatusInternalServerError, "catalog unavailable")
 				return
@@ -109,12 +125,13 @@ func ownerCatalogScopeMW(rt *app.Runtime, gate billingauth.Gate) router.Middlewa
 // RegisterCatalogCollectionRoutes is the separately authorized merchant-admin
 // collection. Supplying an owner subject here is permitted only by that grant.
 func RegisterCatalogCollectionRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	rr = withCatalogWritePolicy(rr, rt)
 	var dbMW []router.Middleware
 	if rt != nil && rt.DB != nil {
 		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
 	}
 	read := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCatalogRead)}, dbMW...)
-	write := append([]router.Middleware{catalogModeWriteGuardMW(rt), opts.merchantActionPermissionMW(permissions.MerchantCatalogUpdate)}, dbMW...)
+	write := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCatalogUpdate)}, dbMW...)
 	rr.Handle(http.MethodGet, "", h(handlers.ListCatalogs), read...)
 	rr.Handle(http.MethodPost, "", h(handlers.EnsureCatalogForOwner), write...)
 	rr.Handle(http.MethodGet, "/by-owner", h(handlers.GetCatalogForOwner), read...)

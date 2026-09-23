@@ -199,6 +199,8 @@ async function refreshTokens(tokens: TokenPair): Promise<TokenPair | null> {
 export interface RequestOptions {
   method?: string
   body?: unknown
+  // Preserve catalog JSON/YAML bytes and exact monetary literals.
+  rawBody?: string
   headers?: Record<string, string>
   query?: Record<string, string | number | boolean | undefined>
   signal?: AbortSignal
@@ -237,7 +239,9 @@ async function doFetch(
   const res = await fetch(url, {
     method: opts.method ?? "GET",
     headers,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    body:
+      opts.rawBody ??
+      (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
     signal: opts.signal,
   })
   if (res.status === 401 && retry && tokens?.refresh_token) {
