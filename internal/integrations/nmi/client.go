@@ -45,6 +45,8 @@ type NMIClient struct {
 	// with ErrProviderReadOnly; reads stay available. Set when mode=readonly
 	// (#346) at client build.
 	ReadOnly bool
+	// LoopbackQualification is set only by an explicitly declared ProviderSandbox loopback runtime.
+	LoopbackQualification bool
 	// httpClient bounds every gateway call with a timeout so a slow/hung NMI
 	// endpoint fails fast instead of blocking the request forever (#363/#367).
 	// The default http.DefaultClient used by http.PostForm has NO timeout.

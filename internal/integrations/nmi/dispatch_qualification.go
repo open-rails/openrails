@@ -142,6 +142,9 @@ func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 }
 
 func (c *NMIClient) qualifyAccount(ctx context.Context) (TestModeProbeResult, error) {
+	if c.LoopbackQualification {
+		return ProbeSimulated, nil
+	}
 	if c.endpointDeploymentExplicit && c.endpointDeployment == config.NMIEndpointGateway {
 		return c.readGatewayTestMode(ctx)
 	}

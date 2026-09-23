@@ -125,6 +125,7 @@ func (a *NMIArmer) NMIClient(ctx context.Context, mid merchant.ID, scope merchan
 		return nil, fmt.Errorf("build store-armed NMI client: %w", err)
 	}
 	client.ReadOnly = a.Config != nil && a.Config.IsProviderReadOnly()
+	client.LoopbackQualification = a.Config != nil && a.Config.SandboxNMIGatewayURL() != ""
 	if a.Endpoints.V5BaseURL != "" {
 		client.V5BaseURL = a.Endpoints.V5BaseURL
 	}

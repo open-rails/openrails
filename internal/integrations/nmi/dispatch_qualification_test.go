@@ -63,3 +63,14 @@ func TestGatewayQualificationUsesReadOnlyQueryAndNoProbeFallback(t *testing.T) {
 }
 
 func testUUID() uuid.UUID { return uuid.New() }
+
+func TestLoopbackQualificationRequiresExplicitFixtureMarker(t *testing.T) {
+	client, err := NewAccountClient(uuid.New(), uuid.New(), "fixture", &config.NMIProviderSettings{SecurityKey: "k", EndpointDeployment: config.NMIEndpointSandbox}, true)
+	require.NoError(t, err)
+	client.V5BaseURL = "http://127.0.0.1:1"
+	_, err = client.QualifyDispatch(context.Background())
+	require.Error(t, err)
+	client.LoopbackQualification = true
+	_, err = client.QualifyDispatch(context.Background())
+	require.NoError(t, err)
+}
