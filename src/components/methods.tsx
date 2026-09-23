@@ -47,8 +47,8 @@ export function MethodList({
             <Label
               htmlFor={controlId}
               className={cn(
-                "text-muted-foreground flex cursor-pointer items-center gap-2.5 py-[13px] text-sm font-medium select-none",
-                active && "text-foreground font-semibold",
+                "flex cursor-pointer items-center gap-2.5 py-[13px] text-sm font-medium text-muted-foreground select-none",
+                active && "font-semibold text-foreground",
                 disabled && "cursor-default"
               )}
             >

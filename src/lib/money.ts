@@ -90,7 +90,8 @@ export function amountToDecimal(
 export function formatAmount(
   amount: Amount | null | undefined,
   currency: string,
-  decimals: number
+  decimals: number,
+  locale?: string
 ): string {
   const code = currency.trim().toUpperCase()
   const units = amountUnits(amount)
@@ -103,7 +104,7 @@ export function formatAmount(
     return `${code} amount exceeds this browser's exact display range`
   const decimal = decimalFromUnits(units, decimals) as `${number}`
   try {
-    return new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat(locale, {
       style: "currency",
       currency: code,
       maximumFractionDigits: decimals,

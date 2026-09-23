@@ -53,7 +53,7 @@ export function CCBillFields({
         />
       </div>
       {error ? (
-        <p className="text-destructive text-[13px]" role="alert">
+        <p className="text-[13px] text-destructive" role="alert">
           {error}
         </p>
       ) : null}

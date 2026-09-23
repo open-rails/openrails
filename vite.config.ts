@@ -9,6 +9,20 @@ import dts from "vite-plugin-dts"
 import { checkoutCssPlugin } from "./tooling/checkout-css/vite-plugin.ts"
 
 const root = path.dirname(fileURLToPath(import.meta.url))
+const src = (p: string) => path.resolve(root, "src", p)
+
+const LOCALES = ["en", "de", "es", "ja", "ko", "zh"]
+
+const EXTERNAL = [
+  "@base-ui/react",
+  "@hugeicons/core-free-icons",
+  "@hugeicons/react",
+  "class-variance-authority",
+  "cn",
+  "react",
+  "react-dom",
+  "zod",
+]
 
 export default defineConfig({
   plugins: [
@@ -16,10 +30,11 @@ export default defineConfig({
     tailwindcss(),
     dts({
       include: ["src"],
-      bundleTypes: true,
+      entryRoot: "src",
+      exclude: ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test/**"],
       tsconfigPath: path.resolve(root, "tsconfig.json"),
     }),
-    checkoutCssPlugin(),
+    checkoutCssPlugin({ entries: ["index"] }),
   ],
   resolve: {
     alias: {
@@ -28,29 +43,21 @@ export default defineConfig({
   },
   build: {
     lib: {
-      entry: path.resolve(root, "src/index.ts"),
+      entry: {
+        index: src("index.ts"),
+        client: src("client/index.ts"),
+        react: src("react/index.ts"),
+        ...Object.fromEntries(
+          LOCALES.map((l) => [`locales/${l}`, src(`locales/${l}.ts`)])
+        ),
+      },
       formats: ["es"],
-      fileName: "index",
       cssFileName: "styles",
     },
     sourcemap: true,
     rollupOptions: {
-      external: [
-        "@base-ui/react",
-        "@base-ui/react/button",
-        "@base-ui/react/dialog",
-        "@base-ui/react/input",
-        "@base-ui/react/radio",
-        "@base-ui/react/radio-group",
-        "@hugeicons/core-free-icons",
-        "@hugeicons/react",
-        "class-variance-authority",
-        "cn",
-        "react",
-        "react-dom",
-        "react/jsx-runtime",
-        "zod",
-      ],
+      external: (id) =>
+        EXTERNAL.some((dep) => id === dep || id.startsWith(`${dep}/`)),
     },
   },
 })

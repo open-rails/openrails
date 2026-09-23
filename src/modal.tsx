@@ -37,7 +37,7 @@ export function CheckoutModal({
       }}
     >
       <DialogContent
-        className={`orck bg-background text-foreground [&>[data-slot=dialog-close]]:text-foreground max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] gap-0 overflow-hidden ring-0 [&>[data-slot=dialog-close]]:top-5 [&>[data-slot=dialog-close]]:right-5 ${compact ? "w-[420px] p-6" : "w-[860px] p-8 sm:max-w-[calc(100vw-2rem)]"}`}
+        className={`orck max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] gap-0 overflow-hidden bg-background text-foreground ring-0 [&>[data-slot=dialog-close]]:top-5 [&>[data-slot=dialog-close]]:right-5 [&>[data-slot=dialog-close]]:text-foreground ${compact ? "w-[420px] p-6" : "w-[860px] p-8 sm:max-w-[calc(100vw-2rem)]"}`}
         data-orck-theme={appearanceTheme(checkoutProps.appearance)}
         style={appearanceStyle(checkoutProps.appearance)}
         showCloseButton={!processing}

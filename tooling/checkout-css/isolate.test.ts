@@ -16,12 +16,12 @@ describe("checkout CSS isolation", () => {
 
     expect(css).not.toContain("@layer")
     expect(css).toContain(
-      '.orck, :where([data-slot="dialog-portal"]:has(> .orck[data-slot="dialog-content"])) { --spacing: .25rem; }'
+      '.orck, :where([data-slot="dialog-portal"]:has(> .orck[data-slot="dialog-content"]), [data-slot="alert-dialog-portal"]:has(> .orck[data-slot="alert-dialog-content"])) { --spacing: .25rem; }'
     )
     expect(css).toContain(".orck .hidden")
     expect(css).toContain(".orck.hidden")
     expect(css).toContain(
-      ':where([data-slot="dialog-portal"]:has(> .orck[data-slot="dialog-content"])) .hidden'
+      ':where([data-slot="dialog-portal"]:has(> .orck[data-slot="dialog-content"]), [data-slot="alert-dialog-portal"]:has(> .orck[data-slot="alert-dialog-content"])) .hidden'
     )
     expect(css).toContain(".orck-collect-field iframe")
     expect(css).not.toMatch(/(^|[},])\s*\.hidden\s*\{/)

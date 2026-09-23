@@ -4,6 +4,9 @@ import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
+import react from "@vitejs/plugin-react"
+import { build } from "vite"
+
 import { startPostgres, stopPostgres, type Postgres } from "./postgres.ts"
 
 const root = path.resolve(import.meta.dirname, "../..")
@@ -22,6 +25,7 @@ export default async function globalSetup() {
     rmSync(work, { recursive: true, force: true })
   }
   try {
+    await buildHostApp()
     const bin = path.join(work, "openrails-e2e-server")
     execFileSync("go", ["build", "-o", bin, "./cmd/server"], {
       cwd: path.join(root, "e2e/server"),
@@ -55,6 +59,26 @@ export default async function globalSetup() {
     await teardown()
     throw err
   }
+}
+
+// Bundles the account host page against a fresh package build (dist/).
+async function buildHostApp() {
+  execFileSync("pnpm", ["build"], { cwd: root, stdio: "inherit" })
+  await build({
+    configFile: false,
+    logLevel: "warn",
+    plugins: [react()],
+    root: path.join(root, "e2e/openrails/app"),
+    build: {
+      outDir: path.join(root, "e2e/openrails/fixtures/app"),
+      emptyOutDir: true,
+      minify: false,
+      rollupOptions: {
+        input: path.join(root, "e2e/openrails/app/main.tsx"),
+        output: { entryFileNames: "account.js" },
+      },
+    },
+  })
 }
 
 function freePort(): Promise<number> {

@@ -1,8 +1,52 @@
-// @openrails/billing-ui — the OpenRails checkout flow as a self-contained
-// component. `Checkout` is the flow; render it inline anywhere. `CheckoutModal`
-// is a ready-made dialog host around the same flow. The package entry installs
-// its isolated stylesheet once in browser environments.
+// @openrails/billing-ui — styled OpenRails checkout and account billing.
+// `Checkout`/`CheckoutModal` are the purchase flow; the account panels manage
+// what was bought (they need `BillingProvider` from `./react`). The entry
+// installs its isolated stylesheet once in browser environments.
 import "./styles.css"
+
+export { BillingUiProvider, type BillingUiProviderProps } from "./provider"
+export { BillingUiRoot } from "./scope"
+export type { Navigate } from "./scope-context"
+export {
+  AccountBilling,
+  type AccountBillingProps,
+} from "./account/account-billing"
+export {
+  SubscriptionsPanel,
+  type SubscriptionsPanelProps,
+} from "./account/subscriptions-panel"
+export {
+  CancelSubscriptionDialog,
+  type CancelSubscriptionDialogProps,
+} from "./account/cancel-dialog"
+export {
+  PaymentMethodsPanel,
+  type CardSetupConfig,
+  type PaymentMethodsPanelProps,
+} from "./account/payment-methods-panel"
+export {
+  PaymentHistory,
+  type PaymentHistoryProps,
+} from "./account/payment-history"
+export {
+  BillingStatusBadge,
+  type BillingStatusBadgeProps,
+} from "./account/status-badge"
+export { statusTone, type StatusTone } from "./account/format"
+export {
+  createTranslator,
+  defaultMessages,
+  defineMessages,
+  interpolate,
+  resolveMessages,
+  useMessages,
+  type BillingUiMessageBundle,
+  type BillingUiMessages,
+  type BillingUiTranslate,
+  type MessageKey,
+  type MessageVars,
+  type Translator,
+} from "./i18n"
 
 export { Checkout, type CheckoutLayout, type CheckoutProps } from "./checkout"
 export { CheckoutModal, type CheckoutModalProps } from "./modal"
@@ -23,6 +67,7 @@ export {
 } from "./lib/money"
 export {
   type CheckoutAppearance,
+  type CheckoutAppearance as BillingAppearance,
   type CheckoutTheme,
   type CheckoutVariables,
 } from "./appearance"

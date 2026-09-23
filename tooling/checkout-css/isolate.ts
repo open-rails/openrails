@@ -2,11 +2,11 @@ import postcss, { type Plugin, type Rule } from "postcss"
 
 const CHECKOUT_ROOT = ".orck"
 
-// DialogContent places its backdrop beside the popup in a Base UI portal, so
-// the backdrop cannot inherit the popup's `.orck` scope. This selector admits
-// only the portal that owns an OpenRails checkout dialog.
+// Dialogs place their backdrop beside the popup in a Base UI portal, so the
+// backdrop cannot inherit the popup's `.orck` scope. This selector admits only
+// portals that own an OpenRails dialog.
 const CHECKOUT_DIALOG_PORTAL =
-  ':where([data-slot="dialog-portal"]:has(> .orck[data-slot="dialog-content"]))'
+  ':where([data-slot="dialog-portal"]:has(> .orck[data-slot="dialog-content"]), [data-slot="alert-dialog-portal"]:has(> .orck[data-slot="alert-dialog-content"]))'
 
 function removeCascadeLayers(): Plugin {
   return {

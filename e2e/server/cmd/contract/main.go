@@ -193,6 +193,13 @@ func versionTS(c contract) []byte {
 	for _, r := range c.Routes {
 		fmt.Fprintf(&b, "  | %q\n", r.Method+" "+r.Path)
 	}
+	// The registry is fixed per OpenRails release; amounts on /me carry no scale.
+	b.WriteString("\n// Currency code to native-unit decimals (openrails.Currencies()).\n")
+	b.WriteString("export const OPENRAILS_CURRENCY_SCALES: Readonly<Record<string, number>> = {\n")
+	for _, cur := range openrails.Currencies() {
+		fmt.Fprintf(&b, "  %s: %d,\n", cur.Code, cur.Decimals)
+	}
+	b.WriteString("}\n")
 	return b.Bytes()
 }
 

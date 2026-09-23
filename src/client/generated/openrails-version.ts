@@ -48,3 +48,10 @@ export type OpenRailsCustomerRoute =
   | "GET /billing/v1/me/tier"
   | "GET /billing/v1/me/transactions"
   | "GET /billing/v1/me/usage"
+
+// Currency code to native-unit decimals (openrails.Currencies()).
+export const OPENRAILS_CURRENCY_SCALES: Readonly<Record<string, number>> = {
+  EUR: 6,
+  JPY: 4,
+  USD: 6,
+}

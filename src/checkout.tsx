@@ -605,7 +605,7 @@ export function Checkout({
                   disabled={processing}
                   error={payError}
                 />
-                <p className="text-muted-foreground text-[13px]">
+                <p className="text-[13px] text-muted-foreground">
                   You’ll finish payment on CCBill’s secure page.
                 </p>
               </MethodBody>
@@ -613,7 +613,7 @@ export function Checkout({
           }
           return (
             <MethodBody>
-              <p className="text-muted-foreground text-[13px]">
+              <p className="text-[13px] text-muted-foreground">
                 You’ll finish payment on Stripe’s secure page.
               </p>
             </MethodBody>
@@ -621,7 +621,7 @@ export function Checkout({
         }}
       />
       {payError && active && active.rail !== "ccbill" ? (
-        <p className="text-destructive text-[13px]" role="alert">
+        <p className="text-[13px] text-destructive" role="alert">
           {payError}
         </p>
       ) : null}
@@ -694,7 +694,7 @@ export function Checkout({
             checkout.
           </p>
           {payError ? (
-            <p className="text-muted-foreground text-xs">{payError}</p>
+            <p className="text-xs text-muted-foreground">{payError}</p>
           ) : null}
         </div>
       ) : phase === "succeeded" ? (

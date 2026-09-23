@@ -1,8 +1,16 @@
 # @openrails/billing-ui
 
-Embeddable React checkout components for OpenRails.
+Embeddable OpenRails billing UI: the checkout flow and the customer's account
+billing (subscriptions, saved cards, payment history).
 
-The package owns the browser checkout flow while the host supplies a
+| Import                            | Contents                                                           |
+| --------------------------------- | ------------------------------------------------------------------ |
+| `@openrails/billing-ui/client`    | Framework-free typed client for `/billing/v1/me/*`, `BillingError` |
+| `@openrails/billing-ui/react`     | `BillingProvider` and headless hooks                               |
+| `@openrails/billing-ui`           | Styled checkout and account components, `BillingUiProvider`, i18n  |
+| `@openrails/billing-ui/locales/*` | `en de es ja ko zh` message bundles                                |
+
+The checkout owns the browser payment flow while the host supplies a
 short-lived `CheckoutSource`. Card data is tokenized in NMI-hosted Collect.js
 iframes and never enters the host application.
 
@@ -14,7 +22,7 @@ Until the `@openrails` npm scope is live, install the tarball attached to each
 GitHub release:
 
 ```sh
-pnpm add https://github.com/open-rails/billing-ui/releases/download/v0.4.2/openrails-billing-ui-0.4.2.tgz
+pnpm add https://github.com/open-rails/billing-ui/releases/download/v0.5.0/openrails-billing-ui-0.5.0.tgz
 ```
 
 ```tsx
@@ -30,6 +38,44 @@ export function PaymentPage() {
   return <Checkout source={source} />
 }
 ```
+
+## Account billing
+
+```tsx
+import { createBillingClient } from "@openrails/billing-ui/client"
+import { BillingProvider } from "@openrails/billing-ui/react"
+import { AccountBilling, BillingUiProvider } from "@openrails/billing-ui"
+import { de } from "@openrails/billing-ui/locales/de"
+
+// auth-ui's authFetch attaches the bearer and retries once after a refresh;
+// `getToken: () => token` works for any other auth.
+const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
+
+<BillingUiProvider appearance={{ theme: "auto" }} messages={de} locale="de" navigate={navigate}>
+  <BillingProvider client={billing} onChange={() => queryClient.invalidateQueries({ queryKey: ["billing"] })}>
+    <AccountBilling
+      plansHref="/plans"
+      cardSetup={{ tokenizationKey, tokenizationURL }} // enables "Add card"
+      defaultCurrency="USD" // enables "Make default"
+      sendSolanaTransaction={(tx) => wallet.signAndSend(tx)} // Solana-rail cancel
+    />
+  </BillingProvider>
+</BillingUiProvider>
+```
+
+- Panels: `SubscriptionsPanel`, `PaymentMethodsPanel`, `PaymentHistory`,
+  `BillingStatusBadge`, `CancelSubscriptionDialog`; `AccountBilling` stacks them.
+- Hooks: `useSubscriptions` (`cancel`, `cancelOnChain`, `resume`,
+  `setPaymentMethod`, per-row `pending`), `usePaymentMethods` (`add`, `remove`,
+  `setDefault`), `usePayments` (offset pages). Actions resolve to `null` or a
+  `BillingError`; they never throw. Cancel and resume are queued by OpenRails
+  (202); hooks re-read the subscription until the change shows.
+- Money is exact: `/me` amounts are int64 native-unit strings, scaled by the
+  pinned OpenRails currency registry (`currencies` option to extend it).
+- Messages: English is complete and the fallback; `messages` layers bundles,
+  `t` lets the host's i18n win. `useMessages().error(err)` maps error codes.
+- Styles are scoped under `.orck`; `appearance.theme` is `light`, `dark` or
+  `auto`.
 
 ## UI primitives
 
@@ -50,3 +96,9 @@ pnpm test:e2e        # Playwright against the real server
 pnpm contract        # regenerate src/client/generated from the pinned OpenRails
 pnpm contract:check  # fail if the generated contract is stale
 ```
+
+`e2e/openrails/account.spec.ts` drives the packaged `AccountBilling` (built from
+`dist/`) through list, cancel, resume, the in-use card refusal and history. Set
+`BILLING_UI_SCREENSHOTS=<dir>` to capture light, dark and mobile screenshots.
+Card deletion calls NMI, which the harness has no credentials for; jsdom tests
+cover it.

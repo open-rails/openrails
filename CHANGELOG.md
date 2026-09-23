@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0
+
+Account billing, alongside checkout. No change to checkout's API.
+
+- `@openrails/billing-ui/client`: `createBillingClient` for the OpenRails
+  customer surface (`/billing/v1/me/*`): subscriptions (list, get, cancel with
+  feedback, resume, payment method, Solana on-chain cancel), payment methods
+  (list, add tokenized card, remove, per-currency default), payments, invoices,
+  status. zod-validated responses, `BillingError` from the error envelope, the
+  pinned currency registry for exact money.
+- `@openrails/billing-ui/react`: `BillingProvider` (`onChange` for host cache
+  invalidation), `useSubscriptions`, `usePaymentMethods`, `usePayments`.
+- Styled: `AccountBilling`, `SubscriptionsPanel` with cancel/resume dialog and
+  provider-portal links, `PaymentMethodsPanel` (adding a card uses
+  `TokenizedCardForm`), `PaymentHistory`, `BillingStatusBadge`,
+  `BillingUiProvider`, `BillingUiRoot`.
+- Messages: typed bundles with `en de es ja ko zh` under `./locales/*`.
+- `formatAmount` takes an optional locale.
+- The route contract and e2e suite run against real OpenRails v0.159.0.
+
 ## 0.4.2
 
 No API or visual change.

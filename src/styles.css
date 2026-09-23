@@ -69,9 +69,11 @@
   --orck-faint: oklch(0.705 0.015 286.067);
   --orck-hairline: oklch(0.141 0.005 285.823 / 6%);
   --orck-success: oklch(0.6 0.13 163);
+  --orck-warning: oklch(0.6 0.15 55);
   --radius: 0.625rem;
-  --orck-font: "Instrument Sans Variable", "Instrument Sans", -apple-system,
-    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --orck-font:
+    "Instrument Sans Variable", "Instrument Sans", -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
 
   font-family: var(--orck-font);
   color: var(--foreground);
@@ -102,6 +104,7 @@
   --orck-faint: oklch(0.552 0.016 285.938);
   --orck-hairline: oklch(1 0 0 / 6%);
   --orck-success: oklch(0.77 0.15 163);
+  --orck-warning: oklch(0.8 0.15 75);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -127,6 +130,7 @@
     --orck-faint: oklch(0.552 0.016 285.938);
     --orck-hairline: oklch(1 0 0 / 6%);
     --orck-success: oklch(0.77 0.15 163);
+    --orck-warning: oklch(0.8 0.15 75);
   }
 }
 

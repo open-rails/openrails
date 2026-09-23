@@ -26,7 +26,7 @@ if (typeof document !== "undefined") {
 `
 }
 
-export function checkoutCssPlugin(): Plugin {
+export function checkoutCssPlugin(options: { entries: string[] }): Plugin {
   return {
     name: "billing-ui-css",
     enforce: "post",
@@ -42,7 +42,11 @@ export function checkoutCssPlugin(): Plugin {
       stylesheet.source = css
 
       for (const item of Object.values(bundle)) {
-        if (item.type === "chunk" && item.isEntry) {
+        if (
+          item.type === "chunk" &&
+          item.isEntry &&
+          options.entries.includes(item.name)
+        ) {
           item.code = `${renderStyleInstaller(css)}\n${item.code}`
         }
       }

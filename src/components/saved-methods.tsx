@@ -86,8 +86,8 @@ export function SavedMethods({
             />
             <span
               className={cn(
-                "text-muted-foreground min-w-0 flex-1 truncate text-sm font-medium tabular-nums transition-colors",
-                active && "text-foreground font-semibold"
+                "min-w-0 flex-1 truncate text-sm font-medium text-muted-foreground tabular-nums transition-colors",
+                active && "font-semibold text-foreground"
               )}
             >
               <span className="sr-only">
@@ -106,8 +106,8 @@ export function SavedMethods({
       <Label
         htmlFor={`${idPrefix}-new`}
         className={cn(
-          "text-muted-foreground flex cursor-pointer items-center gap-3 py-1.5 text-sm font-medium select-none",
-          value === NEW_CARD_VALUE && "text-foreground font-semibold",
+          "flex cursor-pointer items-center gap-3 py-1.5 text-sm font-medium text-muted-foreground select-none",
+          value === NEW_CARD_VALUE && "font-semibold text-foreground",
           disabled && "cursor-default"
         )}
       >
@@ -115,9 +115,9 @@ export function SavedMethods({
         <span
           aria-hidden
           className={cn(
-            "border-border text-muted-foreground grid h-7 w-11 shrink-0 place-items-center rounded-md border border-dashed transition-colors",
+            "grid h-7 w-11 shrink-0 place-items-center rounded-md border border-dashed border-border text-muted-foreground transition-colors",
             value === NEW_CARD_VALUE &&
-              "bg-foreground text-background border-solid border-transparent"
+              "border-solid border-transparent bg-foreground text-background"
           )}
         >
           <HugeiconsIcon icon={Add01Icon} className="size-3.5" />
