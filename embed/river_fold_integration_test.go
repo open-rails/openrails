@@ -67,7 +67,7 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 			TestMode:           config.CredentialPostureSandbox,
 			DB:                 &config.DBConfig{URL: dsn},
 			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB,
-			Auth: &config.AuthConfig{Issuer: "https://river-compose.test", KeysPath: t.TempDir()},
+			Auth: &config.AuthConfig{Issuer: "https://river-compose.test", KeysPath: t.TempDir(), AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true},
 		},
 		River: embed.RiverFromHost(),
 		Redis: rdb,

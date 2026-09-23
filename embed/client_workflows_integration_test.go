@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"math/big"
-	"strings"
 	"testing"
 	"time"
 
@@ -352,6 +351,12 @@ func checkClientCheckout(t *testing.T, ctx context.Context, h *integrationharnes
 	require.Equal(t, "ccbill", checkout.PSPs[0].Key)
 	require.Equal(t, "redirect", checkout.PSPs[0].Flow)
 	require.Empty(t, checkout.PSPs[0].Config)
+	// Existing provider-owned CCBill memberships remain importable above.
+	// New enrollment quotes require a supported saved engine method.
+	integrationharness.SeedPSPs(ctx, t, d.runtime, d.mid, config.PSPSet{
+		"nmi": {Rail: "nmi", AccountID: "client-workflow-" + d.mid.String(), NMI: &config.NMIRailConfig{SecurityKey: "client-workflow-fixture"}},
+	})
+	psp := dbtest.EnsureTestPSP(ctx, t, h.MerchantPool(d.mid.UUID()), d.mid.UUID(), "nmi")
 	product, err := client.Products.Create(ctx, &openrails.ProductCreateParams{Key: "checkout-" + uuid.NewString(), DisplayName: "Hosted fixture"})
 	require.NoError(t, err)
 	duration := 720
@@ -359,21 +364,27 @@ func checkClientCheckout(t *testing.T, ctx context.Context, h *integrationharnes
 	for _, amount := range []int64{10_000_000, 9_007_199_254_740_993} {
 		price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: "checkout-" + uuid.NewString(), UnitAmount: amount, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 		require.NoError(t, err)
-		psp := dbtest.EnsureTestPSP(ctx, t, h.MerchantPool(d.mid.UUID()), d.mid.UUID(), "ccbill")
-		_, err = h.MerchantPool(d.mid.UUID()).Exec(ctx, `INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,flex_id,configuration) VALUES($1,$2,$3,$4,'{"form_name":"test-form"}')`, d.mid.UUID(), sdkPriceID(t, price.ID).UUID(), psp, uuid.NewString())
+		_, err = h.MerchantPool(d.mid.UUID()).Exec(ctx, `INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id) VALUES($1,$2,$3)`, d.mid.UUID(), sdkPriceID(t, price.ID).UUID(), psp)
 		require.NoError(t, err)
 		prices = append(prices, price)
 	}
 	user := openrails.CustomerID(uuid.New())
-	request := openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: user.String(), VerifiedEmail: "checkout@example.test", Username: "checkout-" + uuid.NewString()[:8]}, PriceID: prices[0].ID, IdempotencyKey: uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "ccbill", NameOnCard: "Test Buyer", Zip: "90210", Country: "US"}}
+	method := openrails.PaymentMethodID(uuid.New())
+	_, err = client.EnsureCustomer(ctx, user.String())
+	require.NoError(t, err)
+	_, err = h.MerchantPool(d.mid.UUID()).Exec(ctx, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,initial_transaction_id,rail_customer_ref,rail_method_ref,last_four,card_type) VALUES($1,$2,$3,$4,'nmi',$5,$6,$7,'4242','visa')`, method.UUID(), d.mid.UUID(), user.UUID(), psp, method.String(), user.String(), method.String())
+	require.NoError(t, err)
+	request := openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: user.String(), VerifiedEmail: "checkout@example.test", Username: "checkout-" + uuid.NewString()[:8]}, PriceID: prices[0].ID, IdempotencyKey: uuid.NewString(), PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "nmi", PaymentMethodID: method.String(), NameOnCard: "Test Buyer", Zip: "90210", Country: "US"}}
 	options, err := client.ListCheckoutRailOptions(ctx, prices[0].ID)
 	require.NoError(t, err)
 	require.NotEmpty(t, options)
 	first, err := client.CreateCheckoutSession(ctx, request)
 	require.NoError(t, err)
 	require.NotEmpty(t, first.ID)
-	require.NotNil(t, first.URL)
-	require.True(t, strings.HasPrefix(*first.URL, "https://"))
+	require.Nil(t, first.URL, "a saved-method quote does not redirect to a provider")
+	require.Equal(t, "requires_action", first.Status)
+	require.NotNil(t, first.Amount)
+	require.EqualValues(t, 10_000_000, *first.Amount)
 	require.False(t, first.CreatedAt.IsZero())
 	require.NotNil(t, first.ExpiresAt)
 	require.True(t, first.ExpiresAt.After(first.CreatedAt))
@@ -391,7 +402,7 @@ func checkClientCheckout(t *testing.T, ctx context.Context, h *integrationharnes
 	require.NoError(t, client.Verify(ctx))
 	tier, err := client.ResolveEffectiveTier(ctx, (user).String(), "membership")
 	require.NoError(t, err)
-	require.Nil(t, tier, "a redirect has not bought access")
+	require.Nil(t, tier, "an unconfirmed quote has not bought access")
 	var documentReference []byte
 	for _, reader := range []*openrails.Client{client, d.peer} {
 		price, err := reader.Prices.RetrieveByKey(ctx, prices[1].Key)
