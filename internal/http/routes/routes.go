@@ -826,6 +826,7 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	metricsGrp := rr.Group("/metrics")
 	metricsGrp.Handle(http.MethodPost, "/query", h(httphandlers.MerchantMetricsQuery), metricsRead...)
 	metricsGrp.Handle(http.MethodGet, "/schema", h(httphandlers.MerchantMetricsSchema), metricsRead...)
+	rr.Handle(http.MethodGet, "/billing-analysis", h(httphandlers.MerchantBillingAnalysis), metricsRead...)
 	// #756 metrics Q&A: read-only over the same data as /query (evidence IS
 	// /query output), so it shares the metrics-read permission; the LLM-cost
 	// axis is guarded by the per-merchant ask rate limit + fail-closed consent.
