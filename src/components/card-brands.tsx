@@ -4,7 +4,7 @@
 import * as React from "react"
 
 import { resolveCardBrand } from "#orck/lib/card-brands"
-import { cn } from "#orck/lib/utils"
+import { cn } from "cn"
 
 function VisaMark() {
   return (

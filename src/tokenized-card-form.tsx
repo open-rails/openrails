@@ -9,7 +9,7 @@ import { CardFields } from "./components/card-fields"
 import { PayButton, TrustLine } from "./components/pay-button"
 import { emptyNMIBilling, nmiBillingSchema } from "./lib/billing"
 import { useCollectJS } from "./lib/collect"
-import { cn } from "./lib/utils"
+import { cn } from "cn"
 
 // Only tokenized billing details cross the iframe boundary. PAN/CVC are never
 // accepted by this component or handed to the host callback.

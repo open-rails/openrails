@@ -9,7 +9,7 @@ import { CardBrandPlate } from "#orck/components/card-brands"
 
 import { Label } from "#orck/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "#orck/components/ui/radio-group"
-import { cn } from "#orck/lib/utils"
+import { cn } from "cn"
 import type { SavedPaymentMethod } from "#orck/types"
 
 export const NEW_CARD_VALUE = "new"

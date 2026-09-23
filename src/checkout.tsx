@@ -37,7 +37,7 @@ import {
   type NMIBilling,
 } from "#orck/lib/billing"
 import { amountToDecimal, formatAmount } from "#orck/lib/money"
-import { cn } from "#orck/lib/utils"
+import { cn } from "cn"
 import type { CheckoutSource } from "#orck/source"
 import type {
   CheckoutPhase,

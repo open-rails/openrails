@@ -2,7 +2,7 @@
 // Selection reads through the filled radio and the row title going ink —
 // never a highlighted container (containment budget: one, owned by the
 // host). Each row expands its body in place.
-import { cn } from "#orck/lib/utils"
+import { cn } from "cn"
 import { Label } from "#orck/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "#orck/components/ui/radio-group"
 import { RAIL_META, solanaHint, solanaToken } from "#orck/lib/rail-meta"

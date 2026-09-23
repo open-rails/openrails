@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2
+
+No API or visual change.
+
+- Components import `cn` from the [`cn`](https://github.com/shadcn-ui/cn)
+  package (pinned `0.4.0`), replacing `clsx` and `tailwind-merge`.
+
 ## 0.4.1
 
 Visual only; no API change.

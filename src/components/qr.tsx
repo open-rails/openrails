@@ -3,7 +3,7 @@
 import * as React from "react"
 
 import { buttonVariants } from "#orck/components/ui/button"
-import { cn } from "#orck/lib/utils"
+import { cn } from "cn"
 
 // Keep the official renderer's full quiet zone. Cropping it makes the tile
 // denser but materially reduces scan reliability on lower-quality cameras.

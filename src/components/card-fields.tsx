@@ -3,7 +3,7 @@
 // (fixture tokenization keys) renders inert placeholders with the same
 // geometry so every state is designable without a gateway.
 import { Label } from "#orck/components/ui/label"
-import { cn } from "#orck/lib/utils"
+import { cn } from "cn"
 
 const FIELD =
   "orck-collect-field h-[38px] overflow-hidden rounded-[9px] border border-[color:var(--border)] bg-card px-[3px]"

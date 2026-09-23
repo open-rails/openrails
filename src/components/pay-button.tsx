@@ -1,7 +1,7 @@
 // The one bold element on the surface: the ink button carrying the amount.
 // Redirect rails relabel it; Solana has no button at all.
 import { Button } from "#orck/components/ui/button"
-import { cn } from "#orck/lib/utils"
+import { cn } from "cn"
 
 export function PayButton({
   label,

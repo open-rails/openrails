@@ -2,7 +2,7 @@
 // receipt — line items, tax, a single emphasized rule above "Due today".
 // Compact variant (narrow containers) is one line: who + what left, how much
 // right.
-import { cn } from "#orck/lib/utils"
+import { cn } from "cn"
 import {
   addAmounts,
   formatAmount,
