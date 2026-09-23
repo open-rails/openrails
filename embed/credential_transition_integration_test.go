@@ -48,7 +48,7 @@ func TestRuntimeCredentialCustodyTransitionAndSnapshotRestart(t *testing.T) {
 		rt, err := embed.New(ctx, embed.Options{
 			Config: &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: backend, CredentialSnapshotID: snapshotID,
 				Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
-				DB:         &config.DBConfig{URL: dsn}, Auth: &config.AuthConfig{AllowMemory: true, AllowEphemeralSigningKey: true, KeysPath: t.TempDir(), AllowMissingSenders: true, DirectPeerIP: true, Issuer: "https://custody.openrails.test"}},
+				DB:         &config.DBConfig{URL: dsn}},
 			PGXPool: pool, River: embed.RiverManagedByOpenRails(), StripeTransport: wire, ProviderCredentials: credentials,
 		})
 		require.NoError(t, err)

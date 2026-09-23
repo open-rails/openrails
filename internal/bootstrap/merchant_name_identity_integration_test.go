@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/stretchr/testify/require"
 )
@@ -42,10 +43,7 @@ func TestManifestKeepsCapturedOwnerThroughNameReclaim(t *testing.T) {
 	})
 	selected, err := ProvisionMerchant(ctx, ProvisionMerchantRequest{
 		Config: apiModeReconcileConfig(), ControlPlane: cp, Directory: directory,
-		Slug: "manifest-former", Merchant: MerchantConfig{
-			DisplayName:       "Original owner",
-			RemoteApplication: &RemoteApplicationConfig{Slug: "manifest-owner-app", Issuer: "https://manifest-owner.test", JWKSURI: "https://manifest-owner.test/jwks.json"},
-		}, Options: MerchantManifestReconcileOptions{Overwrite: true},
+		Slug: "manifest-former", Merchant: MerchantConfig{MerchantConfig: merchantbootstrap.MerchantConfig{DisplayName: "Original owner"}, RemoteApplication: &RemoteApplicationConfig{Slug: "manifest-owner-app", Issuer: "https://manifest-owner.test", JWKSURI: "https://manifest-owner.test/jwks.json"}}, Options: MerchantManifestReconcileOptions{Overwrite: true},
 	})
 	require.NoError(t, err)
 	require.Equal(t, a.ID, selected.ID)

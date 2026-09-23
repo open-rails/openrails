@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -30,12 +31,11 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 	cfg := &config.Config{
 		TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true,
 		Encryption: &config.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn},
-		Auth: &config.AuthConfig{Issuer: "https://cutover.openrails.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true},
 	}
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{})
+	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{AllowMemory: true, AllowEphemeralSigningKey: true, DirectPeerIP: true, AllowMissingSenders: true, Issuer: "https://cutover.openrails.test", KeysPath: t.TempDir()}})
 	require.NoError(t, err)
 
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())

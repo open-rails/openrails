@@ -19,7 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
-	billingauthkit "github.com/open-rails/openrails/embed/authkit"
+	billingauthkit "github.com/open-rails/openrails/internal/hostauth"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"

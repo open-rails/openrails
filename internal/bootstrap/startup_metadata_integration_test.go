@@ -8,6 +8,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -26,7 +27,7 @@ func TestStartupPreservesMetadataAndArchiveWhileReloadingSnapshot(t *testing.T) 
 	cfg := &config.Config{SecretBackend: config.SecretBackendSnapshot, TestMode: config.CredentialPostureSandbox}
 	slug := "startup-" + uuid.NewString()
 	account := "acct_" + uuid.NewString()
-	declared := MerchantConfig{DisplayName: "startup name", APIHost: slug + ".example.test", Profile: MerchantProfileConfig{DisplayName: "startup profile"}, PSPs: map[string]PSPConfig{"original-key": {"stripe": {AccountID: account, Secrets: map[string]string{"secret_key": "sk_test_first", "webhook_signing_secret": "whsec_first"}}}}}
+	declared := MerchantConfig{MerchantConfig: merchantbootstrap.MerchantConfig{DisplayName: "startup name", APIHost: slug + ".example.test", Profile: MerchantProfileConfig{DisplayName: "startup profile"}, PSPs: map[string]PSPConfig{"original-key": {"stripe": {AccountID: account, Secrets: map[string]string{"secret_key": "sk_test_first", "webhook_signing_secret": "whsec_first"}}}}}}
 	first := merchants.NewMemorySecretStore()
 	request := ProvisionMerchantRequest{Config: cfg, Database: database, Slug: slug, Merchant: declared, SecretStore: first, Options: MerchantManifestReconcileOptions{Insert: true, IdentityResolver: startupIdentityFixture{}}}
 	row, err := ProvisionMerchant(t.Context(), request)
@@ -79,7 +80,7 @@ func TestMetadataDumpIndependentOfCredentialBackend(t *testing.T) {
 	cfg := sandboxModeReconcileConfig()
 	cfg.SecretBackend = config.SecretBackendSnapshot
 	slug := "dump-" + uuid.NewString()
-	_, err := ProvisionMerchant(t.Context(), ProvisionMerchantRequest{Config: cfg, ControlPlane: cp, Slug: slug, Merchant: MerchantConfig{DisplayName: "Snapshot merchant"}, Options: MerchantManifestReconcileOptions{Insert: true}})
+	_, err := ProvisionMerchant(t.Context(), ProvisionMerchantRequest{Config: cfg, ControlPlane: cp, Slug: slug, Merchant: MerchantConfig{MerchantConfig: merchantbootstrap.MerchantConfig{DisplayName: "Snapshot merchant"}}, Options: MerchantManifestReconcileOptions{Insert: true}})
 	require.NoError(t, err)
 	for _, backend := range []string{config.SecretBackendSnapshot, config.SecretBackendDB} {
 		cfg.SecretBackend = backend

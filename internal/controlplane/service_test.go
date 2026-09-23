@@ -14,6 +14,7 @@ import (
 	logtest "github.com/sirupsen/logrus/hooks/test"
 
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 )
 
 // testEd25519PrivateKeyPEM generates a throwaway ed25519 private key PEM
@@ -37,8 +38,8 @@ func testEd25519PrivateKeyPEM(t *testing.T) string {
 // no emergency revocation without a restart) — a non-development boot on this
 // path must say so loudly.
 func TestResolveControlPlaneKeySource_InlinePEMWarnsOutsideDev(t *testing.T) {
-	cfg := &config.Config{
-		Auth: &config.AuthConfig{
+	cfg := &hostconfig.Config{Config: &config.Config{},
+		Auth: &hostconfig.AuthConfig{
 			ActiveKeyID:         "test-key",
 			ActivePrivateKeyPEM: testEd25519PrivateKeyPEM(t),
 		},
@@ -47,7 +48,7 @@ func TestResolveControlPlaneKeySource_InlinePEMWarnsOutsideDev(t *testing.T) {
 	hook := logtest.NewGlobal()
 	defer hook.Reset()
 
-	if _, err := resolveControlPlaneKeySource(cfg); err != nil {
+	if _, err := resolveControlPlaneKeySource(cfg.Config, cfg.Auth); err != nil {
 		t.Fatalf("resolveControlPlaneKeySource: %v", err)
 	}
 
@@ -63,12 +64,12 @@ func TestResolveControlPlaneKeySource_InlinePEMWarnsOutsideDev(t *testing.T) {
 }
 
 func TestResolveControlPlaneKeySource_EphemeralRequiresExplicitPermission(t *testing.T) {
-	cfg := &config.Config{Auth: &config.AuthConfig{KeysPath: t.TempDir()}}
-	if _, err := resolveControlPlaneKeySource(cfg); err == nil {
+	cfg := &hostconfig.Config{Config: &config.Config{}, Auth: &hostconfig.AuthConfig{KeysPath: t.TempDir()}}
+	if _, err := resolveControlPlaneKeySource(cfg.Config, cfg.Auth); err == nil {
 		t.Fatal("missing key must fail closed")
 	}
 	cfg.Auth.AllowEphemeralSigningKey = true
-	if _, err := resolveControlPlaneKeySource(cfg); err != nil {
+	if _, err := resolveControlPlaneKeySource(cfg.Config, cfg.Auth); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -77,8 +78,8 @@ func TestResolveControlPlaneKeySource_EphemeralRequiresExplicitPermission(t *tes
 // delivery route is the hot-rotating prod path — it must never trip the #752
 // inline-PEM warning, even outside development.
 func TestResolveControlPlaneKeySource_KeysPathNoWarning(t *testing.T) {
-	cfg := &config.Config{
-		Auth: &config.AuthConfig{
+	cfg := &hostconfig.Config{Config: &config.Config{},
+		Auth: &hostconfig.AuthConfig{
 			KeysPath: t.TempDir(),
 		},
 	}
@@ -88,7 +89,7 @@ func TestResolveControlPlaneKeySource_KeysPathNoWarning(t *testing.T) {
 
 	// No keys.json present and not dev -> ResolveKeySource is expected to
 	// error; only the ABSENCE of the inline-PEM warning is under test here.
-	_, _ = resolveControlPlaneKeySource(cfg)
+	_, _ = resolveControlPlaneKeySource(cfg.Config, cfg.Auth)
 
 	for _, e := range hook.AllEntries() {
 		if e.Level == log.WarnLevel && strings.Contains(e.Message, "inline PEM") {
@@ -100,17 +101,17 @@ func TestResolveControlPlaneKeySource_KeysPathNoWarning(t *testing.T) {
 func TestNew_RequiresAuthIssuer(t *testing.T) {
 	// HARD CUT (#469): the control plane is mandatory; standalone needs an
 	// issuer and there is no verifier-only mode.
-	if _, err := New(context.Background(), &config.Config{}, nil); err == nil {
+	if _, err := New(context.Background(), &config.Config{}, nil, nil); err == nil {
 		t.Fatal("expected error when auth is missing")
 	}
-	if _, err := New(context.Background(), &config.Config{Auth: &config.AuthConfig{}}, nil); err == nil {
+	if _, err := New(context.Background(), &config.Config{}, &hostconfig.AuthConfig{}, nil); err == nil {
 		t.Fatal("expected error when auth.issuer is missing")
 	}
 }
 
 func TestNew_RequiresPool(t *testing.T) {
-	cfg := &config.Config{Auth: &config.AuthConfig{Issuer: "https://openrails.example.com"}}
-	if _, err := New(context.Background(), cfg, nil); err == nil {
+	cfg := &hostconfig.Config{Config: &config.Config{}, Auth: &hostconfig.AuthConfig{Issuer: "https://openrails.example.com"}}
+	if _, err := New(context.Background(), cfg.Config, cfg.Auth, nil); err == nil {
 		t.Fatal("expected error when pool is nil")
 	}
 }

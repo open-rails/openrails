@@ -8,7 +8,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	boot "github.com/open-rails/openrails/internal/bootstrap"
+	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -30,9 +30,6 @@ type CheckoutRoutingMatchConfig = boot.CheckoutRoutingMatchConfig
 
 type ProviderRailAccountConfig = boot.ProviderRailAccountConfig
 type PSPSignerConfig = boot.PSPSignerConfig
-type RemoteApplicationConfig = boot.RemoteApplicationConfig
-type StaticJWKSConfig = boot.StaticJWKSConfig
-type StaticJWKConfig = boot.StaticJWKConfig
 
 // upsertMerchantConfig reconciles the constructor's merchant declaration before
 // HTTP routes or workers can observe a partially configured runtime.

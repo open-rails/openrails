@@ -1,13 +1,14 @@
 package config
 
 import (
+	billing "github.com/open-rails/openrails/config"
 	"github.com/stretchr/testify/require"
 	"testing"
 )
 
 func TestSandboxDoesNotRelaxSecurity(t *testing.T) {
-	cfg := validationConfig("")
-	cfg.TestMode = CredentialPostureSandbox
+	cfg := hostValidationConfig()
+	cfg.TestMode = billing.CredentialPostureSandbox
 	cfg.Auth.Issuer = "http://127.0.0.1:3053"
 	require.ErrorContains(t, Validate(cfg), "must use HTTPS")
 	cfg.Auth.AllowLoopbackHTTP = true

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
@@ -27,9 +28,8 @@ func TestControlPlaneClosesOwnedAuthKitPools(t *testing.T) {
 	require.NoError(t, host.Ping(ctx))
 	rdb, _ := dbtest.SharedRedisClient(t)
 	cp, err := New(ctx, &config.Config{
-		DB:   &config.DBConfig{},
-		Auth: &config.AuthConfig{Issuer: "https://ownership.test", MintDisabled: true, DirectPeerIP: true},
-	}, host, WithRedis(rdb))
+		DB: &config.DBConfig{},
+	}, &hostconfig.AuthConfig{Issuer: "https://ownership.test", MintDisabled: true, DirectPeerIP: true}, host, WithRedis(rdb))
 	require.NoError(t, err)
 	t.Cleanup(cp.Close)
 
@@ -59,9 +59,8 @@ func TestControlPlaneClosesOwnedAuthKitPools(t *testing.T) {
 	IntentionalRouteGroups = nil
 	t.Cleanup(func() { IntentionalRouteGroups = groups })
 	closed, err := New(ctx, &config.Config{
-		DB:   &config.DBConfig{},
-		Auth: &config.AuthConfig{Issuer: "https://ownership.test", MintDisabled: true, DirectPeerIP: true},
-	}, host, WithRedis(rdb))
+		DB: &config.DBConfig{},
+	}, &hostconfig.AuthConfig{Issuer: "https://ownership.test", MintDisabled: true, DirectPeerIP: true}, host, WithRedis(rdb))
 	require.NoError(t, err)
 	t.Cleanup(closed.Close)
 	routes, err := closed.AuthRoutes()

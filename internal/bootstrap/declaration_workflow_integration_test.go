@@ -16,6 +16,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -47,8 +48,7 @@ func TestMerchantDeclarationLifecycle(t *testing.T) {
 	cfg := sandboxModeReconcileConfig()
 	snapshot := merchants.NewManifestSecretStore()
 	threshold, floor := int64(75_000_000), int64(2_000_000)
-	mt := MerchantConfig{
-		DisplayName:                        "Host Three",
+	mt := MerchantConfig{MerchantConfig: merchantbootstrap.MerchantConfig{DisplayName: "Host Three",
 		Profile:                            MerchantProfileConfig{DisplayName: "Host Three Billing", LogoURL: "https://cdn.example/logo.png", FromEmail: "billing@example.com", SupportURL: "https://example.com/support"},
 		Invoice:                            &InvoiceConfig{CollectionThreshold: &threshold, MonthlyFloor: &floor, BillingPeriodBoundary: "calendar_month"},
 		DelegatedInvokerWastedSpendWindows: []BudgetWindowConfig{{Key: "burst", Window: "15m", Limit: 5_000_000}, {Key: "sustained", Window: "5h", Limit: 20_000_000}},
@@ -57,7 +57,7 @@ func TestMerchantDeclarationLifecycle(t *testing.T) {
 			"mobius":           {"nmi": {AccountID: "100001", Settings: map[string]any{"tokenization_url": "https://secure.networkmerchants.com/token/Collect.js", "tokenization_key": "public-token"}, Secrets: map[string]string{"security_key": "active-security"}}},
 			"mobius-secondary": {"nmi": {AccountID: "100002", Archived: true, Secrets: map[string]string{"security_key": "archived-security"}}},
 			"ccbill":           {"ccbill": {AccountID: "945280-0000", Secrets: map[string]string{"salt": "flexform-salt", "datalink_username": "merchant-user", "datalink_password": "merchant-pass"}}},
-		},
+		}},
 	}
 	manifest := &BillingConfig{Version: 1, Merchants: map[string]MerchantConfig{"host-three": mt}}
 	apply := MerchantManifestReconcileOptions{Insert: true, Overwrite: true, SecretStore: snapshot.Seeder(), NMIProbeV5BaseURL: gateway.URL}

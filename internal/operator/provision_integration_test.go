@@ -19,6 +19,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
 	embcp "github.com/open-rails/openrails/internal/operator"
@@ -73,16 +74,16 @@ func (s *captureEmailSender) resetLink(email string) string {
 	return s.resetLinks[email]
 }
 
-func hostedTestConfig(t *testing.T, dsn, issuer string) *config.Config {
+func hostedTestConfig(t *testing.T, dsn, issuer string) *hostconfig.Config {
 	t.Helper()
-	return &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
+	return &hostconfig.Config{Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 		TestMode: config.CredentialPostureSandbox,
 		// MODE 2 (#723): the hosted-embedder shape — merchants are created over
 		// code paths (ProvisionMerchant), not a manifest.
 		MerchantConfigHTTP: true,
 		SecretBackend:      config.SecretBackendDB,
 		DB:                 &config.DBConfig{URL: dsn},
-		Auth:               &config.AuthConfig{Issuer: issuer, KeysPath: t.TempDir(), AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowMemory: true, DirectPeerIP: true},
+	}, Auth: &hostconfig.AuthConfig{Issuer: issuer, KeysPath: t.TempDir(), AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowMemory: true, DirectPeerIP: true},
 	}
 }
 
@@ -93,9 +94,9 @@ type hostApp struct{ rt *embed.Runtime }
 func (h *hostApp) App() *app.App                   { return app.HostGraph(h.rt) }
 func (h *hostApp) Close(ctx context.Context) error { return h.rt.Close(ctx) }
 
-func newHostApp(t *testing.T, cfg *config.Config) *hostApp {
+func newHostApp(t *testing.T, cfg *hostconfig.Config) *hostApp {
 	t.Helper()
-	rt, err := embed.New(context.Background(), embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
+	rt, err := embed.New(context.Background(), embed.Options{Config: cfg.Config, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err, "embed.New")
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	return &hostApp{rt: rt}
@@ -139,11 +140,11 @@ func TestHostedPosture_RegisterVerifyProvision(t *testing.T) {
 
 	// Hosted posture with NO sender must fail loudly at construction (#536 gap:
 	// registration verification is Required and nothing could deliver it).
-	err := embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{HostedPosture: true})
+	err := embcp.AttachWithOptions(ctx, e.App(), cfg.Config, nil, embcp.AttachOptions{Auth: cfg.Auth, HostedPosture: true})
 	require.Error(t, err, "hosted posture without a sender must refuse to boot")
 	require.Contains(t, err.Error(), "no email or SMS sender")
 	var typedNilSender *captureEmailSender
-	err = embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
+	err = embcp.AttachWithOptions(ctx, e.App(), cfg.Config, nil, embcp.AttachOptions{Auth: cfg.Auth,
 		HostedPosture: true,
 		EmailSender:   typedNilSender,
 	})
@@ -152,7 +153,7 @@ func TestHostedPosture_RegisterVerifyProvision(t *testing.T) {
 
 	// With a host-owned sender, hosted posture boots.
 	sender := &captureEmailSender{}
-	require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
+	require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg.Config, nil, embcp.AttachOptions{Auth: cfg.Auth,
 		HostedPosture: true,
 		EmailSender:   sender,
 	}))
@@ -254,7 +255,7 @@ func TestProvisionMerchant_ConcurrentFirstCreateRace(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := hostedTestConfig(t, dsn, "https://race.openrails.test")
 	e := newHostApp(t, cfg)
-	require.NoError(t, embcp.Attach(ctx, e.App(), cfg, nil))
+	require.NoError(t, embcp.Attach(ctx, e.App(), cfg.Config, cfg.Auth, nil))
 
 	// Warm up the root group/containment (idempotent, but not the race under
 	// test) with a throwaway slug first, so every iteration below races ONLY
@@ -303,7 +304,7 @@ func TestSelfHostedPosture_RegistrationStaysClosed(t *testing.T) {
 	cfg := hostedTestConfig(t, dsn, "https://selfhosted.openrails.test")
 	e := newHostApp(t, cfg)
 
-	require.NoError(t, embcp.Attach(ctx, e.App(), cfg, nil))
+	require.NoError(t, embcp.Attach(ctx, e.App(), cfg.Config, cfg.Auth, nil))
 	require.True(t, embcp.Get(e.App()).SelfHostedPosture())
 	srv := mountAuthRoutes(t, e)
 

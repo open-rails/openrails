@@ -21,7 +21,7 @@ import (
 	coreauth "github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/jwtkit"
 	"github.com/open-rails/authkit/verify"
-	billingauthkit "github.com/open-rails/openrails/embed/authkit"
+	auth "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -95,8 +95,8 @@ func TestDPoPProofVerifiedOnceAcrossV2RouteAndAuthorization(t *testing.T) {
 		return true, nil
 	}, func(r *http.Request) string { return origin + r.URL.EscapedPath() })).WithService(authority)
 	require.NoError(t, verifier.LoadRemoteApplications(t.Context(), authority, []string{"billing"}))
-	integration, err := billingauthkit.New(billingauthkit.Config{Verifier: verifier, Client: authority, AuthorityIssuer: "https://authority.test", Authority: func(context.Context, billingauth.Requirement) (billingauthkit.Authority, error) {
-		return billingauthkit.Authority{Group: coreauth.GroupRef{Persona: "merchant", Instance: "store"}, Permission: coreauth.Perm(permissions.MerchantCatalogRead)}, nil
+	integration, err := billingauth.NewIntegration(billingauth.IntegrationOptions{Verifier: verifier, Authority: func(context.Context, billingauth.Requirement) (billingauth.Authority, error) {
+		return billingauth.Authority{Scope: auth.Scope{Authority: "https://authority.test", ID: groupID}, Permission: permissions.MerchantCatalogRead}, nil
 	}})
 	require.NoError(t, err)
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

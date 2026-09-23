@@ -24,7 +24,6 @@ import (
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/captcha"
 	captchaembed "github.com/open-rails/openrails/internal/captcha/embed"
-	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -68,11 +67,7 @@ type Assembler struct {
 	// *controlplane.ControlPlane satisfies it.
 	AdminChecker              authpolicy.AdminPermissionChecker
 	ServiceCredentialResolver httproutes.ServiceCredentialResolver
-	// APIKeys is the #757 merchant self-serve API-key manager (the attached
-	// control plane). nil for hosts without a control plane — the /api-keys
-	// routes are then not registered.
-	APIKeys      httphandlers.MerchantAPIKeyManager
-	CaptchaStore *captcha.ChallengeStore
+	CaptchaStore              *captcha.ChallengeStore
 	// RDB is the Redis/Garnet client backing the rate-limit counters + captcha
 	// challenge store. nil falls back to per-process in-memory rate-limit windows.
 	RDB           *redis.Client
@@ -96,7 +91,7 @@ type Assembler struct {
 }
 
 // hostMerchantResolver is the #734 neutral capability a *controlplane.ControlPlane
-// satisfies, asserted off App.ControlPlane (held as `any`) so this package stays
+// satisfies, asserted off App.ControlPlane so this package stays
 // free of AuthKit (#284) — matching the AdminChecker/ServiceCredentialResolver
 // pattern above.
 type hostMerchantResolver interface {
@@ -121,7 +116,7 @@ func HostMerchantResolverFrom(controlPlane any) merchant.HostResolver {
 
 // FromApp builds an Assembler from the gin-free application graph (the same
 // inputs the gin Server derives its embedded surface from). The control plane,
-// when present, is read off app.App.ControlPlane (held as `any`) via an interface
+// when present, is read off app.App.ControlPlane via an interface
 // type assertion to the neutral AdminPermissionChecker — no controlplane import
 // on the embedded request path (#284).
 func FromApp(a *app.App) *Assembler {
@@ -136,17 +131,12 @@ func FromApp(a *app.App) *Assembler {
 	if c, ok := a.ControlPlane.(httproutes.ServiceCredentialResolver); ok {
 		resolver = c
 	}
-	var apiKeys httphandlers.MerchantAPIKeyManager
-	if c, ok := a.ControlPlane.(httphandlers.MerchantAPIKeyManager); ok {
-		apiKeys = c
-	}
 	hostResolve := HostMerchantResolverFrom(a.ControlPlane)
 	asm := &Assembler{
 		Cfg:                       a.Config,
 		Runtime:                   a.Runtime,
 		AdminChecker:              checker,
 		ServiceCredentialResolver: resolver,
-		APIKeys:                   apiKeys,
 		CaptchaStore:              captcha.NewChallengeStore(a.RedisClient),
 		RDB:                       a.RedisClient,
 		AdminLimiter:              middleware.NewAdminOperationLimiter(a.RedisClient),
@@ -230,7 +220,6 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	if routeSets[RouteSetMerchantAdmin] {
 		adminOpts := httproutes.Options{
 			Gate:         s.Gate,
-			APIKeys:      s.APIKeys,
 			AdminLimiter: s.AdminLimiter,
 		}
 		// #528: per-user `/admin` retired; the delegated admin surface is mounted

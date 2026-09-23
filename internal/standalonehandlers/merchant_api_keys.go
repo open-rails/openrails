@@ -1,4 +1,4 @@
-package handlers
+package standalonehandlers
 
 // Merchant self-serve API keys (#757): mint/list/revoke scoped credentials for
 // agents and integrations, all through AuthKit core via the control plane.
@@ -8,6 +8,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"github.com/open-rails/openrails/internal/http/handlers"
 	"net/http"
 	"strings"
 
@@ -33,7 +34,7 @@ type MerchantAPIKeyManager interface {
 // merchantRoutePrincipal returns the gate-resolved principal the merchant
 // permission middleware pinned onto the request.
 func merchantRoutePrincipal(r *httprequest.Request) (billingauth.Principal, bool) {
-	v, ok := r.Get(MerchantRoutePrincipalContextKey)
+	v, ok := r.Get(handlers.MerchantRoutePrincipalContextKey)
 	if !ok {
 		return billingauth.Principal{}, false
 	}

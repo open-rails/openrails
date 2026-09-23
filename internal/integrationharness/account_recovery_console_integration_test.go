@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/stretchr/testify/require"
@@ -87,9 +88,8 @@ func testStandaloneAccountRecovery(t *testing.T, workers bool) {
 		worker, err := serverboot.NewWorker(t.Context(), &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 			PublicBillingBaseURL: surface.BaseURL, TestMode: config.CredentialPostureSandbox,
 			DB: &config.DBConfig{URL: h.DSN}, Redis: &config.RedisConfig{Addr: h.Redis.Options().Addr},
-			Auth:               &config.AuthConfig{Issuer: surface.App().Config.Auth.Issuer, KeysPath: surface.App().Config.Auth.KeysPath, DirectPeerIP: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true},
 			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB,
-		}, nil)
+		}, &serverboot.Options{Auth: &hostconfig.AuthConfig{Issuer: surface.authConfig.Issuer, KeysPath: surface.authConfig.KeysPath, DirectPeerIP: true, AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true}})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, worker.Close(context.Background())) })
 		ctx, cancel := context.WithCancel(t.Context())

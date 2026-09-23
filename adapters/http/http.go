@@ -15,7 +15,12 @@ type Bundle struct {
 }
 
 // Routes materializes the HTTP configuration declared when the runtime was built.
-func Routes(runtime *embed.Runtime) (*Bundle, error) {
+type RouteSource interface {
+	HTTPRoutes() ([]embed.HTTPRoute, error)
+	HTTPRequiresRoot() bool
+}
+
+func Routes(runtime RouteSource) (*Bundle, error) {
 	routes, err := runtime.HTTPRoutes()
 	if err != nil {
 		return nil, err

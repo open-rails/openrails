@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 
+	"net/http"
+
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"net/http"
 )
 
 // HTTPConfig declares externally accessible HTTP capabilities. Nil Options.HTTP
@@ -18,9 +19,6 @@ import (
 // and valid provider verification. Management and buyer surfaces are opt-in and
 // independent of in-process Client access and its catalog-scoped views.
 type HTTPConfig struct {
-	// Standalone selects the attached control plane's billing, identity and console
-	// surface. Health endpoints remain the host's responsibility.
-	Standalone     bool
 	CustomerRoutes []CustomerRoutesConfig
 
 	Checkout       bool
@@ -36,12 +34,6 @@ func ValidateHTTPConfig(cfg *HTTPConfig, auth *billingauth.Integration) error {
 	}
 	if err := validateCustomerRoutes(cfg.CustomerRoutes, auth); err != nil {
 		return err
-	}
-	if cfg.Standalone {
-		if cfg.Checkout || cfg.MerchantAdmin || cfg.Catalog || cfg.MerchantConfig || cfg.MerchantAPI {
-			return fmt.Errorf("openrails HTTP: Standalone cannot be combined with embedded surface options")
-		}
-		return nil
 	}
 	if cfg.Checkout && (auth == nil || auth.Authentication == nil) {
 		return fmt.Errorf("openrails HTTP: Checkout requires Options.Auth.Authentication")

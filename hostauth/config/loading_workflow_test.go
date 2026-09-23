@@ -1,6 +1,7 @@
 package config
 
 import (
+	billing "github.com/open-rails/openrails/config"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,7 +25,7 @@ func TestConfigurationLoadingWorkflow(t *testing.T) {
 		cfg, err := Load("")
 		require.NoError(t, err)
 		require.True(t, cfg.RequiresSecretEncryption())
-		require.Equal(t, CredentialPostureSandbox, cfg.TestMode)
+		require.Equal(t, billing.CredentialPostureSandbox, cfg.TestMode)
 		require.True(t, cfg.IsTestMode())
 		require.Equal(t, "billing", cfg.DB.SchemaName())
 		require.NotNil(t, cfg.Auth)
@@ -46,14 +47,14 @@ func TestConfigurationLoadingWorkflow(t *testing.T) {
 		require.True(t, cfg.DB.SQLTrace)
 		require.Equal(t, "custom_billing", cfg.DB.Schema)
 		require.Equal(t, "custom_billing", cfg.DB.SchemaName())
-		require.Equal(t, SecretBackendDB, cfg.SecretBackend)
-		require.Equal(t, SecretBackendDB, cfg.SecretStoreBackend())
+		require.Equal(t, billing.SecretBackendDB, cfg.SecretBackend)
+		require.Equal(t, billing.SecretBackendDB, cfg.SecretStoreBackend())
 		require.Equal(t, "SG.test-key", cfg.SendGrid.APIKey)
 		require.True(t, cfg.Vault.Enabled)
 		require.Equal(t, "http://127.0.0.1:8200", cfg.Vault.Address)
 		require.Equal(t, "root", cfg.Vault.Token)
 		require.Equal(t, "token", cfg.Vault.AuthMethod)
-		require.Equal(t, ProviderWriteModeLimited, cfg.GetProviderWriteMode())
+		require.Equal(t, billing.ProviderWriteModeLimited, cfg.GetProviderWriteMode())
 		require.True(t, cfg.IsLimitedMode())
 		interval, enabled, err := cfg.CatalogReconciliationSchedule()
 		require.NoError(t, err)
@@ -77,7 +78,7 @@ func TestConfigurationLoadingWorkflow(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, cfg.RequiresSecretEncryption())
 		require.False(t, cfg.IsTestMode())
-		require.Equal(t, CredentialPostureLive, cfg.TestMode)
+		require.Equal(t, billing.CredentialPostureLive, cfg.TestMode)
 
 		t.Setenv("PROVIDER_WRITE_MODE", "readonly")
 		require.NoError(t, os.Unsetenv("TEST_MODE"))
@@ -86,15 +87,15 @@ func TestConfigurationLoadingWorkflow(t *testing.T) {
 		t.Setenv("TEST_MODE", "live")
 		cfg, err = Load("")
 		require.NoError(t, err)
-		require.Equal(t, CredentialPostureLive, cfg.TestMode)
+		require.Equal(t, billing.CredentialPostureLive, cfg.TestMode)
 		t.Setenv("TEST_MODE", "sandbox")
 		cfg, err = Load("", WithOverride("test_mode", "live"))
 		require.NoError(t, err)
-		require.Equal(t, CredentialPostureLive, cfg.TestMode)
+		require.Equal(t, billing.CredentialPostureLive, cfg.TestMode)
 		require.NoError(t, os.Unsetenv("TEST_MODE"))
 		cfg, err = Load("", WithOverride("test_mode", "live"))
 		require.NoError(t, err)
-		require.Equal(t, CredentialPostureLive, cfg.TestMode, "flag alone is explicit outside development")
+		require.Equal(t, billing.CredentialPostureLive, cfg.TestMode, "flag alone is explicit outside development")
 	})
 	t.Run("issuer and partial file overrides", func(t *testing.T) {
 		cfg, err := Load(configInputFile(t, "public_billing_base_url: http://openrails:3053/\nrate_limits:\n  checkout:\n    requests_per_minute: 99\n"))

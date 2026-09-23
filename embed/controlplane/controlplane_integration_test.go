@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -73,15 +74,15 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 		TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, MerchantConfigHTTP: true,
 		Encryption:    &config.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))},
 		SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn},
-		Auth: &config.AuthConfig{Issuer: "https://handle.openrails.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, DirectPeerIP: true},
 	}
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	_, err = controlplane.Attach(ctx, rt, controlplane.Options{HostedPosture: true})
-	require.Error(t, err, "hosted posture without a sender refuses to boot")
-	_, err = controlplane.Attach(ctx, nil, controlplane.Options{})
+	authConfig := &hostconfig.AuthConfig{AllowMemory: true, AllowEphemeralSigningKey: true, DirectPeerIP: true, Issuer: "https://handle.openrails.test", KeysPath: t.TempDir()}
+	_, err = controlplane.Attach(ctx, rt, controlplane.Options{Auth: authConfig, HostedPosture: true})
+	require.ErrorContains(t, err, "sender", "hosted posture without a sender refuses to boot")
+	_, err = controlplane.Attach(ctx, nil, controlplane.Options{Auth: authConfig})
 	require.Error(t, err)
 
 	sender := &captureSender{}
@@ -93,11 +94,11 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 	})
 	require.NoError(t, err)
 	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{
-		HostedPosture: true, EmailSender: sender,
+		Auth: authConfig, HostedPosture: true, EmailSender: sender,
 		MerchantCreation: &controlplane.MerchantCreationConfig{Admission: admission},
 	})
 	require.NoError(t, err)
-	_, err = controlplane.Attach(ctx, rt, controlplane.Options{HostedPosture: true, EmailSender: sender})
+	_, err = controlplane.Attach(ctx, rt, controlplane.Options{Auth: authConfig, HostedPosture: true, EmailSender: sender})
 	require.Error(t, err, "a runtime carries one control plane")
 
 	handler, err := cp.Handler()

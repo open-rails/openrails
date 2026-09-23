@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	vaultint "github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/integrations/vault/vaulttest"
+	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -114,9 +115,9 @@ func TestVaultUUIDPathsSurviveRenameAndReclaim(t *testing.T) {
 	f := newVaultPurgeFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	manifest := bootstrap.MerchantConfig{Custodians: map[string]bootstrap.CustodianConfig{
+	manifest := bootstrap.MerchantConfig{MerchantConfig: merchantbootstrap.MerchantConfig{Custodians: map[string]bootstrap.CustodianConfig{
 		"vault-test": {"basis_theory": bootstrap.CustodianAccountConfig{AccountID: "bt-tenant-test", Settings: map[string]any{"public_api_key": "public-bootstrap-key"}, Secrets: map[string]string{"api_key": "private-bootstrap-key"}}},
-	}}
+	}}}
 	require.NoError(t, f.database.RunInMerchantScope(ctx, f.id, "bootstrap seed", func(ctx context.Context) error {
 		return bootstrap.SeedMerchantManifestSecretPlane(ctx, f.cfg, f.id, manifest, f.store.Secrets, nil)
 	}))

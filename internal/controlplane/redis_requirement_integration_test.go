@@ -12,6 +12,7 @@ import (
 	authcore "github.com/open-rails/authkit/embedded"
 
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
@@ -41,13 +42,12 @@ func (noopEmailSender) SendWelcome(context.Context, string, string) error       
 // in this test environment, which outside development would otherwise be a
 // separate, unrelated construction failure — irrelevant to the Redis gate
 // under test here).
-func stagingControlPlaneConfig() *config.Config {
-	return &config.Config{
-		Auth: &config.AuthConfig{
-			Issuer:       "https://openrails-staging.test",
-			MintDisabled: true,
-			DirectPeerIP: true,
-		},
+func stagingControlPlaneConfig() *hostconfig.Config {
+	return &hostconfig.Config{Config: &config.Config{}, Auth: &hostconfig.AuthConfig{
+		Issuer:       "https://openrails-staging.test",
+		MintDisabled: true,
+		DirectPeerIP: true,
+	},
 	}
 }
 
@@ -62,7 +62,7 @@ func TestNew_HostedStagingWithRedis_Succeeds(t *testing.T) {
 	pool := newBootstrapTestPool(t)
 	rdb, _ := dbtest.SharedRedisClient(t)
 
-	cp, err := New(ctx, stagingControlPlaneConfig(), pool,
+	cp, err := New(ctx, stagingControlPlaneConfig().Config, stagingControlPlaneConfig().Auth, pool,
 		WithHostedPosture(),
 		WithEmailSender(noopEmailSender{}),
 		WithRedis(rdb),
@@ -82,7 +82,7 @@ func TestNew_HostedStagingWithoutRedis_FailsNamingRedis(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
 
-	cp, err := New(ctx, stagingControlPlaneConfig(), pool,
+	cp, err := New(ctx, stagingControlPlaneConfig().Config, stagingControlPlaneConfig().Auth, pool,
 		WithHostedPosture(),
 		WithEmailSender(noopEmailSender{}),
 	)
@@ -124,7 +124,7 @@ func TestProductionClientIPPosture(t *testing.T) {
 			cfg.Auth.DirectPeerIP = tc.direct
 			cfg.TrustedProxies = tc.proxies
 			opts := append([]Option{WithHostedPosture(), WithEmailSender(noopEmailSender{}), WithRedis(rdb)}, tc.opts...)
-			cp, err := New(ctx, cfg, pool, opts...)
+			cp, err := New(ctx, cfg.Config, cfg.Auth, pool, opts...)
 			if tc.wantErr != "" {
 				require.ErrorContains(t, err, tc.wantErr)
 				return

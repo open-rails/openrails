@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -67,7 +68,6 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 			TestMode:           config.CredentialPostureSandbox,
 			DB:                 &config.DBConfig{URL: dsn},
 			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB,
-			Auth: &config.AuthConfig{Issuer: "https://river-compose.test", KeysPath: t.TempDir(), AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true},
 		},
 		River: embed.RiverFromHost(),
 		Redis: rdb,
@@ -80,7 +80,7 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	_, err = rt.CheckJobProgress(ctx)
 	require.ErrorContains(t, err, "not bound")
 	require.ErrorContains(t, rt.RunWorkers(ctx), "not bound")
-	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{})
+	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://river-compose.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}})
 	require.NoError(t, err)
 	suffix := uuid.NewString()[:8]
 	user, err := cp.Core().CreateUser(ctx, "river-"+suffix+"@example.test", "river"+suffix)
@@ -103,7 +103,7 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 		return river.AddWorkerSafely(cfg.Workers, &noopWorker{})
 	}, nil, nil))
 	require.NoError(t, err)
-	_, err = controlplane.Attach(ctx, rt, controlplane.Options{})
+	_, err = controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://river-compose.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}})
 	require.Error(t, err, "components cannot attach after binding")
 
 	require.True(t, sawBillingWorkers, "explicit binding composes billing workers")

@@ -46,7 +46,8 @@ func TestNamingPolicyForwarding(t *testing.T) {
 				opts.Naming = &tc.input
 			}
 			e := newHostApp(t, cfg)
-			require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, opts))
+			opts.Auth = cfg.Auth
+			require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg.Config, nil, opts))
 			cp := embcp.Get(e.App())
 			want, err := tc.input.Normalize()
 			require.NoError(t, err)
@@ -120,7 +121,7 @@ func TestCapturedMerchantGroupSurvivesNameReuse(t *testing.T) {
 	e := newHostApp(t, cfg)
 	refusedName := "refused-" + uuid.NewString()[:8]
 	refusal := errors.New("host name rule")
-	require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
+	require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg.Config, nil, embcp.AttachOptions{Auth: cfg.Auth,
 		HostedPosture: true, EmailSender: &captureEmailSender{},
 		MerchantCreation: &embcp.MerchantCreationConfig{ReservedSlugs: []string{"reserved-capture"}},
 		NameAdmission: func(_ context.Context, req authkit.NameAdmissionRequest) error {

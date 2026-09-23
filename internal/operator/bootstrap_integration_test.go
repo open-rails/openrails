@@ -32,7 +32,7 @@ func TestRunBootstrap_ExternalShapeAndExplicitMintOnly(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := hostedTestConfig(t, dsn, "https://controlplane.openrails.test")
 	e := newHostApp(t, cfg)
-	require.NoError(t, embcp.Attach(ctx, e.App(), cfg, nil))
+	require.NoError(t, embcp.Attach(ctx, e.App(), cfg.Config, cfg.Auth, nil))
 
 	// Provision the merchant through the #738 public seam (no raw SQL): this is
 	// also the realistic API-mode shape, where a merchant row/group can exist

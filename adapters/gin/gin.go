@@ -3,10 +3,11 @@ package openrailsgin
 
 import (
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"github.com/open-rails/openrails/embed"
 	"net/http"
 	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/open-rails/openrails/embed"
 )
 
 type Bundle struct {
@@ -14,7 +15,12 @@ type Bundle struct {
 	rootOnly bool
 }
 
-func Routes(runtime *embed.Runtime) (*Bundle, error) {
+type RouteSource interface {
+	HTTPRoutes() ([]embed.HTTPRoute, error)
+	HTTPRequiresRoot() bool
+}
+
+func Routes(runtime RouteSource) (*Bundle, error) {
 	routes, err := runtime.HTTPRoutes()
 	if err != nil {
 		return nil, err

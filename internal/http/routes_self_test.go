@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/authkit/verify"
+	auth "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -56,7 +56,7 @@ type proofRejectingDelegatedResolver struct {
 
 func (r *proofRejectingDelegatedResolver) ResolveDelegated(req *http.Request) (*controlplane.ResolvedDelegated, error) {
 	r.origin = req.Header.Get("Origin")
-	return nil, verify.ErrSenderProofRequired
+	return nil, auth.ErrSenderProofRequired
 }
 
 func TestRegisterSelfServiceRoutes_HTTPServerRequiresSenderProof(t *testing.T) {

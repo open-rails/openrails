@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
@@ -49,7 +50,7 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 		pool, err := pgxpool.New(t.Context(), dsn)
 		require.NoError(t, err)
 		t.Cleanup(pool.Close)
-		rt, err := embed.New(t.Context(), embed.Options{Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}, Auth: &config.AuthConfig{Issuer: "https://compose.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true}}, PGXPool: pool, River: embed.RiverFromHost()})
+		rt, err := embed.New(t.Context(), embed.Options{Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}}, PGXPool: pool, River: embed.RiverFromHost()})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 		return rt, pool
@@ -79,14 +80,14 @@ func TestHostRiverCompositionRefusals(t *testing.T) {
 	t.Run("requesting jobs seals component attachment", func(t *testing.T) {
 		rt, pool := newRuntime(t)
 		jobs := rt.RiverJobs()
-		_, err := controlplane.Attach(t.Context(), rt, controlplane.Options{})
+		_, err := controlplane.Attach(t.Context(), rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://compose.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}})
 		require.ErrorContains(t, err, "attach before")
 		_, err = riverhelpers.New(t.Context(), pool, nil, jobs)
 		require.NoError(t, err)
 	})
 	t.Run("same runtime cannot be registered twice", func(t *testing.T) {
 		rt, pool := newRuntime(t)
-		_, err := controlplane.Attach(t.Context(), rt, controlplane.Options{})
+		_, err := controlplane.Attach(t.Context(), rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://compose.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}})
 		require.NoError(t, err)
 		_, err = riverhelpers.New(t.Context(), pool, nil, rt.RiverJobs(), rt.RiverJobs())
 		require.ErrorContains(t, err, "duplicate contribution")
@@ -133,10 +134,10 @@ func TestManagedRiverStillComposesControlPlaneBeforeRunWorkers(t *testing.T) {
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}, Auth: &config.AuthConfig{Issuer: "https://managed-compose.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true}}, River: embed.RiverManagedByOpenRails(schema)})
+	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}}, River: embed.RiverManagedByOpenRails(schema)})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
-	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{})
+	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://compose.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}})
 	require.NoError(t, err)
 	suffix := uuid.NewString()[:8]
 	user, err := cp.Core().CreateUser(ctx, "managed-"+suffix+"@example.test", "managed"+suffix)

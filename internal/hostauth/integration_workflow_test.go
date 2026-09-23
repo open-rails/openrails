@@ -1,6 +1,6 @@
 //go:build integration
 
-package authkit_test
+package hostauth_test
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	coreauth "github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/authhttp"
 	authcore "github.com/open-rails/authkit/embedded"
-	billingauthkit "github.com/open-rails/openrails/embed/authkit"
+	auth "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -63,18 +63,19 @@ func TestIntegrationLiveAuthorityAndNativeIdentity(t *testing.T) {
 	}
 	require.NoError(t, client.OperatorAssignGroupRole(ctx, groupA, coreauth.UserSubject(staff.ID), "viewer"))
 	require.NoError(t, client.OperatorAssignGroupRole(ctx, coreauth.RootGroup(), coreauth.UserSubject(operator.ID), "billing-operator"))
-	integration, err := billingauthkit.New(billingauthkit.Config{Verifier: runtime.Verifier(), Client: client, AuthorityIssuer: issuer,
-		Authority: func(_ context.Context, q billingauth.Requirement) (billingauthkit.Authority, error) {
+	integration, err := billingauth.NewIntegration(billingauth.IntegrationOptions{Verifier: runtime.Verifier(), Customer: billingauth.SubjectCustomerID,
+		Authority: func(_ context.Context, q billingauth.Requirement) (billingauth.Authority, error) {
 			if q.Scope != billingauth.MerchantScope {
-				return billingauthkit.Authority{}, nil
+				return billingauth.Authority{}, nil
 			}
-			return billingauthkit.Authority{Group: coreauth.GroupRef{Persona: "merchant", Instance: q.Target.MerchantSlug}, Permission: coreauth.Perm(q.Permission)}, nil
+			return billingauth.Authority{Scope: auth.Scope{Authority: issuer, ID: groupIDs[q.Target.MerchantSlug]}, Permission: q.Permission}, nil
 		},
-		PlatformAuthority: func(_ context.Context, q billingauth.Requirement) (billingauthkit.Authority, error) {
+		PlatformAuthority: func(_ context.Context, q billingauth.Requirement) (billingauth.Authority, error) {
 			if q.Permission != "merchant:payments:refund" {
-				return billingauthkit.Authority{}, nil
+				return billingauth.Authority{}, nil
 			}
-			return billingauthkit.Authority{Group: coreauth.RootGroup(), Permission: "root:payments:refund"}, nil
+			group, err := client.GroupInstanceForSlug(ctx, coreauth.RootGroup())
+			return billingauth.Authority{Scope: auth.Scope{Authority: issuer, ID: group.ID}, Permission: "root:payments:refund"}, err
 		},
 	})
 	require.NoError(t, err)

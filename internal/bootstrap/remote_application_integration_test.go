@@ -15,9 +15,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/merchantbootstrap"
 )
 
 func TestMerchantRemoteApplicationTrustSourcesIntegration(t *testing.T) {
@@ -31,10 +33,10 @@ func TestMerchantRemoteApplicationTrustSourcesIntegration(t *testing.T) {
 		// MintDisabled: this test only exercises cp.Core() directly (never
 		// mints), and "test" is not a dev-like env (#748: verify-only must be
 		// declared outside development, not stumbled into from a missing key).
-		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
+
 	}
 	rdb, _ := dbtest.SharedRedisClient(t)
-	cp, err := controlplane.New(ctx, cfg, pool, controlplane.WithRedis(rdb))
+	cp, err := controlplane.New(ctx, cfg, &hostconfig.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true}, pool, controlplane.WithRedis(rdb))
 	require.NoError(t, err)
 	t.Cleanup(cp.Close)
 
@@ -46,12 +48,10 @@ func TestMerchantRemoteApplicationTrustSourcesIntegration(t *testing.T) {
 		ControlPlane: cp,
 		Database:     appDB,
 		Slug:         "jwks-uri-" + suffix,
-		Merchant: MerchantConfig{
-			DisplayName: "JWKS URI Merchant",
-			RemoteApplication: &RemoteApplicationConfig{
-				Issuer:  jwksIssuer,
-				JWKSURI: jwksURI,
-			},
+		Merchant: MerchantConfig{MerchantConfig: merchantbootstrap.MerchantConfig{DisplayName: "JWKS URI Merchant"}, RemoteApplication: &RemoteApplicationConfig{
+			Issuer:  jwksIssuer,
+			JWKSURI: jwksURI,
+		},
 		},
 		Options: MerchantManifestReconcileOptions{Insert: true},
 	})
@@ -73,19 +73,17 @@ func TestMerchantRemoteApplicationTrustSourcesIntegration(t *testing.T) {
 		ControlPlane: cp,
 		Database:     appDB,
 		Slug:         staticSlug,
-		Merchant: MerchantConfig{
-			DisplayName: "Static JWKS Merchant",
-			RemoteApplication: &RemoteApplicationConfig{
-				Issuer: staticIssuer,
-				JWKS: StaticJWKSConfig{Keys: []StaticJWKConfig{{
-					Kty: jwk.Kty,
-					Use: jwk.Use,
-					Kid: jwk.Kid,
-					Alg: jwk.Alg,
-					Crv: jwk.Crv,
-					X:   jwk.X,
-				}}},
-			},
+		Merchant: MerchantConfig{MerchantConfig: merchantbootstrap.MerchantConfig{DisplayName: "Static JWKS Merchant"}, RemoteApplication: &RemoteApplicationConfig{
+			Issuer: staticIssuer,
+			JWKS: StaticJWKSConfig{Keys: []StaticJWKConfig{{
+				Kty: jwk.Kty,
+				Use: jwk.Use,
+				Kid: jwk.Kid,
+				Alg: jwk.Alg,
+				Crv: jwk.Crv,
+				X:   jwk.X,
+			}}},
+		},
 		},
 		Options: MerchantManifestReconcileOptions{Insert: true},
 	})

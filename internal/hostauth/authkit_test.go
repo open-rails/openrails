@@ -1,4 +1,4 @@
-package authkit
+package hostauth
 
 import (
 	"context"

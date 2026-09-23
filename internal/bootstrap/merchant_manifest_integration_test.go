@@ -20,8 +20,10 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -229,10 +231,10 @@ func newMerchantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlp
 		// MintDisabled: "test" is not a dev-like env (#748: verify-only must be
 		// declared outside development), and this control plane is never asked
 		// to mint in these manifest-reconcile tests.
-		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
+
 	}
 	rdb, _ := dbtest.SharedRedisClient(t)
-	cp, err := controlplane.New(context.Background(), cfg, pool, controlplane.WithRedis(rdb))
+	cp, err := controlplane.New(context.Background(), cfg, &hostconfig.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true}, pool, controlplane.WithRedis(rdb))
 	require.NoError(t, err)
 	t.Cleanup(cp.Close)
 	require.NotNil(t, cp)
@@ -243,9 +245,7 @@ func hostThreeMerchantManifest() *BillingConfig {
 	return &BillingConfig{
 		Version: BootstrapManifestVersion,
 		Merchants: map[string]MerchantConfig{
-			"host-three": {
-				DisplayName: "Host Three",
-			},
+			"host-three": {MerchantConfig: merchantbootstrap.MerchantConfig{DisplayName: "Host Three"}},
 		},
 	}
 }

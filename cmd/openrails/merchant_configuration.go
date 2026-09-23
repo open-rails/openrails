@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -53,7 +54,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 				return fmt.Errorf("--token-file requires --server-url")
 			}
 			path, _ := cmd.Flags().GetString("config")
-			cfg, err := config.LoadDatabase(path)
+			cfg, err := hostconfig.LoadDatabase(path)
 			if err != nil {
 				return err
 			}

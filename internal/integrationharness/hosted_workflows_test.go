@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
 	embcp "github.com/open-rails/openrails/internal/operator"
@@ -261,11 +260,7 @@ func hostedRequest(t *testing.T, method, url, session string, payload any) (int,
 func TestHostedDelegationSenderBoundClient(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
-	hosted := h.StartHosted("USD", HostedWithConfig(func(cfg *config.Config) {
-		// DPoP binds to the trusted listener origin, not the identity issuer.
-		cfg.Auth.RequestOrigin = cfg.PublicBillingBaseURL
-		cfg.Auth.AllowLoopbackHTTP = true
-	}))
+	hosted := h.StartHosted("USD")
 	ownerA, ownerB := hosted.RegisterUser("owner-a"), hosted.RegisterUser("owner-b")
 	a := hosted.ProvisionMerchant(ownerA, "delegate-a-"+uuid.NewString()[:8])
 	b := hosted.ProvisionMerchant(ownerB, "delegate-b-"+uuid.NewString()[:8])

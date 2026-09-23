@@ -22,6 +22,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/auth"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -197,9 +198,8 @@ func WithRateLimitOverrides(overrides map[string]ratelimit.Limit) Option {
 // WithRedis wires a Redis client into the AuthKit engine's ephemeral store
 // (embedded.Deps.Redis) — #753. authhttp.New reuses this SAME client for its
 // own OIDC/SIWS state caches and rate limiter, so this one call satisfies both
-// layers' Redis needs. Required outside development: the engine refuses the
-// in-memory store unless Ephemeral.AllowMemory is set, which New grants only
-// to development (ak#305/#314).
+// layers' Redis needs. Without Redis, the host must explicitly permit the
+// in-memory ephemeral store through AuthConfig.AllowMemory (ak#305/#314).
 func WithRedis(rd *redis.Client) Option {
 	return func(o *options) {
 		o.redis = rd
@@ -207,11 +207,10 @@ func WithRedis(rd *redis.Client) Option {
 }
 
 // clientIPPosture resolves the authhttp client-IP declaration (ak#299): host
-// options override config, direct-peer excludes proxy lists, and outside
-// development an undeclared posture refuses to boot rather than sharing one
-// rate-limit bucket behind an unknown proxy. A development rig is its own
-// edge and defaults to direct-peer.
-func clientIPPosture(cfg *config.Config, options options) (authhttp.Config, error) {
+// options override config, direct-peer excludes proxy lists, and an
+// undeclared posture refuses to boot rather than sharing one rate-limit
+// bucket behind an unknown proxy.
+func clientIPPosture(cfg *config.Config, auth *hostconfig.AuthConfig, options options) (authhttp.Config, error) {
 	proxies := cfg.TrustedProxies
 	if len(options.trustedProxies) > 0 {
 		proxies = options.trustedProxies
@@ -220,7 +219,7 @@ func clientIPPosture(cfg *config.Config, options options) (authhttp.Config, erro
 	if len(options.cloudflareProxies) > 0 {
 		cloudflare = options.cloudflareProxies
 	}
-	directPeer := cfg.Auth.DirectPeerIP || options.directPeerIP
+	directPeer := auth.DirectPeerIP || options.directPeerIP
 	switch {
 	case directPeer && (len(proxies) > 0 || len(cloudflare) > 0):
 		return authhttp.Config{}, errors.New("controlplane: direct_peer_ip conflicts with trusted_proxies/cloudflare_proxies")
@@ -281,16 +280,16 @@ func resolveFrontendConfig(issuer string, override authcore.FrontendConfig) auth
 }
 
 // resolveControlPlaneKeySource builds the JWT signing KeySource for the
-// control plane. Inline key material from config.Config.Auth (env
+// control plane. Inline key material from hostconfig.AuthConfig (env
 // AUTHKIT_ACTIVE_KEY_ID/AUTHKIT_ACTIVE_PRIVATE_KEY_PEM/AUTHKIT_PUBLIC_KEYS,
-// read once at config.Load — #712/or#917) wins when present; otherwise it falls through to the standard
+// read once at hostconfig.Load — #712/or#917) wins when present; otherwise it falls through to the standard
 // keys.json / dev-ephemeral resolution.
-func resolveControlPlaneKeySource(cfg *config.Config) (jwtkit.KeySource, error) {
-	activeKeyID := strings.TrimSpace(cfg.Auth.ActiveKeyID)
-	activePrivateKeyPEM := strings.TrimSpace(cfg.Auth.ActivePrivateKeyPEM)
+func resolveControlPlaneKeySource(cfg *config.Config, auth *hostconfig.AuthConfig) (jwtkit.KeySource, error) {
+	activeKeyID := strings.TrimSpace(auth.ActiveKeyID)
+	activePrivateKeyPEM := strings.TrimSpace(auth.ActivePrivateKeyPEM)
 	if activeKeyID != "" || activePrivateKeyPEM != "" {
 		var publicKeysPEM map[string]string
-		if raw := strings.TrimSpace(cfg.Auth.PublicKeysJSON); raw != "" {
+		if raw := strings.TrimSpace(auth.PublicKeysJSON); raw != "" {
 			if err := json.Unmarshal([]byte(raw), &publicKeysPEM); err != nil {
 				return nil, fmt.Errorf("controlplane: parse auth.public_keys (AUTHKIT_PUBLIC_KEYS) JSON: %w", err)
 			}
@@ -301,15 +300,14 @@ func resolveControlPlaneKeySource(cfg *config.Config) (jwtkit.KeySource, error) 
 		}
 		// #752: inline PEM is frozen for the process lifetime by construction —
 		// unlike keys_path (FILE-watched, hot-rotates), there is no way to rotate
-		// or emergency-revoke this key without a restart. Development is exempt
-		// (short-lived, disposable processes); every other environment gets a
-		// loud, one-time-per-boot heads-up naming the tradeoff.
+		// or emergency-revoke this key without a restart. Every caller gets a
+		// one-time-per-boot heads-up naming the tradeoff.
 		{
 			log.Warnf("controlplane: signing keys loaded from inline PEM (AUTHKIT_ACTIVE_KEY_ID/AUTHKIT_ACTIVE_PRIVATE_KEY_PEM) — this key is FROZEN for the process lifetime: no hot rotation and no emergency revocation without a restart. keys_path (%s) is the FILE-watched, hot-rotating production path (#752); switch to it if you need no-restart key rotation or revocation.", jwtkit.DefaultAuthKeysPath)
 		}
 		return ks, nil
 	}
-	return jwtkit.ResolveKeySource(authKeysPath(cfg), cfg.Auth.AllowEphemeralSigningKey, nil)
+	return jwtkit.ResolveKeySource(authKeysPath(auth), auth.AllowEphemeralSigningKey, nil)
 }
 
 // authKeysPath is the directory AuthKit scans for key material. It holds BOTH
@@ -319,8 +317,8 @@ func resolveControlPlaneKeySource(cfg *config.Config) (jwtkit.KeySource, error) 
 // — a directory a host-run (non-container) engine does not have — so TOTP was
 // permanently unavailable and every RequiresMFA role, including the root owner
 // the bootstrap seeds, could never finish enrolment.
-func authKeysPath(cfg *config.Config) string {
-	if p := strings.TrimSpace(cfg.Auth.KeysPath); p != "" {
+func authKeysPath(auth *hostconfig.AuthConfig) string {
+	if p := strings.TrimSpace(auth.KeysPath); p != "" {
 		return p
 	}
 	return jwtkit.DefaultAuthKeysPath
@@ -333,19 +331,18 @@ func authKeysPath(cfg *config.Config) string {
 //
 // The control plane is mandatory in standalone mode (#469): every input is
 // required and a failure here is a boot failure, never a silent downgrade.
-func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Option) (_ *ControlPlane, retErr error) {
-	if cfg == nil || cfg.Auth == nil {
+func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, pool *pgxpool.Pool, opts ...Option) (_ *ControlPlane, retErr error) {
+	if cfg == nil || auth == nil {
 		return nil, errors.New("controlplane: auth.issuer is required (the control plane is mandatory in standalone mode, #469)")
+	}
+	if err := auth.ValidateTransport(); err != nil {
+		return nil, err
 	}
 	if pool == nil {
 		return nil, errors.New("controlplane: pgx pool is required")
 	}
 
-	if err := cfg.Auth.ValidateTransport(); err != nil {
-		return nil, err
-	}
-
-	issuer := strings.TrimSpace(cfg.Auth.Issuer)
+	issuer := strings.TrimSpace(auth.Issuer)
 	if issuer == "" {
 		return nil, errors.New("controlplane: auth.issuer is required")
 	}
@@ -358,7 +355,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// verifier TRUSTS are guaranteed to be the same key. (When Keys is left nil,
 	// core.NewFromConfig auto-discovers internally and we'd have no handle on the
 	// active signer; in dev it could even generate a different key on a second
-	// call.) Discovery (#712/#231: env is read ONLY at config.Load, never here or
+	// call.) Discovery (#712/#231: env is read ONLY at hostconfig.Load, never here or
 	// inside authkit): inline auth.active_key_id/active_private_key_pem (from
 	// AUTHKIT_ACTIVE_KEY_ID/AUTHKIT_ACTIVE_PRIVATE_KEY_PEM) wins; else
 	// /vault/auth/keys.json;
@@ -368,11 +365,11 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// requires a real signing key or explicit permission for an ephemeral key.
 	var keySource jwtkit.KeySource
 	verifyOnly := false
-	if cfg.Auth.MintDisabled {
+	if auth.MintDisabled {
 		verifyOnly = true
 		log.Info("controlplane: auth.mint_disabled=true; running VERIFY-ONLY by declared posture (token minting disabled)")
 	} else {
-		ks, keyErr := resolveControlPlaneKeySource(cfg)
+		ks, keyErr := resolveControlPlaneKeySource(cfg, auth)
 		switch {
 		case keyErr == nil:
 			keySource = ks
@@ -400,10 +397,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		}
 	}
 
-	naming := authkit.NamingConfig{}
-	if cfg.Auth != nil {
-		naming = cfg.Auth.Naming
-	}
+	naming := auth.Naming
 	if options.naming != nil {
 		naming = *options.naming
 	}
@@ -411,7 +405,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		Naming: naming,
 		Keys: authcore.KeysConfig{
 			Source:     keySource,
-			Path:       authKeysPath(cfg),
+			Path:       authKeysPath(auth),
 			VerifyOnly: verifyOnly,
 		},
 		Token: authcore.TokenConfig{
@@ -426,10 +420,10 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		// explicit local exceptions and passes them onto
 		// them here: the in-memory ephemeral store (no Redis), private-network
 		// JWKS for the local sandbox issuer, and missing senders (the engine
-		// hands codes back instead of delivering). Every other environment
-		// runs fail-closed: Redis required, public JWKS only, senders required.
-		Ephemeral:    authcore.EphemeralConfig{AllowMemory: cfg.Auth.AllowMemory},
-		Applications: authcore.ApplicationsConfig{AllowPrivateNetworkJWKS: cfg.Auth.AllowPrivateNetworkJWKS},
+		// hands codes back instead of delivering). Omitted permissions remain
+		// fail-closed: Redis required, public JWKS only, senders required.
+		Ephemeral:    authcore.EphemeralConfig{AllowMemory: auth.AllowMemory},
+		Applications: authcore.ApplicationsConfig{AllowPrivateNetworkJWKS: auth.AllowPrivateNetworkJWKS},
 		// HARD CUT (#567): OpenRails declares two FLAT top-level permission-group
 		// personas under `root` — `merchant` (owner/support/viewer, `merchant:*`)
 		// and `customer` (owner/member, `customer:*`). There is no merchant coupling
@@ -451,7 +445,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 			Verification:                 registrationVerification(lockedRegistration),
 			PasswordlessLogin:            options.passwordlessLogin,
 			PasswordlessAutoRegistration: options.passwordlessAutoRegistration,
-			AllowMissingSenders:          cfg.Auth.AllowMissingSenders,
+			AllowMissingSenders:          auth.AllowMissingSenders,
 		},
 	}
 
@@ -487,7 +481,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		}
 	}
 
-	httpCfg, err := clientIPPosture(cfg, options)
+	httpCfg, err := clientIPPosture(cfg, auth, options)
 	if err != nil {
 		return nil, err
 	}
@@ -500,7 +494,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		delegatedAudiences: []string{billingauth.TokenAudience},
 	}
 	coreCfg.HTTP = controlPlaneHTTP{controlPlane: cp2, config: httpCfg,
-		requestURL: delegatedRequestURL(cfg.Auth.RequestOrigin, options.dpopRequestURL)}
+		requestURL: delegatedRequestURL(auth.RequestOrigin, options.dpopRequestURL)}
 	authRuntime, err := authcore.New(coreCfg, deps)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit runtime: %w", err)

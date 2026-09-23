@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"github.com/open-rails/openrails/internal/credential"
 	"strings"
 
 	"github.com/open-rails/authkit"
@@ -16,18 +17,12 @@ var ErrRemoteApplicationNotConfigured = errors.New("controlplane: remote_applica
 // is not a remote application access token
 // (typ=remote-application-access+jwt). The caller must NOT treat it as a
 // remote_application credential.
-var ErrNotRemoteApplicationToken = errors.New("controlplane: not a remote application access token")
+var ErrNotRemoteApplicationToken = credential.ErrNotRemoteApplicationToken
 
 // LooksLikeJWT reports whether token has the three-segment compact-JWS shape, so
 // the middleware can route a non-API-key bearer to JWT verification rather than
 // rejecting it. It does NOT validate the token.
-func LooksLikeJWT(token string) bool {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return false
-	}
-	return strings.Count(token, ".") == 2
-}
+var LooksLikeJWT = credential.LooksLikeJWT
 
 // ResolveRemoteApplication validates a remote application access token
 // (#76/#484) and resolves the caller into the same merchant-scoped service-credential result

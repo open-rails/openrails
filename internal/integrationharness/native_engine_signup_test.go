@@ -15,7 +15,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
-	orauthkit "github.com/open-rails/openrails/embed/authkit"
+	orauthkit "github.com/open-rails/openrails/internal/hostauth"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/billingauth"

@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -78,13 +79,13 @@ func TestAdminConsoleServing(t *testing.T) {
 			Host:               "127.0.0.1",
 			Port:               0,
 			DB:                 &config.DBConfig{URL: appDSN},
-			Auth:               &config.AuthConfig{Issuer: "https://controlplane.openrails.test", KeysPath: t.TempDir(), AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true},
-			AdminConsole:       &config.AdminConsoleConfig{Enabled: true},
+
+			AdminConsole: &config.AdminConsoleConfig{Enabled: true},
 		}
 		if h.Redis != nil {
 			cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
 		}
-		_, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{})
+		_, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://controlplane.openrails.test", AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}})
 		require.Error(t, err, "admin_console.enabled without assets must refuse boot")
 		require.Contains(t, err.Error(), "no console assets")
 		require.Contains(t, err.Error(), "build-admin-console.sh", "boot error must name the build step")

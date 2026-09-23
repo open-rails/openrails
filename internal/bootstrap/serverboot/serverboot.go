@@ -16,6 +16,7 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	server "github.com/open-rails/openrails/internal/http"
@@ -35,6 +36,8 @@ type Result struct {
 // Options controls optional dependency overrides for the standalone server
 // composition root.
 type Options struct {
+	Auth *hostconfig.AuthConfig
+
 	PGXPool *pgxpool.Pool
 	Redis   *redis.Client
 	Cache   cache.Cache
@@ -98,7 +101,7 @@ func NewServer(ctx context.Context, cfg *config.Config, opts *Options) (*Result,
 		}
 		return nil
 	}()
-	if cperr := embcp.Attach(context.Background(), application, cfg, injectedPool); cperr != nil {
+	if cperr := embcp.Attach(context.Background(), application, cfg, optsValue(opts, func(o *Options) *hostconfig.AuthConfig { return o.Auth }), injectedPool); cperr != nil {
 		return nil, fmt.Errorf("attach control plane: %w", cperr)
 	}
 	authenticator := optsValue(opts, func(o *Options) billingauth.Authenticator { return o.Authenticator })

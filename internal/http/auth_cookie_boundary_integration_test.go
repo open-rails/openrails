@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/authhttp"
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -31,8 +32,9 @@ func TestAuthKitRefreshCookieSurvivesBillingWrapper(t *testing.T) {
 	httpServer := httptest.NewUnstartedServer(nil)
 	t.Cleanup(httpServer.Close)
 	origin := "https://" + httpServer.Listener.Addr().String()
-	cfg := &config.Config{PublicBillingBaseURL: origin, Auth: &config.AuthConfig{Issuer: origin, KeysPath: t.TempDir(), AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true}}
-	cp, err := controlplane.New(ctx, cfg, pool, controlplane.WithRedis(rdb))
+	cfg := &config.Config{PublicBillingBaseURL: origin}
+	auth := &hostconfig.AuthConfig{Issuer: origin, KeysPath: t.TempDir(), AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true}
+	cp, err := controlplane.New(ctx, cfg, auth, pool, controlplane.WithRedis(rdb))
 	require.NoError(t, err)
 	t.Cleanup(cp.Close)
 	mount, err := authhttp.MountHandler(cp.AuthService(), authhttp.MountOptions{APIPrefix: ControlPlaneAuthPrefix, Groups: cp.MountedRouteGroups(), RefreshCookie: true})

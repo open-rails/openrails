@@ -61,7 +61,7 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 	identity, err := authenticateIntegration(ctx, r, g.auth)
 	if err != nil {
 		var gate billingauth.GateError
-		if errors.As(err, &gate) && gate.Status == http.StatusServiceUnavailable {
+		if errors.As(err, &gate) && (gate.Status == http.StatusServiceUnavailable || gate.Status == http.StatusForbidden) {
 			return billingauth.Principal{}, err
 		}
 		return billingauth.Principal{}, billingauth.GateError{Status: 401, Message: billingauth.UnauthenticatedMessage(err)}
@@ -75,9 +75,7 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 	if strings.HasPrefix(permission, "root:") {
 		scope = billingauth.PlatformScope
 	}
-	if identity.Kind != billingauth.NativeUser && !billingauth.HasPermission(identity.Permissions, permission) {
-		return billingauth.Principal{}, billingauth.GateError{Status: 403, Message: "credential permission ceiling"}
-	}
+
 	subject := identity.SubjectID
 	if identity.Kind == billingauth.NativeUser && (permission == permissions.MerchantCatalogOwnRead || permission == permissions.MerchantCatalogOwnUpdate) {
 		if identity.CustomerID == "" && r.Header.Get("OpenRails-Catalog-Owner") == "" {

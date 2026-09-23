@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/httptesthost"
 	embcp "github.com/open-rails/openrails/internal/operator"
@@ -28,20 +29,21 @@ func TestWebhookMountDoesNotUseHostAsAccountAuthority(t *testing.T) {
 
 	cfg := &config.Config{
 		TestMode: config.CredentialPostureSandbox, SecretBackend: config.SecretBackendSnapshot, ProviderWriteMode: config.ProviderWriteModeReadOnly,
-		DB:   &config.DBConfig{URL: h.DSN},
-		Auth: &config.AuthConfig{Issuer: "https://host-webhook-controlplane.test", AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true, KeysPath: t.TempDir()},
+		DB: &config.DBConfig{URL: h.DSN},
 	}
 
 	e, err := embed.New(context.Background(), embed.Options{Config: cfg, Redis: h.Redis, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 
-	require.NoError(t, embcp.AttachWithOptions(ctx, app.HostGraph(e), cfg, nil, embcp.AttachOptions{}))
-	cp := embcp.Get(app.HostGraph(e))
-	require.NotNil(t, cp, "control plane attached")
+	require.NoError(t, embcp.AttachWithOptions(ctx, app.HostGraph(e), cfg, nil, embcp.AttachOptions{Auth: &hostconfig.AuthConfig{Issuer: "https://host-webhook-controlplane.test", AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS:
 
 	// A bare merchant directory row + api_host is all Host resolution needs
 	// (no AuthKit permission-group linking required for this mechanism).
+	true, DirectPeerIP: true}}))
+	cp := embcp.Get(app.HostGraph(e))
+	require.NotNil(t, cp, "control plane attached")
+
 	hostA := "api.host-webhook-a-" + strings.ReplaceAll(uuid.NewString(), "-", "") + ".test"
 	insertMerchantWithHost(t, h.sharedPool(), "host-webhook-a-"+strings.ReplaceAll(uuid.NewString(), "-", ""), hostA)
 

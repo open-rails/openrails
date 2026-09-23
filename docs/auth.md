@@ -15,9 +15,10 @@ OpenRails-SaaS, not the engine.
 | Merchant operations | Host `Gate` | Verified credential plus current merchant permission |
 | Platform operations | Owned by the host | Local human operator plus current root permission |
 
-Embedded applications supply request-aware authenticators. AuthKit hosts use
-`embed/authkit` with their existing verifier and live admission callback;
-remote JWKS verification cannot independently observe a remote user's ban.
+Embedded applications supply `billingauth.NewIntegration` with a provider-neutral
+request verifier and explicit customer/permission mappings. AuthKit hosts pass
+their existing verifier directly; live admission is an explicit host policy.
+Remote JWKS verification cannot independently observe a remote user's ban.
 The normal local host-user adapter remains distinct from the wire delegated
 profile: a local user has `sub`, while a delegated caller has `delegated_sub`.
 

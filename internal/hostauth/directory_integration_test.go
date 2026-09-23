@@ -1,6 +1,6 @@
 //go:build integration
 
-package authkit_test
+package hostauth_test
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	authcore "github.com/open-rails/authkit/embedded"
-	billingauthkit "github.com/open-rails/openrails/embed/authkit"
+	billingauthkit "github.com/open-rails/openrails/internal/hostauth"
 	"github.com/stretchr/testify/require"
 )
 

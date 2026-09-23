@@ -32,7 +32,6 @@ func TestEmbedded_DeclarePSP(t *testing.T) {
 		SecretBackend:      config.SecretBackendDB,
 		Encryption:         &config.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))},
 		DB:                 &config.DBConfig{URL: appDSN},
-		Auth:               &config.AuthConfig{Issuer: "https://declare-psp-" + suffix + ".openrails.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, DirectPeerIP: true},
 	}
 	ctx := context.Background()
 	declaration := PSPDeclaration{Key: " Platform ", Rail: " PLATFORM ", AccountID: " internal-platform-" + suffix}
