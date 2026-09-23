@@ -40,7 +40,7 @@ func productAccessCustomerPath(id string) (string, error) {
 	return "/v1/merchant/users/" + customer.String() + "/product-access", nil
 }
 
-func (s *ProductAccessClient) Check(ctx context.Context, params *ProductAccessCheckParams) (*ProductAccessCheck, error) {
+func (s *ProductAccessClient) Check(ctx context.Context, params *ProductAccessCheckParams, requestOptions ...RequestOption) (*ProductAccessCheck, error) {
 	if params == nil {
 		return nil, invalidErr("params are required")
 	}
@@ -53,7 +53,7 @@ func (s *ProductAccessClient) Check(ctx context.Context, params *ProductAccessCh
 		return nil, invalidErr("product_id is invalid")
 	}
 	var out ProductAccessCheck
-	if err = s.client.do(ctx, http.MethodGet, path+"?product_id="+url.QueryEscape(product.String()), nil, &out); err != nil {
+	if err = s.client.do(ctx, http.MethodGet, path+"?product_id="+url.QueryEscape(product.String()), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -61,7 +61,7 @@ func (s *ProductAccessClient) Check(ctx context.Context, params *ProductAccessCh
 
 // CheckMany returns an explicit decision for each requested product. Empty input
 // returns an empty map; duplicates share one decision. At most 100 IDs are accepted.
-func (s *ProductAccessClient) CheckMany(ctx context.Context, params *ProductAccessCheckManyParams) (map[string]bool, error) {
+func (s *ProductAccessClient) CheckMany(ctx context.Context, params *ProductAccessCheckManyParams, requestOptions ...RequestOption) (map[string]bool, error) {
 	if params == nil {
 		return nil, invalidErr("params are required")
 	}
@@ -88,13 +88,13 @@ func (s *ProductAccessClient) CheckMany(ctx context.Context, params *ProductAcce
 	}
 	if err = s.client.do(ctx, http.MethodPost, path+"/check", struct {
 		ProductIDs []string `json:"product_ids"`
-	}{ids}, &out); err != nil {
+	}{ids}, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return out.Access, nil
 }
 
-func (s *ProductAccessClient) List(ctx context.Context, params *ProductAccessListParams) (*ProductAccessList, error) {
+func (s *ProductAccessClient) List(ctx context.Context, params *ProductAccessListParams, requestOptions ...RequestOption) (*ProductAccessList, error) {
 	if params == nil {
 		return nil, invalidErr("params are required")
 	}
@@ -113,7 +113,7 @@ func (s *ProductAccessClient) List(ctx context.Context, params *ProductAccessLis
 		query.Set("cursor", params.Cursor)
 	}
 	var out ProductAccessList
-	if err = s.client.do(ctx, http.MethodGet, path+"?"+query.Encode(), nil, &out); err != nil {
+	if err = s.client.do(ctx, http.MethodGet, path+"?"+query.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

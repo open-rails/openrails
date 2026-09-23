@@ -16,7 +16,7 @@ type GrantEntitlementRequest struct {
 }
 
 // GrantEntitlement records an admin-sourced entitlement for a customer.
-func (c *Client) GrantEntitlement(ctx context.Context, customerID string, request GrantEntitlementRequest) (*EntitlementRecord, error) {
+func (c *Client) GrantEntitlement(ctx context.Context, customerID string, request GrantEntitlementRequest, requestOptions ...RequestOption) (*EntitlementRecord, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err
@@ -26,14 +26,14 @@ func (c *Client) GrantEntitlement(ctx context.Context, customerID string, reques
 		return nil, err
 	}
 	var out EntitlementRecord
-	if err := c.do(ctx, http.MethodPost, path+"/entitlements", request, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, path+"/entitlements", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // RevokeEntitlement revokes one entitlement window owned by the customer.
-func (c *Client) RevokeEntitlement(ctx context.Context, customerID string, entitlementID string) error {
+func (c *Client) RevokeEntitlement(ctx context.Context, customerID string, entitlementID string, requestOptions ...RequestOption) error {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return err
@@ -42,5 +42,5 @@ func (c *Client) RevokeEntitlement(ctx context.Context, customerID string, entit
 	if err != nil {
 		return err
 	}
-	return c.do(ctx, http.MethodDelete, path+"/entitlements/"+entitlement, nil, nil)
+	return c.do(ctx, http.MethodDelete, path+"/entitlements/"+entitlement, nil, nil, requestOptions...)
 }

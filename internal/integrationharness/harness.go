@@ -230,7 +230,8 @@ type Surface struct {
 	// the #685 unified in-process client (rt.Client()).
 	rt *embed.Runtime
 
-	currency string
+	currency   string
+	merchantID merchant.ID
 }
 
 // Runtime returns the embedded runtime backing the embedded surface (nil for
@@ -246,9 +247,10 @@ func (s *Surface) App() *app.App { return s.app }
 func (s *Surface) Server() *server.Server { return s.server }
 
 // Client returns a fresh *openrails.Client (NewRemote) for this surface, carrying
-// its token + currency. opts append/override.
+// its known merchant ID, token and currency. opts append/override.
 func (s *Surface) Client(opts ...openrails.ClientOption) *openrails.Client {
 	base := []openrails.ClientOption{
+		openrails.WithMerchantID(s.merchantID),
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return s.Token, nil }),
 		openrails.WithCurrency(s.currency),
 		openrails.WithTimeout(30 * time.Second),
@@ -344,19 +346,20 @@ func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug st
 	// transport (#685) pins this merchant per request.
 	app.HostGraph(rt).Runtime.SetConfiguredMerchant(id)
 
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantAPI: true, Catalog: true, MerchantAdmin: true, Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantAPI: true, Catalog: true, MerchantAdmin: true}, Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
 		merchantID: id, merchantSlug: slug,
-	}})}})
+	}})})
 	require.NoError(h.t, err, "mount production embedded merchant surface")
 	srv := httptest.NewServer(handler)
 	h.cleanup(srv.Close)
 
 	return &Surface{
-		Name:     "embedded",
-		BaseURL:  srv.URL,
-		Token:    "embedded-host-trusting-token", // any token works (trusting resolver)
-		rt:       rt,
-		currency: currency,
+		Name:       "embedded",
+		BaseURL:    srv.URL,
+		Token:      "embedded-host-trusting-token", // any token works (trusting resolver)
+		rt:         rt,
+		currency:   currency,
+		merchantID: id,
 	}
 }
 
@@ -559,13 +562,14 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 	srv.Start()
 
 	return &Surface{
-		Name:     name,
-		BaseURL:  srv.URL,
-		Token:    token,
-		h:        h,
-		app:      app,
-		server:   assembled.Server,
-		currency: currency,
+		Name:       name,
+		BaseURL:    srv.URL,
+		Token:      token,
+		h:          h,
+		app:        app,
+		server:     assembled.Server,
+		currency:   currency,
+		merchantID: dbtest.TestMerchantID,
 	}
 }
 

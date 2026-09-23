@@ -14,6 +14,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -132,7 +133,7 @@ func customerPaymentError(r *httprequest.Request, err error) {
 	switch {
 	case errors.Is(err, money.ErrCustomerSessionRequired):
 		r.APIError(api.NewAPIError(http.StatusForbidden, api.ErrorTypeAuthorization, "customer_action_required", "verified customer action required"))
-	case errors.Is(err, pgx.ErrNoRows):
+	case errors.Is(err, pgx.ErrNoRows), errors.Is(err, subscriptions.ErrSubscriptionNotFound):
 		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, api.CodeResourceNotFound, "billing resource not found"))
 	case errors.Is(err, money.ErrInvoiceRetryIdempotencyConflict), errors.Is(err, intents.ErrRebillKeyConflict):
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "payment_idempotency_conflict", "key belongs to another payment request"))

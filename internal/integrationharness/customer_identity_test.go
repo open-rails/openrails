@@ -50,7 +50,7 @@ func TestOneSubjectHasIndependentMerchantBillingThroughBothClients(t *testing.T)
 				controlplane.PermMerchantCustomerSettingsRead,
 				controlplane.PermMerchantCustomerSettingsUpdate,
 			})
-			remote := server.Client(openrails.WithTokenProvider(func(context.Context) (string, error) { return token, nil }))
+			remote := server.Client(openrails.WithMerchantID(side.merchant), openrails.WithTokenProvider(func(context.Context) (string, error) { return token, nil }))
 			status, body := requestJSON(t, http.MethodPost, server.BaseURL+"/v1/merchant/customers/entitlements:batch", token,
 				map[string]any{"subjects": []string{"not-a-uuid"}})
 			require.Equal(t, http.StatusBadRequest, status, string(body))

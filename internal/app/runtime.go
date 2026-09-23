@@ -44,11 +44,13 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Runtime aggregates infrastructure clients and application services.
 type Runtime struct {
+	Auth                   *billingauth.Integration
 	releaseStripeTransport func()
 	DB                     *db.DB
 	RedisClient            *redis.Client

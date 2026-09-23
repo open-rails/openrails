@@ -63,7 +63,7 @@ type SubscriptionRetryNowResult struct {
 // credentials. Merchant/service credentials cannot attest customer presence.
 // Embedded hosts configure the same verifier through embed.Options and supply
 // the customer's explicit token; ambient request context is never authority.
-func (c *Client) PayInvoiceNow(ctx context.Context, request PayInvoiceNowRequest) (*InvoicePayNowResult, error) {
+func (c *Client) PayInvoiceNow(ctx context.Context, request PayInvoiceNowRequest, requestOptions ...RequestOption) (*InvoicePayNowResult, error) {
 	id, err := requireUUID("invoice_id", request.InvoiceID)
 	if err != nil {
 		return nil, err
@@ -72,7 +72,7 @@ func (c *Client) PayInvoiceNow(ctx context.Context, request PayInvoiceNowRequest
 		return nil, invalidErr("payment_method_id is required")
 	}
 	var out InvoicePayNowResult
-	err = c.doWithHeaders(ctx, http.MethodPost, "/v1/me/invoices/"+id+"/pay-now", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}})
+	err = c.doWithHeaders(ctx, http.MethodPost, "/v1/me/invoices/"+id+"/pay-now", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +81,7 @@ func (c *Client) PayInvoiceNow(ctx context.Context, request PayInvoiceNowRequest
 
 // RetrySubscriptionNow requires verified payer credentials, like PayInvoiceNow.
 // Unresolved replies are read through the existing subscription resource.
-func (c *Client) RetrySubscriptionNow(ctx context.Context, request RetrySubscriptionNowRequest) (*SubscriptionRetryNowResult, error) {
+func (c *Client) RetrySubscriptionNow(ctx context.Context, request RetrySubscriptionNowRequest, requestOptions ...RequestOption) (*SubscriptionRetryNowResult, error) {
 	id, err := requireTypedID("subscription_id", request.SubscriptionID)
 	if err != nil {
 		return nil, err
@@ -90,32 +90,32 @@ func (c *Client) RetrySubscriptionNow(ctx context.Context, request RetrySubscrip
 		return nil, invalidErr("payment_method_id is invalid")
 	}
 	var out SubscriptionRetryNowResult
-	err = c.doWithHeaders(ctx, http.MethodPost, "/v1/me/subscriptions/"+id+"/retry-now", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}})
+	err = c.doWithHeaders(ctx, http.MethodPost, "/v1/me/subscriptions/"+id+"/retry-now", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...)
 	if err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) GetMyInvoice(ctx context.Context, id uuid.UUID) (*InvoiceDTO, error) {
+func (c *Client) GetMyInvoice(ctx context.Context, id uuid.UUID, requestOptions ...RequestOption) (*InvoiceDTO, error) {
 	value, err := requireUUID("invoice_id", id)
 	if err != nil {
 		return nil, err
 	}
 	var out InvoiceDTO
-	if err := c.do(ctx, http.MethodGet, "/v1/me/invoices/"+value, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/me/invoices/"+value, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) GetMySubscription(ctx context.Context, id SubscriptionID) (*Subscription, error) {
+func (c *Client) GetMySubscription(ctx context.Context, id SubscriptionID, requestOptions ...RequestOption) (*Subscription, error) {
 	value, err := requireTypedID("subscription_id", id)
 	if err != nil {
 		return nil, err
 	}
 	var out Subscription
-	if err := c.do(ctx, http.MethodGet, "/v1/me/subscriptions/"+value, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/me/subscriptions/"+value, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

@@ -26,21 +26,21 @@ func providerOperationPath(operationID string) (string, error) {
 
 // OpenOperationAuthorization reserves capacity for one provider operation. An
 // identical retry replays; any changed immutable field is refused.
-func (c *Client) OpenOperationAuthorization(ctx context.Context, req OperationAuthorizationRequest) (*OperationAuthorization, error) {
+func (c *Client) OpenOperationAuthorization(ctx context.Context, req OperationAuthorizationRequest, requestOptions ...RequestOption) (*OperationAuthorization, error) {
 	var out OperationAuthorization
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/provider-operations", req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/provider-operations", req, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) GetOperationAuthorization(ctx context.Context, operationID string) (*OperationAuthorization, error) {
+func (c *Client) GetOperationAuthorization(ctx context.Context, operationID string, requestOptions ...RequestOption) (*OperationAuthorization, error) {
 	path, err := providerOperationPath(operationID)
 	if err != nil {
 		return nil, err
 	}
 	var out OperationAuthorization
-	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, path, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -48,13 +48,13 @@ func (c *Client) GetOperationAuthorization(ctx context.Context, operationID stri
 
 // ReleaseOperationAuthorization releases an open reservation after proven
 // provider non-creation. It is refused once billing evidence exists.
-func (c *Client) ReleaseOperationAuthorization(ctx context.Context, req ReleaseOperationAuthorizationRequest) (*OperationAuthorization, error) {
+func (c *Client) ReleaseOperationAuthorization(ctx context.Context, req ReleaseOperationAuthorizationRequest, requestOptions ...RequestOption) (*OperationAuthorization, error) {
 	path, err := providerOperationPath(req.OperationID)
 	if err != nil {
 		return nil, err
 	}
 	var out OperationAuthorization
-	if err := c.do(ctx, http.MethodPost, path+"/release", req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, path+"/release", req, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -67,7 +67,7 @@ func (c *Client) ReleaseOperationAuthorization(ctx context.Context, req ReleaseO
 // ProviderBillingObservationMaxBytes, so the cap is applied here first: an
 // oversized observation gets the server's invalid_param refusal in every
 // deployment instead of the transport's body-limit status.
-func (c *Client) RecordProviderBillingObservation(ctx context.Context, req ProviderBillingObservationRequest) (*ProviderBillingQualification, error) {
+func (c *Client) RecordProviderBillingObservation(ctx context.Context, req ProviderBillingObservationRequest, requestOptions ...RequestOption) (*ProviderBillingQualification, error) {
 	path, err := providerOperationPath(req.OperationID)
 	if err != nil {
 		return nil, err
@@ -80,19 +80,19 @@ func (c *Client) RecordProviderBillingObservation(ctx context.Context, req Provi
 		return nil, invalidErr(fmt.Sprintf("%v: provider billing observation encodes to %d bytes; limit is %d", ErrInvalid, len(encoded), ProviderBillingObservationMaxBytes))
 	}
 	var out ProviderBillingQualification
-	if err := c.do(ctx, http.MethodPost, path+"/observations", json.RawMessage(encoded), &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, path+"/observations", json.RawMessage(encoded), &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *Client) GetProviderBillingQualification(ctx context.Context, operationID string) (*ProviderBillingQualification, error) {
+func (c *Client) GetProviderBillingQualification(ctx context.Context, operationID string, requestOptions ...RequestOption) (*ProviderBillingQualification, error) {
 	path, err := providerOperationPath(operationID)
 	if err != nil {
 		return nil, err
 	}
 	var out ProviderBillingQualification
-	if err := c.do(ctx, http.MethodGet, path+"/qualification", nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, path+"/qualification", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

@@ -35,7 +35,7 @@ type CatalogClient struct{ client *Client }
 
 // Apply commits one authorized batch; retries must keep the original identity
 // and payload. A new application ID deliberately applies the declaration again.
-func (c *CatalogClient) Apply(ctx context.Context, params *CatalogApplyParams) (*CatalogApplicationReceipt, error) {
+func (c *CatalogClient) Apply(ctx context.Context, params *CatalogApplyParams, requestOptions ...RequestOption) (*CatalogApplicationReceipt, error) {
 	if c.client.ownCatalog {
 		return nil, fmt.Errorf("catalog batch applications require merchant catalog authority")
 	}
@@ -46,19 +46,19 @@ func (c *CatalogClient) Apply(ctx context.Context, params *CatalogApplyParams) (
 		return nil, err
 	}
 	var out CatalogApplicationReceipt
-	if err := c.client.do(ctx, http.MethodPost, "/v1/merchant/catalog/applications", params, &out); err != nil {
+	if err := c.client.do(ctx, http.MethodPost, "/v1/merchant/catalog/applications", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // Revision is a read-only merchant precondition, available with updates disabled.
-func (c *CatalogClient) Revision(ctx context.Context) (*CatalogRevision, error) {
+func (c *CatalogClient) Revision(ctx context.Context, requestOptions ...RequestOption) (*CatalogRevision, error) {
 	if c.client.ownCatalog {
 		return nil, fmt.Errorf("catalog revision requires merchant catalog authority")
 	}
 	var out CatalogRevision
-	if err := c.client.do(ctx, http.MethodGet, "/v1/merchant/catalog/revision", nil, &out); err != nil {
+	if err := c.client.do(ctx, http.MethodGet, "/v1/merchant/catalog/revision", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

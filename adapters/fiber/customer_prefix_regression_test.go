@@ -23,11 +23,11 @@ func TestReviewCustomerPrefixMustNotBecomeNativeWildcard(t *testing.T) {
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg}}
 	for _, prefix := range []string{"/portal/*audience", "/portal/+audience"} {
 		t.Run(prefix, func(t *testing.T) {
-			policy := &embed.HTTPConfig{CustomerExposures: []embed.CustomerHTTPConfig{{Prefix: prefix, Scope: embed.CustomerSubscriptionManagement, DelegatedAuthenticator: reject}}}
+			policy := &embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Prefix: prefix, Scope: embed.CustomerSubscriptionManagement, DelegatedAuthenticator: reject}}}
 			if embedhttp.ValidateHTTPConfig(policy, nil) != nil {
 				return
 			}
-			table, err := embedhttp.CustomerExposureRoutes(graph, policy.CustomerExposures)
+			table, err := embedhttp.BuildCustomerRoutes(graph, policy.CustomerRoutes, nil)
 			require.NoError(t, err)
 			if embedhttp.ValidateRouteTable(table) != nil {
 				return
@@ -56,9 +56,9 @@ func TestReviewSaaSCustomerPrefixMountsNatively(t *testing.T) {
 	})
 	cfg := &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true}
 	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg}}
-	policy := &embed.HTTPConfig{CustomerExposures: []embed.CustomerHTTPConfig{{Prefix: "/api/v1/merchants/{slug}/billing/me", Scope: embed.CustomerSubscriptionManagement, DelegatedAuthenticator: reject}}}
+	policy := &embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Prefix: "/api/v1/merchants/{slug}/billing/me", Scope: embed.CustomerSubscriptionManagement, DelegatedAuthenticator: reject}}}
 	require.NoError(t, embedhttp.ValidateHTTPConfig(policy, nil))
-	table, err := embedhttp.CustomerExposureRoutes(graph, policy.CustomerExposures)
+	table, err := embedhttp.BuildCustomerRoutes(graph, policy.CustomerRoutes, nil)
 	require.NoError(t, err)
 	require.NoError(t, embedhttp.ValidateRouteTable(table))
 	bundle := &Bundle{}

@@ -4,9 +4,8 @@ Tracker: https://github.com/open-rails/tracker/blob/master/openrails/1033.md
 Owner: Codex /root/astra_configured_routes
 Base: 50f24a0074605fa4d9663870eb1d51f108840f31
 
-Configure HTTP exposure when constructing the embedded runtime, or call its
-one-shot ConfigureHTTP after merchant provisioning supplies the verified identity
-binding. Requesting routes freezes policy; reconfiguration and use after Close
+Configure HTTP exposure only when constructing the embedded runtime. Route
+materialization resolves the configured merchant slug after explicit provisioning. Requesting routes freezes policy; reconfiguration and use after Close
 are refused. Materialize one
 route bundle and mount it once on the host router. An unconfigured runtime refuses HTTP route construction. An enabled HTTP configuration includes capability discovery and callbacks
 for configured providers; buyer and management HTTP surfaces require explicit
