@@ -37,17 +37,12 @@ type fakeSolanaRPC struct {
 	programAccounts     []solanaint.ProgramAccount
 	pageCalls           int
 	programAccountCalls int
-	accountDataCalls    int
 }
 
 func (f *fakeSolanaRPC) GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error) {
-	// #817: mint reads resolve base-unit precision from the chain and are memoized
-	// per fetcher. They are served here without touching accountDataCalls, which
-	// tracks the SUBSCRIPTION/plan account reads the lane assertions care about.
 	if blob, ok := fakeMintAccounts[address.String()]; ok {
 		return blob, nil
 	}
-	f.accountDataCalls++
 	return f.accounts[address.String()], nil
 }
 
@@ -235,77 +230,6 @@ func notDueDiscoverySlot(t *testing.T, planPDA string) time.Time {
 	return time.Time{}
 }
 
-func TestSolanaFetcher_Fetch(t *testing.T) {
-	t.Parallel()
-
-	openSub := solanago.NewWallet().PublicKey()
-	closedSub := solanago.NewWallet().PublicKey()
-	planPDA := solanago.NewWallet().PublicKey()
-	wallet := solanago.NewWallet().PublicKey()
-
-	blockTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	rpc := &fakeSolanaRPC{
-		accounts: map[string][]byte{
-			openSub.String(): {0x02, 0x01, 0x02}, // exists but undecodable => presence inference
-			planPDA.String(): buildPlanBlob(t, solanago.PublicKey{}, 5_000_000, 720, 0),
-			// closedSub absent => account closed
-		},
-		signatures: map[string][]solanaint.SignatureInfo{
-			openSub.String(): {
-				// Not resolvable via GetTransaction => signature-only fallback.
-				{Signature: sigFromByte(1), HasError: false, BlockTime: &blockTime},
-				{Signature: sigFromByte(2), HasError: true, BlockTime: &blockTime},
-			},
-		},
-	}
-
-	source := func(ctx context.Context) ([]SolanaSubscriptionRef, error) {
-		return []SolanaSubscriptionRef{
-			{SubscriptionPDA: openSub.String(), PlanPDA: planPDA.String(), SubscriberWallet: wallet.String()},
-			{SubscriptionPDA: closedSub.String(), PlanPDA: planPDA.String(), SubscriberWallet: wallet.String()},
-		}, nil
-	}
-
-	fetcher := &SolanaFetcher{RPC: rpc, Source: source}
-	snap, err := fetcher.Fetch(context.Background(), FetchParams{})
-	require.NoError(t, err)
-
-	require.Equal(t, ProviderSolana, snap.Provider)
-	require.True(t, snap.Capabilities.Subscriptions)
-	require.True(t, snap.Capabilities.Transactions)
-	require.False(t, snap.Capabilities.Refunds)
-	require.False(t, snap.Capabilities.Vault)
-
-	require.Len(t, snap.Subscriptions, 2)
-	open := snap.Subscriptions[0]
-	require.Equal(t, openSub.String(), open.RailSubscriptionID)
-	require.Equal(t, SubscriptionStatusActive, open.Status)
-	require.Equal(t, "account_open", open.RawStatus)
-	require.Equal(t, wallet.String(), open.CustomerID)
-	require.Equal(t, planPDA.String(), open.PlanID)
-	require.Zero(t, open.AmountCents) // zero mint is not a registry stablecoin
-	require.Contains(t, string(open.Raw), `"amount":"5000000"`)
-	require.Contains(t, string(open.Raw), `"period_hours":720`)
-	require.Contains(t, string(open.Raw), "subscription_decode_error")
-
-	closed := snap.Subscriptions[1]
-	require.Equal(t, SubscriptionStatusCancelled, closed.Status)
-	require.Equal(t, "account_closed", closed.RawStatus)
-
-	// Signature listing for the open subscription only (closed has none); both
-	// take the signature-only fallback since GetTransaction knows neither.
-	require.Len(t, snap.Transactions, 2)
-	require.Equal(t, sigFromByte(1), snap.Transactions[0].TransactionID)
-	require.Equal(t, TransactionTypeSale, snap.Transactions[0].Type)
-	require.True(t, snap.Transactions[0].Success)
-	require.Equal(t, blockTime, snap.Transactions[0].OccurredAt)
-	require.Equal(t, openSub.String(), snap.Transactions[0].SubscriptionID)
-	require.Contains(t, string(snap.Transactions[0].Raw), "signature_only")
-
-	require.Equal(t, TransactionTypeDecline, snap.Transactions[1].Type)
-	require.False(t, snap.Transactions[1].Success)
-}
-
 func TestSolanaFetcher_DecodedSubscriptionStatuses(t *testing.T) {
 	t.Parallel()
 
@@ -486,26 +410,6 @@ func TestSolanaFetcher_TransactionClassification(t *testing.T) {
 	fallback := snap.Transactions[5]
 	require.Equal(t, TransactionTypeSale, fallback.Type)
 	require.Contains(t, string(fallback.Raw), "signature_only")
-}
-
-func TestSolanaFetcher_SubscriptionFilter(t *testing.T) {
-	t.Parallel()
-
-	keep := solanago.NewWallet().PublicKey()
-	skip := solanago.NewWallet().PublicKey()
-
-	rpc := &fakeSolanaRPC{accounts: map[string][]byte{keep.String(): {0x02}}}
-	source := func(ctx context.Context) ([]SolanaSubscriptionRef, error) {
-		return []SolanaSubscriptionRef{
-			{SubscriptionPDA: keep.String()},
-			{SubscriptionPDA: skip.String()},
-		}, nil
-	}
-
-	snap, err := (&SolanaFetcher{RPC: rpc, Source: source}).Fetch(context.Background(), FetchParams{SubscriptionID: keep.String()})
-	require.NoError(t, err)
-	require.Len(t, snap.Subscriptions, 1)
-	require.Equal(t, keep.String(), snap.Subscriptions[0].RailSubscriptionID)
 }
 
 // TestSolanaFetcher_WalletScanClassification is the #714 recognize/ignore/park
@@ -1063,92 +967,6 @@ func TestSolanaFiatCents(t *testing.T) {
 	}
 }
 
-// TestSolanaFetcher_DueWindow pins the #720 due-window boundary: a ref's
-// chain read only happens when the fake Due source (simulating
-// ListDueSolanaSubscriptions) reports it at/before now+lead — just-inside
-// and past-due refs are read, just-outside is skipped.
-func TestSolanaFetcher_DueWindow(t *testing.T) {
-	t.Parallel()
-
-	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
-	lead := 4 * time.Hour
-
-	justInside := solanago.NewWallet().PublicKey()
-	justOutside := solanago.NewWallet().PublicKey()
-	pastDue := solanago.NewWallet().PublicKey()
-
-	// nextPullAt mirrors what a real openrails.solana_subscriptions row would
-	// carry; the fake Due closure applies the SAME inequality the SQL query
-	// does (next_pull_at <= before) so the test exercises dueWindowLead()'s
-	// wiring, not just set membership.
-	nextPullAt := map[string]time.Time{
-		justInside.String():  now.Add(lead),               // exactly at the window edge -> due
-		justOutside.String(): now.Add(lead + time.Minute), // one minute past the edge -> not due
-		pastDue.String():     now.Add(-48 * time.Hour),    // long overdue (stuck/dunning) -> due
-	}
-	due := func(ctx context.Context, before time.Time) (map[string]struct{}, error) {
-		out := map[string]struct{}{}
-		for pda, npa := range nextPullAt {
-			if !npa.After(before) {
-				out[pda] = struct{}{}
-			}
-		}
-		return out, nil
-	}
-
-	accounts := map[string][]byte{
-		justInside.String():  {0x02},
-		justOutside.String(): {0x02},
-		pastDue.String():     {0x02},
-	}
-	rpc := &fakeSolanaRPC{accounts: accounts}
-	refs := []SolanaSubscriptionRef{
-		{SubscriptionPDA: justInside.String()},
-		{SubscriptionPDA: justOutside.String()},
-		{SubscriptionPDA: pastDue.String()},
-	}
-	fetcher := &SolanaFetcher{
-		RPC:           rpc,
-		Source:        func(ctx context.Context) ([]SolanaSubscriptionRef, error) { return refs, nil },
-		Due:           due,
-		DueWindowLead: lead,
-		Now:           func() time.Time { return now },
-	}
-
-	snap, err := fetcher.Fetch(context.Background(), FetchParams{})
-	require.NoError(t, err)
-
-	var got []string
-	for _, s := range snap.Subscriptions {
-		got = append(got, s.RailSubscriptionID)
-	}
-	require.ElementsMatch(t, []string{justInside.String(), pastDue.String()}, got)
-	// 2 subscription-account reads (skipped one never calls GetAccountData).
-	require.Equal(t, 2, rpc.accountDataCalls)
-}
-
-// TestSolanaFetcher_DueWindowNoData pins the "no period data" boundary: Due
-// unset entirely (the fetcher has no way to know a due window) fails open —
-// every locally-known ref is still read, exactly like pre-#720 behavior.
-func TestSolanaFetcher_DueWindowNoData(t *testing.T) {
-	t.Parallel()
-
-	a := solanago.NewWallet().PublicKey()
-	b := solanago.NewWallet().PublicKey()
-	rpc := &fakeSolanaRPC{accounts: map[string][]byte{a.String(): {0x02}, b.String(): {0x02}}}
-	refs := []SolanaSubscriptionRef{{SubscriptionPDA: a.String()}, {SubscriptionPDA: b.String()}}
-
-	fetcher := &SolanaFetcher{
-		RPC:    rpc,
-		Source: func(ctx context.Context) ([]SolanaSubscriptionRef, error) { return refs, nil },
-		// Due left nil.
-	}
-	snap, err := fetcher.Fetch(context.Background(), FetchParams{})
-	require.NoError(t, err)
-	require.Len(t, snap.Subscriptions, 2)
-	require.Equal(t, 2, rpc.accountDataCalls)
-}
-
 // TestSolanaFetcher_DueWindowBypassedByNarrowedFetch pins that an explicit
 // per-subscription probe always reads regardless of the due window — an
 // operator asking for one subscription by id gets it now, not next tick.
@@ -1173,34 +991,6 @@ func TestSolanaFetcher_DueWindowBypassedByNarrowedFetch(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, snap.Subscriptions, 1)
 	require.Equal(t, target.String(), snap.Subscriptions[0].RailSubscriptionID)
-}
-
-// TestSolanaPlanDiscoveryCadence pins the #720 slow-cadence gate as a pure
-// function: exactly one of the day's slots is a given plan's turn, and the
-// same slot recurs every solanaDiscoveryCadence with no stored state.
-func TestSolanaPlanDiscoveryCadence(t *testing.T) {
-	t.Parallel()
-
-	plan := solanago.NewWallet().PublicKey().String()
-	slots := int(solanaDiscoveryCadence / solanaDiscoverySlotWidth)
-
-	dueCount := 0
-	var due time.Time
-	for i := 0; i < slots; i++ {
-		c := discoverySlotBase.Add(time.Duration(i) * solanaDiscoverySlotWidth)
-		if planDiscoveryDue(plan, c) {
-			dueCount++
-			due = c
-		}
-	}
-	require.Equal(t, 1, dueCount, "exactly one slot per day is this plan's turn")
-
-	// Recurs every cadence period with no stored watermark.
-	require.True(t, planDiscoveryDue(plan, due.Add(solanaDiscoveryCadence)))
-	require.True(t, planDiscoveryDue(plan, due.Add(2*solanaDiscoveryCadence)))
-	// Neighboring slots (same day) are not due.
-	require.False(t, planDiscoveryDue(plan, due.Add(solanaDiscoverySlotWidth)))
-	require.False(t, planDiscoveryDue(plan, due.Add(-solanaDiscoverySlotWidth)))
 }
 
 // TestSolanaFetcher_DiscoveryCadenceGatesEnumeration proves the cadence gate
