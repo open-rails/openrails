@@ -5237,7 +5237,7 @@
     "internal/auth/policy/admin.go": "f8b7328b4c87926097aa07a72a97ddafd62290db764bb0d2b9f9cc3626f4769c",
     "internal/auth/provider.go": "bca5b1e71635a8ac9d0f7fdb3324de353a6eea81d35815384ba49e9e2aeca915",
     "internal/auth/verifier.go": "fff455adc5824ad634c19e9dbe0073fb8649ca73b97001de1241c740ec101d26",
-    "internal/bootstrap/serverboot/serverboot.go": "f7edec674377700cb40e21887e9a12e13f0a57265091edcae973d0bf7382c56d",
+    "internal/bootstrap/serverboot/serverboot.go": "8174048b1a66d78888910b63a5437fa9aea535c9e16c363a32923eaa96616c9c",
     "internal/controlplane/api_key.go": "b489b70f84468ca600fe471e23626306bf18c477197861abf72538587c1f9918",
     "internal/controlplane/authority.go": "7cb16d51d953f090c73bec3e59c9729443a8b53d8cf767ce75c09f868224369a",
     "internal/controlplane/bootstrap.go": "ea9d197d62b3535d9b687e40f0c34457a807b97c333f2debb7a06a270f1b78af",
