@@ -73,9 +73,12 @@ var publicRailProfiles = map[string]railPublicProfile{
 			{Setting: "tokenization_url", Field: "tokenization_url", Default: DefaultNMICollectJSURL},
 		},
 	},
-	// Hosted-redirect rails: OpenRails builds the URL server-side, so the
-	// browser needs no key at all.
-	string(models.RailStripe): {Flow: FlowRedirect},
+	// Hosted-redirect rails: OpenRails builds the checkout URL server-side.
+	// Stripe's publishable key is public by design; the browser needs it only
+	// for in-page card setup and payment authentication.
+	string(models.RailStripe): {Flow: FlowRedirect, Settings: []publicSetting{
+		{Setting: "publishable_key", Field: "publishable_key"},
+	}},
 	string(models.RailCCBill): {Flow: FlowRedirect},
 	// Solana's browser config (network, chain, mints) is already served, fully
 	// derived, by GET /solana/config; nothing on the PSP row is public.

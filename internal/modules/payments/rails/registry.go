@@ -36,6 +36,8 @@ const (
 type CredentialKey struct {
 	Name             string
 	MerchantWritable bool
+	// Required: a PSP of this rail cannot be armed without it.
+	Required bool
 }
 
 // Descriptor declares one rail's capabilities and metadata (#669) — the facts
@@ -112,6 +114,10 @@ type Descriptor struct {
 	// CredentialKeys are the rail's PSP secret slots, in display
 	// order. Nil = the rail holds no PSP secrets.
 	CredentialKeys []CredentialKey
+
+	// SettingKeys are the rail's scalar non-secret psps.settings keys a host
+	// may declare (tokenizer keys, publishable keys, endpoint selection).
+	SettingKeys []string
 }
 
 func autoBilledNever(*models.Subscription) bool  { return false }
@@ -164,7 +170,8 @@ var descriptors = []Descriptor{
 		// credential. It belongs to the custodian account, not to whichever
 		// gateway its proxy detokenizes into, and lives under
 		// custodians/<kind>/<environment>/<account_id>/api_key.
-		[]CredentialKey{{"security_key", true}, {"webhook_signing_secret", true}},
+		[]CredentialKey{{"security_key", true, true}, {"webhook_signing_secret", true, true}},
+		[]string{"tokenization_key", "tokenization_url", "endpoint_deployment"},
 	},
 	{
 		models.RailCCBill,
@@ -179,7 +186,8 @@ var descriptors = []Descriptor{
 		autoBilledAlways,
 		cancelDestructive, // #696: DataLink SMS cancel — no resume API, access rides the paid runway
 		"",                // CancelPortalURL (none since #696; cancels happen on OUR site)
-		[]CredentialKey{{"salt", true}, {"datalink_username", true}, {"datalink_password", true}},
+		[]CredentialKey{{"salt", true, false}, {"datalink_username", true, false}, {"datalink_password", true, false}},
+		nil,
 	},
 	{
 		models.RailStripe,
@@ -197,7 +205,8 @@ var descriptors = []Descriptor{
 		// webhook_signing_secret_previous (#856): the outgoing secret, retained
 		// for the rollover overlap so events still queued on the superseded
 		// endpoint keep verifying. Dropped when the last predecessor retires.
-		[]CredentialKey{{"secret_key", true}, {"webhook_signing_secret", true}, {"webhook_signing_secret_thin", true}, {"webhook_signing_secret_previous", true}},
+		[]CredentialKey{{"secret_key", true, true}, {"webhook_signing_secret", true, true}, {"webhook_signing_secret_thin", true, false}, {"webhook_signing_secret_previous", true, false}},
+		[]string{"publishable_key"},
 	},
 	{
 		models.RailSolana,
@@ -211,8 +220,9 @@ var descriptors = []Descriptor{
 		false,    // RemoteDeleteOnTerminalCancel (local cancel cascade stops the cranker)
 		autoBilledNever,
 		cancelDestructive,
-		"",                                      // CancelPortalURL
-		[]CredentialKey{{"private_key", false}}, // operator-only signer
+		"", // CancelPortalURL
+		[]CredentialKey{{"private_key", false, false}}, // operator-only signer
+		nil, // structured settings (tokens, RPC) are declared programmatically
 	},
 }
 
