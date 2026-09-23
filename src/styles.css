@@ -4,34 +4,72 @@
 @import "tw-animate-css";
 @source "./";
 
-/* @openrails/billing-ui — scoped token set.
-   The component re-declares the standard shadcn custom properties under its
-   own root, so every utility inside .orck resolves against THESE values, not
-   the host page's. `data-orck-theme` picks the palette; `auto` follows the
-   OS. Integrator overrides land as inline custom properties (appearance.ts)
-   and win over both blocks below. */
+/* @openrails/billing-ui — scoped token set (shadcn base-vega, zinc).
+   The build scopes every rule under `.orck` (tooling/checkout-css), so
+   utilities resolve against these tokens, not the host page's.
+   `data-orck-theme` picks the palette; `auto` follows the OS. Integrator
+   overrides land as inline custom properties (appearance.ts) and win. */
+
+@custom-variant dark {
+  &:where([data-orck-theme="dark"], [data-orck-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where([data-orck-theme="auto"], [data-orck-theme="auto"] *) {
+      @slot;
+    }
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+}
 
 .orck {
-  --background: oklch(0.97 0.002 95);
-  --foreground: oklch(0.21 0.005 285);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.141 0.005 285.823);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.005 285);
-  --muted: oklch(0.94 0.002 95);
-  --muted-foreground: oklch(0.51 0.005 285);
-  --orck-faint: oklch(0.71 0.004 285);
-  --border: oklch(0.21 0.005 285 / 10%);
-  --orck-hairline: oklch(0.21 0.005 285 / 6%);
-  --input: oklch(0.21 0.005 285 / 12%);
-  --primary: oklch(0.21 0.005 285);
+  --card-foreground: oklch(0.141 0.005 285.823);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.141 0.005 285.823);
+  --primary: oklch(0.21 0.006 285.885);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.94 0.002 95);
-  --secondary-foreground: oklch(0.21 0.005 285);
-  --accent: oklch(0.94 0.002 95);
-  --accent-foreground: oklch(0.21 0.005 285);
-  --destructive: oklch(0.577 0.245 27.3);
-  --ring: oklch(0.21 0.005 285 / 35%);
-  --radius: 0.625rem;
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.967 0.001 286.375);
+  --muted-foreground: oklch(0.552 0.016 285.938);
+  --accent: oklch(0.967 0.001 286.375);
+  --accent-foreground: oklch(0.21 0.006 285.885);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.92 0.004 286.32);
+  --input: oklch(0.92 0.004 286.32);
+  --ring: oklch(0.705 0.015 286.067);
+  --orck-faint: oklch(0.705 0.015 286.067);
+  --orck-hairline: oklch(0.141 0.005 285.823 / 6%);
   --orck-success: oklch(0.6 0.13 163);
+  --radius: 0.625rem;
   --orck-font: "Instrument Sans Variable", "Instrument Sans", -apple-system,
     "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
@@ -43,48 +81,64 @@
 }
 
 .orck[data-orck-theme="dark"] {
-  --background: oklch(0.16 0.004 285);
-  --foreground: oklch(0.96 0 0);
-  --card: oklch(0.21 0.005 285);
-  --card-foreground: oklch(0.96 0 0);
-  --muted: oklch(0.25 0.005 285);
-  --muted-foreground: oklch(0.69 0.005 285);
-  --orck-faint: oklch(0.5 0.004 285);
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.21 0.006 285.885);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.21 0.006 285.885);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.92 0.004 286.32);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.552 0.016 285.938);
+  --orck-faint: oklch(0.552 0.016 285.938);
   --orck-hairline: oklch(1 0 0 / 6%);
-  --input: oklch(1 0 0 / 14%);
-  --primary: oklch(0.96 0 0);
-  --primary-foreground: oklch(0.18 0.004 285);
-  --secondary: oklch(0.25 0.005 285);
-  --secondary-foreground: oklch(0.96 0 0);
-  --accent: oklch(0.25 0.005 285);
-  --accent-foreground: oklch(0.96 0 0);
-  --destructive: oklch(0.7 0.19 22);
-  --ring: oklch(1 0 0 / 35%);
   --orck-success: oklch(0.77 0.15 163);
 }
 
 @media (prefers-color-scheme: dark) {
   .orck[data-orck-theme="auto"] {
-    --background: oklch(0.16 0.004 285);
-    --foreground: oklch(0.96 0 0);
-    --card: oklch(0.21 0.005 285);
-    --card-foreground: oklch(0.96 0 0);
-    --muted: oklch(0.25 0.005 285);
-    --muted-foreground: oklch(0.69 0.005 285);
-    --orck-faint: oklch(0.5 0.004 285);
+    --background: oklch(0.141 0.005 285.823);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.21 0.006 285.885);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.21 0.006 285.885);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.92 0.004 286.32);
+    --primary-foreground: oklch(0.21 0.006 285.885);
+    --secondary: oklch(0.274 0.006 286.033);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.274 0.006 286.033);
+    --muted-foreground: oklch(0.705 0.015 286.067);
+    --accent: oklch(0.274 0.006 286.033);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.552 0.016 285.938);
+    --orck-faint: oklch(0.552 0.016 285.938);
     --orck-hairline: oklch(1 0 0 / 6%);
-    --input: oklch(1 0 0 / 14%);
-    --primary: oklch(0.96 0 0);
-    --primary-foreground: oklch(0.18 0.004 285);
-    --secondary: oklch(0.25 0.005 285);
-    --secondary-foreground: oklch(0.96 0 0);
-    --accent: oklch(0.25 0.005 285);
-    --accent-foreground: oklch(0.96 0 0);
-    --destructive: oklch(0.7 0.19 22);
-    --ring: oklch(1 0 0 / 35%);
     --orck-success: oklch(0.77 0.15 163);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  /* No preflight (host page stays untouched), so reset the UA button face. */
+  button {
+    background-color: transparent;
+    color: inherit;
+    font: inherit;
   }
 }
 

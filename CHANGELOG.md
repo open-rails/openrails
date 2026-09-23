@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.1
+
+Visual only; no API change.
+
+- UI primitives regenerated as shadcn `base-vega` on a zinc palette.
+- Theme tokens now map to Tailwind colors, so token utilities (`bg-primary`,
+  `text-muted-foreground`, `border-input`, …) render; in 0.4.0 they emitted no
+  CSS, leaving the pay button and selected radios unstyled.
+- `dark:` variants follow `appearance.theme` instead of the OS alone.
+- `CheckoutModal` now paints its popover panel; buttons inside `.orck` drop the
+  UA button face.
+
 ## 0.4.0
 
 Breaking: the package is renamed `openrails-checkout` → `@openrails/billing-ui`.
