@@ -112,7 +112,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	var delegated billingauth.DelegatedAuthenticator
 	surface := h.StartStandalone("USD", WithClock(billingClock), WithConfig(func(c *config.Config) {
 
-		c.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: vendor.APIBaseURL, SDKURL: vendor.SDKURL}
+		c.HyperSwitch = &config.HyperSwitchConfig{AllowLoopbackHTTP: true, APIBaseURL: vendor.APIBaseURL, SDKURL: vendor.SDKURL}
 		c.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 		{
 			require.NotEmpty(t, vendor.NMIReadBase)

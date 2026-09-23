@@ -15,15 +15,17 @@ import (
 )
 
 // Inputs are facts established by merchant setup or earlier customer activity:
-// an armed checkout price, an existing subscriber and a closed invoice.
+// an armed checkout price and saved method, an existing subscriber and a closed invoice.
 type Inputs struct {
-	Currency         string
-	Run              string
-	CheckoutPriceKey string
-	CheckoutRail     string
-	SubscriberID     openrails.CustomerID
-	SubscriptionID   openrails.SubscriptionID
-	InvoiceID        uuid.UUID
+	Currency                string
+	Run                     string
+	CheckoutPriceKey        string
+	CheckoutRail            string
+	CheckoutCustomerID      openrails.CustomerID
+	CheckoutPaymentMethodID openrails.PaymentMethodID
+	SubscriberID            openrails.CustomerID
+	SubscriptionID          openrails.SubscriptionID
+	InvoiceID               uuid.UUID
 }
 
 // Report is what the application observed. Identifiers created per run are
@@ -146,12 +148,12 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 		return r, fmt.Errorf("checkout options: %w", err)
 	}
 	r.CheckoutRails = len(options)
-	buyer := openrails.CustomerID(uuid.New())
+	buyer := in.CheckoutCustomerID
 	request := openrails.CreateCheckoutSessionRequest{
 		Customer:       openrails.CheckoutCustomerIdentity{ID: buyer.String(), VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer.String()[:8]},
 		PriceID:        price.ID,
 		IdempotencyKey: in.Run + ":checkout",
-		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: in.CheckoutRail, NameOnCard: "Example Buyer", Zip: "90210", Country: "US"},
+		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: in.CheckoutRail, PaymentMethodID: in.CheckoutPaymentMethodID.String(), NameOnCard: "Example Buyer", Zip: "90210", Country: "US"},
 	}
 	session, err := client.CreateCheckoutSession(ctx, request)
 	if err != nil {

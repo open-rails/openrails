@@ -21,6 +21,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/crypto"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
@@ -36,6 +38,11 @@ import (
 // still goes through ApplyMerchantCatalog and real provider reference checks.
 func TestCatalogCLIRuntimeVerifiesWholeArtifactWithoutSigner(t *testing.T) {
 	pool := dbtest.SharedSuperuserPGXPool(t)
+	masterKey := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	deks, err := crypto.NewDBDEKStore(db.WrapPool(pool, "billing"))
+	require.NoError(t, err)
+	encryptor, err := crypto.NewEncryptor(masterKey, deks)
+	require.NoError(t, err)
 	for _, source := range []string{config.SecretBackendSnapshot, config.SecretBackendDB} {
 		for _, missing := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/missing=%t", source, missing), func(t *testing.T) {
@@ -60,7 +67,9 @@ func TestCatalogCLIRuntimeVerifiesWholeArtifactWithoutSigner(t *testing.T) {
 				if source == config.SecretBackendSnapshot {
 					dbKey = "must-not-fall-back-to-db"
 				}
-				_, err = pool.Exec(ctx, `INSERT INTO billing.merchant_secrets(merchant_id,name,value,version) VALUES($1,$2,$3,1)`, mid.UUID(), keyName, dbKey)
+				ciphertext, err := encryptor.Encrypt(ctx, mid, crypto.SecretAAD(mid, keyName), []byte(dbKey))
+				require.NoError(t, err)
+				_, err = pool.Exec(ctx, `INSERT INTO billing.merchant_secrets(merchant_id,name,value,version) VALUES($1,$2,$3,1)`, mid.UUID(), keyName, ciphertext)
 				require.NoError(t, err)
 				// Deliberately unusable private material proves address discovery
 				// does not construct a signer or read a signing credential.
@@ -80,7 +89,7 @@ func TestCatalogCLIRuntimeVerifiesWholeArtifactWithoutSigner(t *testing.T) {
 					fmt.Fprintf(w, `{"object":"plan","id":%q,"plan_amount":%q,"day_frequency":"30","plan_payments":"0"}`, strings.TrimPrefix(r.URL.Path, "/plans/"), amount)
 				}))
 				t.Cleanup(nmi.Close)
-				cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, SecretBackend: source, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, ProviderSandbox: &config.ProviderSandboxConfig{NMIGatewayURL: nmi.URL}}
+				cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, SecretBackend: source, Encryption: &config.EncryptionConfig{MasterKey: masterKey}, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, ProviderSandbox: &config.ProviderSandboxConfig{NMIGatewayURL: nmi.URL}}
 				manifestPath := ""
 				if source == config.SecretBackendSnapshot {
 					manifestPath = filepath.Join(t.TempDir(), "merchants.yaml")

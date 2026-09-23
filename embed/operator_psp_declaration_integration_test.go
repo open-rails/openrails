@@ -20,7 +20,7 @@ func TestOperatorDeclaresImportAttributionAfterMerchantProvision(t *testing.T) {
 	ctx := t.Context()
 	owner, pool, dsn := scopeWithoutRLSDatabase(t)
 	opts := func() embed.Options {
-		return embed.Options{Config: &config.Config{
+		return embed.Options{Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 			TestMode:           config.CredentialPostureSandbox,
 			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB,
 			DB: &config.DBConfig{URL: dsn},

@@ -34,9 +34,8 @@ func run(ctx context.Context, getenv func(string) string) error {
 	}
 	runtime, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{
-			TestMode:           config.CredentialPostureSandbox,
-			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB,
-			DB: &config.DBConfig{URL: dsn},
+			TestMode: config.CredentialPostureSandbox,
+			DB:       &config.DBConfig{URL: dsn},
 		},
 		River: embed.RiverManagedByOpenRails(),
 

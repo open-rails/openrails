@@ -197,11 +197,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("startup bootstrap: %w", err)
 	}
 
-	// MODE 1 (#723/#847): converge the boot merchant manifest EVERY boot —
-	// DB rows as projections (insert+overwrite+prune), secrets seeded into the
-	// in-memory plane. Same semantics as serverboot.NewServer: the conventional
-	// file is optional, an explicit --merchant-manifest path must exist, and
-	// merchant_config_source=api refuses a present manifest.
+	// Reload snapshot credentials and seed absent merchant metadata. Existing
+	// metadata is preserved unless an explicit application changes it. The
+	// conventional file is optional; an explicit manifest path must exist.
 	manifestPath, err := cmd.Flags().GetString("merchant-manifest")
 	if err != nil {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)

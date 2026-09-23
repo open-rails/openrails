@@ -41,7 +41,7 @@ func nmiProbeArmTestServer(t *testing.T, authCode string) *httptest.Server {
 }
 
 func testModeReconcileConfig() *config.Config {
-	return &config.Config{SecretBackend: config.SecretBackendDB, TestMode: config.CredentialPostureSandbox}
+	return &config.Config{SecretBackend: config.SecretBackendSnapshot, TestMode: config.CredentialPostureSandbox}
 }
 
 func nmiManifestWithSecurityKey(securityKey string) *BillingConfig {
@@ -189,7 +189,7 @@ func TestReconcileMerchantManifestNMIProbeSkippedOutsideTestMode(t *testing.T) {
 	}
 	manifest.Merchants["host-three"] = mt
 
-	cfg := &config.Config{SecretBackend: config.SecretBackendDB, TestMode: config.CredentialPostureLive}
+	cfg := &config.Config{SecretBackend: config.SecretBackendSnapshot, TestMode: config.CredentialPostureLive}
 	err := ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{
 		Insert:            true,
 		NMIProbeV5BaseURL: server.URL,

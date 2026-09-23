@@ -60,24 +60,23 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID
 		if err := AssertPSPUnowned(ctx, q, id.UUID(), rail, environment, account); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `INSERT INTO openrails.credential_publications (merchant_id,operation_id,rail,environment,account_id,expected_revision,request_metadata) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (merchant_id,operation_id) DO NOTHING`, id.UUID(), req.OperationID, rail, environment, account, *req.ExpectedRevision, metadata)
+		err := q.CreateCredentialPublication(ctx, gen.CreateCredentialPublicationParams{MerchantID: id.UUID(), OperationID: req.OperationID, Rail: rail, Environment: environment, AccountID: account, ExpectedRevision: *req.ExpectedRevision, RequestMetadata: metadata})
 		if err != nil {
 			return err
 		}
-		var storedRail, storedEnv, storedAccount string
-		var revision int64
-		var storedMetadata []byte
-		err = tx.QueryRow(ctx, `SELECT rail,environment,account_id,expected_revision,request_metadata,result FROM openrails.credential_publications WHERE merchant_id=$1 AND operation_id=$2 FOR UPDATE`, id.UUID(), req.OperationID).Scan(&storedRail, &storedEnv, &storedAccount, &revision, &storedMetadata, &completed)
+		stored, err := q.LockCredentialPublication(ctx, gen.LockCredentialPublicationParams{MerchantID: id.UUID(), OperationID: req.OperationID})
 		if err != nil {
 			return err
 		}
+		completed = stored.Result
+		storedMetadata := stored.RequestMetadata
 		// JSONB key order differs; decode for canonical comparison.
 		var doc any
 		_ = json.Unmarshal(storedMetadata, &doc)
 		storedMetadata, _ = json.Marshal(doc)
 		_ = json.Unmarshal(metadata, &doc)
 		canonical, _ := json.Marshal(doc)
-		if storedRail != rail || storedEnv != environment || storedAccount != account || revision != *req.ExpectedRevision || !bytes.Equal(storedMetadata, canonical) {
+		if stored.Rail != rail || stored.Environment != environment || stored.AccountID != account || stored.ExpectedRevision != *req.ExpectedRevision || !bytes.Equal(storedMetadata, canonical) {
 			return ErrCredentialOperationConflict
 		}
 		return nil
@@ -131,15 +130,15 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID
 		if err := AssertPSPUnowned(ctx, q, id.UUID(), rail, environment, account); err != nil {
 			return err
 		}
-		var receipt []byte
-		if err := tx.QueryRow(ctx, `SELECT result FROM openrails.credential_publications WHERE merchant_id=$1 AND operation_id=$2 FOR UPDATE`, id.UUID(), req.OperationID).Scan(&receipt); err != nil {
+		receipt, err := q.LockCredentialPublicationResult(ctx, gen.LockCredentialPublicationResultParams{MerchantID: id.UUID(), OperationID: req.OperationID})
+		if err != nil {
 			return err
 		}
 		if len(receipt) > 0 {
 			return json.Unmarshal(receipt, &result)
 		}
 		identity, nRail, nEnv, nAccount := PSPNaturalKey(rail, environment, account)
-		existing, err := scanPSPRow(tx.QueryRow(ctx, `SELECT `+pspRowColumns+` FROM openrails.psps WHERE merchant_id=$1 AND rail=$2 AND environment=$3 AND account_id=$4 FOR UPDATE`, id.UUID(), nRail, nEnv, nAccount))
+		existing, err := q.LockPSPForCredentialPublication(ctx, gen.LockPSPForCredentialPublicationParams{MerchantID: id.UUID(), Rail: nRail, Environment: nEnv, AccountID: nAccount})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
@@ -256,7 +255,7 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE openrails.credential_publications SET state='published',result=$3,published_at=now() WHERE merchant_id=$1 AND operation_id=$2`, id.UUID(), req.OperationID, receipt)
+		err = q.CompleteCredentialPublication(ctx, gen.CompleteCredentialPublicationParams{MerchantID: id.UUID(), OperationID: req.OperationID, Result: receipt})
 		return err
 	})
 	return result, err
@@ -297,7 +296,10 @@ func (s *Service) replayProviderCredentialPublication(ctx context.Context, id me
 		if err := AssertPSPUnowned(ctx, q, id.UUID(), rail, environment, account); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `SELECT rail,environment,account_id,expected_revision,request_metadata,result FROM openrails.credential_publications WHERE merchant_id=$1 AND operation_id=$2`, id.UUID(), req.OperationID).Scan(&storedRail, &storedEnv, &storedAccount, &revision, &metadata, &receipt)
+		stored, err := q.GetCredentialPublication(ctx, gen.GetCredentialPublicationParams{MerchantID: id.UUID(), OperationID: req.OperationID})
+		storedRail, storedEnv, storedAccount = stored.Rail, stored.Environment, stored.AccountID
+		revision, metadata, receipt = stored.ExpectedRevision, stored.RequestMetadata, stored.Result
+		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return row, false, nil

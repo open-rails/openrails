@@ -45,7 +45,7 @@ func clientWorkflowDeployments(t *testing.T, h *integrationharness.Harness) []cl
 	t.Helper()
 	remote := h.StartStandalone("USD")
 	peerRuntime, err := embed.New(context.Background(), embed.Options{
-		Config: &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
+		Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
 		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)
@@ -61,6 +61,7 @@ func clientWorkflowDeployments(t *testing.T, h *integrationharness.Harness) []cl
 				cfg.MerchantConfigHTTP = true
 				cfg.AllowCatalogUpdates = true
 				cfg.SecretBackend = config.SecretBackendDB
+				cfg.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 				cfg.ProviderWriteMode = config.ProviderWriteModeFull
 			})
 			d.runtime, d.url, d.token = app.HostGraph(host.Runtime()).Runtime, host.BaseURL, host.Token

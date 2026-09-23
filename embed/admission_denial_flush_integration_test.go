@@ -52,7 +52,7 @@ func TestAdmissionDenialFlush_HostRiverOptionalRedis(t *testing.T) {
 				require.Empty(t, keys, "refuse to flush another test's denial counters")
 			}
 			rt, err := embed.New(ctx, embed.Options{
-				Config: &config.Config{TestMode: config.CredentialPostureSandbox,
+				Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, TestMode: config.CredentialPostureSandbox,
 					MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB,
 					DB: &config.DBConfig{URL: dsn}},
 				PGXPool: pool, Redis: rdb, River: embed.RiverFromHost(),

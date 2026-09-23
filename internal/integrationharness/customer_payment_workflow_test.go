@@ -93,7 +93,7 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 	authn, err := orauthkit.NewDelegatedAuthenticator(cp.AuthService().Verifier(), owned.MerchantID.String())
 	require.NoError(t, err)
 	rt, err := embed.New(ctx, embed.Options{
-		Config: &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}, ProviderSandbox: &config.ProviderSandboxConfig{NMIGatewayURL: wire.URL}},
+		Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}, ProviderSandbox: &config.ProviderSandboxConfig{NMIGatewayURL: wire.URL}},
 		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(), DelegatedAuthenticator: authn,
 	})
 	require.NoError(t, err)

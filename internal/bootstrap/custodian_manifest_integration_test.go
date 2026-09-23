@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // or#880 phase 3: a custodian is DECLARED ONCE and REFERENCED by every PSP
@@ -63,7 +64,8 @@ func TestReconcileMerchantManifestDeclaresOneCustodianForTwoPSPs(t *testing.T) {
 	server := nmiProbeArmTestServer(t, "1")
 	t.Cleanup(server.Close)
 
-	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true, NMIProbeV5BaseURL: server.URL}))
+	snapshot := merchants.NewManifestSecretStore()
+	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true, SecretStore: snapshot.Seeder(), NMIProbeV5BaseURL: server.URL}))
 
 	var merchantID string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM billing.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
@@ -97,38 +99,39 @@ func TestReconcileMerchantManifestDeclaresOneCustodianForTwoPSPs(t *testing.T) {
 	require.NoError(t, rows.Err())
 	require.Equal(t, map[string]string{"100001-880": custodianID, "579146-880": custodianID}, referenced)
 
-	// The custodial secret is stored ONCE, under the CUSTODIAN's identity —
+	// The snapshot holds the custodial secret ONCE, under the CUSTODIAN's identity —
 	// not once per PSP that charges through it.
 	custodianSecret, err := merchants.CustodianSecretName(models.CustodianBasisTheory, "test", "tnt_manifest_880", custodians.SecretAPIKey)
 	require.NoError(t, err)
 	require.Equal(t, "custodians/basis_theory/test/tnt_manifest_880/api_key", custodianSecret)
-	var stored string
-	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT value FROM billing.merchant_secrets WHERE merchant_id = $1::uuid AND name = $2
-	`, merchantID, custodianSecret).Scan(&stored))
-	require.Equal(t, "key_private_880", stored)
+	mid, err := merchant.ParseID(merchantID)
+	require.NoError(t, err)
+	stored, err := snapshot.Get(ctx, mid, custodianSecret)
+	require.NoError(t, err)
+	require.Equal(t, "key_private_880", stored.Value)
+	names, err := snapshot.List(ctx, mid)
+	require.NoError(t, err)
+	require.Len(t, names, 3, "one custodian credential and two distinct gateway credentials")
 
-	var custodialSecretCount int
+	var persistedSecretCount int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*) FROM billing.merchant_secrets
-		WHERE merchant_id = $1::uuid AND name LIKE 'custodians/%'
-	`, merchantID).Scan(&custodialSecretCount))
-	require.Equal(t, 1, custodialSecretCount, "one custodian means one copy of its private key")
+		WHERE merchant_id = $1::uuid
+	`, merchantID).Scan(&persistedSecretCount))
+	require.Zero(t, persistedSecretCount, "snapshot credentials must never persist in the database")
 
 	// Each gateway keeps its OWN security_key — custody shares the vault, not
 	// the thing that charges.
 	for accountID, want := range map[string]string{"100001-880": "sk_primary_880", "579146-880": "sk_backup_880"} {
 		name, err := merchants.PSPSecretName("nmi", "test", accountID, "security_key")
 		require.NoError(t, err)
-		var value string
-		require.NoError(t, pool.QueryRow(ctx, `
-			SELECT value FROM billing.merchant_secrets WHERE merchant_id = $1::uuid AND name = $2
-		`, merchantID, name).Scan(&value))
-		require.Equal(t, want, value)
+		value, err := snapshot.Get(ctx, mid, name)
+		require.NoError(t, err)
+		require.Equal(t, want, value.Value)
 	}
 
 	// Re-applying is idempotent: still one custodian, still both references.
-	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true, Overwrite: true, NMIProbeV5BaseURL: server.URL}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true, Overwrite: true, SecretStore: snapshot.Seeder(), NMIProbeV5BaseURL: server.URL}))
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.custodians WHERE merchant_id = $1::uuid`, merchantID).Scan(&count))
 	require.Equal(t, 1, count)

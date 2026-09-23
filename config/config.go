@@ -1434,25 +1434,28 @@ func validateStripeKeyForTestMode(cfg *Config, rails PSPSet) error {
 			continue
 		}
 
-		secretKey := strings.TrimSpace(stripeProc.Stripe.SecretKey)
-		if secretKey == "" {
-			continue
+		if err := ValidateStripeCredentialPosture(cfg, stripeProc.Stripe.SecretKey); err != nil {
+			return fmt.Errorf("stripe rail %q: %w", strings.ToLower(strings.TrimSpace(name)), err)
 		}
+	}
+	return nil
+}
 
-		// Both standard secret keys (sk_*) and restricted keys (rk_*) carry the
-		// live/test mode in their prefix, so classify either form.
-		isLiveKey := strings.HasPrefix(secretKey, "sk_live_") || strings.HasPrefix(secretKey, "rk_live_")
-		isTestKey := strings.HasPrefix(secretKey, "sk_test_") || strings.HasPrefix(secretKey, "rk_test_")
-
-		if cfg.IsTestMode() && isLiveKey {
-			// Hard guarantee (#347): the sandbox environment must never hold a live
-			// key — a mistakenly-test-modeed production system would otherwise carry
-			// a credential that can move real money.
-			return fmt.Errorf("stripe rail %q: live key (sk_live_/rk_live_) is not allowed when test_mode is enabled; use a test key or unset test_mode", strings.ToLower(strings.TrimSpace(name)))
+// ValidateStripeCredentialPosture checks a single supplied Stripe key against
+// the runtime posture without requiring a complete account or probing Stripe.
+func ValidateStripeCredentialPosture(cfg *Config, secretKey string) error {
+	secretKey = strings.TrimSpace(secretKey)
+	isLiveKey := strings.HasPrefix(secretKey, "sk_live_") || strings.HasPrefix(secretKey, "rk_live_")
+	isTestKey := strings.HasPrefix(secretKey, "sk_test_") || strings.HasPrefix(secretKey, "rk_test_")
+	if secretKey != "" && ((!isLiveKey && !isTestKey) || len(secretKey) <= len("sk_test_")) {
+		return fmt.Errorf("invalid Stripe secret key format: expected sk_live_, rk_live_, sk_test_, or rk_test_ with a nonempty value")
+	}
+	if cfg != nil && cfg.IsTestMode() {
+		if isLiveKey {
+			return fmt.Errorf("live key (sk_live_/rk_live_) is not allowed when test_mode=sandbox; use a test key or set test_mode=live")
 		}
-		if !cfg.IsTestMode() && isTestKey {
-			return fmt.Errorf("stripe rail %q: test key (sk_test_/rk_test_) is not allowed when test_mode=live; use a live key or set test_mode=sandbox", strings.ToLower(strings.TrimSpace(name)))
-		}
+	} else if isTestKey {
+		return fmt.Errorf("test key (sk_test_/rk_test_) is not allowed when test_mode=live; use a live key or set test_mode=sandbox")
 	}
 	return nil
 }

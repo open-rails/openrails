@@ -43,7 +43,7 @@ func TestStandaloneRouteSurface(t *testing.T) {
 		Host:              "127.0.0.1",
 		Port:              0,
 		DB:                &config.DBConfig{URL: appDSN},
-		Auth:              &config.AuthConfig{Issuer: "https://controlplane.openrails.test"},
+		Auth:              &config.AuthConfig{Issuer: "https://controlplane.openrails.test", KeysPath: t.TempDir(), AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true},
 		// The golden documents the FULL surface: LLM-backed routes register only
 		// when configured, so arm them here (the key is never used).
 		LLM: &config.LLMConfig{APIKey: "route-surface-never-used", AskEnabled: true, CatalogCopilotEnabled: true},

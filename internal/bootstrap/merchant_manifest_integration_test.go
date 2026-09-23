@@ -4,7 +4,6 @@ package bootstrap
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -24,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -33,13 +31,8 @@ func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
-	key := make([]byte, 32)
-	for i := range key {
-		key[i] = byte(i + 1)
-	}
-	cfg := &config.Config{SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{
-		MasterKey: base64.StdEncoding.EncodeToString(key),
-	}}
+	cfg := &config.Config{SecretBackend: config.SecretBackendSnapshot, TestMode: config.CredentialPostureLive}
+	snapshot := merchants.NewManifestSecretStore()
 	manifest := hostThreeMerchantManifest()
 	mt := manifest.Merchants["host-three"]
 	const (
@@ -62,7 +55,7 @@ func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 	}
 	manifest.Merchants["host-three"] = mt
 
-	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true, SecretStore: snapshot.Seeder()}))
 
 	var merchantID string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM billing.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
@@ -80,11 +73,9 @@ func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 
 	secretName, err := merchants.PSPSecretName("solana", "live", accountID, "private_key")
 	require.NoError(t, err)
-	backend, err := merchantsecrets.Build(ctx, cfg, cp.Pool())
-	require.NoError(t, err)
 	tid, err := merchant.ParseID(merchantID)
 	require.NoError(t, err)
-	sec, err := backend.Secrets.Get(ctx, tid, secretName)
+	sec, err := snapshot.Get(ctx, tid, secretName)
 	require.NoError(t, err)
 	require.Equal(t, privateKey, sec.Value)
 }

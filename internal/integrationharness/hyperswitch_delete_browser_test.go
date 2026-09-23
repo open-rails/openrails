@@ -115,7 +115,7 @@ func TestHyperSwitchActualBrowserDeletion(t *testing.T) {
 	h := New(t, ctx)
 	var delegated billingauth.DelegatedAuthenticator
 	surface := h.StartStandalone("USD", WithConfig(func(c *config.Config) {
-		c.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: vendor.APIBaseURL, SDKURL: vendor.SDKURL}
+		c.HyperSwitch = &config.HyperSwitchConfig{AllowLoopbackHTTP: true, APIBaseURL: vendor.APIBaseURL, SDKURL: vendor.SDKURL}
 		c.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 	}), func(c *standaloneConfig) {
 		c.delegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {

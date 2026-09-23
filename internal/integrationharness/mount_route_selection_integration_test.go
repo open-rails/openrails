@@ -76,10 +76,16 @@ func TestMountHandlerRouteSelection(t *testing.T) {
 	require.False(t, caps1.RouteGroups["payment_providers"])
 	require.Len(t, caps1.Features, 4)
 	require.False(t, caps1.Features["stripe_billing_portal"])
-	require.False(t, caps1.Features["solana_one_time_payments"])
+	require.True(t, caps1.Features["solana_one_time_payments"], "generic buyer routes are mounted; account readiness is checked per request")
 	require.False(t, caps1.Features["solana_subscription_management"])
 	require.False(t, caps1.Features["provider_credential_writes"])
 	require.NotContains(t, caps1.Features, "webhooks")
+	// Method dispatch proves the Solana route is mounted without invoking a
+	// provider; omitted management routes remain absent on the same handler.
+	w = doMounted(h1, http.MethodDelete, "/billing/v1/solana/config", nil)
+	require.Equal(t, http.StatusMethodNotAllowed, w.Code)
+	w = doMounted(h1, http.MethodPut, "/billing/v1/merchant/payment-providers/ccbill", nil)
+	require.Equal(t, http.StatusNotFound, w.Code)
 
 	// Case 2: customer included -> /v1/me mounted, capabilities.customer=true.
 	h2, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}}, Prefix: "/billing", DelegatedAuthenticator: delegated, Authenticator: authn})

@@ -157,10 +157,10 @@ reads as protection.
 |---|---|---|
 | FC-1 | Missing merchant context is rejected by tenant services; zero merchant parameters do not select all tenants. | `merchant.Require`; scoped SQL |
 | FC-2 | RLS is absent in isolation qualification, so policies cannot hide missing predicates. | owner/normal-login adversarial tests |
-| FC-3 | Boot refuses the DB secret store without `ENCRYPTION_MASTER_KEY` outside dev. | `merchantsecrets/store.go:297-308` |
-| FC-4 | Even in dev, Solana private keys may not be stored unencrypted. | `store.go:227-233` |
-| FC-5 | `secret_backend=vault` without a working Vault, or without KV read capability, refuses. Where secrets live is DECLARED: `merchant_config_source=api` refuses an undeclared `secret_backend`, and `vault.enabled` (which may be Transit signing alone) never selects the KV store (or#893). | `merchantsecrets/store.go`; `config.validateSecretBackend` / `config.validateMerchantConfigSource` |
-| FC-6 | `merchant_config_source=api` refuses env overlays and mounted manifest secrets (two truths); an unknown value refuses to load. | `config.validateMerchantConfigSource` |
+| FC-3 | Managed DB secret storage requires `ENCRYPTION_MASTER_KEY` in both sandbox and live posture. | `merchantsecrets/store.go` |
+| FC-4 | Snapshot credentials remain in memory and cannot be mutated through ordinary Client operations. | `merchants/secrets_manifest.go` |
+| FC-5 | `secret_backend=vault` without a working Vault or KV read capability refuses. `vault.enabled` (which may be Transit signing alone) never selects the KV store. | `merchantsecrets/store.go`; `config.validateSecretBackend` |
+| FC-6 | Credential custody, write capability and external configuration routes are independent. Startup preserves existing metadata and refuses managed provider declarations that would bypass explicit publication. | `bootstrap.ProvisionMerchant`; `embed.HTTPConfig`; `merchants/credential_publication.go` |
 | FC-6b | Catalogs always use database state. `AllowCatalogUpdates` defaults false, omits ordinary mutation routes and denies ordinary Client writes independently of provider credential custody. Trusted local operator application uses the same engine with internal authority. | `catalogpolicy.Check`; `catalogPolicyRouter`; `manifestModeWriteGuardMW` |
 | FC-5b | Every retired config family (`store`, `merchant`, `cors_origins`, `db.require_rls`, `auth.issuers`/`auth.expected_audience`, `rails`, `auth.control_plane`, `private_port`) REFUSES boot with the rename, rather than warning and booting with the operator believing it is active (or#893). | `config.Load`; `config/retired_config_families_test.go` |
 | FC-7 | Webhook signature: a missing secret or missing header is an error. There is **no** unsigned path. HMAC compares with `hmac.Equal`. | `webhookutil.go:98-110`; `sigverify.go:44-71` |

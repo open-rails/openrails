@@ -45,7 +45,9 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 
 	accountID := "acct_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	status, body := requestJSON(t, http.MethodPut, surface.BaseURL+"/v1/merchant/payment-providers/stripe", adminToken, map[string]any{
-		"account_id": accountID,
+		"operation_id":      uuid.NewString(),
+		"expected_revision": 0,
+		"account_id":        accountID,
 		"public_config": map[string]string{
 			"publishable_key": "pk_test_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
 		},
@@ -98,7 +100,9 @@ func TestStandaloneMerchantPaymentProviderConfigHTTP(t *testing.T) {
 
 	invalidAccountID := "nmi_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	invalidStatus, invalidBody := requestJSON(t, http.MethodPut, surface.BaseURL+"/v1/merchant/payment-providers/nmi", adminToken, map[string]any{
-		"account_id": invalidAccountID,
+		"operation_id":      uuid.NewString(),
+		"expected_revision": 0,
+		"account_id":        invalidAccountID,
 		"credentials": map[string]string{
 			"tokenization_url": "http://example.test/collect.js",
 		},

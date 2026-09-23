@@ -47,6 +47,15 @@ func loadProviderCredentialSnapshot(ctx context.Context, rt *app.Runtime, values
 			if err != nil {
 				return err
 			}
+			rail, _, _, credentialKey, _, err := merchants.ParsePSPSecretName(name)
+			if err != nil {
+				return err
+			}
+			if rail == "stripe" && credentialKey == "secret_key" {
+				if err := config.ValidateStripeCredentialPosture(rt.Config, value); err != nil {
+					return fmt.Errorf("provider snapshot stripe credential: %w", err)
+				}
+			}
 			identity := provider.MerchantID.String() + "/" + name
 			if seen[identity] {
 				return fmt.Errorf("provider snapshot contains a duplicate credential")

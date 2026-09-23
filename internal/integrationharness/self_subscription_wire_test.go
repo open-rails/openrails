@@ -41,7 +41,7 @@ func TestSelfSubscriptionWireParity(t *testing.T) {
 	standalone := h.StartStandalone("usd")
 
 	rt, err := embed.New(ctx, embed.Options{
-		Config: &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
+		Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
 		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)

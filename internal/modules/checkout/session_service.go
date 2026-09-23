@@ -2257,7 +2257,7 @@ func solanaSessionUsesPayURL(session *models.CheckoutSession) bool {
 // Standalone: "https://api.mysite.com" → routes at /v1/*
 // Embedded:   "https://api.mysite.com/billing" → routes at /billing/v1/*
 //
-// Generated URLs follow the pattern: APIURL + "/v1/checkout/:id/solana-pay"
+// Generated URLs follow the pattern: PublicBillingBaseURL + "/v1/checkout/:id/solana-pay"
 func (s *CheckoutSessionService) getAPIBaseURL() string {
 	if s.config == nil {
 		return ""

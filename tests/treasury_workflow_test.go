@@ -66,7 +66,7 @@ func newTreasuryWorkflow(t *testing.T, sandbox ...*config.ProviderSandboxConfig)
 	}))
 	owned := surface.ProvisionOwnedMerchant("treasury-" + uuid.NewString()[:8])
 	host, err := embed.New(t.Context(), embed.Options{
-		Config: &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, ProviderSandbox: providerSandbox, DB: &config.DBConfig{URL: h.DSN}},
+		Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, ProviderSandbox: providerSandbox, DB: &config.DBConfig{URL: h.DSN}},
 		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)

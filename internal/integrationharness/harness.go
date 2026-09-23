@@ -486,6 +486,9 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 		Port:              0, // ephemeral; we serve via httptest below
 		DB:                &config.DBConfig{URL: appDSN},
 		Auth: &config.AuthConfig{AllowMemory: true, AllowPrivateNetworkJWKS: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, DirectPeerIP: true,
+			// Sender proofs bind to this host-owned listener, independently of checkout URLs.
+			RequestOrigin:     "http://" + srv.Listener.Addr().String(),
+			AllowLoopbackHTTP: true,
 			// The control plane's own AuthKit issuer.
 			Issuer:   "https://controlplane.openrails.test",
 			KeysPath: h.t.TempDir(),

@@ -63,7 +63,7 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	slug := "river-billing-" + uuid.NewString()[:8]
 	rt, err := embed.New(ctx, embed.Options{
 		Merchant: &embed.MerchantDeclaration{Slug: slug, PSPs: []embed.PSPDeclaration{{Key: "solana", Rail: "solana", AccountID: "11111111111111111111111111111111"}}},
-		Config: &config.Config{
+		Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 			TestMode:           config.CredentialPostureSandbox,
 			DB:                 &config.DBConfig{URL: dsn},
 			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB,

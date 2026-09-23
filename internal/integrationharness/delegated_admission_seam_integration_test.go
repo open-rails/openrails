@@ -53,12 +53,12 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	h := New(t, ctx)
 	dbtest.EnsureTestMerchant(ctx, t, h.sharedPool())
 
-	cfg := &config.Config{
+	cfg := &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 		TestMode:           config.CredentialPostureSandbox,
 		MerchantConfigHTTP: true,
 		SecretBackend:      config.SecretBackendDB,
 		DB:                 &config.DBConfig{URL: h.DSN},
-		Auth:               &config.AuthConfig{Issuer: "https://or918.openrails.test", KeysPath: t.TempDir()},
+		Auth:               &config.AuthConfig{Issuer: "https://or918.openrails.test", KeysPath: t.TempDir(), AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true},
 	}
 	rt, err := embed.New(ctx, embed.Options{
 		Config: cfg, Redis: h.Redis, River: embed.RiverManagedByOpenRails(),

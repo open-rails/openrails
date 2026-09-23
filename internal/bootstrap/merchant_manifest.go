@@ -826,7 +826,7 @@ func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *c
 		return opts.SecretStore, transitStore.SolanaTransit, nil
 	}
 	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
-		log.Info("merchant bootstrap: merchant_config_source=manifest — DB projections reconcile; secrets validate in memory only and are NOT persisted (#723: the server loads them from its boot manifest)")
+		log.Info("merchant bootstrap: snapshot credentials validate in memory and are not persisted")
 		transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("merchant bootstrap: %w", err)
@@ -843,6 +843,22 @@ func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *c
 func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merchants.Merchant, error) {
 	slug := merchant.NormalizeSlug(req.Slug)
 	mt := req.Merchant
+	// Validate declarations before identity creation or seed-once suppression.
+	// An existing merchant must not turn malformed input into a successful boot.
+	if _, _, err := normalizeManifestBillingPolicies(mt); err != nil {
+		return nil, err
+	}
+	if host := merchants.NormalizeAPIHost(mt.APIHost); host != "" {
+		if err := merchants.ValidateAPIHost(host); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := merchantconfig.NormalizeCheckoutRouting(checkoutRoutingRules(mt.CheckoutRouting)); err != nil {
+		return nil, err
+	}
+	if _, err := manifestBudgetWindows("merchant", "delegated_invoker_wasted_spend_windows", mt.DelegatedInvokerWastedSpendWindows); err != nil {
+		return nil, err
+	}
 	if req.Config.SecretStoreBackend() != config.SecretBackendSnapshot && (len(mt.PSPs) > 0 || len(mt.Custodians) > 0) {
 		return nil, fmt.Errorf("managed provider declarations require explicit Client publication operations; startup metadata and credential custody are separate")
 	}
@@ -1396,39 +1412,39 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 // The WHOLE document is validated before ANY of it is written: a bad third
 // policy must not leave the first two installed and the merchant enforcing half
 // a decision.
-func reconcileManifestBillingPolicies(ctx context.Context, database *db.DB, mt MerchantConfig) error {
-	if len(mt.BillingPolicies) == 0 && len(mt.BillingPolicyBindings) == 0 {
-		return nil
-	}
-	type declaredPolicy struct {
-		name string
-		body models.BillingPolicy
-	}
+type manifestBillingPolicy struct {
+	name string
+	body models.BillingPolicy
+}
+
+type manifestBillingBinding struct{ tier, name string }
+
+func normalizeManifestBillingPolicies(mt MerchantConfig) ([]manifestBillingPolicy, []manifestBillingBinding, error) {
 	names := make([]string, 0, len(mt.BillingPolicies))
 	for name := range mt.BillingPolicies {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	policies := make([]declaredPolicy, 0, len(names))
+	policies := make([]manifestBillingPolicy, 0, len(names))
 	for _, declared := range names {
 		name, err := merchantconfig.NormalizeBillingPolicyName(declared)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		src := mt.BillingPolicies[declared]
 		spend, err := manifestBudgetWindows(name, "spend_windows", src.SpendWindows)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		badSpend, err := manifestBudgetWindows(name, "bad_spend_windows", src.BadSpendWindows)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		var rateWindowSeconds int64
 		if raw := strings.TrimSpace(src.AccrualRateWindow); raw != "" {
 			d, perr := time.ParseDuration(raw)
 			if perr != nil {
-				return fmt.Errorf("billing policy %s: accrual_rate_window: %w", name, perr)
+				return nil, nil, fmt.Errorf("billing policy %s: accrual_rate_window: %w", name, perr)
 			}
 			rateWindowSeconds = int64(d / time.Second)
 		}
@@ -1446,24 +1462,28 @@ func reconcileManifestBillingPolicies(ctx context.Context, database *db.DB, mt M
 			PolicyCurrency:            src.PolicyCurrency,
 		})
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
-		policies = append(policies, declaredPolicy{name: name, body: body})
+		policies = append(policies, manifestBillingPolicy{name: name, body: body})
 	}
 
-	type declaredBinding struct {
-		tier string
-		name string
-	}
-	bindings := make([]declaredBinding, 0, len(mt.BillingPolicyBindings))
+	bindings := make([]manifestBillingBinding, 0, len(mt.BillingPolicyBindings))
 	for i, b := range mt.BillingPolicyBindings {
 		name, tier, _, err := merchantconfig.NormalizeBillingPolicyBinding(b.Policy, b.Tier, false)
 		if err != nil {
-			return fmt.Errorf("billing_policy_bindings[%d]: %w", i, err)
+			return nil, nil, fmt.Errorf("billing_policy_bindings[%d]: %w", i, err)
 		}
-		bindings = append(bindings, declaredBinding{tier: tier, name: name})
+		bindings = append(bindings, manifestBillingBinding{tier: tier, name: name})
 	}
 
+	return policies, bindings, nil
+}
+
+func reconcileManifestBillingPolicies(ctx context.Context, database *db.DB, mt MerchantConfig) error {
+	policies, bindings, err := normalizeManifestBillingPolicies(mt)
+	if err != nil {
+		return err
+	}
 	store := admission.NewBillingPolicyStore(database)
 	for _, p := range policies {
 		if err := store.UpsertPolicy(ctx, p.name, p.body); err != nil {

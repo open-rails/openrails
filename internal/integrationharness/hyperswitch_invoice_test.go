@@ -122,7 +122,7 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 	})
 	var delegated billingauth.DelegatedAuthenticator
 	surface := h.StartStandalone("USD", WithConfig(func(c *config.Config) {
-		c.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: g.server.URL, SDKURL: g.server.URL + "/sdk.js"}
+		c.HyperSwitch = &config.HyperSwitchConfig{AllowLoopbackHTTP: true, APIBaseURL: g.server.URL, SDKURL: g.server.URL + "/sdk.js"}
 		c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: g.server.URL + "/nmi"}
 		c.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 	}), func(c *standaloneConfig) {

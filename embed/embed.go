@@ -53,8 +53,7 @@ type Options struct {
 	// Use the existing embed/authkit bridge; ambient host sessions confer no authority.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	// Config is built programmatically by the host; embedded construction never
-	// runs config.Load, so Env and TestMode (sandbox or live) must be set
-	// explicitly. Rate-limit and captcha defaults are seeded when left nil
+	// runs config.Load, so TestMode (sandbox or live) must be set explicitly. Rate-limit and captcha defaults are seeded when left nil
 	// unless Config.RateLimitsDisabled.
 	Config *config.Config
 	// PGXPool is the host-supplied database handle. Leave nil to open one from

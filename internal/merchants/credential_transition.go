@@ -47,7 +47,10 @@ func (s *Service) TransitionProviderCredentials(ctx context.Context, id merchant
 	var expected int64
 	var receiptRail, receiptEnvironment, receiptAccount string
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT result,request_metadata,expected_revision,rail,environment,account_id FROM openrails.credential_publications WHERE merchant_id=$1 AND operation_id=$2`, id.UUID(), req.OperationID).Scan(&receipt, &metadata, &expected, &receiptRail, &receiptEnvironment, &receiptAccount)
+		stored, err := gen.New(tx).GetCredentialPublication(ctx, gen.GetCredentialPublicationParams{MerchantID: id.UUID(), OperationID: req.OperationID})
+		receipt, metadata, expected = stored.Result, stored.RequestMetadata, stored.ExpectedRevision
+		receiptRail, receiptEnvironment, receiptAccount = stored.Rail, stored.Environment, stored.AccountID
+		return err
 	})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return PaymentProviderConfig{}, err

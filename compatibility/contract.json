@@ -563,6 +563,7 @@
       "func ValidateRailAccountID(rail models.Rail, accountID string) error",
       "func ValidateRailSet(cfg *Config, rails PSPSet) error",
       "func ValidateSolanaAccountSettings(settings map[string]any) error",
+      "func ValidateStripeCredentialPosture(cfg *Config, secretKey string) error",
       "func ValidateTokenDecimals(mintOrSymbol string, decimals int) error",
       "func WithOverride(key string, value any) LoadOption",
       "type AdminConsoleConfig struct {\n\tEnabled bool `koanf:\"enabled,omitempty\"`\n\n\tAuthBaseURL string `koanf:\"auth_base_url,omitempty\"`\n\n\tAPIBaseURL string `koanf:\"api_base_url,omitempty\"`\n}",
@@ -780,7 +781,7 @@
     ],
     "examples/billingapp": [
       "func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, error)",
-      "type Inputs struct {\n\tCurrency         string\n\tRun              string\n\tCheckoutPriceKey string\n\tCheckoutRail     string\n\tSubscriberID     openrails.CustomerID\n\tSubscriptionID   openrails.SubscriptionID\n\tInvoiceID        uuid.UUID\n}",
+      "type Inputs struct {\n\tCurrency                string\n\tRun                     string\n\tCheckoutPriceKey        string\n\tCheckoutRail            string\n\tCheckoutCustomerID      openrails.CustomerID\n\tCheckoutPaymentMethodID openrails.PaymentMethodID\n\tSubscriberID            openrails.CustomerID\n\tSubscriptionID          openrails.SubscriptionID\n\tInvoiceID               uuid.UUID\n}",
       "type Report struct {\n\tPolicyWindows       int\n\tCreditLimit         int64\n\tDeposited           int64\n\tAdmitted            bool\n\tCaptured            int64\n\tDeniedBy            string\n\tUnknownRelease      bool\n\tBalance             int64\n\tUsageEvents         int64\n\tCheckoutRails       int\n\tCheckoutReplayed    bool\n\tCheckoutAmount      int64\n\tSubscriptionStatus  string\n\tCancelScheduled     bool\n\tResumed             bool\n\tInvoiceProfileSet   bool\n\tInvoiceDueAfterPaid int64\n\tInvoiceStatus       string\n\tInvoicePaidTwice    bool\n}"
     ],
     "internal/bootstrap": [
@@ -5161,7 +5162,7 @@
     "embed/http_routes.go": "13726a8c54248936a9e11e5aee43d7e8e9c73864352a4cc4234717c246bdc481",
     "embed/transport.go": "903c54277784d553e2c588e1b7d960d3b524d8d3e7b660cfbdc7449df06b960f",
     "errors.go": "bea224812329fcb558d6b087b3a524107ce5d939d16b303b99354d35a6397d55",
-    "examples/embedded/main.go": "4104861f7cef3eabf4c4bdf7b576568c4fa466cf6059c03d43f7e58ddf1dd73e",
+    "examples/embedded/main.go": "da996eea5bac10fc37a778883eb8c70199707438d670f7ae355e2eb1d579de41",
     "internal/app/runtime.go": "15846186a6b6dbacd0fa1301c81a0fb2d4e84b3a472d799f5e91365f9ea20fd2",
     "internal/auth/delegated.go": "d0cc54d53043dbf70fca244031bf96921a7e737175f513f0a50747b36525725f",
     "internal/auth/policy/admin.go": "f8b7328b4c87926097aa07a72a97ddafd62290db764bb0d2b9f9cc3626f4769c",

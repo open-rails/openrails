@@ -43,10 +43,16 @@ func TestReconcileMerchantManifestAppliesAPIHost(t *testing.T) {
 	require.NotNil(t, host)
 	require.Equal(t, "api.host.example", *host)
 
-	// A changed declared host re-asserts (declarative identity, not seed-once).
+	// Startup preserves an existing host, even when its declaration changes.
 	mt.APIHost = "api2.host.example"
 	manifest.Merchants["host-three"] = mt
 	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
+	host = readHost()
+	require.NotNil(t, host)
+	require.Equal(t, "api.host.example", *host)
+
+	// An explicit operator metadata application may change the host.
+	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true, Overwrite: true}))
 	host = readHost()
 	require.NotNil(t, host)
 	require.Equal(t, "api2.host.example", *host)

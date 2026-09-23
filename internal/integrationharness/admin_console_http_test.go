@@ -70,7 +70,7 @@ func TestAdminConsoleServing(t *testing.T) {
 		// The boot error surfaces from serverboot.NewServer, so this drives it
 		// directly with the same config shape the harness boots.
 		_, appDSN := dbtest.SharedRLSPostgres(t)
-		cfg := &config.Config{
+		cfg := &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 			TestMode:           config.CredentialPostureSandbox,
 			MerchantConfigHTTP: true,
 			SecretBackend:      config.SecretBackendDB,
@@ -78,7 +78,7 @@ func TestAdminConsoleServing(t *testing.T) {
 			Host:               "127.0.0.1",
 			Port:               0,
 			DB:                 &config.DBConfig{URL: appDSN},
-			Auth:               &config.AuthConfig{Issuer: "https://controlplane.openrails.test"},
+			Auth:               &config.AuthConfig{Issuer: "https://controlplane.openrails.test", KeysPath: t.TempDir(), AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true},
 			AdminConsole:       &config.AdminConsoleConfig{Enabled: true},
 		}
 		if h.Redis != nil {

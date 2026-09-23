@@ -84,10 +84,10 @@ func testStandaloneAccountRecovery(t *testing.T, workers bool) {
 		require.Equal(t, 2, pending, "API-only startup binds producers without executing callbacks")
 		// A distinct worker application uses the same complete contribution set,
 		// identity issuer and database as the API's unstarted producer client.
-		worker, err := serverboot.NewWorker(t.Context(), &config.Config{
+		worker, err := serverboot.NewWorker(t.Context(), &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 			PublicBillingBaseURL: surface.BaseURL, TestMode: config.CredentialPostureSandbox,
 			DB: &config.DBConfig{URL: h.DSN}, Redis: &config.RedisConfig{Addr: h.Redis.Options().Addr},
-			Auth:               &config.AuthConfig{Issuer: surface.App().Config.Auth.Issuer, KeysPath: surface.App().Config.Auth.KeysPath, DirectPeerIP: true},
+			Auth:               &config.AuthConfig{Issuer: surface.App().Config.Auth.Issuer, KeysPath: surface.App().Config.Auth.KeysPath, DirectPeerIP: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true},
 			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB,
 		}, nil)
 		require.NoError(t, err)

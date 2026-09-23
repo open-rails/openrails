@@ -27,8 +27,9 @@ These independent exceptions default to false:
 
 `auth.mint_disabled` explicitly selects verification-only operation. A key-loading
 failure never silently selects it. Inline signing keys retain their restart-only
-rotation warning. `rate_limits_disabled` remains an explicit declaration that the
-host supplies rate limiting; omission of rate-limit configuration is an error.
+rotation warning. Runtime constructors supply rate-limit and captcha defaults
+when omitted. `rate_limits_disabled` explicitly declares that the host supplies
+rate limiting instead.
 
 HyperSwitch has its own `hyperswitch.allow_loopback_http` exception. It permits
 literal loopback HTTP fixtures only with sandbox provider credentials. This

@@ -13,35 +13,29 @@ override them with `vault.kv_mount` and `vault.transit_mount` when needed.
 
 ## Where merchant secrets live
 
-Where secrets live follows the two-mode doctrine (`merchant_config_source`, see
-[operator-guide.md](operator-guide.md)):
+Credential custody is independent of merchant metadata and HTTP publication:
 
-- **`merchant_config_source: manifest` (MODE 1, default)** — the boot YAML is the truth; secrets are held
-  in memory, **no persistent secret store is constructed**, `secret_backend` is not consulted.
-  Vault, if enabled, serves Transit signing only.
-- **`merchant_config_source: api` (MODE 2)** — a persistent backend selected by `secret_backend`
-  (env `SECRET_BACKEND`), which is **required**:
+- **`secret_backend: snapshot` (default)** — the host supplies credentials at
+  startup. Values stay in memory and ordinary Client operations cannot change
+  them. Vault may still provide Transit signing.
+- **`secret_backend: db`** — managed credentials are envelope-encrypted in
+  PostgreSQL. `encryption.master_key` (`ENCRYPTION_MASTER_KEY`, base64 of 32 raw
+  bytes) is required in both sandbox and live posture. A per-merchant DEK encrypts
+  values; the configured master key wraps that DEK.
+- **`secret_backend: vault`** — managed credentials use exact published KV-v2
+  references. Set `vault.enabled` and the server-owned connection/auth settings.
 
-```yaml
-secret_backend: db      # DEK-encrypted Postgres store — or `vault`
-vault:
-  enabled: true
-```
+`credential_read_only: true` narrows a managed backend to reads. Vault policy
+can narrow it further. External merchant configuration routes are a separate
+choice: embedded `Options.HTTP.MerchantConfig`, or standalone
+`merchant_config_http`. Authorized local Client operations do not require those
+HTTP routes. Remote Clients connect to the remote server and need no local Vault
+or database configuration.
 
-`secret_backend` is **declared intent** — never auto-detected, never auto-fallback (the data lives
-in exactly one place; a store that lacks it would run silently empty). `merchant_config_source: api`
-refuses to boot without it; `vault.enabled` is a Vault *connection* (Transit signing counts) and
-never stands in for the declaration. `secret_backend: vault` requires `vault.enabled`;
-`secret_backend: db` outside development requires `ENCRYPTION_MASTER_KEY` (#667/#723).
-
-### The DB fallback: envelope encryption
-
-With `secret_backend: db`, secrets persist in `openrails.merchant_secrets`, envelope-encrypted:
-`encryption.master_key` (env `ENCRYPTION_MASTER_KEY`, base64 of 32 raw bytes, AES-256) wraps a
-per-merchant DEK in `openrails.merchant_deks`; the DEK encrypts the values. Without the master
-key the store would persist plaintext — **non-development boots refuse this** (#667); development
-proceeds with a loud warning. In production, source the master key from a KMS — the wrapped DEKs
-stay in the DB, the key that unwraps them never does.
+There is no backend auto-fallback. Changing backend configuration does not move
+credentials; use the explicit custody transition described below. Snapshot
+provider credentials can coexist with independently managed alert secrets using
+`alert_secret_backend`.
 
 ## The custodial model — one process token
 
@@ -66,6 +60,8 @@ ServiceAccount is the credential).
 vault:
   enabled: true
   address: https://vault.internal:8200   # env VAULT_ADDR
+  # namespace: billing                  # optional Vault namespace
+  # scope_prefix: openrails              # optional server-owned path prefix
   auth_method: kubernetes                # kubernetes | approle | token
   k8s_role: openrails                    # kubernetes: Vault role bound to the pod's ServiceAccount
   # role_id / secret_id                  # approle; a mounted secret FILE named VAULT_SECRET_ID
@@ -82,7 +78,7 @@ alongside a live reachability re-check of the KV mount.
 Grant only what the deployment uses (these exact policies are exercised against real Vault ACLs
 in the integration suite):
 
-**Transit-only** (`secret_backend: db` or MODE 1; Vault signs Solana only). Scope to exactly the
+**Transit-only** (`secret_backend: db` or `snapshot`; Vault signs Solana only). Scope to exactly the
 key(s) declared as `signer.key`:
 
 ```hcl
@@ -107,7 +103,7 @@ At boot OpenRails probes `sys/capabilities-self` for the KV paths and adapts (ad
 Vault's runtime 403 remains the real boundary):
 
 - `secret_backend: vault` + KV read-write → full secret ops. Read-only → boots, but
-  merchant-secret writes / config-push are disabled with a warning. **No KV read** → **boot
+  credential publication is disabled; ordinary database metadata remains editable. **No KV read** → **boot
   error** (declared-in-Vault but unreachable — never run empty; never fall back to the DB).
 - Transit is NOT path-probed (key names are yours, so there is no path to guess). A Vault
   connection enables the Solana signing surface; the grant is verified against the real key when
@@ -124,53 +120,54 @@ secret/openrails/merchants/<merchant-uuid>/<name>     # value under KV-v2 field 
 
 Immutable merchant UUIDs own the subtree. Renames change no secret paths, and a new owner of an old slug cannot address the original merchant's secrets. Existing pre-launch slug-based keys must be replaced at the UUID paths; no fallback reads old slug paths.
 
-There is exactly ONE canonical name shape, for every rail (#884 retired the flat
-`<rail>/<purpose>` spellings — they were write-only and never read):
+Logical credential slots have the shape
+`psps/<rail>/<live|test>/<account_id>/<key>`. Accounts are operator-declared,
+not selected by request-supplied Vault paths. Managed publication stores immutable
+operation-named candidates and publishes their exact names and versions in
+PostgreSQL. Secret values are write-only at the Client/API boundary and never go
+into publication receipts.
 
-| Secret | `<name>` |
-|---|---|
-| PSP-scoped credential (all rails) | `psps/<rail>/<live\|test>/<account_id>/<key>` |
+Use `Client.PaymentProviders.Upsert` with a stable `operation_id` and the observed
+`expected_revision`. Reuse that operation ID to recover a lost reply. Competing
+updates fail with a revision conflict; they do not silently overwrite each other.
+A failed SQL publication leaves the candidate inactive and preserves the old
+active references. The API cannot change Vault addresses, mounts or prefixes.
 
-The `psps/` prefix is the durable per-PSP shape — one merchant can run multiple accounts on a
-rail without collisions. `<account_id>` is the operator-declared PSP account id (NMI gateway id,
-CCBill `accnum-subacc`, Solana signer address); `<key>` is a rail-registry credential slot
-(`security_key`, `salt`, `datalink_username`, `datalink_password`, `private_key`, …). Examples:
-
-```sh
-vault kv put secret/openrails/merchants/<merchant-uuid>/psps/nmi/live/<gateway-id>/security_key value="$NMI_SECURITY_KEY"
-vault kv put secret/openrails/merchants/<merchant-uuid>/psps/ccbill/live/<accnum-subacc>/salt value="$CCBILL_SALT"
-vault kv put secret/openrails/merchants/<merchant-uuid>/psps/stripe/live/<acct-id>/secret_key value="$STRIPE_SECRET_KEY"
-```
-
-`psps/solana/<env>/<address>/private_key` (local-keypair signer) is operator-only — it is never
-merchant-writable through the dashboard API. Prefer Transit so no such secret exists at all.
-
-**Caching**: all backends are fronted by an in-process 15-minute TTL cache. A write through an
-OpenRails node refreshes that node immediately; an out-of-band `vault kv put` converges on every
-node within one TTL — no restart needed. Roll the nodes for an instant cluster-wide cutover.
+**Reads** use the published exact reference. They neither accept a newer
+unpublished version nor substitute another backend. Managed versioned reads
+consult the backend, so cached values cannot hide revoked backend access. Direct
+`vault kv put` does not publish a new active credential. Snapshot values are
+reloaded from the host's supplied snapshot on restart.
 
 **Error taxonomy** (money-path critical, `errors.Is`): `ErrSecretNotFound` is **terminal** — the
 secret is genuinely absent; never retry, never treat as "verification disabled".
 `ErrSecretBackendUnavailable` (Vault unreachable/sealed/denied, DB error) is **retryable** —
 webhook routes return 503 so the provider redelivers; workers retry rather than cancel.
 
-## Day-2 secret ops
+## Day-2 secret operations
 
-- **Adding a merchant's rail secrets** — MODE 1: edit the boot manifest (or its env/secret-file
-  overlay) and reboot. `push-merchant-config` converges DB projection rows only; it does **not**
-  persist secrets (the server reads them from its own boot manifest), and `merchant_config_source: api`
-  refuses the command outright. MODE 2: `PUT /v1/merchant/payment-providers/<provider>`, or
-  pre-provision with `vault kv put` at the canonical path — OpenRails discovers it lazily.
-- **Rotation** — rotate via the admin API (validated, idempotent on value, version-bumped) or
-  `vault kv put` directly. KV-v2 keeps prior versions; OpenRails always reads the latest.
-- **Solana local keypair** — rotating `psps/solana/.../private_key` changes the merchant's
-  on-chain signer identity: existing on-chain subscription authorizations are bound to the old
-  key, forcing a plan re-publish and re-enroll. Use Transit instead.
-- **DB → Vault migration** — stand up Vault + policy; export existing secrets **through
-  OpenRails** (`List` then `Get` per name — the DB values are envelope-encrypted, never `SELECT`
-  the column raw); `vault kv put` each at its canonical path; flip `secret_backend: vault` and
-  restart; verify per merchant (the admin API's Stripe test action confirms live resolution);
-  only then purge the `merchant_secrets`/`merchant_deks` rows (keep a backup).
+- **Snapshot update:** change the host's credential source and restart with the
+  new snapshot. Startup preserves existing merchant metadata and archived provider
+  state; it does not make the YAML an automatic overwrite/prune operation.
+- **Managed publication/rotation:** use `Client.PaymentProviders.Upsert` locally
+  or remotely with explicit operation identity and revision. Webhook rotations
+  retain required overlap; another rotation cannot discard an unretired prior key.
+- **Custody transition:** the local operator supplies source and target runtimes
+  to `TransitionProviderCredentials`. It copies and validates active/overlap
+  credentials, then publishes target custody with revision checks. A backend flag
+  flip alone refuses existing references. Source secrets are retained; do not
+  delete historical material or old databases as part of the transition.
+- **Managed to snapshot:** preload the target runtime using
+  `Options.ProviderCredentials` and a stable `CredentialSnapshotID`. The label is
+  an operator assertion; the host must supply the same snapshot on restart. The
+  transition verifies the supplied credentials before publishing target custody.
+- **Solana local keypair:** changing the signer changes the on-chain identity.
+  Existing authorizations remain bound to the old key. Prefer Transit custody and
+  handle signer changes as explicit operations, not an incidental secret refresh.
+
+See [merchant metadata applications](merchant-configuration-applications.md) for
+settings changes, replay and the local/remote CLI. Metadata changes and credential
+publication are separate operations.
 
 ## Solana Transit signing
 
@@ -185,8 +182,8 @@ vault write -f transit/keys/my-mainnet-signer type=ed25519 exportable=false
 
 OpenRails sends the serialized transaction message to `transit/sign/<key>` (raw Ed25519,
 `prehashed=false` — exactly what Solana verifies) and reads the public key — which IS the
-merchant's on-chain address — from `transit/keys/<key>`. Transit works with either secret backend
-and in both merchant-source modes. A Transit key rotation mints a new keypair, so it carries the
+merchant's on-chain address — from `transit/keys/<key>`. Transit is independent of
+the selected credential backend. A Transit key rotation mints a new keypair, so it carries the
 same on-chain identity caveat as any signer change.
 
 ## Merchant purge cleanup

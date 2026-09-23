@@ -3,7 +3,6 @@
 package bootstrap
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -18,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -31,9 +29,8 @@ func (r declarationLoopbackTransport) RoundTrip(req *http.Request) (*http.Respon
 	return r.base.RoundTrip(req)
 }
 
-// The operator path applies one complete declaration, converges two replicas,
-// exports it without secret values, and seeds a runtime whose later rotation
-// remains authoritative. All storage is real PostgreSQL and the production store.
+// A host snapshot applies one complete declaration, converges two replicas,
+// exports metadata without credential values, and keeps credentials in memory.
 func TestMerchantDeclarationLifecycle(t *testing.T) {
 	ctx := t.Context()
 	originalTransport := http.DefaultTransport
@@ -48,8 +45,7 @@ func TestMerchantDeclarationLifecycle(t *testing.T) {
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
 	cfg := sandboxModeReconcileConfig()
-	cfg.SecretBackend = config.SecretBackendDB
-	cfg.Encryption = &config.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}
+	snapshot := merchants.NewManifestSecretStore()
 	threshold, floor := int64(75_000_000), int64(2_000_000)
 	mt := MerchantConfig{
 		DisplayName:                        "Host Three",
@@ -64,7 +60,7 @@ func TestMerchantDeclarationLifecycle(t *testing.T) {
 		},
 	}
 	manifest := &BillingConfig{Version: 1, Merchants: map[string]MerchantConfig{"host-three": mt}}
-	apply := MerchantManifestReconcileOptions{Insert: true, Overwrite: true, NMIProbeV5BaseURL: gateway.URL}
+	apply := MerchantManifestReconcileOptions{Insert: true, Overwrite: true, SecretStore: snapshot.Seeder(), NMIProbeV5BaseURL: gateway.URL}
 	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, apply))
 	var id merchant.ID
 	var group string
@@ -115,8 +111,6 @@ func TestMerchantDeclarationLifecycle(t *testing.T) {
 	require.Equal(t, threshold, stored.Threshold)
 	require.Equal(t, floor, stored.Floor)
 
-	backend, err := merchantsecrets.Build(ctx, cfg, cp.Pool())
-	require.NoError(t, err)
 	for key, rails := range mt.PSPs {
 		for rail, declared := range rails {
 			var gotKey, environment, account string
@@ -129,10 +123,7 @@ func TestMerchantDeclarationLifecycle(t *testing.T) {
 			for secretKey, value := range declared.Secrets {
 				name, err := merchants.PSPSecretName(rail, "test", account, secretKey)
 				require.NoError(t, err)
-				var ciphertext string
-				require.NoError(t, pool.QueryRow(ctx, `SELECT value FROM billing.merchant_secrets WHERE merchant_id=$1 AND name=$2`, id, name).Scan(&ciphertext))
-				require.NotEqual(t, value, ciphertext)
-				secret, err := backend.Secrets.Get(ctx, id, name)
+				secret, err := snapshot.Get(ctx, id, name)
 				require.NoError(t, err)
 				require.Equal(t, value, secret.Value)
 			}
@@ -140,7 +131,9 @@ func TestMerchantDeclarationLifecycle(t *testing.T) {
 	}
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.psps WHERE merchant_id=$1`, id).Scan(&count))
 	require.Equal(t, 4, count)
-	svc, err := merchants.NewService(cp.Pool(), backend.Secrets, "test")
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.merchant_secrets WHERE merchant_id=$1`, id).Scan(&count))
+	require.Zero(t, count, "snapshot credentials never persist")
+	svc, err := merchants.NewService(cp.Pool(), snapshot, "test")
 	require.NoError(t, err)
 	tokenization, err := svc.LoadNMITokenizationConfig(ctx, id, "nmi")
 	require.NoError(t, err)
@@ -191,12 +184,13 @@ func TestMerchantDeclarationLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, dumped, reparsed)
 
-	// Seed-once uses the same durable store, preserves out-of-band rotation,
-	// and does not even rewrite PSP updated_at on subsequent invocations.
+	// Reapplying preserves PSP metadata. Runtime credential writes are refused;
+	// managed rotation is exercised by the credential publication workflow.
 	seed, err := ResolvePushMerchantConfigOptions(cfg, true, false, false, false)
 	require.NoError(t, err)
 	require.Equal(t, MerchantManifestReconcileOptions{Insert: true}, seed)
 	seed.NMIProbeV5BaseURL = gateway.URL
+	seed.SecretStore = snapshot.Seeder()
 	scope, armed, err := svc.ActivePSPScope(ctx, id, "stripe", "test")
 	require.NoError(t, err)
 	require.True(t, armed)
@@ -206,59 +200,39 @@ func TestMerchantDeclarationLifecycle(t *testing.T) {
 	require.Equal(t, "sk_test_bootstrap", creds.SecretKey)
 	name, err := merchants.PSPSecretName("stripe", "test", "acct_test_123", "secret_key")
 	require.NoError(t, err)
-	_, err = backend.Secrets.Put(ctx, id, name, "sk_test_rotated")
-	require.NoError(t, err)
+	_, err = snapshot.Put(ctx, id, name, "sk_test_rotated")
+	require.ErrorIs(t, err, merchants.ErrManifestSecretsReadOnly)
 	var updated time.Time
 	require.NoError(t, pool.QueryRow(ctx, `SELECT max(updated_at) FROM billing.psps WHERE merchant_id=$1`, id).Scan(&updated))
 	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, seed))
 	creds, err = svc.LoadStripeCredentials(ctx, id)
 	require.NoError(t, err)
-	require.Equal(t, "sk_test_rotated", creds.SecretKey)
+	require.Equal(t, "sk_test_bootstrap", creds.SecretKey)
 	var updatedAfter time.Time
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*),max(updated_at) FROM billing.psps WHERE merchant_id=$1`, id).Scan(&count, &updatedAfter))
 	require.Equal(t, 4, count)
 	require.True(t, updated.Equal(updatedAfter))
 }
 
-func TestMerchantDeclarationSecretBackends(t *testing.T) {
+// Managed credentials are published through Client operations; startup cannot
+// bypass their revision and credential validation boundaries.
+func TestMerchantDeclarationRefusesManagedProviderBootstrap(t *testing.T) {
 	for _, backendName := range []string{config.SecretBackendDB, config.SecretBackendVault} {
 		t.Run(backendName, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			pool := newMerchantManifestTestPool(t)
 			cp := newMerchantManifestControlPlane(t, pool)
 			cfg := sandboxModeReconcileConfig()
 			cfg.SecretBackend = backendName
-			var vault merchantManifestVault
-			if backendName == config.SecretBackendVault {
-				vault = newMerchantManifestVault(t)
-				cfg.Vault = &config.VaultConfig{Enabled: true, Address: vault.Address, AuthMethod: "token", Token: vault.Token}
-			}
-			manifest := hostThreeMerchantManifest()
-			mt := manifest.Merchants["host-three"]
-			mt.PSPs = map[string]PSPConfig{"stripe": {"stripe": {AccountID: "acct_secret_backend", Secrets: map[string]string{"secret_key": "sk_test_backend"}}}}
-			manifest.Merchants["host-three"] = mt
-			seed, err := ResolvePushMerchantConfigOptions(cfg, true, false, false, false)
-			require.NoError(t, err)
-			require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, seed))
-			var id merchant.ID
-			require.NoError(t, pool.QueryRow(ctx, `SELECT id FROM billing.merchants WHERE slug='host-three'`).Scan(&id))
-			name, err := merchants.PSPSecretName("stripe", "test", "acct_secret_backend", "secret_key")
-			require.NoError(t, err)
-			if backendName == config.SecretBackendVault {
-				require.Equal(t, "sk_test_backend", readVaultKV2Value(t, vault, "secret/openrails/merchants/"+id.String()+"/"+name))
-				var count int
-				require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.merchant_secrets WHERE merchant_id=$1 AND name=$2`, id, name).Scan(&count))
-				require.Zero(t, count)
-			} else {
-				var value string
-				require.NoError(t, pool.QueryRow(ctx, `SELECT value FROM billing.merchant_secrets WHERE merchant_id=$1 AND name=$2`, id, name).Scan(&value))
-				require.Equal(t, "sk_test_backend", value)
-			}
-			backend, err := merchantsecrets.Build(ctx, cfg, cp.Pool())
-			require.NoError(t, err)
-			secret, err := backend.Secrets.Get(ctx, id, name)
-			require.NoError(t, err)
-			require.Equal(t, "sk_test_backend", secret.Value)
+			cfg.Encryption = &config.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}
+			// The provisioning guard rejects managed declarations before contacting
+			// credential storage. Successful DB/Vault publication has separate tests.
+			manifest := nmiManifestWithSecurityKey("must-not-publish")
+			_, err := ProvisionMerchant(ctx, ProvisionMerchantRequest{Config: cfg, ControlPlane: cp, Slug: "host-three", Merchant: manifest.Merchants["host-three"], Options: MerchantManifestReconcileOptions{Insert: true}})
+			require.ErrorContains(t, err, "managed provider declarations require explicit Client publication operations")
+			var count int
+			require.NoError(t, pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.merchants)+(SELECT count(*) FROM billing.psps)+(SELECT count(*) FROM billing.merchant_secrets)`).Scan(&count))
+			require.Zero(t, count, "a refused bootstrap must not create identity, provider, or credential state")
 		})
 	}
 }

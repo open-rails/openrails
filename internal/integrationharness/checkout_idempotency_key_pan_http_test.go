@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/testauth"
 	"github.com/stretchr/testify/require"
@@ -31,7 +32,12 @@ import (
 func TestCheckoutIdempotencyKeyIsNotCardInputHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
-	surface := h.StartStandalone("usd")
+	surface := h.StartStandalone("usd", WithConfig(func(cfg *config.Config) {
+		// This matrix serves 23 checkout probes for one principal in a minute.
+		// Keep the other defaults while allowing every PAN assertion to run.
+		cfg.RateLimits = config.GetDefaultBillingConfig().RateLimits
+		(*cfg.RateLimits)["checkout"].RequestsPerMinute = 60
+	}))
 	caller := surface.RegisterDelegatedCaller(
 		"pankey-"+strings.ReplaceAll(uuid.NewString(), "-", ""),
 		dbtest.TestMerchantSlug,

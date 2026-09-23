@@ -107,9 +107,13 @@ func TestEngineSubscriptionLifecycleHTTP(t *testing.T) {
 
 	var host billingauth.DelegatedAuthenticator
 	surface := h.StartStandalone("USD", WithClock(clockwork.NewFakeClockAt(now)), WithConfig(func(c *config.Config) {
+		// Ten lifecycle scenarios share a loopback IP and exercise repeated
+		// cancellation/resume decisions within one rate-limit window.
+		c.RateLimits = config.GetDefaultBillingConfig().RateLimits
+		(*c.RateLimits)["subscribe"].RequestsPerMinute = 100
 		c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: gateway.URL}
 		c.ProviderWriteMode = config.ProviderWriteModeFull
-		c.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: hs.URL, SDKURL: hs.URL + "/sdk.js"}
+		c.HyperSwitch = &config.HyperSwitchConfig{AllowLoopbackHTTP: true, APIBaseURL: hs.URL, SDKURL: hs.URL + "/sdk.js"}
 		c.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 	}), func(c *standaloneConfig) {
 		c.delegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {

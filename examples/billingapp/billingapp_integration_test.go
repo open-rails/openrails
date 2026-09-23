@@ -26,24 +26,24 @@ func TestMain(m *testing.M) {
 	dbtest.RunMain(m)
 }
 
-func ccbill(account string) config.PSPSet {
-	return config.PSPSet{"ccbill": {AccountID: account, CCBill: &config.CCBillRailConfig{Salt: "billingapp-local-fixture"}}}
+func nmi(account string) config.PSPSet {
+	return config.PSPSet{"nmi": {Rail: "nmi", AccountID: account, NMI: &config.NMIRailConfig{SecurityKey: "billingapp-local-fixture"}}}
 }
 
-// No provider endpoint is called: CCBill checkout signs a redirect locally,
+// No provider endpoint is called: saved-method checkout quotes engine enrollment,
 // cancellation/resume enqueue durable intents, and the invoice receivable is
 // closed by the same money service the invoice worker uses.
 func TestBillingApplicationRunsUnchangedAcrossDeployments(t *testing.T) {
 	ctx := context.Background()
 	h := integrationharness.New(t, ctx)
-	standalone := h.StartStandalone("USD", integrationharness.WithRails(ccbill("999981-0000")))
+	standalone := h.StartStandalone("USD", integrationharness.WithRails(nmi("999981-0000")))
 	tenant := standalone.ProvisionOwnedMerchant("billingapp-tenant")
-	integrationharness.SeedPSPs(ctx, t, standalone.App().Runtime, tenant.MerchantID, ccbill("999981-0001"))
+	integrationharness.SeedPSPs(ctx, t, standalone.App().Runtime, tenant.MerchantID, nmi("999981-0001"))
 
 	newRuntime := func(declaration *embed.MerchantDeclaration) *embed.Runtime {
 		rt, err := embed.New(ctx, embed.Options{
 			Merchant: declaration,
-			Config: &config.Config{
+			Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 				TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true,
 				SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
 				DB: &config.DBConfig{URL: h.DSN},
@@ -59,7 +59,7 @@ func TestBillingApplicationRunsUnchangedAcrossDeployments(t *testing.T) {
 	boundClient, err := bound.Client()
 	require.NoError(t, err)
 	embeddedMerchant := boundClient.MerchantID()
-	integrationharness.SeedPSPs(ctx, t, standalone.App().Runtime, embeddedMerchant, ccbill("999981-0002"))
+	integrationharness.SeedPSPs(ctx, t, standalone.App().Runtime, embeddedMerchant, nmi("999981-0002"))
 	embeddedClient, err := bound.Client(openrails.WithCurrency("USD"))
 	require.NoError(t, err)
 	unbound := newRuntime(nil)
@@ -71,8 +71,8 @@ func TestBillingApplicationRunsUnchangedAcrossDeployments(t *testing.T) {
 	hosted := h.StartHosted("USD")
 	saasHTTP := hosted.ProvisionMerchant(hosted.RegisterUser("owner-a"), "billingapp-saas-"+uuid.NewString()[:8])
 	saasEngine := hosted.ProvisionMerchant(hosted.RegisterUser("owner-b"), "billingapp-saas-"+uuid.NewString()[:8])
-	integrationharness.SeedPSPs(ctx, t, hosted.AppRuntime(), saasHTTP.ID, ccbill("999981-0003"))
-	integrationharness.SeedPSPs(ctx, t, hosted.AppRuntime(), saasEngine.ID, ccbill("999981-0004"))
+	integrationharness.SeedPSPs(ctx, t, hosted.AppRuntime(), saasHTTP.ID, nmi("999981-0003"))
+	integrationharness.SeedPSPs(ctx, t, hosted.AppRuntime(), saasEngine.ID, nmi("999981-0004"))
 
 	deployments := []struct {
 		name     string
@@ -124,14 +124,16 @@ func seedMerchantFacts(ctx context.Context, t *testing.T, h *integrationharness.
 	priceKey := "billingapp-" + price.String()
 	exec(`INSERT INTO billing.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Membership')`, product, mid.UUID(), "billingapp-"+product.String())
 	exec(`INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,10000000,'USD',720,true)`, price, mid.UUID(), product, priceKey)
-	ccbillPSP := dbtest.EnsureTestPSP(ctx, t, pool, mid.UUID(), "ccbill")
-	exec(`INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,flex_id,configuration) VALUES($1,$2,$3,$4,'{"form_name":"billingapp-form"}')`, mid.UUID(), price, ccbillPSP, uuid.NewString())
+	nmiPSP := dbtest.EnsureTestPSP(ctx, t, pool, mid.UUID(), "nmi")
+	exec(`INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id) VALUES($1,$2,$3)`, mid.UUID(), price, nmiPSP)
+	buyer, checkoutMethod := uuid.New(), uuid.New()
+	exec(`INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), buyer)
+	exec(`INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,initial_transaction_id,rail_customer_ref,rail_method_ref,last_four,card_type) VALUES($1,$2,$3,$4,'nmi','billingapp-anchor',$5,$6,'4242','visa')`, checkoutMethod, mid.UUID(), buyer, nmiPSP, buyer.String(), checkoutMethod.String())
 
-	subscriber, method, subscription, nmiPSP := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	subscriber, method, subscription := uuid.New(), uuid.New(), uuid.New()
 	start := time.Now().UTC()
 	exec(`INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), subscriber)
-	exec(`INSERT INTO billing.psps(id,merchant_id,rail,environment,account_id,key) VALUES($1,$2,'nmi','test',$3,$3)`, nmiPSP, mid.UUID(), nmiPSP.String())
-	exec(`INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,initial_transaction_id,last_four,card_type) VALUES($1,$2,$3,$4,'nmi','billingapp-anchor','4242','visa')`, method, mid.UUID(), subscriber, nmiPSP)
+	exec(`INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,initial_transaction_id,rail_customer_ref,rail_method_ref,last_four,card_type) VALUES($1,$2,$3,$4,'nmi',$5,$6,$7,'4242','visa')`, method, mid.UUID(), subscriber, nmiPSP, method.String(), subscriber.String(), method.String())
 	exec(`INSERT INTO billing.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,'nmi','active',$7,$8,$9,$10)`,
 		subscription, mid.UUID(), subscriber, product, price, nmiPSP, subscription.String(), method, start, start.Add(48*time.Hour))
 
@@ -152,7 +154,8 @@ func seedMerchantFacts(ctx context.Context, t *testing.T, h *integrationharness.
 		return err
 	}))
 	return billingapp.Inputs{
-		Currency: "USD", Run: run, CheckoutPriceKey: priceKey, CheckoutRail: "ccbill",
+		Currency: "USD", Run: run, CheckoutPriceKey: priceKey, CheckoutRail: "nmi",
+		CheckoutCustomerID: openrails.CustomerID(buyer), CheckoutPaymentMethodID: openrails.PaymentMethodID(checkoutMethod),
 		SubscriberID: openrails.CustomerID(subscriber), SubscriptionID: openrails.SubscriptionID(subscription), InvoiceID: invoiceID,
 	}, price
 }
