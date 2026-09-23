@@ -111,6 +111,7 @@ var OwnedFunctions = []string{
 	"guard_ledger_account_facts()",
 	"guard_merchant_group_binding()",
 	"guard_merchant_restore()",
+	"guard_product_archive_operation()",
 	"guard_product_catalog_identity()",
 	"guard_provider_cutover_card()",
 	"guard_provider_cutover_intent()",
