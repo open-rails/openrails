@@ -67,6 +67,7 @@ func (d proofDirectory) GetBySlug(context.Context, string) (*merchants.Merchant,
 	row := d.row
 	return &row, nil
 }
+func (d proofDirectory) HasCanonicalNameAuthority() bool { return true }
 func (d proofDirectory) CanonicalSlug(context.Context, merchant.ID) (string, error) {
 	return d.row.Slug, nil
 }

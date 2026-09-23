@@ -5,6 +5,7 @@ package merchanttarget
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -17,6 +18,7 @@ type Directory interface {
 	Get(context.Context, merchant.ID) (*merchants.Merchant, error)
 	GetBySlug(context.Context, string) (*merchants.Merchant, error)
 	CanonicalSlug(context.Context, merchant.ID) (string, error)
+	HasCanonicalNameAuthority() bool
 }
 
 type contextKey struct{}
@@ -80,6 +82,9 @@ func Resolve(ctx context.Context, r *http.Request, directory Directory, bound me
 	if slug == "" && id.IsZero() {
 		return billingauth.Target{}, billingauth.GateError{Status: 400, Message: "merchant selector is required"}
 	}
+	if !bound.IsZero() && !id.IsZero() && id != bound {
+		return billingauth.Target{}, billingauth.GateError{Status: 409, Message: fmt.Sprintf("configured merchant binding mismatch: requested %s, configured %s", id, bound)}
+	}
 	if directory == nil {
 		return billingauth.Target{}, billingauth.GateError{Status: 503, Message: "merchant directory unavailable"}
 	}
@@ -102,16 +107,23 @@ func Resolve(ctx context.Context, r *http.Request, directory Directory, bound me
 	if !bound.IsZero() && selected.ID != bound {
 		return billingauth.Target{}, billingauth.GateError{Status: 409, Message: "configured merchant binding mismatch"}
 	}
+	resolvedSlug := selected.Slug
 	if slug == "" && selected.PermissionGroupID != "" {
 		// Project the current name through this captured immutable identity;
 		// never resolve its stored (possibly forwarded or reused) name again.
-		canonical, err := directory.CanonicalSlug(ctx, selected.ID)
-		if err != nil || canonical == "" {
-			return billingauth.Target{}, billingauth.GateError{Status: 503, Message: "merchant name authority unavailable"}
+		if !directory.HasCanonicalNameAuthority() {
+			// The stable ID/group is enough to address this book. Never present
+			// a possibly stale stored name as current authorization metadata.
+			resolvedSlug = ""
+		} else {
+			canonical, err := directory.CanonicalSlug(ctx, selected.ID)
+			if err != nil || canonical == "" {
+				return billingauth.Target{}, billingauth.GateError{Status: 503, Message: "merchant name authority unavailable"}
+			}
+			resolvedSlug = canonical
 		}
-		selected.Slug = canonical
 	}
-	target := billingauth.Target{MerchantID: selected.ID, MerchantSlug: selected.Slug, AuthorityGroupID: selected.PermissionGroupID}
+	target := billingauth.Target{MerchantID: selected.ID, MerchantSlug: resolvedSlug, AuthorityGroupID: selected.PermissionGroupID}
 	if r != nil {
 		// Preserve the actually resolved name separately from the canonical name.
 		// Active aliases may differ; changing the header later cannot widen it.

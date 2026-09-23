@@ -317,7 +317,7 @@ func TestStandaloneProviderAccountArchiveLifecycle(t *testing.T) {
 	s := providerArchiveSurface{
 		name:   "standalone",
 		mid:    owned.MerchantID,
-		client: surface.Client(openrails.WithAPIKey(owned.APIKey)),
+		client: surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID)),
 		call: func(t *testing.T, method, path string, body any) (int, []byte) {
 			return requestJSON(t, method, surface.BaseURL+path, owned.APIKey, body)
 		},

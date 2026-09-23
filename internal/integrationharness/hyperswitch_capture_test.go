@@ -185,7 +185,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 	}
 	surface := h.StartStandalone("usd", WithConfig(configure))
 	owned := surface.ProvisionOwnedMerchant("capture-" + uuid.NewString()[:8])
-	remote := surface.Client(openrails.WithAPIKey(owned.APIKey))
+	remote := surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID))
 	mid, custodian := owned.MerchantID, uuid.New()
 	psp := dbtest.EnsureTestPSP(ctx, t, h.sharedPool(), mid.UUID(), "nmi")
 	_, err := h.sharedPool().Exec(ctx, `INSERT INTO billing.custodians(id,merchant_id,key,kind,environment,account_id,settings,credential_versions) VALUES($1,$2,$3,'hyperswitch','test',$4,'{"public_api_key":"capture-public","profile_id":"capture-profile"}','{"api_key":1}')`, custodian, mid.UUID(), "capture-"+custodian.String(), g.account)
@@ -307,7 +307,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 	t.Run("lost caller response then cold runtime", func(t *testing.T) {
 		req := request()
 		before := g.count()
-		lost := surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithHTTPClient(&http.Client{Transport: loseCaptureReply{http.DefaultTransport, t}}))
+		lost := surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID), openrails.WithHTTPClient(&http.Client{Transport: loseCaptureReply{http.DefaultTransport, t}}))
 		_, err := lost.CreatePaymentMethodSession(ctx, req)
 		require.Error(t, err)
 		require.Equal(t, before+1, g.count())

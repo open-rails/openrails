@@ -40,7 +40,7 @@ func TestCatalogResourceAtomicOffers(t *testing.T) {
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	remote, err := openrails.NewRemote(server.URL, openrails.WithAPIKey("administrator"))
+	remote, err := openrails.NewRemote(server.URL, openrails.WithAPIKey("administrator"), openrails.WithMerchantID(mid))
 	require.NoError(t, err)
 	for _, transport := range []struct {
 		name   string

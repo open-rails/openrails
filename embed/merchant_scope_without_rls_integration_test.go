@@ -172,8 +172,10 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 		assert.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
 	})
 	t.Run("missing_merchant_fails_closed", func(t *testing.T) {
-		_, err := platform.Client()
-		assert.Error(t, err)
+		unselected, err := platform.Client()
+		require.NoError(t, err)
+		_, err = unselected.Products.Retrieve(ctx, b.product.ID)
+		assert.ErrorIs(t, err, openrails.ErrInvalid, "a reusable client never invents an operation target")
 		_, err = app.HostGraph(platform).Runtime.ProductService.GetByID(ctx, sdkProductID(t, b.product.ID).UUID())
 		assert.Error(t, err, "service access without a merchant must fail before unscoped SQL")
 		handler, err := httptesthost.Handler(platform, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true}, Gate: scopeWithoutRLSGate{}})

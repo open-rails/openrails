@@ -60,6 +60,13 @@ func (s *Service) WithGroupIDResolver(r GroupIDResolver) *Service {
 	return s
 }
 
+// HasCanonicalNameAuthority reports whether current names can be projected
+// through immutable group identity. ID-only operations do not require this
+// optional display-name capability.
+func (s *Service) HasCanonicalNameAuthority() bool {
+	return s != nil && s.groupIDResolver != nil
+}
+
 // CanonicalSlug projects a merchant identity's current public name. Bound
 // merchants require AuthKit; an unbound host-owned row uses its local name.
 func (s *Service) CanonicalSlug(ctx context.Context, id merchant.ID) (string, error) {
