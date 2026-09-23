@@ -3,6 +3,8 @@ name: Validate
 on:
   pull_request:
     branches: [master]
+  # Dispatch on master after releases to refresh caches shared with new PRs.
+  # PR-scoped caches cannot warm other pull requests.
   workflow_dispatch:
 
 permissions:
