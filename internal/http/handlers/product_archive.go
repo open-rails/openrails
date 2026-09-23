@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -177,7 +178,7 @@ func GetProductArchive(r *httprequest.Request) {
 		return
 	}
 	ctx := r.Request.Context()
-	op, err := loadProductArchive(ctx, r.State.DB, "id=$2", id)
+	op, err := loadProductArchiveByID(ctx, r.State.DB, id)
 	if err != nil {
 		if db.IsNotFound(err) || errors.Is(err, pgx.ErrNoRows) {
 			r.ErrorJSON(http.StatusNotFound, "product archive not found")
@@ -194,20 +195,30 @@ func GetProductArchive(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-const productArchiveColumns = `o.id, o.product_id, p.key, o.purchase_action, o.purchased_since, o.reason, o.created_at
-FROM openrails.product_archive_operations o JOIN openrails.products p ON p.merchant_id=o.merchant_id AND p.id=o.product_id`
-
-func loadProductArchive(ctx context.Context, d *db.DB, predicate string, arg any) (productArchiveOperation, error) {
-	var op productArchiveOperation
+func loadProductArchiveByID(ctx context.Context, d *db.DB, id uuid.UUID) (productArchiveOperation, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return op, err
+		return productArchiveOperation{}, err
 	}
-	var action string
-	err = d.Qx(ctx).QueryRow(ctx, `SELECT `+productArchiveColumns+` WHERE o.merchant_id=$1 AND o.`+predicate, mid.UUID(), arg).
-		Scan(&op.ID, &op.ProductID, &op.ProductKey, &action, &op.PurchasedSince, &op.Reason, &op.CreatedAt)
-	op.Action = openrails.PurchaseAction(action)
-	return op, err
+	row, err := d.Gen(ctx).GetProductArchiveByID(ctx, gen.GetProductArchiveByIDParams{MerchantID: mid.UUID(), ID: id})
+	if err != nil {
+		return productArchiveOperation{}, err
+	}
+	return productArchiveOperation{ID: row.ID, ProductID: row.ProductID, ProductKey: row.ProductKey, Action: openrails.PurchaseAction(row.PurchaseAction),
+		PurchasedSince: row.PurchasedSince, Reason: row.Reason, CreatedAt: row.CreatedAt}, nil
+}
+
+func loadProductArchiveByKey(ctx context.Context, d *db.DB, key string) (productArchiveOperation, []byte, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return productArchiveOperation{}, nil, err
+	}
+	row, err := d.Gen(ctx).GetProductArchiveByKey(ctx, gen.GetProductArchiveByKeyParams{MerchantID: mid.UUID(), IdempotencyKey: key})
+	if err != nil {
+		return productArchiveOperation{}, nil, err
+	}
+	return productArchiveOperation{ID: row.ID, ProductID: row.ProductID, ProductKey: row.ProductKey, Action: openrails.PurchaseAction(row.PurchaseAction),
+		PurchasedSince: row.PurchasedSince, Reason: row.Reason, CreatedAt: row.CreatedAt}, row.RequestSha256, nil
 }
 
 // acceptProductArchive records the receipt once per key; a replay with other
@@ -221,35 +232,35 @@ func acceptProductArchive(ctx context.Context, r *httprequest.Request, req produ
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "product_archive:"+mid.String()+":"+key); err != nil {
+		txDB := db.NewWithPgxTx(tx)
+		q := txDB.Gen(ctx)
+		if err := q.LockProductArchiveKey(ctx, "product_archive:"+mid.String()+":"+key); err != nil {
 			return fmt.Errorf("lock product archive: %w", err)
 		}
-		txDB := db.NewWithPgxTx(tx)
-		var stored []byte
-		err = tx.QueryRow(ctx, `SELECT request_sha256 FROM openrails.product_archive_operations WHERE merchant_id=$1 AND idempotency_key=$2`, mid.UUID(), key).Scan(&stored)
+		existing, stored, err := loadProductArchiveByKey(ctx, txDB, key)
 		switch {
 		case err == nil:
 			if string(stored) != string(fingerprint) {
 				refusal = productArchiveError(http.StatusConflict, "idempotency_key_reused", "Idempotency-Key was already used for a different product archive request")
 				return nil
 			}
-			op, err = loadProductArchive(ctx, txDB, "idempotency_key=$2", key)
-			return err
-		case !errors.Is(err, pgx.ErrNoRows):
+			op = existing
+			return nil
+		case !db.IsNotFound(err) && !errors.Is(err, pgx.ErrNoRows):
 			return fmt.Errorf("load product archive: %w", err)
 		}
-		var productID uuid.UUID
+		var product gen.OpenrailsProduct
 		if raw := strings.TrimSpace(req.ProductID); raw != "" {
 			typed, perr := openrails.ParseProductID(raw)
 			if perr != nil || typed.IsZero() {
 				refusal = productArchiveError(http.StatusBadRequest, "invalid_request", "invalid product_id")
 				return nil
 			}
-			err = tx.QueryRow(ctx, `SELECT id FROM openrails.products WHERE merchant_id=$1 AND id=$2`, mid.UUID(), typed.UUID()).Scan(&productID)
+			product, err = q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: mid.UUID(), ID: typed.UUID()})
 		} else {
-			err = tx.QueryRow(ctx, `SELECT id FROM openrails.products WHERE merchant_id=$1 AND key=$2`, mid.UUID(), strings.TrimSpace(req.ProductKey)).Scan(&productID)
+			product, err = q.GetProductByKey(ctx, gen.GetProductByKeyParams{MerchantID: mid.UUID(), Key: strings.TrimSpace(req.ProductKey)})
 		}
-		if errors.Is(err, pgx.ErrNoRows) {
+		if db.IsNotFound(err) || errors.Is(err, pgx.ErrNoRows) {
 			refusal = productArchiveError(http.StatusNotFound, "resource_missing", "product not found")
 			return nil
 		}
@@ -265,11 +276,11 @@ func acceptProductArchive(ctx context.Context, r *httprequest.Request, req produ
 			at := r.Clock.Now().UTC().Add(-window)
 			since = &at
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO openrails.product_archive_operations(merchant_id,idempotency_key,request_sha256,product_id,purchase_action,purchased_since,reason)
-			VALUES($1,$2,$3,$4,$5,$6,$7)`, mid.UUID(), key, fingerprint, productID, req.Purchases.Action, since, strings.TrimSpace(req.Reason)); err != nil {
+		if err := q.InsertProductArchive(ctx, gen.InsertProductArchiveParams{MerchantID: mid.UUID(), IdempotencyKey: key, RequestSha256: fingerprint,
+			ProductID: product.ID, PurchaseAction: req.Purchases.Action, PurchasedSince: since, Reason: strings.TrimSpace(req.Reason)}); err != nil {
 			return fmt.Errorf("record product archive: %w", err)
 		}
-		op, err = loadProductArchive(ctx, txDB, "idempotency_key=$2", key)
+		op, _, err = loadProductArchiveByKey(ctx, txDB, key)
 		return err
 	})
 	if err != nil {
@@ -314,29 +325,15 @@ func qualifyingPurchases(ctx context.Context, d *db.DB, op productArchiveOperati
 	if err != nil {
 		return nil, err
 	}
-	// One-time completed charges of the product. Subscription payments stay
-	// with their grandfathered subscriptions. Bookkeeping rows without money
-	// movement qualify only for off-rail channels, which carry real value.
-	rows, err := d.Qx(ctx).Query(ctx, `SELECT p.id, p.customer_id, p.amount, p.currency, p.purchased_at, p.money_movement
-		FROM openrails.payments p JOIN openrails.prices pr ON pr.merchant_id=p.merchant_id AND pr.id=p.price_id
-		WHERE p.merchant_id=$1 AND pr.product_id=$2 AND p.purchased_at >= $3
-		  AND p.refunded_payment_id IS NULL AND p.amount > 0 AND p.status='completed'
-		  AND p.deleted_at IS NULL AND p.subscription_id IS NULL
-		  AND (p.money_movement='rail' OR p.rail IN ('manual','admin'))
-		ORDER BY p.purchased_at, p.id`, mid.UUID(), op.ProductID, *op.PurchasedSince)
+	rows, err := d.Gen(ctx).ListProductArchivePurchases(ctx, gen.ListProductArchivePurchasesParams{MerchantID: mid.UUID(), ProductID: op.ProductID, PurchasedSince: *op.PurchasedSince})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []qualifyingPurchase
-	for rows.Next() {
-		var q qualifyingPurchase
-		if err := rows.Scan(&q.ID, &q.CustomerID, &q.Amount, &q.Currency, &q.PurchasedAt, &q.MoneyMovement); err != nil {
-			return nil, err
-		}
-		out = append(out, q)
+	out := make([]qualifyingPurchase, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, qualifyingPurchase{ID: row.ID, CustomerID: row.CustomerID, Amount: row.Amount, Currency: row.Currency, PurchasedAt: row.PurchasedAt, MoneyMovement: row.MoneyMovement})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func productArchiveRefundKey(op productArchiveOperation) string {
@@ -490,52 +487,27 @@ func recordPurchaseReview(ctx context.Context, d *db.DB, op productArchiveOperat
 	if err != nil {
 		return openrails.PurchaseReview{}, err
 	}
-	if _, err := d.Qx(ctx).Exec(ctx, `INSERT INTO openrails.reconciliation_findings(merchant_id,finding_type,subject_key,severity,status,recommended_action,evidence)
-		VALUES($1,$2,$3,'medium','requires_review',$4,$5::jsonb) ON CONFLICT (merchant_id,finding_type,subject_key) DO NOTHING`,
-		mid.UUID(), productArchiveFindingType, purchase.ID.String(), "Refund or dismiss a purchase of an archived product", raw); err != nil {
+	if err := d.Gen(ctx).InsertPurchaseReview(ctx, gen.InsertPurchaseReviewParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType,
+		SubjectKey: purchase.ID.String(), RecommendedAction: "Refund or dismiss a purchase of an archived product", Evidence: raw}); err != nil {
 		return openrails.PurchaseReview{}, fmt.Errorf("record purchase review: %w", err)
 	}
 	review, _, err := loadPurchaseReview(ctx, d, purchase.ID)
 	return review, err
 }
 
-const purchaseReviewColumns = `id, status, evidence, operator_notes, created_at, resolved_at`
-
 func loadPurchaseReview(ctx context.Context, d *db.DB, paymentID uuid.UUID) (openrails.PurchaseReview, bool, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return openrails.PurchaseReview{}, false, err
 	}
-	rows, err := d.Qx(ctx).Query(ctx, `SELECT `+purchaseReviewColumns+` FROM openrails.reconciliation_findings
-		WHERE merchant_id=$1 AND finding_type=$2 AND subject_key=$3`, mid.UUID(), productArchiveFindingType, paymentID.String())
+	row, err := d.Gen(ctx).GetPurchaseReviewBySubject(ctx, gen.GetPurchaseReviewBySubjectParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType, SubjectKey: paymentID.String()})
+	if db.IsNotFound(err) || errors.Is(err, pgx.ErrNoRows) {
+		return openrails.PurchaseReview{}, false, nil
+	}
 	if err != nil {
 		return openrails.PurchaseReview{}, false, err
 	}
-	reviews, err := scanPurchaseReviews(rows)
-	if err != nil || len(reviews) == 0 {
-		return openrails.PurchaseReview{}, false, err
-	}
-	return reviews[0], true, nil
-}
-
-func scanPurchaseReviews(rows pgx.Rows) ([]openrails.PurchaseReview, error) {
-	defer rows.Close()
-	var out []openrails.PurchaseReview
-	for rows.Next() {
-		var (
-			id       uuid.UUID
-			status   string
-			raw      []byte
-			notes    *string
-			created  time.Time
-			resolved *time.Time
-		)
-		if err := rows.Scan(&id, &status, &raw, &notes, &created, &resolved); err != nil {
-			return nil, err
-		}
-		out = append(out, purchaseReviewFromFinding(id, status, raw, notes, created, resolved))
-	}
-	return out, rows.Err()
+	return purchaseReviewFromFinding(row.ID, row.Status, row.Evidence, row.OperatorNotes, row.CreatedAt, row.ResolvedAt), true, nil
 }
 
 func purchaseReviewFromFinding(id uuid.UUID, status string, raw []byte, notes *string, created time.Time, resolved *time.Time) openrails.PurchaseReview {
@@ -599,26 +571,21 @@ func ListPurchaseReviews(r *httprequest.Request) {
 		r.InternalError("purchase reviews unavailable", err)
 		return
 	}
-	var total int64
-	where := `merchant_id=$1 AND finding_type=$2 AND status=ANY($3) AND ($4='' OR evidence->'local'->>'product_archive_id'=$4)`
-	args := []any{mid.UUID(), productArchiveFindingType, findingStatuses, archive}
-	if err := r.State.DB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.reconciliation_findings WHERE `+where, args...).Scan(&total); err != nil {
+	q := r.State.DB.Gen(ctx)
+	total, err := q.CountPurchaseReviews(ctx, gen.CountPurchaseReviewsParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType, Statuses: findingStatuses, ProductArchiveID: archive})
+	if err != nil {
 		r.InternalError("purchase reviews could not be counted", err)
 		return
 	}
-	rows, err := r.State.DB.Qx(ctx).Query(ctx, `SELECT `+purchaseReviewColumns+` FROM openrails.reconciliation_findings WHERE `+where+
-		` ORDER BY created_at, id LIMIT $5 OFFSET $6`, append(args, limit, offset)...)
+	rows, err := q.ListPurchaseReviews(ctx, gen.ListPurchaseReviewsParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType, Statuses: findingStatuses,
+		ProductArchiveID: archive, PageLimit: int64(limit), PageOffset: int64(offset)})
 	if err != nil {
 		r.InternalError("purchase reviews could not be listed", err)
 		return
 	}
-	reviews, err := scanPurchaseReviews(rows)
-	if err != nil {
-		r.InternalError("purchase reviews could not be read", err)
-		return
-	}
-	if reviews == nil {
-		reviews = []openrails.PurchaseReview{}
+	reviews := make([]openrails.PurchaseReview, 0, len(rows))
+	for _, row := range rows {
+		reviews = append(reviews, purchaseReviewFromFinding(row.ID, row.Status, row.Evidence, row.OperatorNotes, row.CreatedAt, row.ResolvedAt))
 	}
 	r.JSON(http.StatusOK, openrails.Page[openrails.PurchaseReview]{Object: "list", Data: reviews, Total: total, Limit: limit, Offset: offset, HasMore: int64(offset+len(reviews)) < total})
 }
@@ -684,16 +651,9 @@ func loadPurchaseReviewByID(ctx context.Context, d *db.DB, id uuid.UUID) (openra
 	if err != nil {
 		return openrails.PurchaseReview{}, err
 	}
-	rows, err := d.Qx(ctx).Query(ctx, `SELECT `+purchaseReviewColumns+` FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND finding_type=$2 AND id=$3`, mid.UUID(), productArchiveFindingType, id)
+	row, err := d.Gen(ctx).GetPurchaseReviewByID(ctx, gen.GetPurchaseReviewByIDParams{MerchantID: mid.UUID(), FindingType: productArchiveFindingType, ID: id})
 	if err != nil {
 		return openrails.PurchaseReview{}, err
 	}
-	reviews, err := scanPurchaseReviews(rows)
-	if err != nil {
-		return openrails.PurchaseReview{}, err
-	}
-	if len(reviews) == 0 {
-		return openrails.PurchaseReview{}, pgx.ErrNoRows
-	}
-	return reviews[0], nil
+	return purchaseReviewFromFinding(row.ID, row.Status, row.Evidence, row.OperatorNotes, row.CreatedAt, row.ResolvedAt), nil
 }
