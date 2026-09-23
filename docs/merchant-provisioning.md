@@ -26,40 +26,19 @@ Three file-backed push surfaces (example shapes in `config/bootstrap.example.yam
   with a durable application ID and expected revision in the document.
 
 Catalog application uses its document contract, with `prune: false` by default.
-The merchant configuration mutation flags remain independent:
+Merchant startup initialization uses `push-merchant-config --insert` (or `--seed`)
+and creates missing objects only. `--overwrite` and `--prune` are retired. Managed
+credentials use Client provider publication, not a manifest import into Vault/DB.
+Deliberate metadata changes use `apply-merchant-config` with an application ID and
+observed revision. See [the application contract](merchant-configuration-applications.md).
 
-- `--insert` creates missing state;
-- `--overwrite` re-asserts manifest values over existing state — without it,
-  secrets are **seed-once** (a value rotated out of band is never reverted to
-  the manifest seed);
-- `--prune` deletes merchant secrets (or archives catalog objects) absent from
-  the manifest.
-
-The flags compose; full reconciliation is `--insert --overwrite --prune`.
-
-MODE 2 (`merchant_config_source: api`) replaces this contract for
-`push-merchant-config` with a single flag: `--seed` runs the command as a
-**seed-once importer** (create-only — missing merchants/PSPs/secrets are
-created into the persistent stores; existing values are never touched).
-Without `--seed` the command refuses, and `--seed` refuses to combine with the
-mutation flags: after seeding, the HTTP APIs own merchant config and the
-manifest is never re-asserted over them.
-
-Startup behavior: if `/etc/openrails/bootstrap.yaml` exists, the server applies
-it **first-run only** (gated by AuthKit's bootstrap marker). Normal restarts
-never reapply merchant config or catalog manifests — with one deliberate
-exception: in MODE 1 (`merchant_config_source: manifest`, the default) the server
-itself re-converges the merchant manifest on **every** boot
-(insert+overwrite+prune, secrets held in memory). In MODE 2
-(`merchant_config_source: api`) boot manifests refuse to load; the one-time bootstrap
-path is `push-merchant-config --seed`, which imports the manifest into the
-persistent stores. Mode comparison:
-[standalone-integration.md](standalone-integration.md#two-merchant-source-modes);
-MODE 1 walkthrough: [self-hosting-mode1.md](self-hosting-mode1.md).
+AuthKit authority bootstrap remains first-run only. Merchant startup reloads
+snapshot credentials while preserving existing metadata and archived accounts.
+Catalog manifests are applied explicitly and are not replayed at ordinary boot.
 
 Embedded hosts provision merchants programmatically
 (`embed.Options.Merchant`, same manifest shape) and pass auth at
-HTTP mount time; the issuer-as-owner path below is the standalone mechanism.
+Runtime construction; the issuer-as-owner path below is the standalone mechanism.
 
 ## Merchant identity and names
 
@@ -282,7 +261,7 @@ error, never a silent drop.
 
 - Embedded hosts pass them from their own config tree:
   `embed.LoadMerchantConfigManifestWithOverlays(manifest, overlays...)`.
-- Standalone MODE 1 lists mounted files in `merchant_manifest_overlays`
+- Standalone snapshot custody lists mounted files in `merchant_manifest_overlays`
   (env `MERCHANT_MANIFEST_OVERLAYS`).
 
 The engine itself reads no `BILLING_MERCHANTS_*` env and no secret directory.
@@ -303,32 +282,18 @@ URL-escaped (CCBill's composite id is dash-joined precisely so it never embeds
 the `/` delimiter). Secret keys are validated against each rail's credential
 registry — unknown keys are rejected.
 
-Where the values live depends on the mode:
+Credential custody is selected explicitly by `secret_backend`:
 
-- **MODE 1** (`merchant_config_source: manifest`): in memory only, seeded from the
-  manifest every boot. Nothing is persisted; there is no store to rotate —
-  edit the file/env and reboot.
-- **MODE 2** (`merchant_config_source: api`): a persistent backend, selected by
-  `secret_backend`:
-  - `vault` — Vault KV-v2 at `<mount>/openrails/merchants/<merchant-uuid>/<name>`
-    (e.g. `secret/openrails/merchants/myapp/psps/nmi/live/100001/security_key`);
-    a Vault policy can scope a merchant to its own subtree.
-  - `db` — `openrails.merchant_secrets`, envelope-encrypted via
-    `openrails.merchant_deks`; `ENCRYPTION_MASTER_KEY` is required outside
-    development.
+- `snapshot`: host-owned in-memory values, reloaded and validated at startup.
+- `vault`: managed KV-v2 with server-owned mount/scope and actual policy rights.
+- `db`: envelope-encrypted PostgreSQL storage; `ENCRYPTION_MASTER_KEY` is required
+  for managed storage in both sandbox and live deployments.
 
-  The backend is declared intent, never auto-detected — the data lives in
-  exactly one place. `push-merchant-config --seed` is the bootstrap path: a
-  seed-once import of a manifest file into the configured backend, through the
-  same store services the HTTP APIs write through. It is idempotent and
-  create-only — a re-run never reverts a value rotated via the API — and the
-  store, not the file, is the runtime truth afterward. Keep the seed file
-  outside `/etc/openrails/merchants.yaml` (a manifest at the conventional path
-  refuses MODE-2 server boot) and delete it once seeded — it holds secret
-  values.
-
-Credentials are always loaded by merchant id at request time; they are never
-global process configuration.
+Managed provider writes use versioned Client publication with stable operation
+identity and a revision precondition. Readers resolve the published credential
+version. Direct backend edits do not publish credentials. Changing custody is an
+explicit migration, independent of external HTTP publication. Snapshot values
+are never implicitly copied to a managed backend.
 
 ## Merchant lifecycle
 
@@ -390,11 +355,11 @@ never mint a key with authority beyond its own credential's.
 ## Webhook routing
 
 Inbound rail webhooks resolve the merchant first, then verify. Each deployment
-shape mounts ONE surface, all sharing one handler:
+shape mounts the same account-addressed surface:
 
 ```text
 POST /v1/webhooks/:rail/:account_id                          # standalone: configured account resolves merchant
-POST /billing/v1/merchants/:merchant/webhooks/:rail/:account_id  # embedded: merchant and account are explicit
+POST /billing/v1/webhooks/:rail/:account_id                  # embedded under /billing
 ```
 
 `:rail` is the gateway KIND — `nmi`, `ccbill`, `stripe`, `solana`,
@@ -403,19 +368,20 @@ rail segment: `mobius` and `paykings` both post to `/v1/webhooks/nmi/{account_id
 
 Before deploying this route contract, update existing provider webhook registrations that omit the account segment. Old URLs return404. Updating the callback URL does not change subscription ownership or billing schedules.
 
-Deployments with per-merchant API hosts additionally resolve the merchant from
-the `Host` header at `/webhooks/:provider/:account_id` (see
-[operations.md](operations.md)). In every case the router is **not** the trust
-boundary: OpenRails re-derives the merchant, loads that merchant's signing
-secret, and verifies the signature. An unresolvable slug/host is rejected —
-never routed to a default merchant.
+Provider account identity resolves the merchant in the runtime's configured
+sandbox/live environment. A runtime bound to one merchant refuses another
+merchant's account. The account's signature or provider-specific verification
+must pass, and payload account identity must agree. Host headers and merchant
+slugs do not grant callback authority. The public billing base supplies only the
+external mount prefix; generated Stripe URLs use this same path.
 
 ## Admin surface
 
 OpenRails core exposes no cross-merchant lifecycle or credential routes.
 Merchant admin APIs are scoped to the authenticated merchant. Payment-provider
-mutation routes are omitted when `merchant_config_source=manifest`; provider reads
-and routing dry runs remain available. Catalog mutation routes are omitted unless
+configuration routes require explicit HTTP publication. Snapshot credential writes
+are unavailable, while authorized metadata operations and archive decisions remain
+available through the Client. Catalog mutation routes are omitted unless
 `allow_catalog_updates: true`; the same policy denies ordinary embedded Client
 writes. Catalog reads remain available, and trusted local operator application
 is independent of this flag. Catalog data always lives in the database.

@@ -56,7 +56,7 @@ type PaymentProviderList struct {
 // Credentials are write-only. Retry with the same operation identity and payload;
 // the server owns credential storage paths, environment and publication authority.
 type UpsertPaymentProviderParams struct {
-	OperationID       string            `json:"operation_id"`
+	OperationID       uuid.UUID         `json:"operation_id"`
 	ExpectedRevision  *int64            `json:"expected_revision"`
 	Enabled           *bool             `json:"enabled"`
 	AccountID         string            `json:"account_id"`

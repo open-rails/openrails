@@ -40,7 +40,7 @@ func TestDeclineLifecyclePreservesCustomerInstruments(t *testing.T) {
 	t.Cleanup(gateway.Close)
 	h := New(t, t.Context())
 	surface := h.StartStandalone("USD", WithClock(clockwork.NewFakeClockAt(now)), WithConfig(func(c *config.Config) {
-		c.MerchantConfigSource = config.MerchantConfigSourceAPI
+		c.MerchantConfigHTTP = true
 		c.SecretBackend = config.SecretBackendDB
 		c.ProviderWriteMode = config.ProviderWriteModeLimited
 		c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: gateway.URL}

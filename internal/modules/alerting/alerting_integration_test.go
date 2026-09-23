@@ -77,7 +77,7 @@ func seedMerchant(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) {
 
 func newService(t *testing.T, appDB *db.DB, email alerting.EmailSender) *alerting.Service {
 	t.Helper()
-	backend, err := merchantsecrets.Build(context.Background(), &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}}, appDB.DataPool())
+	backend, err := merchantsecrets.Build(context.Background(), &config.Config{MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}}, appDB.DataPool())
 	require.NoError(t, err)
 	return alerting.NewService(alerting.Deps{
 		DB:      appDB,

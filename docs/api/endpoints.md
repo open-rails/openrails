@@ -578,7 +578,7 @@ boundary). Success returns `200 { "status": "accepted" }`.
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/v1/webhooks/{provider}/{account_id}` | Standalone: the receiving PSP account is explicitly pinned in the path and its credentials verify the callback |
-| POST | `/billing/v1/merchants/{merchant}/webhooks/{provider}/{account_id}` | Embedded: the host pins the merchant and receiving PSP account; that account's credentials verify the callback |
+| POST | `/billing/v1/webhooks/{provider}/{account_id}` | Embedded under /billing: the configured account resolves its merchant; runtime bindings and account credentials verify the callback |
 
 `{provider}` is the gateway KIND — `nmi`, `ccbill`, `stripe`, `solana`,
 `basistheory`. It is never a PSP key: `mobius` and `paykings` both post to

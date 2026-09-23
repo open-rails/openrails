@@ -55,22 +55,21 @@ maps onto the config tree by prefix, e.g. `DB_URL` → `db.url`,
 `secret_backend`. For the two operating dials there are also CLI flags.
 Precedence: **flag beats env beats yaml.**
 
-Only exact `env: dev` or `env: development` values enable development
-relaxations. Every other non-empty environment label is production-strict,
-including `staging`, `production`, and misspellings.
+Security defaults apply in sandbox and live deployments. Narrow local auth
+exceptions must be explicit; provider posture does not relax storage, issuer,
+signing or trusted-proxy requirements.
 
 ```bash
 openrails run-server --config /etc/openrails/config.yaml \
   --provider-write-mode full --test-mode live
 ```
 
-**Required outside development** (config validation refuses boot otherwise):
+**Required configuration** (config validation refuses boot otherwise):
 
 - `provider_write_mode: full | limited | readonly` — how much OpenRails may do
   against the rails (see [operations.md](operations.md) for the full matrix;
   `limited` parks system-initiated writes like dunning, `readonly` blocks all
-  provider writes at the wire). It must be declared explicitly outside
-  development; unset in development fail-closes to `readonly`.
+  provider writes at the wire). Declare it explicitly; unset internal policy fails closed to `readonly`.
 - `test_mode: sandbox | live` — the credential axis, orthogonal to the above.
   `sandbox` routes every rail to its test environment and refuses live
   credentials at boot (live Stripe keys rejected, NMI accounts probed), so no
@@ -79,26 +78,23 @@ openrails run-server --config /etc/openrails/config.yaml \
   every environment — credential validation, not the env string, keeps it
   honest.
 - Non-default database credentials, and an `https` `auth.issuer`.
-- **Merchant-secret storage** (mode 2 / `merchant_config_source: api` only): a secret
-  backend is required outside development — either Vault
-  (`secret_backend: vault`) or the DB store with `ENCRYPTION_MASTER_KEY`
-  (base64, 32-byte AES-256) for envelope encryption. Host provider credentials
-  stay in memory. Optional managed alert-webhook URLs and HyperSwitch SDK
-  capture authorization have their own encryption requirements.
+- **Credential custody**: explicitly select `secret_backend: snapshot`, `vault`,
+  or `db`. Managed DB storage requires `ENCRYPTION_MASTER_KEY` (base64, 32-byte
+  AES-256) even in sandbox. Snapshot credentials stay in process memory.
 - Behind a load balancer, set `trusted_proxies` to its CIDR range or
   `X-Forwarded-For` is ignored and rate limiting keys on the LB's address.
 
-### Two merchant-source modes
+### Credential custody and configuration publication
 
-`merchant_config_source` in config.yaml selects where merchant truth lives:
+Merchant metadata lives in PostgreSQL. `secret_backend` selects snapshot, Vault
+or encrypted DB credential custody. `merchant_config_http` independently selects
+external configuration routes. Authorized local Client operations remain available
+with HTTP off; credential mutation additionally requires a writable backend.
 
-| | MODE 1 — `manifest` (default) | MODE 2 — `api` |
-|---|---|---|
-| Source of truth | YAML mounted at boot, held in memory | DB + Vault, mutated over HTTP APIs |
-| Change a merchant/credential | edit file(s) + reboot | call the API |
-| Provider credentials at rest | never persisted (in-memory) | Vault KV or DEK-encrypted DB (required outside dev) |
-| Provider configuration mutation APIs | routes omitted (reads and dry runs work) | credential writes require a writable secret backend; metadata archives remain available |
-| Pick when | one/few merchants you operate yourself; secrets rendered by Vault Agent/k8s | merchants managed at runtime, SaaS-style |
+Startup initializes missing identities and metadata and reloads snapshot values.
+It preserves subsequent API edits and archived providers. Explicit metadata
+applications carry a stable ID and revision precondition; managed credentials use
+separate publication operations. See [metadata applications](merchant-configuration-applications.md).
 
 Catalogs always use database state. `allow_catalog_updates` independently controls
 ordinary catalog Client/API mutations and defaults to false in both credential
@@ -107,7 +103,7 @@ Trusted operator application is still permitted and uses durable application IDs
 so an unchanged artifact does not overwrite later edits. This does not change
 provider permissions, sandbox/live posture, or `provider_write_mode`.
 
-Full MODE 1 walkthrough (file layout, YAML secret overlays via
+Snapshot walkthrough (file layout, YAML secret overlays via
 `merchant_manifest_overlays`, rotation): [self-hosting-mode1.md](self-hosting-mode1.md).
 
 ### First run
@@ -132,17 +128,15 @@ openrails push-auth-bootstrap --config /etc/openrails/config.yaml --file /etc/op
 #    remote_application block).
 openrails push-merchant-config --config /etc/openrails/config.yaml --file /etc/openrails/merchants.yaml --insert
 
-# 3. Catalog: products, entitlements, prices, per-PSP links; pushes to
-#    providers where supported (Stripe auto-creates; NMI/CCBill are link-only).
+# 3. Catalog: products, entitlements, prices and validated provider bindings.
+#    Provider creation and mutation use their separate workflows.
 openrails apply-catalog --merchant your-merchant --config /etc/openrails/config.yaml --file /etc/openrails/catalog.yaml
 ```
 
-Mode notes: in MODE 1 the server itself loads `/etc/openrails/merchants.yaml`
-on every boot and converges it (insert+overwrite+prune, secrets in memory) — so
-step 2 is simply "mount the file and boot". If `/etc/openrails/bootstrap.yaml`
-is mounted, startup applies it first-run only (gated by AuthKit's bootstrap
-marker). Normal restarts never re-apply merchant config or catalog manifests —
-changing them is an explicit push (or, MODE 1, an edit + reboot).
+Startup loads a configured merchant snapshot into process memory and initializes
+missing metadata. Existing API edits and archived accounts survive restarts.
+AuthKit bootstrap is first-run only; catalog application is always explicit.
+Use metadata applications for deliberate versioned configuration changes.
 
 **Create an API key.** Backend credentials are merchant-scoped API keys
 (`openrails_st_…`) minted through the merchant surface:

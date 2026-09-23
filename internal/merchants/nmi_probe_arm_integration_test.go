@@ -208,22 +208,15 @@ func TestUpsertPaymentProviderConfigRefusesUsingExistingStoredKey(t *testing.T) 
 	require.NoError(t, err)
 	simServer.Close()
 
-	// Simulate the credential having been rotated to a LIVE key out of band
-	// (a merchant editing the raw secret store directly is out of scope for
-	// this codebase, but a follow-up arm that forgets to resend
-	// security_key must still be checked against what's on file).
-	name, err := PSPSecretName("nmi", "test", "arm-348-existing", "security_key")
-	require.NoError(t, err)
-	_, err = store.Put(ctx, tn.ID, name, "now-a-live-key")
-	require.NoError(t, err)
-
+	// The provider can change account posture without changing its key. A
+	// metadata-only update must re-check the exact published credential.
 	liveServer := nmiProbeArmTestServer(t, "2") // declined -> LIVE account
 	defer liveServer.Close()
 	svc.nmiProbeV5BaseURL = liveServer.URL
+	svc.nmiCredentialProbeQueryURL = liveServer.URL
 
-	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: publicationRevision(0),
-		AccountID:    "arm-348-existing",
-		PublicConfig: map[string]string{"note": "unrelated update"},
+	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: currentPublicationRevision(t, svc, tn.ID, "nmi"),
+		AccountID: "arm-348-existing",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "PRODUCTION NMI credentials")

@@ -4,6 +4,7 @@ package controlplane_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -69,9 +70,10 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := &config.Config{
-		TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
+		TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, MerchantConfigHTTP: true,
+		Encryption:    &config.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))},
 		SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn},
-		Auth: &config.AuthConfig{Issuer: "https://handle.openrails.test", KeysPath: t.TempDir()},
+		Auth: &config.AuthConfig{Issuer: "https://handle.openrails.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, DirectPeerIP: true},
 	}
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
@@ -159,44 +161,56 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, members, 1)
 	require.Equal(t, created.MerchantID, members[0].ID)
-	_, err = cp.GetPaymentProviderConfig(ctx, created.MerchantID, "stripe", "test")
-	require.ErrorIs(t, err, controlplane.ErrPaymentProviderNotFound, "an unconfigured rail is a typed refusal")
+	_, err = client.PaymentProviders.Retrieve(ctx, "stripe")
+	require.ErrorIs(t, err, openrails.ErrNotFound, "an unconfigured rail is a typed refusal")
 	require.ErrorIs(t, cp.SetMerchantDisplayName(ctx, merchant.ID(uuid.New()), "Missing"), controlplane.ErrMerchantNotFound)
-	_, err = cp.UpsertPaymentProviderConfig(ctx, created.MerchantID, "ccbill", controlplane.UpsertPaymentProviderConfigRequest{
+	_, err = client.PaymentProviders.Upsert(ctx, "ccbill", &openrails.UpsertPaymentProviderParams{OperationID: uuid.New(), ExpectedRevision: new(int64),
 		AccountID: "999983-0000", Credentials: map[string]string{"salt": "handle-fixture"}})
 	require.NoError(t, err)
-	provider, err := cp.GetPaymentProviderConfig(ctx, created.MerchantID, "ccbill", "test")
+	provider, err := client.PaymentProviders.Retrieve(ctx, "ccbill")
 	require.NoError(t, err)
 	require.Equal(t, "999983-0000", provider.AccountID)
+	encodedProvider, err := json.Marshal(provider)
+	require.NoError(t, err)
+	require.NotContains(t, string(encodedProvider), "handle-fixture", "credential values never appear in Client readback")
+	local, err := rt.Client(openrails.WithMerchantID(created.MerchantID))
+	require.NoError(t, err)
+	localProvider, err := local.PaymentProviders.Retrieve(ctx, "ccbill")
+	require.NoError(t, err)
+	require.Equal(t, provider.ID, localProvider.ID)
+	require.Equal(t, provider.Revision, localProvider.Revision)
+
 	checkout, err := client.GetCheckoutConfig(ctx)
 	require.NoError(t, err)
 	require.Len(t, checkout.PSPs, 1)
 
-	// #655/#656 lifecycle through the handle: list by status, archive by the
+	// Provider lifecycle through the public Client: list by status, archive by the
 	// immutable id with no provider call, last-active refusal, idempotence.
-	active, err := cp.ListPaymentProviderConfigs(ctx, created.MerchantID, "ccbill", "active")
+	active, err := client.PaymentProviders.List(ctx, &openrails.PaymentProviderListParams{Provider: "ccbill", Status: "active"})
 	require.NoError(t, err)
-	require.Len(t, active, 1)
-	require.Equal(t, provider.ID, active[0].ID)
-	_, err = cp.ArchivePaymentProviderAccount(ctx, created.MerchantID, "ccbill", provider.ID, controlplane.ArchivePaymentProviderAccountRequest{})
-	var lastActive *controlplane.LastActiveProviderAccountError
+	require.Len(t, active.Data, 1)
+	require.Equal(t, provider.ID, active.Data[0].ID)
+	_, err = client.PaymentProviders.Archive(ctx, "ccbill", provider.ID, &openrails.ArchivePaymentProviderAccountParams{})
+	var lastActive *openrails.StatusError
 	require.ErrorAs(t, err, &lastActive, "the rail's only active account needs the explicit override")
-	require.Equal(t, provider.ID, lastActive.Account.ID)
-	archived, err := cp.ArchivePaymentProviderAccount(ctx, created.MerchantID, "ccbill", provider.ID, controlplane.ArchivePaymentProviderAccountRequest{AllowLast: true})
+	require.ErrorIs(t, err, openrails.ErrConflict)
+	require.Equal(t, "provider_account_last_active", lastActive.Code)
+	require.Equal(t, provider.ID.String(), lastActive.Metadata["psp_id"])
+	archived, err := client.PaymentProviders.Archive(ctx, "ccbill", provider.ID, &openrails.ArchivePaymentProviderAccountParams{AllowLast: true})
 	require.NoError(t, err)
 	require.True(t, archived.Archived)
 	require.Equal(t, provider.ID, archived.ID)
-	repeat, err := cp.ArchivePaymentProviderAccount(ctx, created.MerchantID, "ccbill", provider.ID, controlplane.ArchivePaymentProviderAccountRequest{})
+	repeat, err := client.PaymentProviders.Archive(ctx, "ccbill", provider.ID, &openrails.ArchivePaymentProviderAccountParams{})
 	require.NoError(t, err, "archiving an archived account is a no-op")
 	require.True(t, repeat.Archived)
-	_, err = cp.ArchivePaymentProviderAccount(ctx, created.MerchantID, "ccbill", uuid.New(), controlplane.ArchivePaymentProviderAccountRequest{AllowLast: true})
-	require.ErrorIs(t, err, controlplane.ErrPaymentProviderAccountNotFound)
-	_, err = cp.GetPaymentProviderConfig(ctx, created.MerchantID, "ccbill", "test")
-	require.ErrorIs(t, err, controlplane.ErrPaymentProviderNotFound, "no active account remains on the rail")
-	drained, err := cp.ListPaymentProviderConfigs(ctx, created.MerchantID, "", "archived")
+	_, err = client.PaymentProviders.Archive(ctx, "ccbill", uuid.New(), &openrails.ArchivePaymentProviderAccountParams{AllowLast: true})
+	require.ErrorIs(t, err, openrails.ErrNotFound)
+	_, err = client.PaymentProviders.Retrieve(ctx, "ccbill")
+	require.ErrorIs(t, err, openrails.ErrNotFound, "no active account remains on the rail")
+	drained, err := client.PaymentProviders.List(ctx, &openrails.PaymentProviderListParams{Status: "archived"})
 	require.NoError(t, err)
-	require.Len(t, drained, 1)
-	require.True(t, drained[0].Drained, "archived with no obligations is drained, and still listed")
+	require.Len(t, drained.Data, 1)
+	require.True(t, drained.Data[0].Drained, "archived with no obligations is drained, and still listed")
 	checkout, err = client.GetCheckoutConfig(ctx)
 	require.NoError(t, err)
 	require.Empty(t, checkout.PSPs, "an archived account is not advertised for new checkout")

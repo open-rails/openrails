@@ -59,14 +59,14 @@ func newTreasuryWorkflow(t *testing.T, sandbox ...*config.ProviderSandboxConfig)
 	t.Helper()
 	h := integrationharness.New(t, context.Background())
 	surface := h.StartStandalone("USD", integrationharness.WithConfig(func(cfg *config.Config) {
-		cfg.MerchantConfigSource = config.MerchantConfigSourceAPI
+		cfg.MerchantConfigHTTP = true
 		cfg.SecretBackend = config.SecretBackendDB
 		cfg.ProviderWriteMode = config.ProviderWriteModeFull
 		cfg.ProviderSandbox = providerSandbox
 	}))
 	owned := surface.ProvisionOwnedMerchant("treasury-" + uuid.NewString()[:8])
 	host, err := embed.New(t.Context(), embed.Options{
-		Config: &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, ProviderSandbox: providerSandbox, DB: &config.DBConfig{URL: h.DSN}},
+		Config: &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, ProviderSandbox: providerSandbox, DB: &config.DBConfig{URL: h.DSN}},
 		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)

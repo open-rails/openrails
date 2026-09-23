@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -162,9 +163,11 @@ func hydrateThinStripeEvent(ctx context.Context, secretKey, accountID string, bo
 	return json.Marshal(result)
 }
 
+var errStripeWebhookAccountMismatch = errors.New("stripe event account/context does not match routed account")
+
 func validateStripeEventScope(event stripeThinEnvelope, accountID string) error {
 	if (event.Account != "" && event.Account != accountID) || (event.Context != "" && event.Context != accountID) {
-		return fmt.Errorf("stripe event account/context does not match routed account")
+		return errStripeWebhookAccountMismatch
 	}
 	return nil
 }

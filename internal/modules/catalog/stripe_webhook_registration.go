@@ -17,12 +17,20 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
+// StripeWebhookPublisher owns atomic credential references for one provider account.
+type StripeWebhookPublisher interface {
+	Load(context.Context) (merchants.StripeWebhookCredentialState, error)
+	Publish(context.Context, string, string) error
+	RetireOverlap(context.Context) error
+}
+
 type ManagedStripeWebhookParams struct {
+	Publication StripeWebhookPublisher
+
 	StripeClients       *stripeapi.Factory
 	Config              *config.Config
 	SecretStore         merchants.MerchantSecretStore
 	MerchantID          merchant.ID
-	MerchantSlug        string
 	ProviderEnvironment string
 	PspID               string
 	SecretKey           string
@@ -44,11 +52,6 @@ type ManagedStripeWebhookResult struct {
 	SkipReason string
 	SecretName string
 	WebhookURL string
-	// RepairedFrom names the secret this pass copied into the current derived
-	// name because the derived name had drifted (a psps row's environment or
-	// account_id changed). Non-empty means a local record was repaired instead
-	// of a remote endpoint being replaced.
-	RepairedFrom string
 	// Retired are superseded endpoints this pass deleted (AllowRetire only).
 	Retired []string
 	// RetirePending are superseded endpoints still inside their overlap window,
@@ -59,15 +62,10 @@ type ManagedStripeWebhookResult struct {
 	OperatorAction string
 }
 
-// PublicStripeWebhookURL builds the inbound Stripe webhook URL for a merchant.
-// Every endpoint includes accountID. An empty account is an error; there is no
-// default-account webhook URL. Embedded hosts include their merchant slug,
-// while standalone hosts pass an empty slug for /v1/webhooks/stripe/{account_id}.
-//
-// or#893: the slug form is the EMBEDDED surface. Standalone stopped mounting
-// the merchant-slug alias — its one surface is …/webhooks/stripe/{account_id},
-// with the merchant derived from that globally unique configured account.
-func PublicStripeWebhookURL(cfg *config.Config, merchantSlug, accountID string) (string, bool, error) {
+// PublicStripeWebhookURL builds the canonical account-specific callback URL.
+// Embedded and standalone hosts publish the same path under their public billing
+// mount. The account resolves the merchant; a slug is never callback authority.
+func PublicStripeWebhookURL(cfg *config.Config, accountID string) (string, bool, error) {
 	base := ""
 	if cfg != nil {
 		base = strings.TrimSpace(cfg.PublicBillingBaseURL)
@@ -92,13 +90,7 @@ func PublicStripeWebhookURL(cfg *config.Config, merchantSlug, accountID string) 
 	if err := (httpx.Policy{}).ValidateURL(base); err != nil {
 		return "", false, nil
 	}
-	parts := []string{"v1"}
-	if strings.TrimSpace(merchantSlug) != "" {
-		parts = append(parts, "merchants", merchantSlug, "webhooks", "stripe")
-	} else {
-		parts = append(parts, "webhooks", "stripe")
-	}
-	parts = append(parts, accountID)
+	parts := []string{"v1", "webhooks", "stripe", accountID}
 	out, err := url.JoinPath(strings.TrimRight(base, "/"), parts...)
 	if err != nil {
 		return "", false, err
@@ -110,7 +102,7 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 	if p.Config != nil && p.Config.IsLimitedMode() {
 		return ManagedStripeWebhookResult{Skipped: true, SkipReason: "provider writes disabled"}, nil
 	}
-	webhookURL, ok, err := PublicStripeWebhookURL(p.Config, p.MerchantSlug, p.PspID)
+	webhookURL, ok, err := PublicStripeWebhookURL(p.Config, p.PspID)
 	if err != nil {
 		return ManagedStripeWebhookResult{}, err
 	}
@@ -119,51 +111,44 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 	}
 
 	secretKey := strings.TrimSpace(p.SecretKey)
-	var secretName, previousName, repairedFrom, currentSecret string
-	haveSecret := false
-	if p.SecretStore != nil && !p.MerchantID.IsZero() && strings.TrimSpace(p.PspID) != "" {
-		keyName, err := merchants.PSPSecretName("stripe", p.ProviderEnvironment, p.PspID, "secret_key")
+	var secretName, currentSecret, previousSecret, endpointID string
+	haveSecret, writable := false, false
+	if p.Publication != nil {
+		state, err := p.Publication.Load(ctx)
 		if err != nil {
 			return ManagedStripeWebhookResult{}, err
 		}
+		secretKey, currentSecret, endpointID, writable = state.SecretKey, state.CurrentSecret, state.EndpointID, state.Writable
+		haveSecret = currentSecret != ""
+		previousSecret = state.PreviousSecret
 		secretName, err = merchants.PSPSecretName("stripe", p.ProviderEnvironment, p.PspID, "webhook_signing_secret")
 		if err != nil {
 			return ManagedStripeWebhookResult{}, err
 		}
-		previousName, err = merchants.PSPSecretName("stripe", p.ProviderEnvironment, p.PspID, "webhook_signing_secret_previous")
+	} else if p.SecretStore != nil && !p.MerchantID.IsZero() {
+		// Read-only host snapshots do not publish generated secrets. Every managed
+		// mutation requires account-bound publication, never direct backend writes.
+		var err error
+		secretName, err = merchants.PSPSecretName("stripe", p.ProviderEnvironment, p.PspID, "webhook_signing_secret")
 		if err != nil {
 			return ManagedStripeWebhookResult{}, err
 		}
-		if secretKey == "" {
-			sec, err := p.SecretStore.Get(ctx, p.MerchantID, keyName)
-			if err != nil && !errors.Is(err, merchants.ErrSecretNotFound) {
-				return ManagedStripeWebhookResult{}, fmt.Errorf("load stripe secret key: %w", err)
-			}
-			secretKey = strings.TrimSpace(sec.Value)
-		}
 		sec, err := p.SecretStore.Get(ctx, p.MerchantID, secretName)
 		if err != nil && !errors.Is(err, merchants.ErrSecretNotFound) {
-			return ManagedStripeWebhookResult{}, fmt.Errorf("load stripe webhook secret: %w", err)
+			return ManagedStripeWebhookResult{}, err
 		}
-		currentSecret = strings.TrimSpace(sec.Value)
+		currentSecret = sec.Value
 		haveSecret = currentSecret != ""
-
-		// #856: a miss here means UNKNOWN, not lost. The commonest cause is a
-		// derived-name drift — the psps row's environment or account_id changed,
-		// so the name we look under moved while the secret sat untouched under
-		// the old one. Repair the local record before concluding anything about
-		// the remote endpoint.
-		if !haveSecret {
-			recovered, from, rerr := recoverStripeWebhookSecret(ctx, p.SecretStore, p.MerchantID, secretName)
-			if rerr != nil {
-				return ManagedStripeWebhookResult{}, rerr
+		if secretKey == "" {
+			name, err := merchants.PSPSecretName("stripe", p.ProviderEnvironment, p.PspID, "secret_key")
+			if err != nil {
+				return ManagedStripeWebhookResult{}, err
 			}
-			if recovered != "" {
-				if _, err := p.SecretStore.Put(ctx, p.MerchantID, secretName, recovered); err != nil {
-					return ManagedStripeWebhookResult{}, fmt.Errorf("repair stripe webhook secret name: %w", err)
-				}
-				currentSecret, haveSecret, repairedFrom = recovered, true, from
+			sec, err = p.SecretStore.Get(ctx, p.MerchantID, name)
+			if err != nil && !errors.Is(err, merchants.ErrSecretNotFound) {
+				return ManagedStripeWebhookResult{}, err
 			}
+			secretKey = sec.Value
 		}
 	}
 
@@ -173,18 +158,26 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 
 	// Provider-created signing secrets require durable writable custody. A
 	// host-declared secret remains usable through a read-only backend.
-	cannotPersist := !merchants.CanStageCredentials(p.SecretStore)
+	cannotPersist := !writable
 	if cannotPersist && !haveSecret {
 		return ManagedStripeWebhookResult{}, fmt.Errorf("credential backend cannot retain generated webhook secret: declare webhook_signing_secret and register endpoint %s out-of-band", webhookURL)
 	}
 
 	rails := railresolve.FixedSet{"stripe": &config.PSPConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
 	svc := &StripeCatalogService{StripeClients: p.StripeClients, Config: p.Config, Rails: rails, BaseURL: p.StripeBaseURL}
+	var publish func(context.Context, string, string) error
+	if writable {
+		publish = p.Publication.Publish
+	}
 	res, err := svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{
+		PublishedEndpointID:      endpointID,
+		RequirePublishedIdentity: writable || endpointID != "",
+		PublishSecret:            publish,
+
 		URL:           webhookURL,
 		EnabledEvents: p.EnabledEvents,
 		HaveSecret:    haveSecret,
-		ForbidCreate:  cannotPersist,
+		ForbidCreate:  cannotPersist || previousSecret != "",
 		Now:           p.Now,
 		RetireOverlap: p.RetireOverlap,
 	})
@@ -193,7 +186,7 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 	}
 	if errors.Is(err, ErrWebhookEndpointBudgetExhausted) {
 		return ManagedStripeWebhookResult{
-			SecretName: secretName, WebhookURL: webhookURL, RepairedFrom: repairedFrom,
+			SecretName: secretName, WebhookURL: webhookURL,
 			OperatorAction: fmt.Sprintf("stripe webhook endpoint %s could not roll over: %v — retire the superseded endpoints (they still deliver) before the account reaches Stripe's per-account limit", webhookURL, err),
 		}, nil
 	}
@@ -201,28 +194,16 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 		return ManagedStripeWebhookResult{}, err
 	}
 	out := ManagedStripeWebhookResult{
-		Result: res, SecretName: secretName, WebhookURL: webhookURL, RepairedFrom: repairedFrom,
-	}
-
-	if s := strings.TrimSpace(res.Secret); s != "" {
-		if secretName == "" {
-			return ManagedStripeWebhookResult{}, fmt.Errorf("stripe webhook secret destination not configured")
-		}
-		// Demote the outgoing secret BEFORE promoting the new one: during the
-		// overlap both endpoints deliver, and the inbound verifier tries both.
-		// Events already queued on the old endpoint keep verifying.
-		if previousName != "" && currentSecret != "" && len(res.Superseded) > 0 {
-			if _, err := p.SecretStore.Put(ctx, p.MerchantID, previousName, currentSecret); err != nil {
-				return ManagedStripeWebhookResult{}, fmt.Errorf("retain previous stripe webhook secret: %w", err)
-			}
-		}
-		if _, err := p.SecretStore.Put(ctx, p.MerchantID, secretName, s); err != nil {
-			return ManagedStripeWebhookResult{}, fmt.Errorf("store stripe webhook secret: %w", err)
-		}
+		Result: res, SecretName: secretName, WebhookURL: webhookURL,
 	}
 
 	out.RetirePending = res.Legacy
 	if len(res.Legacy) == 0 {
+		if p.AllowRetire && writable && previousSecret != "" && !res.UnqualifiedPredecessors && res.EndpointID == endpointID {
+			if err := p.Publication.RetireOverlap(ctx); err != nil {
+				return out, err
+			}
+		}
 		return out, nil
 	}
 	if !p.AllowRetire {
@@ -235,12 +216,12 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 		out.OperatorAction = supersededOperatorAction(webhookURL, res.Legacy, rerr.Error())
 		return out, nil
 	}
-	if len(out.Retired) > 0 && previousName != "" && len(out.RetirePending) == 0 {
-		// The last predecessor is gone; its secret can no longer verify anything.
-		if err := p.SecretStore.Delete(ctx, p.MerchantID, previousName); err != nil && !errors.Is(err, merchants.ErrSecretNotFound) {
-			return ManagedStripeWebhookResult{}, fmt.Errorf("drop retired stripe webhook secret: %w", err)
+	if len(out.Retired) > 0 && len(out.RetirePending) == 0 && writable && !res.UnqualifiedPredecessors {
+		if err := p.Publication.RetireOverlap(ctx); err != nil {
+			return out, fmt.Errorf("retire published stripe webhook overlap: %w", err)
 		}
 	}
+
 	if len(out.RetirePending) > 0 {
 		out.OperatorAction = supersededOperatorAction(webhookURL, out.RetirePending, "still inside the delivery-overlap window")
 	}
@@ -255,43 +236,4 @@ func supersededOperatorAction(webhookURL string, legacy []SupersededEndpoint, wh
 	}
 	return fmt.Sprintf("stripe webhook endpoint %s rolled over to api_version %s; %d superseded endpoint(s) are STILL ENABLED and still delivering: %s — %s",
 		webhookURL, stripeapi.APIVersion, len(legacy), strings.Join(ids, "; "), why)
-}
-
-// recoverStripeWebhookSecret looks for a stripe webhook signing secret stored
-// under a DIFFERENT derived name for this merchant. It returns a value only when
-// the choice is unambiguous — exactly one candidate — because guessing between
-// two Stripe accounts' secrets would silently break inbound verification. A
-// store that cannot list is not an error: recovery is best-effort, and the
-// caller's fallback (roll over additively) is already safe.
-func recoverStripeWebhookSecret(ctx context.Context, store merchants.MerchantSecretStore, merchantID merchant.ID, wantName string) (string, string, error) {
-	names, err := store.List(ctx, merchantID)
-	if err != nil {
-		return "", "", nil
-	}
-	var candidates []string
-	for _, n := range names {
-		if n == wantName {
-			continue
-		}
-		rail, _, _, key, scoped, perr := merchants.ParsePSPSecretName(n)
-		if perr != nil || !scoped || rail != "stripe" || key != "webhook_signing_secret" {
-			continue
-		}
-		candidates = append(candidates, n)
-	}
-	if len(candidates) != 1 {
-		return "", "", nil
-	}
-	sec, err := store.Get(ctx, merchantID, candidates[0])
-	if err != nil {
-		if errors.Is(err, merchants.ErrSecretNotFound) {
-			return "", "", nil
-		}
-		return "", "", fmt.Errorf("recover stripe webhook secret from %s: %w", candidates[0], err)
-	}
-	value := strings.TrimSpace(sec.Value)
-	if value == "" {
-		return "", "", nil
-	}
-	return value, candidates[0], nil
 }

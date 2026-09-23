@@ -10,6 +10,7 @@ import (
 
 func validationConfig(env string) *Config {
 	cfg := GetDefaultBillingConfig()
+	cfg.TestMode = CredentialPostureSandbox
 	cfg.ProviderWriteMode = ProviderWriteModeFull
 	cfg.DB.Username, cfg.DB.Password = "billing_app", "database-password"
 	assembleDBURL(cfg)
@@ -55,7 +56,7 @@ func TestConfigurationPostureValidation(t *testing.T) {
 		{"dev sandbox", "dev", func(c *Config) { c.TestMode = CredentialPostureSandbox }, ""},
 		{"http issuer", "prod", func(c *Config) { c.Auth.Issuer = "http://auth.internal:8080" }, "must use HTTPS"},
 		{"https issuer", "prod", func(c *Config) { c.Auth.Issuer = "https://auth.example.com" }, ""},
-		{"missing write posture", "prod", func(c *Config) { c.ProviderWriteMode = "" }, "provider_write_mode is required"},
+		{"missing write posture stays read-only", "prod", func(c *Config) { c.ProviderWriteMode = "" }, ""},
 		{"invalid credential posture", "dev", func(c *Config) { c.TestMode = "yes" }, `invalid test_mode "yes"`},
 		{"required rate limits", "prod", func(c *Config) { c.RateLimits = nil }, "rate_limits is required"},
 		{"explicit rate-limit opt out", "prod", func(c *Config) { c.RateLimits = nil; c.RateLimitsDisabled = true }, ""},
@@ -78,10 +79,13 @@ func TestConfigurationPostureValidation(t *testing.T) {
 	}
 	cfg := validationConfig("dev")
 	cfg.ProviderWriteMode = ""
-	require.Empty(t, cfg.TestMode)
+	cfg.TestMode = ""
 	require.False(t, cfg.IsTestMode())
 	require.True(t, cfg.IsProviderReadOnly())
-	require.ErrorContains(t, Validate(cfg), "provider_write_mode is required")
+	require.ErrorContains(t, Validate(cfg), "test_mode is required")
+	cfg.TestMode = CredentialPostureSandbox
+	require.NoError(t, Validate(cfg))
+	require.True(t, cfg.IsProviderReadOnly(), "omitted write mode never enables provider writes")
 	cfg.ProviderWriteMode = ProviderWriteModeFull
 	for _, enabled := range []bool{false, true} {
 		cfg.Captcha = &CaptchaConfig{Provider: CaptchaProviderTurnstile}

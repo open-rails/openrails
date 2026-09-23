@@ -20,6 +20,17 @@ const providerCredentialProbeTimeout = 15 * time.Second
 
 func (s *Service) probePaymentProviderCredentials(ctx context.Context, id merchant.ID, rail, environment, accountID string, supplied map[string]string) (bool, error) {
 	switch rail {
+	case "stripe":
+		secretKey, ok, err := s.effectiveProviderCredential(ctx, id, rail, environment, accountID, supplied, "secret_key")
+		if err != nil || !ok {
+			return false, err
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, providerCredentialProbeTimeout)
+		defer cancel()
+		if err := stripeAccountCheck(probeCtx, secretKey, environment, accountID, s.StripeClients); err != nil {
+			return false, err
+		}
+		return true, nil
 	case "nmi":
 		securityKey, ok, err := s.effectiveProviderCredential(ctx, id, rail, environment, accountID, supplied, "security_key")
 		if err != nil || !ok {

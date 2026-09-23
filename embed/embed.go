@@ -34,6 +34,9 @@ type Options struct {
 	// VaultClient is an optional borrowed, authenticated client. The host owns
 	// its renewal and lifetime; the Runtime does not revoke it on Close.
 	VaultClient *vaultapi.Client
+	// ProviderCredentials is an immutable credential dependency for existing
+	// merchants, separate from metadata provisioning and HTTP exposure.
+	ProviderCredentials []ProviderCredentialSnapshot
 	// Auth supplies provider-neutral authentication and live authorization for
 	// both private Client operations and any explicitly published HTTP routes.
 	Auth *billingauth.Integration
@@ -159,6 +162,20 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
 	application.Runtime.VaultClient = opts.VaultClient
+	if len(opts.ProviderCredentials) > 0 && opts.Merchant != nil {
+		for _, rails := range opts.Merchant.Config.PSPs {
+			for _, provider := range rails {
+				if len(provider.Secrets) > 0 {
+					_ = application.Close(ctx)
+					return nil, fmt.Errorf("supply snapshot credentials through either ProviderCredentials or Merchant.Config, not both")
+				}
+			}
+		}
+	}
+	if err := loadProviderCredentialSnapshot(ctx, application.Runtime, opts.ProviderCredentials); err != nil {
+		_ = application.Close(ctx)
+		return nil, err
+	}
 	// Ordinary Client calls need the same provider/secret graph as the
 	// standalone server; worker startup or mounting cannot be prerequisites.
 	if err := application.Runtime.EnsureMerchantsService(ctx); err != nil {

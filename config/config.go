@@ -99,8 +99,7 @@ type Config struct {
 	//   - "readonly": no provider writes
 	// Unset defaults to "readonly" — FAIL CLOSED (Paul 2026-07-02): no provider
 	// write (cancellation, deletion, charge) executes until the operator
-	// explicitly sets full or limited. An explicit value is
-	// REQUIRED (Validate refuses to boot without one).
+	// explicitly sets full or limited. Omission is a supported read-only default.
 	ProviderWriteMode string `koanf:"provider_write_mode,omitempty"`
 
 	// TestMode selects sandbox or live provider credentials. It never relaxes
@@ -153,6 +152,9 @@ type Config struct {
 	// Snapshot values are supplied by the host and are never persisted. Managed
 	// DB storage always requires encryption. Vault access never falls back to DB.
 	SecretBackend string `koanf:"secret_backend,omitempty"`
+	// CredentialSnapshotID is a stable host-owned UUID identifying snapshot custody.
+	// It is required when publishing a managed-to-snapshot custody transition.
+	CredentialSnapshotID string `koanf:"credential_snapshot_id,omitempty"`
 	// CredentialReadOnly declines managed credential writes even when the
 	// selected backend would permit them. It never grants backend privileges.
 	CredentialReadOnly bool `koanf:"credential_read_only,omitempty"`
@@ -1244,14 +1246,13 @@ func Validate(cfg *Config) error {
 	// defense in depth so a typo can never silently take an unrecognized
 	// branch (#745).
 	switch cfg.TestMode {
-	case "", CredentialPostureSandbox, CredentialPostureLive:
+	case CredentialPostureSandbox, CredentialPostureLive:
+	case "":
+		return fmt.Errorf("test_mode is required: choose sandbox or live")
 	default:
 		return fmt.Errorf("invalid test_mode %q: must be %q or %q", cfg.TestMode, CredentialPostureSandbox, CredentialPostureLive)
 	}
 
-	if providerWriteMode == "" {
-		return fmt.Errorf("provider_write_mode is required: choose full, limited or readonly")
-	}
 	if cfg.DB != nil && (strings.TrimSpace(cfg.DB.Username) == "admin" || strings.TrimSpace(cfg.DB.Password) == "admin_password") {
 		return fmt.Errorf("default database credentials are not allowed")
 	}
@@ -1346,6 +1347,12 @@ func validateSourceCIDRs(cidrs []string) error {
 // validateSecretBackend checks declared custody. A live Vault connection may be
 // supplied by an embedded host; backend construction verifies its actual access.
 func validateSecretBackend(cfg *Config) error {
+	if cfg.CredentialSnapshotID != "" {
+		id, err := uuid.Parse(cfg.CredentialSnapshotID)
+		if err != nil || id == uuid.Nil || id.String() != cfg.CredentialSnapshotID {
+			return fmt.Errorf("credential_snapshot_id must be a canonical nonzero UUID")
+		}
+	}
 	switch strings.ToLower(strings.TrimSpace(cfg.SecretBackend)) {
 	case "", SecretBackendSnapshot, SecretBackendDB, SecretBackendVault:
 	default:

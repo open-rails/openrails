@@ -180,6 +180,7 @@ type pspSecretScope struct {
 	settings           map[string]any
 	credentialVersions map[string]int
 	credentialRefs     map[string]SecretRef
+	retiredCredentials map[string]bool
 	custodianID        *uuid.UUID
 }
 
@@ -190,6 +191,7 @@ func (s *pspSecretScope) applyEvidence(raw []byte) {
 	s.settings = pspSettings(raw)
 	s.credentialVersions = CredentialVersions(raw)
 	s.credentialRefs = CredentialRefs(raw)
+	s.retiredCredentials = unmarshalProviderEvidence(raw).RetiredCredentials
 }
 
 func (s pspSecretScope) secretName(key string) (string, error) {
@@ -199,6 +201,9 @@ func (s pspSecretScope) secretName(key string) (string, error) {
 // secretRef pairs the scoped secret name with the rotation version floor
 // recorded on the PSP row (or#812).
 func (s pspSecretScope) secretRef(key string) (SecretRef, error) {
+	if s.retiredCredentials[NormalizeCredentialVersionKey(key)] {
+		return SecretRef{Retired: true}, nil
+	}
 	if ref, ok := s.credentialRefs[NormalizeCredentialVersionKey(key)]; ok {
 		return validatePublishedRef(s.rail, s.environment, s.accountID, key, ref)
 	}
@@ -245,6 +250,7 @@ func (s pspSecretScope) exported() PSPScope {
 		Settings:           settings,
 		CredentialVersions: versions,
 		CredentialRefs:     s.credentialRefs,
+		RetiredCredentials: s.retiredCredentials,
 		CustodianID:        s.custodianID,
 	}
 }

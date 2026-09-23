@@ -37,10 +37,8 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/admission"
-	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
-	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/providerqualification"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -845,6 +843,9 @@ func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *c
 func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merchants.Merchant, error) {
 	slug := merchant.NormalizeSlug(req.Slug)
 	mt := req.Merchant
+	if req.Config.SecretStoreBackend() != config.SecretBackendSnapshot && (len(mt.PSPs) > 0 || len(mt.Custodians) > 0) {
+		return nil, fmt.Errorf("managed provider declarations require explicit Client publication operations; startup metadata and credential custody are separate")
+	}
 	database := req.Database
 	if database == nil {
 		if req.ControlPlane == nil || req.ControlPlane.Pool() == nil {
@@ -902,7 +903,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 	// Keep an existing merchant's display name in sync with the manifest (the
 	// create path already set it). A UUID-scoped update ensures an
 	// empty manifest display name leaves the stored one untouched.
-	if found && strings.TrimSpace(mt.DisplayName) != "" {
+	if found && req.Options.Overwrite && strings.TrimSpace(mt.DisplayName) != "" {
 		directory, err := merchants.NewDirectoryService(database.DataPool())
 		if err != nil {
 			return nil, err
@@ -912,6 +913,18 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 		}
 	}
 
+	// Startup ensures identity and missing accounts. Existing metadata belongs
+	// to ordinary Client operations; restarting a declaration cannot reassert it.
+	if found && !req.Options.Overwrite {
+		mt.DisplayName = ""
+		mt.APIHost = ""
+		mt.Profile = MerchantProfileConfig{}
+		mt.Invoice = nil
+		mt.DelegatedInvokerWastedSpendWindows = nil
+		mt.CheckoutRouting = nil
+		mt.BillingPolicies = nil
+		mt.BillingPolicyBindings = nil
+	}
 	if err := reconcileManifestMerchantConfiguration(ctx, req.Config, database, tn.ID, slug, mt, req.SecretStore, req.SolanaTransit, req.Options); err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: configure %q: %w", slug, err)
 	}
@@ -1185,6 +1198,13 @@ func reconcileManifestCustodians(ctx context.Context, cfg *config.Config, databa
 		}
 		if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 			var err error
+			if !opts.Overwrite {
+				if err := database.Gen(ctx).InsertSnapshotCustodian(ctx, gen.InsertSnapshotCustodianParams{MerchantID: merchantID.UUID(), Key: rc.key, Kind: rc.kind, Environment: environment, AccountID: rc.accountID, Settings: settingsJSON, Archived: archived}); err != nil {
+					return err
+				}
+				row, err = database.Gen(ctx).GetCustodianByIdentity(ctx, gen.GetCustodianByIdentityParams{MerchantID: merchantID.UUID(), Kind: rc.kind, Environment: &environment, AccountID: rc.accountID})
+				return err
+			}
 			row, err = database.Gen(ctx).UpsertCustodian(ctx, gen.UpsertCustodianParams{
 				MerchantID:  merchantID.UUID(),
 				Key:         rc.key,
@@ -1685,6 +1705,40 @@ func reconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 	if err != nil {
 		return err
 	}
+	if cfg.SecretStoreBackend() != config.SecretBackendSnapshot {
+		return fmt.Errorf("managed provider declarations require the Client payment-provider publication operation with operation ID and expected revision")
+	}
+	// Bind credential custody before loading any replacement snapshot material.
+	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
+		row, err := database.Gen(ctx).GetPSPByIdentity(ctx, gen.GetPSPByIdentityParams{MerchantID: merchantID.UUID(), Rail: ra.rail, Environment: &ra.environment, AccountID: ra.accountID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var evidence map[string]json.RawMessage
+		if len(row.Evidence) > 0 {
+			if err := json.Unmarshal(row.Evidence, &evidence); err != nil {
+				return err
+			}
+		}
+		var custody string
+		if raw := evidence["credential_custody"]; len(raw) > 0 {
+			if err := json.Unmarshal(raw, &custody); err != nil {
+				return err
+			}
+		}
+		if custody != "" && custody != "snapshot" {
+			return fmt.Errorf("provider credential custody differs from the selected snapshot; explicit custody migration is required")
+		}
+		if custody == "" && len(evidence["credential_versions"]) > 0 && string(evidence["credential_versions"]) != "{}" {
+			return fmt.Errorf("published managed credentials cannot be replaced by a startup snapshot")
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
 	rail = ra.rail
 	environment := ra.environment
 	accountID := ra.accountID
@@ -1723,34 +1777,6 @@ func reconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 			return err
 		}
 	}
-	reconcileStripeWebhook := func() error {
-		if rail != string(models.RailStripe) {
-			return nil
-		}
-		res, err := catalog.ReconcileManagedStripeWebhook(ctx, catalog.ManagedStripeWebhookParams{
-			StripeClients:       opts.StripeClients,
-			Config:              cfg,
-			SecretStore:         secretStore,
-			MerchantID:          merchantID,
-			MerchantSlug:        merchantSlug,
-			ProviderEnvironment: environment,
-			PspID:               accountID,
-			EnabledEvents:       webhooks.HandledStripeEventTypes,
-		})
-		if err != nil {
-			return fmt.Errorf("reconcile stripe webhook endpoint: %w", err)
-		}
-		fields := log.Fields{"merchant": merchantSlug, "stripe_account_id": accountID}
-		if res.Skipped {
-			fields["reason"] = res.SkipReason
-			log.WithFields(fields).Info("merchant bootstrap: stripe webhook endpoint reconcile skipped")
-		} else {
-			fields["action"] = res.Result.Action
-			fields["endpoint_id"] = res.Result.EndpointID
-			log.WithFields(fields).Info("merchant bootstrap: stripe webhook endpoint reconciled")
-		}
-		return nil
-	}
 
 	found := false
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
@@ -1775,7 +1801,7 @@ func reconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 		return fmt.Errorf("PSP %s:%s:%s is missing; rerun with --insert to create it", rail, environment, accountID)
 	}
 	if found && !opts.Overwrite {
-		return reconcileStripeWebhook()
+		return nil
 	}
 	displayName := identity.DisplayName
 	if n := strings.TrimSpace(localKey); n != "" {
@@ -1785,6 +1811,7 @@ func reconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 	if evidence == nil {
 		evidence = map[string]any{"source": "merchant_config_manifest"}
 	}
+	evidence["credential_custody"] = "snapshot"
 	if signerEvidence != nil {
 		evidence["signer"] = signerEvidence
 	}
@@ -1823,6 +1850,17 @@ func reconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 		if err != nil {
 			return fmt.Errorf("PSP cutover qualification: %w", err)
 		}
+		if !opts.Overwrite {
+			key := ""
+			if displayName != nil {
+				key = *displayName
+			}
+			if err := database.Gen(ctx).InsertSnapshotPSP(ctx, gen.InsertSnapshotPSPParams{ID: railAcctID, MerchantID: merchantID.UUID(), Rail: nRail, Environment: nEnv, AccountID: nAccount, Key: key, Archived: account.Archived, Evidence: evidenceJSON, CustodianID: custodianID}); err != nil {
+				return err
+			}
+			_, err := database.Gen(ctx).GetPSPByIdentity(ctx, gen.GetPSPByIdentityParams{MerchantID: merchantID.UUID(), Rail: nRail, Environment: &nEnv, AccountID: nAccount})
+			return err
+		}
 		_, err := database.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{
 			ID:          railAcctID,
 			MerchantID:  merchantID.UUID(),
@@ -1841,7 +1879,7 @@ func reconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 	}); err != nil {
 		return err
 	}
-	return reconcileStripeWebhook()
+	return nil
 }
 
 // probeNMIAccountBeforeArm requires fresh sandbox qualification for the effective

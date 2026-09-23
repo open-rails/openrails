@@ -51,11 +51,10 @@ func sandboxModeConfig(dsn string, source string) *config.Config {
 		// suite and internal/http's merchant-webhook suite.
 		TestMode:                 config.CredentialPostureSandbox,
 		CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
-		MerchantConfigSource:     source,
+		SecretBackend:            source,
 		AllowCatalogUpdates:      true,
 		// or#893: merchant_config_source=api declares where secrets live. MODE 1 never
 		// consults it, so db is inert there and honest in MODE 2.
-		SecretBackend:     config.SecretBackendDB,
 		ProviderWriteMode: config.ProviderWriteModeFull,
 		DB:                &config.DBConfig{URL: dsn},
 	}
@@ -157,7 +156,7 @@ func postCCBillMerchantWebhook(t *testing.T, serverURL, slug string, payload map
 	body, err := json.Marshal(payload)
 	require.NoError(t, err)
 	req, err := http.NewRequest(http.MethodPost,
-		serverURL+"/v1/merchants/"+slug+"/webhooks/ccbill/"+payload["clientAccnum"].(string)+"-"+payload["clientSubacc"].(string)+"?eventType="+payload["eventType"].(string),
+		serverURL+"/v1/webhooks/ccbill/"+payload["clientAccnum"].(string)+"-"+payload["clientSubacc"].(string)+"?eventType="+payload["eventType"].(string),
 		strings.NewReader(string(body)))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -211,7 +210,7 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	slug := fmt.Sprintf("mwhe2e%d", nano)
 	ccbillAccount := fmt.Sprintf("94%04d-0001", nano%10_000)
 
-	cfg := sandboxModeConfig(dsn, config.MerchantConfigSourceManifest)
+	cfg := sandboxModeConfig(dsn, config.SecretBackendSnapshot)
 
 	rt, id, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))}, slug, embed.MerchantConfig{
 		DisplayName: slug,
@@ -247,9 +246,9 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	// Resolve the seeded price id over the public catalog surface.
 	priceID := fetchCCBillPriceID(t, server.URL)
 
-	// Open a checkout session for the ccbill rail (requires_action: the buyer
-	// is redirected to the FlexForm; the webhook closes the loop).
-	sessionID := openCCBillCheckoutSession(t, server.URL, priceID, username)
+	// A provider-owned checkout started before the new-enrollment hard cut
+	// still completes through its ordinary provider webhook.
+	sessionID := seedLegacyCCBillCheckoutSession(t, ctx, id, priceID, userID)
 
 	subID := fmt.Sprintf("09%d", nano%1_000_000_000)
 	txnID := fmt.Sprintf("19%d", nano%1_000_000_000)
@@ -281,7 +280,8 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	slug := fmt.Sprintf("mwhapi%d", nano)
 	ccbillAccount := fmt.Sprintf("95%04d-0002", nano%10_000)
 
-	cfg := sandboxModeConfig(dsn, config.MerchantConfigSourceAPI)
+	cfg := sandboxModeConfig(dsn, config.SecretBackendDB)
+	cfg.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 	// API mode: bare identity bind; rail truth arrives over the HTTP API.
 
 	rt, id, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))}, slug, embed.MerchantConfig{DisplayName: slug})
@@ -296,7 +296,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	t.Cleanup(adminServer.Close)
 
 	// Layer A, MODE 2: arm the ccbill account over the management API.
-	payload := fmt.Sprintf(`{"account_id":%q,"credentials":{"salt":"api-salt-%s"}}`, ccbillAccount, slug)
+	payload := fmt.Sprintf(`{"operation_id":%q,"expected_revision":0,"account_id":%q,"credentials":{"salt":"api-salt-%s"}}`, uuid.NewString(), ccbillAccount, slug)
 	req, err := http.NewRequest(http.MethodPut, adminServer.URL+"/v1/merchant/payment-providers/ccbill", strings.NewReader(payload))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -362,7 +362,7 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 	nano := time.Now().UnixNano()
 	slug := fmt.Sprintf("mwhoff%d", nano)
 
-	cfg := sandboxModeConfig(dsn, config.MerchantConfigSourceManifest)
+	cfg := sandboxModeConfig(dsn, config.SecretBackendSnapshot)
 	// Merchant exists but declares NO rail accounts at all.
 
 	rt, id, err := newDeclaredMerchant(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), UsernameResolver: billingauthkit.NewDirectory(ccbillIdentity(t, ctx, dsn))}, slug, embed.MerchantConfig{DisplayName: slug})
@@ -413,28 +413,18 @@ func fetchCCBillPriceID(t *testing.T, serverURL string) string {
 	return out.Data[0].ID
 }
 
-// openCCBillCheckoutSession opens a ccbill checkout session over the embedded
-// customer surface and returns its id (status requires_action).
-func openCCBillCheckoutSession(t *testing.T, serverURL, priceID, username string) string {
+// Seed only a historical pending provider reservation. New CCBill recurring
+// enrollment is refused; its already-created provider callbacks remain supported.
+func seedLegacyCCBillCheckoutSession(t *testing.T, ctx context.Context, id merchant.ID, priceID, userID string) string {
 	t.Helper()
-	body := fmt.Sprintf(`{"price_id":%q,"mode":"subscription","payment":{"rail":"ccbill","email":%q,"first_name":"Integration","last_name":"Webhook","address1":"123 Test St","city":"Denver","state":"CO","zip":"80202","country":"US"}}`,
-		priceID, username+"@test.example.com")
-	req, err := http.NewRequest(http.MethodPost, serverURL+"/v1/me/checkout", strings.NewReader(body))
+	database := dbtest.OpenMerchantDB(t, id.UUID())
+	parsedPrice, err := openrails.ParsePriceID(priceID)
 	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer host-credential")
-	resp, err := http.DefaultClient.Do(req)
+	_, err = database.Pool().Exec(ctx, `INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2) ON CONFLICT DO NOTHING`, id.UUID(), uuid.MustParse(userID))
 	require.NoError(t, err)
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	sessionID := uuid.NewString()
+	_, err = database.Pool().Exec(ctx, `INSERT INTO billing.checkout_sessions(id,merchant_id,customer_id,price_id,mode,rail,status,amount,currency,expires_at,psp_id)
+ SELECT $1,$2,$3,$4,'subscription','ccbill','requires_action',$5,'USD',now()+interval '1 day',id FROM billing.psps WHERE merchant_id=$2 AND rail='ccbill' AND archived=false`, sessionID, id.UUID(), uuid.MustParse(userID), parsedPrice.UUID(), ccbillWebhookTestPriceMicros)
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-	var session struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &session))
-	require.NotEmpty(t, session.ID)
-	require.Equal(t, "requires_action", session.Status, string(raw))
-	return session.ID
+	return sessionID
 }

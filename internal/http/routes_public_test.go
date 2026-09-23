@@ -46,7 +46,7 @@ func TestStandaloneCapabilitiesRoute(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &caps), w.Body.String())
 	// Standalone advertises StandaloneDefaultRouteSets — every standalone group on.
 	for _, rs := range embedhttp.StandaloneDefaultRouteSets {
-		require.True(t, caps.RouteGroups[string(rs)], "standalone group %s should be advertised", rs)
+		require.Equal(t, rs != embedhttp.RouteSetMerchantConfig, caps.RouteGroups[string(rs)], "configuration routes require explicit publication: %s", rs)
 	}
 }
 
@@ -68,10 +68,10 @@ func TestStandaloneRootBannerIsExact(t *testing.T) {
 }
 
 func TestStandaloneCapabilitiesCredentialAuthority(t *testing.T) {
-	for _, source := range []string{config.MerchantConfigSourceManifest, config.MerchantConfigSourceAPI} {
+	for _, source := range []string{config.SecretBackendSnapshot, config.SecretBackendDB} {
 		for _, writable := range []bool{false, true} {
-			srv := &Server{runtime: &app.Runtime{
-				Config:            &config.Config{MerchantConfigSource: source},
+			srv := &Server{cfg: &config.Config{MerchantConfigHTTP: true}, runtime: &app.Runtime{
+				Config:            &config.Config{SecretBackend: source},
 				RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable},
 			}}
 			mux := http.NewServeMux()
@@ -81,7 +81,7 @@ func TestStandaloneCapabilitiesCredentialAuthority(t *testing.T) {
 			require.Equal(t, http.StatusOK, w.Code)
 			var caps embedhttp.Capabilities
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &caps))
-			want := source == config.MerchantConfigSourceAPI && writable
+			want := source == config.SecretBackendDB && writable
 			require.Equal(t, want, caps.Features["provider_credential_writes"], "source=%s writable=%v", source, writable)
 		}
 	}

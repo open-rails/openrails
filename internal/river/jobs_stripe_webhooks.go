@@ -128,14 +128,17 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 					return fmt.Errorf("list stripe psps: %w", err)
 				}
 				for _, psp := range psps {
+					if psp.Environment != config.ExpectedProviderEnvironment(w.Config.IsTestMode()) {
+						continue
+					}
 					verdict := gate.CheckMerchant(mctx, merchantID.UUID())
 					fields := log.Fields{"merchant": row.Slug, "stripe_account_id": psp.AccountID}
 					res, err := catalog.ReconcileManagedStripeWebhook(mctx, catalog.ManagedStripeWebhookParams{
+						Publication:         w.Merchants.StripeWebhookPublication(merchantID, psp.AccountID),
 						StripeClients:       w.StripeClients,
 						Config:              w.Config,
 						SecretStore:         w.Merchants.Secrets(),
 						MerchantID:          merchantID,
-						MerchantSlug:        row.Slug,
 						ProviderEnvironment: psp.Environment,
 						PspID:               psp.AccountID,
 						EnabledEvents:       webhooks.HandledStripeEventTypes,
@@ -159,10 +162,6 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 					if !verdict.Allowed && len(res.RetirePending) > 0 {
 						gated++
 						fields["gated_reason"] = verdict.Reason
-					}
-					if res.RepairedFrom != "" {
-						// A local record was repaired instead of a remote endpoint replaced.
-						fields["repaired_from"] = res.RepairedFrom
 					}
 					retired += len(res.Retired)
 					fields["action"] = res.Result.Action

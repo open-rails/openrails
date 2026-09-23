@@ -18,7 +18,7 @@ import (
 )
 
 func TestFiberReviewFullInventoryMountsNatively(t *testing.T) {
-	cfg := &config.Config{AllowCatalogUpdates: true}
+	cfg := &config.Config{AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB}
 	delegated := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return nil, billingauth.ErrUnauthenticated
 	})

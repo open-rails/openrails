@@ -7,6 +7,12 @@ packages:
 # 10.3.1 actually GAINS attestation. Drop an entry once the direct dependency
 # that drags it in (shadcn, eslint) ships the fixed range itself.
 overrides:
+  # Babel 7 uses stable semver APIs. Its legacy 6.3.1 backport fails the
+  # provenance downgrade policy; retain that policy with attested semver 7.
+  # Historical backport: https://github.com/npm/node-semver/issues/886
+  "@babel/core@7.29.7>semver": 7.8.5
+  "@babel/helper-compilation-targets@7.29.7>semver": 7.8.5
+  "@babel/helper-create-class-features-plugin@7.29.7>semver": 7.8.5
   undici: ^7.29.0 # GHSA-4cwx-7wf7-3272
   fast-uri: ^3.1.5 # GHSA-7p8r-x3mc-p8w7
   ip-address: ^10.3.1 # GHSA-mwp4-54f8-5fhr

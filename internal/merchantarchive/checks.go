@@ -207,7 +207,7 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 		{"host_outbox", "delivered_at IS NULL"}, {"webhook_events", "completed_at IS NULL"},
 		{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','reconciliation','prune','converge_enforce','merchant_purge')"},
 		{"maintenance_runs", "kind IN ('prune','converge_enforce','merchant_purge') AND (coverage IS NOT NULL OR affected IS NOT NULL OR summary IS NOT NULL OR inventory_manifest IS NOT NULL OR inventory_total_rows IS NOT NULL)"},
-		{"psps", "jsonb_typeof(evidence)<>'object' OR evidence - ARRAY['settings','signer','public_config','source','credential_versions','credential_refs','configuration_revision','credentials_validated','api_key'] <> '{}'::jsonb"},
+		{"psps", "jsonb_typeof(evidence)<>'object' OR evidence - ARRAY['settings','signer','public_config','source','credential_versions','credential_refs','credential_custody','credential_custody_transition','configuration_revision','credentials_validated','api_key'] <> '{}'::jsonb"},
 	}
 	for _, c := range checks {
 		if err := refuseRows(ctx, tx, id, c.table, c.predicate); err != nil {

@@ -153,10 +153,9 @@ func optsValue[T any](opts *Options, pick func(*Options) T) T {
 
 // ReconcileBootMerchantManifest implements the standalone rows of the #723
 // boot matrix, shared by NewServer and cmd/openrails runServer (#847): every
-// boot converges the MODE-1 merchant manifest — DB rows as projections
-// (insert+overwrite+prune), secrets seeded into the in-memory plane. path
-// empty → the conventional manifest location, which is optional; an EXPLICIT
-// path must exist. api mode refuses a present manifest (two truths).
+// boot ensures missing identities and reloads host-owned snapshot credentials.
+// Existing metadata and archive decisions survive restart. The conventional
+// path is optional; an explicitly supplied path must exist.
 // nmiProbeV5BaseURL is the test-only probe seam (Options.NMIProbeV5BaseURL).
 func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, path, nmiProbeV5BaseURL string) error {
 	explicit := strings.TrimSpace(path) != ""
@@ -166,7 +165,7 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	raw, err := os.ReadFile(path) // #nosec G304 -- path is a boot-time CLI/config value, not request input
 	if os.IsNotExist(err) {
 		if explicit {
-			return fmt.Errorf("merchant manifest %s: %w (merchant_config_source=manifest declared this file as truth, #723)", path, err)
+			return fmt.Errorf("merchant manifest %s: %w (explicit startup manifest is required)", path, err)
 		}
 		return nil
 	}
@@ -183,19 +182,19 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 		return fmt.Errorf("merchant manifest %s: %w", path, err)
 	}
 	rt := application.Runtime
-	if rt == nil || rt.ManifestSecrets == nil {
-		return fmt.Errorf("merchant_config_source=manifest requires the runtime manifest secret plane (#723)")
+	if rt == nil {
+		return fmt.Errorf("merchant startup requires a runtime")
 	}
-	if err := bootstrap.ReconcileMerchantManifestData(ctx, cfg, embcp.Get(application), manifest, bootstrap.MerchantManifestReconcileOptions{
-		StripeClients:     rt.StripeClients,
-		Insert:            true,
-		Overwrite:         true,
-		Prune:             true,
-		SecretStore:       rt.ManifestSecrets.Seeder(),
-		NMIProbeV5BaseURL: nmiProbeV5BaseURL,
-	}); err != nil {
+	opts := bootstrap.MerchantManifestReconcileOptions{StripeClients: rt.StripeClients, Insert: true, NMIProbeV5BaseURL: nmiProbeV5BaseURL}
+	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
+		if rt.ManifestSecrets == nil {
+			return fmt.Errorf("snapshot credentials require the runtime snapshot plane")
+		}
+		opts.SecretStore = rt.ManifestSecrets.Seeder()
+	}
+	if err := bootstrap.ReconcileMerchantManifestData(ctx, cfg, embcp.Get(application), manifest, opts); err != nil {
 		return fmt.Errorf("merchant manifest %s: %w", path, err)
 	}
-	log.WithField("file", path).Info("merchant_config_source=manifest: boot manifest converged; credentials held in memory (#723)")
+	log.WithField("file", path).Info("merchant startup initialized; existing metadata preserved")
 	return nil
 }

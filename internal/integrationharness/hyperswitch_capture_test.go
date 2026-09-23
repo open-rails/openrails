@@ -197,7 +197,7 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 	_, err = surface.App().Runtime.Merchants.Secrets().Put(ctx, mid, name, "capture-fixture-key")
 	require.NoError(t, err)
 	newEmbedded := func(schema ...string) (*embed.Runtime, *openrails.Client) {
-		cfg := &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}}
+		cfg := &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}}
 		configure(cfg)
 		if len(schema) > 0 {
 			cfg.DB.Schema = schema[0]

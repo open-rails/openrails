@@ -302,6 +302,11 @@ const (
 
 // DesiredWebhookEndpoint is the target state for reconciliation.
 type DesiredWebhookEndpoint struct {
+	// PublishSecret must durably publish custody before predecessors are superseded.
+	PublishSecret            func(context.Context, string, string) error
+	PublishedEndpointID      string
+	RequirePublishedIdentity bool
+
 	URL           string
 	EnabledEvents []string
 	// HaveSecret reports whether the caller holds the stored signing secret for
@@ -328,9 +333,10 @@ var ErrWebhookCreateForbidden = errors.New("managed stripe webhook endpoint crea
 // the new signing secret the caller must persist (empty otherwise — the existing
 // secret is still valid).
 type WebhookReconcileResult struct {
-	Action     WebhookReconcileAction
-	EndpointID string
-	Secret     string
+	UnqualifiedPredecessors bool
+	Action                  WebhookReconcileAction
+	EndpointID              string
+	Secret                  string
 	// Superseded are the endpoints this pass stamped as replaced. They are still
 	// enabled; only RetireSupersededWebhookEndpoints removes them.
 	Superseded []string
@@ -373,10 +379,24 @@ func (s *StripeCatalogService) ReconcileWebhookEndpoint(ctx context.Context, des
 	}
 	managed, current := partitionManagedEndpoints(all)
 
-	if current != nil && desired.HaveSecret {
+	if current != nil && desired.HaveSecret && (!desired.RequirePublishedIdentity || current.ID == desired.PublishedEndpointID) {
 		res, err := s.patchInPlace(ctx, current, desired)
 		if err != nil {
 			return WebhookReconcileResult{}, err
+		}
+		stamp := map[string]string{StripeMetadataSupersededAt: now.Format(time.RFC3339)}
+		for _, m := range managed {
+			if m.ID == current.ID {
+				continue
+			}
+			if _, ok := m.supersededAt(); ok {
+				continue
+			}
+			if err := s.UpdateWebhookEndpoint(ctx, m.ID, UpdateWebhookEndpointParams{Metadata: stamp}); err != nil {
+				res.UnqualifiedPredecessors = true
+				continue
+			}
+			m.Metadata[StripeMetadataSupersededAt] = stamp[StripeMetadataSupersededAt]
 		}
 		res.Legacy = supersededEndpoints(managed, current.ID, desired.RetireOverlap)
 		return res, nil
@@ -401,6 +421,11 @@ func (s *StripeCatalogService) ReconcileWebhookEndpoint(ctx context.Context, des
 		return WebhookReconcileResult{}, err
 	}
 
+	if desired.PublishSecret != nil {
+		if err := desired.PublishSecret(ctx, ep.ID, secret); err != nil {
+			return WebhookReconcileResult{}, fmt.Errorf("publish webhook credential for %s (existing endpoints remain enabled): %w", ep.ID, err)
+		}
+	}
 	action := WebhookCreated
 	if len(managed) > 0 {
 		action = WebhookRolledOver
@@ -417,6 +442,7 @@ func (s *StripeCatalogService) ReconcileWebhookEndpoint(ctx context.Context, des
 		// A stamp failure is not fatal: the successor is already live and the
 		// predecessor keeps delivering. The next pass re-stamps it.
 		if err := s.UpdateWebhookEndpoint(ctx, m.ID, UpdateWebhookEndpointParams{Metadata: stamp}); err != nil {
+			res.UnqualifiedPredecessors = true
 			continue
 		}
 		m.Metadata[StripeMetadataSupersededAt] = stamp[StripeMetadataSupersededAt]

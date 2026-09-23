@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/shared/apperr"
+	"net/http"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/crypto"
@@ -11,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-var ErrCredentialOperationConflict = errors.New("merchants: credential operation conflicts with existing candidate")
+var ErrCredentialOperationConflict = apperr.New(http.StatusConflict, "credential_operation_conflict", "credential operation conflicts with the published revision or existing candidate")
 
 // SecretStager durably creates an immutable candidate. Repeating the same
 // operation name and value returns its original version; a different value fails.

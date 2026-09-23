@@ -51,7 +51,7 @@ func TestStripeSandboxRuntimeTransportLifetime(t *testing.T) {
 	ordinaryServer := httptest.NewServer(handler(&ordinaryRequests))
 	defer ordinaryServer.Close()
 	boot := func(transport http.RoundTripper, gateway string) *Runtime {
-		cfg := &config.Config{TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}}
+		cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{URL: dsn}}
 		if gateway != "" {
 			cfg.ProviderSandbox = &config.ProviderSandboxConfig{StripeAPIURL: gateway}
 		}

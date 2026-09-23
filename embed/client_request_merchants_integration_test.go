@@ -39,8 +39,8 @@ func TestClientRequestMerchantHeadlessAndHTTP(t *testing.T) {
 	admin, pool, dsn := scopeWithoutRLSDatabase(t)
 	newConfig := func() *config.Config {
 		return &config.Config{
-			Env: "development", TestMode: config.CredentialPostureSandbox,
-			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
+			TestMode:           config.CredentialPostureSandbox,
+			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 			AllowCatalogUpdates: true, ProviderWriteMode: config.ProviderWriteModeReadOnly,
 			DB: &config.DBConfig{URL: dsn},
 		}

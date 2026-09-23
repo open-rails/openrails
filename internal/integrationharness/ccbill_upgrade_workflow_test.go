@@ -25,7 +25,7 @@ import (
 func TestCCBillUpgradeBilledPriceAndDuplicateCallback(t *testing.T) {
 	h := New(t, t.Context())
 	surface := h.StartStandalone("USD", WithConfig(func(c *config.Config) {
-		c.MerchantConfigSource = config.MerchantConfigSourceAPI
+		c.MerchantConfigHTTP = true
 		c.SecretBackend = config.SecretBackendDB
 	}))
 	owned := surface.ProvisionOwnedMerchant("ccupgrade-" + uuid.NewString()[:8])

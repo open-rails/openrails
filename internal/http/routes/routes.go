@@ -358,6 +358,8 @@ func RegisterMerchantConfigRoutes(rr router.Router, rt *app.Runtime, opts Option
 	}
 	read := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsRead)
 	write := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)
+	rr.Handle(http.MethodGet, "/configuration", h(httphandlers.GetMerchantConfiguration), read)
+	rr.Handle(http.MethodPost, "/configuration/applications", h(httphandlers.ApplyMerchantConfiguration), write)
 	rr.Handle(http.MethodGet, "/settings", h(httphandlers.ServiceGetMerchantSettings), append([]router.Middleware{read}, dbMW...)...)
 	rr.Handle(http.MethodPut, "/settings", h(httphandlers.ServiceSetMerchantSettings), append([]router.Middleware{write}, dbMW...)...)
 	if rt != nil && rt.Merchants != nil {
@@ -904,45 +906,12 @@ func (opts Options) merchantAdminOperationMW(perm string, operation middleware.A
 	return append(mw, trailing...)
 }
 
-// RegisterWebhookRoutes mounts the standalone account-specific surface:
-// POST /webhooks/:provider/:account_id. The configured account resolves its
-// merchant; any payload account identity must agree. :provider is a RAIL —
-// nmi/ccbill/stripe/solana/basistheory — never a PSP key. This is the live
-// production entry point for inbound NMI/CCBill webhooks. Embedded hosts use
-// RegisterMerchantWebhookRoutes instead, since they pin one merchant in context
-// and have no payload-derived merchant to resolve.
+// RegisterWebhookRoutes mounts the canonical callback surface under /webhooks.
+// Every host uses /:provider/:account_id. The configured provider identity resolves
+// its merchant in the runtime environment; runtime bindings and signatures remain
+// mandatory. Provider names are rails, never merchant-specific PSP labels.
 func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	rr.Handle(http.MethodPost, "/:provider/:account_id", h(httphandlers.Webhook))
-}
-
-// RegisterMerchantWebhookRoutes mounts the merchant-scoped webhook surface
-// (POST /merchants/:merchant/webhooks/:provider/:account_id): the merchant is
-// resolved from the URL slug, then that account's signing secret verifies the
-// payload. This is the EMBEDDED surface only — a host that pins one merchant
-// has no payload-derived identity to resolve. or#893 removed the standalone
-// mount: there the canonical RegisterWebhookRoutes surface derives the merchant
-// from PSP identity, and a URL slug was a second way to say the
-// same thing.
-func RegisterMerchantWebhookRoutes(rr router.Router, rt *app.Runtime) {
-	// #641: per-account endpoint — account_id in the path selects which account the
-	// event is for (verify with its secret). For multi-account rails like NMI.
-	rr.Handle(http.MethodPost, "/merchants/:merchant/webhooks/:provider/:account_id", h(httphandlers.MerchantWebhook))
-}
-
-// RegisterHostWebhookRoutes mounts the Host-routed webhook surface (#734):
-// POST /webhooks/:provider/:account_id, merchant resolved from the request's
-// Host header via resolve — the SAME resolver merchant-scoped route
-// resolution and the issuer-consistency check use — rather than a URL slug
-// (RegisterMerchantWebhookRoutes) or payload account identity
-// (RegisterWebhookRoutes). This is the engine half of saas
-// #15's "api.<slug>.<domain>" hostname scheme: pkg/embedded mounts it
-// alongside the merchant-scoped surface at the SAME canonical path shape the
-// standalone provider-only surface uses, since Host (not a path segment)
-// carries the merchant here. Opt-in: callers only mount this when a resolver
-// is available (an attached control plane).
-func RegisterHostWebhookRoutes(rr router.Router, rt *app.Runtime, resolve merchant.HostResolver) {
-	handler := h(httphandlers.HostWebhook(resolve))
-	rr.Handle(http.MethodPost, "/webhooks/:provider/:account_id", handler)
 }
 
 // registerMerchantInvoiceRoutes reuses the existing support-operation limits.

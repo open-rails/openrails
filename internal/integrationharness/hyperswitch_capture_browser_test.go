@@ -61,7 +61,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 		require.NoError(t, err)
 		var input recovery
 		require.NoError(t, json.Unmarshal(raw, &input))
-		restored, err := embed.New(t.Context(), embed.Options{Config: &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: input.DB, Redis: input.Redis, HyperSwitch: input.HyperSwitch, ProviderSandbox: input.ProviderSandbox, Encryption: input.Encryption}, River: embed.RiverManagedByOpenRails()})
+		restored, err := embed.New(t.Context(), embed.Options{Config: &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: input.DB, Redis: input.Redis, HyperSwitch: input.HyperSwitch, ProviderSandbox: input.ProviderSandbox, Encryption: input.Encryption}, River: embed.RiverManagedByOpenRails()})
 		require.NoError(t, err)
 		defer restored.Close(context.Background())
 		runtime := app.HostGraph(restored).Runtime

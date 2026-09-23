@@ -598,6 +598,8 @@ export const listPaymentProviders = (signal?: AbortSignal) =>
 
 // #882: no `environment` — it is derived from the deployment's test_mode.
 export interface UpsertProviderRequest {
+  operation_id: string
+  expected_revision: number
   account_id: string
   public_config?: Record<string, string>
   credentials?: Record<string, string>

@@ -36,7 +36,7 @@ func TestStandaloneRouteSurface(t *testing.T) {
 	cfg := &config.Config{
 		TestMode: config.CredentialPostureSandbox,
 		// Pin the complete API-owned provider surface; host-owned mode omits mutations.
-		MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true,
+		MerchantConfigHTTP: true, AllowCatalogUpdates: true,
 		SecretBackend:     config.SecretBackendDB,
 		Encryption:        &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 		ProviderWriteMode: config.ProviderWriteModeFull,

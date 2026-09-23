@@ -45,7 +45,7 @@ declared; it does not derive it at runtime.
 ### Webhooks
 
 The inbound endpoint is `POST /v1/webhooks/stripe/{account_id}` (standalone) or
-`POST <prefix>/v1/merchants/{merchant}/webhooks/stripe/{account_id}` (embedded). Events
+`POST <prefix>/v1/webhooks/stripe/{account_id}` (embedded). Events
 are verified against the `Stripe-Signature` header using the account's
 `webhook_signing_secret`.
 

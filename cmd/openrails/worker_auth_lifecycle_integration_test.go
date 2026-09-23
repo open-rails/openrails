@@ -22,11 +22,15 @@ import (
 
 func TestStandaloneWorkerIncludesAuthKitLifecycle(t *testing.T) {
 	cfg := &config.Config{
+		TestMode:             config.CredentialPostureSandbox,
+		ProviderWriteMode:    config.ProviderWriteModeReadOnly,
+		RateLimitsDisabled:   true,
+		Encryption:           &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 		PublicBillingBaseURL: "http://127.0.0.1:3053",
 		DB:                   &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
 		Redis:                &config.RedisConfig{Addr: dbtest.SharedRedisAddr(t)},
-		Auth:                 &config.AuthConfig{Issuer: "https://worker-recovery.test", KeysPath: t.TempDir(), DirectPeerIP: true},
-		MerchantConfigSource: config.MerchantConfigSourceAPI,
+		Auth:                 &config.AuthConfig{AllowEphemeralSigningKey: true, AllowMissingSenders: true, Issuer: "https://worker-recovery.test", KeysPath: t.TempDir(), DirectPeerIP: true},
+		MerchantConfigHTTP:   true,
 		SecretBackend:        config.SecretBackendDB,
 	}
 	application, err := serverboot.NewWorker(t.Context(), cfg, nil)
@@ -80,6 +84,16 @@ func TestStandaloneWorkerLoadsHostCredentialManifest(t *testing.T) {
 	var persisted int
 	require.NoError(t, dbtest.SharedSuperuserPGXPool(t).QueryRow(t.Context(), "SELECT count(*) FROM billing.merchant_secrets WHERE merchant_id=$1::uuid", id).Scan(&persisted))
 	require.Zero(t, persisted, "host credentials stay in memory, not a new secret store")
+	// Re-enter the real server/worker boot path after an operator metadata edit.
+	// An unchanged declaration reloads the snapshot without reasserting metadata.
+	_, err = dbtest.SharedSuperuserPGXPool(t).Exec(t.Context(), "UPDATE billing.merchants SET display_name='operator name',api_host='operator.example.test' WHERE id=$1::uuid", id)
+	require.NoError(t, err)
+	require.NoError(t, serverboot.ReconcileBootMerchantManifest(t.Context(), cfg, application, manifest, probe.URL))
+	var displayName, apiHost string
+	require.NoError(t, dbtest.SharedSuperuserPGXPool(t).QueryRow(t.Context(), "SELECT display_name,api_host FROM billing.merchants WHERE id=$1::uuid", id).Scan(&displayName, &apiHost))
+	require.Equal(t, "operator name", displayName)
+	require.Equal(t, "operator.example.test", apiHost)
+
 	_, err = serverboot.NewWorker(t.Context(), cfg, &serverboot.Options{MerchantManifestPath: filepath.Join(dir, "missing.yaml")})
 	require.ErrorContains(t, err, "missing.yaml", "an explicit missing manifest cannot silently start an unarmed worker")
 	root := newRootCmd()

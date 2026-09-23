@@ -160,7 +160,11 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool, options ...Bu
 		return buildManaged(ctx, cfg, pool, opts)
 	}
 	if opts.Snapshot == nil {
-		opts.Snapshot = merchants.NewManifestSecretStore()
+		var err error
+		opts.Snapshot, err = merchants.NewManifestSecretStoreWithIdentity(cfg.CredentialSnapshotID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var alert merchants.MerchantSecretStore = merchants.NewManifestSecretStore()
 	var result *Store

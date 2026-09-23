@@ -71,15 +71,15 @@ func TestAdminConsoleServing(t *testing.T) {
 		// directly with the same config shape the harness boots.
 		_, appDSN := dbtest.SharedRLSPostgres(t)
 		cfg := &config.Config{
-			TestMode:             config.CredentialPostureSandbox,
-			MerchantConfigSource: config.MerchantConfigSourceAPI,
-			SecretBackend:        config.SecretBackendDB,
-			ProviderWriteMode:    config.ProviderWriteModeFull,
-			Host:                 "127.0.0.1",
-			Port:                 0,
-			DB:                   &config.DBConfig{URL: appDSN},
-			Auth:                 &config.AuthConfig{Issuer: "https://controlplane.openrails.test"},
-			AdminConsole:         &config.AdminConsoleConfig{Enabled: true},
+			TestMode:           config.CredentialPostureSandbox,
+			MerchantConfigHTTP: true,
+			SecretBackend:      config.SecretBackendDB,
+			ProviderWriteMode:  config.ProviderWriteModeFull,
+			Host:               "127.0.0.1",
+			Port:               0,
+			DB:                 &config.DBConfig{URL: appDSN},
+			Auth:               &config.AuthConfig{Issuer: "https://controlplane.openrails.test"},
+			AdminConsole:       &config.AdminConsoleConfig{Enabled: true},
 		}
 		if h.Redis != nil {
 			cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}

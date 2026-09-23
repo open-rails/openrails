@@ -23,10 +23,10 @@ func reviewRuntime(cfg *HTTPConfig, delegated billingauth.DelegatedAuthenticator
 		}
 	}
 	var auth *billingauth.Integration
-	if cfg != nil && (cfg.Checkout || cfg.Catalog || cfg.MerchantAdmin || cfg.MerchantAPI || cfg.PaymentProviders) {
+	if cfg != nil && (cfg.Checkout || cfg.Catalog || cfg.MerchantAdmin || cfg.MerchantAPI || cfg.MerchantConfig) {
 		auth = rejectingIntegration()
 	}
-	c := &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true}
+	c := &config.Config{MerchantConfigHTTP: true, AllowCatalogUpdates: true}
 	return &Runtime{httpConfig: cfg, delegatedAuthenticator: delegated, app: &app.App{Config: c, Runtime: &app.Runtime{Config: c, Auth: auth}}}
 }
 func reviewReject(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
@@ -58,15 +58,16 @@ func TestConfiguredRoutesReviewExposureAndCredentialOwnership(t *testing.T) {
 		require.NotContains(t, r.Path, "/merchant/")
 	}
 	rt = reviewRuntime(&HTTPConfig{MerchantConfig: true}, delegated)
-	rt.app.Config.MerchantConfigSource = config.MerchantConfigSourceManifest
+	rt.app.Config.SecretBackend = config.SecretBackendSnapshot
 	routes, err = rt.HTTPRoutes()
 	require.NoError(t, err)
-	for _, r := range routes {
-		if strings.Contains(r.Path, "/merchant/payment-providers") {
-			require.NotContains(t, []string{http.MethodPut, http.MethodDelete}, r.Method)
-			require.False(t, r.Method == http.MethodPost && strings.HasSuffix(r.Path, "/archive"))
-		}
-	}
+	// Metadata routes remain mounted and authorized; custody is enforced when
+	// a request actually supplies credentials.
+	muxSnapshot := reviewMount(t, rt)
+	wSnapshot := httptest.NewRecorder()
+	muxSnapshot.ServeHTTP(wSnapshot, httptest.NewRequest(http.MethodPut, "/api/pay/v1/merchant/payment-providers/stripe", strings.NewReader(`{}`)))
+	require.Equal(t, http.StatusUnauthorized, wSnapshot.Code)
+
 	rt = reviewRuntime(&HTTPConfig{Checkout: true, CustomerRoutes: []CustomerRoutesConfig{{Treasury: true}}, MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}, delegated)
 	routes, err = rt.HTTPRoutes()
 	require.NoError(t, err)

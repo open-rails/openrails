@@ -37,7 +37,7 @@ func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	cfg := &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{
+	cfg := &config.Config{SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{
 		MasterKey: base64.StdEncoding.EncodeToString(key),
 	}}
 	manifest := hostThreeMerchantManifest()
@@ -220,7 +220,7 @@ func TestMerchantManifestDatabaseDSNIsOwned(t *testing.T) {
 // SEC-18: Env is declared, never inferred — an empty Env is no longer
 // development, and the DB secret store refuses a plaintext posture outside it.
 func apiModeReconcileConfig() *config.Config {
-	return &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI}
+	return &config.Config{SecretBackend: config.SecretBackendSnapshot}
 }
 
 // sandboxModeReconcileConfig is apiModeReconcileConfig under test_mode=sandbox.

@@ -350,7 +350,7 @@ func TestEmbeddedProviderAccountArchiveLifecycle(t *testing.T) {
 	rt, err := embed.New(ctx, embed.Options{
 		Merchant: &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug}},
 		Config: &config.Config{
-			TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true,
+			TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, AllowCatalogUpdates: true,
 			SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
 			DB: &config.DBConfig{URL: h.DSN},
 		},

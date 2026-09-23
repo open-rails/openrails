@@ -16,9 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/middleware"
-	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -249,50 +247,13 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 		}
 		s.merchants = deps.Runtime.Merchants
 	} else {
-		var secretBackend *merchantsecrets.Store
-		if deps.Config.SecretStoreBackend() == config.SecretBackendSnapshot {
-			if deps.Runtime == nil || deps.Runtime.ManifestSecrets == nil {
-				return nil, fmt.Errorf("merchant_config_source=manifest requires the runtime manifest secret plane (#723)")
-			}
-			b, err := merchantsecrets.BuildManifest(context.Background(), deps.Config, deps.Runtime.ManifestSecrets, deps.Runtime.DB.DataPool())
-			if err != nil {
-				return nil, err
-			}
-			secretBackend = b
-		} else {
-			b, err := merchantsecrets.Build(context.Background(), deps.Config, deps.Runtime.DB.DataPool())
-			if err != nil {
-				return nil, err
-			}
-			secretBackend = b
+		if err := deps.Runtime.EnsureMerchantsService(context.Background()); err != nil {
+			return nil, err
 		}
-		secretStore := secretBackend.Secrets
-		solanaTransit := secretBackend.SolanaTransit
-
-		tsvc, terr := merchants.NewService(deps.ControlPlane.Pool(), secretStore, config.ExpectedProviderEnvironment(s.cfg.IsTestMode()))
-		if terr != nil {
-			return nil, fmt.Errorf("build merchants service: %w", terr)
-		}
-		// or#914: slug resolution follows ak#264 group renames (tombstone
-		// forwarding) through the control plane's group namespace.
-		tsvc.WithGroupSlugResolver(deps.ControlPlane.MerchantGroupSlugResolver()).WithGroupIDResolver(deps.ControlPlane.MerchantGroupIDResolver()).WithGroupSearchResolver(deps.ControlPlane.MerchantGroupSearchResolver())
-		s.merchants = tsvc
-		if deps.Runtime != nil {
-			deps.Runtime.ArmMerchantsService(tsvc, secretStore)
-			// #748: live-reachability probe for /readyz (nil-safe no-op for the
-			// manifest plane / DB-backed store — only a Vault-backed store checks).
-			deps.Runtime.MerchantSecretPing = secretBackend.Ping
-			// #661: gate the provider route surface on what OpenRails can actually do.
-			deps.Runtime.RouteCapabilities = &routesurface.RuntimeCapabilities{
-				SolanaCanSign: secretBackend.SolanaCanSign,
-				SecretWrite:   secretBackend.SecretWrite,
-			}
-
-		}
-
-		if deps.Runtime != nil {
-			deps.Runtime.ArmSolanaRecurringServices(secretStore, solanaTransit)
-		}
+		// The Runtime owns credential construction and lifetime. HTTP assembly
+		// attaches authority to the same service instead of opening another store.
+		s.merchants = deps.Runtime.Merchants
+		s.merchants.WithGroupSlugResolver(deps.ControlPlane.MerchantGroupSlugResolver()).WithGroupIDResolver(deps.ControlPlane.MerchantGroupIDResolver()).WithGroupSearchResolver(deps.ControlPlane.MerchantGroupSearchResolver())
 
 	}
 

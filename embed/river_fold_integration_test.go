@@ -64,9 +64,9 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	rt, err := embed.New(ctx, embed.Options{
 		Merchant: &embed.MerchantDeclaration{Slug: slug, PSPs: []embed.PSPDeclaration{{Key: "solana", Rail: "solana", AccountID: "11111111111111111111111111111111"}}},
 		Config: &config.Config{
-			TestMode:             config.CredentialPostureSandbox,
-			DB:                   &config.DBConfig{URL: dsn},
-			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
+			TestMode:           config.CredentialPostureSandbox,
+			DB:                 &config.DBConfig{URL: dsn},
+			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB,
 			Auth: &config.AuthConfig{Issuer: "https://river-compose.test", KeysPath: t.TempDir()},
 		},
 		River: embed.RiverFromHost(),

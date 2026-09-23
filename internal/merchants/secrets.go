@@ -271,16 +271,24 @@ type ExactSecretReader interface {
 // it. MinVersion 0 means "no floor recorded" — the pre-rotation state, and the
 // state of every secret written outside the provider-config API.
 type SecretRef struct {
+	Retired    bool   `json:"-"`
 	Name       string `json:"name"`
 	MinVersion int    `json:"version"`
+	Custody    string `json:"custody,omitempty"`
 }
 
 // ReadSecretRef enforces the recorded version floor for every backend. A
 // version-aware cache may refresh first, but a lagging backend is unavailable,
 // never permission to present a retired credential.
 func ReadSecretRef(ctx context.Context, reader MerchantSecretReader, id merchant.ID, ref SecretRef) (Secret, error) {
+	if ref.Retired {
+		return Secret{}, ErrSecretNotFound
+	}
 	if reader == nil {
 		return Secret{}, errors.New("merchants: no secret store configured")
+	}
+	if ref.Custody != "" && ref.Custody != SecretCustodyIdentity(reader) {
+		return Secret{}, ErrCredentialCustodyTransitionRequired
 	}
 	if ref.MinVersion < 0 {
 		return Secret{}, fmt.Errorf("%w: invalid credential version floor", ErrSecretBackendUnavailable)
@@ -332,11 +340,15 @@ type PSPScope struct {
 	// was rotated through the provider-config API. Absent/zero = no floor.
 	CredentialVersions map[string]int
 	CredentialRefs     map[string]SecretRef
+	RetiredCredentials map[string]bool
 }
 
 // SecretRef returns the scoped secret name for key together with the rotation
 // version floor recorded on this PSP row.
 func (s PSPScope) SecretRef(key string) (SecretRef, error) {
+	if s.RetiredCredentials[NormalizeCredentialVersionKey(key)] {
+		return SecretRef{Retired: true}, nil
+	}
 	if ref, ok := s.CredentialRefs[NormalizeCredentialVersionKey(key)]; ok {
 		return validatePublishedRef(s.Rail, s.Environment, s.AccountID, key, ref)
 	}
@@ -351,6 +363,9 @@ func (s PSPScope) SecretRef(key string) (SecretRef, error) {
 // its evidence document — for the paths that hold the raw row rather than a
 // resolved PSPScope.
 func PSPSecretRef(rail, environment, accountID string, evidence []byte, key string) (SecretRef, error) {
+	if unmarshalProviderEvidence(evidence).RetiredCredentials[NormalizeCredentialVersionKey(key)] {
+		return SecretRef{Retired: true}, nil
+	}
 	if ref, ok := CredentialRefs(evidence)[NormalizeCredentialVersionKey(key)]; ok {
 		return validatePublishedRef(rail, environment, accountID, key, ref)
 	}
@@ -487,6 +502,13 @@ func validatePublishedRef(rail, environment, accountID, key string, ref SecretRe
 	canonical, err := PSPSecretName(rail, environment, accountID, key)
 	if err != nil {
 		return SecretRef{}, err
+	}
+	if strings.HasPrefix(ref.Custody, "snapshot:") {
+		identity, err := uuid.Parse(strings.TrimPrefix(ref.Custody, "snapshot:"))
+		if err != nil || identity == uuid.Nil || ref.Name != canonical || ref.MinVersion <= 0 {
+			return SecretRef{}, ErrSecretBackendUnavailable
+		}
+		return ref, nil
 	}
 	parts := strings.SplitN(ref.Name, "/", 3)
 	matching := len(parts) == 3 && parts[2] == canonical

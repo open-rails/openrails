@@ -45,7 +45,7 @@ milestone order, each verifiable before the next:
 1. **Migrations.** Call `embed.ApplyMigrations` with a privileged pool.
    OpenRails owns and applies its embedded billing and managed River schemas.
    Verify: the `openrails` schema exists.
-2. **Boot.** Programmatic `config.Config` (explicit `Env`, `TestMode`,
+2. **Boot.** Programmatic `config.Config` (explicit `TestMode`,
    `ProviderWriteMode`), `embed.New` with the host's pgx pool. Verify: boot succeeds;
    a missing posture field refuses to boot (that is correct behavior, not a bug).
 3. **Merchant + rails.** set `Options.Merchant.Config` before `embed.New` with the user's sandbox PSP entries

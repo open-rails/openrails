@@ -30,9 +30,9 @@ import (
 // the Stripe choke point. The readonly guard and pinned version still run above
 // it, and another runtime cannot replace its destination.
 //
-// This drives the real catalog rail-push (CreatePrice -> the Stripe adapter's
-// find-or-create) through an embedded engine onto a fake wire server.
-func TestEmbeddedStripeTransportSeam_DrivesCatalogRailPush(t *testing.T) {
+// Credential publication drives authenticated provider reads through the fake.
+// Native catalog creation retains local terms without creating provider objects.
+func TestEmbeddedStripeTransportSeam_DrivesCredentialProbeAndLocalCatalog(t *testing.T) {
 	fake := newFakeStripeCatalogAPI(t)
 
 	_, appDSN := dbtest.SharedRLSPostgres(t)
@@ -46,11 +46,11 @@ func TestEmbeddedStripeTransportSeam_DrivesCatalogRailPush(t *testing.T) {
 		AllowCatalogUpdates: true,
 		SecretBackend:       config.SecretBackendDB,
 		Encryption:          &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
-		// The seam exists to exercise the WRITE path; readonly is proven above
-		// the transport by the stripeapi choke-point tests.
+		// Full mode ensures local catalog behavior is not caused by a write guard.
+		// Readonly enforcement is qualified by the stripeapi choke-point tests.
 		ProviderWriteMode: config.ProviderWriteModeFull,
 		DB:                &config.DBConfig{URL: appDSN},
-		Auth:              &config.AuthConfig{AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true, Issuer: "https://stripe-seam-" + sfx + ".openrails.test"},
+		Auth:              &config.AuthConfig{AllowMemory: true, AllowEphemeralSigningKey: true, KeysPath: t.TempDir(), AllowMissingSenders: true, DirectPeerIP: true, Issuer: "https://stripe-seam-" + sfx + ".openrails.test"},
 	}
 	e, err := New(context.Background(), Options{
 		Config:          cfg,
@@ -72,8 +72,10 @@ func TestEmbeddedStripeTransportSeam_DrivesCatalogRailPush(t *testing.T) {
 	require.NotNil(t, e.app.Runtime.Merchants, "the merchant credential plane must be armed")
 	_, err = e.app.Runtime.Merchants.UpsertPaymentProviderConfig(ctx, provisioned.MerchantID, "stripe",
 		merchants.UpsertPaymentProviderConfigRequest{
-			AccountID:   "acct_seam_" + sfx,
-			Credentials: map[string]string{"secret_key": "sk_test_seam_" + sfx},
+			OperationID:      uuid.New(),
+			ExpectedRevision: new(int64),
+			AccountID:        "acct_seam_" + sfx,
+			Credentials:      map[string]string{"secret_key": "sk_test_seam_" + sfx},
 		})
 	require.NoError(t, err)
 
@@ -97,24 +99,23 @@ func TestEmbeddedStripeTransportSeam_DrivesCatalogRailPush(t *testing.T) {
 	}))
 	require.NotNil(t, price)
 
-	// The push actually reached the host's fake wire server — through the choke
-	// point, which stamped the pinned API version on every request.
+	// Account and environment verification reached the runtime-owned fake.
 	products, prices, versions := fake.snapshot()
-	require.NotEmpty(t, products, "the Stripe Product was created on the fake")
-	require.Equal(t, "Seam Product", products[0].Get("name"))
-	require.NotEmpty(t, prices, "the Stripe Price was created on the fake")
-	require.Equal(t, "999", prices[0].Get("unit_amount"), "micros -> Stripe cents")
-	require.Equal(t, "usd", prices[0].Get("currency"))
+	require.Empty(t, products, "native catalog terms do not create Stripe products")
+	require.Empty(t, prices, "native catalog terms do not create Stripe prices")
+	require.GreaterOrEqual(t, len(versions), 2, "publication verifies account and balance on the fake")
+	fake.mu.Lock()
+	paths := append([]string(nil), fake.paths...)
+	fake.mu.Unlock()
+	require.Contains(t, paths, "/v1/account")
+	require.Contains(t, paths, "/v1/balance")
 	for _, v := range versions {
-		require.Equal(t, stripeapi.APIVersion, v, "the choke point still pins Stripe-Version above the host transport")
+		require.Equal(t, stripeapi.APIVersion, v, "the choke point pins Stripe-Version above the host transport")
 	}
+	require.NotContains(t, price.Providers, "stripe", "native terms have no external provider catalog link")
+	require.EqualValues(t, 9_990_000, price.UnitAmount)
+	require.Equal(t, "USD", price.Currency)
 
-	// The link the catalog persisted is the fake's id — proof the host can
-	// assert on rail-push results, which is the whole point of the seam.
-	state, ok := price.Providers["stripe"]
-	require.True(t, ok, "the stripe provider slot is populated")
-	require.Equal(t, "price_seam_fake", state.IDs["price_id"])
-	require.Equal(t, "prod_seam_fake", state.IDs["product_id"])
 }
 
 // A live-credential posture must never accept a redirected transport.
@@ -153,6 +154,7 @@ type fakeStripeCatalogAPI struct {
 	products []url.Values
 	prices   []url.Values
 	versions []string
+	paths    []string
 }
 
 func newFakeStripeCatalogAPI(t *testing.T) *fakeStripeCatalogAPI {
@@ -165,9 +167,21 @@ func newFakeStripeCatalogAPI(t *testing.T) *fakeStripeCatalogAPI {
 	record := func(r *http.Request) {
 		f.mu.Lock()
 		f.versions = append(f.versions, r.Header.Get(stripeapi.VersionHeader))
+		f.paths = append(f.paths, r.URL.Path)
+		require.True(t, strings.HasPrefix(r.Header.Get("Authorization"), "Bearer sk_test_seam_"), "fake receives runtime credential")
+		require.Equal(t, http.MethodGet, r.Method, "native catalog must not write provider objects")
 		f.mu.Unlock()
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/account", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		key := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer sk_test_seam_")
+		writeJSON(w, map[string]any{"object": "account", "id": "acct_seam_" + key})
+	})
+	mux.HandleFunc("GET /v1/balance", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		writeJSON(w, map[string]any{"object": "balance", "livemode": false})
+	})
 	mux.HandleFunc("GET /v1/products/search", func(w http.ResponseWriter, r *http.Request) {
 		record(r)
 		writeJSON(w, map[string]any{"object": "search_result", "data": []any{}, "has_more": false})
@@ -194,7 +208,8 @@ func newFakeStripeCatalogAPI(t *testing.T) *fakeStripeCatalogAPI {
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		record(r)
-		writeJSON(w, map[string]any{"object": "list", "data": []any{}, "has_more": false})
+		t.Errorf("unexpected fake Stripe request: %s %s", r.Method, r.URL.Path)
+		http.Error(w, "unexpected fake request", http.StatusNotFound)
 	})
 	f.server = httptest.NewServer(mux)
 	t.Cleanup(f.server.Close)

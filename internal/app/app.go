@@ -92,6 +92,17 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
+	// Programmatic standalone construction needs the same protective defaults
+	// as the file loader and embedded constructor. Omission never disables them.
+	if !cfg.RateLimitsDisabled {
+		defaults := config.GetDefaultBillingConfig()
+		if cfg.RateLimits == nil {
+			cfg.RateLimits = defaults.RateLimits
+		}
+		if cfg.Captcha == nil {
+			cfg.Captcha = defaults.Captcha
+		}
+	}
 	if err := config.Validate(cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}

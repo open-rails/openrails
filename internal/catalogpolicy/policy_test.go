@@ -11,8 +11,8 @@ import (
 func TestCatalogWritePolicy(t *testing.T) {
 	ctx := context.Background()
 	require.ErrorIs(t, Check(ctx, nil), ErrUpdatesDisabled)
-	for _, source := range []string{config.MerchantConfigSourceManifest, config.MerchantConfigSourceAPI} {
-		cfg := &config.Config{MerchantConfigSource: source}
+	for _, source := range []string{config.SecretBackendSnapshot, config.SecretBackendDB} {
+		cfg := &config.Config{SecretBackend: source}
 		require.ErrorIs(t, Check(ctx, cfg), ErrUpdatesDisabled)
 		require.NoError(t, Check(OperatorContext(ctx), cfg))
 		cfg.AllowCatalogUpdates = true

@@ -111,7 +111,7 @@ webhook arrives.
 Point CCBill's Webhooks admin at:
 
 - `POST /v1/webhooks/ccbill/{account_id}` (standalone; the configured account resolves its merchant), or
-- `POST <prefix>/v1/merchants/{merchant}/webhooks/ccbill/{account_id}` (embedded, e.g. `/billing/v1/...`)
+- `POST <prefix>/v1/webhooks/ccbill/{account_id}` (embedded, e.g. `/billing/v1/...`)
 
 `account_id` is the configured `clientAccnum-clientSubacc` identity and must match the payload. Accountless webhook URLs are not registered.
 

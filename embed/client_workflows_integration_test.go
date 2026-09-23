@@ -45,7 +45,7 @@ func clientWorkflowDeployments(t *testing.T, h *integrationharness.Harness) []cl
 	t.Helper()
 	remote := h.StartStandalone("USD")
 	peerRuntime, err := embed.New(context.Background(), embed.Options{
-		Config: &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
+		Config: &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
 		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)
@@ -58,7 +58,7 @@ func clientWorkflowDeployments(t *testing.T, h *integrationharness.Harness) []cl
 			d.client = remote.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID))
 		} else {
 			host := h.StartEmbeddedMerchant("USD", owned.MerchantID, owned.MerchantSlug, func(cfg *config.Config) {
-				cfg.MerchantConfigSource = config.MerchantConfigSourceAPI
+				cfg.MerchantConfigHTTP = true
 				cfg.AllowCatalogUpdates = true
 				cfg.SecretBackend = config.SecretBackendDB
 				cfg.ProviderWriteMode = config.ProviderWriteModeFull

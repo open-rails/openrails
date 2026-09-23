@@ -339,7 +339,10 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// provisioning seeds it and every store consumer reads it. No persistent
 	// merchant-secret store is ever constructed in this mode.
 	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
-		runtime.ManifestSecrets = merchants.NewManifestSecretStore()
+		runtime.ManifestSecrets, err = merchants.NewManifestSecretStoreWithIdentity(cfg.CredentialSnapshotID)
+		if err != nil {
+			return nil, fmt.Errorf("initialize snapshot credential store: %w", err)
+		}
 	}
 
 	// Arm the late-bound resolvers built above (#788): they close over

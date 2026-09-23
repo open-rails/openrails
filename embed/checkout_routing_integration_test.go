@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/httptesthost"
@@ -31,11 +32,12 @@ import (
 // returns the SAME decision without creating anything.
 
 type routingFixture struct {
-	merchantID    merchant.ID
-	customerURL   string
-	merchantURL   string
-	priceID       string
-	buyerUsername string
+	merchantID      merchant.ID
+	customerURL     string
+	merchantURL     string
+	priceID         string
+	buyerUsername   string
+	paymentMethodID string
 }
 
 // bootRoutingFixture arms the given PSPs + routing policy on a fresh mode-1
@@ -94,6 +96,14 @@ func bootRoutingFixture(
 
 	username := "routing_" + uuid.NewString()[:8]
 	userID := seedProfileUser(t, ctx, dsn, username)
+	// A saved NMI method permits a recurring quote without executing a charge.
+	methodID := uuid.New()
+	_, err = appDB.Pool().Exec(scoped, `INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2) ON CONFLICT DO NOTHING`, id.UUID(), uuid.MustParse(userID))
+	require.NoError(t, err)
+	result, err := appDB.Pool().Exec(scoped, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,rail_customer_ref,rail_method_ref)
+ SELECT $1,$2,$3,id,'nmi','psp','routing-customer','routing-method' FROM billing.psps WHERE merchant_id=$2 AND key='mobius' AND archived=false`, methodID, id.UUID(), uuid.MustParse(userID))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, result.RowsAffected())
 	email := username + "@test.example.com"
 	userAuthn := billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
 		return billingauth.UserContext{UserID: userID, Email: email, EmailVerified: true}, nil
@@ -112,11 +122,12 @@ func bootRoutingFixture(
 	t.Cleanup(merchantServer.Close)
 
 	return routingFixture{
-		merchantID:    id,
-		customerURL:   buyerServer.URL,
-		merchantURL:   merchantServer.URL,
-		priceID:       fetchCCBillPriceID(t, buyerServer.URL),
-		buyerUsername: username,
+		merchantID:      id,
+		customerURL:     buyerServer.URL,
+		merchantURL:     merchantServer.URL,
+		priceID:         fetchCCBillPriceID(t, buyerServer.URL),
+		buyerUsername:   username,
+		paymentMethodID: openrails.PaymentMethodID(methodID).String(),
 	}
 }
 
@@ -155,8 +166,8 @@ func routingDryRun(t *testing.T, fx routingFixture, selector string) routingDryR
 // routing request — and returns the created session id.
 func openRoutedCheckoutSession(t *testing.T, fx routingFixture) string {
 	t.Helper()
-	body := fmt.Sprintf(`{"price_id":%q,"mode":"subscription","payment":{"email":%q,"first_name":"Routing","last_name":"Buyer","address1":"123 Test St","city":"Denver","state":"CO","zip":"80202","country":"US"}}`,
-		fx.priceID, fx.buyerUsername+"@test.example.com")
+	body := fmt.Sprintf(`{"price_id":%q,"payment":{"payment_method_id":%q,"email":%q,"first_name":"Routing","last_name":"Buyer","address1":"123 Test St","city":"Denver","state":"CO","zip":"80202","country":"US"}}`,
+		fx.priceID, fx.paymentMethodID, fx.buyerUsername+"@test.example.com")
 	req, err := http.NewRequest(http.MethodPost, fx.customerURL+"/v1/me/checkout", strings.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -216,8 +227,8 @@ func TestCheckoutRoutingPolicyDecidesRecordsAndDryRuns(t *testing.T) {
 		},
 		[]embed.CheckoutRoutingRuleConfig{
 			// Deliberately NOT the default order: the retired PSP first, then
-			// ccbill, then nmi. If the policy were ignored the default order
-			// would put nmi (mobius) ahead of ccbill.
+			// ccbill, then nmi. The trace retains this declared order and
+			// skips CCBill because new enrollment is unsupported.
 			{Prefer: []string{"paykings", "ccbill", "mobius"}},
 		},
 	)
@@ -227,14 +238,14 @@ func TestCheckoutRoutingPolicyDecidesRecordsAndDryRuns(t *testing.T) {
 	require.Equal(t, "merchant", trace.Policy)
 	require.NotNil(t, trace.Rule)
 	require.Equal(t, 0, *trace.Rule)
-	require.Equal(t, "ccbill", trace.Selected)
-	require.Equal(t, "ccbill", trace.Rail)
+	require.Equal(t, "mobius", trace.Selected)
+	require.Equal(t, "nmi", trace.Rail)
 	require.Equal(t, "subscription", trace.Mode)
 	require.Len(t, trace.Candidates, 3)
 	require.Equal(t, "paykings", trace.Candidates[0].Selector)
 	require.Equal(t, "not_armed", trace.Candidates[0].Skip, "an archived PSP is retired, not unknown")
 	require.Equal(t, "ccbill", trace.Candidates[1].Selector)
-	require.Empty(t, trace.Candidates[1].Skip)
+	require.Equal(t, "mode_unsupported", trace.Candidates[1].Skip)
 	require.Equal(t, "mobius", trace.Candidates[2].Selector)
 	require.Empty(t, trace.Candidates[2].Skip)
 
@@ -249,7 +260,7 @@ func TestCheckoutRoutingPolicyDecidesRecordsAndDryRuns(t *testing.T) {
 	require.NotEmpty(t, sessionID)
 
 	rail, reason := sessionRoutingReason(t, ctx, fx.merchantID, sessionID)
-	require.Equal(t, "ccbill", rail)
+	require.Equal(t, "nmi", rail)
 	require.NotEmpty(t, reason, "the routed session must record WHY it chose this PSP")
 	require.JSONEq(t, string(trace.RoutingReason), string(reason),
 		"the dry-run trace must be the decision a real session records")
@@ -295,7 +306,7 @@ func TestCheckoutRoutingDefaultOrderMatchesLegacyPreference(t *testing.T) {
 		"the default candidate order is the historical hardcoded one")
 	require.Equal(t, "not_armed", trace.Candidates[0].Skip)
 	require.Empty(t, trace.Candidates[1].Skip)
-	require.Empty(t, trace.Candidates[2].Skip)
+	require.Equal(t, "mode_unsupported", trace.Candidates[2].Skip)
 	require.Equal(t, "not_armed", trace.Candidates[3].Skip)
 
 	// MODE-2 PARITY: the same policy declared over the config API takes effect
@@ -305,7 +316,7 @@ func TestCheckoutRoutingDefaultOrderMatchesLegacyPreference(t *testing.T) {
 	require.Equal(t, "merchant", trace.Policy)
 	require.NotNil(t, trace.Rule)
 	require.Equal(t, 0, *trace.Rule)
-	require.Equal(t, "ccbill", trace.Selected)
+	require.Equal(t, "mobius", trace.Selected)
 	require.Equal(t, []string{"ccbill", "mobius"}, []string{trace.Candidates[0].Selector, trace.Candidates[1].Selector})
 
 	// A rule whose conditions do not hold is not reached: EUR-only, USD price.
@@ -371,15 +382,16 @@ func TestCheckoutRoutingKeepsAmbiguousSelectorRefusal(t *testing.T) {
 	)
 
 	// Routing: the ambiguous rail kind is SKIPPED with its class, and the
-	// decision falls through to the unambiguous ccbill PSP.
+	// remaining CCBill candidate also refuses new enrollment.
 	trace := routingDryRun(t, fx, "")
 	require.Equal(t, "default", trace.Policy)
 	require.Equal(t, "ambiguous_selector", trace.Candidates[1].Skip)
-	require.Equal(t, "ccbill", trace.Selected)
+	require.Equal(t, "mode_unsupported", trace.Candidates[2].Skip)
+	require.Empty(t, trace.Selected)
 
 	// An explicitly NAMED ambiguous rail kind is still a hard refusal —
 	// routing does not soften the #848 contract for a caller who asked.
-	body := fmt.Sprintf(`{"price_id":%q,"mode":"subscription","payment":{"rail":"nmi"}}`, fx.priceID)
+	body := fmt.Sprintf(`{"price_id":%q,"payment":{"rail":"nmi"}}`, fx.priceID)
 	req, err := http.NewRequest(http.MethodPost, fx.customerURL+"/v1/me/checkout", strings.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")

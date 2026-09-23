@@ -62,7 +62,7 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 	RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), &app.Runtime{Config: &config.Config{AllowCatalogUpdates: true}}, opts)
 	RegisterServiceRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
 	RegisterCatalogRoutes(router.NewMux(mux, "/billing/v1/merchant/catalog", nil), &app.Runtime{Config: &config.Config{AllowCatalogUpdates: true}}, opts)
-	RegisterPaymentProviderRoutes(router.NewMux(mux, "/billing/v1/merchant/payment-providers", nil), nil, opts)
+	RegisterMerchantConfigRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
 
 	tests := []struct {
 		name   string
@@ -315,7 +315,7 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 func TestCatalogMeterWritesOmittedWhenDisabled(t *testing.T) {
 	mux := http.NewServeMux()
 	checker := &merchantActionChecker{}
-	rt := &app.Runtime{Config: &config.Config{MerchantConfigSource: config.MerchantConfigSourceManifest}}
+	rt := &app.Runtime{Config: &config.Config{SecretBackend: config.SecretBackendSnapshot}}
 	opts := Options{
 		Gate: NewGate(GateOptions{
 			Authenticator:          merchantActionAuth{},
@@ -345,21 +345,21 @@ func TestCatalogMeterWritesOmittedWhenDisabled(t *testing.T) {
 }
 
 func TestCatalogAuthorityDoesNotChangeProviderAuthority(t *testing.T) {
-	for _, merchantSource := range []string{config.MerchantConfigSourceManifest, config.MerchantConfigSourceAPI} {
+	for _, merchantSource := range []string{config.SecretBackendSnapshot, config.SecretBackendDB} {
 		for _, allow := range []bool{false, true} {
 			t.Run(merchantSource+"/"+strconv.FormatBool(allow), func(t *testing.T) {
 				mux := http.NewServeMux()
 				checker := &merchantActionChecker{}
-				rt := &app.Runtime{Config: &config.Config{MerchantConfigSource: merchantSource, AllowCatalogUpdates: allow}}
+				rt := &app.Runtime{Config: &config.Config{SecretBackend: merchantSource, AllowCatalogUpdates: allow}}
 				opts := Options{Gate: NewGate(GateOptions{Authenticator: merchantActionAuth{}, AdminPermissionChecker: checker})}
 				RegisterCatalogRoutes(router.NewMux(mux, "/catalog", nil), rt, opts)
-				RegisterPaymentProviderRoutes(router.NewMux(mux, "/providers", nil), rt, opts)
+				RegisterMerchantConfigRoutes(router.NewMux(mux, "/merchant", nil), rt, opts)
 				for _, request := range []struct {
 					path, permission string
 					enabled          bool
 				}{
 					{"/catalog/meters/storage", policy.PermMerchantCatalogUpdate, allow},
-					{"/providers/stripe", controlplane.PermMerchantPaymentProvidersUpdate, merchantSource == config.MerchantConfigSourceAPI},
+					{"/merchant/payment-providers/stripe", controlplane.PermMerchantPaymentProvidersUpdate, true},
 				} {
 					checker.perm = ""
 					rec := httptest.NewRecorder()
@@ -377,9 +377,8 @@ func TestCatalogAuthorityDoesNotChangeProviderAuthority(t *testing.T) {
 	}
 }
 
-// The lifecycle archives stay mounted when the secret backend is read-only
-// (they never write a secret), while the credential-writing PUT is hidden;
-// host-owned provider configuration omits both archives entirely.
+// Metadata and lifecycle routes remain authorized with read-only credentials.
+// Credential publication itself is refused by the selected backend.
 func TestPaymentProviderArchivesMountWithoutSecretWrite(t *testing.T) {
 	checker := &merchantActionChecker{}
 	gate := NewGate(GateOptions{Authenticator: merchantActionAuth{}, AdminPermissionChecker: checker})
@@ -387,10 +386,10 @@ func TestPaymentProviderArchivesMountWithoutSecretWrite(t *testing.T) {
 	readOnly.SecretWrite = false
 
 	mux := http.NewServeMux()
-	RegisterPaymentProviderRoutes(router.NewMux(mux, "/billing/v1/merchant/payment-providers", nil), nil, Options{Gate: gate, ProviderRoutes: &readOnly})
+	RegisterMerchantConfigRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, Options{Gate: gate, ProviderRoutes: &readOnly})
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/billing/v1/merchant/payment-providers/stripe", strings.NewReader(`{}`)))
-	require.Equal(t, http.StatusMethodNotAllowed, rec.Code, "credential PUT is not mounted without secret writes")
+	require.Equal(t, http.StatusForbidden, rec.Code, "metadata PUT remains mounted and requires authorization")
 	require.NotContains(t, rec.Body.String(), "manifest_driven")
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodDelete, "/billing/v1/merchant/payment-providers/stripe"},
@@ -404,14 +403,13 @@ func TestPaymentProviderArchivesMountWithoutSecretWrite(t *testing.T) {
 	}
 
 	manifest := http.NewServeMux()
-	rt := &app.Runtime{Config: &config.Config{MerchantConfigSource: config.MerchantConfigSourceManifest}}
-	RegisterPaymentProviderRoutes(router.NewMux(manifest, "/billing/v1/merchant/payment-providers", nil), rt, Options{Gate: gate})
+	rt := &app.Runtime{Config: &config.Config{SecretBackend: config.SecretBackendSnapshot}}
+	RegisterMerchantConfigRoutes(router.NewMux(manifest, "/billing/v1/merchant", nil), rt, Options{Gate: gate})
 	checker.perm = ""
 	rec = httptest.NewRecorder()
 	manifest.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/billing/v1/merchant/payment-providers/stripe/accounts/11111111-1111-1111-1111-111111111111/archive", nil))
-	require.Equal(t, http.StatusNotFound, rec.Code)
-	require.NotContains(t, rec.Body.String(), "manifest_driven")
-	require.Empty(t, checker.perm, "unmounted routes must not authorize")
+	require.Equal(t, http.StatusForbidden, rec.Code)
+	require.Equal(t, controlplane.PermMerchantPaymentProvidersUpdate, checker.perm, "snapshot custody does not bypass metadata authorization")
 }
 
 func TestMerchantTierChangeUsesOffChannelAdminLimit(t *testing.T) {
@@ -534,68 +532,39 @@ func TestServiceRoutesDelegatedAdmitGatedByPermission(t *testing.T) {
 	}
 }
 
-// Record actual ServeMux registrations: a generic 405 alone cannot distinguish
-// an absent mutation route from a mounted handler rejecting the request.
-func TestProviderMutationRouteInventory(t *testing.T) {
-	for _, source := range []string{config.MerchantConfigSourceManifest, config.MerchantConfigSourceAPI} {
-		for _, secretWrite := range []bool{false, true} {
-			name := source + "/read-only"
-			if secretWrite {
-				name = source + "/writable"
+// Configuration metadata remains independently authorized for every credential
+// backend. A read-only backend refuses secret publication inside the service;
+// it must not remove metadata reads, archives or ordinary configuration updates.
+func TestMerchantConfigurationRouteInventory(t *testing.T) {
+	for _, backend := range []string{config.SecretBackendSnapshot, config.SecretBackendDB, config.SecretBackendVault} {
+		for _, writable := range []bool{false, true} {
+			rt := &app.Runtime{Config: &config.Config{SecretBackend: backend}, RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable}}
+			var inventory []string
+			rr := router.NewMuxRecorded(http.NewServeMux(), "/merchant", rt, func(pattern string) { inventory = append(inventory, pattern) })
+			RegisterMerchantConfigRoutes(rr, rt, Options{})
+			for _, route := range []string{
+				"GET /merchant/configuration", "POST /merchant/configuration/applications",
+				"GET /merchant/settings", "PUT /merchant/settings",
+				"GET /merchant/payment-providers", "PUT /merchant/payment-providers/{provider}",
+				"POST /merchant/payment-providers/{provider}/accounts/{psp_id}/archive",
+				"POST /merchant/webhooks", "PUT /merchant/webhooks/{id}/url",
+			} {
+				require.Contains(t, inventory, route)
 			}
-			t.Run(name, func(t *testing.T) {
-				rt := &app.Runtime{Config: &config.Config{MerchantConfigSource: source, AllowCatalogUpdates: true}}
-				providerRoutes := routesurface.AllProviderRoutes()
-				providerRoutes.SecretWrite = secretWrite
-				opts := Options{ProviderRoutes: &providerRoutes}
-				var inventory []string
-				mux := http.NewServeMux()
-				record := func(pattern string) { inventory = append(inventory, pattern) }
-				RegisterPaymentProviderRoutes(router.NewMuxRecorded(mux, "/providers", rt, record), rt, opts)
-				RegisterCatalogRoutes(router.NewMuxRecorded(mux, "/catalog", rt, record), rt, opts)
-				RegisterMerchantActionRoutes(router.NewMuxRecorded(mux, "/merchant", rt, record), rt, opts)
-				for _, route := range []string{"GET /providers", "GET /providers/{provider}", "POST /providers/routing/dry-run", "POST /catalog/products", "PUT /catalog/meters/{key}", "POST /merchant/webhooks", "PUT /merchant/webhooks/{id}/url", "DELETE /merchant/webhooks/{id}"} {
-					require.Contains(t, inventory, route)
-				}
-				if source == config.MerchantConfigSourceAPI && secretWrite {
-					require.Contains(t, inventory, "PUT /providers/{provider}")
-				} else {
-					require.NotContains(t, inventory, "PUT /providers/{provider}")
-				}
-				for _, route := range []string{"DELETE /providers/{provider}", "POST /providers/{provider}/accounts/{psp_id}/archive"} {
-					if source == config.MerchantConfigSourceAPI {
-						require.Contains(t, inventory, route)
-					} else {
-						require.NotContains(t, inventory, route)
-					}
-				}
-			})
 		}
 	}
 }
 
-func TestProviderRuntimeCapabilityLimitsRouteRegistration(t *testing.T) {
-	for _, writable := range []bool{false, true} {
-		for _, explicit := range []bool{false, true} {
-			rt := &app.Runtime{
-				Config:            &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI},
-				RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable},
-			}
-			opts := Options{}
-			if explicit {
-				all := routesurface.AllProviderRoutes()
-				opts.ProviderRoutes = &all
-			}
-			var inventory []string
-			rr := router.NewMuxRecorded(http.NewServeMux(), "/providers", rt, func(pattern string) { inventory = append(inventory, pattern) })
-			RegisterPaymentProviderRoutes(rr, rt, opts)
-			if writable {
-				require.Contains(t, inventory, "PUT /providers/{provider}", "explicit=%v", explicit)
-			} else {
-				require.NotContains(t, inventory, "PUT /providers/{provider}", "explicit=%v", explicit)
-			}
-			require.Contains(t, inventory, "DELETE /providers/{provider}")
-			require.Contains(t, inventory, "POST /providers/{provider}/accounts/{psp_id}/archive")
-		}
+func TestOrdinaryBillingDoesNotPublishMerchantConfiguration(t *testing.T) {
+	mux := http.NewServeMux()
+	rt := &app.Runtime{Config: &config.Config{AllowCatalogUpdates: true}}
+	opts := Options{Gate: NewGate(GateOptions{Authenticator: merchantActionAuth{}, AdminPermissionChecker: &merchantActionChecker{}})}
+	RegisterServiceRoutes(router.NewMux(mux, "/merchant", rt), rt, opts)
+	RegisterMerchantActionRoutes(router.NewMux(mux, "/merchant", rt), rt, opts)
+	RegisterCatalogRoutes(router.NewMux(mux, "/merchant/catalog", rt), rt, opts)
+	for _, path := range []string{"/merchant/configuration", "/merchant/settings", "/merchant/payment-providers", "/merchant/api-host", "/merchant/webhooks"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		require.Equal(t, http.StatusNotFound, rec.Code, path)
 	}
 }

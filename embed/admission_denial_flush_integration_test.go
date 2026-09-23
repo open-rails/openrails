@@ -53,7 +53,7 @@ func TestAdmissionDenialFlush_HostRiverOptionalRedis(t *testing.T) {
 			}
 			rt, err := embed.New(ctx, embed.Options{
 				Config: &config.Config{TestMode: config.CredentialPostureSandbox,
-					MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
+					MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB,
 					DB: &config.DBConfig{URL: dsn}},
 				PGXPool: pool, Redis: rdb, River: embed.RiverFromHost(),
 			})

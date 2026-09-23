@@ -81,10 +81,12 @@ func writeMode1Config(t *testing.T, dir, dsn string, port int, merchantSource, k
 	// makes this package pass only where the repo stack is up. Point it at the
 	// suite's own Redis (testcontainer or OPENRAILS_TEST_REDIS_ADDR).
 	redisAddr := dbtest.SharedRedisAddr(t)
-	// or#893: merchant_config_source=api must declare where secrets live. MODE 1 never
-	// consults it, so declaring db is inert there and honest here.
-	cfgYAML := fmt.Sprintf(`merchant_config_source: %s
-secret_backend: db
+	backend := "snapshot"
+	if merchantSource == "api" {
+		backend = "db"
+	}
+	cfgYAML := fmt.Sprintf(`secret_backend: %s
+merchant_config_http: true
 encryption:
   master_key: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
 test_mode: sandbox
@@ -103,7 +105,7 @@ auth:
   active_key_id: mode1-test-key
   active_private_key_pem: |
 %s
-`, merchantSource, port, dsn, redisAddr, indentPEM(keyPEM))
+`, backend, port, dsn, redisAddr, indentPEM(keyPEM))
 	path := filepath.Join(dir, "config.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(cfgYAML), 0o600))
 	return path
@@ -288,8 +290,7 @@ func TestRunServerRefusesMissingExplicitMerchantManifest(t *testing.T) {
 	require.Contains(t, err.Error(), "merchant manifest")
 }
 
-// TestRunServerAPIModeRefusesMerchantManifest: merchant_config_source=api refuses a
-// present boot manifest — two truths (#723).
+// Managed credentials are published explicitly; startup manifests cannot bypass publication.
 func TestRunServerAPIModeRefusesMerchantManifest(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dir := t.TempDir()
@@ -300,7 +301,7 @@ func TestRunServerAPIModeRefusesMerchantManifest(t *testing.T) {
 	root.SetArgs([]string{"run-server", "--config", cfgPath, "--merchant-manifest", manifestPath, "--no-workers"})
 	err := root.Execute()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "merchant_config_source=api refuses")
+	require.Contains(t, err.Error(), "managed provider declarations require explicit Client publication operations")
 }
 
 func waitForServerLive(t *testing.T, liveURL string, done <-chan error) {

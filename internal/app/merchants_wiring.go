@@ -37,6 +37,7 @@ func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 	store := backend.Secrets
 	svc, err := merchants.NewService(r.DB.DataPool(), store, config.ExpectedProviderEnvironment(r.Config.IsTestMode()))
 	if err != nil {
+		backend.Close()
 		return r.armingFailure(fmt.Errorf("merchants service unavailable (#699): %w", err))
 	}
 	// or#858: the merchant purge answers to the same #836 kill switch and #835

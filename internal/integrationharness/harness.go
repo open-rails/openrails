@@ -473,10 +473,10 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 		// MODE 2 (#723): the standalone harness IS the API-driven SaaS shape —
 		// merchants/secrets/catalog mutate over the HTTP surface it exercises.
 		// Manifest-mode standalone behavior is tested per-case, not here.
-		MerchantConfigSource: config.MerchantConfigSourceAPI,
-		AllowCatalogUpdates:  true,
-		SecretBackend:        config.SecretBackendDB,
-		Encryption:           &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
+		MerchantConfigHTTP:  true,
+		AllowCatalogUpdates: true,
+		SecretBackend:       config.SecretBackendDB,
+		Encryption:          &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 		// Explicit full: unset fail-closes to readonly (Paul 2026-07-02), which
 		// would park every provider write. The harness is a sandbox — fake
 		// providers, testcontainers DB — so full behavior is safe and required

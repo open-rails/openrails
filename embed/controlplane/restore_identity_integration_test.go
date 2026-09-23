@@ -4,6 +4,7 @@ package controlplane_test
 
 import (
 	"context"
+	"encoding/base64"
 	embedoperator "github.com/open-rails/openrails/embed/operator"
 	"testing"
 
@@ -21,9 +22,9 @@ import (
 func TestControlPlaneProvisionsRestoreIdentityUnderDestinationAuthority(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.Config{
-		TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
-		SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
-		Auth: &config.AuthConfig{Issuer: "https://restore.openrails.test", KeysPath: t.TempDir()},
+		TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true,
+		Encryption: &config.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
+		Auth: &config.AuthConfig{Issuer: "https://restore.openrails.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true},
 	}
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)

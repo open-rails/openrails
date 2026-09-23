@@ -4,6 +4,7 @@ package controlplane_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 	"time"
@@ -27,9 +28,9 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := &config.Config{
-		TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
-		SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn},
-		Auth: &config.AuthConfig{Issuer: "https://cutover.openrails.test", KeysPath: t.TempDir()},
+		TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true,
+		Encryption: &config.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn},
+		Auth: &config.AuthConfig{Issuer: "https://cutover.openrails.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true},
 	}
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)

@@ -35,7 +35,7 @@ bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 | `checkout` | `checkout` | 10 | Browser checkout create/confirm POSTs — see note |
 | `subscriptions` | `subscribe` | 20 | `POST/PUT/DELETE /v1/me/subscriptions*` |
 | `payment-methods` | `payment` | 40 | `/v1/me/payment-methods*` (any method) |
-| `webhook` | `webhook` | 1200 | `/v1/webhooks*`, `/v1/merchants/*/webhooks/*` |
+| `webhook` | `webhook` | 1200 | `<prefix>/v1/webhooks/*` |
 | `captcha` | — | unlimited | `/v1/captcha/status`, `/v1/captcha/client.js` |
 | `default` | `default` | 300 | everything else |
 

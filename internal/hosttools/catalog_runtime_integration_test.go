@@ -36,7 +36,7 @@ import (
 // still goes through ApplyMerchantCatalog and real provider reference checks.
 func TestCatalogCLIRuntimeVerifiesWholeArtifactWithoutSigner(t *testing.T) {
 	pool := dbtest.SharedSuperuserPGXPool(t)
-	for _, source := range []string{config.MerchantConfigSourceManifest, config.MerchantConfigSourceAPI} {
+	for _, source := range []string{config.SecretBackendSnapshot, config.SecretBackendDB} {
 		for _, missing := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/missing=%t", source, missing), func(t *testing.T) {
 				ctx := t.Context()
@@ -57,7 +57,7 @@ func TestCatalogCLIRuntimeVerifiesWholeArtifactWithoutSigner(t *testing.T) {
 				keyName, err := merchants.PSPSecretName("nmi", "test", nmiID, "security_key")
 				require.NoError(t, err)
 				dbKey := "configured-reader-key"
-				if source == config.MerchantConfigSourceManifest {
+				if source == config.SecretBackendSnapshot {
 					dbKey = "must-not-fall-back-to-db"
 				}
 				_, err = pool.Exec(ctx, `INSERT INTO billing.merchant_secrets(merchant_id,name,value,version) VALUES($1,$2,$3,1)`, mid.UUID(), keyName, dbKey)
@@ -80,9 +80,9 @@ func TestCatalogCLIRuntimeVerifiesWholeArtifactWithoutSigner(t *testing.T) {
 					fmt.Fprintf(w, `{"object":"plan","id":%q,"plan_amount":%q,"day_frequency":"30","plan_payments":"0"}`, strings.TrimPrefix(r.URL.Path, "/plans/"), amount)
 				}))
 				t.Cleanup(nmi.Close)
-				cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, MerchantConfigSource: source, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, ProviderSandbox: &config.ProviderSandboxConfig{NMIGatewayURL: nmi.URL}}
+				cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, SecretBackend: source, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, ProviderSandbox: &config.ProviderSandboxConfig{NMIGatewayURL: nmi.URL}}
 				manifestPath := ""
-				if source == config.MerchantConfigSourceManifest {
+				if source == config.SecretBackendSnapshot {
 					manifestPath = filepath.Join(t.TempDir(), "merchants.yaml")
 					snapshot := fmt.Sprintf("version: 1\nmerchants:\n  %s:\n    display_name: Catalog reader\n    psps:\n      mobius:\n        nmi:\n          account_id: %s\n          secrets: {security_key: configured-reader-key}\n", slug, nmiID)
 					require.NoError(t, os.WriteFile(manifestPath, []byte(snapshot), 0600))
@@ -194,10 +194,10 @@ func TestCatalogCLIRuntimeRefusesUnavailableCredentialPlane(t *testing.T) {
 	require.NoError(t, err)
 	vault := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusForbidden) }))
 	t.Cleanup(vault.Close)
-	cfg := &config.Config{DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendVault, Vault: &config.VaultConfig{Enabled: true, Address: vault.URL, AuthMethod: "token", Token: "fixture-token"}}
+	cfg := &config.Config{DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendVault, Vault: &config.VaultConfig{Enabled: true, Address: vault.URL, AuthMethod: "token", Token: "fixture-token"}}
 	_, _, _, err = catalogRuntime(t.Context(), CatalogApplyOptions{Config: cfg, PGXPool: pool, Merchant: slug})
 	require.ErrorContains(t, err, "credential plane unavailable")
-	cfg.MerchantConfigSource = config.MerchantConfigSourceManifest
+	cfg.SecretBackend = config.SecretBackendSnapshot
 	cfg.Vault = nil
 	_, _, _, err = catalogRuntime(t.Context(), CatalogApplyOptions{Config: cfg, PGXPool: pool, Merchant: slug, MerchantManifestPath: filepath.Join(t.TempDir(), "missing.yaml")})
 	require.ErrorContains(t, err, "read merchant manifest")

@@ -76,6 +76,8 @@ func seedBook(t *testing.T, d *db.DB, id merchant.ID) {
 		custodian, rootGrant, run, batch, nextPrice := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 		exec(`INSERT INTO openrails.custodians(merchant_id,id,key,kind,account_id,settings,credential_versions) VALUES($1,$2,'vault','basis_theory',$3,'{"public_api_key":"public-token","network_tokens":true,"account_updater":true,"account_updater_lookahead_days":30}','{"api_key":9}')`, id.UUID(), custodian, uuid.NewString())
 		exec(`INSERT INTO openrails.merchant_configurations(merchant_id,config) VALUES($1,'{"profile":{"display_name":"Merchant"},"collection_threshold":1000000,"checkout_routing":[{"prefer":["primary"]}]}')`, id.UUID())
+		exec(`INSERT INTO openrails.merchant_configuration_applications(merchant_id,application_id,request_sha256,result)
+         VALUES($1,'seed-book-metadata',decode(repeat('ab',32),'hex'),jsonb_build_object('application_id','seed-book-metadata','revision',repeat('cd',32),'replayed',false))`, id.UUID())
 		exec(`INSERT INTO openrails.billing_policies(merchant_id,name,policy) VALUES($1,'standard','{"kind":"window_spend_cap","spend_windows":[{"key":"daily","window_seconds":86400,"limit":9007199254740993,"currency":"USD"}]}')`, id.UUID())
 		exec(`INSERT INTO openrails.billing_policy_bindings(merchant_id,customer_id,policy_name) VALUES($1,$2,'standard')`, id.UUID(), customer)
 		exec(`INSERT INTO openrails.catalog_meters(merchant_id,key,event_type,value_property,aggregation,unit,group_by) VALUES($1,'tokens','generation','tokens','sum','token','{"model":"model"}')`, id.UUID())

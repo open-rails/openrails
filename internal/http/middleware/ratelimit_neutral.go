@@ -704,8 +704,7 @@ func ClassifyBucket(path, method string) string {
 	switch {
 	case path == "/v1/captcha/status" || path == "/v1/captcha/client.js":
 		return "captcha"
-	case strings.HasPrefix(path, "/v1/webhooks") ||
-		(strings.HasPrefix(path, "/v1/merchants/") && strings.Contains(path, "/webhooks/")):
+	case strings.HasPrefix(path, "/v1/webhooks"):
 		return "webhook"
 	case strings.HasPrefix(path, "/v1/me/payment-methods"):
 		return "payment-methods"

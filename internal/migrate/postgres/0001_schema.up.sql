@@ -3907,6 +3907,7 @@ BEGIN
                   'ledger_transfers',
                   'maintenance_runs',
                   'merchant_configurations',
+                  'merchant_configuration_applications',
                   'merchant_deks',
                   'merchant_destructive_policy',
                   'merchant_secrets',
@@ -4269,3 +4270,30 @@ BEGIN
  RAISE EXCEPTION 'catalog application receipts are immutable' USING ERRCODE='23514';
 END $$;
 CREATE TRIGGER immutable_catalog_application_receipt BEFORE UPDATE OR DELETE ON openrails.catalog_applications FOR EACH ROW EXECUTE FUNCTION openrails.guard_catalog_application_receipt();
+
+-- Metadata applications are local transactions; provider publication is separate.
+CREATE TABLE openrails.merchant_configuration_applications (
+ merchant_id uuid NOT NULL REFERENCES openrails.merchants(id) ON DELETE RESTRICT,
+ application_id text NOT NULL CHECK (length(application_id) BETWEEN 1 AND 128),
+ request_sha256 bytea NOT NULL CHECK (octet_length(request_sha256)=32),
+ result jsonb NOT NULL CHECK (octet_length(result::text)<=16384),
+ applied_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY (merchant_id,application_id)
+);
+CREATE TRIGGER immutable_merchant_configuration_application BEFORE UPDATE OR DELETE
+ ON openrails.merchant_configuration_applications FOR EACH ROW
+ EXECUTE FUNCTION openrails.guard_catalog_application_receipt();
+
+-- Every metadata writer participates in the same merchant lock, including
+-- individual API changes and direct modules. Directory UPDATE already takes it.
+CREATE FUNCTION openrails.lock_merchant_configuration_write() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE mid uuid;
+BEGIN
+ IF TG_OP='DELETE' THEN mid:=OLD.merchant_id; ELSE mid:=NEW.merchant_id; END IF;
+ PERFORM 1 FROM openrails.merchants WHERE id=mid FOR UPDATE;
+ IF NOT FOUND THEN RAISE EXCEPTION 'merchant metadata requires a merchant' USING ERRCODE='P0002'; END IF;
+ IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END $$;
+CREATE TRIGGER lock_merchant_configuration BEFORE INSERT OR UPDATE OR DELETE ON openrails.merchant_configurations FOR EACH ROW EXECUTE FUNCTION openrails.lock_merchant_configuration_write();
+CREATE TRIGGER lock_merchant_billing_policy BEFORE INSERT OR UPDATE OR DELETE ON openrails.billing_policies FOR EACH ROW EXECUTE FUNCTION openrails.lock_merchant_configuration_write();
+CREATE TRIGGER lock_merchant_policy_binding BEFORE INSERT OR UPDATE OR DELETE ON openrails.billing_policy_bindings FOR EACH ROW EXECUTE FUNCTION openrails.lock_merchant_configuration_write();
