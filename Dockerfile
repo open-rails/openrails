@@ -65,9 +65,8 @@ RUN addgroup -g 1001 -S billing && \
     mkdir -p /var/lib/openrails/spool && \
     chown -R billing:billing /var/lib/openrails
 
-# Copy binary and migrations from builder stage.
+# Copy the binary; database migrations are embedded in it.
 COPY --from=builder /app/bin/openrails /usr/local/bin/openrails
-COPY --from=builder /app/migrations ./migrations/
 
 # Configuration files must be mounted at runtime; none are baked into the image.
 
