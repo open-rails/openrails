@@ -77,9 +77,10 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	_, err = controlplane.Attach(ctx, rt, controlplane.Options{HostedPosture: true})
-	require.Error(t, err, "hosted posture without a sender refuses to boot")
-	_, err = controlplane.Attach(ctx, nil, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://handle.openrails.test", KeysPath: t.TempDir()}})
+	authConfig := &hostconfig.AuthConfig{Issuer: "https://handle.openrails.test", KeysPath: t.TempDir()}
+	_, err = controlplane.Attach(ctx, rt, controlplane.Options{Auth: authConfig, HostedPosture: true})
+	require.ErrorContains(t, err, "sender", "hosted posture without a sender refuses to boot")
+	_, err = controlplane.Attach(ctx, nil, controlplane.Options{Auth: authConfig})
 	require.Error(t, err)
 
 	sender := &captureSender{}
@@ -91,11 +92,11 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 	})
 	require.NoError(t, err)
 	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{
-		HostedPosture: true, EmailSender: sender,
+		Auth: authConfig, HostedPosture: true, EmailSender: sender,
 		MerchantCreation: &controlplane.MerchantCreationConfig{Admission: admission},
 	})
 	require.NoError(t, err)
-	_, err = controlplane.Attach(ctx, rt, controlplane.Options{HostedPosture: true, EmailSender: sender})
+	_, err = controlplane.Attach(ctx, rt, controlplane.Options{Auth: authConfig, HostedPosture: true, EmailSender: sender})
 	require.Error(t, err, "a runtime carries one control plane")
 
 	handler, err := cp.Handler()
