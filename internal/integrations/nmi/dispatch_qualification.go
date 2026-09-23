@@ -115,7 +115,7 @@ func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 			text := strings.TrimSpace(string(element))
 			if depth == 2 {
 				value += text
-			} else if text != "" {
+			} else if text != "" && depth != 0 {
 				return ProbeIndeterminate, errors.New("unexpected test-mode text")
 			}
 		case xml.Directive:
