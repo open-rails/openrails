@@ -4,7 +4,7 @@ go 1.26.6
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	github.com/open-rails/openrails v0.156.0
+	github.com/open-rails/openrails v0.157.0
 	github.com/stretchr/testify v1.12.1
 )
 
