@@ -67,7 +67,7 @@ export interface CheckoutProps {
   className?: string
 }
 
-const SOLANA_POLL_INTERVAL_MS = 3_000
+const POLL_INTERVAL_MS = 3_000
 
 function navigateTop(redirectURL: string): void {
   const parsed = new URL(redirectURL)
@@ -119,6 +119,10 @@ export function Checkout({
     React.useState<NMIBilling>(emptyNMIBilling)
   const [solanaURL, setSolanaURL] = React.useState<string>()
   const mounted = React.useRef(true)
+  const sourceRef = React.useRef(source)
+  React.useEffect(() => {
+    sourceRef.current = source
+  }, [source])
   const phaseRef = React.useRef(phase)
   const solanaStartedFor = React.useRef<string | undefined>(undefined)
 
@@ -181,6 +185,10 @@ export function Checkout({
           changePhase("blocked")
           return
         }
+        if (loaded.status === "processing") {
+          changePhase("processing")
+          return
+        }
         if (options.length === 0) {
           changePhase("unavailable")
           return
@@ -203,15 +211,16 @@ export function Checkout({
   // Expiry is enforced client-side too, so the page never invites a payment
   // the backend will refuse.
   React.useEffect(() => {
-    if (!session) return
-    const remaining = Date.parse(session.expires_at) - Date.now()
+    if (!session?.expires_at) return
+    const expiresAt = session.expires_at
+    const remaining = Date.parse(expiresAt) - Date.now()
     if (Number.isNaN(remaining)) return
     // setTimeout overflows past 2^31-1ms and fires immediately, so clamp and
     // re-check the wall clock on fire instead of trusting the timer.
     const delay = Math.min(Math.max(0, remaining), 2 ** 31 - 1)
     const timer = window.setTimeout(() => {
       if (phaseRef.current !== "ready") return
-      if (Date.parse(session.expires_at) - Date.now() <= 0) {
+      if (Date.parse(expiresAt) - Date.now() <= 0) {
         changePhase("expired")
       }
     }, delay)
@@ -249,7 +258,10 @@ export function Checkout({
     [uid]
   )
   const collect = useCollectJS({
-    enabled: Boolean(nmiOption),
+    enabled:
+      Boolean(nmiOption) &&
+      (phase === "ready" ||
+        (phase === "processing" && session?.status !== "processing")),
     active: selected === nmiOption?.id,
     tokenizationKey: nmiOption?.public_config?.tokenization_key ?? "",
     scriptURL: nmiOption?.public_config?.tokenization_url ?? "",
@@ -264,6 +276,7 @@ export function Checkout({
     if (!session || !active || phase !== "ready") return
     setPayError(undefined)
     changePhase("processing")
+    let submitted = false
     try {
       let request: PayRequest = { option_id: active.id }
       if (active.driver === "redirect" && active.rail === "ccbill") {
@@ -289,7 +302,7 @@ export function Checkout({
           return
         }
         const tokenized = await collect.tokenize()
-        if (!mounted.current) return
+        if (!mounted.current || sourceRef.current !== source) return
         request = {
           option_id: active.id,
           payment_token: tokenized.token,
@@ -304,8 +317,9 @@ export function Checkout({
           token_symbol: solanaToken(active)?.symbol,
         }
       }
+      submitted = true
       const result = await source.pay(request)
-      if (!mounted.current) return
+      if (!mounted.current || sourceRef.current !== source) return
       if (active.driver === "redirect" && result.redirect_url) {
         onCompleteRef.current?.(result)
         navigateTop(result.redirect_url)
@@ -355,14 +369,35 @@ export function Checkout({
         changePhase("blocked")
         return
       }
-      setPayError("Checkout did not complete. Try again.")
-      changePhase("ready")
-    } catch (err) {
-      if (!mounted.current) return
-      setPayError(
-        err instanceof Error ? err.message : "Payment failed. Try again."
+      if (result.status === "expired" || result.status === "canceled") {
+        setSession((current) =>
+          current ? { ...current, status: result.status } : current
+        )
+        changePhase("expired")
+        return
+      }
+      setSession((current) =>
+        current ? { ...current, status: "processing" } : current
       )
-      changePhase("ready")
+      changePhase("processing")
+    } catch (err) {
+      if (!mounted.current || sourceRef.current !== source) return
+      if (submitted) {
+        setPayError(
+          "The payment result is not confirmed. Keep this attempt while we check its status."
+        )
+        setSession((current) =>
+          current ? { ...current, status: "processing" } : current
+        )
+        changePhase("processing")
+      } else {
+        setPayError(
+          err instanceof Error
+            ? err.message
+            : "Card entry could not be completed."
+        )
+        changePhase("ready")
+      }
     }
   }, [
     active,
@@ -396,17 +431,15 @@ export function Checkout({
   React.useEffect(() => {
     if (
       !session ||
-      active?.driver !== "solana_pay" ||
-      phase !== "ready" ||
-      !solanaURL
-    ) {
+      (!(phase === "processing" && session.status === "processing") &&
+        !(active?.driver === "solana_pay" && phase === "ready" && solanaURL))
+    )
       return
-    }
 
     let cancelled = false
     let timer: number | undefined
     const schedule = () => {
-      timer = window.setTimeout(() => void poll(), SOLANA_POLL_INTERVAL_MS)
+      timer = window.setTimeout(() => void poll(), POLL_INTERVAL_MS)
     }
     const poll = async () => {
       try {
@@ -436,6 +469,8 @@ export function Checkout({
             changePhase("expired")
             return
           default:
+            // Ready-looking reads can race an accepted write. Keep the local
+            // pending presentation and poll; never re-enable tokenization.
             schedule()
         }
       } catch {
@@ -651,6 +686,17 @@ export function Checkout({
           merchantName={merchantName}
           headline="Checkout isn’t available right now"
         />
+      ) : phase === "processing" && session?.status === "processing" ? (
+        <div role="status" className="grid gap-3 py-6 text-center">
+          <div className="font-semibold">Confirming your payment</div>
+          <p className="text-muted-foreground">
+            The original payment is still being verified. Do not start another
+            checkout.
+          </p>
+          {payError ? (
+            <p className="text-muted-foreground text-xs">{payError}</p>
+          ) : null}
+        </div>
       ) : phase === "succeeded" ? (
         <SucceededView
           merchantName={merchantName}

@@ -57,6 +57,7 @@ const returnURLSchema = z
 export const checkoutSessionStatusSchema = z.enum([
   "created",
   "requires_action",
+  "processing",
   "succeeded",
   "failed",
   "blocked",
@@ -123,7 +124,7 @@ export const checkoutSessionSchema = z.object({
   failure_message: z.string().optional(),
   // Present on hosted-page reads so the page host can redirect on success.
   success_url: returnURLSchema.optional(),
-  expires_at: z.string(),
+  expires_at: z.string().nullish(),
 })
 export type CheckoutSession = z.infer<typeof checkoutSessionSchema>
 

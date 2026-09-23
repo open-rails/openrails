@@ -105,3 +105,36 @@ binds the token on the option's `public_config`:
 
 Version 0.2.5 removes the former `USDC` default: a host that bound no token
 saw “USDC” before and sees no Solana option now.
+
+## Pending payment outcomes
+
+`processing` means an accepted outcome is unresolved. Checkout polls the same
+source's `getSession` without calling `pay` or Collect.js again. The optional
+`expires_at` may be null for an accepted pending attempt; a local display timer
+never releases or fails that attempt. The host must return verified terminal
+state, not infer payment from navigation or a timeout. A thrown error after
+`pay` starts is treated as unknown and remains pending, rather than enabling
+a fresh card token and payment. Tokenization/field validation errors before
+submission remain editable. Explicit `failed` results are definitive host
+responses; they must not represent an unknown provider result.
+
+A custom CheckoutSource may call an application-owned admission wrapper instead
+of the default hosted endpoints. It must retain its logical attempt identity
+and original request, use the same key for an authorized retry, and expose only
+the authorized buyer's state. `getSession` is a read, not another payment.
+
+## Separate NMI card setup
+
+`TokenizedCardForm` reuses the same hosted fields and emits `payment_token`,
+`name_on_card`, `country` and `zip` to its async `onTokenized` callback. The host
+provides explicit save-card consent and uses the callback to invoke its native
+authenticated save-card endpoint. Set `disabled` until consent is given. The
+form never creates a zero-dollar checkout or announces a completed payment.
+After token submission it locks the form; a failed/unknown save must be checked
+against the host's saved-method state before mounting a new attempt.
+
+Saving a card does not authorize a recurring charge. The host separately obtains
+and displays the immutable membership quote, then asks the signed-in customer
+to confirm that agreement.
+
+Hosts must key `TokenizedCardForm` by authenticated customer and provider identity. A customer change must unmount the old form. The form also discards an in-flight token if its tokenization configuration changes or save consent is withdrawn before dispatch.

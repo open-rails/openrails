@@ -863,3 +863,138 @@ describe("CheckoutModal", () => {
     expect(screen.queryByText(/Returning to/)).not.toBeInTheDocument()
   })
 })
+
+describe("accepted processing", () => {
+  it("polls a pending NMI payment without tokenizing or submitting again", async () => {
+    const pay = vi.fn().mockResolvedValue({ status: "processing" })
+    const getSession = vi
+      .fn()
+      .mockResolvedValueOnce(fixtureSession())
+      .mockResolvedValueOnce(
+        fixtureSession({ status: "processing", expires_at: null })
+      )
+      .mockResolvedValue(
+        fixtureSession({ status: "succeeded", payment_id: "pay_verified" })
+      )
+    const onComplete = vi.fn()
+    render(<Checkout source={{ getSession, pay }} onComplete={onComplete} />)
+    const button = await screen.findByRole("button", { name: "Pay $99.00" })
+    vi.useFakeTimers()
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    expect(screen.getByText("Confirming your payment")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Pay $99.00" })
+    ).not.toBeInTheDocument()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000)
+    })
+    expect(screen.getAllByText("Payment complete").length).toBeGreaterThan(0)
+    expect(pay).toHaveBeenCalledTimes(1)
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment_id: "pay_verified",
+        status: "succeeded",
+      })
+    )
+  })
+  it("retains an ambiguous pay failure and ignores local expiry", async () => {
+    const pay = vi.fn().mockRejectedValue(new Error("connection lost"))
+    const getSession = vi
+      .fn()
+      .mockResolvedValue(
+        fixtureSession({ expires_at: new Date(Date.now() + 100).toISOString() })
+      )
+    render(<Checkout source={{ getSession, pay }} />)
+    const button = await screen.findByRole("button", { name: "Pay $99.00" })
+    vi.useFakeTimers()
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3500)
+    })
+    expect(screen.getByText("Confirming your payment")).toBeInTheDocument()
+    expect(
+      screen.queryByText("This checkout link has expired")
+    ).not.toBeInTheDocument()
+    expect(pay).toHaveBeenCalledTimes(1)
+    expect(getSession.mock.calls.length).toBeGreaterThan(1)
+  })
+  it("keeps awaiting an ambiguous pay through stale ready reads until settlement", async () => {
+    const pay = vi.fn().mockRejectedValue(new Error("response lost"))
+    const getSession = vi
+      .fn()
+      .mockResolvedValueOnce(fixtureSession())
+      .mockResolvedValueOnce(fixtureSession({ status: "requires_action" }))
+      .mockResolvedValueOnce(fixtureSession({ status: "created" }))
+      .mockResolvedValue(
+        fixtureSession({ status: "succeeded", payment_id: "settled" })
+      )
+    render(<Checkout source={{ getSession, pay }} />)
+    const button = await screen.findByRole("button", { name: "Pay $99.00" })
+    vi.useFakeTimers()
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000)
+      })
+      expect(screen.getByText("Confirming your payment")).toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Pay $99.00" })
+      ).not.toBeInTheDocument()
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    expect(screen.getAllByText("Payment complete").length).toBeGreaterThan(0)
+    expect(pay).toHaveBeenCalledTimes(1)
+  })
+  it("loads processing without an available rail and waits for definitive failure", async () => {
+    const source: CheckoutSource = {
+      getSession: vi
+        .fn()
+        .mockResolvedValueOnce(
+          fixtureSession({ status: "processing", rails: [], expires_at: null })
+        )
+        .mockResolvedValue(fixtureSession({ status: "failed" })),
+      pay: vi.fn(),
+    }
+    render(<Checkout source={source} />)
+    await screen.findByText("Confirming your payment")
+    expect(
+      await screen.findByText("Payment failed", {}, { timeout: 5000 })
+    ).toBeInTheDocument()
+    expect(source.pay).not.toHaveBeenCalled()
+  })
+})
+
+it("does not apply a previous source's payment result after a source switch", async () => {
+  let resolve!: (value: { status: "succeeded" }) => void
+  const pending = new Promise<{ status: "succeeded" }>((done) => {
+    resolve = done
+  })
+  const oldSource: CheckoutSource = {
+    getSession: async () => fixtureSession(),
+    pay: vi.fn().mockReturnValue(pending),
+  }
+  const complete = vi.fn()
+  const { rerender } = render(
+    <Checkout source={oldSource} onComplete={complete} />
+  )
+  fireEvent.click(await screen.findByRole("button", { name: "Pay $99.00" }))
+  const next = createFixtureSource({
+    session: { merchant: { display_name: "Second merchant" } },
+  })
+  rerender(<Checkout source={next} onComplete={complete} />)
+  await screen.findAllByText("Second merchant")
+  await act(async () => {
+    resolve({ status: "succeeded" })
+    await pending
+  })
+  expect(complete).not.toHaveBeenCalled()
+  expect(screen.getByRole("button", { name: "Pay $99.00" })).toBeEnabled()
+})
