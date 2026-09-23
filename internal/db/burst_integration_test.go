@@ -1,6 +1,6 @@
 //go:build integration
 
-package db
+package db_test
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -34,7 +35,7 @@ func TestMerchantConn_BurstDoesNotWedge(t *testing.T) {
 	} else {
 		dsn += "?pool_max_conns=5"
 	}
-	d, err := NewDB(t.Context(), &config.DBConfig{URL: dsn})
+	d, err := db.NewDB(t.Context(), &config.DBConfig{URL: dsn})
 	require.NoError(t, err)
 	defer d.Close()
 
@@ -88,7 +89,7 @@ func TestMerchantConn_LazyConnNotAcquiredWithoutUse(t *testing.T) {
 	} else {
 		dsn += "?pool_max_conns=2"
 	}
-	d, err := NewDB(t.Context(), &config.DBConfig{URL: dsn})
+	d, err := db.NewDB(t.Context(), &config.DBConfig{URL: dsn})
 	require.NoError(t, err)
 	defer d.Close()
 
