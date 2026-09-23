@@ -4,6 +4,13 @@
 
 Breaking: the session document carries exact money.
 
+- Accepted `processing` outcomes poll the same source without repeating payment
+  or tokenization. Ambiguous pay errors retain that pending attempt; local expiry
+  cannot turn it into a failure. Pending sessions may omit/null `expires_at`.
+- Export `TokenizedCardForm` for separately consented NMI card setup, reusing the
+  existing hosted fields without presenting setup as a payment.
+- Source changes fence late payment callbacks from the previous checkout.
+
 - `plan.unit_amount`, `line_items[].amount`, `tax` and `due_today` are int64
   decimal strings of `plan.currency`'s native unit; `plan.unit_decimals` (the
   currency's registered scale) is required. Numeric amounts are refused as an
