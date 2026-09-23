@@ -275,15 +275,17 @@ Server-to-server billing operations. Every route is gated on the listed
 | DELETE | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | `merchant:customer-settings:update` | Revoke exactly one delegation (or#911); siblings untouched; 404 when nothing exists at the key |
 | GET | `/v1/merchant/entitlements/{entitlement}/customers` | `merchant:customer-settings:read` | Customers currently holding an entitlement |
 | GET | `/v1/merchant/users/{user_id}/product-access` | `merchant:customer-settings:read` | A user's product access |
-| POST | `/v1/merchant/users/{user_id}/product-access/check` | `merchant:customer-settings:read` | Check access for at most 100 product IDs without loading the customer's purchase history |
+| POST | `/v1/merchant/users/{user_id}/entitlements/check` | `merchant:customer-settings:read` | Exact grant-backed checks for at most 100 opaque entitlement keys; optional `at` instant |
+| POST | `/v1/merchant/users/{user_id}/product-access/check` | `merchant:customer-settings:read` | Check access for exactly one bounded product_ids or product_keys list without loading purchase history |
 | GET | `/v1/merchant/invokers/{invoker}/credits` | `merchant:customer-settings:read` | Invoker credit summary `{ currency, balance, held_balance }`. Query: `customer_id`, `currency` |
-| POST | `/v1/merchant/checkout-sessions` | `merchant:checkout:create` | Create a checkout for the supplied customer identity; required Idempotency-Key header |
+| POST | `/v1/merchant/checkout-sessions/lookup` | `merchant:checkout:create` | Read-only original-request lookup by customer and Idempotency-Key; changed payload returns idempotency_key_reused, absent attempt returns 404 |
+| POST | `/v1/merchant/checkout-sessions` | `merchant:checkout:create` | Create a checkout for the supplied customer identity; exactly one price_id or price_key, optional entitlement and offer_kind assertions, required Idempotency-Key header |
 | POST | `/v1/merchant/payment-method-sessions` | `merchant:checkout:create` | Create a nonmonetary saved-payment-method setup session for the supplied customer |
 | POST | `/v1/merchant/solana-cancel-sessions` | `merchant:checkout:create` | Create a customer-authorized Solana subscription cancellation session |
 | POST | `/v1/merchant/solana-tier-change-sessions` | `merchant:checkout:create` | Create a customer-authorized Solana subscription tier-change session |
 | GET | `/v1/merchant/checkout-sessions/{id}` | `merchant:customer-settings:read` | Read a checkout owned by query customer_id |
 | POST | `/v1/merchant/checkout-sessions/{id}/confirm` | `merchant:checkout:create` | Confirm the checkout for the supplied customer_id |
-| GET | `/v1/merchant/checkout-options` | `merchant:customer-settings:read` | Locally ready providers for query price_id; no provider request |
+| GET | `/v1/merchant/checkout-options` | `merchant:customer-settings:read` | Locally ready providers for exactly one query price_id or price_key; no provider request |
 | GET | `/v1/merchant/checkout-config` | `merchant:customer-settings:read` | Armed PSPs, their public browser values and the Solana acceptance policy for the credential's merchant |
 | GET | `/v1/merchant/customers/{customer_id}/effective-tier` | `merchant:customer-settings:read` | Active tier for query group; null when none |
 | POST | `/v1/merchant/admissions` | `merchant:admissions:create` | Pre-authorize spend / place holds; returns the durable admission id. Idempotent per `(customer_id, credit_type, source, source_id)`. An item with `estimated_amount > 0` places a hold and MUST carry `expires_at` (RFC3339): the deadline of the job the hold covers. There is no default lifetime — the hold lives until captured, released, extended, or that deadline |
@@ -430,6 +432,7 @@ when ordinary writes are disabled; there is no remote bypass.
 |---|---|---|
 | GET | `/v1/catalog` | Read the verified caller's catalog (`merchant:catalog:read-own`) |
 | PUT | `/v1/catalog` | Ensure the verified caller's catalog (`merchant:catalog:update-own`) |
+| GET | `/v1/catalog/offers` | Active offers in the caller's catalog for an exact entitlement key; required kind, optional preferred_currency, limit and cursor |
 | GET | `/v1/catalog/products` | List products in the caller's catalog |
 | GET | `/v1/catalog/products/{id}` | Read an owned product |
 | GET | `/v1/catalog/products/by-key/{key}` | Read an owned product by key |
@@ -452,6 +455,7 @@ when ordinary writes are disabled; there is no remote bypass.
 | GET | `/v1/merchant/catalogs/{id}` | Read one merchant catalog (`merchant:catalog:read`) |
 | POST | `/v1/merchant/catalogs` | Ensure a catalog for an explicit `owner_subject` (`merchant:catalog:update`) |
 | POST | `/v1/merchant/catalog/products` | Create a product: at least `{ key, display_name }`, optionally `entitlements_spec` |
+| GET | `/v1/merchant/catalog/offers` | Active offers for an exact entitlement key; required kind (`permanent`, `finite`, `recurring`), optional preferred_currency, limit (max 100) and cursor |
 | GET | `/v1/merchant/catalog/products` | Paginated products; `tier_group` and `archived` (`false` live only, `true` archived only, absent both) filter before count/pagination |
 | GET | `/v1/merchant/catalog/products/{id}` | One product |
 | GET | `/v1/merchant/catalog/products/by-key/{key}` | Product by catalog key |
