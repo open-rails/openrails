@@ -19,10 +19,8 @@ checks() {
     exit 1
   fi
   go build ./...
-  go vet ./...
-  # Integration-tagged files are a separate compilation universe; keep the
-  # compile/vet guard that catches dependency drift before the E2E runner.
-  go vet -tags=integration ./...
+  # Tests vet the same selected files before running; avoid separately loading
+  # and compiling the complete default and integration package graphs.
   # Integration packages run once, with race coverage, in E2E. Retain whole
   # packages here when E2E tags exclude a default source or test file.
   local selected package
@@ -31,7 +29,7 @@ checks() {
   while IFS= read -r package; do
     [[ -n "$package" ]] && unit_packages+=("$package")
   done <<< "$selected"
-  go test -race -count=1 "${unit_packages[@]}"
+  go test -vet=all -race -count=1 "${unit_packages[@]}"
   # Native adapters run once with their integration superset in End-to-end.
   bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
   pnpm --dir web/admin run lint
@@ -53,7 +51,6 @@ checks() {
 
 e2e() {
   : "${OPENRAILS_TEST_DB_DSN:?Set OPENRAILS_TEST_DB_DSN to a disposable PostgreSQL server}"
-  : "${OPENRAILS_TEST_REDIS_ADDR:?Set OPENRAILS_TEST_REDIS_ADDR to the test Redis server}"
   if [[ -z "${SQLC_DATABASE_URL:-}" ]]; then
     export SQLC_ADMIN_DATABASE_URL="${SQLC_ADMIN_DATABASE_URL:-$OPENRAILS_TEST_DB_DSN}"
     export SQLC_VET_DB="openrails_check_${BASHPID}"

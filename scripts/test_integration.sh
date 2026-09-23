@@ -69,6 +69,26 @@ case "${1:-}" in
   --list-checks-packages) checks_packages; exit ;;
 esac
 
+# Package processes own separate PostgreSQL databases. Parallel processes must
+# also own separate Redis servers: some recovery tests intentionally FLUSHALL.
+for arg in "$@"; do
+  case "$arg" in
+    -p|--p|-p=*|--p=*|-parallel|--parallel|-parallel=*|--parallel=*|-test.parallel|--test.parallel|-test.parallel=*|--test.parallel=*)
+      echo "Use OPENRAILS_TEST_PACKAGES for package concurrency; tests within each package stay serial" >&2
+      exit 2
+      ;;
+  esac
+done
+package_parallelism="${OPENRAILS_TEST_PACKAGES:-1}"
+if [[ ! "$package_parallelism" =~ ^[1-9][0-9]*$ ]]; then
+  echo "OPENRAILS_TEST_PACKAGES must be a positive integer" >&2
+  exit 2
+fi
+if [[ "$package_parallelism" -gt 1 && -n "${OPENRAILS_TEST_REDIS_ADDR:-}" ]]; then
+  echo "Parallel packages require process-owned Redis; unset OPENRAILS_TEST_REDIS_ADDR or use OPENRAILS_TEST_PACKAGES=1" >&2
+  exit 2
+fi
+
 if [ "$#" -eq 0 ]; then
   set -- ./...
 fi
@@ -117,7 +137,7 @@ if [[ -z "${OPENRAILS_TEST_DB_DSN:-${OPENRAILS_TEST_DB_URL:-}}" ]]; then
   compose_service_running postgres || started_services+=(postgres)
 fi
 
-if [[ -z "${OPENRAILS_TEST_REDIS_ADDR:-}" ]]; then
+if [[ "$package_parallelism" -eq 1 && -z "${OPENRAILS_TEST_REDIS_ADDR:-}" ]]; then
   compose_services+=(garnet)
   compose_service_running garnet || started_services+=(garnet)
 fi
@@ -140,7 +160,9 @@ if [[ "${#compose_services[@]}" -gt 0 ]]; then
 fi
 
 export OPENRAILS_TEST_DB_DSN="${OPENRAILS_TEST_DB_DSN:-${OPENRAILS_TEST_DB_URL:-postgresql://admin:admin_password@127.0.0.1:${POSTGRES_HOST_PORT}/openrails_db?sslmode=disable}}"
-export OPENRAILS_TEST_REDIS_ADDR="${OPENRAILS_TEST_REDIS_ADDR:-127.0.0.1:${GARNET_HOST_PORT}}"
+if [[ "$package_parallelism" -eq 1 ]]; then
+  export OPENRAILS_TEST_REDIS_ADDR="${OPENRAILS_TEST_REDIS_ADDR:-127.0.0.1:${GARNET_HOST_PORT}}"
+fi
 
 # -count=1 is MANDATORY, not stylistic. Go's test-result cache keys on package
 # content, env vars and files read — it cannot see the Postgres/Garnet stack
@@ -148,4 +170,4 @@ export OPENRAILS_TEST_REDIS_ADDR="${OPENRAILS_TEST_REDIS_ADDR:-127.0.0.1:${GARNE
 # re-earned against the current schema and data. Observed live (or#855): with a
 # warm GOCACHE, whole integration packages came back `ok … (cached)` without a
 # single query running.
-go test -race -count=1 -p 1 -parallel 1 -tags=integration -timeout "${OPENRAILS_INTEGRATION_TIMEOUT:-25m}" "${args[@]}"
+go test -vet=all -race -count=1 -p "$package_parallelism" -parallel 1 -tags=integration -timeout "${OPENRAILS_INTEGRATION_TIMEOUT:-25m}" "${args[@]}"

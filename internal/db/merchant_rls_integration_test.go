@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver for the migration bootstrap
+	"github.com/moby/moby/api/types/container"
 	authkitembedded "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/config"
@@ -177,4 +178,9 @@ func TestMerchantTx_ScopesGUC(t *testing.T) {
 		require.Equal(t, 1, n)
 		return nil
 	}))
+}
+
+func postgresTestLimits(hc *container.HostConfig) {
+	hc.Resources.Memory = 2 << 30
+	hc.Resources.NanoCPUs = 2_000_000_000
 }

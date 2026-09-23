@@ -26,6 +26,8 @@ type fakePlanReader struct {
 	// mintZeroDecimals serves a mint that genuinely reports 0 decimals (the
 	// unpayable case), distinct from the zero-value default below.
 	mintZeroDecimals bool
+	// submitted exposes a created plan only after the captured submit.
+	submitted *fakeSubmitter
 }
 
 func (r fakePlanReader) GetAccountData(_ context.Context, addr solanago.PublicKey) ([]byte, error) {
@@ -38,6 +40,28 @@ func (r fakePlanReader) GetAccountData(_ context.Context, addr solanago.PublicKe
 			d = 6 // devnet/mainnet USDC
 		}
 		return buildMintBlob(d), nil
+	}
+	if r.submitted != nil {
+		for _, set := range r.submitted.submits {
+			for _, ix := range set {
+				if ix.ProgramID() != subscriptions.ProgramID || ix.Accounts()[1].PublicKey != addr {
+					continue
+				}
+				data, err := ix.Data()
+				if err != nil {
+					return nil, err
+				}
+				// create_plan has the account fields after its discriminator;
+				// the account prefixes those fields with owner, bump, status.
+				blob := append([]byte{1}, r.submitted.merchantPub.Bytes()...)
+				blob = append(blob, 254, 0)
+				blob = append(blob, data[1:]...)
+				// created_at follows discriminator, owner, bump, status, plan ID, mint, amount, period.
+				const createdAtOffset = 1 + 32 + 1 + 1 + 8 + 32 + 8 + 8
+				binary.LittleEndian.PutUint64(blob[createdAtOffset:createdAtOffset+8], uint64(testPlanCreatedAt))
+				return blob, nil
+			}
+		}
 	}
 	return r.data, r.err
 }
@@ -62,10 +86,11 @@ func buildMintBlob(decimals uint8) []byte {
 	return blob
 }
 
-// readerWithMint is a fake reader whose plan PDA is empty (publish proceeds) and
-// whose mint reports `decimals`.
-func readerWithMint(decimals uint8) fakePlanReader {
-	return fakePlanReader{mintDecimals: decimals}
+const testPlanCreatedAt = int64(1_717_200_000)
+
+// readerWithMint reports the mint precision and exposes the plan after submit.
+func readerWithMint(decimals uint8, sub *fakeSubmitter) fakePlanReader {
+	return fakePlanReader{mintDecimals: decimals, submitted: sub}
 }
 
 // buildPlanBlob assembles a synthetic on-chain Plan account in the exact byte
@@ -190,8 +215,8 @@ func TestPublishPlanAbsentPDAProceeds(t *testing.T) {
 	merchantKey, _ := solanago.NewRandomPrivateKey()
 	merchantPub := merchantKey.PublicKey()
 
-	reader := fakePlanReader{data: nil} // PDA does not exist
 	sub := &fakeSubmitter{merchantPub: merchantPub}
+	reader := readerWithMint(6, sub) // PDA is absent until submit
 	svc := NewPlanServiceWithReader(sub, reader, "devnet", testSolanaTokens())
 
 	h, err := svc.PublishPlan(context.Background(), PublishPlanInput{
@@ -207,6 +232,9 @@ func TestPublishPlanAbsentPDAProceeds(t *testing.T) {
 	}
 	if len(sub.submits) == 0 {
 		t.Fatal("expected create_plan submit when PDA is absent")
+	}
+	if h.CreatedAt != testPlanCreatedAt {
+		t.Fatalf("created_at = %d, want chain readback %d", h.CreatedAt, testPlanCreatedAt)
 	}
 	if h.Signature == "" {
 		t.Fatal("a fresh publish must carry a submit signature")
