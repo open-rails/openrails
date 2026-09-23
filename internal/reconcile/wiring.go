@@ -16,6 +16,7 @@ func NewEngine(d *db.DB, cfg *config.Config, fetchers map[Provider]RailFetcher) 
 	e := &Engine{
 		Fetchers: fetchers,
 		Store:    &PGStore{DB: d},
+		Evidence: &PGEvidenceStore{DB: d},
 		Local:    &PGLocalStateLoader{DB: d},
 		Writer:   &PGLocalWriter{DB: d},
 		// #665: subscription transitions route through the decider. No

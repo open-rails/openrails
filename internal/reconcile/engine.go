@@ -33,6 +33,10 @@ import (
 type Engine struct {
 	Fetchers map[Provider]RailFetcher
 	Store    Store
+	// Evidence retains the normalized provider snapshot independently of local
+	// mirror mutation policy. A nil store keeps lightweight/unit engines free
+	// of persistence while DB-backed wiring enables billing analysis.
+	Evidence EvidenceStore
 	Local    LocalStateLoader
 	// Writer applies enforce-mode local mirror writes. May be nil for
 	// advisory-only engines.
@@ -420,6 +424,11 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	rep.RemoteSubscriptions = len(snap.Subscriptions)
 	rep.RemoteTransactions = len(snap.Transactions)
 	rep.RemotePaymentMethods = len(snap.PaymentMethods)
+	if e.Evidence != nil {
+		if err := e.Evidence.StoreEvidence(ctx, runID, binding, snap, params.Since, params.Until); err != nil {
+			return rep, nil, nil, nil, fmt.Errorf("store provider evidence: %w", err)
+		}
+	}
 
 	local, err := e.Local.Load(ctx, provider, binding.ID)
 	if err != nil {

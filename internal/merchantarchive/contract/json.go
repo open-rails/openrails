@@ -183,6 +183,15 @@ var captureJSON = object(map[string]jsonRule{
 })
 
 var jsonRules = map[string]jsonRule{
+	"provider_evidence_snapshots.capabilities": object(map[string]jsonRule{
+		"subscriptions": booleanValue, "transactions": booleanValue, "refunds": booleanValue,
+		"chargebacks": booleanValue, "vault": booleanValue,
+	}),
+	"provider_evidence_snapshots.coverage": object(map[string]jsonRule{
+		"subscriptions_exhaustive": booleanValue, "transactions_exhaustive": booleanValue,
+		"transactions_paginated_complete": booleanValue, "transaction_window_since": nullable(textValue),
+		"transaction_window_until": nullable(textValue),
+	}),
 	"rail_intents.nmi_vault_delete.payload":         object(map[string]jsonRule{"billing_entry_only": booleanValue, "user_id": uuidValue, "payment_method_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue}),
 	"rail_intents.nmi_vault_delete.result_evidence": object(map[string]jsonRule{"deleted": booleanValue, "verified_absent": booleanValue, "verified_entry_absent": booleanValue, "already_absent": booleanValue, "no_rail_customer_ref": booleanValue, "vault_id": textValue, "billing_id": textValue, "scoped_to_billing_entry": textValue}),
 	"rail_intents.hyperswitch_method_delete.payload": object(map[string]jsonRule{

@@ -316,6 +316,10 @@ func normalizeNMITransaction(t nmiTransactionXML) []RemoteTransaction {
 			// NMI does not echo the recurring subscription_id on
 			// transactions; order_id correlation lives in Raw.
 			SubscriptionID: "",
+			Source:         strings.TrimSpace(strings.ToLower(a.Source)),
+			CustomerID:     strings.TrimSpace(t.CustomerVaultID),
+			Email:          strings.TrimSpace(t.Email),
+			OrderID:        strings.TrimSpace(t.OrderID),
 			Type:           txnType,
 			Success:        success,
 			Currency:       strings.TrimSpace(t.Currency),

@@ -132,9 +132,19 @@ type RemoteTransaction struct {
 	TransactionID string `json:"transaction_id"`
 	// SubscriptionID links to the rail subscription when the provider
 	// exposes the linkage; empty otherwise (see fetcher notes).
-	SubscriptionID string          `json:"subscription_id,omitempty"`
-	Type           TransactionType `json:"type"`
-	Success        bool            `json:"success"`
+	SubscriptionID string `json:"subscription_id,omitempty"`
+	// Source is the provider-declared transaction origin (for example NMI's
+	// "recurring" versus "api"). It is intentionally optional because some
+	// rails do not expose an origin classification.
+	Source string `json:"source,omitempty"`
+	// CustomerID, Email, and OrderID preserve provider identity hints when the
+	// transaction API exposes them. They are joins for analysis only; the raw
+	// provider record remains authoritative.
+	CustomerID string          `json:"customer_id,omitempty"`
+	Email      string          `json:"email,omitempty"`
+	OrderID    string          `json:"order_id,omitempty"`
+	Type       TransactionType `json:"type"`
+	Success    bool            `json:"success"`
 	// AmountCents is in integer cents of Currency. Zero for Solana (base
 	// units, preserved in Raw).
 	AmountCents int64     `json:"amount_cents"`

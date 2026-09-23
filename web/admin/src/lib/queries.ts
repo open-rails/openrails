@@ -43,6 +43,10 @@ import {
   metricsQuery,
   type MetricsQuery,
 } from "@/lib/api/metrics"
+import {
+  getBillingAnalysis,
+  type BillingAnalysisFilters,
+} from "@/lib/api/billing-analysis"
 
 // Complete collections are explicit: selectors need every eligible record,
 // while catalog screens fetch only their visible page.
@@ -102,6 +106,7 @@ const buildQueryKeys = (root: () => MerchantRoot) => ({
   alerts: () => [...root(), "alerts"] as const,
   ops: () => [...root(), "ops"] as const,
   dashboard: () => [...root(), "dashboard"] as const,
+  billingAnalysis: () => [...root(), "billing-analysis"] as const,
   notifications: () => [...root(), "notifications"] as const,
 })
 
@@ -411,6 +416,13 @@ export const adminQueries = {
       queryKey: queryKeys.dashboard(),
       queryFn: ({ signal }) => getDashboard(signal),
       meta: { errorAction: "Load dashboard" },
+    }),
+  billingAnalysis: (filters: BillingAnalysisFilters) =>
+    queryOptions({
+      queryKey: [...queryKeys.billingAnalysis(), filters],
+      queryFn: ({ signal }) => getBillingAnalysis(filters, signal),
+      placeholderData: keepPreviousData,
+      meta: { errorAction: "Load billing analysis" },
     }),
   widgetMetrics: (query?: MetricsQuery) =>
     queryOptions({
