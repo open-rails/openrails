@@ -3,6 +3,8 @@ name: Validate
 on:
   pull_request:
     branches: [master]
+  # Dispatch on master after releases to refresh caches shared with new PRs.
+  # PR-scoped caches cannot warm other pull requests.
   workflow_dispatch:
 
 permissions:
@@ -15,7 +17,7 @@ concurrency:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   GOMAXPROCS: "2"
-  GOFLAGS: -p=3
+  GOFLAGS: -p=4
 
 jobs:
   checks:
@@ -25,8 +27,24 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        id: go
         with:
           go-version-file: go.mod
+          cache: false
+      - name: Locate Go caches
+        id: go-cache
+        run: |
+          printf 'build=%s\nmodules=%s\n' "$(go env GOCACHE)" "$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      # Separate jobs; save each successful revision's newly compiled source.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.go-cache.outputs.build }}
+            ${{ steps.go-cache.outputs.modules }}
+          key: go-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'adapters/*/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'adapters/*/go.sum') }}-
+            go-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.4.0
         with:
           package_json_file: web/admin/package.json
@@ -64,12 +82,28 @@ jobs:
     env:
       OPENRAILS_TEST_DB_DSN: postgres://admin:test_password@127.0.0.1:5432/openrails_test?sslmode=disable
       # Keep tests serial within a package; independent processes own Redis.
-      OPENRAILS_TEST_PACKAGES: "3"
+      OPENRAILS_TEST_PACKAGES: "4"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        id: go
         with:
           go-version-file: go.mod
+          cache: false
+      - name: Locate Go caches
+        id: go-cache
+        run: |
+          printf 'build=%s\nmodules=%s\n' "$(go env GOCACHE)" "$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      # Separate jobs; save each successful revision's newly compiled source.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.go-cache.outputs.build }}
+            ${{ steps.go-cache.outputs.modules }}
+          key: go-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'adapters/*/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'adapters/*/go.sum') }}-
+            go-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.4.0
         with:
           package_json_file: tests/browser/package.json
@@ -106,8 +140,24 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        id: go
         with:
           go-version-file: go.mod
+          cache: false
+      - name: Locate Go caches
+        id: go-cache
+        run: |
+          printf 'build=%s\nmodules=%s\n' "$(go env GOCACHE)" "$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      # Separate jobs; save each successful revision's newly compiled source.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.go-cache.outputs.build }}
+            ${{ steps.go-cache.outputs.modules }}
+          key: go-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'adapters/*/go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'adapters/*/go.sum') }}-
+            go-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-
       - name: Scan the complete tracked tree
         run: |
           bash scripts/scan-injected-code.sh --all

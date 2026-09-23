@@ -109,7 +109,7 @@ require (
 	github.com/mr-tron/base58 v1.3.0 // indirect
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
-	github.com/open-rails/authkit v0.125.0 // indirect
+	github.com/open-rails/authkit v0.125.1 // indirect
 	github.com/open-rails/helpers v0.1.0 // indirect
 	github.com/open-rails/migratekit v1.0.4 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
