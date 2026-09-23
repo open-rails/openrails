@@ -69,7 +69,7 @@ rule PREPAREs every query) need a live Postgres whose schema matches
   (`openrails_sqlc_vet`) on the local compose Postgres (default
   `127.0.0.1:5434`; override via `SQLC_ADMIN_DATABASE_URL`,
   `SQLC_POSTGRES_HOST`, `POSTGRES_HOST_PORT`, `SQLC_VET_DB`) and applies
-  `migrations/bootstrap/`, then the authored baseline through migratekit with
+  the authored baseline through migratekit with
   explicit canonical schema `openrails`. Runtime fixtures use the default
   `billing` schema and production query rewriting; SQLC vet prepares the source
   SQL directly. AuthKit tables and migrations are outside this query catalog.
@@ -81,17 +81,12 @@ if generated code is stale.
 ## Migrations
 
 `internal/migrate/postgres/0001_schema.up.sql` is a single squashed baseline
-(greenfield — no numbered history before it); new migrations continue from
-`0002_*`. `migrations/bootstrap/` holds instance-level init that runs before
-the app migrations. Schema-shape invariants are enforced by Go tests that live
-next to the migrations.
+for fresh PostgreSQL 18 databases, including extensions and creator catalogs.
+Schema-shape invariants are enforced by Go tests next to the migration.
+All prerelease databases are disposable; no old-schema upgrade is supported.
 
-The baseline was re-squashed (or#893). migratekit tracks applied migrations by
-FILENAME, so a database whose ledger holds the pre-squash names will skip the
-new baseline and sit on a schema nothing describes: **drop and recreate any
-database created before the re-squash — do not try to migrate it forward.**
-Prelaunch, every database is disposable, which is the whole reason the squash
-is allowed.
+Use a fresh database for this pre-v1 hard cut. Do not restamp an old ledger or
+try to upgrade historical schemas; initialization verifies migration identity.
 
 Recreating one:
 
@@ -99,7 +94,7 @@ Recreating one:
 |---|---|
 | Local compose stack | `task docker-reset` — `down -v` (deletes the `postgres_data` volume) then `docker-up`, which re-runs `openrails-migrate` against an empty server. Plain `task docker-down` keeps the volume and therefore keeps the stale ledger. |
 | A dev/staging server you can't drop the volume of | `DROP DATABASE` + `CREATE DATABASE`, then `openrails migrate up`. |
-| A long-lived hand-rolled test pool | Drop `public.migrations` along with the schema — migratekit reads its ledger there, and a surviving ledger makes it *skip* re-applying the baseline. (The integration suite is unaffected: it creates a fresh per-run database every time.) |
+| A hand-rolled test pool | Provision a new disposable database. The integration suite already creates a fresh per-run database. Never clear another library's shared ledger rows. |
 | An EMBEDDED host's database (one schema inside the host's DB) | Stop the host, then run `task db-reset-embedded DSN='…'`. It is plan-only by default and prints the exact `host:port/database` allow-list entry and confirmation token. To apply, set that entry in `OPENRAILS_RESET_TARGETS` and rerun with `CONFIRM='…'`; the schema drop and exact OpenRails/Postgres/schema ledger delete commit together. Restart the host so it re-applies the chain. |
 
 You will not have to notice this yourself: the engine REFUSES to start when the

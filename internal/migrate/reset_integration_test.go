@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -45,12 +44,7 @@ func TestEmbeddedResetIsTransactionalAndLedgerScoped(t *testing.T) {
 	target, err := pgx.Connect(ctx, targetDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, target.Close(context.Background())) })
-	// Exercise the standalone bootstrap SQL followed by the real migrator, not
-	// a handwritten ledger fixture. Re-running startup must be an exact no-op.
-	bootstrap, err := os.ReadFile("../../migrations/bootstrap/0001_postgres_init.sql")
-	require.NoError(t, err)
-	_, err = target.Exec(ctx, string(bootstrap))
-	require.NoError(t, err)
+	// The real initializer owns all DDL; repeated startup is an exact no-op.
 	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: targetDSN}}
 	require.NoError(t, migrate.RunPostgres(ctx, cfg))
 	require.NoError(t, migrate.RunPostgres(ctx, cfg))

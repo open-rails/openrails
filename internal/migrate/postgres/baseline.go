@@ -5,11 +5,10 @@ import (
 	"strings"
 )
 
-// BaselineName is the initial consolidated migration. Additive migrations in
-// FS extend it; initialization and full-schema guards load the complete chain.
+// BaselineName is the complete fresh PostgreSQL schema migration.
 const BaselineName = "0001_schema.up.sql"
 
-// Baseline returns the initial migration, not the complete current schema.
+// Baseline returns the complete fresh PostgreSQL schema.
 func Baseline() (string, error) {
 	b, err := FS.ReadFile(BaselineName)
 	if err != nil {
