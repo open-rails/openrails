@@ -16,6 +16,9 @@ type forwardingDirectory struct {
 	calls int
 }
 
+func (d *forwardingDirectory) CanonicalSlug(context.Context, merchant.ID) (string, error) {
+	return d.m.Slug, nil
+}
 func (d *forwardingDirectory) Get(context.Context, merchant.ID) (*merchants.Merchant, error) {
 	d.calls++
 	return d.m, nil

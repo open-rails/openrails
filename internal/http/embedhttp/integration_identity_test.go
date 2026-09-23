@@ -58,3 +58,18 @@ func TestNativeCustomerRejectsCredentialProvenanceEscalation(t *testing.T) {
 		require.ErrorIs(t, err, billingauth.ErrUnauthenticated)
 	}
 }
+
+func TestNativeStaffDoesNotRequirePayableCustomerMapping(t *testing.T) {
+	auth := &billingauth.Integration{Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
+		return billingauth.Identity{Kind: billingauth.NativeUser, SubjectID: "staff-subject", Issuer: "staff-issuer", CredentialClass: billingauth.CredentialClassUserSession}, nil
+	})}
+	r := requestauth.Begin(httptest.NewRequest(http.MethodGet, "/v2/merchant/products", nil))
+	staff, err := authenticateIntegration(r.Context(), r, auth)
+	require.NoError(t, err)
+	require.Equal(t, "staff-subject", staff.SubjectID)
+	require.Empty(t, staff.CustomerID)
+	_, err = integrationAuthenticator{auth: auth}.Authenticate(r.Context(), r)
+	require.ErrorIs(t, err, billingauth.ErrUnauthenticated, "checkout requires an explicit payable customer mapping")
+	_, err = nativeCustomer(auth, billingauth.Target{MerchantID: merchant.ID(uuid.New()), MerchantSlug: "store"}).AuthenticateDelegated(r.Context(), r)
+	require.ErrorIs(t, err, billingauth.ErrUnauthenticated, "staff authority never invents personal billing ownership")
+}

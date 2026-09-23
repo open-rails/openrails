@@ -6,7 +6,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
@@ -15,6 +14,7 @@ import (
 	coreauth "github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
 	billingauthkit "github.com/open-rails/openrails/embed/authkit"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -22,10 +22,8 @@ import (
 )
 
 func TestIntegrationLiveAuthorityAndNativeIdentity(t *testing.T) {
-	dsn := os.Getenv("OPENRAILS_TEST_DB_DSN")
-	if dsn == "" {
-		t.Skip("OPENRAILS_TEST_DB_DSN is required")
-	}
+	dsn := dbtest.SharedSuperuserDSN(t)
+	t.Cleanup(dbtest.TerminateShared)
 	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
