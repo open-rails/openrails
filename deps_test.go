@@ -1,7 +1,6 @@
 package openrails
 
 import (
-	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -29,6 +28,7 @@ func TestRootPackageStaysLight(t *testing.T) {
 		"github.com/open-rails/openrails/pkg",
 		"github.com/open-rails/openrails/embed",
 		"github.com/gin-gonic/gin",
+		"github.com/gofiber/fiber",
 		"github.com/jackc/pgx",
 		"github.com/riverqueue/river",
 		"github.com/redis/go-redis",
@@ -47,16 +47,18 @@ func TestRootPackageStaysLight(t *testing.T) {
 	}
 }
 
-// TestModuleIsGinFree pins the #670 gin exit for the WHOLE module: gin must not
-// reappear in go.mod (direct or indirect — post-1.17 go.mod lists both). The
-// HTTP surface is framework-neutral net/http; hosts wrap it themselves
-// (gin.WrapH etc.).
-func TestModuleIsGinFree(t *testing.T) {
-	gomod, err := os.ReadFile("go.mod")
+// TestCorePackagesStayFrameworkNeutral keeps framework implementations inside
+// their opt-in adapters. A shared module does not make them engine dependencies.
+func TestCorePackagesStayFrameworkNeutral(t *testing.T) {
+	out, err := exec.Command("go", "list", "-deps", "./config", "./embed", "./pkg/billingauth", "./adapters/http").CombinedOutput()
 	if err != nil {
-		t.Fatalf("read go.mod: %v", err)
+		t.Fatalf("list core package dependencies: %v\n%s", err, out)
 	}
-	if strings.Contains(string(gomod), "github.com/gin-gonic/gin") {
-		t.Errorf("github.com/gin-gonic/gin is back in go.mod — the module is gin-free since #670; mount the neutral handler via the host framework's WrapH instead")
+	for _, dep := range strings.Fields(string(out)) {
+		for _, framework := range []string{"github.com/gin-gonic/gin", "github.com/gofiber/fiber"} {
+			if dep == framework || strings.HasPrefix(dep, framework+"/") {
+				t.Errorf("core package links opt-in framework dependency %q", dep)
+			}
+		}
 	}
 }

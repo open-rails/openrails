@@ -476,6 +476,19 @@
       "var ErrUnauthorized = errors.New(\"openrails: unauthorized\")",
       "var ErrUnreachable = errors.New(\"openrails: unreachable\")"
     ],
+    "adapters/fiber": [
+      "const RouteNamePrefix = \"openrails.\"",
+      "func (b *Bundle) Mount(target fiber.Router) error",
+      "func Routes(runtime RouteSource) (*Bundle, error)",
+      "type Bundle struct {\n}",
+      "type RouteSource interface {\n\tHTTPRoutes() ([]embed.HTTPRoute, error)\n\tHTTPRequiresRoot() bool\n}"
+    ],
+    "adapters/gin": [
+      "func (b *Bundle) Mount(target gin.IRoutes) error",
+      "func Routes(runtime RouteSource) (*Bundle, error)",
+      "type Bundle struct {\n}",
+      "type RouteSource interface {\n\tHTTPRoutes() ([]embed.HTTPRoute, error)\n\tHTTPRequiresRoot() bool\n}"
+    ],
     "adapters/http": [
       "func (b *Bundle) Mount(target any, prefix ...string) error",
       "func (b *Bundle) MountRoot(target any) error",
@@ -1685,6 +1698,21 @@
     ]
   },
   "declaring_file_imports": {
+    "adapters/fiber/fiber.go": {
+      "adaptor": "github.com/gofiber/fiber/v3/middleware/adaptor",
+      "embed": "github.com/open-rails/openrails/embed",
+      "fmt": "fmt",
+      "http": "net/http",
+      "strings": "strings",
+      "v3": "github.com/gofiber/fiber/v3"
+    },
+    "adapters/gin/gin.go": {
+      "embed": "github.com/open-rails/openrails/embed",
+      "fmt": "fmt",
+      "gin": "github.com/gin-gonic/gin",
+      "http": "net/http",
+      "strings": "strings"
+    },
     "adapters/http/http.go": {
       "embed": "github.com/open-rails/openrails/embed",
       "fmt": "fmt",

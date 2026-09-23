@@ -2,10 +2,7 @@
 # A package graph fence: standalone composition may use AuthKit; billing may not.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-packages=(. ./config ./embed ./embed/operator ./pkg/billingauth ./adapters/http)
-if [[ "${1:-}" == "--adapters" ]]; then
-  packages+=(./adapters/gin ./adapters/fiber)
-fi
+packages=(. ./config ./embed ./embed/operator ./pkg/billingauth ./adapters/http ./adapters/gin ./adapters/fiber)
 deps="$(go list -deps "${packages[@]}")"
 if forbidden="$(printf '%s\n' "$deps" | grep -E '^github.com/open-rails/authkit(/|$)')"; then
   printf 'Embedded billing imports AuthKit:\n%s\n' "$forbidden" >&2
@@ -21,7 +18,7 @@ module example.org/independent-billing-host
 go 1.26.6
 
 require (
- github.com/open-rails/openrails v0.155.0
+ github.com/open-rails/openrails v0.157.1
  github.com/open-rails/helpers v0.3.0
 )
 MOD
@@ -32,6 +29,8 @@ import (
  "net/http"
  auth "github.com/open-rails/helpers/auth"
  "github.com/open-rails/openrails/embed"
+ gin "github.com/open-rails/openrails/adapters/gin"
+ fiber "github.com/open-rails/openrails/adapters/fiber"
  "github.com/open-rails/openrails/pkg/billingauth"
 )
 type provider struct{}
@@ -40,6 +39,8 @@ func (principal) Identity() auth.Identity { return auth.Identity{Kind:auth.KindU
 func (provider) AuthenticateRequest(context.Context,*http.Request)(auth.Principal,error) { return principal{},nil }
 var _ billingauth.Verifier = provider{}
 var _ = embed.New
+var _ = gin.Routes
+var _ = fiber.Routes
 func main() { if _,err:=billingauth.NewIntegration(billingauth.IntegrationOptions{Verifier:provider{},Customer:billingauth.SubjectCustomerID});err!=nil {panic(err)} }
 GO
 GOWORK="$consumer_dir/go.work" go work init "$PWD" "$consumer_dir"

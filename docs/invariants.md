@@ -344,7 +344,7 @@ go test ./internal/http/middleware -run TestEnabledCaptchaAlwaysHasVerifier     
 go test ./internal/intents  -run TestGateExecution                    # IDEM-9 (origin + nil mode)
 go test ./internal/shared/moneyutil -run TestEveryMoneyBoundaryIsPinnedOrDeferred     # MONEY-7
 go test ./internal/integrations/nmi -run 'TestStalledGateway|TestPerRequestDeadline'  # NMI ctx + deadlines (or#866)
-go test .                   -run 'TestRootPackageStaysLight|TestModuleIsGinFree'
+go test .                   -run 'TestRootPackageStaysLight|TestCorePackagesStayFrameworkNeutral'
 ```
 
 ---
