@@ -4,6 +4,8 @@ import { BillingError, localError, readBillingError } from "./errors"
 import { OPENRAILS_CURRENCY_SCALES } from "./generated/openrails-version"
 import {
   billingStatusSchema,
+  cardSetupSchema,
+  paymentAuthenticationSchema,
   invoicePageSchema,
   invoiceSchema,
   pageSchema,
@@ -12,6 +14,8 @@ import {
   solanaCancelTxSchema,
   subscriptionSchema,
   type BillingStatus,
+  type CardSetup,
+  type PaymentAuthentication,
   type CurrencyScales,
   type Invoice,
   type NewCard,
@@ -74,6 +78,7 @@ interface RequestOptions {
   query?: Query
   body?: unknown
   signal?: AbortSignal
+  headers?: Record<string, string>
 }
 
 export function createBillingClient(options: BillingClientOptions = {}) {
@@ -97,7 +102,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     path: string,
     opts: RequestOptions = {}
   ): Promise<Response> {
-    const headers = new Headers({ Accept: "application/json" })
+    const headers = new Headers({ Accept: "application/json", ...opts.headers })
     if (opts.body !== undefined) headers.set("Content-Type", "application/json")
     const token = await options.getToken?.()
     if (token) headers.set("Authorization", `Bearer ${token}`)
@@ -248,12 +253,61 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       })
     },
 
-    /** Stores a tokenized card (NMI Collect.js token). */
+    /** Stores a card tokenized in the page (`cardSetupDriver` "collect_js"). */
     addPaymentMethod(card: NewCard): Promise<PaymentMethod> {
       return json(paymentMethodSchema, "/me/payment-methods", {
         method: "POST",
         body: card,
       })
+    },
+
+    /**
+     * Starts an in-page card setup with a PSP whose browser SDK collects the
+     * card (see `cardSetupDriver`). `idempotencyKey` identifies this attempt.
+     */
+    createCardSetup(input: {
+      pspId: string
+      idempotencyKey: string
+    }): Promise<CardSetup> {
+      return json(cardSetupSchema, "/me/payment-methods/stripe-setup", {
+        method: "POST",
+        body: { psp_id: input.pspId, consent: true },
+        headers: { "Idempotency-Key": input.idempotencyKey },
+      })
+    },
+
+    getCardSetup(setupId: string, signal?: AbortSignal): Promise<CardSetup> {
+      return json(
+        cardSetupSchema,
+        `/me/payment-methods/stripe-setup/${id(setupId)}`,
+        { signal }
+      )
+    },
+
+    /** Verifies the setup with the provider; `payment_method_id` once saved. */
+    confirmCardSetup(setupId: string): Promise<CardSetup> {
+      return json(
+        cardSetupSchema,
+        `/me/payment-methods/stripe-setup/${id(setupId)}/confirm`,
+        { method: "POST", body: {} }
+      )
+    },
+
+    /** The provider challenge a pending payment operation is waiting on. */
+    getPaymentAuthentication(
+      operationId: string
+    ): Promise<PaymentAuthentication> {
+      return json(
+        paymentAuthenticationSchema,
+        `/me/payment-operations/${id(operationId)}/authentication`
+      )
+    },
+
+    async confirmPaymentAuthentication(operationId: string): Promise<void> {
+      await send(
+        `/me/payment-operations/${id(operationId)}/authentication/confirm`,
+        { method: "POST", body: {} }
+      )
     },
 
     /** `pending` when the provider is still converging (202). */

@@ -105,6 +105,14 @@ export const es: BillingUiMessageBundle = {
       "Los datos de la tarjeta van directamente al procesador de pagos; este sitio nunca los ve.",
     save: "Guardar tarjeta",
     added: "Tarjeta guardada.",
+    provider: "Proveedor de pago",
+    consent:
+      "Permito guardar esta tarjeta para pagos futuros que acepte por separado.",
+    enterCard: "Introducir los datos de la tarjeta de forma segura",
+    unavailable:
+      "La introducción segura de tarjetas no está disponible para este proveedor.",
+    verificationPending:
+      "La verificación de la tarjeta está pendiente. Revisa tus tarjetas guardadas antes de volver a intentarlo.",
     cardLabel: "{brand} terminada en {last4}",
     fallbackBrand: "Tarjeta",
     expires: "Caduca {date}",

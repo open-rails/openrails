@@ -15,6 +15,7 @@ const LOCALES = ["en", "de", "es", "ja", "ko", "zh"]
 
 const EXTERNAL = [
   "@base-ui/react",
+  "@stripe/stripe-js",
   "@hugeicons/core-free-icons",
   "@hugeicons/react",
   "class-variance-authority",

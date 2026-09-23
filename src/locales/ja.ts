@@ -105,6 +105,13 @@ export const ja: BillingUiMessageBundle = {
       "カード情報は決済代行会社に直接送信され、このサイトには届きません。",
     save: "カードを保存",
     added: "カードを保存しました。",
+    provider: "決済プロバイダー",
+    consent:
+      "別途同意する今後の支払いのために、このカードを保存することを許可します。",
+    enterCard: "カード情報を安全に入力",
+    unavailable: "このプロバイダーでは安全なカード入力を利用できません。",
+    verificationPending:
+      "カードの確認が保留中です。もう一度試す前に保存済みのカードを確認してください。",
     cardLabel: "{brand} 末尾 {last4}",
     fallbackBrand: "カード",
     expires: "有効期限 {date}",

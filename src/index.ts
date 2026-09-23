@@ -21,9 +21,24 @@ export {
 } from "./account/cancel-dialog"
 export {
   PaymentMethodsPanel,
-  type CardSetupConfig,
   type PaymentMethodsPanelProps,
 } from "./account/payment-methods-panel"
+export {
+  SavePaymentMethod,
+  type SavePaymentMethodProps,
+} from "./save-payment-method"
+export { authenticatePayment } from "./authenticate"
+export {
+  canAuthenticatePayment,
+  canSavePaymentMethod,
+  cardSetupDriver,
+  checkoutRails,
+  pspConfigSchema,
+  savedMethodsFor,
+  type CardSetupDriver,
+  type CheckoutRailOffer,
+  type PspConfig,
+} from "./psp"
 export {
   PaymentHistory,
   type PaymentHistoryProps,

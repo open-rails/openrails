@@ -20,12 +20,14 @@ export {
 } from "./errors"
 export type {
   BillingStatus,
+  CardSetup,
   CardSummary,
   CurrencyScales,
   Invoice,
   NewCard,
   Page,
   Payment,
+  PaymentAuthentication,
   PaymentMethod,
   PaymentOperation,
   PaymentRecovery,

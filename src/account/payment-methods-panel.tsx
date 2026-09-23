@@ -28,24 +28,21 @@ import { useMessages } from "#orck/i18n/context"
 import type { Translator } from "#orck/i18n/messages"
 import { usePaymentMethods } from "#orck/react/hooks"
 import { useScopeProps } from "#orck/scope-context"
-import { TokenizedCardForm } from "#orck/tokenized-card-form"
+import { canSavePaymentMethod, type PspConfig } from "#orck/psp"
+import { SavePaymentMethod } from "#orck/save-payment-method"
 import { brandName, expiry, RESET } from "./format"
 import { EmptyState, ErrorState, ListSkeleton, Section } from "./section"
 import { useNotice } from "./notice"
 import { BillingStatusBadge } from "./status-badge"
 
-export interface CardSetupConfig {
-  /** OpenRails PSP key the card is saved with (the checkout option's selector). */
-  provider: string
-  /** NMI Collect.js public tokenization key. */
-  tokenizationKey: string
-  /** Collect.js script URL. */
-  tokenizationURL: string
-}
-
 export interface PaymentMethodsPanelProps {
-  /** Enables "Add card" through the tokenized card form. */
-  cardSetup?: CardSetupConfig
+  /**
+   * OpenRails's browser PSP configs (checkout config). "Add card" offers
+   * each one a card can be saved with in the page.
+   */
+  psps?: readonly PspConfig[]
+  /** Return target after off-page card verification; see `SavePaymentMethod`. */
+  cardSetupReturnURL?: (setupId: string) => string
   /** Enables "Make default" for this currency's invoice collection. */
   defaultCurrency?: string
   appearance?: CheckoutAppearance
@@ -66,7 +63,8 @@ function removeMessage(error: BillingError, m: Translator): string {
 }
 
 export function PaymentMethodsPanel({
-  cardSetup,
+  psps,
+  cardSetupReturnURL,
   defaultCurrency,
   appearance,
   className,
@@ -82,8 +80,9 @@ export function PaymentMethodsPanel({
     message: string
   } | null>(null)
   const [adding, setAdding] = React.useState(false)
-  const [addError, setAddError] = React.useState<string | null>(null)
-  const [formKey, setFormKey] = React.useState(0)
+  const savable = (psps ?? []).filter(canSavePaymentMethod)
+  const [pspId, setPspId] = React.useState<string>()
+  const psp = savable.find((item) => item.psp_id === pspId) ?? savable[0]
   const [notice, announce] = useNotice()
   const currency = defaultCurrency?.toUpperCase()
 
@@ -230,15 +229,8 @@ export function PaymentMethodsPanel({
       className={className}
       data-testid="payment-methods-panel"
       action={
-        cardSetup ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setAddError(null)
-              setAdding(true)
-            }}
-          >
+        psp ? (
+          <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
             <HugeiconsIcon
               icon={Add01Icon}
               aria-hidden
@@ -297,19 +289,12 @@ export function PaymentMethodsPanel({
         </AlertDialogContent>
       </AlertDialog>
 
-      {cardSetup ? (
-        <Dialog
-          open={adding}
-          onOpenChange={(open) => {
-            if (!open && state.adding) return
-            setAdding(open)
-          }}
-        >
+      {psp ? (
+        <Dialog open={adding} onOpenChange={setAdding}>
           <DialogContent
             className={`${scope.className} ${RESET} max-h-[calc(100dvh-2rem)] overflow-y-auto bg-popover text-popover-foreground`}
             data-orck-theme={scope["data-orck-theme"]}
             style={scope.style}
-            showCloseButton={!state.adding}
           >
             <DialogHeader>
               <DialogTitle>{t("paymentMethods.addTitle")}</DialogTitle>
@@ -317,29 +302,28 @@ export function PaymentMethodsPanel({
                 {t("paymentMethods.addDescription")}
               </DialogDescription>
             </DialogHeader>
-            {addError ? (
-              <p role="alert" className="text-sm text-destructive">
-                {addError}
-              </p>
+            {savable.length > 1 ? (
+              <label className="grid gap-1.5 text-sm">
+                {t("paymentMethods.provider")}
+                <select
+                  className="h-9 rounded-md border border-input bg-transparent px-2"
+                  value={psp.psp_id}
+                  onChange={(event) => setPspId(event.target.value)}
+                >
+                  {savable.map((item) => (
+                    <option key={item.psp_id} value={item.psp_id}>
+                      {item.display_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
             ) : null}
-            <TokenizedCardForm
-              key={formKey}
-              tokenizationKey={cardSetup.tokenizationKey}
-              tokenizationURL={cardSetup.tokenizationURL}
-              submitLabel={t("paymentMethods.save")}
+            <SavePaymentMethod
+              key={psp.psp_id}
+              psp={psp}
+              returnURL={cardSetupReturnURL}
               appearance={appearance}
-              onTokenized={async (card) => {
-                setAddError(null)
-                const error = await state.add({
-                  ...card,
-                  provider: cardSetup.provider,
-                })
-                if (error) {
-                  // A definitive refusal: fresh form so the customer can retry.
-                  setAddError(m.error(error))
-                  setFormKey((k) => k + 1)
-                  return
-                }
+              onSaved={() => {
                 setAdding(false)
                 announce(t("paymentMethods.added"))
               }}

@@ -6,7 +6,7 @@ import { BillingUiRoot } from "#orck/scope"
 import { PaymentHistory } from "./payment-history"
 import {
   PaymentMethodsPanel,
-  type CardSetupConfig,
+  type PaymentMethodsPanelProps,
 } from "./payment-methods-panel"
 import {
   SubscriptionsPanel,
@@ -14,7 +14,8 @@ import {
 } from "./subscriptions-panel"
 
 export interface AccountBillingProps {
-  cardSetup?: CardSetupConfig
+  psps?: PaymentMethodsPanelProps["psps"]
+  cardSetupReturnURL?: PaymentMethodsPanelProps["cardSetupReturnURL"]
   defaultCurrency?: string
   sendSolanaTransaction?: SendSolanaTransaction
   plansHref?: string
@@ -26,7 +27,8 @@ export interface AccountBillingProps {
 
 /** Subscriptions, payment methods and history in one column. */
 export function AccountBilling({
-  cardSetup,
+  psps,
+  cardSetupReturnURL,
   defaultCurrency,
   sendSolanaTransaction,
   plansHref,
@@ -48,7 +50,8 @@ export function AccountBilling({
         appearance={appearance}
       />
       <PaymentMethodsPanel
-        cardSetup={cardSetup}
+        psps={psps}
+        cardSetupReturnURL={cardSetupReturnURL}
         defaultCurrency={defaultCurrency}
         appearance={appearance}
       />

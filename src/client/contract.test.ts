@@ -28,6 +28,11 @@ it("calls only routes OpenRails mounts for customers", async () => {
     () => client.cancelSubscriptionOnChain("sub_1", async () => "sig"),
     () => client.listPaymentMethods(),
     () => client.addPaymentMethod({ provider: "nmi", payment_token: "tok" }),
+    () => client.createCardSetup({ pspId: "psp_1", idempotencyKey: "k" }),
+    () => client.getCardSetup("seti_1"),
+    () => client.confirmCardSetup("seti_1"),
+    () => client.getPaymentAuthentication("op_1"),
+    () => client.confirmPaymentAuthentication("op_1"),
     () => client.removePaymentMethod("pm_1"),
     () =>
       client.setDefaultPaymentMethod({
@@ -46,5 +51,5 @@ it("calls only routes OpenRails mounts for customers", async () => {
     return !routes.some((r) => r.method === method && r.pattern.test(path))
   })
   expect(missing).toEqual([])
-  expect(called.size).toBe(15)
+  expect(called.size).toBe(20)
 })

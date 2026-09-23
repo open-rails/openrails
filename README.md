@@ -55,13 +55,29 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
   <BillingProvider client={billing} onChange={() => queryClient.invalidateQueries({ queryKey: ["billing"] })}>
     <AccountBilling
       plansHref="/plans"
-      cardSetup={{ provider: "nmi", tokenizationKey, tokenizationURL }} // enables "Add card"
+      psps={checkoutConfig.psps} // OpenRails checkout config; enables "Add card"
       defaultCurrency="USD" // enables "Make default"
       sendSolanaTransaction={(tx) => wallet.signAndSend(tx)} // Solana-rail cancel
     />
   </BillingProvider>
 </BillingUiProvider>
 ```
+
+## Provider-neutral flows
+
+Hosts pass OpenRails's browser PSP configs (`GET /checkout-config`, `psps`)
+through unchanged; the PSP's `flow` and public `config` pick the browser flow
+(Collect.js, Stripe Elements, redirect, wallet). Hosts never branch on a
+provider:
+
+- `checkoutRails(offers, psps)` and `savedMethodsFor(methods, rails)` build a
+  `CheckoutSource`'s `rails` and `saved_methods`.
+- `<SavePaymentMethod psp={psp} onSaved={(id) => ...} />` saves a card in the
+  page with consent (needs `BillingProvider`); `canSavePaymentMethod(psp)`
+  filters PSPs that support it. After an off-page verification the provider
+  returns to `returnURL(setupId)`; confirm with `client.confirmCardSetup(id)`.
+- `authenticatePayment(client, operationId, psp)` completes a pending
+  payment's 3-D Secure challenge when `canAuthenticatePayment(psp)`.
 
 - Panels: `SubscriptionsPanel` (cancel, resume, change card),
   `PaymentMethodsPanel`, `PaymentHistory`, `BillingStatusBadge`,

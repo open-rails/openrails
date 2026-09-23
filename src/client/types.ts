@@ -225,6 +225,20 @@ export const solanaCancelTxSchema = z.object({
   subscription_pda: z.string().nullish(),
 })
 
+/** An in-page card setup; `payment_method_id` is set once the card is saved. */
+export const cardSetupSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  client_secret: z.string().nullish(),
+  payment_method_id: z.string().nullish(),
+})
+export type CardSetup = z.infer<typeof cardSetupSchema>
+
+export const paymentAuthenticationSchema = z.object({
+  client_secret: z.string().nullish(),
+})
+export type PaymentAuthentication = z.infer<typeof paymentAuthenticationSchema>
+
 /** What a card setup hands the server: tokenized data only, never a PAN. */
 export interface NewCard {
   /** OpenRails PSP key that issued the token (e.g. "nmi"); required. */

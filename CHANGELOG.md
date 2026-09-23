@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.0
+
+Provider-neutral hosts: a host passes OpenRails's browser PSP configs through
+and never branches on Stripe, NMI or any other provider.
+
+- `checkoutRails(offers, psps)` / `savedMethodsFor(methods, rails)` derive the
+  checkout rails and chargeable saved cards from each PSP's `flow` and public
+  config.
+- `SavePaymentMethod`: consented in-page card saving with any PSP — Collect.js
+  tokenization or Stripe Elements card setup (Stripe.js is loaded on first
+  use). `canSavePaymentMethod`, `cardSetupDriver`.
+- `authenticatePayment(client, operationId, psp)`: 3-D Secure for a pending
+  payment operation. `canAuthenticatePayment`.
+- Client: `createCardSetup`, `getCardSetup`, `confirmCardSetup`,
+  `getPaymentAuthentication`, `confirmPaymentAuthentication`.
+- Breaking: `AccountBilling`/`PaymentMethodsPanel` take `psps` (and optional
+  `cardSetupReturnURL`) instead of `cardSetup`; `CardSetupConfig` is removed.
+  Stripe card setup needs OpenRails serving Stripe's `publishable_key`
+  (openrails#1062).
+
 ## 0.7.0
 
 - Periods are exact. OpenRails windows are hours, so a 720h price reads

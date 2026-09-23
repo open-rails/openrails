@@ -104,6 +104,13 @@ export const ko: BillingUiMessageBundle = {
       "카드 정보는 결제 대행사로 바로 전송되며 이 사이트에는 전달되지 않습니다.",
     save: "카드 저장",
     added: "카드를 저장했습니다.",
+    provider: "결제 제공업체",
+    consent:
+      "별도로 동의하는 향후 결제를 위해 이 카드를 저장하는 것을 허용합니다.",
+    enterCard: "카드 정보를 안전하게 입력",
+    unavailable: "이 제공업체에서는 안전한 카드 입력을 사용할 수 없습니다.",
+    verificationPending:
+      "카드 확인이 대기 중입니다. 다시 시도하기 전에 저장된 카드를 확인하세요.",
     cardLabel: "{brand} 끝자리 {last4}",
     fallbackBrand: "카드",
     expires: "유효기간 {date}",
