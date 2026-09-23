@@ -315,7 +315,10 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 	// that transaction, even when limited mode might defer the write itself.
 	if s.localCatalogOnly {
 		for _, target := range targets {
-			if len(req.PSPLinks[target.declared]) > 0 || !s.localEnginePrice(target.rail, priceRequestCycleDays(req)) {
+			if target.rail == string(models.RailCCBill) && len(req.PSPLinks[target.declared]) == 0 {
+				return nil, nil, nil, apperr.Invalidf("local catalog application requires an explicit CCBill form or billing-option link")
+			}
+			if target.rail != string(models.RailCCBill) && (len(req.PSPLinks[target.declared]) > 0 || !s.localEnginePrice(target.rail, priceRequestCycleDays(req))) {
 				return nil, nil, nil, apperr.Invalidf("inline product_data requires local engine catalog terms; create and link legacy provider prices separately")
 			}
 		}
@@ -536,7 +539,7 @@ func (s *Service) merchantAccountRails(ctx context.Context) map[string]railAccou
 // armed psps state, never a boot artifact). No links
 // stored; find-or-create re-discovers by content key and failures are logged.
 func (s *Service) syncSecondaryCatalogAccounts(ctx context.Context, rail string, pctx autoCreateContext, adapter providerAdapter) {
-	if s.rt == nil || s.rt.DB == nil || s.localEnginePrice(rail, pctx.BillingCycleDays) {
+	if s.localCatalogOnly || s.rt == nil || s.rt.DB == nil || s.localEnginePrice(rail, pctx.BillingCycleDays) {
 		return
 	}
 	mid, err := merchant.Require(ctx)

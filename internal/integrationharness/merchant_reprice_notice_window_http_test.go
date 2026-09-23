@@ -101,19 +101,16 @@ func (f *noticeWindowFixture) setNoticeWindowDays(days int) {
 
 func (f *noticeWindowFixture) publish(amount int64) {
 	f.t.Helper()
-	status, body := requestJSON(f.t, http.MethodPost, f.surface.BaseURL+"/v1/merchant/catalog/publish", f.token, map[string]any{
-		"catalog": catalog.Manifest{
-			Version: catalog.SupportedVersion,
-			Products: []catalog.Product{{
-				Key:         f.productKey,
-				DisplayName: "Notice Window Product",
-				Prices: []catalog.Price{{
-					UnitAmount: amount, Currency: "USD", Duration: "30d", AutoRenew: true,
-				}},
+	status, body := requestJSON(f.t, http.MethodPost, f.surface.BaseURL+"/v1/merchant/catalog/applications", f.token, catalogApplicationFixture(f.t, f.surface.BaseURL, f.token, catalog.Manifest{
+		Version: catalog.SupportedVersion,
+		Products: []catalog.Product{{
+			Key:         f.productKey,
+			DisplayName: "Notice Window Product",
+			Prices: []catalog.Price{{
+				UnitAmount: amount, Currency: "USD", Duration: "30d", AutoRenew: true,
 			}},
-		},
-		"insert": true, "overwrite": true,
-	})
+		}},
+	}))
 	require.Equal(f.t, http.StatusOK, status, string(body))
 }
 

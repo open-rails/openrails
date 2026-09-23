@@ -1,6 +1,6 @@
-// Package catalog defines and validates merchant catalog declarations: products,
-// prices, meters and rate cards. Publish them through openrails.Client.PublishCatalog
-// or use embed.Runtime.PushCatalog for manifest-owned bootstrap tooling.
+// Package catalog defines merchant catalog applications and billing-definition
+// types. Apply presence-aware batches through Client.Catalog or local operator
+// tooling; both use the same database-backed transaction and replay contract.
 package catalog
 
 // Manifest is the root of a catalog-as-code document.

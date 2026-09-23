@@ -40,19 +40,20 @@ func TestCLICatalogNamespacesStaySeparate(t *testing.T) {
 	manifestPath := filepath.Join(t.TempDir(), "catalog.yaml")
 	writeManifest := func(title string) {
 		t.Helper()
-		raw := fmt.Sprintf(`version: 1
-catalogs:
-  - merchant: %s
-    products:
-      - key: base
-        display_name: %s
-        entitlements: [base]
-        prices:
-          - currency: usd
-            unit_amount: 1000000
-            duration: 30d
-            auto_renew: true
-`, name, title)
+		raw := fmt.Sprintf(`schema_version: 1
+application_id: create-selected-catalog
+expected_revision: 0
+products:
+  - key: base
+    display_name: %s
+    entitlements_spec: {base: null}
+    prices:
+      - key: base-monthly
+        currency: usd
+        unit_amount: "1000000"
+        access_duration_hours: 720
+        auto_renew: true
+`, title)
 		require.NoError(t, os.WriteFile(manifestPath, []byte(raw), 0o600))
 	}
 	execute := func(cmd *cobra.Command, args ...string) (string, error) {
@@ -66,11 +67,11 @@ catalogs:
 		return out.String(), err
 	}
 	push := func(unbound bool) error {
-		args := []string{"--file", manifestPath, "--insert"}
+		args := []string{"--file", manifestPath, "--merchant", name}
 		if unbound {
 			args = append(args, "--unbound-merchants")
 		}
-		_, err := execute(newPushCatalogCmd(), args...)
+		_, err := execute(newApplyCatalogCmd(), args...)
 		return err
 	}
 	dump := func(unbound bool) (string, error) {

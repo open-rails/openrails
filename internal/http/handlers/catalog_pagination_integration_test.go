@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 	billingservice "github.com/open-rails/openrails/internal/service"
-	manifest "github.com/open-rails/openrails/pkg/catalog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,6 +42,9 @@ func TestCatalogProductFilteringAndEffectivePagination(t *testing.T) {
  i<=1005 AND i%20=0,CASE WHEN i<=1005 THEN timestamptz '2026-01-01' ELSE timestamptz '2026-02-01' END
  FROM generate_series(1,2105) i`, fx.merchant)
 	foreign := newFindingsFixture(t)
+	foreign.rt.MoneyService = money.NewMoneyService(foreign.dbi, foreign.rt.Clock)
+	foreign.rt.ProductService = catalog.NewProductService(foreign.dbi)
+	foreign.rt.PriceService = catalog.NewPriceService(foreign.dbi)
 	foreign.exec(`INSERT INTO billing.products(id,merchant_id,key,display_name,tier_group) VALUES(uuidv7(),$1,'foreign-target','Foreign','target')`, foreign.merchant)
 	seen := map[uuid.UUID]bool{}
 	for offset := 0; ; {
@@ -79,19 +81,26 @@ func TestCatalogProductFilteringAndEffectivePagination(t *testing.T) {
 	absent := catalogPageRequest[billingservice.CatalogProduct](t, fx, AdminListProducts, "tier_group=absent")
 	require.Zero(t, absent.Total)
 	require.Empty(t, absent.Items)
-	// Manifest pruning is another full-list consumer: a request cap is not the
-	// end of a tier group, and the plan must see its thousand-and-first product.
-	fx.exec(`UPDATE billing.products SET archived=false WHERE tier_group='target'`)
-	body, err := json.Marshal(openrails.CatalogPublishRequest{Catalog: manifest.Manifest{Version: manifest.SupportedVersion, Products: []manifest.Product{{Key: "declared", DisplayName: "Declared", TierGroup: "target", Prices: []manifest.Price{{Currency: "USD", UnitAmount: 1, Duration: "30d", AutoRenew: true}}}}}})
+	// Prune enumerates the whole selected catalog, including entirely omitted
+	// groups and rows beyond a page cap, while leaving other merchants alone.
+	fx.rt.Config.AllowCatalogUpdates = true
+	fx.exec(`UPDATE billing.products SET archived=false WHERE merchant_id=$1`, fx.merchant)
+	before := catalogPageRequest[billingservice.CatalogProduct](t, fx, AdminListProducts, "archived=false")
+	foreignBefore := catalogPageRequest[billingservice.CatalogProduct](t, foreign, AdminListProducts, "archived=false")
+	var revision int64
+	require.NoError(t, fx.dbi.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT catalog_revision FROM billing.merchants WHERE id=$1`, fx.merchant).Scan(&revision))
+	body, err := json.Marshal(openrails.CatalogApplyParams{SchemaVersion: 1, ApplicationID: uuid.NewString(), ExpectedRevision: &revision, Prune: true, Products: []openrails.CatalogApplyProduct{{Key: "declared", DisplayName: openrails.CatalogValue("Declared"), TierGroup: openrails.CatalogValue("target")}}})
 	require.NoError(t, err)
 	rec := httptest.NewRecorder()
-	MerchantPublishCatalog(httprequest.NewHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/merchant/catalog/publish", bytes.NewReader(body)).WithContext(fx.ctx), fx.rt))
+	MerchantApplyCatalog(httprequest.NewHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/merchant/catalog/applications", bytes.NewReader(body)).WithContext(fx.ctx), fx.rt))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	var response openrails.CatalogPublishResponse
+	var response openrails.CatalogApplicationReceipt
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
-	require.Nil(t, response.Result, "read-only publication must not archive rows")
-	require.Len(t, response.Plan.Groups, 1)
-	require.Len(t, response.Plan.Groups[0].RemovedProducts, 1005)
+	require.Equal(t, int(before.Total)+1, response.ProductsChanged)
+	remaining := catalogPageRequest[billingservice.CatalogProduct](t, fx, AdminListProducts, "archived=false")
+	require.EqualValues(t, 1, remaining.Total)
+	foreignRemaining := catalogPageRequest[billingservice.CatalogProduct](t, foreign, AdminListProducts, "archived=false")
+	require.Equal(t, foreignBefore.Items, foreignRemaining.Items)
 }
 
 func TestCatalogPricesPageAcross1000AndProductFilter(t *testing.T) {

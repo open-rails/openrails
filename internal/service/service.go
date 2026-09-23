@@ -23,9 +23,12 @@ import (
 // through the HTTP handlers. The standalone HTTP server should treat its routes as thin
 // adapters over this API.
 type Service struct {
-	rt               *app.Runtime
-	catalogTx        *db.DB
-	localCatalogOnly bool
+	rt                   *app.Runtime
+	catalogTx            *db.DB
+	localCatalogOnly     bool
+	catalogWriteLocked   bool
+	catalogCommittedWork *[]func(context.Context, *Service)
+	catalogPreparedLinks map[string]map[string]map[string]string
 }
 
 func New(rt *app.Runtime) (*Service, error) {

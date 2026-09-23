@@ -506,17 +506,28 @@ export const cancelReprice = (id: string) =>
     method: "POST",
   })
 
-export const publishCatalog = (
-  manifest: unknown,
-  opts: {
-    insert?: boolean
-    overwrite?: boolean
-    prune?: boolean
-  }
-) =>
-  api<{ plan: unknown; result?: unknown }>("/merchant/catalog/publish", {
+export interface CatalogApplicationReceipt {
+  application_id: string
+  catalog_id: string
+  base_revision: number
+  applied_revision: number
+  replayed: boolean
+  products_changed: number
+  prices_changed: number
+}
+
+export const getCatalogRevision = () =>
+  api<{ revision: number; writes_allowed: boolean }>(
+    "/merchant/catalog/revision"
+  )
+
+// JSON is valid YAML too. Keep the reviewed document byte-for-byte unchanged
+// instead of parsing/re-encoding money or application identity in the browser.
+export const applyCatalog = (document: string) =>
+  api<CatalogApplicationReceipt>("/merchant/catalog/applications", {
     method: "POST",
-    body: { catalog: manifest, ...opts },
+    rawBody: document,
+    headers: { "Content-Type": "application/yaml" },
   })
 
 export const listCatalogDrift = (

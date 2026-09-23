@@ -13,42 +13,35 @@ import (
 
 const defaultCatalogManifestPath = "/etc/openrails/catalog.yaml"
 
-// catalogOptions holds the flags for `openrails push-merchant-catalog`.
+// catalogOptions selects the operator file and merchant; mutation intent is in
+// the application document, including its durable identity and precondition.
 type catalogOptions struct {
 	file             string
-	insert           bool
-	overwrite        bool
-	prune            bool
+	merchant         string
+	merchantManifest string
 	unboundMerchants bool
 }
 
-// newPushCatalogCmd builds the `openrails push-merchant-catalog` command — a terraform-style
-// declarative apply of a YAML catalog manifest
-// (issue #162). It loads, validates, plans, prints, and applies a catalog.
-//
-// The command runs in-process through a catalog-sized runtime: Postgres plus the
-// catalog/provider facades, without starting the server runtime.
-func newPushCatalogCmd() *cobra.Command {
+// newApplyCatalogCmd executes the same atomic batch as the merchant Client
+// through trusted local operator authority, without starting an HTTP server.
+func newApplyCatalogCmd() *cobra.Command {
 	opts := catalogOptions{file: defaultCatalogManifestPath}
 	cmd := &cobra.Command{
-		Use:   "push-merchant-catalog",
-		Short: "Push a YAML merchant catalog manifest into OpenRails and configured providers",
-		Long: "Loads a declarative catalog manifest (catalogs[] > products > prices), " +
-			"computes a terraform-style plan per merchant, and prints it. A bare command is plan-only. " +
-			"Mutation classes are explicit and compose: --insert creates missing products/prices/provider objects; " +
-			"--overwrite updates existing OpenRails-owned catalog rows; --prune archives OpenRails-owned extras. " +
-			"Products are identified by key within their merchant; prices by financial substance (currency, amount, interval).",
+		Use:   "apply-catalog",
+		Short: "Apply one idempotent catalog batch to an explicitly selected merchant",
+		Long: "Loads a catalog application with application_id and expected_revision, applies it atomically, " +
+			"and prints its receipt. Omitted items are preserved unless the document explicitly sets prune: true. " +
+			"Retry the same document to recover a lost response; a new intended application needs a new identity.",
 		Args: validateCatalogArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runPushCatalog(cmd, opts)
+			return runApplyCatalog(cmd, opts)
 		},
 	}
 	flags := cmd.Flags()
 	flags.BoolVar(&opts.unboundMerchants, "unbound-merchants", false, "Resolve only host-local merchants without an AuthKit group binding")
 	flags.StringVarP(&opts.file, "file", "f", defaultCatalogManifestPath, "catalog manifest YAML file")
-	flags.BoolVar(&opts.insert, "insert", false, "Create missing OpenRails/provider catalog objects from the manifest")
-	flags.BoolVar(&opts.overwrite, "overwrite", false, "Update existing OpenRails-owned catalog objects from the manifest")
-	flags.BoolVar(&opts.prune, "prune", false, "archive OpenRails-owned provider objects absent from the local catalog; foreign provider objects are never touched")
+	flags.StringVar(&opts.merchant, "merchant", "", "merchant name resolved through the configured identity authority")
+	flags.StringVar(&opts.merchantManifest, "merchant-manifest", "", "host-owned merchant credential snapshot (defaults to the conventional merchant manifest)")
 	return cmd
 }
 
@@ -70,19 +63,18 @@ func validateCatalogArgs(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runPushCatalog(cmd *cobra.Command, opts catalogOptions) error {
+func runApplyCatalog(cmd *cobra.Command, opts catalogOptions) error {
 	if strings.TrimSpace(opts.file) == "" {
 		opts.file = defaultCatalogManifestPath
 	}
 
 	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	push := hosttools.CatalogPushOptions{
-		Config:    cfg,
-		File:      opts.file,
-		Out:       cmd.OutOrStdout(),
-		Insert:    opts.insert,
-		Overwrite: opts.overwrite,
-		Prune:     opts.prune,
+	push := hosttools.CatalogApplyOptions{
+		Config:               cfg,
+		File:                 opts.file,
+		Out:                  cmd.OutOrStdout(),
+		Merchant:             opts.merchant,
+		MerchantManifestPath: opts.merchantManifest,
 	}
 	if !opts.unboundMerchants && cfg != nil && cfg.DB != nil {
 		_, authority, close, err := openCLINameDirectory(cmd.Context(), cfg)
@@ -92,5 +84,6 @@ func runPushCatalog(cmd *cobra.Command, opts catalogOptions) error {
 		defer close()
 		push.NameAuthority = authority
 	}
-	return hosttools.PushMerchantCatalog(cmd.Context(), push)
+	_, err := hosttools.ApplyMerchantCatalog(cmd.Context(), push)
+	return err
 }

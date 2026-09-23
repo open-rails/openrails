@@ -468,6 +468,13 @@ func (s *PriceService) ListPriorVersionsByKey(ctx context.Context, merchantID uu
 	return s.pricesFromGen(ctx, rows)
 }
 
+// RecordAuthoredKeyMovement timestamps a current catalog mutation on the same
+// database clock as retirement triggers. Explicit historical timestamps use
+// RecordKeyMovement instead, so imports retain their original effective dates.
+func (s *PriceService) RecordAuthoredKeyMovement(ctx context.Context, merchantID, priceID uuid.UUID, key string) error {
+	return s.RecordKeyMovement(ctx, merchantID, priceID, key, time.Time{})
+}
+
 // RecordKeyMovement appends one entry to the pointer-movement history log:
 // key's current pointer moved to priceID at effectiveAt. Append-only — call
 // exactly once per genuine movement (new row, reactivation, or repoint), never

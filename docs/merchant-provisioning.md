@@ -22,11 +22,11 @@ Three file-backed push surfaces (example shapes in `config/bootstrap.example.yam
 - `openrails push-merchant-config` — merchants: identity, profile, invoice
   policy, issuer-as-owner, PSPs (rail accounts + secrets). Default file
   `/etc/openrails/merchants.yaml`.
-- `openrails push-merchant-catalog` — products, prices, entitlements, per-PSP
-  links. Default file `/etc/openrails/catalog.yaml`.
+- `openrails apply-catalog --merchant NAME --file PATH` — one catalog application
+  with a durable application ID and expected revision in the document.
 
-All three share one **mutation-flag contract**: a bare command is plan-only
-(prints the diff, mutates nothing);
+Catalog application uses its document contract, with `prune: false` by default.
+The merchant configuration mutation flags remain independent:
 
 - `--insert` creates missing state;
 - `--overwrite` re-asserts manifest values over existing state — without it,
@@ -415,7 +415,8 @@ never routed to a default merchant.
 OpenRails core exposes no cross-merchant lifecycle or credential routes.
 Merchant admin APIs are scoped to the authenticated merchant. Payment-provider
 mutation routes are omitted when `merchant_config_source=manifest`; provider reads
-and routing dry runs remain available. Catalog mutation routes return
-`405 manifest_driven` when `catalog_source=manifest`. Catalog source
-defaults to merchant source but can be selected independently
-([self-hosting-mode1.md](self-hosting-mode1.md)).
+and routing dry runs remain available. Catalog mutation routes are omitted unless
+`allow_catalog_updates: true`; the same policy denies ordinary embedded Client
+writes. Catalog reads remain available, and trusted local operator application
+is independent of this flag. Catalog data always lives in the database.
+See [self-hosting-mode1.md](self-hosting-mode1.md).

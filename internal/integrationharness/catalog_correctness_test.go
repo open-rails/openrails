@@ -23,7 +23,7 @@ import (
 
 // Exercise the ordinary authenticated HTTP handler and exported Go facade on
 // separate PostgreSQL sessions. Holding the product lock lets both calls reach
-// their write before either can commit: the old read/full-write lost one patch.
+// their catalog lock before either can commit: the old read/full-write lost one patch.
 func TestCatalogDisjointPatchesAndClearSemantics(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
 	h := New(t, ctx)
@@ -87,9 +87,9 @@ func TestCatalogDisjointPatchesAndClearSemantics(t *testing.T) {
 			require.Eventually(t, func() bool {
 				var n int
 				err := h.Pool().QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database()
-                    AND wait_event_type='Lock' AND query LIKE '%UPDATE billing.products%'`).Scan(&n)
+                    AND wait_event_type='Lock' AND (query LIKE '%UPDATE billing.products%' OR query LIKE '%LockCatalogRevision%')`).Scan(&n)
 				return err == nil && n >= 2
-			}, 10*time.Second, 20*time.Millisecond, "both public patches must reach the blocked UPDATE")
+			}, 10*time.Second, 20*time.Millisecond, "both public patches must block on the product or merchant catalog lock")
 			require.NoError(t, tx.Commit(ctx))
 			require.NoError(t, <-results)
 			require.NoError(t, <-results)

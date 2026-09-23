@@ -221,6 +221,7 @@ var pendingDynamicMoney = map[string]string{
 var pinnedMarshalers = map[string]string{
 	"amount_map.go:AmountMap":                       "TestCanonicalWireFixtures (merchant_settings.json) — decimal strings",
 	"internal/modules/metrics/service.go:MoneyCell": "TestResultWireEncoding — decimal string",
+	"pkg/catalog/application.go:Field":              "TestApplicationFormatsPreserveIntent — exact int64 money as decimal strings",
 }
 
 func TestEveryWireMoneyIntegerIsADecimalString(t *testing.T) {
@@ -491,11 +492,15 @@ func stringFuncName(name string) bool {
 }
 
 func receiverName(expr ast.Expr) string {
-	if star, ok := expr.(*ast.StarExpr); ok {
-		expr = star.X
-	}
-	if ident, ok := expr.(*ast.Ident); ok {
-		return ident.Name
+	switch typed := expr.(type) {
+	case *ast.StarExpr:
+		return receiverName(typed.X)
+	case *ast.IndexExpr:
+		return receiverName(typed.X)
+	case *ast.IndexListExpr:
+		return receiverName(typed.X)
+	case *ast.Ident:
+		return typed.Name
 	}
 	return ""
 }

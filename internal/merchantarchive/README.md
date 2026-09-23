@@ -127,3 +127,5 @@ Creator catalog authority does not authorize export or restore.
 The destination must be empty, including catalogs. Creating a default or owned
 catalog before restore produces the ordinary `not_empty` refusal; the importer
 never reassigns existing catalog ownership or rewrites incoming product IDs.
+
+Catalog applications require archive wire version 2. The consistent snapshot carries the merchant catalog revision in its hashed header and all permanent application receipts alongside catalog state. Restore preserves both atomically; replaying a completed restore cannot reset a later revision. Version 1 artifacts fail closed. Produce a fresh version 2 archive using the current library before cutover; retain older backups as historical artifacts.

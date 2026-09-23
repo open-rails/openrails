@@ -1,9 +1,5 @@
 import { HugeiconsIcon } from "@hugeicons/react"
-import {
-  Add01Icon,
-  Refresh01Icon,
-  Upload01Icon,
-} from "@hugeicons/core-free-icons"
+import { Add01Icon, Refresh01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { Link } from "react-router-dom"
 import { toast } from "sonner"
@@ -44,9 +40,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Textarea } from "@/components/ui/textarea"
 import { getBootstrap } from "@/lib/api/client"
-import { DIALOG_FORM, DIALOG_WIDE } from "@/lib/dialog-width"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import type { CatalogPrice, CatalogProduct } from "@/lib/api/types"
 import {
   currencyScale,
@@ -58,6 +53,7 @@ import {
 } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
 import { adminMutations } from "@/lib/mutations"
+import { CatalogApplicationDialog } from "@/pages/catalog/application-dialog"
 import { CatalogCopilotPanel } from "@/pages/catalog/copilot-panel"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
@@ -82,6 +78,8 @@ function catalogDraftingEnabled(): boolean {
 // Each part of the catalog is its own page, reached from the sub-items the
 // sidebar reveals under Catalog. The shell around them is identical, so it
 // lives here rather than being repeated three times.
+const CatalogWritesContext = React.createContext(false)
+
 function CatalogSection({
   title,
   children,
@@ -89,15 +87,25 @@ function CatalogSection({
   title: string
   children: React.ReactNode
 }) {
+  const { data: capability } = useQuery(adminQueries.catalogRevision())
+  const writesAllowed = capability?.writes_allowed === true
   return (
-    <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-      <CatalogCopilotPanel
-        enabled={catalogCopilotEnabled()}
-        draftingEnabled={catalogDraftingEnabled()}
-      />
-      {children}
-    </div>
+    <CatalogWritesContext.Provider value={writesAllowed}>
+      <div className="flex flex-col gap-4">
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        <CatalogCopilotPanel
+          enabled={catalogCopilotEnabled()}
+          draftingEnabled={writesAllowed && catalogDraftingEnabled()}
+        />
+        {!writesAllowed && (
+          <p className="text-sm text-muted-foreground">
+            Catalog updates are unavailable. You can still browse products and
+            prices.
+          </p>
+        )}
+        {children}
+      </div>
+    </CatalogWritesContext.Provider>
   )
 }
 
@@ -128,6 +136,7 @@ export function CatalogDriftPage() {
 const CATALOG_PAGE_SIZE = 100
 
 function ProductsTab() {
+  const writesAllowed = React.useContext(CatalogWritesContext)
   const [offset, setOffset] = React.useState(0)
   const {
     data,
@@ -144,8 +153,12 @@ function ProductsTab() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end gap-2">
-        <PublishDialog />
-        <ProductDialog />
+        {writesAllowed && (
+          <>
+            <CatalogApplicationDialog />
+            <ProductDialog />
+          </>
+        )}
       </div>
       {loading ? (
         <div className="flex flex-col gap-3 py-2">
@@ -198,6 +211,7 @@ function ProductsTab() {
 }
 
 function ProductRow({ product }: { product: CatalogProduct }) {
+  const writesAllowed = React.useContext(CatalogWritesContext)
   const queryClient = useQueryClient()
   const setProductActive = useMutation(
     adminMutations.setProductActive(queryClient)
@@ -243,17 +257,19 @@ function ProductRow({ product }: { product: CatalogProduct }) {
         )}
       </TableCell>
       <TableCell className="text-right">
-        <div className="flex justify-end gap-2">
-          <ProductDialog product={product} />
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={setProductActive.isPending}
-            onClick={toggle}
-          >
-            {product.archived ? "Activate" : "Deactivate"}
-          </Button>
-        </div>
+        {writesAllowed && (
+          <div className="flex justify-end gap-2">
+            {writesAllowed && <ProductDialog product={product} />}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!writesAllowed || setProductActive.isPending}
+              onClick={toggle}
+            >
+              {product.archived ? "Activate" : "Deactivate"}
+            </Button>
+          </div>
+        )}
       </TableCell>
     </TableRow>
   )
@@ -517,6 +533,7 @@ function ProductDialog({ product }: { product?: CatalogProduct }) {
 }
 
 function PricesTab() {
+  const writesAllowed = React.useContext(CatalogWritesContext)
   const [offset, setOffset] = React.useState(0)
   const { data: products } = useQuery(
     adminQueries.allProducts({ errorAction: "Load products" })
@@ -538,7 +555,7 @@ function PricesTab() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end">
-        <PriceDialog products={products?.items ?? []} />
+        {writesAllowed && <PriceDialog products={products?.items ?? []} />}
       </div>
       {loading ? (
         <div className="flex flex-col gap-3 py-2">
@@ -602,6 +619,7 @@ function PriceRow({
   price: CatalogPrice
   productName: string
 }) {
+  const writesAllowed = React.useContext(CatalogWritesContext)
   const queryClient = useQueryClient()
   const setPriceActive = useMutation(adminMutations.setPriceActive(queryClient))
   const toggle = async () => {
@@ -659,17 +677,21 @@ function PriceRow({
         )}
       </TableCell>
       <TableCell className="text-right">
-        <div className="flex justify-end gap-2">
-          <PriceChangeWizard price={price} productName={productName} />
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={setPriceActive.isPending}
-            onClick={toggle}
-          >
-            {price.archived ? "Activate" : "Deactivate"}
-          </Button>
-        </div>
+        {writesAllowed && (
+          <div className="flex justify-end gap-2">
+            {writesAllowed && (
+              <PriceChangeWizard price={price} productName={productName} />
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!writesAllowed || setPriceActive.isPending}
+              onClick={toggle}
+            >
+              {price.archived ? "Activate" : "Deactivate"}
+            </Button>
+          </div>
+        )}
       </TableCell>
     </LinkedTableRow>
   )
@@ -929,6 +951,7 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
 }
 
 function DriftTab() {
+  const writesAllowed = React.useContext(CatalogWritesContext)
   const queryClient = useQueryClient()
   const { data, isPending: loading } = useQuery(adminQueries.catalogDrift())
   const refreshDrift = useMutation(
@@ -941,7 +964,7 @@ function DriftTab() {
         <Button
           variant="outline"
           size="sm"
-          disabled={refreshDrift.isPending}
+          disabled={!writesAllowed || refreshDrift.isPending}
           onClick={async () => {
             try {
               const report = await refreshDrift.mutateAsync()
@@ -1021,126 +1044,6 @@ function DriftTab() {
         </div>
       )}
     </div>
-  )
-}
-
-function PublishDialog() {
-  const [open, setOpen] = React.useState(false)
-  // The preview belongs to one manifest. Reopening the dialog must not show
-  // the plan from whatever was pasted last time.
-  const [plan, setPlan] = React.useState<string>()
-  const queryClient = useQueryClient()
-  const publish = useMutation(adminMutations.publishCatalog(queryClient))
-
-  const run = async (manifest: string, planOnly: boolean) => {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(manifest)
-    } catch {
-      toast.error("Manifest must be valid JSON")
-      return
-    }
-    try {
-      const res = await publish.mutateAsync({ manifest: parsed, planOnly })
-      setPlan(JSON.stringify(res, null, 2))
-      if (!planOnly) {
-        toast.success("Catalog published")
-      }
-    } catch (err) {
-      toastApiError(err, planOnly ? "Plan catalog publish" : "Publish catalog")
-    }
-  }
-  const form = useForm({
-    defaultValues: { manifest: "" },
-    onSubmit: async ({ value }) => run(value.manifest, false),
-  })
-
-  const handleOpenChange = (next: boolean) => {
-    if (next) {
-      form.reset()
-      setPlan(undefined)
-    }
-    setOpen(next)
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger
-        render={
-          <Button variant="outline" size="sm">
-            <HugeiconsIcon icon={Upload01Icon} className="size-4" /> Publish
-          </Button>
-        }
-      />
-      <DialogContent className={DIALOG_WIDE}>
-        <form
-          className="grid gap-4"
-          onSubmit={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            void form.handleSubmit()
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>Publish catalog manifest</DialogTitle>
-            <DialogDescription>
-              Publishing adds anything new and overwrites anything that already
-              exists. Preview the changes first to see exactly what it will do.
-            </DialogDescription>
-          </DialogHeader>
-          <form.Field name="manifest">
-            {(field) => (
-              <div className="grid gap-1.5">
-                <Label htmlFor="publish-manifest">Manifest</Label>
-                <Textarea
-                  id="publish-manifest"
-                  className="max-h-72 min-h-40 font-mono text-xs"
-                  placeholder='{"groups": ...}'
-                  spellCheck={false}
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => {
-                    // A previewed plan describes the manifest that produced it.
-                    setPlan(undefined)
-                    field.handleChange(event.target.value)
-                  }}
-                />
-              </div>
-            )}
-          </form.Field>
-          {plan && (
-            <div className="grid gap-1.5">
-              <p className="text-sm font-medium">What publishing will change</p>
-              <pre className="max-h-60 overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs">
-                {plan}
-              </pre>
-            </div>
-          )}
-          <DialogFooter>
-            <form.Subscribe selector={(state) => state.values.manifest}>
-              {(manifest) => (
-                <>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={publish.isPending || !manifest.trim()}
-                    onClick={() => void run(manifest, true)}
-                  >
-                    Preview changes
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={publish.isPending || !manifest.trim()}
-                  >
-                    {publish.isPending ? "Publishing…" : "Publish"}
-                  </Button>
-                </>
-              )}
-            </form.Subscribe>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
   )
 }
 

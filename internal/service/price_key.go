@@ -41,12 +41,9 @@ func PriceIntervalLabel(accessDurationHours *int, autoRenew bool) string {
 }
 
 // resolvePriceKey returns the explicit key when supplied, else the
-// auto-default `<product-key>-<interval>`. Ambiguity detection (does this
-// product already declare a DIFFERENT price at the same interval?) is a
-// PLAN-time concern for the MODE 1 manifest converge (pkg/catalog/plan.go,
-// which sees the whole declared price set at once) — this imperative,
-// single-price API layer trusts the caller and always resolves to a concrete
-// key so "edit the amount, apply" stays a one-field diff.
+// auto-default `<product-key>-<interval>`. Batch applications require explicit
+// price keys; this default belongs to individual price creation. Changing the
+// financial terms at a key creates or reuses a financial version.
 func resolvePriceKey(product *models.Product, req CreatePriceRequest) string {
 	key := strings.TrimSpace(req.Key)
 	if key != "" {
@@ -91,16 +88,19 @@ func (s *Service) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice,
 }
 
 // SetPriceKey relabels a price row onto a new key — a pure label mutation
-// (the row's identity/substance never changes). Used by MODE 1's YAML-is-
-// truth converge when a substance-matched, otherwise-unchanged price is
-// declared under a DIFFERENT key string (a plain rename): "Key renamed =
-// treated as new key + archive-by-prune of the old" — this row's key moves to
-// the new value in place; any archived predecessor rows keep the OLD key as
+// (the row's identity/substance never changes). This explicit individual-write
+// operation moves the row's key in place; any archived predecessor rows keep the OLD key as
 // their back-reference (a fossil), never renamed retroactively. If another
 // live row already holds the target key, THAT row is archived first (the same
 // repoint invariant CreatePrice/ActivatePrice enforce), so a rename can also
 // double as a manual repoint.
 func (s *Service) SetPriceKey(ctx context.Context, id openrails.PriceID, key string) (*CatalogPrice, error) {
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogPrice, error) {
+		return scoped.setPriceKey(ctx, id, key)
+	})
+}
+
+func (s *Service) setPriceKey(ctx context.Context, id openrails.PriceID, key string) (*CatalogPrice, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -148,7 +148,7 @@ func (s *Service) SetPriceKey(ctx context.Context, id openrails.PriceID, key str
 		return nil, priceLookup(err)
 	}
 	if !current.Archived {
-		if err := prices.RecordKeyMovement(ctx, tid.UUID(), priceID, key, time.Now().UTC()); err != nil {
+		if err := prices.RecordAuthoredKeyMovement(ctx, tid.UUID(), priceID, key); err != nil {
 			return nil, fmt.Errorf("record key movement for %q -> %s: %w", key, priceID, err)
 		}
 	}
@@ -161,6 +161,7 @@ func (s *Service) SetPriceKey(ctx context.Context, id openrails.PriceID, key str
 // "version chain with dates" surface. Most-recent-first (mirrors
 // ListKeyMovements).
 type PriceKeyHistoryEntry struct {
+	Archived    bool         `json:"archived"`
 	Price       CatalogPrice `json:"price"`
 	EffectiveAt time.Time    `json:"effective_at"`
 }
@@ -207,7 +208,7 @@ func (s *Service) GetPriceKeyHistory(ctx context.Context, key string) ([]PriceKe
 		if err != nil {
 			return nil, fmt.Errorf("resolve price %s for key %q movement: %w", m.PriceID, key, err)
 		}
-		out = append(out, PriceKeyHistoryEntry{Price: *priceToCatalogPrice(p), EffectiveAt: m.EffectiveAt})
+		out = append(out, PriceKeyHistoryEntry{Archived: m.Archived, Price: *priceToCatalogPrice(p), EffectiveAt: m.EffectiveAt})
 	}
 	return out, nil
 }

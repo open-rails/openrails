@@ -111,7 +111,7 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req CreatePriceRequest,
 
 		if !req.Archived && !trueNoOp {
 			// #774 pointer-movement log: key's current pointer moved to priceID.
-			if err := prices.RecordKeyMovement(ctx, tid.UUID(), priceID, key, now); err != nil {
+			if err := prices.RecordAuthoredKeyMovement(ctx, tid.UUID(), priceID, key); err != nil {
 				return fmt.Errorf("record key movement for %q -> %s: %w", key, priceID, err)
 			}
 		}

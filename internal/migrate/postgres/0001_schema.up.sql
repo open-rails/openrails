@@ -818,6 +818,7 @@ CREATE TABLE openrails.merchants (
     api_host text,
     retired_at timestamp with time zone,
     group_release_completed_at timestamp with time zone,
+    catalog_revision bigint NOT NULL DEFAULT 0 CHECK (catalog_revision >= 0),
     CONSTRAINT merchants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'deleted'::text])))
 );
 
@@ -1825,7 +1826,8 @@ CREATE TABLE openrails.price_key_movements (
     key text NOT NULL,
     price_id uuid NOT NULL,
     effective_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    archived boolean NOT NULL DEFAULT false
 );
 
 COMMENT ON TABLE openrails.price_key_movements IS '#774: append-only log of when a price key''s current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation).';
@@ -3864,6 +3866,7 @@ BEGIN
                   'admission_operations',
                   'billing_policies',
                   'billing_policy_bindings',
+                  'catalog_applications',
                   'catalog_meters',
                   'catalog_rate_cards',
                   'catalogs',
@@ -3945,6 +3948,7 @@ BEGIN
     RETURN NEW;
 END;
 $$;
+
 CREATE TRIGGER guard_billing_restore_receipt BEFORE INSERT OR UPDATE OR DELETE ON openrails.maintenance_runs
     FOR EACH ROW EXECUTE FUNCTION openrails.guard_billing_restore_receipt();
 
@@ -4174,3 +4178,77 @@ CREATE TRIGGER subscriptions_collection_policy_immutable BEFORE UPDATE OF collec
 
 
 CREATE INDEX idx_subscriptions_engine_due_global ON openrails.subscriptions (current_period_ends_at,merchant_id) WHERE collection_policy='engine' AND status IN ('active','past_due') AND deleted_at IS NULL;
+
+-- Durable catalog application receipts and authored-write history.
+CREATE TABLE openrails.catalog_applications (
+    merchant_id uuid NOT NULL REFERENCES openrails.merchants(id) ON DELETE RESTRICT,
+    application_id text NOT NULL CHECK (length(application_id) BETWEEN 1 AND 128),
+    catalog_id uuid NOT NULL,
+    schema_version bigint NOT NULL,
+    request_sha256 bytea NOT NULL CHECK (octet_length(request_sha256)=32),
+    base_revision bigint NOT NULL CHECK (base_revision >= 0),
+    applied_revision bigint NOT NULL CHECK (applied_revision = base_revision + 1),
+    result jsonb NOT NULL CHECK (octet_length(result::text) <= 16384),
+    applied_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (merchant_id,application_id),
+    FOREIGN KEY (merchant_id,catalog_id) REFERENCES openrails.catalogs(merchant_id,id) ON DELETE RESTRICT
+);
+COMMENT ON TABLE openrails.catalog_applications IS 'Permanent compact replay receipts, retained and restored with the merchant billing book; never expire by HTTP idempotency TTL.';
+
+-- Individual services acquire the merchant lock first. This trigger also
+-- fences direct imports/module writes, keeping them visible to application CAS.
+CREATE FUNCTION openrails.catalog_authored_write() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE mid uuid;
+BEGIN
+    IF TG_OP='UPDATE' AND NEW IS NOT DISTINCT FROM OLD THEN RETURN NEW; END IF;
+    IF TG_OP='DELETE' THEN mid := OLD.merchant_id; ELSE mid := NEW.merchant_id; END IF;
+    IF current_setting('app.catalog_batch',true) IS DISTINCT FROM mid::text THEN
+        -- A legacy raw writer may already hold a child-row lock. Do not wait
+        -- behind a merchant-first transaction while holding that child: refuse
+        -- with a retryable serialization conflict instead of deadlocking.
+        BEGIN
+            PERFORM id FROM openrails.merchants WHERE id=mid FOR UPDATE NOWAIT;
+        EXCEPTION WHEN lock_not_available THEN
+            RAISE EXCEPTION 'concurrent catalog authoring; retry the transaction' USING ERRCODE='40001';
+        END;
+        UPDATE openrails.merchants SET catalog_revision=catalog_revision+1 WHERE id=mid;
+    END IF;
+    IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END $$;
+CREATE TRIGGER catalog_authored_product BEFORE INSERT OR UPDATE OR DELETE ON openrails.products FOR EACH ROW EXECUTE FUNCTION openrails.catalog_authored_write();
+CREATE TRIGGER catalog_authored_price BEFORE INSERT OR UPDATE OR DELETE ON openrails.prices FOR EACH ROW EXECUTE FUNCTION openrails.catalog_authored_write();
+CREATE TRIGGER catalog_authored_catalog BEFORE INSERT OR UPDATE OR DELETE ON openrails.catalogs FOR EACH ROW EXECUTE FUNCTION openrails.catalog_authored_write();
+CREATE TRIGGER catalog_authored_binding BEFORE INSERT OR UPDATE OR DELETE ON openrails.price_psp_bindings FOR EACH ROW EXECUTE FUNCTION openrails.catalog_authored_write();
+CREATE TRIGGER catalog_authored_meter BEFORE INSERT OR UPDATE OR DELETE ON openrails.catalog_meters FOR EACH ROW EXECUTE FUNCTION openrails.catalog_authored_write();
+CREATE TRIGGER catalog_authored_rate_card BEFORE INSERT OR UPDATE OR DELETE ON openrails.catalog_rate_cards FOR EACH ROW EXECUTE FUNCTION openrails.catalog_authored_write();
+
+-- An unassigned pointer is a real historical state, not the previous active
+-- offer. UUIDv7 movement IDs give deterministic tie ordering within a timestamp.
+
+CREATE FUNCTION openrails.catalog_price_retired() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF NOT OLD.archived AND (NEW.archived OR NEW.key <> OLD.key) THEN
+  INSERT INTO openrails.price_key_movements(merchant_id,key,price_id,effective_at,archived) VALUES(OLD.merchant_id,OLD.key,OLD.id,clock_timestamp(),true);
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER catalog_price_retired AFTER UPDATE OF archived,key ON openrails.prices FOR EACH ROW EXECUTE FUNCTION openrails.catalog_price_retired();
+
+-- Product eligibility is a separate lifecycle flag. Its changes affect offers
+-- without changing their own archive flags or repricing existing subscribers.
+CREATE FUNCTION openrails.catalog_product_offer_state() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF NEW.archived IS DISTINCT FROM OLD.archived THEN
+  INSERT INTO openrails.price_key_movements(merchant_id,key,price_id,effective_at,archived)
+   SELECT p.merchant_id,p.key,p.id,clock_timestamp(),NEW.archived FROM openrails.prices p
+   WHERE p.merchant_id=NEW.merchant_id AND p.product_id=NEW.id AND NOT p.archived;
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER catalog_product_offer_state AFTER UPDATE OF archived ON openrails.products FOR EACH ROW EXECUTE FUNCTION openrails.catalog_product_offer_state();
+
+CREATE FUNCTION openrails.guard_catalog_application_receipt() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ RAISE EXCEPTION 'catalog application receipts are immutable' USING ERRCODE='23514';
+END $$;
+CREATE TRIGGER immutable_catalog_application_receipt BEFORE UPDATE OR DELETE ON openrails.catalog_applications FOR EACH ROW EXECUTE FUNCTION openrails.guard_catalog_application_receipt();

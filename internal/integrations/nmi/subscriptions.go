@@ -444,6 +444,8 @@ func centsToDollarString(cents moneyutil.Cents) string {
 // the id. DayFrequency is the billing interval in days; it is 0 when the plan
 // is month-based (parity with the classic recurring_plans report).
 type RecurringPlanDetail struct {
+	ID           string
+	Payments     *int
 	Found        bool
 	Name         string
 	AmountCents  int64
@@ -487,7 +489,15 @@ func (c *NMIClient) GetRecurringPlanDetailByID(ctx context.Context, planID, curr
 	}
 	// day_frequency is "0"/empty for month-based plans; DayFrequency stays 0.
 	dayFreq, _ := strconv.Atoi(strings.TrimSpace(plan.DayFrequency))
-	return RecurringPlanDetail{Found: true, Name: plan.PlanName, AmountCents: minor, DayFrequency: dayFreq}, nil
+	var payments *int
+	if text := strings.TrimSpace(plan.PlanPayments); text != "" {
+		parsed, err := strconv.Atoi(text)
+		if err != nil || parsed < 0 {
+			return RecurringPlanDetail{}, fmt.Errorf("NMI plan has an invalid payment count")
+		}
+		payments = &parsed
+	}
+	return RecurringPlanDetail{Found: true, ID: plan.ID, Name: plan.PlanName, AmountCents: minor, DayFrequency: dayFreq, Payments: payments}, nil
 }
 
 // SearchTransactions stays on the classic Query API (query.php) DELIBERATELY

@@ -6,7 +6,7 @@ import (
 
 	"github.com/open-rails/openrails"
 
-	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/catalogpolicy"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -276,11 +276,7 @@ func adminUsageMeterPageDTO(
 }
 
 func adminCatalogOwnership(r *httprequest.Request) (string, bool) {
-	source := config.CatalogSourceManifest
-	if r.State != nil && r.State.Config != nil {
-		source = r.State.Config.CatalogSourceMode()
-	}
-	return source, source == config.CatalogSourceAPI
+	return "database", r.State != nil && catalogpolicy.Enabled(r.State.Config)
 }
 
 func writeMeteringValidationError(r *httprequest.Request, code string, err error) {

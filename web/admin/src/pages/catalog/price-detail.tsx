@@ -31,6 +31,7 @@ import { adminQueries } from "@/lib/queries"
 // lives here alongside the catalog list row.
 export function PriceDetailPage() {
   const { id = "" } = useParams()
+  const { data: capability } = useQuery(adminQueries.catalogRevision())
   const navigate = useNavigate()
   // verify (or#812) is opt-in: it makes GET price perform a live retrieve
   // against every attached provider, which is a network round trip per PSP.
@@ -87,10 +88,12 @@ export function PriceDetailPage() {
           </p>
         </div>
         <div className="ml-auto">
-          <PriceChangeWizard
-            price={price}
-            productName={product?.display_name ?? "…"}
-          />
+          {capability?.writes_allowed && (
+            <PriceChangeWizard
+              price={price}
+              productName={product?.display_name ?? "…"}
+            />
+          )}
         </div>
       </div>
 
@@ -148,11 +151,11 @@ export function PriceDetailPage() {
                     </TableCell>
                     <TableCell>{formatDate(entry.effective_at)}</TableCell>
                     <TableCell>
-                      {entry.price.archived ? (
-                        <Badge variant="secondary">grandfathered</Badge>
+                      {entry.archived ? (
+                        <Badge variant="secondary">retired</Badge>
                       ) : (
                         <Badge className="bg-settled-surface text-settled">
-                          current
+                          offered
                         </Badge>
                       )}
                     </TableCell>

@@ -44,7 +44,7 @@ type SyncCatalogSidecarsRequest struct {
 	RateCards []CatalogRateCardSpec `json:"rate_cards,omitempty"`
 }
 
-// CatalogMutationOptions are the same three mutation classes as catalog publish.
+// CatalogMutationOptions controls the private billing-definition merge.
 type CatalogMutationOptions struct{ Insert, Overwrite, Prune bool }
 
 func (s *Service) PlanCatalogBilling(ctx context.Context, desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions) (bool, bool, error) {
@@ -86,6 +86,13 @@ func (s *Service) PlanCatalogBilling(ctx context.Context, desired SyncCatalogSid
 }
 
 func (s *Service) SyncCatalogSidecars(ctx context.Context, desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions) error {
+	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
+		return struct{}{}, scoped.syncCatalogSidecars(ctx, desired, opts)
+	})
+	return err
+}
+
+func (s *Service) syncCatalogSidecars(ctx context.Context, desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions) error {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return err
