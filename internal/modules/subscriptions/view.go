@@ -14,7 +14,7 @@ import (
 func (r *UserSubscriptionResponse) View() openrails.Subscription {
 	out := SubscriptionView(r.Subscription, r.Price, r.EvaluationTime())
 	out.ScheduledPrice = subscriptionPriceView(r.ScheduledPrice)
-	out.ScheduledProduct = subscriptionProductView(r.ScheduledProduct)
+	out.ScheduledProduct = ProductView(r.ScheduledProduct)
 	out.Access = r.Access
 	return out
 }
@@ -32,7 +32,7 @@ func SubscriptionView(sub *models.Subscription, price *models.Price, now time.Ti
 		PaymentMethodID: (*openrails.PaymentMethodID)(sub.PaymentMethodID),
 		Resumable:       Resumable(sub, now), CancelScheduled: CancelScheduled(sub, now), CancelMode: string(CancelModeFor(sub, now)),
 		CancelPortalURL: CancelPortalURL(sub, now),
-		Price:           subscriptionPriceView(price), Product: subscriptionProductView(sub.Product), Card: subscriptionCardView(sub.PaymentMethod),
+		Price:           subscriptionPriceView(price), Product: ProductView(sub.Product), Card: subscriptionCardView(sub.PaymentMethod),
 	}
 	if sub.ScheduledPriceID != nil {
 		id := openrails.PriceID(*sub.ScheduledPriceID).String()
@@ -52,7 +52,8 @@ func subscriptionPriceView(p *models.Price) *openrails.SubscriptionPrice {
 	return &openrails.SubscriptionPrice{ID: openrails.PriceID(p.ID).String(), Key: p.Key, ProductID: openrails.ProductID(p.ProductID).String(), UnitAmount: p.Amount, Currency: p.Currency, AutoRenew: p.AutoRenew, AccessDurationHours: p.AccessDurationHours, Archived: p.Archived}
 }
 
-func subscriptionProductView(p *models.Product) *openrails.SubscriptionProduct {
+// ProductView is the customer-facing product shape shared by subscriptions and payments.
+func ProductView(p *models.Product) *openrails.SubscriptionProduct {
 	if p == nil {
 		return nil
 	}
