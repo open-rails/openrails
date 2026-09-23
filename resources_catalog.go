@@ -84,6 +84,28 @@ func (p *ProductClient) List(ctx context.Context, params *ProductListParams, req
 	return &out, nil
 }
 func (p *PriceClient) Create(ctx context.Context, params *PriceCreateParams, requestOptions ...RequestOption) (*Price, error) {
+	if params == nil {
+		return nil, invalidErr("params are required")
+	}
+	selectors := 0
+	if params.ProductID != "" {
+		selectors++
+		if _, err := resourceProductID(params.ProductID); err != nil {
+			return nil, err
+		}
+	}
+	if params.ProductKey != "" {
+		selectors++
+		if !validProductKey(params.ProductKey) {
+			return nil, invalidErr("product_key is invalid")
+		}
+	}
+	if params.ProductData != nil {
+		selectors++
+	}
+	if selectors != 1 {
+		return nil, invalidErr("exactly one of product_id, product_key and product_data is required")
+	}
 	var out Price
 	if err := p.client.do(ctx, http.MethodPost, p.client.catalogPath()+"/prices", params, &out, requestOptions...); err != nil {
 		return nil, err
