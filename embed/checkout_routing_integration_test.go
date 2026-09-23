@@ -100,8 +100,8 @@ func bootRoutingFixture(
 	methodID := uuid.New()
 	_, err = appDB.Pool().Exec(scoped, `INSERT INTO billing.customers(merchant_id,id) VALUES($1,$2) ON CONFLICT DO NOTHING`, id.UUID(), uuid.MustParse(userID))
 	require.NoError(t, err)
-	result, err := appDB.Pool().Exec(scoped, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,rail_customer_ref,rail_method_ref)
- SELECT $1,$2,$3,id,'nmi','psp','routing-customer','routing-method' FROM billing.psps WHERE merchant_id=$2 AND key='mobius' AND archived=false`, methodID, id.UUID(), uuid.MustParse(userID))
+	result, err := appDB.Pool().Exec(scoped, `INSERT INTO billing.payment_methods(id,merchant_id,customer_id,psp_id,rail,custodian,rail_customer_ref,rail_method_ref,initial_transaction_id)
+ SELECT $1,$2,$3,id,'nmi','psp','routing-customer','routing-method','' FROM billing.psps WHERE merchant_id=$2 AND key='mobius' AND archived=false`, methodID, id.UUID(), uuid.MustParse(userID))
 	require.NoError(t, err)
 	require.EqualValues(t, 1, result.RowsAffected())
 	email := username + "@test.example.com"

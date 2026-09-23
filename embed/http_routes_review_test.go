@@ -59,7 +59,7 @@ func TestConfiguredRoutesReviewExposureAndCredentialOwnership(t *testing.T) {
 	}
 	rt = reviewRuntime(&HTTPConfig{MerchantConfig: true}, delegated)
 	rt.app.Config.SecretBackend = config.SecretBackendSnapshot
-	routes, err = rt.HTTPRoutes()
+	_, err = rt.HTTPRoutes()
 	require.NoError(t, err)
 	// Metadata routes remain mounted and authorized; custody is enforced when
 	// a request actually supplies credentials.

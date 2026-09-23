@@ -25,7 +25,7 @@ func (s *hsSecretReader) Get(_ context.Context, owner merchant.ID, name string) 
 	s.owner, s.name = owner, name
 	return s.secret, s.err
 }
-func (s *hsSecretReader) GetAtLeastVersion(ctx context.Context, owner merchant.ID, name string, floor int) (merchants.Secret, error) {
+func (s *hsSecretReader) GetVersion(ctx context.Context, owner merchant.ID, name string, floor int) (merchants.Secret, error) {
 	s.floor = floor
 	return s.Get(ctx, owner, name)
 }
@@ -53,6 +53,7 @@ func TestHyperSwitchCredentialResolution(t *testing.T) {
 		{name: "null settings", mutate: func(r *gen.OpenrailsCustodian) { r.Settings = []byte(`null`) }, wantError: true},
 		{name: "negative floor", mutate: func(r *gen.OpenrailsCustodian) { r.CredentialVersions = []byte(`{"api_key":-1}`) }, wantError: true},
 		{name: "stale returned key", version: 1, secret: "private", wantError: true, floor: 2},
+		{name: "newer unpublished key", version: 3, secret: "private", wantError: true, floor: 2},
 		{name: "empty key", version: 2, wantError: true, floor: 2},
 		{name: "missing secret", err: merchants.ErrSecretNotFound, wantError: true, floor: 2},
 		{name: "foreign owner", mutate: func(r *gen.OpenrailsCustodian) { r.MerchantID = uuid.New() }, wantError: true},
