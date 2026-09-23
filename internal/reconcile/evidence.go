@@ -99,7 +99,7 @@ func (s *PGEvidenceStore) StoreEvidence(ctx context.Context, runID uuid.UUID, bi
 				Type:            strings.TrimSpace(string(txn.Type)),
 				Success:         txn.Success,
 				AmountCents:     txn.AmountCents,
-				Currency:        strings.TrimSpace(txn.Currency),
+				Currency:        evidenceCurrency(txn.Currency),
 				OccurredAt:      occurredAt,
 				Source:          source,
 				CustomerRef:     customerRef,
@@ -131,7 +131,7 @@ func (s *PGEvidenceStore) StoreEvidence(ctx context.Context, runID uuid.UUID, bi
 				NextBillingAt:           sub.NextBillingAt,
 				LastBilledAt:            sub.LastBilledAt,
 				AmountCents:             sub.AmountCents,
-				Currency:                strings.TrimSpace(sub.Currency),
+				Currency:                evidenceCurrency(sub.Currency),
 				Raw:                     evidenceRaw(sub.Raw),
 			}); err != nil {
 				return fmt.Errorf("store provider subscription %s: %w", sub.RailSubscriptionID, err)
@@ -163,6 +163,14 @@ func timePtr(value time.Time) *time.Time {
 	}
 	value = value.UTC()
 	return &value
+}
+
+func evidenceCurrency(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	if value == "" {
+		return "UNK"
+	}
+	return value
 }
 
 // evidenceRaw keeps malformed/empty provider payloads queryable without
