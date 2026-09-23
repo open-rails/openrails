@@ -181,7 +181,7 @@ func (a *nmiAdapter) nmiClientFor(ctx context.Context, targetAccountID string) (
 	}
 	testMode := a.svc.rt.Config != nil && a.svc.rt.Config.IsTestMode()
 	mid, merr := merchant.Require(ctx)
-	if merr != nil {
+	if merr != nil && proc.ID != uuid.Nil {
 		return nil, "", false
 	}
 	var cerr error
