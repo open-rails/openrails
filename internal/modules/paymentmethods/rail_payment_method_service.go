@@ -245,9 +245,12 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		Address2:     req.Address2,
 	}
 
-	ctx, err = client.QualifyDispatch(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("NMI test-mode qualification refused before vault creation: %w", err)
+	owner, account := client.AccountIdentity()
+	if owner != uuid.Nil && account != uuid.Nil {
+		ctx, err = client.QualifyDispatch(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("NMI test-mode qualification refused before vault creation: %w", err)
+		}
 	}
 	providerStartedAt := time.Now()
 	nmiResponse, err := client.CreateCustomerVault(ctx, vaultData)

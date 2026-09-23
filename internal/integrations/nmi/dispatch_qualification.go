@@ -38,7 +38,7 @@ func (c *NMIClient) dispatchBinding() dispatchBinding {
 // private capability authorizes exactly the next mutation on this captured
 // account/credential/deployment, in this call only. It is never persisted.
 func (c *NMIClient) QualifyDispatch(ctx context.Context) (context.Context, error) {
-	if !c.TestMode {
+	if !c.TestMode || !c.endpointDeploymentExplicit || c.accountMerchantID == uuid.Nil || c.accountPSPID == uuid.Nil {
 		return ctx, nil
 	}
 	if c.ReadOnly {
@@ -55,7 +55,7 @@ func (c *NMIClient) QualifyDispatch(ctx context.Context) (context.Context, error
 }
 
 func (c *NMIClient) qualifyMutation(ctx context.Context) error {
-	if !c.TestMode || c.accountMerchantID == uuid.Nil || c.accountPSPID == uuid.Nil || ctx.Value(probeQualificationKey{}) == c {
+	if !c.TestMode || !c.endpointDeploymentExplicit || c.accountMerchantID == uuid.Nil || c.accountPSPID == uuid.Nil || ctx.Value(probeQualificationKey{}) == c {
 		return nil
 	}
 	if permit, ok := ctx.Value(dispatchQualificationKey{}).(*dispatchQualification); ok {

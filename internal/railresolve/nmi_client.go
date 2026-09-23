@@ -110,6 +110,13 @@ func (a *NMIArmer) NMIClient(ctx context.Context, mid merchant.ID, scope merchan
 	}
 	webhookSecret, _, _ := a.Secret(ctx, mid, scope, "webhook_signing_secret")
 	deployment, err := config.NMIEndpointDeployment(scope.Settings)
+	if deployment == "" {
+		if a.testMode() {
+			deployment = config.NMIEndpointSandbox
+		} else {
+			deployment = config.NMIEndpointGateway
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
