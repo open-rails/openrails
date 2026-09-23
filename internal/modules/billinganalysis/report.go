@@ -175,7 +175,7 @@ func Build(ctx context.Context, database *db.DB, merchantID merchant.ID, opts Op
 
 func listEvents(ctx context.Context, database *db.DB, merchantID merchant.ID, opts Options) ([]evidenceEvent, error) {
 	rows, err := database.Qx(ctx).Query(ctx, `
-SELECT provider, psp_id, event_key, transaction_id, subscription_ref, type,
+SELECT provider, psp_id::text, event_key, transaction_id, subscription_ref, type,
        success, amount_cents, currency, occurred_at, source, customer_ref,
        customer_email, order_ref, decline_code, decline_reason, raw
 FROM openrails.provider_evidence_transactions
@@ -190,11 +190,13 @@ ORDER BY occurred_at ASC, event_key ASC`, merchantID.UUID(), strings.TrimSpace(o
 	var out []evidenceEvent
 	for rows.Next() {
 		var e evidenceEvent
+		var raw []byte
 		if err := rows.Scan(&e.Provider, &e.PSPID, &e.EventKey, &e.TransactionID, &e.SubscriptionRef, &e.Type,
 			&e.Success, &e.AmountCents, &e.Currency, &e.OccurredAt, &e.Source, &e.CustomerRef,
-			&e.CustomerEmail, &e.OrderRef, &e.DeclineCode, &e.DeclineReason, &e.Raw); err != nil {
+			&e.CustomerEmail, &e.OrderRef, &e.DeclineCode, &e.DeclineReason, &raw); err != nil {
 			return nil, fmt.Errorf("scan billing evidence transaction: %w", err)
 		}
+		e.Raw = json.RawMessage(raw)
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -205,7 +207,7 @@ ORDER BY occurred_at ASC, event_key ASC`, merchantID.UUID(), strings.TrimSpace(o
 
 func listCurrentSubscriptions(ctx context.Context, database *db.DB, merchantID merchant.ID, opts Options) ([]subscriptionObservation, error) {
 	rows, err := database.Qx(ctx).Query(ctx, `
-SELECT provider, psp_id, provider_subscription_ref, status, customer_ref,
+SELECT provider, psp_id::text, provider_subscription_ref, status, customer_ref,
        customer_email, next_billing_at
 FROM (
   SELECT DISTINCT ON (provider, psp_id, provider_subscription_ref)
@@ -255,10 +257,13 @@ func derive(events []evidenceEvent, subs []subscriptionObservation, opts Options
 			continue
 		}
 		key := obligationKey(e)
-		seen[key]++
-		kind := classify(e, seen[key])
 		settled := e.Success && strings.EqualFold(e.Type, "sale")
 		failed := !e.Success && (strings.EqualFold(e.Type, "sale") || strings.EqualFold(e.Type, "decline"))
+		kind := "other"
+		if settled || failed {
+			seen[key]++
+			kind = classify(e, seen[key])
+		}
 		day := e.OccurredAt.In(loc).Format("2006-01-02")
 		d := byDay[day]
 		if settled {
