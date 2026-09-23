@@ -5,7 +5,7 @@ intentionally independent of `internal/dbtest`, `internal/integrationharness`,
 Redis, testcontainers, provider credentials, browser automation, and direct
 application-table SQL.
 
-The first slice has four focused scenarios:
+The first slice has five focused scenarios:
 
 - fresh migration plus replay, product/price creation, and entitlement offer
   selection;
@@ -13,6 +13,8 @@ The first slice has four focused scenarios:
 - repeat catalog provisioning through `Products.Ensure`.
 - checkout admission and replay through a deterministic Stripe transport,
   including changed-fingerprint rejection and entitlement access checks.
+- signed Stripe completion, duplicate delivery, and stale expiration converge
+  to one successful purchase and entitlement.
 
 Each test creates one random OpenRails schema in the PostgreSQL service, applies
 the public `embed.ApplyMigrations` entry point, constructs an embedded runtime,
