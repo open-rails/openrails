@@ -6,20 +6,21 @@ stay in memory for the life of the runtime. Changing them means updating the
 host configuration and restarting. OpenRails persists provider metadata for
 references, but does not copy these credentials into its managed secret store.
 
-Catalog authority defaults to the same mode. Set `catalog_source: api` when
-products and prices should change dynamically while provider credentials remain
-host-owned. The opposite credential posture — API-driven merchant configuration
-with a Vault/DB secret store — is MODE 2 (`merchant_config_source: api`). Comparison table:
-[standalone-integration.md](standalone-integration.md#two-merchant-source-modes).
+Catalog data always lives in the database. Set `allow_catalog_updates: true`
+when authorized clients should edit products, prices and metering definitions.
+The default is false in both credential modes; trusted operator catalog application
+remains available. The opposite credential posture — API-driven merchant
+configuration with a Vault/DB secret store — is MODE 2 (`merchant_config_source: api`).
+Comparison table: [standalone-integration.md](standalone-integration.md#two-merchant-source-modes).
 Deployment shape does not imply mode: embedded and standalone can run either.
 
 ## The three files
 
 | File | Owns | Loaded by |
 |---|---|---|
-| `config.yaml` | process/infrastructure config (env, DB, Redis, `provider_write_mode`, `test_mode`, `merchant_config_source`, `catalog_source`) | `config.Load` (standalone) / built programmatically (embedded hosts) |
+| `config.yaml` | process/infrastructure config (env, DB, Redis, `provider_write_mode`, `test_mode`, `merchant_config_source`, `allow_catalog_updates`) | `config.Load` (standalone) / built programmatically (embedded hosts) |
 | merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server` / `run-worker --merchant-manifest <path>`) | merchant identity, profile, invoice policy, **PSPs** — rail accounts + secrets (`merchants.<slug>.psps.<key>.<rail>`) | standalone server and worker boot, every boot; embedded hosts pass the same shape to `Options.Merchant.Config` |
-| catalog manifest (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails push-merchant-catalog` (or the embedded push API) |
+| catalog manifest (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails apply-catalog --merchant NAME --file PATH` (or the trusted operator wrapper) |
 
 Manifest anatomy and field semantics:
 [merchant-provisioning.md](merchant-provisioning.md).
@@ -89,10 +90,10 @@ manifest and secret files before it can use those providers.
   stay available. Requests to omitted routes receive the router's ordinary
   404 or 405; the advertised `secret_write` capability is false. Optional
   managed alert-webhook URLs remain independently editable when configured.
-- Catalog APIs also return 405 by default. Set `catalog_source: api` to permit
-  authorized dynamic product/price/metering edits while keeping provider
-  credentials host-owned. `catalog_source: manifest` uses the catalog push
-  command and refuses catalog API writes, including `POST /catalog/publish`.
+- Catalog mutation routes are omitted by default. Set `allow_catalog_updates: true`
+  to permit authorized dynamic edits while keeping provider credentials host-owned.
+  Reads remain available. Trusted operator application changes database state once
+  per application ID; an unchanged startup artifact does not overwrite later API edits.
 - `openrails dump-merchant-config` errors: there is no store to dump — the
   YAML you already hold is the export.
 - Provider credentials need no `ENCRYPTION_MASTER_KEY`. Optional managed
@@ -113,8 +114,7 @@ manifest and secret files before it can use those providers.
 `merchant_config_source: api`: no manifests at boot (a present manifest file refuses
 boot: two truths), merchant/provider configuration mutates over the HTTP APIs,
 and secrets live in the explicitly selected Vault KV or DB store. DB encryption
-is required outside development. Catalog APIs are enabled by default; an
-explicit `catalog_source: manifest` instead gives catalog authority to a separate
-catalog manifest. Initial bootstrap is `openrails push-merchant-config --seed` — a
+is required outside development. Ordinary catalog writes still require
+`allow_catalog_updates: true`; catalog storage is always the database. Initial bootstrap is `openrails push-merchant-config --seed` — a
 one-time, create-only import of a manifest file into those stores (the command
 refuses without `--seed`; the stores are the truth afterward).

@@ -87,7 +87,11 @@ func Export(ctx context.Context, database *db.DB, id merchant.ID, out io.Writer)
 		if _, err := tx.Exec(ctx, "SELECT openrails.check_billing_restore_ledger($1)", id.UUID()); err != nil {
 			return err
 		}
-		w, err := archivewire.NewWriter(out, id.String())
+		var catalogRevision int64
+		if err := tx.QueryRow(ctx, "SELECT catalog_revision FROM openrails.merchants WHERE id=$1", id.UUID()).Scan(&catalogRevision); err != nil {
+			return err
+		}
+		w, err := archivewire.NewWriter(out, id.String(), catalogRevision)
 		if err != nil {
 			return err
 		}
@@ -157,9 +161,14 @@ func Restore(ctx context.Context, database *db.DB, id merchant.ID, in io.Reader)
 		}
 		var previousDigest *string
 		var previousRows *int64
+		var restoredCatalogRevision int64
 		info, err := contract.Read(in, func(h archivewire.Header) error {
 			if h.MerchantID != id.String() {
 				return &Error{Code: "merchant_mismatch"}
+			}
+			restoredCatalogRevision = h.CatalogRevision
+			if _, err := tx.Exec(ctx, "SELECT set_config('app.catalog_batch',$1,true)", id.String()); err != nil {
+				return err
 			}
 			var receipt string
 			if err := tx.QueryRow(ctx, "SELECT openrails.begin_billing_restore($1)::text", id.UUID()).Scan(&receipt); err != nil {
@@ -193,6 +202,16 @@ func Restore(ctx context.Context, database *db.DB, id merchant.ID, in io.Reader)
 				return &Error{Code: "not_empty"}
 			}
 			return nil
+		}
+		if _, err := tx.Exec(ctx, "UPDATE openrails.merchants SET catalog_revision=$2 WHERE id=$1", id.UUID(), restoredCatalogRevision); err != nil {
+			return err
+		}
+		var invalidReceipts bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM openrails.catalog_applications WHERE merchant_id=$1 AND applied_revision>$2)", id.UUID(), restoredCatalogRevision).Scan(&invalidReceipts); err != nil {
+			return err
+		}
+		if invalidReceipts {
+			return &Error{Code: "integrity", Table: "catalog_applications"}
 		}
 		if err := validateReferences(ctx, tx, id); err != nil {
 			return err

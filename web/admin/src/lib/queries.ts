@@ -2,6 +2,7 @@ import { keepPreviousData, queryOptions } from "@tanstack/react-query"
 
 import { getTokens, type ItemsEnvelope } from "@/lib/api/client"
 import {
+  getCatalogRevision,
   getCustomerPaymentMethods,
   getCustomerProfile,
   getMerchantSettings,
@@ -301,6 +302,11 @@ export const adminQueries = {
       queryKey: [...queryKeys.catalog(), "reprices", { filters, limit }],
       queryFn: ({ signal }) => listReprices(filters!, limit, 0, signal),
       enabled: Boolean(filters),
+    }),
+  catalogRevision: () =>
+    queryOptions({
+      queryKey: [...queryKeys.catalog(), "revision"],
+      queryFn: () => getCatalogRevision(),
     }),
   catalogDrift: (limit = 200, offset = 0) =>
     queryOptions({

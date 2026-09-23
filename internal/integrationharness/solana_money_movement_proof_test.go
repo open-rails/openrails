@@ -47,7 +47,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -122,29 +121,20 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
 	)
 
-	manifest := catalog.Manifest{
-		Version: catalog.SupportedVersion,
-		Products: []catalog.Product{{
-			Key:          productKey,
-			DisplayName:  displayName,
-			Description:  description,
-			Entitlements: []string{entitlement},
-			Prices: []catalog.Price{{
-				UnitAmount: priceMicros,
-				Currency:   "USD",
-				Duration:   "30d",
-				AutoRenew:  true,
-				PSPs:       []string{"solana"}, // priced for the Solana rail
-			}},
-		}},
-	}
-	require.NoError(t, manifest.Validate())
-
-	publishStatus, publishBody := requestJSON(t, "POST", surface.BaseURL+"/v1/merchant/catalog/publish", catalogToken, map[string]any{
-		"catalog": manifest,
-		"insert":  true,
+	// Provider-dependent setup uses ordinary item APIs, whose Solana workflow
+	// remains independently qualified by this proof.
+	catalogClient := surface.Client(openrails.WithAPIKey(catalogToken))
+	createdProduct, err := catalogClient.Products.Create(ctx, &openrails.ProductCreateParams{
+		Key: productKey, DisplayName: displayName, Description: description,
+		EntitlementsSpec: map[string]*int{entitlement: nil},
 	})
-	require.Equal(t, 200, publishStatus, string(publishBody))
+	require.NoError(t, err)
+	duration := 720
+	_, err = catalogClient.Prices.Create(ctx, &openrails.PriceCreateParams{
+		ProductID: createdProduct.ID, Key: productKey + "-monthly", UnitAmount: priceMicros,
+		Currency: "USD", AccessDurationHours: &duration, AutoRenew: true, PSPs: []string{"solana"},
+	})
+	require.NoError(t, err)
 
 	// The catalog/product/price/benefit metadata is persisted in Postgres (the
 	// source of truth) — read it straight from the products table.

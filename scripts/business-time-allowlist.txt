@@ -107,9 +107,7 @@ internal/river/jobs_subscription_converge.go|ScheduledAt: time.Now().Add(debounc
 internal/river/progress.go|return time.Now().UTC()|infrastructure_time|Worker heartbeat and elapsed-work observation|1
 internal/river/progress.go|ticker = clockwork.NewRealClock().NewTicker(m.interval())|infrastructure_time|Worker heartbeat and elapsed-work observation|1
 internal/river/worker_health.go|now := time.Now().UTC()|infrastructure_time|Worker heartbeat observation; optional clock override supported|1
-internal/service/price_key.go|if err := prices.RecordKeyMovement(ctx, tid.UUID(), priceID, key, time.Now().UTC()); err != nil {|db_audit_timestamp|Catalog key movement audit timestamp|1
 internal/service/service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/service/service_definition_catalog.go|now := time.Now().UTC()|db_audit_timestamp|Product creation audit timestamp|1
 internal/service/catalog_price_write.go|now := time.Now().UTC()|db_audit_timestamp|Price creation and key movement audit timestamp|1
-internal/service/service_definition_catalog_admin.go|if err := prices.RecordKeyMovement(ctx, tid.UUID(), priceID, updated.Key, time.Now().UTC()); err != nil {|db_audit_timestamp|Catalog key movement audit timestamp|1
 internal/service/service_webhooks.go|ReceivedAt: time.Now(),|infrastructure_time|Physical webhook receipt timestamp|1

@@ -34,7 +34,7 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	cfg.Env = "production"
 	cfg.TestMode = config.CredentialPostureSandbox
 	cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly
-	cfg.CatalogSource = config.CatalogSourceAPI
+	cfg.AllowCatalogUpdates = true
 	require.Nil(t, cfg.Encryption, "host credentials must not need an encryption key")
 	slug := "host-catalog-" + uuid.NewString()
 	accountID := "acct_" + strings.ReplaceAll(uuid.NewString(), "-", "")
@@ -67,8 +67,6 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	price, err := client.Prices.Create(ctx, &openrails.PriceCreateParams{ProductID: product.ID, Key: "post-usd", UnitAmount: 5_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	require.Equal(t, product.ID, price.ProductID)
-	require.ErrorContains(t, embedoperator.New(rt).PushCatalog(ctx, embedoperator.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Insert: true}), "catalog_source=api")
-	require.NoError(t, embedoperator.New(rt).PushCatalog(ctx, embedoperator.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Out: io.Discard}), "API catalogs still permit a read-only manifest comparison")
 	runtime := app.HostGraph(rt).Runtime
 	mid := runtime.ConfiguredMerchant()
 	name, err := merchants.PSPSecretName("stripe", "test", accountID, "secret_key")
@@ -105,19 +103,20 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, title, read.DisplayName)
 	require.Zero(t, merchantSecretRowCount(t, app.HostGraph(rt2).Runtime.DB.Pool(), ctx, mid))
-	require.NoError(t, embedoperator.New(rt2).PushCatalog(ctx, embedoperator.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 9_000_000), Out: io.Discard}), "provider comparison must use the rotated host credential")
+
 }
 
 // The inverse combination keeps provider API custody while catalog mutations
-// remain host-declared. A webhook signing credential needs no provider traffic.
-func TestManagedCredentialsWithManifestCatalog(t *testing.T) {
+// are disabled independently. A webhook signing credential needs no provider traffic.
+func TestManagedCredentialsWithCatalogUpdatesDisabled(t *testing.T) {
 	ctx := t.Context()
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := manifestModeConfig(dsn)
 	cfg.Env = "production"
 	cfg.TestMode = config.CredentialPostureSandbox
 	cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly
-	cfg.MerchantConfigSource, cfg.CatalogSource = config.MerchantConfigSourceAPI, config.CatalogSourceManifest
+	cfg.MerchantConfigSource = config.MerchantConfigSourceAPI
+	cfg.AllowCatalogUpdates = false
 	cfg.SecretBackend = config.SecretBackendDB
 	cfg.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 	slug := "managed-manifest-" + uuid.NewString()
@@ -155,17 +154,20 @@ func TestManagedCredentialsWithManifestCatalog(t *testing.T) {
 			require.NotEqual(t, secret, persisted, "managed provider credentials must be encrypted")
 		})
 	}
-	require.NoError(t, embedoperator.New(rt).PushCatalog(ctx, embedoperator.PushCatalogOptions{Manifest: manifestModeCatalogYAML(slug, 3_000_000), Insert: true, Out: io.Discard}))
+	application, err := openrails.ParseCatalogApplicationYAML(manifestModeCatalogYAML(slug, 3_000_000))
+	require.NoError(t, err)
+	_, err = embedoperator.New(rt).ApplyCatalog(ctx, mid, application)
+	require.NoError(t, err)
 	client, err := rt.Client()
 	require.NoError(t, err)
 	product, err := client.Products.RetrieveByKey(ctx, "pro")
-	require.NoError(t, err, "manifest catalog reads remain available")
+	require.NoError(t, err, "catalog reads remain available")
 	title := "API overwrite"
 	_, err = client.Products.Update(ctx, product.ID, &openrails.ProductUpdateParams{DisplayName: &title})
 	var refusal *openrails.StatusError
 	require.ErrorAs(t, err, &refusal)
 	require.Equal(t, http.StatusMethodNotAllowed, refusal.Status)
-	require.Contains(t, err.Error(), "catalog_source=manifest")
+	require.NotContains(t, err.Error(), "catalog_source")
 	require.NoError(t, rt.Close(ctx))
 	restarted := boot()
 	loaded, err := app.HostGraph(restarted).Runtime.Merchants.LoadStripeCredentials(ctx, mid)

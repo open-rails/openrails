@@ -183,6 +183,19 @@ type OpenrailsCatalog struct {
 	UpdatedAt    time.Time
 }
 
+// Permanent compact replay receipts, retained and restored with the merchant billing book; never expire by HTTP idempotency TTL.
+type OpenrailsCatalogApplication struct {
+	MerchantID      uuid.UUID
+	ApplicationID   string
+	CatalogID       uuid.UUID
+	SchemaVersion   int64
+	RequestSha256   []byte
+	BaseRevision    int64
+	AppliedRevision int64
+	Result          []byte
+	AppliedAt       time.Time
+}
+
 type OpenrailsCatalogDriftEvent struct {
 	ID                    uuid.UUID
 	PspID                 *uuid.UUID
@@ -664,6 +677,7 @@ type OpenrailsMerchant struct {
 	ApiHost                 *string
 	RetiredAt               *time.Time
 	GroupReleaseCompletedAt *time.Time
+	CatalogRevision         int64
 }
 
 // One merchant-scoped JSON configuration row. Missing keys use service defaults.
@@ -929,6 +943,7 @@ type OpenrailsPriceKeyMovement struct {
 	PriceID     uuid.UUID
 	EffectiveAt time.Time
 	CreatedAt   time.Time
+	Archived    bool
 }
 
 type OpenrailsPricePspBinding struct {

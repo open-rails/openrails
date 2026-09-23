@@ -4,7 +4,6 @@ package embed_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	embedoperator "github.com/open-rails/openrails/embed/operator"
@@ -65,19 +64,21 @@ merchants:
 }
 
 func manifestModeCatalogYAML(slug string, amount int64) []byte {
-	return []byte(fmt.Sprintf(`version: 1
-catalogs:
-  - merchant: %s
-    products:
-      - key: pro
-        display_name: Pro
-        entitlements: [pro-access]
-        prices:
-          - currency: usd
-            unit_amount: %d
-            duration: 30d
-            auto_renew: true
-`, slug, amount))
+	return []byte(fmt.Sprintf(`schema_version: 1
+application_id: %s-price-%d
+expected_revision: 0
+prune: false
+products:
+  - key: pro
+    display_name: Pro
+    entitlements_spec: {pro-access: null}
+    prices:
+      - key: pro-monthly
+        currency: USD
+        unit_amount: %d
+        access_duration_hours: 720
+        auto_renew: true
+`, slug, amount, amount))
 }
 
 // bootManifestRuntime is one "pod boot": parse the manifest bytes (secret-file
@@ -102,10 +103,10 @@ func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug, nmiV5Base
 		MerchantsFn: func() *merchants.Service { return runtime.Merchants },
 		Endpoints:   money.CollectionEndpoints{NMIV5BaseURL: nmiV5BaseURL},
 	}
-	require.NoError(t, embedoperator.New(rt).PushCatalog(ctx, embedoperator.PushCatalogOptions{
-		Manifest: catalogRaw,
-		Insert:   true, Overwrite: true, Prune: true,
-	}))
+	application, err := openrails.ParseCatalogApplicationYAML(catalogRaw)
+	require.NoError(t, err)
+	_, err = embedoperator.New(rt).ApplyCatalog(ctx, id, application)
+	require.NoError(t, err)
 	return rt, id
 }
 
@@ -263,7 +264,7 @@ func TestManifestMode_Loop(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, keyV1, prober.Client.SecurityKey, "prober carries the secret-FILE credential")
 
-	// Catalog converged; the DB rows are a projection for FKs.
+	// The authored application committed catalog database state.
 	require.Equal(t, []int64{5_000_000}, activePriceAmounts(t, pool, ctx, id))
 
 	// MODE 1 invariant: nothing was written to the persistent secret store.
@@ -294,11 +295,14 @@ func TestManifestMode_Loop(t *testing.T) {
 	_, err = runtime.Merchants.Secrets().Put(mctx, id, "psps/nmi/live/"+gatewayID+"/security_key", "sneaky")
 	require.ErrorIs(t, err, merchants.ErrManifestSecretsReadOnly)
 
+	revision, err := client.Catalog.Revision(ctx)
+	require.NoError(t, err)
+	nextApplication := strings.Replace(string(manifestModeCatalogYAML(slug, 7_000_000)), "expected_revision: 0", fmt.Sprintf("expected_revision: %d", revision.Revision), 1)
 	// ---- Rotate: new secret value in the file, new price in the catalog.
 	require.NoError(t, rt1.Close(ctx))
 
 	// ---- Boot 2 (reboot: fresh runtime, same DB).
-	rt2, id2 := bootManifestRuntime(t, ctx, dsn, slug, server.URL, manifestRaw, manifestModeCatalogYAML(slug, 7_000_000), overlay(keyV2))
+	rt2, id2 := bootManifestRuntime(t, ctx, dsn, slug, server.URL, manifestRaw, []byte(nextApplication), overlay(keyV2))
 	require.Equal(t, id, id2, "reboot binds the same merchant")
 
 	require.Equal(t, []int64{7_000_000}, activePriceAmounts(t, pool, ctx, id), "changed price is live after reboot; the old one is archived")
@@ -308,7 +312,7 @@ func TestManifestMode_Loop(t *testing.T) {
 
 	// ---- Boot 3: unchanged inputs are an idempotent no-op.
 	require.NoError(t, rt2.Close(ctx))
-	rt3, id3 := bootManifestRuntime(t, ctx, dsn, slug, server.URL, manifestRaw, manifestModeCatalogYAML(slug, 7_000_000), overlay(keyV2))
+	rt3, id3 := bootManifestRuntime(t, ctx, dsn, slug, server.URL, manifestRaw, []byte(nextApplication), overlay(keyV2))
 	require.Equal(t, id, id3)
 	require.Equal(t, []int64{7_000_000}, activePriceAmounts(t, pool, ctx, id))
 	require.NoError(t, chargeViaStorePlane(t, ctx, rt3, id, server.URL))
@@ -325,7 +329,7 @@ func (g allowAllGate) Authorize(context.Context, *http.Request, string) (billing
 }
 
 // Host-owned provider mutations are absent; catalog mutations retain their
-// independent manifest guard. Provider reads remain available.
+// independent write policy. Provider reads remain available.
 func TestManifestMode_MutationRoutesOmitted(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
@@ -356,18 +360,10 @@ func TestManifestMode_MutationRoutesOmitted(t *testing.T) {
 		return resp.StatusCode, string(raw)
 	}
 
-	assertManifestDriven := func(status int, body string) {
+	assertOmitted := func(status int, body string) {
 		t.Helper()
-		require.Equal(t, http.StatusMethodNotAllowed, status, body)
-		var envelope struct {
-			Error struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		require.NoError(t, json.Unmarshal([]byte(body), &envelope), body)
-		require.Equal(t, "manifest_driven", envelope.Error.Code)
-		require.Contains(t, envelope.Error.Message, "host-declared")
+		require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, status, body)
+		require.NotContains(t, body, "manifest_driven")
 	}
 
 	// Generic method-not-allowed comes from the read route, not a mounted guard.
@@ -379,10 +375,9 @@ func TestManifestMode_MutationRoutesOmitted(t *testing.T) {
 	status, body := do(http.MethodPost, "/v1/merchant/payment-providers/stripe/accounts/11111111-1111-1111-1111-111111111111/archive", "")
 	require.Equal(t, http.StatusNotFound, status, body)
 	require.NotContains(t, body, "manifest_driven")
-	// Catalog mutations — including plan-only publish (documented: the plan is
-	// computed at boot from the YAML; the CLI dry-run remains available).
-	assertManifestDriven(do(http.MethodPost, "/v1/merchant/catalog/products", `{"key":"x","display_name":"X"}`))
-	assertManifestDriven(do(http.MethodPost, "/v1/merchant/catalog/publish", `{"catalog":{"version":1}}`))
+	// Disabled catalog mutations are absent independently of credential custody.
+	assertOmitted(do(http.MethodPost, "/v1/merchant/catalog/products", `{"key":"x","display_name":"X"}`))
+	assertOmitted(do(http.MethodPost, "/v1/merchant/catalog/applications", `{"catalog":{"version":1}}`))
 
 	// Reads stay served (list providers; empty is fine — not 405).
 	status, body = do(http.MethodGet, "/v1/merchant/payment-providers", "")

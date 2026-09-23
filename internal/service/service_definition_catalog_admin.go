@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -153,6 +153,12 @@ func (s *Service) ListProducts(ctx context.Context, opts ListProductsOptions) (C
 
 // ActivateProduct sets status=active on a product.
 func (s *Service) ActivateProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogProduct, error) {
+		return scoped.activateProduct(ctx, id)
+	})
+}
+
+func (s *Service) activateProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -186,6 +192,12 @@ func (s *Service) ActivateProduct(ctx context.Context, id openrails.ProductID) (
 // DeactivateProduct archives a product. Existing subscriptions on its prices
 // are grandfathered and keep billing.
 func (s *Service) DeactivateProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogProduct, error) {
+		return scoped.deactivateProduct(ctx, id)
+	})
+}
+
+func (s *Service) deactivateProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -308,7 +320,13 @@ func (s *Service) ListPrices(ctx context.Context, filter catalog.PriceFilter, li
 // price (best-effort), mirroring propagateProductActiveToStripe — so archiving or
 // re-activating a price in OpenRails is reflected in Stripe.
 func (s *Service) propagatePriceActiveToStripe(ctx context.Context, price *models.Price, active bool) {
-	if s.rt == nil || s.rt.Config == nil || price == nil {
+	s.catalogAfterCommit(ctx, func(ctx context.Context, committed *Service) {
+		committed.propagatePriceActiveToStripeCommitted(ctx, price, active)
+	})
+}
+
+func (s *Service) propagatePriceActiveToStripeCommitted(ctx context.Context, price *models.Price, active bool) {
+	if s.localCatalogOnly || s.rt == nil || s.rt.Config == nil || price == nil {
 		return
 	}
 	var stripePriceID string
@@ -333,6 +351,12 @@ func (s *Service) propagatePriceActiveToStripe(ctx context.Context, price *model
 // this row is un-archived, then one pointer-movement log entry records the
 // move. Activating an already-active row is a no-op (no movement logged).
 func (s *Service) ActivatePrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogPrice, error) {
+		return scoped.activatePrice(ctx, id)
+	})
+}
+
+func (s *Service) activatePrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -382,7 +406,7 @@ func (s *Service) ActivatePrice(ctx context.Context, id openrails.PriceID) (*Cat
 		if err != nil {
 			return nil, err
 		}
-		if err := prices.RecordKeyMovement(ctx, tid.UUID(), priceID, updated.Key, time.Now().UTC()); err != nil {
+		if err := prices.RecordAuthoredKeyMovement(ctx, tid.UUID(), priceID, updated.Key); err != nil {
 			return nil, fmt.Errorf("record key movement for %q -> %s: %w", updated.Key, priceID, err)
 		}
 	}
@@ -393,6 +417,12 @@ func (s *Service) ActivatePrice(ctx context.Context, id openrails.PriceID) (*Cat
 // DeactivatePrice archives a price. Existing subscriptions on this price are
 // grandfathered and keep billing; new purchases are rejected.
 func (s *Service) DeactivatePrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
+	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogPrice, error) {
+		return scoped.deactivatePrice(ctx, id)
+	})
+}
+
+func (s *Service) deactivatePrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
 	if err := catalog.ValidateOwnerScope(ctx); err != nil {
 		return nil, err
 	}
@@ -535,6 +565,15 @@ type ReconcileResult struct {
 func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts ReconcileOptions) (*ReconcileResult, error) {
 	if err := catalog.RefuseOwnerOperation(ctx); err != nil {
 		return nil, err
+	}
+	if !opts.DryRun {
+		cfg, err := s.requireConfig()
+		if err != nil {
+			return nil, err
+		}
+		if err := catalogpolicy.Check(ctx, cfg); err != nil {
+			return nil, err
+		}
 	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
@@ -680,6 +719,15 @@ type ProductReconcileResult struct {
 func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opts ReconcileOptions) (*ProductReconcileResult, error) {
 	if err := catalog.RefuseOwnerOperation(ctx); err != nil {
 		return nil, err
+	}
+	if !opts.DryRun {
+		cfg, err := s.requireConfig()
+		if err != nil {
+			return nil, err
+		}
+		if err := catalogpolicy.Check(ctx, cfg); err != nil {
+			return nil, err
+		}
 	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {

@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	billingservice "github.com/open-rails/openrails/internal/service"
@@ -67,7 +66,7 @@ func TestStandaloneMerchantMeteringRoutesHTTP(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(body, &created))
 	require.Equal(t, strings.ReplaceAll(meterKey, ".", "-"), created.Key)
-	require.Equal(t, config.MerchantConfigSourceAPI, created.ConfigurationSource)
+	require.Equal(t, "database", created.ConfigurationSource)
 	require.True(t, created.WritesAllowed)
 
 	status, body = requestJSON(t, http.MethodPut, meterURL, token, meterRequest)
@@ -92,7 +91,7 @@ func TestStandaloneMerchantMeteringRoutesHTTP(t *testing.T) {
 
 	status, body = requestJSON(t, http.MethodGet, meterURL, token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
-	require.Contains(t, string(body), `"configuration_source":"api"`)
+	require.Contains(t, string(body), `"configuration_source":"database"`)
 
 	status, body = requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/meters/missing-"+suffix, token, nil)
 	require.Equal(t, http.StatusNotFound, status, string(body))

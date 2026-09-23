@@ -330,7 +330,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug string, configure ...func(*config.Config)) *Surface {
 	h.t.Helper()
 
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: h.DSN}}
+	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, AllowCatalogUpdates: true, DB: &config.DBConfig{URL: h.DSN}}
 	for _, apply := range configure {
 		apply(cfg)
 	}
@@ -472,6 +472,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 		// merchants/secrets/catalog mutate over the HTTP surface it exercises.
 		// Manifest-mode standalone behavior is tested per-case, not here.
 		MerchantConfigSource: config.MerchantConfigSourceAPI,
+		AllowCatalogUpdates:  true,
 		SecretBackend:        config.SecretBackendDB,
 		// Explicit full: unset fail-closes to readonly (Paul 2026-07-02), which
 		// would park every provider write. The harness is a sandbox — fake

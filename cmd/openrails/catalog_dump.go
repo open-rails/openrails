@@ -13,6 +13,7 @@ import (
 
 type catalogDumpOptions struct {
 	merchant         string
+	applicationID    string
 	unboundMerchants bool
 }
 
@@ -20,7 +21,7 @@ func newDumpCatalogCmd() *cobra.Command {
 	opts := catalogDumpOptions{}
 	cmd := &cobra.Command{
 		Use:   "dump-merchant-catalog --slug <merchant>",
-		Short: "Dump a merchant's live catalog as push-merchant-catalog YAML",
+		Short: "Dump the merchant's active default catalog as a new catalog application",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runDumpCatalog(cmd, opts)
@@ -28,6 +29,7 @@ func newDumpCatalogCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&opts.unboundMerchants, "unbound-merchants", false, "Resolve only host-local merchants without an AuthKit group binding")
 	cmd.Flags().StringVar(&opts.merchant, "slug", "", "merchant slug to dump")
+	cmd.Flags().StringVar(&opts.applicationID, "application-id", "", "identity for the exported application (default: new UUID)")
 	return cmd
 }
 
@@ -50,6 +52,7 @@ func runDumpCatalog(cmd *cobra.Command, opts catalogDumpOptions) error {
 		Config:        cfg,
 		NameAuthority: authority,
 		Merchant:      slug,
+		ApplicationID: opts.applicationID,
 		Out:           cmd.OutOrStdout(),
 	})
 }

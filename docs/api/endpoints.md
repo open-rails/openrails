@@ -417,13 +417,12 @@ cannot reassign it. Administrators can select a catalog in product creation and
 in product/price list filters. Ordinary merchant product creation continues to
 use the merchant-owned default catalog.
 
-Reads need `merchant:catalog:read`; writes need `merchant:catalog:update`. In
-`catalog_source=manifest` deployments every catalog WRITE answers `405` with
-code `manifest_driven` — update and apply the catalog manifest instead. Empty
-`catalog_source` follows `merchant_config_source`. Host-owned credential mode omits provider credential mutation routes while
-keeping reads available. API-owned catalogs remain independently writable.
-These source modes apply to the runtime; mixed source modes per merchant are
-not supported. Catalog reads stay live.
+Reads need `merchant:catalog:read`; writes need `merchant:catalog:update` and
+`allow_catalog_updates: true`. The flag defaults to false and omits ordinary
+catalog mutation routes; embedded Client mutations follow the same policy.
+Catalog reads remain available. Storage is always the database, independently
+of provider credential custody. Trusted local operator application can run
+when ordinary writes are disabled; there is no remote bypass.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -469,9 +468,10 @@ not supported. Catalog reads stay live.
 | POST | `/v1/merchant/catalog/prices/{id}/key` | Relabel a price's key (version-bump repoint on collision) |
 | GET | `/v1/merchant/catalog/drift` | List catalog↔provider drift (the pull reconciliation is alert-only, never mutating) |
 | POST | `/v1/merchant/catalog/drift/refresh` | Refresh drift detection |
-| POST | `/v1/merchant/catalog/publish` | Push OpenRails definitions to providers |
+| GET | `/v1/merchant/catalog/revision` | Read the current merchant catalog revision |
+| POST | `/v1/merchant/catalog/applications` | Apply a JSON/YAML batch with durable application ID and expected revision |
 | POST | `/v1/merchant/catalog/ask` | Catalog copilot Q&A (read permission; never mutates) |
-| POST | `/v1/merchant/catalog/copilot/confirm` | Log a copilot draft as confirmed (write permission; audit log only, exempt from the manifest guard) |
+| POST | `/v1/merchant/catalog/copilot/confirm` | Log a copilot draft as confirmed (write permission; audit log only; does not mutate catalog definitions) |
 | GET | `/v1/merchant/catalog/meters` | List usage-meter definitions |
 | GET | `/v1/merchant/catalog/meters/{key}` | Read one usage meter |
 | GET | `/v1/merchant/catalog/meters/{key}/overrides` | List negotiated customer overrides for a meter |

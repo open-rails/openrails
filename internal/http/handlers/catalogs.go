@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/catalogscope"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/http/request"
@@ -38,6 +39,14 @@ func OwnCatalog(r *request.Request) {
 }
 
 func EnsureCatalogForOwner(r *request.Request) {
+	if r.State == nil || r.State.Config == nil {
+		writeCatalogError(r, catalogpolicy.ErrUpdatesDisabled)
+		return
+	}
+	if err := catalogpolicy.Check(r.Request.Context(), r.State.Config); err != nil {
+		writeCatalogError(r, err)
+		return
+	}
 	var body struct {
 		OwnerSubject string `json:"owner_subject"`
 	}

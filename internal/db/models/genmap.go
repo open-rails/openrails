@@ -378,6 +378,7 @@ func NotificationFromGen(n gen.OpenrailsNotification) (*NotificationQueue, error
 // PriceKeyMovementFromGen maps a generated price_key_movements row (#774).
 func PriceKeyMovementFromGen(r gen.OpenrailsPriceKeyMovement) *PriceKeyMovement {
 	return &PriceKeyMovement{
+		Archived:    r.Archived,
 		ID:          r.ID,
 		MerchantID:  r.MerchantID,
 		Key:         r.Key,

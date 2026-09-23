@@ -132,7 +132,8 @@ missing, `--overwrite` updates existing, `--prune` removes extras
 | `openrails intents [--status=…] [--rail=…] [--type=…] [--merchant=…]` | list the provider-intent ledger: queued outbound mutations, each row's `executes_under` mode, and the drain forecast |
 | `openrails intents-log [--rail=…] [--intent=…] [--phase=…]` | append-only log of actual provider mutation attempts/results (the executor's audit trail) |
 | `openrails intents resolve --merchant=… --intent=… [--step=…] (--receipt=<provider id> \| --not-executed) --actor=… --reason=…` | close an `unknown_needs_verify` operation from an exact provider receipt (read back and matched) or provider-supported non-execution (an empty submitted NMI invoice search is insufficient); `--not-executed` also releases a `pending` invoice collection that never crossed its submission fence; never resends ([provider uncertainty](provider-uncertainty.md)) |
-| `openrails push-merchant-catalog` / `push-merchant-config` / `push-auth-bootstrap` | push declared file state outward (catalog to providers, merchants/secrets, auth authority); same mutation-flag contract |
+| `openrails apply-catalog --merchant NAME --file PATH` | apply one catalog document with durable application ID and expected revision; prune is explicit in the document |
+| `openrails push-merchant-config` / `push-auth-bootstrap` | provision merchant/provider configuration or AuthKit authority under their own command contracts |
 
 `pull-provider` is manual-only by design — never scheduled. Routine catch-up is
 Provider Refresh's job; `pull-provider` is the full-surface investigation tool

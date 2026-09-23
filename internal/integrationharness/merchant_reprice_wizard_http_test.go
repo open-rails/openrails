@@ -94,19 +94,16 @@ func TestStandaloneMerchantRepriceWizardIncreaseHTTP(t *testing.T) {
 	priceKey := productKey + "-monthly"
 	publish := func(amount int64) {
 		t.Helper()
-		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-			"catalog": catalog.Manifest{
-				Version: catalog.SupportedVersion,
-				Products: []catalog.Product{{
-					Key:         productKey,
-					DisplayName: "Wizard Increase Product",
-					Prices: []catalog.Price{{
-						UnitAmount: amount, Currency: "USD", Duration: "30d", AutoRenew: true,
-					}},
+		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/applications", token, catalogApplicationFixture(t, surface.BaseURL, token, catalog.Manifest{
+			Version: catalog.SupportedVersion,
+			Products: []catalog.Product{{
+				Key:         productKey,
+				DisplayName: "Wizard Increase Product",
+				Prices: []catalog.Price{{
+					UnitAmount: amount, Currency: "USD", Duration: "30d", AutoRenew: true,
 				}},
-			},
-			"insert": true, "overwrite": true,
-		})
+			}},
+		}))
 		require.Equal(t, http.StatusOK, status, string(body))
 	}
 	getByKey := func() billingservice.CatalogPrice {
@@ -156,7 +153,10 @@ func TestStandaloneMerchantRepriceWizardIncreaseHTTP(t *testing.T) {
 		Items []billingservice.PriceKeyHistoryEntry `json:"items"`
 	}
 	require.NoError(t, json.Unmarshal(histBody, &hist))
-	require.Len(t, hist.Items, 2)
+	require.Len(t, hist.Items, 3, "initial binding, retirement and replacement")
+	require.False(t, hist.Items[0].Archived)
+	require.True(t, hist.Items[1].Archived)
+	require.False(t, hist.Items[2].Archived)
 	require.Equal(t, v2.ID, hist.Items[0].Price.ID, "most recent movement first")
 	require.Equal(t, v1.ID, hist.Items[1].Price.ID)
 	require.True(t, hist.Items[0].EffectiveAt.After(hist.Items[1].EffectiveAt) || hist.Items[0].EffectiveAt.Equal(hist.Items[1].EffectiveAt))
@@ -253,19 +253,16 @@ func TestStandaloneMerchantRepriceWizardDecreaseHTTP(t *testing.T) {
 	priceKey := productKey + "-monthly"
 	publish := func(amount int64) {
 		t.Helper()
-		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-			"catalog": catalog.Manifest{
-				Version: catalog.SupportedVersion,
-				Products: []catalog.Product{{
-					Key:         productKey,
-					DisplayName: "Wizard Decrease Product",
-					Prices: []catalog.Price{{
-						UnitAmount: amount, Currency: "USD", Duration: "30d", AutoRenew: true,
-					}},
+		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/applications", token, catalogApplicationFixture(t, surface.BaseURL, token, catalog.Manifest{
+			Version: catalog.SupportedVersion,
+			Products: []catalog.Product{{
+				Key:         productKey,
+				DisplayName: "Wizard Decrease Product",
+				Prices: []catalog.Price{{
+					UnitAmount: amount, Currency: "USD", Duration: "30d", AutoRenew: true,
 				}},
-			},
-			"insert": true, "overwrite": true,
-		})
+			}},
+		}))
 		require.Equal(t, http.StatusOK, status, string(body))
 	}
 	getByKey := func() billingservice.CatalogPrice {

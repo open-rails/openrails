@@ -70,7 +70,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
 1. **Deploy.** Compose stack (or real infra per [operator-guide.md](operator-guide.md)).
    Verify: `GET /health/ready` (note: there is no `/health`).
 2. **Provision.** Manifest with merchant + sandbox PSPs; `push-auth-bootstrap` →
-   `push-merchant-config --insert` → `push-merchant-catalog --insert --overwrite`.
+   `push-merchant-config --insert` → `apply-catalog --merchant NAME --file PATH`.
    Mint an API key. Verify: key works via `client.Verify(ctx)` (Go) or an authenticated
    `GET /v1/merchant/*` call.
 3. **Backend.** Go hosts: root SDK `openrails.NewRemote` + `WithAPIKey`. Other stacks:

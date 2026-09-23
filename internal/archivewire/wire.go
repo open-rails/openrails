@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	Version              = 1
+	Version              = 2
 	MaxBytes       int64 = 1 << 30
 	MaxRecordBytes       = 8 << 20
 )
@@ -29,6 +29,7 @@ type Info struct {
 }
 
 type Header struct {
+	CatalogRevision          int64  `json:"catalog_revision"`
 	Kind                     string `json:"kind"`
 	Version                  int    `json:"version"`
 	MerchantID               string `json:"merchant_id"`
@@ -47,7 +48,7 @@ type Record struct {
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 func validHeader(h Header) bool {
-	return h.Kind == "header" && h.Version == Version && h.Consistency == "repeatable_read" && h.RequiredCutoverCondition == "source_writers_stopped" && uuidPattern.MatchString(h.MerchantID) && h.MerchantID != "00000000-0000-0000-0000-000000000000"
+	return h.CatalogRevision >= 0 && h.Kind == "header" && h.Version == Version && h.Consistency == "repeatable_read" && h.RequiredCutoverCondition == "source_writers_stopped" && uuidPattern.MatchString(h.MerchantID) && h.MerchantID != "00000000-0000-0000-0000-000000000000"
 }
 
 // Read verifies the complete stream, invoking callbacks while it reads. Callers
@@ -199,8 +200,11 @@ type Writer struct {
 	merchantID string
 }
 
-func NewWriter(w io.Writer, merchantID string) (*Writer, error) {
+func NewWriter(w io.Writer, merchantID string, catalogRevision ...int64) (*Writer, error) {
 	h := Header{Kind: "header", Version: Version, MerchantID: merchantID, Consistency: "repeatable_read", RequiredCutoverCondition: "source_writers_stopped"}
+	if len(catalogRevision) > 0 {
+		h.CatalogRevision = catalogRevision[0]
+	}
 	if !validHeader(h) {
 		return nil, errors.New("invalid merchant UUID")
 	}

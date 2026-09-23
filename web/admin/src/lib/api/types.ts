@@ -298,7 +298,7 @@ export interface UsageMeter {
   last_event_at?: string
   created_at: string
   updated_at: string
-  configuration_source: "api" | "manifest"
+  configuration_source: "database"
   writes_allowed: boolean
 }
 
@@ -325,7 +325,7 @@ export interface UsageMeterPage {
   total: number
   limit: number
   offset: number
-  configuration_source: "api" | "manifest"
+  configuration_source: "database"
   writes_allowed: boolean
 }
 
@@ -404,6 +404,8 @@ export interface CatalogPrice {
 // from the #774 pointer-movement log — GET .../prices/by-key/{key}/history.
 // Most-recent-first.
 export interface PriceKeyHistoryEntry {
+  // Availability at this event, independent of the price row's current state.
+  archived: boolean
   price: CatalogPrice
   effective_at: string
 }

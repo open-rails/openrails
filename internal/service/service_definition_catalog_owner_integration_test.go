@@ -28,7 +28,7 @@ func creatorCatalogService(t *testing.T) (*Service, context.Context) {
 	database, err := db.NewWithPGXPool(pool, "")
 	require.NoError(t, err)
 	return &Service{rt: &app.Runtime{
-		DB: database, Config: &config.Config{TestMode: config.CredentialPostureSandbox},
+		DB: database, Config: &config.Config{TestMode: config.CredentialPostureSandbox, AllowCatalogUpdates: true},
 		ProductService: catalog.NewProductService(database), PriceService: catalog.NewPriceService(database),
 	}}, ctx
 }

@@ -65,6 +65,7 @@ func TestPlanMigrationFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 		clock,
 	)
 	rt := &app.Runtime{
+		Config:               &config.Config{AllowCatalogUpdates: true},
 		DB:                   appDB,
 		MoneyService:         money.NewMoneyService(appDB),
 		EntitlementService:   entitlements.NewEntitlementService(appDB),
@@ -145,6 +146,7 @@ func TestFacadeRefusesWithoutAMerchant(t *testing.T) {
 	defer appDB.Close()
 
 	rt := &app.Runtime{
+		Config:             &config.Config{AllowCatalogUpdates: true},
 		DB:                 appDB,
 		MoneyService:       money.NewMoneyService(appDB),
 		EntitlementService: entitlements.NewEntitlementService(appDB),
