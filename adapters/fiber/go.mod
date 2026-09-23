@@ -4,7 +4,7 @@ go 1.26.6
 
 require (
 	github.com/gofiber/fiber/v3 v3.5.0
-	github.com/open-rails/openrails v0.155.0
+	github.com/open-rails/openrails v0.157.0
 	github.com/stretchr/testify v1.12.1
 )
 
@@ -103,8 +103,8 @@ require (
 	github.com/mr-tron/base58 v1.3.0 // indirect
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
-	github.com/open-rails/authkit v0.125.1 // indirect
-	github.com/open-rails/helpers v0.1.0 // indirect
+	github.com/open-rails/authkit v0.126.0 // indirect
+	github.com/open-rails/helpers v0.3.0 // indirect
 	github.com/open-rails/migratekit v1.0.4 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
