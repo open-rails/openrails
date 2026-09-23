@@ -73,6 +73,13 @@ const router = createBrowserRouter(
             })),
         },
         {
+          path: "billing-analysis",
+          lazy: () =>
+            import("@/pages/billing-analysis").then((module) => ({
+              Component: module.BillingAnalysisPage,
+            })),
+        },
+        {
           path: "payments/:id",
           lazy: () =>
             import("@/pages/payments/detail").then((module) => ({
