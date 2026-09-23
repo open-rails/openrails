@@ -872,6 +872,45 @@ ALTER TABLE ONLY openrails.metered_rating_watermarks
 ALTER TABLE ONLY openrails.metered_rating_watermarks
     ADD CONSTRAINT metered_rating_watermarks_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
+-- Creator catalog ownership is business data within an explicitly selected
+-- merchant. It does not create database roles or change merchant authority.
+CREATE TABLE openrails.catalogs (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    merchant_id uuid NOT NULL REFERENCES openrails.merchants(id) ON DELETE RESTRICT,
+    owner_subject text COLLATE "C",
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT catalogs_merchant_id_id_key UNIQUE (merchant_id, id),
+    CONSTRAINT catalogs_owner_subject_nonempty CHECK (owner_subject IS NULL OR owner_subject <> '')
+);
+CREATE UNIQUE INDEX catalogs_one_default ON openrails.catalogs (merchant_id) WHERE owner_subject IS NULL;
+CREATE UNIQUE INDEX catalogs_one_owner ON openrails.catalogs (merchant_id, owner_subject) WHERE owner_subject IS NOT NULL;
+COMMENT ON TABLE openrails.catalogs IS 'Immutable catalog identity within one merchant. NULL owner_subject is its default merchant catalog; non-NULL is an opaque verified host subject. Subject namespace must be preserved on authorized archive relocation.';
+
+CREATE FUNCTION openrails.guard_catalog_identity() RETURNS trigger
+LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
+BEGIN
+    IF TG_OP='DELETE' OR NEW.id IS DISTINCT FROM OLD.id
+       OR NEW.merchant_id IS DISTINCT FROM OLD.merchant_id
+       OR NEW.owner_subject IS DISTINCT FROM OLD.owner_subject THEN
+        RAISE EXCEPTION 'catalog identity and ownership are immutable' USING ERRCODE='23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER immutable_catalog_identity BEFORE UPDATE OR DELETE ON openrails.catalogs
+FOR EACH ROW EXECUTE FUNCTION openrails.guard_catalog_identity();
+
+CREATE FUNCTION openrails.ensure_default_catalog(p_merchant uuid) RETURNS uuid
+LANGUAGE sql SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
+    INSERT INTO openrails.catalogs (merchant_id)
+    VALUES (p_merchant)
+    ON CONFLICT (merchant_id) WHERE owner_subject IS NULL
+    DO UPDATE SET updated_at=openrails.catalogs.updated_at
+    RETURNING id;
+$$;
+REVOKE ALL ON FUNCTION openrails.ensure_default_catalog(uuid) FROM PUBLIC;
+
 CREATE TABLE openrails.products (
     id uuid DEFAULT uuidv7() NOT NULL,
     key text NOT NULL,
@@ -883,7 +922,10 @@ CREATE TABLE openrails.products (
     archived boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    merchant_id uuid NOT NULL
+    merchant_id uuid NOT NULL,
+    catalog_id uuid NOT NULL,
+    CONSTRAINT products_catalog_present CHECK (catalog_id IS NOT NULL),
+    CONSTRAINT products_catalog_fk FOREIGN KEY (merchant_id, catalog_id) REFERENCES openrails.catalogs(merchant_id, id) ON DELETE RESTRICT
 );
 
 COMMENT ON TABLE openrails.products IS 'Product definitions that can be purchased or subscribed to';
@@ -911,6 +953,33 @@ CREATE INDEX idx_products_tier_group ON openrails.products USING btree (tier_gro
 
 ALTER TABLE ONLY openrails.products
     ADD CONSTRAINT products_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
+
+CREATE INDEX products_catalog_id ON openrails.products(merchant_id,catalog_id);
+
+CREATE FUNCTION openrails.assign_product_catalog() RETURNS trigger
+LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
+BEGIN
+    IF NEW.catalog_id IS NULL THEN
+        NEW.catalog_id := openrails.ensure_default_catalog(NEW.merchant_id);
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER assign_product_catalog BEFORE INSERT ON openrails.products
+FOR EACH ROW EXECUTE FUNCTION openrails.assign_product_catalog();
+
+CREATE FUNCTION openrails.guard_product_catalog_identity() RETURNS trigger
+LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
+BEGIN
+    IF NEW.id IS DISTINCT FROM OLD.id OR NEW.merchant_id IS DISTINCT FROM OLD.merchant_id
+       OR NEW.catalog_id IS DISTINCT FROM OLD.catalog_id THEN
+        RAISE EXCEPTION 'product catalog identity is immutable' USING ERRCODE='23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER immutable_product_catalog_identity BEFORE UPDATE ON openrails.products
+FOR EACH ROW EXECUTE FUNCTION openrails.guard_product_catalog_identity();
 
 CREATE TABLE openrails.maintenance_runs (
     id uuid DEFAULT uuidv7() NOT NULL,
