@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -63,7 +64,7 @@ type Charge struct {
 	CustomerRef     string          `json:"customer_ref,omitempty"`
 	CustomerEmail   string          `json:"customer_email,omitempty"`
 	OrderRef        string          `json:"order_ref,omitempty"`
-	AmountCents     int64           `json:"amount_cents"`
+	AmountCents     int64           `json:"amount_cents,string"`
 	Currency        string          `json:"currency,omitempty"`
 	OccurredAt      time.Time       `json:"occurred_at"`
 	Source          string          `json:"source,omitempty"`
@@ -88,7 +89,7 @@ type UnbilledCase struct {
 	SubscriptionRef string    `json:"subscription_ref,omitempty"`
 	CustomerRef     string    `json:"customer_ref,omitempty"`
 	CustomerEmail   string    `json:"customer_email,omitempty"`
-	AmountCents     int64     `json:"amount_cents"`
+	AmountCents     int64     `json:"amount_cents,string"`
 	Currency        string    `json:"currency,omitempty"`
 	UnbilledSince   string    `json:"unbilled_since"`
 	LastFailureAt   time.Time `json:"last_failure_at"`
@@ -152,11 +153,8 @@ func Build(ctx context.Context, database *db.DB, merchantID merchant.ID, opts Op
 	if opts.Location == nil {
 		opts.Location = time.UTC
 	}
-	if opts.To.IsZero() {
-		opts.To = time.Now().UTC()
-	}
-	if opts.From.IsZero() {
-		opts.From = opts.To.AddDate(0, 0, -30)
+	if opts.To.IsZero() || opts.From.IsZero() {
+		return nil, fmt.Errorf("billing analysis time range is required")
 	}
 	if opts.To.Before(opts.From) {
 		return nil, fmt.Errorf("billing analysis end precedes start")
@@ -174,67 +172,33 @@ func Build(ctx context.Context, database *db.DB, merchantID merchant.ID, opts Op
 }
 
 func listEvents(ctx context.Context, database *db.DB, merchantID merchant.ID, opts Options) ([]evidenceEvent, error) {
-	rows, err := database.Qx(ctx).Query(ctx, `
-SELECT provider, psp_id::text, event_key, transaction_id, subscription_ref, type,
-       success, amount_cents, currency, occurred_at, source, customer_ref,
-       customer_email, order_ref, decline_code, decline_reason, raw
-FROM openrails.provider_evidence_transactions
-WHERE merchant_id = $1::uuid
-	    AND ($2::text = '' OR s.provider = $2::text)
-  AND occurred_at <= $3::timestamptz
-ORDER BY occurred_at ASC, event_key ASC`, merchantID.UUID(), strings.TrimSpace(opts.Provider), opts.To)
+	var provider *string
+	if value := strings.TrimSpace(opts.Provider); value != "" {
+		provider = &value
+	}
+	rows, err := database.Gen(ctx).ListProviderEvidenceTransactions(ctx, gen.ListProviderEvidenceTransactionsParams{Provider: provider, ToAt: &opts.To})
 	if err != nil {
 		return nil, fmt.Errorf("list billing evidence transactions: %w", err)
 	}
-	defer rows.Close()
 	var out []evidenceEvent
-	for rows.Next() {
-		var e evidenceEvent
-		var raw []byte
-		if err := rows.Scan(&e.Provider, &e.PSPID, &e.EventKey, &e.TransactionID, &e.SubscriptionRef, &e.Type,
-			&e.Success, &e.AmountCents, &e.Currency, &e.OccurredAt, &e.Source, &e.CustomerRef,
-			&e.CustomerEmail, &e.OrderRef, &e.DeclineCode, &e.DeclineReason, &raw); err != nil {
-			return nil, fmt.Errorf("scan billing evidence transaction: %w", err)
-		}
-		e.Raw = json.RawMessage(raw)
-		out = append(out, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read billing evidence transactions: %w", err)
+	for _, row := range rows {
+		out = append(out, evidenceEvent{Provider: row.Provider, PSPID: row.PspID.String(), EventKey: row.EventKey, TransactionID: row.TransactionID, SubscriptionRef: row.SubscriptionRef, Type: row.Type, Success: row.Success, AmountCents: row.AmountCents, Currency: row.Currency, OccurredAt: row.OccurredAt, Source: row.Source, CustomerRef: row.CustomerRef, CustomerEmail: row.CustomerEmail, OrderRef: row.OrderRef, DeclineCode: row.DeclineCode, DeclineReason: row.DeclineReason, Raw: row.Raw})
 	}
 	return out, nil
 }
 
 func listCurrentSubscriptions(ctx context.Context, database *db.DB, merchantID merchant.ID, opts Options) ([]subscriptionObservation, error) {
-	rows, err := database.Qx(ctx).Query(ctx, `
-SELECT provider, psp_id::text, provider_subscription_ref, status, customer_ref,
-       customer_email, next_billing_at
-FROM (
-  SELECT DISTINCT ON (provider, psp_id, provider_subscription_ref)
-         s.provider, s.psp_id, s.provider_subscription_ref, s.status, s.customer_ref,
-         s.customer_email, s.next_billing_at
-  FROM openrails.provider_evidence_subscriptions s
-  JOIN openrails.provider_evidence_snapshots snap ON snap.id = s.snapshot_id
-  WHERE s.merchant_id = $1::uuid
-    AND ($2::text = '' OR provider = $2::text)
-    AND s.provider_subscription_ref <> ''
-    AND snap.fetched_at <= $3::timestamptz
-  ORDER BY s.provider, s.psp_id, s.provider_subscription_ref, snap.fetched_at DESC, snap.id DESC
-) current_subscriptions`, merchantID.UUID(), strings.TrimSpace(opts.Provider), opts.To)
+	var provider *string
+	if value := strings.TrimSpace(opts.Provider); value != "" {
+		provider = &value
+	}
+	rows, err := database.Gen(ctx).ListCurrentProviderEvidenceSubscriptions(ctx, gen.ListCurrentProviderEvidenceSubscriptionsParams{Provider: provider, ToAt: opts.To})
 	if err != nil {
 		return nil, fmt.Errorf("list billing evidence subscriptions: %w", err)
 	}
-	defer rows.Close()
 	var out []subscriptionObservation
-	for rows.Next() {
-		var s subscriptionObservation
-		if err := rows.Scan(&s.Provider, &s.PSPID, &s.SubscriptionRef, &s.Status, &s.CustomerRef, &s.CustomerEmail, &s.NextBillingAt); err != nil {
-			return nil, fmt.Errorf("scan billing evidence subscription: %w", err)
-		}
-		out = append(out, s)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read billing evidence subscriptions: %w", err)
+	for _, row := range rows {
+		out = append(out, subscriptionObservation{Provider: row.Provider, PSPID: row.PspID.String(), SubscriptionRef: row.ProviderSubscriptionRef, Status: row.Status, CustomerRef: row.CustomerRef, CustomerEmail: row.CustomerEmail, NextBillingAt: row.NextBillingAt})
 	}
 	return out, nil
 }
@@ -409,13 +373,19 @@ func classify(e evidenceEvent, ordinal int) string {
 func obligationKey(e evidenceEvent) string {
 	ref := strings.TrimSpace(e.SubscriptionRef)
 	if ref == "" {
-		ref = strings.TrimSpace(e.OrderRef)
+		if order := strings.TrimSpace(e.OrderRef); order != "" {
+			ref = "order:" + order
+		}
 	}
 	if ref == "" {
-		ref = strings.TrimSpace(e.CustomerRef)
+		if customer := strings.TrimSpace(e.CustomerRef); customer != "" {
+			ref = "customer:" + customer + ":" + e.Currency + ":" + fmt.Sprintf("%d", e.AmountCents)
+		}
 	}
 	if ref == "" {
-		ref = strings.TrimSpace(e.CustomerEmail)
+		if email := strings.TrimSpace(e.CustomerEmail); email != "" {
+			ref = "email:" + email + ":" + e.Currency + ":" + fmt.Sprintf("%d", e.AmountCents)
+		}
 	}
 	if ref == "" {
 		return ""

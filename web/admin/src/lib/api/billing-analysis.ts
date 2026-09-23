@@ -6,6 +6,7 @@ import { api } from "./client"
 export interface BillingAnalysisFilters {
   from: string
   to: string
+  timezone?: string
   provider?: string
   status?: string
 }
@@ -16,6 +17,7 @@ export interface BillingAnalysisDay {
   rebills: number
   failed_rebills: number
   open_unbilled: number
+  unbilled?: BillingAnalysisUnbilledMember[]
 }
 
 export interface BillingAnalysisUnbilledMember {

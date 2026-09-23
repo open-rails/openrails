@@ -102,6 +102,10 @@ GRANT UPDATE(qualified_provider_cost_usd_micros) ON TABLE openrails.provider_bil
 GRANT UPDATE(qualified_at) ON TABLE openrails.provider_billing_qualifications TO :"runtime_user";
 GRANT UPDATE(updated_at) ON TABLE openrails.provider_billing_qualifications TO :"runtime_user";
 GRANT SELECT,INSERT ON TABLE openrails.provider_billing_observations TO :"runtime_user";
+GRANT SELECT,INSERT,UPDATE ON TABLE openrails.provider_evidence_snapshots TO :"runtime_user";
+GRANT SELECT,INSERT,UPDATE ON TABLE openrails.provider_evidence_transactions TO :"runtime_user";
+GRANT SELECT,INSERT,UPDATE ON TABLE openrails.provider_evidence_subscriptions TO :"runtime_user";
+GRANT SELECT,INSERT,UPDATE ON TABLE openrails.provider_evidence_payment_methods TO :"runtime_user";
 GRANT SELECT ON TABLE openrails.freeloader_episodes TO :"runtime_user";
 GRANT SELECT ON TABLE openrails.orphaned_episodes TO :"runtime_user";
 GRANT SELECT, INSERT ON openrails.admission_operations TO :"runtime_user";

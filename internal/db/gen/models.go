@@ -1058,6 +1058,89 @@ type OpenrailsProviderBillingQualification struct {
 	UpdatedAt                      time.Time
 }
 
+// Point-in-time provider payment-method roster observations retained for identity joins and forensics.
+type OpenrailsProviderEvidencePaymentMethod struct {
+	ID            uuid.UUID
+	SnapshotID    uuid.UUID
+	MerchantID    uuid.UUID
+	PspID         uuid.UUID
+	Provider      string
+	RecordKey     string
+	CustomerRef   string
+	CardLast4     string
+	CardExpiry    string
+	CustomerEmail string
+	Raw           []byte
+}
+
+// Immutable provider pull observations retained for provider-neutral billing analysis. Pulls are read-only and do not mutate external rails.
+type OpenrailsProviderEvidenceSnapshot struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	// The observation run that produced this snapshot; retained for reproducibility and idempotent replays.
+	ReconciliationRunID uuid.UUID
+	Provider            string
+	PspID               uuid.UUID
+	FetchedAt           time.Time
+	WindowSince         *time.Time
+	WindowUntil         *time.Time
+	Capabilities        []byte
+	// Normalized provider coverage proof from reconcile.RemoteSnapshot.Coverage.
+	Coverage  []byte
+	CreatedAt time.Time
+}
+
+// Point-in-time provider subscription roster observations. A new snapshot preserves status and next-billing history without changing OpenRails subscriptions.
+type OpenrailsProviderEvidenceSubscription struct {
+	ID                      uuid.UUID
+	SnapshotID              uuid.UUID
+	MerchantID              uuid.UUID
+	PspID                   uuid.UUID
+	Provider                string
+	RecordKey               string
+	ProviderSubscriptionRef string
+	Status                  string
+	RawStatus               string
+	CustomerRef             string
+	CustomerEmail           string
+	Username                string
+	PlanRef                 string
+	NextBillingAt           *time.Time
+	LastBilledAt            *time.Time
+	AmountCents             int64
+	Currency                string
+	Raw                     []byte
+}
+
+// Canonical provider transaction/action evidence. Repeated pulls upsert the same event_key and advance last_seen_at, preventing duplicate report counts.
+type OpenrailsProviderEvidenceTransaction struct {
+	ID              uuid.UUID
+	MerchantID      uuid.UUID
+	PspID           uuid.UUID
+	Provider        string
+	EventKey        string
+	TransactionID   string
+	SubscriptionRef string
+	Type            string
+	Success         bool
+	AmountCents     int64
+	Currency        string
+	OccurredAt      time.Time
+	// Provider-declared event source (for example recurring or api); empty means the provider did not expose one.
+	Source        string
+	CustomerRef   string
+	CustomerEmail string
+	OrderRef      string
+	DeclineCode   string
+	DeclineReason string
+	// Provider record preserved verbatim as normalized JSON for forensics and future classification.
+	Raw             []byte
+	FirstSnapshotID uuid.UUID
+	LastSnapshotID  uuid.UUID
+	FirstSeenAt     time.Time
+	LastSeenAt      time.Time
+}
+
 // Merchant PSP registry. A row is one merchant-owned payment-service-provider account on one rail.
 type OpenrailsPsp struct {
 	ID         uuid.UUID

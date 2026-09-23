@@ -1247,6 +1247,10 @@
       "type adminUsageMeterPageResponse struct {\n\tpaginatedResponse[adminUsageMeterResponse]\n\tConfigurationSource string `json:\"configuration_source\"`\n\tWritesAllowed       bool   `json:\"writes_allowed\"`\n}",
       "type adminUsageMeterResponse struct {\n\tbillingservice.UsageMeterDTO\n\tConfigurationSource string `json:\"configuration_source\"`\n\tWritesAllowed       bool   `json:\"writes_allowed\"`\n}",
       "type adminUserBillingProfile struct {\n\tCustomerID     openrails.CustomerID           `json:\"customer_id\"`\n\tEmail          *string                        `json:\"email,omitempty\"`\n\tTrustLevel     string                         `json:\"trust_level,omitempty\"`\n\tSubscriptions  []openrails.Subscription       `json:\"subscriptions\"`\n\tEntitlements   []openrails.EntitlementRecord  `json:\"entitlements\"`\n\tPayments       []openrails.Payment            `json:\"payments\"`\n\tPaymentMethods []paymentMethodResponse        `json:\"payment_methods\"`\n\tCreditBalance  []adminCreditBalanceResponse   `json:\"credit_balance\"`\n\tProductAccess  []openrails.ProductAccessGrant `json:\"product_access\"`\n}",
+      "type billingAnalysisDay struct {\n\tDate          string                  `json:\"date\"`\n\tSignups       int                     `json:\"signups\"`\n\tRebills       int                     `json:\"rebills\"`\n\tFailedRebills int                     `json:\"failed_rebills\"`\n\tOpenUnbilled  int                     `json:\"open_unbilled\"`\n\tUnbilled      []billingAnalysisMember `json:\"unbilled,omitempty\"`\n}",
+      "type billingAnalysisMember struct {\n\tID             string `json:\"id\"`\n\tSubscriptionID string `json:\"subscription_id,omitempty\"`\n\tEmail          string `json:\"email,omitempty\"`\n\tProvider       string `json:\"provider,omitempty\"`\n\tAmount         int64  `json:\"amount,string\"`\n\tCurrency       string `json:\"currency,omitempty\"`\n\tUnbilledSince  string `json:\"unbilled_since\"`\n\tLastFailedAt   string `json:\"last_failed_at\"`\n\tFailureCount   int    `json:\"failure_count\"`\n\tFailureCode    string `json:\"failure_code,omitempty\"`\n\tFailureReason  string `json:\"failure_reason,omitempty\"`\n\tStatus         string `json:\"status\"`\n}",
+      "type billingAnalysisRange struct {\n\tFrom string `json:\"from\"`\n\tTo   string `json:\"to\"`\n}",
+      "type billingAnalysisResponse struct {\n\tRange     billingAnalysisRange    `json:\"range\"`\n\tTimezone  string                  `json:\"timezone\"`\n\tProviders []string                `json:\"providers\"`\n\tDaily     []billingAnalysisDay    `json:\"daily\"`\n\tUnbilled  []billingAnalysisMember `json:\"unbilled\"`\n}",
       "type cancelSubscriptionRequest struct {\n\tFeedback string `json:\"feedback\"`\n}",
       "type checkoutRoutingCandidateResponse struct {\n\tSelector string `json:\"selector\"`\n\tRail     string `json:\"rail,omitempty\"`\n\n\tSkip string `json:\"skip,omitempty\"`\n}",
       "type checkoutRoutingDryRunRequest struct {\n\tPriceID  string `json:\"price_id,omitempty\"`\n\tPriceKey string `json:\"price_key,omitempty\"`\n\n\tCountry string `json:\"country,omitempty\"`\n\n\tSelector string `json:\"selector,omitempty\"`\n}",
@@ -1423,6 +1427,14 @@
       "type Notification struct {\n\tID        uuid.UUID  `json:\"id\"`\n\tSeverity  Severity   `json:\"severity\"`\n\tTitle     string     `json:\"title\"`\n\tBody      string     `json:\"body\"`\n\tLink      string     `json:\"link,omitempty\"`\n\tData      any        `json:\"data,omitempty\"`\n\tCreatedAt time.Time  `json:\"created_at\"`\n\tReadAt    *time.Time `json:\"read_at,omitempty\"`\n}",
       "type RotateWebhookURLInput struct {\n\tURL string `json:\"url\"`\n}",
       "type Webhook struct {\n\tID              uuid.UUID `json:\"id\"`\n\tMerchantID      uuid.UUID `json:\"merchant_id\"`\n\tName            string    `json:\"name\"`\n\tDestinationHost string    `json:\"destination_host\"`\n\n\tFormat    WebhookFormat `json:\"format\"`\n\tEnabled   bool          `json:\"enabled\"`\n\tCreatedAt time.Time     `json:\"created_at\"`\n\tUpdatedAt time.Time     `json:\"updated_at\"`\n}"
+    ],
+    "internal/modules/billinganalysis": [
+      "type Charge struct {\n\tDay             string          `json:\"day\"`\n\tKind            string          `json:\"kind\"`\n\tProvider        string          `json:\"provider\"`\n\tPSPID           string          `json:\"psp_id,omitempty\"`\n\tEventKey        string          `json:\"event_key\"`\n\tTransactionID   string          `json:\"transaction_id,omitempty\"`\n\tSubscriptionRef string          `json:\"subscription_ref,omitempty\"`\n\tCustomerRef     string          `json:\"customer_ref,omitempty\"`\n\tCustomerEmail   string          `json:\"customer_email,omitempty\"`\n\tOrderRef        string          `json:\"order_ref,omitempty\"`\n\tAmountCents     int64           `json:\"amount_cents,string\"`\n\tCurrency        string          `json:\"currency,omitempty\"`\n\tOccurredAt      time.Time       `json:\"occurred_at\"`\n\tSource          string          `json:\"source,omitempty\"`\n\tRaw             json.RawMessage `json:\"raw,omitempty\"`\n}",
+      "type Day struct {\n\tDate              string         `json:\"date\"`\n\tSettledSignups    int            `json:\"settled_signups\"`\n\tSettledRebills    int            `json:\"settled_rebills\"`\n\tSettledOther      int            `json:\"settled_other\"`\n\tFailedSignups     int            `json:\"failed_signups\"`\n\tFailedRebills     int            `json:\"failed_rebills\"`\n\tFailedOther       int            `json:\"failed_other\"`\n\tOpenUnbilledUsers int            `json:\"open_unbilled_users\"`\n\tDelinquentUsers   int            `json:\"delinquent_users\"`\n\tUnbilled          []UnbilledCase `json:\"unbilled,omitempty\"`\n}",
+      "type DelinquentSubject struct {\n\tProvider        string     `json:\"provider\"`\n\tPSPID           string     `json:\"psp_id,omitempty\"`\n\tSubscriptionRef string     `json:\"subscription_ref,omitempty\"`\n\tCustomerRef     string     `json:\"customer_ref,omitempty\"`\n\tCustomerEmail   string     `json:\"customer_email,omitempty\"`\n\tStatus          string     `json:\"status,omitempty\"`\n\tNextBillingAt   *time.Time `json:\"next_billing_at,omitempty\"`\n\tObligationKey   string     `json:\"obligation_key,omitempty\"`\n}",
+      "type Failure struct {\n\tCharge\n\tDeclineCode   string `json:\"decline_code,omitempty\"`\n\tDeclineReason string `json:\"decline_reason,omitempty\"`\n\tFailureCount  int    `json:\"failure_count\"`\n}",
+      "type Report struct {\n\tFrom                string              `json:\"from\"`\n\tTo                  string              `json:\"to\"`\n\tTimezone            string              `json:\"timezone\"`\n\tProvider            string              `json:\"provider,omitempty\"`\n\tDays                []Day               `json:\"days\"`\n\tCharges             []Charge            `json:\"charges\"`\n\tFailures            []Failure           `json:\"failures\"`\n\tCurrentDelinquent   []DelinquentSubject `json:\"current_delinquent\"`\n\tEvidenceUnavailable bool                `json:\"evidence_unavailable,omitempty\"`\n}",
+      "type UnbilledCase struct {\n\tObligationKey   string    `json:\"obligation_key\"`\n\tProvider        string    `json:\"provider\"`\n\tPSPID           string    `json:\"psp_id,omitempty\"`\n\tSubscriptionRef string    `json:\"subscription_ref,omitempty\"`\n\tCustomerRef     string    `json:\"customer_ref,omitempty\"`\n\tCustomerEmail   string    `json:\"customer_email,omitempty\"`\n\tAmountCents     int64     `json:\"amount_cents,string\"`\n\tCurrency        string    `json:\"currency,omitempty\"`\n\tUnbilledSince   string    `json:\"unbilled_since\"`\n\tLastFailureAt   time.Time `json:\"last_failure_at\"`\n\tFailureCode     string    `json:\"failure_code,omitempty\"`\n\tFailureReason   string    `json:\"failure_reason,omitempty\"`\n\tFailureCount    int       `json:\"failure_count\"`\n}"
     ],
     "internal/modules/catalog": [
       "type PublicProductResponse struct {\n\t*models.Product\n\tPrices []*models.Price `json:\"prices\"`\n}",
@@ -1672,7 +1684,7 @@
       "type RemotePaymentMethod struct {\n\tRailCustomerRef string `json:\"customer_vault_id\"`\n\n\tCardLast4  string          `json:\"card_last4,omitempty\"`\n\tCardExpiry string          `json:\"card_expiry,omitempty\"`\n\tEmail      string          `json:\"email,omitempty\"`\n\tRaw        json.RawMessage `json:\"raw,omitempty\"`\n}",
       "type RemoteSnapshot struct {\n\tProvider       Provider              `json:\"provider\"`\n\tPspID          string                `json:\"psp_id,omitempty\"`\n\tFetchedAt      time.Time             `json:\"fetched_at\"`\n\tSubscriptions  []RemoteSubscription  `json:\"subscriptions\"`\n\tTransactions   []RemoteTransaction   `json:\"transactions\"`\n\tPaymentMethods []RemotePaymentMethod `json:\"vault_entries\"`\n\tCapabilities   Capabilities          `json:\"capabilities\"`\n\tCoverage       SnapshotCoverage      `json:\"coverage\"`\n}",
       "type RemoteSubscription struct {\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n\n\tStatus    SubscriptionStatus `json:\"status\"`\n\tRawStatus string             `json:\"raw_status,omitempty\"`\n\n\tCustomerID string `json:\"customer_id,omitempty\"`\n\n\tEmail    string `json:\"email,omitempty\"`\n\tUsername string `json:\"username,omitempty\"`\n\n\tPlanID string `json:\"plan_id,omitempty\"`\n\n\tNextBillingAt *time.Time `json:\"next_billing_at,omitempty\"`\n\tLastBilledAt  *time.Time `json:\"last_billed_at,omitempty\"`\n\n\tAmountCents int64  `json:\"amount_cents\"`\n\tCurrency    string `json:\"currency,omitempty\"`\n\n\tRaw json.RawMessage `json:\"raw,omitempty\"`\n}",
-      "type RemoteTransaction struct {\n\tTransactionID string `json:\"transaction_id\"`\n\n\tSubscriptionID string          `json:\"subscription_id,omitempty\"`\n\tType           TransactionType `json:\"type\"`\n\tSuccess        bool            `json:\"success\"`\n\n\tAmountCents int64     `json:\"amount_cents\"`\n\tCurrency    string    `json:\"currency,omitempty\"`\n\tOccurredAt  time.Time `json:\"occurred_at\"`\n\n\tDeclineReason string `json:\"decline_reason,omitempty\"`\n\n\tDeclineCode string          `json:\"decline_code,omitempty\"`\n\tRaw         json.RawMessage `json:\"raw,omitempty\"`\n}",
+      "type RemoteTransaction struct {\n\tTransactionID string `json:\"transaction_id\"`\n\n\tSubscriptionID string `json:\"subscription_id,omitempty\"`\n\n\tSource string `json:\"source,omitempty\"`\n\n\tCustomerID string          `json:\"customer_id,omitempty\"`\n\tEmail      string          `json:\"email,omitempty\"`\n\tOrderID    string          `json:\"order_id,omitempty\"`\n\tType       TransactionType `json:\"type\"`\n\tSuccess    bool            `json:\"success\"`\n\n\tAmountCents int64     `json:\"amount_cents\"`\n\tCurrency    string    `json:\"currency,omitempty\"`\n\tOccurredAt  time.Time `json:\"occurred_at\"`\n\n\tDeclineReason string `json:\"decline_reason,omitempty\"`\n\n\tDeclineCode string          `json:\"decline_code,omitempty\"`\n\tRaw         json.RawMessage `json:\"raw,omitempty\"`\n}",
       "type RunRecord struct {\n\tID          uuid.UUID       `json:\"id\"`\n\tMerchantID  uuid.UUID       `json:\"tenant_id\"`\n\tMode        Mode            `json:\"mode\"`\n\tProviders   []string        `json:\"providers\"`\n\tWindowSince *time.Time      `json:\"window_since,omitempty\"`\n\tWindowUntil *time.Time      `json:\"window_until,omitempty\"`\n\tStartedAt   time.Time       `json:\"started_at\"`\n\tFinishedAt  *time.Time      `json:\"finished_at,omitempty\"`\n\tStatus      string          `json:\"status\"`\n\tSummary     json.RawMessage `json:\"summary,omitempty\"`\n\tError       string          `json:\"error,omitempty\"`\n}",
       "type RunResult struct {\n\tRunID          uuid.UUID        `json:\"run_id\"`\n\tMode           Mode             `json:\"mode\"`\n\tStatus         string           `json:\"status\"`\n\tSummary        *RunSummary      `json:\"summary\"`\n\tFindings       []FindingRecord  `json:\"findings\"`\n\tPlannedChanges []MutationRecord `json:\"planned_changes,omitempty\"`\n\tAppliedChanges []MutationRecord `json:\"applied_changes,omitempty\"`\n}",
       "type RunSummary struct {\n\tMode      Mode                       `json:\"mode\"`\n\tProviders map[string]*ProviderReport `json:\"providers\"`\n\tTotals    SummaryTotals              `json:\"totals\"`\n}",
@@ -2544,6 +2556,15 @@
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil"
+    },
+    "internal/http/handlers/merchant_billing_analysis.go": {
+      "billinganalysis": "github.com/open-rails/openrails/internal/modules/billinganalysis",
+      "http": "net/http",
+      "httprequest": "github.com/open-rails/openrails/internal/http/request",
+      "merchant": "github.com/open-rails/openrails/pkg/merchant",
+      "sort": "sort",
+      "strings": "strings",
+      "time": "time"
     },
     "internal/http/handlers/merchant_checkout_routing.go": {
       "billingservice": "github.com/open-rails/openrails/internal/service",
@@ -3436,6 +3457,17 @@
       "strings": "strings",
       "time": "time",
       "uuid": "github.com/google/uuid"
+    },
+    "internal/modules/billinganalysis/report.go": {
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/pkg/merchant",
+      "sort": "sort",
+      "strings": "strings",
+      "time": "time"
     },
     "internal/modules/catalog/public_subscription_service.go": {
       "context": "context",
@@ -5360,6 +5392,7 @@
     "internal/http/handlers/merchant_alerts.go": "d07d61bdfa94515d3e83b8926b841c43eb09f1ae8ddaa1205a48fabc22c2cbaf",
     "internal/http/handlers/merchant_api_host.go": "3b515336d746d43619005c2bfa4a3dcd7bcb576eb5964121d0f86f4f03bc60aa",
     "internal/http/handlers/merchant_archive.go": "a482ce860262a3518f3d8719bfb21193586ccd6152bd48700f635d756e3e7086",
+    "internal/http/handlers/merchant_billing_analysis.go": "fe292cd51014800105f4d451ef62901d1a49a58d5f3852b2483a09dfc9c61bd8",
     "internal/http/handlers/merchant_catalog_copilot.go": "e3e7e624fec1a8806c7b269d7a0de0ab33d6a27c68a2e5fb64e8d4f6d760cb81",
     "internal/http/handlers/merchant_checkout_routing.go": "1feb9b7744c71ae2e0bfae277ca61cc1f48590583340dea99a2eefd290858b4b",
     "internal/http/handlers/merchant_configuration.go": "6d3273dd9b10008abb9f933bafcf9fdc5d50d6b97fd09f2b02495eef9bb533a0",
@@ -5424,7 +5457,7 @@
     "internal/http/routes/catalog_policy.go": "c9253148ba35c685a13ba222f57c623201446c5cfbe23c48997f4b3751673555",
     "internal/http/routes/owner_catalog.go": "1a2faee9d911d513023a8a29f35e9cdf9fdb9d74007929290cc2ac385284bf7a",
     "internal/http/routes/platform.go": "0a9c0fe50803e2933bdf3e500245e90f4df6a7b36d443cc55f6869209a7ae2c6",
-    "internal/http/routes/routes.go": "f0a5e8e7de742808a891998f8b27d4029de8ae2a1ba227d026b88eefd70fb00f",
+    "internal/http/routes/routes.go": "f48035e236688a0a6b86de087ab4dc3b27c8250e1a902d795e3e1ebf53fd7017",
     "internal/http/routes/self.go": "55c28d3d5f4a64c483a1b1c8db8964a0df6ad4c9608b08d99eabb67692bfa81a",
     "internal/http/routes_admin.go": "7acf54fb405f3475d52ed0bd880f9909ad2a62b2679c6088de345927b1de27ab",
     "internal/http/routes_admin_console.go": "49ef2a933c0603c774ffaa567fe79fdf2576a19f9f9a5e80d2e5e6980300ef50",
@@ -5441,9 +5474,10 @@
     "internal/migrate/postgres/0001_schema.up.sql": "454ac14c0ba2dee1a8aadb904a3c3f5ad3b5ffd982d83464a8dc0755d107cc81",
     "internal/migrate/postgres/0002_resource_offer_index.up.sql": "c4d6aeb20190583f6f6e7b27f3e63ed117c1331b20dc8f4b203b8fff5bed0f99",
     "internal/migrate/postgres/0003_product_archive_operations.up.sql": "9a99937d82f75045ac54dcfcf7c0d9592279af7a6f01ac4060f2f86d4ea888ab",
+    "internal/migrate/postgres/0004_provider_evidence.up.sql": "fa5ecac74fe3ecb4558c538237344a4e4a6d7fa990b0dfdd3f790f20a5c1e114",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
-    "internal/migrate/postgres/owned_tables.go": "175c5214afd6bce8d94566011c5316e45f6c17d311a6b1c1204a6f37b7cf7c2c",
+    "internal/migrate/postgres/owned_tables.go": "fac780ccab35e8f09011e8e127fa8b34fd60290047150abdaf1d20e8fced84db",
     "internal/migrate/postgres/schema.go": "a399bef4859e1c1f8c1f952d279d8b70718d7aa7e8a1ce116cea49c9d5f6b090",
     "internal/migrate/postgres/schema_tokens.go": "db02b2faeecf3343919ebf74de33c7e72e918a00737d054e86dedb15ed5a8e6d",
     "internal/migrate/postgres/unique_scope_exemptions.go": "50f144594711a439c71aa95954b102a9ea0b423488a3e850dd6853fccf91ccd8",

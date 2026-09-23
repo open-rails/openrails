@@ -123,11 +123,13 @@ export function BillingAnalysisPage() {
   const to = params.get("to") || today()
   const provider = params.get("provider") || ""
   const status = params.get("status") || "open"
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
   const [selectedDay, setSelectedDay] = React.useState(to)
 
   const filters = {
     from,
     to,
+    timezone,
     ...(provider ? { provider } : {}),
     ...(status ? { status } : {}),
   }
@@ -146,14 +148,8 @@ export function BillingAnalysisPage() {
   const daily = data?.daily ?? []
   const maxEvents = Math.max(1, ...daily.map(eventTotal))
   const members = React.useMemo(() => {
-    const asOf = selectedDay
-    return (data?.unbilled ?? []).filter((member) => {
-      if (member.unbilled_since.slice(0, 10) > asOf) return false
-      if (member.resolved_at && member.resolved_at.slice(0, 10) <= asOf)
-        return false
-      return true
-    })
-  }, [data?.unbilled, selectedDay])
+    return daily.find((day) => day.date === selectedDay)?.unbilled ?? []
+  }, [daily, selectedDay])
   const selectedSummary = daily.find((day) => day.date === selectedDay)
   const openCases = selectedSummary?.open_unbilled ?? members.length
   const signupTotal = daily.reduce((sum, day) => sum + day.signups, 0)
@@ -237,7 +233,6 @@ export function BillingAnalysisPage() {
             <SelectContent>
               <SelectItem value="open">Open cases</SelectItem>
               <SelectItem value="all">All cases</SelectItem>
-              <SelectItem value="recovered">Recovered</SelectItem>
             </SelectContent>
           </Select>
         </label>
