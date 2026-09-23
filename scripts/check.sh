@@ -32,7 +32,7 @@ checks() {
     [[ -n "$package" ]] && unit_packages+=("$package")
   done <<< "$selected"
   go test -race -count=1 "${unit_packages[@]}"
-  bash scripts/check-adapters.sh
+  # Native adapters run once with their integration superset in End-to-end.
   bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
   pnpm --dir web/admin run lint
   pnpm --dir web/admin exec vitest run --maxWorkers=2

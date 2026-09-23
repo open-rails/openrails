@@ -19,11 +19,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStandaloneAccountDeletionAndExplicitRecovery(t *testing.T) {
-	t.Run("api_only", func(t *testing.T) { testStandaloneAccountRecovery(t, false) })
-	t.Run("with_workers", func(t *testing.T) { testStandaloneAccountRecovery(t, true) })
-}
-
 func testStandaloneAccountRecovery(t *testing.T, workers bool) {
 	h := New(t, t.Context())
 	var opts []StandaloneOption

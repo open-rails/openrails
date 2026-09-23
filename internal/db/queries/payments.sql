@@ -101,6 +101,21 @@ SELECT amount, status FROM openrails.payments
 WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND refunded_payment_id = $1
   AND deleted_at IS NULL;
 
+-- Customer history needs completed display totals, not pending refund reservations.
+-- Scope ownership through the original charge before aggregating linked refunds.
+-- name: GetCustomerPaymentRefundTotals :many
+SELECT original.id AS payment_id, sum(abs(refund.amount::numeric))::bigint AS amount_refunded
+FROM openrails.payments original
+JOIN openrails.payments refund ON refund.refunded_payment_id = original.id
+    AND refund.merchant_id = sqlc.arg(merchant_id)::uuid
+WHERE original.merchant_id = sqlc.arg(merchant_id)::uuid
+    AND original.customer_id = sqlc.arg(customer_id)::uuid
+    AND original.id = ANY(sqlc.arg(payment_ids)::uuid[])
+    AND original.amount > 0 AND original.refunded_payment_id IS NULL
+    AND original.deleted_at IS NULL AND refund.deleted_at IS NULL
+    AND refund.status = 'completed'
+GROUP BY original.id;
+
 -- name: LinkRefundedPayment :execrows
 UPDATE openrails.payments
 SET refunded_payment_id = $2
