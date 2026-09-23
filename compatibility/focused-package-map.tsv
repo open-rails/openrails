@@ -67,4 +67,5 @@ current_package	focused_layer	focused_area	status
 ./internal/river	provider+durability	v2.package.internal.river	planned
 ./internal/service	unit+contract	v2.package.internal.service	planned
 ./internal/testfixture	unit+contract	v2.package.internal.testfixture	planned
+./internal/testkit	database+provider+auth	v2.merchant_customer_isolation	planned
 ./tests	unit+contract	v2.package.tests	planned

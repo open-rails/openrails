@@ -124,6 +124,13 @@ The corresponding 67-package inventory is in
 this stage; the hard-cut gate still requires each test within every package to
 be mapped or explicitly retained.
 
+Phase 1 adds `internal/testkit` and the first scenario,
+`TestMerchantCustomerIsolation`. Its `go test -json` stream is the focused
+receipt for the scenario; the mapping remains `planned` until a disposable
+PostgreSQL run succeeds and the receipt is uploaded by a focused CI job. The
+scenario intentionally has no committed “green” receipt, so a local
+container-startup failure cannot be mistaken for coverage evidence.
+
 ## Deterministic fixture contract
 
 Create a small internal `testkit` with these explicit capabilities:
