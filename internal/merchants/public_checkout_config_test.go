@@ -239,4 +239,20 @@ func TestPublicPSPConfigForWithholdsIncompletePSPs(t *testing.T) {
 	if !ok || cfg.Key != string(models.RailStripe) || cfg.Flow != FlowRedirect || len(cfg.Config) != 0 {
 		t.Errorf("keyless stripe projection = %+v (ok=%v)", cfg, ok)
 	}
+
+	// Stripe's publishable key is public; its secrets never are.
+	cfg, _, ok = PublicPSPConfigFor(PSPScope{Rail: string(models.RailStripe), Settings: map[string]any{"publishable_key": "pk_test_abc", "secret_key": "sk_test_x"}}, nil)
+	if !ok || len(cfg.Config) != 1 || cfg.Config["publishable_key"] != "pk_test_abc" {
+		t.Errorf("stripe projection = %+v (ok=%v)", cfg, ok)
+	}
+}
+
+func TestPSPSettingsIncludePublishedPublicConfig(t *testing.T) {
+	got := pspSettings([]byte(`{"settings":{"tokenization_key":"declared"},"public_config":{"tokenization_key":"api","publishable_key":"pk_test_api"}}`))
+	if got["tokenization_key"] != "declared" || got["publishable_key"] != "pk_test_api" {
+		t.Fatalf("settings = %v", got)
+	}
+	if pspSettings([]byte(`{"source":"x"}`)) != nil {
+		t.Fatal("no settings must stay nil")
+	}
 }

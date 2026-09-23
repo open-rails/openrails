@@ -111,6 +111,8 @@ catalog.
     { "key": "mobius-bt", "rail": "nmi", "custodian": "basis_theory", "display_name": "Credit Card",
       "flow": "tokenize",
       "config": { "public_api_key": "<public Basis Theory application key>" } },
+    { "key": "stripe", "rail": "stripe", "custodian": "psp", "display_name": "Stripe",
+      "flow": "redirect", "config": { "publishable_key": "pk_test_..." } },
     { "key": "ccbill", "rail": "ccbill", "custodian": "psp", "display_name": "Credit Card", "flow": "redirect" },
     { "key": "solana", "rail": "solana", "custodian": "psp", "display_name": "Solana", "flow": "wallet" }
   ]
@@ -122,6 +124,8 @@ catalog.
   - `tokenize` — load `config.tokenization_url`, tokenize with `config.tokenization_key`,
     POST the resulting `payment_token`.
   - `redirect` — nothing needed in the browser; POST checkout and follow the `url`.
+    Stripe also serves its `publishable_key` (when declared) for in-page card setup
+    and payment authentication.
   - `wallet` — the buyer's wallet signs; chain/token detail comes from
     `GET /v1/solana/config` and `GET /v1/solana/tokens`.
 - `key` is the value to send as checkout's `payment.rail`.

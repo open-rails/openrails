@@ -267,3 +267,13 @@ func TestWebhookSecretRequiredOutsideDev(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateStripePublishableKeyPosture(t *testing.T) {
+	for _, sandbox := range []bool{true, false} {
+		cfg, _ := stripeTestModeConfig("sk_test_abc", sandbox)
+		require.Equal(t, sandbox, ValidateStripePublishableKeyPosture(cfg, "pk_test_abc") == nil)
+		require.Equal(t, !sandbox, ValidateStripePublishableKeyPosture(cfg, "pk_live_abc") == nil)
+		require.Error(t, ValidateStripePublishableKeyPosture(cfg, "sk_test_abc"))
+		require.Error(t, ValidateStripePublishableKeyPosture(cfg, "pk_test_"))
+	}
+}

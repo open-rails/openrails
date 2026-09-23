@@ -316,6 +316,26 @@ if err != nil { return err }
 mid := client.MerchantID()
 ```
 
+To make enabling a provider pure configuration, build each declaration with
+`embed.PSPFromEnv(key, os.LookupEnv)`. With `P = upper(key) + "_"` it reads
+`P+"RAIL"` (default: the key), `P+"ACCOUNT_ID"`, and `P+upper(name)` for each of
+the rail's credential slots and settings, refusing a missing required secret:
+
+| Rail | Secrets (required first) | Settings |
+| --- | --- | --- |
+| `stripe` | `SECRET_KEY`, `WEBHOOK_SIGNING_SECRET`; `WEBHOOK_SIGNING_SECRET_THIN`, `WEBHOOK_SIGNING_SECRET_PREVIOUS` | `PUBLISHABLE_KEY` |
+| `nmi` | `SECURITY_KEY`, `WEBHOOK_SIGNING_SECRET` | `TOKENIZATION_KEY`, `TOKENIZATION_URL`, `ENDPOINT_DEPLOYMENT` |
+| `ccbill` | `SALT`, `DATALINK_USERNAME`, `DATALINK_PASSWORD` | |
+
+```go
+psps := map[string]embed.PSPConfig{}
+for _, key := range strings.Split(os.Getenv("BILLING_PSPS"), ",") {
+    psp, err := embed.PSPFromEnv(key, os.LookupEnv)
+    if err != nil { return err }
+    psps[key] = psp
+}
+```
+
 The database owns merchant metadata. Startup initializes missing metadata and
 reloads host snapshot credentials without overwriting later API edits or reviving
 archived accounts. Deliberate metadata changes use

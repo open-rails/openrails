@@ -554,11 +554,25 @@ func (s *Service) pspSecretScopeByAccountID(ctx context.Context, id merchant.ID,
 	return scope, true, nil
 }
 
+// pspSettings reads declared settings; public values published through the
+// provider-config API (public_config) fill keys the declaration left unset.
 func pspSettings(raw []byte) map[string]any {
 	var evidence struct {
-		Settings map[string]any `json:"settings"`
+		Settings     map[string]any    `json:"settings"`
+		PublicConfig map[string]string `json:"public_config"`
 	}
-	if len(raw) == 0 || json.Unmarshal(raw, &evidence) != nil || len(evidence.Settings) == 0 {
+	if len(raw) == 0 || json.Unmarshal(raw, &evidence) != nil {
+		return nil
+	}
+	for key, value := range evidence.PublicConfig {
+		if _, ok := evidence.Settings[key]; !ok && value != "" {
+			if evidence.Settings == nil {
+				evidence.Settings = map[string]any{}
+			}
+			evidence.Settings[key] = value
+		}
+	}
+	if len(evidence.Settings) == 0 {
 		return nil
 	}
 	return evidence.Settings

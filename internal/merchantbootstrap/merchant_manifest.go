@@ -1811,6 +1811,19 @@ func ValidateMerchantDeclaration(cfg *config.Config, mt MerchantConfig) error {
 	if _, err := ManifestBudgetWindows("merchant", "delegated_invoker_wasted_spend_windows", mt.DelegatedInvokerWastedSpendWindows); err != nil {
 		return err
 	}
+	for key, psp := range mt.PSPs {
+		for rail, account := range psp {
+			if !strings.EqualFold(strings.TrimSpace(rail), string(models.RailStripe)) {
+				continue
+			}
+			if raw, ok := account.Settings["publishable_key"]; ok {
+				value, _ := raw.(string)
+				if err := config.ValidateStripePublishableKeyPosture(cfg, value); err != nil {
+					return fmt.Errorf("psps.%s.stripe.settings.publishable_key: %w", key, err)
+				}
+			}
+		}
+	}
 	if cfg.SecretStoreBackend() != config.SecretBackendSnapshot && (len(mt.PSPs) > 0 || len(mt.Custodians) > 0) {
 		return fmt.Errorf("managed provider declarations require explicit Client publication operations; startup metadata and credential custody are separate")
 	}

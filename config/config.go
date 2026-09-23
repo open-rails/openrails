@@ -1378,6 +1378,24 @@ func ValidateStripeCredentialPosture(cfg *Config, secretKey string) error {
 	return nil
 }
 
+// ValidateStripePublishableKeyPosture checks a declared browser key the same
+// way: pk_test_ only under sandbox, pk_live_ only under live.
+func ValidateStripePublishableKeyPosture(cfg *Config, key string) error {
+	key = strings.TrimSpace(key)
+	live, test := strings.HasPrefix(key, "pk_live_"), strings.HasPrefix(key, "pk_test_")
+	if (!live && !test) || len(key) <= len("pk_test_") {
+		return fmt.Errorf("invalid Stripe publishable key format: expected pk_live_ or pk_test_ with a nonempty value")
+	}
+	if cfg != nil && cfg.IsTestMode() {
+		if live {
+			return fmt.Errorf("live publishable key (pk_live_) is not allowed when test_mode=sandbox")
+		}
+	} else if test {
+		return fmt.Errorf("test publishable key (pk_test_) is not allowed when test_mode=live")
+	}
+	return nil
+}
+
 // validateRails validates all rails in the new Rails map
 func validateRails(cfg *Config, rails PSPSet) error {
 	// Count accounts per rail: with more than one, each must declare account_id
