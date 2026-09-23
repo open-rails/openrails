@@ -119,6 +119,11 @@ they are coverage obligations, not evidence that a replacement already exists.
 The implementation must add focused scenario IDs and receipt paths to those
 rows before changing a status to `covered`.
 
+The corresponding 67-package inventory is in
+`compatibility/focused-package-map.tsv`. It is deliberately package-level at
+this stage; the hard-cut gate still requires each test within every package to
+be mapped or explicitly retained.
+
 ## Deterministic fixture contract
 
 Create a small internal `testkit` with these explicit capabilities:
