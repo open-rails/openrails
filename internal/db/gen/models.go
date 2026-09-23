@@ -998,6 +998,19 @@ type OpenrailsProduct struct {
 	CatalogID  uuid.UUID
 }
 
+// #1058: immutable product archive receipts; the resolved purchase window and action are fixed at acceptance.
+type OpenrailsProductArchiveOperation struct {
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+	IdempotencyKey string
+	RequestSha256  []byte
+	ProductID      uuid.UUID
+	PurchaseAction string
+	PurchasedSince *time.Time
+	Reason         string
+	CreatedAt      time.Time
+}
+
 // Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement.
 type OpenrailsProviderBillingObservation struct {
 	MerchantID              uuid.UUID
