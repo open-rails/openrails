@@ -434,6 +434,7 @@ type ProductAccessGrant struct {
 type ProductAccessCheck struct {
 	CustomerID string `json:"customer_id"`
 	ProductID  string `json:"product_id"`
+	ProductKey string `json:"product_key,omitempty"`
 	HasAccess  bool   `json:"has_access"`
 }
 

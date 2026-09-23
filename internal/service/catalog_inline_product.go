@@ -25,8 +25,8 @@ func (s *Service) catalogDatabase() *db.DB {
 // product key reuses an existing same-catalog product without changing labels;
 // each explicitly keyed immutable price can be retried concurrently.
 func (s *Service) createPriceWithProduct(ctx context.Context, req CreatePriceRequest) (*CatalogPrice, error) {
-	if !req.ProductID.IsZero() {
-		return nil, apperr.Invalidf("product_id and product_data are mutually exclusive")
+	if !req.ProductID.IsZero() || req.ProductKey != "" {
+		return nil, apperr.Invalidf("product_id, product_key and product_data are mutually exclusive")
 	}
 	data := *req.ProductData
 	data.Key = strings.TrimSpace(data.Key)

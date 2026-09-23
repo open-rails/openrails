@@ -376,6 +376,22 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	if err := s.checkCatalogWritePolicy(ctx); err != nil {
 		return nil, err
 	}
+	selectors := 0
+	if !req.ProductID.IsZero() {
+		selectors++
+	}
+	if req.ProductKey != "" {
+		selectors++
+		if strings.TrimSpace(req.ProductKey) == "" {
+			return nil, apperr.Invalidf("product_key is invalid")
+		}
+	}
+	if req.ProductData != nil {
+		selectors++
+	}
+	if selectors != 1 {
+		return nil, apperr.Invalidf("exactly one of product_id, product_key and product_data is required")
+	}
 	if req.ProductData != nil {
 		return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*CatalogPrice, error) {
 			return scoped.createPrice(ctx, req, owned)
@@ -398,7 +414,7 @@ func (s *Service) createPrice(ctx context.Context, req CreatePriceRequest, owned
 	if err != nil {
 		return nil, err
 	}
-	if req.ProductID.IsZero() {
+	if req.ProductID.IsZero() && req.ProductKey == "" {
 		return nil, apperr.Invalidf("product_id required")
 	}
 	// CUR-6: canonicalise at the price WRITE boundary. ValidateCurrency below
@@ -409,10 +425,16 @@ func (s *Service) createPrice(ctx context.Context, req CreatePriceRequest, owned
 		return nil, err
 	}
 
-	product, err := products.GetByID(ctx, req.ProductID.UUID())
+	var product *models.Product
+	if req.ProductKey != "" {
+		product, err = products.GetByKey(ctx, req.ProductKey)
+	} else {
+		product, err = products.GetByID(ctx, req.ProductID.UUID())
+	}
 	if err != nil {
 		return nil, productLookup(err)
 	}
+	req.ProductID = openrails.ProductID(product.ID)
 
 	// #662: the price id is a pure function of its immutable financial tuple —
 	// exactly the unique_prices_product_amount_window columns. A reprice hashes

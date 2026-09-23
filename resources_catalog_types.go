@@ -81,9 +81,12 @@ type Price struct {
 }
 
 type PriceCreateParams struct {
-	ProductID string `json:"product_id,omitempty"`
+	ProductID  string `json:"product_id,omitempty"`
+	ProductKey string `json:"product_key,omitempty"`
 	// ProductData creates or reuses a product by key within the authorized catalog.
-	// Existing product labels remain unchanged. Exactly one of ProductID and ProductData is required.
+	// Existing product labels remain unchanged. Exactly one of ProductID,
+	// ProductKey and ProductData is required. ProductData.Key creates an identity;
+	// the outer Key names the price, independently of its product selector.
 	ProductData *PriceCreateProductDataParams `json:"product_data,omitempty"`
 
 	// Key (#774) is the durable, per-merchant-unique MOVABLE POINTER handle for
@@ -91,7 +94,7 @@ type PriceCreateParams struct {
 	// #662 immutable substance UUID. Optional: auto-defaults to
 	// "<product-key>-<interval>" when omitted (see PriceIntervalLabel).
 	// With ProductData, a different financial substance under the same key is
-	// a conflict: use a new key for a new immutable offer. With ProductID,
+	// a conflict: use a new key for a new immutable offer. With ProductID or ProductKey,
 	// declaring the SAME key with a DIFFERENT financial substance is a version
 	// bump: the new/reactivated substance row becomes the key's current
 	// target and the previously-current row is archived (grandfathered).
