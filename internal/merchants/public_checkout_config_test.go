@@ -246,3 +246,13 @@ func TestPublicPSPConfigForWithholdsIncompletePSPs(t *testing.T) {
 		t.Errorf("stripe projection = %+v (ok=%v)", cfg, ok)
 	}
 }
+
+func TestPSPSettingsIncludePublishedPublicConfig(t *testing.T) {
+	got := pspSettings([]byte(`{"settings":{"tokenization_key":"declared"},"public_config":{"tokenization_key":"api","publishable_key":"pk_test_api"}}`))
+	if got["tokenization_key"] != "declared" || got["publishable_key"] != "pk_test_api" {
+		t.Fatalf("settings = %v", got)
+	}
+	if pspSettings([]byte(`{"source":"x"}`)) != nil {
+		t.Fatal("no settings must stay nil")
+	}
+}
