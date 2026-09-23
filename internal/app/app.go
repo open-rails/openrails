@@ -58,12 +58,15 @@ func (a *App) SetControlPlane(cp interface{ Close() }, ownedPool *pgxpool.Pool) 
 // override was removed with the ORM (#334).
 type BootstrapOptions struct {
 	StripeTransport http.RoundTripper
-	HostRiver       bool
-	RiverSchema     string
-	PGXPool         *pgxpool.Pool
-	Redis           *redis.Client
-	Cache           cache.Cache
-	Clock           clockwork.Clock
+	// NMITransport replaces the NMI wire at the real endpoints (test seam);
+	// posture is still verified through it.
+	NMITransport http.RoundTripper
+	HostRiver    bool
+	RiverSchema  string
+	PGXPool      *pgxpool.Pool
+	Redis        *redis.Client
+	Cache        cache.Cache
+	Clock        clockwork.Clock
 	// UserDirectory and UsernameResolver are explicit host identity seams.
 	// OpenRails never assumes ownership of AuthKit's profiles schema.
 	UserDirectory    openrails.UserDirectory
@@ -125,6 +128,12 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		StripeTransport: func() http.RoundTripper {
 			if opts != nil {
 				return opts.StripeTransport
+			}
+			return nil
+		}(),
+		NMITransport: func() http.RoundTripper {
+			if opts != nil {
+				return opts.NMITransport
 			}
 			return nil
 		}(),

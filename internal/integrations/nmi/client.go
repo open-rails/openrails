@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	log "github.com/sirupsen/logrus"
 
@@ -186,7 +187,10 @@ func nmiResponseDetail(code int) string {
 	return nmiResponseMessages[code]
 }
 
-func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) (*NMIClient, error) {
+// newClient builds an unbound client. Every caller outside this package goes
+// through NewAccountClient: an NMI client never exists without the merchant,
+// PSP, account and endpoint deployment its credential belongs to (#1055).
+func newClient(provider string, cfg *config.NMIProviderSettings, testMode bool) (*NMIClient, error) {
 	if cfg == nil {
 		return nil, errors.New("nmi provider configuration is required")
 	}
@@ -263,7 +267,7 @@ func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) 
 }
 
 // client returns the configured timeout-bounded HTTP client, falling back to a
-// sane default if a client was constructed without NewClient.
+// sane default if a client was constructed without newClient.
 func (c *NMIClient) client() *http.Client {
 	if c.httpClient != nil {
 		return c.httpClient
@@ -503,14 +507,17 @@ func (c *NMIClient) GetWebhookSecret() string {
 	return c.WebhookSecret
 }
 
-// NewAccountClient binds credentials and their immutable database account in one
-// construction. An unscoped client can make ordinary reads but cannot qualify a
-// durable payment receipt for an account it does not identify.
+// NewAccountClient is the only exported NMI client constructor. It binds the
+// credential to its merchant, PSP, account and endpoint deployment, which is
+// also the identity its sandbox posture verdict is keyed by.
 func NewAccountClient(merchantID, pspID uuid.UUID, provider string, cfg *config.NMIProviderSettings, testMode bool) (*NMIClient, error) {
 	if merchantID == uuid.Nil || pspID == uuid.Nil {
 		return nil, errors.New("provider account identity is required")
 	}
-	client, err := NewClient(provider, cfg, testMode)
+	if strings.TrimSpace(provider) == "" || cfg == nil || strings.TrimSpace(cfg.SecurityKey) == "" {
+		return nil, errors.New("provider account and security key are required")
+	}
+	client, err := newClient(provider, cfg, testMode)
 	if err != nil {
 		return nil, err
 	}
@@ -519,6 +526,16 @@ func NewAccountClient(merchantID, pspID uuid.UUID, provider string, cfg *config.
 	client.accountSecurityKey = cfg.SecurityKey
 	return client, nil
 }
+
+// UseTransport replaces the wire (test seam). Unlike LoopbackFixture it
+// exempts nothing: posture is still verified through the same transport.
+func (c *NMIClient) UseTransport(transport http.RoundTripper) {
+	if c.httpClient == nil {
+		c.httpClient = &http.Client{Timeout: nmiMutationTimeout}
+	}
+	c.httpClient.Transport = transport
+}
+
 func (c *NMIClient) AccountIdentity() (uuid.UUID, uuid.UUID) {
 	return c.accountMerchantID, c.accountPSPID
 }

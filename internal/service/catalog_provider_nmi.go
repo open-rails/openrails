@@ -10,6 +10,8 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -179,33 +181,14 @@ func (a *nmiAdapter) nmiClientFor(ctx context.Context, targetAccountID string) (
 	if err != nil || proc == nil || proc.NMI == nil || strings.TrimSpace(proc.NMI.SecurityKey) == "" {
 		return nil, "", false
 	}
-	testMode := a.svc.rt.Config != nil && a.svc.rt.Config.IsTestMode()
 	mid, merr := merchant.Require(ctx)
-	if merr != nil && proc.ID != uuid.Nil {
+	if merr != nil || proc.ID == uuid.Nil {
 		return nil, "", false
 	}
-	var cerr error
-	if proc.ID == uuid.Nil {
-		// Static rail sets used by catalog unit fixtures have no persisted PSP ID.
-		// Runtime rail resolution always returns a persisted ID; this branch is
-		// intentionally confined to the non-durable fixture seam.
-		client, cerr = nmi.NewClient(proc.EffectiveAccountID(), proc.ToNMIProviderSettings(), testMode)
-	} else {
-		client, cerr = nmi.NewAccountClient(mid.UUID(), proc.ID, proc.EffectiveAccountID(), proc.ToNMIProviderSettings(), testMode)
-	}
-	if cerr != nil {
+	factory := &railresolve.NMIFactory{Config: a.svc.rt.Config, Endpoints: railresolve.LoopbackNMIEndpoints(a.testEndpointURL)}
+	client, err = factory.ClientFor(mid, merchants.PSPScope{ID: proc.ID, Rail: string(models.RailNMI), AccountID: proc.EffectiveAccountID(), Key: proc.Key}, proc.ToNMIProviderSettings())
+	if err != nil {
 		return nil, "", false
-	}
-	client.ReadOnly = a.svc.rt.Config != nil && a.svc.rt.Config.IsProviderReadOnly()
-	endpoint := a.testEndpointURL
-	if endpoint == "" {
-		endpoint = a.svc.rt.Config.SandboxNMIGatewayURL()
-	}
-	if endpoint != "" {
-		client.LoopbackFixture = true
-		client.DirectPostURL = endpoint
-		client.QueryURL = endpoint
-		client.V5BaseURL = endpoint
 	}
 	return client, proc.Key, true
 }

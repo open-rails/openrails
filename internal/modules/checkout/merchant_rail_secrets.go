@@ -343,39 +343,20 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 	if target.Scope == nil {
 		return nil, errors.New("payment provider identity is unavailable")
 	}
-	// Pinned to the resolved account's own secret, at or above the rotation
-	// version floor that account's PSP row records (or#812).
-	ref, err := target.Scope.SecretRef("security_key")
-	if err != nil {
-		return nil, err
-	}
-	value, ok, err := s.merchantSecretRef(ctx, ref)
-	if err != nil {
-		return nil, fmt.Errorf("load merchant NMI secret: %w", err)
-	}
-	if !ok {
-		return nil, fmt.Errorf("missing scoped merchant NMI secret for PSP")
-	}
-	deployment, err := config.NMIEndpointDeployment(target.Scope.Settings)
-	if err != nil {
-		return nil, err
-	}
-	proc := &config.PSPConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: value, EndpointDeployment: deployment}}
+	// Pinned to the resolved account's own versioned secret and declared
+	// endpoint deployment (or#812, #1055).
 	owner, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	client, err := nmi.NewAccountClient(owner.UUID(), target.Scope.ID, target.PSP, proc.ToNMIProviderSettings(), s.Config != nil && s.Config.IsTestMode())
-	if err != nil {
-		return nil, err
+	return s.nmiFactory().Client(ctx, s.MerchantSecrets, owner, *target.Scope)
+}
+
+func (s *CheckoutService) nmiFactory() *railresolve.NMIFactory {
+	if s.NMIClients != nil {
+		return s.NMIClients
 	}
-	if s.NMIEndpointOverride != "" {
-		client.LoopbackFixture = true
-		client.DirectPostURL = s.NMIEndpointOverride
-		client.QueryURL = s.NMIEndpointOverride
-		client.V5BaseURL = s.NMIEndpointOverride
-	}
-	return client, nil
+	return &railresolve.NMIFactory{Config: s.Config}
 }
 
 func (s *CheckoutService) resolveCCBillClient(ctx context.Context) (*ccbill.CCBillClient, error) {

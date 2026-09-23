@@ -98,7 +98,7 @@ func newFakeNMIGateway(t *testing.T) (*fakeNMIGateway, *nmi.NMIClient) {
 	}))
 	t.Cleanup(f.srv.Close)
 
-	client, err := nmi.NewClient("nmi", &config.NMIProviderSettings{
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{
 		SecurityKey:   "test_security_key",
 		WebhookSecret: "test_secret",
 	}, true)

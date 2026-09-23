@@ -75,7 +75,7 @@ func TestCatalogReferencePreflightRejectsMissingAndMismatchedPlans(t *testing.T)
 			fmt.Fprint(w, response)
 		}))
 		hours := 720
-		_, err := verifyNMICatalogReference(t.Context(), newMobiusAdapterWithServer(t, server.URL), "mobius", CreatePriceRequest{Currency: "USD", UnitAmount: 23000000, AccessDurationHours: &hours, AutoRenew: true}, map[string]string{"plan_id": "known"})
+		_, err := verifyNMICatalogReference(nmiCatalogCtx(), newMobiusAdapterWithServer(t, server.URL), "mobius", CreatePriceRequest{Currency: "USD", UnitAmount: 23000000, AccessDurationHours: &hours, AutoRenew: true}, map[string]string{"plan_id": "known"})
 		require.ErrorContains(t, err, "does not match")
 		server.Close()
 	}

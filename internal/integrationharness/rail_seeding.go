@@ -109,6 +109,9 @@ func railAccountSecrets(proc *config.PSPConfig) map[string]string {
 // railAccountSettings maps the typed Solana block onto the rail-account
 // settings evidence shape (#711).
 func railAccountSettings(proc *config.PSPConfig, testMode bool) map[string]any {
+	if proc.NMI != nil && proc.NMI.EndpointDeployment != "" {
+		return map[string]any{"endpoint_deployment": proc.NMI.EndpointDeployment}
+	}
 	if proc.Solana == nil {
 		return nil
 	}

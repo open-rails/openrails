@@ -18,6 +18,12 @@ Verdicts live in the process registry (`internal/providerposture`), keyed by
 rail + merchant + PSP + account + endpoint + credential fingerprint. Any
 change is a new key and a fresh verification.
 
+NMI clients have one constructor, `railresolve.NMIFactory`: it binds the
+PSP's merchant, id, account, versioned security key and declared
+`endpoint_deployment`. `nmi.NewAccountClient` refuses a client without that
+identity, so no path can build a bare-key client whose key differs from the
+verified one.
+
 ## Fail closed
 
 Only `simulated` arms. `live`, `mismatched`, `unknown` (unavailable,

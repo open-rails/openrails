@@ -1008,6 +1008,18 @@ func (s *Service) CountActivePSPsForRail(ctx context.Context, id merchant.ID, ra
 	return int(count), nil
 }
 
+// PSPScopeFromRow is the full scope of a PSP row already read: settings,
+// credential references and custody included, exactly as every resolver
+// builds it.
+func PSPScopeFromRow(row gen.OpenrailsPsp) PSPScope {
+	scope := pspSecretScope{id: row.ID, rail: row.Rail, environment: row.Environment, accountID: row.AccountID, custodianID: row.CustodianID}
+	if row.Key != nil {
+		scope.key = *row.Key
+	}
+	scope.applyEvidence(row.Evidence)
+	return scope.exported()
+}
+
 // PSPScopeByID preserves the selected account across key renames and archive.
 func (s *Service) PSPScopeByID(ctx context.Context, id merchant.ID, pspID uuid.UUID) (PSPScope, bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() || pspID == uuid.Nil {

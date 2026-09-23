@@ -11,11 +11,11 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -227,29 +227,17 @@ func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid merchant.
 
 func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid merchant.ID, out *MerchantPullClients) {
 	if scope, ok := b.resolveScopeCoverage(ctx, mid, ProviderNMI, out); ok {
-		securityKey, ok := b.requireSecret(ctx, mid, scope, "security_key")
-		if !ok {
-			return // fail closed: a declared account never falls back across planes
+		if _, ok := b.requireSecret(ctx, mid, scope, "security_key"); !ok {
+			return // fail closed (logged): a declared account never falls back across planes
 		}
-		// Optional on the pull plane; loaded so the client mirrors the real
-		// account posture instead of a fabricated empty.
-		webhookSecret, _, _ := b.secret(ctx, mid, scope, "webhook_signing_secret")
-		client, err := nmi.NewClient(scope.AccountID, &config.NMIProviderSettings{
-			SecurityKey:   securityKey,
-			WebhookSecret: webhookSecret,
-		}, b.testMode())
+		factory := &railresolve.NMIFactory{Config: b.Config, Endpoints: railresolve.NMIEndpoints{QueryURL: b.Endpoints.NMIQueryURL, V5BaseURL: b.Endpoints.NMIV5BaseURL}}
+		client, err := factory.Client(ctx, b.Merchants.Secrets(), mid, scope)
 		if err != nil {
+			// Fail closed: a declared account never falls back across planes.
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 				"merchant_id": mid.String(), "rail": "nmi",
 			}).Warn("provider pull: rail not armed — NMI client build failed")
 			return
-		}
-		client.ReadOnly = b.readOnly()
-		if b.Endpoints.NMIQueryURL != "" {
-			client.QueryURL = b.Endpoints.NMIQueryURL
-		}
-		if b.Endpoints.NMIV5BaseURL != "" {
-			client.V5BaseURL = b.Endpoints.NMIV5BaseURL
 		}
 		out.Fetchers[ProviderNMI] = keyedFetcher{RailFetcher: NewNMIFetcher(client), key: scope.AccountID}
 		out.Probers[ProviderNMI] = &NMISubscriptionProber{Client: client}

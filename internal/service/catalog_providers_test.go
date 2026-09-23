@@ -77,7 +77,7 @@ func TestCCBillAdapter_Attach(t *testing.T) {
 
 // -- Dispatcher (resolveProviders) tests -------------------------------------
 
-func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
+func TestResolveProviders_MixedLinkedAndEngine(t *testing.T) {
 	s := newUnconfiguredService()
 	productID := uuid.New()
 	priceID := uuid.New()
@@ -88,7 +88,6 @@ func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
 		PSPs:       []string{"ccbill", "nmi"},
 		PSPLinks: map[string]map[string]string{
 			"ccbill": {"form_name": "premium", "flex_id": "abc-123"},
-			// mobius intentionally has no link -> pending
 		},
 	}
 	rails, states, pending, err := s.resolveProviders(context.Background(), &models.Product{ID: productID}, req, priceID)
@@ -98,14 +97,15 @@ func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
 	if states["ccbill"].Status != ProviderStatusLinked {
 		t.Errorf("ccbill: expected linked, got %s", states["ccbill"].Status)
 	}
-	if states["nmi"].Status != ProviderStatusPendingManualLink {
-		t.Errorf("mobius: expected pending_manual_link, got %s", states["nmi"].Status)
+	// #1055: a one-time NMI price is engine terms: no plan, no manual link.
+	if _, ok := states["nmi"]; ok {
+		t.Errorf("nmi: engine price must request no provider object, got %+v", states["nmi"])
 	}
 	if _, ok := rails["nmi"]; ok {
-		t.Error("mobius should not have a rails entry while pending")
+		t.Error("nmi: engine price has no rails entry")
 	}
-	if len(pending) != 1 || pending[0].Provider != "nmi" {
-		t.Fatalf("expected one mobius pending action, got %v", pending)
+	if len(pending) != 0 {
+		t.Fatalf("expected no pending actions, got %v", pending)
 	}
 }
 
@@ -136,7 +136,7 @@ func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
 	svc := &Service{rt: &app.Runtime{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeLimited}}}
 	priceID := uuid.New()
 	rails, states, pending, err := svc.resolveProviders(context.Background(), &models.Product{Key: "premium"}, CreatePriceRequest{
-		PSPs:       []string{"stripe", "nmi"},
+		PSPs:       []string{"stripe", "nmi", "solana"},
 		UnitAmount: 23_000_000,
 		Currency:   "USD",
 	}, priceID)
@@ -146,10 +146,12 @@ func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
 	if len(rails) != 0 {
 		t.Fatalf("no provider objects may be linked in limited mode, got %v", rails)
 	}
-	if _, exists := states["stripe"]; exists {
-		t.Fatal("inline Stripe checkout must not request a remote catalog object")
+	for _, name := range []string{"stripe", "nmi"} {
+		if _, exists := states[name]; exists {
+			t.Fatalf("inline %s checkout must not request a remote catalog object", name)
+		}
 	}
-	for _, name := range []string{"nmi"} {
+	for _, name := range []string{"solana"} {
 		st, ok := states[name]
 		if !ok || st.Status != ProviderStatusPendingManualLink {
 			t.Fatalf("%s: expected pending_manual_link, got %+v", name, st)
@@ -182,7 +184,7 @@ func TestMobiusAdapter_AttachMissingPlanDeferredWhenWritesDisabled(t *testing.T)
 
 	a := newMobiusAdapterWithServer(t, server.URL)
 	cycle := 30
-	_, err := a.Attach(context.Background(), map[string]string{models.RailKeyPlanID: "premium-usd-23000000-30"}, autoCreateContext{
+	_, err := a.Attach(nmiCatalogCtx(), map[string]string{models.RailKeyPlanID: "premium-usd-23000000-30"}, autoCreateContext{
 		ProductKey: "premium", UnitAmount: 23_000_000, Currency: "USD", BillingCycleDays: &cycle,
 		RemoteWritesDisabled: true,
 	})

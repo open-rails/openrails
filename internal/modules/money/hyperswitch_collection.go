@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
@@ -95,7 +93,7 @@ func (b *MerchantCollectionAdapterBuilder) hyperSwitchAdapter(ctx context.Contex
 	if custodian.MerchantID != mid.UUID() || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != scope.Environment || scope.Environment != config.ExpectedProviderEnvironment(b.testMode()) {
 		return nil, fmt.Errorf("HyperSwitch invoice custody does not match the accepted account")
 	}
-	gatewayKey, err := b.requireSecret(ctx, svc, mid, scope, "security_key")
+	posture, err := b.nmiProxyPosture(ctx, svc, mid, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -107,16 +105,6 @@ func (b *MerchantCollectionAdapterBuilder) hyperSwitchAdapter(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	destination := strings.TrimSpace(b.Endpoints.NMIDirectPostURL)
-	if destination == "" {
-		destination = nmi.DefaultDirectPostURL
-		if b.testMode() {
-			destination = nmi.SandboxDirectPostURL
-		}
-	}
-	posture, err := nmi.ProxyPostureClient(gatewayKey, destination, b.testMode(), strings.TrimSpace(b.Endpoints.NMIDirectPostURL) != "")
-	if err != nil {
-		return nil, err
-	}
+	destination, gatewayKey := posture.DirectPostURL, posture.SecurityKey
 	return &hyperSwitchCollectionAdapter{binding: binding, charger: &hscharge.Charger{Client: client, Destination: destination, SecurityKey: hyperswitch.Secret(gatewayKey), Posture: posture}}, nil
 }

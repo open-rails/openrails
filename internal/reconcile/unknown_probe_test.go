@@ -71,7 +71,7 @@ func newNMIProbeFixture(t *testing.T) *nmiProbeFixture {
 		assert.Zero(t, f.directPostHits.Load(), "probes must never send a provider mutation")
 	})
 
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "mobius", &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
 	require.NoError(t, err)
 	client.LoopbackFixture = true
 	client.DirectPostURL = srv.URL

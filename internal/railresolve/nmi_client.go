@@ -41,6 +41,9 @@ type NMIArmer struct {
 	DB          *db.DB
 	MerchantsFn func() *merchants.Service
 	Endpoints   NMIEndpoints
+	// Factory, when set, is the runtime's shared NMI factory (it carries the
+	// runtime's seams); otherwise one is built from Config and Endpoints.
+	Factory *NMIFactory
 }
 
 var _ NMIClientResolver = (*NMIArmer)(nil)
@@ -101,36 +104,20 @@ func (a *NMIArmer) ResolveScope(ctx context.Context, mid merchant.ID, rail strin
 	return svc.PullPSPScope(ctx, mid, rail, a.Environment())
 }
 
-// NMIClient builds the store-armed client for scope. A declared account with
-// a missing security key fails closed.
+// NMIClient builds the store-armed client for scope through the one factory.
 func (a *NMIArmer) NMIClient(ctx context.Context, mid merchant.ID, scope merchants.PSPScope) (*nmi.NMIClient, error) {
-	securityKey, err := a.RequireSecret(ctx, mid, scope, "security_key")
-	if err != nil {
-		return nil, err
+	svc := a.merchants()
+	if svc == nil {
+		return nil, errors.New("merchant credential store is not armed")
 	}
-	webhookSecret, _, _ := a.Secret(ctx, mid, scope, "webhook_signing_secret")
-	deployment, err := config.NMIEndpointDeployment(scope.Settings)
-	if err != nil {
-		return nil, err
+	return a.factory().Client(ctx, svc.Secrets(), mid, scope)
+}
+
+func (a *NMIArmer) factory() *NMIFactory {
+	if a.Factory != nil {
+		return a.Factory
 	}
-	client, err := nmi.NewAccountClient(mid.UUID(), scope.ID, scope.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, WebhookSecret: webhookSecret, EndpointDeployment: deployment}, a.testMode())
-	if err != nil {
-		return nil, fmt.Errorf("build store-armed NMI client: %w", err)
-	}
-	client.ReadOnly = a.Config != nil && a.Config.IsProviderReadOnly()
-	// Endpoint overrides exist only for loopback fake gateways; the client
-	// refuses any mutation whose destination is not a literal loopback IP.
-	client.LoopbackFixture = a.Config != nil && a.Config.SandboxNMIGatewayURL() != "" || a.Endpoints != (NMIEndpoints{})
-	if a.Endpoints.V5BaseURL != "" {
-		client.V5BaseURL = a.Endpoints.V5BaseURL
-	}
-	if a.Endpoints.DirectPostURL != "" {
-		client.DirectPostURL = a.Endpoints.DirectPostURL
-	}
-	if a.Endpoints.QueryURL != "" {
-		client.QueryURL = a.Endpoints.QueryURL
-	}
-	return client, nil
+	return &NMIFactory{Config: a.Config, Endpoints: a.Endpoints}
 }
 
 // Secret loads one scoped secret honouring the PSP row's rotation floor

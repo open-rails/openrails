@@ -31,7 +31,7 @@ func TestLiveSandboxClientSurface(t *testing.T) {
 		t.Skip("NMI_SANDBOX_SECURITY_KEY not set; skipping live sandbox client-surface proof")
 	}
 
-	client, err := NewClient("live-sandbox", &config.NMIProviderSettings{SecurityKey: key}, true)
+	client, err := newClient("live-sandbox", &config.NMIProviderSettings{SecurityKey: key}, true)
 	require.NoError(t, err)
 	require.Equal(t, SandboxV5BaseURL, client.V5BaseURL, "must hit the real sandbox v5 gateway, not a stub")
 

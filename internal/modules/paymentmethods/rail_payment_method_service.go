@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/cardholdername"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -30,13 +31,13 @@ type RailPaymentMethodService struct {
 	PaymentMethodService paymentMethodStore
 	SubscriptionService  subscriptionReader
 	MerchantSecrets      merchants.MerchantSecretReader
-	// NMIEndpointOverride points store-armed NMI clients at a fake gateway
-	// (test seam; empty = real endpoints).
-	NMIEndpointOverride string
-	ProviderSecrets     merchants.PSPSecretResolver
-	ProviderScopes      merchants.PSPScopeResolver
-	Config              *config.Config
-	DB                  *db.DB
+	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
+	// one from Config.
+	NMIClients      *railresolve.NMIFactory
+	ProviderSecrets merchants.PSPSecretResolver
+	ProviderScopes  merchants.PSPScopeResolver
+	Config          *config.Config
+	DB              *db.DB
 	// DeleteIntents routes DeletePaymentMethod through the durable nmi_vault_delete
 	// provider intent (#674 tail); wired at runtime assembly.
 	DeleteIntents PaymentMethodDeleteExecutor
@@ -44,7 +45,6 @@ type RailPaymentMethodService struct {
 	// nmi_payment_method_update provider intent (#928); wired at runtime assembly.
 	UpdateIntents PaymentMethodUpdateExecutor
 	clock         clockwork.Clock
-	newNMIClient  func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error)
 }
 
 type subscriptionReader interface {
@@ -330,14 +330,7 @@ func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provide
 		if !rails.SameRail(models.Rail(row.Rail), models.Rail(provider)) {
 			return nil, nil, fmt.Errorf("PSP %s belongs to rail %s, not %s", row.ID, row.Rail, provider)
 		}
-		client, err := s.resolveNMIClientForScope(ctx, merchants.PSPScope{
-			ID:                 row.ID,
-			Rail:               row.Rail,
-			Environment:        row.Environment,
-			AccountID:          row.AccountID,
-			CredentialVersions: merchants.CredentialVersions(row.Evidence),
-			CredentialRefs:     merchants.CredentialRefs(row.Evidence),
-		})
+		client, err := s.resolveNMIClientForScope(ctx, merchants.PSPScopeFromRow(row))
 		return client, &row.ID, err
 	}
 
@@ -423,52 +416,18 @@ func (s *RailPaymentMethodService) resolveNMIClientByName(ctx context.Context, n
 }
 
 func (s *RailPaymentMethodService) resolveNMIClientForScope(ctx context.Context, scope merchants.PSPScope) (*nmi.NMIClient, error) {
-	provider := strings.TrimSpace(scope.AccountID)
-	if provider == "" {
-		return nil, errors.New("provider account_id required")
-	}
 	if s == nil || s.MerchantSecrets == nil {
 		return nil, errors.New("missing scoped merchant NMI secret for PSP")
 	}
-	tid, err := merchant.Require(ctx)
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	ref, err := scope.SecretRef("security_key")
-	if err != nil {
-		return nil, err
+	factory := s.NMIClients
+	if factory == nil {
+		factory = &railresolve.NMIFactory{Config: s.Config}
 	}
-	sec, err := merchants.ReadSecretRef(ctx, s.MerchantSecrets, tid, ref)
-	if err != nil {
-		if !errors.Is(err, merchants.ErrSecretNotFound) {
-			return nil, fmt.Errorf("load merchant NMI secret: %w", err)
-		}
-		return nil, errors.New("missing scoped merchant NMI secret for PSP")
-	}
-	value := strings.TrimSpace(sec.Value)
-	if value == "" {
-		return nil, errors.New("missing scoped merchant NMI secret for PSP")
-	}
-	proc := &config.PSPConfig{Rail: models.RailNMI, NMI: &config.NMIRailConfig{SecurityKey: value}}
-	return s.buildNMIClient(provider, proc.ToNMIProviderSettings())
-}
-
-func (s *RailPaymentMethodService) buildNMIClient(provider string, cfg *config.NMIProviderSettings) (*nmi.NMIClient, error) {
-	testMode := s != nil && s.Config != nil && s.Config.IsTestMode()
-	if s != nil && s.newNMIClient != nil {
-		return s.newNMIClient(provider, cfg, testMode)
-	}
-	client, err := nmi.NewClient(provider, cfg, testMode)
-	if err != nil {
-		return nil, err
-	}
-	if s != nil && s.NMIEndpointOverride != "" {
-		client.LoopbackFixture = true
-		client.DirectPostURL = s.NMIEndpointOverride
-		client.QueryURL = s.NMIEndpointOverride
-		client.V5BaseURL = s.NMIEndpointOverride
-	}
-	return client, nil
+	return factory.Client(ctx, s.MerchantSecrets, mid, scope)
 }
 
 func nmiNameParts(firstName, lastName, nameOnCard string) (string, string) {

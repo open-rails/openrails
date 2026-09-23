@@ -19,7 +19,7 @@ import (
 // direct-post, query, and v5 endpoints.
 func newTestClient(t *testing.T, serverURL string) *NMIClient {
 	t.Helper()
-	client, err := NewClient("mobius", &config.NMIProviderSettings{
+	client, err := newClient("mobius", &config.NMIProviderSettings{
 		SecurityKey: "test-security-key",
 	}, false)
 	require.NoError(t, err)

@@ -59,6 +59,8 @@ type Runtime struct {
 	providerPosture providerposture.Tracked
 	// NMIPostureV5BaseURL is a test-only seam for the startup sandbox probe.
 	NMIPostureV5BaseURL string
+	// NMIClients is the single PSP-scoped NMI client factory (#1055).
+	NMIClients *railresolve.NMIFactory
 
 	Auth          *billingauth.Integration
 	StripeClients *stripeapi.Factory

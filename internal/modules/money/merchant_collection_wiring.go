@@ -86,6 +86,9 @@ type MerchantCollectionAdapterBuilder struct {
 	DB            *db.DB
 	MerchantsFn   func() *merchants.Service
 	Endpoints     CollectionEndpoints
+	// NMIClients is the runtime's single PSP-scoped NMI factory; nil builds
+	// one from Config and Endpoints.
+	NMIClients *railresolve.NMIFactory
 }
 
 var _ CollectionPlane = (*MerchantCollectionAdapterBuilder)(nil)
@@ -107,9 +110,31 @@ func (b *MerchantCollectionAdapterBuilder) nmiArmer() *railresolve.NMIArmer {
 	if b == nil {
 		return nil
 	}
-	return &railresolve.NMIArmer{Config: b.Config, DB: b.DB, MerchantsFn: b.MerchantsFn, Endpoints: railresolve.NMIEndpoints{
-		V5BaseURL: b.Endpoints.NMIV5BaseURL, DirectPostURL: b.Endpoints.NMIDirectPostURL, QueryURL: b.Endpoints.NMIQueryURL,
-	}}
+	return &railresolve.NMIArmer{Config: b.Config, DB: b.DB, MerchantsFn: b.MerchantsFn, Factory: b.nmiFactory()}
+}
+
+// nmiFactory is the runtime's shared factory; this builder's own endpoint
+// overrides (test seams) bind a copy with the same wire.
+func (b *MerchantCollectionAdapterBuilder) nmiFactory() *railresolve.NMIFactory {
+	endpoints := railresolve.NMIEndpoints{V5BaseURL: b.Endpoints.NMIV5BaseURL, DirectPostURL: b.Endpoints.NMIDirectPostURL, QueryURL: b.Endpoints.NMIQueryURL}
+	if b.NMIClients != nil && endpoints == (railresolve.NMIEndpoints{}) {
+		return b.NMIClients
+	}
+	factory := &railresolve.NMIFactory{Config: b.Config, Endpoints: endpoints}
+	if b.NMIClients != nil {
+		factory.Transport = b.NMIClients.Transport
+	}
+	return factory
+}
+
+// nmiProxyPosture is the posture identity of scope's gateway credential
+// forwarded by a custodian proxy; its DirectPostURL is the destination.
+func (b *MerchantCollectionAdapterBuilder) nmiProxyPosture(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (*nmi.NMIClient, error) {
+	settings, err := b.nmiFactory().Settings(ctx, svc.Secrets(), mid, scope)
+	if err != nil {
+		return nil, err
+	}
+	return b.nmiFactory().ProxyPosture(mid, scope, settings)
 }
 
 func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.Context, method gen.OpenrailsPaymentMethod) (CollectionAdapter, bool, error) {
@@ -258,7 +283,7 @@ func (b *MerchantCollectionAdapterBuilder) custodianProxyAdapter(ctx context.Con
 	if err != nil {
 		return nil, err
 	}
-	gatewayKey, err := b.requireSecret(ctx, svc, mid, scope, "security_key")
+	posture, err := b.nmiProxyPosture(ctx, svc, mid, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -270,14 +295,7 @@ func (b *MerchantCollectionAdapterBuilder) custodianProxyAdapter(ctx context.Con
 	if err != nil {
 		return nil, fmt.Errorf("build store-armed BT client: %w", err)
 	}
-	gw := nmiproxy.GatewayConfig{SecurityKey: gatewayKey, DirectPostURL: b.Endpoints.NMIDirectPostURL}
-	destination := gw.DirectPostURL
-	if destination == "" {
-		destination = nmi.DefaultDirectPostURL
-	}
-	if gw.Posture, err = nmi.ProxyPostureClient(gatewayKey, destination, b.testMode(), gw.DirectPostURL != ""); err != nil {
-		return nil, err
-	}
+	gw := nmiproxy.GatewayConfig{SecurityKey: posture.SecurityKey, DirectPostURL: posture.DirectPostURL, Posture: posture}
 	return NewCustodianProxyCollectionAdapter(nmiproxy.New(bt, gw)), nil
 }
 

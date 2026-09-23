@@ -86,7 +86,7 @@ func newFakeNMIRefundGateway(t *testing.T, originalTxn string) (*fakeNMIRefundGa
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "mobius", &config.NMIProviderSettings{
 		SecurityKey:   "test_security_key",
 		WebhookSecret: "test_secret",
 	}, true)

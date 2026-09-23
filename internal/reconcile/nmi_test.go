@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -121,7 +122,7 @@ func newNMITestFetcher(t *testing.T, queryRequests *[]map[string]string, v5Paths
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, true)
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, true)
 	require.NoError(t, err)
 	client.LoopbackFixture = true
 	client.QueryURL = server.URL
@@ -252,7 +253,7 @@ func TestNMIFetcher_PaginatesTransactions(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, true)
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, true)
 	require.NoError(t, err)
 	client.LoopbackFixture = true
 	client.QueryURL = server.URL
@@ -302,7 +303,7 @@ func TestNMIFetcher_PaginatesV5Rosters(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, true)
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, true)
 	require.NoError(t, err)
 	client.LoopbackFixture = true
 	client.QueryURL = server.URL
@@ -382,7 +383,7 @@ func TestNMIFetcher_EmptyRosterIsNotExhaustive(t *testing.T) {
 			}
 		}))
 		t.Cleanup(server.Close)
-		client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, true)
+		client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, true)
 		require.NoError(t, err)
 		client.LoopbackFixture = true
 		client.QueryURL = server.URL

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -73,7 +74,7 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 	// The REAL NMI client, pointed at the REAL sandbox Direct Post endpoint (no URL
 	// override). The nmi.NewClient testMode=true mirrors the TEST_MODE=sandbox
 	// configuration.
-	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), string(models.RailNMI), &config.NMIProviderSettings{
 		SecurityKey:   securityKey,
 		WebhookSecret: strings.TrimSpace(os.Getenv("NMI_WEBHOOK_SIGNING_SECRET")),
 	}, true)

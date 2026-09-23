@@ -106,7 +106,7 @@ waitToken:
 
 	// The seam under test: OUR client consumes the real token on the LIVE v5
 	// gateway — the exact production vault-creation wire shape.
-	client, err := NewClient("live-collectjs", &config.NMIProviderSettings{SecurityKey: securityKey}, true)
+	client, err := newClient("live-collectjs", &config.NMIProviderSettings{SecurityKey: securityKey}, true)
 	require.NoError(t, err)
 	require.Equal(t, SandboxV5BaseURL, client.V5BaseURL, "must hit the real sandbox v5 gateway, not a stub")
 

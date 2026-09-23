@@ -138,7 +138,7 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, securityKey, storedSecret.Value, "production store resolution must return the seeded rail credential")
 
-	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: storedSecret.Value}, true)
+	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: storedSecret.Value}, true)
 	require.NoError(t, err)
 	railCustomerRef := createNMISandboxVault(t, client)
 	t.Cleanup(func() {

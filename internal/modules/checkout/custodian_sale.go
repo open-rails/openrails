@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -89,8 +90,10 @@ type custodianInstrumentStore interface {
 type custodialPSP struct {
 	Custody            *config.CustodianConfig
 	GatewaySecurityKey string
-	// GatewayDirectPostURL: "" = the NMI client default.
-	GatewayDirectPostURL string
+	// The charging PSP's exact identity and declared credential set (#1055).
+	MerchantID merchant.ID
+	Scope      merchants.PSPScope
+	Settings   *config.NMIProviderSettings
 }
 
 // resolveConfig arms the ctx merchant's custodian-held-card credentials (#788):
@@ -109,7 +112,23 @@ func (s *CheckoutCustodianSaleService) resolveConfig(ctx context.Context) (*cust
 	if rc.NMI == nil || strings.TrimSpace(rc.NMI.SecurityKey) == "" {
 		return nil, errors.New("nmi psp resolved without a gateway security key")
 	}
-	return &custodialPSP{Custody: rc.Custody, GatewaySecurityKey: rc.NMI.SecurityKey}, nil
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &custodialPSP{
+		Custody:            rc.Custody,
+		GatewaySecurityKey: rc.NMI.SecurityKey,
+		MerchantID:         mid,
+		Scope:              merchants.PSPScope{ID: rc.ID, Rail: string(models.RailNMI), AccountID: rc.EffectiveAccountID(), Key: rc.Key},
+		Settings:           rc.ToNMIProviderSettings(),
+	}, nil
+}
+
+// nmiFactory is the single PSP-scoped factory; the proxy destination seam is
+// a loopback fixture like any other endpoint override.
+func (s *CheckoutCustodianSaleService) nmiFactory() *railresolve.NMIFactory {
+	return &railresolve.NMIFactory{Config: s.Config, Endpoints: railresolve.NMIEndpoints{DirectPostURL: s.GatewayDirectPostURLOverride}}
 }
 
 func (s *CheckoutCustodianSaleService) btClient(cfg *custodialPSP) (*basistheory.Client, error) {
@@ -133,22 +152,11 @@ func (s *CheckoutCustodianSaleService) charger(cfg *custodialPSP) (*nmiproxy.Cha
 	if err != nil {
 		return nil, err
 	}
-	gw := nmiproxy.GatewayConfig{
-		SecurityKey:   cfg.GatewaySecurityKey,
-		DirectPostURL: cfg.GatewayDirectPostURL,
-	}
-	if s.GatewayDirectPostURLOverride != "" {
-		gw.DirectPostURL = s.GatewayDirectPostURLOverride
-	}
-	destination := gw.DirectPostURL
-	if destination == "" {
-		destination = nmi.DefaultDirectPostURL
-	}
-	gw.Posture, err = nmi.ProxyPostureClient(gw.SecurityKey, destination, s.Config != nil && s.Config.IsTestMode(), s.GatewayDirectPostURLOverride != "")
+	posture, err := s.nmiFactory().ProxyPosture(cfg.MerchantID, cfg.Scope, cfg.Settings)
 	if err != nil {
 		return nil, err
 	}
-	return nmiproxy.New(bt, gw), nil
+	return nmiproxy.New(bt, nmiproxy.GatewayConfig{SecurityKey: cfg.GatewaySecurityKey, DirectPostURL: posture.DirectPostURL, Posture: posture}), nil
 }
 
 // Process runs the custodian-held-card one-time sale as a write-through intent,
@@ -284,8 +292,7 @@ func decodeCustodianSalePayload(intent gen.OpenrailsRailIntent) (CustodianSalePa
 
 // gatewayQueryClient builds the NMI query-leg client for verify-by-orderid.
 func (h *CustodianSaleIntentHandler) gatewayQueryClient(cfg *custodialPSP) (*nmi.NMIClient, error) {
-	testMode := h.Sale.Config != nil && h.Sale.Config.IsTestMode()
-	return nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: cfg.GatewaySecurityKey}, testMode)
+	return (&railresolve.NMIFactory{Config: h.Sale.Config}).ClientFor(cfg.MerchantID, cfg.Scope, cfg.Settings)
 }
 
 func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {

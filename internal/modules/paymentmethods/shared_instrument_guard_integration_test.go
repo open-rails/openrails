@@ -4,20 +4,20 @@ package paymentmethods
 
 import (
 	"context"
-	"github.com/open-rails/openrails/internal/merchants"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/railresolve"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
 type noSubsReader struct{}
@@ -109,16 +109,7 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 		Config:               vaultTestConfig(true),
 		MerchantSecrets:      secretStore,
 		ProviderSecrets:      vaultStaticProviderSecretResolver{rail: "nmi", environment: "live", accountID: "mobius-account"},
-		newNMIClient: func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error) {
-			client, err := nmi.NewClient(provider, cfg, testMode)
-			if err != nil {
-				return nil, err
-			}
-			client.LoopbackFixture = true
-			client.V5BaseURL = server.URL
-			client.DirectPostURL = server.URL
-			return client, nil
-		},
+		NMIClients:           &railresolve.NMIFactory{Config: vaultTestConfig(true), Endpoints: railresolve.NMIEndpoints{V5BaseURL: server.URL, DirectPostURL: server.URL}},
 	}
 
 	require.NoError(t, svc.CleanupPaymentMethodBestEffort(ctx, pmA), "shared vault deletes must scope to the billing entry")
