@@ -164,6 +164,10 @@ func (h *NMIPaymentMethodUpdateHandler) Execute(ctx context.Context, intent gen.
 	if h.Store == nil {
 		return Parked("payment method update progress store not wired")
 	}
+	ctx, err = client.QualifyDispatch(ctx)
+	if err != nil {
+		return Parked("NMI test-mode qualification refused before vault update: " + err.Error())
+	}
 	if err := h.Store.RecordProgress(ctx, intent.ID, map[string]any{
 		"submission_started": true,
 		"old_card":           remote,

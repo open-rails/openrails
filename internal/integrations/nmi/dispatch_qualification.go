@@ -38,7 +38,9 @@ func (c *NMIClient) dispatchBinding() dispatchBinding {
 // private capability authorizes exactly the next mutation on this captured
 // account/credential/deployment, in this call only. It is never persisted.
 func (c *NMIClient) QualifyDispatch(ctx context.Context) (context.Context, error) {
-	if !c.TestMode {
+	if !c.TestMode || c.accountMerchantID == uuid.Nil || c.accountPSPID == uuid.Nil {
+		// Unscoped clients are test seams and provider-read fixtures. Durable
+		// merchant execution always uses NewAccountClient with both identities.
 		return ctx, nil
 	}
 	if c.ReadOnly {

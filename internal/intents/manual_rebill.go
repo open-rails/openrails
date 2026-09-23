@@ -98,6 +98,10 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.OpenrailsRailI
 	if err := h.prepareProvider(ctx, in, p, client); err != nil {
 		return Parked("prepare accepted rebill: " + err.Error())
 	}
+	ctx, err = client.QualifyDispatch(ctx)
+	if err != nil {
+		return Parked("NMI test-mode qualification refused before rebill: " + err.Error())
+	}
 	first, err := h.validateAndFence(ctx, in, p, true)
 	if err != nil {
 		if errors.Is(err, errRebillSuperseded) || errors.Is(err, charge.ErrInstrumentChanged) {
