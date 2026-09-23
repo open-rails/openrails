@@ -5106,7 +5106,7 @@
     "internal/http/embedhttp/customer_exposures.go": "2ae80601979f5bd21136f1802ad243bdf9d6ea0ee70370e2a9f5bab3fe1623d7",
     "internal/http/embedhttp/embedhttp.go": "12bc6910baab3e19e3f5af7b92c2288accb519a4b40641fa0bc401f6495bd13d",
     "internal/http/embedhttp/fixture_integration.go": "990eeb8976dbe824267f8e623f8f842a34b6cfaffd34432d32f8eb44495478f6",
-    "internal/http/embedhttp/integration.go": "deedf9a88451ba1b5a92f2e908ff88a2a3b0999c8a5e4271536531ff667e4b7d",
+    "internal/http/embedhttp/integration.go": "4259dda0fbad12901b0f9d8e796c244ca4a09872cf2f9313b7dbe357a37e4b7a",
     "internal/http/embedhttp/native_treasury.go": "f319ea6470169e8215f849b0c1c7b5a86dde384bbe522d7f120deea4895c0034",
     "internal/http/embedhttp/route_set.go": "969f2f510a55479d674367881f5dc6c18491e310a51a8aeb62bca0c139e045de",
     "internal/http/embedhttp/self.go": "8227c5fab72933dccb56d26ae083ae46d2ca3db9d0a0371023d89b79d2d0e51b",

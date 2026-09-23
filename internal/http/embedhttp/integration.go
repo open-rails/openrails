@@ -80,9 +80,11 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 	}
 	subject := identity.SubjectID
 	if identity.Kind == billingauth.NativeUser && (permission == permissions.MerchantCatalogOwnRead || permission == permissions.MerchantCatalogOwnUpdate) {
-		if identity.CustomerID == "" {
+		if identity.CustomerID == "" && r.Header.Get("OpenRails-Catalog-Owner") == "" {
 			return billingauth.Principal{}, billingauth.GateError{Status: 403, Message: "canonical personal identity required"}
 		}
+		// With an explicit owner and no personal mapping, leave the actor key
+		// empty so ownerCatalogScopeMW must perform its live administrator check.
 		subject = identity.CustomerID
 	}
 	required := billingauth.Requirement{Permission: permission, Scope: scope, Target: target}
