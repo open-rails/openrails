@@ -17,20 +17,24 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-const providerPostureMerchantBatch = 200
-
-// VerifyProviderPosture verifies, once, every PSP credential set this runtime
-// loads under test_mode=sandbox. A PSP that is not proven to simulate money
-// stays disarmed (its mutations are refused) and Ready reports it; the
-// runtime still starts so reads and other PSPs keep working. Hosts that want
-// a hard startup failure check Ready after construction.
-func (r *Runtime) VerifyProviderPosture(ctx context.Context) {
-	if r == nil || r.Config == nil || !r.Config.IsTestMode() || r.DB == nil || r.Merchants == nil {
+// VerifyProviderPosture verifies, once, every sandbox PSP credential set of
+// the merchants this runtime loads at startup (its configured merchant plus
+// the declared ones). A PSP not proven to simulate money stays disarmed (its
+// mutations are refused) and Ready reports it; the runtime still starts so
+// reads and other PSPs keep working. Hosts that want a hard startup failure
+// check Ready after construction. Credentials loaded later are verified when
+// written or on their first mutation.
+func (r *Runtime) VerifyProviderPosture(ctx context.Context, declared ...merchant.ID) {
+	if r == nil || r.Config == nil || !r.Config.IsTestMode() || r.Config.IsProviderReadOnly() || r.DB == nil || r.Merchants == nil {
 		return
 	}
-	r.providerPostureErr.Store(nil)
 	environment := config.ExpectedProviderEnvironment(true)
-	verifyMerchant := func(mid merchant.ID) {
+	seen := map[merchant.ID]bool{}
+	for _, mid := range append([]merchant.ID{r.ConfiguredMerchant()}, declared...) {
+		if mid.IsZero() || seen[mid] {
+			continue
+		}
+		seen[mid] = true
 		if err := r.DB.RunInMerchantScope(ctx, mid, "provider posture", func(mctx context.Context) error {
 			rows, err := r.DB.Gen(mctx).ListPSPsForMerchant(mctx, gen.ListPSPsForMerchantParams{MerchantID: mid.UUID()})
 			if err != nil {
@@ -44,35 +48,6 @@ func (r *Runtime) VerifyProviderPosture(ctx context.Context) {
 			return nil
 		}); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Error("provider posture: cannot read merchant PSPs")
-		}
-	}
-	// An embedded runtime loads only its configured merchant's credentials.
-	if mid := r.ConfiguredMerchant(); !mid.IsZero() {
-		verifyMerchant(mid)
-		return
-	}
-	var after *uuid.UUID
-	for {
-		ids, err := r.DB.GenDirectory().ListRailArmedMerchants(ctx, gen.ListRailArmedMerchantsParams{
-			Rails:           []string{string(models.RailNMI), string(models.RailStripe), string(models.RailSolana), string(models.RailCCBill)},
-			MerchantLimit:   providerPostureMerchantBatch,
-			AfterMerchantID: after,
-		})
-		if err != nil {
-			failure := fmt.Errorf("list PSP merchants: %w", err)
-			r.providerPostureErr.Store(&failure)
-			log.WithContext(ctx).WithError(err).Error("provider posture: cannot enumerate PSPs; sandbox mutations verify on first use")
-			return
-		}
-		for _, id := range ids {
-			if id == nil {
-				continue
-			}
-			after = id
-			verifyMerchant(merchant.ID(*id))
-		}
-		if len(ids) < providerPostureMerchantBatch {
-			return
 		}
 	}
 }
@@ -141,12 +116,6 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid merchant.ID, pspID u
 // unknown verdicts are re-verified here, so a transient provider outage at
 // startup recovers without a restart.
 func (r *Runtime) providerPostureReady(ctx context.Context) error {
-	if failed := r.providerPostureErr.Load(); failed != nil {
-		r.VerifyProviderPosture(ctx)
-		if failed = r.providerPostureErr.Load(); failed != nil {
-			return *failed
-		}
-	}
 	disarmed := r.providerPosture.Disarmed(ctx, providerposture.Process())
 	if len(disarmed) == 0 {
 		return nil

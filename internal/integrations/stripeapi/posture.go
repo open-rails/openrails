@@ -22,10 +22,10 @@ func PostureKey(secretKey, endpoint, account string) providerposture.Key {
 	return providerposture.Key{Rail: "stripe", AccountID: account, Endpoint: endpoint, Credential: providerposture.Fingerprint(secretKey)}
 }
 
-// PostureCheck requires Stripe's authoritative signals: a test-mode key
+// PostureCheck reads the fixed Stripe API root and requires its authoritative signals: a test-mode key
 // prefix, the declared account's identity (when one is declared) and a live
 // API read reporting livemode=false for the same key.
-func PostureCheck(transport http.RoundTripper, secretKey, endpoint, connected, declared string) providerposture.Check {
+func PostureCheck(transport http.RoundTripper, secretKey, connected, declared string) providerposture.Check {
 	return func(ctx context.Context) (providerposture.Verdict, error) {
 		switch {
 		case strings.HasPrefix(secretKey, "sk_live_") || strings.HasPrefix(secretKey, "rk_live_"):
@@ -35,7 +35,7 @@ func PostureCheck(transport http.RoundTripper, secretKey, endpoint, connected, d
 		}
 		client := &http.Client{Transport: transport, Timeout: DefaultTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 		read := func(path string, target any) error {
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+path, nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, APIBase+path, nil)
 			if err != nil {
 				return err
 			}
@@ -99,7 +99,7 @@ func (f *Factory) PostureCheckFor(secretKey, declared string) providerposture.Ch
 	if f != nil && f.base != nil {
 		return func(context.Context) (providerposture.Verdict, error) { return providerposture.Simulated, nil }
 	}
-	return PostureCheck(http.DefaultTransport, secretKey, APIBase, "", declared)
+	return PostureCheck(http.DefaultTransport, secretKey, "", declared)
 }
 
 // requirePosture gates one sandbox-posture mutation on its key's verdict.
@@ -115,7 +115,7 @@ func requirePosture(req *http.Request, transport http.RoundTripper) error {
 		}
 		return nil
 	}
-	return providerposture.Process().Require(req.Context(), PostureKey(secretKey, endpoint, account), PostureCheck(transport, secretKey, endpoint, account, ""))
+	return providerposture.Process().Require(req.Context(), PostureKey(secretKey, endpoint, account), PostureCheck(transport, secretKey, account, ""))
 }
 
 func requestSecret(req *http.Request) string {

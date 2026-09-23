@@ -149,7 +149,9 @@ func (c *NMIClient) qualifyAccount(ctx context.Context) (TestModeProbeResult, er
 
 // ProxyPostureClient is the posture identity of a credential that a custodian
 // proxy forwards to destination. The destination selects which official
-// signal applies; it never implies the verdict.
+// signal applies; it never implies the verdict. A fixture (set only by code
+// seams or the loopback provider_sandbox) skips verification: OpenRails never
+// dials the destination itself, only the custodian.
 func ProxyPostureClient(securityKey, destination string, testMode, loopbackFixture bool) (*NMIClient, error) {
 	deployment := ""
 	switch destination {
@@ -167,7 +169,7 @@ func ProxyPostureClient(securityKey, destination string, testMode, loopbackFixtu
 		return nil, err
 	}
 	client.DirectPostURL = destination
-	client.LoopbackFixture = loopbackFixture
+	client.proxyFixture = loopbackFixture
 	return client, nil
 }
 
@@ -179,6 +181,9 @@ func (c *NMIClient) RequireArmedFor(ctx context.Context, destination, securityKe
 	}
 	if c.TestMode && (destination != c.DirectPostURL || securityKey != c.SecurityKey) {
 		return fmt.Errorf("%w: proxy credential or destination is not the verified NMI account", providerposture.ErrDisarmed)
+	}
+	if c.proxyFixture {
+		return nil
 	}
 	return c.requireArmed(ctx, destination)
 }

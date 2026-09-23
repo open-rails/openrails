@@ -82,7 +82,7 @@ func TestSandboxStripeLiveOrLiveModeDisarms(t *testing.T) {
 func TestStripeStartupVerificationBindsDeclaredAccount(t *testing.T) {
 	f := newFakeStripe(t, "false", "acct_real")
 	key := "sk_test_" + uuid.NewString()
-	check := PostureCheck(HostRewriteTransport(f.URL), key, APIBase, "", "acct_declared")
+	check := PostureCheck(HostRewriteTransport(f.URL), key, "", "acct_declared")
 	status := providerposture.Process().Verify(context.Background(), PostureKey(key, APIBase, ""), check)
 	require.Equal(t, providerposture.Mismatched, status.Verdict)
 	require.ErrorIs(t, post(t, sandboxClient(f), key), providerposture.ErrDisarmed, "the transport gate honors the startup verdict")

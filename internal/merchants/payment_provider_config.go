@@ -936,6 +936,9 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 // undeclared PSP uses the default deployment and its derived natural-key id.
 func (s *Service) storedNMIDeployment(ctx context.Context, id merchant.ID, rail, environment, accountID string) (string, uuid.UUID, error) {
 	pspID, _, _, _ := PSPNaturalKey(rail, environment, accountID)
+	if s.pool == nil {
+		return "", pspID, nil
+	}
 	var stored struct {
 		Settings map[string]any `json:"settings"`
 	}

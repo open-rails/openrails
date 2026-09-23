@@ -56,8 +56,7 @@ import (
 type Runtime struct {
 	// providerPosture holds the sandbox PSP credentials verified at load;
 	// Ready reports any that are disarmed.
-	providerPosture    providerposture.Tracked
-	providerPostureErr atomic.Pointer[error]
+	providerPosture providerposture.Tracked
 	// NMIPostureV5BaseURL is a test-only seam for the startup sandbox probe.
 	NMIPostureV5BaseURL string
 

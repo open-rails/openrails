@@ -161,17 +161,28 @@ func optsValue[T any](opts *Options, pick func(*Options) T) T {
 // It then verifies every loaded sandbox PSP credential once (disarming, never
 // refusing boot); nmiProbeV5BaseURL is the test-only posture probe seam.
 func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, path, nmiProbeV5BaseURL string) error {
-	if err := reconcileBootMerchantManifest(ctx, cfg, application, path); err != nil {
+	slugs, err := reconcileBootMerchantManifest(ctx, cfg, application, path)
+	if err != nil || application.Runtime == nil {
 		return err
 	}
-	if application.Runtime != nil {
-		application.Runtime.NMIPostureV5BaseURL = nmiProbeV5BaseURL
-		application.Runtime.VerifyProviderPosture(ctx)
+	rt := application.Runtime
+	// Readiness reports an unarmed secret backend; posture waits for it.
+	if err := rt.EnsureMerchantsService(ctx); err != nil || rt.Merchants == nil {
+		log.WithError(err).Warn("provider posture: merchant credentials unavailable at startup; sandbox PSPs verify on first use")
+		return nil
 	}
+	var declared []merchant.ID
+	for _, slug := range slugs {
+		if m, err := rt.Merchants.GetBySlug(ctx, slug); err == nil {
+			declared = append(declared, m.ID)
+		}
+	}
+	rt.NMIPostureV5BaseURL = nmiProbeV5BaseURL
+	rt.VerifyProviderPosture(ctx, declared...)
 	return nil
 }
 
-func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, path string) error {
+func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, path string) ([]string, error) {
 	explicit := strings.TrimSpace(path) != ""
 	if !explicit {
 		path = bootstrap.DefaultMerchantConfigManifestPath
@@ -179,36 +190,40 @@ func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	raw, err := os.ReadFile(path) // #nosec G304 -- path is a boot-time CLI/config value, not request input
 	if os.IsNotExist(err) {
 		if explicit {
-			return fmt.Errorf("merchant manifest %s: %w (explicit startup manifest is required)", path, err)
+			return nil, fmt.Errorf("merchant manifest %s: %w (explicit startup manifest is required)", path, err)
 		}
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return fmt.Errorf("read merchant manifest %s: %w", path, err)
+		return nil, fmt.Errorf("read merchant manifest %s: %w", path, err)
 	}
 
 	overlays, err := bootstrap.ReadMerchantManifestOverlays(cfg.MerchantManifestOverlays)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	manifest, err := bootstrap.LoadMerchantConfigManifestWithOverlays(raw, overlays...)
 	if err != nil {
-		return fmt.Errorf("merchant manifest %s: %w", path, err)
+		return nil, fmt.Errorf("merchant manifest %s: %w", path, err)
 	}
 	rt := application.Runtime
 	if rt == nil {
-		return fmt.Errorf("merchant startup requires a runtime")
+		return nil, fmt.Errorf("merchant startup requires a runtime")
 	}
 	opts := bootstrap.MerchantManifestReconcileOptions{StripeClients: rt.StripeClients, Insert: true}
 	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
 		if rt.ManifestSecrets == nil {
-			return fmt.Errorf("snapshot credentials require the runtime snapshot plane")
+			return nil, fmt.Errorf("snapshot credentials require the runtime snapshot plane")
 		}
 		opts.SecretStore = rt.ManifestSecrets.Seeder()
 	}
 	if err := bootstrap.ReconcileMerchantManifestData(ctx, cfg, embcp.Get(application), manifest, opts); err != nil {
-		return fmt.Errorf("merchant manifest %s: %w", path, err)
+		return nil, fmt.Errorf("merchant manifest %s: %w", path, err)
 	}
 	log.WithField("file", path).Info("merchant startup initialized; existing metadata preserved")
-	return nil
+	slugs := make([]string, 0, len(manifest.Merchants))
+	for slug := range manifest.Merchants {
+		slugs = append(slugs, slug)
+	}
+	return slugs, nil
 }

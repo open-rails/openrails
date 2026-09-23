@@ -49,6 +49,7 @@ type NMIClient struct {
 	// LoopbackFixture marks an explicitly declared loopback fake gateway:
 	// mutations skip posture verification but only reach literal loopback IPs.
 	LoopbackFixture bool
+	proxyFixture    bool
 	// httpClient bounds every gateway call with a timeout so a slow/hung NMI
 	// endpoint fails fast instead of blocking the request forever (#363/#367).
 	// The default http.DefaultClient used by http.PostForm has NO timeout.
