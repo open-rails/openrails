@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -185,6 +186,13 @@ func checkAdminRefundRail(ctx context.Context, r *httprequest.Request, paymentID
 		if err != nil || !ok || client == nil {
 			log.WithError(err).WithField("payment_id", paymentID).Warn("nmi refund rail unavailable")
 			return adminRefundCodedError(http.StatusConflict, refundCodeRailUnavailable, "nmi refunds are unavailable: the payment's rail account is not armed")
+		}
+		// A credential set already known to fail sandbox posture refuses here;
+		// an unverified one is verified by the dispatch gate itself.
+		if client.TestMode && !client.LoopbackFixture {
+			if status, known := providerposture.Process().Lookup(client.PostureKey()); known && !status.Armed() {
+				return adminRefundCodedError(http.StatusConflict, refundCodeRailUnavailable, "nmi refunds are unavailable: sandbox posture is not verified ("+status.Verdict.String()+")")
+			}
 		}
 	default:
 		return adminRefundCodedError(http.StatusBadRequest, refundCodeUnsupported, fmt.Sprintf("refunds not supported for rail: %s", payment.Rail))
