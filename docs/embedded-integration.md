@@ -634,9 +634,21 @@ A host that must commit its own provider obligation atomically with the OpenRail
 authorization, release or settlement uses `embed.NewHostTransactions(rt)` with a transaction
 from its pool. See [provider obligations](architecture/provider-obligation-contract.md).
 
-The in-process Client pins the runtime's bound merchant on every call, so
-application code never scopes connections itself; a multi-merchant runtime
-binds each Client at construction with `openrails.WithMerchantID`.
+The in-process transport resolves and pins the selected immutable merchant for
+each operation, so application code never scopes connections itself. An
+unrestricted multi-merchant runtime can reuse one Client:
+
+```go
+client, err := multiMerchantRuntime.Client(openrails.WithDefaultMerchant("store-a"))
+if err != nil { return err }
+products, err := client.Products.List(ctx, nil, openrails.WithMerchant("store-b"))
+// For stored UUIDs use openrails.ForMerchantID(id) instead of a slug selector.
+```
+
+The default does not restrict an otherwise unrestricted runtime, and the
+per-operation option does not mutate it. A runtime restricted by its merchant
+declaration still refuses a different merchant. Both selectors require the same
+operation permission; neither acts as authorization.
 
 ### 8. Acting on delinquency
 
@@ -646,7 +658,7 @@ your app can shut off what your app runs. Transitions land on a durable,
 acknowledged feed you drain:
 
 ```go
-// client is returned by runtime.Client(openrails.WithMerchantID(mid))
+// client is returned by runtime.Client(openrails.WithDefaultMerchant("my-store"))
 // or openrails.NewRemote(...); both use the same operations.
 for _, kind := range []openrails.HostEventType{
     openrails.HostEventDelinquencyGrace,
