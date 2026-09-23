@@ -20,9 +20,11 @@ network hop, no second credential. Concretely:
   Parity is structural: one client implementation, one handler surface, joined by an
   in-process `http.RoundTripper` instead of a socket (enforced by a dual-mode
   conformance test).
-- A runtime constructed with `Options.Merchant` serves **one merchant**; a
-  multi-merchant runtime (`examples/multimerchant`) binds each Client with
-  `openrails.WithMerchantID`.
+- A runtime constructed with `Options.Merchant` is restricted to that merchant.
+  An unrestricted multi-merchant runtime (`examples/multimerchant`) can reuse one
+  Client: `WithDefaultMerchant` supplies an immutable default, while each operation
+  can select a slug with `WithMerchant` or a stable ID with `ForMerchantID`.
+  Selection never grants authority or overrides a runtime restriction.
 
 ```mermaid
 flowchart LR
@@ -406,7 +408,10 @@ selects applicable configured providers for creator prices. It does not create
 separate merchants, provider accounts, payout policies or checkout authority.
 
 HTTP hosts mount these endpoints by configuring `HTTP.Catalog: true`, under
-`/v1/catalog`. Their existing Gate must return a verified `Principal.Subject`
+`/v1/catalog`. Native personal operations use the explicitly mapped canonical
+`Identity.CustomerID` as the owner key. Explicitly selecting a different owner
+requires the existing live catalog administrator check. Advanced delegated gates
+must return a verified `Principal.Subject`
 and authorize the narrow owner permission. If Subject is absent, the library
 uses only that Gate result's `UserContext.UserID`; both absent is a refusal.
 An owner ID in a body, query, header or ambient host context never supplies
@@ -422,76 +427,53 @@ grants; it is not assigned automatically.
 
 ### 6. Mounting HTTP
 
-OpenRails never parses your credentials. You implement two small `pkg/billingauth`
-interfaces over whatever auth you already have:
+Supply `Options.Auth` with a provider-neutral `billingauth.Integration` at
+construction. It is independent of HTTP publication: the same integration protects
+explicit credentials on headless Client calls and published routes.
 
-- `billingauth.Authenticator` → `UserContext` for checkout/user routes. `UserID` is
-  **required and MUST be a UUID** (it becomes the payable customer_id; non-UUID
-  subjects 401 on required routes and silently downgrade to anonymous on optional
-  ones — map non-UUID native ids to a stable UUID). Optional metadata: `Email`,
-  `EmailVerified`, `Username`, `Roles`, `Entitlements`, `Merchant`/`MerchantRoles`.
-  Adapt closures with `billingauth.AuthenticatorFunc`.
-- `billingauth.DelegatedAuthenticator` → `*billingauth.DelegatedPrincipal` for
-  `/v1/me/*` and `/v1/customers/*`. `MerchantID` and `SubjectID` are required —
-  explicit mapping, no fallbacks, fail-closed 401. Optional: `MerchantSlug`,
-  `Issuer` (audit), `Permissions` (trusted verbatim for in-process hosts — grant
-  only what you mean), contact metadata. Adapt with
-  `billingauth.DelegatedAuthenticatorFunc`.
-- **Invoker-scoped principals** (or#930). Set `Invoker` when the credential
-  spends a payer's money WITHOUT being the payer — your platform's end user
-  drawing on your org's balance under a spend delegation. Use the SAME opaque
-  invoker string you pass to admission, so the identity that is metered is the
-  identity that reads. OpenRails then narrows the principal to exactly one
-  thing, `GET /v1/me/spend-limits`; every other `/v1/me/*` and `/v1/customers/*`
-  route refuses it `403 invoker_scoped_principal`, because `SubjectID` there
-  names an account the invoker does not own. That guard is what makes it safe to
-  map an end-user credential onto a payer account at all — without it the
-  self-service surface is all-or-nothing, and hosts correctly reject end-user
-  tokens outright.
-- `billingauth.Gate` (merchant-admin routes only): `Authorize(ctx, r, permission)
-  (Principal, error)` — checks a live `merchant:*` permission per request.
+- `Authentication.AuthenticateRequest` verifies the credential and returns typed
+  `Identity` provenance. Native users require their original `Issuer` and
+  `SubjectID`; personal customer, checkout and own-catalog operations also require
+  an explicitly mapped canonical UUID `CustomerID`. Map external identities by
+  issuer and subject; OpenRails never guesses or hashes that mapping. Ordinary
+  merchant staff do not need a payable customer identity.
+- `Authorization.Authorize` checks the exact operation and resolved target live.
+  Merchant selection and personal ownership do not grant merchant administration,
+  refunds, or access to another catalog owner. Native JWT roles never provide a
+  permission fallback. Machine and delegated credentials retain their ceilings
+  and cannot become native personal sessions.
 
-AuthKit hosts should not hand-write these. `embed/authkit` ships the
-bridges, in two flavours that differ only in where the verifier comes from:
+The optional AuthKit adapter is `orauthkit.New(orauthkit.Config{...})`. Supply the
+host's existing, initialized `VerifyRequest` verifier; an AuthKit Runtime's local
+verifier exists after its HTTP configuration has been constructed. Personal
+native routes need only that verifier. Privileged operations also need the live
+AuthKit `Client` and an explicit `Authority` mapping to a group and permission.
+Use `PlatformAuthority` for an intentional operation-specific platform counterpart;
+there is no role-name or universal administrator bypass. `AuthorityIssuer` fences
+machine credentials to the receiving permission authority. Verification is
+memoized only within one unchanged request, including sender proofs; permission
+decisions remain live per operation.
 
-| your situation | use |
-|---|---|
-| you already have an AuthKit verifier (in-process AuthKit, embedded control plane) | `NewAuthenticator(v, …)` / `NewDelegatedAuthenticator(v, boundMerchantID, …)` |
-| you trust a REMOTE issuer over JWKS | `NewVerifierAuthenticator(issuers, aud, …)` / `NewVerifierDelegatedAuthenticator(issuers, aud, boundMerchantID, …)` |
+`Config.Admission` is an explicit opt-in liveness veto. The default native JWT
+path retains login/refresh/expiry ban timing rather than adding a ban lookup to
+every request. Applications that already require live admission must retain it.
 
-Inject your own verifier whenever you have one: the request is then verified
-through `VerifyRequest` — your whole credential chain (API-key branch,
-2FA-enrollment gate, issuer enrichment) — so billing cannot end up with a
-weaker check than the rest of your app, and an in-process host never refetches
-its own keys over HTTP. The merchant pin is YOUR engine's bound merchant in
-every flavour, never anything from the caller's token (#913/upstream#1765).
+`CustomerRoutes` defaults to `/v1/me` and resolves its configured merchant slug
+when routes are materialized. `Treasury: true` additionally enables the canonical
+`/v1/customers` group. A native user can access its canonical personal payer
+without a role lookup; selecting the fixed merchant as payer requires live
+`CustomerScope` authorization for the exact customer operation and immutable
+merchant/payer IDs. Sibling customer IDs remain denied.
 
-By default `Permissions` comes from the canonical role→permission preset
-`permissions.ForRoles` (owner/admin → `merchant:*` + `customer:*`; member → the
-customer self-service set; read-only → its `:read` subset). The options
-(or#918):
-
-- `WithAdmission(func(ctx, *http.Request, verify.Claims) error)` — a per-request
-  veto that runs after verification, before the principal is built. JWT verify
-  is stateless, so a **banned or deleted user keeps a valid token until it
-  expires**: put your liveness gate here and every delegated principal,
-  `/v1/me` included, is checked. A non-nil error is logged and answered 401;
-  the message never reaches the client. `WithUserAdmission` is the same veto on
-  the non-delegated authenticator.
-- `WithPermissionResolver(func(ctx, *http.Request, verify.Claims) ([]string, error))`
-  — permissions from the live request instead of the token's roles, for a grant
-  that is a DB read ("is this user a billing admin?") and worth scoping to the
-  admin path so the hot self path stays lookup-free. Runs after the admission
-  veto. An error fails the request closed. Mutually exclusive with
-  `WithRolePermissions` (the simple case: your own role vocabulary).
-- `WithMerchantSlug(slug)` — required if principals must address the merchant's
-  OWN treasury account by slug (or#916); without it the uuid is the only
-  address that resolves.
-- `WithIssuer(iss)` — override the audit issuer (default: the token's `iss`),
-  e.g. `openrails.SelfIssuer` when your customer rows are keyed to it.
-- `WithoutTokenRoles()` (non-delegated) — drop the token's role snapshot from
-  `UserContext`. It is stale for the token's lifetime; omit it rather than pass
-  a snapshot nothing should authorize on.
+Advanced, genuinely delegated audiences can instead supply their own
+`CustomerRoutesConfig.DelegatedAuthenticator`. The existing
+`NewDelegatedAuthenticator` / `NewVerifierDelegatedAuthenticator` helpers remain
+for those explicit integrations, with `WithAdmission` and
+`WithPermissionResolver` for host policy. They confer no permissions by default
+and never infer authority from token roles. The host must preserve verified
+merchant/payer binding, issuer, credential class and invoker restrictions.
+An invoker-scoped principal may read its own `/v1/me/spend-limits`; the other
+personal and treasury operations continue to refuse it.
 
 Configure HTTP once when constructing the runtime, then mount its configured
 routes once on your framework. Enable only the capabilities the application
@@ -503,6 +485,7 @@ auth, err := orauthkit.New(orauthkit.Config{Verifier: authRuntime.Verifier()})
 if err != nil { return err }
 rt, err := embed.New(ctx, embed.Options{
     Config: cfg,
+    Merchant: &embed.MerchantDeclaration{Slug: "my-store"},
     Auth: auth,
     HTTP: &embed.HTTPConfig{
         CustomerRoutes: []embed.CustomerRoutesConfig{{
@@ -512,7 +495,7 @@ rt, err := embed.New(ctx, embed.Options{
     },
 })
 if err != nil { return err }
-// Bootstrap the named merchant with the Client and compose River before serving.
+// Supply the host database and River options, then compose River before serving.
 ```
 
 `Options.Auth` supplies provider-neutral authentication and live operation
