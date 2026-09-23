@@ -66,6 +66,9 @@ func TestPrepareCancel_AttachesReference(t *testing.T) {
 		t.Fatalf("PrepareWithReference: %v", err)
 	}
 	tx := decodeTx(t, res.Transaction)
+	if len(tx.Message.Instructions) != 2 {
+		t.Fatal("cancel transaction must contain only cancellation and its reference tag")
+	}
 	if got := programInstructionAccountCounts(t, tx); len(got) != 1 || got[0] != 5 {
 		t.Fatalf("cancel instruction accounts = %v, want [5]", got)
 	}
