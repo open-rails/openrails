@@ -84,6 +84,18 @@ func TestConfirmTierChange_RollsBackPartialMirrorAndRetries(t *testing.T) {
 	      VALUES ($1,$2,$3,'active','solana',$4,$5,$6,$5,'{}'::jsonb,$7,$8,$9)`,
 		oldSubID, oldPriceID, oldProductID, "old-pda-"+suffix, periodStart, periodEnd, customerID, merchantID, pspID)
 
+	oldEntitlement := uuid.New()
+	exec(`INSERT INTO billing.entitlements (id,merchant_id,customer_id,entitlement,source_type,source_id,start_at,end_at)
+	      VALUES ($1,$2,$3,'old-tier-access','subscription',$4,$5,$6)`, oldEntitlement, merchantID, customerID, oldSubID, periodStart, periodEnd)
+	assertOldAccess := func(wantLive bool) {
+		t.Helper()
+		var live bool
+		require.NoError(t, dbi.Pool().QueryRow(ctx, `SELECT revoked_at IS NULL AND start_at <= now() AND end_at > now()
+		    FROM billing.entitlements WHERE id=$1`, oldEntitlement).Scan(&live))
+		require.Equal(t, wantLive, live, "old tier access follows the committed tier change")
+	}
+	assertOldAccess(true)
+
 	merchantKey, err := solanago.NewRandomPrivateKey()
 	require.NoError(t, err)
 	subscriberKey, err := solanago.NewRandomPrivateKey()
@@ -153,6 +165,7 @@ func TestConfirmTierChange_RollsBackPartialMirrorAndRetries(t *testing.T) {
 	oldAfterFailure, err := repo.GetBySubscriptionID(ctx, oldSubID)
 	require.NoError(t, err)
 	require.Equal(t, models.SolanaSubscriptionActive, oldAfterFailure.Status)
+	assertOldAccess(true)
 
 	result, err := svc.Confirm(ctx, in)
 	require.NoError(t, err)
@@ -162,9 +175,17 @@ func TestConfirmTierChange_RollsBackPartialMirrorAndRetries(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, result.NewSubscription.ID, newMirror.SubscriptionID)
 	require.Equal(t, models.SolanaSubscriptionActive, newMirror.Status)
+	require.True(t, newMirror.NextPullAt.Equal(now.Add(720*time.Hour)))
+	assertOldAccess(false)
+	replay, err := svc.Confirm(ctx, in)
+	require.NoError(t, err)
+	require.True(t, replay.AlreadyConfirmed)
+	require.Equal(t, result.NewSubscription.ID, replay.NewSubscription.ID)
+	assertTierChangeState(t, ctx, dbi, customerID, tierGroup, oldSubID, result.NewSubscription.ID, 1, models.StatusCancelled)
 	oldAfterRetry, err := repo.GetBySubscriptionID(ctx, oldSubID)
 	require.NoError(t, err)
 	require.Equal(t, models.SolanaSubscriptionCancelled, oldAfterRetry.Status)
+	assertOldAccess(false)
 }
 
 func assertTierChangeState(t *testing.T, ctx context.Context, dbi *db.DB, customerID uuid.UUID, tierGroup string, oldSubID, newSubID uuid.UUID, wantLive int, wantOldStatus models.SubscriptionStatus) {

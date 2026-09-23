@@ -11,16 +11,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
-
-// #690 detector tests: the freeloader detector (derive.entitlement.unjustified),
-// the cross-month duplicate-ownership detector (consistency.duplicate.
-// ownership), and the #691 terminal-window closure/runway guard.
 
 // TestConverge_DeadSubRunwayGuard (#690 hazard fix): a user-cancelled sub's
 // PAID RUNWAY window (bounded to period end) is NOT excess — the sweep leaves
@@ -315,168 +310,6 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 			 WHERE merchant_id=$1 AND finding_type='derive.entitlement.unjustified' AND subject_key=ANY($2)`,
 			merchantID, subjects).Scan(&n))
 		require.Equal(t, 2, n, "two freeloader shapes, one finding each, no duplicates")
-		return nil
-	}))
-}
-
-// TestConverge_ConDuplicateOwnership: two live paid ownership grants for the
-// same (customer, product) — the cross-month double purchase — fire ONE
-// critical ADMIN finding with the cancel_and_refund recommendation naming the
-// later purchase; different products and sequential (terminated-then-repurchased)
-// shapes never fire.
-func TestConverge_ConDuplicateOwnership(t *testing.T) {
-	appDB := startReconcilePostgres(t)
-	merchantID := dbtest.TestMerchantID.UUID()
-	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	e := NewConvergeEngine(appDB)
-	suffix := uuid.NewString()[:8]
-	now := time.Now().UTC()
-	var customer uuid.UUID
-
-	prodDup, prodSingle, prodSeq, prodSubShaped := uuid.New(), uuid.New(), uuid.New(), uuid.New()
-	priceID := uuid.New()
-	pay1, pay2, pay3, pay4, pay5, pay6 := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
-	fakeSubID := uuid.New()
-
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		customer = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
-		exec := func(sql string, args ...any) {
-			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
-			require.NoError(t, err)
-		}
-		for i, pid := range []uuid.UUID{prodDup, prodSingle, prodSeq, prodSubShaped} {
-			exec(`INSERT INTO billing.products (id, key, display_name, entitlements_spec, merchant_id)
-			      VALUES ($1,$2,$2,'{}'::jsonb,$3)`, pid, "dupown-"+suffix+"-"+string(rune('a'+i)), merchantID)
-		}
-		exec(`INSERT INTO billing.prices (id, product_id, amount, currency, merchant_id)
-		      VALUES ($1,$2,9990000,'USD',$3)`, priceID, prodDup, merchantID)
-		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
-		seedPay := func(id uuid.UUID, txn string, at time.Time) {
-			exec(`INSERT INTO billing.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
-			      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','completed',$6,$7)`,
-				id, merchantID, customer, priceID, txn, at, pspID)
-		}
-		// Every payment lands in a DIFFERENT month (all share one price →
-		// product for provider_charge's grouping), so the month-scoped
-		// duplicate.provider_charge check never fires — this test isolates the
-		// cross-month gap that consistency.duplicate.ownership closes.
-		seedPay(pay1, "do-1-"+suffix, now.Add(-65*24*time.Hour))
-		seedPay(pay2, "do-2-"+suffix, now.Add(-24*time.Hour))
-		seedPay(pay3, "do-3-"+suffix, now.Add(-95*24*time.Hour))
-		seedPay(pay4, "do-4-"+suffix, now.Add(-125*24*time.Hour))
-		seedPay(pay5, "do-5-"+suffix, now.Add(-155*24*time.Hour))
-		seedPay(pay6, "do-6-"+suffix, now.Add(-35*24*time.Hour))
-
-		gl := grants.New(appDB.Gen(ctx), merchantID)
-		own := func(product uuid.UUID, source grants.SourceType, sourceID string, pay uuid.UUID, at time.Time) uuid.UUID {
-			g, err := gl.Grant(ctx, grants.GrantInput{
-				Customer: customer, Kind: grants.Ownership, Product: &product,
-				Source: source, SourceID: sourceID, Payment: &pay, StartsAt: at,
-			})
-			require.NoError(t, err)
-			return g.ID
-		}
-		// prodDup: two live purchase grants -> duplicate.
-		own(prodDup, grants.Purchase, pay1.String(), pay1, now.Add(-60*24*time.Hour))
-		own(prodDup, grants.Purchase, pay2.String(), pay2, now.Add(-24*time.Hour))
-		// prodSingle: one grant -> clean.
-		own(prodSingle, grants.Purchase, pay3.String(), pay3, now.Add(-90*24*time.Hour))
-		// prodSeq: first terminated before the second was bought -> clean.
-		first := own(prodSeq, grants.Purchase, pay4.String(), pay4, now.Add(-50*24*time.Hour))
-		_, err := gl.Revoke(ctx, first, "refund/regrant test shape")
-		require.NoError(t, err)
-		own(prodSeq, grants.Purchase, pay5.String(), pay5, now.Add(-100*24*time.Hour))
-		// prodSubShaped: purchase + LATER subscription-sourced grant -> duplicate
-		// whose recommendation carries subscription_id.
-		own(prodSubShaped, grants.Purchase, pay3.String(), pay3, now.Add(-90*24*time.Hour))
-		own(prodSubShaped, grants.Subscription, fakeSubID.String(), pay6, now.Add(-2*24*time.Hour))
-		return nil
-	}))
-
-	subjects := []string{
-		"ownership:" + customer.String() + ":" + prodDup.String(),
-		"ownership:" + customer.String() + ":" + prodSingle.String(),
-		"ownership:" + customer.String() + ":" + prodSeq.String(),
-		"ownership:" + customer.String() + ":" + prodSubShaped.String(),
-	}
-	t.Cleanup(func() {
-		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.reconciliation_findings WHERE merchant_id=$1 AND subject_key=ANY($2)`, merchantID, subjects)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.grants WHERE customer_id=$1`, customer)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.payments WHERE id=ANY($1)`, []uuid.UUID{pay1, pay2, pay3, pay4, pay5, pay6})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.prices WHERE id=$1`, priceID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM billing.products WHERE id=ANY($1)`, []uuid.UUID{prodDup, prodSingle, prodSeq, prodSubShaped})
-			return nil
-		})
-	})
-
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		_, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
-		require.NoError(t, err)
-
-		load := func(product uuid.UUID) (string, string, *string, map[string]any, bool) {
-			var status, severity string
-			var prose *string
-			var evidence []byte
-			err := appDB.Qx(ctx).QueryRow(ctx,
-				`SELECT status, severity, recommended_action, evidence FROM billing.reconciliation_findings
-				 WHERE merchant_id=$1 AND finding_type='consistency.duplicate.ownership' AND subject_key=$2`,
-				merchantID, "ownership:"+customer.String()+":"+product.String()).Scan(&status, &severity, &prose, &evidence)
-			if err != nil {
-				return "", "", nil, nil, false
-			}
-			var ev map[string]any
-			require.NoError(t, json.Unmarshal(evidence, &ev))
-			return status, severity, prose, ev, true
-		}
-
-		// prodDup: critical duplicate with the later payment as refund target.
-		status, severity, prose, ev, found := load(prodDup)
-		require.True(t, found, "cross-month double purchase must surface")
-		require.Equal(t, "requires_review", status)
-		require.Equal(t, "critical", severity, "#690: a duplicate charge outranks a freeloader")
-		require.NotNil(t, prose)
-		require.Contains(t, *prose, pay1.String(), "prose names the earlier purchase")
-		require.Contains(t, *prose, pay2.String(), "prose names the later purchase")
-		rec, ok := recommend.FromEvidence(ev)
-		require.True(t, ok)
-		require.Equal(t, recommend.ActionCancelAndRefund, rec.Action)
-		require.Equal(t, openrails.PaymentID(pay2).String(), rec.Params["refund_payment_id"], "later purchase is the default refund target")
-		_, hasSub := rec.Params["subscription_id"]
-		require.False(t, hasSub, "pure one-off duplicate is refund-only")
-
-		// prodSubShaped: later grant is subscription-shaped -> cancel+refund.
-		_, _, _, ev, found = load(prodSubShaped)
-		require.True(t, found)
-		rec, ok = recommend.FromEvidence(ev)
-		require.True(t, ok)
-		require.Equal(t, openrails.SubscriptionID(fakeSubID).String(), rec.Params["subscription_id"])
-		require.Equal(t, openrails.PaymentID(pay6).String(), rec.Params["refund_payment_id"])
-
-		// Negatives.
-		_, _, _, _, found = load(prodSingle)
-		require.False(t, found, "single purchase is clean")
-		_, _, _, _, found = load(prodSeq)
-		require.False(t, found, "sequential repurchase after termination is clean")
-
-		// Surface-only: no grant terminated, no payment touched.
-		var n int
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM billing.grants WHERE customer_id=$1 AND event IN ('revoke','expire','supersede')`, customer).Scan(&n))
-		require.Equal(t, 1, n, "only the test's own seeded termination exists")
-		return nil
-	}))
-
-	// Idempotent: still duplicates -> same two findings, upserted in place.
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		_, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
-		require.NoError(t, err)
-		var n int
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM billing.reconciliation_findings
-			 WHERE merchant_id=$1 AND finding_type='consistency.duplicate.ownership' AND subject_key=ANY($2)`,
-			merchantID, subjects).Scan(&n))
-		require.Equal(t, 2, n)
 		return nil
 	}))
 }

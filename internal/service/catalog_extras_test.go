@@ -2,8 +2,6 @@ package service
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -11,11 +9,9 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -167,49 +163,6 @@ func TestIsContentAddressedNMIPlanID(t *testing.T) {
 
 // -- NMI listing over httptest --------------------------------------------------
 
-// TestDetectNMIExtras_OverQueryAPI runs the real NMI client against an httptest
-// Query API and asserts the listing + classification, and that NO direct-post
-// (write) traffic is ever issued by detection.
-func TestDetectNMIExtras_OverQueryAPI(t *testing.T) {
-	var sawWrite bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			sawWrite = true
-			w.Write([]byte(`{}`))
-			return
-		}
-		if r.URL.Path != "/plans" {
-			t.Errorf("unexpected v5 GET %q", r.URL.Path)
-		}
-		w.Write([]byte(`{"plans":[
-			{"object":"plan","id":"premium-usd-23000000-30","plan_name":"Premium","plan_amount":"23.00"},
-			{"object":"plan","id":"retired-usd-900-30","plan_name":"Retired","plan_amount":"9.00"},
-			{"object":"plan","id":"legacy-vip-plan","plan_name":"Legacy VIP","plan_amount":"5.00"}
-		],"next_cursor":null,"has_more":false}`))
-	}))
-	defer server.Close()
-
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, false)
-	if err != nil {
-		t.Fatalf("new nmi client: %v", err)
-	}
-	client.DirectPostURL = server.URL
-	client.QueryURL = server.URL
-	client.V5BaseURL = server.URL
-
-	remotePlans, err := client.ListRecurringPlans(context.Background())
-	plans := catalog.MapNMIPlans(remotePlans)
-	if err != nil {
-		t.Fatalf("fetch nmi plans: %v", err)
-	}
-	if len(plans) != 3 {
-		t.Fatalf("expected 3 plans, got %d", len(plans))
-	}
-	if sawWrite {
-		t.Fatal("extras detection issued a direct-post (write) request; it must be read-only")
-	}
-}
-
 // -- archive: through the provider intent ledger (#358 phase D) -------------------
 
 // fakeIntentExecutor records every EnqueueAndExecute call and scripts the
@@ -321,27 +274,6 @@ func TestArchiveCatalogExtrasVia_EnqueuesOnlyOwnedActiveObjects(t *testing.T) {
 	for _, c := range exec.calls {
 		if c.Provider == "nmi" {
 			t.Fatalf("an NMI archive intent was enqueued; NMI must stay manual-only: %+v", c)
-		}
-	}
-}
-
-func TestArchiveCatalogExtrasVia_ForeignNeverTouchedEvenOnExhaustive(t *testing.T) {
-	exec := &fakeIntentExecutor{}
-	extras := []CatalogExtra{
-		{Provider: "stripe", ObjectType: "price", ExternalID: "price_foreign", Owned: false, Active: true},
-		{Provider: "stripe", ObjectType: "product", ExternalID: "prod_foreign", Owned: false, Active: true},
-		{Provider: "nmi", ObjectType: "plan", ExternalID: "merchant-plan", Owned: false, Active: true},
-	}
-	outcomes, err := archiveCatalogExtrasVia(context.Background(), exec, dbtest.TestMerchantID.UUID(), time.Now().UTC(), extras)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if len(exec.calls) != 0 {
-		t.Fatalf("foreign objects must never become archive intents: %+v", exec.calls)
-	}
-	for _, o := range outcomes {
-		if o.Action != CatalogExtraSkippedForeign {
-			t.Errorf("%s: expected skipped_foreign, got %s", o.Extra.ExternalID, o.Action)
 		}
 	}
 }

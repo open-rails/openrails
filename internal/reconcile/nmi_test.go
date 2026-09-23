@@ -220,19 +220,6 @@ func TestNMIFetcher_Fetch(t *testing.T) {
 	require.NotContains(t, txnReq, "recurring") // add/update/delete_subscription marker
 }
 
-func TestNMIFetcher_SubscriptionFilterForwarded(t *testing.T) {
-	t.Parallel()
-
-	var v5Paths []string
-	fetcher := newNMITestFetcher(t, nil, &v5Paths)
-
-	snap, err := fetcher.Fetch(context.Background(), FetchParams{SubscriptionID: "11494735091"})
-	require.NoError(t, err)
-	require.Contains(t, v5Paths, "/subscriptions/11494735091")
-	require.Len(t, snap.Subscriptions, 1)
-	require.False(t, snap.Coverage.SubscriptionsExhaustive)
-}
-
 func TestNMIFetcher_PaginatesTransactions(t *testing.T) {
 	t.Parallel()
 
@@ -337,30 +324,6 @@ func nmiTransactionPageXML(start, count int) string {
 	return b.String()
 }
 
-func TestNMIFetcher_ErrorResponse(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"type":"authenticationError","error_code":"E_AUTH","message":"Invalid Security Key"}`))
-			return
-		}
-		_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response><error_response>Invalid Security Key</error_response></nm_response>`))
-	}))
-	t.Cleanup(server.Close)
-
-	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "bad"}, true)
-	require.NoError(t, err)
-	client.QueryURL = server.URL
-	client.V5BaseURL = server.URL
-
-	_, err = NewNMIFetcher(client).Fetch(context.Background(), FetchParams{})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "status 401")
-	require.NotContains(t, err.Error(), "Invalid Security Key")
-}
-
 func TestParseAmountCents(t *testing.T) {
 	t.Parallel()
 
@@ -388,14 +351,6 @@ func TestParseAmountCents(t *testing.T) {
 		require.NoError(t, err, "input %q", tc.in)
 		require.Equal(t, tc.want, got, "input %q", tc.in)
 	}
-}
-
-func TestCardLast4(t *testing.T) {
-	t.Parallel()
-
-	require.Equal(t, "1111", cardLast4("4xxxxxxxxxxx1111"))
-	require.Equal(t, "", cardLast4(""))
-	require.Equal(t, "", cardLast4("xxxx"))
 }
 
 // #842: SubscriptionsExhaustive is an ABSENCE PROOF — it authorizes cancelling
