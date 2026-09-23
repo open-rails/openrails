@@ -71,6 +71,7 @@ var providerWriteSurface = map[string]string{
 	"DeleteCustomerBillingEntry":      "write", // IRREVERSIBLE: shared-vault scoped delete
 
 	// --- reads ----------------------------------------------------------
+	"QualifyDispatch":              "read",
 	"ConfirmApprovedSale":          "read",
 	"ConfirmApprovedUnvaultedSale": "read",
 	"ConfirmLiveSubscription":      "read",
