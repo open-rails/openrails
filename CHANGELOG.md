@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1
+
+- `appearance.theme: "inherit"`: no bundled palette; components use the host
+  page's shadcn tokens and follow its `.dark` class.
+- `SubscriptionsPanel`: "Change card" switches the saved card an active NMI
+  subscription renews on (`useSubscriptions().setPaymentMethod`), which now
+  notifies `subscription.payment_method_changed`.
+
 ## 0.5.0
 
 Account billing, alongside checkout. No change to checkout's API.

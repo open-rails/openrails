@@ -54,6 +54,16 @@ export const zh: BillingUiMessageBundle = {
     updating: "正在更新...",
     paidWith: "{brand} •••• {last4}",
     wallet: "Solana 钱包",
+    changeCard: "更换卡片",
+    changeCardLabel: "更换 {name} 的卡片",
+  },
+  changeCard: {
+    title: "{name} 的付款卡",
+    description: "之后的续费将从所选卡片扣款。",
+    none: "请先在付款方式中添加另一张卡片再切换。",
+    confirm: "使用这张卡",
+    current: "当前",
+    done: "付款卡已更新。",
   },
   cancel: {
     title: "取消 {name}？",

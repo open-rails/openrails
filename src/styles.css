@@ -7,8 +7,10 @@
 /* @openrails/billing-ui — scoped token set (shadcn base-vega, zinc).
    The build scopes every rule under `.orck` (tooling/checkout-css), so
    utilities resolve against these tokens, not the host page's.
-   `data-orck-theme` picks the palette; `auto` follows the OS. Integrator
-   overrides land as inline custom properties (appearance.ts) and win. */
+   `data-orck-theme` picks the palette; `auto` follows the OS; `inherit`
+   defines no palette, so the host's shadcn tokens and `.dark` class apply.
+   Integrator overrides land as inline custom properties (appearance.ts) and
+   win. */
 
 @custom-variant dark {
   &:where([data-orck-theme="dark"], [data-orck-theme="dark"] *) {
@@ -18,6 +20,14 @@
     &:where([data-orck-theme="auto"], [data-orck-theme="auto"] *) {
       @slot;
     }
+  }
+  &:where(
+    .dark [data-orck-theme="inherit"],
+    .dark [data-orck-theme="inherit"] *,
+    .dark[data-orck-theme="inherit"],
+    .dark[data-orck-theme="inherit"] *
+  ) {
+    @slot;
   }
 }
 
@@ -47,7 +57,7 @@
   --radius-2xl: calc(var(--radius) * 1.8);
 }
 
-.orck {
+.orck:not([data-orck-theme="inherit"]) {
   --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.823);
   --card: oklch(1 0 0);
@@ -68,18 +78,36 @@
   --ring: oklch(0.705 0.015 286.067);
   --orck-faint: oklch(0.705 0.015 286.067);
   --orck-hairline: oklch(0.141 0.005 285.823 / 6%);
-  --orck-success: oklch(0.6 0.13 163);
-  --orck-warning: oklch(0.6 0.15 55);
   --radius: 0.625rem;
   --orck-font:
     "Instrument Sans Variable", "Instrument Sans", -apple-system, "Segoe UI",
     Roboto, "Helvetica Neue", Arial, sans-serif;
 
   font-family: var(--orck-font);
+}
+
+.orck {
+  --orck-success: oklch(0.6 0.13 163);
+  --orck-warning: oklch(0.6 0.15 55);
+
   color: var(--foreground);
   -webkit-font-smoothing: antialiased;
   container-type: inline-size;
   container-name: orck;
+}
+
+/* Host palette: derive the checkout-only tokens from the host's. */
+.orck[data-orck-theme="inherit"] {
+  --orck-faint: var(--muted-foreground);
+  --orck-hairline: color-mix(in oklch, var(--foreground) 6%, transparent);
+  --orck-success: var(--success, oklch(0.6 0.13 163));
+  --orck-warning: var(--warning, oklch(0.6 0.15 55));
+  font-family: inherit;
+}
+
+.orck[data-orck-theme="inherit"]:where(.dark *, .dark) {
+  --orck-success: var(--success, oklch(0.77 0.15 163));
+  --orck-warning: var(--warning, oklch(0.8 0.15 75));
 }
 
 .orck[data-orck-theme="dark"] {

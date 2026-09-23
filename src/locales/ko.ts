@@ -54,6 +54,16 @@ export const ko: BillingUiMessageBundle = {
     updating: "업데이트 중...",
     paidWith: "{brand} •••• {last4}",
     wallet: "Solana 지갑",
+    changeCard: "카드 변경",
+    changeCardLabel: "{name} 카드 변경",
+  },
+  changeCard: {
+    title: "{name} 결제 카드",
+    description: "이후 갱신은 선택한 카드로 청구됩니다.",
+    none: "변경하려면 결제 수단에서 다른 카드를 추가하세요.",
+    confirm: "이 카드 사용",
+    current: "현재",
+    done: "결제 카드가 변경되었습니다.",
   },
   cancel: {
     title: "{name}을(를) 해지할까요?",

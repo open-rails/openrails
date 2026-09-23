@@ -55,6 +55,16 @@ export const ja: BillingUiMessageBundle = {
     updating: "更新中...",
     paidWith: "{brand} •••• {last4}",
     wallet: "Solana ウォレット",
+    changeCard: "カードを変更",
+    changeCardLabel: "{name} のカードを変更",
+  },
+  changeCard: {
+    title: "{name} の支払い方法",
+    description: "今後の更新は選択したカードに請求されます。",
+    none: "切り替えるには、支払い方法から別のカードを追加してください。",
+    confirm: "このカードを使う",
+    current: "現在",
+    done: "支払いカードを更新しました。",
   },
   cancel: {
     title: "{name}を解約しますか？",

@@ -7,11 +7,20 @@ import { BillingProvider } from "../../../dist/react.js"
 
 const params = new URLSearchParams(location.hash.slice(1))
 const token = params.get("token")
-const theme = params.get("theme") === "dark" ? "dark" : "light"
+const requested = params.get("theme")
+const theme =
+  requested === "dark" || requested === "inherit" ? requested : "light"
 const changes: string[] = []
 Object.assign(window, { billingChanges: changes })
 
 document.body.style.background = theme === "dark" ? "#09090b" : "#fafafa"
+if (theme === "inherit") {
+  // A host shadcn palette; `.dark` on <html> flips it.
+  const host = document.createElement("style")
+  host.textContent = `:root{--card:rgb(250, 240, 230);--foreground:rgb(20, 10, 0)}
+    :root.dark{--card:rgb(30, 20, 10);--foreground:rgb(240, 230, 220)}`
+  document.head.append(host)
+}
 document.body.style.margin = "0"
 
 const client = createBillingClient({ getToken: () => token })

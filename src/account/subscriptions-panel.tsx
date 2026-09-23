@@ -13,6 +13,7 @@ import { useSubscriptions, type SubscriptionsOptions } from "#orck/react/hooks"
 import { useBillingClient } from "#orck/react/context"
 import { useUiSettings } from "#orck/scope-context"
 import { CancelSubscriptionDialog } from "./cancel-dialog"
+import { ChangeCardDialog } from "./change-card-dialog"
 import {
   brandName,
   formatDate,
@@ -52,6 +53,9 @@ export function SubscriptionsPanel({
   const state = useSubscriptions(options)
   const scales = useBillingClient().currencies
   const [cancelling, setCancelling] = React.useState<Subscription | null>(null)
+  const [changingCard, setChangingCard] = React.useState<Subscription | null>(
+    null
+  )
   const [rowError, setRowError] = React.useState<{
     id: string
     message: string
@@ -141,6 +145,12 @@ export function SubscriptionsPanel({
             !scheduled &&
             !portal &&
             (s.rail !== "solana" || !!sendSolanaTransaction)
+          const canChangeCard =
+            (s.status === "active" || s.status === "past_due") &&
+            !scheduled &&
+            !portal &&
+            s.rail !== "solana" &&
+            !!s.payment_method_id
           const status = scheduled ? "cancel_scheduled" : s.status
           return (
             <li
@@ -217,6 +227,21 @@ export function SubscriptionsPanel({
                     <HugeiconsIcon icon={ArrowUpRight01Icon} aria-hidden />
                   </a>
                 ) : null}
+                {canChangeCard ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!!pending}
+                    aria-label={t("subscriptions.changeCardLabel", { name })}
+                    onClick={() => {
+                      setRowError(null)
+                      setChangingCard(s)
+                    }}
+                  >
+                    {pending === "payment_method" ? <Spinner /> : null}
+                    {t("subscriptions.changeCard")}
+                  </Button>
+                ) : null}
                 {canCancel ? (
                   <Button
                     variant="ghost"
@@ -229,7 +254,11 @@ export function SubscriptionsPanel({
                       setCancelling(s)
                     }}
                   >
-                    {pending && pending !== "resume" ? <Spinner /> : null}
+                    {pending &&
+                    pending !== "resume" &&
+                    pending !== "payment_method" ? (
+                      <Spinner />
+                    ) : null}
                     {t("subscriptions.cancel")}
                   </Button>
                 ) : null}
@@ -256,6 +285,27 @@ export function SubscriptionsPanel({
         </div>
       ) : null}
       {notice}
+      <ChangeCardDialog
+        key={`card-${changingCard?.id ?? "closed"}`}
+        subscription={changingCard}
+        name={changingCard ? subscriptionName(changingCard, m) : ""}
+        onOpenChange={(open) => !open && setChangingCard(null)}
+        pending={
+          !!changingCard && state.pending[changingCard.id] === "payment_method"
+        }
+        onConfirm={async (paymentMethodId) => {
+          if (!changingCard) return null
+          const error = await state.setPaymentMethod(
+            changingCard.id,
+            paymentMethodId
+          )
+          if (!error) {
+            setChangingCard(null)
+            announce(t("changeCard.done"))
+          }
+          return error
+        }}
+      />
       <CancelSubscriptionDialog
         key={cancelling?.id ?? "closed"}
         open={cancelling !== null}

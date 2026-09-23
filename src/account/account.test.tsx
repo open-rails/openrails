@@ -144,6 +144,72 @@ describe("SubscriptionsPanel", () => {
     ).toBeVisible()
   })
 
+  it("switches the card a subscription renews on", async () => {
+    const server = fakeBilling({
+      methods: [
+        paymentMethod({ id: "pm_dddddddd-dddd-4ddd-8ddd-dddddddddddd" }),
+        paymentMethod({
+          id: "pm_2",
+          card: {
+            brand: "mastercard",
+            last4: "5454",
+            exp_month: 1,
+            exp_year: 2031,
+          },
+        }),
+        paymentMethod({
+          id: "pm_other_psp",
+          psp_id: "99999999-9999-9999-9999-999999999999",
+          card: { brand: "amex", last4: "0005" },
+        }),
+      ],
+    })
+    const onChange = vi.fn()
+    const client = createBillingClient({ fetch: server.fetch })
+    render(
+      <BillingUiProvider locale="en-US">
+        <BillingProvider client={client} onChange={onChange}>
+          <SubscriptionsPanel />
+        </BillingProvider>
+      </BillingUiProvider>
+    )
+    const row = await screen.findByTestId("subscription-row")
+    fireEvent.click(
+      within(row).getByRole("button", { name: "Change card for Pro" })
+    )
+    const dialog = await screen.findByRole("dialog")
+    await waitFor(() =>
+      expect(within(dialog).getAllByTestId("change-card-option")).toHaveLength(
+        2
+      )
+    )
+    expect(dialog).not.toHaveTextContent("0005")
+    const use = within(dialog).getByRole("button", { name: "Use this card" })
+    expect(use).toBeDisabled()
+    fireEvent.click(within(dialog).getByText("Mastercard ending 5454"))
+    fireEvent.click(use)
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    )
+    expect(await screen.findByText("Payment card updated.")).toBeVisible()
+    expect(server.calls).toContain(
+      "PUT /me/subscriptions/sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc/payment-method"
+    )
+    await waitFor(() => expect(row).toHaveTextContent("Mastercard •••• 5454"))
+    expect(onChange).toHaveBeenCalledWith({
+      type: "subscription.payment_method_changed",
+      subscriptionId: "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      paymentMethodId: "pm_2",
+    })
+  })
+
+  it("scopes no palette under the inherit theme", async () => {
+    const server = fakeBilling()
+    mount(<SubscriptionsPanel />, server, { appearance: { theme: "inherit" } })
+    const panel = await screen.findByTestId("subscriptions-panel")
+    expect(panel).toHaveAttribute("data-orck-theme", "inherit")
+  })
+
   it("links out for provider-managed cancellation", async () => {
     const server = fakeBilling({
       subscriptions: [

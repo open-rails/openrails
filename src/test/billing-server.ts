@@ -174,6 +174,15 @@ export function fakeBilling(
         })
         return json(200, { subscription_id: sub.id, status: "cancelled" })
       }
+      if (
+        (m = key.match(/^PUT \/me\/subscriptions\/([^/]+)\/payment-method$/))
+      ) {
+        const sub = findSub(decodeURIComponent(m[1]))
+        const pm = state.methods.find((x) => x.id === body?.payment_method_id)
+        if (!sub || !pm) return apiError(404, "resource_not_found")
+        Object.assign(sub, { payment_method_id: pm.id, card: pm.card })
+        return json(200, { success: true })
+      }
       if (key === "GET /me/payment-methods")
         return json(
           200,

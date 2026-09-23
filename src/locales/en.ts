@@ -53,6 +53,16 @@ export const en = {
     updating: "Updating...",
     paidWith: "{brand} •••• {last4}",
     wallet: "Solana wallet",
+    changeCard: "Change card",
+    changeCardLabel: "Change card for {name}",
+  },
+  changeCard: {
+    title: "Pay {name} with",
+    description: "Future renewals charge the selected card.",
+    none: "Add another card under Payment methods to switch.",
+    confirm: "Use this card",
+    current: "Current",
+    done: "Payment card updated.",
   },
   cancel: {
     title: "Cancel {name}?",

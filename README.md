@@ -22,7 +22,7 @@ Until the `@openrails` npm scope is live, install the tarball attached to each
 GitHub release:
 
 ```sh
-pnpm add https://github.com/open-rails/billing-ui/releases/download/v0.5.0/openrails-billing-ui-0.5.0.tgz
+pnpm add https://github.com/open-rails/billing-ui/releases/download/v0.5.1/openrails-billing-ui-0.5.1.tgz
 ```
 
 ```tsx
@@ -63,8 +63,9 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
 </BillingUiProvider>
 ```
 
-- Panels: `SubscriptionsPanel`, `PaymentMethodsPanel`, `PaymentHistory`,
-  `BillingStatusBadge`, `CancelSubscriptionDialog`; `AccountBilling` stacks them.
+- Panels: `SubscriptionsPanel` (cancel, resume, change card),
+  `PaymentMethodsPanel`, `PaymentHistory`, `BillingStatusBadge`,
+  `CancelSubscriptionDialog`; `AccountBilling` stacks them.
 - Hooks: `useSubscriptions` (`cancel`, `cancelOnChain`, `resume`,
   `setPaymentMethod`, per-row `pending`), `usePaymentMethods` (`add`, `remove`,
   `setDefault`), `usePayments` (offset pages). Actions resolve to `null` or a
@@ -74,8 +75,9 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
   pinned OpenRails currency registry (`currencies` option to extend it).
 - Messages: English is complete and the fallback; `messages` layers bundles,
   `t` lets the host's i18n win. `useMessages().error(err)` maps error codes.
-- Styles are scoped under `.orck`; `appearance.theme` is `light`, `dark` or
-  `auto`.
+- Styles are scoped under `.orck`; `appearance.theme` is `light`, `dark`,
+  `auto` or `inherit`. `inherit` bundles no palette: the host page's shadcn
+  tokens (`--background`, `--primary`, ...) and its `.dark` class apply.
 
 ## UI primitives
 

@@ -8,7 +8,7 @@ import { createUser, seedBilling } from "./api"
 
 const shots = process.env.BILLING_UI_SCREENSHOTS
 
-async function open(page: Page, token: string, theme: "light" | "dark") {
+async function open(page: Page, token: string, theme: string) {
   await page.goto(`/account.html#token=${token}&theme=${theme}`)
   await expect(page.getByTestId("subscription-row")).toHaveCount(1)
   await expect(page.getByTestId("payment-row")).toHaveCount(1)
@@ -63,6 +63,17 @@ test("customer manages a subscription from the account page", async ({
   await expect(sub.getByRole("button", { name: "Resume" })).toHaveCount(0)
   await expect(page.getByText("Your subscription will continue.")).toBeVisible()
 
+  // One saved card: the change-card dialog says how to add another.
+  await sub.getByRole("button", { name: "Change card for Membership" }).click()
+  const change = page.getByRole("dialog")
+  await expect(change.getByTestId("change-card-option")).toHaveCount(1)
+  await expect(change).toContainText("Add another card under Payment methods")
+  await expect(
+    change.getByRole("button", { name: "Use this card" })
+  ).toBeDisabled()
+  await change.getByRole("button", { name: "Cancel" }).click()
+  await expect(change).toBeHidden()
+
   // The card pays for the live subscription, so OpenRails refuses removal.
   await card.getByRole("button", { name: "Remove Visa ending 4242" }).click()
   const remove = page.getByRole("alertdialog")
@@ -107,4 +118,24 @@ test("renders the dark theme and a narrow viewport", async ({
       path: `${shots}/account-mobile-dark.png`,
       fullPage: true,
     })
+})
+
+test("inherits the host page's palette and dark class", async ({
+  page,
+  request,
+}) => {
+  const user = await createUser(request)
+  await seedBilling(request, user.id)
+  const cardBackground = () =>
+    page
+      .getByTestId("subscriptions-panel")
+      .evaluate(
+        (el) =>
+          getComputedStyle(el.querySelector("[data-slot=card]")!)
+            .backgroundColor
+      )
+  await open(page, user.access_token, "inherit")
+  expect(await cardBackground()).toBe("rgb(250, 240, 230)")
+  await page.evaluate(() => document.documentElement.classList.add("dark"))
+  expect(await cardBackground()).toBe("rgb(30, 20, 10)")
 })

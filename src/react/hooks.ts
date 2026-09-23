@@ -172,16 +172,26 @@ export function useSubscriptions(
 
   const setPaymentMethod = useCallback(
     (id: string, paymentMethodId: string) =>
-      act(id, "payment_method", async () => {
-        await client.setSubscriptionPaymentMethod(id, paymentMethodId)
-        replace((page) => ({
-          ...page,
-          data: page.data.map((s) =>
-            s.id === id ? { ...s, payment_method_id: paymentMethodId } : s
-          ),
-        }))
-      }),
-    [act, client, replace]
+      act(
+        id,
+        "payment_method",
+        async () => {
+          await client.setSubscriptionPaymentMethod(id, paymentMethodId)
+          replace((page) => ({
+            ...page,
+            data: page.data.map((s) =>
+              s.id === id ? { ...s, payment_method_id: paymentMethodId } : s
+            ),
+          }))
+        },
+        () =>
+          notify({
+            type: "subscription.payment_method_changed",
+            subscriptionId: id,
+            paymentMethodId,
+          })
+      ),
+    [act, client, notify, replace]
   )
 
   return {

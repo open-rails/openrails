@@ -54,6 +54,17 @@ export const es: BillingUiMessageBundle = {
     updating: "Actualizando...",
     paidWith: "{brand} •••• {last4}",
     wallet: "Billetera de Solana",
+    changeCard: "Cambiar tarjeta",
+    changeCardLabel: "Cambiar la tarjeta de {name}",
+  },
+  changeCard: {
+    title: "Pagar {name} con",
+    description:
+      "Las próximas renovaciones se cobrarán a la tarjeta seleccionada.",
+    none: "Añade otra tarjeta en Métodos de pago para cambiarla.",
+    confirm: "Usar esta tarjeta",
+    current: "Actual",
+    done: "Tarjeta de pago actualizada.",
   },
   cancel: {
     title: "¿Cancelar {name}?",

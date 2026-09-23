@@ -10,6 +10,11 @@ export type BillingChange =
       settled: boolean
     }
   | {
+      type: "subscription.payment_method_changed"
+      subscriptionId: string
+      paymentMethodId: string
+    }
+  | {
       type:
         | "payment_method.added"
         | "payment_method.removed"

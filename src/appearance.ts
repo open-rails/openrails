@@ -3,7 +3,9 @@
 // individual tokens without the integrator touching our CSS.
 import type { CSSProperties } from "react"
 
-export type CheckoutTheme = "light" | "dark" | "auto"
+// `inherit` uses the host page's shadcn tokens (`--background`, ...) and its
+// `.dark` class instead of the bundled zinc palette.
+export type CheckoutTheme = "light" | "dark" | "auto" | "inherit"
 
 // The tokens integrators may override. Values are raw CSS color/length
 // strings; they land as custom properties on the checkout root.
