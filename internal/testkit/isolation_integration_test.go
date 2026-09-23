@@ -38,7 +38,7 @@ func TestMerchantCustomerIsolation(t *testing.T) {
 		t.Helper()
 		var got uuid.UUID
 		err := p.Pool().QueryRow(ctx,
-			`SELECT id FROM openrails.customers WHERE merchant_id=$1 AND id=$2`,
+			`SELECT id FROM `+qualified(p.Schema(), "customers")+` WHERE merchant_id=$1 AND id=$2`,
 			owner.UUID(), customer).Scan(&got)
 		if want {
 			require.NoError(t, err)
@@ -54,7 +54,7 @@ func TestMerchantCustomerIsolation(t *testing.T) {
 
 	var rows int
 	require.NoError(t, p.AdminPool().QueryRow(ctx,
-		`SELECT count(*) FROM openrails.customers WHERE merchant_id = ANY($1::uuid[])`,
+		`SELECT count(*) FROM `+qualified(p.Schema(), "customers")+` WHERE merchant_id = ANY($1::uuid[])`,
 		[]uuid.UUID{merchantA.UUID(), merchantB.UUID()}).Scan(&rows))
 	require.Equal(t, 2, rows)
 
@@ -68,10 +68,14 @@ func TestMerchantCustomerIsolation(t *testing.T) {
 	t.Logf("focused receipt: %s", receipt)
 }
 
+func qualified(schema, table string) string {
+	return pgx.Identifier{schema, table}.Sanitize()
+}
+
 func seedMerchant(t testing.TB, p *Postgres, id merchant.ID, slug string) {
 	t.Helper()
 	_, err := p.AdminPool().Exec(context.Background(),
-		`INSERT INTO billing.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
+		`INSERT INTO `+qualified(p.Schema(), "merchants")+` (id, slug, status) VALUES ($1, $2, 'active')`,
 		id.UUID(), slug)
 	require.NoError(t, err)
 }

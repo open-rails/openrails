@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -39,6 +40,7 @@ var TestCustomerID = uuid.MustParse("a5a5a5a5-0000-4000-8000-000000000002")
 type Postgres struct {
 	adminDSN string
 	appDSN   string
+	schema   string
 	admin    *pgxpool.Pool
 	app      *pgxpool.Pool
 }
@@ -61,7 +63,7 @@ func NewPostgres(t *testing.T) *Postgres {
 		admin.Close()
 		t.Fatalf("open testkit application postgres pool: %v", err)
 	}
-	p := &Postgres{adminDSN: adminDSN, appDSN: appDSN, admin: admin, app: app}
+	p := &Postgres{adminDSN: adminDSN, appDSN: appDSN, schema: config.DefaultSchema, admin: admin, app: app}
 	t.Cleanup(func() {
 		app.Close()
 		admin.Close()
@@ -87,6 +89,12 @@ func (p *Postgres) Pool() *pgxpool.Pool { return p.app }
 
 // AdminPool returns the privileged fixture pool.
 func (p *Postgres) AdminPool() *pgxpool.Pool { return p.admin }
+
+// Schema returns the configured OpenRails schema used by the fixture. SQL in a
+// focused scenario must use this value rather than the authored "openrails"
+// namespace: migrations are allowed to rewrite that canonical namespace (and
+// the default deployment stores the physical tables in billing).
+func (p *Postgres) Schema() string { return p.schema }
 
 // Fixture is the deterministic merchant/customer pair used by focused tests.
 type Fixture struct {
