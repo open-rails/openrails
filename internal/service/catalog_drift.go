@@ -72,7 +72,7 @@ func (s *Service) RunCatalogReconciliation(ctx context.Context) (*CatalogDriftRe
 			return nil, err
 		} else if ok {
 			sources.StripePSPID = stripe.ID
-			sources.Stripe = catalog.PinnedStripeLister{PSPID: stripe.ID, Service: &catalog.StripeCatalogService{Config: cfg, Rails: s.rt.RailConfigs}}
+			sources.Stripe = catalog.PinnedStripeLister{PSPID: stripe.ID, Service: &catalog.StripeCatalogService{StripeClients: s.rt.StripeClients, Config: cfg, Rails: s.rt.RailConfigs}}
 		}
 		if account, ok, err := catalog.ActiveDriftPSP(ctx, s.rt.RailConfigs, models.RailNMI); err != nil {
 			return nil, err

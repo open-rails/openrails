@@ -73,7 +73,7 @@ func TestSignedStripeSnapshotCannotNameForeignAccount(t *testing.T) {
 		body := []byte(`{"id":"evt_scope","type":"charge.refunded","` + field + `":"acct_other","data":{"object":{"id":"ch_scope"}}}`)
 		prepared, err := prepareStripeMultiSecret(body, []string{"whsec_selected"}, signStripe("whsec_selected", body), time.Minute)
 		require.NoError(t, err, "the valid signature must not replace account scope validation")
-		_, err = hydrateThinStripeEvent(context.Background(), "sk_test", "acct_selected", prepared.Body)
+		_, err = hydrateThinStripeEvent(context.Background(), "sk_test", "acct_selected", prepared.Body, nil)
 		require.ErrorContains(t, err, "does not match routed account")
 	}
 }

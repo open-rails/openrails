@@ -29,7 +29,7 @@ import (
 
 func storeRebillConfig() *config.Config {
 	// TestMode=sandbox → provider environment "test", matching the seeding below.
-	return &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull}
+	return &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull}
 }
 
 func rebillMerchantsService(t *testing.T, dbi *db.DB) *merchants.Service {
@@ -171,7 +171,7 @@ func TestManualRebillNoStoreRow_ParksFailClosed(t *testing.T) {
 	// only ever declare test-environment accounts, so the pull scope is
 	// deterministically empty here even when other packages concurrently seed
 	// NMI rows for the shared test merchant.
-	liveCfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, ProviderWriteMode: config.ProviderWriteModeFull}
+	liveCfg := &config.Config{TestMode: config.CredentialPostureLive, ProviderWriteMode: config.ProviderWriteModeFull}
 
 	cfg := storeRebillConfig()
 	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, liveCfg, bootClient.DirectPostURL), cfg)

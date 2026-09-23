@@ -56,7 +56,7 @@ func moneyDeploymentBuilders(h *Harness, providers config.ProviderSandboxConfig)
 			var embedded *embed.Runtime
 			start := func() {
 				cfg := &config.Config{
-					Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
+					TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
 					SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN},
 				}
 				sandbox(cfg)

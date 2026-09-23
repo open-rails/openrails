@@ -220,7 +220,7 @@ func pullTestMerchantsService(t *testing.T, dbi *db.DB) *merchants.Service {
 func newStorePullWorker(dbi *db.DB, svc *merchants.Service, nmiSrv *fakeNMIPullServer, dlSrv *fakeDataLinkServer, mode string) *ProviderRefreshWorker {
 	w := &ProviderRefreshWorker{
 		DB:        dbi,
-		Config:    &config.Config{Env: "dev", ProviderWriteMode: mode},
+		Config:    &config.Config{ProviderWriteMode: mode},
 		Merchants: svc,
 		Clock:     clockwork.NewFakeClockAt(time.Now().UTC()),
 		// One window: [now-4h, now-1h].

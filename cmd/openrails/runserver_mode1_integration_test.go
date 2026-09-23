@@ -83,9 +83,10 @@ func writeMode1Config(t *testing.T, dir, dsn string, port int, merchantSource, k
 	redisAddr := dbtest.SharedRedisAddr(t)
 	// or#893: merchant_config_source=api must declare where secrets live. MODE 1 never
 	// consults it, so declaring db is inert there and honest here.
-	cfgYAML := fmt.Sprintf(`env: development
-merchant_config_source: %s
+	cfgYAML := fmt.Sprintf(`merchant_config_source: %s
 secret_backend: db
+encryption:
+  master_key: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
 test_mode: sandbox
 provider_write_mode: full
 host: 127.0.0.1
@@ -95,6 +96,9 @@ db:
 redis:
   addr: %s
 auth:
+  allow_memory: true
+  allow_missing_senders: true
+  direct_peer_ip: true
   issuer: https://controlplane.openrails.test
   active_key_id: mode1-test-key
   active_private_key_pem: |

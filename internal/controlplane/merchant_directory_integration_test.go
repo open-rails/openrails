@@ -20,7 +20,6 @@ func TestListActiveMerchantIDs(t *testing.T) {
 	super := dbtest.SharedSuperuserPGXPool(t)
 	rdb, _ := dbtest.SharedRedisClient(t)
 	cp, err := New(ctx, &config.Config{
-		Env:  "test",
 		DB:   &config.DBConfig{},
 		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
 	}, super, WithRedis(rdb))

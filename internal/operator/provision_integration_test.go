@@ -76,7 +76,6 @@ func (s *captureEmailSender) resetLink(email string) string {
 func hostedTestConfig(t *testing.T, dsn, issuer string) *config.Config {
 	t.Helper()
 	return &config.Config{
-		Env:      "dev",
 		TestMode: config.CredentialPostureSandbox,
 		// MODE 2 (#723): the hosted-embedder shape — merchants are created over
 		// code paths (ProvisionMerchant), not a manifest.

@@ -51,7 +51,6 @@ func TestMountHandlerRouteSelection(t *testing.T) {
 
 	rt, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{
-			Env:      "dev",
 			TestMode: config.CredentialPostureSandbox,
 			DB:       &config.DBConfig{URL: h.DSN},
 		},

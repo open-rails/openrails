@@ -38,7 +38,6 @@ func TestValidateSourceCIDRs(t *testing.T) {
 // must fail boot, never silently no-op into an unintended trust posture.
 func TestValidateRejectsMalformedTrustedProxy(t *testing.T) {
 	cfg := &Config{
-		Env:               "development",
 		ProviderWriteMode: ProviderWriteModeFull,
 		TrustedProxies:    []string{"definitely-not-a-cidr"},
 	}
@@ -52,7 +51,6 @@ func TestValidateRejectsMalformedTrustedProxy(t *testing.T) {
 func TestValidateRejectsBadCCBillWebhookIPAllowlist(t *testing.T) {
 	for _, entry := range []string{"definitely-not-a-cidr", "0.0.0.0/0"} {
 		cfg := &Config{
-			Env:                      "development",
 			ProviderWriteMode:        ProviderWriteModeFull,
 			CCBillWebhookIPAllowlist: []string{entry},
 		}

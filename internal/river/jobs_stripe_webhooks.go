@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
@@ -38,6 +39,7 @@ type StripeWebhookReconcileArgs struct{}
 func (StripeWebhookReconcileArgs) Kind() string { return KindStripeWebhookReconcile }
 
 type StripeWebhookReconcileWorker struct {
+	StripeClients *stripeapi.Factory
 	river.WorkerDefaults[StripeWebhookReconcileArgs]
 	DB        *db.DB
 	Config    *config.Config
@@ -129,6 +131,7 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 					verdict := gate.CheckMerchant(mctx, merchantID.UUID())
 					fields := log.Fields{"merchant": row.Slug, "stripe_account_id": psp.AccountID}
 					res, err := catalog.ReconcileManagedStripeWebhook(mctx, catalog.ManagedStripeWebhookParams{
+						StripeClients:       w.StripeClients,
 						Config:              w.Config,
 						SecretStore:         w.Merchants.Secrets(),
 						MerchantID:          merchantID,

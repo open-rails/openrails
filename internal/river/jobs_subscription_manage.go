@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -48,6 +49,7 @@ type ResumeSubscriptionArgs struct {
 func (ResumeSubscriptionArgs) Kind() string { return KindSubscriptionResume }
 
 type CancelSubscriptionWorker struct {
+	StripeClients *stripeapi.Factory
 	river.WorkerDefaults[CancelSubscriptionArgs]
 	DB                           *db.DB
 	Config                       *config.Config
@@ -130,7 +132,7 @@ func (w CancelSubscriptionWorker) cancel(ctx context.Context, args CancelSubscri
 			return fmt.Errorf("subscription lifecycle service unavailable")
 		}
 		if sub.CollectionPolicy != models.CollectionPolicyEngine {
-			stripeSvc := &subscriptions.StripeService{Config: w.Config, Rails: w.Rails}
+			stripeSvc := &subscriptions.StripeService{StripeClients: w.StripeClients, Config: w.Config, Rails: w.Rails}
 			if err := stripeSvc.CancelSubscription(ctx, sub.RailSubscriptionID); err != nil {
 				return err
 			}
@@ -165,6 +167,7 @@ func (w CancelSubscriptionWorker) cancel(ctx context.Context, args CancelSubscri
 }
 
 type ResumeSubscriptionWorker struct {
+	StripeClients *stripeapi.Factory
 	river.WorkerDefaults[ResumeSubscriptionArgs]
 	Clock                        clockwork.Clock
 	DB                           *db.DB
@@ -265,7 +268,7 @@ func (w ResumeSubscriptionWorker) resume(ctx context.Context, args ResumeSubscri
 			return fmt.Errorf("subscription lifecycle service unavailable")
 		}
 		if sub.CollectionPolicy != models.CollectionPolicyEngine {
-			stripeSvc := &subscriptions.StripeService{Config: w.Config, Rails: w.Rails}
+			stripeSvc := &subscriptions.StripeService{StripeClients: w.StripeClients, Config: w.Config, Rails: w.Rails}
 			if err := stripeSvc.ResumeSubscription(ctx, sub.RailSubscriptionID); err != nil {
 				return err
 			}

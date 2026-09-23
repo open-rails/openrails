@@ -18,7 +18,7 @@ import (
 
 func cliCmdContext(dsn, env string) context.Context {
 	cfg := &config.Config{
-		Env:               env,
+
 		TestMode:          config.CredentialPostureSandbox,
 		ProviderWriteMode: config.ProviderWriteModeReadOnly,
 		DB:                &config.DBConfig{URL: dsn},
@@ -70,7 +70,6 @@ func TestCLICommandsAcceptAppRole(t *testing.T) {
 func TestCLIOpensOwnerConnection(t *testing.T) {
 	superDSN, _ := dbtest.SharedRLSPostgres(t)
 	cfg := &config.Config{
-		Env:      "development",
 		TestMode: config.CredentialPostureSandbox,
 		DB:       &config.DBConfig{URL: superDSN},
 	}
@@ -83,6 +82,6 @@ func TestCLIOpensOwnerConnection(t *testing.T) {
 func TestOpenCLIDBRequiresConfig(t *testing.T) {
 	_, err := openCLIDB(context.Background(), nil)
 	require.ErrorContains(t, err, "config not loaded")
-	_, err = openCLIDB(context.Background(), &config.Config{Env: "staging"})
+	_, err = openCLIDB(context.Background(), &config.Config{})
 	require.ErrorContains(t, err, "config not loaded")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -63,12 +64,13 @@ func (a *App) SetControlPlane(cp any, ownedPool *pgxpool.Pool) {
 // hosts supply their database as a pgx pool (PGXPool); the bun-era *sql.DB
 // override was removed with the ORM (#334).
 type BootstrapOptions struct {
-	HostRiver   bool
-	RiverSchema string
-	PGXPool     *pgxpool.Pool
-	Redis       *redis.Client
-	Cache       cache.Cache
-	Clock       clockwork.Clock
+	StripeTransport http.RoundTripper
+	HostRiver       bool
+	RiverSchema     string
+	PGXPool         *pgxpool.Pool
+	Redis           *redis.Client
+	Cache           cache.Cache
+	Clock           clockwork.Clock
 	// UserDirectory and UsernameResolver are explicit host identity seams.
 	// OpenRails never assumes ownership of AuthKit's profiles schema.
 	UserDirectory    openrails.UserDirectory
@@ -116,7 +118,13 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 
 	runtime, err := buildRuntimeWithOverrides(ctx, cfg, &runtimeOverrides{
 		HostRiver: opts != nil && opts.HostRiver,
-		DB:        dbOverride,
+		StripeTransport: func() http.RoundTripper {
+			if opts != nil {
+				return opts.StripeTransport
+			}
+			return nil
+		}(),
+		DB: dbOverride,
 		RiverSchema: func() string {
 			if opts != nil {
 				return opts.RiverSchema

@@ -13,6 +13,7 @@ var OwnedTables = []string{
 	"catalog_rate_cards",
 	"catalogs",
 	"checkout_sessions",
+	"credential_publications",
 	"custodians",
 	"custody_migrations",
 	"customer_delinquency",

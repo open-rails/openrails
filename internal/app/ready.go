@@ -86,12 +86,6 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 // merchants service (or, in MODE 1, the manifest plane) must be armed, and —
 // when arming built a live backend (Vault) — that backend must still answer.
 func (r *Runtime) merchantSecretsReady(ctx context.Context) error {
-	if r.Config != nil && r.Config.IsManifestMerchantConfigSource() {
-		if r.ManifestSecrets == nil {
-			return fmt.Errorf("manifest secret plane not armed (#723)")
-		}
-		return nil
-	}
 	if r.Merchants == nil {
 		return fmt.Errorf("merchants service not armed (secret-store build failed at boot, #699/#748)")
 	}

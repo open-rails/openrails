@@ -17,6 +17,10 @@ import (
 // error. OpenRails has no Stripe SDK dependency, so this uses a raw HTTP call (the
 // same approach as the webhook thin-event hydration path).
 func defaultStripeBalanceCheck(ctx context.Context, secretKey string) error {
+	return stripeBalanceCheck(ctx, secretKey, nil)
+}
+
+func stripeBalanceCheck(ctx context.Context, secretKey string, clients *stripeapi.Factory) error {
 	secretKey = strings.TrimSpace(secretKey)
 	if secretKey == "" {
 		return apperr.Invalidf("merchants: empty stripe secret key")
@@ -29,7 +33,7 @@ func defaultStripeBalanceCheck(ctx context.Context, secretKey string) error {
 	// Pure read path with no config at hand: the unconditionally write-blocked
 	// choke client keeps the GET working in every mode while making any future
 	// mutation here fail loudly.
-	resp, err := stripeapi.ReadOnlyClient(15 * time.Second).Do(req)
+	resp, err := clients.ReadOnlyClient(15 * time.Second).Do(req)
 	if err != nil {
 		return err
 	}

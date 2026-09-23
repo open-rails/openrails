@@ -392,12 +392,12 @@ type StripeRefundHandler struct {
 	Policy BackoffPolicy
 }
 
-func NewStripeRefundHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clock clockwork.Clock) *StripeRefundHandler {
+func NewStripeRefundHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, clock clockwork.Clock, clients *stripeapi.Factory) *StripeRefundHandler {
 	return &StripeRefundHandler{
 		refundReservations: refundReservations{DB: d, Clock: clock},
 		Config:             cfg,
 		Rails:              rails,
-		Stripe:             &subscriptions.StripeRefundService{Config: cfg, Rails: rails},
+		Stripe:             &subscriptions.StripeRefundService{StripeClients: clients, Config: cfg, Rails: rails},
 		Policy:             DefaultBackoff,
 	}
 }

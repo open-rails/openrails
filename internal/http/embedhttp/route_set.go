@@ -12,8 +12,8 @@ const (
 	RouteSetMerchantAdmin RouteSet = "merchant_admin"
 	// RouteSetCatalog mounts merchant-admin and creator-owned catalog routes.
 	RouteSetCatalog RouteSet = "catalog"
-	// RouteSetPaymentProviders mounts provider config and secret routes.
-	RouteSetPaymentProviders RouteSet = "payment_providers"
+	// RouteSetMerchantConfig mounts merchant settings, provider configuration and outbound webhooks.
+	RouteSetMerchantConfig RouteSet = "merchant_config"
 	// RouteSetMerchantAPI mounts host-internal service/API-key routes.
 	RouteSetMerchantAPI RouteSet = "merchant_api"
 	// RouteSetWebhooks mounts merchant-scoped inbound webhook routes.
@@ -38,7 +38,7 @@ var StandaloneDefaultRouteSets = []RouteSet{
 	RouteSetCustomer,
 	RouteSetMerchantAdmin,
 	RouteSetCatalog,
-	RouteSetPaymentProviders,
+	RouteSetMerchantConfig,
 	RouteSetMerchantAPI,
 	RouteSetWebhooks,
 }
@@ -51,7 +51,7 @@ var AllRouteSets = []RouteSet{
 	RouteSetCustomer,
 	RouteSetMerchantAdmin,
 	RouteSetCatalog,
-	RouteSetPaymentProviders,
+	RouteSetMerchantConfig,
 	RouteSetMerchantAPI,
 	RouteSetWebhooks,
 }

@@ -85,7 +85,7 @@ func testStandaloneAccountRecovery(t *testing.T, workers bool) {
 		// A distinct worker application uses the same complete contribution set,
 		// identity issuer and database as the API's unstarted producer client.
 		worker, err := serverboot.NewWorker(t.Context(), &config.Config{
-			Env: "dev", APIURL: surface.BaseURL, TestMode: config.CredentialPostureSandbox,
+			PublicBillingBaseURL: surface.BaseURL, TestMode: config.CredentialPostureSandbox,
 			DB: &config.DBConfig{URL: h.DSN}, Redis: &config.RedisConfig{Addr: h.Redis.Options().Addr},
 			Auth:                 &config.AuthConfig{Issuer: surface.App().Config.Auth.Issuer, KeysPath: surface.App().Config.Auth.KeysPath, DirectPeerIP: true},
 			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,

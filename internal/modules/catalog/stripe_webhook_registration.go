@@ -18,6 +18,7 @@ import (
 )
 
 type ManagedStripeWebhookParams struct {
+	StripeClients       *stripeapi.Factory
 	Config              *config.Config
 	SecretStore         merchants.MerchantSecretStore
 	MerchantID          merchant.ID
@@ -69,7 +70,7 @@ type ManagedStripeWebhookResult struct {
 func PublicStripeWebhookURL(cfg *config.Config, merchantSlug, accountID string) (string, bool, error) {
 	base := ""
 	if cfg != nil {
-		base = strings.TrimSpace(cfg.APIURL)
+		base = strings.TrimSpace(cfg.PublicBillingBaseURL)
 	}
 	if base == "" {
 		return "", false, nil
@@ -80,7 +81,7 @@ func PublicStripeWebhookURL(cfg *config.Config, merchantSlug, accountID string) 
 	}
 	u, err := url.Parse(base)
 	if err != nil || u.Scheme == "" || u.Host == "" {
-		return "", false, fmt.Errorf("invalid api_url %q", base)
+		return "", false, fmt.Errorf("invalid public_billing_base_url %q", base)
 	}
 	// #SEC-21: Stripe must be able to REACH this endpoint, so it has to be a
 	// public https host. The routability rule is the shared outbound policy —
@@ -170,27 +171,25 @@ func ReconcileManagedStripeWebhook(ctx context.Context, p ManagedStripeWebhookPa
 		return ManagedStripeWebhookResult{Skipped: true, SkipReason: "stripe secret key not configured", WebhookURL: webhookURL, SecretName: secretName}, nil
 	}
 
-	// MODE 1 (#723): a Stripe-minted signing secret would seed only process
-	// memory and be lost on reboot — the endpoint would then be found WITHOUT a
-	// known secret (webhooks unverifiable). Any registration path that needs a
-	// mint is refused; a manifest-declared webhook_signing_secret keeps working.
-	manifestMode := p.Config != nil && p.Config.IsManifestMerchantConfigSource()
-	if manifestMode && !haveSecret {
-		return ManagedStripeWebhookResult{}, fmt.Errorf("merchant_config_source=manifest refuses managed stripe webhook registration without a declared webhook_signing_secret (a Stripe-minted secret cannot survive reboot, #723): declare secrets.webhook_signing_secret in the manifest and register the endpoint %s out-of-band, or run merchant_config_source=api", webhookURL)
+	// Provider-created signing secrets require durable writable custody. A
+	// host-declared secret remains usable through a read-only backend.
+	cannotPersist := !merchants.CanStageCredentials(p.SecretStore)
+	if cannotPersist && !haveSecret {
+		return ManagedStripeWebhookResult{}, fmt.Errorf("credential backend cannot retain generated webhook secret: declare webhook_signing_secret and register endpoint %s out-of-band", webhookURL)
 	}
 
 	rails := railresolve.FixedSet{"stripe": &config.PSPConfig{Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: secretKey}}}
-	svc := &StripeCatalogService{Config: p.Config, Rails: rails, BaseURL: p.StripeBaseURL}
+	svc := &StripeCatalogService{StripeClients: p.StripeClients, Config: p.Config, Rails: rails, BaseURL: p.StripeBaseURL}
 	res, err := svc.ReconcileWebhookEndpoint(ctx, DesiredWebhookEndpoint{
 		URL:           webhookURL,
 		EnabledEvents: p.EnabledEvents,
 		HaveSecret:    haveSecret,
-		ForbidCreate:  manifestMode,
+		ForbidCreate:  cannotPersist,
 		Now:           p.Now,
 		RetireOverlap: p.RetireOverlap,
 	})
 	if errors.Is(err, ErrWebhookCreateForbidden) {
-		return ManagedStripeWebhookResult{}, fmt.Errorf("merchant_config_source=manifest refuses to (re)create the managed stripe webhook endpoint %s (the Stripe-minted signing secret cannot survive reboot, #723): register it out-of-band and declare its webhook_signing_secret in the manifest, or run merchant_config_source=api: %w", webhookURL, err)
+		return ManagedStripeWebhookResult{}, fmt.Errorf("credential backend cannot retain generated webhook secret for endpoint %s: register it out-of-band and declare webhook_signing_secret: %w", webhookURL, err)
 	}
 	if errors.Is(err, ErrWebhookEndpointBudgetExhausted) {
 		return ManagedStripeWebhookResult{

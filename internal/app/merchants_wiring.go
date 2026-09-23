@@ -6,6 +6,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 )
@@ -26,25 +27,14 @@ func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 	if r == nil || r.Merchants != nil || r.DB == nil || r.Config == nil {
 		return nil
 	}
-	var store merchants.MerchantSecretStore
-	var ping func(context.Context) error
-	if r.Config.IsManifestMerchantConfigSource() {
-		if r.ManifestSecrets == nil {
-			return r.armingFailure(fmt.Errorf("merchant_config_source=manifest but the manifest secret plane is missing (#723)"))
-		}
-		backend, err := merchantsecrets.BuildManifest(ctx, r.Config, r.ManifestSecrets, r.DB.DataPool())
-		if err != nil {
-			return r.armingFailure(err)
-		}
-		store, ping = backend.Secrets, backend.Ping
-	} else {
-		backend, err := merchantsecrets.Build(ctx, r.Config, r.DB.DataPool())
-		if err != nil {
-			return r.armingFailure(fmt.Errorf("merchant secret store unavailable (#699): %w", err))
-		}
-		store = backend.Secrets
-		ping = backend.Ping
+	backend, err := merchantsecrets.Build(ctx, r.Config, r.DB.DataPool(), merchantsecrets.BuildOptions{
+		Snapshot: r.ManifestSecrets, VaultClient: r.VaultClient,
+		ReadOnly: r.Config.CredentialReadOnly, AlertBackend: r.Config.AlertSecretBackend,
+	})
+	if err != nil {
+		return r.armingFailure(err)
 	}
+	store := backend.Secrets
 	svc, err := merchants.NewService(r.DB.DataPool(), store, config.ExpectedProviderEnvironment(r.Config.IsTestMode()))
 	if err != nil {
 		return r.armingFailure(fmt.Errorf("merchants service unavailable (#699): %w", err))
@@ -56,7 +46,10 @@ func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 	// still has no route and no CLI; see merchants.PurgeInventory).
 	svc.WithDestructivePolicy(destructive.New(r.DB))
 	r.ArmMerchantsService(svc, store)
-	r.MerchantSecretPing = ping
+	r.MerchantSecretBackend = backend
+	r.MerchantSecretPing = backend.Ping
+	r.RouteCapabilities = &routesurface.RuntimeCapabilities{SolanaCanSign: backend.SolanaCanSign, SecretWrite: backend.SecretWrite}
+	r.ArmSolanaRecurringServices(store, backend.SolanaTransit)
 	return nil
 }
 
@@ -77,6 +70,7 @@ func (r *Runtime) ArmMerchantsService(svc *merchants.Service, store merchants.Me
 		// its rename-forwarding seam on the runtime; apply it now.
 		svc.WithGroupSlugResolver(r.MerchantGroupResolver).WithGroupIDResolver(r.MerchantGroupCanonicalResolver).WithGroupSearchResolver(r.MerchantGroupSearchResolver)
 	}
+	svc.StripeClients = r.StripeClients
 	r.Merchants = svc
 	if r.AlertService != nil {
 		r.AlertService.SetMerchantSecretStore(svc.Secrets())

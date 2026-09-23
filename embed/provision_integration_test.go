@@ -30,7 +30,7 @@ func TestMerchantConstructorSeedsPSPs(t *testing.T) {
 	pool := appDB.Pool()
 
 	slug := fmt.Sprintf("embed-provision-%d", time.Now().UnixNano())
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
+	cfg := &config.Config{TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 	m := embed.MerchantConfig{
 		DisplayName: slug,
 		PSPs: map[string]embed.PSPConfig{

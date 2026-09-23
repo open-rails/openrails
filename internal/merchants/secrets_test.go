@@ -113,7 +113,11 @@ func TestServiceCredentialManagement_WriteOnlyStatusAndDelete(t *testing.T) {
 	store := NewMemorySecretStore()
 	svc := &Service{secrets: store}
 
-	sec, err := svc.PutCredential(ctx, id, "psps/stripe/live/acct_884_test/webhook_signing_secret", "whsec_123")
+	_, err := svc.PutCredential(ctx, id, "psps/stripe/live/acct_884_test/webhook_signing_secret", "whsec_123")
+	if err == nil {
+		t.Fatal("direct PSP writes must require publication")
+	}
+	sec, err := store.Put(ctx, id, "psps/stripe/live/acct_884_test/webhook_signing_secret", "whsec_123")
 	if err != nil {
 		t.Fatalf("put credential: %v", err)
 	}

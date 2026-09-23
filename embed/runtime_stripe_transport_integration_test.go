@@ -26,12 +26,9 @@ import (
 
 // #814 gap 1 — the SUPPORTED fake-Stripe seam for embedding hosts.
 //
-// StripeService.SetBaseURLForTest and stripeapi.SetBaseTransport both live in
-// internal/ (the latter used to be `integration`-tagged as well), so a host
-// embedding OpenRails could not integration-test ANY rail-push path against a
-// fake Stripe — it had to trust engine-side tests. Options.StripeTransport is
-// that seam: a host-supplied RoundTripper installed UNDER the stripeapi choke
-// point, so the readonly guard and the pinned Stripe-Version still run above it.
+// Options.StripeTransport is a host-supplied, runtime-owned dependency under
+// the Stripe choke point. The readonly guard and pinned version still run above
+// it, and another runtime cannot replace its destination.
 //
 // This drives the real catalog rail-push (CreatePrice -> the Stripe adapter's
 // find-or-create) through an embedded engine onto a fake wire server.
@@ -45,15 +42,15 @@ func TestEmbeddedStripeTransportSeam_DrivesCatalogRailPush(t *testing.T) {
 
 	sfx := strings.ToLower(uuid.NewString()[:8])
 	cfg := &config.Config{
-		Env:                  "development",
-		TestMode:             config.CredentialPostureSandbox,
-		MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true,
-		SecretBackend: config.SecretBackendDB,
+		TestMode:            config.CredentialPostureSandbox,
+		AllowCatalogUpdates: true,
+		SecretBackend:       config.SecretBackendDB,
+		Encryption:          &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 		// The seam exists to exercise the WRITE path; readonly is proven above
 		// the transport by the stripeapi choke-point tests.
 		ProviderWriteMode: config.ProviderWriteModeFull,
 		DB:                &config.DBConfig{URL: appDSN},
-		Auth:              &config.AuthConfig{Issuer: "https://stripe-seam-" + sfx + ".openrails.test"},
+		Auth:              &config.AuthConfig{AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true, Issuer: "https://stripe-seam-" + sfx + ".openrails.test"},
 	}
 	e, err := New(context.Background(), Options{
 		Config:          cfg,
@@ -124,7 +121,6 @@ func TestEmbeddedStripeTransportSeam_DrivesCatalogRailPush(t *testing.T) {
 func TestEmbeddedStripeTransportSeam_RefusedOnLiveCredentials(t *testing.T) {
 	_, err := New(context.Background(), Options{
 		Config: &config.Config{
-			Env:      "production",
 			TestMode: config.CredentialPostureLive,
 			DB:       &config.DBConfig{URL: "postgres://unused"},
 		},

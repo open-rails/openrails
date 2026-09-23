@@ -79,11 +79,11 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m Mercha
 		Directory:  directory,
 		Slug:       slug,
 		Merchant:   m,
-		Options:    boot.MerchantManifestReconcileOptions{Insert: true},
+		Options:    boot.MerchantManifestReconcileOptions{Insert: true, StripeClients: a.Runtime.StripeClients},
 	}
 	var secretBackend *merchantsecrets.Store
 	switch {
-	case conf.IsManifestMerchantConfigSource():
+	case conf.SecretStoreBackend() == config.SecretBackendSnapshot:
 		// MODE 1 (#723): this call IS the manifest. Identity/config/account rows
 		// reconcile as DB projections; secrets seed the runtime's in-memory plane
 		// (never a persistent store). An empty MerchantConfig stays a legal
@@ -123,7 +123,7 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m Mercha
 	// MODE 1: arm the runtime consumers (checkout/vault/webhooks/pulls) over the
 	// freshly seeded in-memory plane right away — no standalone server or worker
 	// registration ever needs to run first.
-	if conf.IsManifestMerchantConfigSource() && a.Runtime.Merchants == nil {
+	if conf.SecretStoreBackend() == config.SecretBackendSnapshot && a.Runtime.Merchants == nil {
 		svc, err := merchants.NewService(database.DataPool(), secretBackend.Secrets, config.ExpectedProviderEnvironment(conf.IsTestMode()))
 		if err != nil {
 			return merchant.ID{}, fmt.Errorf("openrails embed: build merchants service: %w", err)
@@ -131,7 +131,7 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m Mercha
 		a.Runtime.ArmMerchantsService(svc, secretBackend.Secrets)
 		a.Runtime.MerchantSecretPing = secretBackend.Ping
 	}
-	if conf.IsManifestMerchantConfigSource() {
+	if conf.SecretStoreBackend() == config.SecretBackendSnapshot {
 		a.Runtime.ArmSolanaRecurringServices(secretBackend.Secrets, secretBackend.SolanaTransit)
 	}
 	return tn.ID, nil

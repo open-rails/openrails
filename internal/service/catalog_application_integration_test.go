@@ -31,7 +31,7 @@ func applicationService(t *testing.T) (*Service, context.Context) {
 	_, err := pool.Exec(ctx, "INSERT INTO billing.merchants(id,slug) VALUES($1,$2)", mid.UUID(), "apply-"+mid.String())
 	require.NoError(t, err)
 	database := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
-	return &Service{rt: &app.Runtime{DB: database, Config: &config.Config{AllowCatalogUpdates: true, NewSubscriptionCollectionPolicy: "engine"}, ProductService: catalog.NewProductService(database), PriceService: catalog.NewPriceService(database), MoneyService: money.NewMoneyService(database)}}, ctx
+	return &Service{rt: &app.Runtime{DB: database, Config: &config.Config{AllowCatalogUpdates: true}, ProductService: catalog.NewProductService(database), PriceService: catalog.NewPriceService(database), MoneyService: money.NewMoneyService(database)}}, ctx
 }
 func applicationParams(t *testing.T, s *Service, ctx context.Context) openrails.CatalogApplyParams {
 	t.Helper()

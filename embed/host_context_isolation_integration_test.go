@@ -78,7 +78,7 @@ func TestHostContextNeverReachesTheEngine(t *testing.T) {
 	standalone := h.StartStandalone("USD")
 	host := h.StartEmbeddedHost("USD")
 	multi, err := embed.New(ctx, embed.Options{
-		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: h.DSN}},
+		Config: &config.Config{TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: h.DSN}},
 		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)

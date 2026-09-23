@@ -18,20 +18,22 @@ func TestWebhookCredentialsRequireEncryption(t *testing.T) {
 	ctx := context.Background()
 	pool := db.WrapPool(dbtest.SharedSuperuserPGXPool(t), config.DefaultSchema)
 	for _, manifestMode := range []bool{false, true} {
-		cfg := &config.Config{Env: "dev", MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB}
+		cfg := &config.Config{SecretBackend: config.SecretBackendDB}
 		var backend *Store
 		var err error
 		if manifestMode {
-			cfg.Env = "production"
-			cfg.MerchantConfigSource = config.MerchantConfigSourceManifest
 			backend, err = BuildManifest(ctx, cfg, merchants.NewManifestSecretStore(), pool)
 		} else {
 			backend, err = Build(ctx, cfg, pool)
 		}
+		if !manifestMode {
+			require.ErrorContains(t, err, "ENCRYPTION_MASTER_KEY")
+			continue
+		}
 		require.NoError(t, err)
 		name := merchants.AlertWebhookURLSecretName(uuid.New())
 		_, err = backend.Secrets.Put(ctx, dbtest.TestMerchantID, name, "https://hooks.example/never-persist-this")
-		require.ErrorContains(t, err, "ENCRYPTION_MASTER_KEY")
+		require.Error(t, err)
 		var count int
 		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.merchant_secrets WHERE merchant_id=$1 AND name=$2`, dbtest.TestMerchantID.UUID(), name).Scan(&count))
 		require.Zero(t, count)

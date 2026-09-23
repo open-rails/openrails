@@ -31,7 +31,6 @@ func TestNew_VerifyOnlyMustBeDeclared(t *testing.T) {
 
 	t.Run("non-dev + no key + mint_disabled unset refuses to boot", func(t *testing.T) {
 		cfg := &config.Config{
-			Env:  "test",
 			Auth: &config.AuthConfig{Issuer: "https://openrails.test"},
 		}
 		_, err := New(ctx, cfg, pool)
@@ -41,7 +40,6 @@ func TestNew_VerifyOnlyMustBeDeclared(t *testing.T) {
 
 	t.Run("non-dev + no key + mint_disabled=true boots verify-only", func(t *testing.T) {
 		cfg := &config.Config{
-			Env:  "test",
 			Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
 		}
 		cp, err := New(ctx, cfg, pool, WithRedis(rdb))
@@ -52,11 +50,10 @@ func TestNew_VerifyOnlyMustBeDeclared(t *testing.T) {
 
 	t.Run("dev + no key + mint_disabled unset still boots on the ephemeral dev key path", func(t *testing.T) {
 		cfg := &config.Config{
-			Env:  "dev",
-			Auth: &config.AuthConfig{Issuer: "https://openrails.test"},
+			Auth: &config.AuthConfig{AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, DirectPeerIP: true, KeysPath: t.TempDir(), Issuer: "https://openrails.test"},
 		}
 		cp, err := New(ctx, cfg, pool)
-		require.NoError(t, err, "development must keep booting without a declared posture (#748 scopes the hard failure to non-development)")
+		require.NoError(t, err, "explicit ephemeral key and memory permissions permit this local fixture")
 		require.NotNil(t, cp)
 		t.Cleanup(cp.Close)
 	})

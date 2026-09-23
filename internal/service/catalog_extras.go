@@ -177,7 +177,7 @@ func (s *Service) DetectCatalogExtras(ctx context.Context) (*CatalogExtrasReport
 	}
 	var stripeLister catalog.StripeCatalogLister
 	if s.rt != nil && s.railArmed(ctx, string(models.RailStripe)) {
-		stripeLister = &catalog.StripeCatalogService{Config: cfg, Rails: s.rt.RailConfigs}
+		stripeLister = &catalog.StripeCatalogService{StripeClients: s.rt.StripeClients, Config: cfg, Rails: s.rt.RailConfigs}
 	}
 	var nmiLister catalog.NMIPlanLister
 	if client := s.resolveNMIClientForMerchant(ctx); client != nil {

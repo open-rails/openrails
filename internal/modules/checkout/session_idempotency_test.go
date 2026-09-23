@@ -234,7 +234,7 @@ func TestValidateCCBillInputCanonicalizesCountryAndPostal(t *testing.T) {
 	require.Equal(t, "US", payment.Country)
 }
 
-func TestValidatePaymentRejectsStripeSavedPaymentMethod(t *testing.T) {
+func TestValidateStripeSavedPaymentMethodRequiresOwnershipService(t *testing.T) {
 	svc := &CheckoutSessionService{}
 	err := svc.validatePayment(context.Background(), "stripe", &CheckoutSessionPaymentRequest{
 		PaymentMethodID: "pm_11111111-1111-1111-1111-111111111111",
@@ -248,7 +248,7 @@ func TestValidatePaymentRejectsStripeSavedPaymentMethod(t *testing.T) {
 	}, &UserIdentity{ID: "user_123"})
 
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "saved payment methods are not supported")
+	require.Contains(t, err.Error(), "payment method service unavailable")
 }
 
 func TestInitialMembershipQuoteAndVerifiedPayerPreparation(t *testing.T) {

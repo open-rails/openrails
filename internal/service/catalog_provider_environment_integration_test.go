@@ -80,7 +80,7 @@ func TestCreatorProviderEnvironmentSurvivesDispatchAndSecondarySync(t *testing.T
 			require.Equal(t, ProviderStatusPendingManualLink, states["named"].Status)
 
 			svc.rt.Config.ProviderWriteMode = config.ProviderWriteModeFull
-			svc.rt.Config.NewSubscriptionCollectionPolicy = "engine"
+
 			for _, recurring := range []bool{false, true} {
 				request.AutoRenew = recurring
 				if recurring {
@@ -99,7 +99,7 @@ func TestCreatorProviderEnvironmentSurvivesDispatchAndSecondarySync(t *testing.T
 			require.NoError(t, err)
 			require.Equal(t, tc.environment+"-named"+suffix, links["named"]["account_id"])
 			require.Equal(t, []string{tc.environment + "-named" + suffix}, adapter.targets, "explicit legacy attachment must not fan out into new provider objects")
-			svc.rt.Config.NewSubscriptionCollectionPolicy = ""
+
 		})
 	}
 }

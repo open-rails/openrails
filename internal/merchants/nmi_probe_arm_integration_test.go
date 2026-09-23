@@ -5,6 +5,7 @@ package merchants
 import (
 	"context"
 	"encoding/json"
+	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -58,7 +59,7 @@ func countNMIAccounts(t *testing.T, svc *Service, accountID string) int {
 // may be persisted (no psps row, no stored secret).
 func TestUpsertPaymentProviderConfigRefusesLiveNMIUnderTestMode(t *testing.T) {
 	pool := newTestPool(t)
-	svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore(), "test")
+	svc, err := NewService(db.WrapPool(pool, ""), newPublicationTestStore(t, pool), "test")
 	require.NoError(t, err)
 	server := nmiProbeArmTestServer(t, "2") // declined -> LIVE account
 	defer server.Close()
@@ -69,7 +70,7 @@ func TestUpsertPaymentProviderConfigRefusesLiveNMIUnderTestMode(t *testing.T) {
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "probe-live-348", PermissionGroupID: "group-probe-live-348"})
 	require.NoError(t, err)
 
-	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
+	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: publicationRevision(0),
 		AccountID:   "arm-348-live",
 		Credentials: map[string]string{"security_key": "live-security-key"},
 	})
@@ -85,7 +86,7 @@ func TestUpsertPaymentProviderConfigRefusesLiveNMIUnderTestMode(t *testing.T) {
 // control: a genuinely sandboxed account (approves the probe) arms normally.
 func TestUpsertPaymentProviderConfigArmsSimulatedNMIUnderTestMode(t *testing.T) {
 	pool := newTestPool(t)
-	svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore(), "test")
+	svc, err := NewService(db.WrapPool(pool, ""), newPublicationTestStore(t, pool), "test")
 	require.NoError(t, err)
 	server := nmiProbeArmTestServer(t, "1") // approved -> simulating
 	defer server.Close()
@@ -96,7 +97,7 @@ func TestUpsertPaymentProviderConfigArmsSimulatedNMIUnderTestMode(t *testing.T) 
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "probe-sim-348", PermissionGroupID: "group-probe-sim-348"})
 	require.NoError(t, err)
 
-	cfg, err := svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
+	cfg, err := svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: publicationRevision(0),
 		AccountID:   "arm-348-sim",
 		Credentials: map[string]string{"security_key": "sandbox-security-key"},
 	})
@@ -108,7 +109,7 @@ func TestUpsertPaymentProviderConfigArmsSimulatedNMIUnderTestMode(t *testing.T) 
 // An inconclusive sandbox probe cannot authorize an account.
 func TestUpsertPaymentProviderConfigProbeIndeterminateRefuses(t *testing.T) {
 	pool := newTestPool(t)
-	svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore(), "test")
+	svc, err := NewService(db.WrapPool(pool, ""), newPublicationTestStore(t, pool), "test")
 	require.NoError(t, err)
 	server := nmiProbeArmTestServer(t, "3") // gateway-level error -> indeterminate
 	defer server.Close()
@@ -119,7 +120,7 @@ func TestUpsertPaymentProviderConfigProbeIndeterminateRefuses(t *testing.T) {
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "probe-indeterminate-348", PermissionGroupID: "group-probe-indeterminate-348"})
 	require.NoError(t, err)
 
-	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
+	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: publicationRevision(0),
 		AccountID:   "arm-348-indeterminate",
 		Credentials: map[string]string{"security_key": "unclear-security-key"},
 	})
@@ -130,7 +131,7 @@ func TestUpsertPaymentProviderConfigProbeIndeterminateRefuses(t *testing.T) {
 // Every arm requires fresh qualification, even after a previous conclusive result.
 func TestUpsertPaymentProviderConfigRequiresFreshProbe(t *testing.T) {
 	pool := newTestPool(t)
-	svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore(), "test")
+	svc, err := NewService(db.WrapPool(pool, ""), newPublicationTestStore(t, pool), "test")
 	require.NoError(t, err)
 	server := nmiProbeArmTestServer(t, "2") // declined -> LIVE account
 	svc.nmiProbeV5BaseURL = server.URL
@@ -139,7 +140,7 @@ func TestUpsertPaymentProviderConfigRequiresFreshProbe(t *testing.T) {
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "probe-qualification-348", PermissionGroupID: "group-probe-qualification-348"})
 	require.NoError(t, err)
 
-	req := UpsertPaymentProviderConfigRequest{
+	req := UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: publicationRevision(0),
 		AccountID:   "arm-348-qualification",
 		Credentials: map[string]string{"security_key": "live-qualification-key"},
 	}
@@ -159,7 +160,7 @@ func TestUpsertPaymentProviderConfigRequiresFreshProbe(t *testing.T) {
 // credential-validation query still runs.
 func TestUpsertPaymentProviderConfigSkipsTestModeProbeOutsideTestMode(t *testing.T) {
 	pool := newTestPool(t)
-	svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore(), "live")
+	svc, err := NewService(db.WrapPool(pool, ""), newPublicationTestStore(t, pool), "live")
 	require.NoError(t, err)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/", r.URL.Path, "production must skip the v5 test-mode probe")
@@ -174,7 +175,7 @@ func TestUpsertPaymentProviderConfigSkipsTestModeProbeOutsideTestMode(t *testing
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "probe-prod-348", PermissionGroupID: "group-probe-prod-348"})
 	require.NoError(t, err)
 
-	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
+	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: publicationRevision(0),
 		AccountID:   "arm-348-prod",
 		Credentials: map[string]string{"security_key": "live-prod-key"},
 	})
@@ -189,7 +190,7 @@ func TestUpsertPaymentProviderConfigSkipsTestModeProbeOutsideTestMode(t *testing
 // omitting security_key.
 func TestUpsertPaymentProviderConfigRefusesUsingExistingStoredKey(t *testing.T) {
 	pool := newTestPool(t)
-	store := NewMemorySecretStore()
+	store := newPublicationTestStore(t, pool)
 	svc, err := NewService(db.WrapPool(pool, ""), store, "test")
 	require.NoError(t, err)
 	simServer := nmiProbeArmTestServer(t, "1") // first arm: simulating
@@ -200,7 +201,7 @@ func TestUpsertPaymentProviderConfigRefusesUsingExistingStoredKey(t *testing.T) 
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "probe-existing-348", PermissionGroupID: "group-probe-existing-348"})
 	require.NoError(t, err)
 
-	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
+	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: publicationRevision(0),
 		AccountID:   "arm-348-existing",
 		Credentials: map[string]string{"security_key": "was-sandbox-then-rotated-live"},
 	})
@@ -220,7 +221,7 @@ func TestUpsertPaymentProviderConfigRefusesUsingExistingStoredKey(t *testing.T) 
 	defer liveServer.Close()
 	svc.nmiProbeV5BaseURL = liveServer.URL
 
-	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
+	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: publicationRevision(0),
 		AccountID:    "arm-348-existing",
 		PublicConfig: map[string]string{"note": "unrelated update"},
 	})

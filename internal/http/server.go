@@ -250,7 +250,7 @@ func newServer(deps Dependencies, routesOnly bool) (*Server, error) {
 		s.merchants = deps.Runtime.Merchants
 	} else {
 		var secretBackend *merchantsecrets.Store
-		if deps.Config.IsManifestMerchantConfigSource() {
+		if deps.Config.SecretStoreBackend() == config.SecretBackendSnapshot {
 			if deps.Runtime == nil || deps.Runtime.ManifestSecrets == nil {
 				return nil, fmt.Errorf("merchant_config_source=manifest requires the runtime manifest secret plane (#723)")
 			}

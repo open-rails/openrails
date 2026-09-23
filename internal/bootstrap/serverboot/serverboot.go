@@ -173,9 +173,7 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	if err != nil {
 		return fmt.Errorf("read merchant manifest %s: %w", path, err)
 	}
-	if !cfg.IsManifestMerchantConfigSource() {
-		return fmt.Errorf("merchant_config_source=api refuses the merchant manifest at %s: merchant truth lives in the API/store, not a boot file (two truths, #723); delete the file or run merchant_config_source=manifest", path)
-	}
+
 	overlays, err := bootstrap.ReadMerchantManifestOverlays(cfg.MerchantManifestOverlays)
 	if err != nil {
 		return err
@@ -189,6 +187,7 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 		return fmt.Errorf("merchant_config_source=manifest requires the runtime manifest secret plane (#723)")
 	}
 	if err := bootstrap.ReconcileMerchantManifestData(ctx, cfg, embcp.Get(application), manifest, bootstrap.MerchantManifestReconcileOptions{
+		StripeClients:     rt.StripeClients,
 		Insert:            true,
 		Overwrite:         true,
 		Prune:             true,

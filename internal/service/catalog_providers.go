@@ -482,8 +482,7 @@ func (s *Service) resolveProvidersWithAdapters(ctx context.Context, product *mod
 // localEnginePrice identifies terms executed without a provider catalog object.
 // Apply the same decision to primary creation and secondary account fanout.
 func (s *Service) localEnginePrice(rail string, cycle *int) bool {
-	return s.rt != nil && s.rt.Config != nil && s.rt.Config.NewSubscriptionCollectionPolicy == "engine" &&
-		(rail == "stripe" || (rail == "nmi" && cycle != nil))
+	return (rail == "stripe" || (rail == "nmi" && cycle != nil))
 }
 
 // railAccountRef is one declared merchant account: its rail plus the

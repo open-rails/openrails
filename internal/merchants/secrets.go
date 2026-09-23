@@ -262,12 +262,17 @@ type VersionedSecretReader interface {
 	GetAtLeastVersion(ctx context.Context, merchantID merchant.ID, name string, minVersion int) (Secret, error)
 }
 
+// ExactSecretReader resolves only a published immutable version.
+type ExactSecretReader interface {
+	GetVersion(context.Context, merchant.ID, string, int) (Secret, error)
+}
+
 // SecretRef names a credential AND the version floor a reader must satisfy for
 // it. MinVersion 0 means "no floor recorded" — the pre-rotation state, and the
 // state of every secret written outside the provider-config API.
 type SecretRef struct {
-	Name       string
-	MinVersion int
+	Name       string `json:"name"`
+	MinVersion int    `json:"version"`
 }
 
 // ReadSecretRef enforces the recorded version floor for every backend. A
@@ -282,16 +287,16 @@ func ReadSecretRef(ctx context.Context, reader MerchantSecretReader, id merchant
 	}
 	var secret Secret
 	var err error
-	if versioned, ok := reader.(VersionedSecretReader); ok && ref.MinVersion > 0 {
-		secret, err = versioned.GetAtLeastVersion(ctx, id, ref.Name, ref.MinVersion)
+	if versioned, ok := reader.(ExactSecretReader); ok && ref.MinVersion > 0 {
+		secret, err = versioned.GetVersion(ctx, id, ref.Name, ref.MinVersion)
 	} else {
 		secret, err = reader.Get(ctx, id, ref.Name)
 	}
 	if err != nil {
 		return Secret{}, err
 	}
-	if secret.Version < ref.MinVersion {
-		return Secret{}, fmt.Errorf("%w: credential version %d is below required version %d", ErrSecretBackendUnavailable, secret.Version, ref.MinVersion)
+	if ref.MinVersion > 0 && secret.Version != ref.MinVersion {
+		return Secret{}, fmt.Errorf("%w: credential version %d differs from published version %d", ErrSecretBackendUnavailable, secret.Version, ref.MinVersion)
 	}
 	return secret, nil
 }
@@ -326,11 +331,15 @@ type PSPScope struct {
 	// (or#812): the Secret.Version each credential reached the last time it
 	// was rotated through the provider-config API. Absent/zero = no floor.
 	CredentialVersions map[string]int
+	CredentialRefs     map[string]SecretRef
 }
 
 // SecretRef returns the scoped secret name for key together with the rotation
 // version floor recorded on this PSP row.
 func (s PSPScope) SecretRef(key string) (SecretRef, error) {
+	if ref, ok := s.CredentialRefs[NormalizeCredentialVersionKey(key)]; ok {
+		return validatePublishedRef(s.Rail, s.Environment, s.AccountID, key, ref)
+	}
 	name, err := PSPSecretName(s.Rail, s.Environment, s.AccountID, key)
 	if err != nil {
 		return SecretRef{}, err
@@ -342,6 +351,9 @@ func (s PSPScope) SecretRef(key string) (SecretRef, error) {
 // its evidence document — for the paths that hold the raw row rather than a
 // resolved PSPScope.
 func PSPSecretRef(rail, environment, accountID string, evidence []byte, key string) (SecretRef, error) {
+	if ref, ok := CredentialRefs(evidence)[NormalizeCredentialVersionKey(key)]; ok {
+		return validatePublishedRef(rail, environment, accountID, key, ref)
+	}
 	name, err := PSPSecretName(rail, environment, accountID, key)
 	if err != nil {
 		return SecretRef{}, err
@@ -459,4 +471,34 @@ func cleanSecretName(name string) string {
 // obligations. Archived PSPs remain available; new admission uses active scopes.
 type PSPIdentityScopeResolver interface {
 	PSPScopeByID(ctx context.Context, merchantID merchant.ID, pspID uuid.UUID) (PSPScope, bool, error)
+}
+
+// CredentialRefs returns the exact immutable candidate selected by publication.
+func CredentialRefs(evidence []byte) map[string]SecretRef {
+	var doc struct {
+		Refs map[string]SecretRef `json:"credential_refs"`
+	}
+	if json.Unmarshal(evidence, &doc) != nil {
+		return nil
+	}
+	return doc.Refs
+}
+func validatePublishedRef(rail, environment, accountID, key string, ref SecretRef) (SecretRef, error) {
+	canonical, err := PSPSecretName(rail, environment, accountID, key)
+	if err != nil {
+		return SecretRef{}, err
+	}
+	parts := strings.SplitN(ref.Name, "/", 3)
+	matching := len(parts) == 3 && parts[2] == canonical
+	if len(parts) == 3 && key == "webhook_signing_secret_previous" {
+		current, _ := PSPSecretName(rail, environment, accountID, "webhook_signing_secret")
+		matching = matching || parts[2] == current
+	}
+	if len(parts) != 3 || parts[0] != "credential_candidates" || !matching || ref.MinVersion <= 0 {
+		return SecretRef{}, ErrSecretBackendUnavailable
+	}
+	if _, err := uuid.Parse(parts[1]); err != nil {
+		return SecretRef{}, ErrSecretBackendUnavailable
+	}
+	return ref, nil
 }

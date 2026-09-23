@@ -341,7 +341,7 @@ func (g archiveGate) Authorize(context.Context, *http.Request, string) (billinga
 	return billingauth.Principal{MerchantID: g.id}, nil
 }
 
-// The embedded Handler mount (RouteSetPaymentProviders) serves the identical
+// The embedded Handler mount (RouteSetMerchantConfig) serves the identical
 // lifecycle: same routes, same codes, same checkout consequence.
 func TestEmbeddedProviderAccountArchiveLifecycle(t *testing.T) {
 	ctx := context.Background()
@@ -350,7 +350,7 @@ func TestEmbeddedProviderAccountArchiveLifecycle(t *testing.T) {
 	rt, err := embed.New(ctx, embed.Options{
 		Merchant: &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug}},
 		Config: &config.Config{
-			Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true,
+			TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true,
 			SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
 			DB: &config.DBConfig{URL: h.DSN},
 		},
@@ -366,7 +366,7 @@ func TestEmbeddedProviderAccountArchiveLifecycle(t *testing.T) {
 	probe := newFakeDataLink(t)
 	runtime.Merchants.SetCredentialProbeEndpointsForIntegration("", probe.URL)
 
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, Gate: archiveGate{id: mid}}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantConfig: true, Gate: archiveGate{id: mid}}})
 	require.NoError(t, err)
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)

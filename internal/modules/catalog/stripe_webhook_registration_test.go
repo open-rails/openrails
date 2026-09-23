@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,22 +15,22 @@ import (
 )
 
 func TestPublicStripeWebhookURL(t *testing.T) {
-	got, ok, err := PublicStripeWebhookURL(&config.Config{APIURL: "https://billing.example.com/billing"}, "acme", "")
+	got, ok, err := PublicStripeWebhookURL(&config.Config{PublicBillingBaseURL: "https://billing.example.com/billing"}, "acme", "")
 	require.ErrorContains(t, err, "account_id is required")
 	require.False(t, ok)
 	require.Empty(t, got)
 
 	// #641: a set account_id yields the per-account endpoint.
-	perAcct, ok, err := PublicStripeWebhookURL(&config.Config{APIURL: "https://billing.example.com/billing"}, "acme", "acct_123")
+	perAcct, ok, err := PublicStripeWebhookURL(&config.Config{PublicBillingBaseURL: "https://billing.example.com/billing"}, "acme", "acct_123")
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, "https://billing.example.com/billing/v1/merchants/acme/webhooks/stripe/acct_123", perAcct)
 
-	standalone, ok, err := PublicStripeWebhookURL(&config.Config{APIURL: "https://billing.example.com"}, "", "acct_123")
+	standalone, ok, err := PublicStripeWebhookURL(&config.Config{PublicBillingBaseURL: "https://billing.example.com"}, "", "acct_123")
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, "https://billing.example.com/v1/webhooks/stripe/acct_123", standalone)
-	_, ok, err = PublicStripeWebhookURL(&config.Config{APIURL: "http://localhost:3053"}, "acme", "acct_123")
+	_, ok, err = PublicStripeWebhookURL(&config.Config{PublicBillingBaseURL: "http://localhost:3053"}, "acme", "acct_123")
 	require.NoError(t, err)
 	require.False(t, ok)
 }
@@ -38,7 +39,7 @@ func TestReconcileManagedStripeWebhookStoresPSPSecret(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeStripeWebhooks()
 	svc := newWebhookTestSvc(t, fake)
-	store := merchants.NewMemorySecretStore()
+	store := newWebhookVaultFixture()
 	merchantID := merchant.ID(uuid.New())
 	secretKeyName, err := merchants.PSPSecretName("stripe", "live", "acct_123", "secret_key")
 	require.NoError(t, err)
@@ -48,8 +49,8 @@ func TestReconcileManagedStripeWebhookStoresPSPSecret(t *testing.T) {
 	require.NoError(t, err)
 
 	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
-		// Mint+persist is mode-2 (api) behavior; manifest mode refuses (#723).
-		Config:              &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantConfigSource: config.MerchantConfigSourceAPI},
+		// Minting requires durable credential custody.
+		Config:              &config.Config{PublicBillingBaseURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
 		SecretStore:         store,
 		MerchantID:          merchantID,
 		MerchantSlug:        "acme",
@@ -77,21 +78,21 @@ func TestReconcileManagedStripeWebhookWithoutStoreDestinationFails(t *testing.T)
 	svc := newWebhookTestSvc(t, fake)
 
 	_, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
-		// Mint is mode-2 (api) behavior; manifest mode refuses (#723).
-		Config:        &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantConfigSource: config.MerchantConfigSourceAPI},
+		// Missing credential custody fails before any provider mutation.
+		Config:        &config.Config{PublicBillingBaseURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
 		SecretKey:     "sk_test_123",
 		PspID:         "acct_123",
 		EnabledEvents: []string{"invoice.paid"},
 		StripeBaseURL: svc.BaseURL,
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "stripe webhook secret destination not configured")
+	require.Contains(t, err.Error(), "credential backend cannot retain generated webhook secret")
 }
 
-// MODE 1 (#723): a managed CREATE would mint a signing secret that only seeds
+// An ephemeral snapshot cannot retain a managed CREATE signing secret: it seeds
 // process memory and is lost on reboot — refused with a pointed error BEFORE
 // any Stripe mutation.
-func TestReconcileManagedStripeWebhookManifestModeRefusesMint(t *testing.T) {
+func TestReconcileManagedStripeWebhookReadOnlyBackendRefusesMint(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeStripeWebhooks()
 	svc := newWebhookTestSvc(t, fake)
@@ -102,9 +103,9 @@ func TestReconcileManagedStripeWebhookManifestModeRefusesMint(t *testing.T) {
 	_, err = store.Put(ctx, merchantID, secretKeyName, "sk_test_123")
 	require.NoError(t, err)
 
-	// Empty MerchantConfigSource = manifest (the default).
+	// An ephemeral credential snapshot cannot retain a provider-generated secret.
 	_, err = ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
-		Config:              &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
+		Config:              &config.Config{PublicBillingBaseURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
 		SecretStore:         store,
 		MerchantID:          merchantID,
 		MerchantSlug:        "acme",
@@ -115,14 +116,14 @@ func TestReconcileManagedStripeWebhookManifestModeRefusesMint(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "webhook_signing_secret")
-	require.Contains(t, err.Error(), "merchant_config_source=manifest")
+	require.Contains(t, err.Error(), "credential backend cannot retain generated webhook secret")
 	require.Zero(t, fake.creates, "no endpoint minted")
 	require.Zero(t, fake.deletes, "nothing deleted")
 }
 
-// MODE 1 + a manifest-declared webhook_signing_secret: finding the existing
+// A read-only backend with a declared webhook_signing_secret: finding the existing
 // managed endpoint stays a no-op — no mint, no error, secret keeps verifying.
-func TestReconcileManagedStripeWebhookManifestModeDeclaredSecretFindsExisting(t *testing.T) {
+func TestReconcileManagedStripeWebhookDeclaredSecretFindsExisting(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeStripeWebhooks()
 	svc := newWebhookTestSvc(t, fake)
@@ -137,6 +138,8 @@ func TestReconcileManagedStripeWebhookManifestModeDeclaredSecretFindsExisting(t 
 	_, err = store.Put(ctx, merchantID, webhookName, "whsec_from_manifest")
 	require.NoError(t, err)
 
+	store = merchants.NewReadOnlySecretStore(store)
+
 	// Existing managed endpoint at the pinned version and desired URL/events.
 	fake.endpoints["we_ok"] = &StripeWebhookEndpoint{
 		ID: "we_ok", URL: "https://billing.example.com/v1/merchants/acme/webhooks/stripe/acct_123", Status: "enabled",
@@ -146,7 +149,7 @@ func TestReconcileManagedStripeWebhookManifestModeDeclaredSecretFindsExisting(t 
 	}
 
 	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
-		Config:              &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
+		Config:              &config.Config{PublicBillingBaseURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
 		SecretStore:         store,
 		MerchantID:          merchantID,
 		MerchantSlug:        "acme",
@@ -174,7 +177,7 @@ func TestReconcileManagedStripeWebhookRepairsDriftedSecretName(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeStripeWebhooks()
 	svc := newWebhookTestSvc(t, fake)
-	store := merchants.NewMemorySecretStore()
+	store := newWebhookVaultFixture()
 	merchantID := merchant.ID(uuid.New())
 
 	// Secrets were written while the psps row said environment=test.
@@ -197,7 +200,7 @@ func TestReconcileManagedStripeWebhookRepairsDriftedSecretName(t *testing.T) {
 
 	// The row now reads environment=live: the derived name misses.
 	res, err := ReconcileManagedStripeWebhook(ctx, ManagedStripeWebhookParams{
-		Config:              &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantConfigSource: config.MerchantConfigSourceAPI},
+		Config:              &config.Config{PublicBillingBaseURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
 		SecretStore:         store,
 		MerchantID:          merchantID,
 		MerchantSlug:        "acme",
@@ -227,10 +230,10 @@ func TestReconcileManagedStripeWebhookVersionBumpIsGapless(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeStripeWebhooks()
 	svc := newWebhookTestSvc(t, fake)
-	store := merchants.NewMemorySecretStore()
+	store := newWebhookVaultFixture()
 	merchantID := merchant.ID(uuid.New())
 	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
-	cfg := &config.Config{APIURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull, MerchantConfigSource: config.MerchantConfigSourceAPI}
+	cfg := &config.Config{PublicBillingBaseURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull}
 
 	keyName, err := merchants.PSPSecretName("stripe", "live", "acct_123", "secret_key")
 	require.NoError(t, err)
@@ -289,4 +292,36 @@ func TestReconcileManagedStripeWebhookVersionBumpIsGapless(t *testing.T) {
 	require.Empty(t, res.OperatorAction)
 	_, err = store.Get(ctx, merchantID, previousName)
 	require.ErrorIs(t, err, merchants.ErrSecretNotFound)
+}
+
+// The fake exercises the real Vault-backed store contract without a live Vault.
+// Its map is fixture storage only; these tests do not qualify Vault durability.
+type webhookVaultFixture struct {
+	values   map[string]map[string]string
+	versions map[string]int
+}
+
+func newWebhookVaultFixture() merchants.MerchantSecretStore {
+	return merchants.NewVaultSecretStore("secret", &webhookVaultFixture{values: map[string]map[string]string{}, versions: map[string]int{}})
+}
+func (v *webhookVaultFixture) ReadSecret(_ context.Context, path string) (map[string]string, int, error) {
+	return v.values[path], v.versions[path], nil
+}
+func (v *webhookVaultFixture) WriteSecret(_ context.Context, path string, data map[string]string) (int, error) {
+	v.values[path] = data
+	v.versions[path]++
+	return v.versions[path], nil
+}
+func (v *webhookVaultFixture) DeleteSecret(_ context.Context, path string) error {
+	delete(v.values, path)
+	return nil
+}
+func (v *webhookVaultFixture) ListSecrets(_ context.Context, prefix string) ([]string, error) {
+	var names []string
+	for path := range v.values {
+		if strings.HasPrefix(path, prefix) {
+			names = append(names, strings.TrimPrefix(strings.TrimPrefix(path, prefix), "/"))
+		}
+	}
+	return names, nil
 }

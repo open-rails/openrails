@@ -43,7 +43,7 @@ func TestInProcessClientHonorsExplicitUnlimitedTimeout(t *testing.T) {
 	// every acquire, exactly as MerchantTx does for the call under test.
 	lockPool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
+	cfg := &config.Config{TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 	rt, err := New(ctx, Options{Config: cfg, River: RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })

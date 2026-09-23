@@ -22,7 +22,8 @@ import (
 // Vault don't carry it; the composition root populates it from env/config.
 type Config struct {
 	// Address is the Vault server URL (VAULT_ADDR). Empty uses the api default.
-	Address string
+	Address   string
+	Namespace string
 	// AuthMethod is "token", "approle", or "kubernetes". Empty defaults to
 	// "token" when a Token is supplied, otherwise it is an error.
 	AuthMethod string
@@ -76,6 +77,10 @@ func Login(ctx context.Context, cfg Config) (*vaultapi.Client, *Supervisor, erro
 	client, err := vaultapi.NewClient(apiCfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("vault: new client: %w", err)
+	}
+
+	if cfg.Namespace != "" {
+		client.SetNamespace(cfg.Namespace)
 	}
 
 	// Token auth short-circuits the credential-login flow: the operator

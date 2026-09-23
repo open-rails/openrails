@@ -21,7 +21,7 @@ func TestOperatorDeclaresImportAttributionAfterMerchantProvision(t *testing.T) {
 	owner, pool, dsn := scopeWithoutRLSDatabase(t)
 	opts := func() embed.Options {
 		return embed.Options{Config: &config.Config{
-			Env: "development", TestMode: config.CredentialPostureSandbox,
+			TestMode:             config.CredentialPostureSandbox,
 			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
 			DB: &config.DBConfig{URL: dsn},
 		}, PGXPool: pool, River: embed.RiverFromHost()}

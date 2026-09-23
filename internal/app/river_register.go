@@ -60,6 +60,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// #367 liveness worker is retired), CCBill DataLink, and scoped
 	// convergence after refresh writes.
 	if err := addTrackedWorker(r, workers, &riverjobs.ProviderRefreshWorker{
+		StripeClients:       r.StripeClients,
 		DB:                  r.DB,
 		Config:              r.Config,
 		Clock:               clock,
@@ -136,6 +137,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add notification email sweep worker: %w", err)
 	}
 	if err := addTrackedWorker(r, workers, &riverjobs.CancelSubscriptionWorker{
+		StripeClients:                r.StripeClients,
 		DB:                           r.DB,
 		Config:                       r.Config,
 		Rails:                        r.RailConfigs,
@@ -146,6 +148,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add cancel subscription worker: %w", err)
 	}
 	if err := addTrackedWorker(r, workers, &riverjobs.ResumeSubscriptionWorker{
+		StripeClients:                r.StripeClients,
 		Clock:                        r.Clock,
 		DB:                           r.DB,
 		Config:                       r.Config,
@@ -175,6 +178,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// #684: webhook wake-ups — the coalesced per-subscription fetch-and-converge
 	// job the slimmed Stripe/NMI subscription-state handlers enqueue.
 	if err := addTrackedWorker(r, workers, &riverjobs.SubscriptionConvergeWorker{
+		StripeClients:                r.StripeClients,
 		DB:                           r.DB,
 		Config:                       r.Config,
 		Rails:                        r.RailConfigs,
@@ -193,17 +197,19 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add subscription converge worker: %w", err)
 	}
 	if err := addTrackedWorker(r, workers, &riverjobs.CatalogReconciliationPullWorker{
-		DB:          r.DB,
-		Config:      r.Config,
-		Rails:       r.RailConfigs,
-		NMIResolver: r.CollectionResolver,
+		StripeClients: r.StripeClients,
+		DB:            r.DB,
+		Config:        r.Config,
+		Rails:         r.RailConfigs,
+		NMIResolver:   r.CollectionResolver,
 	}); err != nil {
 		return fmt.Errorf("add catalog reconciliation worker: %w", err)
 	}
 	if err := addTrackedWorker(r, workers, &riverjobs.StripeWebhookReconcileWorker{
-		DB:        r.DB,
-		Config:    r.Config,
-		Merchants: r.Merchants,
+		StripeClients: r.StripeClients,
+		DB:            r.DB,
+		Config:        r.Config,
+		Merchants:     r.Merchants,
 	}); err != nil {
 		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
 	}
@@ -298,15 +304,15 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewNMIPaymentSourceUpdateHandler(r.DB, r.CollectionResolver, clock), // #674: payment-method swap
 		ccbillCancel,
 		intents.NewNMIRefundHandler(r.DB, r.CollectionResolver, clock),
-		intents.NewStripeRefundHandler(r.DB, r.Config, r.RailConfigs, clock),
+		intents.NewStripeRefundHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
 		ccbillRefund,
 		rebill,
 		// Invoice collection rides the ledger like every other money mover; the
 		// charger and reconciliation reads are the #725 store-armed plane.
 		money.NewInvoiceCollectionHandler(r.DB, r.MoneyCharger, r.CollectionResolver, r.Config, clock),
 		money.NewSubscriptionCollectionHandler(r.DB, r.CollectionResolver, r.Config, clock),
-		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.RailConfigs, clock),
-		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.RailConfigs, clock),
+		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
+		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
 		intents.NewSolanaSunsetPlanHandler(r.DB, r.SolanaPlanService, r.SolanaRPCResolver.ChainReader(), clock),
 		// or#795: the batch account-updater submit (create job + upload the
 		// token CSV) is a paid provider write, so it rides the ledger like

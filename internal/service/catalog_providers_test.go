@@ -334,7 +334,10 @@ func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
 	if len(rails) != 0 {
 		t.Fatalf("no provider objects may be linked in limited mode, got %v", rails)
 	}
-	for _, name := range []string{"stripe", "nmi"} {
+	if _, exists := states["stripe"]; exists {
+		t.Fatal("inline Stripe checkout must not request a remote catalog object")
+	}
+	for _, name := range []string{"nmi"} {
 		st, ok := states[name]
 		if !ok || st.Status != ProviderStatusPendingManualLink {
 			t.Fatalf("%s: expected pending_manual_link, got %+v", name, st)
@@ -343,8 +346,8 @@ func TestResolveProviders_RemoteWritesDisabledDefersAutoCreate(t *testing.T) {
 			t.Fatalf("%s: expected mode message, got %q", name, st.Message)
 		}
 	}
-	if len(pending) != 2 {
-		t.Fatalf("expected 2 pending actions, got %d", len(pending))
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 native catalog pending action, got %d", len(pending))
 	}
 }
 
@@ -434,7 +437,7 @@ func TestResolveProviders_TrialRefusedOnRailsWithoutFirstPhase(t *testing.T) {
 }
 
 func TestEngineCatalogDoesNotCreateProviderMirrors(t *testing.T) {
-	s := &Service{rt: &app.Runtime{Config: &config.Config{NewSubscriptionCollectionPolicy: "engine"}}}
+	s := &Service{rt: &app.Runtime{Config: &config.Config{}}}
 	product := &models.Product{ID: uuid.New(), Key: "engine-local"}
 	hours := 720
 	req := CreatePriceRequest{ProductID: openrails.ProductID(product.ID), UnitAmount: 9990000, Currency: "USD", AccessDurationHours: &hours, AutoRenew: true, PSPs: []string{"stripe", "nmi"}}

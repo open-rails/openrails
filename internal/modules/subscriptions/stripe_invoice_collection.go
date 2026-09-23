@@ -221,7 +221,7 @@ func (s *StripeService) stripePostForm(ctx context.Context, path string, values 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	stripeapi.SetIdempotencyKey(req, strings.TrimSpace(idempotencyKey))
 
-	resp, err := stripeapi.Client(s.Config, 0).Do(req)
+	resp, err := s.StripeClients.Client(s.Config, 0).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -578,7 +578,7 @@ func (s *StripeService) stripeDelete(ctx context.Context, path string) error {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
-	resp, err := stripeapi.Client(s.Config, 0).Do(req)
+	resp, err := s.StripeClients.Client(s.Config, 0).Do(req)
 	if err != nil {
 		return err
 	}
@@ -607,7 +607,7 @@ func (s *StripeService) stripeGet(ctx context.Context, path string, query url.Va
 		return nil, 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
-	resp, err := stripeapi.Client(s.Config, 0).Do(req)
+	resp, err := s.StripeClients.Client(s.Config, 0).Do(req)
 	if err != nil {
 		return nil, 0, err
 	}

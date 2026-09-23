@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -78,6 +80,30 @@ func (s *Service) ListSecretStatuses(ctx context.Context, id merchant.ID) ([]Mer
 		}
 		out = append(out, st)
 	}
+	if s.pool != nil {
+		var rows []gen.OpenrailsPsp
+		err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+			var err error
+			rows, err = gen.New(tx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{MerchantID: id.UUID()})
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			for key, ref := range CredentialRefs(row.Evidence) {
+				checked, err := validatePublishedRef(row.Rail, row.Environment, row.AccountID, key, ref)
+				if err != nil {
+					return nil, err
+				}
+				sec, err := ReadSecretRef(ctx, s.secrets, id, checked)
+				if err != nil && !errors.Is(err, ErrSecretNotFound) {
+					return nil, err
+				}
+				out = append(out, MerchantSecretStatus{Name: ref.Name, Rail: row.Rail, Key: key, Configured: err == nil, Version: sec.Version, DisplayLabel: row.Rail + " " + key})
+			}
+		}
+	}
 	return out, nil
 }
 
@@ -114,6 +140,9 @@ func (s *Service) ValidateCredential(ctx context.Context, id merchant.ID, name, 
 		value = sec.Value
 	}
 
+	if stripeTester == nil {
+		stripeTester = func(ctx context.Context, key string) error { return stripeBalanceCheck(ctx, key, s.StripeClients) }
+	}
 	return validateSecretValue(ctx, name, value, stripeTester)
 }
 

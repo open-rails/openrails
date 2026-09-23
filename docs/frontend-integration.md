@@ -45,7 +45,7 @@ Standalone and SaaS browser clients use AuthKit v0.101.0 browser delegation:
    mutation without its documented durable operation key.
 
 Register the merchant's AuthKit signing application and its bounded grant in
-OpenRails. OpenRails uses its configured `api_url` for proof targets, never
+OpenRails. OpenRails uses its configured `auth.request_origin` for proof targets, never
 arbitrary Host/Forwarded headers. Hosts rewriting paths supply
 `AttachOptions.DPoPRequestURL` from trusted routing configuration. CORS allows
 credential-free preflight with `Authorization` and `DPoP`; direct resource

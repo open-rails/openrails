@@ -12,8 +12,8 @@ import (
 // now a loud warning. The pure message chooser is asserted so the standalone
 // warning stays the scarier one.
 func TestWebhookDedupPosture(t *testing.T) {
-	prod := &config.Config{Env: "production"}
-	dev := &config.Config{Env: "development"}
+	prod := &config.Config{}
+	dev := &config.Config{}
 
 	t.Run("no redis never refuses boot", func(t *testing.T) {
 		require.NoError(t, enforceWebhookDedupPosture(prod, false, false))
@@ -33,10 +33,8 @@ func TestWebhookDedupPosture(t *testing.T) {
 		require.Contains(t, msg, "Postgres (safe)")
 	})
 
-	t.Run("dev and embedded get the per-process warning", func(t *testing.T) {
+	t.Run("embedded gets the per-process warning", func(t *testing.T) {
 		for _, msg := range []string{
-			webhookDedupPostureWarning(dev, false),
-			webhookDedupPostureWarning(&config.Config{Env: "development"}, false),
 			webhookDedupPostureWarning(prod, true),
 			webhookDedupPostureWarning(nil, false),
 		} {

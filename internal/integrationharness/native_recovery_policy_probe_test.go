@@ -97,7 +97,7 @@ func TestFreshNativeProviderRecoveryGap(t *testing.T) {
 	require.NoError(t, err)
 	authn, err := orauthkit.NewDelegatedAuthenticator(cp.AuthService().Verifier(), owned.MerchantID.String())
 	require.NoError(t, err)
-	customerRuntime, err := embed.New(t.Context(), embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}, ProviderSandbox: &config.ProviderSandboxConfig{NMIGatewayURL: wire.URL}}, Redis: h.Redis, River: embed.RiverManagedByOpenRails(), DelegatedAuthenticator: authn})
+	customerRuntime, err := embed.New(t.Context(), embed.Options{Config: &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}, ProviderSandbox: &config.ProviderSandboxConfig{NMIGatewayURL: wire.URL}}, Redis: h.Redis, River: embed.RiverManagedByOpenRails(), DelegatedAuthenticator: authn})
 	require.NoError(t, err)
 	defer customerRuntime.Close(context.Background())
 	app.HostGraph(customerRuntime).Runtime.SetConfiguredMerchant(owned.MerchantID)

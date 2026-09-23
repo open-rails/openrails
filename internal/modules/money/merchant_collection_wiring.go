@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -80,10 +81,11 @@ type NMIClientResolver = railresolve.NMIClientResolver
 // charge time. MerchantsFn is late-bound (Runtime.Merchants is wired after the
 // charger is constructed); a nil fn/service = nothing armable.
 type MerchantCollectionAdapterBuilder struct {
-	Config      *config.Config
-	DB          *db.DB
-	MerchantsFn func() *merchants.Service
-	Endpoints   CollectionEndpoints
+	StripeClients *stripeapi.Factory
+	Config        *config.Config
+	DB            *db.DB
+	MerchantsFn   func() *merchants.Service
+	Endpoints     CollectionEndpoints
 }
 
 var _ CollectionPlane = (*MerchantCollectionAdapterBuilder)(nil)
@@ -229,6 +231,7 @@ func (b *MerchantCollectionAdapterBuilder) stripeService(ctx context.Context, sv
 		return nil, err
 	}
 	service := subscriptions.NewAccountStripeService(b.Config, mid.UUID(), scope.ID, scope.AccountID, secretKey)
+	service.StripeClients = b.StripeClients
 	if b.Endpoints.StripeBaseURL != "" {
 		service.SetBaseURLForTest(b.Endpoints.StripeBaseURL)
 	}

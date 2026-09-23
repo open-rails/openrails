@@ -36,16 +36,15 @@ func enginePI(p StripeEnginePaymentParams) map[string]any {
 func engineCharge(p StripeEnginePaymentParams) map[string]any {
 	return map[string]any{"id": "ch_fixture", "amount": 1299, "amount_captured": 1299, "currency": "usd", "customer": p.Instrument.RailCustomerRef, "payment_method": p.Instrument.RailMethodRef, "payment_intent": "pi_fixture", "status": "succeeded", "paid": true, "captured": true}
 }
-func installEngineWire(t *testing.T, f engineWire) {
+func installEngineWire(t *testing.T, s *StripeService, f engineWire) {
 	t.Helper()
-	release := stripeapi.InstallBaseTransport(f)
-	t.Cleanup(release)
+	s.StripeClients = stripeapi.NewFactory(f)
 }
 
 func TestStripeEngineCreateAndReadSamePayment(t *testing.T) {
 	s, p := engineFixture()
 	var posts int
-	installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+	installEngineWire(t, s, func(r *http.Request) (*http.Response, error) {
 		if r.Header.Get(stripeapi.VersionHeader) != stripeapi.APIVersion || r.Header.Get("Authorization") != "Bearer sk_test_fixture" {
 			t.Fatalf("unguarded or wrong scoped credentials")
 		}
@@ -94,7 +93,7 @@ func TestStripeEngineRenewalOffSession(t *testing.T) {
 	s, p := engineFixture()
 	p.Initial = false
 	p.Instrument.StoredCredentialRecurringRef = "pi_initial"
-	installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+	installEngineWire(t, s, func(r *http.Request) (*http.Response, error) {
 		if r.Method == "POST" {
 			b, _ := io.ReadAll(r.Body)
 			v, _ := url.ParseQuery(string(b))
@@ -116,7 +115,7 @@ func TestStripeEngineLostResponseRecoveryNeverPosts(t *testing.T) {
 	s, p := engineFixture()
 	posts := 0
 	lists := 0
-	installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+	installEngineWire(t, s, func(r *http.Request) (*http.Response, error) {
 		if r.Method == "POST" {
 			posts++
 			return nil, errors.New("simulated timeout after provider accepted")
@@ -152,7 +151,7 @@ func TestStripeEngineAuthenticationKeepsPaymentIdentityAndSecretPrivate(t *testi
 	pi["last_payment_error"] = map[string]any{"code": "authentication_required", "payment_method": map[string]any{"id": "pm_fixture"}}
 	pi["client_secret"] = "pi_fixture_secret_sensitive"
 	posts := 0
-	installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+	installEngineWire(t, s, func(r *http.Request) (*http.Response, error) {
 		if r.Method == "POST" {
 			posts++
 			return engineResponse(402, map[string]any{"error": map[string]any{"payment_intent": pi}}), nil
@@ -209,7 +208,7 @@ func TestStripeEngineRejectsWrongEvidence(t *testing.T) {
 			s, p := engineFixture()
 			pi, ch := enginePI(p), engineCharge(p)
 			tc.mutate(pi, ch)
-			installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+			installEngineWire(t, s, func(r *http.Request) (*http.Response, error) {
 				if r.Method != "GET" {
 					t.Fatal("read mutated provider")
 				}
@@ -227,7 +226,7 @@ func TestStripeEngineRejectsWrongEvidence(t *testing.T) {
 func TestStripeEngineReadOnlyAndAccountRefuseBeforeWire(t *testing.T) {
 	s, p := engineFixture()
 	calls := 0
-	installEngineWire(t, func(r *http.Request) (*http.Response, error) { calls++; return nil, errors.New("unexpected wire") })
+	installEngineWire(t, s, func(r *http.Request) (*http.Response, error) { calls++; return nil, errors.New("unexpected wire") })
 	s.Config.ProviderWriteMode = config.ProviderWriteModeReadOnly
 	if _, err := s.CreateEnginePayment(context.Background(), p); !errors.Is(err, charge.ErrNotDispatched) {
 		t.Fatalf("read-only not proven non-dispatched: %v", err)
@@ -244,7 +243,7 @@ func TestStripeEngineRecoveryMissingOrDuplicateNeverResends(t *testing.T) {
 	for _, duplicate := range []bool{false, true} {
 		t.Run(strconvBool(duplicate), func(t *testing.T) {
 			s, p := engineFixture()
-			installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+			installEngineWire(t, s, func(r *http.Request) (*http.Response, error) {
 				if r.Method != "GET" {
 					t.Fatal("recovery write")
 				}
@@ -269,7 +268,7 @@ func strconvBool(v bool) string {
 }
 func TestStripeEngineConcurrentRecoveryReads(t *testing.T) {
 	s, p := engineFixture()
-	installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+	installEngineWire(t, s, func(r *http.Request) (*http.Response, error) {
 		if r.Method != "GET" {
 			t.Error("concurrent recovery attempted write")
 		}
@@ -305,7 +304,7 @@ func TestStripeEngineReversalRetainsOriginalCapture(t *testing.T) {
 			} else {
 				ch["disputed"] = true
 			}
-			installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+			installEngineWire(t, s, func(r *http.Request) (*http.Response, error) {
 				if r.URL.Path == "/v1/charges/ch_fixture" {
 					return engineResponse(200, ch), nil
 				}
@@ -334,7 +333,7 @@ func TestStripeEngineCustomerRetryKeepsRecurringAgreement(t *testing.T) {
 	p.Initial = false
 	p.CustomerInitiated = true
 	p.Instrument.StoredCredentialRecurringRef = "pi_original"
-	installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+	installEngineWire(t, s, func(r *http.Request) (*http.Response, error) {
 		if r.Method == "POST" {
 			b, _ := io.ReadAll(r.Body)
 			v, _ := url.ParseQuery(string(b))

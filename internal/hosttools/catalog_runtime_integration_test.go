@@ -80,7 +80,7 @@ func TestCatalogCLIRuntimeVerifiesWholeArtifactWithoutSigner(t *testing.T) {
 					fmt.Fprintf(w, `{"object":"plan","id":%q,"plan_amount":%q,"day_frequency":"30","plan_payments":"0"}`, strings.TrimPrefix(r.URL.Path, "/plans/"), amount)
 				}))
 				t.Cleanup(nmi.Close)
-				cfg := &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, MerchantConfigSource: source, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, ProviderSandbox: &config.ProviderSandboxConfig{NMIGatewayURL: nmi.URL}}
+				cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, MerchantConfigSource: source, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, ProviderSandbox: &config.ProviderSandboxConfig{NMIGatewayURL: nmi.URL}}
 				manifestPath := ""
 				if source == config.MerchantConfigSourceManifest {
 					manifestPath = filepath.Join(t.TempDir(), "merchants.yaml")
@@ -194,7 +194,7 @@ func TestCatalogCLIRuntimeRefusesUnavailableCredentialPlane(t *testing.T) {
 	require.NoError(t, err)
 	vault := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusForbidden) }))
 	t.Cleanup(vault.Close)
-	cfg := &config.Config{Env: "development", DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendVault, Vault: &config.VaultConfig{Enabled: true, Address: vault.URL, AuthMethod: "token", Token: "fixture-token"}}
+	cfg := &config.Config{DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendVault, Vault: &config.VaultConfig{Enabled: true, Address: vault.URL, AuthMethod: "token", Token: "fixture-token"}}
 	_, _, _, err = catalogRuntime(t.Context(), CatalogApplyOptions{Config: cfg, PGXPool: pool, Merchant: slug})
 	require.ErrorContains(t, err, "credential plane unavailable")
 	cfg.MerchantConfigSource = config.MerchantConfigSourceManifest

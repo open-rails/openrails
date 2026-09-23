@@ -95,8 +95,7 @@ func stripeFiles(t *testing.T) []stripeFile {
 }
 
 // TestStripeCallSitesUseTheChokePoint: any file naming api.stripe.com must
-// import this package. Without it there is no way to have gone through the
-// guarded transport, so readonly is unenforced and Stripe-Version unpinned.
+// import this package or use the runtime-owned StripeClients factory.
 func TestStripeCallSitesUseTheChokePoint(t *testing.T) {
 	files := stripeFiles(t)
 	if len(files) < 5 {
@@ -112,6 +111,12 @@ func TestStripeCallSitesUseTheChokePoint(t *testing.T) {
 				break
 			}
 		}
+		ast.Inspect(f.file, func(n ast.Node) bool {
+			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "StripeClients" {
+				imported = true
+			}
+			return true
+		})
 		if !imported {
 			violations = append(violations, f.rel)
 		}

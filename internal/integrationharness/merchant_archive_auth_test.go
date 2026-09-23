@@ -164,7 +164,7 @@ func TestMerchantArchiveRealAuthKitHTTPAndEmbeddedParity(t *testing.T) {
 func archiveEmbeddedClient(t *testing.T, dsn, schema string, mid merchant.ID) *openrails.Client {
 	t.Helper()
 	rt, err := embed.New(t.Context(), embed.Options{
-		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn, Schema: schema}},
+		Config: &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn, Schema: schema}},
 		River:  embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)

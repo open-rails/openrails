@@ -58,6 +58,7 @@ type TierChangePreviewResponse = openrails.TierChangePreviewResponse
 
 // CheckoutService handles unified checkout for subscriptions and one-time purchases
 type CheckoutService struct {
+	StripeClients            *stripeapi.Factory
 	SubscriptionService      *subscriptions.SubscriptionService
 	ProductService           *catalog.ProductService
 	PriceService             *catalog.PriceService
@@ -393,35 +394,7 @@ func (s *CheckoutService) processSubscription(
 	coverage *CoverageInfo,
 	rail string,
 ) (*CheckoutResponse, error) {
-	// The requested name is a payment PROVIDER (account key, e.g. "mobius") or
-	// a rail; dispatch on the resolved rail, hand the provider to the leg.
-	target, err := s.resolveRailTarget(ctx, rail)
-	if err != nil {
-		return nil, err
-	}
-	if s.Config != nil && s.Config.NewSubscriptionCollectionPolicy == "engine" {
-		return nil, errors.New("new engine subscriptions require a saved-method checkout session and explicit agreement confirmation")
-	}
-	price = priceForCheckoutTarget(price, target)
-	switch {
-	case target.Rail == "ccbill":
-		return s.processCCBillSubscription(ctx, req, user, price)
-	case rails.IsNMI(models.Rail(target.Rail)):
-		if custodianHeld(target) {
-			// #795: a custodian-held card has no provider-side recurring engine
-			// (the NMI vault subscription needs NMI to hold the card) and the
-			// OpenRails-driven renewal worker for seam charges is not built yet
-			// — enrolling would strand renewals. Loud error, never a silent accept.
-			return nil, errors.New("subscriptions are not supported on custodian-held cards yet (renewals are engine-driven; see #795)")
-		}
-		return s.processNMISubscription(ctx, req, user, price, product, coverage, target)
-	case target.Rail == "stripe":
-		return s.processStripeSubscription(ctx, req, user, price, coverage)
-	case target.Rail == "solana":
-		return nil, errors.New("solana does not support recurring subscriptions; use a one-time price instead")
-	default:
-		return nil, fmt.Errorf("unsupported rail: %s", target.Rail)
-	}
+	return nil, errors.New("new engine subscriptions require a saved-method checkout session and explicit agreement confirmation")
 }
 
 // processOneTimePurchase handles one-time purchases
@@ -843,27 +816,18 @@ func (s *CheckoutService) processStripePayment(
 	if err != nil {
 		return nil, err
 	}
-	var stripePriceID string
-	var inline *stripeCheckoutInlinePrice
-	if s.Config != nil && s.Config.NewSubscriptionCollectionPolicy == "engine" {
-		minor, err := moneyutil.NativeToRailMinorExact(price.Currency, price.Amount)
-		if err != nil {
-			return nil, err
-		}
-		if product == nil || product.ID != price.ProductID {
-			return nil, errors.New("checkout product does not match accepted price")
-		}
-		name := strings.TrimSpace(product.DisplayName)
-		if name == "" {
-			name = product.Key
-		}
-		inline = &stripeCheckoutInlinePrice{Name: name, Currency: price.Currency, AmountMinor: minor}
-	} else {
-		stripePriceID, err = getStripePriceID(price)
-		if err != nil {
-			return nil, err
-		}
+	minor, err := moneyutil.NativeToRailMinorExact(price.Currency, price.Amount)
+	if err != nil {
+		return nil, err
 	}
+	if product == nil || product.ID != price.ProductID {
+		return nil, errors.New("checkout product does not match accepted price")
+	}
+	name := strings.TrimSpace(product.DisplayName)
+	if name == "" {
+		name = product.Key
+	}
+	inline := &stripeCheckoutInlinePrice{Name: name, Currency: price.Currency, AmountMinor: minor}
 	successURL := strings.TrimSpace(req.SuccessURL)
 	cancelURL := strings.TrimSpace(req.CancelURL)
 	if successURL == "" || cancelURL == "" {
@@ -872,7 +836,6 @@ func (s *CheckoutService) processStripePayment(
 
 	urlStr, err := s.createStripeCheckoutSession(ctx, stripeCheckoutParams{
 		Mode:              "payment",
-		PriceID:           stripePriceID,
 		InlinePrice:       inline,
 		SuccessURL:        successURL,
 		CancelURL:         cancelURL,
@@ -1183,7 +1146,7 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	stripeapi.SetIdempotencyKey(req, stripeCheckoutIdempotencyKey(params.IdempotencyKey))
 
-	client := stripeapi.Client(s.Config, 0)
+	client := s.StripeClients.Client(s.Config, 0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("stripe checkout failed: %w", err)
@@ -1872,7 +1835,7 @@ func (s *CheckoutService) processTierChangeStripe(
 	// The Stripe object is read once before anything is frozen: the item the
 	// change targets, and proof that Stripe bills the price the local
 	// subscription says it does. Nothing is written here.
-	stripeService := &subscriptions.StripeService{Config: s.Config, Rails: s.Rails}
+	stripeService := &subscriptions.StripeService{StripeClients: s.StripeClients, Config: s.Config, Rails: s.Rails}
 	state, found, err := stripeService.GetSubscriptionState(ctx, existingSub.RailSubscriptionID)
 	if err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}

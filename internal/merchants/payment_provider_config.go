@@ -55,6 +55,7 @@ func providerCredentialError(err error) error {
 // PaymentProviderConfig is one merchant-owned payment-PSP.
 
 type PaymentProviderConfig struct {
+	Revision        int64                                      `json:"revision"`
 	ID              uuid.UUID                                  `json:"id"`
 	Rail            string                                     `json:"rail"`
 	Environment     string                                     `json:"environment"`
@@ -83,18 +84,22 @@ type PaymentProviderDefinition struct {
 // There is no `environment` field (#882): a deployment is all-test or all-live,
 // so the environment is derived from the deployment's test_mode posture.
 type UpsertPaymentProviderConfigRequest struct {
-	Enabled      *bool             `json:"enabled"`
-	AccountID    string            `json:"account_id"`
-	PublicConfig map[string]string `json:"public_config"`
-	Credentials  map[string]string `json:"credentials"`
+	OperationID      uuid.UUID         `json:"operation_id"`
+	ExpectedRevision *int64            `json:"expected_revision"`
+	Enabled          *bool             `json:"enabled"`
+	AccountID        string            `json:"account_id"`
+	PublicConfig     map[string]string `json:"public_config"`
+	Credentials      map[string]string `json:"credentials"`
 	// LegacyEnvironment stays bound ONLY so a caller still sending `environment`
 	// is refused instead of silently ignored (#882).
 	LegacyEnvironment string `json:"environment,omitempty"`
 }
 
 type pspEvidence struct {
-	PublicConfig         map[string]string `json:"public_config,omitempty"`
-	CredentialsValidated bool              `json:"credentials_validated,omitempty"`
+	Revision             int64                `json:"configuration_revision,omitempty"`
+	CredentialRefs       map[string]SecretRef `json:"credential_refs,omitempty"`
+	PublicConfig         map[string]string    `json:"public_config,omitempty"`
+	CredentialsValidated bool                 `json:"credentials_validated,omitempty"`
 	// CredentialVersions is the or#812 cross-node rotation watermark: the
 	// Secret.Version each credential key reached at its last rotation. It rides
 	// the PSP row because every credential resolution already re-reads that row
@@ -221,6 +226,22 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 	if strings.TrimSpace(req.LegacyEnvironment) != "" {
 		return PaymentProviderConfig{}, apperr.Invalidf("merchants: `environment` was removed (#882): the environment is derived from the deployment's test_mode (currently %q) — drop the field", s.providerEnvironment)
 	}
+	for key, value := range req.PublicConfig {
+		if key != "publishable_key" && key != "tokenization_key" {
+			return PaymentProviderConfig{}, apperr.Invalidf("unsupported public provider configuration field")
+		}
+		if key == "publishable_key" && (rail != "stripe" || !strings.HasPrefix(value, "pk_")) {
+			return PaymentProviderConfig{}, apperr.Invalidf("invalid public publishable key")
+		}
+		if key == "tokenization_key" && rail != "nmi" {
+			return PaymentProviderConfig{}, apperr.Invalidf("invalid public tokenization key")
+		}
+		for _, secret := range req.Credentials {
+			if value != "" && value == secret {
+				return PaymentProviderConfig{}, apperr.Invalidf("secret credentials cannot be stored as public configuration")
+			}
+		}
+	}
 	environment := s.providerEnvironment // derived from test_mode (#681/#882)
 	accountID := strings.TrimSpace(req.AccountID)
 	if accountID == "" {
@@ -275,19 +296,7 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 		lastVerifiedAt = &now
 	}
 
-	// Secrets are written BEFORE the PSP row so the version floor never becomes
-	// visible to another node ahead of the value it demands.
-	credentialVersions := make(map[string]int, len(secretNames))
-	for name, value := range secretNames {
-		sec, err := s.PutCredential(ctx, id, name, value)
-		if err != nil {
-			return PaymentProviderConfig{}, err
-		}
-		if key := secretKeys[name]; key != "" && sec.Version > 0 {
-			credentialVersions[NormalizeCredentialVersionKey(key)] = sec.Version
-		}
-	}
-	row, err := s.upsertPSP(ctx, id, rail, environment, accountID, enabled, req.PublicConfig, credentialsValidated, lastVerifiedAt, credentialVersions)
+	row, err := s.publishProviderCredentials(ctx, id, rail, environment, accountID, enabled, req, secretNames, secretKeys, credentialsValidated, lastVerifiedAt)
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
@@ -692,6 +701,9 @@ func paymentProviderConfigFromRow(row gen.OpenrailsPsp, statuses []MerchantSecre
 			continue
 		}
 		_, ok := configured[name]
+		if ref, published := evidence.CredentialRefs[NormalizeCredentialVersionKey(key)]; published {
+			_, ok = configured[ref.Name]
+		}
 		var validatedAt *time.Time
 		if ok {
 			validatedAt = credentialValidatedAt(row.Rail, key, lastVerifiedAt)
@@ -703,6 +715,7 @@ func paymentProviderConfigFromRow(row gen.OpenrailsPsp, statuses []MerchantSecre
 		}
 	}
 	return PaymentProviderConfig{
+		Revision:       evidence.Revision,
 		ID:             row.ID,
 		Rail:           row.Rail,
 		Environment:    row.Environment,
@@ -734,6 +747,9 @@ func providerValidationCredentialsConfigured(row gen.OpenrailsPsp, configured ma
 		name, err := PSPSecretName(row.Rail, row.Environment, row.AccountID, key)
 		if err != nil {
 			return false
+		}
+		if ref, ok := CredentialRefs(row.Evidence)[NormalizeCredentialVersionKey(key)]; ok {
+			name = ref.Name
 		}
 		if _, ok := configured[name]; !ok {
 			return false
@@ -888,7 +904,7 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 		// credential) — resolve the EFFECTIVE key already on file so a
 		// live account can't slip through by omitting security_key from this
 		// particular request.
-		if sec, gerr := s.secrets.Get(ctx, id, name); gerr == nil {
+		if sec, gerr := s.readPublishedProviderCredential(ctx, id, rail, environment, accountID, "security_key", name); gerr == nil {
 			securityKey = strings.TrimSpace(sec.Value)
 		} else if !errors.Is(gerr, ErrSecretNotFound) {
 			return fmt.Errorf("read effective NMI credential for sandbox qualification: %w", gerr)

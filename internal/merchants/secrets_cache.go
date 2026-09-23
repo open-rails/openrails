@@ -143,3 +143,9 @@ func (c *cachedSecretStore) invalidate(merchantID merchant.ID, name string) {
 	delete(c.entries, key)
 	c.mu.Unlock()
 }
+
+// GetVersion requires the exact published reference. The backend is consulted
+// on every managed versioned read so revoked access cannot be hidden by cache.
+func (c *cachedSecretStore) GetVersion(ctx context.Context, id merchant.ID, name string, version int) (Secret, error) {
+	return ReadSecretRef(ctx, c.inner, id, SecretRef{Name: name, MinVersion: version})
+}

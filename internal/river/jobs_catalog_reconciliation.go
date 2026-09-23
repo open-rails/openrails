@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -40,6 +41,7 @@ func (CatalogReconciliationPullArgs) Kind() string { return KindCatalogReconcili
 // and NMI. Each provider pass is independently skipped if that rail is
 // unconfigured.
 type CatalogReconciliationPullWorker struct {
+	StripeClients *stripeapi.Factory
 	river.WorkerDefaults[CatalogReconciliationPullArgs]
 	DB     *db.DB
 	Config *config.Config
@@ -115,7 +117,7 @@ func (w CatalogReconciliationPullWorker) reconcileMerchant(ctx context.Context) 
 	}
 	if ok {
 		sources.StripePSPID = stripe.ID
-		sources.Stripe = catalog.PinnedStripeLister{PSPID: stripe.ID, Service: &catalog.StripeCatalogService{Config: w.Config, Rails: w.Rails, BaseURL: w.StripeBaseURL}}
+		sources.Stripe = catalog.PinnedStripeLister{PSPID: stripe.ID, Service: &catalog.StripeCatalogService{StripeClients: w.StripeClients, Config: w.Config, Rails: w.Rails, BaseURL: w.StripeBaseURL}}
 	}
 	account, ok, err := catalog.ActiveDriftPSP(ctx, w.Rails, models.RailNMI)
 	if err != nil {

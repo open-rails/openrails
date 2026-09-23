@@ -383,7 +383,7 @@ func TestArchivedPSPRejectsNewWorkButResolvesByAccountID(t *testing.T) {
 	seedArchivedPSP(t, svc, tn.ID, "nmi", "live", accountID)
 	secretName, err := PSPSecretName("nmi", "live", accountID, "webhook_signing_secret")
 	require.NoError(t, err)
-	_, err = svc.PutCredential(ctx, tn.ID, secretName, "archived-webhook-secret")
+	_, err = svc.secrets.Put(ctx, tn.ID, secretName, "archived-webhook-secret")
 	require.NoError(t, err)
 
 	_, ok, err := svc.ActivePSPSecretName(ctx, tn.ID, "nmi", "live", "security_key")

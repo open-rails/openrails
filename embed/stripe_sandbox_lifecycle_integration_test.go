@@ -4,21 +4,21 @@ package embed
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	riverhelpers "github.com/open-rails/helpers/river"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
-	"github.com/riverqueue/river"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,83 +26,82 @@ type lifecycleStripeTransport func(*http.Request) (*http.Response, error)
 
 func (f lifecycleStripeTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// Closing a configured sandbox must release its process-wide test transport.
-// The default transport is intercepted so this test can never contact Stripe.
+// Exercise the actual runtime-built checkout Stripe service with two different
+// fakes and an ordinary runtime. The ordinary client reads a localhost server;
+// neither the default transport nor any global Stripe state is replaced.
 func TestStripeSandboxRuntimeTransportLifetime(t *testing.T) {
 	_, dsn := dbtest.SharedRLSPostgres(t)
 	pool, err := pgxpool.New(context.Background(), dsn)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	var sandboxRequests, otherRequests, defaultRequests atomic.Int64
-	sandbox := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sandboxRequests.Add(1)
-		_, _ = io.WriteString(w, `{"object":"balance"}`)
-	}))
-	t.Cleanup(sandbox.Close)
-	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		otherRequests.Add(1)
-		_, _ = io.WriteString(w, `{"object":"balance"}`)
-	}))
-	t.Cleanup(other.Close)
 	original := http.DefaultTransport
-	http.DefaultTransport = lifecycleStripeTransport(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Host == strings.TrimPrefix(sandbox.URL, "http://") || r.URL.Host == strings.TrimPrefix(other.URL, "http://") {
-			return original.RoundTrip(r)
+	var firstRequests, secondRequests, ordinaryRequests atomic.Int64
+	handler := func(counter *atomic.Int64) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet || r.URL.Path != "/v1/subscriptions" || r.Header.Get(stripeapi.VersionHeader) != stripeapi.APIVersion {
+				http.Error(w, "unexpected fake request", 500)
+				return
+			}
+			counter.Add(1)
+			_, _ = io.WriteString(w, `{"data":[]}`)
 		}
-		if r.URL.Host != "api.stripe.com" {
-			return nil, fmt.Errorf("unexpected non-loopback request to %s", r.URL.Host)
-		}
-		defaultRequests.Add(1)
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"object":"balance"}`)), Request: r}, nil
-	})
-	t.Cleanup(func() { http.DefaultTransport = original; stripeapi.SetBaseTransport(nil) })
-	options := func(gateway string) Options {
-		return Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}, ProviderSandbox: &config.ProviderSandboxConfig{StripeAPIURL: gateway}}, PGXPool: pool, River: RiverManagedByOpenRails()}
 	}
-	boot := func(gateway string) *Runtime {
-		rt, err := New(t.Context(), options(gateway))
+	secondServer := httptest.NewServer(handler(&secondRequests))
+	defer secondServer.Close()
+	ordinaryServer := httptest.NewServer(handler(&ordinaryRequests))
+	defer ordinaryServer.Close()
+	boot := func(transport http.RoundTripper, gateway string) *Runtime {
+		cfg := &config.Config{TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}}
+		if gateway != "" {
+			cfg.ProviderSandbox = &config.ProviderSandboxConfig{StripeAPIURL: gateway}
+		}
+		rt, err := New(t.Context(), Options{Config: cfg, PGXPool: pool, River: RiverManagedByOpenRails(), StripeTransport: transport})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rt.Close(context.Background()) })
+		// Local immutable credentials avoid provider discovery and DB account fixtures.
+		rt.app.Runtime.CheckoutService.StripeService.Rails = railresolve.FixedSet{"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_fake"}}}
 		return rt
 	}
-	read := func() {
-		resp, err := stripeapi.ReadOnlyClient(0).Get("https://api.stripe.com/v1/balance")
-		require.NoError(t, err)
-		require.NoError(t, resp.Body.Close())
+	first := boot(lifecycleStripeTransport(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || r.URL.Host != "api.stripe.com" || r.URL.Path != "/v1/subscriptions" || r.Header.Get(stripeapi.VersionHeader) != stripeapi.APIVersion {
+			return nil, fmt.Errorf("unexpected fake request %s %s", r.Method, r.URL)
+		}
+		firstRequests.Add(1)
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"data":[]}`))}, nil
+	}), "")
+	second := boot(nil, secondServer.URL)
+	ordinary := boot(nil, "")
+	ordinary.app.Runtime.CheckoutService.StripeService.SetBaseURLForTest(ordinaryServer.URL)
+	read := func(rt *Runtime) error {
+		_, err := rt.app.Runtime.CheckoutService.StripeService.ListActiveSubscriptionsForCustomer(t.Context(), "cus_fake")
+		return err
 	}
-	configured := boot(sandbox.URL)
-	read()
-	require.EqualValues(t, 1, sandboxRequests.Load())
-	require.Zero(t, defaultRequests.Load())
-	require.NoError(t, configured.Close(context.Background()))
-	ordinary := boot("")
-	read()
-	require.EqualValues(t, 1, sandboxRequests.Load(), "the closed runtime must not reroute a later ordinary runtime")
-	require.EqualValues(t, 1, defaultRequests.Load())
-	require.NoError(t, ordinary.Close(context.Background()))
-
-	// A failed host River bind occurs after the provider graph is constructed.
-	failed := options(sandbox.URL)
-	failed.River = RiverFromHost()
-	failedRuntime, err := New(t.Context(), failed)
-	require.NoError(t, err)
-	_, err = riverhelpers.New(t.Context(), pool, nil, failedRuntime.RiverJobs(), riverhelpers.NewContribution("fail", func(context.Context, *river.Config) error { return errors.New("deliberate host bind failure") }, nil, nil))
-	require.ErrorContains(t, err, "deliberate host bind failure")
-	require.NoError(t, failedRuntime.Close(context.Background()), "failed startup explicitly closes its runtime")
-	read()
-	require.EqualValues(t, 2, defaultRequests.Load(), "failed startup cleanup releases its sandbox lease")
-	require.EqualValues(t, 1, sandboxRequests.Load())
-
-	// Closing owners out of order must neither clear the surviving runtime nor
-	// revive an older override when the surviving one eventually closes.
-	older, newer := boot(sandbox.URL), boot(other.URL)
-	read()
-	require.EqualValues(t, 1, otherRequests.Load())
-	require.NoError(t, older.Close(context.Background()))
-	read()
-	require.EqualValues(t, 2, otherRequests.Load(), "the newer owner remains active")
-	require.NoError(t, newer.Close(context.Background()))
-	read()
-	require.EqualValues(t, 3, defaultRequests.Load())
-	require.EqualValues(t, 1, sandboxRequests.Load(), "the closed older owner never revives")
+	var wg sync.WaitGroup
+	errs := make(chan error, 30)
+	for _, rt := range []*Runtime{first, second, ordinary} {
+		wg.Add(1)
+		go func(rt *Runtime) {
+			defer wg.Done()
+			for range 10 {
+				errs <- read(rt)
+			}
+		}(rt)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	require.EqualValues(t, 20, firstRequests.Load())
+	require.EqualValues(t, 20, secondRequests.Load())
+	require.EqualValues(t, 20, ordinaryRequests.Load())
+	require.NoError(t, first.Close(context.Background()))
+	require.NoError(t, read(second))
+	require.NoError(t, read(ordinary))
+	require.NoError(t, second.Close(context.Background()))
+	require.NoError(t, read(ordinary))
+	require.EqualValues(t, 20, firstRequests.Load())
+	require.EqualValues(t, 22, secondRequests.Load())
+	require.EqualValues(t, 24, ordinaryRequests.Load())
+	require.Same(t, original, http.DefaultTransport)
 }

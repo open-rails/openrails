@@ -43,7 +43,6 @@ const ccbillWebhookTestPriceMicros = 9_990_000 // $9.99
 
 func sandboxModeConfig(dsn string, source string) *config.Config {
 	return &config.Config{
-		Env: "dev",
 		// Sandbox posture + an EXPLICIT loopback allowlist entry. SEC-19 replaced
 		// the old implicit "test_mode accepts any IP" bypass: the extra CIDR is a
 		// declared credential, honored only under sandbox posture and only while
@@ -291,7 +290,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	require.NoError(t, app.HostGraph(rt).Runtime.EnsureMerchantsService(ctx))
 	cleanupCCBillWebhookMerchant(t, id)
 
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, Catalog: true, Gate: allowAllGate{id: id}}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantConfig: true, Catalog: true, Gate: allowAllGate{id: id}}})
 	require.NoError(t, err)
 	adminServer := httptest.NewServer(handler)
 	t.Cleanup(adminServer.Close)

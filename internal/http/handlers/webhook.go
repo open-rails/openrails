@@ -286,7 +286,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	// Stripe "thin" event destinations deliver a minimal payload without the
 	// object. Hydrate it with the MERCHANT's secret key into the classic
 	// {data:{object}} shape so dispatch only ever sees snapshot-style events.
-	if hydrated, herr := hydrateThinStripeEvent(r.Request.Context(), strings.TrimSpace(creds.SecretKey), creds.AccountID, prepared.Body); herr != nil {
+	if hydrated, herr := hydrateThinStripeEvent(r.Request.Context(), strings.TrimSpace(creds.SecretKey), creds.AccountID, prepared.Body, r.State.StripeClients); herr != nil {
 		log.WithError(herr).Error("failed to hydrate thin stripe event")
 		r.ErrorJSON(http.StatusBadGateway, "Failed to hydrate thin event")
 		return

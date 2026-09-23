@@ -19,7 +19,7 @@ import (
 //     never re-asserted. The mutation flags are refused with --seed — after
 //     seeding, the APIs own merchant config.
 func ResolvePushMerchantConfigOptions(cfg *config.Config, seed, insert, overwrite, prune bool) (MerchantManifestReconcileOptions, error) {
-	if cfg.IsManifestMerchantConfigSource() {
+	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
 		if seed {
 			return MerchantManifestReconcileOptions{}, fmt.Errorf("--seed is the merchant_config_source=api importer gate (#851); manifest mode (#723) is already manifest-is-truth — use --insert/--overwrite/--prune")
 		}

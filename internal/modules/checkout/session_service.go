@@ -680,15 +680,13 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		if err != nil {
 			return nil, err
 		}
-		if s.config != nil && s.config.NewSubscriptionCollectionPolicy == "engine" {
-			if err := quoteInitialMembership(ctx, session, price, product, method, now); err != nil {
-				return nil, err
-			}
-			session.Status = models.CheckoutSessionStatusRequiresAction
+		if err := quoteInitialMembership(ctx, session, price, product, method, now); err != nil {
+			return nil, err
 		}
+		session.Status = models.CheckoutSessionStatusRequiresAction
 	}
 
-	if mode == models.CheckoutSessionModeSubscription && s.config != nil && s.config.NewSubscriptionCollectionPolicy == "engine" {
+	if mode == models.CheckoutSessionModeSubscription {
 		if _, quoted := session.RailState[initialMembershipQuoteKey]; !quoted {
 			return nil, fmt.Errorf("%w: engine enrollment requires a supported saved NMI or Stripe method", ErrCheckoutSessionValidation)
 		}
@@ -1131,7 +1129,7 @@ func (s *CheckoutSessionService) validatePayment(ctx context.Context, rail strin
 	case rails.IsNMI(models.Rail(rail)):
 		return s.validateNMIInput(ctx, payment, user)
 	case rail == "stripe":
-		if s.config != nil && s.config.NewSubscriptionCollectionPolicy == "engine" && strings.TrimSpace(payment.PaymentMethodID) != "" {
+		if strings.TrimSpace(payment.PaymentMethodID) != "" {
 			return s.validateNMIInput(ctx, payment, user)
 		}
 		return s.validateStripeInput(payment)
@@ -2116,8 +2114,8 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 		//   - solana_cancel / solana_tier_change modes → the lifecycle tx.
 		if solanaSessionUsesPayURL(session) {
 			// Construct the Solana Pay URL:
-			// - standalone: solana:{api_url}/v1/checkout/:id/solana-pay
-			// - embedded:   solana:{api_url}/v1/checkout/:id/solana-pay (api_url typically ends with /billing)
+			// - standalone: solana:{public_billing_base_url}/v1/checkout/:id/solana-pay
+			// - embedded:   solana:{public_billing_base_url}/v1/checkout/:id/solana-pay (public_billing_base_url typically ends with /billing)
 			baseURL := s.getAPIBaseURL()
 			if baseURL != "" {
 				resp.Payment.SolanaPayURL = fmt.Sprintf(
@@ -2254,7 +2252,7 @@ func solanaSessionUsesPayURL(session *models.CheckoutSession) bool {
 }
 
 // getAPIBaseURL returns the API base URL for building Solana Pay URLs.
-// Uses config.APIURL which should be set to the full base URL where billing routes are mounted.
+// Uses config.PublicBillingBaseURL which should be set to the full base URL where billing routes are mounted.
 //
 // Standalone: "https://api.mysite.com" → routes at /v1/*
 // Embedded:   "https://api.mysite.com/billing" → routes at /billing/v1/*
@@ -2264,7 +2262,7 @@ func (s *CheckoutSessionService) getAPIBaseURL() string {
 	if s.config == nil {
 		return ""
 	}
-	apiURL := strings.TrimSpace(s.config.APIURL)
+	apiURL := strings.TrimSpace(s.config.PublicBillingBaseURL)
 	if apiURL == "" {
 		return ""
 	}

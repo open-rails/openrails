@@ -119,7 +119,6 @@ func newFakeStripeWebhookAPI(t *testing.T) *fakeStripeWebhookAPI {
 
 	f.server = httptest.NewServer(mux)
 	t.Cleanup(f.server.Close)
-	t.Cleanup(stripeapi.InstallBaseTransport(stripeapi.HostRewriteTransport(f.server.URL)))
 	return f
 }
 
@@ -140,7 +139,7 @@ func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 	fake := newFakeStripeWebhookAPI(t)
 	h := integrationharness.New(t, t.Context())
 	surface := h.StartStandalone("USD", integrationharness.WithConfig(func(cfg *config.Config) {
-		cfg.APIURL = "https://api.openrails-e2e.example.com"
+		cfg.PublicBillingBaseURL = "https://api.openrails-e2e.example.com"
 		cfg.MerchantConfigSource = config.MerchantConfigSourceAPI
 		cfg.SecretBackend = config.SecretBackendDB
 	}))
@@ -177,7 +176,8 @@ func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 
 	now := time.Now().UTC()
 	worker := riverjobs.StripeWebhookReconcileWorker{
-		DB: rt.DB, Config: rt.Config, Merchants: rt.Merchants,
+		StripeClients: stripeapi.NewFactory(stripeapi.HostRewriteTransport(fake.server.URL)),
+		DB:            rt.DB, Config: rt.Config, Merchants: rt.Merchants,
 		Now:           func() time.Time { return now },
 		RetireOverlap: time.Hour,
 	}

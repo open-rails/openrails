@@ -28,9 +28,9 @@ func TestCustomerPaymentRefundTotalsAcrossPages(t *testing.T) {
 	ctx := t.Context()
 	_, pool, dsn := scopeWithoutRLSDatabase(t)
 	runtime, mid, err := newDeclaredMerchant(ctx, embed.Options{
-		Config: &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox,
+		Config: &config.Config{TestMode: config.CredentialPostureSandbox,
 			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
-			ProviderWriteMode: config.ProviderWriteModeReadOnly, NewSubscriptionCollectionPolicy: "engine", DB: &config.DBConfig{URL: dsn}},
+			ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{URL: dsn}},
 		PGXPool: pool, River: embed.RiverFromHost(),
 	}, "refund-history-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Refund history"})
 	require.NoError(t, err)

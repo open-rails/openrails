@@ -20,7 +20,7 @@ func TestSessionToResponse_SolanaPayURLForAllModes(t *testing.T) {
 	t.Parallel()
 
 	cfg := testSolanaCheckoutConfig()
-	cfg.APIURL = "https://api.test.com"
+	cfg.PublicBillingBaseURL = "https://api.test.com"
 	svc := &CheckoutSessionService{config: cfg, rails: testSolanaCheckoutRails()}
 
 	cases := []struct {

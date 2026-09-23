@@ -46,6 +46,7 @@ import (
 // default (allow_incomplete) applies the update, leaves the invoice open and
 // the subscription past_due, and answers 200.
 type fakeStripeTier struct {
+	clients   *stripeapi.Factory
 	mu        sync.Mutex
 	subs      map[string]*fakeStripeSub
 	schedules map[string]map[string]any
@@ -96,8 +97,7 @@ func newFakeStripeTier(t *testing.T) *fakeStripeTier {
 	f := &fakeStripeTier{subs: map[string]*fakeStripeSub{}, schedules: map[string]map[string]any{}, responses: map[string]fakeStripeStored{}}
 	srv := httptest.NewServer(http.HandlerFunc(f.handle))
 	t.Cleanup(srv.Close)
-	stripeapi.SetBaseTransport(stripeapi.HostRewriteTransport(srv.URL))
-	t.Cleanup(func() { stripeapi.SetBaseTransport(nil) })
+	f.clients = stripeapi.NewFactory(stripeapi.HostRewriteTransport(srv.URL))
 	return f
 }
 
@@ -392,6 +392,8 @@ func newStripeTierFixture(t *testing.T) *stripeTierFixture {
 	entSvc := entitlements.NewEntitlementService(dbi, clock)
 	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, clock)
 	svc := NewCheckoutService(subSvc, productSvc, priceSvc, paymentSvc, entSvc, paymentmethods.NewPaymentMethodService(dbi), nil, nil, nil, nil, nil, clock)
+	svc.StripeClients = stripe.clients
+	svc.StripeService.StripeClients = stripe.clients
 	svc.Config = &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}
 	svc.Rails = railresolve.FixedSet{"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_" + sfx}}}
 	fx := &stripeTierFixture{t: t, db: dbi, svc: svc, stripe: stripe, ctx: ctx, clock: clock, user: &UserIdentity{ID: userID}, basic: basic, pro: pro, basicRef: basicRef, proRef: proRef}
@@ -511,7 +513,7 @@ func TestStripeTierChangeUpgradeReceiptAndRecovery(t *testing.T) {
 					paymentSvc := payments.NewPaymentService(fx.db, fx.clock)
 					notifications := subscriptions.NewNotificationService(fx.db, nil)
 					converger := &webhooks.StripeConvergeService{
-						DB: fx.db, Clock: fx.clock, Prober: &subscriptions.HTTPStripeLivenessProber{SecretKey: "sk_test_converge"},
+						DB: fx.db, Clock: fx.clock, Prober: &subscriptions.HTTPStripeLivenessProber{SecretKey: "sk_test_converge", HTTPClient: fx.svc.StripeClients.ReadOnlyClient(0)},
 						PriceService: fx.svc.PriceService, ProductService: fx.svc.ProductService, SubscriptionService: fx.svc.SubscriptionService,
 						SubscriptionLifecycleService: subscriptions.NewSubscriptionLifecycleService(fx.db, fx.svc.ProductService, fx.svc.PriceService, entSvc, notifications, paymentSvc, fx.clock),
 						PaymentService:               paymentSvc, NotificationService: notifications,
@@ -875,7 +877,7 @@ func TestStripeTierChangePaymentBehaviorRefusesUnpaidUpgrade(t *testing.T) {
 	fx := newStripeTierFixture(t)
 	railSub := fx.sub.RailSubscriptionID
 	itemID := fx.stripe.sub(railSub).itemID
-	stripe := &subscriptions.StripeService{Config: fx.svc.Config, Rails: fx.svc.Rails}
+	stripe := &subscriptions.StripeService{StripeClients: fx.svc.StripeClients, Config: fx.svc.Config, Rails: fx.svc.Rails}
 	fx.stripe.setMode("decline")
 	applied, err := stripe.ChangeSubscriptionPrice(fx.ctx, subscriptions.StripePriceChangeParams{SubscriptionID: railSub, ItemID: itemID, StripePriceID: fx.proRef, InternalPriceID: fx.pro.ID.String(), Key: "default-" + uuid.NewString()[:8], ProrationBehavior: "always_invoice"})
 	require.NoError(t, err, "the default applies the change despite the declined payment")

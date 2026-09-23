@@ -44,7 +44,7 @@ func TestBillingApplicationRunsUnchangedAcrossDeployments(t *testing.T) {
 		rt, err := embed.New(ctx, embed.Options{
 			Merchant: declaration,
 			Config: &config.Config{
-				Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
+				TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
 				SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
 				DB: &config.DBConfig{URL: h.DSN},
 			},

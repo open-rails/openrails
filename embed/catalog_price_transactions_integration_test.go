@@ -39,9 +39,9 @@ func TestCatalogPriceKeyTransactions(t *testing.T) {
 	require.Greater(t, pool.Config().MaxConns, int32(1), "concurrent transactions use independent connections")
 	provider := &catalogFailingProvider{}
 	rt, mid, err := newDeclaredMerchant(ctx, embed.Options{Config: &config.Config{
-		Env: "development", TestMode: config.CredentialPostureSandbox,
+		TestMode:             config.CredentialPostureSandbox,
 		MerchantConfigSource: config.MerchantConfigSourceManifest, AllowCatalogUpdates: true,
-		ProviderWriteMode: config.ProviderWriteModeFull, NewSubscriptionCollectionPolicy: "engine", DB: &config.DBConfig{URL: dsn},
+		ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: dsn},
 	}, PGXPool: pool, River: embed.RiverManagedByOpenRails(), StripeTransport: provider}, "price-tx-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Price transaction", PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {AccountID: "acct_transaction_fixture", Secrets: map[string]string{"secret_key": "sk_test_transaction_fixture", "webhook_signing_secret": "whsec_transaction_fixture"}}}}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })

@@ -62,7 +62,7 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 		rt, err := embed.New(ctx, embed.Options{
 			Merchant: declaration,
 			Config: &config.Config{
-				Env: "dev", TestMode: config.CredentialPostureSandbox,
+				TestMode:             config.CredentialPostureSandbox,
 				MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB,
 				ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: dsn},
 			},

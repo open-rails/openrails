@@ -46,7 +46,7 @@ func TestConfiguredRoutesReviewExposureAndCredentialOwnership(t *testing.T) {
 		require.NotContains(t, r.Path, "/me/")
 		require.NotContains(t, r.Path, "/merchant/")
 	}
-	rt = reviewRuntime(&HTTPConfig{PaymentProviders: true, Gate: billingauth.NewDelegatedGate(delegated)}, delegated)
+	rt = reviewRuntime(&HTTPConfig{MerchantConfig: true, Gate: billingauth.NewDelegatedGate(delegated)}, delegated)
 	rt.app.Config.MerchantConfigSource = config.MerchantConfigSourceManifest
 	routes, err = rt.HTTPRoutes()
 	require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestConfiguredRoutesReviewExposureAndCredentialOwnership(t *testing.T) {
 			require.False(t, r.Method == http.MethodPost && strings.HasSuffix(r.Path, "/archive"))
 		}
 	}
-	rt = reviewRuntime(&HTTPConfig{Checkout: true, Customer: true, MerchantAdmin: true, Catalog: true, PaymentProviders: true, MerchantAPI: true,
+	rt = reviewRuntime(&HTTPConfig{Checkout: true, Customer: true, MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true,
 		Authenticator: billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
 			return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 		}), Gate: billingauth.NewDelegatedGate(delegated)}, delegated)
@@ -145,7 +145,7 @@ func TestConfiguredRoutesReviewInvalidAuthFailsBeforeDatabase(t *testing.T) {
 		{HTTPConfig{Customer: true}, "Customer requires"},
 		{HTTPConfig{MerchantAdmin: true}, "management surfaces require"},
 		{HTTPConfig{Catalog: true}, "management surfaces require"},
-		{HTTPConfig{PaymentProviders: true}, "management surfaces require"},
+		{HTTPConfig{MerchantConfig: true}, "management surfaces require"},
 		{HTTPConfig{MerchantAPI: true}, "management surfaces require"},
 	} {
 		_, err := New(context.Background(), Options{Config: &config.Config{}, HTTP: &tc.cfg})

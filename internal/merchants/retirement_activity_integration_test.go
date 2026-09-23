@@ -25,6 +25,7 @@ import (
 // retirement. Every other merchant-scoped table must be a MerchantHasActivity
 // blocker or reach one through a NOT NULL foreign key.
 var retirementNeutralTables = map[string]string{
+	"credential_publications":       "durable credential publication replay receipt; custody material itself blocks retirement",
 	"catalog_applications":          "permanent replay metadata retained with the merchant; an empty application creates no billing obligation and retirement must not erase its receipt",
 	"catalogs":                      "immutable default/creator ownership metadata retained with the merchant; products, not empty catalog identities, are activity",
 	"admission_denials_hourly":      "refused-traffic telemetry anyone can create",

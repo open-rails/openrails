@@ -130,11 +130,11 @@ func (s *Hosted) Start() {
 		return
 	}
 	cfg := &config.Config{
-		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true,
-		SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
-		APIURL: s.BaseURL, CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
+		TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true,
+		SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, ProviderWriteMode: config.ProviderWriteModeFull,
+		PublicBillingBaseURL: s.BaseURL, CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
 		DB:   &config.DBConfig{URL: h.DSN},
-		Auth: &config.AuthConfig{Issuer: "https://hosted.openrails.test", KeysPath: s.keysPath},
+		Auth: &config.AuthConfig{AllowMemory: true, AllowPrivateNetworkJWKS: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, DirectPeerIP: true, Issuer: "https://hosted.openrails.test", KeysPath: s.keysPath},
 	}
 	if h.Redis != nil {
 		cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}

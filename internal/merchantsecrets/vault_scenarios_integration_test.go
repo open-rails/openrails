@@ -181,7 +181,7 @@ func TestVaultFullStack_PaymentProviderConfigRotationAndIsolation(t *testing.T) 
 
 	// PUT /v1/merchant/payment-providers equivalent (service level; the HTTP
 	// handler delegates here): declares the account and stores credentials.
-	cfgA, err := svc.UpsertPaymentProviderConfig(ctx, midA, "nmi", merchants.UpsertPaymentProviderConfigRequest{
+	cfgA, err := svc.UpsertPaymentProviderConfig(ctx, midA, "nmi", merchants.UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: new(int64),
 		AccountID: acctA,
 		Credentials: map[string]string{
 			"security_key":           "sk-full-A-1",
@@ -193,7 +193,10 @@ func TestVaultFullStack_PaymentProviderConfigRotationAndIsolation(t *testing.T) 
 		"API response must show the vault-held credential as configured")
 
 	// The KV holds the value at the canonical PSPSecretName path.
-	keyName := scopedName(t, "nmi", "live", acctA, "security_key")
+	initialRef, ok, err := svc.ActivePSPSecretRef(ctx, midA, "nmi", "live", "security_key")
+	require.NoError(t, err)
+	require.True(t, ok)
+	keyName := initialRef.Name
 	kvData, _, err := rootKV.ReadSecret(ctx, vaultMerchantPath(midA.String(), keyName))
 	require.NoError(t, err)
 	require.Equal(t, "sk-full-A-1", kvData["value"],
@@ -209,25 +212,33 @@ func TestVaultFullStack_PaymentProviderConfigRotationAndIsolation(t *testing.T) 
 	require.Equal(t, "sk-full-A-1", sec.Value)
 
 	// Second merchant configured independently.
-	_, err = svc.UpsertPaymentProviderConfig(ctx, midB, "nmi", merchants.UpsertPaymentProviderConfigRequest{
+	_, err = svc.UpsertPaymentProviderConfig(ctx, midB, "nmi", merchants.UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: new(int64),
 		AccountID:   acctB,
 		Credentials: map[string]string{"security_key": "sk-full-B-1"},
 	})
 	require.NoError(t, err)
 
-	// Rotate A via a second PUT: new value live immediately, KV version bumps.
-	_, err = svc.UpsertPaymentProviderConfig(ctx, midA, "nmi", merchants.UpsertPaymentProviderConfigRequest{
+	// Rotate A by publishing a new immutable candidate.
+	revision := int64(1)
+	_, err = svc.UpsertPaymentProviderConfig(ctx, midA, "nmi", merchants.UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: &revision,
 		AccountID:   acctA,
 		Credentials: map[string]string{"security_key": "sk-full-A-2"},
 	})
 	require.NoError(t, err)
-	sec, err = store.Secrets.Get(ctx, midA, resolved)
+	rotatedRef, ok, err := svc.ActivePSPSecretRef(ctx, midA, "nmi", "live", "security_key")
+	require.NoError(t, err)
+	require.True(t, ok)
+	sec, err = merchants.ReadSecretRef(ctx, store.Secrets, midA, rotatedRef)
 	require.NoError(t, err)
 	require.Equal(t, "sk-full-A-2", sec.Value, "rotation must be live immediately (write-through)")
-	require.Equal(t, 2, kvCurrentVersion(t, root, vaultMerchantPath(midA.String(), keyName)))
+	require.Equal(t, 1, kvCurrentVersion(t, root, vaultMerchantPath(midA.String(), rotatedRef.Name)))
+	require.NotEqual(t, keyName, rotatedRef.Name)
 
 	// The second merchant is untouched by A's rotation.
-	keyNameB := scopedName(t, "nmi", "live", acctB, "security_key")
+	refB, ok, err := svc.ActivePSPSecretRef(ctx, midB, "nmi", "live", "security_key")
+	require.NoError(t, err)
+	require.True(t, ok)
+	keyNameB := refB.Name
 	secB, err := store.Secrets.Get(ctx, midB, keyNameB)
 	require.NoError(t, err)
 	require.Equal(t, "sk-full-B-1", secB.Value)
@@ -279,11 +290,9 @@ func TestVaultCapabilityGating_RealPolicies(t *testing.T) {
 	t.Run("transit-only token + secret_backend=db degrades to DB store", func(t *testing.T) {
 		toToken := vaulttest.TokenWithPolicy(t, "or-ms-transit-only", vaulttest.PolicyTransitOnly)
 		cfg := &config.Config{
-			Env:                  "production",
-			MerchantConfigSource: config.MerchantConfigSourceAPI,
-			SecretBackend:        config.SecretBackendDB,
-			Encryption:           &config.EncryptionConfig{MasterKey: testMasterKey(t)},
-			Vault:                &config.VaultConfig{Enabled: true, Address: addr, AuthMethod: "token", Token: toToken},
+			SecretBackend: config.SecretBackendDB,
+			Encryption:    &config.EncryptionConfig{MasterKey: testMasterKey(t)},
+			Vault:         &config.VaultConfig{Enabled: true, Address: addr, AuthMethod: "token", Token: toToken},
 		}
 		store, err := Build(ctx, cfg, pool)
 		require.NoError(t, err)
@@ -316,7 +325,6 @@ func TestBuildTransit_ThreadsVaultAuthForTransitOnlyConnections(t *testing.T) {
 	toToken := vaulttest.TokenWithPolicy(t, "or-ms-buildtransit-only", vaulttest.PolicyTransitOnly)
 
 	cfg := &config.Config{
-		Env:   "production",
 		Vault: &config.VaultConfig{Enabled: true, Address: addr, AuthMethod: "token", Token: toToken},
 	}
 	store, err := BuildTransit(ctx, cfg)
@@ -327,7 +335,7 @@ func TestBuildTransit_ThreadsVaultAuthForTransitOnlyConnections(t *testing.T) {
 
 	// Vault disabled: BuildTransit's old (nil, nil) contract at the field level —
 	// a non-nil Store whose fields are all zero, so Ping stays a safe no-op.
-	disabled, err := BuildTransit(ctx, &config.Config{Env: "production"})
+	disabled, err := BuildTransit(ctx, &config.Config{})
 	require.NoError(t, err)
 	require.Nil(t, disabled.SolanaTransit)
 	require.Nil(t, disabled.VaultAuth)
@@ -416,10 +424,8 @@ func TestBackendParity_CycleRotationIsolation(t *testing.T) {
 		}},
 		{"db-encrypted", func(t *testing.T) *Store {
 			store, err := Build(ctx, &config.Config{
-				Env:                  "production",
-				MerchantConfigSource: config.MerchantConfigSourceAPI,
-				SecretBackend:        config.SecretBackendDB,
-				Encryption:           &config.EncryptionConfig{MasterKey: testMasterKey(t)},
+				SecretBackend: config.SecretBackendDB,
+				Encryption:    &config.EncryptionConfig{MasterKey: testMasterKey(t)},
 			}, pool)
 			require.NoError(t, err)
 			return store

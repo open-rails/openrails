@@ -41,7 +41,7 @@ func TestStripeRefundDeliveriesConcurrentlyRevokeOnePurchase(t *testing.T) {
 	accountID := "acct_" + uuid.NewString()
 
 	rt, mid, err := newDeclaredMerchant(ctx, embed.Options{Config: &config.Config{
-		Env: "development", TestMode: config.CredentialPostureSandbox,
+		TestMode:             config.CredentialPostureSandbox,
 		MerchantConfigSource: config.MerchantConfigSourceManifest,
 		AllowCatalogUpdates:  true,
 		ProviderWriteMode:    config.ProviderWriteModeReadOnly,

@@ -33,7 +33,6 @@ func TestFleetAggregatesUnderTheEnforcingRole(t *testing.T) {
 	t.Cleanup(appPool.Close)
 
 	cfg := &config.Config{
-		Env:  "test",
 		DB:   &config.DBConfig{},
 		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
 	}

@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -207,8 +206,6 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	readMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsRead)}, dbMW...)
 	writeMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsUpdate)}, dbMW...)
 	admissionMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantAdmissionsCreate)}, dbMW...)
-	settingsReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsRead)}, dbMW...)
-	settingsWriteMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)}, dbMW...)
 	usageReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantUsageRead)}, dbMW...)
 
 	hostEventReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantHostEventsRead)}, dbMW...)
@@ -285,8 +282,6 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	customers.Handle(http.MethodGet, "/effective-tier", h(httphandlers.ServiceResolveEffectiveTier), readMW...)
 
 	group.Handle(http.MethodPost, "/admissions", h(httphandlers.ServiceAdmitBatch), admissionMW...)
-	group.Handle(http.MethodGet, "/settings", h(httphandlers.ServiceGetMerchantSettings), settingsReadMW...)
-	group.Handle(http.MethodPut, "/settings", h(httphandlers.ServiceSetMerchantSettings), settingsWriteMW...)
 	group.Handle(http.MethodGet, "/trust-level", h(httphandlers.ServiceGetTrustLevel), readMW...)
 	group.Handle(http.MethodPost, "/wasted-spend", h(httphandlers.ServiceReportWastedSpend), admissionMW...)
 	group.Handle(http.MethodPut, "/credit-limit", h(httphandlers.ServiceSetCreditLimit), writeMW...)
@@ -353,31 +348,28 @@ func RegisterImportRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	rr.Handle(http.MethodPost, "/billing", h(httphandlers.ImportDeclaredBilling), write)
 }
 
-func RegisterPaymentProviderRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+// RegisterMerchantConfigRoutes is shared by the private Client transport and
+// explicitly selected external management surface. Route publication grants no
+// authority and does not change the selected credential backend's capabilities.
+func RegisterMerchantConfigRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	var dbMW []router.Middleware
 	if rt != nil && rt.DB != nil {
 		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
 	}
-	registerPaymentProviderActionRoutes(rr, rt, opts, dbMW...)
-}
-
-// manifestModeWriteGuardMW keeps host-declared provider configuration immutable.
-// Catalog mutation has its own authority guard below.
-func manifestModeWriteGuardMW(rt *app.Runtime) router.Middleware {
-	return func(next router.Handler) router.Handler {
-		return func(r *httprequest.Request) {
-			if rt != nil && rt.Config.IsManifestMerchantConfigSource() {
-				r.APIError(&api.APIError{
-					HTTPStatus: http.StatusMethodNotAllowed,
-					Type:       api.ErrorTypeInvalidRequest,
-					Code:       "manifest_driven",
-					Message:    "merchant_config_source=manifest: payment-provider configuration is host-declared; update the host configuration and restart",
-				})
-				return
-			}
-			next(r)
-		}
+	read := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsRead)
+	write := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)
+	rr.Handle(http.MethodGet, "/settings", h(httphandlers.ServiceGetMerchantSettings), append([]router.Middleware{read}, dbMW...)...)
+	rr.Handle(http.MethodPut, "/settings", h(httphandlers.ServiceSetMerchantSettings), append([]router.Middleware{write}, dbMW...)...)
+	if rt != nil && rt.Merchants != nil {
+		rr.Handle(http.MethodGet, "/api-host", h(httphandlers.GetMerchantAPIHost), read)
+		rr.Handle(http.MethodPut, "/api-host", h(httphandlers.PutMerchantAPIHost), write)
 	}
+	webhooks := rr.Group("/webhooks")
+	webhooks.Handle(http.MethodGet, "", h(httphandlers.ListMerchantWebhooks), append([]router.Middleware{read}, dbMW...)...)
+	webhooks.Handle(http.MethodPost, "", h(httphandlers.CreateMerchantWebhook), append([]router.Middleware{write}, dbMW...)...)
+	webhooks.Handle(http.MethodDelete, "/:id", h(httphandlers.DeleteMerchantWebhook), append([]router.Middleware{write}, dbMW...)...)
+	webhooks.Handle(http.MethodPut, "/:id/url", h(httphandlers.RotateMerchantWebhookURL), append([]router.Middleware{write}, dbMW...)...)
+	registerPaymentProviderActionRoutes(rr.Group("/payment-providers"), rt, opts, dbMW...)
 }
 
 func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
@@ -710,7 +702,7 @@ func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtim
 	read := opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentProvidersRead)
 	write := opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentProvidersUpdate)
 	readMW := append([]router.Middleware{read}, dbMW...)
-	writeMW := append([]router.Middleware{manifestModeWriteGuardMW(rt), write}, dbMW...)
+	writeMW := append([]router.Middleware{write}, dbMW...)
 
 	providers.Handle(http.MethodGet, "", h(httphandlers.MerchantListPaymentProviders), readMW...)
 	// or#288 routing dry run: read-only "which PSP would this checkout get, and
@@ -719,21 +711,9 @@ func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtim
 	// captured as a provider name.
 	providers.Handle(http.MethodPost, "/routing/dry-run", h(httphandlers.MerchantDryRunCheckoutRouting), readMW...)
 	providers.Handle(http.MethodGet, "/:provider", h(httphandlers.MerchantGetPaymentProvider), readMW...)
-	// Host-owned provider configuration has no mutation HTTP surface. Keep
-	// reads and routing dry runs available, independently of catalog ownership.
-	if rt != nil && rt.Config.IsManifestMerchantConfigSource() {
-		return
-	}
-	// Provider-config WRITE surface persists secrets; mount it only when OpenRails
-	// can actually write them (#661). Explicit route selection cannot override
-	// the runtime backend, and callers may omit ProviderRoutes entirely.
-	secretWrite := opts.ProviderRoutes == nil || opts.ProviderRoutes.SecretWrite
-	if rt != nil && rt.RouteCapabilities != nil {
-		secretWrite = secretWrite && rt.RouteCapabilities.SecretWrite
-	}
-	if secretWrite {
-		providers.Handle(http.MethodPut, "/:provider", h(httphandlers.MerchantPutPaymentProvider), writeMW...)
-	}
+	// Metadata updates remain available with a read-only credential backend.
+	// The service rejects write-only credentials when custody cannot retain them.
+	providers.Handle(http.MethodPut, "/:provider", h(httphandlers.MerchantPutPaymentProvider), writeMW...)
 	// Lifecycle archives (#655/#656) write only the PSP row — never a secret,
 	// never the provider — so they stay mounted when the secret backend is
 	// read-only: a terminated account must be archivable from any deployment.
@@ -873,21 +853,6 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 		apiKeys.Handle(http.MethodDelete, "/:id", h(httphandlers.MerchantRevokeAPIKey(opts.APIKeys)), credentialsManage)
 	}
 
-	// #850 merchant api_host (#734 Host routing): read + assign the merchant's
-	// canonical API host. Reads gate on merchant:settings:read; the write on
-	// merchant:settings:update — owner-only in the fixed #567 catalog. No
-	// MerchantDBConnMW: the merchants directory service writes the directory
-	// row (openrails.merchants, not an RLS-scoped merchant table) with its own
-	// pool.
-	// Registered only when the merchant directory is armed; a deployment
-	// without one has no host mapping to read or assign.
-	if rt != nil && rt.Merchants != nil {
-		apiHostRead := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsRead)
-		apiHostWrite := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)
-		rr.Handle(http.MethodGet, "/api-host", h(httphandlers.GetMerchantAPIHost), apiHostRead)
-		rr.Handle(http.MethodPut, "/api-host", h(httphandlers.PutMerchantAPIHost), apiHostWrite)
-	}
-
 	// #760 merchant team management: roster, invites (register+join links),
 	// role changes, and removal — all through AuthKit group membership. Reads
 	// gate on merchant:members:read; mutations on merchant:members:manage. Only
@@ -909,11 +874,6 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 
 	// Outbound notification destinations and the merchant notification bell.
 	settingsWrite := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)}, dbMW...)
-	webhooks := rr.Group("/webhooks")
-	webhooks.Handle(http.MethodGet, "", h(httphandlers.ListMerchantWebhooks), metricsRead...)
-	webhooks.Handle(http.MethodPost, "", h(httphandlers.CreateMerchantWebhook), settingsWrite...)
-	webhooks.Handle(http.MethodDelete, "/:id", h(httphandlers.DeleteMerchantWebhook), settingsWrite...)
-	webhooks.Handle(http.MethodPut, "/:id/url", h(httphandlers.RotateMerchantWebhookURL), settingsWrite...)
 
 	notifications := rr.Group("/notifications")
 	notifications.Handle(http.MethodGet, "", h(httphandlers.ListMerchantNotifications), metricsRead...)

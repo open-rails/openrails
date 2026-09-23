@@ -34,7 +34,6 @@ func TestStandaloneRouteSurface(t *testing.T) {
 	_, appDSN := dbtest.SharedRLSPostgres(t)
 
 	cfg := &config.Config{
-		Env:      "dev",
 		TestMode: config.CredentialPostureSandbox,
 		// Pin the complete API-owned provider surface; host-owned mode omits mutations.
 		MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true,

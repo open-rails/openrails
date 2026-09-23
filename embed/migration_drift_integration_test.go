@@ -80,7 +80,7 @@ func TestEmbeddedRuntimeRefusesOrphanedMigrations(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	rdb, _ := dbtest.SharedRedisClient(t)
 	newRuntime := func() (*embed.Runtime, error) {
-		cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
+		cfg := &config.Config{TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 		return embed.New(ctx, embed.Options{
 			Config: cfg, Redis: rdb, River: embed.RiverManagedByOpenRails(),
 		})

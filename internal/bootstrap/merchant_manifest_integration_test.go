@@ -37,7 +37,7 @@ func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 	for i := range key {
 		key[i] = byte(i + 1)
 	}
-	cfg := &config.Config{Env: "development", MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{
+	cfg := &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{
 		MasterKey: base64.StdEncoding.EncodeToString(key),
 	}}
 	manifest := hostThreeMerchantManifest()
@@ -170,7 +170,7 @@ func newMerchantManifestTestPool(t *testing.T) *pgxpool.Pool {
 
 	targetDSN := merchantManifestDatabaseDSN(t, adminDSN, dbName)
 	require.NoError(t, migrate.RunPostgres(ctx, &config.Config{
-		Env: "development", DB: &config.DBConfig{URL: targetDSN},
+		DB: &config.DBConfig{URL: targetDSN},
 	}))
 	pool, err := pgxpool.New(ctx, targetDSN)
 	require.NoError(t, err)
@@ -220,7 +220,7 @@ func TestMerchantManifestDatabaseDSNIsOwned(t *testing.T) {
 // SEC-18: Env is declared, never inferred — an empty Env is no longer
 // development, and the DB secret store refuses a plaintext posture outside it.
 func apiModeReconcileConfig() *config.Config {
-	return &config.Config{Env: "development", MerchantConfigSource: config.MerchantConfigSourceAPI}
+	return &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI}
 }
 
 // sandboxModeReconcileConfig is apiModeReconcileConfig under test_mode=sandbox.
@@ -235,7 +235,6 @@ func sandboxModeReconcileConfig() *config.Config {
 func newMerchantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlplane.ControlPlane {
 	t.Helper()
 	cfg := &config.Config{
-		Env: "test",
 		// MintDisabled: "test" is not a dev-like env (#748: verify-only must be
 		// declared outside development), and this control plane is never asked
 		// to mint in these manifest-reconcile tests.

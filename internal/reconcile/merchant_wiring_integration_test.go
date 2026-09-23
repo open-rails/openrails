@@ -67,7 +67,7 @@ func TestMerchantFetcherBuilder_StoreArmsDeclaredAccount(t *testing.T) {
 	require.NoError(t, err)
 
 	armed := MerchantFetcherBuilder{
-		Config:    &config.Config{Env: "dev"},
+		Config:    &config.Config{},
 		Merchants: svc,
 		DB:        dbi,
 	}.Build(context.Background(), mid)
@@ -89,7 +89,7 @@ func TestMerchantFetcherBuilder_NoDeclaredAccountsArmNothing(t *testing.T) {
 	mid := newWiringMerchant(t, dbi, "wiring-boot-"+sfx)
 
 	armed := MerchantFetcherBuilder{
-		Config:    &config.Config{Env: "dev"},
+		Config:    &config.Config{},
 		Merchants: svc,
 		DB:        dbi,
 	}.Build(context.Background(), mid)
@@ -115,7 +115,7 @@ func TestMerchantFetcherBuilder_DeclaredAccountNeverFallsBackAcrossPlanes(t *tes
 	defer hook.Reset()
 
 	armed := MerchantFetcherBuilder{
-		Config:    &config.Config{Env: "dev"},
+		Config:    &config.Config{},
 		Merchants: svc,
 		DB:        dbi,
 	}.Build(context.Background(), mid)

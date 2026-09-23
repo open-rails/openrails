@@ -330,7 +330,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug string, configure ...func(*config.Config)) *Surface {
 	h.t.Helper()
 
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, AllowCatalogUpdates: true, DB: &config.DBConfig{URL: h.DSN}}
+	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, AllowCatalogUpdates: true, DB: &config.DBConfig{URL: h.DSN}}
 	for _, apply := range configure {
 		apply(cfg)
 	}
@@ -464,8 +464,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 	dbtest.EnsureTestMerchant(h.ctx, h.t, h.sharedPool())
 
 	cfg := &config.Config{
-		APIURL:                   "http://" + srv.Listener.Addr().String(),
-		Env:                      "dev",
+		PublicBillingBaseURL:     "http://" + srv.Listener.Addr().String(),
 		TestMode:                 config.CredentialPostureSandbox,
 		CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
 		// MODE 2 (#723): the standalone harness IS the API-driven SaaS shape —
@@ -474,6 +473,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 		MerchantConfigSource: config.MerchantConfigSourceAPI,
 		AllowCatalogUpdates:  true,
 		SecretBackend:        config.SecretBackendDB,
+		Encryption:           &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 		// Explicit full: unset fail-closes to readonly (Paul 2026-07-02), which
 		// would park every provider write. The harness is a sandbox — fake
 		// providers, testcontainers DB — so full behavior is safe and required
@@ -482,7 +482,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 		Host:              "127.0.0.1",
 		Port:              0, // ephemeral; we serve via httptest below
 		DB:                &config.DBConfig{URL: appDSN},
-		Auth: &config.AuthConfig{
+		Auth: &config.AuthConfig{AllowMemory: true, AllowPrivateNetworkJWKS: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, DirectPeerIP: true,
 			// The control plane's own AuthKit issuer.
 			Issuer:   "https://controlplane.openrails.test",
 			KeysPath: h.t.TempDir(),

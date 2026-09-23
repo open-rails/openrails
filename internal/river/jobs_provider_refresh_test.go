@@ -124,7 +124,7 @@ func TestProviderRefreshSchedulerMerchantQueueOverride(t *testing.T) {
 func TestProviderRefreshSchedulerReadonlySkips(t *testing.T) {
 	ins := &fakeRefreshInserter{}
 	w := &ProviderRefreshSchedulerWorker{
-		Config:   &config.Config{Env: "dev", ProviderWriteMode: config.ProviderWriteModeReadOnly},
+		Config:   &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly},
 		Inserter: ins,
 		ListMerchants: func(context.Context) ([]uuid.UUID, error) {
 			t.Fatal("readonly mode must not list merchants")

@@ -54,7 +54,7 @@ and via an hourly reconcile job — subscribing exactly to the event types it ha
 (`invoice.paid`, `invoice.payment_failed`, `checkout.session.completed` and the other
 checkout-session events, `customer.subscription.updated/deleted`, `charge.succeeded`,
 `charge.refunded`, `refund.created/updated`, `payment_method.attached`, and dispute
-open/close). Registration is skipped when the configured `api_url` is not a public
+open/close). Registration is skipped when the configured `public_billing_base_url` is not a public
 `https` URL, when the secret key is missing, or when provider writes are disabled.
 
 Signing-secret handling depends on the merchant source:
@@ -131,7 +131,7 @@ and [Stripe snapshot-to-thin migration](https://docs.stripe.com/webhooks/migrate
 
 ### Catalog ownership
 
-With `new_subscription_collection_policy: engine`, new Stripe products and
+New Stripe products and
 prices stay in OpenRails, including creator catalogs and secondary provider
 accounts. Recurring setup uses saved Customer/PaymentMethod references and
 PaymentIntents; it creates no Stripe Subscription. One-time hosted checkout uses

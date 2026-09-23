@@ -25,7 +25,6 @@ func TestEmbedded_DeclarePSP(t *testing.T) {
 
 	suffix := strings.ToLower(uuid.NewString()[:8])
 	cfg := &config.Config{
-		Env:                  "development",
 		TestMode:             config.CredentialPostureSandbox,
 		ProviderWriteMode:    config.ProviderWriteModeReadOnly,
 		MerchantConfigSource: config.MerchantConfigSourceAPI,

@@ -33,6 +33,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/admission"
@@ -686,6 +687,7 @@ type PSPSignerConfig struct {
 // (both false) is additive + seed-once. Startup provisioning always uses the
 // default; the destructive tiers are opt-in via the CLI and never run on boot.
 type MerchantManifestReconcileOptions struct {
+	StripeClients *stripeapi.Factory
 	// Insert creates missing merchant/issuer/profile/PSP/secret
 	// state declared by the manifest. Manual CLI runs default to plan-only until
 	// this or another mutation flag is set.
@@ -825,7 +827,7 @@ func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *c
 		}
 		return opts.SecretStore, transitStore.SolanaTransit, nil
 	}
-	if cfg.IsManifestMerchantConfigSource() {
+	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
 		log.Info("merchant bootstrap: merchant_config_source=manifest — DB projections reconcile; secrets validate in memory only and are NOT persisted (#723: the server loads them from its boot manifest)")
 		transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
 		if err != nil {
@@ -843,17 +845,6 @@ func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *c
 func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merchants.Merchant, error) {
 	slug := merchant.NormalizeSlug(req.Slug)
 	mt := req.Merchant
-	// MODE 1 (#723): the YAML is the truth — it steamrolls the DB projections
-	// and the in-memory secret plane on every apply. Seed-once/plan tiers are
-	// mode-2 (api) semantics; forcing here keeps every mode-1 caller (embedded
-	// merchant constructor, standalone boot, CLI) converging identically.
-	if req.Config.IsManifestMerchantConfigSource() {
-		req.Options.Insert = true
-		req.Options.Overwrite = true
-		// Prune needs a store to list; a storeless call (read-side bind with no
-		// accounts) has nothing to prune.
-		req.Options.Prune = req.SecretStore != nil
-	}
 	database := req.Database
 	if database == nil {
 		if req.ControlPlane == nil || req.ControlPlane.Pool() == nil {
@@ -1737,6 +1728,7 @@ func reconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 			return nil
 		}
 		res, err := catalog.ReconcileManagedStripeWebhook(ctx, catalog.ManagedStripeWebhookParams{
+			StripeClients:       opts.StripeClients,
 			Config:              cfg,
 			SecretStore:         secretStore,
 			MerchantID:          merchantID,

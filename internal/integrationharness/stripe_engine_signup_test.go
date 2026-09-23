@@ -179,7 +179,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 	surface := h.StartStandalone("USD", WithClock(clock), WithConfig(func(c *config.Config) {
 		c.ProviderSandbox = &config.ProviderSandboxConfig{StripeAPIURL: gateway.URL}
 		c.ProviderWriteMode = config.ProviderWriteModeFull
-		c.NewSubscriptionCollectionPolicy = "engine"
+
 	}), func(c *standaloneConfig) {
 		c.delegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
 			return host.AuthenticateDelegated(ctx, r)
@@ -450,7 +450,7 @@ func stripeEngineSignupSelfHTTP(t *testing.T, reversal string, customerRetry, we
 		replacement := openrails.PaymentMethodID(uuid.New())
 		_, err = customer.RetrySubscriptionNow(t.Context(), openrails.RetrySubscriptionNowRequest{SubscriptionID: subscription, IdempotencyKey: "wrong-method-" + uuid.NewString(), PaymentMethodID: &replacement})
 		require.Error(t, err)
-		rt.Config.NewSubscriptionCollectionPolicy = "provider" // stored engine ownership survives a new-enrollment default change
+
 		retryRequest := openrails.RetrySubscriptionNowRequest{SubscriptionID: subscription, IdempotencyKey: "retry-" + uuid.NewString(), PaymentMethodID: &localMethod}
 		retried, err := customer.RetrySubscriptionNow(t.Context(), retryRequest)
 		require.NoError(t, err)

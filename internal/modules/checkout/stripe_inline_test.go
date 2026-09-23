@@ -16,12 +16,12 @@ import (
 )
 
 func TestEngineOneTimeCheckoutUsesLocalInlineTerms(t *testing.T) {
-	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, NewSubscriptionCollectionPolicy: "engine"}
+	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull}
 	service := &CheckoutService{Config: cfg, Rails: railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: "acct_test", Stripe: &config.StripeRailConfig{SecretKey: "sk_test_synthetic"}}}}
 	product := &models.Product{ID: uuid.New(), DisplayName: "Accepted post"}
 	price := &models.Price{ID: uuid.New(), ProductID: product.ID, Amount: 12340000, Currency: "USD"}
 	calls := 0
-	release := stripeapi.InstallBaseTransport(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) {
+	service.StripeClients = stripeapi.NewFactory(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) {
 		calls++
 		require.Equal(t, "/v1/checkout/sessions", r.URL.Path)
 		require.Equal(t, http.MethodPost, r.Method)
@@ -34,7 +34,6 @@ func TestEngineOneTimeCheckoutUsesLocalInlineTerms(t *testing.T) {
 		require.Equal(t, "payment", r.Form.Get("mode"))
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.test/accepted"}`))}, nil
 	}))
-	defer release()
 	result, err := service.processStripePayment(context.Background(), &CheckoutRequest{SuccessURL: "https://app.example/success", CancelURL: "https://app.example/cancel", IdempotencyKey: "accepted-inline"}, &UserIdentity{ID: uuid.NewString()}, price, product)
 	require.NoError(t, err)
 	require.Equal(t, "redirect_required", result.Status)

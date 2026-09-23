@@ -194,7 +194,7 @@ func (s *Service) updateProduct(ctx context.Context, id openrails.ProductID, req
 		if !s.localCatalogOnly && !req.SkipRailSync && (req.DisplayName != nil || req.Description != nil || req.Archived != nil) && s.rt.Config != nil {
 			stripeProductID := s.lookupStripeProductID(ctx, productID)
 			if stripeProductID != "" {
-				stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.RailConfigs}
+				stripeSvc := &catalog.StripeCatalogService{StripeClients: s.rt.StripeClients, Config: s.rt.Config, Rails: s.rt.RailConfigs}
 				params := catalog.UpdateProductParams{}
 				if req.DisplayName != nil {
 					name := strings.TrimSpace(*req.DisplayName)
@@ -221,7 +221,7 @@ func (s *Service) updateProduct(ctx context.Context, id openrails.ProductID, req
 		// Product exists for this product (i.e. a price has linked it).
 		if !s.localCatalogOnly && !req.SkipRailSync && req.SetEntitlements && s.rt.Config != nil {
 			if stripeProductID := s.lookupStripeProductID(ctx, productID); stripeProductID != "" {
-				stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.RailConfigs}
+				stripeSvc := &catalog.StripeCatalogService{StripeClients: s.rt.StripeClients, Config: s.rt.Config, Rails: s.rt.RailConfigs}
 				keys := make([]string, 0, len(p.EntitlementsSpec))
 				for k := range p.EntitlementsSpec {
 					keys = append(keys, k)
@@ -258,7 +258,7 @@ func (s *Service) propagateProductActiveToStripeCommitted(ctx context.Context, p
 	if stripeProductID == "" {
 		return
 	}
-	stripeSvc := &catalog.StripeCatalogService{Config: s.rt.Config, Rails: s.rt.RailConfigs}
+	stripeSvc := &catalog.StripeCatalogService{StripeClients: s.rt.StripeClients, Config: s.rt.Config, Rails: s.rt.RailConfigs}
 	a := active
 	_ = stripeSvc.UpdateProduct(ctx, stripeProductID, catalog.UpdateProductParams{Active: &a})
 }

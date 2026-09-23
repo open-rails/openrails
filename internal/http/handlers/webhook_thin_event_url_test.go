@@ -32,10 +32,10 @@ func thinBytes(t *testing.T, value any) []byte {
 	return b
 }
 
-func installThinTransport(t *testing.T, responses map[string]string, inspect func(*http.Request)) *[]string {
+func installThinTransport(t *testing.T, responses map[string]string, inspect func(*http.Request)) (*stripeapi.Factory, *[]string) {
 	t.Helper()
 	calls := []string{}
-	stripeapi.SetBaseTransport(stripeThinTransport(func(r *http.Request) (*http.Response, error) {
+	clients := stripeapi.NewFactory(stripeThinTransport(func(r *http.Request) (*http.Response, error) {
 		calls = append(calls, r.URL.Path)
 		require.Equal(t, "https", r.URL.Scheme)
 		require.Equal(t, "api.stripe.com", r.URL.Host)
@@ -52,8 +52,7 @@ func installThinTransport(t *testing.T, responses map[string]string, inspect fun
 		}
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 	}))
-	t.Cleanup(func() { stripeapi.SetBaseTransport(nil) })
-	return &calls
+	return clients, &calls
 }
 
 func TestThinStripeSupportedFinancialAndLegacyNotifications(t *testing.T) {
@@ -76,7 +75,7 @@ func TestThinStripeSupportedFinancialAndLegacyNotifications(t *testing.T) {
 			full["reason"] = map[string]any{"type": "request"}
 			object := map[string]any{"id": tc.id, "object": tc.kind, "customer": "cus_current", "status": "succeeded", "amount": 1000, "subscription": "sub_test"}
 			snapshot := map[string]any{"id": "evt_snapshot", "type": tc.eventType, "created": 1790000000, "data": map[string]any{"object": object, "previous_attributes": map[string]any{"customer": "cus_before"}}}
-			calls := installThinTransport(t, map[string]string{
+			clients, calls := installThinTransport(t, map[string]string{
 				"/v1/account":                        `{"id":"acct_test"}`,
 				"/v2/core/events/evt_thin":           string(thinBytes(t, full)),
 				"/v1/events/evt_snapshot":            string(thinBytes(t, snapshot)),
@@ -91,7 +90,7 @@ func TestThinStripeSupportedFinancialAndLegacyNotifications(t *testing.T) {
 			signed := thinBytes(t, notice)
 			prepared, err := prepareStripeMultiSecret(signed, []string{"whsec_thin"}, signStripe("whsec_thin", signed), 0)
 			require.NoError(t, err)
-			out, err := hydrateThinStripeEvent(context.Background(), "sk_test", "acct_test", prepared.Body)
+			out, err := hydrateThinStripeEvent(context.Background(), "sk_test", "acct_test", prepared.Body, clients)
 			require.NoError(t, err)
 			id, typ, err := webhookutil.ParseStripeEventMeta(out)
 			require.NoError(t, err)
@@ -115,12 +114,12 @@ func TestThinStripeSupportedFinancialAndLegacyNotifications(t *testing.T) {
 
 func TestThinStripeNoSnapshotCorrelation(t *testing.T) {
 	notice := thinFixture("refund.updated", "refund", "re_test", "refunds")
-	installThinTransport(t, map[string]string{
+	clients, _ := installThinTransport(t, map[string]string{
 		"/v1/account":              `{"id":"acct_test"}`,
 		"/v2/core/events/evt_thin": string(thinBytes(t, notice)),
 		"/v1/refunds/re_test":      `{"id":"re_test","object":"refund","status":"succeeded"}`,
 	}, nil)
-	out, err := hydrateThinStripeEvent(context.Background(), "sk_test", "acct_test", thinBytes(t, notice))
+	out, err := hydrateThinStripeEvent(context.Background(), "sk_test", "acct_test", thinBytes(t, notice), clients)
 	require.NoError(t, err)
 	id, typ, err := webhookutil.ParseStripeEventMeta(out)
 	require.NoError(t, err)
@@ -145,8 +144,8 @@ func TestThinStripeRejectsBeforeFetching(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			n := thinFixture("refund.updated", "refund", "re_test", "refunds")
 			tc.mutate(n)
-			calls := installThinTransport(t, nil, nil)
-			_, err := hydrateThinStripeEvent(context.Background(), "sk_test", "acct_test", thinBytes(t, n))
+			clients, calls := installThinTransport(t, nil, nil)
+			_, err := hydrateThinStripeEvent(context.Background(), "sk_test", "acct_test", thinBytes(t, n), clients)
 			require.Error(t, err)
 			require.Empty(t, *calls)
 		})
@@ -155,8 +154,8 @@ func TestThinStripeRejectsBeforeFetching(t *testing.T) {
 		t.Run(url, func(t *testing.T) {
 			n := thinFixture("refund.updated", "refund", "re_test", "refunds")
 			n["related_object"].(map[string]any)["url"] = url
-			calls := installThinTransport(t, nil, nil)
-			_, err := hydrateThinStripeEvent(context.Background(), "sk_test", "acct_test", thinBytes(t, n))
+			clients, calls := installThinTransport(t, nil, nil)
+			_, err := hydrateThinStripeEvent(context.Background(), "sk_test", "acct_test", thinBytes(t, n), clients)
 			require.Error(t, err)
 			require.Empty(t, *calls)
 		})
@@ -202,8 +201,8 @@ func TestThinStripeRejectsFetchedMismatchAndFailure(t *testing.T) {
 			if responses["/v2/core/events/evt_thin"] == "generate" {
 				responses["/v2/core/events/evt_thin"] = string(thinBytes(t, full))
 			}
-			installThinTransport(t, responses, nil)
-			_, err := hydrateThinStripeEvent(context.Background(), "sk_test", "acct_test", thinBytes(t, notice))
+			clients, _ := installThinTransport(t, responses, nil)
+			_, err := hydrateThinStripeEvent(context.Background(), "sk_test", "acct_test", thinBytes(t, notice), clients)
 			require.Error(t, err)
 		})
 	}
@@ -211,13 +210,12 @@ func TestThinStripeRejectsFetchedMismatchAndFailure(t *testing.T) {
 
 func TestThinStripeRefusesRedirectWithoutForwardingKey(t *testing.T) {
 	calls := 0
-	stripeapi.SetBaseTransport(stripeThinTransport(func(r *http.Request) (*http.Response, error) {
+	clients := stripeapi.NewFactory(stripeThinTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
 		require.Equal(t, "api.stripe.com", r.URL.Host)
 		return &http.Response{StatusCode: 302, Header: http.Header{"Location": []string{"https://api.stripe.com.evil.example/collect"}}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
 	}))
-	t.Cleanup(func() { stripeapi.SetBaseTransport(nil) })
-	_, err := hydrateThinStripeEvent(context.Background(), "sk_test", "acct_test", thinBytes(t, thinFixture("refund.updated", "refund", "re_test", "refunds")))
+	_, err := hydrateThinStripeEvent(context.Background(), "sk_test", "acct_test", thinBytes(t, thinFixture("refund.updated", "refund", "re_test", "refunds")), clients)
 	require.Error(t, err)
 	require.Equal(t, 1, calls)
 }

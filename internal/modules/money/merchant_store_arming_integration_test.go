@@ -98,7 +98,7 @@ func TestRailCredentialStoreArming_ProductionResolutionPath(t *testing.T) {
 	require.Equal(t, stripeKey, creds.SecretKey, "LoadStripeCredentials must resolve the seeded scoped secret")
 
 	stripeSvc := &subscriptions.StripeService{
-		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox},
+		Config: &config.Config{TestMode: config.CredentialPostureSandbox},
 		Rails: railresolve.FixedSet{
 			"stripe": {Rail: models.RailStripe, AccountID: stripeAccount, Stripe: &config.StripeRailConfig{SecretKey: creds.SecretKey}},
 		},

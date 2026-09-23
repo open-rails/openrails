@@ -39,7 +39,7 @@ func buildCapabilities(active []RouteSet, providerRoutes routesurface.ProviderRo
 		"stripe_billing_portal":          groups[RouteSetCustomer] && providerRoutes.StripePortal,
 		"solana_one_time_payments":       groups[RouteSetCheckout] && providerRoutes.Solana,
 		"solana_subscription_management": groups[RouteSetCustomer] && providerRoutes.SolanaSigning,
-		"provider_credential_writes":     groups[RouteSetPaymentProviders] && providerRoutes.SecretWrite,
+		"provider_credential_writes":     groups[RouteSetMerchantConfig] && providerRoutes.SecretWrite,
 	}}
 }
 

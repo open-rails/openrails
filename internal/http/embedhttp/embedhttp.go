@@ -247,11 +247,11 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 		httproutes.RegisterCatalogCollectionRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant/catalogs", s.Runtime), s.Runtime, adminOpts)
 		httproutes.RegisterOwnedCatalogRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/catalog", s.Runtime), s.Runtime, adminOpts)
 	}
-	if routeSets[RouteSetPaymentProviders] {
+	if routeSets[RouteSetMerchantConfig] {
 		adminOpts := httproutes.Options{
 			Gate: s.Gate,
 		}
-		httproutes.RegisterPaymentProviderRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant/payment-providers", s.Runtime), s.Runtime, adminOpts)
+		httproutes.RegisterMerchantConfigRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, adminOpts)
 	}
 	if routeSets[RouteSetMerchantAPI] {
 		httproutes.RegisterServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, httproutes.Options{Gate: s.Gate})
@@ -336,7 +336,7 @@ func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool) error {
 	if (routeSets[RouteSetCheckout] || routeSets[RouteSetCustomer]) && (s == nil || s.Authenticator == nil) {
 		return fmt.Errorf("embedded billing: user route groups require Options.Authenticator")
 	}
-	if (routeSets[RouteSetMerchantAdmin] || routeSets[RouteSetCatalog] || routeSets[RouteSetPaymentProviders] || routeSets[RouteSetMerchantAPI]) && (s == nil || s.Gate == nil) {
+	if (routeSets[RouteSetMerchantAdmin] || routeSets[RouteSetCatalog] || routeSets[RouteSetMerchantConfig] || routeSets[RouteSetMerchantAPI]) && (s == nil || s.Gate == nil) {
 		return fmt.Errorf("embedded billing: merchant route groups require Options.Gate")
 	}
 	return nil

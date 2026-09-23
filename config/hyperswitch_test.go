@@ -28,9 +28,9 @@ func TestHyperSwitchEndpointsBelongToHostAndRequireSecureTransport(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := providerSandboxConfig(tc.posture, ProviderSandboxConfig{})
-			cfg.Env = tc.env
+
 			cfg.Encryption = &EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
-			cfg.HyperSwitch = &HyperSwitchConfig{APIBaseURL: tc.url, SDKURL: tc.url}
+			cfg.HyperSwitch = &HyperSwitchConfig{AllowLoopbackHTTP: true, APIBaseURL: tc.url, SDKURL: tc.url}
 			err := Validate(cfg)
 			if tc.ok {
 				require.NoError(t, err)

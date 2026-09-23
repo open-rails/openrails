@@ -37,7 +37,7 @@ func TestStorePing(t *testing.T) {
 	pool, ctx := startSecretsPostgres(t)
 
 	t.Run("DB-backed store: Ping is always a no-op", func(t *testing.T) {
-		store, err := Build(ctx, &config.Config{Env: "dev", MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB}, pool)
+		store, err := Build(ctx, &config.Config{SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: testMasterKey(t)}}, pool)
 		require.NoError(t, err)
 		require.NoError(t, store.Ping(ctx))
 	})

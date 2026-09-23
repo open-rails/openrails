@@ -4,6 +4,7 @@ package merchants
 
 import (
 	"context"
+	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -121,7 +122,7 @@ func (n *rotationNode) resolveUnversioned(t *testing.T, id merchant.ID) string {
 
 func (n *rotationNode) rotate(t *testing.T, id merchant.ID, accountID, key string) error {
 	t.Helper()
-	_, err := n.svc.UpsertPaymentProviderConfig(context.Background(), id, "nmi", UpsertPaymentProviderConfigRequest{
+	_, err := n.svc.UpsertPaymentProviderConfig(context.Background(), id, "nmi", UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: currentPublicationRevision(t, n.svc, id, "nmi"),
 		AccountID:   accountID,
 		Credentials: map[string]string{"security_key": key},
 	})
@@ -170,7 +171,7 @@ func TestCredentialRotationCutsOverAcrossNodes(t *testing.T) {
 
 	var stored string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT value FROM billing.merchant_secrets WHERE merchant_id = $1 AND name LIKE 'psps/nmi/%'
+		SELECT value FROM billing.merchant_secrets WHERE merchant_id = $1 AND name LIKE 'credential_candidates/%/psps/nmi/%'
 	`, tn.ID.UUID()).Scan(&stored))
 	require.Equal(t, "key-v1", stored, "a refused rotation must never write the rejected credential")
 
@@ -185,8 +186,8 @@ func TestCredentialRotationCutsOverAcrossNodes(t *testing.T) {
 
 	cfg, err = nodeA.svc.GetPaymentProviderConfig(ctx, tn.ID, "nmi", "live")
 	require.NoError(t, err)
-	require.Equal(t, 2, cfg.Credentials["security_key"].RotationVersion,
-		"a committed rotation must raise the version floor")
+	require.Equal(t, 1, cfg.Credentials["security_key"].RotationVersion,
+		"each immutable candidate retains backend version one")
 
 	// The rotating node is immediately correct (write-through).
 	require.Equal(t, "key-v2", nodeA.resolve(t, tn.ID))
@@ -204,8 +205,8 @@ func TestCredentialRotationCutsOverAcrossNodes(t *testing.T) {
 
 	gw.accept("key-v3")
 	require.NoError(t, nodeA.rotate(t, tn.ID, accountID, "key-v3"))
-	require.Equal(t, "key-v2", nodeC.resolveUnversioned(t, tn.ID),
-		"without the version floor a warm cache keeps serving the retired credential — this is the bug or#812 fixes")
+	require.Equal(t, "key-v3", nodeC.resolveUnversioned(t, tn.ID),
+		"a fresh published immutable reference selects the new candidate even through a warm cache")
 	require.Equal(t, "key-v3", nodeC.resolve(t, tn.ID),
 		"the same node, same warm cache, reading WITH the version floor, gets the rotated credential")
 	require.Equal(t, "key-v3", nodeB.resolve(t, tn.ID))
@@ -228,7 +229,7 @@ func TestRotationPreservesUntouchedCredentialVersions(t *testing.T) {
 	require.NoError(t, err)
 
 	const accountID = "rotation-812-partial"
-	_, err = node.svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
+	_, err = node.svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: currentPublicationRevision(t, node.svc, tn.ID, "nmi"),
 		AccountID: accountID,
 		Credentials: map[string]string{
 			"security_key":           "nmi-key-a",
@@ -239,23 +240,23 @@ func TestRotationPreservesUntouchedCredentialVersions(t *testing.T) {
 
 	// Rotate ONLY the security key.
 	gw.accept("nmi-key-b")
-	cfg, err := node.svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
+	cfg, err := node.svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: currentPublicationRevision(t, node.svc, tn.ID, "nmi"),
 		AccountID:   accountID,
 		Credentials: map[string]string{"security_key": "nmi-key-b"},
 	})
 	require.NoError(t, err)
-	require.Equal(t, 2, cfg.Credentials["security_key"].RotationVersion, "the rotated credential's floor must rise")
+	require.Equal(t, 1, cfg.Credentials["security_key"].RotationVersion, "the rotated credential's floor must rise")
 	require.Equal(t, 1, cfg.Credentials["webhook_signing_secret"].RotationVersion,
 		"an untouched credential must keep the floor it already had")
 
 	// Re-putting the SAME value is not a rotation: the store keeps the version,
 	// so the floor must not drift upward and force pointless re-reads.
-	cfg, err = node.svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{
+	cfg, err = node.svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: currentPublicationRevision(t, node.svc, tn.ID, "nmi"),
 		AccountID:   accountID,
 		Credentials: map[string]string{"security_key": "nmi-key-b"},
 	})
 	require.NoError(t, err)
-	require.Equal(t, 2, cfg.Credentials["security_key"].RotationVersion)
+	require.Equal(t, 1, cfg.Credentials["security_key"].RotationVersion)
 	require.Equal(t, 1, cfg.Credentials["webhook_signing_secret"].RotationVersion)
 }
 

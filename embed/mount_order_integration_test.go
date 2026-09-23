@@ -25,7 +25,7 @@ func TestMountedHandlerUsesConstructorMerchant(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
 	slug := fmt.Sprintf("mount-order-%d", time.Now().UnixNano())
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB}
+	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB}
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), Merchant: &embed.MerchantDeclaration{Slug: slug, Config: embed.MerchantConfig{DisplayName: slug}}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })

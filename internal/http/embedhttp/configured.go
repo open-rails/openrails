@@ -28,7 +28,7 @@ type HTTPConfig struct {
 	Customer               bool
 	MerchantAdmin          bool
 	Catalog                bool
-	PaymentProviders       bool
+	MerchantConfig         bool
 	MerchantAPI            bool
 	Authenticator          billingauth.Authenticator
 	Gate                   billingauth.Gate
@@ -42,7 +42,7 @@ func ValidateHTTPConfig(cfg *HTTPConfig, delegated billingauth.DelegatedAuthenti
 		return err
 	}
 	if cfg.Standalone {
-		if cfg.Checkout || cfg.Customer || cfg.MerchantAdmin || cfg.Catalog || cfg.PaymentProviders || cfg.MerchantAPI || cfg.Authenticator != nil || cfg.Gate != nil || cfg.DelegatedAuthenticator != nil {
+		if cfg.Checkout || cfg.Customer || cfg.MerchantAdmin || cfg.Catalog || cfg.MerchantConfig || cfg.MerchantAPI || cfg.Authenticator != nil || cfg.Gate != nil || cfg.DelegatedAuthenticator != nil {
 			return fmt.Errorf("openrails HTTP: Standalone cannot be combined with embedded surface options")
 		}
 		return nil
@@ -53,7 +53,7 @@ func ValidateHTTPConfig(cfg *HTTPConfig, delegated billingauth.DelegatedAuthenti
 	if cfg.Customer && cfg.DelegatedAuthenticator == nil && delegated == nil {
 		return fmt.Errorf("openrails HTTP: Customer requires HTTP.DelegatedAuthenticator or Options.DelegatedAuthenticator")
 	}
-	if (cfg.MerchantAdmin || cfg.Catalog || cfg.PaymentProviders || cfg.MerchantAPI) && cfg.Gate == nil {
+	if (cfg.MerchantAdmin || cfg.Catalog || cfg.MerchantConfig || cfg.MerchantAPI) && cfg.Gate == nil {
 		return fmt.Errorf("openrails HTTP: management surfaces require HTTP.Gate")
 	}
 	return nil
@@ -67,7 +67,7 @@ func (cfg HTTPConfig) routeSets() []RouteSet {
 	}{
 		{cfg.Checkout, RouteSetCheckout}, {cfg.Customer, RouteSetCustomer},
 		{cfg.MerchantAdmin, RouteSetMerchantAdmin}, {cfg.Catalog, RouteSetCatalog},
-		{cfg.PaymentProviders, RouteSetPaymentProviders}, {cfg.MerchantAPI, RouteSetMerchantAPI},
+		{cfg.MerchantConfig, RouteSetMerchantConfig}, {cfg.MerchantAPI, RouteSetMerchantAPI},
 	} {
 		if v.enabled {
 			sets = append(sets, v.set)

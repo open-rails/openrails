@@ -79,7 +79,7 @@ services:
       # ENV has no default in the binary and config.Load refuses an empty one,
       # so the migrate service must declare it too — without this the stack
       # never gets past migrations.
-      ENV: "${ENV:-development}"
+
       TEST_MODE: "${TEST_MODE:-sandbox}"
       # Database connection over the compose network.
       DB_HOST: "postgres"
@@ -154,14 +154,20 @@ services:
       # merchant secrets) is the development one. The DB role is NOT one of
       # those relaxations: EnforceRLSPosture refuses to boot on a
       # superuser/BYPASSRLS role in EVERY environment, development included.
-      ENV: "${ENV:-development}"
+
       TEST_MODE: "${TEST_MODE:-sandbox}"
       # The zero-config Compose profile is an interactive sandbox, so provider
       # writes are enabled by default. Production still fail-closes to readonly
       # when this setting is omitted outside this local profile.
       PROVIDER_WRITE_MODE: "${PROVIDER_WRITE_MODE:-full}"
       PORT: "3053"
-      API_URL: "${API_URL:-http://localhost:3053}"
+      PUBLIC_BILLING_BASE_URL: "${PUBLIC_BILLING_BASE_URL:-http://localhost:3053}"
+      AUTH_ALLOW_LOOPBACK_HTTP: "true"
+      AUTH_ALLOW_MEMORY: "true"
+      AUTH_ALLOW_MISSING_SENDERS: "true"
+      AUTH_ALLOW_EPHEMERAL_SIGNING_KEY: "true"
+      AUTH_DIRECT_PEER_IP: "true"
+      AUTH_REQUEST_ORIGIN: "${AUTH_REQUEST_ORIGIN:-http://localhost:3053}"
       AUTH_ISSUER: "${AUTH_ISSUER:-http://localhost:3053}"
       # AuthKit signing keys for OpenRails' own issuer (read once at
       # config.Load, never by the authkit library itself — #712/#231; names
@@ -223,7 +229,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      ENV: "dev"
+
       DEVSERVER_LISTEN_ADDR: ":8080"
       DEVSERVER_ISSUER: "http://issuer:8080"
       DEVSERVER_ISSUED_AUDIENCES: "openrails-app"

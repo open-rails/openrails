@@ -8,6 +8,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	catalogmodule "github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -47,6 +48,10 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 		return nil, nil, nil, err
 	}
 	rt := &app.Runtime{DB: database, Config: cfg, ProductService: catalogmodule.NewProductService(database), PriceService: catalogmodule.NewPriceService(database), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database)}
+	rt.StripeClients = stripeapi.NewFactory(nil)
+	if api := cfg.SandboxStripeAPIURL(); api != "" {
+		rt.StripeClients = stripeapi.NewFactory(stripeapi.HostRewriteTransport(api))
+	}
 	cleanup := func() {
 		cancel()
 		if err := rt.Close(context.Background()); err != nil {
@@ -64,7 +69,7 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 		return fail(fmt.Errorf("resolve catalog merchant %q: %w", opts.Merchant, err))
 	}
 	rt.SetConfiguredMerchant(selected.ID)
-	if cfg.IsManifestMerchantConfigSource() {
+	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
 		rt.Merchants, err = pullProviderManifestPlane(ctx, cfg, database, PullProviderOptions{
 			MerchantID: selected.ID, NameAuthority: opts.NameAuthority, MerchantManifestPath: opts.MerchantManifestPath,
 		})
@@ -86,6 +91,7 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 			return fail(fmt.Errorf("catalog runtime credential plane unavailable: %w", err))
 		}
 	}
+	rt.Merchants.StripeClients = rt.StripeClients
 	rt.Merchants.WithNameAuthority(opts.NameAuthority)
 	rt.RailConfigs = railresolve.NewMerchantsSource(cfg, func() *merchants.Service { return rt.Merchants })
 	// Catalog application verifies existing plans. This graph never constructs

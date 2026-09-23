@@ -15,7 +15,9 @@ package vault
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	vaultapi "github.com/hashicorp/vault/api"
@@ -83,10 +85,22 @@ func (a *KVv2Adapter) metadataPath(full string) string {
 // ErrSecretNotFound). A transport/permission error propagates so callers can fail
 // closed and distinguish "Vault unreachable" (retry) from "absent" (terminal).
 func (a *KVv2Adapter) ReadSecret(ctx context.Context, path string) (map[string]string, int, error) {
-	sec, err := a.client.Logical().ReadWithContext(ctx, a.dataPath(path))
+	return a.ReadSecretVersion(ctx, path, 0)
+}
+
+// ReadSecretVersion reads an exact KV-v2 version. Zero explicitly selects latest.
+func (a *KVv2Adapter) ReadSecretVersion(ctx context.Context, path string, version int) (map[string]string, int, error) {
+	if version < 0 {
+		return nil, 0, fmt.Errorf("vault kv: invalid version")
+	}
+	query := map[string][]string{}
+	if version > 0 {
+		query["version"] = []string{strconv.Itoa(version)}
+	}
+	sec, err := a.client.Logical().ReadWithDataWithContext(ctx, a.dataPath(path), query)
 	if err != nil {
 		a.notifyErr(err)
-		return nil, 0, fmt.Errorf("vault kv read: %w", err)
+		return nil, 0, fmt.Errorf("vault kv read: %w", credentialBackendError(err))
 	}
 	if sec == nil || sec.Data == nil {
 		return nil, 0, nil // not found
@@ -120,14 +134,31 @@ func kvResponseVersion(raw any) int {
 }
 
 func (a *KVv2Adapter) WriteSecret(ctx context.Context, path string, data map[string]string) (int, error) {
+	return a.writeSecret(ctx, path, data, nil)
+}
+
+// WriteSecretCAS writes only if expectedVersion is the current version; zero
+// creates a new path. This is a backend compare-and-set, not a SQL transaction.
+func (a *KVv2Adapter) WriteSecretCAS(ctx context.Context, path string, data map[string]string, expectedVersion int) (int, error) {
+	if expectedVersion < 0 {
+		return 0, fmt.Errorf("vault kv: invalid CAS version")
+	}
+	return a.writeSecret(ctx, path, data, &expectedVersion)
+}
+
+func (a *KVv2Adapter) writeSecret(ctx context.Context, path string, data map[string]string, expectedVersion *int) (int, error) {
 	payload := make(map[string]any, len(data))
 	for k, v := range data {
 		payload[k] = v
 	}
-	sec, err := a.client.Logical().WriteWithContext(ctx, a.dataPath(path), map[string]any{"data": payload})
+	body := map[string]any{"data": payload}
+	if expectedVersion != nil {
+		body["options"] = map[string]any{"cas": *expectedVersion}
+	}
+	sec, err := a.client.Logical().WriteWithContext(ctx, a.dataPath(path), body)
 	if err != nil {
 		a.notifyErr(err)
-		return 0, fmt.Errorf("vault kv write: %w", err)
+		return 0, fmt.Errorf("vault kv write: %w", credentialBackendError(err))
 	}
 	if sec != nil {
 		return kvResponseVersion(sec.Data), nil
@@ -208,4 +239,27 @@ func (a *KVv2Adapter) BackendIdentity() string {
 		return ""
 	}
 	return strings.TrimRight(a.client.Address(), "/") + "|" + a.client.Namespace()
+}
+
+var (
+	ErrPermissionDenied = errors.New("vault: credential access denied or token revoked")
+	ErrSealed           = errors.New("vault: sealed")
+	ErrUnavailable      = errors.New("vault: unavailable")
+)
+
+func credentialBackendError(err error) error {
+	var response *vaultapi.ResponseError
+	if errors.As(err, &response) {
+		if response.StatusCode == 403 {
+			return ErrPermissionDenied
+		}
+		if response.StatusCode == 503 {
+			for _, message := range response.Errors {
+				if strings.Contains(strings.ToLower(message), "sealed") {
+					return ErrSealed
+				}
+			}
+		}
+	}
+	return ErrUnavailable
 }

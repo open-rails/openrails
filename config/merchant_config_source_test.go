@@ -1,49 +1,43 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
-	"testing"
-
 	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestMerchantConfigSourceHardCut(t *testing.T) {
+	for _, key := range []string{"MERCHANT_SOURCE", "MERCHANT_CONFIG_SOURCE"} {
+		for _, value := range []string{"", "manifest", "api"} {
+			t.Run(key+"/"+value, func(t *testing.T) {
+				t.Chdir(t.TempDir())
+				t.Setenv(key, value)
+				_, err := Load("")
+				require.ErrorContains(t, err, "select secret_backend and merchant_config_http independently")
+				_, err = LoadDatabase("")
+				require.ErrorContains(t, err, "select secret_backend and merchant_config_http independently")
+			})
+		}
+	}
+	for _, key := range []string{"merchant_source", "merchant_config_source"} {
+		t.Run(key, func(t *testing.T) {
+			_, err := Load(configInputFile(t, key+": manifest\n"))
+			require.ErrorContains(t, err, "select secret_backend and merchant_config_http independently")
+		})
+	}
+	require.Empty(t, envKeyToConfigKey("MERCHANT_SOURCE"))
+	require.Empty(t, envKeyToConfigKey("MERCHANT_CONFIG_SOURCE"))
+}
+
+func TestMerchantConfigHTTPIndependentOfBackend(t *testing.T) {
 	t.Chdir(t.TempDir())
-	t.Setenv("ENV", "development")
-	t.Run("new environment spelling", func(t *testing.T) {
-		t.Setenv("MERCHANT_CONFIG_SOURCE", "api")
-		t.Setenv("SECRET_BACKEND", "db")
-		cfg, err := Load("")
-		require.NoError(t, err)
-		require.Equal(t, MerchantConfigSourceAPI, cfg.MerchantConfigSourceMode())
-	})
-	t.Run("new config spelling", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "config.yaml")
-		require.NoError(t, os.WriteFile(path, []byte("env: development\nmerchant_config_source: manifest\nallow_catalog_updates: true\n"), 0600))
-		cfg, err := Load(path)
-		require.NoError(t, err)
-		require.True(t, cfg.IsManifestMerchantConfigSource())
-		require.True(t, cfg.AllowCatalogUpdates)
-	})
-	for _, value := range []string{"", "manifest", "api"} {
-		t.Run("retired env="+value, func(t *testing.T) {
-			t.Setenv("MERCHANT_SOURCE", value)
-			t.Setenv("MERCHANT_CONFIG_SOURCE", "manifest")
-			_, err := Load("")
-			require.ErrorContains(t, err, "use merchant_config_source / MERCHANT_CONFIG_SOURCE")
-			_, err = LoadDatabase("")
-			require.ErrorContains(t, err, "use merchant_config_source / MERCHANT_CONFIG_SOURCE")
-		})
+	for _, backend := range []string{"snapshot", "vault"} {
+		t.Setenv("SECRET_BACKEND", backend)
+		for _, publish := range []string{"false", "true"} {
+			t.Setenv("MERCHANT_CONFIG_HTTP", publish)
+			cfg, err := Load("")
+			require.NoError(t, err)
+			require.Equal(t, backend, cfg.SecretStoreBackend())
+			require.Equal(t, publish == "true", cfg.MerchantConfigHTTP)
+		}
 	}
-	for _, suffix := range []string{"", "merchant_config_source: manifest\n"} {
-		t.Run("retired config "+suffix, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "config.yaml")
-			require.NoError(t, os.WriteFile(path, []byte("env: development\nmerchant_source: manifest\n"+suffix), 0600))
-			_, err := Load(path)
-			require.ErrorContains(t, err, "use merchant_config_source / MERCHANT_CONFIG_SOURCE")
-		})
-	}
-	require.Empty(t, envKeyToConfigKey("MERCHANT_SOURCE"), "old env is rejected explicitly, never consumed as an alias")
-	require.Equal(t, "merchant_config_source", envKeyToConfigKey("MERCHANT_CONFIG_SOURCE"))
 }

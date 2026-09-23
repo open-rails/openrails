@@ -71,7 +71,6 @@ func TestAdminConsoleServing(t *testing.T) {
 		// directly with the same config shape the harness boots.
 		_, appDSN := dbtest.SharedRLSPostgres(t)
 		cfg := &config.Config{
-			Env:                  "dev",
 			TestMode:             config.CredentialPostureSandbox,
 			MerchantConfigSource: config.MerchantConfigSourceAPI,
 			SecretBackend:        config.SecretBackendDB,

@@ -35,7 +35,7 @@ import (
 func TestEmbeddedTranscribedPathPinsTheMerchantConnection(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
+	cfg := &config.Config{TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 
 	rdb, _ := dbtest.SharedRedisClient(t)
 	slug := fmt.Sprintf("or868-b3-%d", time.Now().UnixNano())

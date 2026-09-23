@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -240,6 +241,7 @@ func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[
 // are cheap per-merchant structs — nothing credentialed is cached across
 // merchants (#653).
 type ProviderRefreshWorker struct {
+	StripeClients *stripeapi.Factory
 	river.WorkerDefaults[ProviderRefreshMerchantArgs]
 	DB     *db.DB
 	Config *config.Config
@@ -293,10 +295,11 @@ func (w *ProviderRefreshWorker) Work(ctx context.Context, job *river.Job[Provide
 	// absent for that merchant (its WARN names merchant/rail/secret); the
 	// other rails keep pulling.
 	builder := reconcile.MerchantFetcherBuilder{
-		Config:    w.Config,
-		Merchants: w.Merchants,
-		DB:        w.DB,
-		Endpoints: w.PullEndpoints,
+		StripeClients: w.StripeClients,
+		Config:        w.Config,
+		Merchants:     w.Merchants,
+		DB:            w.DB,
+		Endpoints:     w.PullEndpoints,
 	}
 
 	err := w.refreshMerchant(ctx, mid, builder, &stats, logger)

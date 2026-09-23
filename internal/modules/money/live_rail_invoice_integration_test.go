@@ -85,7 +85,7 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 	// declared full: unset now fails CLOSED to readonly, and this test's whole
 	// point is a real test-mode invoice write.
 	stripeSvc := &subscriptions.StripeService{
-		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull},
+		Config: &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull},
 		Rails: railresolve.FixedSet{
 			"stripe": {Rail: models.RailStripe, AccountID: stripeAccountID, Stripe: &config.StripeRailConfig{SecretKey: storeCreds.SecretKey}},
 		},

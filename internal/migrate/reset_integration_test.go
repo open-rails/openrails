@@ -45,7 +45,7 @@ func TestEmbeddedResetIsTransactionalAndLedgerScoped(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, target.Close(context.Background())) })
 	// The real initializer owns all DDL; repeated startup is an exact no-op.
-	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: targetDSN}}
+	cfg := &config.Config{DB: &config.DBConfig{URL: targetDSN}}
 	require.NoError(t, migrate.RunPostgres(ctx, cfg))
 	require.NoError(t, migrate.RunPostgres(ctx, cfg))
 	status, err := migrate.InspectPostgres(ctx, cfg)

@@ -35,14 +35,12 @@ func TestEnsureMerchantsService_ArmingFailure(t *testing.T) {
 
 	// A Vault login failure (bad address, nothing listening) fails
 	// merchantsecrets.Build unconditionally, in every environment — unlike the
-	// #667 encryption posture (which dev is deliberately ALLOWED to run
-	// without), this isolates the dev-vs-non-dev ARMING gate itself.
+	// encryption validation, this isolates the backend availability gate.
 	failingConfig := func(env string) *config.Config {
 		return &config.Config{
-			Env:                  env,
-			MerchantConfigSource: config.MerchantConfigSourceAPI,
-			SecretBackend:        config.SecretBackendVault,
-			Vault:                &config.VaultConfig{Enabled: true, Address: "http://127.0.0.1:1", AuthMethod: "token", Token: "irrelevant"},
+
+			SecretBackend: config.SecretBackendVault,
+			Vault:         &config.VaultConfig{Enabled: true, Address: "http://127.0.0.1:1", AuthMethod: "token", Token: "irrelevant"},
 		}
 	}
 
@@ -67,11 +65,10 @@ func TestReady_FullStackGreenAndNamesVaultOutage(t *testing.T) {
 	addr, token := vaulttest.Addr(t)
 
 	cfg := &config.Config{
-		Env:                  "production",
-		MerchantConfigSource: config.MerchantConfigSourceAPI,
-		SecretBackend:        config.SecretBackendVault,
-		DB:                   &config.DBConfig{URL: dsn},
-		Vault:                &config.VaultConfig{Enabled: true, Address: addr, AuthMethod: "token", Token: token},
+
+		SecretBackend: config.SecretBackendVault,
+		DB:            &config.DBConfig{URL: dsn},
+		Vault:         &config.VaultConfig{Enabled: true, Address: addr, AuthMethod: "token", Token: token},
 	}
 
 	rt := &Runtime{DB: appDB, Config: cfg}

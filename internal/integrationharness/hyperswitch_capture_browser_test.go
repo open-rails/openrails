@@ -61,7 +61,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 		require.NoError(t, err)
 		var input recovery
 		require.NoError(t, json.Unmarshal(raw, &input))
-		restored, err := embed.New(t.Context(), embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: input.DB, Redis: input.Redis, HyperSwitch: input.HyperSwitch, ProviderSandbox: input.ProviderSandbox, Encryption: input.Encryption}, River: embed.RiverManagedByOpenRails()})
+		restored, err := embed.New(t.Context(), embed.Options{Config: &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: input.DB, Redis: input.Redis, HyperSwitch: input.HyperSwitch, ProviderSandbox: input.ProviderSandbox, Encryption: input.Encryption}, River: embed.RiverManagedByOpenRails()})
 		require.NoError(t, err)
 		defer restored.Close(context.Background())
 		runtime := app.HostGraph(restored).Runtime
@@ -111,7 +111,7 @@ func TestHyperSwitchActualBrowserInvoice(t *testing.T) {
 	billingClock := NewSettableClock(nil)
 	var delegated billingauth.DelegatedAuthenticator
 	surface := h.StartStandalone("USD", WithClock(billingClock), WithConfig(func(c *config.Config) {
-		c.NewSubscriptionCollectionPolicy = "engine"
+
 		c.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: vendor.APIBaseURL, SDKURL: vendor.SDKURL}
 		c.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 		{

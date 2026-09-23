@@ -31,7 +31,7 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	ctx := t.Context()
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := manifestModeConfig(dsn)
-	cfg.Env = "production"
+
 	cfg.TestMode = config.CredentialPostureSandbox
 	cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly
 	cfg.AllowCatalogUpdates = true
@@ -42,7 +42,7 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	boot := func(key string) *embed.Runtime {
 		gate := &allowAllGate{}
 
-		rt, _, err := newDeclaredMerchant(ctx, embed.Options{HTTP: &embed.HTTPConfig{PaymentProviders: true, Gate: gate}, Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t, key: key}}, slug, embed.MerchantConfig{
+		rt, _, err := newDeclaredMerchant(ctx, embed.Options{HTTP: &embed.HTTPConfig{MerchantConfig: true, Gate: gate}, Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t, key: key}}, slug, embed.MerchantConfig{
 			DisplayName: "Host credential catalog",
 			PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {
 				AccountID: accountID,
@@ -112,7 +112,7 @@ func TestManagedCredentialsWithCatalogUpdatesDisabled(t *testing.T) {
 	ctx := t.Context()
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := manifestModeConfig(dsn)
-	cfg.Env = "production"
+
 	cfg.TestMode = config.CredentialPostureSandbox
 	cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly
 	cfg.MerchantConfigSource = config.MerchantConfigSourceAPI
@@ -132,7 +132,7 @@ func TestManagedCredentialsWithCatalogUpdatesDisabled(t *testing.T) {
 	runtime := app.HostGraph(rt).Runtime
 	mid := runtime.ConfiguredMerchant()
 	require.Nil(t, runtime.ManifestSecrets, "managed credentials must not acquire a host fallback")
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, Gate: allowAllGate{id: mid}}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantConfig: true, Gate: allowAllGate{id: mid}}})
 	require.NoError(t, err)
 	for _, secret := range []string{"whsec_managed_catalog_v1", "whsec_managed_catalog_v2"} {
 		payload, err := json.Marshal(map[string]any{"account_id": account, "credentials": map[string]string{"webhook_signing_secret": secret}})

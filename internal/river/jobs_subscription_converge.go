@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"strings"
 	"time"
@@ -131,6 +132,7 @@ func (e *SubscriptionConvergeEnqueuer) EnqueueSubscriptionConverge(ctx context.C
 // converges the local row through the decider (#665) plus the rail-specific
 // signup/mirror legs (webhooks.StripeConvergeService / NMIConvergeService).
 type SubscriptionConvergeWorker struct {
+	StripeClients *stripeapi.Factory
 	river.WorkerDefaults[SubscriptionConvergeArgs]
 	DB     *db.DB
 	Config *config.Config
@@ -242,6 +244,7 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 			if err != nil {
 				return uuid.Nil, fmt.Errorf("%s (stripe): %w", subscriptionConvergeMissingClient, err)
 			}
+			p.HTTPClient = w.StripeClients.ReadOnlyClient(0)
 			prober = p
 		}
 		svc := &webhooks.StripeConvergeService{

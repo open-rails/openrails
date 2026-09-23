@@ -117,7 +117,7 @@ func ProviderRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRo
 		}
 	}
 	if rt != nil {
-		if rt.Config.IsManifestMerchantConfigSource() {
+		if rt.Config.SecretStoreBackend() == config.SecretBackendSnapshot {
 			r.SecretWrite = false
 		}
 		if caps := rt.RouteCapabilities; caps != nil {
@@ -161,7 +161,7 @@ func ConfiguredProviderRoutes(ctx context.Context, rt *app.Runtime, buyer bool) 
 		selected.StripePortal = false
 		selected.Solana = false
 		selected.SolanaSigning = false
-	} else if rt.Config.IsManifestMerchantConfigSource() {
+	} else if rt.Config.SecretStoreBackend() == config.SecretBackendSnapshot {
 		mid := rt.ConfiguredMerchant()
 		if mid.IsZero() || rt.Merchants == nil {
 			return selected, fmt.Errorf("openrails HTTP: declare the manifest merchant before mounting buyer routes")

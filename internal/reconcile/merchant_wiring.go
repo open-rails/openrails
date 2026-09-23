@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -71,9 +73,10 @@ type ProviderEndpoints struct {
 // MerchantFetcherBuilder builds one merchant's fetchers/probers at use time
 // from the armed rail state (nil Merchants = nothing arms; fail closed).
 type MerchantFetcherBuilder struct {
-	Config    *config.Config
-	Merchants *merchants.Service
-	DB        *db.DB
+	StripeClients *stripeapi.Factory
+	Config        *config.Config
+	Merchants     *merchants.Service
+	DB            *db.DB
 
 	// AccountIDs optionally pins a rail to one declared account_id (operator
 	// pulls; may target archived accounts for drain, #655).
@@ -296,11 +299,13 @@ func (b MerchantFetcherBuilder) buildStripe(ctx context.Context, mid merchant.ID
 			return
 		}
 		fetcher := NewStripeFetcher(secretKey)
+		fetcher.HTTPClient = b.StripeClients.ReadOnlyClient(30 * time.Second)
 		fetcher.BaseURL = b.Endpoints.StripeBaseURL
 		out.Fetchers[ProviderStripe] = keyedFetcher{RailFetcher: fetcher, key: scope.AccountID}
 		out.Probers[ProviderStripe] = &StripeSubscriptionProber{Prober: &subscriptions.HTTPStripeLivenessProber{
-			SecretKey: secretKey,
-			BaseURL:   b.Endpoints.StripeBaseURL,
+			SecretKey:  secretKey,
+			HTTPClient: b.StripeClients.ReadOnlyClient(30 * time.Second),
+			BaseURL:    b.Endpoints.StripeBaseURL,
 		}}
 	}
 }

@@ -22,7 +22,7 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
 func TestStandaloneNativeFiberInventoryAndCustomerParameters(t *testing.T) {
 	ctx := context.Background()
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, Auth: &config.AuthConfig{Issuer: "https://fiber.openrails.test", KeysPath: t.TempDir()}, AdminConsole: &config.AdminConsoleConfig{Enabled: true}}
+	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, Auth: &config.AuthConfig{Issuer: "https://fiber.openrails.test", KeysPath: t.TempDir()}, AdminConsole: &config.AdminConsoleConfig{Enabled: true}}
 	assets := fstest.MapFS{"index.html": {Data: []byte("console page")}, "assets/site.js": {Data: []byte("console asset")}}
 	runtime, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), ConsoleAssets: assets})
 	require.NoError(t, err)

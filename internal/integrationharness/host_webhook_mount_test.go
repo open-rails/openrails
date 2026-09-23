@@ -39,7 +39,6 @@ func TestHostRoutedWebhookMountHTTP(t *testing.T) {
 	h := New(t, ctx)
 
 	cfg := &config.Config{
-		Env:      "dev",
 		TestMode: config.CredentialPostureSandbox,
 		DB:       &config.DBConfig{URL: h.DSN},
 		Auth:     &config.AuthConfig{Issuer: "https://host-webhook-controlplane.test"},

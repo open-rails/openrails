@@ -31,7 +31,7 @@ func TestAuthKitRefreshCookieSurvivesBillingWrapper(t *testing.T) {
 	httpServer := httptest.NewUnstartedServer(nil)
 	t.Cleanup(httpServer.Close)
 	origin := "https://" + httpServer.Listener.Addr().String()
-	cfg := &config.Config{Env: "dev", APIURL: origin, Auth: &config.AuthConfig{Issuer: origin, KeysPath: t.TempDir()}}
+	cfg := &config.Config{PublicBillingBaseURL: origin, Auth: &config.AuthConfig{Issuer: origin, KeysPath: t.TempDir()}}
 	cp, err := controlplane.New(ctx, cfg, pool, controlplane.WithRedis(rdb))
 	require.NoError(t, err)
 	t.Cleanup(cp.Close)

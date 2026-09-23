@@ -29,7 +29,7 @@ func TestCustomSchemaKeepsBillingValuesAndRestoreFunctions(t *testing.T) {
 		_, err = conn.Exec(context.Background(), "DELETE FROM public.migrations WHERE app=$1 AND schema=$2", config.MigratekitApp, schema)
 		require.NoError(t, err)
 	})
-	cfg := &config.Config{Env: "development", DB: &config.DBConfig{URL: dsn, Schema: schema}}
+	cfg := &config.Config{DB: &config.DBConfig{URL: dsn, Schema: schema}}
 	require.NoError(t, migrate.RunPostgres(ctx, cfg))
 	require.NoError(t, migrate.RunPostgres(ctx, cfg), "fresh schema replay is exact")
 	status, err := migrate.InspectPostgres(ctx, cfg)

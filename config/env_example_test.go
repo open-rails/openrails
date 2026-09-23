@@ -79,7 +79,7 @@ func TestEnvExampleRoundTrip(t *testing.T) {
 
 	cfg, err := Load("")
 	require.NoError(t, err, ".env.example must boot config.Load as-is")
-	require.True(t, cfg.IsDev())
+	require.True(t, cfg.RequiresSecretEncryption())
 	require.Equal(t, CredentialPostureSandbox, cfg.TestMode, "the example must pin the sandbox posture explicitly")
 	require.Equal(t, ProviderWriteModeFull, cfg.GetProviderWriteMode())
 	require.NotEmpty(t, cfg.DB.URL)

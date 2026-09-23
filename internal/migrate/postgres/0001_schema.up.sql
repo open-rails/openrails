@@ -1666,6 +1666,22 @@ CREATE UNIQUE INDEX uq_merchant_destructive_policy_merchant ON openrails.merchan
 ALTER TABLE ONLY openrails.merchant_destructive_policy
     ADD CONSTRAINT merchant_destructive_policy_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
+-- Credential publication receipts contain identities and exact references only.
+CREATE TABLE openrails.credential_publications (
+ merchant_id uuid NOT NULL REFERENCES openrails.merchants(id) ON DELETE RESTRICT,
+ operation_id uuid NOT NULL,
+ rail text NOT NULL,
+ environment text NOT NULL,
+ account_id text NOT NULL,
+ expected_revision bigint NOT NULL CHECK (expected_revision >= 0),
+ request_metadata jsonb NOT NULL,
+ state text NOT NULL DEFAULT 'staging' CHECK (state IN ('staging','published')),
+ result jsonb,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ published_at timestamptz,
+ PRIMARY KEY (merchant_id,operation_id)
+);
+
 CREATE TABLE openrails.merchant_secrets (
     merchant_id uuid NOT NULL,
     name text NOT NULL,
@@ -3871,6 +3887,7 @@ BEGIN
                   'catalog_rate_cards',
                   'catalogs',
                   'checkout_sessions',
+                  'credential_publications',
                   'custodians',
                   'custody_migrations',
                   'customer_delinquency',

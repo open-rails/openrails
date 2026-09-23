@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"net/http"
 
 	"context"
 	"fmt"
@@ -66,6 +67,7 @@ const (
 )
 
 type runtimeOverrides struct {
+	StripeTransport  http.RoundTripper
 	HostRiver        bool
 	RiverSchema      string
 	DB               *db.DB
@@ -193,12 +195,21 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		return runtimeRef.Merchants
 	}
 	railConfigs := railresolve.NewMerchantsSource(cfg, merchantsFn)
+	var stripeTransport http.RoundTripper
+	if api := cfg.SandboxStripeAPIURL(); api != "" {
+		stripeTransport = stripeapi.HostRewriteTransport(api)
+	}
+	if overrides != nil && overrides.StripeTransport != nil {
+		stripeTransport = overrides.StripeTransport
+	}
+	stripeClients := stripeapi.NewFactory(stripeTransport)
 	// #725/#730/#788: the ONE store-armed per-merchant credential builder
 	// (invoice collection adapters, manual-rebill + cancel NMI clients).
 	collectionResolver := &money.MerchantCollectionAdapterBuilder{
-		Config:      cfg,
-		DB:          database,
-		MerchantsFn: merchantsFn,
+		StripeClients: stripeClients,
+		Config:        cfg,
+		DB:            database,
+		MerchantsFn:   merchantsFn,
 	}
 	// #728/#788: per-merchant Solana RPC (poller, crank, intent verify legs,
 	// request-plane transaction builds).
@@ -213,7 +224,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		userDirectory = overrides.UserDirectory
 		usernameResolver = overrides.UsernameResolver
 	}
-	serviceInstances, err := createServices(database, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider, usernameResolver)
+	serviceInstances, err := createServices(database, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider, usernameResolver, stripeClients)
 	if err != nil {
 		return nil, err
 	}
@@ -271,11 +282,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	moneyCharger := money.NewScopedCharger(database, nil)
 
 	runtime := &Runtime{
-		DB:          database,
-		RedisClient: redisClient,
-		redisOwned:  redisOwned,
-		Config:      cfg,
-		Clock:       clock,
+		StripeClients: stripeClients,
+		DB:            database,
+		RedisClient:   redisClient,
+		redisOwned:    redisOwned,
+		Config:        cfg,
+		Clock:         clock,
 		// #746: one proxy-aware client-IP resolver, built once from config;
 		// empty yields a resolver that trusts nothing. Cloudflare peers (ak#298)
 		// are trusted for X-Forwarded-For here exactly as AuthKit trusts them.
@@ -326,7 +338,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// MODE 1 (#723): the in-memory credential plane exists from boot; manifest
 	// provisioning seeds it and every store consumer reads it. No persistent
 	// merchant-secret store is ever constructed in this mode.
-	if cfg.IsManifestMerchantConfigSource() {
+	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
 		runtime.ManifestSecrets = merchants.NewManifestSecretStore()
 	}
 
@@ -456,12 +468,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// nmi_payment_source_update intent (ambiguity ⇒ pending_verify, never a
 	// silent local↔remote split).
 	runtime.PaymentSourceUpdateIntents = &intents.PaymentSourceUpdateThrough{Runner: intentRunner, DB: database}
-
-	// Install only after runtime construction succeeds. The runtime releases
-	// its sandbox lease on Close, including a later embedded-construction failure.
-	if api := cfg.SandboxStripeAPIURL(); api != "" {
-		runtime.releaseStripeTransport = stripeapi.InstallBaseTransport(stripeapi.HostRewriteTransport(api))
-	}
 
 	return runtime, nil
 }
@@ -597,12 +603,11 @@ func enforceWebhookDedupPosture(cfg *config.Config, hasRedis, embeddedHost bool)
 
 // webhookDedupPostureWarning is pure (no redis/db) so the message choice is unit testable.
 func webhookDedupPostureWarning(cfg *config.Config, embeddedHost bool) string {
-	if embeddedHost || cfg == nil || cfg.IsDev() {
+	if embeddedHost || cfg == nil {
 		return "redis not configured: webhook dedup truth stays in Postgres (safe); lease coordination and the completed-key cache degrade to per-process memory (#678)"
 	}
-	return fmt.Sprintf(
-		"redis not configured in standalone mode (env %q): webhook dedup truth stays in Postgres (safe), but multi-replica deployments lose cross-replica lease coordination and the fast-path cache — expect wasted duplicate processing attempts; configure redis (#678)",
-		cfg.Env,
+	return fmt.Sprint(
+		"redis not configured in standalone mode: webhook dedup truth stays in Postgres (safe), but multi-replica deployments lose cross-replica lease coordination and the fast-path cache — expect wasted duplicate processing attempts; configure redis (#678)",
 	)
 }
 
@@ -652,22 +657,16 @@ type servicesInstances struct {
 	RailCustomerService    *payments.RailCustomerService
 }
 
-// alertingDashboardBaseURL builds the absolute base the #736 alert dashboard
-// deep links hang off. Prefers the deployment's own APIURL (so emailed/webhook
-// links are clickable); appends the /admin console mount when that SPA is
-// enabled. Empty => the link is a console-relative path.
+// alertingDashboardBaseURL uses the independently configured admin destination.
+// Empty leaves alert links relative to the consuming console.
 func alertingDashboardBaseURL(cfg *config.Config) string {
 	if cfg == nil {
 		return ""
 	}
-	base := strings.TrimRight(cfg.APIURL, "/")
-	if cfg.AdminConsole.IsEnabled() {
-		return base + "/admin"
-	}
-	return base
+	return strings.TrimRight(cfg.DashboardBaseURL, "/")
 }
 
-func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver openrails.UsernameResolver) (*servicesInstances, error) {
+func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver openrails.UsernameResolver, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
@@ -822,13 +821,13 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		purchaseService,
 		clock,
 	)
-	adminSubscriptionService.StripeService = &subscriptions.StripeService{Config: cfg, Rails: railConfigs}
+	adminSubscriptionService.StripeService = &subscriptions.StripeService{StripeClients: stripeClients, Config: cfg, Rails: railConfigs}
 
 	// #813: plan migrations — cross-product bulk retirement over the #773
 	// reprice engine. Observed rails with a server-side push: Stripe, and
 	// (#815) gateway-native NMI recurring via the per-merchant client
 	// resolver.
-	planMigrationService := subscriptions.NewPlanMigrationService(repriceService, &subscriptions.StripeService{Config: cfg, Rails: railConfigs}, subscriptions.NewNMIPlanPusher(collectionResolver))
+	planMigrationService := subscriptions.NewPlanMigrationService(repriceService, &subscriptions.StripeService{StripeClients: stripeClients, Config: cfg, Rails: railConfigs}, subscriptions.NewNMIPlanPusher(collectionResolver))
 
 	// #678: Postgres (webhook_events) is the dedup truth; Redis is cache + lease coordination.
 	deduplicationService, err := webhooks.NewDeduplicationService(webhookIdempotencyService, database, clock)
@@ -836,6 +835,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		return nil, err
 	}
 	webhookDispatcher := &webhooks.WebhookDispatcher{
+		StripeClients:                stripeClients,
 		Config:                       cfg,
 		DB:                           database,
 		Clock:                        clock,
@@ -867,6 +867,8 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		railConfigs,
 		clock,
 	)
+	checkoutService.StripeClients = stripeClients
+	checkoutService.StripeService.StripeClients = stripeClients
 	checkoutService.SetSubscriptionLifecycleService(subscriptionLifecycleService)
 	webhookDispatcher.PurchaseRegistrar = checkoutService
 	// Wire durable product-access grants (issue #250) into the one-time purchase

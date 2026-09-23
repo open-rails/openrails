@@ -106,7 +106,7 @@ func bootRoutingFixture(
 	buyerServer := httptest.NewServer(buyerHandler)
 	t.Cleanup(buyerServer.Close)
 
-	merchantHandler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, MerchantAPI: true, Gate: allowAllGate{id: id}}})
+	merchantHandler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantConfig: true, MerchantAPI: true, Gate: allowAllGate{id: id}}})
 	require.NoError(t, err)
 	merchantServer := httptest.NewServer(merchantHandler)
 	t.Cleanup(merchantServer.Close)

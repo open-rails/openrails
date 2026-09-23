@@ -52,16 +52,16 @@ func TestHydrateThinStripeEvent(t *testing.T) {
 	ctx := context.Background()
 
 	// Snapshot event (object already present) -> nothing to hydrate.
-	out, err := hydrateThinStripeEvent(ctx, "sk_test", "acct_test", []byte(`{"id":"evt_1","type":"x","data":{"object":{"id":"cs_1"}}}`))
+	out, err := hydrateThinStripeEvent(ctx, "sk_test", "acct_test", []byte(`{"id":"evt_1","type":"x","data":{"object":{"id":"cs_1"}}}`), nil)
 	require.NoError(t, err)
 	require.Nil(t, out)
 
 	// No related_object -> not a hydratable thin event, pass through.
-	out, err = hydrateThinStripeEvent(ctx, "sk_test", "acct_test", []byte(`{"id":"evt_2","type":"x"}`))
+	out, err = hydrateThinStripeEvent(ctx, "sk_test", "acct_test", []byte(`{"id":"evt_2","type":"x"}`), nil)
 	require.NoError(t, err)
 	require.Nil(t, out)
 
 	// Thin event but no secret key configured -> error (cannot fetch object).
-	_, err = hydrateThinStripeEvent(ctx, "", "acct_test", []byte(`{"id":"evt_3","type":"x","related_object":{"id":"cs_1","type":"checkout.session","url":"https://api.stripe.com/v1/checkout/sessions/cs_1"}}`))
+	_, err = hydrateThinStripeEvent(ctx, "", "acct_test", []byte(`{"id":"evt_3","type":"x","related_object":{"id":"cs_1","type":"checkout.session","url":"https://api.stripe.com/v1/checkout/sessions/cs_1"}}`), nil)
 	require.Error(t, err)
 }

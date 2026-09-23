@@ -10,7 +10,7 @@ import (
 
 func validationConfig(env string) *Config {
 	cfg := GetDefaultBillingConfig()
-	cfg.Env, cfg.ProviderWriteMode = env, ProviderWriteModeFull
+	cfg.ProviderWriteMode = ProviderWriteModeFull
 	cfg.DB.Username, cfg.DB.Password = "billing_app", "database-password"
 	assembleDBURL(cfg)
 	return cfg
@@ -18,8 +18,8 @@ func validationConfig(env string) *Config {
 
 func TestConfigurationPostureValidation(t *testing.T) {
 	for _, env := range []string{"", "dev", "development", "prod", "production", "DEV"} {
-		cfg := &Config{Env: env}
-		require.Equal(t, env == "dev" || env == "development", cfg.IsDev(), env)
+		cfg := &Config{}
+		require.True(t, cfg.RequiresSecretEncryption(), env)
 		if env == "" {
 			require.True(t, cfg.RequiresSecretEncryption())
 		}
@@ -53,13 +53,13 @@ func TestConfigurationPostureValidation(t *testing.T) {
 		}, ""},
 		{"production full", "prod", func(c *Config) {}, ""},
 		{"dev sandbox", "dev", func(c *Config) { c.TestMode = CredentialPostureSandbox }, ""},
-		{"http issuer", "prod", func(c *Config) { c.Auth.Issuer = "http://auth.internal:8080" }, "must use https outside development"},
+		{"http issuer", "prod", func(c *Config) { c.Auth.Issuer = "http://auth.internal:8080" }, "must use HTTPS"},
 		{"https issuer", "prod", func(c *Config) { c.Auth.Issuer = "https://auth.example.com" }, ""},
-		{"missing write posture", "prod", func(c *Config) { c.ProviderWriteMode = "" }, "provider_write_mode is required outside development"},
+		{"missing write posture", "prod", func(c *Config) { c.ProviderWriteMode = "" }, "provider_write_mode is required"},
 		{"invalid credential posture", "dev", func(c *Config) { c.TestMode = "yes" }, `invalid test_mode "yes"`},
-		{"required rate limits", "prod", func(c *Config) { c.RateLimits = nil }, "rate_limits is required outside development"},
+		{"required rate limits", "prod", func(c *Config) { c.RateLimits = nil }, "rate_limits is required"},
 		{"explicit rate-limit opt out", "prod", func(c *Config) { c.RateLimits = nil; c.RateLimitsDisabled = true }, ""},
-		{"development rate limits", "dev", func(c *Config) { c.RateLimits = nil }, ""},
+		{"required rates regardless of posture", "dev", func(c *Config) { c.RateLimits = nil }, "rate_limits is required"},
 		{"captcha half pair", "dev", func(c *Config) { c.Captcha = &CaptchaConfig{Provider: CaptchaProviderTurnstile, SecretKey: "secret"} }, "BOTH site_key and secret_key"},
 		{"captcha unsupported", "dev", func(c *Config) {
 			c.Captcha = &CaptchaConfig{Provider: "recaptcha", SiteKey: "site", SecretKey: "secret"}
@@ -81,7 +81,8 @@ func TestConfigurationPostureValidation(t *testing.T) {
 	require.Empty(t, cfg.TestMode)
 	require.False(t, cfg.IsTestMode())
 	require.True(t, cfg.IsProviderReadOnly())
-	require.NoError(t, Validate(cfg))
+	require.ErrorContains(t, Validate(cfg), "provider_write_mode is required")
+	cfg.ProviderWriteMode = ProviderWriteModeFull
 	for _, enabled := range []bool{false, true} {
 		cfg.Captcha = &CaptchaConfig{Provider: CaptchaProviderTurnstile}
 		if enabled {
@@ -94,62 +95,23 @@ func TestConfigurationPostureValidation(t *testing.T) {
 
 func TestConfigurationStorageAndSecrets(t *testing.T) {
 	var nilCfg *Config
-	require.True(t, nilCfg.IsManifestMerchantConfigSource())
-	require.True(t, (&Config{}).IsManifestMerchantConfigSource())
-	require.Equal(t, MerchantConfigSourceManifest, (&Config{}).MerchantConfigSourceMode())
-	require.ErrorContains(t, Validate(&Config{Env: "development", MerchantConfigSource: "yaml", DB: &DBConfig{URL: "postgres://u:p@localhost/x"}}), "merchant_config_source")
-	for _, row := range []struct {
-		cfg     *Config
-		backend string
-		invalid bool
-	}{
-		{nil, SecretBackendDB, false}, {&Config{}, SecretBackendDB, false},
-		{&Config{SecretBackend: "db"}, SecretBackendDB, false},
-		{&Config{SecretBackend: "vault"}, SecretBackendVault, true},
-		{&Config{SecretBackend: "vault", Vault: &VaultConfig{Enabled: true}}, SecretBackendVault, false},
-		{&Config{Vault: &VaultConfig{Enabled: true}}, SecretBackendDB, false},
-		{&Config{SecretBackend: "db", Vault: &VaultConfig{Enabled: true}}, SecretBackendDB, false},
-	} {
-		require.Equal(t, row.backend, row.cfg.SecretStoreBackend())
-		if row.cfg != nil {
-			require.Equal(t, row.invalid, validateSecretBackend(row.cfg) != nil)
+	require.Equal(t, SecretBackendSnapshot, nilCfg.SecretStoreBackend())
+	for _, backend := range []string{"", SecretBackendSnapshot, SecretBackendVault} {
+		cfg := validationConfig("")
+		cfg.SecretBackend = backend
+		for _, published := range []bool{false, true} {
+			cfg.MerchantConfigHTTP = published
+			require.NoError(t, Validate(cfg))
 		}
+	}
+	for _, posture := range []CredentialPosture{CredentialPostureSandbox, CredentialPostureLive} {
+		cfg := validationConfig("")
+		cfg.TestMode, cfg.SecretBackend = posture, SecretBackendDB
+		require.ErrorContains(t, Validate(cfg), "encryption.master_key")
+		cfg.Encryption = &EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}
+		require.NoError(t, Validate(cfg))
 	}
 	require.Error(t, validateSecretBackend(&Config{SecretBackend: "consul"}))
-	for _, env := range []string{"production", "development"} {
-		for _, vault := range []bool{false, true} {
-			cfg := validationConfig(env)
-			cfg.MerchantConfigSource = MerchantConfigSourceAPI
-			cfg.Vault = &VaultConfig{Enabled: vault}
-			require.ErrorContains(t, Validate(cfg), "merchant_config_source=api requires an explicit secret_backend")
-		}
-	}
-	for _, row := range []struct {
-		name, source, backend, env string
-		vault, encrypted           bool
-		message                    string
-	}{
-		{"vault declaration", MerchantConfigSourceAPI, SecretBackendVault, "production", true, false, ""},
-		{"unencrypted database", MerchantConfigSourceAPI, SecretBackendDB, "production", false, false, "requires ENCRYPTION_MASTER_KEY outside development"},
-		{"encrypted database", MerchantConfigSourceAPI, SecretBackendDB, "production", false, true, ""},
-		{"development database", MerchantConfigSourceAPI, SecretBackendDB, "development", false, false, ""},
-		{"manifest stores no secrets", MerchantConfigSourceManifest, "", "production", false, false, ""},
-	} {
-		t.Run(row.name, func(t *testing.T) {
-			cfg := validationConfig(row.env)
-			cfg.MerchantConfigSource, cfg.SecretBackend = row.source, row.backend
-			cfg.Vault = &VaultConfig{Enabled: row.vault}
-			if row.encrypted {
-				cfg.Encryption = &EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}
-			}
-			err := Validate(cfg)
-			if row.message == "" {
-				require.NoError(t, err)
-			} else {
-				require.ErrorContains(t, err, row.message)
-			}
-		})
-	}
 	for _, row := range []struct {
 		cfg     *EncryptionConfig
 		message string
@@ -215,7 +177,7 @@ func TestConfigurationLLMValidation(t *testing.T) {
 		{"gemini", "", "dev", `invalid llm.provider "gemini"`},
 		{"openai", "api.openai.com/v1", "dev", "invalid llm.base_url"}, {"openai", "/v1", "dev", "invalid llm.base_url"},
 		{"openai", "ftp://host/v1", "dev", "invalid llm.base_url"}, {"openai", "://nope", "dev", "invalid llm.base_url"},
-		{"openai", "http://localhost:11434/v1", "dev", ""}, {"openai", "http://localhost:11434/v1", "prod", "must use https outside development"},
+		{"openai", "http://localhost:11434/v1", "dev", "must use https"}, {"openai", "http://localhost:11434/v1", "prod", "must use https"},
 		{"openai", "https://api.groq.com/openai/v1", "prod", ""},
 	} {
 		cfg := validationConfig(row.env)

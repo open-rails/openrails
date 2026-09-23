@@ -9,7 +9,7 @@ import (
 
 func TestLoadDatabaseUsesOnlyDatabaseConfiguration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	raw := "env: production\ndb:\n  url: postgres://file.invalid/db\n  schema: archive_test\nauth:\n  invalid_server_field: true\nprovider_write_mode: invalid\n"
+	raw := "db:\n  url: postgres://file.invalid/db\n  schema: archive_test\nauth:\n  invalid_server_field: true\nprovider_write_mode: invalid\n"
 	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func TestLoadDatabaseUsesOnlyDatabaseConfiguration(t *testing.T) {
 	if cfg.DB.URL != "postgres://env.invalid/db" || cfg.DB.Schema != "archive_test" {
 		t.Fatalf("database precedence or schema lost: %#v", cfg.DB)
 	}
-	if cfg.Auth != nil || cfg.Redis != nil || cfg.Env != "" {
+	if cfg.Auth != nil || cfg.Redis != nil {
 		t.Fatal("returned a server configuration")
 	}
 	cfg, err = LoadDatabase(path, WithOverride("db.url", "postgres://flag.invalid/db"))

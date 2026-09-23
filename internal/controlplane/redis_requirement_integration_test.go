@@ -43,7 +43,6 @@ func (noopEmailSender) SendWelcome(context.Context, string, string) error       
 // under test here).
 func stagingControlPlaneConfig() *config.Config {
 	return &config.Config{
-		Env: "staging",
 		Auth: &config.AuthConfig{
 			Issuer:       "https://openrails-staging.test",
 			MintDisabled: true,

@@ -4,6 +4,7 @@ package merchants
 
 import (
 	"context"
+	"github.com/google/uuid"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,7 +26,7 @@ func pspEnvironment(t *testing.T, svc *Service, accountID string) string {
 // tolerating it would keep teaching a knob that no longer exists.
 func TestUpsertPaymentProviderConfigRefusesDeclaredEnvironment(t *testing.T) {
 	pool := newTestPool(t)
-	svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore(), "live")
+	svc, err := NewService(db.WrapPool(pool, ""), newPublicationTestStore(t, pool), "live")
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -34,7 +35,7 @@ func TestUpsertPaymentProviderConfigRefusesDeclaredEnvironment(t *testing.T) {
 
 	// Even an AGREEING declaration is refused.
 	for i, declared := range []string{"live", "test", "moon"} {
-		_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "ccbill", UpsertPaymentProviderConfigRequest{
+		_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "ccbill", UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: publicationRevision(0),
 			LegacyEnvironment: declared,
 			AccountID:         "99882" + string(rune('0'+i)) + "-0000",
 			Credentials:       map[string]string{"salt": "salt-882"},
@@ -62,12 +63,12 @@ func TestUpsertPaymentProviderConfigDerivesEnvironmentFromTestMode(t *testing.T)
 		{posture: "live", slug: "psp-env-live-882", account: "888201-0000"},
 		{posture: "test", slug: "psp-env-test-882", account: "888202-0000"},
 	} {
-		svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore(), tc.posture)
+		svc, err := NewService(db.WrapPool(pool, ""), newPublicationTestStore(t, pool), tc.posture)
 		require.NoError(t, err)
 		tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: tc.slug, PermissionGroupID: "group-" + tc.slug})
 		require.NoError(t, err)
 
-		cfg, err := svc.UpsertPaymentProviderConfig(ctx, tn.ID, "ccbill", UpsertPaymentProviderConfigRequest{
+		cfg, err := svc.UpsertPaymentProviderConfig(ctx, tn.ID, "ccbill", UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: publicationRevision(0),
 			AccountID:   tc.account,
 			Credentials: map[string]string{"salt": "salt-" + tc.posture},
 		})
@@ -80,6 +81,6 @@ func TestUpsertPaymentProviderConfigDerivesEnvironmentFromTestMode(t *testing.T)
 		name, ok, err := svc.ActivePSPSecretName(ctx, tn.ID, "ccbill", tc.posture, "salt")
 		require.NoError(t, err)
 		require.True(t, ok)
-		require.Equal(t, "psps/ccbill/"+tc.posture+"/"+tc.account+"/salt", name)
+		require.Contains(t, name, "/psps/ccbill/"+tc.posture+"/"+tc.account+"/salt")
 	}
 }

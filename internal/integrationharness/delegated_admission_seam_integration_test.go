@@ -54,7 +54,6 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	dbtest.EnsureTestMerchant(ctx, t, h.sharedPool())
 
 	cfg := &config.Config{
-		Env:                  "dev",
 		TestMode:             config.CredentialPostureSandbox,
 		MerchantConfigSource: config.MerchantConfigSourceAPI,
 		SecretBackend:        config.SecretBackendDB,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	vaultapi "github.com/hashicorp/vault/api"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,8 +22,10 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/integrations/fx"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -49,9 +52,9 @@ import (
 
 // Runtime aggregates infrastructure clients and application services.
 type Runtime struct {
-	releaseStripeTransport func()
-	DB                     *db.DB
-	RedisClient            *redis.Client
+	StripeClients *stripeapi.Factory
+	DB            *db.DB
+	RedisClient   *redis.Client
 	// redisOwned marks a self-dialed client; injected clients are borrowed and
 	// must never be closed here (the host owns their lifecycle).
 	redisOwned bool
@@ -129,9 +132,11 @@ type Runtime struct {
 	// ingest verify seam (#786). Nil-safe: recording never fails a webhook.
 	WebhookHealth *webhookhealth.Recorder
 
-	MoneyCharger        money.Charger
-	RailCustomerService *payments.RailCustomerService
-	Merchants           *merchants.Service
+	MoneyCharger          money.Charger
+	RailCustomerService   *payments.RailCustomerService
+	Merchants             *merchants.Service
+	VaultClient           *vaultapi.Client
+	MerchantSecretBackend *merchantsecrets.Store
 	// MerchantGroupResolver is the or#914 rename-forwarding seam an attached
 	// control plane installs (slug -> merchant group id + current slug,
 	// tombstone-following). ArmMerchantsService applies it to any merchants
@@ -295,10 +300,10 @@ func (r *Runtime) Close(ctx context.Context) error {
 	r.riverCompositionSealed = true
 	r.riverCompositionMu.Unlock()
 
-	if r.releaseStripeTransport != nil {
-		defer r.releaseStripeTransport()
-	}
 	var errs []error
+	if r.MerchantSecretBackend != nil {
+		defer r.MerchantSecretBackend.Close()
+	}
 
 	// #895: stop the out-of-River progress detector first — it outlives the
 	// River client on purpose, so nothing else will cancel it.

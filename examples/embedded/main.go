@@ -56,7 +56,7 @@ func run(ctx context.Context, getenv func(string) string) (runErr error) {
 			return billingauth.UserContext{}, fmt.Errorf("sign in required")
 		})},
 		Config: &config.Config{
-			Env: "development", TestMode: config.CredentialPostureSandbox,
+			TestMode:             config.CredentialPostureSandbox,
 			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
 			DB: &config.DBConfig{URL: dsn},
 		},

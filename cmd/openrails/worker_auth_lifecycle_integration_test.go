@@ -22,7 +22,7 @@ import (
 
 func TestStandaloneWorkerIncludesAuthKitLifecycle(t *testing.T) {
 	cfg := &config.Config{
-		Env: "dev", APIURL: "http://127.0.0.1:3053",
+		PublicBillingBaseURL: "http://127.0.0.1:3053",
 		DB:                   &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
 		Redis:                &config.RedisConfig{Addr: dbtest.SharedRedisAddr(t)},
 		Auth:                 &config.AuthConfig{Issuer: "https://worker-recovery.test", KeysPath: t.TempDir(), DirectPeerIP: true},
