@@ -865,6 +865,7 @@ UPDATE openrails.checkout_sessions SET
     metadata = $14,
     rail_fields = $15,
     rail_state = COALESCE($16::jsonb, '{}'::jsonb)
+      || CASE WHEN rail_state ? '_openrails_request_fingerprint' THEN jsonb_build_object('_openrails_request_fingerprint', rail_state->'_openrails_request_fingerprint') ELSE '{}'::jsonb END
       || CASE WHEN rail_state ? 'accepted_purchase' THEN jsonb_build_object('accepted_purchase', rail_state->'accepted_purchase') ELSE '{}'::jsonb END
       || CASE WHEN rail_state->>'purchase_submitted'='true' THEN '{"purchase_submitted":true}'::jsonb ELSE '{}'::jsonb END
       || CASE WHEN rail_state->>'provider_closed'='true' THEN '{"provider_closed":true}'::jsonb ELSE '{}'::jsonb END,

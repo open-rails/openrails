@@ -338,6 +338,7 @@ func TestPurchaseCrashBeforeDispatchResumesFrozenArchivedTerms(t *testing.T) {
 func TestPurchaseProgressCannotEraseDispatchOrAcceptedTerms(t *testing.T) {
 	fx, service, _, psp := purchaseSessionFixture(t)
 	stale := admittedPurchaseFixture(t, fx, service, psp, "stale-writer", models.RailStripe)
+	originalFingerprint := stale.RailState[checkoutSessionFingerprintKey]
 	originalTerms, err := purchaseTerms(stale)
 	require.NoError(t, err)
 	n, err := fx.db.Gen(fx.ctx).ClaimHostedPurchaseDispatch(fx.ctx, gen.ClaimHostedPurchaseDispatchParams{MerchantID: fx.merchantID.UUID(), ID: stale.ID})
@@ -348,6 +349,7 @@ func TestPurchaseProgressCannotEraseDispatchOrAcceptedTerms(t *testing.T) {
 	current, err := service.repo.GetByID(fx.ctx, stale.ID)
 	require.NoError(t, err)
 	require.Equal(t, true, current.RailState["purchase_submitted"])
+	require.Equal(t, originalFingerprint, current.RailState[checkoutSessionFingerprintKey], "stale progress cannot strand exact accepted replay")
 	terms, err := purchaseTerms(current)
 	require.NoError(t, err)
 	require.Equal(t, originalTerms.PaymentID, terms.PaymentID)
