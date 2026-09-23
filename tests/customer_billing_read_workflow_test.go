@@ -112,6 +112,8 @@ func TestCustomerBillingReadWorkflow(t *testing.T) {
 		ids = append(ids, row["id"])
 		require.Equal(t, "9990000", row["amount"])
 		require.Equal(t, "USD", row["currency"])
+		require.Equal(t, "Account access", row["product"].(map[string]any)["display_name"])
+		require.Equal(t, "720h", row["price"].(map[string]any)["recurring"].(map[string]any)["interval"])
 	}
 	require.ElementsMatch(t, []any{openrails.PaymentID(first).String(), openrails.PaymentID(second).String()}, ids)
 	var status map[string]any

@@ -120,7 +120,7 @@ scoped to the token's subject — no `:user_id` appears in any path.
 | GET | `/v1/me/invoices` | List the subject's invoices |
 | GET | `/v1/me/invoices/{id}` | One invoice, including payer-scoped recovery state |
 | POST | `/v1/me/invoices/{id}/pay-now` | Verified customer payment on an NMI saved method. Requires Idempotency-Key and payment_method_id; 200 complete, 202 unresolved, coded 402 card refusal. |
-| GET | `/v1/me/payments` | One-off payment history. Query: `type` (rail filter), `limit`, `offset` |
+| GET | `/v1/me/payments` | Payment history; each row carries `price` and the bought `product` (`display_name`). Query: `type` (rail filter), `limit`, `offset` |
 | GET | `/v1/me/entitlements/active` | The subject's currently-active entitlements |
 | GET | `/v1/me/tier` | THE effective tier in one tier group (or#912): highest tier_rank among products whose entitlements intersect the subject's active windows; `tier: null` when none. Query: `group` (required), `at` (RFC3339, optional). Tier carries the immutable `entitlement` identifier + mutable `display_name` + `tier_rank` + product ref |
 | GET | `/v1/me/products` | Products relevant to the subject |

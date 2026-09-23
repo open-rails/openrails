@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
 )
@@ -104,7 +105,9 @@ type userPaymentObject struct {
 	Captured       bool                      `json:"captured,omitempty"`
 	CreatedAt      time.Time                 `json:"created_at"`
 	Price          *api.PriceObject          `json:"price,omitempty"`
-	Card           *paymentCardJSON          `json:"card,omitempty"`
+	// Product is what was bought, for history labels.
+	Product *openrails.SubscriptionProduct `json:"product,omitempty"`
+	Card    *paymentCardJSON               `json:"card,omitempty"`
 }
 
 // paymentCardJSON is the card snapshot for a single payment (the card used for
@@ -144,8 +147,16 @@ func PaymentToUserAPI(p *models.Payment, amountRefunded int64) userPaymentObject
 		Captured:       payment.Captured,
 		CreatedAt:      payment.CreatedAt,
 		Price:          payment.Price,
+		Product:        paymentProduct(p),
 		Card:           paymentCardFromModel(p),
 	}
+}
+
+func paymentProduct(p *models.Payment) *openrails.SubscriptionProduct {
+	if p.Price == nil {
+		return nil
+	}
+	return subscriptions.ProductView(p.Price.Product)
 }
 
 func refundStatusCountsTowardAPIAmount(status string) bool {
