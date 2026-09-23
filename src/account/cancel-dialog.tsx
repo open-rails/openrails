@@ -1,5 +1,7 @@
 import * as React from "react"
 
+import type { CheckoutAppearance } from "#orck/appearance"
+
 import {
   CANCEL_FEEDBACK_MAX,
   CANCEL_FEEDBACK_MIN,
@@ -36,6 +38,7 @@ export interface CancelSubscriptionDialogProps {
   pending?: SubscriptionAction
   /** Resolves null on success; the dialog then closes. */
   onConfirm: (feedback: string) => Promise<BillingError | null>
+  appearance?: CheckoutAppearance
 }
 
 export function CancelSubscriptionDialog({
@@ -45,10 +48,11 @@ export function CancelSubscriptionDialog({
   onChain = false,
   pending,
   onConfirm,
+  appearance,
 }: CancelSubscriptionDialogProps) {
   const m = useMessages()
   const { t } = m
-  const scope = useScopeProps()
+  const scope = useScopeProps(appearance)
   const reasonId = React.useId()
   const hintId = React.useId()
   const [feedback, setFeedback] = React.useState("")

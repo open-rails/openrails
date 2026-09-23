@@ -1,4 +1,6 @@
 import * as React from "react"
+
+import type { CheckoutAppearance } from "#orck/appearance"
 import { cn } from "cn"
 
 import type { BillingError } from "#orck/client/errors"
@@ -42,6 +44,7 @@ export interface ChangeCardDialogProps {
   pending: boolean
   /** Resolves null on success; the dialog then closes. */
   onConfirm: (paymentMethodId: string) => Promise<BillingError | null>
+  appearance?: CheckoutAppearance
 }
 
 export function ChangeCardDialog({
@@ -50,8 +53,9 @@ export function ChangeCardDialog({
   onOpenChange,
   pending,
   onConfirm,
+  appearance,
 }: ChangeCardDialogProps) {
-  const scope = useScopeProps()
+  const scope = useScopeProps(appearance)
   return (
     <Dialog
       open={subscription !== null}

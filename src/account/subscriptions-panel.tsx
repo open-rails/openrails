@@ -36,6 +36,8 @@ export interface SubscriptionsPanelProps extends SubscriptionsOptions {
   sendSolanaTransaction?: SendSolanaTransaction
   /** Empty-state link to the host's plans page (uses `navigate` if set). */
   plansHref?: string
+  /** Host content under a row, e.g. a plan-change control. */
+  renderSubscriptionFooter?: (subscription: Subscription) => React.ReactNode
   appearance?: CheckoutAppearance
   className?: string
 }
@@ -43,6 +45,7 @@ export interface SubscriptionsPanelProps extends SubscriptionsOptions {
 export function SubscriptionsPanel({
   sendSolanaTransaction,
   plansHref,
+  renderSubscriptionFooter,
   appearance,
   className,
   ...options
@@ -152,6 +155,7 @@ export function SubscriptionsPanel({
             s.rail !== "solana" &&
             !!s.payment_method_id
           const status = scheduled ? "cancel_scheduled" : s.status
+          const footer = renderSubscriptionFooter?.(s)
           return (
             <li
               key={s.id}
@@ -263,6 +267,14 @@ export function SubscriptionsPanel({
                   </Button>
                 ) : null}
               </div>
+              {footer ? (
+                <div
+                  data-testid="subscription-footer"
+                  className="border-t border-border/60 pt-3 @md:col-span-2"
+                >
+                  {footer}
+                </div>
+              ) : null}
             </li>
           )
         })}
@@ -290,6 +302,7 @@ export function SubscriptionsPanel({
         subscription={changingCard}
         name={changingCard ? subscriptionName(changingCard, m) : ""}
         onOpenChange={(open) => !open && setChangingCard(null)}
+        appearance={appearance}
         pending={
           !!changingCard && state.pending[changingCard.id] === "payment_method"
         }
@@ -312,6 +325,7 @@ export function SubscriptionsPanel({
         onOpenChange={(open) => !open && setCancelling(null)}
         name={cancelling ? subscriptionName(cancelling, m) : ""}
         onChain={onChain}
+        appearance={appearance}
         pending={cancelling ? state.pending[cancelling.id] : undefined}
         onConfirm={async (feedback) => {
           if (!cancelling) return null

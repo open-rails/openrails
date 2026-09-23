@@ -22,7 +22,7 @@ Until the `@openrails` npm scope is live, install the tarball attached to each
 GitHub release:
 
 ```sh
-pnpm add https://github.com/open-rails/billing-ui/releases/download/v0.5.1/openrails-billing-ui-0.5.1.tgz
+pnpm add https://github.com/open-rails/billing-ui/releases/download/v0.5.2/openrails-billing-ui-0.5.2.tgz
 ```
 
 ```tsx
@@ -66,6 +66,8 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
 - Panels: `SubscriptionsPanel` (cancel, resume, change card),
   `PaymentMethodsPanel`, `PaymentHistory`, `BillingStatusBadge`,
   `CancelSubscriptionDialog`; `AccountBilling` stacks them.
+- `renderSubscriptionFooter={(s) => ...}` adds host content under a
+  subscription row; `useBillingRefresh()` refetches after host-side changes.
 - Hooks: `useSubscriptions` (`cancel`, `cancelOnChain`, `resume`,
   `setPaymentMethod`, per-row `pending`), `usePaymentMethods` (`add`, `remove`,
   `setDefault`), `usePayments` (offset pages). Actions resolve to `null` or a

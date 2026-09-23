@@ -27,6 +27,8 @@ export interface BillingContextValue {
   /** Bumped after every mutation; hooks refetch on change. */
   version: number
   notify(change: BillingChange): void
+  /** Refetch every hook after a host-side change such as a plan switch. */
+  refresh(): void
   settle: { intervalMs: number; attempts: number }
 }
 
@@ -39,3 +41,5 @@ export function useBillingContext(): BillingContextValue {
 }
 
 export const useBillingClient = (): BillingClient => useBillingContext().client
+
+export const useBillingRefresh = (): (() => void) => useBillingContext().refresh

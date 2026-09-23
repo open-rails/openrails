@@ -107,6 +107,29 @@ describe("AccountBilling", () => {
 })
 
 describe("SubscriptionsPanel", () => {
+  it("renders host footer content under each row", async () => {
+    mount(
+      <SubscriptionsPanel
+        renderSubscriptionFooter={(s) => <span>plan for {s.id}</span>}
+      />,
+      fakeBilling()
+    )
+    const row = await screen.findByTestId("subscription-row")
+    expect(within(row).getByTestId("subscription-footer")).toHaveTextContent(
+      "plan for sub_"
+    )
+  })
+
+  it("carries the panel appearance into its dialogs", async () => {
+    mount(<SubscriptionsPanel appearance={{ theme: "dark" }} />, fakeBilling())
+    const row = await screen.findByTestId("subscription-row")
+    fireEvent.click(within(row).getByRole("button", { name: "Cancel Pro" }))
+    expect(await screen.findByRole("alertdialog")).toHaveAttribute(
+      "data-orck-theme",
+      "dark"
+    )
+  })
+
   it("cancels with feedback, then resumes", async () => {
     const server = fakeBilling()
     mount(<SubscriptionsPanel />, server)

@@ -8,13 +8,17 @@ import {
   PaymentMethodsPanel,
   type CardSetupConfig,
 } from "./payment-methods-panel"
-import { SubscriptionsPanel } from "./subscriptions-panel"
+import {
+  SubscriptionsPanel,
+  type SubscriptionsPanelProps,
+} from "./subscriptions-panel"
 
 export interface AccountBillingProps {
   cardSetup?: CardSetupConfig
   defaultCurrency?: string
   sendSolanaTransaction?: SendSolanaTransaction
   plansHref?: string
+  renderSubscriptionFooter?: SubscriptionsPanelProps["renderSubscriptionFooter"]
   historyPageSize?: number
   appearance?: CheckoutAppearance
   className?: string
@@ -26,6 +30,7 @@ export function AccountBilling({
   defaultCurrency,
   sendSolanaTransaction,
   plansHref,
+  renderSubscriptionFooter,
   historyPageSize,
   appearance,
   className,
@@ -39,6 +44,7 @@ export function AccountBilling({
       <SubscriptionsPanel
         sendSolanaTransaction={sendSolanaTransaction}
         plansHref={plansHref}
+        renderSubscriptionFooter={renderSubscriptionFooter}
         appearance={appearance}
       />
       <PaymentMethodsPanel

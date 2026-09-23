@@ -2,6 +2,7 @@
 export { BillingProvider, type BillingProviderProps } from "./provider"
 export {
   useBillingClient,
+  useBillingRefresh,
   type BillingChange,
   type BillingContextValue,
 } from "./context"

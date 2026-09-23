@@ -37,11 +37,18 @@ export function BillingProvider({
     setVersion((v) => v + 1)
     onChangeRef.current?.(change)
   }, [])
+  const refresh = useCallback(() => setVersion((v) => v + 1), [])
   const intervalMs = settle?.intervalMs ?? 1000
   const attempts = settle?.attempts ?? 10
   const value = useMemo(
-    () => ({ client, version, notify, settle: { intervalMs, attempts } }),
-    [client, version, notify, intervalMs, attempts]
+    () => ({
+      client,
+      version,
+      notify,
+      refresh,
+      settle: { intervalMs, attempts },
+    }),
+    [client, version, notify, refresh, intervalMs, attempts]
   )
   return (
     <BillingContext.Provider value={value}>{children}</BillingContext.Provider>

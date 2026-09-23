@@ -11,6 +11,7 @@ import {
   subscription,
   type FakeBilling,
 } from "../test/billing-server"
+import { useBillingRefresh } from "./context"
 import { usePaymentMethods, usePayments, useSubscriptions } from "./hooks"
 import { BillingProvider, type BillingProviderProps } from "./provider"
 
@@ -62,6 +63,22 @@ describe("useSubscriptions", () => {
     })
     await waitFor(() =>
       expect(result.current.subscriptions![0].cancel_scheduled).toBe(false)
+    )
+  })
+
+  it("refetches when the host refreshes", async () => {
+    const server = fakeBilling()
+    const { result } = setup(
+      () => ({ subs: useSubscriptions(), refresh: useBillingRefresh() }),
+      server
+    )
+    await waitFor(() =>
+      expect(result.current.subs.subscriptions).toHaveLength(1)
+    )
+    server.subscriptions[0].status = "past_due"
+    act(() => result.current.refresh())
+    await waitFor(() =>
+      expect(result.current.subs.subscriptions![0].status).toBe("past_due")
     )
   })
 

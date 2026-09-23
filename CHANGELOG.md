@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.2
+
+- `renderSubscriptionFooter` (on `SubscriptionsPanel` and `AccountBilling`)
+  renders host content under a subscription row, e.g. a plan-change control.
+- `useBillingRefresh()` (from `./react`) refetches every hook after a
+  host-side change such as a plan switch.
+- The cancel and change-card dialogs use the panel's `appearance`; they read
+  only the provider's, so `AccountBilling appearance` missed them.
+
 ## 0.5.1
 
 - `appearance.theme: "inherit"`: no bundled palette; components use the host
