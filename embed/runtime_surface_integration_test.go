@@ -43,6 +43,6 @@ func TestRuntimeOwnsReadinessAndRiverChecks(t *testing.T) {
 	_, err = rt.CheckJobProgress(ctx)
 	require.NoError(t, err)
 
-	_, err = embed.New(ctx, embed.Options{Config: &config.Config{}, HTTP: &embed.HTTPConfig{Customer: true}})
-	require.ErrorContains(t, err, "DelegatedAuthenticator", "the self surface never mounts without authentication")
+	_, err = embed.New(ctx, embed.Options{Config: &config.Config{}, HTTP: &embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}}})
+	require.ErrorContains(t, err, "requires its own authenticator", "the self surface never mounts without authentication")
 }

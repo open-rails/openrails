@@ -34,7 +34,7 @@ func TestStandaloneMerchantControlBoundaries(t *testing.T) {
 
 	// A different merchant group's API key is valid, but it is pinned to that group's
 	// own merchant.
-	merchantBClient := standalone.Client(openrails.WithTokenProvider(func(context.Context) (string, error) {
+	merchantBClient := standalone.Client(openrails.WithMerchantID(merchantB.MerchantID), openrails.WithTokenProvider(func(context.Context) (string, error) {
 		return merchantB.APIKey, nil
 	}))
 	status, body = postDepositCredits(t, standalone.BaseURL, merchantB.APIKey, customerB, 2_000)

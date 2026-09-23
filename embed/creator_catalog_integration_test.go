@@ -186,11 +186,11 @@ func TestCreatorCatalogAuthority(t *testing.T) {
 	})
 
 	t.Run("remote administrator scope matches embedded scope", func(t *testing.T) {
-		handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, Gate: creatorAdminTestGate{mid: mid}}})
+		handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true}, Gate: creatorAdminTestGate{mid: mid}})
 		require.NoError(t, err)
 		server := httptest.NewServer(handler)
 		t.Cleanup(server.Close)
-		remote, err := openrails.NewRemote(server.URL, openrails.WithAPIKey("administrator"))
+		remote, err := openrails.NewRemote(server.URL, openrails.WithAPIKey("administrator"), openrails.WithMerchantID(mid))
 		require.NoError(t, err)
 		scoped, err := remote.ForCatalogOwner(subjectA)
 		require.NoError(t, err)
@@ -206,11 +206,11 @@ func TestCreatorCatalogAuthority(t *testing.T) {
 	})
 
 	t.Run("HTTP identity comes only from the gate", func(t *testing.T) {
-		handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, Gate: creatorTestGate{mid: mid, subject: subjectA}}})
+		handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true}, Gate: creatorTestGate{mid: mid, subject: subjectA}})
 		require.NoError(t, err)
 		server := httptest.NewServer(handler)
 		t.Cleanup(server.Close)
-		remote, err := openrails.NewRemote(server.URL, openrails.WithOwnCatalog(), openrails.WithAPIKey("owner"))
+		remote, err := openrails.NewRemote(server.URL, openrails.WithOwnCatalog(), openrails.WithAPIKey("owner"), openrails.WithMerchantID(mid))
 		require.NoError(t, err)
 		ownView, err := remote.ForCatalogOwner(subjectA)
 		require.NoError(t, err)

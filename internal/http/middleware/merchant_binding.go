@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -13,6 +14,13 @@ import (
 // principal is pinned. Neither a Client header nor an existing runtime/Host
 // binding may silently select a merchant different from the verified one.
 func EnforceMerchantBinding(r *request.Request, actual merchant.ID) bool {
+	if raw := strings.TrimSpace(r.Header(merchant.SlugHeader)); raw != "" {
+		target, ok := merchanttarget.FromContext(r.Request.Context())
+		if !ok || target.MerchantID != actual || merchanttarget.Assert(r.Request, target) != nil {
+			r.APIError(api.ConflictError("resolved merchant binding mismatch"))
+			return false
+		}
+	}
 	if raw := strings.TrimSpace(r.Header(merchant.BindingHeader)); raw != "" {
 		expected, err := merchant.ParseID(raw)
 		if err != nil || expected.IsZero() {

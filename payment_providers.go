@@ -73,7 +73,7 @@ type ArchivePaymentProviderAccountParams struct {
 // remote transport. External HTTP exposure is a server construction decision.
 type PaymentProviderClient struct{ client *Client }
 
-func (p *PaymentProviderClient) List(ctx context.Context, params *PaymentProviderListParams) (*PaymentProviderList, error) {
+func (p *PaymentProviderClient) List(ctx context.Context, params *PaymentProviderListParams, requestOptions ...RequestOption) (*PaymentProviderList, error) {
 	query := url.Values{}
 	if params != nil {
 		for key, value := range map[string]string{"provider": params.Provider, "environment": params.Environment, "status": params.Status} {
@@ -83,32 +83,32 @@ func (p *PaymentProviderClient) List(ctx context.Context, params *PaymentProvide
 		}
 	}
 	var out PaymentProviderList
-	if err := p.client.do(ctx, http.MethodGet, "/v1/merchant/payment-providers?"+query.Encode(), nil, &out); err != nil {
+	if err := p.client.do(ctx, http.MethodGet, "/v1/merchant/payment-providers?"+query.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (p *PaymentProviderClient) Retrieve(ctx context.Context, provider string) (*PaymentProviderConfig, error) {
-	return p.request(ctx, http.MethodGet, provider, "", nil)
+func (p *PaymentProviderClient) Retrieve(ctx context.Context, provider string, requestOptions ...RequestOption) (*PaymentProviderConfig, error) {
+	return p.request(ctx, http.MethodGet, provider, "", nil, requestOptions...)
 }
 
-func (p *PaymentProviderClient) Upsert(ctx context.Context, provider string, params *UpsertPaymentProviderParams) (*PaymentProviderConfig, error) {
+func (p *PaymentProviderClient) Upsert(ctx context.Context, provider string, params *UpsertPaymentProviderParams, requestOptions ...RequestOption) (*PaymentProviderConfig, error) {
 	if params == nil {
 		return nil, fmt.Errorf("payment provider configuration is required")
 	}
-	return p.request(ctx, http.MethodPut, provider, "", params)
+	return p.request(ctx, http.MethodPut, provider, "", params, requestOptions...)
 }
 
 // Archive archives a particular account without deleting historical obligations.
-func (p *PaymentProviderClient) Archive(ctx context.Context, provider string, accountID uuid.UUID, params *ArchivePaymentProviderAccountParams) (*PaymentProviderConfig, error) {
+func (p *PaymentProviderClient) Archive(ctx context.Context, provider string, accountID uuid.UUID, params *ArchivePaymentProviderAccountParams, requestOptions ...RequestOption) (*PaymentProviderConfig, error) {
 	if accountID == uuid.Nil {
 		return nil, fmt.Errorf("payment provider account ID is required")
 	}
-	return p.request(ctx, http.MethodPost, provider, "/accounts/"+accountID.String()+"/archive", params)
+	return p.request(ctx, http.MethodPost, provider, "/accounts/"+accountID.String()+"/archive", params, requestOptions...)
 }
 
-func (p *PaymentProviderClient) request(ctx context.Context, method, provider, suffix string, params any) (*PaymentProviderConfig, error) {
+func (p *PaymentProviderClient) request(ctx context.Context, method, provider, suffix string, params any, requestOptions ...RequestOption) (*PaymentProviderConfig, error) {
 	provider, err := pathID("provider", provider)
 	if err != nil {
 		return nil, err
@@ -116,7 +116,7 @@ func (p *PaymentProviderClient) request(ctx context.Context, method, provider, s
 	var out struct {
 		Provider PaymentProviderConfig `json:"payment_provider"`
 	}
-	if err := p.client.do(ctx, method, "/v1/merchant/payment-providers/"+provider+suffix, params, &out); err != nil {
+	if err := p.client.do(ctx, method, "/v1/merchant/payment-providers/"+provider+suffix, params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out.Provider, nil

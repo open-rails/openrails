@@ -147,7 +147,7 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 	boot, err := cp.RunBootstrap(ctx, controlplane.BootstrapOptions{BootstrapMerchantSlug: slug, MintInitialAPIKey: true})
 	require.NoError(t, err)
 	require.NotEmpty(t, boot.APIKeySecret)
-	client, err := openrails.NewRemote(srv.URL, openrails.WithAPIKey(boot.APIKeySecret))
+	client, err := openrails.NewRemote(srv.URL, openrails.WithAPIKey(boot.APIKeySecret), openrails.WithMerchantID(created.MerchantID))
 	require.NoError(t, err)
 	settings, err := client.GetMerchantSettings(ctx)
 	require.NoError(t, err)

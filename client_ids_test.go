@@ -22,7 +22,7 @@ func TestGetDepositPreservesOpaqueSourceKeys(t *testing.T) {
 		_, _ = w.Write([]byte(`{"amount":"1"}`))
 	}))
 	t.Cleanup(server.Close)
-	client, err := NewRemote(server.URL, WithAPIKey("test-key"))
+	client, err := NewRemote(server.URL, WithAPIKey("test-key"), WithDefaultMerchant("fixture"))
 	require.NoError(t, err)
 	for _, key := range []string{".", "..", "source/receipt?part=1&currency=JPY"} {
 		t.Run(key, func(t *testing.T) {
@@ -48,6 +48,7 @@ func (n noRequestTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 func TestClientRefusesEmptyIdentifiersBeforeIO(t *testing.T) {
 	ctx := context.Background()
 	c, err := NewRemote("http://openrails.invalid",
+		WithDefaultMerchant("fixture"),
 		WithHTTPClient(&http.Client{Transport: noRequestTransport{t}}),
 		WithTokenProvider(func(context.Context) (string, error) { return "", errors.New("token provider must not run") }),
 	)

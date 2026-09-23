@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/inprocess"
+	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -33,12 +34,15 @@ type Options struct {
 	// VaultClient is an optional borrowed, authenticated client. The host owns
 	// its renewal and lifetime; the Runtime does not revoke it on Close.
 	VaultClient *vaultapi.Client
+	// Auth supplies provider-neutral authentication and live authorization for
+	// both private Client operations and any explicitly published HTTP routes.
+	Auth *billingauth.Integration
 	// Merchant declares this runtime's billing merchant and optional PSP identities.
 	// Reconciliation finishes before HTTP configuration and worker startup.
 	Merchant *MerchantDeclaration
 
 	// HTTP configures the externally mounted surface once. Leave nil for a
-	// headless runtime or call ConfigureHTTP after merchant/auth provisioning.
+	// headless runtime. Merchant slugs are resolved when routes are materialized.
 	HTTP *HTTPConfig
 
 	// DelegatedAuthenticator verifies explicit customer credentials for Client
@@ -125,7 +129,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	if err := validateMerchantDeclaration(opts.Merchant); err != nil {
 		return nil, err
 	}
-	if err := embedhttp.ValidateHTTPConfig(opts.HTTP, opts.DelegatedAuthenticator); err != nil {
+	if err := embedhttp.ValidateHTTPConfig(opts.HTTP, opts.Auth); err != nil {
 		return nil, err
 	}
 	if opts.River.host && opts.RunWorkers {
@@ -162,6 +166,10 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		return nil, fmt.Errorf("initialize merchant services: %w", err)
 	}
 	application.ConsoleAssets = opts.ConsoleAssets
+	if opts.Auth != nil {
+		copy := *opts.Auth
+		application.Runtime.Auth = &copy
+	}
 
 	r := &Runtime{app: application, delegatedAuthenticator: opts.DelegatedAuthenticator}
 	if err := configureMerchant(ctx, application, opts.Merchant); err != nil {
@@ -169,7 +177,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		return nil, err
 	}
 	if opts.HTTP != nil {
-		if err := r.ConfigureHTTP(*opts.HTTP); err != nil {
+		if err := r.configureHTTP(*opts.HTTP); err != nil {
 			_ = r.Close(ctx)
 			return nil, err
 		}
@@ -217,12 +225,14 @@ func applyEmbeddedDefaults(cfg *config.Config) error {
 }
 
 // Client returns the same typed client as NewRemote over the in-process
-// operation transport. It is bound to the runtime's configured merchant, or to
-// WithMerchantID on a multi-merchant runtime; an unbound client is refused.
+// operation transport. The configured merchant is an immutable default; an
+// unrestricted runtime also supports explicit per-operation merchant selectors.
 func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, error) {
 	rt := r.app.Runtime
 	r.handlerOnce.Do(func() { r.handler = newServiceHandler(rt, r.delegatedAuthenticator) })
-	transport, hostCapability := inprocess.NewTransport(r.handler, rt.ConfiguredMerchant)
+	transport, hostCapability := inprocess.NewTransportWithResolver(r.handler, rt.ConfiguredMerchant, func(ctx context.Context, request *http.Request) (billingauth.Target, error) {
+		return merchanttarget.Resolve(ctx, request, rt.Merchants, rt.ConfiguredMerchant(), "")
+	})
 	defaults := []openrails.ClientOption{
 		openrails.WithHTTPClient(&http.Client{Transport: transport}),
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return hostCapability, nil }),
@@ -230,18 +240,7 @@ func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, 
 	if id := rt.ConfiguredMerchant(); !id.IsZero() {
 		defaults = append(defaults, openrails.WithMerchantID(id))
 	}
-	clientOptions := append(defaults, options...)
-	client, err := openrails.NewRemote(inprocessBaseURL, clientOptions...)
-	if err != nil {
-		return nil, err
-	}
-	switch bound := rt.ConfiguredMerchant(); {
-	case client.MerchantID().IsZero():
-		return nil, fmt.Errorf("openrails embed: runtime serves several merchants; bind the client with openrails.WithMerchantID")
-	case !bound.IsZero() && client.MerchantID() != bound:
-		return nil, fmt.Errorf("openrails embed: %s", merchantMismatchMsg(bound, client.MerchantID()))
-	}
-	return client, nil
+	return openrails.NewRemote(inprocessBaseURL, append(defaults, options...)...)
 }
 
 // RunWorkers runs the River workers, blocking until ctx is done.

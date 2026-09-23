@@ -144,7 +144,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantAPI: true, Customer: true, Gate: httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn})}, Prefix: "/billing", DelegatedAuthenticator: authn})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantAPI: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}}, Prefix: "/billing", DelegatedAuthenticator: authn, Gate: httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn})})
 	require.NoError(t, err)
 
 	get := func(token, path string) *httptest.ResponseRecorder {
@@ -200,7 +200,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 		orauthkit.WithPermissionResolver(grant),
 	)
 	require.NoError(t, err)
-	noSlugHandler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Customer: true}, Prefix: "/billing", DelegatedAuthenticator: unslugged})
+	noSlugHandler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}}, Prefix: "/billing", DelegatedAuthenticator: unslugged})
 	require.NoError(t, err)
 	_, plainToken2 := newUser("or918-owner2")
 	req := httptest.NewRequest(http.MethodGet, merchantBalance, nil)

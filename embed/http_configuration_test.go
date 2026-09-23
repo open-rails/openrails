@@ -14,12 +14,12 @@ import (
 
 func TestHTTPConfigurationIsOneShotAndCopied(t *testing.T) {
 	runtime := reviewRuntime(nil, nil)
-	require.ErrorContains(t, runtime.ConfigureHTTP(HTTPConfig{Customer: true}), "requires")
+	require.ErrorContains(t, runtime.configureHTTP(HTTPConfig{CustomerRoutes: []CustomerRoutesConfig{{Treasury: true}}}), "requires")
 	require.Nil(t, runtime.httpConfig, "failed validation cannot enable HTTP")
 	policy := HTTPConfig{}
-	require.NoError(t, runtime.ConfigureHTTP(policy))
+	require.NoError(t, runtime.configureHTTP(policy))
 	policy.Catalog = true
-	require.ErrorContains(t, runtime.ConfigureHTTP(HTTPConfig{}), "already configured")
+	require.ErrorContains(t, runtime.configureHTTP(HTTPConfig{}), "already configured")
 	routes, err := runtime.HTTPRoutes()
 	require.NoError(t, err)
 	require.NotEmpty(t, routes)
@@ -31,11 +31,11 @@ func TestHTTPConfigurationIsOneShotAndCopied(t *testing.T) {
 	again, err := runtime.HTTPRoutes()
 	require.NoError(t, err)
 	require.Equal(t, original, again[0].Path)
-	require.ErrorContains(t, runtime.ConfigureHTTP(HTTPConfig{}), "frozen")
+	require.ErrorContains(t, runtime.configureHTTP(HTTPConfig{}), "frozen")
 	disabled := reviewRuntime(nil, nil)
 	_, err = disabled.HTTPRoutes()
 	require.ErrorContains(t, err, "disabled")
-	require.ErrorContains(t, disabled.ConfigureHTTP(HTTPConfig{}), "frozen")
+	require.ErrorContains(t, disabled.configureHTTP(HTTPConfig{}), "frozen")
 }
 
 func TestHTTPConcurrentConfigurationHasOneOwner(t *testing.T) {
@@ -43,7 +43,7 @@ func TestHTTPConcurrentConfigurationHasOneOwner(t *testing.T) {
 	var wait sync.WaitGroup
 	results := make(chan error, 12)
 	for range 12 {
-		wait.Go(func() { results <- runtime.ConfigureHTTP(HTTPConfig{}) })
+		wait.Go(func() { results <- runtime.configureHTTP(HTTPConfig{}) })
 	}
 	wait.Wait()
 	close(results)
@@ -61,7 +61,7 @@ func TestHTTPConcurrentConfigurationHasOneOwner(t *testing.T) {
 func TestLateHTTPAuthenticationAndSharedMountLimits(t *testing.T) {
 	runtime := reviewRuntime(nil, nil)
 	runtime.app.Config.RateLimits = &config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}}
-	require.NoError(t, runtime.ConfigureHTTP(HTTPConfig{Customer: true, DelegatedAuthenticator: billingauth.DelegatedAuthenticatorFunc(reviewReject)}))
+	require.NoError(t, runtime.configureHTTP(HTTPConfig{CustomerRoutes: []CustomerRoutesConfig{{Treasury: true, DelegatedAuthenticator: billingauth.DelegatedAuthenticatorFunc(reviewReject)}}}))
 	// Each host obtains a bundle independently. Runtime policy and counters must
 	// not reset simply because the second adapter materializes its mount.
 	for i, prefix := range []string{"/first", "/second"} {

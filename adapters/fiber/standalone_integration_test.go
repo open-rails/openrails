@@ -24,11 +24,6 @@ func TestStandaloneNativeFiberInventoryAndCustomerParameters(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, Auth: &config.AuthConfig{Issuer: "https://fiber.openrails.test", KeysPath: t.TempDir()}, AdminConsole: &config.AdminConsoleConfig{Enabled: true}}
 	assets := fstest.MapFS{"index.html": {Data: []byte("console page")}, "assets/site.js": {Data: []byte("console asset")}}
-	runtime, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), ConsoleAssets: assets})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, runtime.Close(ctx)) })
-	_, err = controlplane.Attach(ctx, runtime, controlplane.Options{})
-	require.NoError(t, err)
 	calls := 0
 	auth := billingauth.DelegatedAuthenticatorFunc(func(_ context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		calls++
@@ -37,7 +32,11 @@ func TestStandaloneNativeFiberInventoryAndCustomerParameters(t *testing.T) {
 		require.Equal(t, "/api/v1/merchants/owner/billing/me/subscriptions/not-id/cancel?proof=raw", r.RequestURI)
 		return nil, billingauth.GateError{Status: 403, Message: "host denied"}
 	})
-	require.NoError(t, runtime.ConfigureHTTP(embed.HTTPConfig{Standalone: true, CustomerExposures: []embed.CustomerHTTPConfig{{Prefix: "/api/v1/merchants/{slug}/billing/me", Scope: embed.CustomerSubscriptionManagement, DelegatedAuthenticator: auth}}}))
+	runtime, err := embed.New(ctx, embed.Options{HTTP: &embed.HTTPConfig{Standalone: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Prefix: "/api/v1/merchants/{slug}/billing/me", Scope: embed.CustomerSubscriptionManagement, DelegatedAuthenticator: auth}}}, Config: cfg, River: embed.RiverManagedByOpenRails(), ConsoleAssets: assets})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runtime.Close(ctx)) })
+	_, err = controlplane.Attach(ctx, runtime, controlplane.Options{})
+	require.NoError(t, err)
 	bundle, err := Routes(runtime)
 	require.NoError(t, err)
 	target := fiber.New(fiber.Config{CaseSensitive: true, StrictRouting: true})

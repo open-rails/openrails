@@ -99,7 +99,7 @@ func TestCustomerInvoicePaymentClientWorkflow(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 	app.HostGraph(rt).Runtime.SetConfiguredMerchant(owned.MerchantID)
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Customer: true}, DelegatedAuthenticator: authn})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}}, DelegatedAuthenticator: authn})
 	require.NoError(t, err, "mount inherits the runtime's verifier")
 	mounted := httptest.NewServer(handler)
 	t.Cleanup(mounted.Close)

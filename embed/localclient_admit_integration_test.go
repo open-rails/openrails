@@ -20,9 +20,9 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
-// TestInProcessClientBindingIsImmutable: an in-process client names exactly one
-// merchant at construction, and a runtime bound to another merchant refuses it
-// before any handler runs (#772).
+// TestInProcessClientBindingIsImmutable: operation selection never changes an
+// immutable Client default or overrides the runtime restriction. Invalid/missing
+// targets fail before any handler runs (#772).
 func TestInProcessClientBindingIsImmutable(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
@@ -32,8 +32,10 @@ func TestInProcessClientBindingIsImmutable(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	_, err = rt.Client()
-	require.ErrorContains(t, err, "WithMerchantID", "a multi-merchant runtime never guesses the merchant")
+	unselected, err := rt.Client()
+	require.NoError(t, err, "one reusable client may select each operation separately")
+	_, err = unselected.GetMerchantSettings(ctx)
+	require.ErrorIs(t, err, openrails.ErrInvalid, "a multi-merchant operation never guesses the merchant")
 	otherID := openrails.MerchantID(uuid.New())
 	early, err := rt.Client(openrails.WithMerchantID(otherID))
 	require.NoError(t, err)
@@ -47,8 +49,11 @@ func TestInProcessClientBindingIsImmutable(t *testing.T) {
 	app.HostGraph(rt).Runtime.SetConfiguredMerchant(boundID)
 	customerID := seedCustomerForBoundMerchant(ctx, t, boundID)
 
-	_, err = rt.Client(openrails.WithMerchantID(otherID))
-	require.ErrorContains(t, err, boundID.String(), "construction refuses a different merchant")
+	mismatched, err := rt.Client(openrails.WithMerchantID(otherID))
+	require.NoError(t, err)
+	_, err = mismatched.GetMerchantSettings(ctx)
+	require.ErrorIs(t, err, openrails.ErrConflict, "the operation refuses a different merchant before lookup or mutation")
+	require.Contains(t, err.Error(), boundID.String())
 
 	for name, call := range map[string]func() error{
 		"read": func() error { _, err := early.GetMerchantSettings(ctx); return err },

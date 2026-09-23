@@ -60,7 +60,7 @@ func TestSelfSubscriptionWireParity(t *testing.T) {
 		}
 		return &billingauth.DelegatedPrincipal{MerchantID: dbtest.TestMerchantID.String(), MerchantSlug: dbtest.TestMerchantSlug, SubjectID: embeddedCustomer.String(), Issuer: "embedded-host"}, nil
 	})
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Customer: true, Gate: httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn})}, DelegatedAuthenticator: authn})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}}, DelegatedAuthenticator: authn, Gate: httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn})})
 	require.NoError(t, err)
 	surfaces["embedded"] = surface{customer: embeddedCustomer, call: func(method, path string, body any) (int, []byte) {
 		var buf bytes.Buffer

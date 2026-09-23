@@ -10,7 +10,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -52,9 +51,10 @@ func run(ctx context.Context, getenv func(string) string) (runErr error) {
 	// there. Compose components before binding; extend the supplied config.
 	runtime, err := embed.New(ctx, embed.Options{
 		Merchant: &embed.MerchantDeclaration{Slug: slug},
-		HTTP: &embed.HTTPConfig{Checkout: true, Authenticator: billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
-			return billingauth.UserContext{}, fmt.Errorf("sign in required")
+		Auth: &billingauth.Integration{Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
+			return billingauth.Identity{}, billingauth.ErrUnauthenticated
 		})},
+		HTTP: &embed.HTTPConfig{Checkout: true},
 		Config: &config.Config{
 			TestMode:             config.CredentialPostureSandbox,
 			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,

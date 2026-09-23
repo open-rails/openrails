@@ -164,7 +164,7 @@ func testHyperSwitchInvoiceDeletionWorkflow(t *testing.T, deleteCompleted bool) 
 	_, err = rt.Merchants.Secrets().Put(ctx, owned.MerchantID, name, "invoice-key")
 	require.NoError(t, err)
 	rt.CollectionResolver.(*money.MerchantCollectionAdapterBuilder).Endpoints.NMIDirectPostURL = "https://secure.nmi.com/api/transact.php"
-	client := surface.Client(openrails.WithAPIKey(owned.APIKey))
+	client := surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID))
 	customer := openrails.CustomerID(uuid.MustParse(user.ID))
 	setup, err := client.CreatePaymentMethodSession(ctx, openrails.CreatePaymentMethodSessionRequest{IdempotencyKey: uuid.NewString(), Customer: openrails.CheckoutCustomerIdentity{ID: customer.String(), VerifiedEmail: *user.Email, Username: "invoice"}, PaymentOptions: openrails.CheckoutPaymentOptions{PSPID: psp.String()}})
 	require.NoError(t, err)

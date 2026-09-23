@@ -29,7 +29,7 @@ type MerchantBillingImportResult struct {
 // The writer may contain incomplete bytes when an error is returned; publish a
 // file only after success. The Client verifies the archive's integrity footer,
 // and uses the same credential, merchant binding and timeout as other methods.
-func (c *Client) ExportMerchantBilling(ctx context.Context, dst io.Writer) error {
+func (c *Client) ExportMerchantBilling(ctx context.Context, dst io.Writer, requestOptions ...RequestOption) error {
 	if dst == nil {
 		return invalidErr("archive writer is required")
 	}
@@ -41,14 +41,14 @@ func (c *Client) ExportMerchantBilling(ctx context.Context, dst io.Writer) error
 			return fmt.Errorf("%w: incomplete or invalid billing archive: %w", ErrUnreachable, err)
 		}
 		return nil
-	})
+	}, requestOptions...)
 }
 
 // ImportMerchantBilling atomically restores an archive into an empty destination
 // with the same merchant UUID. Provision destination authority separately and
 // keep destination workers stopped through restoration and reconfiguration.
 // No provider call is made. A lost response can be retried with the same archive.
-func (c *Client) ImportMerchantBilling(ctx context.Context, src io.Reader) (*MerchantBillingImportResult, error) {
+func (c *Client) ImportMerchantBilling(ctx context.Context, src io.Reader, requestOptions ...RequestOption) (*MerchantBillingImportResult, error) {
 	if src == nil {
 		return nil, invalidErr("archive reader is required")
 	}
@@ -74,7 +74,7 @@ func (c *Client) ImportMerchantBilling(ctx context.Context, src io.Reader) (*Mer
 			return fmt.Errorf("%w: archive receipt must contain one JSON value", ErrUnreachable)
 		}
 		return nil
-	})
+	}, requestOptions...)
 	if err != nil {
 		return nil, err
 	}

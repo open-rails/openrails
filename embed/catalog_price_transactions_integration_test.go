@@ -47,11 +47,11 @@ func TestCatalogPriceKeyTransactions(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 	local, err := rt.Client()
 	require.NoError(t, err)
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, Gate: creatorAdminTestGate{mid: mid}}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true}, Gate: creatorAdminTestGate{mid: mid}})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	remote, err := openrails.NewRemote(server.URL, openrails.WithAPIKey("administrator"))
+	remote, err := openrails.NewRemote(server.URL, openrails.WithAPIKey("administrator"), openrails.WithMerchantID(mid))
 	require.NoError(t, err)
 	_, err = owner.Exec(ctx, `CREATE FUNCTION billing.reject_price_fixture() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
  IF NEW.amount=4000000 THEN RAISE EXCEPTION 'fixture price insert rejected'; END IF; RETURN NEW; END $$;

@@ -15,8 +15,19 @@ import (
 )
 
 func reviewRuntime(cfg *HTTPConfig, delegated billingauth.DelegatedAuthenticator) *Runtime {
+	if cfg != nil {
+		for i := range cfg.CustomerRoutes {
+			if cfg.CustomerRoutes[i].DelegatedAuthenticator == nil {
+				cfg.CustomerRoutes[i].DelegatedAuthenticator = delegated
+			}
+		}
+	}
+	var auth *billingauth.Integration
+	if cfg != nil && (cfg.Checkout || cfg.Catalog || cfg.MerchantAdmin || cfg.MerchantAPI || cfg.PaymentProviders) {
+		auth = rejectingIntegration()
+	}
 	c := &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true}
-	return &Runtime{httpConfig: cfg, delegatedAuthenticator: delegated, app: &app.App{Config: c, Runtime: &app.Runtime{Config: c}}}
+	return &Runtime{httpConfig: cfg, delegatedAuthenticator: delegated, app: &app.App{Config: c, Runtime: &app.Runtime{Config: c, Auth: auth}}}
 }
 func reviewReject(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 	return nil, billingauth.ErrUnauthenticated
@@ -46,7 +57,7 @@ func TestConfiguredRoutesReviewExposureAndCredentialOwnership(t *testing.T) {
 		require.NotContains(t, r.Path, "/me/")
 		require.NotContains(t, r.Path, "/merchant/")
 	}
-	rt = reviewRuntime(&HTTPConfig{MerchantConfig: true, Gate: billingauth.NewDelegatedGate(delegated)}, delegated)
+	rt = reviewRuntime(&HTTPConfig{MerchantConfig: true}, delegated)
 	rt.app.Config.MerchantConfigSource = config.MerchantConfigSourceManifest
 	routes, err = rt.HTTPRoutes()
 	require.NoError(t, err)
@@ -56,10 +67,7 @@ func TestConfiguredRoutesReviewExposureAndCredentialOwnership(t *testing.T) {
 			require.False(t, r.Method == http.MethodPost && strings.HasSuffix(r.Path, "/archive"))
 		}
 	}
-	rt = reviewRuntime(&HTTPConfig{Checkout: true, Customer: true, MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true,
-		Authenticator: billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
-			return billingauth.UserContext{}, billingauth.ErrUnauthenticated
-		}), Gate: billingauth.NewDelegatedGate(delegated)}, delegated)
+	rt = reviewRuntime(&HTTPConfig{Checkout: true, CustomerRoutes: []CustomerRoutesConfig{{Treasury: true}}, MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}, delegated)
 	routes, err = rt.HTTPRoutes()
 	require.NoError(t, err)
 	require.NotEmpty(t, routes)
@@ -97,7 +105,7 @@ func TestConfiguredRoutesReviewPreserveSignedRequest(t *testing.T) {
 		require.Equal(t, body, string(raw))
 		return nil, billingauth.ErrUnauthenticated
 	})
-	mux := reviewMount(t, reviewRuntime(&HTTPConfig{Customer: true}, delegated))
+	mux := reviewMount(t, reviewRuntime(&HTTPConfig{CustomerRoutes: []CustomerRoutesConfig{{Treasury: true}}}, delegated))
 	req := httptest.NewRequest(http.MethodGet, target, strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer signed")
 	w := httptest.NewRecorder()
@@ -108,7 +116,7 @@ func TestConfiguredRoutesReviewPreserveSignedRequest(t *testing.T) {
 
 func TestConfiguredRoutesReviewSharedLimiterAtCustomPrefix(t *testing.T) {
 	delegated := billingauth.DelegatedAuthenticatorFunc(reviewReject)
-	rt := reviewRuntime(&HTTPConfig{Customer: true}, delegated)
+	rt := reviewRuntime(&HTTPConfig{CustomerRoutes: []CustomerRoutesConfig{{Treasury: true}}}, delegated)
 	rt.app.Config.RateLimits = &config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}, "default": {RequestsPerMinute: 60}}
 	mux := reviewMount(t, rt)
 	for i, path := range []string{"/api/pay/v1/me/checkout", "/api/pay/v1/customers/customer-1/checkout"} {
@@ -142,7 +150,7 @@ func TestConfiguredRoutesReviewInvalidAuthFailsBeforeDatabase(t *testing.T) {
 		message string
 	}{
 		{HTTPConfig{Checkout: true}, "Checkout requires"},
-		{HTTPConfig{Customer: true}, "Customer requires"},
+		{HTTPConfig{CustomerRoutes: []CustomerRoutesConfig{{Treasury: true}}}, "requires its own authenticator"},
 		{HTTPConfig{MerchantAdmin: true}, "management surfaces require"},
 		{HTTPConfig{Catalog: true}, "management surfaces require"},
 		{HTTPConfig{MerchantConfig: true}, "management surfaces require"},
@@ -153,9 +161,17 @@ func TestConfiguredRoutesReviewInvalidAuthFailsBeforeDatabase(t *testing.T) {
 	}
 }
 
+func rejectingIntegration() *billingauth.Integration {
+	return &billingauth.Integration{Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
+		return billingauth.Identity{}, billingauth.ErrUnauthenticated
+	}), Authorization: billingauth.AuthorizationFunc(func(context.Context, *http.Request, billingauth.Identity, billingauth.Requirement) error {
+		return billingauth.ErrUnauthenticated
+	})}
+}
+
 func TestConfiguredRoutesOmitDisabledCatalogMutations(t *testing.T) {
 	delegated := billingauth.DelegatedAuthenticatorFunc(reviewReject)
-	rt := reviewRuntime(&HTTPConfig{Catalog: true, MerchantAdmin: true, Gate: billingauth.NewDelegatedGate(delegated)}, delegated)
+	rt := reviewRuntime(&HTTPConfig{Catalog: true, MerchantAdmin: true}, delegated)
 	rt.app.Config.AllowCatalogUpdates = false
 	routes, err := rt.HTTPRoutes()
 	require.NoError(t, err)

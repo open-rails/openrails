@@ -9,7 +9,7 @@ import (
 // a positive rail payment for the given price. Refunding that payment does not
 // erase the historical fact, nor does archiving it. This reads the payment record and
 // remains true after its acknowledged host event is pruned.
-func (c *Client) HasSettledPayment(ctx context.Context, customerID string, priceID string) (bool, error) {
+func (c *Client) HasSettledPayment(ctx context.Context, customerID string, priceID string, requestOptions ...RequestOption) (bool, error) {
 	customer, err := requireCustomerID(customerID)
 	if err != nil {
 		return false, err
@@ -21,6 +21,6 @@ func (c *Client) HasSettledPayment(ctx context.Context, customerID string, price
 	var out struct {
 		Settled bool `json:"settled"`
 	}
-	err = c.do(ctx, http.MethodGet, "/v1/merchant/customers/"+customer+"/payment-settlement-status?price_id="+price, nil, &out)
+	err = c.do(ctx, http.MethodGet, "/v1/merchant/customers/"+customer+"/payment-settlement-status?price_id="+price, nil, &out, requestOptions...)
 	return out.Settled, err
 }

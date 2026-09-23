@@ -29,12 +29,12 @@ func TestCustomerExposureProfilesKeepAuthorityAndOriginalRequest(t *testing.T) {
 		})
 	}
 	runtime := reviewRuntime(nil, nil)
-	cfg := HTTPConfig{CustomerExposures: []CustomerHTTPConfig{
+	cfg := HTTPConfig{CustomerRoutes: []CustomerRoutesConfig{
 		{Prefix: "/billing/v1/me", DelegatedAuthenticator: verifier("portal")},
 		{Prefix: "/api/v1/merchants/{slug}/billing/me", Scope: CustomerSubscriptionManagement, DelegatedAuthenticator: verifier("platform")},
 	}}
-	require.NoError(t, runtime.ConfigureHTTP(cfg))
-	cfg.CustomerExposures[0].Prefix = "/mutated"
+	require.NoError(t, runtime.configureHTTP(cfg))
+	cfg.CustomerRoutes[0].Prefix = "/mutated"
 	mux := reviewMount(t, runtime)
 	for _, tc := range []struct {
 		path, token string
@@ -73,24 +73,24 @@ func TestCustomerExposureProfilesKeepAuthorityAndOriginalRequest(t *testing.T) {
 
 func TestCustomerExposureValidationRefusesAmbiguityAndFallbackAuthority(t *testing.T) {
 	verifier := billingauth.DelegatedAuthenticatorFunc(reviewReject)
-	for _, prefix := range []string{"", "/", "/customer/", "/customer/../other", "/customer/{tail...}", "/customer/{slug}/%2f"} {
+	for _, prefix := range []string{"/", "/customer/", "/customer/../other", "/customer/{tail...}", "/customer/{slug}/%2f"} {
 		runtime := reviewRuntime(nil, verifier)
-		require.Error(t, runtime.ConfigureHTTP(HTTPConfig{CustomerExposures: []CustomerHTTPConfig{{Prefix: prefix, DelegatedAuthenticator: verifier}}}), prefix)
+		require.Error(t, runtime.configureHTTP(HTTPConfig{CustomerRoutes: []CustomerRoutesConfig{{Prefix: prefix, DelegatedAuthenticator: verifier}}}), prefix)
 	}
 	runtime := reviewRuntime(nil, verifier)
-	require.ErrorContains(t, runtime.ConfigureHTTP(HTTPConfig{CustomerExposures: []CustomerHTTPConfig{{Prefix: "/portal"}}}), "own authenticator")
-	require.NoError(t, runtime.ConfigureHTTP(HTTPConfig{Customer: true, CustomerExposures: []CustomerHTTPConfig{{Prefix: "/v1/me", DelegatedAuthenticator: verifier}}}))
+	require.ErrorContains(t, runtime.configureHTTP(HTTPConfig{CustomerRoutes: []CustomerRoutesConfig{{Prefix: "/portal"}}}), "own authenticator")
+	require.NoError(t, runtime.configureHTTP(HTTPConfig{CustomerRoutes: []CustomerRoutesConfig{{Prefix: "/v1/me", DelegatedAuthenticator: verifier}, {Prefix: "/v1/me", DelegatedAuthenticator: verifier}}}))
 	_, err := runtime.HTTPRoutes()
 	require.ErrorContains(t, err, "conflicting")
 	standalone := reviewRuntime(nil, nil)
-	require.NoError(t, standalone.ConfigureHTTP(HTTPConfig{Standalone: true}))
+	require.NoError(t, standalone.configureHTTP(HTTPConfig{Standalone: true}))
 	_, err = standalone.HTTPRoutes()
 	require.ErrorContains(t, err, "no control plane")
 }
 
 func TestCustomerBillingManagementRoutesAndCapabilities(t *testing.T) {
 	runtime := reviewRuntime(nil, nil)
-	require.NoError(t, runtime.ConfigureHTTP(HTTPConfig{CustomerExposures: []CustomerHTTPConfig{{
+	require.NoError(t, runtime.configureHTTP(HTTPConfig{CustomerRoutes: []CustomerRoutesConfig{{
 		Prefix: "/v1/me", Scope: CustomerBillingManagement,
 		DelegatedAuthenticator: billingauth.DelegatedAuthenticatorFunc(reviewReject),
 	}}}))

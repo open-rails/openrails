@@ -74,24 +74,24 @@ type PlanMigrationCancelResult struct {
 }
 
 // PreviewPlanMigration classifies the affected subscriptions without writing.
-func (c *Client) PreviewPlanMigration(ctx context.Context, request PlanMigrationRequest) (*PlanMigrationResult, error) {
+func (c *Client) PreviewPlanMigration(ctx context.Context, request PlanMigrationRequest, requestOptions ...RequestOption) (*PlanMigrationResult, error) {
 	if err := request.requirePrices(); err != nil {
 		return nil, err
 	}
 	var out PlanMigrationResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations/preview", request, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations/preview", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // CreatePlanMigration schedules the migration and records its batch.
-func (c *Client) CreatePlanMigration(ctx context.Context, request PlanMigrationRequest) (*PlanMigrationResult, error) {
+func (c *Client) CreatePlanMigration(ctx context.Context, request PlanMigrationRequest, requestOptions ...RequestOption) (*PlanMigrationResult, error) {
 	if err := request.requirePrices(); err != nil {
 		return nil, err
 	}
 	var out PlanMigrationResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations", request, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations", request, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -106,13 +106,13 @@ func (r PlanMigrationRequest) requirePrices() error {
 }
 
 // CancelPlanMigration cancels the batch's still-scheduled subscriptions.
-func (c *Client) CancelPlanMigration(ctx context.Context, batchID uuid.UUID) (*PlanMigrationCancelResult, error) {
+func (c *Client) CancelPlanMigration(ctx context.Context, batchID uuid.UUID, requestOptions ...RequestOption) (*PlanMigrationCancelResult, error) {
 	batch, err := requireUUID("batch_id", batchID)
 	if err != nil {
 		return nil, err
 	}
 	var out PlanMigrationCancelResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations/"+batch+"/cancel", nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations/"+batch+"/cancel", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
