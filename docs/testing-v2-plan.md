@@ -113,6 +113,12 @@ current integration test to one matrix row. A test may be retained as a
 regression when it proves a unique failure mode; otherwise it must point to the
 focused scenario that replaces it.
 
+The initial workflow-cell inventory is checked in at
+`compatibility/focused-test-map.tsv`. Its rows intentionally say `planned`:
+they are coverage obligations, not evidence that a replacement already exists.
+The implementation must add focused scenario IDs and receipt paths to those
+rows before changing a status to `covered`.
+
 ## Deterministic fixture contract
 
 Create a small internal `testkit` with these explicit capabilities:
@@ -174,3 +180,26 @@ approval requires all of the following:
 Only after this evidence is accepted may old tests be removed in a separate
 hard-cut change. This issue itself does not delete tests or alter required
 coverage.
+
+## Implementation sequence
+
+1. **Freeze the inventory.** Validate the TSV map against
+   `compatibility/workflows.tsv`, enumerate every integration package/test, and
+   mark unique regressions that must remain. Add a checker that rejects an
+   unknown current workflow cell or a focused row without an owner.
+2. **Build fixtures without changing production code.** Land the process-owned
+   PostgreSQL/River/provider/principal/topology helpers and prove their cleanup
+   and connection budgets with small contract tests.
+3. **Port one vertical slice.** Implement merchant isolation, neutral authority,
+   catalog/resource access, one-off checkout, and embedded/HTTP parity. Run it
+   beside the old workflows and record normalized receipts.
+4. **Port financial uncertainty.** Add recurring admission, frozen terms,
+   provider journals, duplicate/out-of-order webhooks, refunds, cancellation,
+   rebill, and River restart scenarios. Add mutation fixtures that deliberately
+   remove each safety fence and require failure.
+5. **Port schema and browser contracts.** Add migration ownership/drift,
+   account-deletion callbacks, channel/editor flows, tokenized checkout, and
+   `/me` billing lifecycle. Keep live PSP checks in their existing gated job.
+6. **Run the dual-suite gate.** Require three exact-head runs with the old and
+   focused suites, compare receipts and failure injection results, then obtain
+   explicit review for any hard-cut deletion in a separate change.
