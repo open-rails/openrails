@@ -4,9 +4,18 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 func (c *Client) CreateCheckoutSession(ctx context.Context, request CreateCheckoutSessionRequest, requestOptions ...RequestOption) (*CheckoutSession, error) {
+	if (strings.TrimSpace(request.PriceID) == "") == (strings.TrimSpace(request.PriceKey) == "") {
+		return nil, invalidErr("exactly one of price_id or price_key is required")
+	}
+	if request.PriceID != "" {
+		if id, err := ParsePriceID(request.PriceID); err != nil || id.IsZero() {
+			return nil, invalidErr("price_id must be a valid price ID; use price_key for an opaque key")
+		}
+	}
 	var out CheckoutSession
 	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/checkout-sessions", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...); err != nil {
 		return nil, err
@@ -82,6 +91,19 @@ func (c *Client) ListCheckoutRailOptions(ctx context.Context, priceID string, re
 	}
 	var out []CheckoutRailOption
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/checkout-options?"+url.Values{"price_id": {price}}.Encode(), nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListCheckoutRailOptionsByKey reads ready providers for the current offer
+// named by an opaque price key, including keys that resemble price IDs.
+func (c *Client) ListCheckoutRailOptionsByKey(ctx context.Context, priceKey string, requestOptions ...RequestOption) ([]CheckoutRailOption, error) {
+	if strings.TrimSpace(priceKey) == "" {
+		return nil, invalidErr("price_key is required")
+	}
+	var out []CheckoutRailOption
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/checkout-options?"+url.Values{"price_key": {priceKey}}.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return out, nil

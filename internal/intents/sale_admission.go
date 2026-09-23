@@ -54,7 +54,7 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.Openrails
 			if err != nil {
 				return err
 			}
-			if accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
+			if accepted.CheckoutSessionID != terms.CheckoutSessionID || accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
 				return apperr.Conflictf("checkout key belongs to another accepted purchase")
 			}
 			row = previous
@@ -62,6 +62,15 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.Openrails
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
+		}
+		if terms.AccessDurationHours == nil {
+			pending, err := d.Gen(ctx).HasUnresolvedProductCheckout(ctx, gen.HasUnresolvedProductCheckoutParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.ProductID, ExceptSessionID: terms.CheckoutSessionID})
+			if err != nil {
+				return err
+			}
+			if pending {
+				return apperr.Conflictf("another checkout of this product is unresolved")
+			}
 		}
 		_, err = d.Gen(ctx).GetUnresolvedSaleForCustomerProduct(ctx, gen.GetUnresolvedSaleForCustomerProductParams{MerchantID: p.MerchantID, CustomerID: customer.String(), ProductID: terms.ProductID.String()})
 		if err == nil {
@@ -88,7 +97,7 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.Openrails
 		if err != nil {
 			return err
 		}
-		if accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
+		if accepted.CheckoutSessionID != terms.CheckoutSessionID || accepted.UserID != terms.UserID || accepted.PriceID != terms.PriceID || accepted.RequestFingerprint != terms.RequestFingerprint || accepted.PaymentMethodID != terms.PaymentMethodID || accepted.Instrument.PSPID != terms.Instrument.PSPID {
 			return apperr.Conflictf("checkout key belongs to another accepted purchase")
 		}
 		return nil

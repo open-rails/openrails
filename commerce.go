@@ -70,13 +70,16 @@ type CheckoutCustomerIdentity struct {
 // interaction. Do not use this command as an unattended way to establish a
 // customer-initiated stored-card agreement.
 type CreateCheckoutSessionRequest struct {
-	Customer       CheckoutCustomerIdentity `json:"customer"`
-	PriceID        string                   `json:"price_id,omitzero"`
-	PaymentOptions CheckoutPaymentOptions   `json:"payment"`
-	Metadata       map[string]string        `json:"metadata"`
-	IdempotencyKey string                   `json:"-"`
-	SuccessURL     string                   `json:"success_url"` // Required for Stripe hosted checkout
-	CancelURL      string                   `json:"cancel_url"`  // Required for Stripe hosted checkout
+	Customer CheckoutCustomerIdentity `json:"customer"`
+	// Supply exactly one of PriceID or PriceKey. Keys are always opaque, even
+	// when they resemble UUIDs. Accepted retries retain the original offer.
+	PriceID        string                 `json:"price_id,omitzero"`
+	PriceKey       string                 `json:"price_key,omitempty"`
+	PaymentOptions CheckoutPaymentOptions `json:"payment"`
+	Metadata       map[string]string      `json:"metadata"`
+	IdempotencyKey string                 `json:"-"`
+	SuccessURL     string                 `json:"success_url"` // Required for Stripe hosted checkout
+	CancelURL      string                 `json:"cancel_url"`  // Required for Stripe hosted checkout
 }
 
 // CreatePaymentMethodSessionRequest authorizes a nonmonetary card setup.

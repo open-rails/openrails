@@ -20,6 +20,9 @@ type PriceService struct {
 	db *db.DB
 }
 
+// Database supplies the transaction owner for checkout admission and settlement.
+func (s *PriceService) Database() *db.DB { return s.db }
+
 func NewPriceService(db *db.DB) *PriceService {
 	return &PriceService{db: db}
 }

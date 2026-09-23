@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -24,14 +23,13 @@ type CheckoutRailOption struct {
 }
 
 // ListCheckoutRailOptions returns payment providers that this runtime can use
-// for new checkout against priceRef, IN THE MERCHANT'S ROUTING ORDER (or#288).
+// for new checkout against exactly one price ID or key, in routing order.
 // It performs no remote provider probes and no writes; readiness means the
 // active local account, required credentials, price link, checkout mode, and
 // runtime services are all present.
-func (s *CheckoutSessionService) ListCheckoutRailOptions(ctx context.Context, priceRef string) ([]CheckoutRailOption, error) {
-	priceRef = strings.TrimSpace(priceRef)
-	if priceRef == "" {
-		return nil, fmt.Errorf("price reference is required")
+func (s *CheckoutSessionService) ListCheckoutRailOptions(ctx context.Context, priceID, priceKey string) ([]CheckoutRailOption, error) {
+	if err := validateCheckoutPriceSelector(priceID, priceKey); err != nil {
+		return nil, err
 	}
 	if s == nil || s.priceService == nil || s.productService == nil {
 		return nil, fmt.Errorf("checkout rail options unavailable")
@@ -48,7 +46,7 @@ func (s *CheckoutSessionService) ListCheckoutRailOptions(ctx context.Context, pr
 		return nil, fmt.Errorf("resolve checkout merchant: %w", err)
 	}
 
-	price, err := catalog.ResolveReference(ctx, s.priceService, priceRef)
+	price, err := resolveCheckoutPrice(ctx, s.priceService, priceID, priceKey)
 	if err != nil {
 		return nil, fmt.Errorf("resolve checkout price: %w", err)
 	}

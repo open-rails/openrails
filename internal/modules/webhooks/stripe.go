@@ -702,12 +702,7 @@ func (s *StripeWebhookService) handleCheckoutSessionExpired(ctx context.Context,
 		return nil
 	}
 
-	if err := s.CheckoutSessionService.MarkExpired(ctx, sessionID, "checkout expired"); err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-			"checkout_session_id": sessionID,
-		}).Warn("failed to update checkout session from stripe expiration")
-	}
-	return nil
+	return s.CheckoutSessionService.MarkProviderCheckoutClosed(ctx, sessionID, models.CheckoutSessionStatusExpired)
 }
 
 func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Context, obj json.RawMessage) error {
@@ -764,15 +759,16 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 	}
 
 	result, err := s.PurchaseRegistrar.RegisterPurchase(ctx, &payments.RegisterPurchaseRequest{
-		UserID:         userID,
-		PriceID:        priceID,
-		Rail:           string(models.RailStripe),
-		TransactionID:  paymentTransactionID,
-		Amount:         amountMicros,
-		AmountProvided: true,
-		Currency:       sess.Currency,
-		Metadata:       stripeCheckoutPaymentMetadata(sess),
-		AttemptKind:    payments.AttemptInitial,
+		CheckoutSessionID: parseCheckoutSessionID(sess.Metadata),
+		UserID:            userID,
+		PriceID:           priceID,
+		Rail:              string(models.RailStripe),
+		TransactionID:     paymentTransactionID,
+		Amount:            amountMicros,
+		AmountProvided:    true,
+		Currency:          sess.Currency,
+		Metadata:          stripeCheckoutPaymentMetadata(sess),
+		AttemptKind:       payments.AttemptInitial,
 	})
 	if err != nil {
 		return fmt.Errorf("register purchase: %w", err)
@@ -810,7 +806,7 @@ func (s *StripeWebhookService) handleCheckoutSessionAsyncPaymentFailed(ctx conte
 	if sessionID == uuid.Nil {
 		return nil
 	}
-	if err := s.CheckoutSessionService.MarkFailed(ctx, sessionID, "stripe async payment failed", "async_payment_failed"); err != nil {
+	if err := s.CheckoutSessionService.MarkProviderCheckoutClosed(ctx, sessionID, models.CheckoutSessionStatusFailed); err != nil {
 		return fmt.Errorf("mark stripe checkout failed: %w", err)
 	}
 	return nil

@@ -7,20 +7,22 @@ import (
 )
 
 type RegisterPurchaseRequest struct {
-	UserID           string
-	PriceID          uuid.UUID
-	Rail             string
-	TransactionID    string
-	Amount           int64
-	AmountProvided   bool
-	Currency         string
-	SubscriptionID   *uuid.UUID
-	WalletPurchase   bool
-	PurchasedAt      *time.Time
-	DiscountCode     *string
-	DiscountReason   *string
-	DiscountMetadata map[string]any
-	Metadata         map[string]any
+	// CheckoutSessionID binds a provider observation to locally accepted terms.
+	CheckoutSessionID uuid.UUID
+	UserID            string
+	PriceID           uuid.UUID
+	Rail              string
+	TransactionID     string
+	Amount            int64
+	AmountProvided    bool
+	Currency          string
+	SubscriptionID    *uuid.UUID
+	WalletPurchase    bool
+	PurchasedAt       *time.Time
+	DiscountCode      *string
+	DiscountReason    *string
+	DiscountMetadata  map[string]any
+	Metadata          map[string]any
 	// AttemptKind stamps payments.attempt_kind (initial|renewal, #733);
 	// empty = unknown (manual/imported rows).
 	AttemptKind string

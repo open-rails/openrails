@@ -1,21 +1,22 @@
 # Catalog checkout admission audit (#1051)
 
-Status: implementation plan. This records source findings at
-`579653413a0b278e53003874904ed2069e4545a6`; it does not declare the missing
-invariants implemented. The chosen HTTP integration is the thin host wrapper.
+Status: implementation and qualification in progress. Initial source findings at
+`579653413a0b278e53003874904ed2069e4545a6` are distinguished below from the
+implementation. The chosen HTTP integration is the thin host wrapper.
 
 ## Existing reusable contract
 
-`Client.CreateCheckoutSession` already accepts an opaque price key in `PriceID`.
-`catalog.ResolveReference` resolves it within the selected merchant. `Price.Key`
+The core catalog resolver already supports opaque keys, but the original
+merchant service rejected non-ID `PriceID` inputs. This change supplies explicit
+`PriceID` or `PriceKey` selectors end to end instead of overloading an ID. `Price.Key`
 names the active member of an immutable price history; `Product.Key` can name
 the host's opaque resource without a billing foreign key to host tables.
 `Client.Catalog.Apply` supplies atomic catalog writes with revision checks and
 application replay. `TestCatalogApplicationRollbackAndPriceHistory` covers a
 price-key move, archive and deliberate reactivation of historical terms.
 
-This is sufficient to express a current offer without adding a product-selector
-API: the host maps its resource to a stable product and price key. Billing owns
+This is sufficient to express a current offer using one checkout operation: the host maps its resource to a stable product
+and price key. Billing owns
 resolution, active product/price checks, and the commercial amount. A merchant
 selector chooses scope; it does not grant authority. Customer identity comes
 from the verified host or the authenticated customer route, never unchecked
@@ -33,12 +34,10 @@ browser customer fields.
 | Provider uncertainty | Existing NMI intent execution and Stripe provider idempotency are the recovery mechanisms. | New admission exclusion must remain held while a prior provider outcome is uncertain. Wall-clock checkout expiry alone does not prove an unknown provider session unpayable. |
 | Refund and history | Product ownership and feature grants use the existing grant/payment lifecycle. Historical prices remain addressable. | Verify refund revocation permits the intended next purchase while the original accepted key still replays its original result. |
 
-The model documents `AccessDurationHours == nil` as perpetual ownership and a
-positive duration as a finite access window. Credits use their separate deposit
-and ledger operation. That documentation is useful evidence, but an explicit
-product repeat-purchase policy may still be needed if real catalog consumers
-use perpetual prices for repeatable goods. Do not apply a blanket
-already-owned prohibition to finite access, subscriptions or credit deposits.
+The existing model defines a non-recurring price with `AccessDurationHours == nil`
+as perpetual ownership. That precise contract scopes the new ownership guard.
+Finite access and subscriptions retain their existing eligibility rules; credit
+deposits use a separate ledger operation. No product-policy schema is added.
 
 ## Chosen integration and implementation sequence
 
@@ -86,3 +85,46 @@ reprice/archive versus accepted replay, permanent versus repeatable purchase,
 different-key concurrency, unknown-provider retry, accepted benefit retention,
 refund revocation and embedded/remote transport parity. No live provider charge,
 refund, schedule mutation or deployment is part of this qualification.
+
+## Explicit catalog selectors
+
+`CreateCheckoutSessionRequest` requires exactly one `PriceID` or `PriceKey`.
+`PriceID` retains the typed `price_<uuid>` contract. `PriceKey` is always an
+opaque catalog key, even when its text looks like a UUID. This is a hard cut:
+move old keys from `price_id` into `price_key`; do not resolve the key in the
+host first. The request fingerprint includes the selector, so changing from
+key to ID under one accepted idempotency key conflicts even if both currently
+resolve to the same offer. Empty new key fields do not alter existing ID-only
+request fingerprints.
+
+`ListCheckoutRailOptions` continues to take an ID;
+`ListCheckoutRailOptionsByKey` takes a key. HTTP checkout-options and routing
+dry-run accept exactly one `price_id` or `price_key`. Catalog `RetrieveByKey`
+methods remain explicit. Product-access and price-creation product selectors
+are delivered by the coordinated #1051 product-selector lane. Creation `Key`
+fields still declare a handle; they are not alternate IDs.
+
+Recurring change-tier/preview and Solana tier-change new-offer key selectors
+are a separate linked #1051 follow-up because their accepted-term replay and
+financial lifecycle need their own qualification. Historical subscription,
+payment, import and accepted-operation coordinates remain immutable IDs.
+
+## Recovery and qualification evidence
+
+Hosted Stripe dispatch is claimed in the existing session immediately before
+HTTP submission, after local validation. A process crash or unknown transport
+result cannot issue another hosted create merely because the provider's
+idempotency retention or the local TTL has elapsed. A known pre-dispatch
+validation failure closes only its never-submitted attempt atomically.
+Verified Stripe expiration/failure can release the exclusion; payment and
+provider closure cannot be overwritten by a late handler response. Accepted
+terms, dispatch and closure facts survive stale session-state writes.
+
+The core PostgreSQL regressions cover different-key concurrency, buyer binding,
+DB-only replay, crash-before-submit, archived accepted terms, unknown provider
+retention, provider-verified closure, original benefit settlement, ownership-only
+duplicate eligibility, refund revocation/rebuy, cross-provider NMI exclusion,
+stale state and a webhook winning the create-response race. The public Client
+regression exercises embedded and actual HTTP transports with catalog apply,
+reprice, old-price refusal, explicit UUID-shaped keys and archive replay.
+These proofs use local provider transports and owned test databases only.

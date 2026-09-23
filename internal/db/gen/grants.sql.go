@@ -65,7 +65,6 @@ type CheckProductAccessRow struct {
 	HasAccess bool
 }
 
-// CheckProductAccess: one bounded lookup for the page's candidate products.
 func (q *Queries) CheckProductAccess(ctx context.Context, arg CheckProductAccessParams) ([]CheckProductAccessRow, error) {
 	rows, err := q.db.Query(ctx, checkProductAccess,
 		arg.MerchantID,
@@ -283,6 +282,40 @@ func (q *Queries) HasInitialMembershipGrant(ctx context.Context, arg HasInitialM
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const hasPermanentProductOwnership = `-- name: HasPermanentProductOwnership :one
+SELECT EXISTS (
+ SELECT 1 FROM openrails.grants g
+ WHERE g.merchant_id = $1::uuid
+   AND g.customer_id = $2::uuid
+   AND g.product_id = $3::uuid
+   AND g.kind = 'ownership' AND g.event = 'grant'
+   AND g.starts_at <= $4::timestamptz AND g.ends_at IS NULL
+   AND NOT EXISTS (SELECT 1 FROM openrails.grants t
+    WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
+      AND t.event IN ('revoke','expire','supersede'))
+)
+`
+
+type HasPermanentProductOwnershipParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	ProductID  uuid.UUID
+	AtTime     time.Time
+}
+
+// CheckProductAccess: one bounded lookup for the page's candidate products.
+func (q *Queries) HasPermanentProductOwnership(ctx context.Context, arg HasPermanentProductOwnershipParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasPermanentProductOwnership,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.ProductID,
+		arg.AtTime,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const insertGrant = `-- name: InsertGrant :one

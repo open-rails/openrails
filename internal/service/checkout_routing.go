@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -14,6 +13,7 @@ import (
 // it empty to trace what the merchant's routing policy would pick.
 type CheckoutRoutingDryRun struct {
 	PriceID  string
+	PriceKey string
 	Country  string
 	Selector string
 }
@@ -46,9 +46,6 @@ func (s *Service) DryRunCheckoutRouting(ctx context.Context, in CheckoutRoutingD
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(in.PriceID) == "" {
-		return nil, fmt.Errorf("price reference is required")
-	}
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -60,7 +57,7 @@ func (s *Service) DryRunCheckoutRouting(ctx context.Context, in CheckoutRoutingD
 	var mode models.CheckoutSessionMode
 	if err := rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
 		var runErr error
-		decision, mode, runErr = checkoutSessions.DryRunRouting(scopedCtx, in.PriceID, in.Country, in.Selector)
+		decision, mode, runErr = checkoutSessions.DryRunRouting(scopedCtx, in.PriceID, in.PriceKey, in.Country, in.Selector)
 		return runErr
 	}); err != nil {
 		return nil, fmt.Errorf("dry run checkout routing: %w", err)

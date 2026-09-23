@@ -135,15 +135,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 		r.UsageEvents += row.EventCount
 	}
 
-	price, err := client.Prices.RetrieveByKey(ctx, in.CheckoutPriceKey)
-	if err != nil {
-		return r, fmt.Errorf("resolve checkout price: %w", err)
-	}
-	priceID, err := openrails.ParsePriceID(price.ID)
-	if err != nil {
-		return r, fmt.Errorf("checkout price ID: %w", err)
-	}
-	options, err := client.ListCheckoutRailOptions(ctx, (priceID).String())
+	options, err := client.ListCheckoutRailOptionsByKey(ctx, in.CheckoutPriceKey)
 	if err != nil {
 		return r, fmt.Errorf("checkout options: %w", err)
 	}
@@ -151,7 +143,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	buyer := in.CheckoutCustomerID
 	request := openrails.CreateCheckoutSessionRequest{
 		Customer:       openrails.CheckoutCustomerIdentity{ID: buyer.String(), VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer.String()[:8]},
-		PriceID:        price.ID,
+		PriceKey:       in.CheckoutPriceKey,
 		IdempotencyKey: in.Run + ":checkout",
 		PaymentOptions: openrails.CheckoutPaymentOptions{Rail: in.CheckoutRail, PaymentMethodID: in.CheckoutPaymentMethodID.String(), NameOnCard: "Example Buyer", Zip: "90210", Country: "US"},
 	}

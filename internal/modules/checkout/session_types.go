@@ -43,6 +43,7 @@ type CheckoutSessionPaymentRequest struct {
 
 type CheckoutSessionCreateRequest struct {
 	PriceID        string
+	PriceKey       string
 	Mode           string
 	Payment        CheckoutSessionPaymentRequest
 	Metadata       map[string]string

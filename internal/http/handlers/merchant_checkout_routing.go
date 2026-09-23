@@ -10,8 +10,9 @@ import (
 // checkoutRoutingDryRunRequest is the dry-run body. Every field is a routing
 // INPUT: nothing here creates or mutates anything.
 type checkoutRoutingDryRunRequest struct {
-	// PriceID accepts a price id or a price key (#774).
-	PriceID string `json:"price_id"`
+	// Supply exactly one explicit ID or opaque key.
+	PriceID  string `json:"price_id,omitempty"`
+	PriceKey string `json:"price_key,omitempty"`
 	// Country is the payer's country when known (ISO-3166-1 alpha-2).
 	Country string `json:"country,omitempty"`
 	// Selector traces an EXPLICITLY named PSP (the checkout payment.rail value).
@@ -58,6 +59,7 @@ func MerchantDryRunCheckoutRouting(r *httprequest.Request) {
 	}
 	trace, err := svc.DryRunCheckoutRouting(r.Request.Context(), billingservice.CheckoutRoutingDryRun{
 		PriceID:  req.PriceID,
+		PriceKey: req.PriceKey,
 		Country:  req.Country,
 		Selector: req.Selector,
 	})

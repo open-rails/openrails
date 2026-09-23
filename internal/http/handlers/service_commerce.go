@@ -126,16 +126,13 @@ func ServiceConfirmCheckoutSession(r *httprequest.Request) {
 
 func ServiceListCheckoutRailOptions(r *httprequest.Request) {
 	price := strings.TrimSpace(r.Query("price_id"))
-	if price == "" {
-		r.ErrorJSON(http.StatusBadRequest, "price_id required")
-		return
-	}
+	key := r.Query("price_key")
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)
 		return
 	}
-	out, err := svc.ListCheckoutRailOptions(r.Request.Context(), price)
+	out, err := svc.ListCheckoutRailOptions(r.Request.Context(), price, key)
 	if err != nil {
 		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
 		return

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -64,27 +65,37 @@ func saleReplayParams(in gen.OpenrailsRailIntent) intents.EnqueueParams {
 func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.DB, req *CheckoutRequest, user *UserIdentity, priceID, methodID uuid.UUID, target railTarget, fingerprint string) (payments.NMISalePayload, error) {
 	var out payments.NMISalePayload
 	purchase := s.PurchaseService.transactionBound(d)
-	price, err := purchase.PriceService.GetByID(ctx, priceID)
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return out, err
 	}
-	product, err := purchase.ProductService.GetByID(ctx, price.ProductID)
-	if err != nil {
-		return out, err
+	var price *models.Price
+	var product *models.Product
+	eligibility := &EligibilityResult{Status: EligibilityAllowed}
+	if req.acceptedPurchase != nil {
+		price, product = req.acceptedPurchase.catalog(mid.UUID())
+		if price.ID != priceID {
+			return out, errors.New("accepted session price mismatch")
+		}
+	} else {
+		price, err = purchase.PriceService.GetByID(ctx, priceID)
+		if err != nil {
+			return out, err
+		}
+		product, err = purchase.ProductService.GetByID(ctx, price.ProductID)
+		if err != nil {
+			return out, err
+		}
+		eligibility, err = purchase.CheckPurchaseEligibility(ctx, user.ID, price.ID)
+		if err != nil {
+			return out, err
+		}
 	}
 	if price.AutoRenew {
 		return out, errors.New("sale requires a one-time price")
 	}
-	eligibility, err := purchase.CheckPurchaseEligibility(ctx, user.ID, price.ID)
-	if err != nil {
-		return out, err
-	}
 	if eligibility.Status != EligibilityAllowed {
 		return out, apperr.Conflictf("purchase is not eligible: %s", eligibility.Reason)
-	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return out, err
 	}
 	method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: mid.UUID(), ID: methodID})
 	if err != nil {
@@ -98,6 +109,9 @@ func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.
 	if eligibility.Coverage != nil && eligibility.Coverage.EndDate != nil && eligibility.Coverage.EndDate.After(start) {
 		start = eligibility.Coverage.EndDate.UTC()
 	}
+	if req.acceptedPurchase != nil {
+		now, start = req.acceptedPurchase.AcceptedAt, req.acceptedPurchase.EntitlementStart
+	}
 	var end *time.Time
 	if price.AccessDurationHours != nil && *price.AccessDurationHours > 0 {
 		v := now.Add(time.Duration(*price.AccessDurationHours) * time.Hour)
@@ -108,5 +122,13 @@ func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.
 		entitlements = map[string]*int{}
 	}
 	out = payments.NMISalePayload{Provider: "nmi", PSP: target.PSP, Amount: price.Amount, Currency: price.Currency, Description: fmt.Sprintf("Purchase: %s", product.DisplayName), UserID: user.ID, PriceID: price.ID, E2ERunID: strings.TrimSpace(req.Metadata["e2e_run_id"]), PaymentMethodID: method.ID, Instrument: charge.FreezeInstrument(method), PaymentID: uuidutil.NewV7(), ProductID: product.ID, ListAmount: price.Amount, AcceptedAt: now, Entitlements: entitlements, AccessDurationHours: price.AccessDurationHours, EntitlementStart: start, OwnershipStart: now, OwnershipEnd: end, Eligibility: string(eligibility.Status), RequestFingerprint: fingerprint}
+	if req.acceptedPurchase != nil {
+		out.PaymentID = req.acceptedPurchase.PaymentID
+		id, err := openrails.ParseCheckoutSessionID(req.CheckoutSessionID)
+		if err != nil {
+			return out, err
+		}
+		out.CheckoutSessionID = id.UUID()
+	}
 	return out, nil
 }

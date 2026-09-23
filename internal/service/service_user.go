@@ -18,14 +18,10 @@ import (
 
 // ListCheckoutRailOptions returns the locally ready payment-provider choices
 // for a price. It does not probe remote providers or mutate billing state.
-func (s *Service) ListCheckoutRailOptions(ctx context.Context, priceRef string) ([]CheckoutRailOption, error) {
+func (s *Service) ListCheckoutRailOptions(ctx context.Context, priceID, priceKey string) ([]CheckoutRailOption, error) {
 	checkoutSessions, err := s.requireCheckoutSessionService()
 	if err != nil {
 		return nil, err
-	}
-	priceRef = strings.TrimSpace(priceRef)
-	if priceRef == "" {
-		return nil, fmt.Errorf("price reference is required")
 	}
 	rt, err := s.runtime()
 	if err != nil {
@@ -37,7 +33,7 @@ func (s *Service) ListCheckoutRailOptions(ctx context.Context, priceRef string) 
 	var options []checkout.CheckoutRailOption
 	err = rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
 		var listErr error
-		options, listErr = checkoutSessions.ListCheckoutRailOptions(scopedCtx, priceRef)
+		options, listErr = checkoutSessions.ListCheckoutRailOptions(scopedCtx, priceID, priceKey)
 		return listErr
 	})
 	if err != nil {
@@ -125,14 +121,14 @@ func (s *Service) createCheckoutSessionForCustomer(ctx context.Context, customer
 		}
 	}
 	if mode == "" {
-		priceID, err := openrails.ParsePriceID(req.PriceID)
-		if err != nil || priceID.IsZero() {
-			return nil, fmt.Errorf("%w: invalid price_id", checkout.ErrCheckoutSessionValidation)
+		req.PriceID = strings.TrimSpace(req.PriceID)
+		if priceID, err := openrails.ParsePriceID(req.PriceID); err == nil && !priceID.IsZero() {
+			req.PriceID = priceID.String()
 		}
-		req.PriceID = priceID.String()
 	}
 	svcReq := &checkout.CheckoutSessionCreateRequest{
 		PriceID:        req.PriceID,
+		PriceKey:       req.PriceKey,
 		SubscriptionID: subscriptionID,
 		NewPriceID:     newPriceID,
 		Mode:           mode,
