@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -54,6 +55,21 @@ func (s *PGEvidenceStore) StoreEvidence(ctx context.Context, runID uuid.UUID, bi
 	if provider == "" {
 		return fmt.Errorf("reconcile evidence: provider is empty")
 	}
+	if rail := strings.TrimSpace(binding.Rail); rail != "" && !strings.EqualFold(rail, provider) {
+		return fmt.Errorf("reconcile evidence: provider %q does not match PSP rail %q", provider, rail)
+	}
+	if pspID := strings.TrimSpace(snap.PspID); pspID != "" {
+		parsed, err := uuid.Parse(pspID)
+		if err != nil {
+			return fmt.Errorf("reconcile evidence: snapshot PSP id %q is invalid: %w", pspID, err)
+		}
+		if parsed != binding.ID {
+			return fmt.Errorf("reconcile evidence: snapshot PSP %s does not match binding %s", parsed, binding.ID)
+		}
+	}
+	if !since.IsZero() && !until.IsZero() && until.Before(since) {
+		return fmt.Errorf("reconcile evidence: window end precedes start")
+	}
 	fetchedAt := snap.FetchedAt.UTC()
 	if fetchedAt.IsZero() {
 		return fmt.Errorf("reconcile evidence: snapshot fetched_at is empty")
@@ -65,6 +81,11 @@ func (s *PGEvidenceStore) StoreEvidence(ctx context.Context, runID uuid.UUID, bi
 	coverage, err := json.Marshal(snap.Coverage)
 	if err != nil {
 		return fmt.Errorf("marshal provider coverage: %w", err)
+	}
+	for _, txn := range snap.Transactions {
+		if txn.OccurredAt.IsZero() {
+			return fmt.Errorf("reconcile evidence: transaction %q has no occurred_at", strings.TrimSpace(txn.TransactionID))
+		}
 	}
 	return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
@@ -85,9 +106,6 @@ func (s *PGEvidenceStore) StoreEvidence(ctx context.Context, runID uuid.UUID, bi
 		snapshotID := row.ID
 		for _, txn := range snap.Transactions {
 			occurredAt := txn.OccurredAt.UTC()
-			if occurredAt.IsZero() {
-				occurredAt = fetchedAt
-			}
 			source, customerRef, email, orderRef := transactionIdentity(txn)
 			if _, err := q.UpsertProviderEvidenceTransaction(ctx, gen.UpsertProviderEvidenceTransactionParams{
 				MerchantID:      mid.UUID(),
@@ -99,7 +117,7 @@ func (s *PGEvidenceStore) StoreEvidence(ctx context.Context, runID uuid.UUID, bi
 				Type:            strings.TrimSpace(string(txn.Type)),
 				Success:         txn.Success,
 				AmountCents:     txn.AmountCents,
-				Currency:        evidenceCurrency(txn.Currency),
+				Currency:        evidenceCurrencyPtr(transactionCurrency(txn)),
 				OccurredAt:      occurredAt,
 				Source:          source,
 				CustomerRef:     customerRef,
@@ -131,7 +149,7 @@ func (s *PGEvidenceStore) StoreEvidence(ctx context.Context, runID uuid.UUID, bi
 				NextBillingAt:           sub.NextBillingAt,
 				LastBilledAt:            sub.LastBilledAt,
 				AmountCents:             sub.AmountCents,
-				Currency:                evidenceCurrency(sub.Currency),
+				Currency:                evidenceCurrencyPtr(sub.Currency),
 				Raw:                     evidenceRaw(sub.Raw),
 			}); err != nil {
 				return fmt.Errorf("store provider subscription %s: %w", sub.RailSubscriptionID, err)
@@ -167,19 +185,39 @@ func timePtr(value time.Time) *time.Time {
 
 func evidenceCurrency(value string) string {
 	value = strings.ToUpper(strings.TrimSpace(value))
-	if value == "" {
-		return "UNK"
-	}
 	return value
+}
+
+func evidenceCurrencyPtr(value string) *string {
+	value = evidenceCurrency(value)
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 // evidenceRaw keeps malformed/empty provider payloads queryable without
 // making a successful pull fail solely because a provider omitted raw data.
 func evidenceRaw(raw json.RawMessage) []byte {
-	if len(raw) == 0 || !json.Valid(raw) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
 		return []byte(`{}`)
 	}
-	return raw
+	var value any
+	if err := json.Unmarshal(trimmed, &value); err != nil {
+		b, _ := json.Marshal(map[string]string{"_raw_text": string(raw)})
+		return b
+	}
+	// Evidence tables intentionally constrain raw payloads to objects/arrays so
+	// report queries can safely inspect provider fields. Keep scalar provider
+	// responses queryable without discarding their value.
+	switch value.(type) {
+	case map[string]any, []any:
+		return trimmed
+	default:
+		b, _ := json.Marshal(map[string]any{"_raw_value": value})
+		return b
+	}
 }
 
 func evidenceObject(raw json.RawMessage) map[string]any {
@@ -200,16 +238,16 @@ func evidenceString(object map[string]any, key string) string {
 
 func transactionIdentity(tx RemoteTransaction) (source, customerRef, email, orderRef string) {
 	object := evidenceObject(tx.Raw)
-	source = strings.TrimSpace(tx.Source)
+	source = strings.ToLower(strings.TrimSpace(tx.Source))
 	customerRef = strings.TrimSpace(tx.CustomerID)
-	email = strings.TrimSpace(tx.Email)
+	email = strings.ToLower(strings.TrimSpace(tx.Email))
 	orderRef = strings.TrimSpace(tx.OrderID)
 	if source == "" {
 		if action, ok := object["action"].(map[string]any); ok {
-			source = evidenceString(action, "source")
+			source = strings.ToLower(evidenceString(action, "source"))
 		}
 		if source == "" {
-			source = evidenceString(object, "source")
+			source = strings.ToLower(evidenceString(object, "source"))
 		}
 	}
 	if customerRef == "" {
@@ -222,7 +260,7 @@ func transactionIdentity(tx RemoteTransaction) (source, customerRef, email, orde
 		}
 	}
 	if email == "" {
-		email = evidenceString(object, "email")
+		email = strings.ToLower(evidenceString(object, "email"))
 	}
 	if orderRef == "" {
 		orderRef = evidenceString(object, "order_id")
@@ -230,32 +268,37 @@ func transactionIdentity(tx RemoteTransaction) (source, customerRef, email, orde
 	return source, customerRef, email, orderRef
 }
 
+func transactionCurrency(tx RemoteTransaction) string {
+	value := evidenceCurrency(tx.Currency)
+	if value != "" {
+		return value
+	}
+	return evidenceCurrency(evidenceString(evidenceObject(tx.Raw), "currency"))
+}
+
 func transactionEventKey(tx RemoteTransaction) string {
-	source, customerRef, email, orderRef := transactionIdentity(tx)
+	source, _, _, _ := transactionIdentity(tx)
+	// Contact and subscription hints may be enriched on a later pull. They are
+	// useful report joins, but must not turn the same provider action into a new
+	// charge. Its transaction id and action facts are the stable identity.
 	identity := struct {
 		TransactionID string
 		OccurredAt    string
 		Source        string
-		CustomerRef   string
-		Email         string
-		OrderRef      string
-		Subscription  string
 		Type          TransactionType
 		Success       bool
 		AmountCents   int64
 		Currency      string
+		DeclineCode   string
 	}{
 		TransactionID: strings.TrimSpace(tx.TransactionID),
 		OccurredAt:    tx.OccurredAt.UTC().Format(time.RFC3339Nano),
 		Source:        source,
-		CustomerRef:   customerRef,
-		Email:         email,
-		OrderRef:      orderRef,
-		Subscription:  strings.TrimSpace(tx.SubscriptionID),
-		Type:          tx.Type,
+		Type:          TransactionType(strings.ToLower(strings.TrimSpace(string(tx.Type)))),
 		Success:       tx.Success,
 		AmountCents:   tx.AmountCents,
-		Currency:      strings.TrimSpace(tx.Currency),
+		Currency:      transactionCurrency(tx),
+		DeclineCode:   strings.TrimSpace(tx.DeclineCode),
 	}
 	b, _ := json.Marshal(identity)
 	if identity.TransactionID == "" {

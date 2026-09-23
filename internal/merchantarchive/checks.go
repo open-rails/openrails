@@ -68,15 +68,18 @@ var excludedColumns = map[string]string{
 // credential watermarks, or explicitly excluded raw/operational
 // data. A new unclassified column fails closed even when currently empty.
 var omittedColumns = map[string]string{
-	"custodians":        "credential_versions",
-	"subscriptions":     "destructive_run_class",
-	"payments":          "discount_metadata destructive_run_class",
-	"payment_methods":   "metadata",
-	"checkout_sessions": "destructive_run_class",
-	"entitlements":      "period destructive_run_class",
-	"usage_events":      "metadata",
-	"maintenance_runs":  "run_class coverage affected note summary error inventory_manifest inventory_total_rows",
-	"rail_intents":      "destructive_run_class",
+	"provider_evidence_transactions":    "raw",
+	"provider_evidence_subscriptions":   "raw",
+	"provider_evidence_payment_methods": "raw",
+	"custodians":                        "credential_versions",
+	"subscriptions":                     "destructive_run_class",
+	"payments":                          "discount_metadata destructive_run_class",
+	"payment_methods":                   "metadata",
+	"checkout_sessions":                 "destructive_run_class",
+	"entitlements":                      "period destructive_run_class",
+	"usage_events":                      "metadata",
+	"maintenance_runs":                  "run_class coverage affected note summary error inventory_manifest inventory_total_rows",
+	"rail_intents":                      "destructive_run_class",
 }
 
 func checkSchema(ctx context.Context, tx pgx.Tx) error {

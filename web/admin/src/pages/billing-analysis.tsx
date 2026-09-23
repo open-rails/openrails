@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Link, useSearchParams } from "react-router-dom"
+import { useSearchParams } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 
 import { StatusBadge } from "@/components/status-badge"
@@ -28,10 +28,12 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type {
+  BillingAnalysisCharge,
   BillingAnalysisDay,
+  BillingAnalysisFailure,
   BillingAnalysisUnbilledMember,
 } from "@/lib/api/billing-analysis"
-import { formatDate, shortId } from "@/lib/format"
+import { formatDate } from "@/lib/format"
 import { adminQueries } from "@/lib/queries"
 
 function isoDate(date: Date): string {
@@ -59,7 +61,41 @@ function dayLabel(value: string): string {
 }
 
 function eventTotal(day: BillingAnalysisDay): number {
-  return day.signups + day.rebills + day.failed_rebills
+  return (
+    day.signups +
+    day.rebills +
+    day.settled_other +
+    day.failed_signups +
+    day.failed_rebills +
+    day.failed_other
+  )
+}
+
+function amount(value: string | number | undefined, currency?: string): string {
+  if (value == null || value === "") return "—"
+  const cents = Number(value)
+  if (!Number.isFinite(cents)) return String(value)
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: currency || "USD",
+  }).format(cents / 100)
+}
+
+function subject(row: {
+  customer_email?: string
+  customer_ref?: string
+  email?: string
+  order_ref?: string
+  subscription_ref?: string
+}): string {
+  return (
+    row.customer_email ||
+    row.email ||
+    row.customer_ref ||
+    row.order_ref ||
+    row.subscription_ref ||
+    "Unknown member"
+  )
 }
 
 function memberDate(value?: string): string {
@@ -76,7 +112,7 @@ function csvEscape(value: unknown): string {
 function downloadUnbilled(rows: BillingAnalysisUnbilledMember[]) {
   const header = [
     "id",
-    "customer_id",
+    "customer_ref",
     "subscription_id",
     "email",
     "provider",
@@ -92,7 +128,7 @@ function downloadUnbilled(rows: BillingAnalysisUnbilledMember[]) {
     ...rows.map((row) =>
       [
         row.id,
-        row.customer_id,
+        row.customer_ref,
         row.subscription_id,
         row.email,
         row.provider,
@@ -117,12 +153,181 @@ function downloadUnbilled(rows: BillingAnalysisUnbilledMember[]) {
   URL.revokeObjectURL(url)
 }
 
+function rawEvidence(value: unknown): React.ReactNode {
+  if (value == null) return null
+  let text: string
+  try {
+    text = JSON.stringify(value, null, 2)
+  } catch {
+    text = String(value)
+  }
+  return (
+    <details className="max-w-72">
+      <summary className="cursor-pointer text-xs text-muted-foreground">
+        Raw payload
+      </summary>
+      <pre className="mt-2 max-h-48 overflow-auto rounded bg-muted p-2 text-[10px] break-all whitespace-pre-wrap">
+        {text}
+      </pre>
+    </details>
+  )
+}
+
+function ChargeTable({ rows }: { rows: BillingAnalysisCharge[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Kind</TableHead>
+            <TableHead>Member</TableHead>
+            <TableHead>Provider/source</TableHead>
+            <TableHead>Reference</TableHead>
+            <TableHead>Amount</TableHead>
+            <TableHead>Raw</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 ? (
+            <TableRow>
+              <TableCell
+                colSpan={6}
+                className="h-20 text-center text-muted-foreground"
+              >
+                No successful charges for this day.
+              </TableCell>
+            </TableRow>
+          ) : (
+            rows.map((row) => (
+              <TableRow key={row.event_key}>
+                <TableCell className="font-medium">{row.kind}</TableCell>
+                <TableCell>
+                  <div className="grid gap-0.5">
+                    <span>{subject(row)}</span>
+                    {row.customer_ref && row.customer_email && (
+                      <span className="text-xs text-muted-foreground">
+                        {row.customer_ref}
+                      </span>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="grid gap-0.5">
+                    <span>{row.provider || "—"}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {row.source || "unknown source"}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell className="max-w-48">
+                  <span
+                    className="block truncate text-xs"
+                    title={row.transaction_id || row.subscription_ref}
+                  >
+                    {row.transaction_id ||
+                      row.subscription_ref ||
+                      row.order_ref ||
+                      "—"}
+                  </span>
+                </TableCell>
+                <TableCell className="whitespace-nowrap tabular-nums">
+                  {amount(row.amount_cents, row.currency)}
+                </TableCell>
+                <TableCell>{rawEvidence(row.raw)}</TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}
+
+function FailureTable({ rows }: { rows: BillingAnalysisFailure[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Kind</TableHead>
+            <TableHead>Member</TableHead>
+            <TableHead>Provider/source</TableHead>
+            <TableHead>Reference</TableHead>
+            <TableHead>Reason</TableHead>
+            <TableHead>Raw</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 ? (
+            <TableRow>
+              <TableCell
+                colSpan={6}
+                className="h-20 text-center text-muted-foreground"
+              >
+                No failed charge attempts for this day.
+              </TableCell>
+            </TableRow>
+          ) : (
+            rows.map((row) => (
+              <TableRow key={row.event_key}>
+                <TableCell className="font-medium">{row.kind}</TableCell>
+                <TableCell>
+                  <div className="grid gap-0.5">
+                    <span>{subject(row)}</span>
+                    {row.customer_ref && row.customer_email && (
+                      <span className="text-xs text-muted-foreground">
+                        {row.customer_ref}
+                      </span>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="grid gap-0.5">
+                    <span>{row.provider || "—"}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {row.source || "unknown source"}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell className="max-w-48">
+                  <span
+                    className="block truncate text-xs"
+                    title={row.transaction_id || row.subscription_ref}
+                  >
+                    {row.transaction_id ||
+                      row.subscription_ref ||
+                      row.order_ref ||
+                      "—"}
+                  </span>
+                </TableCell>
+                <TableCell className="max-w-64">
+                  <div
+                    className="truncate text-xs"
+                    title={row.decline_reason || row.decline_code}
+                  >
+                    {row.decline_reason ||
+                      row.decline_code ||
+                      "Unknown failure"}
+                    <span className="ml-1 text-muted-foreground">
+                      ({row.failure_count})
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell>{rawEvidence(row.raw)}</TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}
+
 export function BillingAnalysisPage() {
   const [params, setParams] = useSearchParams()
   const from = params.get("from") || defaultFrom()
   const to = params.get("to") || today()
   const provider = params.get("provider") || ""
-  const status = params.get("status") || "open"
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
   const [selectedDay, setSelectedDay] = React.useState(to)
 
@@ -131,7 +336,6 @@ export function BillingAnalysisPage() {
     to,
     timezone,
     ...(provider ? { provider } : {}),
-    ...(status ? { status } : {}),
   }
   const { data, isPending, isError, error } = useQuery(
     adminQueries.billingAnalysis(filters)
@@ -147,11 +351,8 @@ export function BillingAnalysisPage() {
 
   const daily = data?.daily ?? []
   const maxEvents = Math.max(1, ...daily.map(eventTotal))
-  const members = React.useMemo(() => {
-    return daily.find((day) => day.date === selectedDay)?.unbilled ?? []
-  }, [daily, selectedDay])
   const selectedSummary = daily.find((day) => day.date === selectedDay)
-  const openCases = selectedSummary?.open_unbilled ?? members.length
+  const members = selectedSummary?.unbilled ?? []
   const signupTotal = daily.reduce((sum, day) => sum + day.signups, 0)
   const rebillTotal = daily.reduce((sum, day) => sum + day.rebills, 0)
   const failedTotal = daily.reduce((sum, day) => sum + day.failed_rebills, 0)
@@ -219,23 +420,6 @@ export function BillingAnalysisPage() {
             </SelectContent>
           </Select>
         </label>
-        <label className="grid gap-1 text-xs font-medium text-muted-foreground">
-          Member status
-          <Select
-            value={status || "all"}
-            onValueChange={(value) =>
-              setFilter("status", !value || value === "all" ? "" : value)
-            }
-          >
-            <SelectTrigger className="w-40 text-foreground">
-              <SelectValue placeholder="Open cases" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="open">Open cases</SelectItem>
-              <SelectItem value="all">All cases</SelectItem>
-            </SelectContent>
-          </Select>
-        </label>
         <span className="pb-1 text-xs text-muted-foreground">
           {data?.timezone ? `Times shown in ${data.timezone}` : ""}
         </span>
@@ -258,8 +442,12 @@ export function BillingAnalysisPage() {
               tone="failed"
             />
             <SummaryCard
-              label="Open unbilled members"
-              value={openCases}
+              label="Delinquent accounts"
+              value={
+                selectedSummary?.delinquent_users ??
+                data?.delinquent?.length ??
+                0
+              }
               tone="held"
             />
           </div>
@@ -281,8 +469,18 @@ export function BillingAnalysisPage() {
                       <TableHead className="text-right">Signups</TableHead>
                       <TableHead className="text-right">Rebills</TableHead>
                       <TableHead className="text-right">
+                        Other success
+                      </TableHead>
+                      <TableHead className="text-right">
+                        Failed signups
+                      </TableHead>
+                      <TableHead className="text-right">
                         Failed rebills
                       </TableHead>
+                      <TableHead className="text-right">
+                        Other failures
+                      </TableHead>
+                      <TableHead className="text-right">Delinquent</TableHead>
                       <TableHead className="text-right">
                         Open unbilled
                       </TableHead>
@@ -293,7 +491,7 @@ export function BillingAnalysisPage() {
                     {isPending ? (
                       <TableRow>
                         <TableCell
-                          colSpan={6}
+                          colSpan={10}
                           className="h-28 text-center text-muted-foreground"
                         >
                           Loading…
@@ -302,7 +500,7 @@ export function BillingAnalysisPage() {
                     ) : daily.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={6}
+                          colSpan={10}
                           className="h-28 text-center text-muted-foreground"
                         >
                           No billing activity in this range.
@@ -330,7 +528,19 @@ export function BillingAnalysisPage() {
                               {day.rebills}
                             </TableCell>
                             <TableCell className="text-right tabular-nums">
+                              {day.settled_other}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {day.failed_signups}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
                               {day.failed_rebills}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {day.failed_other}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {day.delinquent_users}
                             </TableCell>
                             <TableCell className="text-right font-medium tabular-nums">
                               {day.open_unbilled}
@@ -357,6 +567,34 @@ export function BillingAnalysisPage() {
               </div>
             </CardContent>
           </Card>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle>Successful charges</CardTitle>
+                <CardDescription>
+                  {selectedDay
+                    ? `Settled provider events on ${dayLabel(selectedDay)}`
+                    : "Settled provider events"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ChargeTable rows={selectedSummary?.charges ?? []} />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Failed charge attempts</CardTitle>
+                <CardDescription>
+                  Failed signup, rebill, and other attempts remain visible with
+                  their provider reason and raw payload.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <FailureTable rows={selectedSummary?.failures ?? []} />
+              </CardContent>
+            </Card>
+          </div>
 
           <Card>
             <CardHeader className="flex-row items-center justify-between gap-3">
@@ -401,22 +639,17 @@ export function BillingAnalysisPage() {
                         <TableRow key={member.id}>
                           <TableCell>
                             <div className="grid gap-0.5">
-                              {member.customer_id ? (
-                                <Link
-                                  className="font-medium hover:underline"
-                                  to={`/customers/${member.customer_id}`}
-                                >
-                                  {member.email ||
-                                    shortId(member.customer_id, 16)}
-                                </Link>
-                              ) : (
-                                <span className="font-medium">
-                                  {member.email || "Unknown member"}
+                              <span className="font-medium">
+                                {subject(member)}
+                              </span>
+                              {member.customer_ref && member.email && (
+                                <span className="text-xs text-muted-foreground">
+                                  {member.customer_ref}
                                 </span>
                               )}
                               {member.subscription_id && (
                                 <span className="text-xs text-muted-foreground">
-                                  {shortId(member.subscription_id, 16)}
+                                  subscription: {member.subscription_id}
                                 </span>
                               )}
                             </div>

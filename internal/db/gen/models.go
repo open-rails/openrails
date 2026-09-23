@@ -1108,7 +1108,7 @@ type OpenrailsProviderEvidenceSubscription struct {
 	NextBillingAt           *time.Time
 	LastBilledAt            *time.Time
 	AmountCents             int64
-	Currency                string
+	Currency                *string
 	Raw                     []byte
 }
 
@@ -1124,7 +1124,7 @@ type OpenrailsProviderEvidenceTransaction struct {
 	Type            string
 	Success         bool
 	AmountCents     int64
-	Currency        string
+	Currency        *string
 	OccurredAt      time.Time
 	// Provider-declared event source (for example recurring or api); empty means the provider did not expose one.
 	Source        string

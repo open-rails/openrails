@@ -182,7 +182,11 @@ func listEvents(ctx context.Context, database *db.DB, merchantID merchant.ID, op
 	}
 	var out []evidenceEvent
 	for _, row := range rows {
-		out = append(out, evidenceEvent{Provider: row.Provider, PSPID: row.PspID.String(), EventKey: row.EventKey, TransactionID: row.TransactionID, SubscriptionRef: row.SubscriptionRef, Type: row.Type, Success: row.Success, AmountCents: row.AmountCents, Currency: row.Currency, OccurredAt: row.OccurredAt, Source: row.Source, CustomerRef: row.CustomerRef, CustomerEmail: row.CustomerEmail, OrderRef: row.OrderRef, DeclineCode: row.DeclineCode, DeclineReason: row.DeclineReason, Raw: row.Raw})
+		currency := ""
+		if row.Currency != nil {
+			currency = *row.Currency
+		}
+		out = append(out, evidenceEvent{Provider: row.Provider, PSPID: row.PspID.String(), EventKey: row.EventKey, TransactionID: row.TransactionID, SubscriptionRef: row.SubscriptionRef, Type: row.Type, Success: row.Success, AmountCents: row.AmountCents, Currency: currency, OccurredAt: row.OccurredAt, Source: row.Source, CustomerRef: row.CustomerRef, CustomerEmail: row.CustomerEmail, OrderRef: row.OrderRef, DeclineCode: row.DeclineCode, DeclineReason: row.DeclineReason, Raw: row.Raw})
 	}
 	return out, nil
 }
@@ -205,7 +209,17 @@ func listCurrentSubscriptions(ctx context.Context, database *db.DB, merchantID m
 
 func derive(events []evidenceEvent, subs []subscriptionObservation, opts Options) *Report {
 	loc := opts.Location
-	seen := make(map[string]int)
+	// Provider queries normally return chronological rows, but derive must remain
+	// correct when a caller supplies an unsorted fixture or a future adapter
+	// changes query ordering. Stable ordering also makes classification and
+	// recovery deterministic when timestamps tie.
+	sort.SliceStable(events, func(i, j int) bool {
+		if events[i].OccurredAt.Equal(events[j].OccurredAt) {
+			return events[i].EventKey < events[j].EventKey
+		}
+		return events[i].OccurredAt.Before(events[j].OccurredAt)
+	})
+	classification := make(map[string]classificationState)
 	open := make(map[string]*UnbilledCase)
 	failureCounts := make(map[string]int)
 	charges := make([]Charge, 0)
@@ -225,8 +239,15 @@ func derive(events []evidenceEvent, subs []subscriptionObservation, opts Options
 		failed := !e.Success && (strings.EqualFold(e.Type, "sale") || strings.EqualFold(e.Type, "decline"))
 		kind := "other"
 		if settled || failed {
-			seen[key]++
-			kind = classify(e, seen[key])
+			state := classification[key]
+			kind = classify(e, state)
+			if key != "" {
+				state.seen = true
+				if settled {
+					state.successful = true
+				}
+				classification[key] = state
+			}
 		}
 		day := e.OccurredAt.In(loc).Format("2006-01-02")
 		d := byDay[day]
@@ -245,6 +266,9 @@ func derive(events []evidenceEvent, subs []subscriptionObservation, opts Options
 			}
 			if key != "" {
 				delete(open, key)
+				// A successful settlement closes this billing cycle. The next
+				// failed attempt should start its own failure count.
+				failureCounts[key] = 0
 			}
 		}
 		if failed {
@@ -283,6 +307,11 @@ func derive(events []evidenceEvent, subs []subscriptionObservation, opts Options
 		}
 	}
 	for _, c := range open {
+		// A current past-due subscription and its latest failed attempt
+		// describe the same obligation; expose one roster row.
+		if rosterKeys[c.ObligationKey] {
+			continue
+		}
 		current = append(current, DelinquentSubject{Provider: c.Provider, PSPID: c.PSPID, SubscriptionRef: c.SubscriptionRef, CustomerRef: c.CustomerRef, CustomerEmail: c.CustomerEmail, Status: "failed", ObligationKey: c.ObligationKey})
 	}
 	sort.Slice(current, func(i, j int) bool { return current[i].ObligationKey < current[j].ObligationKey })
@@ -307,6 +336,7 @@ func derive(events []evidenceEvent, subs []subscriptionObservation, opts Options
 		key := obligationKey(e)
 		if e.Success && strings.EqualFold(e.Type, "sale") {
 			delete(open, key)
+			failureCounts[key] = 0
 			return
 		}
 		if !(!e.Success && (strings.EqualFold(e.Type, "sale") || strings.EqualFold(e.Type, "decline"))) || key == "" {
@@ -335,10 +365,15 @@ func derive(events []evidenceEvent, subs []subscriptionObservation, opts Options
 		}
 		d := byDay[key]
 		d.OpenUnbilledUsers = len(open)
-		d.DelinquentUsers = len(rosterKeys)
-		for obligation := range open {
-			if !rosterKeys[obligation] {
-				d.DelinquentUsers++
+		// Historical subscription status is unavailable when the provider only
+		// returns the latest roster. Count failed obligations for each day, and
+		// merge the point-in-time past-due roster into the report's final day.
+		d.DelinquentUsers = len(open)
+		if day.Equal(endDay) {
+			for obligation := range rosterKeys {
+				if _, exists := open[obligation]; !exists {
+					d.DelinquentUsers++
+				}
 			}
 		}
 		for _, c := range open {
@@ -355,21 +390,37 @@ func derive(events []evidenceEvent, subs []subscriptionObservation, opts Options
 	return &Report{From: opts.From.In(loc).Format(time.RFC3339), To: opts.To.In(loc).Format(time.RFC3339), Timezone: loc.String(), Provider: strings.TrimSpace(opts.Provider), Days: days, Charges: charges, Failures: failures, CurrentDelinquent: current}
 }
 
-func classify(e evidenceEvent, ordinal int) string {
+type classificationState struct {
+	seen       bool
+	successful bool
+}
+
+// classify applies provider source hints without treating every API-originated
+// transaction as a new signup or rebill. API sources can include retries or
+// later manual charges; once an obligation has settled, those later API events
+// remain other unless the provider marks them recurring/renewal.
+func classify(e evidenceEvent, state classificationState) string {
 	switch strings.ToLower(strings.TrimSpace(e.Source)) {
 	case "recurring", "renewal", "rebill":
 		return "rebill"
 	case "api", "initial", "signup":
-		return "signup"
-	}
-	if (e.SubscriptionRef != "" || e.OrderRef != "") && ordinal == 1 {
+		if state.successful {
+			// API is not a provider guarantee that this is a renewal. Keep
+			// later API-originated events visible as other rather than
+			// inflating the rebill total.
+			return "other"
+		}
 		return "signup"
 	}
 	if e.SubscriptionRef != "" || e.OrderRef != "" {
-		return "rebill"
+		if state.seen {
+			return "rebill"
+		}
+		return "signup"
 	}
 	return "other"
 }
+
 func obligationKey(e evidenceEvent) string {
 	ref := strings.TrimSpace(e.SubscriptionRef)
 	if ref == "" {

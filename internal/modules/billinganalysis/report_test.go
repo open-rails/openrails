@@ -37,6 +37,57 @@ func TestDeriveKeepsFailureOpenUntilSuccess(t *testing.T) {
 	require.Equal(t, "p/a/sub", report.Days[2].Unbilled[0].ObligationKey)
 }
 
+func TestDeriveSortsEventsAndTreatsAPIRecoveryAsSignup(t *testing.T) {
+	base := time.Date(2026, 3, 1, 1, 0, 0, 0, time.UTC)
+	// Deliberately provide the success before the initial failed API attempt.
+	events := []evidenceEvent{
+		{Provider: "p", PSPID: "a", EventKey: "success", SubscriptionRef: "sub", Type: "sale", Source: "api", Success: true, AmountCents: 100, Currency: "USD", OccurredAt: base.Add(time.Hour)},
+		{Provider: "p", PSPID: "a", EventKey: "retry", SubscriptionRef: "sub", Type: "decline", Source: "api", Success: false, AmountCents: 100, Currency: "USD", OccurredAt: base.Add(-time.Hour)},
+	}
+	report := derive(events, nil, Options{From: base.Add(-2 * time.Hour), To: base.Add(2 * time.Hour), Location: time.UTC})
+	require.Equal(t, 1, report.Days[1].FailedSignups)
+	require.Equal(t, 1, report.Days[1].SettledSignups)
+	require.Empty(t, report.Days[1].Unbilled)
+}
+
+func TestDeriveDeduplicatesRosterAndOpenFailure(t *testing.T) {
+	base := time.Date(2026, 6, 1, 1, 0, 0, 0, time.UTC)
+	events := []evidenceEvent{{Provider: "p", PSPID: "a", EventKey: "f", SubscriptionRef: "sub", Type: "decline", Source: "recurring", OccurredAt: base, Success: false, AmountCents: 100}}
+	subs := []subscriptionObservation{{Provider: "p", PSPID: "a", SubscriptionRef: "sub", Status: "past_due"}}
+	report := derive(events, subs, Options{From: base, To: base, Location: time.UTC})
+	require.Len(t, report.CurrentDelinquent, 1)
+	require.Equal(t, "past_due", report.CurrentDelinquent[0].Status)
+}
+
+func TestClassifyDoesNotAssumeLaterAPIIsRebill(t *testing.T) {
+	e := evidenceEvent{Source: "api", SubscriptionRef: "sub"}
+	require.Equal(t, "signup", classify(e, classificationState{}))
+	require.Equal(t, "other", classify(e, classificationState{seen: true, successful: true}))
+	require.Equal(t, "rebill", classify(evidenceEvent{Source: "recurring", SubscriptionRef: "sub"}, classificationState{successful: true}))
+}
+
+func TestDeriveResetsFailureCountAfterSettlement(t *testing.T) {
+	base := time.Date(2026, 5, 1, 1, 0, 0, 0, time.UTC)
+	events := []evidenceEvent{
+		{Provider: "p", PSPID: "a", EventKey: "f1", SubscriptionRef: "sub", Type: "decline", Source: "recurring", OccurredAt: base, Success: false, AmountCents: 100},
+		{Provider: "p", PSPID: "a", EventKey: "ok", SubscriptionRef: "sub", Type: "sale", Source: "recurring", OccurredAt: base.Add(24 * time.Hour), Success: true, AmountCents: 100},
+		{Provider: "p", PSPID: "a", EventKey: "f2", SubscriptionRef: "sub", Type: "decline", Source: "recurring", OccurredAt: base.Add(48 * time.Hour), Success: false, AmountCents: 100},
+	}
+	report := derive(events, nil, Options{From: base, To: base.Add(48 * time.Hour), Location: time.UTC})
+	require.Len(t, report.Failures, 2)
+	require.Equal(t, 1, report.Failures[0].FailureCount)
+	require.Equal(t, 1, report.Failures[1].FailureCount)
+}
+
+func TestDeriveDoesNotProjectCurrentRosterIntoHistoricalDays(t *testing.T) {
+	base := time.Date(2026, 4, 1, 1, 0, 0, 0, time.UTC)
+	subs := []subscriptionObservation{{Provider: "p", PSPID: "a", SubscriptionRef: "sub", Status: "past_due"}}
+	report := derive(nil, subs, Options{From: base, To: base.Add(24 * time.Hour), Location: time.UTC})
+	require.Equal(t, 0, report.Days[0].DelinquentUsers)
+	require.Equal(t, 1, report.Days[1].DelinquentUsers)
+	require.Len(t, report.CurrentDelinquent, 1)
+}
+
 func TestFilterDelinquent(t *testing.T) {
 	items := []DelinquentSubject{{Status: "past_due"}, {Status: "failed"}}
 	require.Len(t, FilterDelinquent(items, "past_due"), 1)
