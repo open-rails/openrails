@@ -10,7 +10,7 @@ const CHECKOUT_DIALOG_PORTAL =
 
 function removeCascadeLayers(): Plugin {
   return {
-    postcssPlugin: "openrails-checkout-remove-layers",
+    postcssPlugin: "billing-ui-remove-layers",
     Once(root) {
       root.walkAtRules("layer", (rule) => {
         if (rule.nodes) {
@@ -56,7 +56,7 @@ function sameElementSelector(selector: string): string | undefined {
 
 function scopeSelectors(): Plugin {
   return {
-    postcssPlugin: "openrails-checkout-scope-selectors",
+    postcssPlugin: "billing-ui-scope-selectors",
     Once(root) {
       root.walkRules((rule) => {
         if (isKeyframeStep(rule)) return
@@ -84,7 +84,7 @@ function scopeSelectors(): Plugin {
 
 function namespaceTailwindInternals(): Plugin {
   return {
-    postcssPlugin: "openrails-checkout-namespace-tailwind-internals",
+    postcssPlugin: "billing-ui-namespace-tailwind-internals",
     Once(root) {
       root.walkAtRules((rule) => {
         if (/keyframes$/i.test(rule.name) && !rule.params.startsWith("orck-")) {

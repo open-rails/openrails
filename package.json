@@ -1,16 +1,16 @@
 {
-  "name": "openrails-checkout",
-  "version": "0.3.0",
+  "name": "@openrails/billing-ui",
+  "version": "0.4.0",
   "description": "Embeddable hosted checkout components for OpenRails.",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/open-rails/openrails-checkout.git"
+    "url": "git+https://github.com/open-rails/billing-ui.git"
   },
-  "homepage": "https://github.com/open-rails/openrails-checkout#readme",
+  "homepage": "https://github.com/open-rails/billing-ui#readme",
   "bugs": {
-    "url": "https://github.com/open-rails/openrails-checkout/issues"
+    "url": "https://github.com/open-rails/billing-ui/issues"
   },
   "packageManager": "pnpm@11.0.0",
   "engines": {

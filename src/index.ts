@@ -1,4 +1,4 @@
-// openrails-checkout — the OpenRails checkout flow as a self-contained
+// @openrails/billing-ui — the OpenRails checkout flow as a self-contained
 // component. `Checkout` is the flow; render it inline anywhere. `CheckoutModal`
 // is a ready-made dialog host around the same flow. The package entry installs
 // its isolated stylesheet once in browser environments.

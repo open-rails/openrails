@@ -5,12 +5,11 @@ on:
     types: [published]
 
 permissions:
-  contents: read
-  id-token: write
+  contents: write
 
 jobs:
-  publish:
-    name: Publish to npm
+  package:
+    name: Attach package tarball
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -30,7 +29,6 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
 
       - name: Verify release tag
         run: node -e "const p=require('./package.json'); const tag='v'+p.version; if (process.env.GITHUB_REF_NAME !== tag) throw new Error('release tag must be '+tag)"
@@ -51,6 +49,9 @@ jobs:
         run: |
           mkdir release
           pnpm pack --pack-destination release
+          test -f "release/openrails-billing-ui-${GITHUB_REF_NAME#v}.tgz"
 
-      - name: Publish package
-        run: npm publish "./release/openrails-checkout-${GITHUB_REF_NAME#v}.tgz" --access public --provenance=false
+      - name: Upload release archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" release/*.tgz --repo "$GITHUB_REPOSITORY" --clobber

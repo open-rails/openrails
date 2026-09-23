@@ -2,7 +2,7 @@ import type { Plugin } from "vite"
 
 import { isolateCheckoutCss } from "./isolate.ts"
 
-const STYLE_ELEMENT_ID = "openrails-checkout-styles"
+const STYLE_ELEMENT_ID = "billing-ui-styles"
 
 /**
  * Vite extracts library CSS instead of retaining the source import. Installing
@@ -18,7 +18,7 @@ if (typeof document !== "undefined") {
   if (!__orckStyle) {
     __orckStyle = document.createElement("style");
     __orckStyle.id = ${JSON.stringify(STYLE_ELEMENT_ID)};
-    __orckStyle.setAttribute("data-openrails-checkout", "");
+    __orckStyle.setAttribute("data-billing-ui", "");
     (document.head || document.documentElement).appendChild(__orckStyle);
   }
   if (__orckStyle.textContent !== __orckCss) __orckStyle.textContent = __orckCss;
@@ -28,14 +28,14 @@ if (typeof document !== "undefined") {
 
 export function checkoutCssPlugin(): Plugin {
   return {
-    name: "openrails-checkout-css",
+    name: "billing-ui-css",
     enforce: "post",
     async generateBundle(_options, bundle) {
       const stylesheet = Object.values(bundle).find(
         (item) => item.type === "asset" && item.fileName.endsWith(".css")
       )
       if (!stylesheet || stylesheet.type !== "asset") {
-        throw new Error("openrails-checkout build did not emit a stylesheet")
+        throw new Error("billing-ui build did not emit a stylesheet")
       }
 
       const css = await isolateCheckoutCss(String(stylesheet.source))

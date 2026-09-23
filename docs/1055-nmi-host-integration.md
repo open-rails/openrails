@@ -23,6 +23,6 @@ Bounded library changes:
   the demo uses build/lint and manual qualification only.
 
 The existing metadata rename PR15 and customer billing package PR13 remain
-separately owned. Publication uses the normal npm release workflow after review
+separately owned. Publication uses the GitHub release tarball workflow after review
 and CI; no source checkout path ships in a host dependency manifest. Real NMI
 iframe/tokenization/provider qualification remains a separate browser gate.

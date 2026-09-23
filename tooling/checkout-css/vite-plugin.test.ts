@@ -7,7 +7,7 @@ describe("checkout CSS Vite plugin", () => {
     const installer = renderStyleInstaller(".orck{display:block}")
 
     expect(installer).toContain('typeof document !== "undefined"')
-    expect(installer).toContain("openrails-checkout-styles")
+    expect(installer).toContain("billing-ui-styles")
     expect(installer).toContain("document.getElementById")
   })
 })

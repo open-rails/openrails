@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0
+
+Breaking: the package is renamed `openrails-checkout` → `@openrails/billing-ui`.
+
+- Import from `@openrails/billing-ui` and `@openrails/billing-ui/styles.css`.
+- The injected stylesheet is `<style id="billing-ui-styles" data-billing-ui>`.
+- Releases attach the packed tarball to the GitHub release instead of
+  publishing to npm:
+  `https://github.com/open-rails/billing-ui/releases/download/v0.4.0/openrails-billing-ui-0.4.0.tgz`.
+
 ## 0.3.0
 
 Breaking: the session document carries exact money.

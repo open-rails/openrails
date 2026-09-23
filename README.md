@@ -1,4 +1,4 @@
-# openrails-checkout
+# @openrails/billing-ui
 
 Embeddable React checkout components for OpenRails.
 
@@ -10,9 +10,16 @@ See [Payment form contract](docs/payment-form-contract.md) for the exact-money
 session document, billing fields, browser-autofill behavior, and the checkout
 request schema.
 
+Until the `@openrails` npm scope is live, install the tarball attached to each
+GitHub release:
+
+```sh
+pnpm add https://github.com/open-rails/billing-ui/releases/download/v0.4.0/openrails-billing-ui-0.4.0.tgz
+```
+
 ```tsx
-import { Checkout, createHttpSource } from "openrails-checkout"
-import "openrails-checkout/styles.css"
+import { Checkout, createHttpSource } from "@openrails/billing-ui"
+import "@openrails/billing-ui/styles.css"
 
 const source = createHttpSource({
   baseUrl: "https://merchant.example",
