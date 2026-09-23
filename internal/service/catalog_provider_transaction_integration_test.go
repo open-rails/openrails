@@ -71,7 +71,7 @@ func TestCatalogProviderPreparationAndPropagationOutsideTransaction(t *testing.T
 		}
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(payload)), Request: r}, nil
 	}))
-	price, err := s.CreatePrice(ctx, CreatePriceRequest{ProductID: product.ID, Key: "boundary-price", Currency: "USD", UnitAmount: 1000000, PSPs: []string{"stripe"}})
+	price, err := s.CreatePrice(ctx, CreatePriceRequest{ProductID: product.ID, Key: "boundary-price", Currency: "USD", UnitAmount: 1000000, PSPs: []string{"stripe"}, PSPLinks: map[string]map[string]string{"stripe": {"lookup_key": "boundary-native-price"}}})
 	require.NoError(t, err)
 	require.Greater(t, posts, 0, "exercise provider creation, not only provider reads")
 	require.Equal(t, "price_boundary", price.Providers["stripe"].IDs["price_id"])

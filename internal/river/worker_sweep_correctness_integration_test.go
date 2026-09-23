@@ -127,7 +127,7 @@ func TestStripeWebhookSweepCoverageAndFailure(t *testing.T) {
 	secrets := &sweepSecrets{MerchantSecretStore: merchants.NewMemorySecretStore(), seen: map[merchant.ID]bool{}, fail: merchant.ID(ids[0])}
 	service, err := merchants.NewService(db.WrapPool(database.Pool(), ""), secrets, "test")
 	require.NoError(t, err)
-	worker := StripeWebhookReconcileWorker{DB: database, Config: &config.Config{PublicBillingBaseURL: "https://billing.example.test", ProviderWriteMode: config.ProviderWriteModeFull}, Merchants: service}
+	worker := StripeWebhookReconcileWorker{DB: database, Config: &config.Config{TestMode: config.CredentialPostureSandbox, PublicBillingBaseURL: "https://billing.example.test", ProviderWriteMode: config.ProviderWriteModeFull}, Merchants: service}
 	ctx := context.Background()
 	err = (&WorkerHealthMiddleware{DB: database}).Work(ctx, &rivertype.JobRow{Kind: KindStripeWebhookReconcile}, func(ctx context.Context) error { return worker.Work(ctx, nil) })
 	require.ErrorContains(t, err, "controlled secret provider outage")

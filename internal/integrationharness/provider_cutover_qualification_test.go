@@ -119,6 +119,12 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 		rt.Merchants.SetCredentialProbeEndpointsForIntegration(probe.URL, "")
 		rt.Merchants.SetNMIProbeV5EndpointForIntegration(probe.URL)
 		mctx := merchant.WithID(ctx, owner.MerchantID)
+		publication := func(t *testing.T, account string, enabled *bool, key string) merchants.UpsertPaymentProviderConfigRequest {
+			t.Helper()
+			var revision int64
+			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT COALESCE((evidence->>'configuration_revision')::bigint, 0) FROM billing.psps WHERE merchant_id=$1 AND rail='nmi' AND environment='test' AND account_id=$2`, owner.MerchantID.UUID(), account).Scan(&revision))
+			return merchants.UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: &revision, AccountID: account, Enabled: enabled, Credentials: map[string]string{"security_key": key}}
+		}
 		rotate := func(t *testing.T, p cutoverHTTPFixture, role, key string) {
 			account := p.SourceKey
 			enabled := false
@@ -129,8 +135,9 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 			g.mu.Lock()
 			g.Accounts[key] = g.Accounts[account]
 			g.mu.Unlock()
+			req := publication(t, account, &enabled, key)
 			err := rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
-				_, err := rt.Merchants.UpsertPaymentProviderConfig(cctx, owner.MerchantID, "nmi", merchants.UpsertPaymentProviderConfigRequest{AccountID: account, Enabled: &enabled, Credentials: map[string]string{"security_key": key}})
+				_, err := rt.Merchants.UpsertPaymentProviderConfig(cctx, owner.MerchantID, "nmi", req)
 				return err
 			})
 			require.NoError(t, err)
@@ -320,8 +327,9 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 			g.Accounts[wrongKey] = &cutoverAccount{Source: true, Subs: map[string]nmi.V5Subscription{}}
 			g.mu.Unlock()
 			disabled := false
+			req := publication(t, p.SourceKey, &disabled, wrongKey)
 			require.NoError(t, rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
-				_, err := rt.Merchants.UpsertPaymentProviderConfig(cctx, owner.MerchantID, "nmi", merchants.UpsertPaymentProviderConfigRequest{AccountID: p.SourceKey, Enabled: &disabled, Credentials: map[string]string{"security_key": wrongKey}})
+				_, err := rt.Merchants.UpsertPaymentProviderConfig(cctx, owner.MerchantID, "nmi", req)
 				return err
 			}))
 			proof := qualify(t, p, "source")
@@ -369,10 +377,11 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 			g.Accounts[replacement] = g.Accounts[p.TargetKey]
 			g.mu.Unlock()
 			rotated := make(chan error, 1)
+			req := publication(t, p.TargetKey, nil, replacement)
 			go func() {
 				defer close(rotated)
 				rotated <- rt.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
-					_, err := rt.Merchants.UpsertPaymentProviderConfig(cctx, owner.MerchantID, "nmi", merchants.UpsertPaymentProviderConfigRequest{AccountID: p.TargetKey, Credentials: map[string]string{"security_key": replacement}})
+					_, err := rt.Merchants.UpsertPaymentProviderConfig(cctx, owner.MerchantID, "nmi", req)
 					return err
 				})
 			}()

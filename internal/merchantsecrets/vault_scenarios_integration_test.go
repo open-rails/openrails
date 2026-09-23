@@ -12,8 +12,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"path"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +29,7 @@ import (
 	vaultint "github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/integrations/vault/vaulttest"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -270,11 +274,24 @@ func TestVaultCapabilityGating_RealPolicies(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "ro-visible", got.Value)
 
-		// A write through the read-only token fails as a REAL Vault 403, surfaced
-		// as the retryable backend-unavailable class (never silent success).
+		// The real Vault policy probe installs an explicitly read-only store.
+		// Writes fail locally as a capability refusal, not a retryable outage.
 		_, err = store.Secrets.Put(ctx, mid, name, "ro-write-attempt")
 		require.Error(t, err)
+		require.ErrorIs(t, err, merchants.ErrSecretStoreReadOnly)
+		require.NotErrorIs(t, err, merchants.ErrSecretBackendUnavailable)
+		var refusal *apperr.Error
+		require.ErrorAs(t, err, &refusal)
+		require.Equal(t, http.StatusForbidden, refusal.Status)
+		// Bypassing only the local capability wrapper still hits Vault's real ACL.
+		// An unexpected denial at this lower layer remains backend-unavailable.
+		rawReadOnly := merchants.NewVaultSecretStore("secret", vaultint.NewKVv2Adapter(vaulttest.Client(t, addr, roToken), "secret"))
+		_, err = rawReadOnly.Put(ctx, mid, name, "raw-denied-attempt")
 		require.ErrorIs(t, err, merchants.ErrSecretBackendUnavailable)
+		data, _, err := vaultint.NewKVv2Adapter(vaulttest.RootClient(t), "secret").ReadSecret(ctx, vaultMerchantPath(mid.String(), name))
+		require.NoError(t, err)
+		require.Equal(t, "ro-visible", data["value"])
+
 		got, err = rootStore.Secrets.Get(ctx, mid, name)
 		require.NoError(t, err)
 		require.Equal(t, "ro-visible", got.Value, "failed write must not change the stored value")
@@ -342,31 +359,48 @@ func TestBuildTransit_ThreadsVaultAuthForTransitOnlyConnections(t *testing.T) {
 	require.NoError(t, disabled.Ping(ctx))
 }
 
-// --- Outage semantics: pause/unpause a dedicated container ----------------------
+// --- Outage semantics: interrupt a private connection to real Vault -------------
 
 func TestVaultOutage_FailClosedAtBootAndRead_RecoverWithoutRestart(t *testing.T) {
 	pool, ctx := startSecretsPostgres(t)
-	d := vaulttest.StartDedicated(t)
+	addr, rootToken := vaulttest.Addr(t)
+	target, err := url.Parse(addr)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var disconnected atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if disconnected.Load() {
+			// Close the actual transport connection without fabricating a Vault
+			// response. Other tests retain their direct path to the real server.
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				_ = conn.Close()
+			}
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
 	mid, slug := registerMerchant(t, ctx, pool, "vout")
 
-	cfg := vaultBackedConfig("production", d.Addr, d.RootToken)
+	cfg := vaultBackedConfig("production", server.URL, rootToken)
 
 	// Unreachable at boot ⇒ Build fails loudly (vault declared means vault
 	// required). #751: token-mode Login itself now does a self-lookup (to
 	// learn renewability/TTL for the re-auth Supervisor), so an unreachable
 	// Vault can fail as early as "vault login" instead of the later
 	// capability probe — either is the same loud, no-degrade boot failure.
-	d.Pause(t)
+	disconnected.Store(true)
 	bootCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	_, err := Build(bootCtx, cfg, pool)
+	_, err = Build(bootCtx, cfg, pool)
 	cancel()
 	require.Error(t, err, "boot with unreachable Vault must fail loudly, never degrade")
 	require.True(t,
 		strings.Contains(err.Error(), "vault capability probe") || strings.Contains(err.Error(), "vault login"),
 		"unexpected boot error shape: %v", err)
-	d.Unpause(t)
+	disconnected.Store(false)
 
-	// Healthy boot; seed nameA through the store (it lands in the read cache too).
+	// Healthy boot; seed nameA through the managed store.
 	store, err := Build(ctx, cfg, pool)
 	require.NoError(t, err)
 	nameA := scopedName(t, "nmi", "live", "vout-a-"+slug, "security_key")
@@ -375,7 +409,7 @@ func TestVaultOutage_FailClosedAtBootAndRead_RecoverWithoutRestart(t *testing.T)
 
 	// Seed nameB directly in Vault (never read through this process yet), so the
 	// outage read below cannot be served by the in-process cache.
-	rootKV := vaultint.NewKVv2Adapter(d.Client(t, d.RootToken), "secret")
+	rootKV := vaultint.NewKVv2Adapter(vaulttest.RootClient(t), "secret")
 	nameB := scopedName(t, "nmi", "live", "vout-b-"+slug, "security_key")
 	func() {
 		_, werr := rootKV.WriteSecret(ctx, vaultMerchantPath(mid.String(), nameB), map[string]string{"value": "vB"})
@@ -384,7 +418,7 @@ func TestVaultOutage_FailClosedAtBootAndRead_RecoverWithoutRestart(t *testing.T)
 
 	// Unreachable at read time ⇒ typed fail-closed error: retryable backend
 	// unavailability, NEVER "secret absent" and never a fabricated value.
-	d.Pause(t)
+	disconnected.Store(true)
 	readCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	_, err = store.Secrets.Get(readCtx, mid, nameB)
 	cancel()
@@ -393,17 +427,18 @@ func TestVaultOutage_FailClosedAtBootAndRead_RecoverWithoutRestart(t *testing.T)
 	require.False(t, errors.Is(err, merchants.ErrSecretNotFound),
 		"an outage must never read as terminal absence (would disable webhook verification / cancel work)")
 
-	// Pinned by design: a value this process already read/wrote stays served from
-	// the in-process TTL cache during the outage (DefaultSecretCacheTTL) — the
-	// cache holds real previously-authoritative values, never fabricated ones.
-	cached, err := store.Secrets.Get(ctx, mid, nameA)
-	require.NoError(t, err)
-	require.Equal(t, "vA", cached.Value)
+	// Managed Vault reads recheck authority, even for a previously read value.
+	// A prior successful write must not conceal a later outage or revoked ACL.
+	readCtx, cancel = context.WithTimeout(ctx, 3*time.Second)
+	_, err = store.Secrets.Get(readCtx, mid, nameA)
+	cancel()
+	require.ErrorIs(t, err, merchants.ErrSecretBackendUnavailable)
+	require.NotErrorIs(t, err, merchants.ErrSecretNotFound)
 
-	// Unpause ⇒ recovery WITHOUT a process restart; pre-outage data intact.
-	d.Unpause(t)
+	// Restore connectivity without a process restart; pre-outage data stays intact.
+	disconnected.Store(false)
 	got, err := store.Secrets.Get(ctx, mid, nameB)
-	require.NoError(t, err, "recovery after unpause must not need a new Build/restart")
+	require.NoError(t, err, "recovery after reconnect must not need a new Build/restart")
 	require.Equal(t, "vB", got.Value)
 }
 

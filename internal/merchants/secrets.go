@@ -335,16 +335,16 @@ type PSPScope struct {
 	// CustodianID references the custodian holding the instruments charged
 	// through this PSP (or#880). nil = the PSP holds its own.
 	CustodianID *uuid.UUID
-	// CredentialVersions is the rotation watermark per credential key
-	// (or#812): the Secret.Version each credential reached the last time it
-	// was rotated through the provider-config API. Absent/zero = no floor.
+	// CredentialVersions holds logical per-slot rotation generations for
+	// published credentials. CredentialRefs owns their physical versions.
+	// Legacy rows without references use these values as backend floors.
 	CredentialVersions map[string]int
 	CredentialRefs     map[string]SecretRef
 	RetiredCredentials map[string]bool
 }
 
-// SecretRef returns the scoped secret name for key together with the rotation
-// version floor recorded on this PSP row.
+// SecretRef returns the exact published name and physical backend version.
+// Legacy rows without published references retain their canonical-name floor.
 func (s PSPScope) SecretRef(key string) (SecretRef, error) {
 	if s.RetiredCredentials[NormalizeCredentialVersionKey(key)] {
 		return SecretRef{Retired: true}, nil

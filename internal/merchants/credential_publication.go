@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
@@ -34,7 +35,7 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID
 	}
 	if len(names) > 0 {
 		if !CanStageCredentials(s.secrets) && snapshotRefs == nil {
-			return gen.OpenrailsPsp{}, ErrManifestSecretsReadOnly
+			return gen.OpenrailsPsp{}, credentialWriteRefusal(s.secrets)
 		}
 	}
 	custody := SecretCustodyIdentity(s.secrets)
@@ -206,13 +207,45 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id merchant.ID
 		}
 		if publication.RetireWebhookOverlap {
 			delete(merged, "webhook_signing_secret_previous")
-			delete(versions, "webhook_signing_secret_previous")
 			retired["webhook_signing_secret_previous"] = true
 		}
 		for key, ref := range refs {
+			// Backend versions belong to immutable candidate names; each new
+			// candidate can be version one. This separate per-slot generation
+			// fences qualifications across rotations, including A -> B -> A.
+			generation := versions[key]
+			// Every reference being published must remain readable, including
+			// a preserved webhook overlap; only a superseded old value may
+			// be missing during an explicitly authorized recovery rotation.
+			nextSecret, err := ReadSecretRef(ctx, s.secrets, id, ref)
+			if err != nil {
+				return err
+			}
+			unchanged := false
+			if existing.ID != uuid.Nil && transitionFrom == "" && !retired[key] {
+				previous, err := PSPSecretRef(rail, environment, account, existing.Evidence, key)
+				if err != nil {
+					return err
+				}
+				oldSecret, err := ReadSecretRef(ctx, s.secrets, id, previous)
+				if err != nil && !errors.Is(err, ErrSecretNotFound) {
+					return err
+				}
+				if err == nil {
+					unchanged = oldSecret.Value == nextSecret.Value
+				}
+			}
+			if !unchanged || generation == 0 {
+				if generation == math.MaxInt {
+					return fmt.Errorf("merchants: credential rotation generation exhausted")
+				}
+				generation++
+			}
+			// Keep retired-slot generations: later reuse must never reset its
+			// epoch. Custody transitions advance even when values are equal.
+			versions[key] = generation
 			delete(retired, key)
 			merged[key] = ref
-			versions[key] = ref.MinVersion
 		}
 		raw, err := marshalProviderEvidence(existing.Evidence, req.PublicConfig, validated, versions)
 		if err != nil {

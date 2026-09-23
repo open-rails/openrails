@@ -96,7 +96,7 @@ func (p *StripeWebhookPublication) RetireOverlap(ctx context.Context) error {
 }
 func (p *StripeWebhookPublication) publish(ctx context.Context, endpoint string, names, keys map[string]string, retire bool) error {
 	if !CanStageCredentials(p.service.secrets) {
-		return ErrManifestSecretsReadOnly
+		return credentialWriteRefusal(p.service.secrets)
 	}
 	evidence := unmarshalProviderEvidence(p.row.Evidence)
 	operation := uuid.NewSHA1(p.merchant.UUID(), []byte("stripe-webhook/"+p.service.providerEnvironment+"/"+p.account+"/"+endpoint))

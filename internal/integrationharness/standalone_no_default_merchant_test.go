@@ -17,7 +17,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
 	embcp "github.com/open-rails/openrails/internal/operator"
@@ -37,12 +36,11 @@ func TestStandaloneNoDefaultMerchantResolvesRequestScopedMerchant(t *testing.T) 
 	cp := embcp.Get(surface.app)
 	require.NotNil(t, cp)
 	fixturePool := h.Pool()
-	secretStore, err := merchants.NewDBSecretStore(db.WrapPool(fixturePool, ""))
-	require.NoError(t, err)
+	secretStore := surface.app.Runtime.Merchants.Secrets()
 	const whsec = "whsec_no_default_merchant"
 	const accountID = "acct_no_default_merchant"
 	// The harness runs test_mode ⇒ posture resolves environment=test rows (#681).
-	_, err = fixturePool.Exec(ctx, `
+	_, err := fixturePool.Exec(ctx, `
 		INSERT INTO billing.psps (merchant_id, rail, environment, account_id, archived)
 		VALUES ($1::uuid, 'stripe', 'test', $2, false)
 		ON CONFLICT (rail, environment, account_id) DO UPDATE

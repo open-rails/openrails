@@ -120,7 +120,7 @@ func TestVaultUUIDPathsSurviveRenameAndReclaim(t *testing.T) {
 	require.NoError(t, f.database.RunInMerchantScope(ctx, f.id, "bootstrap seed", func(ctx context.Context) error {
 		return bootstrap.SeedMerchantManifestSecretPlane(ctx, f.cfg, f.id, manifest, f.store.Secrets, nil)
 	}))
-	name, err := merchants.PSPSecretName("stripe", "test", "acct_uuid", "webhook_signing_secret")
+	name, err := merchants.CustodianSecretName("basis_theory", "test", "uuid-tenant", "api_key")
 	require.NoError(t, err)
 	require.NoError(t, f.database.RunInMerchantScope(ctx, f.id, "test write", func(ctx context.Context) error {
 		_, err := f.service.RotateCredential(ctx, f.id, name, "whsec_original")
@@ -201,7 +201,7 @@ func TestVaultPurgeIncludesWriteCommittedAfterInventory(t *testing.T) {
 	defer release.Do(func() { close(f.releaseWrite) })
 	inventory, err := f.service.TakePurgeInventory(ctx, f.id)
 	require.NoError(t, err)
-	name, _ := merchants.PSPSecretName("stripe", "test", "acct_race", "webhook_signing_secret")
+	name, _ := merchants.CustodianSecretName("basis_theory", "test", "race-tenant", "api_key")
 	f.blockWrite.Store(true)
 	writeResult := make(chan error, 1)
 	go func() {
@@ -276,8 +276,8 @@ func TestManifestManagedWebhookPurge(t *testing.T) {
 			f := newVaultPurgeFixture(t)
 			ctx := context.Background()
 			cfg := *f.cfg
-			cfg.SecretBackend = backend
 			cfg.SecretBackend = config.SecretBackendSnapshot
+			cfg.AlertSecretBackend = backend
 			cfg.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 			manifest := merchants.NewManifestSecretStore()
 			providerName, err := merchants.PSPSecretName("stripe", "test", "acct_manifest", "secret_key")

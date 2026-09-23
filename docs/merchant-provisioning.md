@@ -291,7 +291,13 @@ Credential custody is selected explicitly by `secret_backend`:
 
 Managed provider writes use versioned Client publication with stable operation
 identity and a revision precondition. Readers resolve the published credential
-version. Direct backend edits do not publish credentials. Changing custody is an
+version. Each credential slot also has a monotonic logical rotation generation,
+independent of the immutable secret candidate's backend version. Changing its
+value or custody advances that generation, including an A-to-B-to-A rotation;
+receipt replay, unchanged values in the same custody, and metadata-only edits do
+not. Qualification uses this generation to reject stale credentials. Retired
+overlap slots retain their generation so later reuse cannot reset it.
+Direct backend edits do not publish credentials. Changing custody is an
 explicit migration, independent of external HTTP publication. Snapshot values
 are never implicitly copied to a managed backend.
 

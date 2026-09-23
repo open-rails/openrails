@@ -31,12 +31,10 @@ Postgres specifics worth knowing:
   merchant list) are `SECURITY DEFINER` — they need an owner that can read
   across merchants, and they raise rather than return an empty result if it
   cannot.
-- `ENV` is REQUIRED and has no default. It decides whether merchant secrets may
-  be stored plaintext and whether the DB role must enforce RLS, so an
-  undeclared environment refuses to boot instead of quietly meaning
-  "development". Only the exact values `dev` and `development` enable
-  development relaxations; every other non-empty label (including `staging`,
-  `production`, or a misspelling) receives the strict posture.
+- Security defaults are independent of payment posture. Managed database secrets
+  always require encryption. Local issuer/signing/sender exceptions are explicit
+  Auth settings; see [runtime configuration](runtime-configuration.md). `ENV` is
+  retired and refuses loading rather than silently selecting a weaker posture.
 - Migrations: `openrails migrate up --runtime-database-url "$APP_DATABASE_URL"`
   provisions direct access for the host login and applies AuthKit, River, and OpenRails
   migrations (`internal/migrate/postgres/`, baseline `0001_schema.up.sql`, new ones

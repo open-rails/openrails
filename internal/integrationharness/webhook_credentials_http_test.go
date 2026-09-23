@@ -32,11 +32,31 @@ func TestWebhookCredentialHTTPWorkflow(t *testing.T) {
 	}
 }
 
+func TestSnapshotWebhookCreationRequiresManagedAlertBackend(t *testing.T) {
+	ctx := t.Context()
+	h := New(t, ctx)
+	surface := h.StartStandalone("usd", WithConfig(func(cfg *config.Config) {
+		cfg.SecretBackend = config.SecretBackendSnapshot
+	}))
+	rt := surface.App().Runtime
+	rt.AlertService = alerting.NewService(alerting.Deps{DB: rt.DB, Secrets: rt.Merchants.Secrets(), Outbound: httpx.Policy{Allow: httpx.AllowLoopback}})
+	var beforeHooks, beforeSecrets int
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.merchant_webhooks WHERE merchant_id=$1), (SELECT count(*) FROM billing.merchant_secrets WHERE merchant_id=$1)`, dbtest.TestMerchantID.UUID()).Scan(&beforeHooks, &beforeSecrets))
+	status, raw := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/webhooks", surface.Token, map[string]any{"name": "unavailable", "url": "http://127.0.0.1:1/not-sent"})
+	require.Equal(t, http.StatusForbidden, status, string(raw))
+	require.Contains(t, string(raw), "credential_store_read_only")
+	var hooks, secrets int
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM billing.merchant_webhooks WHERE merchant_id=$1), (SELECT count(*) FROM billing.merchant_secrets WHERE merchant_id=$1)`, dbtest.TestMerchantID.UUID()).Scan(&hooks, &secrets))
+	require.Equal(t, beforeHooks, hooks, "capability refusal must precede durable webhook creation")
+	require.Equal(t, beforeSecrets, secrets, "snapshot mode must not silently choose persistent credential custody")
+}
+
 func webhookCredentialHTTPWorkflow(t *testing.T, source string) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd", WithConfig(func(cfg *config.Config) {
 		cfg.SecretBackend = source
+		cfg.AlertSecretBackend = config.SecretBackendDB
 		cfg.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 	}))
 	rt := surface.App().Runtime

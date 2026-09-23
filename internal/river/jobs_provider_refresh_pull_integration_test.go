@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -195,7 +196,7 @@ func seedLocalCCBillSub(t *testing.T, dbi *db.DB, mid merchant.ID, pspID uuid.UU
 // psps row id.
 func seedPSP(t *testing.T, svc *merchants.Service, mid merchant.ID, rail, accountID string, credentials map[string]string) uuid.UUID {
 	t.Helper()
-	cfg, err := svc.UpsertPaymentProviderConfig(context.Background(), mid, rail, merchants.UpsertPaymentProviderConfigRequest{
+	cfg, err := svc.UpsertPaymentProviderConfig(context.Background(), mid, rail, merchants.UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: new(int64),
 		AccountID:   accountID,
 		Credentials: credentials,
 	})
@@ -205,7 +206,10 @@ func seedPSP(t *testing.T, svc *merchants.Service, mid merchant.ID, rail, accoun
 
 func pullTestMerchantsService(t *testing.T, dbi *db.DB) *merchants.Service {
 	t.Helper()
-	svc, err := merchants.NewService(dbi.DataPool(), merchants.NewMemorySecretStore(), "live")
+	backend, err := merchantsecrets.Build(t.Context(), &config.Config{SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}}, dbi.DataPool())
+	require.NoError(t, err)
+	t.Cleanup(backend.Close)
+	svc, err := merchants.NewService(dbi.DataPool(), backend.Secrets, "live")
 	require.NoError(t, err)
 	nmiProbeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))

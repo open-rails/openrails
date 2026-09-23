@@ -118,6 +118,7 @@ func TestTrustedProxies_ClientIPBucketsByForwardedHeader(t *testing.T) {
 	run := func(t *testing.T, trustedProxies []string) []int {
 		dsn := dbtest.SharedPostgresDSN(t)
 		cfg := hostedTestConfig(t, dsn, "https://controlplane.openrails.test")
+		cfg.Auth.DirectPeerIP = len(trustedProxies) == 0
 		e := newHostApp(t, cfg)
 		require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
 			EmailSender:    &captureEmailSender{},
@@ -165,6 +166,7 @@ func TestTrustedProxies_InvalidCIDRFailsAttach(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := hostedTestConfig(t, dsn, "https://controlplane.openrails.test")
+	cfg.Auth.DirectPeerIP = false
 	e := newHostApp(t, cfg)
 
 	err := embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
@@ -226,6 +228,7 @@ func TestPasswordlessPolicyForwarding(t *testing.T) {
 
 	t.Run("login without auto-registration", func(t *testing.T) {
 		cfg := hostedTestConfig(t, dsn, "https://passwordless-login-only.openrails.test")
+		cfg.Auth.DirectPeerIP = false
 		e := newHostApp(t, cfg)
 		sender := &captureEmailSender{}
 		require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{

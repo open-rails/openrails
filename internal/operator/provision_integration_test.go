@@ -82,7 +82,7 @@ func hostedTestConfig(t *testing.T, dsn, issuer string) *config.Config {
 		MerchantConfigHTTP: true,
 		SecretBackend:      config.SecretBackendDB,
 		DB:                 &config.DBConfig{URL: dsn},
-		Auth:               &config.AuthConfig{Issuer: issuer, KeysPath: t.TempDir()},
+		Auth:               &config.AuthConfig{Issuer: issuer, KeysPath: t.TempDir(), AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowMemory: true, DirectPeerIP: true},
 	}
 }
 

@@ -166,7 +166,7 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool, options ...Bu
 			return nil, err
 		}
 	}
-	var alert merchants.MerchantSecretStore = merchants.NewManifestSecretStore()
+	var alert merchants.MerchantSecretStore = merchants.NewReadOnlySecretStore(merchants.NewMemorySecretStore())
 	var result *Store
 	if opts.AlertBackend != "" {
 		if opts.AlertBackend != config.SecretBackendDB && opts.AlertBackend != config.SecretBackendVault {

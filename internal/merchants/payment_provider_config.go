@@ -65,11 +65,10 @@ type pspEvidence struct {
 	CredentialRefs       map[string]SecretRef `json:"credential_refs,omitempty"`
 	PublicConfig         map[string]string    `json:"public_config,omitempty"`
 	CredentialsValidated bool                 `json:"credentials_validated,omitempty"`
-	// CredentialVersions is the or#812 cross-node rotation watermark: the
-	// Secret.Version each credential key reached at its last rotation. It rides
-	// the PSP row because every credential resolution already re-reads that row
-	// live from the shared DB, so the floor costs no extra query and reaches
-	// every node the instant the rotation commits.
+	// CredentialVersions is the per-slot logical rotation generation used to
+	// fence qualification across value and custody changes. Published readers
+	// use CredentialRefs for the independent backend version and exact name.
+	// Legacy rows without references retain their original backend floors.
 	CredentialVersions map[string]int `json:"credential_versions,omitempty"`
 }
 
