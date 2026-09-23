@@ -41,7 +41,7 @@ run_fixture() {
         PATH="$fixture/bin:$PATH" \
         POSTGRES_HOST_PORT=49161 \
         GARNET_HOST_PORT=49162 \
-        bash scripts/test_integration.sh ./fixturepkg
+        bash scripts/test_integration.sh "$@" ./fixturepkg
     ) >/dev/null 2>&1
 }
 
@@ -123,6 +123,12 @@ if run_fixture; then
 fi
 [[ ! -s "$log" ]] || { echo "invalid count touched services" >&2; exit 1; }
 unset OPENRAILS_TEST_PACKAGES
+for override in -p=3 --p=3 -parallel=2 --parallel=2 -test.parallel=2 --test.parallel=2; do
+    if run_fixture "$override"; then
+        echo "test_integration_test: parallelism override accepted: $override" >&2; exit 1
+    fi
+    [[ ! -s "$log" ]] || { echo "parallelism override touched services" >&2; exit 1; }
+done
 
 echo "integration teardown regression tests passed"
 

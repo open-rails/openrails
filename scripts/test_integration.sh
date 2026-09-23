@@ -71,6 +71,14 @@ esac
 
 # Package processes own separate PostgreSQL databases. Parallel processes must
 # also own separate Redis servers: some recovery tests intentionally FLUSHALL.
+for arg in "$@"; do
+  case "$arg" in
+    -p|--p|-p=*|--p=*|-parallel|--parallel|-parallel=*|--parallel=*|-test.parallel|--test.parallel|-test.parallel=*|--test.parallel=*)
+      echo "Use OPENRAILS_TEST_PACKAGES for package concurrency; tests within each package stay serial" >&2
+      exit 2
+      ;;
+  esac
+done
 package_parallelism="${OPENRAILS_TEST_PACKAGES:-1}"
 if [[ ! "$package_parallelism" =~ ^[1-9][0-9]*$ ]]; then
   echo "OPENRAILS_TEST_PACKAGES must be a positive integer" >&2
