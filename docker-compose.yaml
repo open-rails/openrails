@@ -17,8 +17,6 @@ services:
       # PG18+ requires the mount at /var/lib/postgresql (not .../data) so it can
       # manage the version-specific data subdirectory (e.g. 18/main) itself.
       - postgres_data:/var/lib/postgresql
-      # Bootstrap SQL runs automatically during first initialization
-      - ./migrations/bootstrap/0001_postgres_init.sql:/docker-entrypoint-initdb.d/0001_postgres_init.sql:ro
     command:
       - postgres
       - -c

@@ -3,7 +3,6 @@ sql:
   - engine: "postgresql"
     queries: "internal/db/queries"
     schema:
-      - "migrations/bootstrap"
       - "internal/migrate/postgres"
       - "internal/db/schema"
     database:
