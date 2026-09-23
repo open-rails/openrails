@@ -62,7 +62,7 @@ func TestEmbeddedStripeTransportSeam_DrivesCredentialProbeAndLocalCatalog(t *tes
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 
 	ctx := context.Background()
-	require.NoError(t, embcp.Attach(ctx, e.app, cfg, &hostconfig.AuthConfig{Issuer: "https://stripe-seam-" + sfx + ".openrails.test", AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}, pool))
+	require.NoError(t, embcp.Attach(ctx, e.app, cfg, &hostconfig.AuthConfig{KeysPath: t.TempDir(), Issuer: "https://stripe-seam-" + sfx + ".openrails.test", AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}, pool))
 	provisioned, err := embcp.ProvisionMerchant(ctx, e.app, embcp.ProvisionMerchantRequest{Slug: "seam-" + sfx})
 	require.NoError(t, err)
 	// Bind the engine to its merchant, as an embedding host does at startup.

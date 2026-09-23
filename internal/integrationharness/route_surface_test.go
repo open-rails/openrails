@@ -53,7 +53,7 @@ func TestStandaloneRouteSurface(t *testing.T) {
 		cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
 	}
 
-	assembled, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://controlplane.openrails.test", AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}})
+	assembled, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{Auth: &hostconfig.AuthConfig{KeysPath: t.TempDir(), Issuer: "https://controlplane.openrails.test", AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = assembled.App.Close(context.Background()) })
 

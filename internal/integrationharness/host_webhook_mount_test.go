@@ -36,7 +36,7 @@ func TestWebhookMountDoesNotUseHostAsAccountAuthority(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 
-	require.NoError(t, embcp.AttachWithOptions(ctx, app.HostGraph(e), cfg, nil, embcp.AttachOptions{Auth: &hostconfig.AuthConfig{Issuer: "https://host-webhook-controlplane.test", AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS:
+	require.NoError(t, embcp.AttachWithOptions(ctx, app.HostGraph(e), cfg, nil, embcp.AttachOptions{Auth: &hostconfig.AuthConfig{KeysPath: t.TempDir(), Issuer: "https://host-webhook-controlplane.test", AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS:
 
 	// A bare merchant directory row + api_host is all Host resolution needs
 	// (no AuthKit permission-group linking required for this mechanism).

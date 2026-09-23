@@ -85,7 +85,7 @@ func TestAdminConsoleServing(t *testing.T) {
 		if h.Redis != nil {
 			cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
 		}
-		_, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://controlplane.openrails.test", AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}})
+		_, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{Auth: &hostconfig.AuthConfig{KeysPath: t.TempDir(), Issuer: "https://controlplane.openrails.test", AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}})
 		require.Error(t, err, "admin_console.enabled without assets must refuse boot")
 		require.Contains(t, err.Error(), "no console assets")
 		require.Contains(t, err.Error(), "build-admin-console.sh", "boot error must name the build step")
