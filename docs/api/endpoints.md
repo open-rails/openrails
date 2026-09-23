@@ -120,7 +120,7 @@ scoped to the token's subject — no `:user_id` appears in any path.
 | GET | `/v1/me/invoices` | List the subject's invoices |
 | GET | `/v1/me/invoices/{id}` | One invoice, including payer-scoped recovery state |
 | POST | `/v1/me/invoices/{id}/pay-now` | Verified customer payment on an NMI saved method. Requires Idempotency-Key and payment_method_id; 200 complete, 202 unresolved, coded 402 card refusal. |
-| GET | `/v1/me/payments` | Payment history; each row carries `price` and the bought `product` (`display_name`). Query: `type` (rail filter), `limit`, `offset` |
+| GET | `/v1/me/payments` | Payment and refund history; each row embeds `product` (`id`, `key`, `display_name`, ...). Query: `type` (rail filter), `limit`, `offset` |
 | GET | `/v1/me/entitlements/active` | The subject's currently-active entitlements |
 | GET | `/v1/me/tier` | THE effective tier in one tier group (or#912): highest tier_rank among products whose entitlements intersect the subject's active windows; `tier: null` when none. Query: `group` (required), `at` (RFC3339, optional). Tier carries the immutable `entitlement` identifier + mutable `display_name` + `tier_rank` + product ref |
 | GET | `/v1/me/products` | Products relevant to the subject |
@@ -359,7 +359,7 @@ for those routes.
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
 | GET | `/v1/merchant/payments` | `merchant:payments:read` | List payments with filters (`customer_id`, `price_id`, `status`, `rail`, ...); `Client.ListPayments` |
-| GET | `/v1/merchant/payments/{id}` | `merchant:payments:read` | One payment with refund history; `Client.GetPayment` |
+| GET | `/v1/merchant/payments/{id}` | `merchant:payments:read` | One payment with refund history; payments and refunds embed the `product` summary; `Client.GetPayment` |
 | POST | `/v1/merchant/payments/{id}/refunds` | `merchant:payments:refund` | Refund through the rail. `Idempotency-Key` required; body `{amount}` or `{full:true}`, optional `reason`, `revoke_access` (explicit). 201 settled, 202 pending; `refund_rail_unavailable`/`refund_unsupported` refusals. `Client.RefundPayment` |
 | GET | `/v1/merchant/purchase-reviews` | `merchant:payments:read` | Purchases a product archive recorded for review (`status=open\|refunded\|dismissed`, `product_archive_id`); `Client.ListPurchaseReviews` |
 | POST | `/v1/merchant/purchase-reviews/{id}/resolve` | `merchant:payments:refund` | `{decision: refund\|dismiss, notes}`; refund returns the remaining amount and ends the purchase's access; `Client.ResolvePurchaseReview` |

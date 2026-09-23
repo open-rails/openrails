@@ -51,6 +51,8 @@ type Payment struct {
 	FailureCode   *string      `json:"failure_code,omitempty"`
 	FailureReason *string      `json:"failure_reason,omitempty"`
 	Refunds       *PaymentList `json:"refunds,omitempty"`
+	// Product is the product this charge (or the charge a refund reverses) bought.
+	Product *ProductSummary `json:"product,omitempty"`
 	// RefundedPaymentID and Reason are set on refund objects: the charge the
 	// refund reverses and the merchant's stated reason.
 	RefundedPaymentID *PaymentID   `json:"refunded_payment_id,omitempty"`

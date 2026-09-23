@@ -158,6 +158,7 @@ func TestPortableRefundAndProductArchiveWorkflow(t *testing.T) {
 			require.EqualValues(t, -4_000_000, first.Amount)
 			require.Equal(t, "goodwill", first.Reason)
 			require.Equal(t, paid, *first.RefundedPaymentID)
+			require.Equal(t, &openrails.ProductSummary{ID: o.product.ID, Key: o.product.Key, DisplayName: "Post"}, first.Product, "the refund names the product it reverses")
 			require.True(t, hasAccess(o, customer), "a refund without revoke_access keeps the purchase's access")
 
 			replay, err := client.RefundPayment(ctx, paid, partial)
@@ -175,6 +176,10 @@ func TestPortableRefundAndProductArchiveWorkflow(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "refunded", got.Status)
 			require.EqualValues(t, 10_000_000, got.AmountRefunded)
+			require.Equal(t, first.Product, got.Product)
+			for _, refund := range got.Refunds.Data {
+				require.Equal(t, first.Product, refund.Product)
+			}
 			_, err = client.RefundPayment(ctx, paid, openrails.RefundPaymentParams{Full: true, IdempotencyKey: uuid.NewString()})
 			require.ErrorIs(t, err, openrails.ErrInvalid)
 			require.Equal(t, 2, gateway.count("ok-"+paid.UUID().String()))
