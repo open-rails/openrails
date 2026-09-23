@@ -63,3 +63,12 @@ payer, not the billing merchant. Its verifier/resolver must check current hosted
 merchant ownership, return that captured hosted merchant UUID as the canonical
 payer, and bind the principal to the PLATFORM billing merchant. A stale owner or
 an unrelated hosted merchant must fail before any of the four mutations.
+
+Native treasury can be declared in the same customer entry with `Treasury: true`.
+It uses constructor `Options.Auth` plus the merchant slug, so the application need
+not obtain a merchant UUID before constructing authentication. The canonical
+personal payer needs no role lookup. Selecting the fixed merchant as payer by
+UUID or its captured slug requires live authorization for the exact `customer:*`
+route permission with `Scope: CustomerScope` and both immutable merchant and
+payer UUIDs. Sibling customer IDs remain denied. Explicit delegated treasury
+continues to enforce its existing credential ceilings and payer constraints.

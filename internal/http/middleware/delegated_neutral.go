@@ -275,6 +275,12 @@ func RequirePermission(perm string) router.Middleware {
 				r.AbortJSON(http.StatusUnauthorized, "bearer principal required")
 				return
 			}
+			if authority, native := nativeTreasuryFromRequest(r); native {
+				if requireNativeTreasuryPermission(r, authority, perm) {
+					next(r)
+				}
+				return
+			}
 			if !principal.Can(r.Request.Context(), perm) {
 				r.AbortJSON(http.StatusForbidden, "permission_required")
 				return
@@ -385,7 +391,12 @@ func CustomerScopeRequired() router.Middleware {
 				r.AbortJSON(http.StatusUnauthorized, "delegated principal invalid")
 				return
 			}
-			payer, ok := ResolveTreasuryPayer(r.Param("customer_id"), resolved)
+			var payer *TreasuryPayer
+			if authority, native := nativeTreasuryFromRequest(r); native {
+				payer, ok = bindNativeTreasuryPayer(r, authority)
+			} else {
+				payer, ok = ResolveTreasuryPayer(r.Param("customer_id"), resolved)
+			}
 			if !ok {
 				r.AbortJSON(http.StatusForbidden, "customer_scope_mismatch")
 				return

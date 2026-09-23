@@ -22,7 +22,7 @@ type Identity struct {
 	Kind      PrincipalKind
 	SubjectID string
 	// CustomerID is the canonical payable UUID explicitly mapped by the host
-	// from (Issuer, SubjectID). Required for customer/checkout operations, optional
+	// from (Issuer, SubjectID). Required for customer/checkout and personal catalog operations, optional
 	// for merchant staff. OpenRails never guesses or hashes this mapping.
 	CustomerID      string
 	Issuer          string

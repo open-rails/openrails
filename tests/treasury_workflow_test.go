@@ -100,7 +100,7 @@ func newTreasuryWorkflow(t *testing.T, sandbox ...*config.ProviderSandboxConfig)
 		}
 		return principal, nil
 	})
-	handler, err := httptesthost.Handler(host, httptesthost.Options{HTTP: embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury:true}}}, DelegatedAuthenticator: principalSource})
+	handler, err := httptesthost.Handler(host, httptesthost.Options{HTTP: embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}}, DelegatedAuthenticator: principalSource})
 	require.NoError(t, err)
 	hostServer := httptest.NewServer(handler)
 	t.Cleanup(hostServer.Close)

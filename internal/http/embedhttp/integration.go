@@ -2,6 +2,7 @@ package embedhttp
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
+	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -41,7 +43,14 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 		if host.MerchantID.IsZero() || !billingauth.HasPermission(host.Permissions, permission) {
 			return billingauth.Principal{}, billingauth.GateError{Status: 403, Message: "permission_required"}
 		}
-		if err := merchanttarget.Assert(r, billingauth.Target{MerchantID: host.MerchantID, MerchantSlug: host.MerchantSlug}); err != nil {
+		target := billingauth.Target{MerchantID: host.MerchantID, MerchantSlug: host.MerchantSlug}
+		if captured, ok := merchanttarget.FromContext(ctx); ok {
+			if captured.MerchantID != host.MerchantID {
+				return billingauth.Principal{}, billingauth.GateError{Status: 409, Message: "host merchant binding mismatch"}
+			}
+			target = captured
+		}
+		if err := merchanttarget.Assert(r, target); err != nil {
 			return billingauth.Principal{}, err
 		}
 		return billingauth.Principal{MerchantID: host.MerchantID, Subject: host.Subject, Permissions: append([]string(nil), host.Permissions...)}, nil
@@ -51,6 +60,10 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 	}
 	identity, err := authenticateIntegration(ctx, r, g.auth)
 	if err != nil {
+		var gate billingauth.GateError
+		if errors.As(err, &gate) && gate.Status == http.StatusServiceUnavailable {
+			return billingauth.Principal{}, err
+		}
 		return billingauth.Principal{}, billingauth.GateError{Status: 401, Message: billingauth.UnauthenticatedMessage(err)}
 	}
 	target, err := merchanttarget.Resolve(ctx, r, g.runtime.Merchants, g.runtime.ConfiguredMerchant(), "")
@@ -65,11 +78,22 @@ func (g integrationGate) Authorize(ctx context.Context, r *http.Request, permiss
 	if identity.Kind != billingauth.NativeUser && !billingauth.HasPermission(identity.Permissions, permission) {
 		return billingauth.Principal{}, billingauth.GateError{Status: 403, Message: "credential permission ceiling"}
 	}
+	subject := identity.SubjectID
+	if identity.Kind == billingauth.NativeUser && (permission == permissions.MerchantCatalogOwnRead || permission == permissions.MerchantCatalogOwnUpdate) {
+		if identity.CustomerID == "" {
+			return billingauth.Principal{}, billingauth.GateError{Status: 403, Message: "canonical personal identity required"}
+		}
+		subject = identity.CustomerID
+	}
 	required := billingauth.Requirement{Permission: permission, Scope: scope, Target: target}
 	if err := g.auth.Authorization.Authorize(ctx, r, identity, required); err != nil {
-		return billingauth.Principal{}, err
+		var gate billingauth.GateError
+		if errors.As(err, &gate) {
+			return billingauth.Principal{}, err
+		}
+		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusServiceUnavailable, Message: "authorization unavailable"}
 	}
-	principal := billingauth.Principal{MerchantID: target.MerchantID, Subject: identity.SubjectID}
+	principal := billingauth.Principal{MerchantID: target.MerchantID, Subject: subject}
 	if identity.Kind == billingauth.NativeUser {
 		principal.UserContext = billingauth.UserContext{UserID: identity.CustomerID, Email: identity.Email, EmailVerified: identity.EmailVerified, Username: identity.Username, Merchant: target.MerchantSlug}
 	} else {
@@ -132,7 +156,7 @@ func authenticateIntegration(ctx context.Context, r *http.Request, auth *billing
 		if err != nil {
 			return billingauth.Identity{}, err
 		}
-		if strings.TrimSpace(identity.SubjectID) == "" || strings.TrimSpace(identity.Issuer) == "" {
+		if (identity.Kind != billingauth.Machine && strings.TrimSpace(identity.SubjectID) == "") || strings.TrimSpace(identity.Issuer) == "" {
 			return billingauth.Identity{}, billingauth.ErrUnauthenticated
 		}
 		switch identity.Kind {

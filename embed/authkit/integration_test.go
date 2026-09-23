@@ -51,3 +51,9 @@ func TestIntegrationMemoIdentityAndExplicitAdmission(t *testing.T) {
 	require.Equal(t, 1, calls, "distinct opt-in admission is never bypassed by another integration's memo")
 	require.Equal(t, 2, v.calls)
 }
+
+func TestIntegrationRejectsUnconfiguredRuntimeVerifier(t *testing.T) {
+	var verifier *verify.Verifier
+	_, err := New(Config{Verifier: verifier})
+	require.ErrorContains(t, err, "verifier is required")
+}

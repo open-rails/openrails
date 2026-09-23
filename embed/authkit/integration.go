@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -43,7 +44,7 @@ type Config struct {
 type integration struct{ cfg Config }
 
 func New(cfg Config) (*billingauth.Integration, error) {
-	if cfg.Verifier == nil {
+	if cfg.Verifier == nil || (reflect.ValueOf(cfg.Verifier).Kind() == reflect.Pointer && reflect.ValueOf(cfg.Verifier).IsNil()) {
 		return nil, fmt.Errorf("authkit integration: verifier is required")
 	}
 	if (cfg.Client == nil) != (cfg.Authority == nil && cfg.PlatformAuthority == nil) {
@@ -86,7 +87,12 @@ func identityFromClaims(cl verify.Claims) (billingauth.Identity, error) {
 		out.SubjectID = cl.UserID
 		out.CustomerID = cl.UserID
 		out.CredentialClass = billingauth.CredentialClassUserSession
-	case coreauth.PrincipalKindAPIKey, coreauth.PrincipalKindRemoteApplication:
+	case coreauth.PrincipalKindAPIKey:
+		out.Kind = billingauth.Machine
+		out.Issuer = cl.PermissionGroupAuthorityIssuer
+		out.CredentialClass = billingauth.CredentialClassAutomation
+		out.Permissions = append([]string(nil), cl.Permissions...)
+	case coreauth.PrincipalKindRemoteApplication:
 		out.Kind = billingauth.Machine
 		out.SubjectID = cl.RemoteApplicationID
 		out.CredentialClass = billingauth.CredentialClassAutomation

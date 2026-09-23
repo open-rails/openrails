@@ -86,10 +86,13 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 		}
 		return conflictResponse(req, message), nil
 	}
+	// Drop all ambient values before target resolution; retain only the trusted
+	// resolver's fresh result, including the requested forwarded name.
+	ctx = engineContext(ctx)
 	var slug string
-	var resolvedTarget *billingauth.Target
 	if t.resolveTarget != nil {
-		target, err := t.resolveTarget(engineContext(ctx), req)
+		selectionRequest := req.Clone(ctx)
+		target, err := t.resolveTarget(ctx, selectionRequest)
 		if err != nil {
 			var gate billingauth.GateError
 			if errors.As(err, &gate) {
@@ -98,7 +101,7 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 			return refuse(err.Error())
 		}
 		mid, slug = target.MerchantID, target.MerchantSlug
-		resolvedTarget = &target
+		ctx = merchanttarget.WithResolved(selectionRequest.Context(), target)
 	}
 	if mid.IsZero() {
 		return refuse("openrails: in-process client is not bound to a merchant")
@@ -109,10 +112,6 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	}
 	// Only the caller's cancellation and deadline reach the engine; every host
 	// context value is dropped (engineContext).
-	ctx = engineContext(ctx)
-	if resolvedTarget != nil {
-		ctx = merchanttarget.WithResolved(ctx, *resolvedTarget)
-	}
 	if req.Header.Get("Authorization") == "Bearer "+t.hostCredential {
 		ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{MerchantID: mid, MerchantSlug: slug, Subject: t.subject, Permissions: append([]string(nil), t.permissions...)})
 	}

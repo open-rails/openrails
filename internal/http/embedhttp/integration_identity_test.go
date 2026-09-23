@@ -7,7 +7,10 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
+	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
@@ -72,4 +75,57 @@ func TestNativeStaffDoesNotRequirePayableCustomerMapping(t *testing.T) {
 	require.ErrorIs(t, err, billingauth.ErrUnauthenticated, "checkout requires an explicit payable customer mapping")
 	_, err = nativeCustomer(auth, billingauth.Target{MerchantID: merchant.ID(uuid.New()), MerchantSlug: "store"}).AuthenticateDelegated(r.Context(), r)
 	require.ErrorIs(t, err, billingauth.ErrUnauthenticated, "staff authority never invents personal billing ownership")
+}
+
+func TestPersonalCatalogUsesCanonicalIssuerAwareIdentity(t *testing.T) {
+	target := billingauth.Target{MerchantID: merchant.ID(uuid.New()), MerchantSlug: "store"}
+	for _, tc := range []struct{ issuer, customer string }{{"issuer-a", uuid.NewString()}, {"issuer-b", uuid.NewString()}, {"issuer-c", ""}} {
+		t.Run(tc.issuer, func(t *testing.T) {
+			auth := &billingauth.Integration{
+				Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
+					return billingauth.Identity{Kind: billingauth.NativeUser, SubjectID: "same-opaque-subject", Issuer: tc.issuer, CustomerID: tc.customer, CredentialClass: billingauth.CredentialClassUserSession}, nil
+				}),
+				Authorization: billingauth.AuthorizationFunc(func(_ context.Context, _ *http.Request, i billingauth.Identity, _ billingauth.Requirement) error {
+					require.Equal(t, "same-opaque-subject", i.SubjectID)
+					require.Equal(t, tc.issuer, i.Issuer)
+					return nil
+				}),
+			}
+			gate := integrationGate{auth: auth, runtime: &app.Runtime{}}
+			r := requestauth.Begin(httptest.NewRequest(http.MethodGet, "/v1/catalog", nil))
+			r = r.WithContext(merchanttarget.WithResolved(r.Context(), target))
+			principal, err := gate.Authorize(r.Context(), r, permissions.MerchantCatalogOwnRead)
+			if tc.customer == "" {
+				var denied billingauth.GateError
+				require.ErrorAs(t, err, &denied)
+				require.Equal(t, 403, denied.Status)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.customer, principal.Subject)
+			}
+			principal, err = gate.Authorize(r.Context(), r, permissions.MerchantCatalogRead)
+			require.NoError(t, err, "ordinary staff authority needs no payable customer mapping")
+			require.Equal(t, "same-opaque-subject", principal.Subject)
+		})
+	}
+}
+
+func TestIntegrationGateDistinguishesDeniedAndUnavailableAuthority(t *testing.T) {
+	target := billingauth.Target{MerchantID: merchant.ID(uuid.New()), MerchantSlug: "store"}
+	for _, tc := range []struct {
+		err    error
+		status int
+	}{{billingauth.GateError{Status: 403, Message: "denied"}, 403}, {billingauth.GateError{Status: 503, Message: "unavailable"}, 503}, {context.DeadlineExceeded, 503}} {
+		auth := &billingauth.Integration{Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
+			return billingauth.Identity{Kind: billingauth.NativeUser, SubjectID: "staff", Issuer: "issuer", CredentialClass: billingauth.CredentialClassUserSession}, nil
+		}), Authorization: billingauth.AuthorizationFunc(func(context.Context, *http.Request, billingauth.Identity, billingauth.Requirement) error {
+			return tc.err
+		})}
+		r := requestauth.Begin(httptest.NewRequest(http.MethodGet, "/v2/merchant/products", nil))
+		r = r.WithContext(merchanttarget.WithResolved(r.Context(), target))
+		_, err := (integrationGate{auth: auth, runtime: &app.Runtime{}}).Authorize(r.Context(), r, permissions.MerchantCatalogRead)
+		var failure billingauth.GateError
+		require.ErrorAs(t, err, &failure)
+		require.Equal(t, tc.status, failure.Status)
+	}
 }

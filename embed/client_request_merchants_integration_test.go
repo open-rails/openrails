@@ -360,7 +360,7 @@ func TestClientRequestMerchantHeadlessAndHTTP(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(names.Close)
 		authority := controlplane.MerchantNameAuthority(names)
-		aliasRuntime := newRuntime(&embed.HTTPConfig{MerchantAdmin: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: former, Scope: embed.CustomerBillingManagement}}})
+		aliasRuntime := newRuntime(&embed.HTTPConfig{MerchantAdmin: true, Catalog: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: former, Scope: embed.CustomerBillingManagement}}})
 		for _, runtime := range []*embed.Runtime{headless, aliasRuntime} {
 			app.HostGraph(runtime).Runtime.Merchants.WithNameAuthority(authority)
 		}
@@ -385,7 +385,7 @@ func TestClientRequestMerchantHeadlessAndHTTP(t *testing.T) {
 		for _, mode := range []struct {
 			name   string
 			client *openrails.Client
-		}{{"headless", aliasLocal}, {"http", aliasRemote}} {
+		}{{"trusted-host", host}, {"headless", aliasLocal}, {"http", aliasRemote}} {
 			t.Run(mode.name, func(t *testing.T) {
 				product, err := mode.client.Products.Create(ctx, &openrails.ProductCreateParams{Key: "forwarded-" + mode.name, DisplayName: "Forwarded product"}, openrails.WithMerchant(former))
 				require.NoError(t, err)
@@ -393,6 +393,9 @@ func TestClientRequestMerchantHeadlessAndHTTP(t *testing.T) {
 					read, err := mode.client.Products.Retrieve(ctx, product.ID, selector)
 					require.NoError(t, err)
 					require.Equal(t, product.ID, read.ID)
+				}
+				if mode.name == "trusted-host" {
+					return // Customer self routes require an explicit native identity.
 				}
 				before := authenticationCalls.Load()
 				_, err = mode.client.GetMyInvoice(ctx, uuid.New(), openrails.WithMerchant(former))

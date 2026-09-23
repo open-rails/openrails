@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	coreauth "github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/authhttp"
 	authcore "github.com/open-rails/authkit/embedded"
 	billingauthkit "github.com/open-rails/openrails/embed/authkit"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -35,11 +36,11 @@ func TestIntegrationLiveAuthorityAndNativeIdentity(t *testing.T) {
 		require.NoError(t, err)
 	})
 	const issuer = "https://identity1047.test"
-	runtime, err := authcore.New(authcore.Config{Schema: schema, Keys: authcore.KeysConfig{AllowEphemeralDevKeys: true},
+	runtime, err := authcore.New(authcore.Config{Schema: schema, HTTP: authhttp.Config{DirectPeerIP: true}, Keys: authcore.KeysConfig{AllowEphemeralDevKeys: true},
 		Token:     authcore.TokenConfig{Issuer: issuer, IssuedAudiences: []string{"billing"}, ExpectedAudiences: []string{"billing"}},
 		Ephemeral: authcore.EphemeralConfig{AllowMemory: true}, TwoFactor: authcore.TwoFactorConfig{Mode: authcore.TwoFactorDisabled},
 		RBAC: []authcore.PersonaDef{
-			authcore.IntrinsicRootPersona(authcore.RoleDef{Name: "billing-operator", Permissions: []string{"root:merchant:payments:refund"}}),
+			authcore.IntrinsicRootPersona(authcore.RoleDef{Name: "billing-operator", Permissions: []string{"root:payments:refund"}}),
 			{Name: "merchant", Parent: coreauth.RootPersona, Roles: []authcore.RoleDef{{Name: "viewer", Permissions: []string{"merchant:payments:read"}}}},
 		},
 	}, authcore.Deps{Postgres: pool})
@@ -73,7 +74,7 @@ func TestIntegrationLiveAuthorityAndNativeIdentity(t *testing.T) {
 			if q.Permission != "merchant:payments:refund" {
 				return billingauthkit.Authority{}, nil
 			}
-			return billingauthkit.Authority{Group: coreauth.RootGroup(), Permission: "root:merchant:payments:refund"}, nil
+			return billingauthkit.Authority{Group: coreauth.RootGroup(), Permission: "root:payments:refund"}, nil
 		},
 	})
 	require.NoError(t, err)
@@ -89,6 +90,10 @@ func TestIntegrationLiveAuthorityAndNativeIdentity(t *testing.T) {
 		r.Header.Set("Authorization", "Bearer "+token)
 		identity, err := integration.Authentication.AuthenticateRequest(r.Context(), r)
 		require.NoError(t, err)
+		if identity.Kind != billingauth.Machine {
+			require.NotEmpty(t, identity.SubjectID)
+		}
+		require.NotEmpty(t, identity.Issuer)
 		if identity.Kind == billingauth.NativeUser {
 			require.Empty(t, identity.Permissions, "native token role/permission extras cannot confer authority")
 		}
@@ -114,10 +119,17 @@ func TestIntegrationLiveAuthorityAndNativeIdentity(t *testing.T) {
 	check(operatorToken, "bravo", "merchant:payments:refund", 0)
 	check(operatorToken, "bravo", "merchant:payment-providers:update", 403)
 	// An actual opaque API key remains bounded to its immutable permission group.
-	_, key, err := client.MintAPIKeyWithOptions(ctx, groupA, coreauth.APIKeyMintOptions{Name: "read-only", Role: "viewer", CreatedBy: owner.ID})
+	record, key, err := client.MintAPIKeyWithOptions(ctx, groupA, coreauth.APIKeyMintOptions{Name: "read-only", Role: "viewer", CreatedBy: owner.ID})
 	require.NoError(t, err)
 	check(key, "alpha", "merchant:payments:read", 0)
 	check(key, "bravo", "merchant:payments:read", 403)
 	check(key, "alpha", "merchant:payments:refund", 403)
+	revoked, err := client.RevokeAPIKey(ctx, groupA, record.ID)
+	require.NoError(t, err)
+	require.True(t, revoked)
+	r := requestauth.Begin(httptest.NewRequest(http.MethodGet, "https://billing.test/v2/merchant/payments", nil))
+	r.Header.Set("Authorization", "Bearer "+key)
+	_, err = integration.Authentication.AuthenticateRequest(r.Context(), r)
+	require.Error(t, err, "revoked API key must fail live verification on the next request")
 
 }

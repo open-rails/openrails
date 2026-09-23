@@ -127,7 +127,7 @@ This design intentionally does not change reusable Client merchant-scoping seman
 
 ### Canonical customer identity
 
-Neutral native identity requires `SubjectID` and `Issuer`. Customer and checkout
+Neutral native identity requires `SubjectID` and `Issuer`. Customer, checkout and personal own-catalog
 operations additionally require an explicit canonical UUID `CustomerID`; merchant
 staff need no payable customer mapping. Hosts map `(Issuer, SubjectID)` to their payable customer UUID;
 OpenRails has no issuer/opaque-subject mapping table and never hashes, guesses,
@@ -137,3 +137,10 @@ therefore represent different payable customers. Missing mapping on a customer o
 The original subject and issuer remain the inputs for privileged authorization;
 personal payer predicates use the canonical customer ID. Ownership does not grant
 merchant refund or administration permission.
+
+Native `merchant:catalog:own:*` operations use the explicit canonical identity as
+the personal owner key, preventing equal opaque subjects from different issuers
+from sharing one creator catalog. Missing mapping denies that personal operation;
+ordinary staff/platform authorization continues to use the original issuer and
+subject without requiring a payable customer. Explicit channel/group catalog
+selection retains its separate permission and ownership checks.
