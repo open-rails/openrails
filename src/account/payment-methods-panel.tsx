@@ -35,6 +35,8 @@ import { useNotice } from "./notice"
 import { BillingStatusBadge } from "./status-badge"
 
 export interface CardSetupConfig {
+  /** OpenRails PSP key the card is saved with (the checkout option's selector). */
+  provider: string
   /** NMI Collect.js public tokenization key. */
   tokenizationKey: string
   /** Collect.js script URL. */
@@ -328,7 +330,10 @@ export function PaymentMethodsPanel({
               appearance={appearance}
               onTokenized={async (card) => {
                 setAddError(null)
-                const error = await state.add(card)
+                const error = await state.add({
+                  ...card,
+                  provider: cardSetup.provider,
+                })
                 if (error) {
                   // A definitive refusal: fresh form so the customer can retry.
                   setAddError(m.error(error))

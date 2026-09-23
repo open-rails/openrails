@@ -55,7 +55,7 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
   <BillingProvider client={billing} onChange={() => queryClient.invalidateQueries({ queryKey: ["billing"] })}>
     <AccountBilling
       plansHref="/plans"
-      cardSetup={{ tokenizationKey, tokenizationURL }} // enables "Add card"
+      cardSetup={{ provider: "nmi", tokenizationKey, tokenizationURL }} // enables "Add card"
       defaultCurrency="USD" // enables "Make default"
       sendSolanaTransaction={(tx) => wallet.signAndSend(tx)} // Solana-rail cancel
     />

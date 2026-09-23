@@ -130,7 +130,11 @@ describe("usePaymentMethods", () => {
     await waitFor(() => expect(result.current.methods).toHaveLength(1))
 
     await act(async () => {
-      await result.current.add({ payment_token: "tok", name_on_card: "A" })
+      await result.current.add({
+        provider: "nmi",
+        payment_token: "tok",
+        name_on_card: "A",
+      })
     })
     await waitFor(() => expect(result.current.methods).toHaveLength(2))
 

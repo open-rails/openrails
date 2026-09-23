@@ -27,7 +27,7 @@ it("calls only routes OpenRails mounts for customers", async () => {
     () => client.setSubscriptionPaymentMethod("sub_1", "pm_1"),
     () => client.cancelSubscriptionOnChain("sub_1", async () => "sig"),
     () => client.listPaymentMethods(),
-    () => client.addPaymentMethod({ payment_token: "tok" }),
+    () => client.addPaymentMethod({ provider: "nmi", payment_token: "tok" }),
     () => client.removePaymentMethod("pm_1"),
     () =>
       client.setDefaultPaymentMethod({

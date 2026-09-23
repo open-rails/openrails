@@ -217,6 +217,8 @@ export const solanaCancelTxSchema = z.object({
 
 /** What a card setup hands the server: tokenized data only, never a PAN. */
 export interface NewCard {
+  /** OpenRails PSP key that issued the token (e.g. "nmi"); required. */
+  provider: string
   payment_token: string
   name_on_card?: string
   country?: string

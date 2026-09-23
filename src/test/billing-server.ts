@@ -189,6 +189,9 @@ export function fakeBilling(
           page(state.methods, limit, offset, state.methods.length)
         )
       if (key === "POST /me/payment-methods") {
+        // Like OpenRails: the PSP that tokenized the card is required.
+        const body = JSON.parse(String(init.body ?? "{}")) as Row
+        if (!body.provider) return apiError(400, "invalid_request")
         const created = paymentMethod({
           id: `pm_${state.methods.length + 1}`,
           card: {

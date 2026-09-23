@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0
+
+- "Add card" works against real OpenRails, which requires the PSP that
+  tokenized the card: `CardSetupConfig.provider` (the PSP key, e.g. `"nmi"`)
+  is required and sent as `NewCard.provider`. Before, every add was refused
+  with 400 `provider is required`.
+
 ## 0.5.2
 
 - `renderSubscriptionFooter` (on `SubscriptionsPanel` and `AccountBilling`)
