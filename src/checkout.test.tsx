@@ -922,6 +922,37 @@ describe("accepted processing", () => {
     expect(pay).toHaveBeenCalledTimes(1)
     expect(getSession.mock.calls.length).toBeGreaterThan(1)
   })
+  it("keeps awaiting an ambiguous pay through stale ready reads until settlement", async () => {
+    const pay = vi.fn().mockRejectedValue(new Error("response lost"))
+    const getSession = vi
+      .fn()
+      .mockResolvedValueOnce(fixtureSession())
+      .mockResolvedValueOnce(fixtureSession({ status: "requires_action" }))
+      .mockResolvedValueOnce(fixtureSession({ status: "created" }))
+      .mockResolvedValue(
+        fixtureSession({ status: "succeeded", payment_id: "settled" })
+      )
+    render(<Checkout source={{ getSession, pay }} />)
+    const button = await screen.findByRole("button", { name: "Pay $99.00" })
+    vi.useFakeTimers()
+    await act(async () => {
+      fireEvent.click(button)
+    })
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000)
+      })
+      expect(screen.getByText("Confirming your payment")).toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Pay $99.00" })
+      ).not.toBeInTheDocument()
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    expect(screen.getAllByText("Payment complete").length).toBeGreaterThan(0)
+    expect(pay).toHaveBeenCalledTimes(1)
+  })
   it("loads processing without an available rail and waits for definitive failure", async () => {
     const source: CheckoutSource = {
       getSession: vi

@@ -136,3 +136,5 @@ against the host's saved-method state before mounting a new attempt.
 Saving a card does not authorize a recurring charge. The host separately obtains
 and displays the immutable membership quote, then asks the signed-in customer
 to confirm that agreement.
+
+Hosts must key `TokenizedCardForm` by authenticated customer and provider identity. A customer change must unmount the old form. The form also discards an in-flight token if its tokenization configuration changes or save consent is withdrawn before dispatch.

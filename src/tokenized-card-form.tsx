@@ -53,6 +53,13 @@ export function TokenizedCardForm({
   const [busy, setBusy] = React.useState(false)
   const [submitted, setSubmitted] = React.useState(false)
   const [error, setError] = React.useState<string>()
+  const authorization = React.useRef({ generation: 0, disabled })
+  React.useLayoutEffect(() => {
+    authorization.current = {
+      generation: authorization.current.generation + 1,
+      disabled,
+    }
+  }, [tokenizationKey, tokenizationURL, disabled])
   const mounted = React.useRef(true)
   React.useEffect(() => {
     mounted.current = true
@@ -81,10 +88,16 @@ export function TokenizedCardForm({
     }
     setBusy(true)
     setError(undefined)
+    const generation = authorization.current.generation
     let sent = false
     try {
       const token = await collect.tokenize()
-      if (!mounted.current) return
+      if (
+        !mounted.current ||
+        authorization.current.generation !== generation ||
+        authorization.current.disabled
+      )
+        return
       sent = true
       setSubmitted(true)
       await onTokenized({ payment_token: token.token, ...parsed.data })

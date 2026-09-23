@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { TokenizedCardForm } from "./tokenized-card-form"
 
@@ -74,3 +74,44 @@ describe("TokenizedCardForm", () => {
     expect(save).toHaveBeenCalledTimes(1)
   })
 })
+
+it.each(["key", "url", "consent"])(
+  "discards a token when %s changes while tokenization is pending",
+  async (change) => {
+    const save = vi.fn().mockResolvedValue(undefined)
+    const props = {
+      tokenizationKey: "preview_fixture",
+      tokenizationURL: "https://gateway.example/Collect.js",
+      onTokenized: save,
+    }
+    const { rerender } = render(<TokenizedCardForm {...props} />)
+    fireEvent.change(screen.getByLabelText("Name on card"), {
+      target: { value: "Pat Reader" },
+    })
+    fireEvent.change(screen.getByLabelText("Country"), {
+      target: { value: "US" },
+    })
+    fireEvent.change(screen.getByLabelText(/ZIP/), {
+      target: { value: "94107" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save card" }))
+    rerender(
+      <TokenizedCardForm
+        {...props}
+        tokenizationKey={
+          change === "key" ? "preview_other" : props.tokenizationKey
+        }
+        tokenizationURL={
+          change === "url"
+            ? "https://other.example/Collect.js"
+            : props.tokenizationURL
+        }
+        disabled={change === "consent"}
+      />
+    )
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(save).not.toHaveBeenCalled()
+  }
+)

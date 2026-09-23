@@ -469,6 +469,8 @@ export function Checkout({
             changePhase("expired")
             return
           default:
+            // Ready-looking reads can race an accepted write. Keep the local
+            // pending presentation and poll; never re-enable tokenization.
             schedule()
         }
       } catch {
