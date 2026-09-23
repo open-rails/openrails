@@ -76,5 +76,5 @@ boundary.
 
 - sqlc prepare/schema validity: `task sqlc-check`.
 - contract execution: `task test-query-contracts`.
-- hot entitlement lookup plan shape at 100k rows: `task test-query-perf`.
+- nine hot query access paths with a bounded non-uniform fixture: `task test-query-perf`.
 
