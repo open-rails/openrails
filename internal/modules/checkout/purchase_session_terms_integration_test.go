@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
@@ -388,4 +389,89 @@ func TestPurchaseNMISessionAdmissionSurvivesArchiveBeforeDispatch(t *testing.T) 
 	require.NoError(t, err)
 	require.Contains(t, paid.EntitlementsSpecSnapshot, "accepted_nmi_post")
 	require.NotContains(t, paid.EntitlementsSpecSnapshot, "replaced_nmi_post")
+}
+
+func TestPermanentBundlesAllowPartialOwnershipAndBlockFullyCoveredResources(t *testing.T) {
+	fx, service, _, psp := purchaseSessionFixture(t)
+	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{"post:a":null,"post:b":null}' WHERE id=$1`, fx.productID)
+	require.NoError(t, err)
+	access := entitlements.NewEntitlementService(fx.db)
+	_, err = access.PushNewEntitlement(fx.ctx, entitlements.PushNewEntitlementParams{UserID: fx.userID, Entitlement: "post:a", Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: uuid.New()})
+	require.NoError(t, err)
+	calls := 0
+	restore := stripeapi.InstallBaseTransport(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { calls++; return stripeCheckoutOK(), nil }))
+	defer restore()
+	req := purchaseSessionRequest(fx, "partial-bundle")
+	req.Entitlement = "post:b"
+	bundle, err := service.CreateSession(fx.ctx, req, &UserIdentity{ID: fx.userID})
+	require.NoError(t, err, "owning A must not block bundle A+B")
+	// A different product granting only B is redundant while the accepted
+	// bundle reserves B, even before the provider emits the paid event.
+	productID, priceID := uuid.New(), uuid.New()
+	_, err = fx.db.Pool().Exec(fx.ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name,entitlements_spec) VALUES($1,$2,$3,'B alone','{"post:b":null}')`, productID, fx.merchantID.UUID(), uuid.NewString())
+	require.NoError(t, err)
+	_, err = fx.db.Pool().Exec(fx.ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency) VALUES($1,$2,$3,1000000,'USD')`, priceID, fx.merchantID.UUID(), productID)
+	require.NoError(t, err)
+	other := purchaseSessionRequest(fx, "redundant-b")
+	other.PriceID = openrails.PriceID(priceID).String()
+	other.Entitlement = "post:b"
+	_, err = service.CreateSession(fx.ctx, other, &UserIdentity{ID: fx.userID})
+	require.ErrorIs(t, err, ErrCheckoutSessionConflict)
+	require.Equal(t, 1, calls)
+	// Cross-product pending exclusion never consults current product benefits.
+	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{}' WHERE id=$1`, fx.productID)
+	require.NoError(t, err)
+	other.IdempotencyKey = "still-reserved-b"
+	_, err = service.CreateSession(fx.ctx, other, &UserIdentity{ID: fx.userID})
+	require.ErrorIs(t, err, ErrCheckoutSessionConflict)
+	wrong := purchaseSessionRequest(fx, "wrong-resource")
+	wrong.Entitlement = "post:missing"
+	_, err = service.CreateSession(fx.ctx, wrong, &UserIdentity{ID: fx.userID})
+	require.ErrorIs(t, err, ErrCheckoutSessionValidation)
+	paid, err := fx.purchase.RegisterPurchase(db.WithPSPID(fx.ctx, psp), &payments.RegisterPurchaseRequest{CheckoutSessionID: bundle.ID.UUID(), UserID: fx.userID, PriceID: fx.priceID, Rail: "stripe", TransactionID: "pi_bundle", Amount: 5000000, AmountProvided: true, Currency: "USD"})
+	require.NoError(t, err)
+	other.IdempotencyKey = "owned-b"
+	_, err = service.CreateSession(fx.ctx, other, &UserIdentity{ID: fx.userID})
+	require.ErrorIs(t, err, ErrCheckoutSessionConflict)
+	require.NoError(t, access.EndActiveByPayment(fx.ctx, paid.PaymentID, models.EntitlementRevokeRefund))
+	_, err = productaccess.NewService(fx.db).RevokeProductAccessByPayment(fx.ctx, paid.PaymentID, models.ProductAccessRevokeRefund)
+	require.NoError(t, err)
+	decisions, err := access.CheckMany(fx.ctx, fx.userID, []string{"post:a", "post:b"}, time.Time{})
+	require.NoError(t, err)
+	require.Equal(t, map[string]bool{"post:a": true, "post:b": false}, decisions, "refund removes only bundle's grants, preserving independently acquired A")
+}
+
+func TestPermanentResourceConcurrentDistinctProductsAdmitOne(t *testing.T) {
+	fx, service, _, _ := purchaseSessionFixture(t)
+	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{"post:shared":null}' WHERE id=$1`, fx.productID)
+	require.NoError(t, err)
+	product, price := uuid.New(), uuid.New()
+	_, err = fx.db.Pool().Exec(fx.ctx, `INSERT INTO billing.products(id,merchant_id,key,display_name,entitlements_spec) VALUES($1,$2,$3,'Alternative','{"post:shared":null}')`, product, fx.merchantID.UUID(), uuid.NewString())
+	require.NoError(t, err)
+	_, err = fx.db.Pool().Exec(fx.ctx, `INSERT INTO billing.prices(id,merchant_id,product_id,amount,currency) VALUES($1,$2,$3,1000000,'USD')`, price, fx.merchantID.UUID(), product)
+	require.NoError(t, err)
+	var calls atomic.Int32
+	restore := stripeapi.InstallBaseTransport(initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { calls.Add(1); return stripeCheckoutOK(), nil }))
+	defer restore()
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for _, id := range []uuid.UUID{fx.priceID, price} {
+		go func() {
+			<-start
+			req := purchaseSessionRequest(fx, uuid.NewString())
+			req.PriceID = openrails.PriceID(id).String()
+			req.Entitlement = "post:shared"
+			req.OfferKind = openrails.OfferPermanent
+			_, err := service.CreateSession(fx.ctx, req, &UserIdentity{ID: fx.userID})
+			results <- err
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	if first != nil {
+		first, second = second, first
+	}
+	require.NoError(t, first)
+	require.ErrorIs(t, second, ErrCheckoutSessionConflict)
+	require.EqualValues(t, 1, calls.Load())
 }

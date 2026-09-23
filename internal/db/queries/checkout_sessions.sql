@@ -219,7 +219,7 @@ FOR SHARE OF p, product;
 UPDATE openrails.checkout_sessions
 SET rail_state = rail_state || '{"purchase_submitted":true}'::jsonb
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
-  AND mode='one_off' AND rail='stripe'
+  AND deleted_at IS NULL AND mode='one_off' AND rail='stripe'
   AND status IN ('created','failed') AND rail_state ? 'accepted_purchase'
   AND NOT COALESCE((rail_state->>'purchase_submitted')::boolean, false)
   AND NOT COALESCE((rail_state->>'provider_closed')::boolean, false);
@@ -233,7 +233,7 @@ SET status='failed', updated_at=sqlc.arg(now)::timestamptz,
       || CASE WHEN NOT COALESCE((rail_state->>'purchase_submitted')::boolean, false)
               THEN '{"provider_closed":true}'::jsonb ELSE '{}'::jsonb END
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
-  AND mode='one_off' AND rail='stripe' AND rail_state ? 'accepted_purchase'
+  AND deleted_at IS NULL AND mode='one_off' AND rail='stripe' AND rail_state ? 'accepted_purchase'
   AND status<>'succeeded';
 
 -- name: CloseHostedCheckoutFromProvider :execrows
@@ -242,7 +242,7 @@ SET status=CASE WHEN status='succeeded' THEN status ELSE sqlc.arg(status)::text 
     rail_state=COALESCE(rail_state, '{}'::jsonb) || '{"provider_closed":true}'::jsonb,
     updated_at=sqlc.arg(now)::timestamptz
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
-  AND psp_id=sqlc.arg(psp_id)::uuid AND rail='stripe';
+  AND psp_id=sqlc.arg(psp_id)::uuid AND rail='stripe' AND deleted_at IS NULL;
 
 -- A local expiry or failed HTTP request does not prove a provider cannot charge.
 -- Only a completed purchase or authoritative provider cancellation releases a

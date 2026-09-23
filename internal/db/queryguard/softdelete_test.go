@@ -51,6 +51,8 @@ var allow = map[string]string{
 	"CountInvalidStripeSetupReferences":     "canonical archive retains completed setup history including removed methods and tombstones",
 	"CountInvalidCheckoutCaptureReferences": "archive integrity audit validates every retained capture binding, including tombstones; this is not a live-session read",
 	"HasSettledPayment":                     "historical positive rail-payment proof survives archival and event retention; a tombstone must not grant another first-payment trial",
+	"HasUnresolvedProductCheckout":          "a tombstone is not provider nonexecution; retained unknown checkout must still exclude a second charge",
+	"PermanentBenefitsCovered":              "retained unresolved checkout benefit reservations survive local tombstones until provider outcome resolves; active entitlement reads still filter deleted rows",
 	"MerchantHasActivity":                   "retirement is only for never-used merchants; historical and soft-deleted payments/subscriptions must disqualify them",
 	"ListHostEvents":                        "a settled event's payer/price coordinates come from its payment row; the event stays deliverable after the payment is tombstoned",
 	// The prune's own reversal path: it exists to find stamped rows.

@@ -22,7 +22,7 @@ WHERE product.merchant_id=sqlc.arg(merchant_id)::uuid
  AND (sqlc.narg(catalog_id)::uuid IS NULL OR product.catalog_id=sqlc.narg(catalog_id)::uuid)
  AND NOT product.archived AND NOT price.archived
  AND product.entitlements_spec ? sqlc.arg(entitlement)::text
- AND ((sqlc.arg(kind)::text='permanent' AND NOT price.auto_renew AND price.access_duration_hours IS NULL)
+ AND ((sqlc.arg(kind)::text='permanent' AND NOT price.auto_renew AND price.access_duration_hours IS NULL AND COALESCE(product.entitlements_spec->>sqlc.arg(entitlement)::text,'0')='0')
    OR (sqlc.arg(kind)::text='finite' AND NOT price.auto_renew AND price.access_duration_hours IS NOT NULL)
    OR (sqlc.arg(kind)::text='recurring' AND price.auto_renew))
  AND (sqlc.narg(after_id)::uuid IS NULL OR
@@ -30,3 +30,32 @@ WHERE product.merchant_id=sqlc.arg(merchant_id)::uuid
    (sqlc.arg(after_currency)::text<>sqlc.arg(preferred_currency)::text, sqlc.arg(after_currency)::text, sqlc.narg(after_id)::uuid))
 ORDER BY price.currency<>sqlc.arg(preferred_currency)::text, price.currency, price.id
 LIMIT sqlc.arg(page_limit)::int;
+
+-- A partial bundle remains useful; reject only when every durable benefit is
+-- already owned or reserved by another accepted permanent purchase. Admission
+-- calls this under the same customer lock used by session and sale insertion.
+-- name: PermanentBenefitsCovered :one
+SELECT cardinality(sqlc.arg(entitlements)::text[])>0 AND NOT EXISTS (
+ SELECT 1 FROM unnest(sqlc.arg(entitlements)::text[]) AS wanted(key)
+ WHERE NOT EXISTS (
+   SELECT 1 FROM openrails.entitlements e
+   WHERE e.merchant_id=sqlc.arg(merchant_id)::uuid AND e.customer_id=sqlc.arg(customer_id)::uuid
+     AND e.entitlement=wanted.key AND e.end_at IS NULL AND e.start_at<=sqlc.arg(at_time)::timestamptz
+     AND e.revoked_at IS NULL AND e.deleted_at IS NULL
+ ) AND NOT (sqlc.arg(include_pending)::boolean AND (
+   EXISTS (SELECT 1 FROM openrails.checkout_sessions s
+    WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.customer_id=sqlc.arg(customer_id)::uuid
+      AND s.id<>sqlc.arg(except_session_id)::uuid AND s.mode='one_off' AND s.status<>'succeeded'
+      AND (s.status IN ('created','requires_action') OR (s.rail IN ('stripe','solana') AND NOT COALESCE((s.rail_state->>'provider_closed')::boolean,false)))
+      AND s.rail_state->'accepted_purchase'->>'access_duration_hours' IS NULL
+      AND s.rail_state->'accepted_purchase'->'entitlements' ? wanted.key
+      AND COALESCE(s.rail_state->'accepted_purchase'->'entitlements'->>wanted.key,'0')='0')
+   OR EXISTS (SELECT 1 FROM openrails.rail_intents i
+    WHERE i.merchant_id=sqlc.arg(merchant_id)::uuid AND i.intent_type='nmi_sale'
+      AND i.payload->>'user_id'=sqlc.arg(customer_id)::uuid::text
+      AND i.status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')
+      AND i.payload->>'access_duration_hours' IS NULL
+      AND i.payload->'entitlements' ? wanted.key
+      AND COALESCE(i.payload->'entitlements'->>wanted.key,'0')='0')
+ ))
+);

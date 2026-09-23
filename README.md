@@ -43,7 +43,12 @@ idempotency; a host wrapper supplies verified identity and its content policy.
 
 | Operation | Reference contract |
 | --- | --- |
-| `CreateCheckoutSession` | Exactly one `PriceID` or `PriceKey` |
+| `CreateCheckoutSession` | Exactly one `PriceID` or `PriceKey`; optional `Entitlement` and `OfferKind` admission assertions |
+| `LookupCheckoutSession` | Read-only replay lookup with the original complete checkout request |
+| `ListOffersForEntitlement` | Exact opaque resource key, explicit kind, currency preference and cursor |
+| `HasEntitlement` / `CheckEntitlements` | Exact grant-backed access; batch maximum 100 keys |
+| `ProductAccess.Check` / `CheckMany` | Product ID or key; archived purchase access remains readable |
+| `Prices.Create` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
 | `ListCheckoutRailOptions` / `ListCheckoutRailOptionsByKey` | Explicit ID / key methods |
 | Checkout-options HTTP and routing dry-run | Exactly one `price_id` or `price_key` |
 | Catalog retrieval | `Retrieve(id)` or `RetrieveByKey(key)` |

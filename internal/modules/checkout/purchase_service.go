@@ -173,7 +173,7 @@ func (s *CheckoutPurchaseService) CheckPurchaseEligibility(ctx context.Context, 
 		}
 	}
 
-	coverage, err := s.GetUserProductCoverage(ctx, userID, product)
+	coverage, err := s.purchaseCoverage(ctx, userID, price, product)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check existing coverage: %w", err)
 	}

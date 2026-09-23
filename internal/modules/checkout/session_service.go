@@ -504,16 +504,18 @@ func checkoutSessionRequestFingerprintForRail(req *CheckoutSessionCreateRequest,
 		Metadata    map[string]string
 		SuccessURL  string
 		CancelURL   string
-		Entitlement string `json:",omitempty"`
+		Entitlement string              `json:",omitempty"`
+		OfferKind   openrails.OfferKind `json:",omitempty"`
 	}{
 		PriceID:     strings.TrimSpace(req.PriceID),
-		PriceKey:    strings.TrimSpace(req.PriceKey),
+		PriceKey:    req.PriceKey,
 		Mode:        strings.TrimSpace(req.Mode),
 		Payment:     payment,
 		Metadata:    normalizeMetadata(req.Metadata),
 		SuccessURL:  strings.TrimSpace(req.SuccessURL),
 		CancelURL:   strings.TrimSpace(req.CancelURL),
-		Entitlement: strings.TrimSpace(req.Entitlement),
+		Entitlement: req.Entitlement,
+		OfferKind:   req.OfferKind,
 	})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
@@ -524,7 +526,7 @@ func decodeCheckoutSessionIdempotencyResult(payload json.RawMessage, req *Checko
 	if err := json.Unmarshal(payload, &cached); err == nil && cached.Response != nil {
 		fingerprint := checkoutSessionRequestFingerprintForRail(req, user, cached.Response.Payment.Rail)
 		if cached.RequestFingerprint != "" && fingerprint != "" && cached.RequestFingerprint != fingerprint {
-			return nil, fmt.Errorf("%w: idempotency key reused with different checkout session parameters", ErrCheckoutSessionConflict)
+			return nil, fmt.Errorf("%w: %w", ErrCheckoutSessionConflict, openrails.ErrIdempotencyKeyReused)
 		}
 		return cached.Response, nil
 	}
@@ -553,7 +555,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		if err == nil {
 			stored, _ := existing.RailState[checkoutSessionFingerprintKey].(string)
 			if existing.CustomerID.String() != user.ID || stored == "" || stored != checkoutSessionRequestFingerprintForRail(req, user, string(existing.Rail)) {
-				return nil, fmt.Errorf("%w: idempotency key reused with different checkout session parameters", ErrCheckoutSessionConflict)
+				return nil, fmt.Errorf("%w: %w", ErrCheckoutSessionConflict, openrails.ErrIdempotencyKeyReused)
 			}
 			existing.IdempotencyKey = normalize.OptionalString(req.IdempotencyKey)
 			return s.resumeIdempotentSession(db.WithPSPID(ctx, existing.PspID), existing, existing, &req.Payment, req.SuccessURL, req.CancelURL, user)
@@ -577,13 +579,8 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	if !product.IsPurchasable() {
 		return nil, fmt.Errorf("%w: product is not active", ErrCheckoutSessionValidation)
 	}
-	if key := strings.TrimSpace(req.Entitlement); key != "" {
-		if product.EntitlementsSpec == nil {
-			return nil, fmt.Errorf("%w: selected product does not grant entitlement %q", ErrCheckoutSessionValidation, key)
-		}
-		if _, ok := product.EntitlementsSpec[key]; !ok {
-			return nil, fmt.Errorf("%w: selected product does not grant entitlement %q", ErrCheckoutSessionValidation, key)
-		}
+	if err := validateOfferAssertion(price, product, req.Entitlement, req.OfferKind); err != nil {
+		return nil, err
 	}
 
 	// or#288 + #848: resolve the processor ONCE, before the session exists.
@@ -655,6 +652,12 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		requestFingerprint = checkoutSessionRequestFingerprintForRail(req, user, rail)
 	}
 	railState := map[string]any{}
+	if req.OfferKind != "" {
+		railState["requested_offer_kind"] = string(req.OfferKind)
+	}
+	if req.Entitlement != "" {
+		railState["requested_entitlement"] = req.Entitlement
+	}
 	if requestFingerprint != "" {
 		railState[checkoutSessionFingerprintKey] = requestFingerprint
 	}
@@ -781,7 +784,7 @@ func (s *CheckoutSessionService) resumeIdempotentSession(
 		storedFingerprint != "" &&
 		storedFingerprint == requestedFingerprint
 	if !parametersMatch {
-		return nil, fmt.Errorf("%w: idempotency key reused with different checkout session parameters", ErrCheckoutSessionConflict)
+		return nil, fmt.Errorf("%w: %w", ErrCheckoutSessionConflict, openrails.ErrIdempotencyKeyReused)
 	}
 
 	if response, found, err := s.initialMembershipSessionResponse(ctx, existing); found || err != nil {

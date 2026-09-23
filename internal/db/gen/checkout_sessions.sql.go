@@ -160,7 +160,7 @@ const claimHostedPurchaseDispatch = `-- name: ClaimHostedPurchaseDispatch :execr
 UPDATE openrails.checkout_sessions
 SET rail_state = rail_state || '{"purchase_submitted":true}'::jsonb
 WHERE merchant_id=$1::uuid AND id=$2::uuid
-  AND mode='one_off' AND rail='stripe'
+  AND deleted_at IS NULL AND mode='one_off' AND rail='stripe'
   AND status IN ('created','failed') AND rail_state ? 'accepted_purchase'
   AND NOT COALESCE((rail_state->>'purchase_submitted')::boolean, false)
   AND NOT COALESCE((rail_state->>'provider_closed')::boolean, false)
@@ -188,7 +188,7 @@ SET status=CASE WHEN status='succeeded' THEN status ELSE $1::text END,
     rail_state=COALESCE(rail_state, '{}'::jsonb) || '{"provider_closed":true}'::jsonb,
     updated_at=$2::timestamptz
 WHERE merchant_id=$3::uuid AND id=$4::uuid
-  AND psp_id=$5::uuid AND rail='stripe'
+  AND psp_id=$5::uuid AND rail='stripe' AND deleted_at IS NULL
 `
 
 type CloseHostedCheckoutFromProviderParams struct {
@@ -469,7 +469,7 @@ SET status='failed', updated_at=$1::timestamptz,
       || CASE WHEN NOT COALESCE((rail_state->>'purchase_submitted')::boolean, false)
               THEN '{"provider_closed":true}'::jsonb ELSE '{}'::jsonb END
 WHERE merchant_id=$3::uuid AND id=$4::uuid
-  AND mode='one_off' AND rail='stripe' AND rail_state ? 'accepted_purchase'
+  AND deleted_at IS NULL AND mode='one_off' AND rail='stripe' AND rail_state ? 'accepted_purchase'
   AND status<>'succeeded'
 `
 

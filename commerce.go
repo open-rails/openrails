@@ -43,6 +43,8 @@ type SolanaCheckoutToken struct {
 
 // CheckoutPSPConfig describes one armed PSP for browser checkout.
 type CheckoutPSPConfig struct {
+	// PSPID is the public stable account selector used by saved-method setup.
+	PSPID string `json:"psp_id"`
 	// Key is the checkout payment.rail selector.
 	Key string `json:"key"`
 	// Rail is the gateway kind: nmi, ccbill, stripe or solana.
@@ -78,6 +80,7 @@ type CreateCheckoutSessionRequest struct {
 	// Entitlement optionally binds admission to the opaque resource the host
 	// showed. OpenRails verifies the selected product grants this key.
 	Entitlement    string                 `json:"entitlement,omitempty"`
+	OfferKind      OfferKind              `json:"offer_kind,omitempty"`
 	PaymentOptions CheckoutPaymentOptions `json:"payment"`
 	Metadata       map[string]string      `json:"metadata"`
 	IdempotencyKey string                 `json:"-"`

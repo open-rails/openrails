@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -68,6 +69,51 @@ func permanentPurchase(price *models.Price) bool {
 	return price != nil && !price.AutoRenew && price.AccessDurationHours == nil
 }
 
+func permanentBenefitKeys(spec map[string]*int) []string {
+	keys := make([]string, 0, len(spec))
+	for key, duration := range spec {
+		// A finite benefit gives additional value on a subsequent purchase.
+		if duration != nil && *duration > 0 {
+			return nil
+		}
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func (s *CheckoutPurchaseService) permanentCoverage(ctx context.Context, user string, product *models.Product, pending bool, except uuid.UUID) (*CoverageInfo, error) {
+	keys := permanentBenefitKeys(product.EntitlementsSpec)
+	coverage := &CoverageInfo{}
+	if len(keys) == 0 {
+		return coverage, nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	customer, err := customerIDFromUser(user)
+	if err != nil {
+		return nil, err
+	}
+	covered, err := s.database.Gen(ctx).PermanentBenefitsCovered(ctx, gen.PermanentBenefitsCoveredParams{MerchantID: mid.UUID(), CustomerID: customer, Entitlements: keys, AtTime: s.now(), IncludePending: pending, ExceptSessionID: except})
+	if err != nil {
+		return nil, err
+	}
+	if covered != nil && *covered {
+		coverage.HasCoverage = true
+		coverage.IsIndefinite = true
+		coverage.SourceType = "entitlement"
+	}
+	return coverage, nil
+}
+
+func (s *CheckoutPurchaseService) purchaseCoverage(ctx context.Context, user string, price *models.Price, product *models.Product) (*CoverageInfo, error) {
+	if permanentPurchase(price) && s.database != nil {
+		return s.permanentCoverage(ctx, user, product, false, uuid.Nil)
+	}
+	return s.GetUserProductCoverage(ctx, user, product)
+}
+
 func (s *CheckoutPurchaseService) checkPermanentOwnership(ctx context.Context, user string, price *models.Price, product *models.Product) error {
 	if !permanentPurchase(price) || s.database == nil {
 		return nil
@@ -122,6 +168,11 @@ func (s *CheckoutSessionService) admitPurchaseSession(ctx context.Context, sessi
 		if price.AutoRenew || session.Amount == nil || *session.Amount != price.Amount || session.Currency == nil || *session.Currency != price.Currency {
 			return fmt.Errorf("%w: purchase terms changed", ErrCheckoutSessionConflict)
 		}
+		key, _ := session.RailState["requested_entitlement"].(string)
+		kind, _ := session.RailState["requested_offer_kind"].(string)
+		if err := validateOfferAssertion(price, product, key, openrails.OfferKind(kind)); err != nil {
+			return err
+		}
 		purchase := NewCheckoutPurchaseService(catalog.NewPriceService(d), catalog.NewProductService(d), payments.NewPaymentService(d, s.clock), entitlements.NewEntitlementService(d, s.clock), nil, s.clock)
 		purchase.SubscriptionService = subscriptions.NewSubscriptionService(d, purchase.PriceService, purchase.ProductService, nil, s.clock)
 		eligibility, err := purchase.CheckPurchaseEligibility(ctx, session.CustomerID.String(), price.ID)
@@ -132,6 +183,13 @@ func (s *CheckoutSessionService) admitPurchaseSession(ctx context.Context, sessi
 			return fmt.Errorf("%w: %s", ErrCheckoutSessionConflict, eligibility.Reason)
 		}
 		if permanentPurchase(price) {
+			coverage, err := purchase.permanentCoverage(ctx, session.CustomerID.String(), product, true, session.ID)
+			if err != nil {
+				return err
+			}
+			if coverage.HasCoverage {
+				return fmt.Errorf("%w: all permanent benefits are already owned or reserved", ErrCheckoutSessionConflict)
+			}
 			pending, err := d.Gen(ctx).HasUnresolvedProductCheckout(ctx, gen.HasUnresolvedProductCheckoutParams{MerchantID: mid.UUID(), CustomerID: session.CustomerID, ProductID: product.ID, ExceptSessionID: session.ID})
 			if err != nil {
 				return err

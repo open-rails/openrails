@@ -119,6 +119,7 @@ func PublicPSPConfigFor(scope PSPScope, custodian *CustodianScope) (PublicPSPCon
 	}
 
 	out := PublicPSPConfig{
+		PSPID:       scope.ID.String(),
 		Key:         key,
 		Rail:        rail,
 		Custodian:   models.CustodianPSP,

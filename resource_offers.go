@@ -100,7 +100,7 @@ func (c *Client) ListOffersForEntitlement(ctx context.Context, entitlement strin
 		query.Set("cursor", params.Cursor)
 	}
 	var result OfferList
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/offers?"+query.Encode(), nil, &result, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, c.catalogPath()+"/offers?"+query.Encode(), nil, &result, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &result, nil

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
@@ -45,7 +46,7 @@ func TestCatalogCheckoutCurrentOfferAcrossEmbeddedAndRemote(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
 	local, err := runtime.Client()
 	require.NoError(t, err)
-	handler, err := httptesthost.Handler(runtime, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, MerchantAPI: true}, Gate: creatorAdminTestGate{mid: mid}})
+	handler, err := httptesthost.Handler(runtime, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, MerchantAPI: true, MerchantAdmin: true}, Gate: creatorAdminTestGate{mid: mid}})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -60,9 +61,37 @@ func TestCatalogCheckoutCurrentOfferAcrossEmbeddedAndRemote(t *testing.T) {
 				_, err = client.Catalog.Apply(ctx, &openrails.CatalogApplyParams{SchemaVersion: 1, ApplicationID: uuid.NewString(), ExpectedRevision: &revision.Revision, Products: []openrails.CatalogApplyProduct{product}})
 				require.NoError(t, err)
 			}
-			apply(openrails.CatalogApplyProduct{Key: productKey, DisplayName: openrails.CatalogValue("Post"), Prices: []openrails.CatalogApplyPrice{{Key: offerKey, UnitAmount: openrails.CatalogValue(int64(1_000_000)), Currency: openrails.CatalogValue("USD")}}})
+			apply(openrails.CatalogApplyProduct{Key: productKey, DisplayName: openrails.CatalogValue("Post"), EntitlementsSpec: openrails.CatalogValue(map[string]*int{"resource:" + name: nil}), Prices: []openrails.CatalogApplyPrice{{Key: offerKey, UnitAmount: openrails.CatalogValue(int64(1_000_000)), Currency: openrails.CatalogValue("USD")}}})
+			apply(openrails.CatalogApplyProduct{Key: "alternative-" + name, DisplayName: openrails.CatalogValue("Bundle"), EntitlementsSpec: openrails.CatalogValue(map[string]*int{"resource:" + name: nil, "extra:" + name: nil}), Prices: []openrails.CatalogApplyPrice{
+				{Key: "eur-" + name, UnitAmount: openrails.CatalogValue(int64(900000)), Currency: openrails.CatalogValue("EUR")},
+				{Key: "membership-" + name, UnitAmount: openrails.CatalogValue(int64(2000000)), Currency: openrails.CatalogValue("USD"), AutoRenew: openrails.CatalogValue(true), AccessDurationHours: openrails.CatalogValue(720)},
+			}})
+			page, err := client.ListOffersForEntitlement(ctx, "resource:"+name, openrails.OfferListParams{Kind: openrails.OfferPermanent, PreferredCurrency: "USD", Limit: 1})
+			require.NoError(t, err)
+			require.Len(t, page.Data, 1)
+			require.Equal(t, "USD", page.Data[0].Currency)
+			require.True(t, page.HasMore)
+			second, err := client.ListOffersForEntitlement(ctx, "resource:"+name, openrails.OfferListParams{Kind: openrails.OfferPermanent, PreferredCurrency: "USD", Limit: 1, Cursor: page.NextCursor})
+			require.NoError(t, err)
+			require.Len(t, second.Data, 1)
+			require.Equal(t, "EUR", second.Data[0].Currency)
+			require.False(t, second.HasMore)
+			_, err = client.ListOffersForEntitlement(ctx, "another-resource", openrails.OfferListParams{Kind: openrails.OfferPermanent, PreferredCurrency: "USD", Cursor: page.NextCursor})
+			require.ErrorIs(t, err, openrails.ErrInvalid)
+			membership, err := client.ListOffersForEntitlement(ctx, "resource:"+name, openrails.OfferListParams{Kind: openrails.OfferRecurring, PreferredCurrency: "USD"})
+			require.NoError(t, err)
+			require.Len(t, membership.Data, 1)
+			require.True(t, membership.Data[0].AutoRenew)
+			require.Equal(t, 720, *membership.Data[0].AccessDurationHours)
 			customer := uuid.NewString()
-			request := openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "reader@example.com"}, PriceKey: offerKey, PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"}, IdempotencyKey: uuid.NewString(), SuccessURL: "https://blog.example/success", CancelURL: "https://blog.example/cancel"}
+			request := openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "reader@example.com"}, PriceKey: offerKey, Entitlement: "resource:" + name, OfferKind: openrails.OfferPermanent, PaymentOptions: openrails.CheckoutPaymentOptions{Rail: "stripe"}, IdempotencyKey: uuid.NewString(), SuccessURL: "https://blog.example/success", CancelURL: "https://blog.example/cancel"}
+			wrongKind := request
+			wrongKind.OfferKind = openrails.OfferRecurring
+			wrongKind.IdempotencyKey = uuid.NewString()
+			_, err = client.CreateCheckoutSession(ctx, wrongKind)
+			require.ErrorIs(t, err, openrails.ErrInvalid)
+			_, lookupErr := client.LookupCheckoutSession(ctx, request)
+			require.ErrorIs(t, lookupErr, openrails.ErrNotFound)
 			original, err := client.CreateCheckoutSession(ctx, request)
 			require.NoError(t, err, "the one SDK operation resolves the opaque current offer")
 			require.EqualValues(t, 1_000_000, *original.Amount)
@@ -95,6 +124,7 @@ func TestCatalogCheckoutCurrentOfferAcrossEmbeddedAndRemote(t *testing.T) {
 			uuidKey := priceID.UUID().String()
 			apply(openrails.CatalogApplyProduct{Key: "uuid-key-" + name, DisplayName: openrails.CatalogValue("UUID key"), Prices: []openrails.CatalogApplyPrice{{Key: uuidKey, UnitAmount: openrails.CatalogValue(int64(3_000_000)), Currency: openrails.CatalogValue("USD")}}})
 			keyRequest := current
+			keyRequest.Entitlement = ""
 			keyRequest.Customer.ID, keyRequest.IdempotencyKey, keyRequest.PriceKey = uuid.NewString(), uuid.NewString(), uuidKey
 			byKey, err := client.CreateCheckoutSession(ctx, keyRequest)
 			require.NoError(t, err)
@@ -123,6 +153,34 @@ func TestCatalogCheckoutCurrentOfferAcrossEmbeddedAndRemote(t *testing.T) {
 			replay, err = client.CreateCheckoutSession(ctx, current)
 			require.NoError(t, err)
 			require.Equal(t, next.ID, replay.ID)
+			looked, err := client.LookupCheckoutSession(ctx, request)
+			require.NoError(t, err)
+			require.Equal(t, original.ID, looked.ID)
+			changed := request
+			changed.SuccessURL = "https://blog.example/different"
+			_, err = client.LookupCheckoutSession(ctx, changed)
+			require.ErrorIs(t, err, openrails.ErrIdempotencyKeyReused)
+			changed = request
+			changed.Entitlement = "another-resource"
+			_, err = client.LookupCheckoutSession(ctx, changed)
+			require.ErrorIs(t, err, openrails.ErrIdempotencyKeyReused)
+			changed = request
+			changed.Customer.ID = uuid.NewString()
+			_, err = client.LookupCheckoutSession(ctx, changed)
+			require.ErrorIs(t, err, openrails.ErrNotFound)
+			grant, err := client.GrantEntitlement(ctx, customer, openrails.GrantEntitlementRequest{Entitlement: "resource:" + name})
+			require.NoError(t, err)
+			require.NotNil(t, grant)
+			access, err := client.CheckEntitlements(ctx, customer, []string{"resource:" + name, "missing"}, time.Time{})
+			require.NoError(t, err)
+			require.Equal(t, map[string]bool{"resource:" + name: true, "missing": false}, access)
+			owned, err := client.HasEntitlement(ctx, customer, "resource:"+name, time.Time{})
+			require.NoError(t, err)
+			require.True(t, owned)
+			offers, err := client.ListOffersForEntitlement(ctx, "resource:"+name, openrails.OfferListParams{Kind: openrails.OfferPermanent})
+			require.NoError(t, err)
+			require.Len(t, offers.Data, 1, "only independent alternative bundle remains after archive")
+
 		})
 	}
 	// Direct HTTP callers get the same exclusivity check even without the SDK.

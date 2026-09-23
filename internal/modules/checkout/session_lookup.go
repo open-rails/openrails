@@ -8,11 +8,9 @@ import (
 	"strings"
 )
 
-type CheckoutSessionLookupRequest struct{ PriceID, PriceKey, Entitlement, IdempotencyKey string }
-
 // LookupSession finds only a buyer-bound idempotent session and validates the
 // original selector/resource assertion; it never resolves a provider or writes.
-func (s *CheckoutSessionService) LookupSession(ctx context.Context, req *CheckoutSessionLookupRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
+func (s *CheckoutSessionService) LookupSession(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	if req == nil || user == nil || strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, ErrCheckoutSessionValidation
 	}
@@ -26,24 +24,22 @@ func (s *CheckoutSessionService) LookupSession(ctx context.Context, req *Checkou
 	id := idempotentCheckoutSessionID(mid.UUID(), scopeIdempotencyKey(user.ID, req.IdempotencyKey))
 	session, err := s.repo.GetByID(ctx, id)
 	if db.IsNotFound(err) {
-		return nil, openrails.ErrNotFound
+		return nil, ErrCheckoutSessionNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
 	if session.CustomerID.String() != user.ID {
-		return nil, openrails.ErrNotFound
+		return nil, ErrCheckoutSessionNotFound
 	}
-	request := &CheckoutSessionCreateRequest{PriceID: req.PriceID, PriceKey: req.PriceKey, Entitlement: req.Entitlement, IdempotencyKey: req.IdempotencyKey}
+	canonicalizeCheckoutPaymentName(&req.Payment)
 	stored, _ := session.RailState[checkoutSessionFingerprintKey].(string)
-	fingerprint := checkoutSessionRequestFingerprintForRail(request, user, string(session.Rail))
+	fingerprint := checkoutSessionRequestFingerprintForRail(req, user, string(session.Rail))
 	if stored == "" || stored != fingerprint {
 		return nil, openrails.ErrIdempotencyKeyReused
 	}
-	if req.Entitlement != "" {
-		if value, _ := session.RailState[acceptedPurchaseTermsKey].(map[string]any); value != nil {
-			_ = value
-		}
+	if response, found, err := s.initialMembershipSessionResponse(ctx, session); found || err != nil {
+		return response, err
 	}
 	return s.sessionToResponse(session), nil
 }

@@ -128,3 +128,40 @@ stale state and a webhook winning the create-response race. The public Client
 regression exercises embedded and actual HTTP transports with catalog apply,
 reprice, old-price refusal, explicit UUID-shaped keys and archive replay.
 These proofs use local provider transports and owned test databases only.
+
+## Resource offers and thin host replay
+
+A resource key such as `post:<stable-id>` identifies access independently of the
+product key. Several products can grant that resource through `EntitlementsSpec`;
+one product can grant several resources. `ListOffersForEntitlement` performs an
+indexed exact reverse lookup of active products and prices. Kind is required
+(`permanent`, `finite`, or `recurring`), pages cap at 100, and preferred currency
+only changes ordering. Every row retains its native currency, amount, duration
+and renewal flag. It never substitutes a monthly plan for permanent access.
+
+`HasEntitlement` and `CheckEntitlements` query only the requested keys in the
+existing grant projection. They do not join mutable product contents to invent
+access. Permanent bundle admission rejects an already-owned product or benefits
+that are all already permanently held/reserved. Partial ownership does not
+block a bundle with additional value. Customer-row serialization and accepted
+benefit snapshots extend the existing session/intent exclusion across products.
+Refunds revoke their own payment sources without erasing independent grants.
+
+The host sends `Entitlement` and `OfferKind` assertions alongside the selected
+immutable price ID (or current price key). Admission checks the resource and
+commercial kind and freezes the benefits. PPV uses `permanent`; channel membership
+uses `recurring`. Membership checks remain host policy; purchased PPV access
+survives the membership's end.
+
+A wrapper first calls `LookupCheckoutSession` with the original complete request.
+It returns a read-only projection of that buyer's accepted session, even after
+host policy/catalog changes, or `ErrNotFound`. A changed request under the same
+key returns `ErrIdempotencyKeyReused`. Only on not-found does the host run its live
+new-purchase policy and call `CreateCheckoutSession`. Lookup performs no provider
+work and does not resume a financial operation. A concurrent creation still
+passes through the existing idempotency and admission locks.
+
+Management-only customer routes expose GET `/me/checkout/:id` and POST
+`/me/checkout/:id/confirm` for an app-admitted session. Generic checkout creation
+remains absent. Confirmation preserves the existing verified interactive-payer
+requirement; merchant credentials cannot impersonate that proof.

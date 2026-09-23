@@ -91,17 +91,12 @@ func (s *Service) lookupCheckoutSession(ctx context.Context, user *checkout.User
 	}
 	var resp *checkout.CheckoutSessionResponse
 	err = rt.DB.RunInMerchantConn(ctx, func(scoped context.Context) error {
-		priceID := req.PriceID
-		if priceID == "" {
-			priceID = req.PriceKey
+		svcReq, err := checkoutCreateRequest(req, "", "", "")
+		if err != nil {
+			return err
 		}
-		var key string
-		if req.PriceKey != "" {
-			key = req.PriceKey
-		}
-		returnErr := error(nil)
-		resp, returnErr = checkoutSessions.LookupSession(scoped, &checkout.CheckoutSessionLookupRequest{PriceID: priceID, PriceKey: key, Entitlement: req.Entitlement, IdempotencyKey: req.IdempotencyKey}, user)
-		return returnErr
+		resp, err = checkoutSessions.LookupSession(scoped, svcReq, user)
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -149,57 +144,9 @@ func (s *Service) createCheckoutSessionForCustomer(ctx context.Context, customer
 		return nil, err
 	}
 
-	if raw := req.PaymentOptions.PaymentMethodID; raw != "" {
-		id, err := openrails.ParsePaymentMethodID(raw)
-		if err != nil || id.IsZero() {
-			return nil, fmt.Errorf("%w: invalid payment_method_id", checkout.ErrCheckoutSessionValidation)
-		}
-	}
-	var pspID uuid.UUID
-	if req.PaymentOptions.PSPID != "" {
-		pspID, err = uuid.Parse(req.PaymentOptions.PSPID)
-		if err != nil || pspID == uuid.Nil {
-			return nil, fmt.Errorf("%w: invalid psp_id", checkout.ErrCheckoutSessionValidation)
-		}
-	}
-	if mode == "" {
-		req.PriceID = strings.TrimSpace(req.PriceID)
-		if priceID, err := openrails.ParsePriceID(req.PriceID); err == nil && !priceID.IsZero() {
-			req.PriceID = priceID.String()
-		}
-	}
-	svcReq := &checkout.CheckoutSessionCreateRequest{
-		PriceID:        req.PriceID,
-		PriceKey:       req.PriceKey,
-		Entitlement:    req.Entitlement,
-		SubscriptionID: subscriptionID,
-		NewPriceID:     newPriceID,
-		Mode:           mode,
-		Metadata:       req.Metadata,
-		IdempotencyKey: req.IdempotencyKey,
-		SuccessURL:     req.SuccessURL,
-		CancelURL:      req.CancelURL,
-		Payment: checkout.CheckoutSessionPaymentRequest{
-			PSPID:           pspID,
-			Rail:            req.PaymentOptions.Rail,
-			PaymentMethodID: req.PaymentOptions.PaymentMethodID,
-			PaymentToken:    req.PaymentOptions.PaymentToken,
-			TokenSymbol:     req.PaymentOptions.TokenSymbol,
-			Flow:            req.PaymentOptions.Flow,
-			Wallet:          req.PaymentOptions.Wallet,
-			Email:           req.PaymentOptions.Email,
-			NameOnCard:      req.PaymentOptions.NameOnCard,
-			FirstName:       req.PaymentOptions.FirstName,
-			LastName:        req.PaymentOptions.LastName,
-			Address1:        req.PaymentOptions.Address1,
-			City:            req.PaymentOptions.City,
-			State:           req.PaymentOptions.State,
-			Zip:             req.PaymentOptions.Zip,
-			Country:         req.PaymentOptions.Country,
-			LastFour:        req.PaymentOptions.LastFour,
-			CardType:        req.PaymentOptions.CardType,
-			ExpiryDate:      req.PaymentOptions.ExpiryDate,
-		},
+	svcReq, err := checkoutCreateRequest(req, mode, subscriptionID, newPriceID)
+	if err != nil {
+		return nil, err
 	}
 
 	rt, err := s.runtime()
@@ -446,4 +393,61 @@ func checkoutResponseID[T interface{ String() string }](id *T) *string {
 	}
 	value := (*id).String()
 	return &value
+}
+
+func checkoutCreateRequest(req CreateCheckoutSessionRequest, mode, subscriptionID, newPriceID string) (*checkout.CheckoutSessionCreateRequest, error) {
+	if raw := req.PaymentOptions.PaymentMethodID; raw != "" {
+		id, err := openrails.ParsePaymentMethodID(raw)
+		if err != nil || id.IsZero() {
+			return nil, fmt.Errorf("%w: invalid payment_method_id", checkout.ErrCheckoutSessionValidation)
+		}
+	}
+	var pspID uuid.UUID
+	var err error
+	if req.PaymentOptions.PSPID != "" {
+		pspID, err = uuid.Parse(req.PaymentOptions.PSPID)
+		if err != nil || pspID == uuid.Nil {
+			return nil, fmt.Errorf("%w: invalid psp_id", checkout.ErrCheckoutSessionValidation)
+		}
+	}
+	if mode == "" {
+		req.PriceID = strings.TrimSpace(req.PriceID)
+		if priceID, err := openrails.ParsePriceID(req.PriceID); err == nil && !priceID.IsZero() {
+			req.PriceID = priceID.String()
+		}
+	}
+	return &checkout.CheckoutSessionCreateRequest{
+		PriceID:        req.PriceID,
+		PriceKey:       req.PriceKey,
+		Entitlement:    req.Entitlement,
+		OfferKind:      req.OfferKind,
+		SubscriptionID: subscriptionID,
+		NewPriceID:     newPriceID,
+		Mode:           mode,
+		Metadata:       req.Metadata,
+		IdempotencyKey: req.IdempotencyKey,
+		SuccessURL:     req.SuccessURL,
+		CancelURL:      req.CancelURL,
+		Payment: checkout.CheckoutSessionPaymentRequest{
+			PSPID:           pspID,
+			Rail:            req.PaymentOptions.Rail,
+			PaymentMethodID: req.PaymentOptions.PaymentMethodID,
+			PaymentToken:    req.PaymentOptions.PaymentToken,
+			TokenSymbol:     req.PaymentOptions.TokenSymbol,
+			Flow:            req.PaymentOptions.Flow,
+			Wallet:          req.PaymentOptions.Wallet,
+			Email:           req.PaymentOptions.Email,
+			NameOnCard:      req.PaymentOptions.NameOnCard,
+			FirstName:       req.PaymentOptions.FirstName,
+			LastName:        req.PaymentOptions.LastName,
+			Address1:        req.PaymentOptions.Address1,
+			City:            req.PaymentOptions.City,
+			State:           req.PaymentOptions.State,
+			Zip:             req.PaymentOptions.Zip,
+			Country:         req.PaymentOptions.Country,
+			LastFour:        req.PaymentOptions.LastFour,
+			CardType:        req.PaymentOptions.CardType,
+			ExpiryDate:      req.PaymentOptions.ExpiryDate,
+		},
+	}, nil
 }

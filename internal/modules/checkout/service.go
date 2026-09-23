@@ -330,7 +330,12 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 	}
 
 	// Check for existing coverage and determine if purchase is allowed
-	coverage, err := s.GetUserProductCoverage(ctx, user.ID, product)
+	var coverage *CoverageInfo
+	if permanentPurchase(price) && s.PurchaseService != nil {
+		coverage, err = s.PurchaseService.purchaseCoverage(ctx, user.ID, price, product)
+	} else {
+		coverage, err = s.GetUserProductCoverage(ctx, user.ID, product)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to check existing coverage: %w", err)
 	}

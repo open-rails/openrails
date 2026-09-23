@@ -64,6 +64,23 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.Openrails
 			return err
 		}
 		if terms.AccessDurationHours == nil {
+			keys := make([]string, 0, len(terms.Entitlements))
+			for key, duration := range terms.Entitlements {
+				if duration != nil && *duration > 0 {
+					keys = nil
+					break
+				}
+				keys = append(keys, key)
+			}
+			if len(keys) > 0 {
+				covered, err := d.Gen(ctx).PermanentBenefitsCovered(ctx, gen.PermanentBenefitsCoveredParams{MerchantID: p.MerchantID, CustomerID: customer, Entitlements: keys, AtTime: terms.AcceptedAt, IncludePending: true, ExceptSessionID: terms.CheckoutSessionID})
+				if err != nil {
+					return err
+				}
+				if covered != nil && *covered {
+					return apperr.Conflictf("all permanent benefits are already owned or reserved")
+				}
+			}
 			pending, err := d.Gen(ctx).HasUnresolvedProductCheckout(ctx, gen.HasUnresolvedProductCheckoutParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.ProductID, ExceptSessionID: terms.CheckoutSessionID})
 			if err != nil {
 				return err
