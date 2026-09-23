@@ -1,5 +1,5 @@
 {
-  "openrails_version": "v0.160.1-0.20260923210704-78039ea92e29",
+  "openrails_version": "v0.161.0",
   "routes": [
     {
       "method": "GET",
