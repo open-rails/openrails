@@ -19,12 +19,20 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/standalonedb"
 )
+
+type standaloneAuthKey struct{}
+
+func standaloneAuth(ctx context.Context) *hostconfig.AuthConfig {
+	auth, _ := ctx.Value(standaloneAuthKey{}).(*hostconfig.AuthConfig)
+	return auth
+}
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
@@ -51,24 +59,25 @@ func newRootCmd() *cobra.Command {
 			// the old path wrote PROVIDER_WRITE_MODE/TEST_MODE into the
 			// process env before Load, a back-door the env doctrine bans).
 			// The deprecated --mode alias is gone (#710).
-			var loadOpts []config.LoadOption
+			var loadOpts []hostconfig.LoadOption
 			if mode, err := cmd.Flags().GetString("provider-write-mode"); err == nil && strings.TrimSpace(mode) != "" {
-				loadOpts = append(loadOpts, config.WithOverride("provider_write_mode", strings.TrimSpace(mode)))
+				loadOpts = append(loadOpts, hostconfig.WithOverride("provider_write_mode", strings.TrimSpace(mode)))
 			}
 			if posture, err := cmd.Flags().GetString("test-mode"); err == nil && strings.TrimSpace(posture) != "" {
-				loadOpts = append(loadOpts, config.WithOverride("test_mode", strings.TrimSpace(posture)))
+				loadOpts = append(loadOpts, hostconfig.WithOverride("test_mode", strings.TrimSpace(posture)))
 			}
 
-			load := config.Load
+			load := hostconfig.Load
 			if isDatabaseOnlyBillingCommand(cmd) {
-				load = config.LoadDatabase
+				load = hostconfig.LoadDatabase
 			}
 			cfg, err := load(configPath, loadOpts...)
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 
-			cmd.SetContext(context.WithValue(cmd.Context(), config.ConfigContextKey, cfg))
+			ctx := context.WithValue(cmd.Context(), config.ConfigContextKey, cfg.Config)
+			cmd.SetContext(context.WithValue(ctx, standaloneAuthKey{}, cfg.Auth))
 			return nil
 		},
 		Long: "Standalone OpenRails server for payments, credits, usage, and subscriptions",
@@ -182,7 +191,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Attach the OpenRails-owned AuthKit control plane (#284). MANDATORY in
 	// standalone mode (#469): construction failure exits non-zero — there is no
 	// verifier-only downgrade.
-	cp, err := controlplane.Attach(context.Background(), embeddedApp, controlplane.Options{})
+	cp, err := controlplane.Attach(context.Background(), embeddedApp, controlplane.Options{Auth: standaloneAuth(cmd.Context())})
 	if err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("attach control plane: %w", err)
@@ -347,7 +356,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
 	}
-	application, err := serverboot.NewWorker(bootCtx, cfg, &serverboot.Options{MerchantManifestPath: manifestPath, NMIProbeV5BaseURL: bootNMIProbeV5BaseURL})
+	application, err := serverboot.NewWorker(bootCtx, cfg, &serverboot.Options{Auth: standaloneAuth(cmd.Context()), MerchantManifestPath: manifestPath, NMIProbeV5BaseURL: bootNMIProbeV5BaseURL})
 	if err != nil {
 		if bootCtx.Err() != nil {
 			log.WithError(err).Info("Shutdown requested while booting; exiting")

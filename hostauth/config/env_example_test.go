@@ -1,6 +1,7 @@
 package config
 
 import (
+	billing "github.com/open-rails/openrails/config"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,7 @@ var composeOnlyEnvVars = map[string]bool{
 // every var must route to a real config key (or be a declared compose
 // interpolation var), and the file as a whole must pass config.Load.
 func TestEnvExampleRoundTrip(t *testing.T) {
-	examplePath, err := filepath.Abs(filepath.Join("..", ".env.example"))
+	examplePath, err := filepath.Abs(filepath.Join("..", "..", ".env.example"))
 	require.NoError(t, err)
 	vars, err := godotenv.Read(examplePath)
 	require.NoError(t, err)
@@ -46,7 +47,7 @@ func TestEnvExampleRoundTrip(t *testing.T) {
 	require.Equal(t, "5544", moved["DB_PORT"])
 	require.Contains(t, moved["DB_URL"], ":5544/openrails_db")
 
-	compose, err := os.ReadFile(filepath.Join("..", "docker-compose.yaml"))
+	compose, err := os.ReadFile(filepath.Join("..", "..", "docker-compose.yaml"))
 	require.NoError(t, err)
 	for name := range composeOnlyEnvVars {
 		require.Containsf(t, string(compose), "${"+name, "%s is declared compose-only but docker-compose.yaml never interpolates it", name)
@@ -80,7 +81,7 @@ func TestEnvExampleRoundTrip(t *testing.T) {
 	cfg, err := Load("")
 	require.NoError(t, err, ".env.example must boot config.Load as-is")
 	require.True(t, cfg.IsDev())
-	require.Equal(t, CredentialPostureSandbox, cfg.TestMode, "the example must pin the sandbox posture explicitly")
-	require.Equal(t, ProviderWriteModeFull, cfg.GetProviderWriteMode())
+	require.Equal(t, billing.CredentialPostureSandbox, cfg.TestMode, "the example must pin the sandbox posture explicitly")
+	require.Equal(t, billing.ProviderWriteModeFull, cfg.GetProviderWriteMode())
 	require.NotEmpty(t, cfg.DB.URL)
 }

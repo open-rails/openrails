@@ -23,7 +23,7 @@ func TestProvisionRepairKeepsCapturedIdentity(t *testing.T) {
 	cfg.Auth.Naming = authkit.NamingConfig{RenameInterval: &zero, FormerNames: authkit.FormerNameRetentionConfig{Mode: authkit.FormerNamesImmediate}}
 	e := newHostApp(t, cfg)
 	var duringAdmission func(context.Context) error
-	require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
+	require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg.Config, nil, embcp.AttachOptions{Auth: cfg.Auth,
 		MerchantCreation: &embcp.MerchantCreationConfig{Admission: func(ctx context.Context, _, _ string) error {
 			if duringAdmission != nil {
 				return duringAdmission(ctx)

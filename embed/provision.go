@@ -9,8 +9,8 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	boot "github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -33,9 +33,6 @@ type CheckoutRoutingMatchConfig = boot.CheckoutRoutingMatchConfig
 
 type ProviderRailAccountConfig = boot.ProviderRailAccountConfig
 type PSPSignerConfig = boot.PSPSignerConfig
-type RemoteApplicationConfig = boot.RemoteApplicationConfig
-type StaticJWKSConfig = boot.StaticJWKSConfig
-type StaticJWKConfig = boot.StaticJWKConfig
 
 // upsertMerchantConfig reconciles the constructor's merchant declaration before
 // HTTP routes or workers can observe a partially configured runtime.
@@ -143,7 +140,6 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m Mercha
 // identity bind.
 func merchantConfigDeclaresManifestTruth(m MerchantConfig) bool {
 	return len(m.PSPs) > 0 ||
-		m.RemoteApplication != nil ||
 		m.Invoice != nil ||
 		len(m.DelegatedInvokerWastedSpendWindows) > 0 ||
 		len(m.CheckoutRouting) > 0 ||

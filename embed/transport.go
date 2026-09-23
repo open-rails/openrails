@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -54,7 +53,7 @@ func newServiceHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator
 
 // hostPermissions is the owner grant used by embedded host assertions.
 func hostPermissions() []string {
-	return []string{string(controlplane.MerchantType.OwnerGrant())}
+	return []string{"merchant:*"}
 }
 
 func merchantMismatchMsg(bound, pinned merchant.ID) string {

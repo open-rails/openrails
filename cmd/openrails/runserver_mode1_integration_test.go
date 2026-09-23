@@ -27,7 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
 	embcp "github.com/open-rails/openrails/internal/operator"
@@ -219,12 +219,13 @@ func TestRunServerMode1BootArmsNMIPSPFromManifest(t *testing.T) {
 	_, err = pool.Exec(ctx, `UPDATE billing.merchants SET api_host = 'chaos-mode1.test' WHERE id = $1`, merchantID)
 	require.NoError(t, err)
 
-	cfg, err := config.Load(cfgPath)
+	loaded, err := hostconfig.Load(cfgPath)
 	require.NoError(t, err)
+	cfg := loaded.Config
 	mintApp, err := app.Bootstrap(ctx, cfg)
 	require.NoError(t, err)
 	defer func() { _ = mintApp.Close(context.Background()) }()
-	require.NoError(t, embcp.Attach(ctx, mintApp, cfg, nil))
+	require.NoError(t, embcp.Attach(ctx, mintApp, cfg, loaded.Auth, nil))
 	cp := embcp.Get(mintApp)
 	require.NotNil(t, cp)
 	username := "mode1user" + strings.ReplaceAll(uuid.NewString(), "-", "")[:8]

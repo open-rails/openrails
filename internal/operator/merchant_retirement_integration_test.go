@@ -28,7 +28,7 @@ func TestMerchantRetirementBoundary(t *testing.T) {
 	e := newHostApp(t, cfg)
 	sfx := strings.ToLower(uuid.NewString()[:8])
 	hostReserved := "retire-vip-" + sfx
-	require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
+	require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg.Config, nil, embcp.AttachOptions{Auth: cfg.Auth,
 		HostedPosture:    true,
 		EmailSender:      &captureEmailSender{},
 		MerchantCreation: &embcp.MerchantCreationConfig{ReservedSlugs: []string{hostReserved}},

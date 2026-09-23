@@ -27,7 +27,7 @@ func TestSetGetMerchantAPIHost(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := hostedTestConfig(t, dsn, "https://hosts.openrails.test")
 	e := newHostApp(t, cfg)
-	require.NoError(t, embcp.Attach(ctx, e.App(), cfg, nil))
+	require.NoError(t, embcp.Attach(ctx, e.App(), cfg.Config, cfg.Auth, nil))
 
 	sfx := strings.ToLower(uuid.NewString()[:8])
 	slug := "hostset-" + sfx

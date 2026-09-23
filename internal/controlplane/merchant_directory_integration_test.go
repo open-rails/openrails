@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -20,10 +21,9 @@ func TestListActiveMerchantIDs(t *testing.T) {
 	super := dbtest.SharedSuperuserPGXPool(t)
 	rdb, _ := dbtest.SharedRedisClient(t)
 	cp, err := New(ctx, &config.Config{
-		Env:  "test",
-		DB:   &config.DBConfig{},
-		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
-	}, super, WithRedis(rdb))
+		Env: "test",
+		DB:  &config.DBConfig{},
+	}, &hostconfig.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true}, super, WithRedis(rdb))
 	require.NoError(t, err)
 	t.Cleanup(cp.Close)
 

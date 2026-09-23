@@ -19,6 +19,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
@@ -102,13 +103,13 @@ func enrollTestMFA(ctx context.Context, t *testing.T, pool *pgxpool.Pool, userID
 
 func newTestControlPlane(t *testing.T, pool *pgxpool.Pool, opts ...Option) *ControlPlane {
 	t.Helper()
-	cfg := &config.Config{
+	cfg := &hostconfig.Config{Config: &config.Config{
 		// "dev": authkit v0.78.0 resolves signing keys fail-closed outside dev
 		// (no keys.json -> no ephemeral keys -> IssueAccessToken missing_signer).
-		Env:  "dev",
-		Auth: &config.AuthConfig{Issuer: "https://openrails.test", KeysPath: t.TempDir()},
+		Env: "dev",
+	}, Auth: &hostconfig.AuthConfig{Issuer: "https://openrails.test", KeysPath: t.TempDir()},
 	}
-	cp, err := New(context.Background(), cfg, pool, opts...)
+	cp, err := New(context.Background(), cfg.Config, cfg.Auth, pool, opts...)
 	require.NoError(t, err)
 	t.Cleanup(cp.Close)
 	require.NotNil(t, cp)

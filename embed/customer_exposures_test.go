@@ -82,10 +82,6 @@ func TestCustomerExposureValidationRefusesAmbiguityAndFallbackAuthority(t *testi
 	require.NoError(t, runtime.configureHTTP(HTTPConfig{CustomerRoutes: []CustomerRoutesConfig{{Prefix: "/v1/me", DelegatedAuthenticator: verifier}, {Prefix: "/v1/me", DelegatedAuthenticator: verifier}}}))
 	_, err := runtime.HTTPRoutes()
 	require.ErrorContains(t, err, "conflicting")
-	standalone := reviewRuntime(nil, nil)
-	require.NoError(t, standalone.configureHTTP(HTTPConfig{Standalone: true}))
-	_, err = standalone.HTTPRoutes()
-	require.ErrorContains(t, err, "no control plane")
 }
 
 func TestCustomerBillingManagementRoutesAndCapabilities(t *testing.T) {

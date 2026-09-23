@@ -1,4 +1,4 @@
-package handlers
+package standalonehandlers
 
 // Merchant team management (#760): the roster, invites, role changes, and member
 // removal behind /v1/merchant/team, all through AuthKit group membership via the

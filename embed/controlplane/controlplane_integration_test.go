@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -71,7 +72,6 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 	cfg := &config.Config{
 		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
 		SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn},
-		Auth: &config.AuthConfig{Issuer: "https://handle.openrails.test", KeysPath: t.TempDir()},
 	}
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 
 	_, err = controlplane.Attach(ctx, rt, controlplane.Options{HostedPosture: true})
 	require.Error(t, err, "hosted posture without a sender refuses to boot")
-	_, err = controlplane.Attach(ctx, nil, controlplane.Options{})
+	_, err = controlplane.Attach(ctx, nil, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://handle.openrails.test", KeysPath: t.TempDir()}})
 	require.Error(t, err)
 
 	sender := &captureSender{}

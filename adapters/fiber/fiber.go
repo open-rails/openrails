@@ -3,11 +3,12 @@ package openrailsfiber
 
 import (
 	"fmt"
+	"net/http"
+	"strings"
+
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	"github.com/open-rails/openrails/embed"
-	"net/http"
-	"strings"
 )
 
 // RouteNamePrefix identifies native OpenRails registrations in Fiber inspection.
@@ -18,7 +19,12 @@ type Bundle struct {
 	rootOnly bool
 }
 
-func Routes(runtime *embed.Runtime) (*Bundle, error) {
+type RouteSource interface {
+	HTTPRoutes() ([]embed.HTTPRoute, error)
+	HTTPRequiresRoot() bool
+}
+
+func Routes(runtime RouteSource) (*Bundle, error) {
 	routes, err := runtime.HTTPRoutes()
 	if err != nil {
 		return nil, err

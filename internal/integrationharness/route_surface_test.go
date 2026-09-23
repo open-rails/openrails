@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/dbtest"
 	embcp "github.com/open-rails/openrails/internal/operator"
@@ -44,7 +45,6 @@ func TestStandaloneRouteSurface(t *testing.T) {
 		Host:              "127.0.0.1",
 		Port:              0,
 		DB:                &config.DBConfig{URL: appDSN},
-		Auth:              &config.AuthConfig{Issuer: "https://controlplane.openrails.test"},
 		// The golden documents the FULL surface: LLM-backed routes register only
 		// when configured, so arm them here (the key is never used).
 		LLM: &config.LLMConfig{APIKey: "route-surface-never-used", AskEnabled: true, CatalogCopilotEnabled: true},
@@ -53,7 +53,7 @@ func TestStandaloneRouteSurface(t *testing.T) {
 		cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
 	}
 
-	assembled, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{})
+	assembled, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://controlplane.openrails.test"}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = assembled.App.Close(context.Background()) })
 

@@ -18,6 +18,7 @@ checks() {
     printf 'Run gofmt on:\n%s\n' "$unformatted" >&2
     exit 1
   fi
+  bash scripts/check-embedded-auth-boundary.sh
   go build ./...
   # Tests vet the same selected files before running; avoid separately loading
   # and compiling the complete default and integration package graphs.

@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"github.com/open-rails/openrails/internal/credential"
 	"runtime/debug"
 	"strings"
 	"sync/atomic"
@@ -40,7 +41,7 @@ type issuerRegistryRefresh struct {
 // ErrDelegatedIssuerUnknown indicates a presented token's validated `iss` is not
 // a registered AuthKit remote_application mapped via permission-group ownership to an
 // active merchant. Fail closed: the token is rejected even if well-formed.
-var ErrDelegatedIssuerUnknown = errors.New("controlplane: delegated token issuer maps to no active merchant")
+var ErrDelegatedIssuerUnknown = credential.ErrDelegatedIssuerUnknown
 
 // ErrRemoteApplicationSourceUnavailable indicates the control plane has no
 // AuthKit core client to read remote_applications from (a partially-configured

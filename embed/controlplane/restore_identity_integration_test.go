@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -23,12 +24,11 @@ func TestControlPlaneProvisionsRestoreIdentityUnderDestinationAuthority(t *testi
 	cfg := &config.Config{
 		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
 		SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
-		Auth: &config.AuthConfig{Issuer: "https://restore.openrails.test", KeysPath: t.TempDir()},
 	}
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{})
+	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://restore.openrails.test", KeysPath: t.TempDir()}})
 	require.NoError(t, err)
 	suffix := uuid.NewString()[:8]
 	owner, err := cp.Core().CreateUser(ctx, "restore-"+suffix+"@example.test", "restore"+suffix)

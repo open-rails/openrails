@@ -19,7 +19,7 @@ func TestUpsertPaymentProviderConfig(t *testing.T) {
 	ctx := context.Background()
 	cfg := hostedTestConfig(t, dbtest.SharedPostgresDSN(t), "https://providers.openrails.test")
 	e := newHostApp(t, cfg)
-	require.NoError(t, embcp.Attach(ctx, e.App(), cfg, nil))
+	require.NoError(t, embcp.Attach(ctx, e.App(), cfg.Config, cfg.Auth, nil))
 	require.NoError(t, e.App().Runtime.EnsureMerchantsService(ctx))
 
 	suffix := strings.ToLower(uuid.NewString()[:8])

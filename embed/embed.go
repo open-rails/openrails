@@ -44,7 +44,7 @@ type Options struct {
 
 	// DelegatedAuthenticator verifies explicit customer credentials for Client
 	// self-service calls and is the default verifier for customer HTTP mounts.
-	// Use the existing embed/authkit bridge; ambient host sessions confer no authority.
+	// Use billingauth.NewIntegration with the host verifier and explicit mappings.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	// Config is built programmatically by the host; embedded construction never
 	// runs config.Load, so Env and TestMode (sandbox or live) must be set

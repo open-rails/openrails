@@ -8,8 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/authkit"
-	"github.com/open-rails/authkit/verify"
+	auth "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/request"
@@ -125,7 +124,7 @@ func TestDelegatedSelfRequired_NoAdminOverride(t *testing.T) {
 }
 
 func TestDelegatedSelfRequired_DeniesExpired(t *testing.T) {
-	resolver := fakeDelegatedResolver{err: authkit.ErrAccessTokenExpired}
+	resolver := fakeDelegatedResolver{err: auth.ErrExpired}
 	r := newDelegatedTestRouter(resolver, "")
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
@@ -133,7 +132,7 @@ func TestDelegatedSelfRequired_DeniesExpired(t *testing.T) {
 }
 
 func TestDelegatedSelfRequired_DeniesRevoked(t *testing.T) {
-	resolver := fakeDelegatedResolver{err: authkit.ErrAccessTokenRevoked}
+	resolver := fakeDelegatedResolver{err: auth.ErrRevoked}
 	r := newDelegatedTestRouter(resolver, "")
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
@@ -168,7 +167,7 @@ func TestDelegatedSelfRequired_DeniesCrossMerchant(t *testing.T) {
 }
 
 func TestDelegatedSelfRequired_DeniesMissingProof(t *testing.T) {
-	resolver := fakeDelegatedResolver{err: verify.ErrSenderProofRequired}
+	resolver := fakeDelegatedResolver{err: auth.ErrSenderProofRequired}
 	r := newDelegatedTestRouter(resolver, "")
 	w := doDelegatedRequest(r, true)
 	require.Equal(t, http.StatusUnauthorized, w.Code)

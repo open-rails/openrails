@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -21,18 +22,18 @@ import (
 
 func TestConfiguredStandaloneRoutesReuseOwnedResources(t *testing.T) {
 	ctx := context.Background()
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, Auth: &config.AuthConfig{Issuer: "https://configured.openrails.test", KeysPath: t.TempDir()}}
-	rt, err := embed.New(ctx, embed.Options{HTTP: &embed.HTTPConfig{Standalone: true}, Config: cfg, River: embed.RiverManagedByOpenRails()})
+	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}}
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(ctx)) })
-	_, err = controlplane.Attach(ctx, rt, controlplane.Options{})
+	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://configured.openrails.test", KeysPath: t.TempDir()}})
 	require.NoError(t, err)
 	graph := app.HostGraph(rt).Runtime
 	merchants, capabilities, solana := graph.Merchants, graph.RouteCapabilities, graph.SolanaRPCResolver
-	routes, err := rt.HTTPRoutes()
+	routes, err := cp.HTTPRoutes()
 	require.NoError(t, err)
-	require.True(t, rt.HTTPRequiresRoot())
-	bundle, err := openrailshttp.Routes(rt)
+	require.True(t, cp.HTTPRequiresRoot())
+	bundle, err := openrailshttp.Routes(cp)
 	require.NoError(t, err)
 	mux := http.NewServeMux()
 	require.ErrorContains(t, bundle.Mount(mux, "/outer"), "root")
@@ -53,26 +54,26 @@ func TestConfiguredStandaloneRoutesReuseOwnedResources(t *testing.T) {
 	require.Same(t, merchants, graph.Merchants)
 	require.Same(t, capabilities, graph.RouteCapabilities)
 	require.Same(t, solana, graph.SolanaRPCResolver)
-	again, err := rt.HTTPRoutes()
+	again, err := cp.HTTPRoutes()
 	require.NoError(t, err)
 	require.Len(t, again, len(routes))
 }
 
 func TestRejectedStandaloneExposureDoesNotRearmRuntime(t *testing.T) {
 	ctx := context.Background()
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, Auth: &config.AuthConfig{Issuer: "https://rejected.openrails.test", KeysPath: t.TempDir()}}
+	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}}
 	reject := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return nil, billingauth.ErrUnauthenticated
 	})
-	rt, err := embed.New(ctx, embed.Options{HTTP: &embed.HTTPConfig{Standalone: true, CustomerRoutes: []embed.CustomerRoutesConfig{{DelegatedAuthenticator: reject}}}, Config: cfg, River: embed.RiverManagedByOpenRails()})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(ctx)) })
-	_, err = controlplane.Attach(ctx, rt, controlplane.Options{})
+	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://rejected.openrails.test", KeysPath: t.TempDir()}}, embed.CustomerRoutesConfig{DelegatedAuthenticator: reject})
 	require.NoError(t, err)
 	graph := app.HostGraph(rt).Runtime
 	merchants, capabilities, solana := graph.Merchants, graph.RouteCapabilities, graph.SolanaRPCResolver
 	for range 2 {
-		_, err = rt.HTTPRoutes()
+		_, err = cp.HTTPRoutes()
 		require.ErrorContains(t, err, "conflicting")
 		require.Same(t, merchants, graph.Merchants)
 		require.Same(t, capabilities, graph.RouteCapabilities)

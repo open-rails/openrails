@@ -1,17 +1,13 @@
 package embed
 
 import (
-	"context"
 	"fmt"
-	"github.com/open-rails/openrails/internal/merchanttarget"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"net/http"
-	"net/url"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/http/routebundle"
+
 	"github.com/open-rails/openrails/internal/http/embedhttp"
-	"github.com/open-rails/openrails/internal/http/router"
-	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/requestauth"
 )
 
@@ -29,11 +25,7 @@ const (
 // HTTPRoute is one native registration. Path uses net/http whole-segment
 // wildcards, relative to the mount (for example /v1/me/{id}). Handler binds
 // Request.PathValue while retaining the original URL and body for authorization.
-type HTTPRoute struct {
-	Method  string
-	Path    string
-	Handler http.Handler
-}
+type HTTPRoute = routebundle.Route
 
 // configureHTTP copies the constructor-owned HTTP policy once.
 // Invalid policy leaves the runtime unconfigured. Routes freezes configuration;
@@ -79,92 +71,27 @@ func (r *Runtime) HTTPRoutes() ([]HTTPRoute, error) {
 		return nil, fmt.Errorf("openrails HTTP: disabled; supply Options.HTTP at construction")
 	}
 	if !r.httpBuilt {
-		var table *router.Table
-		var err error
-		trimPrefix := "/billing"
-		if r.httpConfig.Standalone {
-			standalone, buildErr := operator.StandaloneRoutes(r.app)
-			if buildErr != nil {
-				return nil, buildErr
-			}
-			table = standalone
-			trimPrefix = ""
-		} else {
-			table, err = embedhttp.ConfiguredRoutes(r.app, r.httpConfig)
-			if err != nil {
-				return nil, err
-			}
+		table, err := embedhttp.ConfiguredRoutes(r.app, r.httpConfig)
+		if err != nil {
+			return nil, err
 		}
 		for i := range table.Entries {
-			table.Entries[i].Path = strings.TrimPrefix(table.Entries[i].Path, trimPrefix)
-		}
-		if r.httpConfig.Standalone {
-			extra, err := embedhttp.BuildCustomerRoutes(r.app, r.httpConfig.CustomerRoutes, r.app.Runtime.Auth)
-			if err != nil {
-				return nil, err
-			}
-			table.Entries = append(table.Entries, extra.Entries...)
-		}
-		if r.httpConfig.Standalone {
-			router.AddMerchantSelectorRoutes(table, "", func(ctx context.Context, request *http.Request) (billingauth.Target, error) {
-				return merchanttarget.Resolve(ctx, request, r.app.Runtime.Merchants, r.app.Runtime.ConfiguredMerchant(), "")
-			})
+			table.Entries[i].Path = strings.TrimPrefix(table.Entries[i].Path, "/billing")
 		}
 		if err := embedhttp.ValidateRouteTable(table); err != nil {
 			return nil, err
 		}
-		r.httpRoutes = publicHTTPRoutes(table)
+		r.httpRoutes = routebundle.FromTable(table)
 		r.httpBuilt = true
 	}
 	return append([]HTTPRoute(nil), r.httpRoutes...), nil
 }
 
-func publicHTTPRoutes(table *router.Table) []HTTPRoute {
-	routes := make([]HTTPRoute, 0, len(table.Entries))
-	for _, entry := range table.Entries {
-		routes = append(routes, HTTPRoute{Method: entry.Method, Path: entry.Path, Handler: withVerificationMemo(bindHTTPPathValues(entry.Path, entry.Handler))})
-	}
-	return routes
-}
+// HTTPRequiresRoot is false for the mount-relative embedded billing surface.
+func (r *Runtime) HTTPRequiresRoot() bool { return false }
 
 func bindHTTPPathValues(pattern string, next http.Handler) http.Handler {
-	parts := strings.Split(strings.TrimPrefix(pattern, "/"), "/")
-	if strings.HasSuffix(pattern, "...}") {
-		// Only root-anchored console assets use subtree routes. Their handler
-		// reads the original URL; customer exposure prefixes forbid subtrees.
-		return next
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Mount groups add leading segments; route patterns describe the suffix.
-		path := strings.Split(strings.Trim(r.URL.EscapedPath(), "/"), "/")
-		if len(path) < len(parts) {
-			http.NotFound(w, r)
-			return
-		}
-		path = path[len(path)-len(parts):]
-		for i, part := range parts {
-			if strings.HasPrefix(part, "{") && strings.HasSuffix(part, "}") {
-				value, err := url.PathUnescape(path[i])
-				if err != nil {
-					http.Error(w, "invalid path", 400)
-					return
-				}
-				r.SetPathValue(part[1:len(part)-1], value)
-			}
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// HTTPRequiresRoot reports whether configured routes include issuer-anchored
-// control-plane and console URLs. Such bundles mount at the host root.
-func (r *Runtime) HTTPRequiresRoot() bool {
-	if r == nil {
-		return false
-	}
-	r.httpMu.Lock()
-	defer r.httpMu.Unlock()
-	return r.httpConfig != nil && r.httpConfig.Standalone
+	return routebundle.BindPathValues(pattern, next)
 }
 
 func withVerificationMemo(next http.Handler) http.Handler {

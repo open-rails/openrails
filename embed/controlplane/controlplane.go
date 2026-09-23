@@ -10,6 +10,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
+
+	"github.com/open-rails/openrails/internal/http/embedhttp"
+	"github.com/open-rails/openrails/internal/http/routebundle"
+	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/merchanttarget"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
@@ -120,8 +126,11 @@ func CustomerGroupSlug(userID string) string           { return operator.Custome
 
 // ControlPlane is the attached OpenRails control plane for one runtime.
 type ControlPlane struct {
-	app *app.App
-	cp  *corecp.ControlPlane
+	app            *app.App
+	cp             *corecp.ControlPlane
+	routesMu       sync.Mutex
+	customerRoutes []embed.CustomerRoutesConfig
+	routes         []embed.HTTPRoute
 }
 
 func graph(rt *embed.Runtime) (*app.App, error) {
@@ -140,7 +149,7 @@ func graph(rt *embed.Runtime) (*app.App, error) {
 // construction failure is fatal for a standalone or hosted process. Attach
 // before Runtime.RunWorkers (managed) or Runtime.RiverJobs (host-owned).
 // Its AuthKit workers, queues and schedules join that same composed fleet.
-func Attach(ctx context.Context, rt *embed.Runtime, opts Options) (*ControlPlane, error) {
+func Attach(ctx context.Context, rt *embed.Runtime, opts Options, customerRoutes ...embed.CustomerRoutesConfig) (*ControlPlane, error) {
 	a, err := graph(rt)
 	if err != nil {
 		return nil, err
@@ -151,7 +160,7 @@ func Attach(ctx context.Context, rt *embed.Runtime, opts Options) (*ControlPlane
 	if err := operator.AttachWithOptions(ctx, a, a.Config, a.Runtime.DB.Pool(), opts); err != nil {
 		return nil, err
 	}
-	return &ControlPlane{app: a, cp: operator.Get(a)}, nil
+	return &ControlPlane{app: a, cp: operator.Get(a), customerRoutes: append([]embed.CustomerRoutesConfig(nil), customerRoutes...)}, nil
 }
 
 // MerchantCreationAdmission composes the hosted merchant-creation predicate for
@@ -340,3 +349,36 @@ var (
 func (c *ControlPlane) SetProviderCutoverQualification(ctx context.Context, merchantID merchant.ID, pspID uuid.UUID, qualification *ProviderCutoverQualification) error {
 	return operator.SetProviderCutoverQualification(ctx, c.app, merchantID, pspID, qualification)
 }
+
+// HTTPRoutes materializes the standalone host's billing, identity and console
+// surface. Embedded billing runtimes never import or construct these routes.
+func (c *ControlPlane) HTTPRoutes() ([]embed.HTTPRoute, error) {
+	if c == nil {
+		return nil, errors.New("standalone routes: control plane is required")
+	}
+	c.routesMu.Lock()
+	defer c.routesMu.Unlock()
+	if c.routes != nil {
+		return append([]embed.HTTPRoute(nil), c.routes...), nil
+	}
+	table, err := operator.StandaloneRoutes(c.app)
+	if err != nil {
+		return nil, err
+	}
+	extra, err := embedhttp.BuildCustomerRoutes(c.app, c.customerRoutes, c.app.Runtime.Auth)
+	if err != nil {
+		return nil, err
+	}
+	table.Entries = append(table.Entries, extra.Entries...)
+	router.AddMerchantSelectorRoutes(table, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
+		return merchanttarget.Resolve(ctx, r, c.app.Runtime.Merchants, c.app.Runtime.ConfiguredMerchant(), "")
+	})
+	if err := embedhttp.ValidateRouteTable(table); err != nil {
+		return nil, err
+	}
+	c.routes = routebundle.FromTable(table)
+	return append([]embed.HTTPRoute(nil), c.routes...), nil
+}
+
+// HTTPRequiresRoot preserves issuer-anchored standalone URLs.
+func (c *ControlPlane) HTTPRequiresRoot() bool { return true }

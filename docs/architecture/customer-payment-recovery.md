@@ -24,12 +24,10 @@ result, err := customer.PayInvoiceNow(ctx, openrails.PayInvoiceNowRequest{
 ```
 
 The authenticator must verify a customer's credential before mapping it to the
-payer and set `CredentialClassUserSession`. The AuthKit bridge derives this
-from verified claims; device-key credentials are automation authority and do
-not establish customer interaction. Custom trusted bridges explicitly attest
-this class. It is never accepted from a request header/body. Unknown or
-automation classes retain their existing self reads but cannot initiate CIT. The `embed/authkit` bridge performs the existing host verification and
-supports a live admission veto. A merchant API key or service credential cannot
+payer and set `CredentialClassUserSession`. The host explicitly maps a verified
+neutral principal with billingauth.NewIntegration; device-key credentials are
+automation authority and do not establish customer interaction. It is never accepted from a request header/body. Unknown or
+automation classes retain their existing self reads but cannot initiate CIT. The host verifier owns verification and any explicit live admission policy. A merchant API key or service credential cannot
 become customer-present by supplying a payment method. Ambient host request
 context remains isolated. The default runtime Client is the merchant-owner
 client and is not a customer credential. An explicit per-mount verifier override

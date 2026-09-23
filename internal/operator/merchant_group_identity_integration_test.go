@@ -44,7 +44,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 
 	var refuse atomic.Bool
 	sender := &captureEmailSender{}
-	require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, e.App().Runtime.DB.Pool(), embcp.AttachOptions{
+	require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg.Config, e.App().Runtime.DB.Pool(), embcp.AttachOptions{Auth: cfg.Auth,
 		HostedPosture: true,
 		EmailSender:   sender,
 		MerchantCreation: &embcp.MerchantCreationConfig{

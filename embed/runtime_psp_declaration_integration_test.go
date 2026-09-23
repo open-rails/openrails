@@ -31,7 +31,6 @@ func TestEmbedded_DeclarePSP(t *testing.T) {
 		MerchantConfigSource: config.MerchantConfigSourceAPI,
 		SecretBackend:        config.SecretBackendDB,
 		DB:                   &config.DBConfig{URL: appDSN},
-		Auth:                 &config.AuthConfig{Issuer: "https://declare-psp-" + suffix + ".openrails.test"},
 	}
 	ctx := context.Background()
 	declaration := PSPDeclaration{Key: " Platform ", Rail: " PLATFORM ", AccountID: " internal-platform-" + suffix}

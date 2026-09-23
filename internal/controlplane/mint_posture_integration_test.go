@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
@@ -30,32 +31,32 @@ func TestNew_VerifyOnlyMustBeDeclared(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("non-dev + no key + mint_disabled unset refuses to boot", func(t *testing.T) {
-		cfg := &config.Config{
-			Env:  "test",
-			Auth: &config.AuthConfig{Issuer: "https://openrails.test"},
+		cfg := &hostconfig.Config{Config: &config.Config{
+			Env: "test",
+		}, Auth: &hostconfig.AuthConfig{Issuer: "https://openrails.test"},
 		}
-		_, err := New(ctx, cfg, pool)
+		_, err := New(ctx, cfg.Config, cfg.Auth, pool)
 		require.Error(t, err, "an undeclared verify-only posture outside development must refuse to boot")
 		require.Contains(t, err.Error(), "mint_disabled")
 	})
 
 	t.Run("non-dev + no key + mint_disabled=true boots verify-only", func(t *testing.T) {
-		cfg := &config.Config{
-			Env:  "test",
-			Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
+		cfg := &hostconfig.Config{Config: &config.Config{
+			Env: "test",
+		}, Auth: &hostconfig.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
 		}
-		cp, err := New(ctx, cfg, pool, WithRedis(rdb))
+		cp, err := New(ctx, cfg.Config, cfg.Auth, pool, WithRedis(rdb))
 		require.NoError(t, err, "a DECLARED verify-only posture must boot even outside development")
 		require.NotNil(t, cp)
 		t.Cleanup(cp.Close)
 	})
 
 	t.Run("dev + no key + mint_disabled unset still boots on the ephemeral dev key path", func(t *testing.T) {
-		cfg := &config.Config{
-			Env:  "dev",
-			Auth: &config.AuthConfig{Issuer: "https://openrails.test"},
+		cfg := &hostconfig.Config{Config: &config.Config{
+			Env: "dev",
+		}, Auth: &hostconfig.AuthConfig{Issuer: "https://openrails.test"},
 		}
-		cp, err := New(ctx, cfg, pool)
+		cp, err := New(ctx, cfg.Config, cfg.Auth, pool)
 		require.NoError(t, err, "development must keep booting without a declared posture (#748 scopes the hard failure to non-development)")
 		require.NotNil(t, cp)
 		t.Cleanup(cp.Close)

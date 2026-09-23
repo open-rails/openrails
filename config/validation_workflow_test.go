@@ -49,12 +49,9 @@ func TestConfigurationPostureValidation(t *testing.T) {
 		{"production sandbox", "prod", func(c *Config) { c.TestMode = CredentialPostureSandbox }, ""},
 		{"staging sandbox", "staging", func(c *Config) {
 			c.TestMode = CredentialPostureSandbox
-			c.Auth.Issuer = "https://auth.staging.example.com"
 		}, ""},
 		{"production full", "prod", func(c *Config) {}, ""},
 		{"dev sandbox", "dev", func(c *Config) { c.TestMode = CredentialPostureSandbox }, ""},
-		{"http issuer", "prod", func(c *Config) { c.Auth.Issuer = "http://auth.internal:8080" }, "must use https outside development"},
-		{"https issuer", "prod", func(c *Config) { c.Auth.Issuer = "https://auth.example.com" }, ""},
 		{"missing write posture", "prod", func(c *Config) { c.ProviderWriteMode = "" }, "provider_write_mode is required outside development"},
 		{"invalid credential posture", "dev", func(c *Config) { c.TestMode = "yes" }, `invalid test_mode "yes"`},
 		{"required rate limits", "prod", func(c *Config) { c.RateLimits = nil }, "rate_limits is required outside development"},
