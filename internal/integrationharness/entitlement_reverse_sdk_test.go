@@ -24,7 +24,7 @@ func TestEntitlementReverseLookupSDKClient(t *testing.T) {
 	now := time.Now().UTC()
 	premium := "premium-sdk-" + uuid.NewString()[:8]
 
-	client, clientErr := openrails.NewRemote(surface.BaseURL,
+	client, clientErr := openrails.NewRemote(surface.BaseURL, openrails.WithMerchantID(dbtest.TestMerchantID),
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return surface.Token, nil }))
 	if clientErr != nil {
 		t.Fatal(clientErr)

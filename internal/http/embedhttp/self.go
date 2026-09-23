@@ -76,7 +76,11 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant
 	mux.Wrap(func(entry router.Entry) http.Handler {
 		canonical := entry.Path
 		if selfPrefix != "" {
-			canonical = EmbeddedV1Prefix + "/me" + strings.TrimPrefix(entry.Path, selfPrefix)
+			if strings.HasPrefix(entry.Path, selfPrefix+"/") {
+				canonical = EmbeddedV1Prefix + "/me" + strings.TrimPrefix(entry.Path, selfPrefix)
+			} else {
+				canonical = "/billing" + entry.Path
+			}
 		}
 		return middleware.ChainHTTP(entry.Handler,
 			middleware.WithRoutePath(canonical),

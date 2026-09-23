@@ -331,13 +331,13 @@ func checkClientCredentials(t *testing.T, ctx context.Context, d clientWorkflowD
 	empty, err := openrails.NewRemote(d.url, openrails.WithAPIKey("  "))
 	require.ErrorContains(t, err, "WithAPIKey")
 	require.Nil(t, empty)
-	unreachable, err := openrails.NewRemote("http://127.0.0.1:1", openrails.WithAPIKey("whatever"), openrails.WithTimeout(2*time.Second))
+	unreachable, err := openrails.NewRemote("http://127.0.0.1:1", openrails.WithAPIKey("whatever"), openrails.WithMerchantID(d.mid), openrails.WithTimeout(2*time.Second))
 	require.NoError(t, err)
 	require.ErrorIs(t, unreachable.Verify(ctx), openrails.ErrUnreachable)
 	if d.name != "standalone" {
 		return
 	}
-	bad, err := openrails.NewRemote(d.url, openrails.WithAPIKey("openrails_st_wrong_token"), openrails.WithTimeout(30*time.Second))
+	bad, err := openrails.NewRemote(d.url, openrails.WithAPIKey("openrails_st_wrong_token"), openrails.WithMerchantID(d.mid), openrails.WithTimeout(30*time.Second))
 	require.NoError(t, err)
 	require.ErrorIs(t, bad.Verify(ctx), openrails.ErrUnauthorized)
 	_, err = bad.Balance(ctx, (openrails.CustomerID(uuid.New())).String())
@@ -353,7 +353,7 @@ func checkClientCredentials(t *testing.T, ctx context.Context, d clientWorkflowD
 	require.NoError(t, json.NewDecoder(response.Body).Decode(&registry))
 	require.Equal(t, openrails.CurrencyRegistry{Object: "currencies", Currencies: openrails.Currencies()}, registry)
 	for _, allowed := range []string{permissions.MerchantCatalogRead, permissions.MerchantCustomerSettingsRead} {
-		reader, err := openrails.NewRemote(d.url, openrails.WithAPIKey(d.authority.MintAPIKey(d.slug, "reader", []string{allowed})))
+		reader, err := openrails.NewRemote(d.url, openrails.WithAPIKey(d.authority.MintAPIKey(d.slug, "reader", []string{allowed})), openrails.WithMerchantID(d.mid))
 		require.NoError(t, err)
 		if allowed == permissions.MerchantCatalogRead {
 			_, err = reader.EnsureCustomer(ctx, (openrails.CustomerID(uuid.New())).String())

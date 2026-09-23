@@ -41,7 +41,6 @@ import (
 	"github.com/open-rails/authkit/verify"
 
 	"github.com/open-rails/openrails/internal/auth"
-	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -107,24 +106,10 @@ func WithoutTokenRoles() Option {
 type DelegatedOption func(*delegatedOptions)
 
 type delegatedOptions struct {
-	rolePermissions func(roles []string) []string
-	resolver        PermissionResolver
-	admit           Admission
-	merchantSlug    string
-	issuer          string
-}
-
-// WithRolePermissions overrides the canonical permissions.ForRoles preset
-// with the host's own role→permission mapping. The mapping's output feeds
-// DelegatedPrincipal.Permissions verbatim (the embedding host is trusted,
-// #564), and composes with billingauth.NewDelegatedGate — wildcard grants
-// like permissions.MerchantAll are expanded by billingauth.HasPermission. A
-// mapper returning nil grants nothing beyond the grant-free /v1/me surface.
-//
-// Use WithPermissionResolver instead when the grant depends on anything other
-// than the token's roles; setting both is a construction error.
-func WithRolePermissions(mapper func(roles []string) []string) DelegatedOption {
-	return func(o *delegatedOptions) { o.rolePermissions = mapper }
+	resolver     PermissionResolver
+	admit        Admission
+	merchantSlug string
+	issuer       string
 }
 
 // WithPermissionResolver replaces the role→permission mapping with a
@@ -178,7 +163,7 @@ func WithIssuer(issuer string) DelegatedOption {
 // NewAuthenticator builds a framework-neutral billingauth.Authenticator over
 // the HOST's own verifier: the credential is checked exactly the way the host
 // checks every other request. Pass the result as
-// embed.HTTPConfig.Authenticator or a host Gate input.
+// a standalone host Gate input. Embedded constructors use New(Config) with Options.Auth.
 func NewAuthenticator(v Verifier, opts ...Option) (billingauth.Authenticator, error) {
 	if v == nil {
 		return nil, fmt.Errorf("authenticator: verifier is required (pass the host's own verifier, or use NewVerifierAuthenticator for remote JWKS issuers)")
@@ -228,9 +213,8 @@ func NewVerifierAuthenticator(issuers []string, expectedAud string, opts ...Opti
 //     produces claims, and the merchant pin is never read from them.
 //   - SubjectID: the token's `sub` claim (the acting end user).
 //   - Issuer: the verified token issuer, or WithIssuer's override, for audit.
-//   - Permissions: permissions.ForRoles over the token's roles by default;
-//     WithRolePermissions for another role vocabulary, WithPermissionResolver
-//     for a grant that needs the request or a live authority.
+//   - Permissions: none by default. WithPermissionResolver supplies explicit
+//     live authority; token role names never confer billing permissions.
 //
 // Every host used to hand-write this mapping; host-four's was a live bug
 // (upstream#1765) and host-three simply never wrote one, 404ing its whole
@@ -265,28 +249,13 @@ func newDelegated(v auth.RequestVerifier, merchantID string, opts []DelegatedOpt
 			opt(&o)
 		}
 	}
-	// Two answers to the same question is a wiring bug, and silently
-	// preferring one hides a grant the host believes it configured.
-	if o.rolePermissions != nil && o.resolver != nil {
-		return nil, fmt.Errorf("delegated authenticator: WithRolePermissions and WithPermissionResolver are mutually exclusive — a role mapping is the resolver's simple case, so pass one")
-	}
-	resolver := o.resolver
-	if resolver == nil {
-		mapper := o.rolePermissions
-		if mapper == nil {
-			mapper = func(roles []string) []string { return permissions.ForRoles(roles...) }
-		}
-		resolver = func(_ context.Context, _ *http.Request, cl verify.Claims) ([]string, error) {
-			return mapper(cl.Roles), nil
-		}
-	}
 	return auth.NewDelegatedAuthenticator(auth.DelegatedConfig{
 		Verifier:     v,
 		MerchantID:   merchantID,
 		MerchantSlug: o.merchantSlug,
 		Issuer:       o.issuer,
 		Admit:        auth.Admission(o.admit),
-		Permissions:  auth.PermissionResolver(resolver),
+		Permissions:  auth.PermissionResolver(o.resolver),
 	}), nil
 }
 

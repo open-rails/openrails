@@ -23,10 +23,10 @@ func TestAdmissionClientRecoveryAndCaptureReceipt(t *testing.T) {
 	require.NoError(t, err)
 	standalone := h.StartStandalone("USD")
 	otherMerchant := standalone.ProvisionOwnedMerchant("admission-other-" + uuid.NewString())
-	otherClient, err := openrails.NewRemote(standalone.BaseURL, openrails.WithAPIKey(otherMerchant.APIKey), openrails.WithTimeout(30*time.Second))
+	otherClient, err := openrails.NewRemote(standalone.BaseURL, openrails.WithAPIKey(otherMerchant.APIKey), openrails.WithMerchantID(otherMerchant.MerchantID), openrails.WithTimeout(30*time.Second))
 	require.NoError(t, err)
 	remoteMerchant := standalone.ProvisionOwnedMerchant("admission-remote-" + uuid.NewString())
-	remoteClient, err := openrails.NewRemote(standalone.BaseURL, openrails.WithAPIKey(remoteMerchant.APIKey), openrails.WithTimeout(30*time.Second))
+	remoteClient, err := openrails.NewRemote(standalone.BaseURL, openrails.WithAPIKey(remoteMerchant.APIKey), openrails.WithMerchantID(remoteMerchant.MerchantID), openrails.WithTimeout(30*time.Second))
 	require.NoError(t, err)
 	clients := map[string]*openrails.Client{"embedded": embeddedClient, "remote": remoteClient}
 	for name, client := range clients {

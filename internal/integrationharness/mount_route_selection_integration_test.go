@@ -64,7 +64,7 @@ func TestMountHandlerRouteSelection(t *testing.T) {
 	app.HostGraph(rt).Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
 	// Case 1: customer omitted -> /v1/me is not mounted, capabilities.customer=false.
-	h1, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, Authenticator: authn}, Prefix: "/billing"})
+	h1, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true}, Prefix: "/billing", Authenticator: authn})
 	require.NoError(t, err)
 
 	w := doMounted(h1, http.MethodGet, "/billing/v1/me/balance?currency=USD", nil)
@@ -83,7 +83,7 @@ func TestMountHandlerRouteSelection(t *testing.T) {
 	require.NotContains(t, caps1.Features, "webhooks")
 
 	// Case 2: customer included -> /v1/me mounted, capabilities.customer=true.
-	h2, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, Customer: true, Authenticator: authn}, Prefix: "/billing", DelegatedAuthenticator: delegated})
+	h2, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Checkout: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true}}}, Prefix: "/billing", DelegatedAuthenticator: delegated, Authenticator: authn})
 	require.NoError(t, err)
 
 	caps2 := getCapabilities(t, h2)

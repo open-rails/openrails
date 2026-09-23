@@ -113,7 +113,7 @@ func TestRecoveryClientAcrossTransports(t *testing.T) {
 	// Catalog-read selects the fixed viewer role; support legitimately has
 	// subscription-update authority and is not a read-only principal.
 	token := remote.MintAPIKey(dbtest.TestMerchantSlug, "recovery-readonly", []string{permissions.MerchantSubscriptionsRead, permissions.MerchantCatalogRead})
-	reader, err := openrails.NewRemote(remote.BaseURL, openrails.WithAPIKey(token))
+	reader, err := openrails.NewRemote(remote.BaseURL, openrails.WithAPIKey(token), openrails.WithMerchantID(dbtest.TestMerchantID))
 	require.NoError(t, err)
 	require.ErrorIs(t, reader.ResumeSubscription(ctx, openrails.SubscriptionID(uuid.New())), openrails.ErrDenied)
 	_, err = reader.DeletePaymentMethod(ctx, (openrails.CustomerID(uuid.New())).String(), openrails.PaymentMethodID(uuid.New()))

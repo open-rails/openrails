@@ -1,6 +1,7 @@
 package embed
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -8,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
@@ -16,27 +17,23 @@ import (
 
 func TestCatalogClientScopeCannotExpand(t *testing.T) {
 	mid := merchant.ID(uuid.New())
-	graph := &app.Runtime{}
-	graph.SetConfiguredMerchant(mid)
-	rt := &Runtime{app: &app.App{Runtime: graph}}
 	product := openrails.ProductID(uuid.New())
 	const subject = "作者 / external:123"
 	calls := 0
-	rt.handlerOnce.Do(func() {
-		rt.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			calls++
-			require.Equal(t, "/v1/catalog/products/"+product.String(), r.URL.Path)
-			owner, err := base64.RawURLEncoding.DecodeString(r.Header.Get("OpenRails-Catalog-Owner"))
-			require.NoError(t, err)
-			require.Equal(t, subject, string(owner))
-			principal, ok := requestauth.HostPrincipalFromContext(r.Context())
-			require.True(t, ok)
-			require.Equal(t, mid, principal.MerchantID)
-			require.Empty(t, principal.Subject, "the selector must never impersonate the authenticated actor")
-			require.NoError(t, json.NewEncoder(w).Encode(openrails.CatalogProduct{ID: product}))
-		})
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		require.Equal(t, "/v1/catalog/products/"+product.String(), r.URL.Path)
+		owner, err := base64.RawURLEncoding.DecodeString(r.Header.Get("OpenRails-Catalog-Owner"))
+		require.NoError(t, err)
+		require.Equal(t, subject, string(owner))
+		principal, ok := requestauth.HostPrincipalFromContext(r.Context())
+		require.True(t, ok)
+		require.Equal(t, mid, principal.MerchantID)
+		require.Empty(t, principal.Subject, "the selector must never impersonate the authenticated actor")
+		require.NoError(t, json.NewEncoder(w).Encode(openrails.CatalogProduct{ID: product}))
 	})
-	admin, err := rt.Client()
+	transport, capability := inprocess.NewTransport(handler, func() merchant.ID { return mid })
+	admin, err := openrails.NewRemote(inprocessBaseURL, openrails.WithMerchantID(mid), openrails.WithHTTPClient(&http.Client{Transport: transport}), openrails.WithTokenProvider(func(context.Context) (string, error) { return capability, nil }))
 	require.NoError(t, err)
 	owner, err := admin.ForCatalogOwner(subject)
 	require.NoError(t, err)

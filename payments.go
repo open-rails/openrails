@@ -72,20 +72,20 @@ type PaymentFilter struct {
 }
 
 // GetPayment reads one payment with its refunds.
-func (c *Client) GetPayment(ctx context.Context, id PaymentID) (*Payment, error) {
+func (c *Client) GetPayment(ctx context.Context, id PaymentID, requestOptions ...RequestOption) (*Payment, error) {
 	payment, err := requireTypedID("payment_id", id)
 	if err != nil {
 		return nil, err
 	}
 	var out Payment
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/payments/"+payment, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/payments/"+payment, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // ListPayments lists the merchant's payments, newest first.
-func (c *Client) ListPayments(ctx context.Context, filter PaymentFilter) (*Page[Payment], error) {
+func (c *Client) ListPayments(ctx context.Context, filter PaymentFilter, requestOptions ...RequestOption) (*Page[Payment], error) {
 	q := pageQuery(filter.PageOptions)
 	for key, value := range map[string]string{"customer_id": filter.CustomerID, "price_id": filter.PriceID, "status": filter.Status, "rail": filter.Rail} {
 		if value = strings.TrimSpace(value); value != "" {
@@ -93,7 +93,7 @@ func (c *Client) ListPayments(ctx context.Context, filter PaymentFilter) (*Page[
 		}
 	}
 	var out Page[Payment]
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/payments?"+q.Encode(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/payments?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

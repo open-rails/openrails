@@ -27,16 +27,8 @@ import (
 func TestCustomerPaymentRefundTotalsAcrossPages(t *testing.T) {
 	ctx := t.Context()
 	_, pool, dsn := scopeWithoutRLSDatabase(t)
-	runtime, mid, err := newDeclaredMerchant(ctx, embed.Options{
-		Config: &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox,
-			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
-			ProviderWriteMode: config.ProviderWriteModeReadOnly, NewSubscriptionCollectionPolicy: "engine", DB: &config.DBConfig{URL: dsn}},
-		PGXPool: pool, River: embed.RiverFromHost(),
-	}, "refund-history-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Refund history"})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
 	alice, bob := uuid.New(), uuid.New()
-	authn := billingauth.DelegatedAuthenticatorFunc(func(_ context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
+	authn := billingauth.AuthenticationFunc(func(_ context.Context, r *http.Request) (billingauth.Identity, error) {
 		var customer uuid.UUID
 		switch r.Header.Get("Authorization") {
 		case "Bearer alice":
@@ -44,11 +36,21 @@ func TestCustomerPaymentRefundTotalsAcrossPages(t *testing.T) {
 		case "Bearer bob":
 			customer = bob
 		default:
-			return nil, billingauth.ErrUnauthenticated
+			return billingauth.Identity{}, billingauth.ErrUnauthenticated
 		}
-		return &billingauth.DelegatedPrincipal{MerchantID: mid.String(), SubjectID: customer.String(), CredentialClass: billingauth.CredentialClassUserSession}, nil
+		return billingauth.Identity{Kind: billingauth.NativeUser, SubjectID: customer.String(), CustomerID: customer.String(), Issuer: "refund-history-fixture", CredentialClass: billingauth.CredentialClassUserSession}, nil
 	})
-	require.NoError(t, runtime.ConfigureHTTP(embed.HTTPConfig{CustomerExposures: []embed.CustomerHTTPConfig{{Prefix: "/v1/me", Scope: embed.CustomerBillingManagement, DelegatedAuthenticator: authn}}}))
+	slug := "refund-history-" + uuid.NewString()
+	runtime, mid, err := newDeclaredMerchant(ctx, embed.Options{
+		Auth: &billingauth.Integration{Authentication: authn},
+		HTTP: &embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: slug, Scope: embed.CustomerBillingManagement}}},
+		Config: &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox,
+			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
+			ProviderWriteMode: config.ProviderWriteModeReadOnly, NewSubscriptionCollectionPolicy: "engine", DB: &config.DBConfig{URL: dsn}},
+		PGXPool: pool, River: embed.RiverFromHost(),
+	}, slug, embed.MerchantConfig{DisplayName: "Refund history"})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
 	routes, err := openrailshttp.Routes(runtime)
 	require.NoError(t, err)
 	mux := http.NewServeMux()

@@ -69,7 +69,7 @@ type HostEventListOptions struct {
 	PaymentID           PaymentID
 }
 
-func (c *Client) ListHostEvents(ctx context.Context, options HostEventListOptions) ([]HostEvent, error) {
+func (c *Client) ListHostEvents(ctx context.Context, options HostEventListOptions, requestOptions ...RequestOption) ([]HostEvent, error) {
 	query := url.Values{}
 	if options.Type != "" {
 		query.Set("type", string(options.Type))
@@ -84,7 +84,7 @@ func (c *Client) ListHostEvents(ctx context.Context, options HostEventListOption
 		query.Set("payment_id", options.PaymentID.String())
 	}
 	var out []HostEvent
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/host-events?"+query.Encode(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/host-events?"+query.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -92,10 +92,10 @@ func (c *Client) ListHostEvents(ctx context.Context, options HostEventListOption
 
 // AcknowledgeHostEvent is idempotent. Call only after the host's idempotent
 // processing has committed; an unacknowledged event is redelivered.
-func (c *Client) AcknowledgeHostEvent(ctx context.Context, id uuid.UUID) error {
+func (c *Client) AcknowledgeHostEvent(ctx context.Context, id uuid.UUID, requestOptions ...RequestOption) error {
 	event, err := requireUUID("event_id", id)
 	if err != nil {
 		return err
 	}
-	return c.do(ctx, http.MethodPost, "/v1/merchant/host-events/"+event+"/acknowledge", nil, nil)
+	return c.do(ctx, http.MethodPost, "/v1/merchant/host-events/"+event+"/acknowledge", nil, nil, requestOptions...)
 }

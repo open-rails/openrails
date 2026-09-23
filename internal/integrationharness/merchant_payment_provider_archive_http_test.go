@@ -317,7 +317,7 @@ func TestStandaloneProviderAccountArchiveLifecycle(t *testing.T) {
 	s := providerArchiveSurface{
 		name:   "standalone",
 		mid:    owned.MerchantID,
-		client: surface.Client(openrails.WithAPIKey(owned.APIKey)),
+		client: surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID)),
 		call: func(t *testing.T, method, path string, body any) (int, []byte) {
 			return requestJSON(t, method, surface.BaseURL+path, owned.APIKey, body)
 		},
@@ -366,7 +366,7 @@ func TestEmbeddedProviderAccountArchiveLifecycle(t *testing.T) {
 	probe := newFakeDataLink(t)
 	runtime.Merchants.SetCredentialProbeEndpointsForIntegration("", probe.URL)
 
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true, Gate: archiveGate{id: mid}}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true}, Gate: archiveGate{id: mid}})
 	require.NoError(t, err)
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)

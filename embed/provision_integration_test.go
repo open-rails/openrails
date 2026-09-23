@@ -69,7 +69,16 @@ func TestMerchantConstructorSeedsPSPs(t *testing.T) {
 	t.Cleanup(func() { _ = restarted.Close(context.Background()) })
 	require.Equal(t, id, again)
 	require.Equal(t, 2, countPSPs(), "restart does not duplicate PSPs")
-	// The one-merchant binding cannot be overridden by a client selector.
-	_, err = restarted.Client(openrails.WithMerchantID(merchant.ID(uuid.New())))
+	// Selection is checked per operation; it cannot override the runtime binding.
+	mismatched, err := restarted.Client(openrails.WithMerchantID(merchant.ID(uuid.New())))
+	require.NoError(t, err)
+	_, err = mismatched.GetMerchantSettings(ctx)
+	require.ErrorIs(t, err, openrails.ErrConflict, "reject the target before merchant lookup or provider work")
 	require.ErrorContains(t, err, id.String())
+	client, err := restarted.Client()
+	require.NoError(t, err)
+	require.Equal(t, id, client.MerchantID(), "selection does not mutate the runtime default")
+	_, err = client.GetMerchantSettings(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, countPSPs(), "rejected selection does not change the provisioned PSPs")
 }

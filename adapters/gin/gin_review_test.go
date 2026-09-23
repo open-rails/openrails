@@ -23,12 +23,13 @@ func TestGinReviewFullInventoryMountsNatively(t *testing.T) {
 	delegated := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return nil, billingauth.ErrUnauthenticated
 	})
-	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg}}
-	policy := &embed.HTTPConfig{Checkout: true, Customer: true, MerchantAdmin: true, Catalog: true, PaymentProviders: true, MerchantAPI: true,
-		Authenticator: billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
-			return billingauth.UserContext{}, billingauth.ErrUnauthenticated
-		}), Gate: billingauth.NewDelegatedGate(delegated)}
-	table, err := embedhttp.ConfiguredRoutes(graph, policy, delegated)
+	graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg, Auth: &billingauth.Integration{Authentication: billingauth.AuthenticationFunc(func(context.Context, *http.Request) (billingauth.Identity, error) {
+		return billingauth.Identity{}, billingauth.ErrUnauthenticated
+	}), Authorization: billingauth.AuthorizationFunc(func(context.Context, *http.Request, billingauth.Identity, billingauth.Requirement) error {
+		return billingauth.ErrUnauthenticated
+	})}}}
+	policy := &embed.HTTPConfig{Checkout: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true, DelegatedAuthenticator: delegated}}, MerchantAdmin: true, Catalog: true, PaymentProviders: true, MerchantAPI: true}
+	table, err := embedhttp.ConfiguredRoutes(graph, policy)
 	require.NoError(t, err)
 	b := &Bundle{}
 	for _, route := range table.Entries {
