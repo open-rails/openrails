@@ -143,10 +143,6 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Ope
 	} else if _, err = client.ReadSingleCardVaultBilling(ctx, p.Instrument.RailCustomerRef, p.Instrument.RailMethodRef); err != nil {
 		return intents.Parked("enrollment instrument readback unavailable or unqualified")
 	}
-	ctx, err = client.QualifyDispatch(ctx)
-	if err != nil {
-		return intents.Parked("NMI test-mode qualification refused before submission: " + err.Error())
-	}
 	proof, submitted, err := h.fenceInitialMembership(ctx, in, p)
 	if err != nil {
 		return intents.Ambiguous("enrollment could not retain its submission fence: " + err.Error())

@@ -192,6 +192,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		_ = r.Close(ctx)
 		return nil, err
 	}
+	application.Runtime.VerifyProviderPosture(ctx)
 	if opts.HTTP != nil {
 		if err := r.configureHTTP(*opts.HTTP); err != nil {
 			_ = r.Close(ctx)

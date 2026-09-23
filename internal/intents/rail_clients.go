@@ -79,6 +79,7 @@ func ccbillDataLinkForMerchant(ctx context.Context, cfg *config.Config, src rail
 	}
 	if endpointOverride != "" {
 		dl.BaseURL = endpointOverride
+		dl.LoopbackFixture = true
 	}
 	return dl, nil
 }

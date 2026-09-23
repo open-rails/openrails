@@ -123,6 +123,7 @@ func newNMITestFetcher(t *testing.T, queryRequests *[]map[string]string, v5Paths
 
 	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.QueryURL = server.URL
 	client.V5BaseURL = server.URL
 	return NewNMIFetcher(client)
@@ -253,6 +254,7 @@ func TestNMIFetcher_PaginatesTransactions(t *testing.T) {
 
 	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.QueryURL = server.URL
 	client.V5BaseURL = server.URL
 
@@ -302,6 +304,7 @@ func TestNMIFetcher_PaginatesV5Rosters(t *testing.T) {
 
 	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.QueryURL = server.URL
 	client.V5BaseURL = server.URL
 
@@ -381,6 +384,7 @@ func TestNMIFetcher_EmptyRosterIsNotExhaustive(t *testing.T) {
 		t.Cleanup(server.Close)
 		client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "test-key"}, true)
 		require.NoError(t, err)
+		client.LoopbackFixture = true
 		client.QueryURL = server.URL
 		client.V5BaseURL = server.URL
 		return NewNMIFetcher(client)

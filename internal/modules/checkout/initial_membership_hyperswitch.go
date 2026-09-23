@@ -45,5 +45,5 @@ func (h *InitialMembershipIntentHandler) hyperSwitchCharger(ctx context.Context,
 	if method.ID != p.Instrument.RailMethodRef {
 		return nil, charge.ErrInstrumentChanged
 	}
-	return &hscharge.Charger{Client: client, Destination: gateway.DirectPostURL, SecurityKey: hyperswitch.Secret(gateway.SecurityKey)}, nil
+	return &hscharge.Charger{Client: client, Destination: gateway.DirectPostURL, SecurityKey: hyperswitch.Secret(gateway.SecurityKey), Posture: gateway}, nil
 }

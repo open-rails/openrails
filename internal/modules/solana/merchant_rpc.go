@@ -73,11 +73,12 @@ func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid merchant.ID) (*sol
 		network = "devnet"
 	}
 	return solanarpc.NewRPCClientWithConfig(solanarpc.RPCClientConfig{
-		Endpoint:    b.Endpoint,
-		RPCProvider: settings.RPCProvider,
-		RPCAPIKey:   settings.RPCAPIKey,
-		Network:     network,
-		ReadOnly:    b.Config != nil && b.Config.IsProviderReadOnly(),
+		Endpoint:        b.Endpoint,
+		LoopbackFixture: b.Endpoint != "",
+		RPCProvider:     settings.RPCProvider,
+		RPCAPIKey:       settings.RPCAPIKey,
+		Network:         network,
+		ReadOnly:        b.Config != nil && b.Config.IsProviderReadOnly(),
 	}), nil
 }
 

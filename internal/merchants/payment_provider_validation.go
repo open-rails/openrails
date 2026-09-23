@@ -36,7 +36,11 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id mercha
 		if err != nil || !ok {
 			return false, err
 		}
-		client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{SecurityKey: securityKey}, environment == "test")
+		deployment, _, err := s.storedNMIDeployment(ctx, id, rail, environment, accountID)
+		if err != nil {
+			return false, err
+		}
+		client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, environment == "test")
 		if err != nil {
 			return false, fmt.Errorf("merchants: build nmi credential probe: %w", err)
 		}

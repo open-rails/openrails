@@ -76,6 +76,7 @@ func readChargedRequest(ctx context.Context, in gen.OpenrailsRailIntent, request
 	if err != nil {
 		return intents.CollectedReceipt{}, false, err
 	}
+	client.LoopbackFixture = true
 	client.QueryURL = server.URL
 	client.V5BaseURL = server.URL
 	return intents.ReadNMICollectionReceipt(ctx, in, receiptFixtureNMI{client, request}, reference)

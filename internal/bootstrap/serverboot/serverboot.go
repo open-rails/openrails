@@ -59,9 +59,8 @@ type Options struct {
 	// admin_console.enabled without assets is a boot error.
 	ConsoleAssets fs.FS
 
-	// NMIProbeV5BaseURL is a test-only seam: overrides the base URL the #348
-	// test_mode NMI arm probe hits during the boot-manifest reconcile. Empty in
-	// production (the probe uses nmi.NewClient's documented default).
+	// NMIProbeV5BaseURL is a test-only seam: overrides the v5 base URL the
+	// startup sandbox posture probe hits. Empty in production.
 	NMIProbeV5BaseURL string
 
 	ConfiguredMerchant merchant.ID
@@ -159,8 +158,20 @@ func optsValue[T any](opts *Options, pick func(*Options) T) T {
 // boot ensures missing identities and reloads host-owned snapshot credentials.
 // Existing metadata and archive decisions survive restart. The conventional
 // path is optional; an explicitly supplied path must exist.
-// nmiProbeV5BaseURL is the test-only probe seam (Options.NMIProbeV5BaseURL).
+// It then verifies every loaded sandbox PSP credential once (disarming, never
+// refusing boot); nmiProbeV5BaseURL is the test-only posture probe seam.
 func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, path, nmiProbeV5BaseURL string) error {
+	if err := reconcileBootMerchantManifest(ctx, cfg, application, path); err != nil {
+		return err
+	}
+	if application.Runtime != nil {
+		application.Runtime.NMIPostureV5BaseURL = nmiProbeV5BaseURL
+		application.Runtime.VerifyProviderPosture(ctx)
+	}
+	return nil
+}
+
+func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, application *app.App, path string) error {
 	explicit := strings.TrimSpace(path) != ""
 	if !explicit {
 		path = bootstrap.DefaultMerchantConfigManifestPath
@@ -188,7 +199,7 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	if rt == nil {
 		return fmt.Errorf("merchant startup requires a runtime")
 	}
-	opts := bootstrap.MerchantManifestReconcileOptions{StripeClients: rt.StripeClients, Insert: true, NMIProbeV5BaseURL: nmiProbeV5BaseURL}
+	opts := bootstrap.MerchantManifestReconcileOptions{StripeClients: rt.StripeClients, Insert: true}
 	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
 		if rt.ManifestSecrets == nil {
 			return fmt.Errorf("snapshot credentials require the runtime snapshot plane")

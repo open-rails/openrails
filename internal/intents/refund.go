@@ -296,10 +296,6 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 		return h.recoverReceipt(ctx, intent, p)
 	}
 
-	ctx, err = client.QualifyDispatch(ctx)
-	if err != nil {
-		return Parked("NMI test-mode qualification refused before refund: " + err.Error())
-	}
 	result, err := client.Refund(ctx, nmi.RefundParams{TransactionID: p.ProviderTarget, Amount: p.AmountCents, Currency: p.Currency})
 	if err != nil {
 		if errors.Is(err, nmi.ErrProviderReadOnly) {

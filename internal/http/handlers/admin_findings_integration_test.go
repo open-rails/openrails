@@ -103,6 +103,7 @@ func newFakeNMIGateway(t *testing.T) (*fakeNMIGateway, *nmi.NMIClient) {
 		WebhookSecret: "test_secret",
 	}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.DirectPostURL = f.srv.URL
 	client.QueryURL = f.srv.URL
 	client.V5BaseURL = f.srv.URL

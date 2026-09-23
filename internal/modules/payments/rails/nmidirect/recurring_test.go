@@ -23,6 +23,7 @@ func recurringFixture(t *testing.T, handler http.HandlerFunc) *Charger {
 	t.Cleanup(server.Close)
 	client, err := nmi.NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "account-key"}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.DirectPostURL, client.V5BaseURL, client.QueryURL = server.URL+"/sale", server.URL, server.URL+"/query"
 	return New(client)
 }

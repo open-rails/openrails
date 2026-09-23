@@ -58,6 +58,7 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 	}
 
 	probe("merchant_secrets", r.merchantSecretsReady(ctx))
+	probe("psp_posture", r.providerPostureReady(ctx))
 
 	var riverErr error
 	if r.hostRiver && !r.hostRiverBound.Load() {

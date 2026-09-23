@@ -71,7 +71,12 @@ var providerWriteSurface = map[string]string{
 	"DeleteCustomerBillingEntry":      "write", // IRREVERSIBLE: shared-vault scoped delete
 
 	// --- reads ----------------------------------------------------------
-	"QualifyDispatch":              "read",
+	// Sandbox posture verification: query reads, or the dedicated sandbox's
+	// simulated-only qualification probe; never live money.
+	"CheckPosture":                 "read",
+	"VerifyPosture":                "read",
+	"PostureKey":                   "read",
+	"RequireArmedFor":              "read",
 	"ConfirmApprovedSale":          "read",
 	"ConfirmApprovedUnvaultedSale": "read",
 	"ConfirmLiveSubscription":      "read",

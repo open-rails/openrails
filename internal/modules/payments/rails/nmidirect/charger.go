@@ -129,12 +129,3 @@ func FailureCode(err *nmi.CustomerVaultError) string {
 	}
 	return "nmi_declined"
 }
-
-// QualifyDispatch delegates the exact captured NMI account qualification to
-// intent handlers before they write their submission fence.
-func (c *Charger) QualifyDispatch(ctx context.Context) (context.Context, error) {
-	if c == nil || c.Client == nil {
-		return ctx, errors.New("nmi charger not initialized")
-	}
-	return c.Client.QualifyDispatch(ctx)
-}

@@ -197,12 +197,12 @@ func (a *nmiAdapter) nmiClientFor(ctx context.Context, targetAccountID string) (
 		return nil, "", false
 	}
 	client.ReadOnly = a.svc.rt.Config != nil && a.svc.rt.Config.IsProviderReadOnly()
-	client.LoopbackQualification = a.svc.rt.Config != nil && a.svc.rt.Config.SandboxNMIGatewayURL() != ""
 	endpoint := a.testEndpointURL
 	if endpoint == "" {
 		endpoint = a.svc.rt.Config.SandboxNMIGatewayURL()
 	}
 	if endpoint != "" {
+		client.LoopbackFixture = true
 		client.DirectPostURL = endpoint
 		client.QueryURL = endpoint
 		client.V5BaseURL = endpoint

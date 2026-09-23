@@ -745,6 +745,7 @@ func TestNMIProviderCutoverQualification(t *testing.T) {
 				for id, key := range map[uuid.UUID]string{p.Source: p.SourceKey, p.Target: p.TargetKey} {
 					client, err := nmi.NewAccountClient(owner.MerchantID.UUID(), id, key, &config.NMIProviderSettings{SecurityKey: key}, true)
 					require.NoError(t, err)
+					client.LoopbackFixture = true
 					client.V5BaseURL = g.Server.URL
 					clients[id] = client
 				}

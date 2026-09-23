@@ -26,7 +26,7 @@ type NMIClientResolver interface {
 }
 
 // NMIEndpoints overrides NMI base URLs on store-armed clients (a test seam
-// for fake gateways). Zero value = real endpoints.
+// for loopback fake gateways only). Zero value = real endpoints.
 type NMIEndpoints struct {
 	V5BaseURL     string
 	DirectPostURL string
@@ -110,13 +110,6 @@ func (a *NMIArmer) NMIClient(ctx context.Context, mid merchant.ID, scope merchan
 	}
 	webhookSecret, _, _ := a.Secret(ctx, mid, scope, "webhook_signing_secret")
 	deployment, err := config.NMIEndpointDeployment(scope.Settings)
-	if deployment == "" {
-		if a.testMode() {
-			deployment = config.NMIEndpointSandbox
-		} else {
-			deployment = config.NMIEndpointGateway
-		}
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +118,9 @@ func (a *NMIArmer) NMIClient(ctx context.Context, mid merchant.ID, scope merchan
 		return nil, fmt.Errorf("build store-armed NMI client: %w", err)
 	}
 	client.ReadOnly = a.Config != nil && a.Config.IsProviderReadOnly()
-	client.LoopbackQualification = a.Config != nil && a.Config.SandboxNMIGatewayURL() != ""
+	// Endpoint overrides exist only for loopback fake gateways; the client
+	// refuses any mutation whose destination is not a literal loopback IP.
+	client.LoopbackFixture = a.Config != nil && a.Config.SandboxNMIGatewayURL() != "" || a.Endpoints != (NMIEndpoints{})
 	if a.Endpoints.V5BaseURL != "" {
 		client.V5BaseURL = a.Endpoints.V5BaseURL
 	}

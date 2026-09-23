@@ -353,6 +353,7 @@ func newFakeSwapGateway(t *testing.T, railSubID, initialVault string) (*fakeSwap
 	t.Cleanup(srv.Close)
 	client, err := nmi.NewClient("nmi", &config.NMIProviderSettings{SecurityKey: "test_security_key", WebhookSecret: "test_secret"}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.V5BaseURL, client.QueryURL, client.DirectPostURL = srv.URL, srv.URL, srv.URL
 	return f, client
 }

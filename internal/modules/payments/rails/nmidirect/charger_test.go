@@ -78,6 +78,7 @@ func newChargerAgainst(t *testing.T, handler http.HandlerFunc) *Charger {
 	t.Cleanup(server.Close)
 	client, err := nmi.NewClient("nmi", &config.NMIProviderSettings{SecurityKey: "k"}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.DirectPostURL = server.URL
 	client.QueryURL = server.URL
 	client.V5BaseURL = server.URL

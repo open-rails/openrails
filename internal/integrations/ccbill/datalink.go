@@ -26,8 +26,10 @@ type DataLinkClient struct {
 	// ReadOnly blocks every SMS mutation (CancelSubscription) at the transport
 	// with ErrProviderReadOnly; reads stay available. Set from
 	// cfg.IsProviderReadOnly() in build_runtime (mode=readonly, #346).
-	ReadOnly   bool
-	HTTPClient *http.Client
+	ReadOnly bool
+	// LoopbackFixture marks an explicitly declared loopback fake DataLink.
+	LoopbackFixture bool
+	HTTPClient      *http.Client
 }
 
 const defaultDataLinkBaseURL = "https://datalink.ccbill.com"

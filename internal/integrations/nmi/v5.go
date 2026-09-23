@@ -131,7 +131,7 @@ func (c *NMIClient) sendV5Request(ctx context.Context, method, path string, body
 	}
 
 	if mutating {
-		if err := c.qualifyMutation(ctx); err != nil {
+		if err := c.requireArmed(ctx, req.URL.String()); err != nil {
 			return err
 		}
 	}

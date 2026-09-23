@@ -132,6 +132,9 @@ func (c *Charger) chargeThroughProxy(ctx context.Context, req charge.Request, sr
 	if err != nil {
 		return charge.Result{}, err
 	}
+	if err := c.Gateway.Posture.RequireArmedFor(ctx, c.Gateway.directPostURL(), c.Gateway.SecurityKey); err != nil {
+		return charge.Result{}, errors.Join(charge.ErrNotDispatched, err)
+	}
 	proxyRes, err := c.BT.ProxyForm(ctx, c.Gateway.directPostURL(), form)
 	if err != nil {
 		// Ambiguous (may have forwarded), BT pre-forward failure (clean,

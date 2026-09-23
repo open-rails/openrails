@@ -182,7 +182,7 @@ func TestFactoryInstallsUnderTheGuard(t *testing.T) {
 
 	req, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/products", nil)
 	require.NoError(t, err)
-	resp, err := factory.newClient(false, 0).Do(req)
+	resp, err := factory.newClient(false, false, 0).Do(req)
 	require.NoError(t, err)
 	_ = resp.Body.Close()
 	require.NotNil(t, seen, "the installed transport carried the request")
@@ -192,7 +192,7 @@ func TestFactoryInstallsUnderTheGuard(t *testing.T) {
 	seen = nil
 	req2, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/products", nil)
 	require.NoError(t, err)
-	_, err = factory.newClient(true, 0).Do(req2)
+	_, err = factory.newClient(true, false, 0).Do(req2)
 	require.ErrorIs(t, err, ErrProviderReadOnly)
 	require.Nil(t, seen, "a fake wire server must never buy a caller an unguarded write")
 

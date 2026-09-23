@@ -245,13 +245,6 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		Address2:     req.Address2,
 	}
 
-	owner, account := client.AccountIdentity()
-	if owner != uuid.Nil && account != uuid.Nil {
-		ctx, err = client.QualifyDispatch(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("NMI test-mode qualification refused before vault creation: %w", err)
-		}
-	}
 	providerStartedAt := time.Now()
 	nmiResponse, err := client.CreateCustomerVault(ctx, vaultData)
 	providerDuration = time.Since(providerStartedAt)
@@ -470,6 +463,7 @@ func (s *RailPaymentMethodService) buildNMIClient(provider string, cfg *config.N
 		return nil, err
 	}
 	if s != nil && s.NMIEndpointOverride != "" {
+		client.LoopbackFixture = true
 		client.DirectPostURL = s.NMIEndpointOverride
 		client.QueryURL = s.NMIEndpointOverride
 		client.V5BaseURL = s.NMIEndpointOverride

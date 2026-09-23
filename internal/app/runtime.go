@@ -44,6 +44,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
@@ -53,6 +54,13 @@ import (
 
 // Runtime aggregates infrastructure clients and application services.
 type Runtime struct {
+	// providerPosture holds the sandbox PSP credentials verified at load;
+	// Ready reports any that are disarmed.
+	providerPosture    providerposture.Tracked
+	providerPostureErr atomic.Pointer[error]
+	// NMIPostureV5BaseURL is a test-only seam for the startup sandbox probe.
+	NMIPostureV5BaseURL string
+
 	Auth          *billingauth.Integration
 	StripeClients *stripeapi.Factory
 	DB            *db.DB

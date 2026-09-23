@@ -65,7 +65,7 @@ func TestReconcileMerchantManifestDeclaresOneCustodianForTwoPSPs(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	snapshot := merchants.NewManifestSecretStore()
-	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true, SecretStore: snapshot.Seeder(), NMIProbeV5BaseURL: server.URL}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true, SecretStore: snapshot.Seeder()}))
 
 	var merchantID string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM billing.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
@@ -131,7 +131,7 @@ func TestReconcileMerchantManifestDeclaresOneCustodianForTwoPSPs(t *testing.T) {
 	}
 
 	// Re-applying is idempotent: still one custodian, still both references.
-	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true, Overwrite: true, SecretStore: snapshot.Seeder(), NMIProbeV5BaseURL: server.URL}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true, Overwrite: true, SecretStore: snapshot.Seeder()}))
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.custodians WHERE merchant_id = $1::uuid`, merchantID).Scan(&count))
 	require.Equal(t, 1, count)

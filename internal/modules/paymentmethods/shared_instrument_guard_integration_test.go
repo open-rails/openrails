@@ -114,6 +114,7 @@ func TestDeleteVaultSharedVaultScopesToBillingEntry(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
+			client.LoopbackFixture = true
 			client.V5BaseURL = server.URL
 			client.DirectPostURL = server.URL
 			return client, nil

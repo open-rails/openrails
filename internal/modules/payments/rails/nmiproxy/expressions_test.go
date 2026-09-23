@@ -202,7 +202,11 @@ func TestChargerOutcomes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return New(bt, GatewayConfig{SecurityKey: "sk", DirectPostURL: "https://gw.example/transact.php"}), srv
+		posture, err := nmi.ProxyPostureClient("sk", "https://gw.example/transact.php", false, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return New(bt, GatewayConfig{SecurityKey: "sk", DirectPostURL: "https://gw.example/transact.php", Posture: posture}), srv
 	}
 	req := charge.Request{
 		Instrument:  charge.Instrument{Rail: Rail, MethodRef: testTokenID},

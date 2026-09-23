@@ -93,14 +93,6 @@ func (h *SubscriptionCollectionHandler) Execute(ctx context.Context, in gen.Open
 	if err != nil {
 		return intents.Parked("arm accepted recurring charge: " + err.Error())
 	}
-	if qualifier, ok := charger.(interface {
-		QualifyDispatch(context.Context) (context.Context, error)
-	}); ok {
-		ctx, err = qualifier.QualifyDispatch(ctx)
-		if err != nil {
-			return intents.Parked("NMI test-mode qualification refused before submission: " + err.Error())
-		}
-	}
 	_, proof, first, err := h.validateAndFence(ctx, in, p, true)
 	if err != nil {
 		if errors.Is(err, errEngineObligationChanged) || errors.Is(err, charge.ErrInstrumentChanged) {

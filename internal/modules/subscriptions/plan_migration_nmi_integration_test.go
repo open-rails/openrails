@@ -88,6 +88,7 @@ func newFakeNMIPlanGateway(t *testing.T, merchantID, pspID uuid.UUID, railSubID,
 		SecurityKey: "test_security_key", WebhookSecret: "test_secret",
 	}, true)
 	require.NoError(t, err)
+	client.LoopbackFixture = true
 	client.V5BaseURL = srv.URL
 	client.QueryURL = srv.URL
 	client.DirectPostURL = srv.URL
@@ -128,6 +129,7 @@ func TestNMIPlanPreparationUsesExactAccountRecordAndCurrencyScale(t *testing.T) 
 				original := pusher.resolver.(fakeNMIClientSource).client
 				other, err := nmi.NewAccountClient(f.merchantID, uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "test_security_key", WebhookSecret: "test_secret"}, true)
 				require.NoError(t, err)
+				other.LoopbackFixture = true
 				other.V5BaseURL, other.DirectPostURL = original.V5BaseURL, original.DirectPostURL
 				pusher.resolver = fakeNMIClientSource{client: other}
 			case "missing installment count":

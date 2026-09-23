@@ -1081,6 +1081,9 @@ func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID u
 				transactionID = strings.TrimSpace(*session.TransactionID)
 			}
 			_ = s.finalizeSolanaTransferReference(ctx, session, transactionID)
+			if response, found, err := s.acceptedOperationSessionResponse(ctx, session); found || err != nil {
+				return response, err
+			}
 			return s.sessionToResponse(session), nil
 		}
 		if session.Status != models.CheckoutSessionStatusExpired {

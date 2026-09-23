@@ -25,6 +25,7 @@ func testClient(t *testing.T, url string) *NMIClient {
 	c.DirectPostURL = url
 	c.QueryURL = url
 	c.V5BaseURL = url
+	c.LoopbackFixture = true
 	return c
 }
 
