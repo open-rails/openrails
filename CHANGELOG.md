@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.0 (unreleased)
+## 0.7.0
 
 - Periods are exact. OpenRails windows are hours, so a 720h price reads
   "every 30 days" (was "every month") and 8760h "every 365 days"; only exact
