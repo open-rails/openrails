@@ -33,7 +33,7 @@ import (
 func storeCollectionTestConfig() *config.Config {
 	// TestMode=sandbox → provider environment "test", matching
 	// merchantsServiceForTest / seedPSPSecrets.
-	return &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull}
+	return &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull, ProviderSandbox: &config.ProviderSandboxConfig{NMIGatewayURL: "http://127.0.0.1:1"}}
 }
 
 func storeArmedCharger(dbi *db.DB, msvc *merchants.Service, boot map[string]money.CollectionAdapter, endpoints money.CollectionEndpoints) *money.ScopedCharger {
