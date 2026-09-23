@@ -186,6 +186,20 @@ fi
 grep -Fq 'empty Go package metadata' "$fixture/failure"
 unset FAKE_GO_LIST_EMPTY
 
+# Scheduling changes order only: every selected package occurs exactly once.
+export OPENRAILS_TEST_PACKAGES=4 OPENRAILS_TEST_DB_DSN='postgresql://external/db'
+for package in embed internal/app internal/river internal/integrationharness; do
+    mkdir -p "$fixture/$package"
+    printf '//go:build integration\n\npackage fixture\n' >"$fixture/$package/integration.go"
+done
+run_fixture ./...
+command="$(grep '^go test ' "$log")"
+[[ "$command" == *" ./internal/integrationharness ./internal/app ./internal/river ./embed ./defaultprod ./defaulttest ./integrationonly ./mixed ./fixturepkg" ]] || {
+    echo "test_integration_test: scheduling lost or duplicated a package: $command" >&2; exit 1
+}
+unset OPENRAILS_TEST_PACKAGES OPENRAILS_TEST_DB_DSN
+rm -rf "$fixture/embed" "$fixture/internal"
+
 rm -rf "$fixture/mixed" "$fixture/defaulttest" "$fixture/defaultprod" "$fixture/integrationonly"
 if run_selection --list-checks-packages >"$fixture/failure" 2>&1; then
     echo "test_integration_test: absent integration packages were accepted" >&2; exit 1

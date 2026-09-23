@@ -98,6 +98,15 @@ for arg in "$@"; do
   if [ "$arg" = "./..." ]; then
     pkgs=()
     package_list="$(selected_integration_packages)"
+    # Start the long workflow packages before the short ones so their worker
+    # and browser waits overlap useful work instead of extending the run's tail.
+    package_list="$(printf '%s\n' "$package_list" | awk '
+      $0 == "./internal/integrationharness" { priority = 0 }
+      $0 == "./internal/app" { priority = 1 }
+      $0 == "./internal/river" { priority = 2 }
+      $0 == "./embed" { priority = 3 }
+      { print (priority == "" ? 4 : priority), $0; priority = "" }
+    ' | sort -k1,1n -k2,2 | cut -d" " -f2-)"
     while IFS= read -r pkg; do
       [ -n "$pkg" ] && pkgs+=("$pkg")
     done <<< "$package_list"
