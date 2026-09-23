@@ -281,6 +281,28 @@ func (q *Queries) CountInvalidEngineCheckoutReferences(ctx context.Context, merc
 	return count, err
 }
 
+const countInvalidPurchaseCheckoutReferences = `-- name: CountInvalidPurchaseCheckoutReferences :one
+SELECT count(*) FROM openrails.checkout_sessions s
+LEFT JOIN openrails.prices p ON p.merchant_id=s.merchant_id AND p.id=s.price_id
+WHERE s.merchant_id=$1::uuid AND s.rail_state ? 'accepted_purchase'
+ AND (p.id IS NULL
+   OR s.rail_state->'accepted_purchase'->>'product_id' IS DISTINCT FROM p.product_id::text
+   OR s.rail_state->'accepted_purchase'->>'price_id' IS DISTINCT FROM p.id::text
+   OR s.rail_state->'accepted_purchase'->>'amount' IS DISTINCT FROM p.amount::text
+   OR s.rail_state->'accepted_purchase'->>'currency' IS DISTINCT FROM p.currency
+   OR s.rail_state->'accepted_purchase'->>'access_duration_hours' IS DISTINCT FROM p.access_duration_hours::text
+   OR p.auto_renew)
+`
+
+// Archive integrity includes tombstones and preserves accepted commercial
+// snapshots against their immutable price identity, not current product text.
+func (q *Queries) CountInvalidPurchaseCheckoutReferences(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countInvalidPurchaseCheckoutReferences, merchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countInvalidStripeSetupReferences = `-- name: CountInvalidStripeSetupReferences :one
 SELECT count(*) FROM openrails.checkout_sessions cs
 WHERE cs.merchant_id=$1::uuid AND cs.mode='payment_method' AND cs.rail='stripe' AND cs.status='succeeded'

@@ -7,6 +7,7 @@ import (
 
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -79,7 +80,31 @@ func TestStripePortalPaymentMethodChangesConvergeFromProviderTruth(t *testing.T)
 		"id": "pm_new", "customer": "cus_portal",
 	}, nil)
 	newMethod := requireStripeMethod(t, ctx, dbi, pspID, "pm_new")
+	require.Equal(t, "cus_portal", newMethod.RailCustomerRef, "attached webhook must retain the verified Stripe customer handle")
 	require.Equal(t, newMethod.ID, *requireSubscription(t, ctx, pool, subscriptionID).PaymentMethodID)
+	// Delivery order is not provider state: a delayed detach cannot park a
+	// method that live Stripe still reports attached and selected.
+	deliverStripePaymentStateEvent(t, ctx, service, eventPrefix+"_stale_detach", "payment_method.detached", map[string]any{"id": "pm_new", "customer": nil}, map[string]any{"customer": "cus_portal"})
+	require.Empty(t, requireStripeMethod(t, ctx, dbi, pspID, "pm_new").ParkReason)
+	require.Equal(t, newMethod.ID, *requireSubscription(t, ctx, pool, subscriptionID).PaymentMethodID)
+	require.Zero(t, stripeDetachedFindingCount(t, ctx, pool, pspID, "pm_new"))
+	deliverStripePaymentStateEvent(t, ctx, service, eventPrefix+"_duplicate_attach", "payment_method.attached", map[string]any{"id": "pm_new", "customer": "cus_portal"}, nil)
+	require.Equal(t, newMethod.ID, requireStripeMethod(t, ctx, dbi, pspID, "pm_new").ID)
+	for _, failure := range []string{"unavailable", "wrong-method"} {
+		original := reader.methods["pm_new"]
+		if failure == "unavailable" {
+			reader.methodErr = errors.New("provider read unavailable")
+		} else {
+			reader.methods["pm_new"] = &payments.StripePaymentMethodState{ID: "pm_other"}
+		}
+		payload, err := json.Marshal(map[string]any{"id": eventPrefix + "_read_" + failure, "type": "payment_method.detached", "data": map[string]any{"object": map[string]any{"id": "pm_new", "customer": "cus_portal"}}})
+		require.NoError(t, err)
+		require.Error(t, service.HandleStripeWebhook(ctx, payload))
+		require.Empty(t, requireStripeMethod(t, ctx, dbi, pspID, "pm_new").ParkReason)
+		require.Equal(t, newMethod.ID, *requireSubscription(t, ctx, pool, subscriptionID).PaymentMethodID)
+		reader.methodErr = nil
+		reader.methods["pm_new"] = original
+	}
 
 	// Detaching the current method parks evidence and converges the link to
 	// Stripe's current fallback. The detached event omits its former customer;
@@ -174,6 +199,7 @@ type stripePaymentStateFake struct {
 	customers         map[string]*payments.StripeCustomerPaymentState
 	notFoundCustomers map[string]bool
 	customerCalls     int
+	methodErr         error
 }
 
 func newStripePaymentStateFake() *stripePaymentStateFake {
@@ -187,6 +213,9 @@ func newStripePaymentStateFake() *stripePaymentStateFake {
 func (f *stripePaymentStateFake) PaymentMethod(_ context.Context, id string) (*payments.StripePaymentMethodState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.methodErr != nil {
+		return nil, f.methodErr
+	}
 	return f.methods[id], nil
 }
 

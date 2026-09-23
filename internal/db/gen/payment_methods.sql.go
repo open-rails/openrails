@@ -12,6 +12,43 @@ import (
 	"github.com/google/uuid"
 )
 
+const bindMissingStripeCustomerReference = `-- name: BindMissingStripeCustomerReference :execrows
+UPDATE openrails.payment_methods
+SET rail_customer_ref=$1::text, updated_at=$2::timestamptz
+WHERE merchant_id=$3::uuid AND id=$4::uuid
+ AND customer_id=$5::uuid AND psp_id=$6::uuid
+ AND rail='stripe' AND rail_method_ref=$7::text
+ AND rail_customer_ref='' AND custodian='psp' AND custodian_id IS NULL AND park_reason=''
+`
+
+type BindMissingStripeCustomerReferenceParams struct {
+	RailCustomerRef string
+	Now             time.Time
+	MerchantID      uuid.UUID
+	ID              uuid.UUID
+	CustomerID      uuid.UUID
+	PspID           uuid.UUID
+	RailMethodRef   string
+}
+
+// Verified Stripe setup/provider readback can complete a historical mirror
+// missing its customer reference. It cannot rename an existing binding.
+func (q *Queries) BindMissingStripeCustomerReference(ctx context.Context, arg BindMissingStripeCustomerReferenceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, bindMissingStripeCustomerReference,
+		arg.RailCustomerRef,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+		arg.CustomerID,
+		arg.PspID,
+		arg.RailMethodRef,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const captureStoredCredentialRef = `-- name: CaptureStoredCredentialRef :execrows
 UPDATE openrails.payment_methods SET
     stored_credential_recurring_ref = CASE

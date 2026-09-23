@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/stretchr/testify/require"
 )
@@ -154,8 +155,19 @@ func TestUnknownHostedPurchaseRetainsExclusionUntilProviderClosure(t *testing.T)
 	_, err := service.CreateSession(fx.ctx, purchaseSessionRequest(fx, "uncertain"), &UserIdentity{ID: fx.userID})
 	require.Error(t, err)
 	id := idempotentCheckoutSessionID(fx.merchantID.UUID(), scopeIdempotencyKey(fx.userID, "uncertain"))
+	lookup, err := service.LookupSession(fx.ctx, purchaseSessionRequest(fx, "uncertain"), &UserIdentity{ID: fx.userID})
+	require.NoError(t, err)
+	require.Equal(t, "processing", lookup.Status)
+	require.Nil(t, lookup.ExpiresAt)
 	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.checkout_sessions SET status='expired', expires_at=now()-interval '1 day' WHERE id=$1`, id)
 	require.NoError(t, err)
+	lookup, err = service.LookupSession(fx.ctx, purchaseSessionRequest(fx, "uncertain"), &UserIdentity{ID: fx.userID})
+	require.NoError(t, err)
+	require.Equal(t, "processing", lookup.Status)
+	require.Nil(t, lookup.ExpiresAt)
+	read, err := service.GetSession(fx.ctx, id, &UserIdentity{ID: fx.userID})
+	require.NoError(t, err)
+	require.Equal(t, "processing", read.Status)
 	_, err = service.CreateSession(fx.ctx, purchaseSessionRequest(fx, "uncertain"), &UserIdentity{ID: fx.userID})
 	require.Error(t, err)
 	_, err = service.CreateSession(fx.ctx, purchaseSessionRequest(fx, "different-key"), &UserIdentity{ID: fx.userID})
@@ -165,6 +177,9 @@ func TestUnknownHostedPurchaseRetainsExclusionUntilProviderClosure(t *testing.T)
 	require.ErrorIs(t, err, ErrCheckoutSessionNotFound)
 	err = service.MarkProviderCheckoutClosed(db.WithPSPID(fx.ctx, psp), id, models.CheckoutSessionStatusExpired)
 	require.NoError(t, err)
+	lookup, err = service.LookupSession(fx.ctx, purchaseSessionRequest(fx, "uncertain"), &UserIdentity{ID: fx.userID})
+	require.NoError(t, err)
+	require.Equal(t, "expired", lookup.Status)
 	_, err = service.CreateSession(fx.ctx, purchaseSessionRequest(fx, "after-provider-closed"), &UserIdentity{ID: fx.userID})
 	require.Error(t, err) // Synthetic transport still fails, but this is a NEW legitimate attempt.
 	require.EqualValues(t, 2, calls.Load())
@@ -172,6 +187,9 @@ func TestUnknownHostedPurchaseRetainsExclusionUntilProviderClosure(t *testing.T)
 
 func TestSessionSettlementPreservesAcceptedBenefitsAndLatePayment(t *testing.T) {
 	fx, service, _, psp := purchaseSessionFixture(t)
+	store := replaycache.NewStore(nil)
+	t.Cleanup(store.Close)
+	service.idempotencyService = store
 	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{"accepted_post":null}' WHERE id=$1`, fx.productID)
 	require.NoError(t, err)
 	restore := installPurchaseProvider(service, initialStripeWireUnit(func(r *http.Request) (*http.Response, error) { return stripeCheckoutOK(), nil }))
@@ -182,6 +200,9 @@ func TestSessionSettlementPreservesAcceptedBenefitsAndLatePayment(t *testing.T) 
 	require.NoError(t, err)
 	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.checkout_sessions SET status='expired', expires_at=now()-interval '1 day' WHERE id=$1`, original.ID.UUID())
 	require.NoError(t, err)
+	uncertain, err := service.CreateSession(fx.ctx, purchaseSessionRequest(fx, "accepted"), &UserIdentity{ID: fx.userID})
+	require.NoError(t, err)
+	require.Equal(t, "processing", uncertain.Status, "cached create replays the current unresolved projection, not stale local expiry")
 	ctx := db.WithPSPID(fx.ctx, psp)
 	req := &payments.RegisterPurchaseRequest{CheckoutSessionID: original.ID.UUID(), UserID: fx.userID, PriceID: fx.priceID, Rail: "stripe", TransactionID: "pi_accepted_1051", Amount: 5_000_000, AmountProvided: true, Currency: "USD"}
 	paid, err := fx.purchase.RegisterPurchase(ctx, req)

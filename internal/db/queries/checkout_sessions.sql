@@ -245,6 +245,20 @@ SET status=CASE WHEN status='succeeded' THEN status ELSE sqlc.arg(status)::text 
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid
   AND psp_id=sqlc.arg(psp_id)::uuid AND rail='stripe' AND deleted_at IS NULL;
 
+-- Archive integrity includes tombstones and preserves accepted commercial
+-- snapshots against their immutable price identity, not current product text.
+-- name: CountInvalidPurchaseCheckoutReferences :one
+SELECT count(*) FROM openrails.checkout_sessions s
+LEFT JOIN openrails.prices p ON p.merchant_id=s.merchant_id AND p.id=s.price_id
+WHERE s.merchant_id=sqlc.arg(merchant_id)::uuid AND s.rail_state ? 'accepted_purchase'
+ AND (p.id IS NULL
+   OR s.rail_state->'accepted_purchase'->>'product_id' IS DISTINCT FROM p.product_id::text
+   OR s.rail_state->'accepted_purchase'->>'price_id' IS DISTINCT FROM p.id::text
+   OR s.rail_state->'accepted_purchase'->>'amount' IS DISTINCT FROM p.amount::text
+   OR s.rail_state->'accepted_purchase'->>'currency' IS DISTINCT FROM p.currency
+   OR s.rail_state->'accepted_purchase'->>'access_duration_hours' IS DISTINCT FROM p.access_duration_hours::text
+   OR p.auto_renew);
+
 -- A local expiry or failed HTTP request does not prove a provider cannot charge.
 -- Only a completed purchase or authoritative provider cancellation releases a
 -- hosted session. NMI's accepted operation owns uncertainty after submission.

@@ -371,7 +371,7 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 				if err != nil {
 					return nil, err
 				}
-				if cached.MembershipQuote != nil {
+				if cached.MembershipQuote != nil || cached.Mode == string(models.CheckoutSessionModeOneOff) && s.db != nil {
 					return s.GetSession(ctx, cached.ID.UUID(), user)
 				}
 				return cached, nil
@@ -2178,6 +2178,16 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 
 	if terms, err := readInitialMembershipQuote(session); err == nil {
 		resp.MembershipQuote = &CheckoutSessionMembershipQuote{ProductName: terms.ProductName, CycleHours: int64(terms.PeriodEnd.Sub(terms.PeriodStart) / time.Hour), Entitlements: models.CloneEntitlementsSpec(terms.Entitlements)}
+	}
+	// Local HTTP failure and TTL expiry cannot declare a submitted Stripe
+	// purchase financially failed. Keep callers polling the accepted attempt
+	// until payment or authoritative provider closure resolves it.
+	if _, accepted := session.RailState[acceptedPurchaseTermsKey]; accepted && session.Rail == models.RailStripe && session.RailState["purchase_submitted"] == true && session.RailState["provider_closed"] != true {
+		if session.Status == models.CheckoutSessionStatusCreated || session.Status == models.CheckoutSessionStatusFailed || session.Status == models.CheckoutSessionStatusExpired || session.Status == models.CheckoutSessionStatusCanceled || session.Status == models.CheckoutSessionStatusRequiresAction && s.isExpired(session) {
+			resp.Status = "processing"
+			resp.ExpiresAt = nil
+			resp.Message = "The original payment outcome is being verified. Keep this checkout attempt."
+		}
 	}
 
 	if action := s.buildNextAction(resp); action != nil {

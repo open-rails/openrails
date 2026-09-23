@@ -1,6 +1,33 @@
 package contract
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
+
+func TestAcceptedPurchaseArchiveRefusesUncertaintyAndChangedMoney(t *testing.T) {
+	p := Profile{Name: "checkout_sessions", Columns: []Column{{"mode", "text"}, {"rail", "text"}, {"status", "text"}, {"price_id", "uuid"}, {"amount", "bigint"}, {"currency", "text"}, {"rail_state", "jsonb"}}}
+	for _, tc := range []struct {
+		name, status, amount     string
+		submitted, closed, valid bool
+	}{
+		{"paid", "succeeded", "100", true, false, true},
+		{"local expiry unknown", "expired", "100", true, false, false},
+		{"provider closed", "expired", "100", true, true, true},
+		{"never submitted", "failed", "100", false, true, true},
+		{"changed amount", "succeeded", "101", true, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mode, rail, money, currency := "one_off", "stripe", "100", "USD"
+			id := testMerchant
+			state := fmt.Sprintf(`{"accepted_purchase":{"price_id":%q,"product_id":%q,"payment_id":%q,"product_key":"post","product_name":"Post","amount":%q,"currency":"USD","access_duration_hours":null,"entitlements":{"post:one":null},"accepted_at":"2026-09-23T00:00:00Z","entitlement_start":"2026-09-23T00:00:00Z"},"purchase_submitted":%t,"provider_closed":%t}`, id, id, id, tc.amount, tc.submitted, tc.closed)
+			err := ValidateValues(p, []*string{&mode, &rail, &tc.status, &id, &money, &currency, &state})
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%v error=%v", tc.valid, err)
+			}
+		})
+	}
+}
 
 func TestCheckoutIntentReceiptContracts(t *testing.T) {
 	p := Profile{Name: "rail_intents", Columns: []Column{{"intent_type", "text"}, {"status", "text"}, {"payload", "jsonb"}, {"result_evidence", "jsonb"}}}

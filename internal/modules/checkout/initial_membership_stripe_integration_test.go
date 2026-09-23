@@ -55,7 +55,7 @@ func initialStripeResponse(v any) *http.Response {
 }
 
 func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
-	for _, mode := range []string{"paid", "lost response", "authentication", "declined", "wrong method", "setup", "not dispatched", "refunded", "disputed", "verify readonly", "verify limited", "verify full", "verify lost cancel", "opaque valid", "opaque malformed", "bound missing", "bound wrong owner", "bound changed quote", "bound deleted", "bound paid"} {
+	for _, mode := range []string{"paid", "lost response", "authentication", "declined", "wrong method", "setup", "setup mirrored", "setup missing reference", "setup wrong reference", "not dispatched", "refunded", "disputed", "verify readonly", "verify limited", "verify full", "verify lost cancel", "opaque valid", "opaque malformed", "bound missing", "bound wrong owner", "bound changed quote", "bound deleted", "bound paid"} {
 		t.Run(mode, func(t *testing.T) {
 			fx := newSubIntentFixtureForMerchant(t, merchant.ID(uuid.New()))
 			_, seedErr := fx.db.Pool().Exec(fx.ctx, `UPDATE billing.products SET entitlements_spec='{"stripe_engine_access":null}' WHERE id=(SELECT product_id FROM billing.prices WHERE id=$1)`, fx.priceID)
@@ -157,7 +157,7 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 				case r.Method == "GET" && r.URL.Path == "/v1/charges/ch_initial":
 					method := "pm_initial"
 					customer := "cus_initial"
-					if mode == "setup" {
+					if strings.HasPrefix(mode, "setup") {
 						method = "pm_setup"
 						customer = "cus_setup"
 					}
@@ -182,7 +182,7 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 			fx.svc.StripeService.StripeClients = service.StripeClients
 			principal := billingauth.DelegatedPrincipal{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid.String(), SubjectID: terms.CustomerID.String()}
 			key := "stripe-initial-" + uuid.NewString()
-			if mode == "setup" {
+			if strings.HasPrefix(mode, "setup") {
 				fx.svc.RailCustomerService = payments.NewRailCustomerService(fx.db)
 				setupKey := "setup-key-" + uuid.NewString()
 				action, err := fx.svc.CreateStripeMethodSetup(fx.ctx, terms.PSPID, setupKey, principal, resolver)
@@ -203,11 +203,48 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 				mu.Lock()
 				setupStatus = "succeeded"
 				mu.Unlock()
+				var mirroredID uuid.UUID
+				if mode != "setup" {
+					reader := &payments.HTTPStripePaymentStateReader{SecretKey: "sk_test_initial", HTTPClient: service.StripeClients.ReadOnlyClient(0)}
+					mirrored, err := payments.MirrorAttachedStripePaymentMethod(db.WithPSPID(fx.ctx, terms.PSPID), fx.db, fx.svc.RailCustomerService, nil, reader, "pm_setup")
+					require.NoError(t, err)
+					require.NotNil(t, mirrored)
+					require.Equal(t, "cus_setup", mirrored.RailCustomerRef)
+					mirroredID = mirrored.ID
+					if mode == "setup missing reference" || mode == "setup wrong reference" {
+						ref := ""
+						if mode == "setup wrong reference" {
+							ref = "cus_different"
+						}
+						_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE billing.payment_methods SET rail_customer_ref=$2 WHERE id=$1`, mirrored.ID, ref)
+						require.NoError(t, err)
+					}
+				}
 				completed, err := fx.svc.ConfirmStripeMethodSetup(fx.ctx, action.ID.UUID(), principal, resolver)
+				if mode == "setup wrong reference" {
+					require.ErrorIs(t, err, ErrCheckoutSessionConflict)
+					require.Zero(t, posts)
+					return
+				}
 				require.NoError(t, err)
 				require.NotNil(t, completed.PaymentMethodID)
+				if mirroredID != uuid.Nil {
+					require.Equal(t, mirroredID, completed.PaymentMethodID.UUID())
+				}
+				method, err := fx.db.Gen(fx.ctx).GetPaymentMethodByID(fx.ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: completed.PaymentMethodID.UUID()})
+				require.NoError(t, err)
+				require.Equal(t, "cus_setup", method.RailCustomerRef)
 				require.Empty(t, completed.ClientSecret)
 				terms.PaymentMethodID = completed.PaymentMethodID.UUID()
+				// Confirmation before the attached event, and repeated attached
+				// deliveries after either ordering, converge on the same method.
+				reader := &payments.HTTPStripePaymentStateReader{SecretKey: "sk_test_initial", HTTPClient: service.StripeClients.ReadOnlyClient(0)}
+				for range 2 {
+					mirrored, err := payments.MirrorAttachedStripePaymentMethod(db.WithPSPID(fx.ctx, terms.PSPID), fx.db, fx.svc.RailCustomerService, nil, reader, "pm_setup")
+					require.NoError(t, err)
+					require.Equal(t, terms.PaymentMethodID, mirrored.ID)
+					require.Equal(t, "cus_setup", mirrored.RailCustomerRef)
+				}
 				stored, err := NewCheckoutSessionRepo(fx.db).GetByID(fx.ctx, action.ID.UUID())
 				require.NoError(t, err)
 				raw, _ := json.Marshal(stored.RailState)
