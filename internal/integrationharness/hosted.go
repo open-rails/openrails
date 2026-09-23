@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -133,8 +134,7 @@ func (s *Hosted) Start() {
 		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true,
 		SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
 		APIURL: s.BaseURL, CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
-		DB:   &config.DBConfig{URL: h.DSN},
-		Auth: &config.AuthConfig{Issuer: "https://hosted.openrails.test", KeysPath: s.keysPath},
+		DB: &config.DBConfig{URL: h.DSN},
 	}
 	if h.Redis != nil {
 		cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
@@ -145,7 +145,7 @@ func (s *Hosted) Start() {
 	rt, err := embed.New(h.ctx, embed.Options{Config: cfg, Redis: h.Redis, River: embed.RiverManagedByOpenRails()})
 	require.NoError(h.t, err, "hosted embed.New")
 	s.runtime = rt // Stop owns cleanup even if attaching the control plane fails.
-	cp, err := controlplane.Attach(h.ctx, rt, controlplane.Options{
+	cp, err := controlplane.Attach(h.ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://hosted.openrails.test", KeysPath: s.keysPath},
 		HostedPosture: true, PasswordlessLogin: true, PasswordlessAutoRegistration: true,
 		EmailSender: s.Sender, Frontend: authcore.FrontendConfig{BaseURL: s.BaseURL},
 		// One loopback peer registers every hosted user in these workflows;

@@ -15,9 +15,10 @@ import (
 	"github.com/open-rails/authkit/ratelimit"
 
 	"github.com/open-rails/openrails/config"
-	billingauthkit "github.com/open-rails/openrails/embed/authkit"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
+	billingauthkit "github.com/open-rails/openrails/internal/hostauth"
 )
 
 // AttachOptions configures the embedded AuthKit control-plane seam.
@@ -33,7 +34,7 @@ import (
 //
 // authcore.Config (the AuthKit engine):
 //   - Token (Issuer/Audiences/durations/SessionMaxPerUser): NOT forwarded.
-//     Issuer comes from cfg.Auth.Issuer (already host-configurable at the
+//     Issuer comes from AttachOptions.Auth.Issuer (already host-configurable at the
 //     config layer); the audience is the OpenRails product constant
 //     billingauth.TokenAudience, not a per-host dial (#750). Token
 //     durations/session caps have no AttachOptions knob yet — an open gap,
@@ -43,7 +44,7 @@ import (
 //     from HostedPosture (open+required vs closed+none), while the independent
 //     passwordless login and auto-registration policies are explicit opt-ins.
 //   - Keys: NOT forwarded. Signing-key resolution is OpenRails' own
-//     responsibility (resolveControlPlaneKeySource: cfg.Auth.* inline
+//     responsibility (resolveControlPlaneKeySource: AttachOptions.Auth inline
 //     material, else vault keys.json, else dev-ephemeral) — a host has no
 //     business injecting a KeySource or flipping VerifyOnly.
 //   - Identity (OAuth/OIDC providers): NOT forwarded. No AttachOptions
@@ -93,11 +94,14 @@ import (
 //     client the engine was wired with above (#210).
 //   - Languages / Documents: NOT forwarded — no host has asked for them yet.
 type AttachOptions struct {
+	// Auth is the explicit standalone identity configuration, separate from billing.
+	Auth *hostconfig.AuthConfig
+
 	// DPoPRequestURL returns the externally visible request URL when the host
 	// rewrites mounted billing paths. It must use trusted routing configuration.
 	DPoPRequestURL func(*http.Request) string
 
-	// Naming overrides config.Auth.Naming as one site policy input. Nil uses config.
+	// Naming overrides Auth.Naming as one site policy input. Nil uses config.
 	Naming *authkit.NamingConfig
 	// NameAdmission is a side-effect-free host claim check; creation charges use MerchantCreation.Admission.
 	NameAdmission func(context.Context, authkit.NameAdmissionRequest) error
@@ -192,8 +196,8 @@ func Get(a *app.App) *controlplane.ControlPlane {
 // standalone boot path can exit non-zero. injectedPool, when non-nil, is reused
 // as the control-plane pool; otherwise Attach creates an OpenRails-owned pool
 // whose lifecycle App.Close manages.
-func Attach(ctx context.Context, a *app.App, cfg *config.Config, injectedPool *pgxpool.Pool) error {
-	return AttachWithOptions(ctx, a, cfg, injectedPool, AttachOptions{})
+func Attach(ctx context.Context, a *app.App, cfg *config.Config, auth *hostconfig.AuthConfig, injectedPool *pgxpool.Pool) error {
+	return AttachWithOptions(ctx, a, cfg, injectedPool, AttachOptions{Auth: auth})
 }
 
 // AttachWithOptions builds the control plane with host-selected posture.
@@ -282,7 +286,7 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	if opts.MerchantCreation != nil {
 		cpOpts = append(cpOpts, controlplane.WithMerchantCreation(*opts.MerchantCreation))
 	}
-	cp, err := controlplane.New(ctx, cfg, pool, cpOpts...)
+	cp, err := controlplane.New(ctx, cfg, opts.Auth, pool, cpOpts...)
 	if err != nil {
 		if ownedPool {
 			pool.Close()

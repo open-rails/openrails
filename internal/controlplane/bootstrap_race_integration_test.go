@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
@@ -27,9 +28,9 @@ func TestBootstrap_ConcurrentColdBoot(t *testing.T) {
 	const n = 4
 	// One ControlPlane per simulated node, all over the same empty DB.
 	cps := make([]*ControlPlane, n)
-	configs := make([]*config.Config, n)
+	configs := make([]*hostconfig.Config, n)
 	for i := range configs {
-		configs[i] = &config.Config{Env: "dev", Auth: &config.AuthConfig{
+		configs[i] = &hostconfig.Config{Config: &config.Config{Env: "dev"}, Auth: &hostconfig.AuthConfig{
 			Issuer: "https://openrails.test", KeysPath: t.TempDir(),
 		}}
 	}
@@ -52,7 +53,7 @@ func TestBootstrap_ConcurrentColdBoot(t *testing.T) {
 			<-start
 			// AuthKit now initializes root during construction, so the
 			// constructor belongs inside the cold-boot barrier too.
-			cps[i], errs[i] = New(ctx, configs[i], pool)
+			cps[i], errs[i] = New(ctx, configs[i].Config, configs[i].Auth, pool)
 			if errs[i] != nil {
 				return
 			}
@@ -110,7 +111,7 @@ func TestBootstrap_ConcurrentColdBoot(t *testing.T) {
 func TestBootstrap_RootGroupRaceLoserAdopts(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
-	cfg := &config.Config{Env: "dev", Auth: &config.AuthConfig{
+	cfg := &hostconfig.Config{Config: &config.Config{Env: "dev"}, Auth: &hostconfig.AuthConfig{
 		Issuer: "https://openrails.test", KeysPath: t.TempDir(),
 	}}
 
@@ -127,7 +128,7 @@ func TestBootstrap_RootGroupRaceLoserAdopts(t *testing.T) {
 	go func() {
 		var berr error
 		defer func() { done <- berr }()
-		cp, berr := New(ctx, cfg, pool)
+		cp, berr := New(ctx, cfg.Config, cfg.Auth, pool)
 		if berr != nil {
 			return
 		}

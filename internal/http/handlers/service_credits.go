@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	billingidentity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
@@ -67,12 +67,12 @@ func parseServiceCustomerID(raw string) (*billingidentity.CustomerID, error) {
 
 // serviceCredentialFromRequest returns the resolved service credential the auth
 // middleware pinned onto the context, or a (status, message) error pair.
-func serviceCredentialFromRequest(r *httprequest.Request) (*controlplane.ResolvedServiceCredential, int, string) {
+func serviceCredentialFromRequest(r *httprequest.Request) (*credential.ResolvedServiceCredential, int, string) {
 	v, ok := r.Get(middleware.ServiceCredentialContextKey)
 	if !ok {
 		return nil, http.StatusUnauthorized, "API key required"
 	}
-	resolved, ok := v.(*controlplane.ResolvedServiceCredential)
+	resolved, ok := v.(*credential.ResolvedServiceCredential)
 	if !ok || resolved == nil {
 		return nil, http.StatusInternalServerError, "API key state invalid"
 	}
@@ -93,7 +93,7 @@ func hasMerchantRoutePrincipal(r *httprequest.Request) bool {
 
 func requireServiceCustomerScope(r *httprequest.Request, tenantSubject billingidentity.CustomerID) bool {
 	if v, ok := r.Get(middleware.ServiceCredentialContextKey); ok {
-		resolved, ok := v.(*controlplane.ResolvedServiceCredential)
+		resolved, ok := v.(*credential.ResolvedServiceCredential)
 		if !ok || resolved == nil {
 			r.ErrorJSON(http.StatusInternalServerError, "API key state invalid")
 			return false
@@ -113,7 +113,7 @@ func requireServiceCustomerScope(r *httprequest.Request, tenantSubject billingid
 
 func serviceCustomerScopeAllows(r *httprequest.Request, tenantSubject billingidentity.CustomerID) bool {
 	if v, ok := r.Get(middleware.ServiceCredentialContextKey); ok {
-		resolved, ok := v.(*controlplane.ResolvedServiceCredential)
+		resolved, ok := v.(*credential.ResolvedServiceCredential)
 		return ok && resolved != nil && resolved.AllowsCustomer(tenantSubject.UUID())
 	}
 	return hasMerchantRoutePrincipal(r)

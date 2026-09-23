@@ -7,12 +7,11 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/authkit"
-	"github.com/open-rails/authkit/verify"
+	auth "github.com/open-rails/helpers/auth"
 	log "github.com/sirupsen/logrus"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/permissions"
@@ -29,9 +28,9 @@ import (
 const (
 	// PrincipalContextKey holds the resolved bearer *Principal.
 	PrincipalContextKey = "openrails.principal"
-	// DelegatedContextKey holds the *controlplane.ResolvedDelegated.
+	// DelegatedContextKey holds the *credential.ResolvedDelegated.
 	DelegatedContextKey = "openrails.delegated"
-	// ServiceCredentialContextKey holds the *controlplane.ResolvedServiceCredential
+	// ServiceCredentialContextKey holds the *credential.ResolvedServiceCredential
 	// for the request (pinned by the route gate; read by handlers).
 	ServiceCredentialContextKey = "openrails.service_credential"
 )
@@ -83,12 +82,12 @@ func (p *Principal) Can(ctx context.Context, perm string) bool {
 // against live AuthKit + merchant-directory state. The control plane implements
 // it; tests can inject a fake.
 type DelegatedResolver interface {
-	ResolveDelegated(r *http.Request) (*controlplane.ResolvedDelegated, error)
+	ResolveDelegated(r *http.Request) (*credential.ResolvedDelegated, error)
 }
 
 // DelegatedFromRequest returns the resolved delegated token attached to the
 // request, if any.
-func DelegatedFromRequest(r *request.Request) (*controlplane.ResolvedDelegated, bool) {
+func DelegatedFromRequest(r *request.Request) (*credential.ResolvedDelegated, bool) {
 	if r == nil {
 		return nil, false
 	}
@@ -96,7 +95,7 @@ func DelegatedFromRequest(r *request.Request) (*controlplane.ResolvedDelegated, 
 	if !ok {
 		return nil, false
 	}
-	resolved, ok := v.(*controlplane.ResolvedDelegated)
+	resolved, ok := v.(*credential.ResolvedDelegated)
 	return resolved, ok && resolved != nil
 }
 
@@ -133,19 +132,19 @@ func DelegatedSelfRequired(resolver DelegatedResolver) router.Middleware {
 			resolved, err := resolver.ResolveDelegated(r.Request)
 			if err != nil {
 				switch {
-				case errors.Is(err, authkit.ErrAccessTokenExpired):
+				case errors.Is(err, auth.ErrExpired):
 					r.AbortJSON(http.StatusUnauthorized, "delegated_token_expired")
-				case errors.Is(err, authkit.ErrAccessTokenRevoked):
+				case errors.Is(err, auth.ErrRevoked):
 					r.AbortJSON(http.StatusUnauthorized, "delegated_token_revoked")
-				case errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved),
-					errors.Is(err, controlplane.ErrDelegatedIssuerUnknown):
+				case errors.Is(err, credential.ErrServiceCredentialMerchantUnresolved),
+					errors.Is(err, credential.ErrDelegatedIssuerUnknown):
 					r.AbortJSON(http.StatusForbidden, "delegated_merchant_unresolved")
-				case errors.Is(err, verify.ErrSenderProofRequired):
+				case errors.Is(err, auth.ErrSenderProofRequired):
 					r.SetHeader("WWW-Authenticate", `DPoP error="invalid_dpop_proof", algs="ES256"`)
 					r.AbortJSON(http.StatusUnauthorized, "sender_proof_required")
-				case errors.Is(err, controlplane.ErrDelegatedUnavailable):
+				case errors.Is(err, credential.ErrDelegatedUnavailable):
 					r.AbortJSON(http.StatusServiceUnavailable, "delegated_verification_unavailable")
-				case errors.Is(err, controlplane.ErrDelegatedNotConfigured):
+				case errors.Is(err, credential.ErrDelegatedNotConfigured):
 					r.AbortJSON(http.StatusInternalServerError, "delegated authentication not configured")
 				default:
 					log.WithError(err).Warn("delegated token resolution failed")
@@ -183,7 +182,7 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) router
 				r.AbortJSON(http.StatusUnauthorized, billingauth.UnauthenticatedMessage(err))
 				return
 			}
-			resolved, verr := controlplane.ResolvedDelegatedFromHostPrincipal(principal)
+			resolved, verr := credential.ResolvedDelegatedFromHostPrincipal(principal)
 			if verr != nil {
 				r.AbortJSON(http.StatusUnauthorized, "delegated_principal_invalid")
 				return
@@ -198,7 +197,7 @@ func DelegatedPrincipalRequired(authn billingauth.DelegatedAuthenticator) router
 
 // bindDelegated pins the resolved merchant (#223), binds the acting user, and
 // records the delegated state + principal for the permission gates.
-func bindDelegated(r *request.Request, resolved *controlplane.ResolvedDelegated, typ CredentialType, class billingauth.CredentialClass) bool {
+func bindDelegated(r *request.Request, resolved *credential.ResolvedDelegated, typ CredentialType, class billingauth.CredentialClass) bool {
 	if !EnforceMerchantBinding(r, resolved.MerchantID) {
 		return false
 	}
@@ -217,7 +216,7 @@ func bindDelegated(r *request.Request, resolved *controlplane.ResolvedDelegated,
 	return true
 }
 
-func principalFromDelegated(resolved *controlplane.ResolvedDelegated, typ CredentialType, class billingauth.CredentialClass) *Principal {
+func principalFromDelegated(resolved *credential.ResolvedDelegated, typ CredentialType, class billingauth.CredentialClass) *Principal {
 	if resolved == nil {
 		return nil
 	}
@@ -337,7 +336,7 @@ func TreasuryPayerFromRequest(r *request.Request) (*TreasuryPayer, bool) {
 //
 // No match — including merchant coordinates presented without merchant-admin
 // authority — fails closed.
-func ResolveTreasuryPayer(customerID string, resolved *controlplane.ResolvedDelegated) (*TreasuryPayer, bool) {
+func ResolveTreasuryPayer(customerID string, resolved *credential.ResolvedDelegated) (*TreasuryPayer, bool) {
 	customerID = strings.TrimSpace(customerID)
 	if customerID == "" || resolved == nil || resolved.MerchantID.IsZero() {
 		return nil, false

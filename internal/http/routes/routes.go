@@ -8,11 +8,11 @@ import (
 
 	"github.com/open-rails/openrails/internal/requestauth"
 
-	"github.com/open-rails/authkit/verify"
+	auth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
-	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/credential"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -38,17 +38,6 @@ type Options struct {
 	// value derived from configured PSPs.
 	ProviderRoutes *routesurface.ProviderRoutes
 
-	// APIKeys is the #757 merchant self-serve API-key manager (mint/list/revoke
-	// through AuthKit core). Implemented by *controlplane.ControlPlane. Nil
-	// (an embedded host without a control plane) omits the /api-keys routes.
-	APIKeys httphandlers.MerchantAPIKeyManager
-
-	// Team is the #760 merchant team manager (roster, invites, role changes,
-	// removal via AuthKit group membership). Implemented by
-	// *controlplane.ControlPlane. Nil (an embedded host without a control plane)
-	// omits the /team routes.
-	Team httphandlers.MerchantTeamManager
-
 	// AdminLimiter is the #111 per-human-admin operation limiter. It runs after
 	// Gate has resolved the effective principal, so counters key the authorized
 	// user rather than an untrusted token claim or source IP.
@@ -71,21 +60,21 @@ type legacyGate GateOptions
 
 type ServiceCredentialResolver interface {
 	LooksLikeAPIKey(token string) bool
-	ResolveAPIKey(ctx context.Context, token string) (*controlplane.ResolvedServiceCredential, error)
+	ResolveAPIKey(ctx context.Context, token string) (*credential.ResolvedServiceCredential, error)
 }
 
 // DelegatedResolver validates a browser-direct delegated access token and
 // resolves its merchant + acting user (#259/#555).
 type DelegatedResolver interface {
-	ResolveDelegated(r *http.Request) (*controlplane.ResolvedDelegated, error)
+	ResolveDelegated(r *http.Request) (*credential.ResolvedDelegated, error)
 }
 
 type serviceJWTResolver interface {
-	ResolveServiceJWT(ctx context.Context, token string) (*controlplane.ResolvedServiceCredential, error)
+	ResolveServiceJWT(ctx context.Context, token string) (*credential.ResolvedServiceCredential, error)
 }
 
 type remoteApplicationResolver interface {
-	ResolveRemoteApplication(ctx context.Context, token string) (*controlplane.ResolvedServiceCredential, error)
+	ResolveRemoteApplication(ctx context.Context, token string) (*credential.ResolvedServiceCredential, error)
 }
 
 // requiredMW builds the neutral "authentication required" middleware for the
@@ -191,8 +180,8 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 func RegisterMerchantArchiveRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	// Archives own their snapshot/restore transaction and its merchant RLS pin;
 	// no outer merchant connection is held while transferring the artifact.
-	rr.Handle(http.MethodGet, "/billing-archive", h(httphandlers.ExportMerchantBilling), opts.merchantActionPermissionMW(controlplane.PermMerchantBillingExport))
-	rr.Handle(http.MethodPost, "/billing-archive", h(httphandlers.ImportMerchantBilling), opts.merchantActionPermissionMW(controlplane.PermMerchantBillingImport))
+	rr.Handle(http.MethodGet, "/billing-archive", h(httphandlers.ExportMerchantBilling), opts.merchantActionPermissionMW(permissions.MerchantBillingExport))
+	rr.Handle(http.MethodPost, "/billing-archive", h(httphandlers.ImportMerchantBilling), opts.merchantActionPermissionMW(permissions.MerchantBillingImport))
 }
 
 // RegisterServiceRoutes mounts the merchant billing surface. Access is gated by
@@ -204,15 +193,15 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	if rt != nil && rt.DB != nil {
 		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
 	}
-	readMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsRead)}, dbMW...)
-	writeMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsUpdate)}, dbMW...)
-	admissionMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantAdmissionsCreate)}, dbMW...)
-	settingsReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsRead)}, dbMW...)
-	settingsWriteMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)}, dbMW...)
-	usageReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantUsageRead)}, dbMW...)
+	readMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCustomerSettingsRead)}, dbMW...)
+	writeMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCustomerSettingsUpdate)}, dbMW...)
+	admissionMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantAdmissionsCreate)}, dbMW...)
+	settingsReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantSettingsRead)}, dbMW...)
+	settingsWriteMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantSettingsUpdate)}, dbMW...)
+	usageReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantUsageRead)}, dbMW...)
 
-	hostEventReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantHostEventsRead)}, dbMW...)
-	hostEventAckMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantHostEventsAcknowledge)}, dbMW...)
+	hostEventReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantHostEventsRead)}, dbMW...)
+	hostEventAckMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantHostEventsAcknowledge)}, dbMW...)
 	group.Handle(http.MethodGet, "/host-events", h(httphandlers.ServiceListHostEvents), hostEventReadMW...)
 	group.Handle(http.MethodPost, "/host-events/:id/acknowledge", h(httphandlers.ServiceAcknowledgeHostEvent), hostEventAckMW...)
 
@@ -226,7 +215,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	customers.Handle(http.MethodPut, "", h(httphandlers.ServiceEnsureCustomer), writeMW...)
 	customers.Handle(http.MethodGet, "/billing-policy", h(httphandlers.ServiceGetCustomerBillingPolicy), readMW...)
 	customers.Handle(http.MethodPut, "/billing-policy", h(httphandlers.ServiceSetCustomerBillingPolicy), writeMW...)
-	paymentReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentsRead)}, dbMW...)
+	paymentReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantPaymentsRead)}, dbMW...)
 	customers.Handle(http.MethodGet, "/payment-settlement-status", h(httphandlers.ServicePaymentSettlementStatus), paymentReadMW...)
 	customers.Handle(http.MethodGet, "/entitlements",
 		h(httphandlers.ServiceGetCustomerEntitlements),
@@ -349,7 +338,7 @@ func RegisterCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 // subscriptions/payments/payment methods wholesale). No MerchantDBConnMW:
 // the import seam pins its own merchant-scoped RLS connection.
 func RegisterImportRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	write := opts.merchantActionPermissionMW(controlplane.PermMerchantBillingImport)
+	write := opts.merchantActionPermissionMW(permissions.MerchantBillingImport)
 	rr.Handle(http.MethodPost, "/billing", h(httphandlers.ImportDeclaredBilling), write)
 }
 
@@ -429,7 +418,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		if hp.MerchantID.IsZero() {
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "host_principal_invalid"}
 		}
-		resolved := &controlplane.ResolvedServiceCredential{
+		resolved := &credential.ResolvedServiceCredential{
 			OwnerGroupRef: "in-process-host",
 			MerchantID:    hp.MerchantID,
 			MerchantSlug:  hp.MerchantSlug,
@@ -443,11 +432,11 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	if resolved, err, handled := g.resolveServiceCredential(ctx, req, g.Authenticator != nil); handled {
 		if err != nil {
 			switch {
-			case errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved):
+			case errors.Is(err, credential.ErrServiceCredentialMerchantUnresolved):
 				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "service_credential_merchant_unresolved"}
-			case errors.Is(err, controlplane.ErrServiceCredentialScopeDenied):
+			case errors.Is(err, credential.ErrServiceCredentialScopeDenied):
 				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "service_credential_resource_scope_denied"}
-			case errors.Is(err, controlplane.ErrDelegatedIssuerUnknown), errors.Is(err, controlplane.ErrServiceCredentialHostMismatch):
+			case errors.Is(err, credential.ErrDelegatedIssuerUnknown), errors.Is(err, credential.ErrServiceCredentialHostMismatch):
 				// The API key or issuer resolves to a different Host merchant.
 				// Issuer resolution also uses its sentinel for unregistered/disabled issuers.
 				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "host_merchant_mismatch"}
@@ -464,16 +453,16 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		return billingauth.Principal{MerchantID: resolved.MerchantID, Permissions: resolved.Permissions}, nil
 	}
 	if g.DelegatedResolver != nil && req != nil {
-		if token := authorizationToken(req.Header.Get("Authorization")); controlplane.LooksLikeJWT(token) {
+		if token := authorizationToken(req.Header.Get("Authorization")); credential.LooksLikeJWT(token) {
 			resolved, err := g.DelegatedResolver.ResolveDelegated(req)
 			if err != nil {
-				if errors.Is(err, controlplane.ErrDelegatedUnavailable) {
+				if errors.Is(err, credential.ErrDelegatedUnavailable) {
 					return billingauth.Principal{}, billingauth.GateError{Status: http.StatusServiceUnavailable, Message: "delegated_verification_unavailable"}
 				}
-				if errors.Is(err, verify.ErrSenderProofRequired) {
+				if errors.Is(err, auth.ErrSenderProofRequired) {
 					return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "sender_proof_required"}
 				}
-				if g.Authenticator == nil || !errors.Is(err, controlplane.ErrDelegatedInvalid) {
+				if g.Authenticator == nil || !errors.Is(err, credential.ErrDelegatedInvalid) {
 					return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "delegated_token_invalid"}
 				}
 			} else {
@@ -500,7 +489,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		if err != nil {
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: billingauth.UnauthenticatedMessage(err)}
 		}
-		resolved, verr := controlplane.ResolvedDelegatedFromHostPrincipal(principal)
+		resolved, verr := credential.ResolvedDelegatedFromHostPrincipal(principal)
 		if verr != nil {
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "delegated_principal_invalid"}
 		}
@@ -544,7 +533,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		switch {
 		case errors.Is(err, authpolicy.ErrPermissionRequired):
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
-		case errors.Is(err, authpolicy.ErrMerchantUnresolved), errors.Is(err, controlplane.ErrMerchantAmbiguous):
+		case errors.Is(err, authpolicy.ErrMerchantUnresolved), errors.Is(err, credential.ErrMerchantAmbiguous):
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
 		default:
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "failed to check permission"}
@@ -579,7 +568,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	return billingauth.Principal{MerchantID: mid, Subject: uc.UserID, UserContext: uc}, nil
 }
 
-func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Request, allowJWTFallthrough bool) (*controlplane.ResolvedServiceCredential, error, bool) {
+func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Request, allowJWTFallthrough bool) (*credential.ResolvedServiceCredential, error, bool) {
 	resolver := g.ServiceCredentialResolver
 	if resolver == nil || r == nil {
 		return nil, nil, false
@@ -595,7 +584,7 @@ func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Reques
 		}
 		return resolved, nil, true
 	}
-	if !controlplane.LooksLikeJWT(token) {
+	if !credential.LooksLikeJWT(token) {
 		return nil, nil, false
 	}
 	if raResolver, ok := resolver.(remoteApplicationResolver); ok {
@@ -603,10 +592,10 @@ func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Reques
 		if err == nil {
 			return resolved, nil, true
 		}
-		if allowJWTFallthrough && errors.Is(err, controlplane.ErrDelegatedInvalid) {
+		if allowJWTFallthrough && errors.Is(err, credential.ErrDelegatedInvalid) {
 			return nil, nil, false
 		}
-		if !errors.Is(err, controlplane.ErrNotRemoteApplicationToken) {
+		if !errors.Is(err, credential.ErrNotRemoteApplicationToken) {
 			return nil, err, true
 		}
 	}
@@ -621,9 +610,9 @@ func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Reques
 		// as 403 — not fall through to the delegated/user-session paths, which
 		// would mislabel it 401 access_token_wrong_typ. A wrong-typ (not-a-service-JWT)
 		// error still falls through so delegated/user tokens reach their own resolvers.
-		if errors.Is(err, controlplane.ErrServiceCredentialScopeDenied) ||
-			errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved) ||
-			errors.Is(err, controlplane.ErrDelegatedIssuerUnknown) {
+		if errors.Is(err, credential.ErrServiceCredentialScopeDenied) ||
+			errors.Is(err, credential.ErrServiceCredentialMerchantUnresolved) ||
+			errors.Is(err, credential.ErrDelegatedIssuerUnknown) {
 			return nil, err, true
 		}
 	}
@@ -642,7 +631,7 @@ func bearerToken(header string) string {
 func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {
 	readActions := catalog
 	catalog = withCatalogWritePolicy(catalog, rt)
-	read := opts.merchantActionPermissionMW(controlplane.PermMerchantCatalogRead)
+	read := opts.merchantActionPermissionMW(permissions.MerchantCatalogRead)
 	write := opts.merchantActionPermissionMW(authpolicy.PermMerchantCatalogUpdate)
 	readMW := append([]router.Middleware{read}, dbMW...)
 	writeMW := append([]router.Middleware{write}, dbMW...)
@@ -707,8 +696,8 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 }
 
 func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {
-	read := opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentProvidersRead)
-	write := opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentProvidersUpdate)
+	read := opts.merchantActionPermissionMW(permissions.MerchantPaymentProvidersRead)
+	write := opts.merchantActionPermissionMW(permissions.MerchantPaymentProvidersUpdate)
 	readMW := append([]router.Middleware{read}, dbMW...)
 	writeMW := append([]router.Middleware{manifestModeWriteGuardMW(rt), write}, dbMW...)
 
@@ -743,17 +732,17 @@ func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtim
 
 func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {
 	registerMerchantInvoiceRoutes(rr, opts, dbMW...)
-	customerRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsRead)}, dbMW...)
-	offChannelWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCustomerSettingsUpdate, middleware.AdminOperationOffChannel, dbMW...)
-	grantWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCustomerSettingsUpdate, middleware.AdminOperationGrant, dbMW...)
-	revokeWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCustomerSettingsUpdate, middleware.AdminOperationDestructive, dbMW...)
-	payRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentsRead)}, dbMW...)
-	payRefund := opts.merchantAdminOperationMW(controlplane.PermMerchantPaymentsRefund, middleware.AdminOperationDestructive, dbMW...)
-	subRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSubscriptionsRead)}, dbMW...)
-	subWrite := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSubscriptionsUpdate)}, dbMW...)
-	tierChangeWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantSubscriptionsUpdate, middleware.AdminOperationOffChannel, dbMW...)
-	subCancel := opts.merchantAdminOperationMW(controlplane.PermMerchantSubscriptionsUpdate, middleware.AdminOperationDestructive, dbMW...)
-	repairRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantRepairAlertsRead)}, dbMW...)
+	customerRead := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCustomerSettingsRead)}, dbMW...)
+	offChannelWrite := opts.merchantAdminOperationMW(permissions.MerchantCustomerSettingsUpdate, middleware.AdminOperationOffChannel, dbMW...)
+	grantWrite := opts.merchantAdminOperationMW(permissions.MerchantCustomerSettingsUpdate, middleware.AdminOperationGrant, dbMW...)
+	revokeWrite := opts.merchantAdminOperationMW(permissions.MerchantCustomerSettingsUpdate, middleware.AdminOperationDestructive, dbMW...)
+	payRead := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantPaymentsRead)}, dbMW...)
+	payRefund := opts.merchantAdminOperationMW(permissions.MerchantPaymentsRefund, middleware.AdminOperationDestructive, dbMW...)
+	subRead := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantSubscriptionsRead)}, dbMW...)
+	subWrite := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantSubscriptionsUpdate)}, dbMW...)
+	tierChangeWrite := opts.merchantAdminOperationMW(permissions.MerchantSubscriptionsUpdate, middleware.AdminOperationOffChannel, dbMW...)
+	subCancel := opts.merchantAdminOperationMW(permissions.MerchantSubscriptionsUpdate, middleware.AdminOperationDestructive, dbMW...)
+	repairRead := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantRepairAlertsRead)}, dbMW...)
 
 	// #740: merchant customer list/search for the admin console.
 	rr.Handle(http.MethodGet, "/customers", h(httphandlers.ListAdminCustomers), customerRead...)
@@ -772,9 +761,9 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	// (merchant:credits:grant — owner-level, NOT held by the fixed support
 	// role) rather than riding customer-settings:update like its siblings:
 	// minting balance is the one grant whose blast radius is monetary.
-	creditsGrantWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCreditsGrant, middleware.AdminOperationGrant, dbMW...)
+	creditsGrantWrite := opts.merchantAdminOperationMW(permissions.MerchantCreditsGrant, middleware.AdminOperationGrant, dbMW...)
 	customers.Handle(http.MethodPost, "/credits", h(httphandlers.AdminGrantCredits), creditsGrantWrite...)
-	creditsRevokeWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCreditsRevoke, middleware.AdminOperationDestructive, dbMW...)
+	creditsRevokeWrite := opts.merchantAdminOperationMW(permissions.MerchantCreditsRevoke, middleware.AdminOperationDestructive, dbMW...)
 	customers.Handle(http.MethodGet, "/credits", h(httphandlers.ListAdminCreditGrants(opts.Gate)), customerRead...)
 	customers.Handle(http.MethodDelete, "/credits/:grant_id", h(httphandlers.RevokeAdminCreditGrant), creditsRevokeWrite...)
 	customers.Handle(http.MethodGet, "/credit-transactions", h(httphandlers.ListAdminCreditTransactions), customerRead...)
@@ -836,7 +825,7 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 
 	// #733 PG-first metrics API (replaces the #735-deleted ClickHouse surface):
 	// one composable query endpoint + the registry/schema doc.
-	metricsRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantMetricsRead)}, dbMW...)
+	metricsRead := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantMetricsRead)}, dbMW...)
 	metricsGrp := rr.Group("/metrics")
 	metricsGrp.Handle(http.MethodPost, "/query", h(httphandlers.MerchantMetricsQuery), metricsRead...)
 	metricsGrp.Handle(http.MethodGet, "/schema", h(httphandlers.MerchantMetricsSchema), metricsRead...)
@@ -852,25 +841,12 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	// #741 configurable dashboard: reads share the metrics permission (a
 	// dashboard is a saved view over metrics); writes + NL generation (the
 	// LLM call costs money) need the dashboard write grant.
-	dashboardWrite := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantDashboardUpdate)}, dbMW...)
+	dashboardWrite := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantDashboardUpdate)}, dbMW...)
 	rr.Handle(http.MethodGet, "/dashboard", h(httphandlers.GetMerchantDashboard), metricsRead...)
 	rr.Handle(http.MethodPut, "/dashboard", h(httphandlers.PutMerchantDashboard), dashboardWrite...)
 	// NL widget generation exists only when an LLM key is configured.
 	if rt != nil && rt.DashboardService.NLConfigured() {
 		rr.Handle(http.MethodPost, "/dashboard/widgets/generate", h(httphandlers.GenerateDashboardWidget), dashboardWrite...)
-	}
-
-	// #757 merchant self-serve API keys: mint/list/revoke scoped credentials
-	// through AuthKit core. Gated on merchant:credentials:manage — the SAME
-	// string AuthKit's own mint authorization checks; only the merchant owner
-	// (merchant:*) holds it in the fixed #567 catalog. No MerchantDBConnMW:
-	// these handlers touch only the control plane, never the runtime DB.
-	if opts.APIKeys != nil {
-		credentialsManage := opts.merchantActionPermissionMW(controlplane.PermMerchantCredentialsManage)
-		apiKeys := rr.Group("/api-keys")
-		apiKeys.Handle(http.MethodPost, "", h(httphandlers.MerchantCreateAPIKey(opts.APIKeys)), credentialsManage)
-		apiKeys.Handle(http.MethodGet, "", h(httphandlers.MerchantListAPIKeys(opts.APIKeys)), credentialsManage)
-		apiKeys.Handle(http.MethodDelete, "/:id", h(httphandlers.MerchantRevokeAPIKey(opts.APIKeys)), credentialsManage)
 	}
 
 	// #850 merchant api_host (#734 Host routing): read + assign the merchant's
@@ -882,33 +858,14 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	// Registered only when the merchant directory is armed; a deployment
 	// without one has no host mapping to read or assign.
 	if rt != nil && rt.Merchants != nil {
-		apiHostRead := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsRead)
-		apiHostWrite := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)
+		apiHostRead := opts.merchantActionPermissionMW(permissions.MerchantSettingsRead)
+		apiHostWrite := opts.merchantActionPermissionMW(permissions.MerchantSettingsUpdate)
 		rr.Handle(http.MethodGet, "/api-host", h(httphandlers.GetMerchantAPIHost), apiHostRead)
 		rr.Handle(http.MethodPut, "/api-host", h(httphandlers.PutMerchantAPIHost), apiHostWrite)
 	}
 
-	// #760 merchant team management: roster, invites (register+join links),
-	// role changes, and removal — all through AuthKit group membership. Reads
-	// gate on merchant:members:read; mutations on merchant:members:manage. Only
-	// the owner (merchant:*) holds either in the fixed #567 catalog, so the whole
-	// surface is owner-only (mirrors #757). No MerchantDBConnMW: control plane
-	// only. `/team/invites` (literal) and `/team/:user_id` never collide — they
-	// differ by segment shape/method.
-	if opts.Team != nil {
-		membersRead := opts.merchantActionPermissionMW(controlplane.PermMerchantMembersRead)
-		membersManage := opts.merchantActionPermissionMW(controlplane.PermMerchantMembersManage)
-		team := rr.Group("/team")
-		team.Handle(http.MethodGet, "", h(httphandlers.MerchantListTeam(opts.Team)), membersRead)
-		team.Handle(http.MethodGet, "/invites", h(httphandlers.MerchantListTeamInvites(opts.Team)), membersRead)
-		team.Handle(http.MethodPost, "/invites", h(httphandlers.MerchantInviteTeamMember(opts.Team)), membersManage)
-		team.Handle(http.MethodDelete, "/invites/:id", h(httphandlers.MerchantRevokeTeamInvite(opts.Team)), membersManage)
-		team.Handle(http.MethodPatch, "/:user_id", h(httphandlers.MerchantChangeTeamRole(opts.Team)), membersManage)
-		team.Handle(http.MethodDelete, "/:user_id", h(httphandlers.MerchantRemoveTeamMember(opts.Team)), membersManage)
-	}
-
 	// Outbound notification destinations and the merchant notification bell.
-	settingsWrite := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)}, dbMW...)
+	settingsWrite := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantSettingsUpdate)}, dbMW...)
 	webhooks := rr.Group("/webhooks")
 	webhooks.Handle(http.MethodGet, "", h(httphandlers.ListMerchantWebhooks), metricsRead...)
 	webhooks.Handle(http.MethodPost, "", h(httphandlers.CreateMerchantWebhook), settingsWrite...)
@@ -927,7 +884,7 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	// #692 operator findings queue: reads share the repair surface permission;
 	// resolve executes recommendations (cancel/refund/revoke/grant) and is a
 	// distinct write grant. One item at a time — no bulk endpoint (#679).
-	findingsResolve := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantFindingsResolve)}, dbMW...)
+	findingsResolve := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantFindingsResolve)}, dbMW...)
 	findings := rr.Group("/findings")
 	findings.Handle(http.MethodGet, "", h(httphandlers.AdminListFindings), repairRead...)
 	findings.Handle(http.MethodGet, "/:id", h(httphandlers.AdminGetFinding), repairRead...)
@@ -987,10 +944,10 @@ func RegisterHostWebhookRoutes(rr router.Router, rt *app.Runtime, resolve mercha
 
 // registerMerchantInvoiceRoutes reuses the existing support-operation limits.
 func registerMerchantInvoiceRoutes(rr router.Router, opts Options, dbMW ...router.Middleware) {
-	read := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantInvoicesRead)}, dbMW...)
-	update := opts.merchantAdminOperationMW(controlplane.PermMerchantInvoicesUpdate, middleware.AdminOperationDestructive, dbMW...)
-	collect := opts.merchantAdminOperationMW(controlplane.PermMerchantInvoicesCollect, middleware.AdminOperationOffChannel, dbMW...)
-	remittance := opts.merchantAdminOperationMW(controlplane.PermMerchantInvoicesUpdate, middleware.AdminOperationOffChannel, dbMW...)
+	read := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantInvoicesRead)}, dbMW...)
+	update := opts.merchantAdminOperationMW(permissions.MerchantInvoicesUpdate, middleware.AdminOperationDestructive, dbMW...)
+	collect := opts.merchantAdminOperationMW(permissions.MerchantInvoicesCollect, middleware.AdminOperationOffChannel, dbMW...)
+	remittance := opts.merchantAdminOperationMW(permissions.MerchantInvoicesUpdate, middleware.AdminOperationOffChannel, dbMW...)
 	invoices := rr.Group("/invoices")
 	invoices.Handle(http.MethodGet, "", h(httphandlers.ListAdminInvoices(opts.Gate)), read...)
 	invoices.Handle(http.MethodGet, "/:id", h(httphandlers.GetAdminInvoice(opts.Gate)), read...)
@@ -999,8 +956,8 @@ func registerMerchantInvoiceRoutes(rr router.Router, opts Options, dbMW ...route
 	invoices.Handle(http.MethodPost, "/:id/uncollectible", h(httphandlers.MutateAdminInvoice("mark_uncollectible")), update...)
 	invoices.Handle(http.MethodPost, "/:id/payments", h(httphandlers.MutateAdminInvoice("record_payment")), remittance...)
 	invoices.Handle(http.MethodPost, "/:id/retry-collection", h(httphandlers.RetryAdminInvoiceCollection), collect...)
-	profileRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsRead)}, dbMW...)
-	profileWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCustomerSettingsUpdate, middleware.AdminOperationGrant, dbMW...)
+	profileRead := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCustomerSettingsRead)}, dbMW...)
+	profileWrite := opts.merchantAdminOperationMW(permissions.MerchantCustomerSettingsUpdate, middleware.AdminOperationGrant, dbMW...)
 	rr.Handle(http.MethodGet, "/customers/:customer_id/invoice-profile", h(httphandlers.GetAdminInvoiceProfile(opts.Gate)), profileRead...)
 	rr.Handle(http.MethodPut, "/customers/:customer_id/invoice-profile", h(httphandlers.PutAdminInvoiceProfile), profileWrite...)
 }
@@ -1011,4 +968,9 @@ func authorizationToken(header string) string {
 		return fields[1]
 	}
 	return ""
+}
+
+// RequireMerchantPermission applies the same billing merchant gate to host routes.
+func (opts Options) RequireMerchantPermission(permission string) router.Middleware {
+	return opts.merchantActionPermissionMW(permission)
 }

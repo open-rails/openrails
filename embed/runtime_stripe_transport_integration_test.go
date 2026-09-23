@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -53,7 +54,6 @@ func TestEmbeddedStripeTransportSeam_DrivesCatalogRailPush(t *testing.T) {
 		// the transport by the stripeapi choke-point tests.
 		ProviderWriteMode: config.ProviderWriteModeFull,
 		DB:                &config.DBConfig{URL: appDSN},
-		Auth:              &config.AuthConfig{Issuer: "https://stripe-seam-" + sfx + ".openrails.test"},
 	}
 	e, err := New(context.Background(), Options{
 		Config:          cfg,
@@ -65,7 +65,7 @@ func TestEmbeddedStripeTransportSeam_DrivesCatalogRailPush(t *testing.T) {
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 
 	ctx := context.Background()
-	require.NoError(t, embcp.Attach(ctx, e.app, cfg, pool))
+	require.NoError(t, embcp.Attach(ctx, e.app, cfg, &hostconfig.AuthConfig{Issuer: "https://stripe-seam-" + sfx + ".openrails.test"}, pool))
 	provisioned, err := embcp.ProvisionMerchant(ctx, e.app, embcp.ProvisionMerchantRequest{Slug: "seam-" + sfx})
 	require.NoError(t, err)
 	// Bind the engine to its merchant, as an embedding host does at startup.

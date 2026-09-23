@@ -1,37 +1,6 @@
-// Package authkit provides opt-in AuthKit authentication and directory adapters.
-// Hosts pass authenticators at HTTP mount time and NewDirectory through
-// embed.Options.UserDirectory and UsernameResolver. Billing depends on neutral
-// contracts; these adapters use AuthKit's public APIs.
-//
-// # Two ways in
-//
-// Each authenticator comes in two constructors, differing ONLY in where the
-// verifier comes from:
-//
-//   - New…Authenticator(v, …) takes the host's OWN verifier. Use this whenever
-//     the host already has one — an in-process AuthKit, a control plane it
-//     embeds, a verifier configured with the host's credential chain. The
-//     request is verified exactly the way the host verifies every other
-//     request (VerifyRequest: API-key branch, 2FA-enrollment gate,
-//     delegated-issuer enrichment), so billing cannot end up with a weaker
-//     credential check than the rest of the host.
-//   - NewVerifier…Authenticator(issuers, aud, …) builds a JWKS verifier over a
-//     REMOTE issuer allowlist, fetching keys from each issuer's
-//     /.well-known/jwks.json. A host embedding the control plane in-process
-//     must NOT verify its own tokens this way (mint and verify would drift
-//     across an HTTP fetch of its own keys); that is what the injecting
-//     constructor is for.
-//
-// # The admission seam (#918)
-//
-// Both families take an Admission veto and, on the delegated side, a
-// request-scoped PermissionResolver. They exist because "principal = f(token)"
-// is not enough for a privileged surface: JWT verification is stateless, so a
-// banned or deleted subject keeps a valid token until it expires, and a grant
-// like "is this user a billing admin?" is a live DB read, not a claim. Hosts
-// that had to hand-roll a bridge for those two decisions (host-one #803) plug
-// them in here instead. The host injects its admission and grant authority.
-package authkit
+// Package hostauth contains standalone identity composition and legacy host
+// fixture adapters. Embedded hosts use the neutral billingauth integration.
+package hostauth
 
 import (
 	"context"

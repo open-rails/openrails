@@ -25,7 +25,7 @@ func TestNoLibraryEnvReads(t *testing.T) {
 	// godotenv.Load has exactly ONE consumption point, logged at boot.
 	writeNeedles := []string{"os.Setenv(", "os.Unsetenv(", "godotenv.Load("}
 	writeAllowedFiles := map[string]string{
-		"config/config.go": "the ONE godotenv.Load consumption point (logged at boot); no Setenv",
+		"hostauth/config/load.go": "the ONE standalone godotenv.Load consumption point (logged at boot); no Setenv",
 	}
 
 	// Allowlisted path prefixes (relative to the module root). One-line
@@ -33,7 +33,8 @@ func TestNoLibraryEnvReads(t *testing.T) {
 	allowedPrefixes := map[string]string{
 		"cmd/":                                   "binary boundary: the process entrypoint owns flags and env",
 		"examples/":                              "standalone example apps: each is its own main(), a binary boundary like cmd/",
-		"config/":                                "the config-loading pipeline — the ONE place env is read",
+		"config/":                                "mounted secret-file access for explicit host loading",
+		"hostauth/config/":                       "standalone configuration-loading boundary",
 		"tests/":                                 "test binaries own their env (OPENRAILS_TEST_*, RAILS_* fixtures)",
 		"scripts/":                               "operational tooling run as its own process, not importable library code",
 		"internal/dbtest/":                       "test-support package: container/DSN discovery for test binaries",

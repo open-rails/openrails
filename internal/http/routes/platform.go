@@ -4,10 +4,11 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/open-rails/openrails/permissions"
+
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/controlplane"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -16,7 +17,7 @@ import (
 
 // RootPermissionChecker authorizes a user against the singleton ROOT
 // permission-group (#721) — the platform-operator tier. Implemented by
-// *controlplane.ControlPlane.HasRootPermission.
+// *credential.ControlPlane.HasRootPermission.
 type RootPermissionChecker interface {
 	HasRootPermission(ctx context.Context, userID, perm string) (bool, error)
 }
@@ -44,16 +45,16 @@ type AdminRateLimitUnlocker interface {
 // touching a merchant's customers/payments/subscriptions: creation stays the
 // self-service flow and destructive purge stays the #225 gated path.
 func RegisterPlatformRoutes(rr router.Router, rt *app.Runtime, opts PlatformOptions) {
-	read := opts.platformPermissionMW(controlplane.PermRootMerchantsRead)
-	del := opts.platformPermissionMW(controlplane.PermRootMerchantsDelete)
-	restore := opts.platformPermissionMW(controlplane.PermRootMerchantsRestore)
-	unlock := opts.platformPermissionMW(controlplane.PermRootAdminRateLimitsUnlock)
+	read := opts.platformPermissionMW(permissions.RootMerchantsRead)
+	del := opts.platformPermissionMW(permissions.RootMerchantsDelete)
+	restore := opts.platformPermissionMW(permissions.RootMerchantsRestore)
+	unlock := opts.platformPermissionMW(permissions.RootAdminRateLimitsUnlock)
 
 	// #SEC-22: cross-merchant worker health (last_error is another merchant's
 	// verbatim job error) lives on the platform tier; the merchant tier keeps
 	// the same list with the error TEXT withheld.
 	rr.Handle(http.MethodGet, "/worker-health", h(httphandlers.GetPlatformWorkerHealth),
-		opts.platformPermissionMW(controlplane.PermRootWorkerHealthRead))
+		opts.platformPermissionMW(permissions.RootWorkerHealthRead))
 
 	merchants := rr.Group("/merchants")
 	merchants.Handle(http.MethodGet, "", h(httphandlers.PlatformListMerchants), read)

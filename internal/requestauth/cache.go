@@ -35,6 +35,6 @@ func Once[T any](ctx context.Context, owner any, verify func() (T, error)) (T, e
 	}
 	stored, _ := c.values.LoadOrStore(owner, &result{})
 	entry := stored.(*result)
-	entry.once.Do(func() { value, err := verify(); entry.value, entry.err = value, err })
-	return entry.value.(T), entry.err
+	entry.once.Do(func() { value, err := verify(); entry.value, entry.err = &value, err })
+	return *entry.value.(*T), entry.err
 }

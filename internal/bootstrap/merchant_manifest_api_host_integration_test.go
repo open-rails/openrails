@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
@@ -60,7 +61,7 @@ func TestReconcileMerchantManifestAPIHostTakenFailsLoudly(t *testing.T) {
 	first := &BillingConfig{
 		Version: BootstrapManifestVersion,
 		Merchants: map[string]MerchantConfig{
-			"host-three": {DisplayName: "Host Three", APIHost: "api.shared.example"},
+			"host-three": {MerchantConfig: merchantbootstrap.MerchantConfig{DisplayName: "Host Three", APIHost: "api.shared.example"}},
 		},
 	}
 	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, first, MerchantManifestReconcileOptions{Insert: true}))
@@ -68,7 +69,7 @@ func TestReconcileMerchantManifestAPIHostTakenFailsLoudly(t *testing.T) {
 	second := &BillingConfig{
 		Version: BootstrapManifestVersion,
 		Merchants: map[string]MerchantConfig{
-			"other-app": {DisplayName: "Other App", APIHost: "api.shared.example"},
+			"other-app": {MerchantConfig: merchantbootstrap.MerchantConfig{DisplayName: "Other App", APIHost: "api.shared.example"}},
 		},
 	}
 	err := ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, second, MerchantManifestReconcileOptions{Insert: true})

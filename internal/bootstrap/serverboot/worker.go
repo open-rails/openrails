@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -27,7 +28,7 @@ func NewWorker(ctx context.Context, cfg *config.Config, opts *Options) (*app.App
 	if err != nil {
 		return nil, err
 	}
-	if err := embcp.Attach(ctx, application, cfg, optsValue(opts, func(o *Options) *pgxpool.Pool { return o.PGXPool })); err != nil {
+	if err := embcp.Attach(ctx, application, cfg, optsValue(opts, func(o *Options) *hostconfig.AuthConfig { return o.Auth }), optsValue(opts, func(o *Options) *pgxpool.Pool { return o.PGXPool })); err != nil {
 		_ = application.Close(context.Background())
 		return nil, fmt.Errorf("attach worker control plane: %w", err)
 	}

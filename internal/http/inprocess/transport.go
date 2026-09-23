@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
 
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -24,7 +23,7 @@ import (
 // full merchant owner grant, identical to what a merchant-owner API key
 // resolves to on the standalone wire path.
 func hostPermissions() []string {
-	return []string{string(controlplane.MerchantType.OwnerGrant())}
+	return []string{"merchant:*"}
 }
 
 // NewTransport uses the same host authority and context isolation for embedded

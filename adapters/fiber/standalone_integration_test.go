@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/stretchr/testify/require"
@@ -22,7 +23,7 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
 func TestStandaloneNativeFiberInventoryAndCustomerParameters(t *testing.T) {
 	ctx := context.Background()
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, Auth: &config.AuthConfig{Issuer: "https://fiber.openrails.test", KeysPath: t.TempDir()}, AdminConsole: &config.AdminConsoleConfig{Enabled: true}}
+	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}, AdminConsole: &config.AdminConsoleConfig{Enabled: true}}
 	assets := fstest.MapFS{"index.html": {Data: []byte("console page")}, "assets/site.js": {Data: []byte("console asset")}}
 	calls := 0
 	auth := billingauth.DelegatedAuthenticatorFunc(func(_ context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
@@ -32,12 +33,12 @@ func TestStandaloneNativeFiberInventoryAndCustomerParameters(t *testing.T) {
 		require.Equal(t, "/api/v1/merchants/owner/billing/me/subscriptions/not-id/cancel?proof=raw", r.RequestURI)
 		return nil, billingauth.GateError{Status: 403, Message: "host denied"}
 	})
-	runtime, err := embed.New(ctx, embed.Options{HTTP: &embed.HTTPConfig{Standalone: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Prefix: "/api/v1/merchants/{slug}/billing/me", Scope: embed.CustomerSubscriptionManagement, DelegatedAuthenticator: auth}}}, Config: cfg, River: embed.RiverManagedByOpenRails(), ConsoleAssets: assets})
+	runtime, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails(), ConsoleAssets: assets})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runtime.Close(ctx)) })
-	_, err = controlplane.Attach(ctx, runtime, controlplane.Options{})
+	cp, err := controlplane.Attach(ctx, runtime, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://fiber.openrails.test", KeysPath: t.TempDir()}}, embed.CustomerRoutesConfig{Prefix: "/api/v1/merchants/{slug}/billing/me", Scope: embed.CustomerSubscriptionManagement, DelegatedAuthenticator: auth})
 	require.NoError(t, err)
-	bundle, err := Routes(runtime)
+	bundle, err := Routes(cp)
 	require.NoError(t, err)
 	target := fiber.New(fiber.Config{CaseSensitive: true, StrictRouting: true})
 	require.ErrorContains(t, bundle.Mount(target.Group("/outer")), "root")

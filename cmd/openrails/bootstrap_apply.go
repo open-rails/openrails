@@ -130,7 +130,7 @@ func runPushAuthBootstrap(cmd *cobra.Command, opts pushAuthBootstrapOptions) err
 		}
 	}()
 
-	if err := embcp.Attach(ctx, application, cfg, nil); err != nil {
+	if err := embcp.Attach(ctx, application, cfg, standaloneAuth(ctx), nil); err != nil {
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 
@@ -174,7 +174,7 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 		}
 	}()
 
-	if err := embcp.Attach(ctx, application, cfg, nil); err != nil {
+	if err := embcp.Attach(ctx, application, cfg, standaloneAuth(ctx), nil); err != nil {
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 
@@ -216,7 +216,7 @@ func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) e
 			log.WithError(closeErr).Error("dump-merchant-config cleanup failed")
 		}
 	}()
-	if err := embcp.Attach(ctx, application, cfg, nil); err != nil {
+	if err := embcp.Attach(ctx, application, cfg, standaloneAuth(ctx), nil); err != nil {
 		return fmt.Errorf("attach control plane: %w", err)
 	}
 

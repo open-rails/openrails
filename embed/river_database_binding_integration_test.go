@@ -41,7 +41,7 @@ func TestPhysicalRiverPoolBinding(t *testing.T) {
 			ledgerPool, err := pgxpool.NewWithConfig(ctx, cfg)
 			require.NoError(t, err)
 			t.Cleanup(ledgerPool.Close)
-			rt, err := embed.New(ctx, embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}, Auth: &config.AuthConfig{Issuer: "https://physical-binding.test", KeysPath: t.TempDir()}}, PGXPool: ledgerPool, River: embed.RiverFromHost()})
+			rt, err := embed.New(ctx, embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}}, PGXPool: ledgerPool, River: embed.RiverFromHost()})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 			queuePool := ledgerPool

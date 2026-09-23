@@ -1,16 +1,12 @@
 package config
 
 import (
-	"os"
 	"strconv"
 	"testing"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/stretchr/testify/require"
 )
-
-// Every Load in this package declares development except explicit refusal cases.
-func TestMain(m *testing.M) { _ = os.Setenv("ENV", "development"); os.Exit(m.Run()) }
 
 // stripeTestModeConfig builds a minimal Config plus in-memory PSPSet with a
 // single Stripe rail carrying the given secret key and test_mode setting.

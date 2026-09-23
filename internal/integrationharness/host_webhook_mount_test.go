@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/httptesthost"
 	embcp "github.com/open-rails/openrails/internal/operator"
@@ -42,14 +43,13 @@ func TestHostRoutedWebhookMountHTTP(t *testing.T) {
 		Env:      "dev",
 		TestMode: config.CredentialPostureSandbox,
 		DB:       &config.DBConfig{URL: h.DSN},
-		Auth:     &config.AuthConfig{Issuer: "https://host-webhook-controlplane.test"},
 	}
 
 	e, err := embed.New(context.Background(), embed.Options{Config: cfg, Redis: h.Redis, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 
-	require.NoError(t, embcp.AttachWithOptions(ctx, app.HostGraph(e), cfg, nil, embcp.AttachOptions{}))
+	require.NoError(t, embcp.AttachWithOptions(ctx, app.HostGraph(e), cfg, nil, embcp.AttachOptions{Auth: &hostconfig.AuthConfig{Issuer: "https://host-webhook-controlplane.test"}}))
 	cp := embcp.Get(app.HostGraph(e))
 	require.NotNil(t, cp, "control plane attached")
 

@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"errors"
+	"github.com/open-rails/openrails/internal/credential"
 	"strings"
 
 	"github.com/open-rails/authkit"
@@ -76,7 +77,7 @@ func (c *ControlPlane) HasRootPermission(ctx context.Context, userID, perm strin
 
 // ErrMerchantAmbiguous requires an explicit selector when several distinct
 // merchant groups are present in the user's live memberships.
-var ErrMerchantAmbiguous = errors.New("controlplane: user belongs to multiple merchants")
+var ErrMerchantAmbiguous = credential.ErrMerchantAmbiguous
 
 func (c *ControlPlane) merchantGroupForUser(ctx context.Context, userID string) (authkit.GroupInstance, error) {
 	memberships, err := c.Core().ListSubjectGroups(ctx, authkit.UserSubject(userID))

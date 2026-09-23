@@ -25,14 +25,10 @@ type App struct {
 	Cache       cache.Cache
 	RedisClient *redis.Client
 
-	// ControlPlane is OpenRails' OpenRails-owned AuthKit control plane (#224),
-	// held as `any` so the embedded CORE (internal/app, pkg/embedded, embedhttp)
-	// imports neither internal/controlplane nor — through it — AuthKit (#284).
-	// It is nil only for embedded hosts that never attach one; the standalone
-	// path ALWAYS attaches the concrete *controlplane.ControlPlane via
-	// SetControlPlane (#469) and recovers it with a type assertion (see
-	// embed/controlplane).
-	ControlPlane any
+	// ControlPlane is an optional host-owned lifecycle resource. Concrete
+	// identity capabilities are supplied by standalone composition; the billing
+	// runtime only owns its cleanup.
+	ControlPlane interface{ Close() }
 	// ConsoleAssets is the host-built admin console SPA (#754), served by the
 	// standalone surface when admin_console is enabled.
 	ConsoleAssets fs.FS
@@ -44,12 +40,9 @@ type App struct {
 	controlPlanePool *pgxpool.Pool
 }
 
-// SetControlPlane attaches the OpenRails-owned AuthKit control plane built by the
-// opt-in/standalone path (#284). cp is the concrete *controlplane.ControlPlane
-// (kept as `any` here so the core stays AuthKit-free); ownedPool, when non-nil,
-// is an OpenRails-owned pgx pool whose lifecycle App.Close manages. The control
-// plane itself is owned by App even when the caller supplies a borrowed pool.
-func (a *App) SetControlPlane(cp any, ownedPool *pgxpool.Pool) {
+// SetControlPlane registers host identity cleanup and its optional owned pool.
+// Borrowed pools remain owned by the host.
+func (a *App) SetControlPlane(cp interface{ Close() }, ownedPool *pgxpool.Pool) {
 	if a == nil {
 		return
 	}
@@ -200,8 +193,8 @@ func (a *App) Close(ctx context.Context) error {
 			errs = append(errs, err)
 		}
 	}
-	if cp, ok := a.ControlPlane.(interface{ Close() }); ok {
-		cp.Close()
+	if a.ControlPlane != nil {
+		a.ControlPlane.Close()
 	}
 	a.ControlPlane = nil
 	if a.controlPlanePool != nil {

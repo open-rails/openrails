@@ -6,17 +6,17 @@ import (
 	"net/http"
 	"strings"
 
+	helpersauth "github.com/open-rails/helpers/auth"
+
 	"github.com/open-rails/authkit/dpop"
 	authcore "github.com/open-rails/authkit/embedded"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/verify"
+	"github.com/open-rails/openrails/internal/credential"
 
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ResolvedDelegated is the result of validating a browser-direct DELEGATED ACCESS
@@ -24,135 +24,23 @@ import (
 // It carries everything the self-service routes need for a human end-user acting
 // on their OWN billing: the acting user (the token's `delegated_sub`) and the
 // resolved OpenRails merchant the user belongs to.
-type ResolvedDelegated struct {
-	CredentialClass billingauth.CredentialClass
-	// Merchant is the resolved merchant's slug, sourced from the issuer registry
-	// (openrails.merchants via the validated `iss`). Delegated tokens carry NO
-	// merchant claims (authkit v0.23.0 issuer-only profile); the slug is
-	// receiver-side directory data, identical to MerchantSlug.
-	Merchant string
-	// MerchantID is the resolved OpenRails merchant (#223).
-	MerchantID merchant.ID
-	// MerchantSlug is the resolved merchant's slug.
-	MerchantSlug string
-	// CustomerID is the durable OpenRails payable subject for
-	// (MerchantID, DelegatedSubject).
-	CustomerID uuid.UUID
-	// DelegatedSubject is the acting end-user id (`delegated_sub`). This is the
-	// user the self-service handlers scope every read/write to. There is NEVER a
-	// normal `sub` on a delegated access token.
-	//
-	// SHARED-USER-NAMESPACE REQUIREMENT (issue #259): for a federated merchant whose
-	// users are shared across multiple issuers (e.g. multiple host apps = distinct
-	// issuers, one merchant, one user set), `delegated_sub` MUST be the merchant's
-	// CANONICAL user id (the shared AuthKit subject) so a token from EITHER issuer
-	// resolves to the SAME OpenRails billing account. OpenRails cannot detect a
-	// divergent per-service local id, so the HOST is responsible for presenting
-	// the canonical id; OpenRails uses this value verbatim as the billing account
-	// key. (For merchant-admin tokens this is the ACTING ADMIN, recorded for audit.)
-	DelegatedSubject string
-	// Issuer is the VALIDATED token `iss`: the registered merchant issuer the merchant
-	// was pinned from (every delegated token is FEDERATED merchant-signed, #259).
-	// Used for audit and issuer/subject attribution (#246).
-	Issuer string
-	// Invoker is the opaque host-owned spend principal this credential acts as
-	// under CustomerID's account (or#930). Non-empty means INVOKER-SCOPED: the
-	// caller spends the payer's money without being the payer, so it may read
-	// its own spend windows and nothing else. Only the host-principal seam
-	// (billingauth.DelegatedPrincipal) sets it — the invoker string is host-owned
-	// and opaque, so a signed delegated token has nothing to carry it in.
-	Invoker string
-	// Permissions is the token's claim, already bounded by AuthKit's verifier to the
-	// signing remote-app's stored authority (#564): an over-claim rejects the token,
-	// so this is a subset the signer is entitled to grant. Empty for self-service.
-	Permissions []string
-	// Email/Username are optional non-authoritative identity fields from delegated
-	// token attributes. They are for hosted checkout/contact metadata only;
-	// authorization remains delegated_sub + permissions.
-	Email         string
-	EmailVerified bool
-	Username      string
-	// Solana wallet attributes are issuer-verified facts copied from the host
-	// AuthKit account into the delegated token. Self-service wallet-link writes
-	// trust these claims, never browser-supplied wallet addresses.
-	SolanaAddress        string
-	SolanaPrimarySNSName string
-	SolanaVerifiedAt     string
-}
+type ResolvedDelegated = credential.ResolvedDelegated
 
-// HasPermission reports whether the resolved delegated token grants perm.
-//
-// Glob-aware, identical to every other credential type (#565): a granted token
-// covers perm via AuthKit's namespace-anchored glob semantics, so a minter that
-// puts `merchant:*` on a token covers `merchant:catalog:update`, while an exact
-// grant still matches exactly. The minter chooses exact vs glob (a glob may
-// expose more than strictly necessary — the minter's call, not a gate rule).
-func (r *ResolvedDelegated) HasPermission(perm string) bool {
-	for _, grant := range r.Permissions {
-		if authkit.Perm(perm).Matches(authkit.Perm(grant)) {
-			return true
-		}
-	}
-	return false
-}
-
-// ResolvedDelegatedFromHostPrincipal validates a host-supplied IN-PROCESS
-// delegated principal (billingauth.DelegatedAuthenticator output) and converts it
-// to ResolvedDelegated. When OpenRails runs as a subsystem the embedding host is
-// TRUSTED (in process), so its supplied permissions are authoritative — no
-// allowlist (#564); merchant + subject must be explicit. Shared by the gin self
-// surface and the merchant routes (internal/http/middleware + routes) so both gate the same way.
-func ResolvedDelegatedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*ResolvedDelegated, error) {
-	if p == nil {
-		return nil, billingauth.ErrDelegatedPrincipalInvalid
-	}
-	if err := p.Validate(); err != nil {
-		return nil, err
-	}
-	merchantID, err := merchant.ParseID(strings.TrimSpace(p.MerchantID))
-	if err != nil || merchantID.IsZero() {
-		return nil, billingauth.ErrDelegatedPrincipalInvalid
-	}
-	subject := strings.TrimSpace(p.SubjectID)
-	customerID := identity.CustomerIDFromString(subject)
-	if customerID.IsZero() {
-		return nil, billingauth.ErrDelegatedPrincipalInvalid
-	}
-	perms := make([]string, 0, len(p.Permissions))
-	for _, perm := range p.Permissions {
-		if perm = strings.TrimSpace(perm); perm != "" {
-			perms = append(perms, perm)
-		}
-	}
-	return &ResolvedDelegated{
-		CredentialClass:  p.CredentialClass,
-		Merchant:         strings.TrimSpace(p.MerchantSlug),
-		MerchantID:       merchantID,
-		MerchantSlug:     strings.TrimSpace(p.MerchantSlug),
-		CustomerID:       customerID.UUID(),
-		DelegatedSubject: subject,
-		Issuer:           strings.TrimSpace(p.Issuer),
-		Invoker:          strings.TrimSpace(p.Invoker),
-		Permissions:      perms,
-		Email:            p.Email,
-		EmailVerified:    p.EmailVerified,
-		Username:         p.Username,
-	}, nil
-}
+var ResolvedDelegatedFromHostPrincipal = credential.ResolvedDelegatedFromHostPrincipal
 
 // ErrDelegatedNotConfigured indicates the control plane has no delegated-token
 // verifier. That is a wiring bug (#469: the standalone always builds one), so
 // this is a defensive fail-closed guard.
-var ErrDelegatedNotConfigured = errors.New("controlplane: delegated access verifier not configured")
+var ErrDelegatedNotConfigured = credential.ErrDelegatedNotConfigured
 
 // ErrDelegatedInvalid is the sanitized error for any delegated-token rejection
 // that is not specifically expiry/revocation/merchant-unresolved. It never leaks
 // internal verifier detail to the response.
-var ErrDelegatedInvalid = errors.New("controlplane: invalid delegated access token")
+var ErrDelegatedInvalid = credential.ErrDelegatedInvalid
 
 // ErrDelegatedUnavailable means sender-proof replay protection could not be
 // consulted. A caller must fail closed without treating it as invalid credentials.
-var ErrDelegatedUnavailable = errors.New("controlplane: delegated verification unavailable")
+var ErrDelegatedUnavailable = credential.ErrDelegatedUnavailable
 
 // DelegatedVerifier returns the control plane's delegated-access-token verifier.
 // Exposed for the middleware and tests.
@@ -237,16 +125,16 @@ func (c *ControlPlane) ResolveDelegated(r *http.Request) (*ResolvedDelegated, er
 			return nil, ErrDelegatedUnavailable
 		}
 		if errors.Is(err, verify.ErrSenderProofRequired) {
-			return nil, verify.ErrSenderProofRequired
+			return nil, errors.Join(verify.ErrSenderProofRequired, helpersauth.ErrSenderProofRequired)
 		}
 		// Preserve expiry so the middleware can return a precise reason; map
 		// everything else to a sanitized invalid error (never leak verifier
 		// internals or distinguish bad-signature from wrong-audience to clients).
 		if errors.Is(err, authkit.ErrAccessTokenExpired) {
-			return nil, authkit.ErrAccessTokenExpired
+			return nil, errors.Join(authkit.ErrAccessTokenExpired, helpersauth.ErrExpired)
 		}
 		if errors.Is(err, authkit.ErrAccessTokenRevoked) {
-			return nil, authkit.ErrAccessTokenRevoked
+			return nil, errors.Join(authkit.ErrAccessTokenRevoked, helpersauth.ErrRevoked)
 		}
 		return nil, ErrDelegatedInvalid
 	}
@@ -261,7 +149,7 @@ func (c *ControlPlane) ResolveDelegated(r *http.Request) (*ResolvedDelegated, er
 	// Wire delegation always has a sender binding. Trusted in-process user
 	// adapters are a separate interface and do not weaken this HTTP contract.
 	if principal.ConfirmationCertificateSHA256 == nil && principal.ConfirmationJWKThumbprintSHA256 == nil {
-		return nil, verify.ErrSenderProofRequired
+		return nil, errors.Join(verify.ErrSenderProofRequired, helpersauth.ErrSenderProofRequired)
 	}
 	subject := strings.TrimSpace(principal.DelegatedSubject)
 	if subject == "" {

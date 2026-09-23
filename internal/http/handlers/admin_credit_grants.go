@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"github.com/open-rails/openrails/permissions"
 	"math"
 	"net/http"
 	"strconv"
@@ -9,7 +10,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/controlplane"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/money"
 	billingservice "github.com/open-rails/openrails/internal/service"
@@ -62,9 +62,9 @@ func ListAdminCreditGrants(gate billingauth.Gate) func(*httprequest.Request) {
 		}
 		canGrant, canRevoke := false, false
 		if gate != nil {
-			_, err = gate.Authorize(r.Request.Context(), r.Request, controlplane.PermMerchantCreditsGrant)
+			_, err = gate.Authorize(r.Request.Context(), r.Request, permissions.MerchantCreditsGrant)
 			canGrant = err == nil
-			_, err = gate.Authorize(r.Request.Context(), r.Request, controlplane.PermMerchantCreditsRevoke)
+			_, err = gate.Authorize(r.Request.Context(), r.Request, permissions.MerchantCreditsRevoke)
 			canRevoke = err == nil
 		}
 		r.SuccessJSON(struct {

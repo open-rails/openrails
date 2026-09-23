@@ -56,6 +56,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	hostconfig "github.com/open-rails/openrails/hostauth/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -221,8 +222,9 @@ type Surface struct {
 	// RegisterRemoteApplication to exercise the #484 remote application access
 	// token through the SAME real control plane the server authenticates against.
 	// Nil for the embedded host.
-	h   *Harness
-	app *app.App
+	h          *Harness
+	app        *app.App
+	authConfig *hostconfig.AuthConfig
 	// server is the standalone *server.Server (nil for the embedded host).
 	server *server.Server
 
@@ -485,11 +487,6 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 		Host:              "127.0.0.1",
 		Port:              0, // ephemeral; we serve via httptest below
 		DB:                &config.DBConfig{URL: appDSN},
-		Auth: &config.AuthConfig{
-			// The control plane's own AuthKit issuer.
-			Issuer:   "https://controlplane.openrails.test",
-			KeysPath: h.t.TempDir(),
-		},
 	}
 	if h.Redis != nil {
 		cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
@@ -497,7 +494,13 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 	for _, mutate := range sc.configMutators {
 		mutate(cfg)
 	}
+	authConfig := &hostconfig.AuthConfig{
+		// The control plane's own AuthKit issuer.
+		Issuer:   "https://controlplane.openrails.test",
+		KeysPath: h.t.TempDir(),
+	}
 	assembled, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{
+		Auth:                   authConfig,
 		Clock:                  sc.clock,
 		ConfiguredMerchant:     sc.configuredMerchant,
 		Authenticator:          sc.authenticator,
@@ -567,6 +570,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 		Token:      token,
 		h:          h,
 		app:        app,
+		authConfig: authConfig,
 		server:     assembled.Server,
 		currency:   currency,
 		merchantID: dbtest.TestMerchantID,

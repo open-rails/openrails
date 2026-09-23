@@ -1,10 +1,10 @@
 package routes
 
 import (
+	"github.com/open-rails/openrails/permissions"
 	"net/http"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/controlplane"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -157,9 +157,9 @@ func RegisterCustomerTreasuryRoutes(rr router.Router, rt *app.Runtime, delegated
 	// invokers/roles/tiers draw on its balance.
 	group.Handle(http.MethodGet, "/:customer_id/spend-delegations",
 		h(httphandlers.GetCustomerSpendDelegations),
-		middleware.RequirePermission(controlplane.PermCustomerSpendDelegationsRead),
+		middleware.RequirePermission(permissions.CustomerSpendDelegationsRead),
 	)
-	putSpendDelegations := middleware.RequirePermission(controlplane.PermCustomerSpendDelegationsUpdate)
+	putSpendDelegations := middleware.RequirePermission(permissions.CustomerSpendDelegationsUpdate)
 	group.Handle(http.MethodPut, "/:customer_id/spend-delegations",
 		h(httphandlers.PutCustomerSpendDelegations),
 		putSpendDelegations,
@@ -177,7 +177,7 @@ func RegisterCustomerTreasuryRoutes(rr router.Router, rt *app.Runtime, delegated
 
 	// Read the payer's money state. `status` is intentionally NOT mounted (it
 	// reports consumer concepts the customer does not own).
-	read := middleware.RequirePermission(controlplane.PermCustomerBalanceRead)
+	read := middleware.RequirePermission(permissions.CustomerBalanceRead)
 	group.Handle(http.MethodGet, "/:customer_id/balance", h(httphandlers.GetMyBalance), read)
 	group.Handle(http.MethodGet, "/:customer_id/transactions", h(httphandlers.GetMyAccountTransactions), read)
 	group.Handle(http.MethodGet, "/:customer_id/usage", h(httphandlers.GetMyUsage), read)
@@ -188,11 +188,11 @@ func RegisterCustomerTreasuryRoutes(rr router.Router, rt *app.Runtime, delegated
 	// Choose the payer's automatic invoice collection method per currency.
 	group.Handle(http.MethodPut, "/:customer_id/collection-payment-method",
 		h(httphandlers.SetMyCollectionPaymentMethod),
-		middleware.RequirePermission(controlplane.PermCustomerBillingUpdate),
+		middleware.RequirePermission(permissions.CustomerBillingUpdate),
 	)
 
 	// Manage the payer's saved payment methods and optional provider portal.
-	pmPerm := middleware.RequirePermission(controlplane.PermCustomerPaymentMethodsUpdate)
+	pmPerm := middleware.RequirePermission(permissions.CustomerPaymentMethodsUpdate)
 	group.Handle(http.MethodGet, "/:customer_id/payment-methods", h(httphandlers.ListPaymentMethods), pmPerm)
 	group.Handle(http.MethodPost, "/:customer_id/payment-methods", h(httphandlers.CreatePaymentMethod), pmPerm)
 	group.Handle(http.MethodPut, "/:customer_id/payment-methods/:id", h(httphandlers.UpdatePaymentMethod), pmPerm)
@@ -202,7 +202,7 @@ func RegisterCustomerTreasuryRoutes(rr router.Router, rt *app.Runtime, delegated
 	}
 
 	// Pre-pay / load credits onto the customer balance via checkout.
-	checkoutPerm := middleware.RequirePermission(controlplane.PermCustomerCheckoutCreate)
+	checkoutPerm := middleware.RequirePermission(permissions.CustomerCheckoutCreate)
 	group.Handle(http.MethodPost, "/:customer_id/checkout", h(httphandlers.CreateCheckoutSession), checkoutPerm)
 	group.Handle(http.MethodGet, "/:customer_id/checkout/:id", h(httphandlers.GetCheckoutSession), checkoutPerm)
 	group.Handle(http.MethodPost, "/:customer_id/checkout/:id/confirm", h(httphandlers.ConfirmCheckoutSession), checkoutPerm)

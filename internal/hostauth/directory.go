@@ -1,9 +1,10 @@
-package authkit
+package hostauth
 
 import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/jackc/pgx/v5"
 
 	"github.com/google/uuid"

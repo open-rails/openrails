@@ -41,7 +41,7 @@ func TestMerchantCreationPolicy(t *testing.T) {
 	require.Error(t, err, "a zero allowance is a refused construction, not a silent default")
 
 	sender := &captureEmailSender{}
-	require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
+	require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg.Config, nil, embcp.AttachOptions{Auth: cfg.Auth,
 		HostedPosture:    true,
 		EmailSender:      sender,
 		MerchantCreation: &embcp.MerchantCreationConfig{Admission: admission},

@@ -1,6 +1,7 @@
 package config
 
 import (
+	billing "github.com/open-rails/openrails/config"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,7 +17,7 @@ func TestMerchantConfigSourceHardCut(t *testing.T) {
 		t.Setenv("SECRET_BACKEND", "db")
 		cfg, err := Load("")
 		require.NoError(t, err)
-		require.Equal(t, MerchantConfigSourceAPI, cfg.MerchantConfigSourceMode())
+		require.Equal(t, billing.MerchantConfigSourceAPI, cfg.MerchantConfigSourceMode())
 	})
 	t.Run("new config spelling", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "config.yaml")

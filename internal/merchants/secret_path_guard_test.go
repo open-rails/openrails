@@ -45,8 +45,8 @@ func TestNoAdHocSecretPathConstruction(t *testing.T) {
 			// The RETIRED prefix. Only the loud rename checks may name it.
 			fragment: `"rail_merchant_accounts`,
 			allowed: map[string]string{
-				"internal/bootstrap/merchant_manifest.go": "legacy manifest-KEY rename check (config keys, not secret paths)",
-				"embed/provision.go":                      "legacy manifest-KEY rename check (config keys, not secret paths)",
+				"internal/merchantbootstrap/merchant_manifest.go": "legacy manifest-KEY rename check (config keys, not secret paths)",
+				"embed/provision.go":                              "legacy manifest-KEY rename check (config keys, not secret paths)",
 			},
 		},
 		{

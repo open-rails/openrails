@@ -5,9 +5,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/openrails/internal/credential"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -28,44 +28,7 @@ const (
 // that merchant group; its merchant identity is THE GROUP it belongs to — never a
 // resource scope — and its authority over the merchant is its assigned group role
 // (resolved to `merchant:*` perms).
-type ResolvedServiceCredential struct {
-	// OwnerGroupID is the internal id of the merchant permission-group the
-	// credential is nested under (#567) — the caller's authority anchor.
-	OwnerGroupID string
-	// OwnerGroupRef is that merchant group's resource ref (the merchant slug),
-	// presentation/audit only.
-	OwnerGroupRef string
-	// MerchantID is the OpenRails merchant (#480) the credential administers.
-	MerchantID merchant.ID
-	// MerchantSlug is the resolved merchant's slug.
-	MerchantSlug string
-	// Permissions is the credential's granted OpenRails permission set
-	// (`merchant:` permissions resolved from the group role).
-	Permissions []string
-}
-
-// HasPermission reports whether the resolved credential grants perm. Glob-aware,
-// identical to every other credential type (#565): a granted token covers perm
-// via AuthKit's namespace-anchored glob semantics (`merchant:*` covers
-// `merchant:catalog:update`; an exact grant still matches exactly).
-func (r *ResolvedServiceCredential) HasPermission(perm string) bool {
-	for _, grant := range r.Permissions {
-		if authkit.Perm(perm).Matches(authkit.Perm(grant)) {
-			return true
-		}
-	}
-	return false
-}
-
-// AllowsCustomer reports whether this credential may act for a payable subject
-// inside its resolved merchant. #569 (hard cut): merchant credentials are
-// merchant-wide — there is no "merchant key scoped to one customer" concept — so
-// a resolved merchant credential may act for any payable subject within its
-// merchant. Customer spend-delegation policy is a separate OpenRails budget
-// constraint checked during admission; it is not an AuthKit resource scope.
-func (r *ResolvedServiceCredential) AllowsCustomer(subject uuid.UUID) bool {
-	return r != nil && !r.MerchantID.IsZero() && subject != uuid.Nil
-}
+type ResolvedServiceCredential = credential.ResolvedServiceCredential
 
 // MerchantScope resolves an external name through AuthKit before selecting its
 // immutable billing binding. A local display projection never owns the name.
@@ -159,17 +122,17 @@ func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*Resolv
 
 // ErrServiceCredentialHostMismatch rejects a valid API key presented against
 // another merchant's canonical host.
-var ErrServiceCredentialHostMismatch = errors.New("controlplane: API key merchant does not match request host")
+var ErrServiceCredentialHostMismatch = credential.ErrServiceCredentialHostMismatch
 
 // ErrServiceCredentialMerchantUnresolved indicates the caller's permission group
 // backs no active OpenRails merchant (no openrails.merchants row with that
 // permission_group_id, or the merchant is deleted). Treated as an
 // authorization failure: the caller cannot act on any merchant surface.
-var ErrServiceCredentialMerchantUnresolved = errors.New("controlplane: API key caller owns no active merchant")
+var ErrServiceCredentialMerchantUnresolved = credential.ErrServiceCredentialMerchantUnresolved
 
 // ErrServiceCredentialScopeDenied indicates an otherwise valid service credential
 // lacks the required OpenRails merchant authority.
-var ErrServiceCredentialScopeDenied = errors.New("controlplane: API key resource scope denied")
+var ErrServiceCredentialScopeDenied = credential.ErrServiceCredentialScopeDenied
 
 // merchantForGroupID resolves the OpenRails merchant a caller administers from
 // its authenticated authkit permission-group id: the merchant whose
