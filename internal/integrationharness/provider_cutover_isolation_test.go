@@ -59,7 +59,10 @@ func TestNMIProviderCutoverIsolation(t *testing.T) {
 	ctx := t.Context()
 	h := New(t, ctx)
 	g := newCutoverGateway(t)
-	s := h.StartStandalone("USD", WithConfig(func(c *config.Config) { c.ProviderWriteMode = config.ProviderWriteModeFull }))
+	s := h.StartStandalone("USD", WithConfig(func(c *config.Config) {
+		c.ProviderWriteMode = config.ProviderWriteModeFull
+		c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: g.Server.URL}
+	}))
 	_, err := h.Pool().Exec(ctx, `UPDATE billing.destructive_action_switch SET enabled=true`)
 	require.NoError(t, err)
 	t.Cleanup(func() {
