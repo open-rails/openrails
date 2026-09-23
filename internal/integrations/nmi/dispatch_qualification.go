@@ -38,9 +38,7 @@ func (c *NMIClient) dispatchBinding() dispatchBinding {
 // private capability authorizes exactly the next mutation on this captured
 // account/credential/deployment, in this call only. It is never persisted.
 func (c *NMIClient) QualifyDispatch(ctx context.Context) (context.Context, error) {
-	if !c.TestMode || c.accountMerchantID == uuid.Nil || c.accountPSPID == uuid.Nil {
-		// Unscoped clients are test seams and provider-read fixtures. Durable
-		// merchant execution always uses NewAccountClient with both identities.
+	if !c.TestMode {
 		return ctx, nil
 	}
 	if c.ReadOnly {
@@ -57,7 +55,7 @@ func (c *NMIClient) QualifyDispatch(ctx context.Context) (context.Context, error
 }
 
 func (c *NMIClient) qualifyMutation(ctx context.Context) error {
-	if !c.TestMode || ctx.Value(probeQualificationKey{}) == c {
+	if !c.TestMode || c.accountMerchantID == uuid.Nil || c.accountPSPID == uuid.Nil || ctx.Value(probeQualificationKey{}) == c {
 		return nil
 	}
 	if permit, ok := ctx.Value(dispatchQualificationKey{}).(*dispatchQualification); ok {
@@ -92,7 +90,7 @@ func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 		return ProbeIndeterminate, errors.New("oversized test-mode response")
 	}
 	decoder := xml.NewDecoder(strings.NewReader(raw))
-	depth, count := 0, 0
+	depth, count, roots := 0, 0, 0
 	value := ""
 	for {
 		token, err := decoder.Token()
@@ -105,6 +103,12 @@ func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 		switch element := token.(type) {
 		case xml.StartElement:
 			depth++
+			if depth == 1 {
+				roots++
+				if roots > 1 {
+					return ProbeIndeterminate, errors.New("multiple test-mode roots")
+				}
+			}
 			if element.Name.Space != "" || len(element.Attr) != 0 || depth == 1 && element.Name.Local != "nm_response" || depth == 2 && element.Name.Local != "test_mode_enabled" || depth > 2 {
 				return ProbeIndeterminate, errors.New("unexpected test-mode response")
 			}
@@ -117,14 +121,14 @@ func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 			text := strings.TrimSpace(string(element))
 			if depth == 2 {
 				value += text
-			} else if text != "" && depth != 0 {
+			} else if text != "" {
 				return ProbeIndeterminate, errors.New("unexpected test-mode text")
 			}
 		case xml.Directive:
 			return ProbeIndeterminate, errors.New("unsupported test-mode XML directive")
 		}
 	}
-	if depth != 0 || count != 1 {
+	if depth != 0 || count != 1 || roots != 1 {
 		return ProbeIndeterminate, errors.New("missing or repeated test-mode result")
 	}
 	switch value {
@@ -138,7 +142,7 @@ func parseGatewayTestMode(raw string) (TestModeProbeResult, error) {
 }
 
 func (c *NMIClient) qualifyAccount(ctx context.Context) (TestModeProbeResult, error) {
-	if c.endpointDeploymentExplicit && c.endpointDeployment == config.NMIEndpointGateway {
+	if c.endpointDeployment == config.NMIEndpointGateway {
 		return c.readGatewayTestMode(ctx)
 	}
 	return c.ProbeTestMode(ctx)

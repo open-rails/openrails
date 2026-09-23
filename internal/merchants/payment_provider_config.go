@@ -915,7 +915,23 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 	if securityKey == "" {
 		return nil // unconfigured; nothing to verify
 	}
-	client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{SecurityKey: securityKey}, true)
+	var stored struct {
+		Settings map[string]any `json:"settings"`
+	}
+	row, readErr := gen.New(s.pool).GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{MerchantID: id.UUID(), Rail: rail, Environment: &environment, AccountID: accountID})
+	if readErr != nil && !errors.Is(readErr, pgx.ErrNoRows) {
+		return readErr
+	}
+	if readErr == nil {
+		if err := json.Unmarshal(row.Evidence, &stored); err != nil {
+			return err
+		}
+	}
+	deployment, err := config.NMIEndpointDeployment(stored.Settings)
+	if err != nil {
+		return err
+	}
+	client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, true)
 	if err != nil {
 		return fmt.Errorf("construct NMI sandbox qualification client: %w", err)
 	}

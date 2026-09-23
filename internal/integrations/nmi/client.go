@@ -36,11 +36,10 @@ type NMIClient struct {
 	DirectPostURL string
 	// QueryURL survives #663 for transaction SEARCH only (v5 has no
 	// payments list/search; v4's report endpoint is partner-key-only).
-	QueryURL                   string
-	V5BaseURL                  string
-	TestMode                   bool
-	endpointDeployment         string
-	endpointDeploymentExplicit bool
+	QueryURL           string
+	V5BaseURL          string
+	TestMode           bool
+	endpointDeployment string
 	// ReadOnly blocks EVERY mutation — classic direct-post AND v5 non-GET —
 	// with ErrProviderReadOnly; reads stay available. Set when mode=readonly
 	// (#346) at client build.
@@ -232,15 +231,14 @@ func NewClient(provider string, cfg *config.NMIProviderSettings, testMode bool) 
 	}).Info("NMI endpoint selection")
 
 	return &NMIClient{
-		providerName:               provider,
-		SecurityKey:                securityKey,
-		WebhookSecret:              webhookSecret,
-		DirectPostURL:              directPostURL,
-		QueryURL:                   queryURL,
-		V5BaseURL:                  v5BaseURL,
-		TestMode:                   testMode,
-		endpointDeployment:         deployment,
-		endpointDeploymentExplicit: strings.TrimSpace(cfg.EndpointDeployment) != "",
+		providerName:       provider,
+		SecurityKey:        securityKey,
+		WebhookSecret:      webhookSecret,
+		DirectPostURL:      directPostURL,
+		QueryURL:           queryURL,
+		V5BaseURL:          v5BaseURL,
+		TestMode:           testMode,
+		endpointDeployment: deployment,
 		httpClient: &http.Client{
 			// Backstop only; the real bound is the per-request context
 			// deadline (nmiMutationTimeout / nmiReadTimeout).
@@ -426,6 +424,9 @@ func (c *NMIClient) sendDirectRequest(ctx context.Context, data url.Values) (_ s
 	defer cancel()
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
+	if err := c.qualifyMutation(ctx); err != nil {
+		return "", err
+	}
 	resp, err := c.client().Do(req)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{

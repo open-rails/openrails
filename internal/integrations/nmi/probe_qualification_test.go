@@ -17,6 +17,7 @@ func TestCheckTestModeArmRequiresFreshQualification(t *testing.T) {
 			server := probeServer(t, tc.response, nil)
 			defer server.Close()
 			client := probeClient(t, server.URL)
+			client.endpointDeployment = "sandbox"
 			err := CheckTestModeArm(context.Background(), client)
 			if tc.allowed {
 				require.NoError(t, err)
