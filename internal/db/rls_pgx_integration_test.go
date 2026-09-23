@@ -1,6 +1,6 @@
 //go:build integration
 
-package db
+package db_test
 
 import (
 	"context"
@@ -9,13 +9,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Connection binding supplies session scope to queries that explicitly test it.
 // The probe has no policies, so there is no hidden database filter.
 
-func pgxProbeVals(ctx context.Context, t *testing.T, d *DB) []string {
+func pgxProbeVals(ctx context.Context, t *testing.T, d *db.DB) []string {
 	t.Helper()
 	rows, err := d.Qx(ctx).Query(ctx, `SELECT val FROM billing.rls_probe WHERE merchant_id=nullif(current_setting('app.merchant_id',true),'')::uuid ORDER BY val`)
 	require.NoError(t, err)

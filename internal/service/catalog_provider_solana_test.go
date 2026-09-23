@@ -39,9 +39,10 @@ func TestSolanaAdapter_AutoCreateRecurringDefaultsToUSDC(t *testing.T) {
 	const usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 	hours := 30 * 24
 	days := 30
+	sub := &planSubmitterStub{merchantPub: solanago.NewWallet().PublicKey()}
 	plan := recurring.NewPlanServiceWithReader(
-		&planSubmitterStub{merchantPub: solanago.NewWallet().PublicKey()},
-		mintReaderStub{mint: usdcMint, decimals: 6},
+		sub,
+		mintReaderStub{mint: usdcMint, decimals: 6, submitted: sub},
 		"mainnet",
 		map[string]config.TokenConfig{"USDC": {Mint: usdcMint}},
 	)
@@ -67,9 +68,10 @@ func TestSolanaAdapter_AutoCreateRecurringDefaultsToDUSDInTestMode(t *testing.T)
 	const dusdMint = "7R5ehi23KtGj8e5ysBjr39dktJh2KtSFSeH44fd2s22T"
 	hours := 30 * 24
 	days := 30
+	sub := &planSubmitterStub{merchantPub: solanago.NewWallet().PublicKey()}
 	plan := recurring.NewPlanServiceWithReader(
-		&planSubmitterStub{merchantPub: solanago.NewWallet().PublicKey()},
-		mintReaderStub{mint: dusdMint, decimals: 6},
+		sub,
+		mintReaderStub{mint: dusdMint, decimals: 6, submitted: sub},
 		"devnet",
 		map[string]config.TokenConfig{"DUSD": {Mint: dusdMint}},
 	)
@@ -211,9 +213,10 @@ func TestSolanaAdapter_RemoteWritesDisabledDefersPublish(t *testing.T) {
 	const usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 	hours := 30 * 24
 	days := 30
+	sub := &planSubmitterStub{merchantPub: solanago.NewWallet().PublicKey()}
 	plan := recurring.NewPlanServiceWithReader(
-		&planSubmitterStub{merchantPub: solanago.NewWallet().PublicKey()},
-		mintReaderStub{mint: usdcMint, decimals: 6},
+		sub,
+		mintReaderStub{mint: usdcMint, decimals: 6, submitted: sub},
 		"mainnet",
 		map[string]config.TokenConfig{"USDC": {Mint: usdcMint}},
 	)

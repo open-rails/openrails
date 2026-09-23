@@ -15,7 +15,7 @@ concurrency:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   GOMAXPROCS: "2"
-  GOFLAGS: -p=1
+  GOFLAGS: -p=3
 
 jobs:
   checks:
@@ -60,17 +60,11 @@ jobs:
           POSTGRES_USER: admin
           POSTGRES_PASSWORD: test_password
         ports: [5432:5432]
-        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
-      redis:
-        image: redis:7-alpine
-        ports: [6379:6379]
-        # The service-container action passes this through to `docker create`;
-        # keep the health command as one executable so Docker does not parse a
-        # shell-quoted string as part of the image reference.
-        options: --health-cmd redis-cli --health-interval 5s --health-timeout 5s --health-retries 10
+        options: --tmpfs /var/lib/postgresql:rw,size=2g --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       OPENRAILS_TEST_DB_DSN: postgres://admin:test_password@127.0.0.1:5432/openrails_test?sslmode=disable
-      OPENRAILS_TEST_REDIS_ADDR: 127.0.0.1:6379
+      # Keep tests serial within a package; independent processes own Redis.
+      OPENRAILS_TEST_PACKAGES: "3"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0

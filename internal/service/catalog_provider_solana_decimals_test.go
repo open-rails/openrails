@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/binary"
 	"strconv"
 	"testing"
 
@@ -11,35 +12,68 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
+const testPlanCreatedAt = int64(1_717_200_000)
+
 const testUSDCMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 
 // planSubmitterStub satisfies recurring.Submitter without touching a chain.
-type planSubmitterStub struct{ merchantPub solanago.PublicKey }
+type planSubmitterStub struct {
+	merchantPub solanago.PublicKey
+	plans       map[solanago.PublicKey][]byte
+}
 
 func (s *planSubmitterStub) MerchantAddress(context.Context, merchant.ID) (solanago.PublicKey, error) {
 	return s.merchantPub, nil
 }
 
-func (s *planSubmitterStub) Submit(context.Context, merchant.ID, []solanago.Instruction) (solanago.Signature, error) {
+func (s *planSubmitterStub) Submit(_ context.Context, _ merchant.ID, instructions []solanago.Instruction) (solanago.Signature, error) {
+	for _, ix := range instructions {
+		if ix.ProgramID() != subscriptions.ProgramID {
+			continue
+		}
+		data, err := ix.Data()
+		if err != nil {
+			return solanago.Signature{}, err
+		}
+		// create_plan's data follows the account's owner/bump/status prefix.
+		blob := append([]byte{1}, s.merchantPub.Bytes()...)
+		blob = append(blob, 254, 0)
+		blob = append(blob, data[1:]...)
+		// created_at follows discriminator, owner, bump, status, plan ID, mint, amount, period.
+		const createdAtOffset = 1 + 32 + 1 + 1 + 8 + 32 + 8 + 8
+		binary.LittleEndian.PutUint64(blob[createdAtOffset:createdAtOffset+8], uint64(testPlanCreatedAt))
+		if s.plans == nil {
+			s.plans = make(map[solanago.PublicKey][]byte)
+		}
+		s.plans[ix.Accounts()[1].PublicKey] = blob
+	}
 	return solanago.Signature{1}, nil
 }
 
 // mintReaderStub answers the mint address with a synthetic SPL mint account at
-// `decimals` and every other address (the plan PDA) with an empty account, so
-// PublishPlan proceeds past its re-publish guard.
+// `decimals`. A plan PDA is absent until submission, then exposes its chain
+// account so PublishPlan can read back the authoritative created_at.
 type mintReaderStub struct {
 	mint     string
 	decimals uint8
 	// absent makes the mint read return an empty account (mint not on chain).
-	absent bool
+	absent    bool
+	submitted *planSubmitterStub
 }
 
 func (r mintReaderStub) GetAccountData(_ context.Context, addr solanago.PublicKey) ([]byte, error) {
-	if addr.String() != r.mint || r.absent {
+	if addr.String() != r.mint {
+		if r.submitted != nil {
+			return r.submitted.plans[addr], nil
+		}
+		return nil, nil
+	}
+	if r.absent {
 		return nil, nil
 	}
 	blob := make([]byte, solanaint.MintAccountSize)
@@ -78,9 +112,10 @@ func TestSolanaAdapter_DeclarativeMintHonoursOnChainDecimals(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(strconv.Itoa(int(tc.decimals))+"-decimals", func(t *testing.T) {
+			sub := &planSubmitterStub{merchantPub: key.PublicKey()}
 			plan := recurring.NewPlanServiceWithReader(
-				&planSubmitterStub{merchantPub: key.PublicKey()},
-				mintReaderStub{mint: testUSDCMint, decimals: tc.decimals},
+				sub,
+				mintReaderStub{mint: testUSDCMint, decimals: tc.decimals, submitted: sub},
 				"mainnet",
 				map[string]config.TokenConfig{"USDC": {Mint: testUSDCMint}},
 			)
@@ -102,6 +137,9 @@ func TestSolanaAdapter_DeclarativeMintHonoursOnChainDecimals(t *testing.T) {
 			}
 			if got := out[solanaKeyAmountBaseUnits]; got != strconv.FormatUint(tc.want, 10) {
 				t.Fatalf("%d micros @%d decimals: plan amount_base_units = %s, want %d", tc.micros, tc.decimals, got, tc.want)
+			}
+			if got := out["created_at"]; got != strconv.FormatInt(testPlanCreatedAt, 10) {
+				t.Fatalf("created_at = %s, want chain readback %d", got, testPlanCreatedAt)
 			}
 			if got := out[solanaKeyMintSymbol]; got != "USDC" {
 				t.Fatalf("plan mint_symbol = %q, want USDC", got)
