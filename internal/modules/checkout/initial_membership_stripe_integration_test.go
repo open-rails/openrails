@@ -88,7 +88,7 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 			var setup map[string]any
 			setupStatus := "requires_payment_method"
 			posts, cancels := 0, 0
-			release := stripeapi.InstallBaseTransport(initialStripeWire(func(r *http.Request) (*http.Response, error) {
+			service.StripeClients = stripeapi.NewFactory(initialStripeWire(func(r *http.Request) (*http.Response, error) {
 				mu.Lock()
 				defer mu.Unlock()
 				require.Equal(t, stripeapi.APIVersion, r.Header.Get(stripeapi.VersionHeader))
@@ -178,7 +178,8 @@ func TestStripeInitialMembershipOwnedWorkflow(t *testing.T) {
 					return nil, errors.New("unexpected Stripe route")
 				}
 			}))
-			defer release()
+			fx.svc.StripeClients = service.StripeClients
+			fx.svc.StripeService.StripeClients = service.StripeClients
 			principal := billingauth.DelegatedPrincipal{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid.String(), SubjectID: terms.CustomerID.String()}
 			key := "stripe-initial-" + uuid.NewString()
 			if mode == "setup" {

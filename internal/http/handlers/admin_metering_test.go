@@ -75,10 +75,10 @@ func TestDefaultUsageRateCardInput(t *testing.T) {
 }
 
 func TestAdminUsageMeterCatalogCapability(t *testing.T) {
-	for _, source := range []string{config.MerchantConfigSourceManifest, config.MerchantConfigSourceAPI} {
+	for _, backend := range []string{config.SecretBackendSnapshot, config.SecretBackendDB, config.SecretBackendVault} {
 		for _, allow := range []bool{false, true} {
 			r := httprequest.NewHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil),
-				&app.Runtime{Config: &config.Config{MerchantConfigSource: source, AllowCatalogUpdates: allow}})
+				&app.Runtime{Config: &config.Config{SecretBackend: backend, AllowCatalogUpdates: allow}})
 			meter := adminUsageMeterDTO(r, billingservice.UsageMeterDTO{Key: "requests"})
 			page := adminUsageMeterPageDTO(r, []adminUsageMeterResponse{}, 0, 50, 0)
 			require.Equal(t, "database", meter.ConfigurationSource)

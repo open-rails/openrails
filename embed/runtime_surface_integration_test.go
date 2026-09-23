@@ -30,7 +30,7 @@ func TestRuntimeOwnsReadinessAndRiverChecks(t *testing.T) {
 	declaration := embed.PSPDeclaration{Key: "legacy", Rail: "ccbill", AccountID: fmt.Sprintf("9%d", time.Now().UnixNano()%1e9)}
 	rt, err := embed.New(ctx, embed.Options{
 		Merchant: &embed.MerchantDeclaration{Slug: fmt.Sprintf("runtime-surface-%d", time.Now().UnixNano()), PSPs: []embed.PSPDeclaration{declaration, declaration}},
-		Config:   &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}},
+		Config:   &config.Config{TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}},
 		PGXPool:  pool,
 		River:    embed.RiverFromHost(),
 	})

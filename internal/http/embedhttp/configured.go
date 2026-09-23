@@ -21,11 +21,11 @@ import (
 type HTTPConfig struct {
 	CustomerRoutes []CustomerRoutesConfig
 
-	Checkout         bool
-	MerchantAdmin    bool
-	Catalog          bool
-	PaymentProviders bool
-	MerchantAPI      bool
+	Checkout       bool
+	MerchantAdmin  bool
+	Catalog        bool
+	MerchantConfig bool
+	MerchantAPI    bool
 }
 
 func ValidateHTTPConfig(cfg *HTTPConfig, auth *billingauth.Integration) error {
@@ -38,7 +38,7 @@ func ValidateHTTPConfig(cfg *HTTPConfig, auth *billingauth.Integration) error {
 	if cfg.Checkout && (auth == nil || auth.Authentication == nil) {
 		return fmt.Errorf("openrails HTTP: Checkout requires Options.Auth.Authentication")
 	}
-	if (cfg.MerchantAdmin || cfg.Catalog || cfg.PaymentProviders || cfg.MerchantAPI) && (auth == nil || auth.Authentication == nil || auth.Authorization == nil) {
+	if (cfg.MerchantAdmin || cfg.Catalog || cfg.MerchantConfig || cfg.MerchantAPI) && (auth == nil || auth.Authentication == nil || auth.Authorization == nil) {
 		return fmt.Errorf("openrails HTTP: management surfaces require Options.Auth authentication and authorization")
 	}
 	return nil
@@ -52,7 +52,7 @@ func (cfg HTTPConfig) routeSets() []RouteSet {
 	}{
 		{cfg.Checkout, RouteSetCheckout},
 		{cfg.MerchantAdmin, RouteSetMerchantAdmin}, {cfg.Catalog, RouteSetCatalog},
-		{cfg.PaymentProviders, RouteSetPaymentProviders}, {cfg.MerchantAPI, RouteSetMerchantAPI},
+		{cfg.MerchantConfig, RouteSetMerchantConfig}, {cfg.MerchantAPI, RouteSetMerchantAPI},
 	} {
 		if v.enabled {
 			sets = append(sets, v.set)

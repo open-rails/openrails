@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -197,9 +198,8 @@ func WithRateLimitOverrides(overrides map[string]ratelimit.Limit) Option {
 // WithRedis wires a Redis client into the AuthKit engine's ephemeral store
 // (embedded.Deps.Redis) — #753. authhttp.New reuses this SAME client for its
 // own OIDC/SIWS state caches and rate limiter, so this one call satisfies both
-// layers' Redis needs. Required outside development: the engine refuses the
-// in-memory store unless Ephemeral.AllowMemory is set, which New grants only
-// to development (ak#305/#314).
+// layers' Redis needs. Without Redis, the host must explicitly permit the
+// in-memory ephemeral store through AuthConfig.AllowMemory (ak#305/#314).
 func WithRedis(rd *redis.Client) Option {
 	return func(o *options) {
 		o.redis = rd
@@ -207,10 +207,9 @@ func WithRedis(rd *redis.Client) Option {
 }
 
 // clientIPPosture resolves the authhttp client-IP declaration (ak#299): host
-// options override config, direct-peer excludes proxy lists, and outside
-// development an undeclared posture refuses to boot rather than sharing one
-// rate-limit bucket behind an unknown proxy. A development rig is its own
-// edge and defaults to direct-peer.
+// options override config, direct-peer excludes proxy lists, and an
+// undeclared posture refuses to boot rather than sharing one rate-limit
+// bucket behind an unknown proxy.
 func clientIPPosture(cfg *config.Config, auth *hostconfig.AuthConfig, options options) (authhttp.Config, error) {
 	proxies := cfg.TrustedProxies
 	if len(options.trustedProxies) > 0 {
@@ -225,10 +224,7 @@ func clientIPPosture(cfg *config.Config, auth *hostconfig.AuthConfig, options op
 	case directPeer && (len(proxies) > 0 || len(cloudflare) > 0):
 		return authhttp.Config{}, errors.New("controlplane: direct_peer_ip conflicts with trusted_proxies/cloudflare_proxies")
 	case !directPeer && len(proxies) == 0 && len(cloudflare) == 0:
-		if !cfg.IsDev() {
-			return authhttp.Config{}, errors.New("controlplane: an explicit client-IP posture is required outside development: set auth.direct_peer_ip=true when clients connect directly, or trusted_proxies / cloudflare_proxies for the proxies in front")
-		}
-		directPeer = true
+		return authhttp.Config{}, errors.New("controlplane: an explicit client-IP posture is required: set auth.direct_peer_ip=true, or trusted_proxies / cloudflare_proxies")
 	}
 	return authhttp.Config{
 		TrustedProxies:    proxies,
@@ -304,15 +300,14 @@ func resolveControlPlaneKeySource(cfg *config.Config, auth *hostconfig.AuthConfi
 		}
 		// #752: inline PEM is frozen for the process lifetime by construction —
 		// unlike keys_path (FILE-watched, hot-rotates), there is no way to rotate
-		// or emergency-revoke this key without a restart. Development is exempt
-		// (short-lived, disposable processes); every other environment gets a
-		// loud, one-time-per-boot heads-up naming the tradeoff.
-		if !cfg.IsDev() {
-			log.Warnf("controlplane: signing keys loaded from inline PEM (AUTHKIT_ACTIVE_KEY_ID/AUTHKIT_ACTIVE_PRIVATE_KEY_PEM) outside development — this key is FROZEN for the process lifetime: no hot rotation and no emergency revocation without a restart. keys_path (%s) is the FILE-watched, hot-rotating production path (#752); switch to it if you need no-restart key rotation or revocation.", jwtkit.DefaultAuthKeysPath)
+		// or emergency-revoke this key without a restart. Every caller gets a
+		// one-time-per-boot heads-up naming the tradeoff.
+		{
+			log.Warnf("controlplane: signing keys loaded from inline PEM (AUTHKIT_ACTIVE_KEY_ID/AUTHKIT_ACTIVE_PRIVATE_KEY_PEM) — this key is FROZEN for the process lifetime: no hot rotation and no emergency revocation without a restart. keys_path (%s) is the FILE-watched, hot-rotating production path (#752); switch to it if you need no-restart key rotation or revocation.", jwtkit.DefaultAuthKeysPath)
 		}
 		return ks, nil
 	}
-	return jwtkit.ResolveKeySource(authKeysPath(auth), cfg.IsDev(), nil)
+	return jwtkit.ResolveKeySource(authKeysPath(auth), auth.AllowEphemeralSigningKey, nil)
 }
 
 // authKeysPath is the directory AuthKit scans for key material. It holds BOTH
@@ -340,7 +335,7 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 	if cfg == nil || auth == nil {
 		return nil, errors.New("controlplane: auth.issuer is required (the control plane is mandatory in standalone mode, #469)")
 	}
-	if err := auth.Validate(cfg.IsDev()); err != nil {
+	if err := auth.ValidateTransport(); err != nil {
 		return nil, err
 	}
 	if pool == nil {
@@ -366,20 +361,8 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 	// /vault/auth/keys.json;
 	// else (dev only) an ephemeral dev key.
 	//
-	// The signing key is OPTIONAL (#527/#87): a control plane with no key runs
-	// as a pure VERIFIER instead of failing the boot — it verifies inbound
-	// host-app delegated tokens and serves RBAC, but cannot MINT tokens (mint
-	// paths return authkit ErrMissingSigner). But verify-only must be a
-	// DECLARED posture, not stumbled into (#748): auth.mint_disabled=true
-	// says so explicitly and skips key discovery entirely (there is nothing to
-	// discover — minting is off by intent). Without that flag, a signing-key
-	// discovery error used to silently downgrade to verify-only with a warn,
-	// indistinguishable from an outage, with mint failures only surfacing at
-	// request time. Now a discovery error is a construction (boot) failure
-	// outside development (mirrors the #667 encryption-posture gate);
-	// development keeps the original warn-and-continue so a from-scratch dev
-	// boot with no keys.json still runs on its ephemeral dev key path (which
-	// itself never errors — see jwtkit.ResolveKeySource).
+	// Mint-disabled explicitly chooses verify-only. All other construction
+	// requires a real signing key or explicit permission for an ephemeral key.
 	var keySource jwtkit.KeySource
 	verifyOnly := false
 	if auth.MintDisabled {
@@ -390,11 +373,8 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 		switch {
 		case keyErr == nil:
 			keySource = ks
-		case cfg.IsDev():
-			log.WithError(keyErr).Warn("controlplane: no signing key discovered; running VERIFY-ONLY (token minting disabled) — development only; declare auth.mint_disabled=true to make this posture explicit outside development (#748)")
-			verifyOnly = true
 		default:
-			return nil, fmt.Errorf("controlplane: signing key discovery failed outside development (declare auth.mint_disabled=true if verify-only is intentional, #748): %w", keyErr)
+			return nil, fmt.Errorf("controlplane: signing key discovery failed (declare auth.mint_disabled=true if verify-only is intentional, #748): %w", keyErr)
 		}
 	}
 
@@ -437,13 +417,13 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 		APIKeys:  authcore.APIKeysConfig{Prefix: APIKeyPrefix},
 		// ak#314: authkit has no environment classifier; the dev-rig
 		// relaxations are explicit flags, all off by default. OpenRails keeps
-		// its own env vocabulary (config.Env, SEC-18) and maps development onto
+		// explicit local exceptions and passes them onto
 		// them here: the in-memory ephemeral store (no Redis), private-network
 		// JWKS for the local sandbox issuer, and missing senders (the engine
-		// hands codes back instead of delivering). Every other environment
-		// runs fail-closed: Redis required, public JWKS only, senders required.
-		Ephemeral:    authcore.EphemeralConfig{AllowMemory: cfg.IsDev()},
-		Applications: authcore.ApplicationsConfig{AllowPrivateNetworkJWKS: cfg.IsDev()},
+		// hands codes back instead of delivering). Omitted permissions remain
+		// fail-closed: Redis required, public JWKS only, senders required.
+		Ephemeral:    authcore.EphemeralConfig{AllowMemory: auth.AllowMemory},
+		Applications: authcore.ApplicationsConfig{AllowPrivateNetworkJWKS: auth.AllowPrivateNetworkJWKS},
 		// HARD CUT (#567): OpenRails declares two FLAT top-level permission-group
 		// personas under `root` — `merchant` (owner/support/viewer, `merchant:*`)
 		// and `customer` (owner/member, `customer:*`). There is no merchant coupling
@@ -465,7 +445,7 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 			Verification:                 registrationVerification(lockedRegistration),
 			PasswordlessLogin:            options.passwordlessLogin,
 			PasswordlessAutoRegistration: options.passwordlessAutoRegistration,
-			AllowMissingSenders:          cfg.IsDev(),
+			AllowMissingSenders:          auth.AllowMissingSenders,
 		},
 	}
 
@@ -514,7 +494,7 @@ func New(ctx context.Context, cfg *config.Config, auth *hostconfig.AuthConfig, p
 		delegatedAudiences: []string{billingauth.TokenAudience},
 	}
 	coreCfg.HTTP = controlPlaneHTTP{controlPlane: cp2, config: httpCfg,
-		requestURL: delegatedRequestURL(cfg.APIURL, options.dpopRequestURL)}
+		requestURL: delegatedRequestURL(auth.RequestOrigin, options.dpopRequestURL)}
 	authRuntime, err := authcore.New(coreCfg, deps)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit runtime: %w", err)
@@ -638,11 +618,15 @@ func WithDPoPRequestURL(target func(*http.Request) string) Option {
 	return func(o *options) { o.dpopRequestURL = target }
 }
 
-func delegatedRequestURL(apiURL string, override func(*http.Request) string) func(*http.Request) string {
+func delegatedRequestURL(requestOrigin string, override func(*http.Request) string) func(*http.Request) string {
 	if override != nil {
 		return override
 	}
-	base := strings.TrimRight(strings.TrimSpace(apiURL), "/")
+	base := strings.TrimRight(strings.TrimSpace(requestOrigin), "/")
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
+		base = ""
+	}
 	return func(r *http.Request) string {
 		if base == "" {
 			return ""

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -56,12 +57,13 @@ func (a *App) SetControlPlane(cp interface{ Close() }, ownedPool *pgxpool.Pool) 
 // hosts supply their database as a pgx pool (PGXPool); the bun-era *sql.DB
 // override was removed with the ORM (#334).
 type BootstrapOptions struct {
-	HostRiver   bool
-	RiverSchema string
-	PGXPool     *pgxpool.Pool
-	Redis       *redis.Client
-	Cache       cache.Cache
-	Clock       clockwork.Clock
+	StripeTransport http.RoundTripper
+	HostRiver       bool
+	RiverSchema     string
+	PGXPool         *pgxpool.Pool
+	Redis           *redis.Client
+	Cache           cache.Cache
+	Clock           clockwork.Clock
 	// UserDirectory and UsernameResolver are explicit host identity seams.
 	// OpenRails never assumes ownership of AuthKit's profiles schema.
 	UserDirectory    openrails.UserDirectory
@@ -82,6 +84,17 @@ func Bootstrap(ctx context.Context, cfg *config.Config) (*App, error) {
 func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *BootstrapOptions) (*App, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
+	}
+	// Programmatic standalone construction needs the same protective defaults
+	// as the file loader and embedded constructor. Omission never disables them.
+	if !cfg.RateLimitsDisabled {
+		defaults := config.GetDefaultBillingConfig()
+		if cfg.RateLimits == nil {
+			cfg.RateLimits = defaults.RateLimits
+		}
+		if cfg.Captcha == nil {
+			cfg.Captcha = defaults.Captcha
+		}
 	}
 	if err := config.Validate(cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
@@ -109,7 +122,13 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 
 	runtime, err := buildRuntimeWithOverrides(ctx, cfg, &runtimeOverrides{
 		HostRiver: opts != nil && opts.HostRiver,
-		DB:        dbOverride,
+		StripeTransport: func() http.RoundTripper {
+			if opts != nil {
+				return opts.StripeTransport
+			}
+			return nil
+		}(),
+		DB: dbOverride,
 		RiverSchema: func() string {
 			if opts != nil {
 				return opts.RiverSchema

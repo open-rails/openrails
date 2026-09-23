@@ -39,7 +39,7 @@ func alertValidationError(r *httprequest.Request, verr *alerting.ValidationError
 }
 
 // handleAlertWriteError maps service errors to API errors (validation → 400,
-// missing row → 404, else 500).
+// missing row → 404, typed capability refusals → their status, else 500).
 func handleAlertWriteError(r *httprequest.Request, err error, notFoundMsg string) {
 	var verr *alerting.ValidationError
 	switch {
@@ -48,7 +48,7 @@ func handleAlertWriteError(r *httprequest.Request, err error, notFoundMsg string
 	case db.IsNotFound(err):
 		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, "not_found", notFoundMsg))
 	default:
-		r.ErrorJSON(http.StatusInternalServerError, "alerting request failed")
+		writeRefusal(r, err, "alerting request failed")
 	}
 }
 

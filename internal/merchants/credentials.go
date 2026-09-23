@@ -179,6 +179,8 @@ type pspSecretScope struct {
 	key                string
 	settings           map[string]any
 	credentialVersions map[string]int
+	credentialRefs     map[string]SecretRef
+	retiredCredentials map[string]bool
 	custodianID        *uuid.UUID
 }
 
@@ -188,6 +190,8 @@ type pspSecretScope struct {
 func (s *pspSecretScope) applyEvidence(raw []byte) {
 	s.settings = pspSettings(raw)
 	s.credentialVersions = CredentialVersions(raw)
+	s.credentialRefs = CredentialRefs(raw)
+	s.retiredCredentials = unmarshalProviderEvidence(raw).RetiredCredentials
 }
 
 func (s pspSecretScope) secretName(key string) (string, error) {
@@ -197,6 +201,12 @@ func (s pspSecretScope) secretName(key string) (string, error) {
 // secretRef pairs the scoped secret name with the rotation version floor
 // recorded on the PSP row (or#812).
 func (s pspSecretScope) secretRef(key string) (SecretRef, error) {
+	if s.retiredCredentials[NormalizeCredentialVersionKey(key)] {
+		return SecretRef{Retired: true}, nil
+	}
+	if ref, ok := s.credentialRefs[NormalizeCredentialVersionKey(key)]; ok {
+		return validatePublishedRef(s.rail, s.environment, s.accountID, key, ref)
+	}
 	name, err := s.secretName(key)
 	if err != nil {
 		return SecretRef{}, err
@@ -239,6 +249,8 @@ func (s pspSecretScope) exported() PSPScope {
 		Key:                s.key,
 		Settings:           settings,
 		CredentialVersions: versions,
+		CredentialRefs:     s.credentialRefs,
+		RetiredCredentials: s.retiredCredentials,
 		CustodianID:        s.custodianID,
 	}
 }
@@ -251,11 +263,11 @@ func (s *Service) ActivePSPSecretName(ctx context.Context, id merchant.ID, rail,
 	if err != nil || !ok {
 		return "", ok, err
 	}
-	name, err := scope.secretName(key)
+	ref, err := scope.secretRef(key)
 	if err != nil {
 		return "", false, err
 	}
-	return name, true, nil
+	return ref.Name, true, nil
 }
 
 // ActivePSPSecretRef is ActivePSPSecretName plus the rotation version floor
@@ -940,6 +952,9 @@ func (s *Service) allMerchantIDs(ctx context.Context) ([]merchant.ID, error) {
 
 // PutCredential stores/rotates a single per-merchant credential.
 func (s *Service) PutCredential(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
+	if _, _, _, _, psp, _ := ParsePSPSecretName(name); psp {
+		return Secret{}, apperr.Invalidf("PSP credential writes require provider configuration publication with operation_id and expected_revision")
+	}
 	if s.secrets == nil {
 		return Secret{}, errors.New("merchants: no secret store configured")
 	}

@@ -16,7 +16,7 @@ func stripeTestModeConfig(secretKey string, testMode bool) (*Config, PSPSet) {
 		posture = CredentialPostureSandbox
 	}
 	return &Config{
-			Env:               "development", // SEC-18: dev posture is declared, never inferred from an empty Env
+			// SEC-18: dev posture is declared, never inferred from an empty Env
 			ProviderWriteMode: ProviderWriteModeFull,
 			TestMode:          posture,
 		}, PSPSet{
@@ -37,7 +37,7 @@ func TestValidateStripeKeyForTestMode(t *testing.T) {
 					key := prefix + "_" + keyMode + "_abc123"
 					t.Run(env+"/"+key+"/"+strconv.FormatBool(sandbox), func(t *testing.T) {
 						cfg, rails := stripeTestModeConfig(key, sandbox)
-						cfg.Env = env
+
 						err := validateStripeKeyForTestMode(cfg, rails)
 						if sandbox == (keyMode == "test") {
 							require.NoError(t, err)
@@ -51,7 +51,7 @@ func TestValidateStripeKeyForTestMode(t *testing.T) {
 		}
 	}
 	cfg, rails := stripeTestModeConfig("sk_live_primary", false)
-	rails["stripe_archived"] = &PSPConfig{Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_test_legacy"}}
+	rails["stripe_archived"] = &PSPConfig{Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_test_legacy", WebhookSigningSecret: "whsec_fixture"}}
 	require.Error(t, validateStripeKeyForTestMode(cfg, rails), "archived accounts must also match the declared posture")
 	require.Equal(t, "sk_live_primary", rails["stripe"].Stripe.SecretKey)
 	require.Equal(t, "sk_test_legacy", rails["stripe_archived"].Stripe.SecretKey)
@@ -59,8 +59,8 @@ func TestValidateStripeKeyForTestMode(t *testing.T) {
 
 func TestActiveRailByType(t *testing.T) {
 	rails := PSPSet{
-		"stripe_old": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_live_old"}},
-		"stripe_new": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_new"}},
+		"stripe_old": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_live_old", WebhookSigningSecret: "whsec_fixture"}},
+		"stripe_new": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_new", WebhookSigningSecret: "whsec_fixture"}},
 		"mobius":     {Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec"}},
 	}
 	key, proc, err := rails.ActiveRailByType(models.RailStripe)
@@ -69,21 +69,21 @@ func TestActiveRailByType(t *testing.T) {
 	require.Equal(t, "sk_live_new", proc.Stripe.SecretKey)
 	require.Equal(t, proc, rails.GetStripeRail())
 
-	rails["stripe_other"] = &PSPConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_other"}}
+	rails["stripe_other"] = &PSPConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_other", WebhookSigningSecret: "whsec_fixture"}}
 	key, proc, err = rails.ActiveRailByType(models.RailStripe)
 	require.NoError(t, err)
 	require.Equal(t, "stripe_new", key)
 	require.Equal(t, "sk_live_new", proc.Stripe.SecretKey)
-	require.NoError(t, ValidateRailSet(&Config{Env: "development", ProviderWriteMode: ProviderWriteModeFull}, PSPSet{
-		"stripe_a": {Rail: models.RailStripe, AccountID: "acct_a", Stripe: &StripeRailConfig{SecretKey: "sk_live_a"}},
-		"stripe_b": {Rail: models.RailStripe, AccountID: "acct_b", Stripe: &StripeRailConfig{SecretKey: "sk_live_b"}},
+	require.NoError(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, PSPSet{
+		"stripe_a": {Rail: models.RailStripe, AccountID: "acct_a", Stripe: &StripeRailConfig{SecretKey: "sk_live_a", WebhookSigningSecret: "whsec_fixture"}},
+		"stripe_b": {Rail: models.RailStripe, AccountID: "acct_b", Stripe: &StripeRailConfig{SecretKey: "sk_live_b", WebhookSigningSecret: "whsec_fixture"}},
 	}))
 
 	// Two accounts on a rail without account_id is rejected: the made-up map name
 	// can't be the provider identity (#641).
-	require.ErrorContains(t, ValidateRailSet(&Config{Env: "development", ProviderWriteMode: ProviderWriteModeFull}, PSPSet{
-		"stripe_a": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_live_a"}},
-		"stripe_b": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_b"}},
+	require.ErrorContains(t, ValidateRailSet(&Config{ProviderWriteMode: ProviderWriteModeFull}, PSPSet{
+		"stripe_a": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_live_a", WebhookSigningSecret: "whsec_fixture"}},
+		"stripe_b": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_b", WebhookSigningSecret: "whsec_fixture"}},
 	}), "must declare account_id")
 }
 
@@ -119,16 +119,16 @@ func TestRailEnvironmentDerivesFromTestMode(t *testing.T) {
 	require.Equal(t, ProviderEnvironmentTest, ExpectedProviderEnvironment(true))
 	require.Equal(t, ProviderEnvironmentLive, ExpectedProviderEnvironment(false))
 
-	sandbox := &Config{Env: "development", ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureSandbox}
+	sandbox := &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureSandbox}
 	require.Equal(t, ProviderEnvironmentTest, ExpectedProviderEnvironment(sandbox.IsTestMode()))
 	require.NoError(t, ValidateRailSet(sandbox, PSPSet{
-		"stripe": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_test_x"}},
+		"stripe": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_test_x", WebhookSigningSecret: "whsec_fixture"}},
 	}))
 
-	live := &Config{Env: "development", ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureLive}
+	live := &Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureLive}
 	require.Equal(t, ProviderEnvironmentLive, ExpectedProviderEnvironment(live.IsTestMode()))
 	require.NoError(t, ValidateRailSet(live, PSPSet{
-		"stripe": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_x"}},
+		"stripe": {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_x", WebhookSigningSecret: "whsec_fixture"}},
 	}))
 }
 
@@ -137,7 +137,7 @@ func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 	cfg.DB.URL = "postgres://admin:admin_password@localhost:5432/openrails_db?sslmode=disable"
 	cfg.TestMode = CredentialPostureSandbox
 	rails := PSPSet{
-		"stripe": {Rail: "stripe", Stripe: &StripeRailConfig{SecretKey: "sk_live_abc123"}},
+		"stripe": {Rail: "stripe", Stripe: &StripeRailConfig{SecretKey: "sk_live_abc123", WebhookSigningSecret: "whsec_fixture"}},
 	}
 	require.Error(t, ValidateRailSet(cfg, rails))
 
@@ -152,7 +152,7 @@ func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 	rails2 := PSPSet{
 		"stripe": {
 			Rail:   "stripe",
-			Stripe: &StripeRailConfig{SecretKey: "sk_test_abc123"},
+			Stripe: &StripeRailConfig{SecretKey: "sk_test_abc123", WebhookSigningSecret: "whsec_fixture"},
 		},
 	}
 	require.Error(t, ValidateRailSet(cfg2, rails2))
@@ -160,7 +160,7 @@ func TestStripeLiveKeyRejectedInTestMode(t *testing.T) {
 }
 
 func TestRailConfigTypedBlocksAndArchived(t *testing.T) {
-	cfg := &Config{Env: "development"}
+	cfg := &Config{}
 	rails := PSPSet{
 		"mobius": {
 			Rail: models.RailNMI,
@@ -172,7 +172,7 @@ func TestRailConfigTypedBlocksAndArchived(t *testing.T) {
 		"stripe_old": {
 			Rail:     models.RailStripe,
 			Archived: true,
-			Stripe:   &StripeRailConfig{SecretKey: "sk_live_old"},
+			Stripe:   &StripeRailConfig{SecretKey: "sk_live_old", WebhookSigningSecret: "whsec_fixture"},
 		},
 	}
 	require.NoError(t, ValidateRailSet(cfg, rails))
@@ -218,7 +218,7 @@ func TestCCBillAccountIDRejectsSlash(t *testing.T) {
 
 func TestSolanaRPCProviderValidation(t *testing.T) {
 	cfg := GetDefaultBillingConfig()
-	cfg.Env = "production"
+
 	base := func(solana *SolanaRailConfig) PSPSet {
 		return PSPSet{"solana": {Rail: models.RailSolana, Solana: solana}}
 	}
@@ -242,14 +242,14 @@ func TestWebhookSecretRequiredOutsideDev(t *testing.T) {
 			for _, secret := range []string{"", "whsec_test_dummy"} {
 				t.Run(string(rail)+"/"+env+"/"+secret, func(t *testing.T) {
 					cfg := GetDefaultBillingConfig()
-					cfg.Env = env
-					if cfg.IsDev() {
+
+					if env == "development" {
 						cfg.TestMode = CredentialPostureSandbox
 					}
 					psp := &PSPConfig{Rail: rail}
 					if rail == models.RailStripe {
 						key := "sk_live_dummy"
-						if cfg.IsDev() {
+						if env == "development" {
 							key = "sk_test_dummy"
 						}
 						psp.Stripe = &StripeRailConfig{SecretKey: key, WebhookSigningSecret: secret}
@@ -257,7 +257,7 @@ func TestWebhookSecretRequiredOutsideDev(t *testing.T) {
 						psp.NMI = &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSigningSecret: secret}
 					}
 					err := ValidateRailSet(cfg, PSPSet{"p": psp})
-					if env == "production" && secret == "" {
+					if secret == "" {
 						require.Error(t, err)
 					} else {
 						require.NoError(t, err)

@@ -55,7 +55,7 @@ func newPushMerchantConfigCmd() *cobra.Command {
 	opts := pushMerchantConfigOptions{file: bootstrap.DefaultMerchantConfigManifestPath}
 	cmd := &cobra.Command{
 		Use:   "push-merchant-config",
-		Short: "Push OpenRails merchant configuration (merchant group + issuer-as-owner + secrets + profile) from YAML",
+		Short: "Initialize missing merchant identities and snapshot metadata from YAML",
 		Args:  validatePushMerchantConfigArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runPushMerchantConfig(cmd, opts)
@@ -66,7 +66,7 @@ func newPushMerchantConfigCmd() *cobra.Command {
 		"create missing merchant/config objects declared by the manifest",
 		"re-assert manifest secret/config values over existing state",
 		"delete merchant secrets that are absent from the manifest")
-	cmd.Flags().BoolVar(&opts.seed, "seed", false, "merchant_config_source=api only (#851): seed-once import — create missing merchants/PSPs/secrets into the persistent stores; existing values are never touched and the HTTP APIs own merchant config afterward")
+	cmd.Flags().BoolVar(&opts.seed, "seed", false, "create missing merchant metadata; managed provider credentials require Client publication")
 	return cmd
 }
 
@@ -158,10 +158,7 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 	if cfg == nil {
 		return fmt.Errorf("config not loaded; push-merchant-config requires --config")
 	}
-	// #723/#851: in api mode (MODE 2) the APIs own merchant config, so a bare
-	// run refuses (two truths) — but --seed runs the command as a seed-once
-	// importer into the persistent stores. Manifest mode applies DB projections
-	// (secrets are validated but never persisted; the server holds them in memory).
+	// Initial provisioning is create-only; updates use explicit applications.
 	reconcileOpts, err := bootstrap.ResolvePushMerchantConfigOptions(cfg, opts.seed, opts.insert, opts.overwrite, opts.prune)
 	if err != nil {
 		return err
@@ -191,14 +188,13 @@ func newDumpMerchantConfigCmd() *cobra.Command {
 	opts := dumpMerchantConfigOptions{}
 	cmd := &cobra.Command{
 		Use:   "dump-merchant-config",
-		Short: "Dump a merchant's OpenRails configuration as push-merchant-config YAML; secrets are redacted unless --include-secrets is set",
+		Short: "Dump redacted merchant configuration as YAML",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runDumpMerchantConfig(cmd, opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.slug, "slug", "", "merchant slug to dump (required)")
 	cmd.Flags().StringVarP(&opts.out, "out", "o", "", "write YAML to this file (default: stdout)")
-	cmd.Flags().BoolVar(&opts.includeSecrets, "include-secrets", false, "include plaintext merchant secret values in the dumped YAML")
 	_ = cmd.MarkFlagRequired("slug")
 	return cmd
 }

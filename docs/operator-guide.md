@@ -10,7 +10,7 @@ territory. The primary deep manual is [operations.md](operations.md).
 |---|---|---|---|
 | **Postgres 18+** | yes | Source of truth: double-entry money ledger, grant ledger, subscriptions, entitlements, catalog, the provider-intent ledger, and River's job queue. Can share an instance with your host app — OpenRails owns the `openrails` schema. | Data loss. Provider-owned facts (charges, remote subscription liveness) can be re-imported with `pull-provider`, but the ledger, credits, entitlements, and catalog are OpenRails-owned and exist nowhere else. **Back this up.** |
 | **Redis-compatible service** (Garnet recommended) | optional | Rate-limit buckets (per-IP / per-user), the atomic usage-billing admission gate (spendgate), card-abuse tracking, and hourly admission-denial aggregates (flushed to Postgres every 5 minutes). | Rate limiting degrades to per-process in-memory counters (logged, automatic). If Redis is configured but unreachable, boot continues but readiness stays failed until it recovers. Deliberately omitting Redis keeps readiness green and uses the per-process fallback. Redis holds only transient counters — nothing durable. |
-| **HashiCorp Vault** | optional | Primary merchant-secret backend in production (`secret_backend: vault`), and/or Transit signing for Solana custody — two independent capabilities, grantable separately. See [vault.md](vault.md). | With an effective `secret_backend: db`, secrets live envelope-encrypted in `openrails.merchant_secrets` instead. `encryption.master_key` / env `ENCRYPTION_MASTER_KEY` (base64, 32 bytes) is what encrypts them; construction refuses the DB store without it outside development, while development warns and permits plaintext. Manifest mode persists no merchant secrets and does not construct this store. |
+| **HashiCorp Vault** | optional | Primary merchant-secret backend in production (`secret_backend: vault`), and/or Transit signing for Solana custody — two independent capabilities, grantable separately. See [vault.md](vault.md). | With an effective `secret_backend: db`, secrets live envelope-encrypted in `openrails.merchant_secrets` instead. `encryption.master_key` / env `ENCRYPTION_MASTER_KEY` (base64, 32 bytes) is what encrypts them; construction refuses managed DB storage without encryption in both sandbox and live. Snapshot credentials stay in process memory. |
 
 OpenRails' own JWT signing keys come from `AUTHKIT_KEYS_PATH/keys.json`
 (file-watched, hot-rotating) or the inline `AUTHKIT_ACTIVE_KEY_ID` /
@@ -31,12 +31,10 @@ Postgres specifics worth knowing:
   merchant list) are `SECURITY DEFINER` — they need an owner that can read
   across merchants, and they raise rather than return an empty result if it
   cannot.
-- `ENV` is REQUIRED and has no default. It decides whether merchant secrets may
-  be stored plaintext and whether the DB role must enforce RLS, so an
-  undeclared environment refuses to boot instead of quietly meaning
-  "development". Only the exact values `dev` and `development` enable
-  development relaxations; every other non-empty label (including `staging`,
-  `production`, or a misspelling) receives the strict posture.
+- Security defaults are independent of payment posture. Managed database secrets
+  always require encryption. Local issuer/signing/sender exceptions are explicit
+  Auth settings; see [runtime configuration](runtime-configuration.md). `ENV` is
+  retired and refuses loading rather than silently selecting a weaker posture.
 - Migrations: `openrails migrate up --runtime-database-url "$APP_DATABASE_URL"`
   provisions direct access for the host login and applies AuthKit, River, and OpenRails
   migrations (`internal/migrate/postgres/`, baseline `0001_schema.up.sql`, new ones
@@ -54,14 +52,13 @@ beats yaml). Full detail and semantics: [operations.md → "Operating
 modes"](operations.md#operating-modes-the-safety-levers).
 
 - **`provider_write_mode`** (`PROVIDER_WRITE_MODE`, `--provider-write-mode`) —
-  the behavior dial: `full | limited | readonly`. Required outside development
+  the behavior dial: `full | limited | readonly`. Required explicitly
   (boot refuses without it); unset fail-closes to `readonly` wherever it is
   consulted. `limited` = humans can do everything (checkout, cancel, refund),
   the system initiates nothing; `readonly` = nothing writes to a provider at
   all, wire-enforced.
 - **`test_mode`** (`TEST_MODE`, `--test-mode`) — the credential axis:
-  `sandbox | live`; required outside development (or#915 — no silent live
-  default), sandbox by omission in development. Sandbox routes every rail to
+  `sandbox | live`; required explicitly with no implicit posture default. Sandbox routes every rail to
   its test environment and refuses live credentials at boot (live Stripe keys
   rejected, NMI accounts probed with a test card). Live posture likewise
   refuses Stripe test keys in every environment instead of silently disabling
@@ -171,24 +168,21 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
 ### Secrets & credential rotation
 
 - **Backends**: `secret_backend: db` (envelope-encrypted in Postgres under
-  `ENCRYPTION_MASTER_KEY`) or `secret_backend: vault` (KV-v2). REQUIRED under
-  `merchant_config_source: api`. Declared, never auto-detected, never inferred from
+  `ENCRYPTION_MASTER_KEY`) or `secret_backend: vault` (KV-v2). Managed DB storage requires encryption even in sandbox. Snapshot custody keeps
+  host-owned values in memory. Declared, never auto-detected, never inferred from
   `vault.enabled`, never silently falls back. Vault setup + minimal
   policies: [vault.md](vault.md); per-merchant secret ops, canonical names,
   and the DB→Vault migration runbook:
   [vault.md](vault.md).
 - **Naming**: addressed as `(merchant_id, name)` in code; Vault path
-  `secret/openrails/merchants/<merchant-uuid>/<name>`. A 15-minute TTL cache
-  fronts all backends — out-of-band Vault writes converge within one TTL, no
-  restart needed.
-- **Rotation within the same PSP** is a non-event: the account
-  identity re-resolves under the new key and matches. Rotate through
-  `PUT /v1/merchant/payment-providers/{rail}` or the console's **Rotate**
-  action — the new credential is live-probed first (a failed probe writes
-  nothing and leaves the old credential serving), and the committed rotation
-  records a version watermark on the shared PSP row that no node may serve a
-  cached credential below. Cutover is deployment-wide at the next credential
-  read; the 15-minute TTL is only the backstop for writes made out of band.
+  `secret/openrails/merchants/<merchant-uuid>/<name>`. Published references select exact validated versions. Direct backend edits do
+  not publish a new active credential. Managed publication does not require restarting the runtime.
+- **Rotation within the same PSP** uses the Client payment-provider publication
+  operation with a stable operation ID and expected revision. A candidate is
+  staged and account/environment validated before its exact version is published.
+  Retry the same operation to recover a lost response. A failed publication leaves
+  the previous published credentials active; an unpublished candidate is not read
+  merely because it is newer in Vault.
 - **Pointing credentials at a different account** trips the account guard:
   every provider intent is stamped with the PSP row it was
   enqueued against, and the executor parks intents whose account no longer

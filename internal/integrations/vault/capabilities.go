@@ -23,8 +23,12 @@ type Capabilities struct {
 
 // SelfCapabilities probes what the client's token may do on the KV paths OpenRails
 // uses. Never derive authorization from this — only hide/degrade features.
-func SelfCapabilities(ctx context.Context, client *vaultapi.Client, kvMount string) (Capabilities, error) {
-	kvPath := kvMount + "/data/openrails/probe"
+func SelfCapabilities(ctx context.Context, client *vaultapi.Client, kvMount string, scopePrefix ...string) (Capabilities, error) {
+	prefix := "openrails"
+	if len(scopePrefix) > 0 && scopePrefix[0] != "" {
+		prefix = scopePrefix[0]
+	}
+	kvPath := kvMount + "/data/" + prefix + "/probe"
 	caps, err := selfCapabilitiesOnPaths(ctx, client, []string{kvPath})
 	if err != nil {
 		return Capabilities{}, err

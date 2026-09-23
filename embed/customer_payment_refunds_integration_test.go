@@ -44,9 +44,9 @@ func TestCustomerPaymentRefundTotalsAcrossPages(t *testing.T) {
 	runtime, mid, err := newDeclaredMerchant(ctx, embed.Options{
 		Auth: &billingauth.Integration{Authentication: authn},
 		HTTP: &embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: slug, Scope: embed.CustomerBillingManagement}}},
-		Config: &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox,
-			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
-			ProviderWriteMode: config.ProviderWriteModeReadOnly, NewSubscriptionCollectionPolicy: "engine", DB: &config.DBConfig{URL: dsn}},
+		Config: &config.Config{TestMode: config.CredentialPostureSandbox,
+			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
+			ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{URL: dsn}},
 		PGXPool: pool, River: embed.RiverFromHost(),
 	}, slug, embed.MerchantConfig{DisplayName: "Refund history"})
 	require.NoError(t, err)

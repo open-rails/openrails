@@ -4,6 +4,7 @@ package controlplane_test
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -22,11 +23,11 @@ import (
 
 func TestConfiguredStandaloneRoutesReuseOwnedResources(t *testing.T) {
 	ctx := context.Background()
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}}
+	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, Encryption: &config.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}}
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(ctx)) })
-	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://configured.openrails.test", KeysPath: t.TempDir()}})
+	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{AllowMemory: true, AllowEphemeralSigningKey: true, DirectPeerIP: true, AllowMissingSenders: true, Issuer: "https://configured.openrails.test", KeysPath: t.TempDir()}})
 	require.NoError(t, err)
 	graph := app.HostGraph(rt).Runtime
 	merchants, capabilities, solana := graph.Merchants, graph.RouteCapabilities, graph.SolanaRPCResolver
@@ -61,14 +62,14 @@ func TestConfiguredStandaloneRoutesReuseOwnedResources(t *testing.T) {
 
 func TestRejectedStandaloneExposureDoesNotRearmRuntime(t *testing.T) {
 	ctx := context.Background()
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}}
+	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, Encryption: &config.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}}
 	reject := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return nil, billingauth.ErrUnauthenticated
 	})
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(ctx)) })
-	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://rejected.openrails.test", KeysPath: t.TempDir()}}, embed.CustomerRoutesConfig{DelegatedAuthenticator: reject})
+	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{AllowMemory: true, AllowEphemeralSigningKey: true, DirectPeerIP: true, AllowMissingSenders: true, Issuer: "https://rejected.openrails.test", KeysPath: t.TempDir()}}, embed.CustomerRoutesConfig{DelegatedAuthenticator: reject})
 	require.NoError(t, err)
 	graph := app.HostGraph(rt).Runtime
 	merchants, capabilities, solana := graph.Merchants, graph.RouteCapabilities, graph.SolanaRPCResolver

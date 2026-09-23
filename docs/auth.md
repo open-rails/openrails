@@ -40,7 +40,7 @@ clients instead use a certificate-bound delegated Bearer token and its actual
 TLS client certificate. Unbound wire delegation is unsupported.
 
 See [frontend integration](frontend-integration.md#authentication) for the
-mint/request contract. Receiver proof targets use the configured `api_url`;
+mint/request contract. Receiver proof targets use the configured `auth.request_origin`;
 `AttachOptions.DPoPRequestURL` supplies trusted external URL mapping for hosts
 that rewrite paths. Arbitrary Host/Forwarded headers never define that target.
 Redis-backed AuthKit proof claims are shared across receiver replicas and must

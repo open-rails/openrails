@@ -131,9 +131,9 @@ func (s *Hosted) Start() {
 		return
 	}
 	cfg := &config.Config{
-		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true,
-		SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
-		APIURL: s.BaseURL, CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
+		TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, AllowCatalogUpdates: true,
+		SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, ProviderWriteMode: config.ProviderWriteModeFull,
+		PublicBillingBaseURL: s.BaseURL, CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
 		DB: &config.DBConfig{URL: h.DSN},
 	}
 	if h.Redis != nil {
@@ -145,7 +145,7 @@ func (s *Hosted) Start() {
 	rt, err := embed.New(h.ctx, embed.Options{Config: cfg, Redis: h.Redis, River: embed.RiverManagedByOpenRails()})
 	require.NoError(h.t, err, "hosted embed.New")
 	s.runtime = rt // Stop owns cleanup even if attaching the control plane fails.
-	cp, err := controlplane.Attach(h.ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://hosted.openrails.test", KeysPath: s.keysPath},
+	cp, err := controlplane.Attach(h.ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://hosted.openrails.test", RequestOrigin: s.BaseURL, AllowLoopbackHTTP: true, KeysPath: s.keysPath, AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true},
 		HostedPosture: true, PasswordlessLogin: true, PasswordlessAutoRegistration: true,
 		EmailSender: s.Sender, Frontend: authcore.FrontendConfig{BaseURL: s.BaseURL},
 		// One loopback peer registers every hosted user in these workflows;

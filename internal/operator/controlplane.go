@@ -62,8 +62,8 @@ import (
 //     cfg.DB.SchemaName() at the DB-wiring layer; SolanaNetwork is never
 //     overridden today.
 //   - The dev-rig flags (Ephemeral.AllowMemory, Applications.AllowPrivateNetworkJWKS,
-//     Registration.AllowMissingSenders; ak#314): NOT forwarded — the control
-//     plane maps cfg.Env==development onto them and nothing else may.
+//     Registration.AllowMissingSenders; ak#314): selected explicitly through
+//     AttachOptions.Auth; billing configuration cannot enable them.
 //
 // authcore.Deps (engine dependencies):
 //   - Email / SMS: FORWARDED via AttachOptions.EmailSender / SMSSender (#738).

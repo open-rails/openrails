@@ -65,6 +65,9 @@ func newCCBillWebhookRequest(t *testing.T, testMode bool, remoteAddr string) (*h
 		TestMode:                 credentialPostureFromBool(testMode),
 		CCBillWebhookIPAllowlist: devAllowlist,
 	}}
+	bound, err := merchant.Require(req.Context())
+	require.NoError(t, err)
+	rt.SetConfiguredMerchant(bound)
 	return httprequest.NewHTTP(w, req, rt), w
 }
 
@@ -203,6 +206,9 @@ func newCCBillWebhookRequestBehindProxy(t *testing.T, remoteAddr, forwardedFor s
 		Config:         &config.Config{TestMode: config.CredentialPostureLive, TrustedProxies: trustedProxies},
 		TrustedProxies: iputil.ParseTrustedProxies(trustedProxies),
 	}
+	bound, err := merchant.Require(req.Context())
+	require.NoError(t, err)
+	rt.SetConfiguredMerchant(bound)
 	return httprequest.NewHTTP(w, req, rt), w
 }
 

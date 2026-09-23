@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -24,16 +25,7 @@ import (
 
 // PaymentProviderCredentialStatus is the redacted credential view returned to
 // merchant admins. It never contains plaintext.
-type PaymentProviderCredentialStatus struct {
-	Configured      bool       `json:"configured"`
-	LastValidatedAt *time.Time `json:"last_validated_at,omitempty"`
-	// RotationVersion is the or#812 cross-node cutover watermark: the secret
-	// version this credential reached at its last rotation through this API.
-	// Every node refuses to serve an OLDER version from cache, so a rotation is
-	// deployment-wide the moment this number moves. 0 = the credential was
-	// never rotated through this API (manifest-armed or pre-or#812).
-	RotationVersion int `json:"rotation_version,omitempty"`
-}
+type PaymentProviderCredentialStatus = openrails.PaymentProviderCredentialStatus
 
 // ErrPaymentProviderNotFound reports that the merchant has no active provider
 // account on the requested rail and environment.
@@ -54,52 +46,29 @@ func providerCredentialError(err error) error {
 
 // PaymentProviderConfig is one merchant-owned payment-PSP.
 
-type PaymentProviderConfig struct {
-	ID              uuid.UUID                                  `json:"id"`
-	Rail            string                                     `json:"rail"`
-	Environment     string                                     `json:"environment"`
-	AccountID       string                                     `json:"account_id"`
-	Archived        bool                                       `json:"archived"`
-	Drained         bool                                       `json:"drained"`
-	OpenObligations int64                                      `json:"open_obligations"`
-	PublicConfig    map[string]string                          `json:"public_config,omitempty"`
-	Credentials     map[string]PaymentProviderCredentialStatus `json:"credentials"`
-	FirstSeenAt     time.Time                                  `json:"first_seen_at"`
-	LastVerifiedAt  *time.Time                                 `json:"last_validated_at,omitempty"`
-	ReplacedAt      *time.Time                                 `json:"replaced_at,omitempty"`
-	CreatedAt       time.Time                                  `json:"created_at"`
-	UpdatedAt       time.Time                                  `json:"updated_at"`
-}
+type PaymentProviderConfig = openrails.PaymentProviderConfig
 
 // PaymentProviderDefinition describes one merchant-configurable provider from
 // the rail registry. CredentialKeys contains only merchant-writable secrets.
-type PaymentProviderDefinition struct {
-	Rail           string   `json:"rail"`
-	DisplayName    string   `json:"display_name"`
-	CredentialKeys []string `json:"credential_keys"`
-}
+type PaymentProviderDefinition = openrails.PaymentProviderDefinition
 
 // UpsertPaymentProviderConfigRequest creates or replaces one PSP.
 // There is no `environment` field (#882): a deployment is all-test or all-live,
 // so the environment is derived from the deployment's test_mode posture.
-type UpsertPaymentProviderConfigRequest struct {
-	Enabled      *bool             `json:"enabled"`
-	AccountID    string            `json:"account_id"`
-	PublicConfig map[string]string `json:"public_config"`
-	Credentials  map[string]string `json:"credentials"`
-	// LegacyEnvironment stays bound ONLY so a caller still sending `environment`
-	// is refused instead of silently ignored (#882).
-	LegacyEnvironment string `json:"environment,omitempty"`
-}
+type UpsertPaymentProviderConfigRequest = openrails.UpsertPaymentProviderParams
 
 type pspEvidence struct {
-	PublicConfig         map[string]string `json:"public_config,omitempty"`
-	CredentialsValidated bool              `json:"credentials_validated,omitempty"`
-	// CredentialVersions is the or#812 cross-node rotation watermark: the
-	// Secret.Version each credential key reached at its last rotation. It rides
-	// the PSP row because every credential resolution already re-reads that row
-	// live from the shared DB, so the floor costs no extra query and reaches
-	// every node the instant the rotation commits.
+	WebhookEndpointID    string               `json:"webhook_endpoint_id,omitempty"`
+	RetiredCredentials   map[string]bool      `json:"retired_credentials,omitempty"`
+	CredentialCustody    string               `json:"credential_custody,omitempty"`
+	Revision             int64                `json:"configuration_revision,omitempty"`
+	CredentialRefs       map[string]SecretRef `json:"credential_refs,omitempty"`
+	PublicConfig         map[string]string    `json:"public_config,omitempty"`
+	CredentialsValidated bool                 `json:"credentials_validated,omitempty"`
+	// CredentialVersions is the per-slot logical rotation generation used to
+	// fence qualification across value and custody changes. Published readers
+	// use CredentialRefs for the independent backend version and exact name.
+	// Legacy rows without references retain their original backend floors.
 	CredentialVersions map[string]int `json:"credential_versions,omitempty"`
 }
 
@@ -164,10 +133,6 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 		return nil, err
 	}
 
-	statuses, err := s.ListSecretStatuses(ctx, id)
-	if err != nil {
-		return nil, err
-	}
 	accountIDs := make([]uuid.UUID, 0, len(rows))
 	for _, row := range rows {
 		accountIDs = append(accountIDs, row.ID)
@@ -184,8 +149,12 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 		if !pspLifecycleMatches(row.Archived, status) {
 			continue
 		}
+		statuses, err := s.paymentProviderCredentialStatuses(ctx, id, row)
+		if err != nil {
+			return nil, err
+		}
 		cfg := paymentProviderConfigFromRow(row, statuses)
-		cfg.applyOpenObligations(openObligations[row.ID])
+		applyOpenObligations(&cfg, openObligations[row.ID])
 		out = append(out, cfg)
 	}
 	return out, nil
@@ -221,10 +190,59 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 	if strings.TrimSpace(req.LegacyEnvironment) != "" {
 		return PaymentProviderConfig{}, apperr.Invalidf("merchants: `environment` was removed (#882): the environment is derived from the deployment's test_mode (currently %q) — drop the field", s.providerEnvironment)
 	}
+	for key, value := range req.PublicConfig {
+		if key != "publishable_key" && key != "tokenization_key" {
+			return PaymentProviderConfig{}, apperr.Invalidf("unsupported public provider configuration field")
+		}
+		if key == "publishable_key" && (rail != "stripe" || !strings.HasPrefix(value, "pk_")) {
+			return PaymentProviderConfig{}, apperr.Invalidf("invalid public publishable key")
+		}
+		if key == "tokenization_key" && rail != "nmi" {
+			return PaymentProviderConfig{}, apperr.Invalidf("invalid public tokenization key")
+		}
+		for _, secret := range req.Credentials {
+			if value != "" && value == secret {
+				return PaymentProviderConfig{}, apperr.Invalidf("secret credentials cannot be stored as public configuration")
+			}
+		}
+	}
 	environment := s.providerEnvironment // derived from test_mode (#681/#882)
 	accountID := strings.TrimSpace(req.AccountID)
 	if accountID == "" {
 		return PaymentProviderConfig{}, apperr.Invalidf("merchants: provider account_id required")
+	}
+	if req.OperationID == uuid.Nil || req.ExpectedRevision == nil || *req.ExpectedRevision < 0 {
+		return PaymentProviderConfig{}, apperr.Invalidf("operation_id and nonnegative expected_revision are required")
+	}
+	if receipt, completed, err := s.replayProviderCredentialPublication(ctx, id, rail, environment, accountID, req); err != nil {
+		return PaymentProviderConfig{}, err
+	} else if completed {
+		return s.paymentProviderConfigWithObligations(ctx, id, receipt)
+	}
+	if len(req.Credentials) > 0 && !CanStageCredentials(s.secrets) {
+		return PaymentProviderConfig{}, apperr.New(http.StatusMethodNotAllowed, "credential_source_read_only", "provider credential source has no writable durable custody")
+	}
+	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if _, err := q.LockLiveMerchantForSecretWrite(ctx, id.UUID()); err != nil {
+			return err
+		}
+		if err := AssertPSPUnowned(ctx, q, id.UUID(), rail, environment, accountID); err != nil {
+			return err
+		}
+		row, err := q.GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{MerchantID: id.UUID(), Rail: rail, Environment: &environment, AccountID: accountID})
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err == nil {
+			custody := unmarshalProviderEvidence(row.Evidence).CredentialCustody
+			if custody != "" && custody != SecretCustodyIdentity(s.secrets) {
+				return ErrCredentialCustodyTransitionRequired
+			}
+		}
+		return nil
+	}); err != nil {
+		return PaymentProviderConfig{}, err
 	}
 	if err := s.refuseLiveNMIUnderTestMode(ctx, id, rail, environment, accountID, req.Credentials); err != nil {
 		return PaymentProviderConfig{}, err
@@ -250,11 +268,12 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 		if err != nil {
 			return PaymentProviderConfig{}, err
 		}
-		if err := s.ValidateCredential(ctx, id, name, value, nil); err != nil {
-			return PaymentProviderConfig{}, err
-		}
 		if rail == "stripe" && normalizedKey == "secret_key" {
-			credentialsValidated = true
+			if err := validateSecretValueLocal(name, value); err != nil {
+				return PaymentProviderConfig{}, err
+			}
+		} else if err := s.ValidateCredential(ctx, id, name, value, nil); err != nil {
+			return PaymentProviderConfig{}, err
 		}
 		secretNames[name] = value
 		secretKeys[name] = normalizedKey
@@ -275,23 +294,11 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 		lastVerifiedAt = &now
 	}
 
-	// Secrets are written BEFORE the PSP row so the version floor never becomes
-	// visible to another node ahead of the value it demands.
-	credentialVersions := make(map[string]int, len(secretNames))
-	for name, value := range secretNames {
-		sec, err := s.PutCredential(ctx, id, name, value)
-		if err != nil {
-			return PaymentProviderConfig{}, err
-		}
-		if key := secretKeys[name]; key != "" && sec.Version > 0 {
-			credentialVersions[NormalizeCredentialVersionKey(key)] = sec.Version
-		}
-	}
-	row, err := s.upsertPSP(ctx, id, rail, environment, accountID, enabled, req.PublicConfig, credentialsValidated, lastVerifiedAt, credentialVersions)
+	row, err := s.publishProviderCredentials(ctx, id, rail, environment, accountID, enabled, req, secretNames, secretKeys, credentialsValidated, lastVerifiedAt)
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
-	statuses, err := s.ListSecretStatuses(ctx, id)
+	statuses, err := s.paymentProviderCredentialStatuses(ctx, id, row)
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
@@ -300,7 +307,7 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
-	cfg.applyOpenObligations(openObligations[row.ID])
+	applyOpenObligations(&cfg, openObligations[row.ID])
 	return cfg, nil
 }
 
@@ -402,7 +409,7 @@ func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id merchant.I
 }
 
 func (s *Service) paymentProviderConfigWithObligations(ctx context.Context, id merchant.ID, row gen.OpenrailsPsp) (PaymentProviderConfig, error) {
-	statuses, err := s.ListSecretStatuses(ctx, id)
+	statuses, err := s.paymentProviderCredentialStatuses(ctx, id, row)
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
@@ -411,7 +418,7 @@ func (s *Service) paymentProviderConfigWithObligations(ctx context.Context, id m
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
-	cfg.applyOpenObligations(openObligations[row.ID])
+	applyOpenObligations(&cfg, openObligations[row.ID])
 	return cfg, nil
 }
 
@@ -523,6 +530,7 @@ func markPSPArchived(ctx context.Context, tx pgx.Tx, id merchant.ID, pspID uuid.
 	return scanPSPRow(tx.QueryRow(ctx, `
 		UPDATE openrails.psps
 		   SET archived = true,
+             evidence=jsonb_set(COALESCE(evidence,'{}'::jsonb),'{configuration_revision}',to_jsonb(COALESCE((evidence->>'configuration_revision')::bigint,0)+1)),
 		       replaced_at = COALESCE(replaced_at, now()),
 		       updated_at = now()
 		 WHERE id = $1 AND merchant_id = $2
@@ -663,7 +671,7 @@ func (s *Service) pspOpenObligations(ctx context.Context, id merchant.ID, accoun
 	return out, err
 }
 
-func (c *PaymentProviderConfig) applyOpenObligations(count int64) {
+func applyOpenObligations(c *PaymentProviderConfig, count int64) {
 	c.OpenObligations = count
 	c.Drained = c.Archived && count == 0
 }
@@ -692,6 +700,12 @@ func paymentProviderConfigFromRow(row gen.OpenrailsPsp, statuses []MerchantSecre
 			continue
 		}
 		_, ok := configured[name]
+		if ref, published := evidence.CredentialRefs[NormalizeCredentialVersionKey(key)]; published {
+			_, ok = configured[ref.Name]
+		}
+		if evidence.RetiredCredentials[NormalizeCredentialVersionKey(key)] {
+			ok = false
+		}
 		var validatedAt *time.Time
 		if ok {
 			validatedAt = credentialValidatedAt(row.Rail, key, lastVerifiedAt)
@@ -703,6 +717,7 @@ func paymentProviderConfigFromRow(row gen.OpenrailsPsp, statuses []MerchantSecre
 		}
 	}
 	return PaymentProviderConfig{
+		Revision:       evidence.Revision,
 		ID:             row.ID,
 		Rail:           row.Rail,
 		Environment:    row.Environment,
@@ -734,6 +749,9 @@ func providerValidationCredentialsConfigured(row gen.OpenrailsPsp, configured ma
 		name, err := PSPSecretName(row.Rail, row.Environment, row.AccountID, key)
 		if err != nil {
 			return false
+		}
+		if ref, ok := CredentialRefs(row.Evidence)[NormalizeCredentialVersionKey(key)]; ok {
+			name = ref.Name
 		}
 		if _, ok := configured[name]; !ok {
 			return false
@@ -888,7 +906,7 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 		// credential) — resolve the EFFECTIVE key already on file so a
 		// live account can't slip through by omitting security_key from this
 		// particular request.
-		if sec, gerr := s.secrets.Get(ctx, id, name); gerr == nil {
+		if sec, gerr := s.readPublishedProviderCredential(ctx, id, rail, environment, accountID, "security_key", name); gerr == nil {
 			securityKey = strings.TrimSpace(sec.Value)
 		} else if !errors.Is(gerr, ErrSecretNotFound) {
 			return fmt.Errorf("read effective NMI credential for sandbox qualification: %w", gerr)
@@ -908,4 +926,25 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 		return providerCredentialError(fmt.Errorf("merchants: rail %q account %q: %w", rail, accountID, err))
 	}
 	return nil
+}
+
+// Read only the registry-bounded slots for this account. Published references
+// select exact custody; fallback names are used only for unpublished slots.
+func (s *Service) paymentProviderCredentialStatuses(ctx context.Context, id merchant.ID, row gen.OpenrailsPsp) ([]MerchantSecretStatus, error) {
+	var statuses []MerchantSecretStatus
+	for _, key := range paymentProviderCredentialKeys(row.Rail) {
+		ref, err := PSPSecretRef(row.Rail, row.Environment, row.AccountID, row.Evidence, key)
+		if err != nil {
+			return nil, err
+		}
+		if ref.Retired {
+			continue
+		}
+		value, err := ReadSecretRef(ctx, s.secrets, id, ref)
+		if err != nil && !errors.Is(err, ErrSecretNotFound) {
+			return nil, err
+		}
+		statuses = append(statuses, MerchantSecretStatus{Name: ref.Name, Key: key, Rail: row.Rail, Configured: err == nil, Version: value.Version})
+	}
+	return statuses, nil
 }

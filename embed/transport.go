@@ -38,6 +38,7 @@ func newServiceHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator
 	httproutes.RegisterCatalogRoutes(router.NewMux(mux, "/v1/merchant/catalog", rt), rt, opts)
 	httproutes.RegisterCatalogCollectionRoutes(router.NewMux(mux, "/v1/merchant/catalogs", rt), rt, opts)
 	httproutes.RegisterOwnedCatalogRoutes(router.NewMux(mux, "/v1/catalog", rt), rt, opts)
+	httproutes.RegisterMerchantConfigRoutes(router.NewMux(mux, "/v1/merchant", rt), rt, opts)
 	// #737: DeclaredBilling import, same gate (host principal holds merchant:*).
 	httproutes.RegisterImportRoutes(router.NewMux(mux, "/v1/import", rt), rt, opts)
 	if authn != nil {

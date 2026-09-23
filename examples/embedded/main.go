@@ -56,9 +56,8 @@ func run(ctx context.Context, getenv func(string) string) (runErr error) {
 		})},
 		HTTP: &embed.HTTPConfig{Checkout: true},
 		Config: &config.Config{
-			Env: "development", TestMode: config.CredentialPostureSandbox,
-			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
-			DB: &config.DBConfig{URL: dsn},
+			TestMode: config.CredentialPostureSandbox,
+			DB:       &config.DBConfig{URL: dsn},
 		},
 		PGXPool: pool,
 		River:   embed.RiverFromHost(),

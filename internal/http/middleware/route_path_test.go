@@ -22,7 +22,7 @@ func TestRoutePathPreservesRequestAndSelectsPolicy(t *testing.T) {
 	}{
 		{"checkout", "/billing/v1/customers/{customer_id}/checkout", "/api/pay/v1/customers/a%2Fb/checkout?x=1", "checkout", "checkout", true},
 		{"payment methods", "/billing/v1/me/payment-methods", "/api/pay/v1/me/payment-methods", "payment-methods", "payment", true},
-		{"webhook", "/billing/v1/merchants/{merchant}/webhooks/{provider}", "/api/pay/v1/merchants/demo/webhooks/stripe", "webhook", "webhook", false},
+		{"webhook", "/billing/v1/webhooks/{provider}/{account_id}", "/api/pay/v1/webhooks/stripe/acct_test", "webhook", "webhook", false},
 		{"captcha", "/billing/v1/captcha/status", "/api/pay/v1/captcha/status", "captcha", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -5,19 +5,21 @@
 # infrastructure: listeners, databases, Vault, rate limits, captcha, and similar
 # deployment concerns.
 
-env: development # REQUIRED (SEC-18); no default — an undeclared environment refuses to boot, because the permissive posture (plaintext merchant secrets, an RLS-bypassing DB role) is the development one
-provider_write_mode: full # full | limited | readonly; UNSET fail-closes to readonly (no provider writes) — set full/limited explicitly; required outside development
-test_mode: sandbox        # sandbox | live; allowed in every environment (#762) — rail-credential validation, not env, keeps it honest. REQUIRED outside development (or#915): the credential posture is never inherited by omission
+provider_write_mode: full # full | limited | readonly; UNSET fail-closes to readonly (no provider writes) — set full/limited explicitly to enable writes
+test_mode: sandbox        # sandbox | live; allowed in every environment (#762) — rail-credential validation, not env, keeps it honest. REQUIRED: the credential posture is never inherited by omission
 
-merchant_config_source: manifest # host-declared merchant/provider config; credentials stay in memory
+secret_backend: snapshot # immutable host values; alternatively vault or encrypted db
+merchant_config_http: false # standalone configuration routes; local Client stays available
+credential_read_only: false # may restrict a managed backend; cannot grant storage privileges
 allow_catalog_updates: false # enable ordinary catalog Client/API writes; independent of credential custody
 # Trusted local operator catalog application remains available when false.
-# merchant_config_source: api instead uses managed provider credentials and requires
-# secret_backend: db | vault; DB credentials need an encryption key outside dev.
+# DB credentials require encryption.master_key in every credential posture.
+# alert_secret_backend: db # optional managed outbound webhooks beside a snapshot
+# credential_snapshot_id: <canonical UUID> # stable host identity for an explicit custody transition
 
 host: 0.0.0.0
 port: 3053
-api_url: http://localhost:3053
+public_billing_base_url: http://localhost:3053
 
 # Minimum separation between two equal post-absence provider-billing reads.
 # Empty defaults to 24h; values must be positive whole-second Go durations.
@@ -44,6 +46,11 @@ redis:
   db: 0
 
 auth:
+  allow_loopback_http: true # explicit local issuer exception
+  allow_memory: true # local single-process AuthKit store
+  allow_missing_senders: true # no email delivery in this local example
+  allow_ephemeral_signing_key: true # disposable local signing key
+  request_origin: http://localhost:3053 # public HTTP origin, no billing mount path
   issuer: http://localhost:3053 # issuer URL; JWKS is served under this authority
   # Declare only when AuthKit receives direct client connections.
   # Behind proxies, configure top-level trusted_proxies instead.
@@ -142,7 +149,7 @@ admin_console:
 #   api_key: ""              # SECRET — set env LLM_API_KEY or a mounted secret file
 #   base_url: ""             # optional endpoint override (env LLM_BASE_URL) — with provider=openai
 #                            # this serves any OpenAI-compatible backend, base INCLUDES /v1
-#                            # (e.g. https://api.groq.com/openai/v1, dev-only http://localhost:11434/v1)
+#                            # (e.g. https://api.groq.com/openai/v1, https://models.example/v1)
 #   ask_enabled: false       # #756 consent: /metrics/ask sends aggregate query RESULTS to the
 #                            # LLM provider (widget generation sends only the schema) — opt in
 #                            # explicitly; env LLM_ASK_ENABLED

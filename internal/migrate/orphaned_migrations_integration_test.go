@@ -64,7 +64,7 @@ func TestRunPostgres_RefusesOrphanedMigrations(t *testing.T) {
 		}
 	})
 
-	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: dsn}}
+	cfg := &config.Config{DB: &config.DBConfig{URL: dsn}}
 
 	// Re-running the migrator over a database it built is a clean no-op.
 	require.NoError(t, migrate.RunPostgres(ctx, cfg),

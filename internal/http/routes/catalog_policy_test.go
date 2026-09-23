@@ -16,9 +16,9 @@ import (
 // Record real mux registrations: router 404/405 alone does not establish that
 // a mutation was omitted instead of mounted with rejecting middleware.
 func TestCatalogMutationRouteInventory(t *testing.T) {
-	for _, source := range []string{config.MerchantConfigSourceManifest, config.MerchantConfigSourceAPI} {
+	for _, source := range []string{config.SecretBackendSnapshot, config.SecretBackendDB} {
 		for _, allow := range []bool{false, true} {
-			rt := &app.Runtime{Config: &config.Config{MerchantConfigSource: source, AllowCatalogUpdates: allow}}
+			rt := &app.Runtime{Config: &config.Config{SecretBackend: source, AllowCatalogUpdates: allow}}
 			var inventory []string
 			mux := http.NewServeMux()
 			record := func(pattern string) { inventory = append(inventory, pattern) }

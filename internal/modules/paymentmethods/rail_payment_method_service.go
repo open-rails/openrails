@@ -336,6 +336,7 @@ func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provide
 			Environment:        row.Environment,
 			AccountID:          row.AccountID,
 			CredentialVersions: merchants.CredentialVersions(row.Evidence),
+			CredentialRefs:     merchants.CredentialRefs(row.Evidence),
 		})
 		return client, &row.ID, err
 	}

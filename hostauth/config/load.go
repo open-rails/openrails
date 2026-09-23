@@ -172,13 +172,14 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		opt(&options)
 	}
 	k := koanf.New(".")
+	for _, retired := range []string{"ENV", "API_URL", "NEW_SUBSCRIPTION_COLLECTION_POLICY"} {
+		if _, present := os.LookupEnv(retired); present {
+			return nil, fmt.Errorf("%s is retired: use explicit security settings, public_billing_base_url and default engine collection", retired)
+		}
+	}
 
-	// Start from sensible defaults so zero-config works in containers/compose —
-	// except the environment. GetDefaultBillingConfig is the DEVELOPMENT default
-	// set; Load must not inherit that posture, so ENV is cleared here and
-	// required below once every source has been overlaid (SEC-18).
+	// Defaults contain no environment-dependent security exceptions.
 	cfg := &Config{Config: billing.GetDefaultBillingConfig(), Auth: &AuthConfig{}}
-	cfg.Env = ""
 
 	// A .env in the working directory is a real config source, so consuming
 	// one is LOGGED (or#915): a deployment silently absorbing a stray .env is
@@ -286,7 +287,17 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return nil, fmt.Errorf("catalog_source / CATALOG_SOURCE was removed: catalogs always use the database; set allow_catalog_updates / ALLOW_CATALOG_UPDATES to enable ordinary catalog mutations")
 	}
 	if _, present := os.LookupEnv("MERCHANT_SOURCE"); k.Exists("merchant_source") || present {
-		return nil, fmt.Errorf("merchant_source / MERCHANT_SOURCE was renamed: use merchant_config_source / MERCHANT_CONFIG_SOURCE (manifest|api)")
+		return nil, fmt.Errorf("merchant_source / MERCHANT_SOURCE was removed: select secret_backend and merchant_config_http independently")
+	}
+	if _, present := os.LookupEnv("MERCHANT_CONFIG_SOURCE"); k.Exists("merchant_config_source") || present {
+		return nil, fmt.Errorf("merchant_config_source / MERCHANT_CONFIG_SOURCE was removed: select secret_backend and merchant_config_http independently")
+	}
+
+	for _, retired := range []string{"ENV", "API_URL", "NEW_SUBSCRIPTION_COLLECTION_POLICY"} {
+		_, present := os.LookupEnv(retired)
+		if present || k.Exists(strings.ToLower(retired)) {
+			return nil, fmt.Errorf("%s is retired: use explicit security settings, public_billing_base_url and default engine collection", retired)
+		}
 	}
 
 	if databaseOnly {
@@ -432,58 +443,9 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return nil, fmt.Errorf("unmarshaling config (unknown keys refuse boot — or#915): %w", err)
 	}
 
-	// SEC-18: ENV is REQUIRED and has no default. Every other knob can fail
-	// closed on its own; this one decides WHICH way the others fail, so it must
-	// be declared, not inferred. Silently reading unset as "development" meant a
-	// container deployed without ENV kept merchant secrets in PLAINTEXT.
-	cfg.Env = strings.TrimSpace(cfg.Env)
-	if cfg.Env == "" {
-		return nil, fmt.Errorf("ENV is required (SEC-18): set env (env ENV) to development for a local/dev deployment, or to production/staging/<name> — there is no default, because the permissive posture (plaintext merchant secrets) is the development one")
-	}
-
-	// Sandbox-by-default in development (#355/#745): when test_mode is not
-	// explicitly provided, a dev boot defaults to sandbox credentials so a
-	// local run can never accidentally move real money against live rail
-	// credentials — the dangerous case is silent ("forgot to set it"), so the
-	// safe value is the one you get by omission. To run live locally, set
-	// test_mode=live explicitly (env TEST_MODE=live, flag --test-mode=live).
-	//
-	// Outside development test_mode is REQUIRED (or#915, fail-closed like
-	// provider_write_mode): the old silent live default meant an operator who
-	// believed an ignored TEST_ENV had put them in test was actually pointed
-	// at live credentials. The credential posture decides whether real money
-	// moves — it must be declared, never inherited by omission. This only
-	// governs standalone Load(); embedded hosts build the Config
-	// programmatically and MUST supply their own value — embedded.New refuses
-	// to construct otherwise.
 	if !k.Exists("test_mode") {
-		if !cfg.IsDev() {
-			return nil, fmt.Errorf("test_mode is required outside development (or#915): set test_mode (env TEST_MODE, flag --test-mode) to live or sandbox — the credential posture must be declared explicitly, there is no default")
-		}
-		cfg.TestMode = billing.CredentialPostureSandbox
+		return nil, fmt.Errorf("test_mode is required: declare sandbox or live")
 	}
-
-	// The control plane is mandatory in standalone mode (#469). In development
-	// auth.issuer defaults to the deployment's own base URL so zero-config dev
-	// boots; outside development a missing issuer fails fast at control-plane
-	// construction.
-	if cfg.Auth == nil {
-		cfg.Auth = &AuthConfig{}
-	}
-	if strings.TrimSpace(cfg.Auth.Issuer) == "" {
-		if cfg.IsDev() {
-			issuer := strings.TrimSpace(cfg.APIURL)
-			if issuer == "" {
-				port := int(cfg.Port)
-				if port == 0 {
-					port = 3053
-				}
-				issuer = fmt.Sprintf("http://localhost:%d", port)
-			}
-			cfg.Auth.Issuer = strings.TrimRight(issuer, "/")
-		}
-	}
-
 	// Assemble DB URL from pieces if not explicitly set
 	if cfg.DB != nil {
 		cfg.DB.URL = cfg.DB.GetConnectionString()

@@ -194,7 +194,7 @@ func (h *StripeTierChangeIntentHandler) Verify(ctx context.Context, in gen.Openr
 }
 
 func (h *StripeTierChangeIntentHandler) stripe() *subscriptions.StripeService {
-	return &subscriptions.StripeService{Config: h.Checkout.Config, Rails: h.Checkout.Rails}
+	return &subscriptions.StripeService{StripeClients: h.Checkout.StripeClients, Config: h.Checkout.Config, Rails: h.Checkout.Rails}
 }
 
 func (h *StripeTierChangeIntentHandler) replayable(step *stripeTierChangeStep) bool {

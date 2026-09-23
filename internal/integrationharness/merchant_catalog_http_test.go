@@ -149,11 +149,10 @@ func (trialCapabilityNoNetwork) RoundTrip(r *http.Request) (*http.Response, erro
 func TestCatalogApplicationRefusesTrialOnRailsWithoutFirstPhase(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
-	surface := h.StartStandalone("usd", WithConfig(func(cfg *config.Config) { cfg.NewSubscriptionCollectionPolicy = "engine" }))
+	surface := h.StartStandalone("usd", WithConfig(func(cfg *config.Config) {}))
 	// This checks local capability rules with unarmed declarations. Any provider
 	// request is a fixture bug; refuse it under the real Stripe choke point.
-	release := stripeapi.InstallBaseTransport(trialCapabilityNoNetwork{})
-	t.Cleanup(release)
+	surface.App().Runtime.StripeClients = stripeapi.NewFactory(trialCapabilityNoNetwork{})
 	owned := surface.ProvisionOwnedMerchant("trial-capability-" + uuid.NewString()[:8])
 	token := surface.MintAPIKey(
 		owned.MerchantSlug,

@@ -4,7 +4,6 @@ package bootstrap
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -26,7 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -35,13 +33,8 @@ func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
-	key := make([]byte, 32)
-	for i := range key {
-		key[i] = byte(i + 1)
-	}
-	cfg := &config.Config{Env: "development", MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{
-		MasterKey: base64.StdEncoding.EncodeToString(key),
-	}}
+	cfg := &config.Config{SecretBackend: config.SecretBackendSnapshot, TestMode: config.CredentialPostureLive}
+	snapshot := merchants.NewManifestSecretStore()
 	manifest := hostThreeMerchantManifest()
 	mt := manifest.Merchants["host-three"]
 	const (
@@ -64,7 +57,7 @@ func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 	}
 	manifest.Merchants["host-three"] = mt
 
-	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true, SecretStore: snapshot.Seeder()}))
 
 	var merchantID string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM billing.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
@@ -82,11 +75,9 @@ func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 
 	secretName, err := merchants.PSPSecretName("solana", "live", accountID, "private_key")
 	require.NoError(t, err)
-	backend, err := merchantsecrets.Build(ctx, cfg, cp.Pool())
-	require.NoError(t, err)
 	tid, err := merchant.ParseID(merchantID)
 	require.NoError(t, err)
-	sec, err := backend.Secrets.Get(ctx, tid, secretName)
+	sec, err := snapshot.Get(ctx, tid, secretName)
 	require.NoError(t, err)
 	require.Equal(t, privateKey, sec.Value)
 }
@@ -172,7 +163,7 @@ func newMerchantManifestTestPool(t *testing.T) *pgxpool.Pool {
 
 	targetDSN := merchantManifestDatabaseDSN(t, adminDSN, dbName)
 	require.NoError(t, migrate.RunPostgres(ctx, &config.Config{
-		Env: "development", DB: &config.DBConfig{URL: targetDSN},
+		DB: &config.DBConfig{URL: targetDSN},
 	}))
 	pool, err := pgxpool.New(ctx, targetDSN)
 	require.NoError(t, err)
@@ -222,7 +213,7 @@ func TestMerchantManifestDatabaseDSNIsOwned(t *testing.T) {
 // SEC-18: Env is declared, never inferred — an empty Env is no longer
 // development, and the DB secret store refuses a plaintext posture outside it.
 func apiModeReconcileConfig() *config.Config {
-	return &config.Config{Env: "development", MerchantConfigSource: config.MerchantConfigSourceAPI}
+	return &config.Config{SecretBackend: config.SecretBackendSnapshot}
 }
 
 // sandboxModeReconcileConfig is apiModeReconcileConfig under test_mode=sandbox.
@@ -237,7 +228,6 @@ func sandboxModeReconcileConfig() *config.Config {
 func newMerchantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlplane.ControlPlane {
 	t.Helper()
 	cfg := &config.Config{
-		Env: "test",
 		// MintDisabled: "test" is not a dev-like env (#748: verify-only must be
 		// declared outside development), and this control plane is never asked
 		// to mint in these manifest-reconcile tests.

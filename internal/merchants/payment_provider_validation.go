@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -18,6 +20,17 @@ const providerCredentialProbeTimeout = 15 * time.Second
 
 func (s *Service) probePaymentProviderCredentials(ctx context.Context, id merchant.ID, rail, environment, accountID string, supplied map[string]string) (bool, error) {
 	switch rail {
+	case "stripe":
+		secretKey, ok, err := s.effectiveProviderCredential(ctx, id, rail, environment, accountID, supplied, "secret_key")
+		if err != nil || !ok {
+			return false, err
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, providerCredentialProbeTimeout)
+		defer cancel()
+		if err := stripeAccountCheck(probeCtx, secretKey, environment, accountID, s.StripeClients); err != nil {
+			return false, err
+		}
+		return true, nil
 	case "nmi":
 		securityKey, ok, err := s.effectiveProviderCredential(ctx, id, rail, environment, accountID, supplied, "security_key")
 		if err != nil || !ok {
@@ -84,7 +97,7 @@ func (s *Service) effectiveProviderCredential(ctx context.Context, id merchant.I
 	if err != nil {
 		return "", false, err
 	}
-	secret, err := s.secrets.Get(ctx, id, name)
+	secret, err := s.readPublishedProviderCredential(ctx, id, rail, environment, accountID, key, name)
 	if errors.Is(err, ErrSecretNotFound) {
 		return "", false, nil
 	}
@@ -93,4 +106,26 @@ func (s *Service) effectiveProviderCredential(ctx context.Context, id merchant.I
 	}
 	value := strings.TrimSpace(secret.Value)
 	return value, value != "", nil
+}
+
+func (s *Service) readPublishedProviderCredential(ctx context.Context, id merchant.ID, rail, environment, account, key, name string) (Secret, error) {
+	ref := SecretRef{Name: name}
+	if s.pool != nil {
+		var row gen.OpenrailsPsp
+		err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+			var err error
+			row, err = gen.New(tx).GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{MerchantID: id.UUID(), Rail: rail, Environment: &environment, AccountID: account})
+			return err
+		})
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return Secret{}, err
+		}
+		if err == nil {
+			ref, err = PSPSecretRef(rail, environment, account, row.Evidence, key)
+			if err != nil {
+				return Secret{}, err
+			}
+		}
+	}
+	return ReadSecretRef(ctx, s.secrets, id, ref)
 }

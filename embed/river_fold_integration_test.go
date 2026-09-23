@@ -64,11 +64,10 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	slug := "river-billing-" + uuid.NewString()[:8]
 	rt, err := embed.New(ctx, embed.Options{
 		Merchant: &embed.MerchantDeclaration{Slug: slug, PSPs: []embed.PSPDeclaration{{Key: "solana", Rail: "solana", AccountID: "11111111111111111111111111111111"}}},
-		Config: &config.Config{
-			Env:                  "dev",
-			TestMode:             config.CredentialPostureSandbox,
-			DB:                   &config.DBConfig{URL: dsn},
-			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
+		Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
+			TestMode:           config.CredentialPostureSandbox,
+			DB:                 &config.DBConfig{URL: dsn},
+			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB,
 		},
 		River: embed.RiverFromHost(),
 		Redis: rdb,
@@ -81,7 +80,7 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	_, err = rt.CheckJobProgress(ctx)
 	require.ErrorContains(t, err, "not bound")
 	require.ErrorContains(t, rt.RunWorkers(ctx), "not bound")
-	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://river-compose.test", KeysPath: t.TempDir()}})
+	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://river-compose.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}})
 	require.NoError(t, err)
 	suffix := uuid.NewString()[:8]
 	user, err := cp.Core().CreateUser(ctx, "river-"+suffix+"@example.test", "river"+suffix)
@@ -104,7 +103,7 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 		return river.AddWorkerSafely(cfg.Workers, &noopWorker{})
 	}, nil, nil))
 	require.NoError(t, err)
-	_, err = controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://river-compose.test", KeysPath: t.TempDir()}})
+	_, err = controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://river-compose.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}})
 	require.Error(t, err, "components cannot attach after binding")
 
 	require.True(t, sawBillingWorkers, "explicit binding composes billing workers")
@@ -198,8 +197,8 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 func TestRiverDefault_ConstructsManagedFleet(t *testing.T) {
 	ctx := context.Background()
 	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{
-		Env: "dev", TestMode: config.CredentialPostureSandbox,
-		DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
+		TestMode: config.CredentialPostureSandbox,
+		DB:       &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
 	}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rt.Close(ctx)) })
@@ -209,7 +208,7 @@ func TestRiverDefault_ConstructsManagedFleet(t *testing.T) {
 // A host must supply the pool it owns before any fleet can be constructed.
 func TestRiverFromHost_MissingPoolRefuses(t *testing.T) {
 	ctx := t.Context()
-	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}}, River: embed.RiverFromHost()})
+	rt, err := embed.New(ctx, embed.Options{Config: &config.Config{TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)}}, River: embed.RiverFromHost()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	_, err = riverhelpers.New(ctx, nil, nil, rt.RiverJobs())

@@ -71,21 +71,21 @@ func TestAdminConsoleServing(t *testing.T) {
 		// The boot error surfaces from serverboot.NewServer, so this drives it
 		// directly with the same config shape the harness boots.
 		_, appDSN := dbtest.SharedRLSPostgres(t)
-		cfg := &config.Config{
-			Env:                  "dev",
-			TestMode:             config.CredentialPostureSandbox,
-			MerchantConfigSource: config.MerchantConfigSourceAPI,
-			SecretBackend:        config.SecretBackendDB,
-			ProviderWriteMode:    config.ProviderWriteModeFull,
-			Host:                 "127.0.0.1",
-			Port:                 0,
-			DB:                   &config.DBConfig{URL: appDSN},
-			AdminConsole:         &config.AdminConsoleConfig{Enabled: true},
+		cfg := &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
+			TestMode:           config.CredentialPostureSandbox,
+			MerchantConfigHTTP: true,
+			SecretBackend:      config.SecretBackendDB,
+			ProviderWriteMode:  config.ProviderWriteModeFull,
+			Host:               "127.0.0.1",
+			Port:               0,
+			DB:                 &config.DBConfig{URL: appDSN},
+
+			AdminConsole: &config.AdminConsoleConfig{Enabled: true},
 		}
 		if h.Redis != nil {
 			cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
 		}
-		_, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://controlplane.openrails.test"}})
+		_, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{Auth: &hostconfig.AuthConfig{KeysPath: t.TempDir(), Issuer: "https://controlplane.openrails.test", AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}})
 		require.Error(t, err, "admin_console.enabled without assets must refuse boot")
 		require.Contains(t, err.Error(), "no console assets")
 		require.Contains(t, err.Error(), "build-admin-console.sh", "boot error must name the build step")

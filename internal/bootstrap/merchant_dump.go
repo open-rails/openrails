@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -32,8 +31,7 @@ type DumpMerchantConfigOptions struct {
 // profile, invoice/collection policy, delegated-invoker windows, and PSPs)
 // and returns it in the push-merchant-config YAML shape (#646/#653).
 // Secret fields are omitted entirely by default (so a redacted dump can be
-// re-applied without a placeholder overwriting real secrets); IncludeSecrets
-// emits plaintext from the configured secret backend for operator-controlled exports.
+// re-applied without a placeholder overwriting real secrets). Plaintext export is refused.
 func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, slug string, opts DumpMerchantConfigOptions) (*BillingConfig, error) {
 	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
 		return nil, fmt.Errorf("dump-merchant-config requires an enabled control plane")
@@ -42,16 +40,11 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	if slug == "" {
 		return nil, fmt.Errorf("merchant slug is required")
 	}
-	// #723: in manifest mode there is no store to dump — the YAML the operator
-	// already holds IS the truth (DB rows are projections of it).
-	if cfg.IsManifestMerchantConfigSource() {
-		return nil, fmt.Errorf("merchant_config_source=manifest has no merchant-secret store to dump (#723): the boot manifest is already the export; dump-merchant-config serves merchant_config_source=api deployments")
+	if opts.IncludeSecrets {
+		return nil, fmt.Errorf("plaintext credential export is not supported by merchant configuration dump")
 	}
-	secretBackend, err := merchantsecrets.Build(ctx, cfg, cp.Pool())
-	if err != nil {
-		return nil, fmt.Errorf("build secret store: %w", err)
-	}
-	secretStore := secretBackend.Secrets
+	// Metadata is independent of credential custody and needs no secret backend.
+	var secretStore merchants.MerchantSecretStore
 	database, err := db.NewWithPGXPool(cp.Pool().Raw(), cp.Pool().Schema())
 	if err != nil {
 		return nil, fmt.Errorf("wrap control-plane db: %w", err)

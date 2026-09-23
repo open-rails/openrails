@@ -26,9 +26,9 @@ func TestCatalogResourceAtomicOffers(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	rt, mid, err := newDeclaredMerchant(ctx, embed.Options{Config: &config.Config{
-		Env: "development", TestMode: config.CredentialPostureSandbox,
-		MerchantConfigSource: config.MerchantConfigSourceManifest, AllowCatalogUpdates: true,
-		ProviderWriteMode: config.ProviderWriteModeFull, NewSubscriptionCollectionPolicy: "engine", DB: &config.DBConfig{URL: dsn},
+		TestMode:            config.CredentialPostureSandbox,
+		AllowCatalogUpdates: true,
+		ProviderWriteMode:   config.ProviderWriteModeFull, DB: &config.DBConfig{URL: dsn},
 	}, PGXPool: pool, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t}}, "inline-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Inline catalog", PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {
 		AccountID: "acct_inline_fixture", Secrets: map[string]string{"secret_key": "sk_test_inline_fixture", "webhook_signing_secret": "whsec_inline_fixture"},
 	}}}})

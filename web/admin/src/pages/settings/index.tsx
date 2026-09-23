@@ -48,7 +48,8 @@ import {
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
-import { ApiError } from "@/lib/api/client"
+import { ProviderPublicationAttempts } from "@/lib/provider-publication"
+import { ApiError, getTokens } from "@/lib/api/client"
 import { adminQueries } from "@/lib/queries"
 import { NotificationsTab } from "./notifications"
 import { ApiKeysTab } from "./api-keys"
@@ -453,7 +454,7 @@ function ProvidersTab() {
               Configure the payment rails this merchant can use.
             </p>
           </div>
-          <ProviderDialog providerDefinitions={providerDefinitions} />
+          <ProviderDialog key={getTokens()?.merchant ?? ""} providerDefinitions={providerDefinitions} />
         </div>
         {!data?.data?.length ? (
           <p className="py-2 text-sm text-muted-foreground">
@@ -593,6 +594,7 @@ function ProviderRow({
         {!provider.archived && (
           <div className="flex justify-end gap-2">
             <RotateCredentialsDialog
+              key={`${getTokens()?.merchant ?? ""}:${provider.id}`}
               provider={provider}
               credentialKeys={
                 providerDefinitions.find((d) => d.rail === provider.rail)
@@ -651,8 +653,9 @@ function ProviderRow({
 //  2. A committed rotation is deployment-wide, not just this node: it raises the
 //     credential's version floor on the shared PSP row, and every node refuses
 //     to answer a credential read from a cache entry below that floor.
-//  3. Plaintext is dropped from browser state the moment it is submitted.
-function RotateCredentialsDialog({
+//  3. Secret fields clear on success or dismissal. Unconfirmed submissions
+//     retain their operation identity for a deliberate retry.
+export function RotateCredentialsDialog({
   provider,
   credentialKeys,
 }: {
@@ -660,6 +663,9 @@ function RotateCredentialsDialog({
   credentialKeys: string[]
 }) {
   const [open, setOpen] = React.useState(false)
+  const [merchant] = React.useState(() => getTokens()?.merchant ?? "")
+  const attempts = React.useRef(new ProviderPublicationAttempts())
+  const reviewedRevision = React.useRef(0)
   const queryClient = useQueryClient()
   const saveProvider = useMutation(
     adminMutations.savePaymentProvider(queryClient)
@@ -670,16 +676,14 @@ function RotateCredentialsDialog({
       const supplied = Object.fromEntries(
         Object.entries(value.credentials).filter(([, item]) => item.trim())
       )
-      // Plaintext must not remain in browser state while the request is in flight.
-      form.reset()
       try {
-        await saveProvider.mutateAsync({
-          rail: provider.rail,
-          provider: {
-            account_id: provider.account_id,
-            credentials: supplied,
-          },
+        const request = await attempts.current.prepare(merchant, provider.rail, reviewedRevision.current, {
+          account_id: provider.account_id, credentials: supplied,
         })
+        if ((getTokens()?.merchant ?? "") !== merchant) throw new Error("Merchant changed; reopen this provider form")
+        await saveProvider.mutateAsync({ rail: provider.rail, provider: request })
+        attempts.current.complete(request.operation_id)
+        form.reset()
         toast.success(
           `Credentials validated and rotated. Every node serves the new ${provider.rail} credential from its next read.`
         )
@@ -687,8 +691,12 @@ function RotateCredentialsDialog({
       } catch (err) {
         toastApiError(
           err,
-          "Rotation refused. Your current credential is unchanged and still working."
+          err instanceof ApiError && err.status === 409
+            ? "Provider changed. Close this form and review its current state before changing your submission."
+            : "Rotation outcome unconfirmed. Retry the same credentials to recover this submission."
         )
+      } finally {
+        saveProvider.reset()
       }
     },
   })
@@ -696,6 +704,7 @@ function RotateCredentialsDialog({
   const close = (next: boolean) => {
     // Never leave plaintext in state behind a closed dialog.
     if (!next) form.reset()
+    if (next) reviewedRevision.current = provider.configuration_revision ?? 0
     setOpen(next)
   }
 
@@ -766,8 +775,8 @@ function RotateCredentialsDialog({
                 })}
                 <p className="text-xs text-muted-foreground">
                   Once this succeeds, the new credential is used for the next
-                  charge and every one after it. Nothing needs restarting, and
-                  the old credential stops being used straight away.
+                  charge and every one after it. Previous webhook signing secrets
+                  remain accepted while their required overlap is active.
                 </p>
               </div>
             )}
@@ -858,6 +867,8 @@ function ProviderDialog({
   providerDefinitions: PaymentProviderDefinition[]
 }) {
   const [open, setOpen] = React.useState(false)
+  const [merchant] = React.useState(() => getTokens()?.merchant ?? "")
+  const attempts = React.useRef(new ProviderPublicationAttempts())
   const queryClient = useQueryClient()
   const saveProvider = useMutation(
     adminMutations.savePaymentProvider(queryClient)
@@ -873,18 +884,22 @@ function ProviderDialog({
         Object.entries(value.credentials).filter(([, item]) => item !== "")
       )
       try {
-        await saveProvider.mutateAsync({
-          rail: value.rail,
-          provider: {
-            account_id: value.accountID.trim(),
-            ...(Object.keys(credentials).length ? { credentials } : {}),
-          },
+        const request = await attempts.current.prepare(merchant, value.rail, 0, {
+          account_id: value.accountID.trim(),
+          ...(Object.keys(credentials).length ? { credentials } : {}),
         })
+        if ((getTokens()?.merchant ?? "") !== merchant) throw new Error("Merchant changed; reopen this provider form")
+        await saveProvider.mutateAsync({ rail: value.rail, provider: request })
+        attempts.current.complete(request.operation_id)
         form.reset()
         toast.success("Provider saved")
         setOpen(false)
       } catch (err) {
-        toastApiError(err, "Save provider")
+        toastApiError(err, err instanceof ApiError && err.status === 409
+          ? "This account changed or already exists. Review the provider list before submitting a new change."
+          : "Save outcome unconfirmed. Retry the same submission to recover its result.")
+      } finally {
+        saveProvider.reset()
       }
     },
   })

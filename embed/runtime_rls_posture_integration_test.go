@@ -18,7 +18,7 @@ func TestNewAcceptsOwnerAndRuntimeConnections(t *testing.T) {
 			pool, err := pgxpool.New(t.Context(), dsn)
 			require.NoError(t, err)
 			t.Cleanup(pool.Close)
-			cfg := &config.Config{Env: "staging", TestMode: config.CredentialPostureLive, ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{URL: dsn}}
+			cfg := &config.Config{TestMode: config.CredentialPostureLive, ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{URL: dsn}}
 			runtime, err := New(t.Context(), Options{Config: cfg, PGXPool: pool, River: RiverManagedByOpenRails()})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })

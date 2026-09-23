@@ -169,21 +169,20 @@ func TestSentinelSurvivesWrapping(t *testing.T) {
 	require.ErrorIs(t, wrapped, ErrProviderReadOnly)
 }
 
-// #814: SetBaseTransport is the supported (untagged) test seam. It installs
+// #814: Factory is the supported (untagged) test seam. It installs
 // UNDER the guard — readonly still refuses writes before a byte reaches the
 // host transport, and the version pin is stamped on what does — and nil
 // restores the default.
-func TestSetBaseTransportInstallsUnderTheGuard(t *testing.T) {
+func TestFactoryInstallsUnderTheGuard(t *testing.T) {
 	var seen *http.Request
-	SetBaseTransport(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	factory := NewFactory(roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		seen = req
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("{}")), Header: http.Header{}}, nil
 	}))
-	t.Cleanup(func() { SetBaseTransport(nil) })
 
 	req, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/products", nil)
 	require.NoError(t, err)
-	resp, err := newClient(false, 0).Do(req)
+	resp, err := factory.newClient(false, 0).Do(req)
 	require.NoError(t, err)
 	_ = resp.Body.Close()
 	require.NotNil(t, seen, "the installed transport carried the request")
@@ -193,14 +192,52 @@ func TestSetBaseTransportInstallsUnderTheGuard(t *testing.T) {
 	seen = nil
 	req2, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/products", nil)
 	require.NoError(t, err)
-	_, err = newClient(true, 0).Do(req2)
+	_, err = factory.newClient(true, 0).Do(req2)
 	require.ErrorIs(t, err, ErrProviderReadOnly)
 	require.Nil(t, seen, "a fake wire server must never buy a caller an unguarded write")
 
-	SetBaseTransport(nil)
-	require.Equal(t, http.DefaultTransport, defaultBaseTransport())
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestFactoriesKeepConcurrentDestinationsAndGuardsIndependent(t *testing.T) {
+	t.Parallel()
+	original := http.DefaultTransport
+	for _, identity := range []string{"first", "second"} {
+		t.Run(identity, func(t *testing.T) {
+			t.Parallel()
+			var requests atomic.Int64
+			factory := NewFactory(roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Host != "api.stripe.com" || req.URL.Path != "/v1/products" {
+					return nil, errors.New("unexpected fake request")
+				}
+				require.Equal(t, APIVersion, req.Header.Get(VersionHeader))
+				require.Equal(t, identity, req.Header.Get(IdempotencyKeyHeader))
+				requests.Add(1)
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(identity))}, nil
+			}))
+			client := factory.Client(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, 0)
+			for range 20 {
+				req, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/products", nil)
+				require.NoError(t, err)
+				SetIdempotencyKey(req, identity)
+				resp, err := client.Do(req)
+				require.NoError(t, err)
+				body, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				require.NoError(t, resp.Body.Close())
+				require.Equal(t, identity, string(body))
+			}
+			req, err := http.NewRequest(http.MethodPost, "https://api.stripe.com/v1/products", nil)
+			require.NoError(t, err)
+			_, err = factory.ReadOnlyClient(0).Do(req)
+			require.ErrorIs(t, err, ErrProviderReadOnly)
+			_, err = client.Get("https://api.stripe.com/unexpected")
+			require.ErrorContains(t, err, "unexpected fake request")
+			require.EqualValues(t, 20, requests.Load())
+			require.Same(t, original, http.DefaultTransport)
+		})
+	}
+}

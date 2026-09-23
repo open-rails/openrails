@@ -43,10 +43,9 @@ disabling new enrollment must retain servicing and receipt reconciliation for
 that agreement. Sharing or replacing a card cannot change a subscription's
 owner.
 
-The trusted process setting `new_subscription_collection_policy: engine` opts
-new supported enrollments into owned agreement confirmation. The default empty
-or `provider` value preserves native enrollment during rollout. Recurring NMI
-and Stripe prices need no provider catalog links in engine mode; explicit
+New supported enrollments use engine-owned agreement confirmation by default.
+There is no process-wide collection-owner selector. Recurring NMI
+and Stripe prices need no provider catalog links for new engine-owned enrollment; explicit
 historical links remain usable. CCBill engine signup and unsupported free/trial
 terms refuse before payment. Fixed-hour catalog cycles are the supported new
 engine terms; this does not reinterpret old provider calendar/finite schedules.
@@ -56,7 +55,7 @@ first submission while retaining possibly submitted operation verification and
 webhook handling. Provider write
 mode remains an additional existing execution gate. Neither setting mutates
 stored ownership. Existing engine sessions and accepted operations replay their
-stored terms after enrollment defaults change. Existing engine payments that
+stored terms across restarts. Existing engine payments that
 require Stripe authentication resume the original PaymentIntent through the
 owned, non-cacheable authentication resource; a mutable declined PI is canceled
 and read back before the obligation becomes retryable.

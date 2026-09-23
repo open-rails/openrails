@@ -1,46 +1,22 @@
 package bootstrap
 
 import (
-	"testing"
-
-	"github.com/stretchr/testify/require"
-
 	"github.com/open-rails/openrails/config"
+	"github.com/stretchr/testify/require"
+	"testing"
 )
 
-// #851: push-merchant-config flag doctrine per merchant-source mode.
 func TestResolvePushMerchantConfigOptions(t *testing.T) {
-	manifestCfg := &config.Config{MerchantConfigSource: config.MerchantConfigSourceManifest}
-	apiCfg := &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI}
-
-	t.Run("manifest mode passes mutation flags through", func(t *testing.T) {
-		opts, err := ResolvePushMerchantConfigOptions(manifestCfg, false, true, true, true)
-		require.NoError(t, err)
-		require.Equal(t, MerchantManifestReconcileOptions{Insert: true, Overwrite: true, Prune: true}, opts)
-	})
-
-	t.Run("manifest mode refuses --seed", func(t *testing.T) {
-		_, err := ResolvePushMerchantConfigOptions(manifestCfg, true, false, false, false)
-		require.ErrorContains(t, err, "--seed is the merchant_config_source=api importer gate")
-	})
-
-	t.Run("api mode refuses without --seed", func(t *testing.T) {
-		_, err := ResolvePushMerchantConfigOptions(apiCfg, false, false, false, false)
-		require.ErrorContains(t, err, "seed-once importer")
-		_, err = ResolvePushMerchantConfigOptions(apiCfg, false, true, false, false)
-		require.ErrorContains(t, err, "seed-once importer")
-	})
-
-	t.Run("api mode --seed refuses mutation flags", func(t *testing.T) {
-		for _, flags := range [][3]bool{{true, false, false}, {false, true, false}, {false, false, true}} {
-			_, err := ResolvePushMerchantConfigOptions(apiCfg, true, flags[0], flags[1], flags[2])
-			require.ErrorContains(t, err, "does not combine")
+	for _, backend := range []string{config.SecretBackendSnapshot, config.SecretBackendDB, config.SecretBackendVault} {
+		cfg := &config.Config{SecretBackend: backend}
+		for _, seed := range []bool{false, true} {
+			opts, err := ResolvePushMerchantConfigOptions(cfg, seed, false, false, false)
+			require.NoError(t, err)
+			require.Equal(t, seed, opts.Insert)
+			_, err = ResolvePushMerchantConfigOptions(cfg, seed, true, true, false)
+			require.ErrorContains(t, err, "expected revision")
+			_, err = ResolvePushMerchantConfigOptions(cfg, seed, true, false, true)
+			require.ErrorContains(t, err, "expected revision")
 		}
-	})
-
-	t.Run("api mode --seed is create-only", func(t *testing.T) {
-		opts, err := ResolvePushMerchantConfigOptions(apiCfg, true, false, false, false)
-		require.NoError(t, err)
-		require.Equal(t, MerchantManifestReconcileOptions{Insert: true}, opts)
-	})
+	}
 }

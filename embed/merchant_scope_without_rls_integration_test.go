@@ -62,8 +62,8 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 		rt, err := embed.New(ctx, embed.Options{
 			Merchant: declaration,
 			Config: &config.Config{
-				Env: "dev", TestMode: config.CredentialPostureSandbox,
-				MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB,
+				TestMode:           config.CredentialPostureSandbox,
+				MerchantConfigHTTP: true, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 				ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: dsn},
 			},
 			PGXPool: pool, River: embed.RiverManagedByOpenRails(),

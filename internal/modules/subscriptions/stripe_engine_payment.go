@@ -136,7 +136,7 @@ func (s *StripeService) CreateEnginePayment(ctx context.Context, p StripeEngineP
 	req.Header.Set("Authorization", "Bearer "+scoped.accountSecret)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	stripeapi.SetIdempotencyKey(req, "engine:"+p.OperationID.String())
-	resp, err := stripeapi.Client(scoped.Config, 0).Do(req)
+	resp, err := scoped.StripeClients.Client(scoped.Config, 0).Do(req)
 	if errors.Is(err, stripeapi.ErrProviderReadOnly) {
 		return StripeEnginePaymentResult{}, fmt.Errorf("%w: %v", charge.ErrNotDispatched, err)
 	}

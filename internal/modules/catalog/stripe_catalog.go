@@ -20,7 +20,8 @@ import (
 )
 
 type StripeCatalogService struct {
-	Config *config.Config
+	StripeClients *stripeapi.Factory
+	Config        *config.Config
 	// Rails resolves the ctx merchant's armed Stripe account (Layer C, #788).
 	Rails railresolve.Source
 	// BaseURL overrides the Stripe API root (https://api.stripe.com). Empty in
@@ -64,7 +65,11 @@ func (s *StripeCatalogService) httpClient() *http.Client {
 	if s != nil {
 		cfg = s.Config
 	}
-	return stripeapi.Client(cfg, 0)
+	var clients *stripeapi.Factory
+	if s != nil {
+		clients = s.StripeClients
+	}
+	return clients.Client(cfg, 0)
 }
 
 type stripeObject struct {

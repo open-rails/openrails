@@ -61,7 +61,7 @@ func TestEnforceEncryptionPosture(t *testing.T) {
 		wantErr          bool
 	}{
 		{"prod + no key = boot refused", false, true, true},
-		{"dev + no key = allowed (warns)", false, false, false},
+		{"no environment bypass for encryption", false, false, true},
 		{"prod + key = allowed", true, true, false},
 		{"dev + key = allowed", true, false, false},
 	}
@@ -90,24 +90,9 @@ func TestEnforceEncryptionPosture(t *testing.T) {
 // RequiresSecretEncryption pins the env signal: only development may run the
 // DB-backed store without an encryption key. (The RLS-role gate is NOT env
 // dependent — see db.EnforceRLSPosture, or#782.)
-func TestRequiresSecretEncryption_EnvSignal(t *testing.T) {
-	cases := []struct {
-		env  string
-		want bool
-	}{
-		// SEC-18: an UNDECLARED env is not development — it requires encryption.
-		{"", true}, {"dev", false}, {"development", false},
-		{"production", true}, {"staging", true},
-	}
-	for _, tc := range cases {
-		cfg := &config.Config{Env: tc.env}
-		if got := cfg.RequiresSecretEncryption(); got != tc.want {
-			t.Fatalf("Env=%q: RequiresSecretEncryption()=%v, want %v", tc.env, got, tc.want)
-		}
-	}
-	var nilCfg *config.Config
-	if nilCfg.RequiresSecretEncryption() {
-		t.Fatal("nil config must not require encryption")
+func TestRequiresSecretEncryption(t *testing.T) {
+	if !(&config.Config{}).RequiresSecretEncryption() {
+		t.Fatal("encrypted custody required")
 	}
 }
 

@@ -76,7 +76,7 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 		require.Equal(t, first.ID, selected.ID)
 		require.Equal(t, newName, selected.Slug)
 	}
-	cfg := &config.Config{DB: &config.DBConfig{Schema: config.DefaultSchema}, MerchantConfigSource: "manifest"}
+	cfg := &config.Config{DB: &config.DBConfig{Schema: config.DefaultSchema}, SecretBackend: config.SecretBackendSnapshot}
 	applicationID := "name-authority-" + suffix
 	catalogFor := func(display string) []byte {
 		// Both newly provisioned merchant catalogs start at revision zero. The

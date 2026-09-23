@@ -38,10 +38,10 @@ func TestCreatorCatalogAuthority(t *testing.T) {
 
 		rt, mid, err := newDeclaredMerchant(ctx, embed.Options{
 			Config: &config.Config{
-				Env: "development", TestMode: config.CredentialPostureSandbox,
-				MerchantConfigSource: config.MerchantConfigSourceManifest, AllowCatalogUpdates: true,
-				ProviderWriteMode: config.ProviderWriteModeReadOnly,
-				DB:                &config.DBConfig{URL: ownerURL.String()},
+				TestMode:            config.CredentialPostureSandbox,
+				AllowCatalogUpdates: true,
+				ProviderWriteMode:   config.ProviderWriteModeReadOnly,
+				DB:                  &config.DBConfig{URL: ownerURL.String()},
 			},
 			PGXPool: owner, River: embed.RiverManagedByOpenRails(),
 		}, "creator-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Creator platform"})

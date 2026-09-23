@@ -35,7 +35,6 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	rdb, _ := dbtest.SharedRedisClient(t)
 	rt, err := New(ctx, Options{
 		Config: &config.Config{
-			Env:      "dev",
 			TestMode: config.CredentialPostureLive,
 			DB:       &config.DBConfig{URL: dsn},
 		},
@@ -280,7 +279,7 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	// through an actual balanced deposit instead of rewriting immutable facts.
 	overflowRuntime, err := New(ctx, Options{
 		Merchant: &MerchantDeclaration{Slug: "auth-overflow-" + uuid.NewString()},
-		Config:   &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
+		Config:   &config.Config{TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
 		Redis:    rdb, River: RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)

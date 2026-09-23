@@ -32,7 +32,7 @@ func TestCatalogProviderPreparationAndPropagationOutsideTransaction(t *testing.T
 	owner := dbtest.SharedSuperuserPGXPool(t)
 	s.rt.Config.TestMode = config.CredentialPostureSandbox
 	s.rt.Config.ProviderWriteMode = config.ProviderWriteModeFull
-	s.rt.Config.NewSubscriptionCollectionPolicy = ""
+
 	s.rt.RailConfigs = railresolve.FixedSet{"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_catalog_boundary"}}}
 	_, err = owner.Exec(ctx, "INSERT INTO billing.psps(merchant_id,id,key,rail,environment,account_id) VALUES($1,$2,'stripe','stripe','test','acct_boundary')", mid.UUID(), uuid.New())
 	require.NoError(t, err)
@@ -40,7 +40,7 @@ func TestCatalogProviderPreparationAndPropagationOutsideTransaction(t *testing.T
 	require.NoError(t, err)
 	calls, posts := 0, 0
 	var onCall func(*http.Request)
-	cleanup := stripeapi.InstallBaseTransport(catalogBoundaryTransport(func(r *http.Request) (*http.Response, error) {
+	s.rt.StripeClients = stripeapi.NewFactory(catalogBoundaryTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
 		if r.Method == http.MethodPost {
 			posts++
@@ -71,8 +71,7 @@ func TestCatalogProviderPreparationAndPropagationOutsideTransaction(t *testing.T
 		}
 		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(payload)), Request: r}, nil
 	}))
-	t.Cleanup(cleanup)
-	price, err := s.CreatePrice(ctx, CreatePriceRequest{ProductID: product.ID, Key: "boundary-price", Currency: "USD", UnitAmount: 1000000, PSPs: []string{"stripe"}})
+	price, err := s.CreatePrice(ctx, CreatePriceRequest{ProductID: product.ID, Key: "boundary-price", Currency: "USD", UnitAmount: 1000000, PSPs: []string{"stripe"}, PSPLinks: map[string]map[string]string{"stripe": {"lookup_key": "boundary-native-price"}}})
 	require.NoError(t, err)
 	require.Greater(t, posts, 0, "exercise provider creation, not only provider reads")
 	require.Equal(t, "price_boundary", price.Providers["stripe"].IDs["price_id"])

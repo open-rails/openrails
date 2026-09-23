@@ -18,7 +18,7 @@ func TestStripeEngineSetupBoundReadAndSecretIsolation(t *testing.T) {
 	p := StripeEngineSetupParams{payment.MerchantID, payment.PSPID, payment.CustomerID, uuid.New(), "cus_fixture"}
 	setup := map[string]any{"id": "seti_fixture", "status": "requires_payment_method", "customer": "cus_fixture", "payment_method": "pm_fixture", "usage": "off_session", "livemode": false, "payment_method_types": []string{"card"}, "metadata": p.metadata(), "client_secret": "seti_fixture_secret_private"}
 	count := 0
-	installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+	installEngineWire(t, s, func(r *http.Request) (*http.Response, error) {
 		require.Equal(t, "Bearer sk_test_fixture", r.Header.Get("Authorization"))
 		if r.Method == "POST" {
 			count++
@@ -62,7 +62,7 @@ func TestStripeEngineDeclineCancelsOriginalBeforeTerminal(t *testing.T) {
 	pi["status"] = "requires_payment_method"
 	pi["last_payment_error"] = map[string]any{"code": "card_declined"}
 	cancels := 0
-	installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+	installEngineWire(t, s, func(r *http.Request) (*http.Response, error) {
 		if r.Method == "POST" {
 			require.Equal(t, "/v1/payment_intents/pi_fixture/cancel", r.URL.Path)
 			require.Equal(t, "engine:"+p.OperationID.String()+":cancel", r.Header.Get("Idempotency-Key"))
@@ -91,7 +91,7 @@ func TestStripeEngineCanceledProofPreservesIssuerDecline(t *testing.T) {
 			pi := enginePI(p)
 			pi["status"] = "requires_payment_method"
 			pi["last_payment_error"] = map[string]any{"code": "card_declined", "decline_code": code}
-			installEngineWire(t, func(r *http.Request) (*http.Response, error) {
+			installEngineWire(t, s, func(r *http.Request) (*http.Response, error) {
 				if r.Method == "POST" {
 					require.Equal(t, "/v1/payment_intents/pi_fixture/cancel", r.URL.Path)
 					pi["status"] = "canceled"

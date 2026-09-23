@@ -51,7 +51,7 @@ func TestNativeEngineSignupSelfHTTPAndDueWorker(t *testing.T) {
 	surface := h.StartStandalone("USD", WithClock(clock), WithConfig(func(c *config.Config) {
 		c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: wire.URL}
 		c.ProviderWriteMode = config.ProviderWriteModeFull
-		c.NewSubscriptionCollectionPolicy = "engine"
+
 	}), func(c *standaloneConfig) {
 		c.delegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {
 			return host.AuthenticateDelegated(ctx, r)

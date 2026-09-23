@@ -33,7 +33,7 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	ctx := t.Context()
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := manifestModeConfig(dsn)
-	cfg.Env = "production"
+
 	cfg.TestMode = config.CredentialPostureSandbox
 	cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly
 	cfg.AllowCatalogUpdates = true
@@ -44,7 +44,7 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	boot := func(key string) *embed.Runtime {
 		gate := &allowAllGate{}
 
-		rt, _, err := newDeclaredMerchant(ctx, embed.Options{Auth: providerFixtureIntegration(gate), HTTP: &embed.HTTPConfig{PaymentProviders: true}, Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t, key: key}}, slug, embed.MerchantConfig{
+		rt, _, err := newDeclaredMerchant(ctx, embed.Options{Auth: providerFixtureIntegration(gate), HTTP: &embed.HTTPConfig{MerchantConfig: true}, Config: cfg, River: embed.RiverManagedByOpenRails(), StripeTransport: catalogAuthorityTransport{t: t, key: key}}, slug, embed.MerchantConfig{
 			DisplayName: "Host credential catalog",
 			PSPs: map[string]embed.PSPConfig{"stripe": {"stripe": {
 				AccountID: accountID,
@@ -82,7 +82,7 @@ func TestHostCredentialsWithAPICatalog(t *testing.T) {
 	handler := http.NewServeMux()
 	require.NoError(t, routes.Mount(handler))
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/v1/merchant/payment-providers/stripe", strings.NewReader(`{"credentials":{"secret_key":"replacement"}}`)))
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/v1/merchant/payment-providers/stripe", strings.NewReader(fmt.Sprintf(`{"operation_id":%q,"expected_revision":0,"account_id":%q,"credentials":{"secret_key":"replacement"}}`, uuid.NewString(), accountID))))
 	require.Equal(t, http.StatusMethodNotAllowed, recorder.Code)
 	require.NotContains(t, recorder.Body.String(), "manifest_driven")
 	require.Zero(t, merchantSecretRowCount(t, runtime.DB.Pool(), ctx, mid))
@@ -113,10 +113,10 @@ func TestManagedCredentialsWithCatalogUpdatesDisabled(t *testing.T) {
 	ctx := t.Context()
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := manifestModeConfig(dsn)
-	cfg.Env = "production"
+
 	cfg.TestMode = config.CredentialPostureSandbox
 	cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly
-	cfg.MerchantConfigSource = config.MerchantConfigSourceAPI
+	cfg.MerchantConfigHTTP = true
 	cfg.AllowCatalogUpdates = false
 	cfg.SecretBackend = config.SecretBackendDB
 	cfg.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
@@ -133,10 +133,10 @@ func TestManagedCredentialsWithCatalogUpdatesDisabled(t *testing.T) {
 	runtime := app.HostGraph(rt).Runtime
 	mid := runtime.ConfiguredMerchant()
 	require.Nil(t, runtime.ManifestSecrets, "managed credentials must not acquire a host fallback")
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true}, Gate: allowAllGate{id: mid}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantConfig: true}, Gate: allowAllGate{id: mid}})
 	require.NoError(t, err)
-	for _, secret := range []string{"whsec_managed_catalog_v1", "whsec_managed_catalog_v2"} {
-		payload, err := json.Marshal(map[string]any{"account_id": account, "credentials": map[string]string{"webhook_signing_secret": secret}})
+	for revision, secret := range []string{"whsec_managed_catalog_v1", "whsec_managed_catalog_v2"} {
+		payload, err := json.Marshal(map[string]any{"operation_id": uuid.NewString(), "expected_revision": revision, "account_id": account, "credentials": map[string]string{"webhook_signing_secret": secret}})
 		require.NoError(t, err)
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodPut, "/v1/merchant/payment-providers/stripe", strings.NewReader(string(payload)))
@@ -148,11 +148,9 @@ func TestManagedCredentialsWithCatalogUpdatesDisabled(t *testing.T) {
 		require.Equal(t, secret, loaded.WebhookSigningSecret)
 		require.NotZero(t, merchantSecretRowCount(t, runtime.DB.Pool(), ctx, mid))
 		inMerchantScope(t, runtime.DB.Pool(), ctx, mid, func(tx pgx.Tx) {
-			var persisted string
-			name, err := merchants.PSPSecretName("stripe", "test", account, "webhook_signing_secret")
-			require.NoError(t, err)
-			require.NoError(t, tx.QueryRow(ctx, `SELECT value FROM billing.merchant_secrets WHERE merchant_id=$1 AND name=$2`, mid.UUID(), name).Scan(&persisted))
-			require.NotEqual(t, secret, persisted, "managed provider credentials must be encrypted")
+			var plaintext int
+			require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM billing.merchant_secrets WHERE merchant_id=$1 AND value=$2`, mid.UUID(), secret).Scan(&plaintext))
+			require.Zero(t, plaintext, "published candidates must be encrypted, never canonical plaintext")
 		})
 	}
 	application, err := openrails.ParseCatalogApplicationYAML(manifestModeCatalogYAML(slug, 3_000_000))

@@ -4,6 +4,7 @@ package embed
 
 import (
 	"context"
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -25,12 +26,12 @@ func TestEmbedded_DeclarePSP(t *testing.T) {
 
 	suffix := strings.ToLower(uuid.NewString()[:8])
 	cfg := &config.Config{
-		Env:                  "development",
-		TestMode:             config.CredentialPostureSandbox,
-		ProviderWriteMode:    config.ProviderWriteModeReadOnly,
-		MerchantConfigSource: config.MerchantConfigSourceAPI,
-		SecretBackend:        config.SecretBackendDB,
-		DB:                   &config.DBConfig{URL: appDSN},
+		TestMode:           config.CredentialPostureSandbox,
+		ProviderWriteMode:  config.ProviderWriteModeReadOnly,
+		MerchantConfigHTTP: true,
+		SecretBackend:      config.SecretBackendDB,
+		Encryption:         &config.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))},
+		DB:                 &config.DBConfig{URL: appDSN},
 	}
 	ctx := context.Background()
 	declaration := PSPDeclaration{Key: " Platform ", Rail: " PLATFORM ", AccountID: " internal-platform-" + suffix}

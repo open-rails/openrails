@@ -4,6 +4,7 @@ package controlplane_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 	"time"
@@ -28,13 +29,13 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := &config.Config{
-		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
-		SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn},
+		TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true,
+		Encryption: &config.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn},
 	}
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://cutover.openrails.test", KeysPath: t.TempDir()}})
+	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{AllowMemory: true, AllowEphemeralSigningKey: true, DirectPeerIP: true, AllowMissingSenders: true, Issuer: "https://cutover.openrails.test", KeysPath: t.TempDir()}})
 	require.NoError(t, err)
 
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())

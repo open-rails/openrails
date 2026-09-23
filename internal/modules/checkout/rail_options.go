@@ -123,7 +123,7 @@ func (s *CheckoutSessionService) checkoutRailSkipReason(price *models.Price, tar
 	if price == nil || providerConfig == nil {
 		return models.CheckoutRoutingSkipNotArmed
 	}
-	if mode == models.CheckoutSessionModeSubscription && s.config != nil && s.config.NewSubscriptionCollectionPolicy == "engine" {
+	if mode == models.CheckoutSessionModeSubscription {
 		if price.Amount <= 0 || price.TrialUnitAmount != nil || price.TrialDurationHours != nil || price.RecurringCycleHours() == nil {
 			return models.CheckoutRoutingSkipModeUnsupported
 		}
@@ -147,7 +147,7 @@ func (s *CheckoutSessionService) checkoutRailSkipReason(price *models.Price, tar
 		if providerConfig.Stripe == nil || strings.TrimSpace(providerConfig.Stripe.SecretKey) == "" {
 			return models.CheckoutRoutingSkipCredentialsMissing
 		}
-		if mode == models.CheckoutSessionModeOneOff && s.config != nil && s.config.NewSubscriptionCollectionPolicy == "engine" {
+		if mode == models.CheckoutSessionModeOneOff {
 			return ""
 		}
 		if stripePaidIntroUnsupported(price) {

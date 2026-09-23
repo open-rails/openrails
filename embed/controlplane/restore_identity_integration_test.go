@@ -4,6 +4,7 @@ package controlplane_test
 
 import (
 	"context"
+	"encoding/base64"
 	embedoperator "github.com/open-rails/openrails/embed/operator"
 	"testing"
 
@@ -22,13 +23,13 @@ import (
 func TestControlPlaneProvisionsRestoreIdentityUnderDestinationAuthority(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.Config{
-		Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI,
-		SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
+		TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true,
+		Encryption: &config.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
 	}
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://restore.openrails.test", KeysPath: t.TempDir()}})
+	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{Auth: &hostconfig.AuthConfig{AllowMemory: true, AllowEphemeralSigningKey: true, DirectPeerIP: true, AllowMissingSenders: true, Issuer: "https://restore.openrails.test", KeysPath: t.TempDir()}})
 	require.NoError(t, err)
 	suffix := uuid.NewString()[:8]
 	owner, err := cp.Core().CreateUser(ctx, "restore-"+suffix+"@example.test", "restore"+suffix)

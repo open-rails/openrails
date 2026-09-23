@@ -7,6 +7,9 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/service"
+	"github.com/open-rails/openrails/pkg/merchant"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
@@ -23,6 +26,8 @@ type MerchantDeclaration struct {
 	Slug   string
 	Config MerchantConfig
 	PSPs   []PSPDeclaration
+	// MetadataApplication applies an explicitly versioned metadata update after identity binding.
+	MetadataApplication *openrails.MerchantConfigurationApplyParams
 }
 
 func validateMerchantDeclaration(declaration *MerchantDeclaration) error {
@@ -65,6 +70,11 @@ func configureMerchant(ctx context.Context, application *app.App, declaration *M
 	id, err := upsertMerchantConfig(ctx, application, declaration.Slug, declaration.Config)
 	if err != nil {
 		return err
+	}
+	if declaration.MetadataApplication != nil {
+		if _, err := service.ApplyMerchantMetadata(merchant.WithID(ctx, id), application.Runtime.DB, *declaration.MetadataApplication); err != nil {
+			return err
+		}
 	}
 	for _, psp := range declaration.PSPs {
 		if _, err := hosttools.DeclarePSP(ctx, application, id, psp); err != nil {

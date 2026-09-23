@@ -85,11 +85,11 @@ func testStandaloneAccountRecovery(t *testing.T, workers bool) {
 		require.Equal(t, 2, pending, "API-only startup binds producers without executing callbacks")
 		// A distinct worker application uses the same complete contribution set,
 		// identity issuer and database as the API's unstarted producer client.
-		worker, err := serverboot.NewWorker(t.Context(), &config.Config{
-			Env: "dev", APIURL: surface.BaseURL, TestMode: config.CredentialPostureSandbox,
+		worker, err := serverboot.NewWorker(t.Context(), &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
+			PublicBillingBaseURL: surface.BaseURL, TestMode: config.CredentialPostureSandbox,
 			DB: &config.DBConfig{URL: h.DSN}, Redis: &config.RedisConfig{Addr: h.Redis.Options().Addr},
-			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
-		}, &serverboot.Options{Auth: &hostconfig.AuthConfig{Issuer: surface.authConfig.Issuer, KeysPath: surface.authConfig.KeysPath, DirectPeerIP: true}})
+			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB,
+		}, &serverboot.Options{Auth: &hostconfig.AuthConfig{Issuer: surface.authConfig.Issuer, KeysPath: surface.authConfig.KeysPath, DirectPeerIP: true, AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true}})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, worker.Close(context.Background())) })
 		ctx, cancel := context.WithCancel(t.Context())

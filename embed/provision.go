@@ -3,16 +3,13 @@ package embed
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/goccy/go-yaml"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/http/routesurface"
 	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -76,38 +73,23 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m Mercha
 		Directory:  directory,
 		Slug:       slug,
 		Merchant:   m,
-		Options:    boot.MerchantManifestReconcileOptions{Insert: true},
+		Options:    boot.MerchantManifestReconcileOptions{Insert: true, StripeClients: a.Runtime.StripeClients},
 	}
-	var secretBackend *merchantsecrets.Store
 	switch {
-	case conf.IsManifestMerchantConfigSource():
-		// MODE 1 (#723): this call IS the manifest. Identity/config/account rows
-		// reconcile as DB projections; secrets seed the runtime's in-memory plane
-		// (never a persistent store). An empty MerchantConfig stays a legal
-		// read-side bind (host-two). ProvisionMerchant forces Insert+Overwrite+
-		// Prune so a re-run (host reboot) steamrolls stale in-memory values.
+	case conf.SecretStoreBackend() == config.SecretBackendSnapshot:
+		// Load the host-owned snapshot into this process. Metadata initialization
+		// is create-only; authorized edits and archived accounts survive restarts.
 		if a.Runtime == nil || a.Runtime.ManifestSecrets == nil {
-			return merchant.ID{}, fmt.Errorf("openrails embed: merchant_config_source=manifest requires the runtime manifest secret plane (#723)")
+			return merchant.ID{}, fmt.Errorf("openrails embed: snapshot credentials require the runtime snapshot plane")
 		}
 		req.SecretStore = a.Runtime.ManifestSecrets.Seeder()
-		backend, err := merchantsecrets.BuildManifest(ctx, conf, a.Runtime.ManifestSecrets, database.DataPool())
-		if err != nil {
-			return merchant.ID{}, fmt.Errorf("openrails embed: %w", err)
+		backend := a.Runtime.MerchantSecretBackend
+		if backend == nil {
+			return merchant.ID{}, fmt.Errorf("openrails embed: credential backend must be initialized before provisioning")
 		}
-		secretBackend = backend
 		req.SolanaTransit = backend.SolanaTransit
-		// Preserve backend capabilities for managed alert-webhook URLs. Provider
-		// route discovery separately omits host-owned credential mutations;
-		// Solana signing keys can live in memory.
-		a.Runtime.RouteCapabilities = &routesurface.RuntimeCapabilities{
-			SolanaCanSign: backend.SolanaCanSign,
-			SecretWrite:   backend.SecretWrite,
-		}
-	case merchantConfigDeclaresManifestTruth(m):
-		// MODE 2 (#724): merchant truth arrives via the HTTP APIs; a manifest-shaped
-		// upsert is a second truth and refuses loudly. A bare bind (empty config or
-		// display name only) stays legal — it declares no truth.
-		return merchant.ID{}, fmt.Errorf("openrails embed: merchant_config_source=api refuses manifest-declared merchant config (two truths, #723/#724); configure providers via PUT /v1/merchant/payment-providers, or run merchant_config_source=manifest")
+	case len(m.PSPs) > 0 || len(m.Custodians) > 0:
+		return merchant.ID{}, fmt.Errorf("openrails embed: provider credential declarations require a host snapshot; use the Client payment-provider publication operation for managed credentials")
 	}
 
 	tn, err := boot.ProvisionMerchant(ctx, req)
@@ -117,37 +99,7 @@ func upsertMerchantConfig(ctx context.Context, a *app.App, slug string, m Mercha
 	if a.Runtime.ConfiguredMerchant().IsZero() {
 		a.Runtime.SetConfiguredMerchant(tn.ID)
 	}
-	// MODE 1: arm the runtime consumers (checkout/vault/webhooks/pulls) over the
-	// freshly seeded in-memory plane right away — no standalone server or worker
-	// registration ever needs to run first.
-	if conf.IsManifestMerchantConfigSource() && a.Runtime.Merchants == nil {
-		svc, err := merchants.NewService(database.DataPool(), secretBackend.Secrets, config.ExpectedProviderEnvironment(conf.IsTestMode()))
-		if err != nil {
-			return merchant.ID{}, fmt.Errorf("openrails embed: build merchants service: %w", err)
-		}
-		a.Runtime.ArmMerchantsService(svc, secretBackend.Secrets)
-		a.Runtime.MerchantSecretPing = secretBackend.Ping
-	}
-	if conf.IsManifestMerchantConfigSource() {
-		a.Runtime.ArmSolanaRecurringServices(secretBackend.Secrets, secretBackend.SolanaTransit)
-	}
 	return tn.ID, nil
-}
-
-// merchantConfigDeclaresManifestTruth reports whether a constructor merchant
-// payload carries manifest-owned truth (accounts/secrets, profile, invoice
-// policy, spend windows, remote-application trust) as opposed to a bare
-// identity bind.
-func merchantConfigDeclaresManifestTruth(m MerchantConfig) bool {
-	return len(m.PSPs) > 0 ||
-		m.Invoice != nil ||
-		len(m.DelegatedInvokerWastedSpendWindows) > 0 ||
-		len(m.CheckoutRouting) > 0 ||
-		strings.TrimSpace(m.Profile.DisplayName) != "" ||
-		strings.TrimSpace(m.Profile.LogoURL) != "" ||
-		strings.TrimSpace(m.Profile.FromEmail) != "" ||
-		strings.TrimSpace(m.Profile.SupportURL) != "" ||
-		strings.TrimSpace(m.Profile.SignupURL) != ""
 }
 
 // ParseMerchantConfig parses a single merchant YAML document into a MerchantConfig.

@@ -1,8 +1,8 @@
 // Package controlplane attaches the OpenRails-owned AuthKit control plane to an
 // embedded runtime and exposes the operator mechanisms a hosted product
-// composes: merchant provisioning and directory, provider configuration,
+// composes: merchant provisioning and directory,
 // fleet aggregates, retirement and the standalone HTTP surface. Ordinary
-// billing goes through openrails.Client; hosts that bring their own AuthKit
+// billing and provider configuration go through openrails.Client; hosts that bring their own AuthKit
 // never import this package.
 package controlplane
 
@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
 	corecp "github.com/open-rails/openrails/internal/controlplane"
-	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/providerqualification"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -34,20 +33,13 @@ import (
 type Options = operator.AttachOptions
 
 type (
-	MerchantCreationConfig               = operator.MerchantCreationConfig
-	MerchantCreationPolicy               = operator.MerchantCreationPolicy
-	BootstrapOptions                     = operator.BootstrapOptions
-	BootstrapResult                      = operator.BootstrapResult
-	ProvisionMerchantRequest             = operator.ProvisionMerchantRequest
-	ProvisionMerchantResult              = operator.ProvisionMerchantResult
-	MerchantRef                          = operator.MerchantRef
-	PaymentProviderConfig                = operator.PaymentProviderConfig
-	UpsertPaymentProviderConfigRequest   = operator.UpsertPaymentProviderConfigRequest
-	ArchivePaymentProviderAccountRequest = operator.ArchivePaymentProviderAccountRequest
-	// LastActiveProviderAccountError is ArchivePaymentProviderAccount's refusal
-	// to archive the rail's only active account without AllowLast; match it
-	// with errors.As.
-	LastActiveProviderAccountError      = merchants.LastActiveProviderAccountError
+	MerchantCreationConfig              = operator.MerchantCreationConfig
+	MerchantCreationPolicy              = operator.MerchantCreationPolicy
+	BootstrapOptions                    = operator.BootstrapOptions
+	BootstrapResult                     = operator.BootstrapResult
+	ProvisionMerchantRequest            = operator.ProvisionMerchantRequest
+	ProvisionMerchantResult             = operator.ProvisionMerchantResult
+	MerchantRef                         = operator.MerchantRef
 	FleetSnapshot                       = operator.FleetSnapshot
 	FleetSeries                         = operator.FleetSeries
 	FleetMerchantFunnel                 = operator.FleetMerchantFunnel
@@ -111,12 +103,6 @@ var (
 	// ErrProviderAccountCutoverNotQualified is the reason a cross-account plan
 	// reports; it is never executed automatically.
 	ErrProviderAccountCutoverNotQualified = operator.ErrProviderAccountCutoverNotQualified
-	// ErrPaymentProviderNotFound is GetPaymentProviderConfig's answer when the
-	// merchant has no active account on the rail; match it with errors.Is.
-	ErrPaymentProviderNotFound = merchants.ErrPaymentProviderNotFound
-	// ErrPaymentProviderAccountNotFound is ArchivePaymentProviderAccount's
-	// answer for a PSP id the merchant does not own on that rail.
-	ErrPaymentProviderAccountNotFound = merchants.ErrPaymentProviderAccountNotFound
 )
 
 // MerchantGroup and CustomerGroup name the AuthKit persona groups.
@@ -264,36 +250,6 @@ func (c *ControlPlane) SetMerchantAPIHost(ctx context.Context, id merchant.ID, a
 
 func (c *ControlPlane) GetMerchantAPIHost(ctx context.Context, id merchant.ID) (string, error) {
 	return operator.GetMerchantAPIHost(ctx, c.app, id)
-}
-
-// GetPaymentProviderConfig returns one redacted provider account.
-func (c *ControlPlane) GetPaymentProviderConfig(ctx context.Context, id merchant.ID, rail, environment string) (PaymentProviderConfig, error) {
-	return operator.GetPaymentProviderConfig(ctx, c.app, id, rail, environment)
-}
-
-// UpsertPaymentProviderConfig arms a provider account through the merchant
-// secret backend. The supplied credentials are live-probed before anything is
-// written, so it cannot archive a dark account: use
-// ArchivePaymentProviderAccount for that.
-func (c *ControlPlane) UpsertPaymentProviderConfig(ctx context.Context, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error) {
-	return operator.UpsertPaymentProviderConfig(ctx, c.app, id, rail, req)
-}
-
-// ListPaymentProviderConfigs returns the merchant's redacted provider accounts
-// on rail ("" = every rail) with status "active", "archived" or "" (all) —
-// the immutable `ID` each carries is what ArchivePaymentProviderAccount takes.
-func (c *ControlPlane) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID, rail, status string) ([]PaymentProviderConfig, error) {
-	return operator.ListPaymentProviderConfigs(ctx, c.app, id, rail, status)
-}
-
-// ArchivePaymentProviderAccount archives exactly the account pspID on rail
-// (#655 lifecycle, #656 emergency step 3). No provider call is made and the
-// credentials stay, so a terminated account archives and its existing
-// obligations keep draining. Archiving an archived account is a no-op. The
-// rail's only active account is refused with LastActiveProviderAccountError
-// unless req.AllowLast is set.
-func (c *ControlPlane) ArchivePaymentProviderAccount(ctx context.Context, id merchant.ID, rail string, pspID uuid.UUID, req ArchivePaymentProviderAccountRequest) (PaymentProviderConfig, error) {
-	return operator.ArchivePaymentProviderAccount(ctx, c.app, id, rail, pspID, req)
 }
 
 // FleetAnalytics returns cross-merchant operator aggregates, excluding one merchant.

@@ -99,8 +99,8 @@ const cases: Case[] = [
     "DELETE /merchant/customers/cus_1/rate-overrides/tokens", [...meterTree, ...customerTree, "dashboard"]],
   ["updates settings without dropping the provider list", (c, g) => g(M.updateMerchantSettings(c), { profile: { display_name: "Acme" } }),
     "PUT /merchant/settings", ["settings"]],
-  ["saves provider credentials", (c, g) => g(M.savePaymentProvider(c), { rail: "nmi", provider: { account_id: "gw_1" } }),
-    "PUT /merchant/payment-providers/nmi", ["providers"], { account_id: "gw_1" }],
+  ["saves provider credentials", (c, g) => g(M.savePaymentProvider(c), { rail: "nmi", provider: { account_id: "gw_1", operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9", expected_revision: 0 } }),
+    "PUT /merchant/payment-providers/nmi", ["providers"], { account_id: "gw_1", operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9", expected_revision: 0 }],
   ["archives one provider account by id", (c, g) => g(M.archivePaymentProvider(c), { rail: "nmi", id: "psp_1", allowLast: true }),
     "POST /merchant/payment-providers/nmi/accounts/psp_1/archive", ["providers"], { allow_last: true }],
   ["sets a customer credit limit at the int64 boundary", (_c, g) => g(M.setCreditLimit(), creditLimit),
@@ -122,8 +122,14 @@ it.each(cases)("%s", async (_name, run, expected, invalidates, body) => {
   const queryClient = client()
   const seeded = [...seedCache(queryClient, "merchant-a"), ...seedCache(queryClient, "merchant-b")]
   selectMerchant("merchant-a")
+  if (_name === "saves provider credentials") {
+    routes["PUT /merchant/payment-providers/nmi"] = () => {
+      selectMerchant("merchant-b") // switch after the scoped request was dispatched
+      return {}
+    }
+  }
   await run(queryClient, (options, input) => {
-    selectMerchant("merchant-b") // the console switched merchants mid-flight
+    if (_name !== "saves provider credentials") selectMerchant("merchant-b")
     return exec(queryClient, options, input)
   })
   expect(calls(requests)).toEqual(typeof expected === "string" ? [expected] : expected)

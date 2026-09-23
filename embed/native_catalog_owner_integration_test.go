@@ -69,8 +69,8 @@ func TestNativeCatalogOwnerSelectionRequiresCanonicalSelfOrLiveAdmin(t *testing.
 	}
 	runtime, mid, err := newDeclaredMerchant(ctx, embed.Options{
 		Config: &config.Config{
-			Env: "development", TestMode: config.CredentialPostureSandbox,
-			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
+			TestMode:           config.CredentialPostureSandbox,
+			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 			AllowCatalogUpdates: true, ProviderWriteMode: config.ProviderWriteModeReadOnly,
 			DB: &config.DBConfig{URL: dsn},
 		},

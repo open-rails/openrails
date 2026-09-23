@@ -28,7 +28,6 @@ func TestClose_DoesNotCloseInjectedRedisClient(t *testing.T) {
 	require.NoError(t, rdb.Ping(ctx).Err())
 
 	cfg := &config.Config{
-		Env:      "development",
 		TestMode: config.CredentialPostureSandbox,
 		DB:       &config.DBConfig{URL: appDSN},
 	}

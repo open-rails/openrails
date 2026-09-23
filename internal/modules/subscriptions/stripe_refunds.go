@@ -38,8 +38,9 @@ type StripeAPICallError struct {
 func (e *StripeAPICallError) Error() string { return e.Message }
 
 type StripeRefundService struct {
-	Config *config.Config
-	Rails  railresolve.Source
+	StripeClients *stripeapi.Factory
+	Config        *config.Config
+	Rails         railresolve.Source
 
 	// BaseURL overrides the Stripe API root. Empty means the production
 	// Stripe API (https://api.stripe.com). Tests set this to an httptest
@@ -123,7 +124,7 @@ func (s *StripeRefundService) CreateRefund(ctx context.Context, params RefundPar
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	stripeapi.SetIdempotencyKey(req, idempotencyKey)
 
-	client := stripeapi.Client(s.Config, 30*time.Second)
+	client := s.StripeClients.Client(s.Config, 30*time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("stripe refund request failed: %w", err)
@@ -210,7 +211,7 @@ func (s *StripeRefundService) GetRefund(ctx context.Context, refundID string) (*
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 
-	client := stripeapi.Client(s.Config, 0)
+	client := s.StripeClients.Client(s.Config, 0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("stripe refund fetch failed: %w", err)
@@ -267,7 +268,7 @@ func (s *StripeRefundService) FindRefundByIdempotencyKey(ctx context.Context, ch
 	}
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 
-	client := stripeapi.Client(s.Config, 0)
+	client := s.StripeClients.Client(s.Config, 0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, false, fmt.Errorf("stripe refund list failed: %w", err)

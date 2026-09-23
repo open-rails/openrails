@@ -76,15 +76,14 @@ func (s *captureEmailSender) resetLink(email string) string {
 
 func hostedTestConfig(t *testing.T, dsn, issuer string) *hostconfig.Config {
 	t.Helper()
-	return &hostconfig.Config{Config: &config.Config{
-		Env:      "dev",
+	return &hostconfig.Config{Config: &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 		TestMode: config.CredentialPostureSandbox,
 		// MODE 2 (#723): the hosted-embedder shape — merchants are created over
 		// code paths (ProvisionMerchant), not a manifest.
-		MerchantConfigSource: config.MerchantConfigSourceAPI,
-		SecretBackend:        config.SecretBackendDB,
-		DB:                   &config.DBConfig{URL: dsn},
-	}, Auth: &hostconfig.AuthConfig{Issuer: issuer, KeysPath: t.TempDir()},
+		MerchantConfigHTTP: true,
+		SecretBackend:      config.SecretBackendDB,
+		DB:                 &config.DBConfig{URL: dsn},
+	}, Auth: &hostconfig.AuthConfig{Issuer: issuer, KeysPath: t.TempDir(), AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowMemory: true, DirectPeerIP: true},
 	}
 }
 

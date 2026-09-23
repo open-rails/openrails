@@ -39,13 +39,13 @@ func TestCapabilitiesHandler(t *testing.T) {
 		t.Fatalf("route_groups has %d keys, want %d (all known groups)", len(caps.RouteGroups), len(AllRouteSets))
 	}
 	want := map[RouteSet]bool{
-		RouteSetCheckout:         true,
-		RouteSetCustomer:         true, // advertised even though the user handler strips it
-		RouteSetWebhooks:         true,
-		RouteSetMerchantAdmin:    false,
-		RouteSetCatalog:          false,
-		RouteSetPaymentProviders: false,
-		RouteSetMerchantAPI:      false,
+		RouteSetCheckout:       true,
+		RouteSetCustomer:       true, // advertised even though the user handler strips it
+		RouteSetWebhooks:       true,
+		RouteSetMerchantAdmin:  false,
+		RouteSetCatalog:        false,
+		RouteSetMerchantConfig: false,
+		RouteSetMerchantAPI:    false,
 	}
 	for rs, w := range want {
 		if caps.RouteGroups[rs] != w {

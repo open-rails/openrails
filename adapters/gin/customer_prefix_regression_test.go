@@ -32,7 +32,7 @@ func TestReviewCustomerPrefixNativeCompatibility(t *testing.T) {
 				calls++
 				return nil, billingauth.ErrUnauthenticated
 			})
-			cfg := &config.Config{MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true}
+			cfg := &config.Config{SecretBackend: config.SecretBackendDB, MerchantConfigHTTP: true, AllowCatalogUpdates: true}
 			graph := &app.App{Config: cfg, Runtime: &app.Runtime{Config: cfg}}
 			policy := &embed.HTTPConfig{}
 			for _, prefix := range tc.prefixes {

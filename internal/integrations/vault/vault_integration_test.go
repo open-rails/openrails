@@ -116,3 +116,28 @@ func TestVaultTransitEd25519SignVerify(t *testing.T) {
 		t.Fatal("Solana signer over Vault Transit produced an unverifiable signature")
 	}
 }
+
+func TestVaultExactPublicationAndCAS(t *testing.T) {
+	ctx := t.Context()
+	kv := NewKVv2Adapter(liveClient(t), "secret")
+	path := "secret/openrails/publication-proof/" + time.Now().Format("150405.000000000")
+	defer kv.DeleteSecret(ctx, path)
+	first, err := kv.WriteSecretCAS(ctx, path, map[string]string{"value": "published"}, 0)
+	if err != nil || first != 1 {
+		t.Fatalf("create CAS: version=%d err=%v", first, err)
+	}
+	if _, err := kv.WriteSecretCAS(ctx, path, map[string]string{"value": "competing"}, 0); err == nil {
+		t.Fatal("CAS must refuse duplicate creation")
+	}
+	second, err := kv.WriteSecretCAS(ctx, path, map[string]string{"value": "unpublished"}, first)
+	if err != nil || second != 2 {
+		t.Fatalf("stage CAS: version=%d err=%v", second, err)
+	}
+	data, version, err := kv.ReadSecretVersion(ctx, path, first)
+	if err != nil || version != first || data["value"] != "published" {
+		t.Fatalf("exact publication lost: version=%d err=%v", version, err)
+	}
+	if _, err := kv.WriteSecretCAS(ctx, path, map[string]string{"value": "stale"}, first); err == nil {
+		t.Fatal("stale CAS must fail")
+	}
+}

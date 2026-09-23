@@ -86,9 +86,9 @@ func newRootCmd() *cobra.Command {
 	rootCmd.PersistentFlags().
 		StringP("config", "c", "config.yaml", "Path to config file")
 	rootCmd.PersistentFlags().
-		String("provider-write-mode", "", "Payment-provider write policy: full | limited | readonly (overrides PROVIDER_WRITE_MODE env and config.yaml; required outside development)")
+		String("provider-write-mode", "", "Payment-provider write policy: full | limited | readonly (overrides PROVIDER_WRITE_MODE env and config.yaml; omission defaults to readonly)")
 	rootCmd.PersistentFlags().
-		String("test-mode", "", "Credential posture: sandbox | live (sandbox uses Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_MODE env and config.yaml; required outside development")
+		String("test-mode", "", "Credential posture: sandbox | live (sandbox uses Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_MODE env and config.yaml; posture must be explicit")
 
 	serverCmd := &cobra.Command{
 		Use:   "run-server",
@@ -141,7 +141,7 @@ func newRootCmd() *cobra.Command {
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, newMigrateStatusCmd())
 	// Drop cobra's auto-generated `completion` subcommand.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newApplyCatalogCmd(), newDumpCatalogCmd(), newPullProviderCmd(), newPruneCmd(), newConvergeCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newMerchantConfigurationCmd(false), newMerchantConfigurationCmd(true), newApplyCatalogCmd(), newDumpCatalogCmd(), newPullProviderCmd(), newPruneCmd(), newConvergeCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd())
 	return rootCmd
 }
 
@@ -206,11 +206,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("startup bootstrap: %w", err)
 	}
 
-	// MODE 1 (#723/#847): converge the boot merchant manifest EVERY boot —
-	// DB rows as projections (insert+overwrite+prune), secrets seeded into the
-	// in-memory plane. Same semantics as serverboot.NewServer: the conventional
-	// file is optional, an explicit --merchant-manifest path must exist, and
-	// merchant_config_source=api refuses a present manifest.
+	// Reload snapshot credentials and seed absent merchant metadata. Existing
+	// metadata is preserved unless an explicit application changes it. The
+	// conventional file is optional; an explicit manifest path must exist.
 	manifestPath, err := cmd.Flags().GetString("merchant-manifest")
 	if err != nil {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)

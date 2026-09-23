@@ -9,8 +9,13 @@ package tests
 // the only fake is the Stripe wire server behind the stripeapi choke point.
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -27,9 +32,9 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
-	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	riverjobs "github.com/open-rails/openrails/internal/river"
+	"github.com/open-rails/openrails/internal/shared/webhookutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -119,7 +124,6 @@ func newFakeStripeWebhookAPI(t *testing.T) *fakeStripeWebhookAPI {
 
 	f.server = httptest.NewServer(mux)
 	t.Cleanup(f.server.Close)
-	t.Cleanup(stripeapi.InstallBaseTransport(stripeapi.HostRewriteTransport(f.server.URL)))
 	return f
 }
 
@@ -140,14 +144,14 @@ func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 	fake := newFakeStripeWebhookAPI(t)
 	h := integrationharness.New(t, t.Context())
 	surface := h.StartStandalone("USD", integrationharness.WithConfig(func(cfg *config.Config) {
-		cfg.APIURL = "https://api.openrails-e2e.example.com"
-		cfg.MerchantConfigSource = config.MerchantConfigSourceAPI
+		cfg.PublicBillingBaseURL = "https://api.openrails-e2e.example.com"
+		cfg.MerchantConfigHTTP = true
+		cfg.RateLimitsDisabled = true
 		cfg.SecretBackend = config.SecretBackendDB
 	}))
 	owned := surface.ProvisionOwnedMerchant("rollover-" + uuid.NewString()[:8])
 	rt := surface.App().Runtime
 	ctx := merchant.WithID(t.Context(), owned.MerchantID)
-	env := config.ExpectedProviderEnvironment(rt.Config.IsTestMode())
 	accountID := "acct_rollover_" + uuid.NewString()
 	integrationharness.SeedPSPs(ctx, t, rt, owned.MerchantID, config.PSPSet{"stripe": {Rail: "stripe", AccountID: accountID, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_856", WebhookSigningSecret: "whsec_on_the_old_endpoint"}}})
 	pool := h.MerchantPool(owned.MerchantID.UUID())
@@ -162,12 +166,7 @@ func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 	t.Cleanup(func() {
 		require.NoError(t, gate.SetSwitch(context.Background(), previousSwitch, "rollover-test", "restore fixture state"))
 	})
-	secretsStore := rt.Merchants.Secrets()
-	webhookName, err := merchants.PSPSecretName("stripe", env, accountID, "webhook_signing_secret")
-	require.NoError(t, err)
-	previousName, err := merchants.PSPSecretName("stripe", env, accountID, "webhook_signing_secret_previous")
-	require.NoError(t, err)
-	wantURL := "https://api.openrails-e2e.example.com/v1/merchants/" + owned.MerchantSlug + "/webhooks/stripe/" + accountID
+	wantURL := "https://api.openrails-e2e.example.com/v1/webhooks/stripe/" + accountID
 	fake.endpoints["we_old"] = map[string]any{
 		"id": "we_old", "object": "webhook_endpoint", "status": "enabled",
 		"url": wantURL, "api_version": "2020-01-01", "created": int64(1),
@@ -177,7 +176,8 @@ func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 
 	now := time.Now().UTC()
 	worker := riverjobs.StripeWebhookReconcileWorker{
-		DB: rt.DB, Config: rt.Config, Merchants: rt.Merchants,
+		StripeClients: stripeapi.NewFactory(stripeapi.HostRewriteTransport(fake.server.URL)),
+		DB:            rt.DB, Config: rt.Config, Merchants: rt.Merchants,
 		Now:           func() time.Time { return now },
 		RetireOverlap: time.Hour,
 	}
@@ -194,12 +194,42 @@ func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 
 	// The new secret is primary and the outgoing one is retained, so deliveries
 	// already queued on the superseded endpoint still verify: no gap.
-	cur, err := secretsStore.Get(ctx, owned.MerchantID, webhookName)
+	creds, ok, err := rt.Merchants.LoadStripeCredentialsForAccount(ctx, owned.MerchantID, accountID)
 	require.NoError(t, err)
-	require.NotEqual(t, "whsec_on_the_old_endpoint", cur.Value)
-	prev, err := secretsStore.Get(ctx, owned.MerchantID, previousName)
+	require.True(t, ok)
+	require.NotEqual(t, "whsec_on_the_old_endpoint", creds.WebhookSigningSecret)
+	require.Equal(t, "whsec_on_the_old_endpoint", creds.WebhookSigningPrevious)
+	body := []byte(fmt.Sprintf(`{"id":%q,"type":"customer.created","account":%q,"data":{"object":{"id":"cus_callback","object":"customer"}}}`, "evt_"+uuid.NewString(), accountID))
+	signature := func(secret string) string {
+		timestamp := time.Now().Unix()
+		mac := hmac.New(sha256.New, []byte(secret))
+		_, _ = fmt.Fprintf(mac, "%d.%s", timestamp, body)
+		return fmt.Sprintf("t=%d,v1=%x", timestamp, mac.Sum(nil))
+	}
+	require.NoError(t, webhookutil.VerifyStripeSignature(creds.WebhookSigningSecret, signature("whsec_rolled_we_new_a"), body, time.Minute))
+	require.NoError(t, webhookutil.VerifyStripeSignature(creds.WebhookSigningPrevious, signature("whsec_on_the_old_endpoint"), body, time.Minute))
+	// The URL created by the actual worker must enter the native standalone
+	// handler, with both overlap signatures accepted and a forgery refused.
+	createdURL, ok := live["we_new_a"]["url"].(string)
+	require.True(t, ok)
+	require.Equal(t, wantURL, createdURL)
+	callback, err := url.Parse(createdURL)
 	require.NoError(t, err)
-	require.Equal(t, "whsec_on_the_old_endpoint", prev.Value)
+	for _, key := range []string{creds.WebhookSigningSecret, creds.WebhookSigningPrevious, "whsec_forged"} {
+		request, err := http.NewRequest(http.MethodPost, surface.BaseURL+callback.RequestURI(), bytes.NewReader(body))
+		require.NoError(t, err)
+		request.Header.Set("Stripe-Signature", signature(key))
+		response, err := http.DefaultClient.Do(request)
+		require.NoError(t, err)
+		responseBody, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		require.NoError(t, err)
+		want := http.StatusOK
+		if key == "whsec_forged" {
+			want = http.StatusUnauthorized
+		}
+		require.Equal(t, want, response.StatusCode, string(responseBody))
+	}
 
 	// The rollover raised an operator finding rather than self-deleting.
 	require.Contains(t, openWebhookFinding(t, rt.DB, owned.MerchantID, accountID), "STILL ENABLED")
@@ -224,8 +254,9 @@ func TestStripeWebhookReconcileVersionBumpIsGapless(t *testing.T) {
 	require.Equal(t, []string{"we_old"}, deletes, "only the already-replaced endpoint is removed")
 	require.NotContains(t, live, "we_old")
 	require.Len(t, live, 1, "the successor is still there — never left unreachable")
-	_, err = secretsStore.Get(ctx, owned.MerchantID, previousName)
-	require.ErrorIs(t, err, merchants.ErrSecretNotFound)
+	creds, _, err = rt.Merchants.LoadStripeCredentialsForAccount(ctx, owned.MerchantID, accountID)
+	require.NoError(t, err)
+	require.Empty(t, creds.WebhookSigningPrevious)
 	require.Empty(t, openWebhookFinding(t, rt.DB, owned.MerchantID, accountID), "the finding auto-resolves")
 }
 

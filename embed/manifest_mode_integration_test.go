@@ -41,10 +41,9 @@ import (
 
 func manifestModeConfig(dsn string) *config.Config {
 	return &config.Config{
-		Env:      "dev",
 		TestMode: config.CredentialPostureLive,
 		// Explicit default (#723): manifest-is-truth.
-		MerchantConfigSource: config.MerchantConfigSourceManifest,
+
 		// full: the loop test executes a (fake-provider) charge.
 		ProviderWriteMode: config.ProviderWriteModeFull,
 		DB:                &config.DBConfig{URL: dsn},
@@ -342,7 +341,7 @@ func TestManifestMode_MutationRoutesOmitted(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, PaymentProviders: true}, Gate: allowAllGate{id: id}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{Catalog: true, MerchantConfig: true}, Gate: allowAllGate{id: id}})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
@@ -366,15 +365,13 @@ func TestManifestMode_MutationRoutesOmitted(t *testing.T) {
 		require.NotContains(t, body, "manifest_driven")
 	}
 
-	// Generic method-not-allowed comes from the read route, not a mounted guard.
-	for _, method := range []string{http.MethodPut, http.MethodDelete} {
-		status, body := do(method, "/v1/merchant/payment-providers/stripe", `{"account_id":"acct_x"}`)
-		require.Equal(t, http.StatusMethodNotAllowed, status, body)
-		require.NotContains(t, body, "manifest_driven")
-	}
-	status, body := do(http.MethodPost, "/v1/merchant/payment-providers/stripe/accounts/11111111-1111-1111-1111-111111111111/archive", "")
+	// Credential publication is refused by snapshot custody, while metadata
+	// lifecycle routes remain mounted and validate account ownership.
+	status, body := do(http.MethodPut, "/v1/merchant/payment-providers/stripe", fmt.Sprintf(`{"operation_id":%q,"expected_revision":0,"account_id":"acct_x","credentials":{"webhook_signing_secret":"whsec_snapshot"}}`, uuid.NewString()))
+	require.Equal(t, http.StatusMethodNotAllowed, status, body)
+	require.Contains(t, body, "credential_source_read_only")
+	status, body = do(http.MethodPost, "/v1/merchant/payment-providers/stripe/accounts/11111111-1111-1111-1111-111111111111/archive", "")
 	require.Equal(t, http.StatusNotFound, status, body)
-	require.NotContains(t, body, "manifest_driven")
 	// Disabled catalog mutations are absent independently of credential custody.
 	assertOmitted(do(http.MethodPost, "/v1/merchant/catalog/products", `{"key":"x","display_name":"X"}`))
 	assertOmitted(do(http.MethodPost, "/v1/merchant/catalog/applications", `{"catalog":{"version":1}}`))
@@ -395,12 +392,12 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 	nano := time.Now().UnixNano()
 	slug := fmt.Sprintf("mapi%d", nano)
 	cfg := &config.Config{
-		Env:                  "dev",
-		TestMode:             config.CredentialPostureLive,
-		MerchantConfigSource: config.MerchantConfigSourceAPI,
-		SecretBackend:        config.SecretBackendDB,
-		ProviderWriteMode:    config.ProviderWriteModeFull,
-		DB:                   &config.DBConfig{URL: dsn},
+		TestMode:           config.CredentialPostureLive,
+		MerchantConfigHTTP: true,
+		SecretBackend:      config.SecretBackendDB,
+		Encryption:         &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
+		ProviderWriteMode:  config.ProviderWriteModeFull,
+		DB:                 &config.DBConfig{URL: dsn},
 	}
 	// API mode still allows the bare identity bind.
 
@@ -420,12 +417,12 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 		}
 	})
 
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{PaymentProviders: true}, Gate: allowAllGate{id: id}})
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantConfig: true}, Gate: allowAllGate{id: id}})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	payload := fmt.Sprintf(`{"account_id":"acct_%d","credentials":{"webhook_signing_secret":"whsec_%d"}}`, nano, nano)
+	payload := fmt.Sprintf(`{"operation_id":%q,"expected_revision":0,"account_id":"acct_%d","credentials":{"webhook_signing_secret":"whsec_%d"}}`, uuid.NewString(), nano, nano)
 	req, err := http.NewRequest(http.MethodPut, server.URL+"/v1/merchant/payment-providers/stripe", strings.NewReader(payload))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -641,7 +638,7 @@ func TestManifestMode_ProviderRoutesDeriveWebhooksFromDBArmedAccounts(t *testing
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/merchants/"+slug+"/webhooks/ccbill/"+ccbillAccount, strings.NewReader("{}"))
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/webhooks/ccbill/"+ccbillAccount, strings.NewReader("{}"))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)

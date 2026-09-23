@@ -47,7 +47,7 @@ func TestMerchantRefundAuthorityAndReplayWorkflow(t *testing.T) {
 	t.Cleanup(wire.Close)
 	h := New(t, ctx)
 	surface := h.StartStandalone("USD", WithConfig(func(c *config.Config) {
-		c.MerchantConfigSource = config.MerchantConfigSourceAPI
+		c.MerchantConfigHTTP = true
 		c.SecretBackend = config.SecretBackendDB
 		c.ProviderWriteMode = config.ProviderWriteModeFull
 		c.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: wire.URL}

@@ -38,6 +38,7 @@ type VaultKV interface {
 // own subtree. The value field stored at each path is keyed "value".
 type vaultSecretStore struct {
 	mount  string
+	prefix string
 	client VaultKV
 }
 
@@ -49,12 +50,12 @@ func NewVaultSecretStore(mount string, client VaultKV) MerchantSecretStore {
 	if mount == "" {
 		mount = "secret"
 	}
-	return &vaultSecretStore{mount: mount, client: client}
+	return &vaultSecretStore{mount: mount, prefix: "openrails", client: client}
 }
 
 // pathFor builds the merchant-scoped Vault path for a (merchant, name) pair.
 func (v *vaultSecretStore) pathFor(merchantID merchant.ID, name string) string {
-	return path.Join(v.mount, "openrails", "merchants", merchantID.String(), cleanSecretName(name))
+	return path.Join(v.mount, v.prefix, "merchants", merchantID.String(), cleanSecretName(name))
 }
 
 func (v *vaultSecretStore) Get(ctx context.Context, tenantID merchant.ID, name string) (Secret, error) {
@@ -141,4 +142,42 @@ func (v *vaultSecretStore) cleanupTarget(id merchant.ID) (string, string, error)
 		return "", "", fmt.Errorf("Vault cleanup requires a stable backend identity")
 	}
 	return "vault:" + backend.BackendIdentity(), v.pathFor(id, ""), nil
+}
+
+// GetVersion never selects a newer, unpublished candidate.
+func (v *vaultSecretStore) GetVersion(ctx context.Context, id merchant.ID, name string, version int) (Secret, error) {
+	if err := validateSecretRef(id, name); err != nil {
+		return Secret{}, err
+	}
+	reader, ok := v.client.(interface {
+		ReadSecretVersion(context.Context, string, int) (map[string]string, int, error)
+	})
+	if !ok || version <= 0 {
+		return Secret{}, ErrSecretBackendUnavailable
+	}
+	data, actual, err := reader.ReadSecretVersion(ctx, v.pathFor(id, name), version)
+	if err != nil {
+		return Secret{}, errors.Join(ErrSecretBackendUnavailable, err)
+	}
+	value, ok := data["value"]
+	if !ok {
+		return Secret{}, ErrSecretNotFound
+	}
+	if actual != version {
+		return Secret{}, ErrSecretBackendUnavailable
+	}
+	return Secret{Name: name, Value: value, Version: actual}, nil
+}
+
+// NewVaultSecretStoreWithPrefix accepts only a server-owned, canonical namespace.
+func NewVaultSecretStoreWithPrefix(mount, prefix string, client VaultKV) (MerchantSecretStore, error) {
+	if prefix == "" {
+		prefix = "openrails"
+	}
+	if cleanSecretName(prefix) != prefix || strings.Contains(prefix, "//") {
+		return nil, fmt.Errorf("invalid Vault scope prefix")
+	}
+	store := NewVaultSecretStore(mount, client).(*vaultSecretStore)
+	store.prefix = prefix
+	return store, nil
 }

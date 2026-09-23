@@ -78,6 +78,7 @@ func (s *Service) ListSecretStatuses(ctx context.Context, id merchant.ID) ([]Mer
 		}
 		out = append(out, st)
 	}
+
 	return out, nil
 }
 
@@ -114,6 +115,9 @@ func (s *Service) ValidateCredential(ctx context.Context, id merchant.ID, name, 
 		value = sec.Value
 	}
 
+	if stripeTester == nil {
+		stripeTester = func(ctx context.Context, key string) error { return stripeBalanceCheck(ctx, key, s.StripeClients) }
+	}
 	return validateSecretValue(ctx, name, value, stripeTester)
 }
 

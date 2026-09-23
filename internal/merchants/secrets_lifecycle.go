@@ -55,3 +55,7 @@ func (s *lifecycleSecretStore) GetAtLeastVersion(ctx context.Context, id merchan
 	}
 	return s.MerchantSecretStore.Get(ctx, id, name)
 }
+
+func (s *lifecycleSecretStore) GetVersion(ctx context.Context, id merchant.ID, name string, version int) (Secret, error) {
+	return ReadSecretRef(ctx, s.MerchantSecretStore, id, SecretRef{Name: name, MinVersion: version})
+}

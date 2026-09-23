@@ -30,7 +30,7 @@ func TestBootstrap_ConcurrentColdBoot(t *testing.T) {
 	cps := make([]*ControlPlane, n)
 	configs := make([]*hostconfig.Config, n)
 	for i := range configs {
-		configs[i] = &hostconfig.Config{Config: &config.Config{Env: "dev"}, Auth: &hostconfig.AuthConfig{
+		configs[i] = &hostconfig.Config{Config: &config.Config{}, Auth: &hostconfig.AuthConfig{AllowMemory: true, AllowPrivateNetworkJWKS: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, DirectPeerIP: true,
 			Issuer: "https://openrails.test", KeysPath: t.TempDir(),
 		}}
 	}
@@ -111,7 +111,7 @@ func TestBootstrap_ConcurrentColdBoot(t *testing.T) {
 func TestBootstrap_RootGroupRaceLoserAdopts(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
-	cfg := &hostconfig.Config{Config: &config.Config{Env: "dev"}, Auth: &hostconfig.AuthConfig{
+	cfg := &hostconfig.Config{Config: &config.Config{}, Auth: &hostconfig.AuthConfig{AllowMemory: true, AllowPrivateNetworkJWKS: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, DirectPeerIP: true,
 		Issuer: "https://openrails.test", KeysPath: t.TempDir(),
 	}}
 

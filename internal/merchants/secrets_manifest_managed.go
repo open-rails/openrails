@@ -99,3 +99,10 @@ func mutableSecretView(store MerchantSecretStore) MerchantSecretStore {
 		}
 	}
 }
+
+func (s *manifestManagedSecretStore) GetVersion(ctx context.Context, id merchant.ID, name string, version int) (Secret, error) {
+	if isAlertWebhookSecret(name) {
+		return ReadSecretRef(ctx, s.managed, id, SecretRef{Name: name, MinVersion: version})
+	}
+	return ReadSecretRef(ctx, s.manifest, id, SecretRef{Name: name, MinVersion: version})
+}

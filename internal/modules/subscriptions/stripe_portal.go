@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"io"
 	"net/http"
@@ -12,12 +13,12 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 )
 
 type StripePortalService struct {
-	Config *config.Config
-	Rails  railresolve.Source
+	StripeClients *stripeapi.Factory
+	Config        *config.Config
+	Rails         railresolve.Source
 }
 
 func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerID, returnURL string) (string, error) {
@@ -42,7 +43,7 @@ func (s *StripePortalService) CreatePortalSession(ctx context.Context, customerI
 	req.Header.Set("Authorization", "Bearer "+secretKey)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := stripeapi.Client(s.Config, 0)
+	client := s.StripeClients.Client(s.Config, 0)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("stripe portal failed: %w", err)

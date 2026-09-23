@@ -146,22 +146,29 @@ func (h *Harness) StartStandaloneProcess(opts ...ProcessOption) *StandaloneProce
 	if h.Redis != nil {
 		redisAddr = h.Redis.Options().Addr
 	}
-	cfgYAML := fmt.Sprintf(`env: dev
-merchant_config_source: api
-secret_backend: db
+	cfgYAML := fmt.Sprintf(`secret_backend: db
+encryption:
+  master_key: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
 test_mode: sandbox
 provider_write_mode: full
 host: 127.0.0.1
 port: %d
-api_url: http://127.0.0.1:%d
+public_billing_base_url: http://127.0.0.1:%d
 db:
   url: %s
 redis:
   addr: %s
 auth:
+  allow_memory: true
+  allow_private_network_jwks: true
+  allow_missing_senders: true
+  allow_ephemeral_signing_key: true
+  direct_peer_ip: true
+  allow_loopback_http: true
+  request_origin: http://127.0.0.1:%d
   issuer: https://process.openrails.test
   keys_path: %s
-%s`, port, port, h.DSN, redisAddr, filepath.Join(dir, "keys"), strings.Join(pc.extraYAML, ""))
+%s`, port, port, h.DSN, redisAddr, port, filepath.Join(dir, "keys"), strings.Join(pc.extraYAML, ""))
 	configPath := filepath.Join(dir, "config.yaml")
 	require.NoError(h.t, os.MkdirAll(filepath.Join(dir, "keys"), 0o700))
 	require.NoError(h.t, os.WriteFile(configPath, []byte(cfgYAML), 0o600))

@@ -259,7 +259,7 @@ func TestSessionToResponse_TransactionRequestSolanaPayURLUsesCanonicalV1Path(t *
 			t.Parallel()
 
 			cfg := testSolanaCheckoutConfig()
-			cfg.APIURL = tc.apiURL
+			cfg.PublicBillingBaseURL = tc.apiURL
 
 			svc := &CheckoutSessionService{config: cfg, rails: testSolanaCheckoutRails()}
 			session := &models.CheckoutSession{

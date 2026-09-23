@@ -292,10 +292,11 @@ var jsonRules = map[string]jsonRule{
 		"declined": booleanValue, "response_code": integerValue, "localization_id": textValue, "provider_subscription_id": textValue,
 	})),
 
-	"custodians.settings":                      object(map[string]jsonRule{"public_api_key": textValue, "profile_id": textValue, "network_tokens": booleanSetting, "account_updater": booleanSetting, "account_updater_lookahead_days": integerSetting}),
-	"catalog_applications.result":              object(map[string]jsonRule{"application_id": textValue, "catalog_id": textValue, "base_revision": integerValue, "applied_revision": integerValue, "replayed": booleanValue, "products_changed": integerValue, "prices_changed": integerValue}),
-	"products.entitlements_spec":               nullable(dictionary(nullable(integerValue))),
-	"subscriptions.entitlements_spec_snapshot": nullable(dictionary(nullable(integerValue))),
+	"custodians.settings":                        object(map[string]jsonRule{"public_api_key": textValue, "profile_id": textValue, "network_tokens": booleanSetting, "account_updater": booleanSetting, "account_updater_lookahead_days": integerSetting}),
+	"merchant_configuration_applications.result": object(map[string]jsonRule{"application_id": textValue, "revision": textValue, "replayed": booleanValue}),
+	"catalog_applications.result":                object(map[string]jsonRule{"application_id": textValue, "catalog_id": textValue, "base_revision": integerValue, "applied_revision": integerValue, "replayed": booleanValue, "products_changed": integerValue, "prices_changed": integerValue}),
+	"products.entitlements_spec":                 nullable(dictionary(nullable(integerValue))),
+	"subscriptions.entitlements_spec_snapshot":   nullable(dictionary(nullable(integerValue))),
 	// Checkout writes correlation coordinates and delayed-start metadata;
 	// ordinary subscription updates add notes and supersession markers.
 	// Superseding a NULL response wraps it as previous_gateway_response:null.

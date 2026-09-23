@@ -42,9 +42,9 @@ func TestCustomerBillingManagementOwnHistoryAndPagination(t *testing.T) {
 	})
 	runtime, mid, err := newDeclaredMerchant(ctx, embed.Options{
 		HTTP: &embed.HTTPConfig{CustomerRoutes: []embed.CustomerRoutesConfig{{Scope: embed.CustomerBillingManagement, DelegatedAuthenticator: authn}}},
-		Config: &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox,
-			MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
-			ProviderWriteMode: config.ProviderWriteModeReadOnly, NewSubscriptionCollectionPolicy: "engine", DB: &config.DBConfig{URL: dsn}},
+		Config: &config.Config{TestMode: config.CredentialPostureSandbox,
+			MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
+			ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{URL: dsn}},
 		PGXPool: pool, River: embed.RiverFromHost(),
 	}, "customer-management-"+uuid.NewString(), embed.MerchantConfig{DisplayName: "Customer management"})
 	require.NoError(t, err)

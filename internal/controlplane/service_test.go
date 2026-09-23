@@ -5,6 +5,8 @@ import (
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -36,12 +38,11 @@ func testEd25519PrivateKeyPEM(t *testing.T) string {
 // no emergency revocation without a restart) — a non-development boot on this
 // path must say so loudly.
 func TestResolveControlPlaneKeySource_InlinePEMWarnsOutsideDev(t *testing.T) {
-	cfg := &hostconfig.Config{Config: &config.Config{
-		Env: "production",
-	}, Auth: &hostconfig.AuthConfig{
-		ActiveKeyID:         "test-key",
-		ActivePrivateKeyPEM: testEd25519PrivateKeyPEM(t),
-	},
+	cfg := &hostconfig.Config{Config: &config.Config{},
+		Auth: &hostconfig.AuthConfig{
+			ActiveKeyID:         "test-key",
+			ActivePrivateKeyPEM: testEd25519PrivateKeyPEM(t),
+		},
 	}
 
 	hook := logtest.NewGlobal()
@@ -62,28 +63,14 @@ func TestResolveControlPlaneKeySource_InlinePEMWarnsOutsideDev(t *testing.T) {
 	}
 }
 
-// TestResolveControlPlaneKeySource_InlinePEMSilentInDev: development is
-// exempt (short-lived, disposable processes) — no warning noise there.
-func TestResolveControlPlaneKeySource_InlinePEMSilentInDev(t *testing.T) {
-	cfg := &hostconfig.Config{Config: &config.Config{
-		Env: "development",
-	}, Auth: &hostconfig.AuthConfig{
-		ActiveKeyID:         "test-key",
-		ActivePrivateKeyPEM: testEd25519PrivateKeyPEM(t),
-	},
+func TestResolveControlPlaneKeySource_EphemeralRequiresExplicitPermission(t *testing.T) {
+	cfg := &hostconfig.Config{Config: &config.Config{}, Auth: &hostconfig.AuthConfig{KeysPath: t.TempDir()}}
+	if _, err := resolveControlPlaneKeySource(cfg.Config, cfg.Auth); err == nil {
+		t.Fatal("missing key must fail closed")
 	}
-
-	hook := logtest.NewGlobal()
-	defer hook.Reset()
-
+	cfg.Auth.AllowEphemeralSigningKey = true
 	if _, err := resolveControlPlaneKeySource(cfg.Config, cfg.Auth); err != nil {
-		t.Fatalf("resolveControlPlaneKeySource: %v", err)
-	}
-
-	for _, e := range hook.AllEntries() {
-		if e.Level == log.WarnLevel && strings.Contains(e.Message, "inline PEM") {
-			t.Fatalf("unexpected inline-PEM warning in development: %q", e.Message)
-		}
+		t.Fatal(err)
 	}
 }
 
@@ -91,11 +78,10 @@ func TestResolveControlPlaneKeySource_InlinePEMSilentInDev(t *testing.T) {
 // delivery route is the hot-rotating prod path — it must never trip the #752
 // inline-PEM warning, even outside development.
 func TestResolveControlPlaneKeySource_KeysPathNoWarning(t *testing.T) {
-	cfg := &hostconfig.Config{Config: &config.Config{
-		Env: "production",
-	}, Auth: &hostconfig.AuthConfig{
-		KeysPath: t.TempDir(),
-	},
+	cfg := &hostconfig.Config{Config: &config.Config{},
+		Auth: &hostconfig.AuthConfig{
+			KeysPath: t.TempDir(),
+		},
 	}
 
 	hook := logtest.NewGlobal()
@@ -127,5 +113,25 @@ func TestNew_RequiresPool(t *testing.T) {
 	cfg := &hostconfig.Config{Config: &config.Config{}, Auth: &hostconfig.AuthConfig{Issuer: "https://openrails.example.com"}}
 	if _, err := New(context.Background(), cfg.Config, cfg.Auth, nil); err == nil {
 		t.Fatal("expected error when pool is nil")
+	}
+}
+
+func TestDelegatedRequestURLUsesTrustedOriginAndEscapedTarget(t *testing.T) {
+	for _, path := range []string{"/v1/orders", "/billing/v1/orders", "/billing/v1/a%2Fb", "/billing/v1/a//b"} {
+		r := httptest.NewRequest(http.MethodGet, "http://untrusted.test"+path+"?q=x", nil)
+		r.Header.Set("X-Forwarded-Host", "attacker.test")
+		got := delegatedRequestURL("https://billing.example", nil)(r)
+		if got != "https://billing.example"+path {
+			t.Fatalf("target %q: %q", path, got)
+		}
+	}
+	r := httptest.NewRequest(http.MethodGet, "http://untrusted.test/billing/v1/a", nil)
+	for _, bad := range []string{"", "https://billing.example/billing", "https://user:secret@billing.example", "https://billing.example?override=yes"} {
+		if got := delegatedRequestURL(bad, nil)(r); got != "" {
+			t.Fatalf("invalid origin %q produced %q", bad, got)
+		}
+	}
+	if got := delegatedRequestURL("", func(*http.Request) string { return "https://host.example/original%2Fpath" })(r); got != "https://host.example/original%2Fpath" {
+		t.Fatal(got)
 	}
 }

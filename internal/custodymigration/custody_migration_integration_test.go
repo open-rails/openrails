@@ -549,7 +549,7 @@ func TestRemappedInstrumentChargesThroughTheSurvivorGateway(t *testing.T) {
 
 	bt := newFakeBTProxy(t)
 	builder := &money.MerchantCollectionAdapterBuilder{
-		Config:      &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull},
+		Config:      &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull},
 		DB:          fx.db,
 		MerchantsFn: func() *merchants.Service { return fx.merchants },
 		Endpoints:   money.CollectionEndpoints{BTBaseURL: bt.srv.URL, NMIDirectPostURL: "https://survivor.example/api/transact.php"},

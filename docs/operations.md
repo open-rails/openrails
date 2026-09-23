@@ -47,9 +47,10 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `migrate up` / `migrate pg` | apply all migrations / Postgres-only (River + OpenRails) |
 | `migrate status [--json]` | compare embedded OpenRails migrations with the applied ledger; non-zero unless names and hashes match exactly |
 | `push-auth-bootstrap [--file] [--dry-run] [--startup-only --name]` | push AuthKit root authority from a bootstrap manifest |
-| `push-merchant-config [--file] [mutation flags]` | push merchant groups + PSP declarations + secrets from `merchants.yaml` |
+| `push-merchant-config [--file] --insert` | initialize missing merchant identities and snapshot metadata; existing metadata is preserved |
+| `get-merchant-config` / `apply-merchant-config --merchant NAME --file PATH` | read or apply metadata using stable application ID and revision; local or `--server-url` remote Client |
 | `apply-catalog --merchant NAME --file PATH` | atomic local catalog application with durable replay identity |
-| `dump-merchant-config --slug [--out] [--include-secrets]` / `dump-merchant-catalog --slug` | export a merchant's config / catalog manifest |
+| `dump-merchant-config --slug [--out]` / `dump-merchant-catalog --slug` | export a merchant's config / catalog manifest |
 | `pull-provider` / `pull-provider report` | manual provider truth-pull / run report — see "Provider Pull" |
 | `prune list` / `converge list` | inspect the destructive runs a `--prune` / an enforcing pull opened |
 | `undo-run --run <id>` | plan or apply the reversal of one destructive run, whatever kind — see "Reversing a destructive run" |
@@ -612,26 +613,22 @@ tracker issue #701.
 
 ## Operating modes (the safety levers)
 
-Two orthogonal settings. `env` is the strictness label around them: only exact
-`dev` or `development` values enable development relaxations; every other
-non-empty value, including `staging`, `production`, and misspellings, receives
-the production-strict gates.
+Security defaults are independent of provider sandbox/live posture. Declare both
+`provider_write_mode` (`full`, `limited`, `readonly`) and `test_mode` (`sandbox`,
+`live`) explicitly. CLI flags override environment variables, which override YAML.
+An unset write policy fails closed to `readonly` wherever it is consulted;
+constructor validation requires an explicit policy. Sandbox validates test
+credentials and never relaxes issuer, signing, storage or proxy protections.
 
-- **`provider_write_mode`** (yaml) / `PROVIDER_WRITE_MODE` (env) /
-  `--provider-write-mode` (CLI flag; flag beats env beats yaml) — the pure
-  **behavior** dial: how much OpenRails may do against the payment rails. One
-  of `full | limited | readonly`. Required outside development — the boot
-  refuses without an explicit value, checked on the RAW setting. Unset
-  **fail-closes to `readonly`** everywhere the mode is consulted (including
-  development): forgetting the knob can never mean full behavior. The old
-  `mode` / `MODE` / `--mode` alias is removed (#710) — a set key fails loudly.
-- **`test_mode`** (yaml) / `TEST_MODE` (env) / `--test-mode` (CLI flag) — the
-  **credential** axis: `sandbox | live`, no other values. Required outside
-  development (or#915): the boot refuses without an explicit value — the old
-  silent live default could put a deployment on live credentials by omission.
-  Development-only, an unset value defaults to sandbox. Embedded hosts build
-  `Config` programmatically and must set it explicitly or construction
-  refuses to boot (#745).
+Narrow local exceptions are configured explicitly under `auth` (for example
+`allow_loopback_http`, `allow_memory`, `allow_missing_senders`, `direct_peer_ip`).
+Managed DB credentials always require encryption. `public_billing_base_url` is
+only the public callback/link mount base; issuer, `auth.request_origin`, remote
+Client server URL and `dashboard_base_url` are independent.
+
+New supported subscriptions use OpenRails collection by default. Existing or
+imported agreements retain their persisted owner and provider obligations; startup
+configuration never transfers them or starts a second collector.
 
 What each provider write mode permits (`test_mode` applies orthogonally: with
 sandbox the same matrix holds against sandbox rails, so no real money can move
@@ -817,14 +814,11 @@ engine-wide policy**, not a per-merchant setting.
   a hosted product should refuse to let a merchant self-provision as a slug
   (a slug commonly becomes `api.<slug>.<domain>`); the engine doesn't enforce
   it — the host does.
-- **Webhook surfaces**: all verify with the resolved merchant/account's own
-  signing secret, and `:rail` is always the gateway kind, never a PSP key.
-  Standalone: `/v1/webhooks/:rail/:account_id`; the configured account resolves
-  the merchant and payload account identity must agree. Embedded:
-  `/billing/v1/merchants/:merchant/webhooks/:rail/:account_id`,
-  the host's pinned merchant named by slug. Host-routed
-  (`RegisterHostWebhookRoutes`, mounted when a host resolver is attached):
-  `/webhooks/:rail/:account_id`, merchant resolved from the Host header.
+- **Webhook surface**: `<prefix>/v1/webhooks/:rail/:account_id` in embedded and
+  standalone deployments. The provider account resolves its merchant in the
+  configured environment; an explicit runtime merchant binding is enforced.
+  Provider signature/source verification and matching payload identity remain
+  required. Host headers do not choose callback authority.
 - **Consistency with token issuers**: a JWT minted for merchant A's issuer is
   rejected when presented against merchant B's Host, even though the token
   verifies — Host-merchant must equal issuer-merchant on every

@@ -19,12 +19,13 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // #699 precedence rule: merchant-store first, boot-config rails fallback,
 // conflict = store wins with a WARN. Exercised against a real Postgres
-// (psps scope resolution) with a memory secret store.
+// (psps scope resolution) with an encrypted managed credential store.
 
 func newWiringMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 	t.Helper()
@@ -42,7 +43,10 @@ func newWiringMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 
 func newWiringService(t *testing.T, dbi *db.DB) *merchants.Service {
 	t.Helper()
-	svc, err := merchants.NewService(dbi.DataPool(), merchants.NewMemorySecretStore(), "live")
+	backend, err := merchantsecrets.Build(t.Context(), &config.Config{SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}}, dbi.DataPool())
+	require.NoError(t, err)
+	t.Cleanup(backend.Close)
+	svc, err := merchants.NewService(dbi.DataPool(), backend.Secrets, "live")
 	require.NoError(t, err)
 	probeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))
@@ -60,14 +64,14 @@ func TestMerchantFetcherBuilder_StoreArmsDeclaredAccount(t *testing.T) {
 	mid := newWiringMerchant(t, dbi, "wiring-store-"+sfx)
 
 	storeKey := "store-key-" + sfx
-	_, err := svc.UpsertPaymentProviderConfig(context.Background(), mid, "nmi", merchants.UpsertPaymentProviderConfigRequest{
+	_, err := svc.UpsertPaymentProviderConfig(context.Background(), mid, "nmi", merchants.UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: new(int64),
 		AccountID:   "8811" + sfx,
 		Credentials: map[string]string{"security_key": storeKey},
 	})
 	require.NoError(t, err)
 
 	armed := MerchantFetcherBuilder{
-		Config:    &config.Config{Env: "dev"},
+		Config:    &config.Config{},
 		Merchants: svc,
 		DB:        dbi,
 	}.Build(context.Background(), mid)
@@ -89,7 +93,7 @@ func TestMerchantFetcherBuilder_NoDeclaredAccountsArmNothing(t *testing.T) {
 	mid := newWiringMerchant(t, dbi, "wiring-boot-"+sfx)
 
 	armed := MerchantFetcherBuilder{
-		Config:    &config.Config{Env: "dev"},
+		Config:    &config.Config{},
 		Merchants: svc,
 		DB:        dbi,
 	}.Build(context.Background(), mid)
@@ -106,7 +110,7 @@ func TestMerchantFetcherBuilder_DeclaredAccountNeverFallsBackAcrossPlanes(t *tes
 	mid := newWiringMerchant(t, dbi, "wiring-closed-"+sfx)
 
 	// Account row declared, but the security_key secret was never seeded.
-	_, err := svc.UpsertPaymentProviderConfig(context.Background(), mid, "nmi", merchants.UpsertPaymentProviderConfigRequest{
+	_, err := svc.UpsertPaymentProviderConfig(context.Background(), mid, "nmi", merchants.UpsertPaymentProviderConfigRequest{OperationID: uuid.New(), ExpectedRevision: new(int64),
 		AccountID: "8833" + sfx,
 	})
 	require.NoError(t, err)
@@ -115,7 +119,7 @@ func TestMerchantFetcherBuilder_DeclaredAccountNeverFallsBackAcrossPlanes(t *tes
 	defer hook.Reset()
 
 	armed := MerchantFetcherBuilder{
-		Config:    &config.Config{Env: "dev"},
+		Config:    &config.Config{},
 		Merchants: svc,
 		DB:        dbi,
 	}.Build(context.Background(), mid)

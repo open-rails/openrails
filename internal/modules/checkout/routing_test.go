@@ -18,7 +18,8 @@ import (
 
 // routingFixturePrice is a recurring price linked on all four rails.
 func routingFixturePrice() *models.Price {
-	return &models.Price{
+	hours := 720
+	return &models.Price{Amount: 1000000, AccessDurationHours: &hours,
 		ID:        uuid.New(),
 		Key:       "pro-monthly",
 		Currency:  "usd",
@@ -92,7 +93,7 @@ func TestRouteDefaultOrderIsTodaysHardcodedOrder(t *testing.T) {
 	assert.Nil(t, decision.Rule)
 	assert.Equal(t, "stripe", decision.Selected())
 	assert.Equal(t, "stripe", decision.Target.Rail)
-	assert.Equal(t, []string{"stripe", "nmi", "ccbill"}, decision.Eligible())
+	assert.Equal(t, []string{"stripe", "nmi"}, decision.Eligible())
 }
 
 // The first eligible candidate wins; the unavailable ones ahead of it are
@@ -115,9 +116,10 @@ func TestRouteFallsThroughUnavailableCandidates(t *testing.T) {
 	require.NotNil(t, reason)
 	assert.Equal(t, models.CheckoutRoutingPolicyDefault, reason.Policy)
 	assert.Equal(t, "nmi", reason.Selected)
-	assert.Equal(t, []string{"ccbill"}, reason.Fallbacks)
+	assert.Empty(t, reason.Fallbacks)
 	assert.Equal(t, []models.CheckoutRoutingSkip{
 		{Selector: "stripe", Reason: models.CheckoutRoutingSkipNotArmed},
+		{Selector: "ccbill", Reason: models.CheckoutRoutingSkipModeUnsupported},
 		{Selector: "solana", Reason: models.CheckoutRoutingSkipNotArmed},
 	}, reason.Skipped)
 }

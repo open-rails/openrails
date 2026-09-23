@@ -69,7 +69,7 @@ func TestHyperSwitchActualBrowserDeletion(t *testing.T) {
 		require.NoError(t, err)
 		var input recovery
 		require.NoError(t, json.Unmarshal(raw, &input))
-		local, err := embed.New(t.Context(), embed.Options{Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: input.DB, Redis: input.Redis, HyperSwitch: input.HyperSwitch, Encryption: input.Encryption}, River: embed.RiverManagedByOpenRails()})
+		local, err := embed.New(t.Context(), embed.Options{Config: &config.Config{TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: input.DB, Redis: input.Redis, HyperSwitch: input.HyperSwitch, Encryption: input.Encryption}, River: embed.RiverManagedByOpenRails()})
 		require.NoError(t, err)
 		defer local.Close(context.Background())
 		rt := app.HostGraph(local).Runtime
@@ -115,7 +115,7 @@ func TestHyperSwitchActualBrowserDeletion(t *testing.T) {
 	h := New(t, ctx)
 	var delegated billingauth.DelegatedAuthenticator
 	surface := h.StartStandalone("USD", WithConfig(func(c *config.Config) {
-		c.HyperSwitch = &config.HyperSwitchConfig{APIBaseURL: vendor.APIBaseURL, SDKURL: vendor.SDKURL}
+		c.HyperSwitch = &config.HyperSwitchConfig{AllowLoopbackHTTP: true, APIBaseURL: vendor.APIBaseURL, SDKURL: vendor.SDKURL}
 		c.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
 	}), func(c *standaloneConfig) {
 		c.delegatedAuthenticator = billingauth.DelegatedAuthenticatorFunc(func(ctx context.Context, r *http.Request) (*billingauth.DelegatedPrincipal, error) {

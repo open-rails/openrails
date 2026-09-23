@@ -5,6 +5,7 @@ package merchantarchive
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,9 +36,11 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
@@ -74,6 +77,7 @@ func newPurchaseArchiveServices(d *db.DB, clock clockwork.Clock) purchaseArchive
 
 func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 	t.Helper()
+	retainedProvider := recurring && (phase == "pending" || phase == "activated" || phase == "cutover")
 	schema, rail := "archive_purchase_writer", models.RailNMI
 	if recurring {
 		schema = "archive_subscription_writer"
@@ -180,7 +184,7 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 				fmt.Fprintf(w, `<nm_response><subscription id="%s"><subscription_id>%s</subscription_id><plan><plan_id>writer-plan</plan_id></plan><orderid>%s</orderid><ponumber>%s</ponumber><next_charge_date>%s</next_charge_date></subscription></nm_response>`, providerSubscription, providerSubscription, acceptedForm.Get("orderid"), acceptedForm.Get("ponumber"), start.Format("2006-01-02"))
 			} else if r.Method == http.MethodGet {
 				require.Equal(t, "/payments/"+transaction, r.URL.Path)
-				_ = json.NewEncoder(w).Encode(map[string]any{"id": transaction, "response": "1", "amount": acceptedForm.Get("amount"), "currency": acceptedForm.Get("currency"), "customer_vault_id": acceptedForm.Get("customer_vault_id"), "actions": []map[string]any{{"id": transaction, "type": "sale", "success": true, "amount": acceptedForm.Get("amount")}}})
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": transaction, "response": "1", "amount": acceptedForm.Get("amount"), "currency": acceptedForm.Get("currency"), "customer_vault_id": acceptedForm.Get("customer_vault_id"), "billing_id": acceptedForm.Get("billing_id"), "actions": []map[string]any{{"id": transaction, "type": "sale", "success": true, "amount": acceptedForm.Get("amount")}}})
 			} else if r.Form.Get("order_id") == acceptedForm.Get("orderid") {
 				fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, transaction, acceptedForm.Get("orderid"))
 			} else {
@@ -189,7 +193,7 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 			return
 		}
 		operationMatches := r.Form.Get("type") == "sale" && r.Form.Get("recurring") == ""
-		if recurring {
+		if retainedProvider {
 			operationMatches = r.Form.Get("recurring") == "add_subscription" && r.Form.Get("plan_id") == "writer-plan"
 		}
 		if r.Method != http.MethodPost || !operationMatches {
@@ -232,15 +236,23 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 		return &checkout.CheckoutSessionCreateRequest{PriceID: openrails.PriceID(price).String(), Payment: checkout.CheckoutSessionPaymentRequest{Rail: "writer-account", PaymentMethodID: openrails.PaymentMethodID(methodID).String()}, IdempotencyKey: clientKey}
 	}
 	user := &checkout.UserIdentity{ID: customer.String()}
+	principal := billingauth.DelegatedPrincipal{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: id.String(), SubjectID: customer.String()}
+	var retainedOperation gen.OpenrailsRailIntent
+	if retainedProvider {
+		retainedOperation = acceptRetainedProviderEnrollment(t, ctx, source, checkoutService, method, product, price, now, phase, clientKey)
+	}
 	if phase != "" && phase != "cutover" {
-		result, checkoutErr := checkoutService.Checkout(ctx, &checkout.CheckoutRequest{PriceID: openrails.PriceID(price).String(), Rail: "writer-account", PaymentMethodID: openrails.PaymentMethodID(methodID).String(), IdempotencyKey: clientKey}, user)
-		if phase == "refused" {
+		operationKey := checkout.InitialMembershipIdempotencyKey(clientKey)
+		if !retainedProvider {
+			quote, err := sessionService.CreateSession(ctx, sessionRequest(), user)
+			require.NoError(t, err)
+			require.Equal(t, "requires_action", quote.Status)
+			_, checkoutErr := sessionService.ConfirmCustomerSession(ctx, quote.ID.UUID(), &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Rail: "nmi"}}, user, principal)
 			require.Error(t, checkoutErr)
-		} else {
-			require.NoError(t, checkoutErr)
-			require.NotNil(t, result)
+			operationKey = checkout.InitialMembershipIdempotencyKey("checkout_session:" + quote.ID.UUID().String())
 		}
-		operation, err := intents.NewStore(source).GetByIdempotencyKey(ctx, checkout.InitialMembershipIdempotencyKey(clientKey))
+
+		operation, err := intents.NewStore(source).GetByIdempotencyKey(ctx, operationKey)
 		require.NoError(t, err)
 		payload, err := subscriptions.DecodeInitialMembershipPayload(operation)
 		require.NoError(t, err)
@@ -310,12 +322,22 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 		return
 	}
 	firstRequest := sessionRequest()
-	first, err := sessionService.CreateSession(ctx, firstRequest, user)
-	require.NoError(t, err)
-	require.Equal(t, "succeeded", first.Status)
-	require.Equal(t, transaction, first.Payment.TransactionID)
+	var first *checkout.CheckoutSessionResponse
+	var sessionID uuid.UUID
+	if !retainedProvider {
+		first, err = sessionService.CreateSession(ctx, firstRequest, user)
+		require.NoError(t, err)
+		sessionID = first.ID.UUID()
+		if recurring {
+			require.Equal(t, "requires_action", first.Status)
+			require.Zero(t, gatewayCalls.Load(), "a quote is not permission to charge")
+			first, err = sessionService.ConfirmCustomerSession(ctx, sessionID, &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Rail: "nmi"}}, user, principal)
+			require.NoError(t, err)
+		}
+		require.Equal(t, "succeeded", first.Status)
+		require.Equal(t, transaction, first.Payment.TransactionID)
+	}
 	require.EqualValues(t, 1, gatewayCalls.Load())
-	sessionID := first.ID.UUID()
 	if !recurring {
 		stored, err := source.Gen(ctx).GetCheckoutSessionByID(ctx, gen.GetCheckoutSessionByIDParams{MerchantID: id.UUID(), ID: sessionID})
 		require.NoError(t, err)
@@ -323,20 +345,33 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 		require.NoError(t, json.Unmarshal(stored.RailState, &state))
 		require.Equal(t, "cf0b56594a544b069795b7521f553ad1ab9dbc4413daf5369343142307519d66", state["_openrails_request_fingerprint"])
 	}
-	first, err = sessionService.GetSession(ctx, sessionID, user)
-	require.NoError(t, err)
+	if !retainedProvider {
+		first, err = sessionService.GetSession(ctx, sessionID, user)
+		require.NoError(t, err)
+	}
 	payment, err := services.payments.GetByPSPTransactionID(ctx, rail, transaction)
 	require.NoError(t, err)
 	paymentID := payment.ID
 	var subscriptionID uuid.UUID
 	if recurring {
-		require.NotNil(t, first.SubscriptionID)
-		subscriptionID = first.SubscriptionID.UUID()
+		if retainedProvider {
+			payload, err := subscriptions.DecodeInitialMembershipPayload(retainedOperation)
+			require.NoError(t, err)
+			subscriptionID = payload.Terms.SubscriptionID
+		} else {
+			require.NotNil(t, first.SubscriptionID)
+			subscriptionID = first.SubscriptionID.UUID()
+		}
 	}
-	require.NotEqual(t, firstRequest.IdempotencyKey, sessionID.String(), "caller replay key is distinct from persisted session identity")
+	if !retainedProvider {
+		require.NotEqual(t, firstRequest.IdempotencyKey, sessionID.String(), "caller replay key is distinct from persisted session identity")
+	}
 	operationKey := checkout.NMISaleIdempotencyKey("checkout_native_session:" + sessionID.String())
 	if recurring {
-		operationKey = checkout.InitialMembershipIdempotencyKey("checkout_native_session:" + sessionID.String())
+		operationKey = checkout.InitialMembershipIdempotencyKey("checkout_session:" + sessionID.String())
+		if retainedProvider {
+			operationKey = retainedOperation.IdempotencyKey
+		}
 	}
 	operation, err := intents.NewStore(source).GetByIdempotencyKey(ctx, operationKey)
 	require.NoError(t, err)
@@ -360,7 +395,7 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 	require.NotEqual(t, "[]", before.grants, "purchase writers must actually create benefits")
 	for _, entitlement := range before.entitlements {
 		require.True(t, now.Equal(entitlement.StartAt))
-		if recurring {
+		if retainedProvider {
 			require.Nil(t, entitlement.EndAt)
 		} else {
 			require.NotNil(t, entitlement.EndAt)
@@ -370,7 +405,12 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 	if recurring {
 		require.Equal(t, &subscriptionID, before.payment.SubscriptionID)
 		require.Equal(t, models.StatusActive, before.subscription.Status)
-		require.Equal(t, providerSubscription, before.subscription.RailSubscriptionID)
+		if retainedProvider {
+			require.Equal(t, providerSubscription, before.subscription.RailSubscriptionID)
+		} else {
+			require.Empty(t, before.subscription.RailSubscriptionID)
+			require.Equal(t, models.CollectionPolicyEngine, before.subscription.CollectionPolicy)
+		}
 		require.True(t, now.Equal(*before.subscription.CurrentPeriodStartsAt))
 		require.True(t, end.Equal(*before.subscription.CurrentPeriodEndsAt))
 	} else {
@@ -391,9 +431,15 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 	acknowledged, err := source.Gen(ctx).AcknowledgeHostEvent(ctx, gen.AcknowledgeHostEventParams{MerchantID: id.UUID(), ID: events[0].ID, Now: now})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, acknowledged)
-	sourceReplay, err := sessionService.CreateSession(ctx, sessionRequest(), user)
-	require.NoError(t, err)
-	require.Equal(t, first, sourceReplay, "source and destination use the same session replay path")
+	if !retainedProvider {
+		sourceReplay, err := sessionService.CreateSession(ctx, sessionRequest(), user)
+		require.NoError(t, err)
+		require.Equal(t, first, sourceReplay, "source and destination use the same session replay path")
+	} else {
+		replayed, err := checkoutService.Intents.(*intents.Runner).ExecuteByID(ctx, operation.ID)
+		require.NoError(t, err)
+		require.JSONEq(t, string(operation.ResultEvidence), string(replayed.ResultEvidence), "retained provider enrollment replays its accepted receipt")
+	}
 	require.EqualValues(t, 1, gatewayCalls.Load())
 	if phase == "cutover" {
 		cutoverArmed.Store(true)
@@ -473,7 +519,11 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 		})
 		var evidence map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(operation.ResultEvidence, &evidence))
-		delete(evidence, "qualified_enrollment")
+		if retainedProvider {
+			delete(evidence, "qualified_enrollment")
+		} else {
+			delete(evidence, "qualified_receipt")
+		}
 		changed, err := json.Marshal(evidence)
 		require.NoError(t, err)
 		missing := string(changed)
@@ -501,15 +551,22 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool, phase string) {
 	clock.Advance(time.Hour)
 	restoredCheckout := newPurchaseArchiveCheckout(target, restoredServices, clock, provider, client)
 	restoredSession := newPurchaseArchiveSession(target, restoredCheckout, clock)
-	readBack, err := restoredSession.GetSession(targetCtx, sessionID, user)
-	require.NoError(t, err)
-	require.Equal(t, first, readBack, "ordinary restored session read returns original result")
-	replay, err := restoredSession.CreateSession(targetCtx, sessionRequest(), user)
-	require.NoError(t, err)
-	require.Equal(t, first, replay, "fresh process/cache replays the durable session")
-	confirmed, err := restoredSession.ConfirmSession(targetCtx, sessionID, &checkout.CheckoutSessionConfirmRequest{}, user)
-	require.NoError(t, err)
-	require.Equal(t, first, confirmed)
+	if !retainedProvider {
+		readBack, err := restoredSession.GetSession(targetCtx, sessionID, user)
+		require.NoError(t, err)
+		require.Equal(t, first, readBack, "ordinary restored session read returns original result")
+		replay, err := restoredSession.CreateSession(targetCtx, sessionRequest(), user)
+		require.NoError(t, err)
+		require.Equal(t, first, replay, "fresh process/cache replays the durable session")
+		var confirmed *checkout.CheckoutSessionResponse
+		if recurring {
+			confirmed, err = restoredSession.ConfirmCustomerSession(targetCtx, sessionID, &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Rail: "nmi"}}, user, principal)
+		} else {
+			confirmed, err = restoredSession.ConfirmSession(targetCtx, sessionID, &checkout.CheckoutSessionConfirmRequest{}, user)
+		}
+		require.NoError(t, err)
+		require.Equal(t, first, confirmed)
+	}
 	require.EqualValues(t, 1, gatewayCalls.Load(), "restored checkout cannot charge or enroll again")
 	replayOperation, err := (&intents.Runner{Store: intents.NewStore(target)}).ExecuteByID(targetCtx, operation.ID)
 	require.NoError(t, err)
@@ -599,7 +656,7 @@ func newPurchaseArchiveCheckout(d *db.DB, s purchaseArchiveServices, clock clock
 	c.ProviderSecrets = provider
 	c.ResolveNMIClientOverride = func(context.Context, string) (*nmi.NMIClient, error) { return client, nil }
 	c.SetSubscriptionLifecycleService(s.lifecycle)
-	runner := &intents.Runner{Store: intents.NewStore(d), Registry: intents.NewRegistry(checkout.NewNMISaleIntentHandler(c.NMISaleService), checkout.NewInitialMembershipIntentHandler(c)), Config: cfg}
+	runner := &intents.Runner{Store: intents.NewStore(d), Registry: intents.NewRegistry(checkout.NewNMISaleIntentHandler(c.NMISaleService), checkout.NewInitialMembershipIntentHandler(c, purchaseArchiveNMIReader{client})), Config: cfg, Clock: clock}
 	c.Intents, c.NMISaleService.Intents = runner, runner
 	return c
 }
@@ -642,4 +699,41 @@ func TestInitialMembershipPendingArchiveRejectsStartGrant(t *testing.T) {
 
 func TestInitialMembershipObservedPaymentArchive(t *testing.T) {
 	testPurchaseWorkflowArchive(t, true, "activated")
+}
+
+// Retained provider-owned cohorts predate engine-only customer enrollment.
+// Seed their accepted command, then let the real handler qualify the loopback
+// provider receipt and author every payment, subscription, grant and event.
+func acceptRetainedProviderEnrollment(t *testing.T, ctx context.Context, d *db.DB, service *checkout.CheckoutService, method *models.PaymentMethod, product, price uuid.UUID, now time.Time, phase, key string) gen.OpenrailsRailIntent {
+	t.Helper()
+	mid, err := merchant.Require(ctx)
+	require.NoError(t, err)
+	start, amount, paymentID := now, int64(2500000), uuid.New()
+	pending := phase == "pending" || phase == "activated"
+	if pending {
+		start = now.Add(96 * time.Hour).UTC().Truncate(24 * time.Hour)
+		amount = 0
+		paymentID = uuid.Nil
+	}
+	end := start.Add(48 * time.Hour)
+	scheduleStart := end
+	if pending {
+		scheduleStart = start
+	}
+	saved, err := d.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: method.ID})
+	require.NoError(t, err)
+	terms := subscriptions.InitialMembershipTerms{CollectionPolicy: models.CollectionPolicyProvider, SubscriptionID: uuid.New(), PaymentID: paymentID, CustomerID: method.CustomerID, PSPID: method.PspID, ProductID: product, PriceID: price, PaymentMethodID: method.ID, ProductName: "Writer product", Amount: amount, RecurringAmount: 2500000, Currency: "USD", AcceptedAt: now, PeriodStart: start, PeriodEnd: end, Pending: pending, Entitlements: map[string]*int{"archive_access": new(48), "archive_download": new(48)}}
+	payload := subscriptions.InitialMembershipPayload{Terms: terms, Instrument: charge.FreezeInstrument(saved), RequestFingerprint: fmt.Sprintf("%x", sha256.Sum256([]byte(key))), CheckoutIdempotencyKey: key, PSP: "writer-account", NativeSchedule: &subscriptions.NMIInitialScheduleTerms{PlanID: "writer-plan", StartDate: scheduleStart.Format("20060102"), DayFrequency: 2, Card: nmi.CardUserData{FirstName: "Archive", LastName: "Buyer", Address1: "N/A", City: "N/A", State: "N/A", Zip: "00000", Country: "US"}}}
+	op, err := intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: "nmi", PspID: method.PspID, IntentType: subscriptions.TypeInitialMembership, PriceID: &price, Payload: payload, IdempotencyKey: checkout.InitialMembershipIdempotencyKey(key), NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "retained provider enrollment fixture"})
+	require.NoError(t, err)
+	op, err = service.Intents.(*intents.Runner).ExecuteByID(ctx, op.ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusSucceeded, op.Status)
+	return op
+}
+
+type purchaseArchiveNMIReader struct{ client *nmi.NMIClient }
+
+func (r purchaseArchiveNMIReader) ResolveNMIClient(context.Context, uuid.UUID, *uuid.UUID) (*nmi.NMIClient, bool, error) {
+	return r.client, true, nil
 }

@@ -77,7 +77,7 @@ func TestEngineProducerScopesEachEligibleMerchant(t *testing.T) {
 	}
 	svc := money.NewMoneyService(d)
 	require.NoError(t, svc.SetHyperSwitchDeployment("http://127.0.0.1:1"))
-	worker := DunningWorker{DB: d, Config: &config.Config{Env: "dev", ProviderWriteMode: config.ProviderWriteModeFull}, Clock: clockwork.NewFakeClockAt(now), EngineCollections: svc}
+	worker := DunningWorker{DB: d, Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, Clock: clockwork.NewFakeClockAt(now), EngineCollections: svc}
 	require.NoError(t, worker.Work(t.Context(), &river.Job[DunningArgs]{}))
 	require.NoError(t, worker.Work(t.Context(), &river.Job[DunningArgs]{}))
 	for _, s := range subjects {

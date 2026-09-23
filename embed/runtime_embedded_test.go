@@ -9,35 +9,32 @@ import (
 	"github.com/open-rails/openrails/config"
 )
 
-// #745: embedded construction must declare Env and TestMode explicitly — no
-// implicit dev-like defaulting the way standalone config.Load applies.
-
-func TestApplyEmbeddedDefaultsRequiresExplicitEnv(t *testing.T) {
-	cfg := &config.Config{TestMode: config.CredentialPostureLive}
-	err := applyEmbeddedDefaults(cfg)
-	require.Error(t, err)
-	require.ErrorContains(t, err, "config.Env is required")
-
-	cfg = &config.Config{Env: "   ", TestMode: config.CredentialPostureLive}
-	require.ErrorContains(t, applyEmbeddedDefaults(cfg), "config.Env is required")
+// Provider posture is explicit; secure runtime defaults need no environment label.
+func TestApplyEmbeddedDefaultsWithoutEnvironmentLabel(t *testing.T) {
+	for _, posture := range []config.CredentialPosture{config.CredentialPostureLive, config.CredentialPostureSandbox} {
+		cfg := &config.Config{TestMode: posture}
+		require.NoError(t, applyEmbeddedDefaults(cfg))
+		require.False(t, cfg.RateLimitsDisabled)
+		require.NotNil(t, cfg.RateLimits)
+	}
 }
 
 func TestApplyEmbeddedDefaultsRequiresExplicitTestMode(t *testing.T) {
-	cfg := &config.Config{Env: "development"}
+	cfg := &config.Config{}
 	err := applyEmbeddedDefaults(cfg)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "config.TestMode is required")
 
-	// Neither a dev-like Env nor a prod-like one may silently pick a posture.
-	cfg = &config.Config{Env: "production"}
+	// A second zero-value configuration must also refuse to guess.
+	cfg = &config.Config{}
 	require.ErrorContains(t, applyEmbeddedDefaults(cfg), "config.TestMode is required")
 }
 
 func TestApplyEmbeddedDefaultsAcceptsExplicitPosture(t *testing.T) {
-	cfg := &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox}
+	cfg := &config.Config{TestMode: config.CredentialPostureSandbox}
 	require.NoError(t, applyEmbeddedDefaults(cfg))
 
-	cfg = &config.Config{Env: "production", TestMode: config.CredentialPostureLive}
+	cfg = &config.Config{TestMode: config.CredentialPostureLive}
 	require.NoError(t, applyEmbeddedDefaults(cfg))
 }
 
@@ -45,7 +42,7 @@ func TestApplyEmbeddedDefaultsAcceptsExplicitPosture(t *testing.T) {
 // defaults config.Load applies — the embedded HTTP surface must not silently
 // ship unthrottled.
 func TestApplyEmbeddedDefaultsSeedsRateLimitsWhenNil(t *testing.T) {
-	cfg := &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox}
+	cfg := &config.Config{TestMode: config.CredentialPostureSandbox}
 	require.NoError(t, applyEmbeddedDefaults(cfg))
 
 	require.NotNil(t, cfg.RateLimits, "embedded construction must seed curated rate-limit defaults")
@@ -56,14 +53,13 @@ func TestApplyEmbeddedDefaultsSeedsRateLimitsWhenNil(t *testing.T) {
 
 func TestApplyEmbeddedDefaultsLeavesHostRateLimitsAlone(t *testing.T) {
 	custom := &config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}}
-	cfg := &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox, RateLimits: custom}
+	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, RateLimits: custom}
 	require.NoError(t, applyEmbeddedDefaults(cfg))
 	require.Same(t, custom, cfg.RateLimits, "a host-supplied RateLimits must not be overwritten")
 }
 
 func TestApplyEmbeddedDefaultsExplicitDisableYieldsPassthrough(t *testing.T) {
 	cfg := &config.Config{
-		Env:                "development",
 		TestMode:           config.CredentialPostureSandbox,
 		RateLimitsDisabled: true,
 	}
@@ -80,11 +76,11 @@ func TestNewRejectsMissingConfig(t *testing.T) {
 }
 
 func TestNewRejectsUnsetPostureBeforeTouchingTheDatabase(t *testing.T) {
-	cfg := &config.Config{} // no Env, no TestMode, no DB
+	cfg := &config.Config{} // no TestMode or database
 	_, err := New(context.Background(), Options{Config: cfg, River: RiverManagedByOpenRails()})
-	require.ErrorContains(t, err, "config.Env is required")
+	require.ErrorContains(t, err, "config.TestMode is required")
 
-	cfg = &config.Config{Env: "development"}
+	cfg = &config.Config{}
 	_, err = New(context.Background(), Options{Config: cfg, River: RiverManagedByOpenRails()})
 	require.ErrorContains(t, err, "config.TestMode is required")
 }
@@ -92,9 +88,9 @@ func TestNewRejectsUnsetPostureBeforeTouchingTheDatabase(t *testing.T) {
 // Omitting River selects a managed fleet and reaches normal posture validation.
 func TestNewDefaultsRiverOwnership(t *testing.T) {
 	_, err := New(context.Background(), Options{Config: &config.Config{}})
-	require.ErrorContains(t, err, "config.Env is required")
+	require.ErrorContains(t, err, "config.TestMode is required")
 	_, err = New(context.Background(), Options{Config: &config.Config{}, River: RiverFromHost()})
-	require.ErrorContains(t, err, "config.Env is required")
+	require.ErrorContains(t, err, "config.TestMode is required")
 }
 
 func TestHostRiverRejectsAutomaticStartupBeforeBinding(t *testing.T) {

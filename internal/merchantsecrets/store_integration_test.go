@@ -8,19 +8,15 @@ import (
 	"encoding/base64"
 	"io"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	log "github.com/sirupsen/logrus"
-	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/vault/vaulttest"
-	"github.com/open-rails/openrails/internal/merchants"
 )
 
 // TestMain composes the dbtest and vaulttest shared-container teardowns (both
@@ -55,17 +51,15 @@ func testMasterKey(t *testing.T) string {
 // Vault, never a mock).
 func vaultBackedConfig(env, addr, token string) *config.Config {
 	return &config.Config{
-		Env:                  env,
-		MerchantConfigSource: config.MerchantConfigSourceAPI,
-		SecretBackend:        config.SecretBackendVault,
-		Vault:                &config.VaultConfig{Enabled: true, Address: addr, AuthMethod: "token", Token: token},
+		SecretBackend: config.SecretBackendVault,
+		Vault:         &config.VaultConfig{Enabled: true, Address: addr, AuthMethod: "token", Token: token},
 	}
 }
 
 // #667 (a): production posture + DB store + no ENCRYPTION_MASTER_KEY refuses boot.
 func TestBuild_ProdDBStoreNoMasterKey_RefusesBoot(t *testing.T) {
 	pool, ctx := startSecretsPostgres(t)
-	cfg := &config.Config{Env: "production", MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB}
+	cfg := &config.Config{SecretBackend: config.SecretBackendDB}
 	_, err := Build(ctx, cfg, pool)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "ENCRYPTION_MASTER_KEY")
@@ -86,21 +80,10 @@ func TestBuild_ProdVaultStoreNoMasterKey_Boots(t *testing.T) {
 }
 
 // #667 (c): dev + DB store + no key boots, with the loud plaintext warning.
-func TestBuild_DevDBStoreNoMasterKey_BootsWithWarning(t *testing.T) {
+func TestBuild_DBStoreNoMasterKeyRefusesAllPostures(t *testing.T) {
 	pool, ctx := startSecretsPostgres(t)
-	hook := logtest.NewGlobal()
-	defer hook.Reset()
-	cfg := &config.Config{Env: "dev", MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB}
-	store, err := Build(ctx, cfg, pool)
-	require.NoError(t, err)
-	require.NotNil(t, store.Secrets)
-	var warned bool
-	for _, e := range hook.AllEntries() {
-		if e.Level == log.WarnLevel && strings.Contains(e.Message, "PLAINTEXT") {
-			warned = true
-		}
-	}
-	require.True(t, warned, "dev boot without ENCRYPTION_MASTER_KEY must warn that secrets persist plaintext")
+	_, err := Build(ctx, &config.Config{SecretBackend: config.SecretBackendDB}, pool)
+	require.ErrorContains(t, err, "ENCRYPTION_MASTER_KEY")
 }
 
 // #667 (d): production + DB store + master key boots and round-trips an encrypted
@@ -108,10 +91,8 @@ func TestBuild_DevDBStoreNoMasterKey_BootsWithWarning(t *testing.T) {
 func TestBuild_ProdDBStoreWithKey_RoundTripsEncrypted(t *testing.T) {
 	pool, ctx := startSecretsPostgres(t)
 	cfg := &config.Config{
-		Env:                  "production",
-		MerchantConfigSource: config.MerchantConfigSourceAPI,
-		SecretBackend:        config.SecretBackendDB,
-		Encryption:           &config.EncryptionConfig{MasterKey: testMasterKey(t)},
+		SecretBackend: config.SecretBackendDB,
+		Encryption:    &config.EncryptionConfig{MasterKey: testMasterKey(t)},
 	}
 	store, err := Build(ctx, cfg, pool)
 	require.NoError(t, err)
@@ -139,28 +120,8 @@ func TestBuild_ProdDBStoreWithKey_RoundTripsEncrypted(t *testing.T) {
 // does; the pre-fix guard pattern still named the retired
 // `rail_merchant_accounts/` prefix and could therefore never match, so the key
 // landed plaintext in openrails.merchant_secrets.
-func TestBuild_DevDBStoreNoMasterKey_RefusesSolanaPrivateKey(t *testing.T) {
+func TestBuild_NoPlaintextCredentialCustody(t *testing.T) {
 	pool, ctx := startSecretsPostgres(t)
-	cfg := &config.Config{Env: "dev", MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB}
-	store, err := Build(ctx, cfg, pool)
-	require.NoError(t, err)
-
-	mid, _ := registerMerchant(t, ctx, pool, "sec20")
-	name, err := merchants.PSPSecretName("solana", "live", "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9", "private_key")
-	require.NoError(t, err)
-
-	_, err = store.Secrets.Put(ctx, mid, name, "5JsolanaSigningKeyPlaintext")
-	require.Error(t, err, "solana private key must not be storable without ENCRYPTION_MASTER_KEY")
-	require.Contains(t, err.Error(), "ENCRYPTION_MASTER_KEY")
-
-	var stored int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM billing.merchant_secrets WHERE merchant_id=$1::uuid AND name=$2`,
-		mid.String(), name).Scan(&stored))
-	require.Zero(t, stored, "refused write must persist nothing")
-
-	// The refusal is targeted, not a blanket plaintext ban: dev still stores
-	// ordinary credentials.
-	_, err = store.Secrets.Put(ctx, mid, "psps/stripe/live/acct_884_test/secret_key", "sk_test_sec20")
-	require.NoError(t, err)
+	_, err := Build(ctx, &config.Config{SecretBackend: config.SecretBackendDB}, pool)
+	require.ErrorContains(t, err, "ENCRYPTION_MASTER_KEY")
 }

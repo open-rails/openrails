@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
@@ -39,7 +40,8 @@ type InvoiceConfig = boot.InvoiceConfig
 
 // PullProviderOptions mirrors `openrails pull-provider` for embedded hosts.
 type PullProviderOptions struct {
-	PGXPool *pgxpool.Pool
+	StripeClients *stripeapi.Factory
+	PGXPool       *pgxpool.Pool
 	// NameAuthority resolves names in an external merchant manifest. The pull
 	// itself is always scoped by MerchantID; nil selects unbound host names only.
 	NameAuthority merchant.NameAuthority
@@ -71,7 +73,7 @@ type PullProviderOptions struct {
 	// MerchantManifestPath reads the MODE-1 manifest from disk when
 	// MerchantManifest is nil. Empty tries the conventional
 	// bootstrap.DefaultMerchantConfigManifestPath (optional); an explicit path
-	// must load. Ignored in merchant_config_source=api.
+	// must load. Used only for snapshot credentials.
 	MerchantManifestPath string
 
 	// Endpoints overrides provider base URLs on store-armed pull clients — a
@@ -156,11 +158,12 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 		// An explicit --provider-account pins that rail to the named account
 		// (archived accounts stay addressable for drain, #655).
 		armed := reconcile.MerchantFetcherBuilder{
-			Config:     rt.Config,
-			Merchants:  rt.Merchants,
-			DB:         rt.DB,
-			AccountIDs: accountPins,
-			Endpoints:  opts.Endpoints,
+			StripeClients: rt.StripeClients,
+			Config:        rt.Config,
+			Merchants:     rt.Merchants,
+			DB:            rt.DB,
+			AccountIDs:    accountPins,
+			Endpoints:     opts.Endpoints,
 		}.Build(ctx, merchantID)
 		fetchers := armed.Fetchers
 		if len(fetchers) == 0 {
@@ -352,9 +355,10 @@ func PullProviderReport(ctx context.Context, opts PullProviderReportOptions) err
 // clients here — the empty PSPSet and the nil NMI/CCBill/Solana clients this
 // struct used to carry were read by nothing (or#893).
 type pullProviderRuntime struct {
-	DB        *db.DB
-	Config    *config.Config
-	Merchants *merchants.Service
+	StripeClients *stripeapi.Factory
+	DB            *db.DB
+	Config        *config.Config
+	Merchants     *merchants.Service
 }
 
 func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pullProviderRuntime, func(), error) {
@@ -384,7 +388,7 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 	// read zero providers and reported success-shaped output over a snapshot it
 	// never fetched. There is no credential plane to fall back to; say so.
 	var merchantsSvc *merchants.Service
-	if cfg.IsManifestMerchantConfigSource() {
+	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
 		svc, err := pullProviderManifestPlane(ctx, cfg, database, opts)
 		if err != nil {
 			cleanup()
@@ -404,10 +408,21 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 		}
 		merchantsSvc = svc
 	}
+	stripeClients := opts.StripeClients
+	if stripeClients == nil {
+		stripeClients = stripeapi.NewFactory(nil)
+		if api := cfg.SandboxStripeAPIURL(); api != "" {
+			stripeClients = stripeapi.NewFactory(stripeapi.HostRewriteTransport(api))
+		}
+	}
+	if merchantsSvc != nil {
+		merchantsSvc.StripeClients = stripeClients
+	}
 	return &pullProviderRuntime{
-		DB:        database,
-		Config:    cfg,
-		Merchants: merchantsSvc,
+		StripeClients: stripeClients,
+		DB:            database,
+		Config:        cfg,
+		Merchants:     merchantsSvc,
 	}, cleanup, nil
 }
 
@@ -429,7 +444,7 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 		}
 		raw, err := os.ReadFile(path) // #nosec G304 -- path is opts.MerchantManifestPath (operator CLI flag) or a fixed conventional default
 		if os.IsNotExist(err) && !explicit {
-			log.Warn("pull-provider: merchant_config_source=manifest but no merchant manifest was supplied or found; no rail can be armed (#723)")
+			log.Warn("pull-provider: snapshot credentials selected but no merchant manifest was supplied or found; no rail can be armed")
 			return nil, nil
 		}
 		if err != nil {

@@ -24,7 +24,7 @@ func TestMigrateStatusReportsContentDriftAndExitsNonzero(t *testing.T) {
 	defer cancel()
 	database := dbtest.SharedSuperuserPGXPool(t)
 	schema := fmt.Sprintf("status_%d", time.Now().UnixNano())
-	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{
+	cfg := &config.Config{DB: &config.DBConfig{
 		URL: dbtest.SharedSuperuserDSN(t), Schema: schema,
 	}}
 	t.Cleanup(func() {

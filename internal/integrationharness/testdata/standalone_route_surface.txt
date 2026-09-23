@@ -86,6 +86,7 @@ GET /v1/merchant/catalogs/{id}
 GET /v1/merchant/checkout-config
 GET /v1/merchant/checkout-options
 GET /v1/merchant/checkout-sessions/{id}
+GET /v1/merchant/configuration
 GET /v1/merchant/credit-limit
 GET /v1/merchant/credits/balance
 GET /v1/merchant/credits/deposit
@@ -205,6 +206,7 @@ POST /v1/merchant/catalog/reprice-all-prior-versions
 POST /v1/merchant/catalogs
 POST /v1/merchant/checkout-sessions
 POST /v1/merchant/checkout-sessions/{id}/confirm
+POST /v1/merchant/configuration/applications
 POST /v1/merchant/credits/deposit
 POST /v1/merchant/customers/entitlements:batch
 POST /v1/merchant/customers/{customer_id}/credits

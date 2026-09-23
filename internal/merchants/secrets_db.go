@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -123,4 +124,28 @@ func (d *dbSecretStore) List(ctx context.Context, merchantID merchant.ID) ([]str
 		return nil, fmt.Errorf("merchants: list merchant secrets: %w", err)
 	}
 	return names, nil
+}
+
+func (d *dbSecretStore) StageSecret(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
+	if err := validateSecretRef(id, name); err != nil {
+		return Secret{}, err
+	}
+	var result Secret
+	err := d.database.DataPool().CommittedMerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := gen.New(tx).LockLiveMerchantForSecretWrite(ctx, id.UUID()); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO openrails.merchant_secrets (merchant_id,name,value,version) VALUES ($1,$2,$3,1) ON CONFLICT (merchant_id,name) DO NOTHING`, id.UUID(), name, value)
+		if err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT name,value,version FROM openrails.merchant_secrets WHERE merchant_id=$1 AND name=$2`, id.UUID(), name).Scan(&result.Name, &result.Value, &result.Version)
+	})
+	if err != nil {
+		return Secret{}, ErrSecretBackendUnavailable
+	}
+	if result.Value != value {
+		return Secret{}, ErrCredentialOperationConflict
+	}
+	return result, nil
 }

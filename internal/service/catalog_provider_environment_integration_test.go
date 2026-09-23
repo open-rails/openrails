@@ -18,6 +18,9 @@ type recordingCatalogAdapter struct{ targets []string }
 
 func (a *recordingCatalogAdapter) Name() string { return "stripe" }
 func (a *recordingCatalogAdapter) AutoCreate(_ context.Context, in autoCreateContext) (map[string]string, error) {
+	if in.RemoteWritesDisabled {
+		return nil, errRemoteWritesDisabled
+	}
 	a.targets = append(a.targets, in.TargetAccountID)
 	return map[string]string{"account_id": in.TargetAccountID, "price_id": "fake-price"}, nil
 }
@@ -62,14 +65,16 @@ func TestCreatorProviderEnvironmentSurvivesDispatchAndSecondarySync(t *testing.T
 			require.NoError(t, err)
 			require.Equal(t, []string{"named", "stripe"}, keys)
 			adapter := &recordingCatalogAdapter{}
-			request := CreatePriceRequest{ProductID: openrails.ProductID(product.ID), PSPs: keys, UnitAmount: 1_000_000, Currency: "USD"}
+			request := CreatePriceRequest{ProductID: openrails.ProductID(product.ID), PSPs: keys, UnitAmount: 1_000_000, Currency: "USD",
+				PSPLinks: map[string]map[string]string{"named": {"lookup_key": "explicit-native-named"}, "stripe": {"lookup_key": "explicit-native-default"}},
+			}
 			rails, _, pending, err := svc.resolveProvidersWithAdapters(owner, product, request, uuid.New(), map[string]providerAdapter{"stripe": adapter})
 			require.NoError(t, err)
 			require.Empty(t, pending)
 			require.Equal(t, tc.environment+"-named"+suffix, rails["named"]["account_id"], "duplicate account keys must resolve in the selected credential environment")
-			// The canonical rail target uses its armed default, then synchronizes
-			// the active accounts on that rail. No real adapter/network is invoked.
-			require.ElementsMatch(t, []string{tc.environment + "-named" + suffix, "", tc.environment + "-named" + suffix, tc.environment + "-stripe" + suffix}, adapter.targets)
+			// The canonical rail uses its armed default. Explicit links do not
+			// create additional native prices on secondary Stripe accounts.
+			require.ElementsMatch(t, []string{tc.environment + "-named" + suffix, ""}, adapter.targets)
 
 			adapter.targets = nil
 			svc.rt.Config.ProviderWriteMode = config.ProviderWriteModeReadOnly
@@ -80,7 +85,8 @@ func TestCreatorProviderEnvironmentSurvivesDispatchAndSecondarySync(t *testing.T
 			require.Equal(t, ProviderStatusPendingManualLink, states["named"].Status)
 
 			svc.rt.Config.ProviderWriteMode = config.ProviderWriteModeFull
-			svc.rt.Config.NewSubscriptionCollectionPolicy = "engine"
+			request.PSPLinks = nil
+
 			for _, recurring := range []bool{false, true} {
 				request.AutoRenew = recurring
 				if recurring {
@@ -99,7 +105,7 @@ func TestCreatorProviderEnvironmentSurvivesDispatchAndSecondarySync(t *testing.T
 			require.NoError(t, err)
 			require.Equal(t, tc.environment+"-named"+suffix, links["named"]["account_id"])
 			require.Equal(t, []string{tc.environment + "-named" + suffix}, adapter.targets, "explicit legacy attachment must not fan out into new provider objects")
-			svc.rt.Config.NewSubscriptionCollectionPolicy = ""
+
 		})
 	}
 }

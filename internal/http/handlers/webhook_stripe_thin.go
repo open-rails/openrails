@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -45,7 +46,7 @@ type stripeThinEnvelope struct {
 // hydrateThinStripeEvent runs only AFTER the original bytes pass HMAC
 // verification. Unknown/malformed thin events fail retryably; acknowledging an
 // unrecognized v1.* event would silently lose financial notifications.
-func hydrateThinStripeEvent(ctx context.Context, secretKey, accountID string, body []byte) ([]byte, error) {
+func hydrateThinStripeEvent(ctx context.Context, secretKey, accountID string, body []byte, clients *stripeapi.Factory) ([]byte, error) {
 	var notice stripeThinEnvelope
 	if err := json.Unmarshal(body, &notice); err != nil {
 		return nil, err
@@ -72,7 +73,7 @@ func hydrateThinStripeEvent(ctx context.Context, secretKey, accountID string, bo
 
 	// A direct account key must actually belong to the routed account. Never use
 	// a payload-supplied context to switch the authority of an organization key.
-	client := stripeapi.ReadOnlyClient(15 * time.Second)
+	client := clients.ReadOnlyClient(15 * time.Second)
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	account, err := fetchThinStripeJSON(ctx, client, secretKey, "/v1/account", "")
 	if err != nil {
@@ -162,9 +163,11 @@ func hydrateThinStripeEvent(ctx context.Context, secretKey, accountID string, bo
 	return json.Marshal(result)
 }
 
+var errStripeWebhookAccountMismatch = errors.New("stripe event account/context does not match routed account")
+
 func validateStripeEventScope(event stripeThinEnvelope, accountID string) error {
 	if (event.Account != "" && event.Account != accountID) || (event.Context != "" && event.Context != accountID) {
-		return fmt.Errorf("stripe event account/context does not match routed account")
+		return errStripeWebhookAccountMismatch
 	}
 	return nil
 }

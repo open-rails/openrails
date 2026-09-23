@@ -22,18 +22,20 @@ import (
 // Client executes the same typed billing operations over an HTTP or in-process
 // transport. Applications may define narrow interfaces for the methods they use.
 type Client struct {
-	ProductAccess *ProductAccessClient
-	Products      *ProductClient
-	Prices        *PriceClient
-	Catalog       *CatalogClient
-	baseURL       string
-	merchantID    MerchantID
-	merchantSlug  string
-	ownCatalog    bool
-	catalogOwner  string
-	currency      string
-	client        *http.Client
-	timeout       time.Duration
+	ProductAccess         *ProductAccessClient
+	Products              *ProductClient
+	Prices                *PriceClient
+	Catalog               *CatalogClient
+	PaymentProviders      *PaymentProviderClient
+	MerchantConfiguration *MerchantConfigurationClient
+	baseURL               string
+	merchantID            MerchantID
+	merchantSlug          string
+	ownCatalog            bool
+	catalogOwner          string
+	currency              string
+	client                *http.Client
+	timeout               time.Duration
 	// tokenFn mints the per-call Bearer (e.g. a host-signed AuthKit service JWT,
 	// #411, or an OpenRails-issued API key). It is the SOLE credential; a
 	// mint failure errors the call so the problem surfaces instead of being

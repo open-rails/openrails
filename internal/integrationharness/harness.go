@@ -334,7 +334,7 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug string, configure ...func(*config.Config)) *Surface {
 	h.t.Helper()
 
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, AllowCatalogUpdates: true, DB: &config.DBConfig{URL: h.DSN}}
+	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, AllowCatalogUpdates: true, DB: &config.DBConfig{URL: h.DSN}}
 	for _, apply := range configure {
 		apply(cfg)
 	}
@@ -348,7 +348,7 @@ func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug st
 	// transport (#685) pins this merchant per request.
 	app.HostGraph(rt).Runtime.SetConfiguredMerchant(id)
 
-	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantAPI: true, Catalog: true, MerchantAdmin: true}, Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
+	handler, err := httptesthost.Handler(rt, httptesthost.Options{HTTP: embed.HTTPConfig{MerchantAPI: true, Catalog: true, MerchantAdmin: true, MerchantConfig: true}, Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
 		merchantID: id, merchantSlug: slug,
 	}})})
 	require.NoError(h.t, err, "mount production embedded merchant surface")
@@ -469,16 +469,16 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 	dbtest.EnsureTestMerchant(h.ctx, h.t, h.sharedPool())
 
 	cfg := &config.Config{
-		APIURL:                   "http://" + srv.Listener.Addr().String(),
-		Env:                      "dev",
+		PublicBillingBaseURL:     "http://" + srv.Listener.Addr().String(),
 		TestMode:                 config.CredentialPostureSandbox,
 		CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
 		// MODE 2 (#723): the standalone harness IS the API-driven SaaS shape —
 		// merchants/secrets/catalog mutate over the HTTP surface it exercises.
 		// Manifest-mode standalone behavior is tested per-case, not here.
-		MerchantConfigSource: config.MerchantConfigSourceAPI,
-		AllowCatalogUpdates:  true,
-		SecretBackend:        config.SecretBackendDB,
+		MerchantConfigHTTP:  true,
+		AllowCatalogUpdates: true,
+		SecretBackend:       config.SecretBackendDB,
+		Encryption:          &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 		// Explicit full: unset fail-closes to readonly (Paul 2026-07-02), which
 		// would park every provider write. The harness is a sandbox — fake
 		// providers, testcontainers DB — so full behavior is safe and required
@@ -495,9 +495,11 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 		mutate(cfg)
 	}
 	authConfig := &hostconfig.AuthConfig{
+		// DPoP binds to the known listener, independent of billing/checkout URLs.
+		RequestOrigin: "http://" + srv.Listener.Addr().String(), AllowLoopbackHTTP: true,
 		// The control plane's own AuthKit issuer.
 		Issuer:   "https://controlplane.openrails.test",
-		KeysPath: h.t.TempDir(),
+		KeysPath: h.t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true,
 	}
 	assembled, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{
 		Auth:                   authConfig,

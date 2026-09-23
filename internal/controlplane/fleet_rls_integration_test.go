@@ -34,8 +34,7 @@ func TestFleetAggregatesUnderTheEnforcingRole(t *testing.T) {
 	t.Cleanup(appPool.Close)
 
 	cfg := &hostconfig.Config{Config: &config.Config{
-		Env: "test",
-		DB:  &config.DBConfig{},
+		DB: &config.DBConfig{},
 	}, Auth: &hostconfig.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
 	}
 	rdb, _ := dbtest.SharedRedisClient(t)

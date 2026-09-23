@@ -152,4 +152,22 @@ func TestReconcileMerchantManifestRefusesInvalidBillingPolicy(t *testing.T) {
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.billing_policies`).Scan(&count))
 	require.Zero(t, count, "a manifest that fails validation must install no policy at all")
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM billing.merchants`).Scan(&count))
+	require.Zero(t, count, "invalid declarations must fail before creating merchant identity")
+
+	// The same validation runs when startup would preserve existing metadata.
+	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, hostThreeMerchantManifest(), MerchantManifestReconcileOptions{Insert: true}))
+	manifest := hostThreeMerchantManifest()
+	mt := manifest.Merchants["host-three"]
+	_, err := pool.Exec(ctx, `UPDATE billing.merchants SET display_name='existing merchant metadata' WHERE slug='host-three'`)
+	require.NoError(t, err)
+	mt.DisplayName = "must not replace existing metadata"
+	mt.BillingPolicies = map[string]BillingPolicyConfig{"bad": {Kind: "unknown"}}
+	manifest.Merchants["host-three"] = mt
+	err = ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true})
+	require.ErrorContains(t, err, "unknown kind")
+	var displayName string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT display_name FROM billing.merchants WHERE slug='host-three'`).Scan(&displayName))
+	require.Equal(t, "existing merchant metadata", displayName)
+
 }

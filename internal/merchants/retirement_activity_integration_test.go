@@ -25,22 +25,24 @@ import (
 // retirement. Every other merchant-scoped table must be a MerchantHasActivity
 // blocker or reach one through a NOT NULL foreign key.
 var retirementNeutralTables = map[string]string{
-	"catalog_applications":          "permanent replay metadata retained with the merchant; an empty application creates no billing obligation and retirement must not erase its receipt",
-	"catalogs":                      "immutable default/creator ownership metadata retained with the merchant; products, not empty catalog identities, are activity",
-	"admission_denials_hourly":      "refused-traffic telemetry anyone can create",
-	"webhook_health":                "inbound delivery counters include rejected, unsigned requests",
-	"webhook_health_daily":          "rollup of webhook_health",
-	"dashboard_configs":             "presentation layout",
-	"merchant_configurations":       "settings, not an obligation, connection, customer or catalog",
-	"merchant_deks":                 "wrapped key material; stored credentials are merchant_secrets",
-	"merchant_destructive_policy":   "operator safety switch",
-	"destructive_run_before_images": "operator maintenance ledger",
-	"maintenance_runs":              "operator maintenance ledger; historical findings do not represent live merchant activity",
-	"reconciliation_findings":       "operator maintenance ledger",
-	"reconciliation_state":          "reconciliation watermark",
-	"rail_mutation_logs":            "history of provider mutations, which need a PSP or custodian",
-	"metered_rating_watermarks":     "derived from customer usage",
-	"notifications":                 "inbox records derived from other activity",
+	"merchant_configuration_applications": "permanent metadata replay receipt retained with the merchant; configuration edits create no billing obligation and retirement must preserve their replay identity",
+	"credential_publications":             "durable credential publication replay receipt; custody material itself blocks retirement",
+	"catalog_applications":                "permanent replay metadata retained with the merchant; an empty application creates no billing obligation and retirement must not erase its receipt",
+	"catalogs":                            "immutable default/creator ownership metadata retained with the merchant; products, not empty catalog identities, are activity",
+	"admission_denials_hourly":            "refused-traffic telemetry anyone can create",
+	"webhook_health":                      "inbound delivery counters include rejected, unsigned requests",
+	"webhook_health_daily":                "rollup of webhook_health",
+	"dashboard_configs":                   "presentation layout",
+	"merchant_configurations":             "settings, not an obligation, connection, customer or catalog",
+	"merchant_deks":                       "wrapped key material; stored credentials are merchant_secrets",
+	"merchant_destructive_policy":         "operator safety switch",
+	"destructive_run_before_images":       "operator maintenance ledger",
+	"maintenance_runs":                    "operator maintenance ledger; historical findings do not represent live merchant activity",
+	"reconciliation_findings":             "operator maintenance ledger",
+	"reconciliation_state":                "reconciliation watermark",
+	"rail_mutation_logs":                  "history of provider mutations, which need a PSP or custodian",
+	"metered_rating_watermarks":           "derived from customer usage",
+	"notifications":                       "inbox records derived from other activity",
 }
 
 func TestRetirementActivityClassifiesEveryMerchantTable(t *testing.T) {
@@ -223,6 +225,11 @@ func TestRetireUnusedRetainsCatalogIdentityMetadata(t *testing.T) {
 	require.NoError(t, err)
 	receipt, err := q.GetCatalogApplication(ctx, gen.GetCatalogApplicationParams{MerchantID: m.ID.UUID(), ApplicationID: "empty-application"})
 	require.NoError(t, err)
+	digest := []byte(strings.Repeat("a", 32))
+	metadataResult := []byte(`{"application_id":"metadata-one","revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","replayed":false}`)
+	require.NoError(t, q.InsertMerchantConfigurationApplication(ctx, gen.InsertMerchantConfigurationApplicationParams{MerchantID: m.ID.UUID(), ApplicationID: "metadata-one", RequestSha256: digest, Result: metadataResult}))
+	metadataReceipt, err := q.GetMerchantConfigurationApplication(ctx, gen.GetMerchantConfigurationApplicationParams{MerchantID: m.ID.UUID(), ApplicationID: "metadata-one"})
+	require.NoError(t, err)
 	released := false
 	result, err := svc.RetireUnused(ctx, m.ID, group, nil, func(_ context.Context, id string) error { require.Equal(t, group, id); released = true; return nil })
 	require.NoError(t, err)
@@ -231,6 +238,10 @@ func TestRetireUnusedRetainsCatalogIdentityMetadata(t *testing.T) {
 	retainedReceipt, err := q.GetCatalogApplication(ctx, gen.GetCatalogApplicationParams{MerchantID: m.ID.UUID(), ApplicationID: "empty-application"})
 	require.NoError(t, err)
 	require.Equal(t, receipt, retainedReceipt, "retirement preserves durable replay identity")
+	retainedMetadata, err := q.GetMerchantConfigurationApplication(ctx, gen.GetMerchantConfigurationApplicationParams{MerchantID: m.ID.UUID(), ApplicationID: "metadata-one"})
+	require.NoError(t, err)
+	require.Equal(t, metadataReceipt, retainedMetadata, "retirement preserves metadata replay identity and revision receipt")
+
 	for _, before := range []gen.OpenrailsCatalog{defaults, owned} {
 		after, err := q.GetCatalog(ctx, gen.GetCatalogParams{MerchantID: m.ID.UUID(), ID: before.ID})
 		require.NoError(t, err)

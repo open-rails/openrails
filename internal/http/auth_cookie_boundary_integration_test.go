@@ -32,8 +32,9 @@ func TestAuthKitRefreshCookieSurvivesBillingWrapper(t *testing.T) {
 	httpServer := httptest.NewUnstartedServer(nil)
 	t.Cleanup(httpServer.Close)
 	origin := "https://" + httpServer.Listener.Addr().String()
-	cfg := &config.Config{Env: "dev", APIURL: origin}
-	cp, err := controlplane.New(ctx, cfg, &hostconfig.AuthConfig{Issuer: origin, KeysPath: t.TempDir()}, pool, controlplane.WithRedis(rdb))
+	cfg := &config.Config{PublicBillingBaseURL: origin}
+	auth := &hostconfig.AuthConfig{Issuer: origin, KeysPath: t.TempDir(), AllowEphemeralSigningKey: true, AllowMissingSenders: true, DirectPeerIP: true}
+	cp, err := controlplane.New(ctx, cfg, auth, pool, controlplane.WithRedis(rdb))
 	require.NoError(t, err)
 	t.Cleanup(cp.Close)
 	mount, err := authhttp.MountHandler(cp.AuthService(), authhttp.MountOptions{APIPrefix: ControlPlaneAuthPrefix, Groups: cp.MountedRouteGroups(), RefreshCookie: true})

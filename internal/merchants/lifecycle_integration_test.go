@@ -89,6 +89,21 @@ CREATE TABLE IF NOT EXISTS billing.customers (
     subject     TEXT
 );
 
+CREATE TABLE IF NOT EXISTS billing.credential_publications (
+ merchant_id uuid NOT NULL REFERENCES billing.merchants(id) ON DELETE RESTRICT,
+ operation_id uuid NOT NULL,
+ rail text NOT NULL,
+ environment text NOT NULL,
+ account_id text NOT NULL,
+ expected_revision bigint NOT NULL CHECK (expected_revision >= 0),
+ request_metadata jsonb NOT NULL,
+ state text NOT NULL DEFAULT 'staging' CHECK (state IN ('staging','published')),
+ result jsonb,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ published_at timestamptz,
+ PRIMARY KEY (merchant_id,operation_id)
+);
+
 CREATE TABLE IF NOT EXISTS billing.merchant_secrets (
     merchant_id UUID NOT NULL,
     name       TEXT NOT NULL,
@@ -383,7 +398,7 @@ func TestArchivedPSPRejectsNewWorkButResolvesByAccountID(t *testing.T) {
 	seedArchivedPSP(t, svc, tn.ID, "nmi", "live", accountID)
 	secretName, err := PSPSecretName("nmi", "live", accountID, "webhook_signing_secret")
 	require.NoError(t, err)
-	_, err = svc.PutCredential(ctx, tn.ID, secretName, "archived-webhook-secret")
+	_, err = svc.secrets.Put(ctx, tn.ID, secretName, "archived-webhook-secret")
 	require.NoError(t, err)
 
 	_, ok, err := svc.ActivePSPSecretName(ctx, tn.ID, "nmi", "live", "security_key")

@@ -300,6 +300,8 @@ Server-to-server billing operations. Every route is gated on the listed
 | POST | `/v1/merchant/usage/rollup` | `merchant:usage:read` | Usage rollup query |
 | POST | `/v1/merchant/usage/resource-revenue` | `merchant:usage:read` | Resource-revenue query |
 | GET | `/v1/merchant/settings` | `merchant:settings:read` | Merchant billing settings |
+| GET | `/v1/merchant/configuration` | `merchant:settings:read` | Read the merchant configuration and its current revision |
+| POST | `/v1/merchant/configuration/applications` | `merchant:settings:update` | Apply a configuration document with an application ID and expected revision; returns a durable receipt ([configuration applications](../merchant-configuration-applications.md)) |
 | PUT | `/v1/merchant/settings` | `merchant:settings:update` | Replace the merchant settings document atomically ([merchant-settings.md](merchant-settings.md)), incl. `billing_policies` + `billing_policy_bindings` ([billing-policies.md](../billing-policies.md)) |
 | GET | `/v1/merchant/api-host` | `merchant:settings:read` | The merchant's canonical API host (#734 Host routing); `api_host` null when unset |
 | PUT | `/v1/merchant/api-host` | `merchant:settings:update` | Assign the canonical API host: `{ api_host }` (bare lowercase hostname; `""` clears). Owner-only in the fixed role catalog; 409 when taken by another merchant |
@@ -578,7 +580,7 @@ boundary). Success returns `200 { "status": "accepted" }`.
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/v1/webhooks/{provider}/{account_id}` | Standalone: the receiving PSP account is explicitly pinned in the path and its credentials verify the callback |
-| POST | `/billing/v1/merchants/{merchant}/webhooks/{provider}/{account_id}` | Embedded: the host pins the merchant and receiving PSP account; that account's credentials verify the callback |
+| POST | `/billing/v1/webhooks/{provider}/{account_id}` | Embedded under /billing: the configured account resolves its merchant; runtime bindings and account credentials verify the callback |
 
 `{provider}` is the gateway KIND — `nmi`, `ccbill`, `stripe`, `solana`,
 `basistheory`. It is never a PSP key: `mobius` and `paykings` both post to

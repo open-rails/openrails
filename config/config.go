@@ -76,14 +76,6 @@ func (p *CredentialPosture) UnmarshalText(text []byte) error {
 }
 
 type Config struct {
-	// Env is the deployment environment and it is REQUIRED (SEC-18). It is the
-	// switch behind RequiresSecretEncryption, so an unset value must never read
-	// as "development": a container shipped without ENV would otherwise boot
-	// with PLAINTEXT merchant secrets (NMI security_key, Stripe sk_, CCBill
-	// DataLink passwords, webhook signing secrets) after a single warning —
-	// silently. Load() refuses an empty ENV, and IsDev() reads empty as NOT development so any path that
-	// bypasses Load still fails closed. Env: ENV.
-	Env  string       `koanf:"env,omitempty"`
 	Port FlexiblePort `koanf:"port,omitempty"` // Standalone only: public HTTP port (default 3053)
 	Host string       `koanf:"host,omitempty"` // Standalone only: address to bind to (default 0.0.0.0)
 
@@ -95,44 +87,19 @@ type Config struct {
 	//   - "readonly": no provider writes
 	// Unset defaults to "readonly" — FAIL CLOSED (Paul 2026-07-02): no provider
 	// write (cancellation, deletion, charge) executes until the operator
-	// explicitly sets full or limited. Outside development an explicit value is
-	// still REQUIRED (Validate refuses to boot without one).
+	// explicitly sets full or limited. Omission is a supported read-only default.
 	ProviderWriteMode string `koanf:"provider_write_mode,omitempty"`
 
-	// TestMode is the sandbox-credential axis (#355), orthogonal to Mode.
-	// "sandbox" routes every rail to its sandbox environment AND the
-	// credential guarantees attach: a live Stripe key (sk_live_/rk_live_)
-	// refuses to boot, configured NMI accounts are probed at boot (a decline
-	// of the non-issued test card proves production credentials and refuses
-	// the boot), CCBill uses the sandbox URL, and Solana derives devnet.
-	// "live" runs production credentials. Two explicit states ONLY (#745,
-	// replaces the bool whose zero value silently meant live money): the
-	// empty Go zero value is UNSET, tolerated only by standalone Load() —
-	// which defaults it to sandbox in development and live outside it (#355)
-	// — so a local boot is sandbox by default and a prod boot is live by
-	// default. embedded.New never runs Load's defaulting and refuses to
-	// construct with it unset — an embedded host must declare its posture,
-	// never guess (supersedes #711's warn-only).
-	//
-	// Posture (this field) and environment strictness (Env/IsDev) are
-	// INDEPENDENT axes (#762): sandbox is allowed in every environment,
-	// including production — a staging (or production) deployment running
-	// sandbox rails under full non-dev hard gates is a legitimate, common
-	// shape, not a footgun. Nothing here special-cases env=production; the
-	// credential guarantees this field attaches (live-key refusal above, the
-	// NMI live-gateway probe) are what keep a sandbox posture honest
-	// regardless of Env. Set test_mode=live explicitly to run live credentials
-	// locally in development.
+	// TestMode selects sandbox or live provider credentials. It never relaxes
+	// authentication, transport security or credential encryption. Constructors
+	// require an explicit posture independently of provider write permissions.
 	TestMode CredentialPosture `koanf:"test_mode,omitempty"`
 
-	// APIURL is the base URL where billing's versioned routes are mounted.
-	// Used for generating URLs (e.g., Solana Pay transaction_request URLs).
-	//
-	// Standalone mode: "https://api.mysite.com" (routes at /v1/*)
-	// Embedded mode:   "https://api.mysite.com/billing" (routes at /billing/v1/*)
-	//
-	// Formula: generated_url = APIURL + {version_path} + "/checkout/:id/solana-pay"
-	APIURL string `koanf:"api_url,omitempty"`
+	// PublicBillingBaseURL is the external billing mount, excluding /v1.
+	// Used only to generate provider callbacks and customer billing links.
+	PublicBillingBaseURL string `koanf:"public_billing_base_url,omitempty"`
+	// DashboardBaseURL is the independent destination for administrative links.
+	DashboardBaseURL string `koanf:"dashboard_base_url,omitempty"`
 
 	DB         *DBConfig         `koanf:"db,omitempty"`
 	Redis      *RedisConfig      `koanf:"redis,omitempty"`
@@ -168,29 +135,23 @@ type Config struct {
 	// work like any other secret env name).
 	LLM *LLMConfig `koanf:"llm,omitempty"`
 
-	// SecretBackend declares WHERE merchant secrets physically live: "db" (the
-	// DEK-encrypted Postgres store / values-injected) or "vault" (Vault KV-v2).
-	// It is declared intent, never auto-detected and never auto-fallback — the data
-	// lives in exactly one place (#661). REQUIRED in merchant_config_source=api mode
-	// (or#893 deleted the vault.enabled derivation). Env: SECRET_BACKEND. Only
-	// Provider credentials use this backend only in merchant_config_source=api mode.
-	// Manifest providers stay in memory; optional managed alert-webhook URLs
-	// can independently use this backend and require encryption when stored in DB.
+	// SecretBackend selects credential custody: snapshot (default), vault or db.
+	// Snapshot values are supplied by the host and are never persisted. Managed
+	// DB storage always requires encryption. Vault access never falls back to DB.
 	SecretBackend string `koanf:"secret_backend,omitempty"`
-
-	// MerchantConfigSource selects authority for merchant configuration and provider
-	// credentials. AllowCatalogUpdates independently controls catalog writes.
-	//   - "manifest" (DEFAULT, empty = manifest): MODE 1. The boot YAML (merchant
-	//     manifest + the host's structured secret overlays) IS
-	//     the truth, held in memory. Provider-config mutation APIs are rejected
-	//     (405); change =
-	//     edit the YAML + reboot. DB rows are boot-converged projections for FKs.
-	//   - "api": MODE 2. No manifests at boot (their presence refuses boot —
-	//     two truths); merchant configuration/secrets live in the DB + secret backend
-	//     and mutate over the HTTP APIs.
-	// Deployment shape does NOT imply mode — embedded and standalone can run
-	// either. Env: MERCHANT_CONFIG_SOURCE. Unknown values refuse to load.
-	MerchantConfigSource string `koanf:"merchant_config_source,omitempty"`
+	// CredentialSnapshotID is a stable host-owned UUID identifying snapshot custody.
+	// It is required when publishing a managed-to-snapshot custody transition.
+	CredentialSnapshotID string `koanf:"credential_snapshot_id,omitempty"`
+	// CredentialReadOnly declines managed credential writes even when the
+	// selected backend would permit them. It never grants backend privileges.
+	CredentialReadOnly bool `koanf:"credential_read_only,omitempty"`
+	// AlertSecretBackend optionally selects vault or encrypted db custody for
+	// outbound webhook credentials independently of read-only provider snapshots.
+	AlertSecretBackend string `koanf:"alert_secret_backend,omitempty"`
+	// MerchantConfigHTTP publishes standalone merchant settings/provider routes.
+	// Embedded hosts select HTTP.MerchantConfig instead. Neither flag disables
+	// authorized in-process Client operations or changes credential custody.
+	MerchantConfigHTTP bool `koanf:"merchant_config_http,omitempty"`
 	// AllowCatalogUpdates enables ordinary product, price, catalog and metering
 	// definition mutations and their HTTP routes. Defaults to false independently
 	// of provider credential custody. Trusted operator bootstrap remains available.
@@ -255,10 +216,6 @@ type Config struct {
 	// HyperSwitch is a trusted host-owned deployment, never tenant-controlled.
 	HyperSwitch *HyperSwitchConfig `koanf:"hyperswitch,omitempty"`
 
-	// NewSubscriptionCollectionPolicy is consulted only when accepting a new
-	// agreement. Empty/provider preserves enrollment during staged rollout;
-	// engine requires a supported saved-method confirmation flow.
-	NewSubscriptionCollectionPolicy string `koanf:"new_subscription_collection_policy"`
 	// EngineAdmissionHold pauses new renewal obligations, never receipt recovery.
 	EngineAdmissionHold bool `koanf:"engine_admission_hold"`
 }
@@ -383,46 +340,18 @@ func (cfg *Config) ProviderBillingQuiescence() (time.Duration, error) {
 }
 
 const (
-	SecretBackendDB    = "db"
-	SecretBackendVault = "vault"
+	SecretBackendSnapshot = "snapshot"
+	SecretBackendDB       = "db"
+	SecretBackendVault    = "vault"
 )
 
-// Merchant-source modes (#723/#724).
-const (
-	MerchantConfigSourceManifest = "manifest"
-	MerchantConfigSourceAPI      = "api"
-)
-
-// MerchantConfigSourceMode returns the normalized merchant-source mode: "manifest"
-// (MODE 1, the default) or "api" (MODE 2). Unknown values are rejected by
-// Validate; this accessor treats only an explicit "api" as mode 2.
-func (cfg *Config) MerchantConfigSourceMode() string {
-	if cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.MerchantConfigSource), MerchantConfigSourceAPI) {
-		return MerchantConfigSourceAPI
-	}
-	return MerchantConfigSourceManifest
-}
-
-// IsManifestMerchantConfigSource reports MODE 1 (#723): manifest-is-truth, secrets
-// in memory, provider-configuration mutation HTTP routes omitted.
-func (cfg *Config) IsManifestMerchantConfigSource() bool {
-	return cfg.MerchantConfigSourceMode() == MerchantConfigSourceManifest
-}
-
-// SecretStoreBackend returns where merchant secrets live: "vault" or "db".
-// ONLY the declared secret_backend is consulted — or#893 deleted the
-// vault.enabled inference, so enabling Vault for Transit signing can no longer
-// silently move the secret store. merchant_config_source=api requires the declaration
-// (validateMerchantConfigSource). Manifest mode uses this backend only for optional
-// managed alert-webhook URLs, never for provider credentials.
+// SecretStoreBackend returns the declared credential custody. Empty chooses an
+// immutable host snapshot; unknown inputs remain invalid rather than selecting DB.
 func (cfg *Config) SecretStoreBackend() string {
-	if cfg == nil {
-		return SecretBackendDB
+	if cfg == nil || strings.TrimSpace(cfg.SecretBackend) == "" {
+		return SecretBackendSnapshot
 	}
-	if strings.ToLower(strings.TrimSpace(cfg.SecretBackend)) == SecretBackendVault {
-		return SecretBackendVault
-	}
-	return SecretBackendDB
+	return strings.ToLower(strings.TrimSpace(cfg.SecretBackend))
 }
 
 // EncryptionConfig configures per-merchant encryption-at-rest (issue #227). The
@@ -434,7 +363,7 @@ func (cfg *Config) SecretStoreBackend() string {
 // ENCRYPTION_MASTER_KEY env var. PRODUCTION: the master key should come from a
 // KMS (the wrapped DEKs in openrails.merchant_deks stay in the DB; the master key
 // that unwraps them never does). An empty key disables this encryptor. Managed
-// DB provider credentials then require development posture, while sensitive
+// Managed DB provider credentials always require encryption, while sensitive
 // optional features such as stored webhook URLs and SDK capture tokens refuse
 // persistence. Host-owned provider credentials remain in memory.
 type EncryptionConfig struct {
@@ -449,9 +378,11 @@ type EncryptionConfig struct {
 // Solana PSP selects its signer. KV and Transit mounts default to "secret" and
 // "transit" (KVMount/TransitMount below); the secret cache TTL is fixed in code.
 type VaultConfig struct {
-	Enabled    bool   `koanf:"enabled,omitempty"`
-	Address    string `koanf:"address,omitempty"`     // VAULT_ADDR; empty uses the api default
-	AuthMethod string `koanf:"auth_method,omitempty"` // "token" | "approle" | "kubernetes"
+	Namespace   string `koanf:"namespace,omitempty"`
+	ScopePrefix string `koanf:"scope_prefix,omitempty"`
+	Enabled     bool   `koanf:"enabled,omitempty"`
+	Address     string `koanf:"address,omitempty"`     // VAULT_ADDR; empty uses the api default
+	AuthMethod  string `koanf:"auth_method,omitempty"` // "token" | "approle" | "kubernetes"
 	// Token is a pre-issued Vault token (VAULT_TOKEN). When set with no explicit
 	// auth_method, token auth is selected (dev / e2e against a -dev Vault).
 	Token    string `koanf:"token,omitempty"`
@@ -522,7 +453,7 @@ type LLMConfig struct {
 	// (Groq, Together, Ollama, vLLM). Convention per dialect: openai INCLUDES
 	// the version segment (e.g. http://localhost:11434/v1), anthropic is the
 	// origin (e.g. https://api.anthropic.com). Must be an absolute URL; https
-	// required outside development. Env: LLM_BASE_URL.
+	// required. Env: LLM_BASE_URL.
 	BaseURL string `koanf:"base_url,omitempty"`
 	// APIKey is the provider credential (SECRET — env LLM_API_KEY or a
 	// mounted secret file, never committed config). Empty = feature off.
@@ -1204,7 +1135,7 @@ func (c *CaptchaConfig) EffectiveChallengeBuckets() []string {
 
 // Validate validates the billing configuration
 func Validate(cfg *Config) error {
-	// Skip strict validation in development environments
+	// Credential posture never relaxes security validation.
 	// Provider write mode must be a known value — a typo (e.g. "redaonly") must
 	// never silently boot with full behavior (#346).
 	providerWriteMode := cfg.normalizedProviderWriteMode()
@@ -1233,54 +1164,18 @@ func Validate(cfg *Config) error {
 	// defense in depth so a typo can never silently take an unrecognized
 	// branch (#745).
 	switch cfg.TestMode {
-	case "", CredentialPostureSandbox, CredentialPostureLive:
+	case CredentialPostureSandbox, CredentialPostureLive:
+	case "":
+		return fmt.Errorf("test_mode is required: choose sandbox or live")
 	default:
 		return fmt.Errorf("invalid test_mode %q: must be %q or %q", cfg.TestMode, CredentialPostureSandbox, CredentialPostureLive)
 	}
 
-	isDev := cfg.IsDev()
-	if !isDev {
-		// #762: posture (TestMode: sandbox|live) and environment strictness
-		// (isDev vs non-dev hard gates) are INDEPENDENT axes — sandbox is
-		// legitimate outside development (a staging environment running
-		// sandbox rails under full production-grade gates is exactly the
-		// point), so there is no environment-based rejection of
-		// test_mode=sandbox here. The #355-era "sandbox is dev-only" rule
-		// this superseded conflated the two axes; that left staging with no
-		// honest posture (it had to lie as env=development to unlock sandbox,
-		// disabling every other hard gate, or lie as live with no rail
-		// credentials). What actually prevents a sandbox posture from being
-		// misused in a genuinely-live deployment is rail-credential
-		// validation, not the environment string: the NMI live-gateway probe
-		// asks the gateway itself whether the credentials are live, and
-		// validateStripeKeyForTestMode hard-rejects a live secret key
-		// (sk_live_/rk_live_) whenever TestMode is sandbox, in every
-		// environment including production. A deployment that declares
-		// env=production and test_mode=sandbox simply runs a fully-gated
-		// sandbox deployment — self-consistent, not a security hole.
-		//
-		// Outside development the operating mode must be declared explicitly —
-		// "I forgot to set it" must never silently pick a behavior. Checked on
-		// the RAW value: GetProviderWriteMode fail-closes unset to readonly,
-		// which must not satisfy this explicitness gate.
-		if providerWriteMode == "" {
-			return fmt.Errorf("provider_write_mode is required outside development: set provider_write_mode (or env PROVIDER_WRITE_MODE) to one of full, limited, readonly")
-		}
-		if cfg.DB != nil {
-			if strings.TrimSpace(cfg.DB.Username) == "admin" || strings.TrimSpace(cfg.DB.Password) == "admin_password" {
-				return fmt.Errorf("default database credentials are not allowed outside development")
-			}
-		}
-		// #742: a nil RateLimits map is a passthrough in RateLimitHTTP — every
-		// endpoint runs unthrottled. embedded.New seeds the curated defaults
-		// whenever a host leaves this nil, so this only trips for a host that
-		// built its own Config directly (bypassing embedded.New) or a
-		// standalone config.yaml that explicitly nulled the map — either way,
-		// "forgot to configure rate limits" must never silently ship
-		// unprotected outside development.
-		if cfg.RateLimits == nil && !cfg.RateLimitsDisabled {
-			return fmt.Errorf("rate_limits is required outside development unless rate_limits_disabled is set (#742): set rate_limits, or rate_limits_disabled=true if this host fronts OpenRails with its own gateway/limiter")
-		}
+	if cfg.DB != nil && (strings.TrimSpace(cfg.DB.Username) == "admin" || strings.TrimSpace(cfg.DB.Password) == "admin_password") {
+		return fmt.Errorf("default database credentials are not allowed")
+	}
+	if cfg.RateLimits == nil && !cfg.RateLimitsDisabled {
+		return fmt.Errorf("rate_limits is required unless rate_limits_disabled is explicitly set for a host-owned limiter")
 	}
 	if err := validateCaptcha(cfg.Captcha); err != nil {
 		return fmt.Errorf("captcha config validation failed: %w", err)
@@ -1296,14 +1191,14 @@ func Validate(cfg *Config) error {
 		}
 		// Same root-of-trust posture as the auth issuer: plaintext HTTP to
 		// the model endpoint (prompts + aggregate results in flight) is
-		// dev-only.
+		// prohibited.
 		if base := strings.TrimSpace(cfg.LLM.BaseURL); base != "" {
 			u, err := url.Parse(base)
 			if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 				return fmt.Errorf("invalid llm.base_url %q: must be an absolute http(s) URL", base)
 			}
-			if !isDev && u.Scheme != "https" {
-				return fmt.Errorf("llm.base_url %q must use https outside development", base)
+			if u.Scheme != "https" {
+				return fmt.Errorf("llm.base_url %q must use https", base)
 			}
 		}
 	}
@@ -1317,9 +1212,6 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("encryption config validation failed: %w", err)
 	}
 
-	if cfg.NewSubscriptionCollectionPolicy != "" && cfg.NewSubscriptionCollectionPolicy != "provider" && cfg.NewSubscriptionCollectionPolicy != "engine" {
-		return fmt.Errorf("new_subscription_collection_policy must be provider or engine")
-	}
 	if err := validateHyperSwitch(cfg); err != nil {
 		return err
 	}
@@ -1328,10 +1220,6 @@ func Validate(cfg *Config) error {
 	}
 	if err := validateSecretBackend(cfg); err != nil {
 		return fmt.Errorf("secret_backend config validation failed: %w", err)
-	}
-
-	if err := validateMerchantConfigSource(cfg, isDev); err != nil {
-		return fmt.Errorf("merchant_config_source config validation failed: %w", err)
 	}
 
 	if err := validateSourceCIDRs(cfg.TrustedProxies); err != nil {
@@ -1371,52 +1259,29 @@ func validateSourceCIDRs(cidrs []string) error {
 	return nil
 }
 
-// validateMerchantConfigSource enforces the #723 boot matrix rows that are pure
-// config posture:
-//   - unknown merchant_config_source values refuse to load (a typo must never
-//     silently pick a truth model);
-//   - api mode outside development requires a merchant-secret backend (Vault,
-//     or ENCRYPTION_MASTER_KEY for the DB store) — extends the #667 posture
-//     from store-build time to declared-mode time.
-//
-// The manifest-mode rows (manifest file expected but unresolvable; api mode
-// with a merchants.yaml on disk) are enforced where manifests load: serverboot
-// (standalone) and embed.Options.Merchant (embedded).
-func validateMerchantConfigSource(cfg *Config, isDev bool) error {
-	switch strings.ToLower(strings.TrimSpace(cfg.MerchantConfigSource)) {
-	case "", MerchantConfigSourceManifest, MerchantConfigSourceAPI:
-	default:
-		return fmt.Errorf("merchant_config_source must be %q or %q (empty defaults to %q)", MerchantConfigSourceManifest, MerchantConfigSourceAPI, MerchantConfigSourceManifest)
-	}
-	if cfg.MerchantConfigSourceMode() != MerchantConfigSourceAPI {
-		return nil
-	}
-	// or#893: WHERE merchant secrets live is declared intent, never inferred.
-	// vault.enabled means "a Vault connection exists" (Transit signing counts);
-	// it does not mean the secret store moved there.
-	switch strings.ToLower(strings.TrimSpace(cfg.SecretBackend)) {
-	case SecretBackendDB:
-		if !isDev && (cfg.Encryption == nil || strings.TrimSpace(cfg.Encryption.MasterKey) == "") {
-			return fmt.Errorf("merchant_config_source=api with secret_backend=db requires ENCRYPTION_MASTER_KEY outside development (#667/#723): the DB store would hold merchant credentials in plaintext")
-		}
-	case SecretBackendVault:
-		// validateSecretBackend already requires vault.enabled for this backend.
-	default:
-		return fmt.Errorf("merchant_config_source=api requires an explicit secret_backend (%q or %q): where merchant secrets live is declared intent, never derived from vault.enabled (#661/#893)", SecretBackendDB, SecretBackendVault)
-	}
-	return nil
-}
-
-// validateSecretBackend checks the declared secret backend is valid and reachable.
-// secret_backend=vault needs a Vault connection to serve the KV store (#661).
+// validateSecretBackend checks declared custody. A live Vault connection may be
+// supplied by an embedded host; backend construction verifies its actual access.
 func validateSecretBackend(cfg *Config) error {
+	if cfg.CredentialSnapshotID != "" {
+		id, err := uuid.Parse(cfg.CredentialSnapshotID)
+		if err != nil || id == uuid.Nil || id.String() != cfg.CredentialSnapshotID {
+			return fmt.Errorf("credential_snapshot_id must be a canonical nonzero UUID")
+		}
+	}
 	switch strings.ToLower(strings.TrimSpace(cfg.SecretBackend)) {
+	case "", SecretBackendSnapshot, SecretBackendDB, SecretBackendVault:
+	default:
+		return fmt.Errorf("secret_backend must be snapshot, db or vault")
+	}
+	switch cfg.AlertSecretBackend {
 	case "", SecretBackendDB, SecretBackendVault:
 	default:
-		return fmt.Errorf("secret_backend must be %q or %q", SecretBackendDB, SecretBackendVault)
+		return fmt.Errorf("alert_secret_backend must be db or vault when configured")
 	}
-	if cfg.SecretStoreBackend() == SecretBackendVault && (cfg.Vault == nil || !cfg.Vault.Enabled) {
-		return fmt.Errorf("secret_backend=vault requires vault.enabled (secrets declared in Vault KV need a Vault connection)")
+	if cfg.SecretStoreBackend() == SecretBackendDB || cfg.AlertSecretBackend == SecretBackendDB {
+		if cfg.Encryption == nil || strings.TrimSpace(cfg.Encryption.MasterKey) == "" {
+			return fmt.Errorf("DB credential storage requires encryption.master_key")
+		}
 	}
 	return nil
 }
@@ -1465,11 +1330,7 @@ func ValidateRailSet(cfg *Config, rails PSPSet) error {
 	if len(rails) == 0 {
 		return nil
 	}
-	isDev := true
-	if cfg != nil {
-		isDev = cfg.IsDev()
-	}
-	if err := validateRails(cfg, rails, isDev); err != nil {
+	if err := validateRails(cfg, rails); err != nil {
 		return fmt.Errorf("rails validation failed: %w", err)
 	}
 	return validateStripeKeyForTestMode(cfg, rails)
@@ -1488,31 +1349,34 @@ func validateStripeKeyForTestMode(cfg *Config, rails PSPSet) error {
 			continue
 		}
 
-		secretKey := strings.TrimSpace(stripeProc.Stripe.SecretKey)
-		if secretKey == "" {
-			continue
-		}
-
-		// Both standard secret keys (sk_*) and restricted keys (rk_*) carry the
-		// live/test mode in their prefix, so classify either form.
-		isLiveKey := strings.HasPrefix(secretKey, "sk_live_") || strings.HasPrefix(secretKey, "rk_live_")
-		isTestKey := strings.HasPrefix(secretKey, "sk_test_") || strings.HasPrefix(secretKey, "rk_test_")
-
-		if cfg.IsTestMode() && isLiveKey {
-			// Hard guarantee (#347): the sandbox environment must never hold a live
-			// key — a mistakenly-test-modeed production system would otherwise carry
-			// a credential that can move real money.
-			return fmt.Errorf("stripe rail %q: live key (sk_live_/rk_live_) is not allowed when test_mode is enabled; use a test key or unset test_mode", strings.ToLower(strings.TrimSpace(name)))
-		}
-		if !cfg.IsTestMode() && isTestKey {
-			return fmt.Errorf("stripe rail %q: test key (sk_test_/rk_test_) is not allowed when test_mode=live; use a live key or set test_mode=sandbox", strings.ToLower(strings.TrimSpace(name)))
+		if err := ValidateStripeCredentialPosture(cfg, stripeProc.Stripe.SecretKey); err != nil {
+			return fmt.Errorf("stripe rail %q: %w", strings.ToLower(strings.TrimSpace(name)), err)
 		}
 	}
 	return nil
 }
 
+// ValidateStripeCredentialPosture checks a single supplied Stripe key against
+// the runtime posture without requiring a complete account or probing Stripe.
+func ValidateStripeCredentialPosture(cfg *Config, secretKey string) error {
+	secretKey = strings.TrimSpace(secretKey)
+	isLiveKey := strings.HasPrefix(secretKey, "sk_live_") || strings.HasPrefix(secretKey, "rk_live_")
+	isTestKey := strings.HasPrefix(secretKey, "sk_test_") || strings.HasPrefix(secretKey, "rk_test_")
+	if secretKey != "" && ((!isLiveKey && !isTestKey) || len(secretKey) <= len("sk_test_")) {
+		return fmt.Errorf("invalid Stripe secret key format: expected sk_live_, rk_live_, sk_test_, or rk_test_ with a nonempty value")
+	}
+	if cfg != nil && cfg.IsTestMode() {
+		if isLiveKey {
+			return fmt.Errorf("live key (sk_live_/rk_live_) is not allowed when test_mode=sandbox; use a test key or set test_mode=live")
+		}
+	} else if isTestKey {
+		return fmt.Errorf("test key (sk_test_/rk_test_) is not allowed when test_mode=live; use a live key or set test_mode=sandbox")
+	}
+	return nil
+}
+
 // validateRails validates all rails in the new Rails map
-func validateRails(cfg *Config, rails PSPSet, isDev bool) error {
+func validateRails(cfg *Config, rails PSPSet) error {
 	// Count accounts per rail: with more than one, each must declare account_id
 	// (the made-up map name can't be the provider identity, #641).
 	countByRail := map[models.Rail]int{}
@@ -1539,25 +1403,25 @@ func validateRails(cfg *Config, rails PSPSet, isDev bool) error {
 		}
 		switch effectiveType {
 		case models.RailNMI:
-			if err := validateNMIRail(name, proc, isDev); err != nil {
+			if err := validateNMIRail(name, proc); err != nil {
 				return err
 			}
 		case models.RailCCBill:
-			if err := validateCCBillRail(name, proc, isDev); err != nil {
+			if err := validateCCBillRail(name, proc); err != nil {
 				return err
 			}
 		case models.RailStripe:
-			if err := validateStripeRail(name, proc, isDev); err != nil {
+			if err := validateStripeRail(name, proc); err != nil {
 				return err
 			}
 		case models.RailSolana:
-			if err := validateSolanaRail(name, proc, isDev); err != nil {
+			if err := validateSolanaRail(name, proc); err != nil {
 				return err
 			}
 		default:
 			return fmt.Errorf("rail '%s' has unknown type '%s'", name, effectiveType)
 		}
-		if err := validateCustody(name, proc, isDev); err != nil {
+		if err := validateCustody(name, proc); err != nil {
 			return err
 		}
 	}
@@ -1565,10 +1429,7 @@ func validateRails(cfg *Config, rails PSPSet, isDev bool) error {
 }
 
 // validateNMIRail validates an NMI-type rail
-func validateNMIRail(name string, proc *PSPConfig, isDev bool) error {
-	if isDev {
-		return nil // Skip strict validation in dev
-	}
+func validateNMIRail(name string, proc *PSPConfig) error {
 	nmi := proc.NMI
 	if nmi == nil {
 		return fmt.Errorf("rail '%s' (nmi): nmi block is required", name)
@@ -1579,14 +1440,14 @@ func validateNMIRail(name string, proc *PSPConfig, isDev bool) error {
 	}
 
 	if strings.TrimSpace(nmi.WebhookSigningSecret) == "" {
-		return fmt.Errorf("rail '%s' (nmi): webhook_signing_secret is required outside development (signature verification cannot be disabled in production)", name)
+		return fmt.Errorf("rail '%s' (nmi): webhook_signing_secret is required (signature verification cannot be disabled)", name)
 	}
 
 	return nil
 }
 
 // validateCCBillRail validates a CCBill-type rail
-func validateCCBillRail(name string, proc *PSPConfig, isDev bool) error {
+func validateCCBillRail(name string, proc *PSPConfig) error {
 	// #697/#711: identity checks run even in dev — the clientAccnum/clientSubacc
 	// pair is DERIVED from the dash-joined account_id, so a missing or malformed
 	// account_id is a config bug, not a missing credential.
@@ -1595,9 +1456,6 @@ func validateCCBillRail(name string, proc *PSPConfig, isDev bool) error {
 	}
 	if _, _, err := SplitCCBillAccountID(proc.EffectiveAccountID()); err != nil {
 		return fmt.Errorf("rail '%s' (ccbill): account_id is required (the pair is derived from it): %w", name, err)
-	}
-	if isDev {
-		return nil // Skip strict validation in dev
 	}
 	ccbill := proc.CCBill
 	if ccbill == nil {
@@ -1614,7 +1472,7 @@ func validateCCBillRail(name string, proc *PSPConfig, isDev bool) error {
 }
 
 // validateStripeRail validates a Stripe-type rail
-func validateStripeRail(name string, proc *PSPConfig, isDev bool) error {
+func validateStripeRail(name string, proc *PSPConfig) error {
 	stripe := proc.Stripe
 	if stripe == nil {
 		return fmt.Errorf("rail '%s' (stripe): stripe block is required", name)
@@ -1624,10 +1482,7 @@ func validateStripeRail(name string, proc *PSPConfig, isDev bool) error {
 	}
 
 	if strings.TrimSpace(stripe.WebhookSigningSecret) == "" {
-		if !isDev {
-			return fmt.Errorf("rail '%s' (stripe): webhook_signing_secret is required outside development (signature verification cannot be disabled in production)", name)
-		}
-		log.Warnf("rail '%s' (stripe): webhook_signing_secret not configured; signature verification disabled", name)
+		return fmt.Errorf("rail '%s' (stripe): webhook_signing_secret is required", name)
 	}
 
 	return nil
@@ -1636,7 +1491,7 @@ func validateStripeRail(name string, proc *PSPConfig, isDev bool) error {
 // validateSolanaRail validates only config-loading concerns. Solana token
 // pricing/default policy belongs to internal/modules/solana/tokens and is
 // applied at runtime by configureSolanaRail.
-func validateSolanaRail(name string, proc *PSPConfig, isDev bool) error {
+func validateSolanaRail(name string, proc *PSPConfig) error {
 	solana := proc.Solana
 	if solana == nil {
 		return fmt.Errorf("rail '%s' (solana): solana block is required", name)
@@ -1660,7 +1515,7 @@ func validateSolanaRail(name string, proc *PSPConfig, isDev bool) error {
 // rail: only rails the custodian's registry entry names as proxy rails may
 // reference it, and a referenced custodian must be fully armed or the checkout
 // it backs is silently dead.
-func validateCustody(name string, proc *PSPConfig, isDev bool) error {
+func validateCustody(name string, proc *PSPConfig) error {
 	if !proc.HasThirdPartyCustody() {
 		return nil
 	}
@@ -1674,9 +1529,6 @@ func validateCustody(name string, proc *PSPConfig, isDev bool) error {
 	}
 	if strings.TrimSpace(proc.Custody.AccountID) == "" {
 		return fmt.Errorf("rail '%s': custodian %q requires account_id (the custodian-native tenant id)", name, d.Kind)
-	}
-	if isDev {
-		return nil
 	}
 	for _, slot := range d.Secrets {
 		if slot.Required && slot.Name == custodians.SecretAPIKey && strings.TrimSpace(proc.Custody.APIKey) == "" {
@@ -1810,21 +1662,24 @@ func (cfg *Config) IsProviderReadOnly() bool {
 	return cfg.GetProviderWriteMode() == ProviderWriteModeReadOnly
 }
 
-// IsDev returns true if the environment is development.
-//
-// SEC-18: an EMPTY Env is NOT development. It used to be, which made every
-// dev-only relaxation (plaintext merchant secrets)
-// the default for any deployment that simply forgot to set ENV. Unset is now
-// the strict posture; Load() refuses it outright.
-func (cfg *Config) IsDev() bool {
-	return cfg != nil && (cfg.Env == "dev" || cfg.Env == "development")
-}
+// RequiresSecretEncryption is unconditional for managed database credentials.
+func (cfg *Config) RequiresSecretEncryption() bool { return true }
 
-// RequiresSecretEncryption reports whether startup must fail if the DB-backed
-// merchant secret store would persist secrets PLAINTEXT (no ENCRYPTION_MASTER_KEY).
-// Only development may run without a key (#667).
-func (cfg *Config) RequiresSecretEncryption() bool {
-	return cfg != nil && !cfg.IsDev()
+// validatePublicURL permits HTTP only for explicitly authorized loopback hosts.
+func validatePublicURL(raw string, allowLoopback, originOnly bool) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("must be an absolute HTTPS URL without credentials, query or fragment")
+	}
+	if originOnly && u.Path != "" && u.Path != "/" {
+		return fmt.Errorf("must be an origin without a path")
+	}
+	ip := net.ParseIP(u.Hostname())
+	loopback := u.Hostname() == "localhost" || (ip != nil && ip.IsLoopback())
+	if u.Scheme != "https" && !(u.Scheme == "http" && allowLoopback && loopback) {
+		return fmt.Errorf("must use HTTPS (HTTP requires an explicit loopback exception)")
+	}
+	return nil
 }
 
 // assembleDBURL builds the database URL from atomic parameters if not explicitly set
@@ -1846,8 +1701,7 @@ func assembleDBURL(cfg *Config) {
 	cfg.DB.URL = connStr
 }
 
-// validateDatabase validates database configuration
-// ValidateDatabase validates the database-only configuration used by offline operators.
+// ValidateDatabase validates database-only configuration for offline operators.
 func ValidateDatabase(cfg *DBConfig) error {
 	if cfg == nil {
 		return fmt.Errorf("database configuration is required")
@@ -1867,18 +1721,11 @@ func ValidateDatabase(cfg *DBConfig) error {
 	return nil
 }
 
-// GetDefaultBillingConfig returns the DEVELOPMENT default configuration — a
-// local, zero-config working set. Load() uses it as its base but CLEARS Env
-// first (SEC-18): the deployment environment is the one knob whose default
-// cannot be safe, because "development" is the permissive posture (plaintext
-// merchant secrets). A deployment
-// declares ENV or does not boot.
+// GetDefaultBillingConfig supplies infrastructure defaults without security exceptions.
 func GetDefaultBillingConfig() *Config {
 	return &Config{
-		Env:    "development",
-		Host:   "0.0.0.0",
-		Port:   3053,
-		APIURL: "http://localhost:3053",
+		Host: "0.0.0.0",
+		Port: 3053,
 		DB: &DBConfig{
 			Host:     "localhost",
 			Port:     "5434",
@@ -1964,11 +1811,5 @@ func logTestModeStatus(cfg *Config) {
 		log.Warn("🔴 LIVE CREDENTIALS - Real charges enabled")
 		log.Info("   Payment providers will use production environments")
 
-		// Warn if running real charges in dev environment. This only happens when
-		// TEST_MODE=live is set explicitly; omitted test_mode defaults to sandbox in dev.
-		if cfg.IsDev() {
-			log.Warn("⚠️  Real payment processing enabled in dev environment")
-			log.Warn("   Set test_mode=sandbox (env TEST_MODE=sandbox, flag --test-mode=sandbox) to use sandbox environments")
-		}
 	}
 }

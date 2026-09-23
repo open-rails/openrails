@@ -76,6 +76,8 @@ func seedBook(t *testing.T, d *db.DB, id merchant.ID) {
 		custodian, rootGrant, run, batch, nextPrice := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 		exec(`INSERT INTO openrails.custodians(merchant_id,id,key,kind,account_id,settings,credential_versions) VALUES($1,$2,'vault','basis_theory',$3,'{"public_api_key":"public-token","network_tokens":true,"account_updater":true,"account_updater_lookahead_days":30}','{"api_key":9}')`, id.UUID(), custodian, uuid.NewString())
 		exec(`INSERT INTO openrails.merchant_configurations(merchant_id,config) VALUES($1,'{"profile":{"display_name":"Merchant"},"collection_threshold":1000000,"checkout_routing":[{"prefer":["primary"]}]}')`, id.UUID())
+		exec(`INSERT INTO openrails.merchant_configuration_applications(merchant_id,application_id,request_sha256,result)
+         VALUES($1,'seed-book-metadata',decode(repeat('ab',32),'hex'),jsonb_build_object('application_id','seed-book-metadata','revision',repeat('cd',32),'replayed',false))`, id.UUID())
 		exec(`INSERT INTO openrails.billing_policies(merchant_id,name,policy) VALUES($1,'standard','{"kind":"window_spend_cap","spend_windows":[{"key":"daily","window_seconds":86400,"limit":9007199254740993,"currency":"USD"}]}')`, id.UUID())
 		exec(`INSERT INTO openrails.billing_policy_bindings(merchant_id,customer_id,policy_name) VALUES($1,$2,'standard')`, id.UUID(), customer)
 		exec(`INSERT INTO openrails.catalog_meters(merchant_id,key,event_type,value_property,aggregation,unit,group_by) VALUES($1,'tokens','generation','tokens','sum','token','{"model":"model"}')`, id.UUID())
@@ -157,6 +159,63 @@ func TestBillingBookRoundTripAndRetry(t *testing.T) {
 		require.Equal(t, 1, transitions)
 		return nil
 	}))
+}
+
+// Deployment credential publications must not prevent a billing book from
+// moving, and restoring that book must never arm the source credential plane.
+func TestProviderPublicationEvidenceStaysAtSource(t *testing.T) {
+	source := archiveDB(t, "openrails")
+	target := archiveDB(t, "archive_publication_target")
+	id := merchant.ID(uuid.New())
+	provision(t, source, id)
+	provision(t, target, id)
+	ctx := merchant.WithID(t.Context(), id)
+	psp, operation := uuid.New(), uuid.New()
+	candidate := "credential_candidates/" + operation.String() + "/psps/stripe/test/acct_archive/secret_key"
+	evidence, err := json.Marshal(map[string]any{
+		"public_config":                 map[string]string{"publishable_key": "pk_test_portable"},
+		"credential_versions":           map[string]int{"secret_key": 7, "webhook_signing_secret_previous": 5},
+		"credential_refs":               map[string]any{"secret_key": map[string]any{"name": candidate, "version": 1, "custody": "vault"}},
+		"credential_custody":            "vault",
+		"credential_custody_transition": map[string]any{"operation_id": operation, "from": "db", "to": "vault"},
+		"configuration_revision":        9,
+		"credentials_validated":         true,
+		"retired_credentials":           map[string]bool{"webhook_signing_secret_previous": true},
+		"webhook_endpoint_id":           "we_source_only",
+	})
+	require.NoError(t, err)
+	require.NoError(t, source.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO openrails.psps(merchant_id,id,rail,environment,account_id,key,evidence) VALUES($1,$2,'stripe','test',$2::uuid::text,'stripe',$3)`, id.UUID(), psp, evidence)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO openrails.credential_publications(merchant_id,operation_id,rail,environment,account_id,expected_revision,request_metadata,state,result,published_at) VALUES($1,$2,'stripe','test',$3,8,'{}','published',$4,now())`, id.UUID(), operation, psp.String(), evidence)
+		return err
+	}))
+	var artifact bytes.Buffer
+	require.NoError(t, Export(ctx, source, id, &artifact))
+	for _, excluded := range []string{candidate, "credential_refs", "credential_custody", "configuration_revision", "credential_versions", "credentials_validated", "retired_credentials", "webhook_endpoint_id", "we_source_only"} {
+		require.NotContains(t, artifact.String(), excluded)
+	}
+	_, err = Restore(ctx, target, id, bytes.NewReader(artifact.Bytes()))
+	require.NoError(t, err)
+	require.NoError(t, target.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var restored []byte
+		require.NoError(t, tx.QueryRow(ctx, `SELECT evidence FROM openrails.psps WHERE merchant_id=$1 AND id=$2`, id.UUID(), psp).Scan(&restored))
+		require.JSONEq(t, `{"public_config":{"publishable_key":"pk_test_portable"}}`, string(restored))
+		var receipts, secrets int
+		require.NoError(t, tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM openrails.credential_publications WHERE merchant_id=$1),(SELECT count(*) FROM openrails.merchant_secrets WHERE merchant_id=$1)`, id.UUID()).Scan(&receipts, &secrets))
+		require.Zero(t, receipts)
+		require.Zero(t, secrets)
+		return nil
+	}))
+	// Unreviewed evidence is still refused; classification is not a blanket
+	// permission to discard future replay or financial facts.
+	require.NoError(t, source.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE openrails.psps SET evidence=evidence || '{"unclassified_replay_fact":true}'::jsonb WHERE merchant_id=$1 AND id=$2`, id.UUID(), psp)
+		return err
+	}))
+	require.ErrorContains(t, Export(ctx, source, id, &bytes.Buffer{}), "unsupported_state: psps")
 }
 
 func TestRestoreBadFooterRollsBackAndCannotForgeGuard(t *testing.T) {

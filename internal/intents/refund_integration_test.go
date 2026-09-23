@@ -459,7 +459,7 @@ func stripeIntegrationRails() railresolve.FixedSet {
 
 func (fx refundFixture) stripeRunner(cfg *config.Config, baseURL string) *Runner {
 	rails := stripeIntegrationRails()
-	handler := NewStripeRefundHandler(fx.db, cfg, rails, nil)
+	handler := NewStripeRefundHandler(fx.db, cfg, rails, nil, nil)
 	handler.Stripe = &subscriptions.StripeRefundService{Config: cfg, Rails: rails, BaseURL: baseURL}
 	return &Runner{Store: fx.store, Registry: NewRegistry(handler), Config: cfg}
 }

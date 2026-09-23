@@ -20,6 +20,7 @@ import (
 // Every OpenRails-owned table has an explicit decision. These are deployment/operations
 // data or unsupported opaque evidence, not additional archive row profiles.
 var excludedTables = map[string]string{
+	"credential_publications":   "deployment credential custody receipts; secrets are re-entered at destination",
 	"merchants":                 "destination identity and host authority are explicitly provisioned",
 	"worker_state":              "deployment-wide worker health and fair sweep cursors",
 	"destructive_action_switch": "deployment-wide safety switch",
@@ -39,6 +40,7 @@ var excludedTables = map[string]string{
 // Explicit exclusions cover only these reviewed columns. A later column is
 // unclassified even on a diagnostic table and must receive a new decision.
 var excludedColumns = map[string]string{
+	"credential_publications":         "merchant_id operation_id rail environment account_id expected_revision request_metadata state result created_at published_at",
 	"destructive_action_switch":       "id singleton enabled updated_by reason updated_at",
 	"worker_state":                    "worker_kind cursor_merchant_id cursor_version registered_at expected_period_seconds last_success_at last_error_at last_error consecutive_failures last_alerted_at updated_at",
 	"merchants":                       "id slug status permission_group_id created_at updated_at deleted_at display_name api_host retired_at group_release_completed_at catalog_revision",
@@ -205,7 +207,9 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 		{"host_outbox", "delivered_at IS NULL"}, {"webhook_events", "completed_at IS NULL"},
 		{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','reconciliation','prune','converge_enforce','merchant_purge')"},
 		{"maintenance_runs", "kind IN ('prune','converge_enforce','merchant_purge') AND (coverage IS NOT NULL OR affected IS NOT NULL OR summary IS NOT NULL OR inventory_manifest IS NOT NULL OR inventory_total_rows IS NOT NULL)"},
-		{"psps", "jsonb_typeof(evidence)<>'object' OR evidence - ARRAY['settings','signer','public_config','source','credential_versions','credentials_validated','api_key'] <> '{}'::jsonb"},
+		// Credential retirement and webhook endpoint registrations belong to the
+		// source deployment, like secret references and publication revisions.
+		{"psps", "jsonb_typeof(evidence)<>'object' OR evidence - ARRAY['settings','signer','public_config','source','credential_versions','credential_refs','credential_custody','credential_custody_transition','configuration_revision','credentials_validated','retired_credentials','webhook_endpoint_id','api_key'] <> '{}'::jsonb"},
 	}
 	for _, c := range checks {
 		if err := refuseRows(ctx, tx, id, c.table, c.predicate); err != nil {

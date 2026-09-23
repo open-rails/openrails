@@ -54,12 +54,11 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	h := New(t, ctx)
 	dbtest.EnsureTestMerchant(ctx, t, h.sharedPool())
 
-	cfg := &config.Config{
-		Env:                  "dev",
-		TestMode:             config.CredentialPostureSandbox,
-		MerchantConfigSource: config.MerchantConfigSourceAPI,
-		SecretBackend:        config.SecretBackendDB,
-		DB:                   &config.DBConfig{URL: h.DSN},
+	cfg := &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
+		TestMode:           config.CredentialPostureSandbox,
+		MerchantConfigHTTP: true,
+		SecretBackend:      config.SecretBackendDB,
+		DB:                 &config.DBConfig{URL: h.DSN},
 	}
 	rt, err := embed.New(ctx, embed.Options{
 		Config: cfg, Redis: h.Redis, River: embed.RiverManagedByOpenRails(),
@@ -70,7 +69,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	app.Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
 	// The host's own AuthKit, beside the engine — the host-one shape.
-	require.NoError(t, embcp.Attach(ctx, app, cfg, &hostconfig.AuthConfig{Issuer: "https://or918.openrails.test", KeysPath: t.TempDir()}, nil), "attach control plane")
+	require.NoError(t, embcp.Attach(ctx, app, cfg, &hostconfig.AuthConfig{Issuer: "https://or918.openrails.test", KeysPath: t.TempDir(), AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}, nil), "attach control plane")
 	_, err = embcp.RunBootstrap(ctx, app, embcp.BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug})
 	require.NoError(t, err, "control plane bootstrap links the merchant permission group")
 	cp := embcp.Get(app)

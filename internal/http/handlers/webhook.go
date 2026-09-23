@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/webhookutil"
 	"github.com/open-rails/openrails/internal/webhookauth"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -76,84 +77,20 @@ func Webhook(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusServiceUnavailable, "Webhook processing is not configured")
 		return
 	}
-	// The global webhook surface attributes events only to the construction-time
-	// configured merchant (set by an embedded host scoped to one merchant). A standalone
-	// multi-merchant deployment pins no process-wide merchant, so there is no
-	// merchant to attribute this event to — fail closed with an explicit pointer
-	// to the per-merchant surface rather than letting a downstream merchant.Require
-	// surface a generic error (audit OR-API-C2).
-	mid, err := merchant.Require(r.Request.Context())
-	if err != nil {
-		if handled, accepted := processPSPWebhook(r, provider, strings.TrimSpace(r.Param("account_id")), clientIP); handled {
-			if accepted {
-				r.SuccessJSON(map[string]string{"status": "accepted"})
-			}
-			return
-		}
-		log.WithFields(log.Fields{"provider": provider, "client_ip": clientIP}).
-			Warn("global webhook surface hit with no configured merchant and no resolvable PSP")
-		r.ErrorJSON(http.StatusNotFound, "No merchant is configured for the global webhook surface and no PSP could be resolved from the webhook")
+	if bound := r.State.ConfiguredMerchant(); !bound.IsZero() {
+		r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), bound))
+		processResolvedMerchantWebhook(r, provider, bound, strings.TrimSpace(r.Param("account_id")))
 		return
 	}
-	// #788: ONE ingestion seam — the pinned-merchant global surface routes
-	// through the SAME verify/dispatch primitive as the merchant-scoped and
-	// Host-routed surfaces, resolving credentials from the armed rail state.
-	processResolvedMerchantWebhook(r, provider, mid, strings.TrimSpace(r.Param("account_id")))
-}
-
-func MerchantWebhook(r *httprequest.Request) {
-	if r.State == nil || r.State.Merchants == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "Merchant webhook routing is not configured")
+	// Account identity selects scope. Never trust an ambient merchant context
+	// supplied by a host middleware instead of resolving the configured account.
+	if handled, accepted := processPSPWebhook(r, provider, strings.TrimSpace(r.Param("account_id")), clientIP); handled {
+		if accepted {
+			r.SuccessJSON(map[string]string{"status": "accepted"})
+		}
 		return
 	}
-	provider, ok := canonicalWebhookRail(r)
-	if !ok {
-		return
-	}
-	route, err := r.State.Merchants.ResolveBySlug(r.Request.Context(), r.Param("merchant"))
-	if err != nil {
-		if errors.Is(err, merchants.ErrMerchantRouteUnresolved) {
-			r.ErrorJSON(http.StatusNotFound, "Unknown merchant")
-			return
-		}
-		log.WithError(err).Error("merchant webhook: resolve merchant failed")
-		r.ErrorJSON(http.StatusInternalServerError, "Merchant resolution failed")
-		return
-	}
-	ctx := merchant.WithID(r.Request.Context(), route.MerchantID)
-	r.Request = r.Request.WithContext(ctx)
-	processResolvedMerchantWebhook(r, provider, route.MerchantID, strings.TrimSpace(r.Param("account_id")))
-}
-
-// HostWebhook returns the Host-routed webhook handler (#734): resolve pins the
-// merchant from the request's Host header — the SAME resolver merchant-scoped
-// route resolution and the issuer-consistency check use — instead of a URL
-// slug (contrast MerchantWebhook), so
-// the exact same verify/dispatch primitive (processResolvedMerchantWebhook)
-// runs unchanged once the merchant is known. This is the engine half of saas
-// #15's "api.<slug>.<domain>" hostname scheme: the mount is opt-in
-// (pkg/embedded's RegisterHostWebhookRoutes, gated on an attached control
-// plane); an unresolvable Host (unknown/disabled/ambiguous merchant) is a hard
-// 404, never a fall-through to payload-derived resolution.
-func HostWebhook(resolve merchant.HostResolver) func(r *httprequest.Request) {
-	return func(r *httprequest.Request) {
-		if resolve == nil {
-			r.ErrorJSON(http.StatusServiceUnavailable, "Host-routed webhook resolution is not configured")
-			return
-		}
-		provider, ok := canonicalWebhookRail(r)
-		if !ok {
-			return
-		}
-		mid, err := resolve(r.Request.Context(), r.Request.Host)
-		if err != nil || mid.IsZero() {
-			r.ErrorJSON(http.StatusNotFound, "Unknown merchant")
-			return
-		}
-		ctx := merchant.WithID(r.Request.Context(), mid)
-		r.Request = r.Request.WithContext(ctx)
-		processResolvedMerchantWebhook(r, provider, mid, strings.TrimSpace(r.Param("account_id")))
-	}
+	r.ErrorJSON(http.StatusNotFound, "No configured provider account resolves this webhook")
 }
 
 // pinWebhookMerchantConn pins the resolved merchant's DB connection (the
@@ -161,7 +98,7 @@ func HostWebhook(resolve merchant.HostResolver) func(r *httprequest.Request) {
 // the release the caller must defer.
 //
 // The webhook surfaces resolve their merchant INSIDE the handler — from the URL
-// slug (MerchantWebhook), the Host header (HostWebhook) or the payload's account
+// configured runtime binding or provider account
 // identity (processPSPWebhook) — so middleware.MerchantDBConnMW
 // cannot have run: at middleware time there is no merchant to pin. Without this,
 // downstream reads and writes would not share the resolved merchant's request
@@ -173,6 +110,13 @@ func HostWebhook(resolve merchant.HostResolver) func(r *httprequest.Request) {
 // the Stripe-by-account path that re-enters processResolvedMerchantWebhook is
 // safe.
 func pinWebhookMerchantConn(r *httprequest.Request, merchantID merchant.ID) (func(), bool) {
+	if r != nil && r.State != nil {
+		if bound := r.State.ConfiguredMerchant(); !bound.IsZero() && bound != merchantID {
+			r.ErrorJSON(http.StatusNotFound, "Unknown provider account")
+			return func() {}, false
+		}
+	}
+
 	if r == nil || r.State == nil || r.State.DB == nil || merchantID.IsZero() {
 		return func() {}, true
 	}
@@ -282,11 +226,15 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		}
 		return
 	}
-	r.State.WebhookHealth.Accepted(r.Request.Context(), subscriptions.RailStripe)
 	// Stripe "thin" event destinations deliver a minimal payload without the
 	// object. Hydrate it with the MERCHANT's secret key into the classic
 	// {data:{object}} shape so dispatch only ever sees snapshot-style events.
-	if hydrated, herr := hydrateThinStripeEvent(r.Request.Context(), strings.TrimSpace(creds.SecretKey), creds.AccountID, prepared.Body); herr != nil {
+	if hydrated, herr := hydrateThinStripeEvent(r.Request.Context(), strings.TrimSpace(creds.SecretKey), creds.AccountID, prepared.Body, r.State.StripeClients); herr != nil {
+		if errors.Is(herr, errStripeWebhookAccountMismatch) {
+			r.State.WebhookHealth.Rejected(r.Request.Context(), subscriptions.RailStripe)
+			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "webhook_account_mismatch", "Webhook account does not match payload"))
+			return
+		}
 		log.WithError(herr).Error("failed to hydrate thin stripe event")
 		r.ErrorJSON(http.StatusBadGateway, "Failed to hydrate thin event")
 		return
@@ -298,6 +246,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 			return
 		}
 	}
+	r.State.WebhookHealth.Accepted(r.Request.Context(), subscriptions.RailStripe)
 	if r.State.WebhookDispatcher == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "Webhook processing unavailable")
 		return

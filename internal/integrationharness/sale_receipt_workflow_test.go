@@ -60,7 +60,7 @@ func TestQualifiedOneTimeSaleClientAcrossEmbeddedAndHTTP(t *testing.T) {
 	server := h.StartStandalone("USD", WithConfig(configure))
 	owned := server.ProvisionOwnedMerchant("sale-proof-" + uuid.NewString()[:8])
 	psp := h.ArmLoopbackNMI(server.App().Runtime, owned.MerchantID)
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}}
+	cfg := &config.Config{Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}, TestMode: config.CredentialPostureSandbox, MerchantConfigHTTP: true, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}}
 	configure(cfg)
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, Redis: h.Redis, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)

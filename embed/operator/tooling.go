@@ -57,7 +57,8 @@ func (r *Operator) PullProvider(ctx context.Context, opts PullProviderOptions) e
 		return err
 	}
 	return hosttools.PullProvider(ctx, hosttools.PullProviderOptions{
-		PGXPool: r.app.Runtime.DB.Pool(), Config: r.app.Config,
+		StripeClients: r.app.Runtime.StripeClients,
+		PGXPool:       r.app.Runtime.DB.Pool(), Config: r.app.Config,
 		MerchantID: opts.MerchantID, Providers: opts.Providers, PSP: opts.PSP, Since: opts.Since, Until: opts.Until,
 		Format: opts.Format, LogDir: opts.LogDir, Insert: opts.Insert, Overwrite: opts.Overwrite, Prune: opts.Prune,
 		Out: opts.Out, PruneExpectRows: opts.PruneExpectRows, PruneActor: opts.PruneActor,

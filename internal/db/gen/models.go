@@ -276,6 +276,20 @@ type OpenrailsCheckoutSession struct {
 	RoutingReason []byte
 }
 
+type OpenrailsCredentialPublication struct {
+	MerchantID       uuid.UUID
+	OperationID      uuid.UUID
+	Rail             string
+	Environment      string
+	AccountID        string
+	ExpectedRevision int64
+	RequestMetadata  []byte
+	State            string
+	Result           []byte
+	CreatedAt        time.Time
+	PublishedAt      *time.Time
+}
+
 // or#880: merchant custodian registry. A row is one merchant-owned account with a third-party card custodian (Basis Theory today). Custody is orthogonal to the rail: this says WHO HOLDS the card, openrails.psps says who charges it. Referenced by psps.custodian_id — one custodian can back many PSPs.
 type OpenrailsCustodian struct {
 	ID         uuid.UUID
@@ -687,6 +701,14 @@ type OpenrailsMerchantConfiguration struct {
 	Config    []byte
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type OpenrailsMerchantConfigurationApplication struct {
+	MerchantID    uuid.UUID
+	ApplicationID string
+	RequestSha256 []byte
+	Result        []byte
+	AppliedAt     time.Time
 }
 
 // Wrapped per-merchant Data Encryption Keys for envelope encryption-at-rest (issue #227). wrapped_dek = merchant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. Merchant-owned; queries carry explicit merchant predicates.

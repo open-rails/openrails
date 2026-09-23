@@ -11,8 +11,9 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"strings"
 	"sync"
+
+	vaultapi "github.com/hashicorp/vault/api"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -22,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/inprocess"
-	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -31,6 +31,12 @@ import (
 
 // Options configures the embedded runtime.
 type Options struct {
+	// VaultClient is an optional borrowed, authenticated client. The host owns
+	// its renewal and lifetime; the Runtime does not revoke it on Close.
+	VaultClient *vaultapi.Client
+	// ProviderCredentials is an immutable credential dependency for existing
+	// merchants, separate from metadata provisioning and HTTP exposure.
+	ProviderCredentials []ProviderCredentialSnapshot
 	// Auth supplies provider-neutral authentication and live authorization for
 	// both private Client operations and any explicitly published HTTP routes.
 	Auth *billingauth.Integration
@@ -47,8 +53,7 @@ type Options struct {
 	// Use billingauth.NewIntegration with the host verifier and explicit mappings.
 	DelegatedAuthenticator billingauth.DelegatedAuthenticator
 	// Config is built programmatically by the host; embedded construction never
-	// runs config.Load, so Env and TestMode (sandbox or live) must be set
-	// explicitly. Rate-limit and captcha defaults are seeded when left nil
+	// runs config.Load, so TestMode (sandbox or live) must be set explicitly. Rate-limit and captcha defaults are seeded when left nil
 	// unless Config.RateLimitsDisabled.
 	Config *config.Config
 	// PGXPool is the host-supplied database handle. Leave nil to open one from
@@ -69,7 +74,7 @@ type Options struct {
 	ConsoleAssets fs.FS
 	// StripeTransport is the test seam under the Stripe API choke point for
 	// driving rail pushes against a fake Stripe. Refused with a live posture.
-	// Process-wide: this does not independently route concurrent runtimes.
+	// Scoped to this runtime; borrowed and never closed by OpenRails.
 	StripeTransport http.RoundTripper
 	// UserDirectory and UsernameResolver are optional host identity adapters.
 	// OpenRails does not assume ownership of AuthKit's profiles schema; hosts
@@ -92,8 +97,6 @@ type Runtime struct {
 	delegatedAuthenticator billingauth.DelegatedAuthenticator
 	app                    *app.App
 	svc                    *service.Service
-
-	releaseStripeTransport func()
 
 	closeOnce sync.Once
 	closeErr  error
@@ -152,9 +155,25 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 		Cache:            opts.Cache,
 		UserDirectory:    opts.UserDirectory,
 		UsernameResolver: opts.UsernameResolver,
+		StripeTransport:  opts.StripeTransport,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
+	}
+	application.Runtime.VaultClient = opts.VaultClient
+	if len(opts.ProviderCredentials) > 0 && opts.Merchant != nil {
+		for _, rails := range opts.Merchant.Config.PSPs {
+			for _, provider := range rails {
+				if len(provider.Secrets) > 0 {
+					_ = application.Close(ctx)
+					return nil, fmt.Errorf("supply snapshot credentials through either ProviderCredentials or Merchant.Config, not both")
+				}
+			}
+		}
+	}
+	if err := loadProviderCredentialSnapshot(ctx, application.Runtime, opts.ProviderCredentials); err != nil {
+		_ = application.Close(ctx)
+		return nil, err
 	}
 	// Ordinary Client calls need the same provider/secret graph as the
 	// standalone server; worker startup or mounting cannot be prerequisites.
@@ -169,9 +188,6 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 	}
 
 	r := &Runtime{app: application, delegatedAuthenticator: opts.DelegatedAuthenticator}
-	if opts.StripeTransport != nil {
-		r.releaseStripeTransport = stripeapi.InstallBaseTransport(opts.StripeTransport)
-	}
 	if err := configureMerchant(ctx, application, opts.Merchant); err != nil {
 		_ = r.Close(ctx)
 		return nil, err
@@ -207,9 +223,6 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 // applyEmbeddedDefaults enforces the posture embedded construction must declare
 // and seeds the protective defaults config.Load applies.
 func applyEmbeddedDefaults(cfg *config.Config) error {
-	if strings.TrimSpace(cfg.Env) == "" {
-		return fmt.Errorf("openrails embed: config.Env is required; embedded construction never runs config.Load's dev-like empty-Env default")
-	}
 	switch cfg.TestMode {
 	case config.CredentialPostureSandbox, config.CredentialPostureLive:
 	default:
@@ -268,9 +281,6 @@ func (r *Runtime) Close(ctx context.Context) error {
 			r.workersCancel()
 			<-r.workersDone // join before closing resources even if shutdown ctx was canceled
 			r.workersCancel = nil
-		}
-		if r.releaseStripeTransport != nil {
-			defer r.releaseStripeTransport()
 		}
 		r.closeErr = r.app.Close(ctx)
 	})

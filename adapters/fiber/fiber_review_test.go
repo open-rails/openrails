@@ -18,7 +18,7 @@ import (
 )
 
 func TestFiberReviewFullInventoryMountsNatively(t *testing.T) {
-	cfg := &config.Config{AllowCatalogUpdates: true, MerchantConfigSource: config.MerchantConfigSourceAPI}
+	cfg := &config.Config{AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB}
 	delegated := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return nil, billingauth.ErrUnauthenticated
 	})
@@ -27,7 +27,7 @@ func TestFiberReviewFullInventoryMountsNatively(t *testing.T) {
 	}), Authorization: billingauth.AuthorizationFunc(func(context.Context, *http.Request, billingauth.Identity, billingauth.Requirement) error {
 		return billingauth.ErrUnauthenticated
 	})}}}
-	policy := &embed.HTTPConfig{Checkout: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true, DelegatedAuthenticator: delegated}}, MerchantAdmin: true, Catalog: true, PaymentProviders: true, MerchantAPI: true}
+	policy := &embed.HTTPConfig{Checkout: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Treasury: true, DelegatedAuthenticator: delegated}}, MerchantAdmin: true, Catalog: true, MerchantConfig: true, MerchantAPI: true}
 	table, err := embedhttp.ConfiguredRoutes(graph, policy)
 	require.NoError(t, err)
 	b := &Bundle{}

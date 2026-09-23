@@ -41,11 +41,11 @@ func TestStripeRefundDeliveriesConcurrentlyRevokeOnePurchase(t *testing.T) {
 	accountID := "acct_" + uuid.NewString()
 
 	rt, mid, err := newDeclaredMerchant(ctx, embed.Options{Config: &config.Config{
-		Env: "development", TestMode: config.CredentialPostureSandbox,
-		MerchantConfigSource: config.MerchantConfigSourceManifest,
-		AllowCatalogUpdates:  true,
-		ProviderWriteMode:    config.ProviderWriteModeReadOnly,
-		DB:                   &config.DBConfig{URL: dsn},
+		TestMode: config.CredentialPostureSandbox,
+
+		AllowCatalogUpdates: true,
+		ProviderWriteMode:   config.ProviderWriteModeReadOnly,
+		DB:                  &config.DBConfig{URL: dsn},
 	}}, slug, embed.MerchantConfig{PSPs: map[string]embed.PSPConfig{
 		"stripe": {"stripe": {AccountID: accountID, Secrets: map[string]string{"secret_key": "sk_test_fixture", "webhook_signing_secret": secret}}},
 	}})
@@ -91,7 +91,7 @@ func TestStripeRefundDeliveriesConcurrentlyRevokeOnePurchase(t *testing.T) {
 		require.NoError(t, err)
 		go func() {
 			<-start
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/v1/merchants/"+slug+"/webhooks/stripe/"+accountID, bytes.NewReader(payload))
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/v1/webhooks/stripe/"+accountID, bytes.NewReader(payload))
 			if err != nil {
 				results <- response{err: err}
 				return

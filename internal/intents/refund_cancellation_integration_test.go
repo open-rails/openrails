@@ -53,7 +53,7 @@ func TestStripeRefundReceiptSurvivesCanceledRequest(t *testing.T) {
 			ctx, cancel := context.WithCancel(reqCtx)
 			defer cancel()
 			stripe := &cancelingStripe{cancel: cancel}
-			handler := NewStripeRefundHandler(run, fullModeConfig(), stripeTestRails(), nil)
+			handler := NewStripeRefundHandler(run, fullModeConfig(), stripeTestRails(), nil, nil)
 			handler.Stripe = stripe
 			runner := &Runner{Store: NewStore(run), Registry: NewRegistry(handler), Config: fullModeConfig()}
 

@@ -27,12 +27,11 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/admission"
-	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
-	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/providerqualification"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -630,6 +629,7 @@ type PSPSignerConfig struct {
 // (both false) is additive + seed-once. Startup provisioning always uses the
 // default; the destructive tiers are opt-in via the CLI and never run on boot.
 type MerchantManifestReconcileOptions struct {
+	StripeClients *stripeapi.Factory
 	// Insert creates missing merchant/issuer/profile/PSP/secret
 	// state declared by the manifest. Manual CLI runs default to plan-only until
 	// this or another mutation flag is set.
@@ -698,16 +698,8 @@ type ProvisionMerchantRequest struct {
 func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merchants.Merchant, error) {
 	slug := merchant.NormalizeSlug(req.Slug)
 	mt := req.Merchant
-	// MODE 1 (#723): the YAML is the truth — it steamrolls the DB projections
-	// and the in-memory secret plane on every apply. Seed-once/plan tiers are
-	// mode-2 (api) semantics; forcing here keeps every mode-1 caller (embedded
-	// merchant constructor, standalone boot, CLI) converging identically.
-	if req.Config.IsManifestMerchantConfigSource() {
-		req.Options.Insert = true
-		req.Options.Overwrite = true
-		// Prune needs a store to list; a storeless call (read-side bind with no
-		// accounts) has nothing to prune.
-		req.Options.Prune = req.SecretStore != nil
+	if err := ValidateMerchantDeclaration(req.Config, mt); err != nil {
+		return nil, err
 	}
 	database := req.Database
 	if database == nil {
@@ -752,7 +744,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 	// Keep an existing merchant's display name in sync with the manifest (the
 	// create path already set it). A UUID-scoped update ensures an
 	// empty manifest display name leaves the stored one untouched.
-	if found && strings.TrimSpace(mt.DisplayName) != "" {
+	if found && req.Options.Overwrite && strings.TrimSpace(mt.DisplayName) != "" {
 		directory, err := merchants.NewDirectoryService(database.DataPool())
 		if err != nil {
 			return nil, err
@@ -762,6 +754,18 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 		}
 	}
 
+	// Startup ensures identity and missing accounts. Existing metadata belongs
+	// to ordinary Client operations; restarting a declaration cannot reassert it.
+	if found && !req.Options.Overwrite {
+		mt.DisplayName = ""
+		mt.APIHost = ""
+		mt.Profile = MerchantProfileConfig{}
+		mt.Invoice = nil
+		mt.DelegatedInvokerWastedSpendWindows = nil
+		mt.CheckoutRouting = nil
+		mt.BillingPolicies = nil
+		mt.BillingPolicyBindings = nil
+	}
 	if err := ReconcileManifestMerchantConfiguration(ctx, req.Config, database, tn.ID, slug, mt, req.SecretStore, req.SolanaTransit, req.Options); err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: configure %q: %w", slug, err)
 	}
@@ -982,6 +986,13 @@ func ReconcileManifestCustodians(ctx context.Context, cfg *config.Config, databa
 		}
 		if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 			var err error
+			if !opts.Overwrite {
+				if err := database.Gen(ctx).InsertSnapshotCustodian(ctx, gen.InsertSnapshotCustodianParams{MerchantID: merchantID.UUID(), Key: rc.key, Kind: rc.kind, Environment: environment, AccountID: rc.accountID, Settings: settingsJSON, Archived: archived}); err != nil {
+					return err
+				}
+				row, err = database.Gen(ctx).GetCustodianByIdentity(ctx, gen.GetCustodianByIdentityParams{MerchantID: merchantID.UUID(), Kind: rc.kind, Environment: &environment, AccountID: rc.accountID})
+				return err
+			}
 			row, err = database.Gen(ctx).UpsertCustodian(ctx, gen.UpsertCustodianParams{
 				MerchantID:  merchantID.UUID(),
 				Key:         rc.key,
@@ -1174,73 +1185,10 @@ func ReconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 // policy must not leave the first two installed and the merchant enforcing half
 // a decision.
 func ReconcileManifestBillingPolicies(ctx context.Context, database *db.DB, mt MerchantConfig) error {
-	if len(mt.BillingPolicies) == 0 && len(mt.BillingPolicyBindings) == 0 {
-		return nil
+	policies, bindings, err := normalizeManifestBillingPolicies(mt)
+	if err != nil {
+		return err
 	}
-	type declaredPolicy struct {
-		name string
-		body models.BillingPolicy
-	}
-	names := make([]string, 0, len(mt.BillingPolicies))
-	for name := range mt.BillingPolicies {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	policies := make([]declaredPolicy, 0, len(names))
-	for _, declared := range names {
-		name, err := merchantconfig.NormalizeBillingPolicyName(declared)
-		if err != nil {
-			return err
-		}
-		src := mt.BillingPolicies[declared]
-		spend, err := ManifestBudgetWindows(name, "spend_windows", src.SpendWindows)
-		if err != nil {
-			return err
-		}
-		badSpend, err := ManifestBudgetWindows(name, "bad_spend_windows", src.BadSpendWindows)
-		if err != nil {
-			return err
-		}
-		var rateWindowSeconds int64
-		if raw := strings.TrimSpace(src.AccrualRateWindow); raw != "" {
-			d, perr := time.ParseDuration(raw)
-			if perr != nil {
-				return fmt.Errorf("billing policy %s: accrual_rate_window: %w", name, perr)
-			}
-			rateWindowSeconds = int64(d / time.Second)
-		}
-		body, err := merchantconfig.NormalizeBillingPolicy(name, models.BillingPolicy{
-			Kind:                      models.BillingPolicyKind(src.Kind),
-			OutstandingCapAmount:      src.OutstandingCap,
-			SpendWindows:              spend,
-			AccrualRateCapPerHour:     src.AccrualRateCapPerHour,
-			AccrualRateWindowSeconds:  rateWindowSeconds,
-			BadSpendWindows:           badSpend,
-			CollectionThresholdAmount: src.CollectionThreshold,
-			CollectionCycleBoundary:   src.CollectionCycleBoundary,
-			DelinquencyGraceDays:      src.DelinquencyGraceDays,
-			DelinquencyAmountFloor:    src.DelinquencyAmountFloor,
-			PolicyCurrency:            src.PolicyCurrency,
-		})
-		if err != nil {
-			return err
-		}
-		policies = append(policies, declaredPolicy{name: name, body: body})
-	}
-
-	type declaredBinding struct {
-		tier string
-		name string
-	}
-	bindings := make([]declaredBinding, 0, len(mt.BillingPolicyBindings))
-	for i, b := range mt.BillingPolicyBindings {
-		name, tier, _, err := merchantconfig.NormalizeBillingPolicyBinding(b.Policy, b.Tier, false)
-		if err != nil {
-			return fmt.Errorf("billing_policy_bindings[%d]: %w", i, err)
-		}
-		bindings = append(bindings, declaredBinding{tier: tier, name: name})
-	}
-
 	store := admission.NewBillingPolicyStore(database)
 	for _, p := range policies {
 		if err := store.UpsertPolicy(ctx, p.name, p.body); err != nil {
@@ -1482,6 +1430,40 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 	if err != nil {
 		return err
 	}
+	if cfg.SecretStoreBackend() != config.SecretBackendSnapshot {
+		return fmt.Errorf("managed provider declarations require the Client payment-provider publication operation with operation ID and expected revision")
+	}
+	// Bind credential custody before loading any replacement snapshot material.
+	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
+		row, err := database.Gen(ctx).GetPSPByIdentity(ctx, gen.GetPSPByIdentityParams{MerchantID: merchantID.UUID(), Rail: ra.rail, Environment: &ra.environment, AccountID: ra.accountID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		var evidence map[string]json.RawMessage
+		if len(row.Evidence) > 0 {
+			if err := json.Unmarshal(row.Evidence, &evidence); err != nil {
+				return err
+			}
+		}
+		var custody string
+		if raw := evidence["credential_custody"]; len(raw) > 0 {
+			if err := json.Unmarshal(raw, &custody); err != nil {
+				return err
+			}
+		}
+		if custody != "" && custody != "snapshot" {
+			return fmt.Errorf("provider credential custody differs from the selected snapshot; explicit custody migration is required")
+		}
+		if custody == "" && len(evidence["credential_versions"]) > 0 && string(evidence["credential_versions"]) != "{}" {
+			return fmt.Errorf("published managed credentials cannot be replaced by a startup snapshot")
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
 	rail = ra.rail
 	environment := ra.environment
 	accountID := ra.accountID
@@ -1520,33 +1502,6 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 			return err
 		}
 	}
-	reconcileStripeWebhook := func() error {
-		if rail != string(models.RailStripe) {
-			return nil
-		}
-		res, err := catalog.ReconcileManagedStripeWebhook(ctx, catalog.ManagedStripeWebhookParams{
-			Config:              cfg,
-			SecretStore:         secretStore,
-			MerchantID:          merchantID,
-			MerchantSlug:        merchantSlug,
-			ProviderEnvironment: environment,
-			PspID:               accountID,
-			EnabledEvents:       webhooks.HandledStripeEventTypes,
-		})
-		if err != nil {
-			return fmt.Errorf("reconcile stripe webhook endpoint: %w", err)
-		}
-		fields := log.Fields{"merchant": merchantSlug, "stripe_account_id": accountID}
-		if res.Skipped {
-			fields["reason"] = res.SkipReason
-			log.WithFields(fields).Info("merchant bootstrap: stripe webhook endpoint reconcile skipped")
-		} else {
-			fields["action"] = res.Result.Action
-			fields["endpoint_id"] = res.Result.EndpointID
-			log.WithFields(fields).Info("merchant bootstrap: stripe webhook endpoint reconciled")
-		}
-		return nil
-	}
 
 	found := false
 	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
@@ -1571,7 +1526,7 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 		return fmt.Errorf("PSP %s:%s:%s is missing; rerun with --insert to create it", rail, environment, accountID)
 	}
 	if found && !opts.Overwrite {
-		return reconcileStripeWebhook()
+		return nil
 	}
 	displayName := identity.DisplayName
 	if n := strings.TrimSpace(localKey); n != "" {
@@ -1581,6 +1536,7 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 	if evidence == nil {
 		evidence = map[string]any{"source": "merchant_config_manifest"}
 	}
+	evidence["credential_custody"] = "snapshot"
 	if signerEvidence != nil {
 		evidence["signer"] = signerEvidence
 	}
@@ -1619,6 +1575,17 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 		if err != nil {
 			return fmt.Errorf("PSP cutover qualification: %w", err)
 		}
+		if !opts.Overwrite {
+			key := ""
+			if displayName != nil {
+				key = *displayName
+			}
+			if err := database.Gen(ctx).InsertSnapshotPSP(ctx, gen.InsertSnapshotPSPParams{ID: railAcctID, MerchantID: merchantID.UUID(), Rail: nRail, Environment: nEnv, AccountID: nAccount, Key: key, Archived: account.Archived, Evidence: evidenceJSON, CustodianID: custodianID}); err != nil {
+				return err
+			}
+			_, err := database.Gen(ctx).GetPSPByIdentity(ctx, gen.GetPSPByIdentityParams{MerchantID: merchantID.UUID(), Rail: nRail, Environment: &nEnv, AccountID: nAccount})
+			return err
+		}
 		_, err := database.Gen(ctx).UpsertPSP(ctx, gen.UpsertPSPParams{
 			ID:          railAcctID,
 			MerchantID:  merchantID.UUID(),
@@ -1637,7 +1604,7 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 	}); err != nil {
 		return err
 	}
-	return reconcileStripeWebhook()
+	return nil
 }
 
 // ProbeNMIAccountBeforeArm requires fresh sandbox qualification for the effective
@@ -1871,4 +1838,94 @@ func StringPtrIfNotEmpty(v string) *string {
 		return nil
 	}
 	return &v
+}
+
+func ValidateMerchantDeclaration(cfg *config.Config, mt MerchantConfig) error {
+	// Validate declarations before identity creation or seed-once suppression.
+	// An existing merchant must not turn malformed input into a successful boot.
+	if _, _, err := normalizeManifestBillingPolicies(mt); err != nil {
+		return err
+	}
+	if host := merchants.NormalizeAPIHost(mt.APIHost); host != "" {
+		if err := merchants.ValidateAPIHost(host); err != nil {
+			return err
+		}
+	}
+	if _, err := merchantconfig.NormalizeCheckoutRouting(CheckoutRoutingRules(mt.CheckoutRouting)); err != nil {
+		return err
+	}
+	if _, err := ManifestBudgetWindows("merchant", "delegated_invoker_wasted_spend_windows", mt.DelegatedInvokerWastedSpendWindows); err != nil {
+		return err
+	}
+	if cfg.SecretStoreBackend() != config.SecretBackendSnapshot && (len(mt.PSPs) > 0 || len(mt.Custodians) > 0) {
+		return fmt.Errorf("managed provider declarations require explicit Client publication operations; startup metadata and credential custody are separate")
+	}
+	return nil
+}
+
+type manifestBillingPolicy struct {
+	name string
+	body models.BillingPolicy
+}
+
+type manifestBillingBinding struct{ tier, name string }
+
+func normalizeManifestBillingPolicies(mt MerchantConfig) ([]manifestBillingPolicy, []manifestBillingBinding, error) {
+	names := make([]string, 0, len(mt.BillingPolicies))
+	for name := range mt.BillingPolicies {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	policies := make([]manifestBillingPolicy, 0, len(names))
+	for _, declared := range names {
+		name, err := merchantconfig.NormalizeBillingPolicyName(declared)
+		if err != nil {
+			return nil, nil, err
+		}
+		src := mt.BillingPolicies[declared]
+		spend, err := ManifestBudgetWindows(name, "spend_windows", src.SpendWindows)
+		if err != nil {
+			return nil, nil, err
+		}
+		badSpend, err := ManifestBudgetWindows(name, "bad_spend_windows", src.BadSpendWindows)
+		if err != nil {
+			return nil, nil, err
+		}
+		var rateWindowSeconds int64
+		if raw := strings.TrimSpace(src.AccrualRateWindow); raw != "" {
+			d, perr := time.ParseDuration(raw)
+			if perr != nil {
+				return nil, nil, fmt.Errorf("billing policy %s: accrual_rate_window: %w", name, perr)
+			}
+			rateWindowSeconds = int64(d / time.Second)
+		}
+		body, err := merchantconfig.NormalizeBillingPolicy(name, models.BillingPolicy{
+			Kind:                      models.BillingPolicyKind(src.Kind),
+			OutstandingCapAmount:      src.OutstandingCap,
+			SpendWindows:              spend,
+			AccrualRateCapPerHour:     src.AccrualRateCapPerHour,
+			AccrualRateWindowSeconds:  rateWindowSeconds,
+			BadSpendWindows:           badSpend,
+			CollectionThresholdAmount: src.CollectionThreshold,
+			CollectionCycleBoundary:   src.CollectionCycleBoundary,
+			DelinquencyGraceDays:      src.DelinquencyGraceDays,
+			DelinquencyAmountFloor:    src.DelinquencyAmountFloor,
+			PolicyCurrency:            src.PolicyCurrency,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		policies = append(policies, manifestBillingPolicy{name: name, body: body})
+	}
+
+	bindings := make([]manifestBillingBinding, 0, len(mt.BillingPolicyBindings))
+	for i, b := range mt.BillingPolicyBindings {
+		name, tier, _, err := merchantconfig.NormalizeBillingPolicyBinding(b.Policy, b.Tier, false)
+		if err != nil {
+			return nil, nil, fmt.Errorf("billing_policy_bindings[%d]: %w", i, err)
+		}
+		bindings = append(bindings, manifestBillingBinding{tier: tier, name: name})
+	}
+
+	return policies, bindings, nil
 }

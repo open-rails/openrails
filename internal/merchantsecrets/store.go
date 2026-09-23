@@ -48,6 +48,7 @@ func resolveVaultTransitMount(vc *config.VaultConfig) string {
 // client for Solana signing, and the probed Vault capabilities (#661). Capabilities
 // gate which operations/routes light up — they are advisory, never authorization.
 type Store struct {
+	closeAuth     context.CancelFunc
 	Secrets       merchants.MerchantSecretStore
 	SolanaTransit solanaint.TransitClient
 	Capabilities  vault.Capabilities
@@ -70,7 +71,16 @@ type Store struct {
 	// DefaultVaultKVMount) Build probed vclient against — Ping re-probes the
 	// same mount, never the package default directly, so a non-default mount
 	// stays correct post-construction.
-	kvMount string
+	kvMount     string
+	scopePrefix string
+}
+
+// Close stops only authentication supervision owned by this runtime. It never
+// revokes a borrowed host token or closes a borrowed client.
+func (s *Store) Close() {
+	if s != nil && s.closeAuth != nil {
+		s.closeAuth()
+	}
 }
 
 // Ping reports whether the merchant-secret backend is usable RIGHT NOW — the
@@ -91,7 +101,7 @@ func (s *Store) Ping(ctx context.Context) error {
 			return fmt.Errorf("vault auth: %w", err)
 		}
 	}
-	if _, err := vault.SelfCapabilities(ctx, s.vclient, s.kvMount); err != nil {
+	if _, err := vault.SelfCapabilities(ctx, s.vclient, s.kvMount, s.scopePrefix); err != nil {
 		return fmt.Errorf("vault unreachable: %w", err)
 	}
 	return nil
@@ -118,21 +128,88 @@ func deriveRouteGates(useVault, vaultConnected, encryptionEnabled bool, caps vau
 // while what the token may actually do is capability-driven. A transit-only policy
 // yields signing with zero KV access; a KV policy yields the secret store; both can
 // coexist.
-func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, error) {
-	if pool == nil {
-		return nil, fmt.Errorf("build merchant secret store: db pool is required")
+// BuildOptions are runtime-owned credential dependencies. Borrowed Vault clients
+// remain authenticated and lifecycle-managed by their host.
+type BuildOptions struct {
+	Snapshot     *merchants.ManifestSecretStore
+	VaultClient  *vaultapi.Client
+	ReadOnly     bool
+	AlertBackend string
+}
+
+func Build(ctx context.Context, cfg *config.Config, pool *db.Pool, options ...BuildOptions) (*Store, error) {
+	if pool == nil || cfg == nil {
+		return nil, fmt.Errorf("build merchant secret store: config and db pool are required")
 	}
-	// Provider credentials in manifest deployments must stay in the manifest.
-	// BuildManifest supplies the narrow managed webhook namespace beside it.
-	if cfg.IsManifestMerchantConfigSource() {
-		return nil, fmt.Errorf("merchant_config_source=manifest requires BuildManifest so provider credentials remain in the manifest")
+	opts := BuildOptions{ReadOnly: cfg.CredentialReadOnly, AlertBackend: cfg.AlertSecretBackend}
+	if len(options) > 1 {
+		return nil, fmt.Errorf("one credential options value is required")
 	}
-	return buildManaged(ctx, cfg, pool)
+	if len(options) == 1 {
+		supplied := options[0]
+		if supplied.Snapshot != nil {
+			opts.Snapshot = supplied.Snapshot
+		}
+		opts.VaultClient = supplied.VaultClient
+		opts.ReadOnly = opts.ReadOnly || supplied.ReadOnly
+		if supplied.AlertBackend != "" {
+			opts.AlertBackend = supplied.AlertBackend
+		}
+	}
+	if cfg.SecretStoreBackend() != "snapshot" {
+		return buildManaged(ctx, cfg, pool, opts)
+	}
+	if opts.Snapshot == nil {
+		var err error
+		opts.Snapshot, err = merchants.NewManifestSecretStoreWithIdentity(cfg.CredentialSnapshotID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var alert merchants.MerchantSecretStore = merchants.NewReadOnlySecretStore(merchants.NewMemorySecretStore())
+	var result *Store
+	if opts.AlertBackend != "" {
+		if opts.AlertBackend != config.SecretBackendDB && opts.AlertBackend != config.SecretBackendVault {
+			return nil, fmt.Errorf("invalid alert credential backend")
+		}
+		copy := *cfg
+		copy.SecretBackend = opts.AlertBackend
+		var err error
+		result, err = buildManaged(ctx, &copy, pool, BuildOptions{VaultClient: opts.VaultClient})
+		if err != nil {
+			return nil, err
+		}
+		alert = result.Secrets
+	} else {
+		var err error
+		if opts.VaultClient != nil {
+			result = &Store{SolanaTransit: vault.NewTransitAdapter(opts.VaultClient, resolveVaultTransitMount(cfg.Vault))}
+		} else {
+			result, err = BuildTransit(ctx, cfg)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	result.Secrets = merchants.NewManifestManagedSecretStore(opts.Snapshot, alert)
+	result.SecretWrite = false
+	result.SolanaCanSign = true
+	return result, nil
 }
 
 // buildManaged constructs the existing persistent secret backend. Manifest
 // deployments use it only for the explicitly routed alert-webhook namespace.
-func buildManaged(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, error) {
+func buildManaged(ctx context.Context, cfg *config.Config, pool *db.Pool, options ...BuildOptions) (result *Store, buildErr error) {
+	var ownedCancel context.CancelFunc
+	defer func() {
+		if buildErr != nil && ownedCancel != nil {
+			ownedCancel()
+		}
+	}()
+	var opts BuildOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	backend := cfg.SecretStoreBackend()
 
 	// Open a Vault connection whenever Vault is configured, then probe what the
@@ -145,22 +222,31 @@ func buildManaged(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Stor
 		vaultAuth *vault.Supervisor
 	)
 	kvMount := DefaultVaultKVMount
-	if cfg != nil && cfg.Vault != nil && cfg.Vault.Enabled {
+	if opts.VaultClient != nil || (cfg != nil && cfg.Vault != nil && cfg.Vault.Enabled) {
 		vc := cfg.Vault
+		if vc == nil {
+			vc = &config.VaultConfig{}
+		}
 		kvMount = resolveVaultKVMount(vc)
-		client, sup, err := vault.Login(ctx, vault.Config{
-			Address:    vc.Address,
-			AuthMethod: vc.AuthMethod,
-			Token:      vc.Token,
-			RoleID:     vc.RoleID,
-			SecretID:   vc.SecretID,
-			K8sRole:    vc.K8sRole,
-		})
+		client, sup, err := opts.VaultClient, (*vault.Supervisor)(nil), error(nil)
+		if client == nil {
+			authCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+			ownedCancel = cancel
+			client, sup, err = vault.Login(authCtx, vault.Config{
+				Address:    vc.Address,
+				Namespace:  vc.Namespace,
+				AuthMethod: vc.AuthMethod,
+				Token:      vc.Token,
+				RoleID:     vc.RoleID,
+				SecretID:   vc.SecretID,
+				K8sRole:    vc.K8sRole,
+			})
+		}
 		if err != nil {
 			return nil, fmt.Errorf("vault login: %w", err)
 		}
 		vaultAuth = sup
-		caps, err = vault.SelfCapabilities(ctx, client, kvMount)
+		caps, err = vault.SelfCapabilities(ctx, client, kvMount, vc.ScopePrefix)
 		if err != nil {
 			// Only fatal when secrets are declared to live in Vault: the KV store
 			// can't be verified. Otherwise degrade — transit signing doesn't need
@@ -186,23 +272,32 @@ func buildManaged(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Stor
 		if !caps.KVWrite {
 			log.Warn("vault: secret_backend=vault with read-only KV capability; merchant-secret writes / config-push are disabled")
 		}
-		store := merchants.NewVaultSecretStore(
-			kvMount,
-			vault.NewKVv2Adapter(vclient, kvMount).WithReauthTrigger(vaultAuth),
-		)
+		prefix := ""
+		if cfg.Vault != nil {
+			prefix = cfg.Vault.ScopePrefix
+		}
+		store, err := merchants.NewVaultSecretStoreWithPrefix(kvMount, prefix, vault.NewKVv2Adapter(vclient, kvMount).WithReauthTrigger(vaultAuth))
+		if err != nil {
+			return nil, err
+		}
+		if opts.ReadOnly || !caps.KVWrite {
+			store = merchants.NewReadOnlySecretStore(store)
+		}
 		database, err := db.NewWithPGXPool(pool.Raw(), pool.Schema())
 		if err != nil {
 			return nil, err
 		}
 		return &Store{
-			Secrets:       merchants.NewLifecycleSecretStore(database, merchants.NewCachedSecretStore(store, merchants.DefaultSecretCacheTTL)),
+			closeAuth:     ownedCancel,
+			Secrets:       merchants.NewLifecycleSecretStore(database, store),
 			SolanaTransit: transit,
 			Capabilities:  caps,
 			SolanaCanSign: solanaCanSign,
-			SecretWrite:   secretWrite,
+			SecretWrite:   secretWrite && !opts.ReadOnly,
 			VaultAuth:     vaultAuth,
 			vclient:       vclient,
 			kvMount:       kvMount,
+			scopePrefix:   prefix,
 		}, nil
 	}
 
@@ -210,12 +305,16 @@ func buildManaged(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Stor
 	if err != nil {
 		return nil, err
 	}
+	if opts.ReadOnly {
+		secrets = merchants.NewReadOnlySecretStore(secrets)
+	}
 	return &Store{
+		closeAuth:     ownedCancel,
 		Secrets:       secrets,
 		SolanaTransit: transit,
 		Capabilities:  caps,
 		SolanaCanSign: solanaCanSign,
-		SecretWrite:   secretWrite,
+		SecretWrite:   secretWrite && !opts.ReadOnly,
 		VaultAuth:     vaultAuth,
 	}, nil
 }
@@ -225,8 +324,11 @@ func buildManaged(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Stor
 // declared in Vault but the token can't read KV — and callers must NOT auto-fallback
 // to the DB store (the data lives in Vault, not the DB, so DB would be empty).
 func gateSecretBackend(backend string, vaultConnected bool, caps vault.Capabilities, kvMount string) (useVault bool, err error) {
-	if backend != config.SecretBackendVault {
+	if backend == config.SecretBackendDB {
 		return false, nil
+	}
+	if backend != config.SecretBackendVault {
+		return false, fmt.Errorf("unknown credential backend")
 	}
 	if !vaultConnected {
 		return false, fmt.Errorf("secret_backend=vault requires vault.enabled (no Vault connection to serve the KV store)")
@@ -256,22 +358,12 @@ func buildDBSecretStore(cfg *config.Config, pool *db.Pool) (merchants.MerchantSe
 	if err != nil {
 		return nil, fmt.Errorf("build merchant encryptor: %w", err)
 	}
-	if !cfg.IsManifestMerchantConfigSource() {
-		if err := enforceEncryptionPosture(enc.Enabled(), cfg.RequiresSecretEncryption()); err != nil {
-			return nil, err
-		}
+	if err := enforceEncryptionPosture(enc.Enabled(), true); err != nil {
+		return nil, err
 	}
 	store, err := merchants.NewEncryptedSecretStore(dbStore, enc)
 	if err != nil {
 		return nil, fmt.Errorf("wrap DB merchant secret store with encryption: %w", err)
-	}
-	// Only reachable in dev post-#667; Solana keys are self-custody funds, so
-	// plaintext is refused even where dev deliberately allows it for the rest.
-	if !enc.Enabled() {
-		store = merchants.NewWriteRestrictedSecretStore(store, map[string]string{
-			merchants.SolanaPrivateKeyWritePattern(): "ENCRYPTION_MASTER_KEY is required before storing DB-backed Solana private keys",
-			merchants.AlertWebhookURLWritePattern():  "ENCRYPTION_MASTER_KEY is required before storing DB-backed webhook credentials",
-		})
 	}
 	return merchants.NewCachedSecretStore(store, merchants.DefaultSecretCacheTTL), nil
 }
@@ -281,20 +373,13 @@ func buildDBSecretStore(cfg *config.Config, pool *db.Pool) (merchants.MerchantSe
 // Provider writes still receive the manifest-mode refusal; managed URL writes
 // require encryption or Vault. A missing DB encryption key leaves the optional
 // webhook feature disabled without requiring provider credentials in the DB.
-func BuildManifest(ctx context.Context, cfg *config.Config, store *merchants.ManifestSecretStore, pool *db.Pool) (*Store, error) {
-	if store == nil || pool == nil {
-		return nil, fmt.Errorf("build manifest secret plane: manifest and database are required")
+func BuildManifest(ctx context.Context, cfg *config.Config, snapshot *merchants.ManifestSecretStore, pool *db.Pool) (*Store, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("credential config is required")
 	}
-	backend, err := buildManaged(ctx, cfg, pool)
-	if err != nil {
-		return nil, err
-	}
-	backend.Secrets = merchants.NewManifestManagedSecretStore(store, backend.Secrets)
-	// Manifest provider keys remain available and immutable, while operator
-	// webhook destinations are persisted only through the managed backend.
-	backend.SolanaCanSign = true
-	backend.SecretWrite = true
-	return backend, nil
+	copy := *cfg
+	copy.SecretBackend = "snapshot"
+	return Build(ctx, &copy, pool, BuildOptions{Snapshot: snapshot})
 }
 
 // BuildTransit opens the Vault Transit signing client when Vault is enabled
@@ -313,8 +398,10 @@ func BuildTransit(ctx context.Context, cfg *config.Config) (*Store, error) {
 		return &Store{}, nil
 	}
 	vc := cfg.Vault
-	client, sup, err := vault.Login(ctx, vault.Config{
+	authCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	client, sup, err := vault.Login(authCtx, vault.Config{
 		Address:    vc.Address,
+		Namespace:  vc.Namespace,
 		AuthMethod: vc.AuthMethod,
 		Token:      vc.Token,
 		RoleID:     vc.RoleID,
@@ -322,9 +409,11 @@ func BuildTransit(ctx context.Context, cfg *config.Config) (*Store, error) {
 		K8sRole:    vc.K8sRole,
 	})
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("vault login: %w", err)
 	}
 	return &Store{
+		closeAuth:     cancel,
 		SolanaTransit: vault.NewTransitAdapter(client, resolveVaultTransitMount(vc)),
 		VaultAuth:     sup,
 		vclient:       client,
@@ -335,13 +424,9 @@ func BuildTransit(ctx context.Context, cfg *config.Config) (*Store, error) {
 // secret store, mirroring db.EnforceRLSPosture: outside development a disabled
 // encryptor refuses boot (secrets would persist plaintext at rest); development
 // proceeds with one loud warning. Vault-backed deployments never reach this.
-func enforceEncryptionPosture(encryptionEnabled, require bool) error {
+func enforceEncryptionPosture(encryptionEnabled, _ bool) error {
 	if encryptionEnabled {
 		return nil
 	}
-	if require {
-		return fmt.Errorf("merchant secrets: secret_backend=db with no ENCRYPTION_MASTER_KEY would persist merchant provider credentials PLAINTEXT in openrails.merchant_secrets; set ENCRYPTION_MASTER_KEY (base64 32-byte AES-256 key) or store secrets in Vault (secret_backend=vault); only development may run without")
-	}
-	log.Warn("merchant secrets: ENCRYPTION_MASTER_KEY is not set; DB-backed merchant secrets will persist PLAINTEXT at rest (development only — non-development boots refuse this posture, #667)")
-	return nil
+	return fmt.Errorf("merchant secrets: encrypted DB custody requires ENCRYPTION_MASTER_KEY; select secret_backend=snapshot or secret_backend=vault otherwise")
 }

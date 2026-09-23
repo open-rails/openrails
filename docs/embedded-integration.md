@@ -89,10 +89,10 @@ to boot unless you declare posture explicitly (#745):
 
 | Field | Required | Meaning |
 |---|---|---|
-| `Env` | yes | `"development"` / `"staging"` / `"production"`. Empty errors; development-only secret-storage relaxations must be explicit. |
 | `TestMode` | yes | `config.CredentialPostureSandbox` or `config.CredentialPostureLive`. The zero value is UNSET and rejected — it can never silently mean "live". |
 | `ProviderWriteMode` | recommended | `config.ProviderWriteModeFull` etc.; unset fail-closes to readonly. |
-| `MerchantConfigSource` | defaults to `config.MerchantConfigSourceManifest` | Mode 1 (manifest-is-truth, secrets in memory, reboot to change) vs `MerchantConfigSourceAPI` (mode 2: provision via HTTP APIs + persistent secret store). |
+| `SecretBackend` | defaults to `snapshot` | Immutable host credentials, live Vault, or encrypted database custody; independent of metadata and HTTP exposure. |
+| `PublicBillingBaseURL` | when generating callbacks or links | External billing mount base, excluding `/v1`; distinct from issuer, DPoP origin and dashboard. |
 | `AllowCatalogUpdates` | false | Enables ordinary product, price, catalog and metering writes and their routes, independently of provider credentials. Trusted local operator application remains available when false. |
 | `DB` | yes | Schema defaults to `billing`. The injected pool can be the same owning connection used for initialization. |
 
@@ -316,22 +316,18 @@ if err != nil { return err }
 mid := client.MerchantID()
 ```
 
-Semantics by mode:
+The database owns merchant metadata. Startup initializes missing metadata and
+reloads host snapshot credentials without overwriting later API edits or reviving
+archived accounts. Deliberate metadata changes use
+`Client.MerchantConfiguration.Apply` with a stable application ID and reviewed
+revision, optionally supplied as `MerchantDeclaration.MetadataApplication`.
 
-- **Mode 1 (`merchant_config_source=manifest`, the default)**: the constructor declaration is the manifest —
-  it steamrolls the DB projections and seeds secrets into the runtime's **in-memory**
-  plane (never a persistent store) on every run, then arms checkout/vault/webhooks
-  immediately. Change credentials = change the config + reboot. Provider PUT,
-  DELETE and account-archive HTTP routes are omitted; reads and routing dry
-  runs remain available. The advertised `secret_write` capability is false,
-  including with explicit provider route selections. This does not disable
-  separately configured managed alert-webhook URL updates.
-- **Mode 2 (`merchant_config_source=api`)**: a manifest-shaped upsert (PSPs, profile,
-  invoice, remote-application trust) refuses loudly — two truths. Only a bare
-  identity bind (slug + top-level `DisplayName`) is legal; arm providers through
-  `embed/controlplane` (`cp.UpsertPaymentProviderConfig`) or
-  `PUT /v1/merchant/payment-providers/{provider}` (`RouteSetPaymentProviders`),
-  Catalog authoring is selected independently below.
+`SecretBackend` selects only credential custody. Snapshot values stay in memory;
+managed provider credentials are published through `Client.PaymentProviders` with
+an operation ID and expected account revision. A local Client works without HTTP
+publication. `HTTP.MerchantConfig` opts into the shared settings/provider route
+family, with normal authentication and authorization; read-only custody still
+rejects credential changes. Standalone uses `merchant_config_http` for this flag.
 
 YAML-first hosts can keep the merchant in a file: `embed.ParseMerchantConfig` (one
 merchant, strict — unknown fields rejected) or
@@ -346,13 +342,14 @@ and merchant batch application). Trusted local operator application remains
 available when ordinary updates are disabled.
 
 For dynamic products with host-owned Stripe credentials, construct the runtime
-with `MerchantConfigSource: config.MerchantConfigSourceManifest` and
+with `SecretBackend: config.SecretBackendSnapshot` and
 `AllowCatalogUpdates: true`, then pass the host's account and secrets
 in `Options.Merchant.Config` as above. OpenRails keeps provider credentials in
-memory and refuses provider-configuration API writes. The host rotates credentials
+memory and refuses credential publication into the read-only snapshot. Metadata
+and account archival remain independent authorized operations. The host rotates credentials
 by updating its configuration and constructing a new runtime. Existing API catalog
-rows survive restart. Do not bootstrap host credentials through a provider PUT:
-that operation selects managed persistence when `MerchantConfigSource` is `api`.
+rows survive restart. Provider PUT does not change backend selection: it publishes
+only through the runtime's already configured writable backend.
 
 Host-supplied provider credentials alone need no encryption master key. Optional
 DB-backed alert-webhook URLs and HyperSwitch SDK capture authorization still

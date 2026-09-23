@@ -236,27 +236,17 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 		httproutes.RegisterCatalogCollectionRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant/catalogs", s.Runtime), s.Runtime, adminOpts)
 		httproutes.RegisterOwnedCatalogRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/catalog", s.Runtime), s.Runtime, adminOpts)
 	}
-	if routeSets[RouteSetPaymentProviders] {
+	if routeSets[RouteSetMerchantConfig] {
 		adminOpts := httproutes.Options{
 			Gate: s.Gate,
 		}
-		httproutes.RegisterPaymentProviderRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant/payment-providers", s.Runtime), s.Runtime, adminOpts)
+		httproutes.RegisterMerchantConfigRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, adminOpts)
 	}
 	if routeSets[RouteSetMerchantAPI] {
 		httproutes.RegisterServiceRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/merchant", s.Runtime), s.Runtime, httproutes.Options{Gate: s.Gate})
 	}
 	if routeSets[RouteSetWebhooks] {
-		httproutes.RegisterMerchantWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime)
-		// #734: the Host-routed webhook mount (saas #15's "api.<slug>.<domain>"
-		// scheme) is additive — it mounts at the canonical no-merchant-segment
-		// path ("/billing/v1/webhooks/:provider"), distinct from the merchant-scoped
-		// path above, and only when a control plane is attached (HostResolve != nil).
-		// A host with no control plane, or one that never configures any
-		// merchant's api_host, is unaffected: the path simply isn't mounted / never
-		// resolves.
-		if s.HostResolve != nil {
-			httproutes.RegisterHostWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, s.HostResolve)
-		}
+		httproutes.RegisterWebhookRoutes(router.NewMux(mux, EmbeddedV1Prefix+"/webhooks", s.Runtime), s.Runtime)
 	}
 
 	// Resolve the configured merchant on each request before merchant-owned
@@ -325,7 +315,7 @@ func (s *Assembler) validateAuthBoundary(routeSets map[RouteSet]bool) error {
 	if (routeSets[RouteSetCheckout] || routeSets[RouteSetCustomer]) && (s == nil || s.Authenticator == nil) {
 		return fmt.Errorf("embedded billing: user route groups require Options.Authenticator")
 	}
-	if (routeSets[RouteSetMerchantAdmin] || routeSets[RouteSetCatalog] || routeSets[RouteSetPaymentProviders] || routeSets[RouteSetMerchantAPI]) && (s == nil || s.Gate == nil) {
+	if (routeSets[RouteSetMerchantAdmin] || routeSets[RouteSetCatalog] || routeSets[RouteSetMerchantConfig] || routeSets[RouteSetMerchantAPI]) && (s == nil || s.Gate == nil) {
 		return fmt.Errorf("embedded billing: merchant route groups require Options.Gate")
 	}
 	return nil

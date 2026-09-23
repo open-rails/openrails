@@ -1,6 +1,7 @@
 package config
 
 import (
+	billing "github.com/open-rails/openrails/config"
 	"github.com/stretchr/testify/require"
 	"os"
 	"path/filepath"
@@ -9,8 +10,8 @@ import (
 
 func TestCatalogUpdatesConfigLoading(t *testing.T) {
 	t.Chdir(t.TempDir())
-	t.Setenv("ENV", "development")
-	t.Setenv("MERCHANT_CONFIG_SOURCE", "manifest")
+
+	t.Setenv("SECRET_BACKEND", "snapshot")
 	cfg, err := Load("")
 	require.NoError(t, err)
 	require.False(t, cfg.AllowCatalogUpdates)
@@ -18,7 +19,7 @@ func TestCatalogUpdatesConfigLoading(t *testing.T) {
 	cfg, err = Load("")
 	require.NoError(t, err)
 	require.True(t, cfg.AllowCatalogUpdates)
-	require.True(t, cfg.IsManifestMerchantConfigSource())
+	require.Equal(t, billing.SecretBackendSnapshot, cfg.SecretStoreBackend())
 	t.Setenv("ALLOW_CATALOG_UPDATES", "invalid")
 	_, err = Load("")
 	require.Error(t, err)
@@ -26,7 +27,7 @@ func TestCatalogUpdatesConfigLoading(t *testing.T) {
 
 func TestRetiredCatalogSourceRefusesLoad(t *testing.T) {
 	t.Chdir(t.TempDir())
-	t.Setenv("ENV", "development")
+
 	for _, value := range []string{"", "manifest", "api"} {
 		t.Run("env="+value, func(t *testing.T) {
 			t.Setenv("CATALOG_SOURCE", value)
@@ -37,7 +38,7 @@ func TestRetiredCatalogSourceRefusesLoad(t *testing.T) {
 		})
 	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(path, []byte("env: development\ncatalog_source: api\n"), 0600))
+	require.NoError(t, os.WriteFile(path, []byte("catalog_source: api\n"), 0600))
 	_, err := Load(path)
 	require.ErrorContains(t, err, "allow_catalog_updates")
 	require.Empty(t, envKeyToConfigKey("CATALOG_SOURCE"))

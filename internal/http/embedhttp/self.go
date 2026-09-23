@@ -121,7 +121,7 @@ func ProviderRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRo
 		}
 	}
 	if rt != nil {
-		if rt.Config.IsManifestMerchantConfigSource() {
+		if rt.Config.SecretStoreBackend() == config.SecretBackendSnapshot {
 			r.SecretWrite = false
 		}
 		if caps := rt.RouteCapabilities; caps != nil {
@@ -152,10 +152,9 @@ func armedProviderRoutes(ctx context.Context, rt *app.Runtime, mid merchant.ID) 
 	}
 }
 
-// ConfiguredProviderRoutes resolves optional buyer routes without hiding store
-// failures. API-owned configurations retain routes as providers are added; each
-// request still enforces actual account readiness. Manifest-owned hosts must
-// finish provider declaration before materializing their buyer HTTP surface.
+// ConfiguredProviderRoutes selects buyer routes independently of credential
+// custody. Each request checks its selected account and current credential
+// readiness; mounting a route never arms an account or grants secret access.
 func ConfiguredProviderRoutes(ctx context.Context, rt *app.Runtime, buyer bool) (routesurface.ProviderRoutes, error) {
 	if rt == nil || rt.Config == nil {
 		return routesurface.ProviderRoutes{}, fmt.Errorf("openrails HTTP: runtime configuration is missing")
@@ -165,23 +164,6 @@ func ConfiguredProviderRoutes(ctx context.Context, rt *app.Runtime, buyer bool) 
 		selected.StripePortal = false
 		selected.Solana = false
 		selected.SolanaSigning = false
-	} else if rt.Config.IsManifestMerchantConfigSource() {
-		mid := rt.ConfiguredMerchant()
-		if mid.IsZero() || rt.Merchants == nil {
-			return selected, fmt.Errorf("openrails HTTP: declare the manifest merchant before mounting buyer routes")
-		}
-		environment := config.ExpectedProviderEnvironment(rt.Config.IsTestMode())
-		_, stripe, err := rt.Merchants.ActivePSPScope(ctx, mid, string(models.RailStripe), environment)
-		if err != nil {
-			return selected, fmt.Errorf("openrails HTTP: resolve Stripe routes: %w", err)
-		}
-		_, solana, err := rt.Merchants.ActivePSPScope(ctx, mid, string(models.RailSolana), environment)
-		if err != nil {
-			return selected, fmt.Errorf("openrails HTTP: resolve Solana routes: %w", err)
-		}
-		selected.StripePortal = stripe
-		selected.Solana = solana
-		selected.SolanaSigning = solana
 	}
 	return ProviderRoutesForRuntime(rt, &selected), nil
 }

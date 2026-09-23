@@ -372,7 +372,7 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 		}
 		return nil
 	case sub.Rail == models.RailStripe:
-		stripeSvc := &subscriptions.StripeService{Config: r.State.Config, Rails: r.State.RailConfigs}
+		stripeSvc := &subscriptions.StripeService{StripeClients: r.State.StripeClients, Config: r.State.Config, Rails: r.State.RailConfigs}
 		if err := stripeSvc.CancelSubscription(ctx, sub.RailSubscriptionID); err != nil {
 			return fmt.Errorf("cancel stripe subscription %s: %w", subID, err)
 		}

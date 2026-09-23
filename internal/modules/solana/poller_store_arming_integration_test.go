@@ -80,7 +80,7 @@ func TestMerchantRPCBuilder_StoreSettingsWin(t *testing.T) {
 	})
 
 	b := &MerchantRPCBuilder{
-		Config:      &config.Config{Env: "dev"},
+		Config:      &config.Config{},
 		MerchantsFn: func() *merchants.Service { return svc },
 	}
 
@@ -104,7 +104,7 @@ func TestMerchantRPCBuilder_NoDeclaredAccountResolvesNothing(t *testing.T) {
 	mid := newSolanaTestMerchant(t, dbi, "sol-boot-"+sfx)
 
 	b := &MerchantRPCBuilder{
-		Config:      &config.Config{Env: "dev"},
+		Config:      &config.Config{},
 		MerchantsFn: func() *merchants.Service { return svc },
 	}
 
@@ -128,7 +128,7 @@ func TestMerchantRPCBuilder_MalformedSettingsFailLoud(t *testing.T) {
 	seedSolanaRailAccount(t, dbi, mid, "WaLLet"+sfx, map[string]any{"rpc_provider": "bogus"})
 
 	b := &MerchantRPCBuilder{
-		Config:      &config.Config{Env: "dev"},
+		Config:      &config.Config{},
 		MerchantsFn: func() *merchants.Service { return svc },
 	}
 
@@ -200,7 +200,7 @@ func TestSolanaPollerPass_PerMerchantStoreArming(t *testing.T) {
 	// Merchant B: declares nothing → boot fallback.
 	midBoot := newSolanaTestMerchant(t, dbi, "sol-pass-boot-"+sfx)
 
-	cfg := &config.Config{Env: "dev"}
+	cfg := &config.Config{}
 	builder := &MerchantRPCBuilder{
 		Config:      cfg,
 		MerchantsFn: func() *merchants.Service { return svc },
@@ -271,7 +271,7 @@ func TestPendingSetRefusesAMalformedMemberInsteadOfDeletingIt(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
 
-	paySvc := NewSolanaPayService(dbi, rdb, &config.Config{Env: "dev"}, nil, nil, nil, nil, nil, nil)
+	paySvc := NewSolanaPayService(dbi, rdb, &config.Config{}, nil, nil, nil, nil, nil, nil)
 
 	bare := "or893-bare-" + uuid.NewString()
 	require.NoError(t, rdb.SAdd(context.Background(), pendingSolanaPaymentsKey, bare).Err())
@@ -293,7 +293,7 @@ func TestRemovePendingPaymentRequiresAMerchant(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	dbi := dbtest.OpenAppDB(t, dsn)
 
-	paySvc := NewSolanaPayService(dbi, rdb, &config.Config{Env: "dev"}, nil, nil, nil, nil, nil, nil)
+	paySvc := NewSolanaPayService(dbi, rdb, &config.Config{}, nil, nil, nil, nil, nil, nil)
 
 	err := paySvc.RemovePendingPayment(context.Background(), "some-reference")
 	require.Error(t, err)

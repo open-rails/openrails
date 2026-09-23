@@ -30,15 +30,10 @@ func (s *Server) registerUserRoutes(mux router.Registrar) {
 	s.registerUserRoutesAt(mux, StandaloneV1Prefix)
 }
 
-// registerWebhookRoutes mounts the canonical provider-only webhook surface (#650):
-// /webhooks/:provider/:account_id (the configured account resolves its merchant).
-// Standalone mounts this; embedded hosts
-// use the merchant-scoped surface because they pin one merchant in context.
+// registerWebhookRoutes mounts the canonical account-specific callback surface.
+// Embedded and standalone runtimes share account/environment resolution,
+// configured merchant restrictions and provider verification.
 func (s *Server) registerWebhookRoutes(mux router.Registrar) {
-	if s.controlPlane != nil && !s.controlPlane.SelfHostedPosture() {
-		httproutes.RegisterHostWebhookRoutes(router.NewMuxRecorded(mux, StandaloneV1Prefix, s.runtime, s.recordRoute), s.runtime, s.hostMerchantResolver)
-		return
-	}
 	httproutes.RegisterWebhookRoutes(router.NewMuxRecorded(mux, StandaloneV1Prefix+"/webhooks", s.runtime, s.recordRoute), s.runtime)
 }
 
@@ -62,10 +57,15 @@ func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
 	s.handle(mux, http.MethodGet+" /health/ready", http.HandlerFunc(s.readyHandler))
 
 	// Capability discovery (#623): which route groups this deployment serves.
-	// Standalone mounts the full surface, so it advertises StandaloneDefaultRouteSets.
-	// Same hand-written handler the embedded surface serves at /billing/v1/capabilities.
+	// Configuration management is opt-in even on the standalone server.
+	groups := make([]embedhttp.RouteSet, 0, len(embedhttp.StandaloneDefaultRouteSets))
+	for _, group := range embedhttp.StandaloneDefaultRouteSets {
+		if group != embedhttp.RouteSetMerchantConfig || (s.cfg != nil && s.cfg.MerchantConfigHTTP) {
+			groups = append(groups, group)
+		}
+	}
 	s.handle(mux, http.MethodGet+" "+StandaloneV1Prefix+"/capabilities",
-		embedhttp.CapabilitiesHandler(embedhttp.StandaloneDefaultRouteSets, embedhttp.ProviderRoutesForRuntime(s.runtime, nil)))
+		embedhttp.CapabilitiesHandler(groups, embedhttp.ProviderRoutesForRuntime(s.runtime, nil)))
 
 	// Kubernetes-style health check endpoints (aliases)
 	s.handle(mux, http.MethodGet+" /healthz", live)

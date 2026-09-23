@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -58,6 +59,7 @@ type WebhookMessage struct {
 
 // WebhookDispatcher routes persisted webhook events to rail-specific handlers.
 type WebhookDispatcher struct {
+	StripeClients                *stripeapi.Factory
 	Config                       *config.Config
 	DB                           *db.DB
 	Clock                        clockwork.Clock
@@ -206,7 +208,9 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		factory := d.StripePaymentStateReaderFactory
 		if factory == nil {
 			factory = func(secretKey string) payments.StripePaymentStateReader {
-				return payments.NewHTTPStripePaymentStateReader(secretKey)
+				reader := payments.NewHTTPStripePaymentStateReader(secretKey)
+				reader.HTTPClient = d.StripeClients.ReadOnlyClient(0)
+				return reader
 			}
 		}
 		paymentState = factory(proc.Stripe.SecretKey)

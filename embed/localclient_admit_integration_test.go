@@ -26,7 +26,7 @@ import (
 func TestInProcessClientBindingIsImmutable(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
-	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
+	cfg := &config.Config{TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 
 	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)

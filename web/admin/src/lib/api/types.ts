@@ -625,6 +625,7 @@ export interface MerchantSettings {
 }
 
 export interface PaymentProviderConfig {
+  configuration_revision?: number
   id: string
   rail: Rail
   environment: string

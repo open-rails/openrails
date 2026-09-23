@@ -85,7 +85,7 @@ func TestIndependentProviderEmbeddedCustomerAndStaffRoutes(t *testing.T) {
 	})
 	require.NoError(t, err)
 	runtime, _, err := newDeclaredMerchant(ctx, embed.Options{
-		Config:  &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox, MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{URL: dsn}},
+		Config:  &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeReadOnly, DB: &config.DBConfig{URL: dsn}},
 		PGXPool: pool, River: embed.RiverFromHost(), Auth: integration,
 		HTTP: &embed.HTTPConfig{MerchantAdmin: true, CustomerRoutes: []embed.CustomerRoutesConfig{{Merchant: slug, Treasury: true}}},
 	}, slug, embed.MerchantConfig{DisplayName: "Independent identity provider"})

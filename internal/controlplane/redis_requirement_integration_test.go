@@ -43,9 +43,7 @@ func (noopEmailSender) SendWelcome(context.Context, string, string) error       
 // separate, unrelated construction failure — irrelevant to the Redis gate
 // under test here).
 func stagingControlPlaneConfig() *hostconfig.Config {
-	return &hostconfig.Config{Config: &config.Config{
-		Env: "staging",
-	}, Auth: &hostconfig.AuthConfig{
+	return &hostconfig.Config{Config: &config.Config{}, Auth: &hostconfig.AuthConfig{
 		Issuer:       "https://openrails-staging.test",
 		MintDisabled: true,
 		DirectPeerIP: true,

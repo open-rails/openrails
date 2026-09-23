@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"sort"
 	"strconv"
 	"strings"
@@ -616,16 +617,25 @@ func (s *Service) SetMerchantConfiguration(ctx context.Context, in MerchantConfi
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	cfg, _, err := merchantconfig.NewStore(s.rt.DB).Get(ctx)
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
-	cfg, err = applyMerchantConfiguration(cfg, in)
-	if err != nil {
-		return err
-	}
-
-	return merchantconfig.NewStore(s.rt.DB).Upsert(ctx, cfg)
+	return s.rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		database := s.rt.DB.NewWithPgxTx(tx)
+		if _, err := database.Gen(ctx).LockMerchantSettings(ctx, mid.UUID()); err != nil {
+			return err
+		}
+		cfg, _, err := merchantconfig.NewStore(database).Get(ctx)
+		if err != nil {
+			return err
+		}
+		cfg, err = applyMerchantConfiguration(cfg, in)
+		if err != nil {
+			return err
+		}
+		return merchantconfig.NewStore(database).Upsert(ctx, cfg)
+	})
 }
 
 func applyMerchantConfiguration(cfg models.MerchantConfiguration, in MerchantConfiguration) (models.MerchantConfiguration, error) {

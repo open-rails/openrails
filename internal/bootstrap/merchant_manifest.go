@@ -300,8 +300,8 @@ func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *c
 		}
 		return opts.SecretStore, transitStore.SolanaTransit, nil
 	}
-	if cfg.IsManifestMerchantConfigSource() {
-		log.Info("merchant bootstrap: merchant_config_source=manifest — DB projections reconcile; secrets validate in memory only and are NOT persisted (#723: the server loads them from its boot manifest)")
+	if cfg.SecretStoreBackend() == config.SecretBackendSnapshot {
+		log.Info("merchant bootstrap: snapshot credentials validate in memory and are not persisted")
 		transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
 		if err != nil {
 			return nil, nil, fmt.Errorf("merchant bootstrap: %w", err)
@@ -318,16 +318,8 @@ func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *c
 func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merchants.Merchant, error) {
 	slug := merchant.NormalizeSlug(req.Slug)
 	mt := req.Merchant
-	// MODE 1 (#723): the YAML is the truth — it steamrolls the DB projections
-	// and the in-memory secret plane on every apply. Seed-once/plan tiers are
-	// mode-2 (api) semantics; forcing here keeps every mode-1 caller (embedded
-	// merchant constructor, standalone boot, CLI) converging identically.
-	if req.Config.IsManifestMerchantConfigSource() {
-		req.Options.Insert = true
-		req.Options.Overwrite = true
-		// Prune needs a store to list; a storeless call (read-side bind with no
-		// accounts) has nothing to prune.
-		req.Options.Prune = req.SecretStore != nil
+	if err := merchantbootstrap.ValidateMerchantDeclaration(req.Config, mt.MerchantConfig); err != nil {
+		return nil, err
 	}
 	database := req.Database
 	if database == nil {
@@ -386,7 +378,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 	// Keep an existing merchant's display name in sync with the manifest (the
 	// create path already set it). A UUID-scoped update ensures an
 	// empty manifest display name leaves the stored one untouched.
-	if found && strings.TrimSpace(mt.DisplayName) != "" {
+	if found && req.Options.Overwrite && strings.TrimSpace(mt.DisplayName) != "" {
 		directory, err := merchants.NewDirectoryService(database.DataPool())
 		if err != nil {
 			return nil, err
@@ -396,6 +388,18 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 		}
 	}
 
+	// Startup ensures identity and missing accounts. Existing metadata belongs
+	// to ordinary Client operations; restarting a declaration cannot reassert it.
+	if found && !req.Options.Overwrite {
+		mt.DisplayName = ""
+		mt.APIHost = ""
+		mt.Profile = MerchantProfileConfig{}
+		mt.Invoice = nil
+		mt.DelegatedInvokerWastedSpendWindows = nil
+		mt.CheckoutRouting = nil
+		mt.BillingPolicies = nil
+		mt.BillingPolicyBindings = nil
+	}
 	if err := reconcileManifestMerchantConfiguration(ctx, req.Config, database, tn.ID, slug, mt.MerchantConfig, req.SecretStore, req.SolanaTransit, req.Options); err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: configure %q: %w", slug, err)
 	}

@@ -31,7 +31,7 @@ func TestCCBillCallbacksUseRuntimeClock(t *testing.T) {
 	clock := clockwork.NewFakeClockAt(now)
 	h := New(t, t.Context())
 	surface := h.StartStandalone("USD", WithClock(clock), WithConfig(func(c *config.Config) {
-		c.MerchantConfigSource = config.MerchantConfigSourceAPI
+		c.MerchantConfigHTTP = true
 		c.SecretBackend = config.SecretBackendDB
 	}))
 	owned := surface.ProvisionOwnedMerchant("ccbill-" + uuid.NewString()[:8])

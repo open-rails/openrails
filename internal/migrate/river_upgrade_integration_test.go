@@ -92,7 +92,7 @@ func TestRunPostgresUpgradesRiverV026State(t *testing.T) {
 		VALUES ('legacy-client', $1, now())`, riverUpgradeQueue)
 	require.NoError(t, err)
 
-	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: targetDSN}}
+	cfg := &config.Config{DB: &config.DBConfig{URL: targetDSN}}
 	require.NoError(t, migrate.RunPostgres(ctx, cfg))
 
 	var versions []int

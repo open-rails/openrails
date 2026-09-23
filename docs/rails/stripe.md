@@ -45,7 +45,7 @@ declared; it does not derive it at runtime.
 ### Webhooks
 
 The inbound endpoint is `POST /v1/webhooks/stripe/{account_id}` (standalone) or
-`POST <prefix>/v1/merchants/{merchant}/webhooks/stripe/{account_id}` (embedded). Events
+`POST <prefix>/v1/webhooks/stripe/{account_id}` (embedded). Events
 are verified against the `Stripe-Signature` header using the account's
 `webhook_signing_secret`.
 
@@ -54,19 +54,19 @@ and via an hourly reconcile job — subscribing exactly to the event types it ha
 (`invoice.paid`, `invoice.payment_failed`, `checkout.session.completed` and the other
 checkout-session events, `customer.subscription.updated/deleted`, `charge.succeeded`,
 `charge.refunded`, `refund.created/updated`, `payment_method.attached`, and dispute
-open/close). Registration is skipped when the configured `api_url` is not a public
+open/close). Registration is skipped when the configured `public_billing_base_url` is not a public
 `https` URL, when the secret key is missing, or when provider writes are disabled.
 
-Signing-secret handling depends on the merchant source:
+Signing-secret handling depends on credential custody:
 
-- **API/DB mode** (`merchant_config_source: api`): when OpenRails creates the endpoint,
-  Stripe mints the signing secret and OpenRails stores it in the merchant secret
-  store. Fully hands-off.
-- **Manifest mode** (`merchant_config_source: manifest`): a freshly minted secret would
-  live only in process memory and be lost on reboot, so OpenRails refuses to create
-  the endpoint. Register it once in the Stripe Dashboard (same URL, same events) and
-  declare its `whsec_…` as `secrets.webhook_signing_secret`; reconcile then manages
-  the existing endpoint in place.
+- **Writable managed credentials** (`secret_backend: db` or `vault`): endpoint
+  creation stages the returned signing secret, then publishes its exact reference
+  with the provider revision. Only after publication can the old endpoint become
+  superseded. Failed publication preserves the previous active configuration.
+- **Snapshot or read-only credentials**: OpenRails cannot retain a newly minted
+  key durably, so it refuses endpoint creation. Register the endpoint once in the
+  Stripe Dashboard and supply its `whsec_…` in the externally managed credentials.
+  Reconciliation can manage the existing endpoint within provider-write policy.
 
 The endpoint's `api_version` is pinned to the same single constant that stamps the
 `Stripe-Version` header on every outbound call, so inbound event shapes and outbound
@@ -131,7 +131,7 @@ and [Stripe snapshot-to-thin migration](https://docs.stripe.com/webhooks/migrate
 
 ### Catalog ownership
 
-With `new_subscription_collection_policy: engine`, new Stripe products and
+New Stripe products and
 prices stay in OpenRails, including creator catalogs and secondary provider
 accounts. Recurring setup uses saved Customer/PaymentMethod references and
 PaymentIntents; it creates no Stripe Subscription. One-time hosted checkout uses

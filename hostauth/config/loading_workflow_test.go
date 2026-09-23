@@ -24,16 +24,16 @@ func TestConfigurationLoadingWorkflow(t *testing.T) {
 		t.Chdir(t.TempDir())
 		cfg, err := Load("")
 		require.NoError(t, err)
-		require.True(t, cfg.IsDev())
+		require.True(t, cfg.RequiresSecretEncryption())
 		require.Equal(t, billing.CredentialPostureSandbox, cfg.TestMode)
 		require.True(t, cfg.IsTestMode())
 		require.Equal(t, "billing", cfg.DB.SchemaName())
 		require.NotNil(t, cfg.Auth)
-		require.Equal(t, "http://localhost:3053", cfg.Auth.Issuer)
+		require.Empty(t, cfg.Auth.Issuer)
 		for key, value := range map[string]string{
 			"DB_HOST": "  example.com  ", "DB_USERNAME": "  user  ", "DB_PASSWORD": "  pass  ", "DB_SQL_TRACE": "true", "DB_SCHEMA": "  Custom_Billing  ",
 			"VAULT_ENABLED": "true", "VAULT_ADDR": "http://127.0.0.1:8200", "VAULT_TOKEN": "root", "VAULT_AUTH_METHOD": "token",
-			"SECRET_BACKEND": "db", "SENDGRID_API_KEY": "SG.test-key", "TEST_MODE": "sandbox", "PROVIDER_WRITE_MODE": "limited",
+			"SECRET_BACKEND": "db", "ENCRYPTION_MASTER_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "SENDGRID_API_KEY": "SG.test-key", "TEST_MODE": "sandbox", "PROVIDER_WRITE_MODE": "limited",
 			"CATALOG_RECONCILIATION_INTERVAL": "30m", "PROVIDER_BILLING_QUIESCENCE_INTERVAL": "36h",
 			"AUTHKIT_ACTIVE_KEY_ID": "kid-1", "AUTHKIT_ACTIVE_PRIVATE_KEY_PEM": "-----BEGIN PRIVATE KEY-----", "AUTHKIT_PUBLIC_KEYS": `{"kid-0":"-----BEGIN PUBLIC KEY-----"}`,
 		} {
@@ -76,14 +76,14 @@ func TestConfigurationLoadingWorkflow(t *testing.T) {
 		t.Setenv("TEST_MODE", "live")
 		cfg, err := Load("")
 		require.NoError(t, err)
-		require.True(t, cfg.IsDev())
+		require.True(t, cfg.RequiresSecretEncryption())
 		require.False(t, cfg.IsTestMode())
 		require.Equal(t, billing.CredentialPostureLive, cfg.TestMode)
-		t.Setenv("ENV", "production")
+
 		t.Setenv("PROVIDER_WRITE_MODE", "readonly")
 		require.NoError(t, os.Unsetenv("TEST_MODE"))
 		_, err = Load("")
-		require.ErrorContains(t, err, "test_mode is required outside development")
+		require.ErrorContains(t, err, "test_mode is required")
 		t.Setenv("TEST_MODE", "live")
 		cfg, err = Load("")
 		require.NoError(t, err)
@@ -98,9 +98,9 @@ func TestConfigurationLoadingWorkflow(t *testing.T) {
 		require.Equal(t, billing.CredentialPostureLive, cfg.TestMode, "flag alone is explicit outside development")
 	})
 	t.Run("issuer and partial file overrides", func(t *testing.T) {
-		cfg, err := Load(configInputFile(t, "env: development\napi_url: http://openrails:3053/\nrate_limits:\n  checkout:\n    requests_per_minute: 99\n"))
+		cfg, err := Load(configInputFile(t, "public_billing_base_url: http://openrails:3053/\nrate_limits:\n  checkout:\n    requests_per_minute: 99\n"))
 		require.NoError(t, err)
-		require.Equal(t, "http://openrails:3053", cfg.Auth.Issuer)
+		require.Empty(t, cfg.Auth.Issuer)
 		require.Equal(t, 99, (*cfg.RateLimits)["checkout"].RequestsPerMinute)
 		require.Equal(t, 20, (*cfg.RateLimits)["subscribe"].RequestsPerMinute)
 		require.NotNil(t, (*cfg.RateLimits)["default"])
@@ -116,7 +116,7 @@ func TestConfigurationInputRefusals(t *testing.T) {
 		key, value string
 		message    []string
 	}{
-		{"ENV", "", []string{"ENV is required"}}, {"ENV", "   ", []string{"ENV is required"}},
+		{"ENV", "", []string{"ENV is retired"}}, {"ENV", "   ", []string{"ENV is retired"}},
 		{"OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY", "fail_open", []string{"billing_hot_path was removed"}},
 		{"TEST_ENV", "true", []string{"TEST_ENV was never consumed and is removed (or#915)"}},
 		{"DB_TYPO_FIELD", "x", []string{"unknown keys refuse boot", "typo_field"}},
@@ -144,7 +144,7 @@ func TestConfigurationInputRefusals(t *testing.T) {
 		yaml    string
 		message []string
 	}{
-		{"env: development\nnot_a_real_key: 1\n", []string{"unknown keys refuse boot", "not_a_real_key"}},
+		{"not_a_real_key: 1\n", []string{"unknown keys refuse boot", "not_a_real_key"}},
 		{"mode: readonly\n", []string{"mode was removed"}},
 	} {
 		_, err := Load(configInputFile(t, row.yaml))

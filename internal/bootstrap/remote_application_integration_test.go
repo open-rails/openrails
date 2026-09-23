@@ -29,8 +29,7 @@ func TestMerchantRemoteApplicationTrustSourcesIntegration(t *testing.T) {
 	require.NoError(t, err)
 
 	cfg := &config.Config{
-		Env: "test",
-		DB:  &config.DBConfig{},
+		DB: &config.DBConfig{},
 		// MintDisabled: this test only exercises cp.Core() directly (never
 		// mints), and "test" is not a dev-like env (#748: verify-only must be
 		// declared outside development, not stumbled into from a missing key).

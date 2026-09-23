@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -74,9 +75,10 @@ func (deniedPolicy) AllowDestructive(context.Context, uuid.UUID) (bool, string) 
 // secrets. Control-plane callers create/resolve the AuthKit permission-group and
 // pass its id explicitly; this service never creates AuthKit authority itself.
 type Service struct {
-	pool     *db.Pool
-	database *db.DB
-	secrets  MerchantSecretStore
+	StripeClients *stripeapi.Factory
+	pool          *db.Pool
+	database      *db.DB
+	secrets       MerchantSecretStore
 	// providerEnvironment is the deployment posture (#681): test under
 	// test_mode, live otherwise. Scoped credential lookups resolve
 	// psps rows in THIS environment only.

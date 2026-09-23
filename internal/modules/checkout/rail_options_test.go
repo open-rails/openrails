@@ -8,7 +8,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,159 +50,29 @@ func TestCheckoutModeForRail(t *testing.T) {
 }
 
 func TestCheckoutRailSkipReason(t *testing.T) {
-	t.Parallel()
-
-	stripePrice := railOptionPrice(true, "stripe", map[string]string{
-		models.RailKeyStripePriceID: "price_test",
-	})
-	nmiPrice := railOptionPrice(true, "mobius", map[string]string{
-		models.RailKeyRail:   "nmi",
-		models.RailKeyPlanID: "plan_test",
-	})
-	ccbillPrice := railOptionPrice(true, "ccbill", map[string]string{
-		models.RailKeyCCBillFormName: "form_test",
-		models.RailKeyCCBillFlexID:   "flex_test",
-	})
-	solanaPrice := railOptionPrice(true, "solana", map[string]string{
-		"plan_id":           "1",
-		"amount_base_units": "100",
-		"period_hours":      "720",
-		"mint_symbol":       "USDC",
-	})
-
-	solanaReady := &CheckoutSessionService{
-		solanaPrepareSubscribe: &recurring.PrepareSubscribeService{},
-		solanaEnroll:           &recurring.EnrollService{},
-	}
-
-	tests := []struct {
-		name           string
-		service        *CheckoutSessionService
-		price          *models.Price
-		target         railTarget
-		providerConfig *config.PSPConfig
-		mode           models.CheckoutSessionMode
-		// wantSkip is the or#288 skip class, "" when the PSP is ready.
-		wantSkip string
+	hours := 720
+	terms := &models.Price{ID: uuid.New(), Amount: 1000000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours}
+	oneoff := &models.Price{ID: uuid.New(), Amount: 1000000, Currency: "USD"}
+	for _, tc := range []struct {
+		name, rail string
+		price      *models.Price
+		provider   *config.PSPConfig
+		mode       models.CheckoutSessionMode
+		want       string
 	}{
-		{
-			name:    "stripe recurring ready",
-			service: &CheckoutSessionService{},
-			price:   stripePrice,
-			target:  railTarget{PSP: "stripe", Rail: "stripe"},
-			providerConfig: &config.PSPConfig{
-				Rail:   models.RailStripe,
-				Stripe: &config.StripeRailConfig{SecretKey: "sk_test_value"},
-			},
-			mode: models.CheckoutSessionModeSubscription,
-		},
-		{
-			name:    "stripe missing price link",
-			service: &CheckoutSessionService{},
-			price:   &models.Price{ID: uuid.New(), AutoRenew: true},
-			target:  railTarget{PSP: "stripe", Rail: "stripe"},
-			providerConfig: &config.PSPConfig{
-				Rail:   models.RailStripe,
-				Stripe: &config.StripeRailConfig{SecretKey: "sk_test_value"},
-			},
-			mode:     models.CheckoutSessionModeSubscription,
-			wantSkip: models.CheckoutRoutingSkipLinkMissing,
-		},
-		{
-			name:    "stripe exact account among sibling links",
-			service: &CheckoutSessionService{},
-			price: &models.Price{ID: uuid.New(), AutoRenew: true, PSPLinks: map[string]map[string]string{
-				"stripe": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_active"},
-				"old":    {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_stale"},
-			}},
-			target: railTarget{PSP: "stripe", Rail: "stripe"},
-			providerConfig: &config.PSPConfig{
-				Rail:   models.RailStripe,
-				Stripe: &config.StripeRailConfig{SecretKey: "sk_test_value"},
-			},
-			mode: models.CheckoutSessionModeSubscription,
-		},
-		{
-			name:    "nmi recurring ready for exact provider",
-			service: &CheckoutSessionService{},
-			price:   nmiPrice,
-			target:  railTarget{PSP: "mobius", Rail: "nmi"},
-			providerConfig: &config.PSPConfig{
-				Rail: models.RailNMI,
-				NMI:  &config.NMIRailConfig{SecurityKey: "security_test"},
-			},
-			mode: models.CheckoutSessionModeSubscription,
-		},
-		{
-			name:    "nmi recurring missing exact provider plan",
-			service: &CheckoutSessionService{},
-			price:   nmiPrice,
-			target:  railTarget{PSP: "other", Rail: "nmi"},
-			providerConfig: &config.PSPConfig{
-				Rail: models.RailNMI,
-				NMI:  &config.NMIRailConfig{SecurityKey: "security_test"},
-			},
-			mode:     models.CheckoutSessionModeSubscription,
-			wantSkip: models.CheckoutRoutingSkipLinkMissing,
-		},
-		{
-			name:    "ccbill recurring ready",
-			service: &CheckoutSessionService{},
-			price:   ccbillPrice,
-			target:  railTarget{PSP: "ccbill", Rail: "ccbill"},
-			providerConfig: &config.PSPConfig{
-				Rail:      models.RailCCBill,
-				AccountID: "945280-0000",
-				CCBill:    &config.CCBillRailConfig{},
-			},
-			mode: models.CheckoutSessionModeSubscription,
-		},
-		{
-			name:    "ccbill one off unsupported",
-			service: &CheckoutSessionService{},
-			price:   ccbillPrice,
-			target:  railTarget{PSP: "ccbill", Rail: "ccbill"},
-			providerConfig: &config.PSPConfig{
-				Rail:      models.RailCCBill,
-				AccountID: "945280-0000",
-				CCBill:    &config.CCBillRailConfig{},
-			},
-			mode:     models.CheckoutSessionModeOneOff,
-			wantSkip: models.CheckoutRoutingSkipModeUnsupported,
-		},
-		{
-			name:    "solana recurring ready",
-			service: solanaReady,
-			price:   solanaPrice,
-			target:  railTarget{PSP: "solana", Rail: "solana"},
-			providerConfig: &config.PSPConfig{
-				Rail: models.RailSolana,
-				Solana: &config.SolanaRailConfig{Tokens: map[string]config.TokenConfig{
-					"USDC": {Mint: "mint_test"},
-				}},
-			},
-			mode: models.CheckoutSessionModeSubscription,
-		},
-		{
-			name:    "solana recurring services unavailable",
-			service: &CheckoutSessionService{},
-			price:   solanaPrice,
-			target:  railTarget{PSP: "solana", Rail: "solana"},
-			providerConfig: &config.PSPConfig{
-				Rail: models.RailSolana,
-				Solana: &config.SolanaRailConfig{Tokens: map[string]config.TokenConfig{
-					"USDC": {Mint: "mint_test"},
-				}},
-			},
-			mode:     models.CheckoutSessionModeSubscription,
-			wantSkip: models.CheckoutRoutingSkipServiceUnavailable,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			assert.Equal(t, tt.wantSkip, tt.service.checkoutRailSkipReason(tt.price, tt.target, tt.providerConfig, tt.mode))
+		{"stripe recurring local terms", "stripe", terms, &config.PSPConfig{Stripe: &config.StripeRailConfig{SecretKey: "sk_test_fixture"}}, models.CheckoutSessionModeSubscription, ""},
+		{"nmi recurring local terms", "nmi", terms, &config.PSPConfig{NMI: &config.NMIRailConfig{SecurityKey: "fixture"}}, models.CheckoutSessionModeSubscription, ""},
+		{"stripe missing credentials", "stripe", terms, &config.PSPConfig{}, models.CheckoutSessionModeSubscription, models.CheckoutRoutingSkipCredentialsMissing},
+		{"nmi missing credentials", "nmi", terms, &config.PSPConfig{}, models.CheckoutSessionModeSubscription, models.CheckoutRoutingSkipCredentialsMissing},
+		{"ccbill new enrollment unsupported", "ccbill", terms, &config.PSPConfig{CCBill: &config.CCBillRailConfig{}}, models.CheckoutSessionModeSubscription, models.CheckoutRoutingSkipModeUnsupported},
+		{"solana new enrollment unsupported", "solana", terms, &config.PSPConfig{Solana: &config.SolanaRailConfig{}}, models.CheckoutSessionModeSubscription, models.CheckoutRoutingSkipModeUnsupported},
+		{"zero amount terms unsupported", "stripe", &models.Price{AutoRenew: true, AccessDurationHours: &hours}, &config.PSPConfig{Stripe: &config.StripeRailConfig{SecretKey: "sk_test_fixture"}}, models.CheckoutSessionModeSubscription, models.CheckoutRoutingSkipModeUnsupported},
+		{"stripe oneoff requires no remote price", "stripe", oneoff, &config.PSPConfig{Stripe: &config.StripeRailConfig{SecretKey: "sk_test_fixture"}}, models.CheckoutSessionModeOneOff, ""},
+		{"ccbill oneoff unsupported", "ccbill", oneoff, &config.PSPConfig{CCBill: &config.CCBillRailConfig{}}, models.CheckoutSessionModeOneOff, models.CheckoutRoutingSkipModeUnsupported},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &CheckoutSessionService{}
+			require.Equal(t, tc.want, service.checkoutRailSkipReason(tc.price, railTarget{Rail: tc.rail}, tc.provider, tc.mode))
 		})
 	}
 }
@@ -211,7 +80,8 @@ func TestCheckoutRailSkipReason(t *testing.T) {
 func TestListCheckoutRailOptionsForPrice_ReturnsExecutableSelectors(t *testing.T) {
 	t.Parallel()
 
-	price := &models.Price{
+	hours := 720
+	price := &models.Price{Amount: 1000000, Currency: "USD", AccessDurationHours: &hours,
 		ID:        uuid.New(),
 		AutoRenew: true,
 		PSPLinks: map[string]map[string]string{
@@ -262,7 +132,6 @@ func TestListCheckoutRailOptionsForPrice_ReturnsExecutableSelectors(t *testing.T
 	require.Equal(t, []CheckoutRailOption{
 		{Selector: "stripe", PSPID: merchants.PspID("stripe", "live", "acct_stripe"), Rail: "stripe", Mode: "subscription"},
 		{Selector: "nmi", PSPID: merchants.PspID("nmi", "live", "acct_nmi"), Rail: "nmi", Mode: "subscription"},
-		{Selector: "ccbill", PSPID: merchants.PspID("ccbill", "live", "945280-0000"), Rail: "ccbill", Mode: "subscription"},
 	}, options)
 
 	for _, option := range options {
@@ -356,7 +225,7 @@ func railOptionPrice(autoRenew bool, provider string, link map[string]string) *m
 func TestEngineRoutingUsesLocalTermsAndRejectsUnsupportedRoutes(t *testing.T) {
 	hours := 720
 	price := &models.Price{Amount: 9990000, Currency: "USD", AutoRenew: true, AccessDurationHours: &hours}
-	service := &CheckoutSessionService{config: &config.Config{NewSubscriptionCollectionPolicy: "engine"}}
+	service := &CheckoutSessionService{config: &config.Config{}}
 	for _, rail := range []string{"nmi", "stripe"} {
 		cfg := &config.PSPConfig{NMI: &config.NMIRailConfig{SecurityKey: "synthetic"}, Stripe: &config.StripeRailConfig{SecretKey: "synthetic"}}
 		require.Empty(t, service.checkoutRailSkipReason(price, railTarget{Rail: rail}, cfg, models.CheckoutSessionModeSubscription), "engine needs no provider catalog binding")

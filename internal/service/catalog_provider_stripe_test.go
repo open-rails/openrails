@@ -23,7 +23,7 @@ import (
 
 func newStripeAdapterWithServer(serverURL string) *stripeAdapter {
 	svc := &Service{rt: &app.Runtime{
-		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull},
+		Config: &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull},
 		RailConfigs: railresolve.FixedSet{
 			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_wirepin"}},
 		},

@@ -219,11 +219,11 @@ type StripeArchiveProductHandler struct {
 	stripeArchiveCore
 }
 
-func NewStripeArchiveProductHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, _ clockwork.Clock) *StripeArchiveProductHandler {
+func NewStripeArchiveProductHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, _ clockwork.Clock, clients *stripeapi.Factory) *StripeArchiveProductHandler {
 	return &StripeArchiveProductHandler{stripeArchiveCore{
 		Config:      cfg,
 		Rails:       rails,
-		Stripe:      &catalog.StripeCatalogService{Config: cfg, Rails: rails},
+		Stripe:      &catalog.StripeCatalogService{StripeClients: clients, Config: cfg, Rails: rails},
 		LoadCatalog: dbCatalogRowsLoader(d),
 		Policy:      DefaultBackoff,
 	}}
@@ -277,11 +277,11 @@ type StripeArchivePriceHandler struct {
 	stripeArchiveCore
 }
 
-func NewStripeArchivePriceHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, _ clockwork.Clock) *StripeArchivePriceHandler {
+func NewStripeArchivePriceHandler(d *db.DB, cfg *config.Config, rails railresolve.Source, _ clockwork.Clock, clients *stripeapi.Factory) *StripeArchivePriceHandler {
 	return &StripeArchivePriceHandler{stripeArchiveCore{
 		Config:      cfg,
 		Rails:       rails,
-		Stripe:      &catalog.StripeCatalogService{Config: cfg, Rails: rails},
+		Stripe:      &catalog.StripeCatalogService{StripeClients: clients, Config: cfg, Rails: rails},
 		LoadCatalog: dbCatalogRowsLoader(d),
 		Policy:      DefaultBackoff,
 	}}

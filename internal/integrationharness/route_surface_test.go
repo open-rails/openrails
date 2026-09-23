@@ -35,16 +35,16 @@ func TestStandaloneRouteSurface(t *testing.T) {
 	_, appDSN := dbtest.SharedRLSPostgres(t)
 
 	cfg := &config.Config{
-		Env:      "dev",
 		TestMode: config.CredentialPostureSandbox,
 		// Pin the complete API-owned provider surface; host-owned mode omits mutations.
-		MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true,
+		MerchantConfigHTTP: true, AllowCatalogUpdates: true,
 		SecretBackend:     config.SecretBackendDB,
 		Encryption:        &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="},
 		ProviderWriteMode: config.ProviderWriteModeFull,
 		Host:              "127.0.0.1",
 		Port:              0,
 		DB:                &config.DBConfig{URL: appDSN},
+
 		// The golden documents the FULL surface: LLM-backed routes register only
 		// when configured, so arm them here (the key is never used).
 		LLM: &config.LLMConfig{APIKey: "route-surface-never-used", AskEnabled: true, CatalogCopilotEnabled: true},
@@ -53,7 +53,7 @@ func TestStandaloneRouteSurface(t *testing.T) {
 		cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
 	}
 
-	assembled, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{Auth: &hostconfig.AuthConfig{Issuer: "https://controlplane.openrails.test"}})
+	assembled, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{Auth: &hostconfig.AuthConfig{KeysPath: t.TempDir(), Issuer: "https://controlplane.openrails.test", AllowMemory: true, AllowEphemeralSigningKey: true, AllowMissingSenders: true, AllowPrivateNetworkJWKS: true, DirectPeerIP: true}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = assembled.App.Close(context.Background()) })
 
