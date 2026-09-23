@@ -4,6 +4,7 @@ const port = 4173
 
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: ["openrails/**"],
   fullyParallel: true,
   retries: 0,
   workers: 1,

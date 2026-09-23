@@ -1,0 +1,532 @@
+{
+  "openrails_version": "v0.159.0",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/balance",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/billing-portal",
+      "scopes": [
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/checkout",
+      "scopes": [
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/checkout/{id}",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/checkout/{id}/confirm",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/billing/v1/me/collection-payment-method",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/entitlements/active",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/invoices",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/invoices/{id}",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/invoices/{id}/pay-now",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/notifications",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/notifications/unread-count",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/notifications/{id}/read",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/payment-methods",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/payment-methods",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/payment-methods/stripe-setup",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/payment-methods/stripe-setup/{id}",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/payment-methods/stripe-setup/{id}/confirm",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/billing/v1/me/payment-methods/{id}",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/billing/v1/me/payment-methods/{id}",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/payment-operations/{id}/authentication",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/payment-operations/{id}/authentication/confirm",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/payments",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/products",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/products/{product_id}/access",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/spend-limits",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/status",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/subscriptions",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/subscriptions/{id}",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/subscriptions/{id}/cancel",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/subscriptions/{id}/change-tier",
+      "scopes": [
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/subscriptions/{id}/change-tier/preview",
+      "scopes": [
+        "self_service"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/billing/v1/me/subscriptions/{id}/payment-method",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/subscriptions/{id}/provider-cutover",
+      "scopes": [
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/subscriptions/{id}/provider-cutover",
+      "scopes": [
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/subscriptions/{id}/provider-cutover/preview",
+      "scopes": [
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/subscriptions/{id}/resume",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/subscriptions/{id}/retry-now",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/subscriptions/{id}/solana-cancel",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/subscriptions/{id}/solana-cancel-tx",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/subscriptions/{id}/solana-tier-change",
+      "scopes": [
+        "self_service"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/billing/v1/me/subscriptions/{id}/solana-tier-change/confirm",
+      "scopes": [
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/tier",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/transactions",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/billing/v1/me/usage",
+      "scopes": [
+        "billing_management",
+        "self_service"
+      ]
+    }
+  ],
+  "hosted_checkout_session": [
+    {
+      "name": "id",
+      "type": "string"
+    },
+    {
+      "name": "status",
+      "type": "string"
+    },
+    {
+      "name": "merchant",
+      "type": "object",
+      "fields": [
+        {
+          "name": "display_name",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "plan",
+      "type": "object",
+      "fields": [
+        {
+          "name": "display_name",
+          "type": "string"
+        },
+        {
+          "name": "unit_amount",
+          "type": "string"
+        },
+        {
+          "name": "currency",
+          "type": "string"
+        },
+        {
+          "name": "unit_decimals",
+          "type": "number"
+        },
+        {
+          "name": "period_hours",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "automatically_renews",
+          "type": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "line_items",
+      "type": "array",
+      "optional": true,
+      "fields": [
+        {
+          "name": "label",
+          "type": "string"
+        },
+        {
+          "name": "sublabel",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "amount",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "tax",
+      "type": "string",
+      "optional": true
+    },
+    {
+      "name": "due_today",
+      "type": "string",
+      "optional": true
+    },
+    {
+      "name": "rails",
+      "type": "array",
+      "fields": [
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "rail",
+          "type": "string"
+        },
+        {
+          "name": "mode",
+          "type": "string"
+        },
+        {
+          "name": "driver",
+          "type": "string"
+        },
+        {
+          "name": "public_config",
+          "type": "object",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "saved_methods",
+      "type": "array",
+      "optional": true,
+      "fields": [
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "option_id",
+          "type": "string"
+        },
+        {
+          "name": "rail",
+          "type": "string"
+        },
+        {
+          "name": "brand",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "last_four",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "exp_month",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "exp_year",
+          "type": "number",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "name": "transaction_url",
+      "type": "string",
+      "optional": true
+    },
+    {
+      "name": "payment_id",
+      "type": "string",
+      "optional": true
+    },
+    {
+      "name": "subscription_id",
+      "type": "string",
+      "optional": true
+    },
+    {
+      "name": "failure_message",
+      "type": "string",
+      "optional": true
+    },
+    {
+      "name": "success_url",
+      "type": "string",
+      "optional": true
+    },
+    {
+      "name": "expires_at",
+      "type": "string"
+    }
+  ]
+}

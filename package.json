@@ -45,6 +45,9 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:browser": "playwright test",
+    "test:e2e": "playwright test -c playwright.e2e.config.ts",
+    "contract": "node e2e/scripts/contract.ts",
+    "contract:check": "pnpm contract && git diff --exit-code -- src/client/generated && test -z \"$(git status --porcelain -- src/client/generated)\"",
     "format": "prettier --write \"**/*.{css,ts,tsx,json,md}\"",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
     "prepublishOnly": "pnpm check"
