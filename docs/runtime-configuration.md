@@ -9,6 +9,12 @@ retired inputs and refuse configuration loading.
 
 ## Authentication
 
+Embedded billing receives `config.Config` and a provider-neutral authentication
+integration through `Options.Auth`; it does not load AuthKit configuration.
+Standalone hosts use `hostauth/config.Config`, which composes billing settings
+with `hostauth/config.AuthConfig`. Its loader handles YAML, environment variables
+and mounted secret files. Remote consumers only construct a Client.
+
 An embedded host supplying authentication does not need a standalone issuer or
 signing key. When constructing the OpenRails authentication control plane, supply
 `auth.issuer` explicitly. No billing URL is an issuer fallback. HTTPS is required.

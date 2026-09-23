@@ -58,7 +58,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			cmd.SetContext(context.WithValue(cmd.Context(), config.ConfigContextKey, cfg))
+			cmd.SetContext(context.WithValue(cmd.Context(), config.ConfigContextKey, cfg.Config))
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
