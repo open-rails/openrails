@@ -84,6 +84,25 @@ func (c *Client) GetCheckoutSession(ctx context.Context, customerID string, sess
 	return &out, nil
 }
 
+// GetCheckoutSessionByKey retrieves an accepted resource checkout without its
+// original payment token. This read never resumes dispatch or alters the strict
+// Create/Lookup request fingerprint. Entitlement must match admission exactly.
+func (c *Client) GetCheckoutSessionByKey(ctx context.Context, customerID, idempotencyKey, entitlement string, requestOptions ...RequestOption) (*CheckoutSession, error) {
+	customer, err := requireCustomerID(customerID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(idempotencyKey) == "" || strings.TrimSpace(entitlement) == "" {
+		return nil, invalidErr("idempotency key and entitlement are required")
+	}
+	var out CheckoutSession
+	path := "/v1/merchant/checkout-sessions/by-key?" + url.Values{"customer_id": {customer}, "entitlement": {entitlement}}.Encode()
+	if err := c.doWithHeaders(ctx, http.MethodGet, path, nil, &out, http.Header{"Idempotency-Key": {idempotencyKey}}, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *Client) ConfirmCheckoutSession(ctx context.Context, sessionID string, request ConfirmCheckoutSessionRequest, requestOptions ...RequestOption) (*CheckoutSession, error) {
 	typedSession, err := ParseCheckoutSessionID(sessionID)
 	if err != nil {

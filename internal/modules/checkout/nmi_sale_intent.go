@@ -103,6 +103,10 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.OpenrailsRail
 	if err != nil {
 		return h.complete(ctx, in, nil, intents.TerminalWithEvidence("instrument changed before submission", map[string]any{"not_executed": true}))
 	}
+	ctx, err = client.QualifyDispatch(ctx)
+	if err != nil {
+		return intents.Parked("NMI test-mode qualification refused before submission: " + err.Error())
+	}
 	submitted, err := intents.NewStore(h.database()).RecordProgressIfAbsent(ctx, in.ID, "sale_submitted", true)
 	if err != nil {
 		return intents.Ambiguous("cannot retain sale submission fence: " + err.Error())

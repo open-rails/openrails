@@ -109,7 +109,11 @@ func (a *NMIArmer) NMIClient(ctx context.Context, mid merchant.ID, scope merchan
 		return nil, err
 	}
 	webhookSecret, _, _ := a.Secret(ctx, mid, scope, "webhook_signing_secret")
-	client, err := nmi.NewAccountClient(mid.UUID(), scope.ID, scope.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, WebhookSecret: webhookSecret}, a.testMode())
+	deployment, err := config.NMIEndpointDeployment(scope.Settings)
+	if err != nil {
+		return nil, err
+	}
+	client, err := nmi.NewAccountClient(mid.UUID(), scope.ID, scope.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, WebhookSecret: webhookSecret, EndpointDeployment: deployment}, a.testMode())
 	if err != nil {
 		return nil, fmt.Errorf("build store-armed NMI client: %w", err)
 	}

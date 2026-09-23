@@ -79,6 +79,7 @@ func (c *NMIClient) ProbeTestMode(ctx context.Context) (TestModeProbeResult, err
 		return ProbeIndeterminate, err
 	}
 
+	ctx = context.WithValue(ctx, probeQualificationKey{}, c)
 	approved, txnID, gatewayErr, err := c.probeAuth(ctx, probeAmount())
 	if err != nil {
 		return ProbeIndeterminate, err

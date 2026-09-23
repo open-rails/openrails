@@ -1498,7 +1498,7 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 	// used to probe, with no replacement — refusing an armed live NMI account
 	// under test_mode). Runs before anything below persists the account row.
 	if rail == string(models.RailNMI) && cfg != nil && cfg.IsTestMode() {
-		if err := ProbeNMIAccountBeforeArm(ctx, secretStore, merchantID, rail, environment, accountID, opts.NMIProbeV5BaseURL); err != nil {
+		if err := ProbeNMIAccountBeforeArm(ctx, secretStore, merchantID, rail, environment, accountID, opts.NMIProbeV5BaseURL, account.Settings); err != nil {
 			return err
 		}
 	}
@@ -1609,7 +1609,7 @@ func ReconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 
 // ProbeNMIAccountBeforeArm requires fresh sandbox qualification for the effective
 // credential before a manifest may arm an NMI account.
-func ProbeNMIAccountBeforeArm(ctx context.Context, secretStore merchants.MerchantSecretStore, merchantID merchant.ID, rail, environment, accountID, probeV5BaseURL string) error {
+func ProbeNMIAccountBeforeArm(ctx context.Context, secretStore merchants.MerchantSecretStore, merchantID merchant.ID, rail, environment, accountID, probeV5BaseURL string, settings ...map[string]any) error {
 	name, err := merchants.PSPSecretName(rail, environment, accountID, "security_key")
 	if err != nil {
 		return err
@@ -1625,7 +1625,15 @@ func ProbeNMIAccountBeforeArm(ctx context.Context, secretStore merchants.Merchan
 	if securityKey == "" {
 		return nil
 	}
-	client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{SecurityKey: securityKey}, true)
+	var selected map[string]any
+	if len(settings) > 0 {
+		selected = settings[0]
+	}
+	deployment, err := config.NMIEndpointDeployment(selected)
+	if err != nil {
+		return err
+	}
+	client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, true)
 	if err != nil {
 		return fmt.Errorf("construct NMI sandbox qualification client: %w", err)
 	}

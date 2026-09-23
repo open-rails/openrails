@@ -14,7 +14,7 @@ var ErrLiveCredentialsUnderTestMode = errors.New("PRODUCTION NMI credentials det
 // transactions before it may be armed in sandbox mode. Unknown is a refusal;
 // neither a missing cache nor an unavailable gateway can authorize live money.
 func CheckTestModeArm(ctx context.Context, client *NMIClient) error {
-	result, err := client.ProbeTestMode(ctx)
+	result, err := client.qualifyAccount(ctx)
 	if err != nil {
 		return fmt.Errorf("NMI sandbox qualification failed; refusing to arm: %w", err)
 	}

@@ -278,6 +278,7 @@ Server-to-server billing operations. Every route is gated on the listed
 | POST | `/v1/merchant/users/{user_id}/entitlements/check` | `merchant:customer-settings:read` | Exact grant-backed checks for at most 100 opaque entitlement keys; optional `at` instant |
 | POST | `/v1/merchant/users/{user_id}/product-access/check` | `merchant:customer-settings:read` | Check access for exactly one bounded product_ids or product_keys list without loading purchase history |
 | GET | `/v1/merchant/invokers/{invoker}/credits` | `merchant:customer-settings:read` | Invoker credit summary `{ currency, balance, held_balance }`. Query: `customer_id`, `currency` |
+| GET | `/v1/merchant/checkout-sessions/by-key` | `merchant:customer-settings:read` | Read-only customer receipt lookup by Idempotency-Key and required accepted entitlement; no payment token or provider call |
 | POST | `/v1/merchant/checkout-sessions/lookup` | `merchant:checkout:create` | Read-only original-request lookup by customer and Idempotency-Key; changed payload returns idempotency_key_reused, absent attempt returns 404 |
 | POST | `/v1/merchant/checkout-sessions` | `merchant:checkout:create` | Create a checkout for the supplied customer identity; exactly one price_id or price_key, optional entitlement and offer_kind assertions, required Idempotency-Key header |
 | POST | `/v1/merchant/payment-method-sessions` | `merchant:checkout:create` | Create a nonmonetary saved-payment-method setup session for the supplied customer |
