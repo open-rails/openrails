@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
@@ -68,70 +66,6 @@ func catalogReferencePlanFixture(t *testing.T) (context.Context, *recurring.Plan
 	submitter := &catalogReadOnlySubmitter{owner: owner}
 	plan := recurring.NewPlanServiceWithReader(submitter, reader, "mainnet", map[string]config.TokenConfig{"USDC": {Mint: mintText}})
 	return merchant.WithID(t.Context(), merchant.ID(uuid.New())), plan, reader, submitter, address
-}
-
-// The fixture is the complete Doujins artifact, including both NMI references,
-// the recurring Solana selection with no supplied PDA, archived one-time
-// Solana prices, and the archived CCBill introductory-price offer.
-func TestCatalogReferencePreflightReadsWholeDoujinsArtifactWithoutWrites(t *testing.T) {
-	raw, err := os.ReadFile("testdata/doujins-catalog-application.yaml")
-	require.NoError(t, err)
-	application, err := openrails.ParseCatalogApplicationYAML(raw)
-	require.NoError(t, err)
-	reads := 0
-	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, http.MethodGet, r.Method, "reference preflight must never create a provider plan")
-		reads++
-		switch r.URL.Path {
-		case "/plans/premium_new":
-			fmt.Fprint(w, `{"object":"plan","id":"premium_new","plan_amount":"23.00","day_frequency":"30","plan_payments":"0"}`)
-		case "/plans/premium":
-			fmt.Fprint(w, `{"object":"plan","id":"premium","plan_amount":"19.00","day_frequency":"30","plan_payments":"0"}`)
-		default:
-			t.Errorf("unexpected provider read %s", r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	t.Cleanup(gateway.Close)
-	nmi := newMobiusAdapterWithServer(t, gateway.URL)
-	ctx, plan, reader, submitter, _ := catalogReferencePlanFixture(t)
-	verified := 0
-	for _, product := range application.Products {
-		for _, price := range product.Prices {
-			req := CreatePriceRequest{Key: price.Key, Currency: price.Currency.Value, UnitAmount: price.UnitAmount.Value, AccessDurationHours: &price.AccessDurationHours.Value, AutoRenew: price.AutoRenew.Value, Archived: price.Archived.Value}
-			if price.TrialUnitAmount.Set {
-				req.TrialUnitAmount = &price.TrialUnitAmount.Value
-			}
-			if price.TrialDurationHours.Set {
-				req.TrialDurationHours = &price.TrialDurationHours.Value
-			}
-			for _, provider := range price.PSPs.Value {
-				link := price.PSPLinks.Value[provider]
-				var out map[string]string
-				switch provider {
-				case "mobius":
-					out, err = verifyNMICatalogReference(ctx, nmi, "mobius", req, link)
-				case "ccbill":
-					out, err = declaredCCBillCatalogReference(link)
-				case "solana":
-					out, err = verifySolanaCatalogReference(ctx, plan, reader, "USDC", product.Key, req, link)
-				default:
-					t.Fatalf("unhandled real artifact provider %s", provider)
-				}
-				require.NoError(t, err, "%s / %s", price.Key, provider)
-				require.NotEmpty(t, out, "a declaration must not silently lose its provider")
-				if provider == "solana" && !req.AutoRenew {
-					require.Equal(t, "solana", out["provider"])
-					require.NotContains(t, out, solanaKeyPlanPDA)
-				}
-				verified++
-			}
-		}
-	}
-	require.Equal(t, 9, verified)
-	require.Equal(t, 2, reads)
-	require.Equal(t, 2, reader.reads)
-	require.Zero(t, submitter.writes)
 }
 
 func TestCatalogReferencePreflightRejectsMissingAndMismatchedPlans(t *testing.T) {

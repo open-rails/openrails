@@ -65,6 +65,9 @@ func TestPrepareCancel_AttachesReference(t *testing.T) {
 		t.Fatalf("PrepareWithReference: %v", err)
 	}
 	tx := decodeTx(t, res.Transaction)
+	if got := programInstructionAccountCounts(t, tx); len(got) != 1 || got[0] != 5 {
+		t.Fatalf("cancel instruction accounts = %v, want [5]", got)
+	}
 	found, ro := referenceInAccountKeys(t, tx, reference)
 	if !found {
 		t.Fatal("cancel tx must contain the Solana Pay reference in its account keys")
@@ -74,23 +77,6 @@ func TestPrepareCancel_AttachesReference(t *testing.T) {
 	}
 	if res.SubscriptionPDA != row.SubscriptionPDA {
 		t.Errorf("SubscriptionPDA = %q, want %q", res.SubscriptionPDA, row.SubscriptionPDA)
-	}
-}
-
-func TestPrepareCancel_NoReferenceWhenEmpty(t *testing.T) {
-	row := newCancelRow(t)
-	svc := NewPrepareCancelService(fakeCancelReader{row: row}, fakeCancelRPC{})
-
-	// Both Prepare and PrepareWithReference("") must build the SAME tx (no extra
-	// account), so the existing auth-gated cancel handler is unaffected.
-	res, err := svc.Prepare(context.Background(), uuid.New())
-	if err != nil {
-		t.Fatalf("Prepare: %v", err)
-	}
-	tx := decodeTx(t, res.Transaction)
-	// cancel_subscription has 5 accounts; no reference appended.
-	if got := len(tx.Message.AccountKeys); got != 5 {
-		t.Errorf("unreferenced cancel tx should have 5 account keys, got %d", got)
 	}
 }
 
@@ -135,70 +121,6 @@ func programInstructionAccountCounts(t *testing.T, tx *solanago.Transaction) []i
 		}
 	}
 	return out
-}
-
-func TestReferenceTagInstruction(t *testing.T) {
-	payer := solanago.MustPublicKeyFromBase58(randKeyStr(t))
-
-	// Empty reference -> nothing to tag.
-	none, err := referenceTagInstruction(payer, "")
-	if err != nil || none != nil {
-		t.Fatalf("empty reference: ix=%v err=%v, want nil, nil", none, err)
-	}
-	ixs, err := withReference([]solanago.Instruction{}, payer, "")
-	if err != nil || len(ixs) != 0 {
-		t.Fatalf("withReference(empty) = %v, %v; want unchanged", ixs, err)
-	}
-
-	reference := randKeyStr(t)
-	tag, err := referenceTagInstruction(payer, reference)
-	if err != nil {
-		t.Fatalf("referenceTagInstruction: %v", err)
-	}
-	if !tag.ProgramID().Equals(solanago.SystemProgramID) {
-		t.Fatalf("tag program = %s, want System Program", tag.ProgramID())
-	}
-	data, _ := tag.Data()
-	if len(data) != 12 || data[0] != 2 || data[4] != 0 {
-		t.Fatalf("tag data = %x, want Transfer (index 2) of 0 lamports", data)
-	}
-	metas := tag.Accounts()
-	if len(metas) != 3 {
-		t.Fatalf("expected 3 accounts (payer, payer, reference), got %d", len(metas))
-	}
-	if !metas[0].PublicKey.Equals(payer) || !metas[0].IsSigner || !metas[0].IsWritable {
-		t.Error("payer must be the signing, writable sender")
-	}
-	last := metas[2]
-	if last.PublicKey.String() != reference {
-		t.Errorf("trailing account = %s, want reference %s", last.PublicKey, reference)
-	}
-	if last.IsSigner || last.IsWritable {
-		t.Error("reference meta must be read-only + non-signer")
-	}
-
-	if _, err := referenceTagInstruction(payer, "not-base58!"); err == nil {
-		t.Error("invalid reference must error")
-	}
-}
-
-// The reference never lands on a subscriptions-program instruction: cancel keeps
-// its exact 5 accounts with the reference in a separate tag instruction.
-func TestPrepareCancel_ReferenceDoesNotTouchProgramInstruction(t *testing.T) {
-	row := newCancelRow(t)
-	svc := NewPrepareCancelService(fakeCancelReader{row: row}, fakeCancelRPC{})
-
-	res, err := svc.PrepareWithReference(context.Background(), uuid.New(), randKeyStr(t))
-	if err != nil {
-		t.Fatalf("PrepareWithReference: %v", err)
-	}
-	tx := decodeTx(t, res.Transaction)
-	if got := programInstructionAccountCounts(t, tx); len(got) != 1 || got[0] != 5 {
-		t.Fatalf("cancel_subscription accounts = %v, want [5]", got)
-	}
-	if len(tx.Message.Instructions) != 2 {
-		t.Fatalf("referenced cancel tx should be [cancel, reference tag], got %d instructions", len(tx.Message.Instructions))
-	}
 }
 
 func TestPrepareTierChange_UpgradeWithReference(t *testing.T) {

@@ -15,38 +15,24 @@ import (
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// fakeTierLifecycle records the CreateMembership + CancelMembership calls.
+// The failure tests observe attempted writes; successful persistence is tested
+// by the SQL rollback/retry workflow.
 type fakeTierLifecycle struct {
-	created     *submod.CreateMembershipParams
-	cancelled   *submod.CancelMembershipParams
-	createErr   error
-	cancelErr   error
-	newSubID    uuid.UUID
 	createCalls int
 	cancelCalls int
 }
 
-func (f *fakeTierLifecycle) CreateMembershipTx(_ context.Context, _ *db.DB, p *submod.CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
+func (f *fakeTierLifecycle) CreateMembershipTx(context.Context, *db.DB, *submod.CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
 	f.createCalls++
-	f.created = p
-	if f.createErr != nil {
-		return nil, nil, f.createErr
-	}
-	id := f.newSubID
-	if id == uuid.Nil {
-		id = uuid.New()
-		f.newSubID = id
-	}
-	return &models.Subscription{ID: id}, nil, nil
+	return &models.Subscription{ID: uuid.New()}, nil, nil
 }
 
-func (f *fakeTierLifecycle) CancelMembershipTx(_ context.Context, _ *db.DB, p *submod.CancelMembershipParams) (*submod.CancelMembershipTxResult, error) {
+func (f *fakeTierLifecycle) CancelMembershipTx(context.Context, *db.DB, *submod.CancelMembershipParams) (*submod.CancelMembershipTxResult, error) {
 	f.cancelCalls++
-	f.cancelled = p
-	return &submod.CancelMembershipTxResult{}, f.cancelErr
+	return &submod.CancelMembershipTxResult{}, nil
 }
 
-func (f *fakeTierLifecycle) DispatchNotifications(context.Context, []*models.NotificationQueue) {}
+func (*fakeTierLifecycle) DispatchNotifications(context.Context, []*models.NotificationQueue) {}
 
 type directTierTransactor struct{}
 
@@ -54,37 +40,27 @@ func (directTierTransactor) MerchantTx(ctx context.Context, fn func(context.Cont
 	return fn(ctx, nil)
 }
 
-// fakeTierStore stubs the on-chain state store. existingByPDA powers the
-// idempotency guard; upserted captures the new row; statusSet captures SetStatus.
+// fakeTierStore captures scheduling and attempted writes on failure paths.
 type fakeTierStore struct {
-	oldRow        *models.SolanaSubscription
-	existingByPDA *models.SolanaSubscription
-	upserted      *models.SolanaSubscription
-	statusSet     map[uuid.UUID]string
-	upsertCalls   int
-	statusErr     error
+	oldRow      *models.SolanaSubscription
+	upserted    *models.SolanaSubscription
+	upsertCalls int
+	statusErr   error
 }
 
 func (f *fakeTierStore) GetBySubscriptionID(_ context.Context, _ uuid.UUID) (*models.SolanaSubscription, error) {
 	return f.oldRow, nil
 }
 func (f *fakeTierStore) GetBySubscriptionPDA(_ context.Context, _ string) (*models.SolanaSubscription, error) {
-	return f.existingByPDA, nil
+	return nil, nil
 }
 func (f *fakeTierStore) UpsertTx(_ context.Context, _ *db.DB, s *models.SolanaSubscription) error {
 	f.upsertCalls++
 	f.upserted = s
 	return nil
 }
-func (f *fakeTierStore) SetStatusTx(_ context.Context, _ *db.DB, id uuid.UUID, status string) error {
-	if f.statusErr != nil {
-		return f.statusErr
-	}
-	if f.statusSet == nil {
-		f.statusSet = map[uuid.UUID]string{}
-	}
-	f.statusSet[id] = status
-	return nil
+func (f *fakeTierStore) SetStatusTx(context.Context, *db.DB, uuid.UUID, string) error {
+	return f.statusErr
 }
 
 func TestConfirmTierChange_OldMirrorStatusFailureIsReturned(t *testing.T) {
@@ -138,62 +114,6 @@ func baseConfirmInput(oldSubID uuid.UUID) ConfirmTierChangeInput {
 		NewPlanCreatedAt:   1_700_000_000,
 		NewFiatAmount:      5000,
 		NewCurrency:        "USD",
-	}
-}
-
-func TestConfirmTierChange_Upgrade_MirrorsNewAndCancelsOld(t *testing.T) {
-	oldRow := newOldRow()
-	store := &fakeTierStore{oldRow: oldRow}
-	life := &fakeTierLifecycle{}
-	frozen := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	svc := NewConfirmTierChangeService(&fakeConfirmRPC{outcome: okOutcome()}, life, store, directTierTransactor{}, "mainnet")
-	svc.now = func() time.Time { return frozen }
-
-	in := baseConfirmInput(oldRow.SubscriptionID)
-	in.IsUpgrade = true
-	in.FirstChargeBaseUnits = 31_330_000
-
-	res, err := svc.Confirm(context.Background(), in)
-	if err != nil {
-		t.Fatalf("Confirm upgrade: %v", err)
-	}
-	if res.AlreadyConfirmed {
-		t.Fatal("fresh confirm should not be AlreadyConfirmed")
-	}
-	if life.createCalls != 1 {
-		t.Fatalf("expected one CreateMembership, got %d", life.createCalls)
-	}
-	if life.cancelCalls != 1 {
-		t.Fatalf("expected one CancelMembership (old), got %d", life.cancelCalls)
-	}
-	// New membership: rail solana, rail_subscription_id = new PDA.
-	if life.created.Rail != models.RailSolana {
-		t.Fatalf("new membership rail = %v, want solana", life.created.Rail)
-	}
-	if life.created.RailSubscriptionID == nil || *life.created.RailSubscriptionID != "NEWPDA" {
-		t.Fatalf("new membership rail_subscription_id = %v, want NEWPDA", life.created.RailSubscriptionID)
-	}
-	// Old membership cancelled immediately.
-	if life.cancelled.SubscriptionID == nil || *life.cancelled.SubscriptionID != oldRow.SubscriptionID {
-		t.Fatalf("cancelled wrong subscription: %+v", life.cancelled)
-	}
-	if !life.cancelled.RevokeAccess {
-		t.Fatal("old cancel must be immediate (RevokeAccess=true)")
-	}
-	// UPGRADE next_pull_at = now + new_period (period 1 pulled atomically).
-	wantNext := frozen.Add(720 * time.Hour)
-	if !store.upserted.NextPullAt.Equal(wantNext) {
-		t.Fatalf("upgrade next_pull_at = %v, want %v (now + new period)", store.upserted.NextPullAt, wantNext)
-	}
-	if store.upserted.Status != models.SolanaSubscriptionActive {
-		t.Fatalf("new row status = %q, want active", store.upserted.Status)
-	}
-	if store.upserted.SubscriptionID != res.NewSubscription.ID {
-		t.Fatal("new row must link to the new membership")
-	}
-	// Old on-chain row flipped cancelled.
-	if store.statusSet[oldRow.ID] != models.SolanaSubscriptionCancelled {
-		t.Fatalf("old row status = %q, want cancelled", store.statusSet[oldRow.ID])
 	}
 }
 
@@ -258,36 +178,6 @@ func TestConfirmTierChange_NeverConfirmed_NoMirror(t *testing.T) {
 	}
 	if life.createCalls != 0 || life.cancelCalls != 0 {
 		t.Fatal("no DB mutation may happen when the signature never confirmed")
-	}
-}
-
-func TestConfirmTierChange_Idempotent_ReturnsExisting(t *testing.T) {
-	oldRow := newOldRow()
-	existingNewSubID := uuid.New()
-	store := &fakeTierStore{
-		oldRow:        oldRow,
-		existingByPDA: &models.SolanaSubscription{SubscriptionID: existingNewSubID, SubscriptionPDA: "NEWPDA"},
-	}
-	life := &fakeTierLifecycle{}
-	rpcStub := &fakeConfirmRPC{outcome: okOutcome()}
-	svc := NewConfirmTierChangeService(rpcStub, life, store, directTierTransactor{}, "mainnet")
-
-	in := baseConfirmInput(oldRow.SubscriptionID)
-	in.IsUpgrade = true
-	in.FirstChargeBaseUnits = 1_000_000
-
-	res, err := svc.Confirm(context.Background(), in)
-	if err != nil {
-		t.Fatalf("idempotent re-confirm: %v", err)
-	}
-	if !res.AlreadyConfirmed {
-		t.Fatal("re-confirm of an already-mirrored tier change must report AlreadyConfirmed")
-	}
-	if res.NewSubscription.ID != existingNewSubID {
-		t.Fatalf("re-confirm should return the existing new subscription %s, got %s", existingNewSubID, res.NewSubscription.ID)
-	}
-	if life.createCalls != 0 || life.cancelCalls != 0 || rpcStub.called {
-		t.Fatal("a completed tier change must short-circuit before re-watching or re-mirroring")
 	}
 }
 
