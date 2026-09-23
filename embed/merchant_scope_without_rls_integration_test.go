@@ -63,7 +63,7 @@ func scopeWithoutRLSJourney(t *testing.T, owner bool) {
 			Merchant: declaration,
 			Config: &config.Config{
 				Env: "dev", TestMode: config.CredentialPostureSandbox,
-				MerchantConfigSource: config.MerchantConfigSourceAPI, SecretBackend: config.SecretBackendDB,
+				MerchantConfigSource: config.MerchantConfigSourceAPI, AllowCatalogUpdates: true, SecretBackend: config.SecretBackendDB,
 				ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: dsn},
 			},
 			PGXPool: pool, River: embed.RiverManagedByOpenRails(),

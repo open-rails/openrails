@@ -101,6 +101,14 @@ func seedBook(t *testing.T, d *db.DB, id merchant.ID) {
 		exec(`INSERT INTO openrails.subscription_reprices(merchant_id,subscription_id,from_price_id,to_price_id,effective_at,reprice_batch_id) VALUES($1,$2,$3,$4,'2027-01-01',$5)`, id.UUID(), sub, price, nextPrice, batch)
 		exec(`INSERT INTO openrails.solana_subscriptions(merchant_id,subscription_id,subscriber_wallet,authority_pda,subscription_pda,plan_pda,merchant_address,mint,plan_created_at_fingerprint,next_pull_at) VALUES($1,$2,'wallet','authority',$2::uuid::text,'plan','merchant','mint',123,'2027-01-01')`, id.UUID(), sub)
 		exec(`INSERT INTO openrails.custody_migrations(merchant_id,batch_id,payment_method_id,rail,from_custodian,to_custodian,to_custodian_id,to_rail_method_ref,outcome) VALUES($1,$2,$3,'nmi','psp','basis_theory',$4,'vault-token','remapped')`, id.UUID(), uuid.New(), pm, custodian)
+		exec(`INSERT INTO openrails.catalog_applications
+			(merchant_id,application_id,catalog_id,schema_version,request_sha256,base_revision,applied_revision,result)
+			SELECT m.id,'seed-book',p.catalog_id,1,decode(repeat('ab',32),'hex'),m.catalog_revision-1,m.catalog_revision,
+			jsonb_build_object('application_id','seed-book','catalog_id','cat_' || p.catalog_id::text,
+			'base_revision',m.catalog_revision-1,'applied_revision',m.catalog_revision,'replayed',false,
+			'products_changed',1,'prices_changed',2)
+			FROM openrails.merchants m JOIN openrails.products p ON p.merchant_id=m.id
+			WHERE m.id=$1 AND p.id=$2`, id.UUID(), product)
 		return nil
 	}))
 }

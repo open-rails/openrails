@@ -141,7 +141,10 @@ func TestCatalogPriceKeyTransactions(t *testing.T) {
 			}
 			require.Equal(t, 1, live)
 			require.NoError(t, owner.QueryRow(ctx, `SELECT count(*) FROM billing.price_key_movements WHERE merchant_id=$1 AND key=$2`, mid.UUID(), request.Key).Scan(&movements))
-			require.Equal(t, 3, movements, "identical replays do not append movements")
+			require.Equal(t, 5, movements, "three price activations and two retirements are retained; identical replays add nothing")
+			var retirements int
+			require.NoError(t, owner.QueryRow(ctx, `SELECT count(*) FROM billing.price_key_movements WHERE merchant_id=$1 AND key=$2 AND archived`, mid.UUID(), request.Key).Scan(&retirements))
+			require.Equal(t, 2, retirements, "each superseded version records its retirement")
 			// INSERT fails after the helper has archived the previous current row.
 			// The transaction must restore the original pointer and movement history.
 			broken := request

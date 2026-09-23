@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/config"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -42,20 +43,22 @@ func TestMerchantMeteringRouteToInvoiceAcceptance(t *testing.T) {
 	)
 	meterKey := proveMerchantMeteringRouteToInvoice(t, ctx, h, standalone, standaloneToken)
 
-	// Embedded manifest-owned deployments expose the same reads, but their
-	// catalog remains declaration-owned and therefore refuses runtime writes.
-	embedded := h.StartEmbeddedHost("usd")
+	// Embedded deployments can explicitly disable ordinary catalog updates
+	// while preserving the same database-backed reads.
+	embedded := h.StartEmbeddedMerchant("usd", dbtest.TestMerchantID, dbtest.TestMerchantSlug, func(cfg *config.Config) { cfg.AllowCatalogUpdates = false })
 	meterURL := embedded.BaseURL + "/v1/merchant/catalog/meters/" + meterKey
 	status, body := requestJSON(t, http.MethodGet, meterURL, embedded.Token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
-	require.Contains(t, string(body), `"configuration_source":"manifest"`)
+	require.Contains(t, string(body), `"configuration_source":"database"`)
 	require.Contains(t, string(body), `"writes_allowed":false`)
 
 	status, body = requestJSON(t, http.MethodPut, meterURL, embedded.Token, map[string]any{
 		"aggregation": pricing.AggregationCount,
 	})
 	require.Equal(t, http.StatusMethodNotAllowed, status, string(body))
-	requireAPIErrorCode(t, body, "manifest_driven")
+	status, body = requestJSON(t, http.MethodGet, meterURL, embedded.Token, nil)
+	require.Equal(t, http.StatusOK, status, string(body))
+	require.Contains(t, string(body), `"aggregation":"sum"`, "refused writes preserve the meter")
 }
 
 func proveMerchantMeteringRouteToInvoice(

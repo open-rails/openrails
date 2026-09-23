@@ -14,7 +14,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	catalogmodule "github.com/open-rails/openrails/internal/modules/catalog"
+	railreg "github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -211,16 +213,23 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params openrail
 					if found {
 						rail = account.Rail
 					}
+					if (request.TrialUnitAmount != nil || request.TrialDurationHours != nil) && !railreg.SupportsCatalogTrial(models.Rail(rail)) {
+						return nil, fmt.Errorf("%w: PSP %q on rail %s cannot execute trial first-phase terms", ErrTrialUnsupportedOnRail, key, rail)
+					}
+					if found {
+						if account.Archived && !request.Archived {
+							return nil, apperr.Invalidf("provider %q is archived", key)
+						}
+						// A local engine offer still selects an account. Its identity and
+						// eligibility must survive the gap before the final commit.
+						out.accounts[account.ID] = account
+					}
 					if len(link) == 0 && scoped.localEnginePrice(rail, priceRequestCycleDays(request)) {
 						continue
 					}
 					if !found {
 						return nil, apperr.Invalidf("provider %q has no matching merchant account", key)
 					}
-					if account.Archived && !request.Archived {
-						return nil, apperr.Invalidf("provider %q is archived", key)
-					}
-					out.accounts[account.ID] = account
 					verificationRequest := request
 					verificationRequest.Archived = verificationRequest.Archived || product.Archived
 					out.checks = append(out.checks, catalogReferenceCheck{key: decl.Key, provider: key, productKey: product.Key, account: account, request: verificationRequest, link: cloneStringMap(link)})

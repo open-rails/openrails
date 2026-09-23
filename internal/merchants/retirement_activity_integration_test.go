@@ -25,6 +25,7 @@ import (
 // retirement. Every other merchant-scoped table must be a MerchantHasActivity
 // blocker or reach one through a NOT NULL foreign key.
 var retirementNeutralTables = map[string]string{
+	"catalog_applications":          "permanent replay metadata retained with the merchant; an empty application creates no billing obligation and retirement must not erase its receipt",
 	"catalogs":                      "immutable default/creator ownership metadata retained with the merchant; products, not empty catalog identities, are activity",
 	"admission_denials_hourly":      "refused-traffic telemetry anyone can create",
 	"webhook_health":                "inbound delivery counters include rejected, unsigned requests",
@@ -213,11 +214,23 @@ func TestRetireUnusedRetainsCatalogIdentityMetadata(t *testing.T) {
 	require.NoError(t, err)
 	owned, err := q.EnsureOwnedCatalog(ctx, gen.EnsureOwnedCatalogParams{MerchantID: m.ID.UUID(), OwnerSubject: "creator/retirement-metadata"})
 	require.NoError(t, err)
+	_, err = pool.Exec(ctx, `INSERT INTO billing.catalog_applications
+		(merchant_id,application_id,catalog_id,schema_version,request_sha256,base_revision,applied_revision,result)
+		SELECT $1,'empty-application',$2,1,decode(repeat('ab',32),'hex'),catalog_revision-1,catalog_revision,
+		jsonb_build_object('application_id','empty-application','catalog_id','cat_' || $2::uuid::text,
+		'base_revision',catalog_revision-1,'applied_revision',catalog_revision,'replayed',false)
+		FROM billing.merchants WHERE id=$1`, m.ID.UUID(), defaults.ID)
+	require.NoError(t, err)
+	receipt, err := q.GetCatalogApplication(ctx, gen.GetCatalogApplicationParams{MerchantID: m.ID.UUID(), ApplicationID: "empty-application"})
+	require.NoError(t, err)
 	released := false
 	result, err := svc.RetireUnused(ctx, m.ID, group, nil, func(_ context.Context, id string) error { require.Equal(t, group, id); released = true; return nil })
 	require.NoError(t, err)
 	require.True(t, result.Retired)
 	require.True(t, released)
+	retainedReceipt, err := q.GetCatalogApplication(ctx, gen.GetCatalogApplicationParams{MerchantID: m.ID.UUID(), ApplicationID: "empty-application"})
+	require.NoError(t, err)
+	require.Equal(t, receipt, retainedReceipt, "retirement preserves durable replay identity")
 	for _, before := range []gen.OpenrailsCatalog{defaults, owned} {
 		after, err := q.GetCatalog(ctx, gen.GetCatalogParams{MerchantID: m.ID.UUID(), ID: before.ID})
 		require.NoError(t, err)

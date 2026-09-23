@@ -199,11 +199,8 @@ func TestCatalogApplicationRefusesTrialOnRailsWithoutFirstPhase(t *testing.T) {
 		t.Run(psp+" is refused", func(t *testing.T) {
 			status, body, productKey := publish(t, psp)
 			require.Equal(t, http.StatusBadRequest, status, string(body))
-			if psp == "nmi" {
-				require.Contains(t, string(body), "trial")
-			} else {
-				require.Contains(t, string(body), "catalog")
-			}
+			requireAPIErrorCode(t, body, "trial_unsupported_on_rail")
+			require.Contains(t, string(body), "trial")
 
 			// The refusal is total: no price row was written for the product.
 			var priceCount int

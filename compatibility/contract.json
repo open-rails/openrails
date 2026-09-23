@@ -5206,7 +5206,7 @@
     "internal/migrate/postgres/0003_catalog_applications.up.sql": "5e9edbb3331f3dbe9994f2aa5cf26ad17971d3edfd46bc8679a8e3958a367d4c",
     "internal/migrate/postgres/baseline.go": "6fbb4ba0e7ce9ab95559fbd38ae0dcf0dd054e78087f3b7f4c0e19a54b649219",
     "internal/migrate/postgres/migrations.go": "23eddd4ca7160c3ba35beb118c3a380d6bdd67620e17d5b8623f00291067153e",
-    "internal/migrate/postgres/owned_tables.go": "c4115cf6cde8b6905ef4e326e903452aba1e83669874fb4eb6defac4a7e57b8e",
+    "internal/migrate/postgres/owned_tables.go": "9358f4e2b4c34bb96e28ca0b61aa630d25235edbbdfd06129259e19cbed3de16",
     "internal/migrate/postgres/schema.go": "a399bef4859e1c1f8c1f952d279d8b70718d7aa7e8a1ce116cea49c9d5f6b090",
     "internal/migrate/postgres/schema_tokens.go": "db02b2faeecf3343919ebf74de33c7e72e918a00737d054e86dedb15ed5a8e6d",
     "internal/migrate/postgres/unique_scope_exemptions.go": "50f144594711a439c71aa95954b102a9ea0b423488a3e850dd6853fccf91ccd8",
