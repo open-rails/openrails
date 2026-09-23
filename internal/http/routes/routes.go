@@ -671,6 +671,12 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 	catalog.Handle(http.MethodPost, "/drift/refresh", h(httphandlers.AdminRefreshCatalogDrift), writeMW...)
 	catalog.Handle(http.MethodGet, "/revision", h(httphandlers.MerchantCatalogRevision), readMW...)
 	catalog.Handle(http.MethodPost, "/applications", h(httphandlers.MerchantApplyCatalog), writeMW...)
+	// #1058: archive a product and refund or review recent purchases. It can
+	// move money, so it also needs the refund grant.
+	archiveMW := append([]router.Middleware{write, opts.merchantActionPermissionMW(permissions.MerchantPaymentsRefund)}, dbMW...)
+	archiveReadMW := append([]router.Middleware{read, opts.merchantActionPermissionMW(permissions.MerchantPaymentsRead)}, dbMW...)
+	catalog.Handle(http.MethodPost, "/product-archives", h(httphandlers.CreateProductArchive), archiveMW...)
+	readActions.Handle(http.MethodGet, "/product-archives/:id", h(httphandlers.GetProductArchive), archiveReadMW...)
 
 	// #779 catalog copilot: read-only Q&A (+ flag-gated Phase 2 drafting,
 	// never a mutation) shares the catalog-read permission, like #756's
@@ -767,6 +773,11 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	payments.Handle(http.MethodGet, "", h(httphandlers.GetAdminPayments), payRead...)
 	payments.Handle(http.MethodGet, "/:id", h(httphandlers.GetAdminPayment), payRead...)
 	payments.Handle(http.MethodPost, "/:id/refunds", h(httphandlers.AdminRefundPayment), payRefund...)
+
+	// #1058: purchases a product archive recorded for merchant review.
+	reviews := rr.Group("/purchase-reviews")
+	reviews.Handle(http.MethodGet, "", h(httphandlers.ListPurchaseReviews), payRead...)
+	reviews.Handle(http.MethodPost, "/:id/resolve", h(httphandlers.ResolvePurchaseReview), payRefund...)
 
 	subs := rr.Group("/subscriptions")
 	subs.Handle(http.MethodGet, "", h(httphandlers.GetAdminSubscriptions), subRead...)

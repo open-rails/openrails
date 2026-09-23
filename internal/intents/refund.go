@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -301,6 +302,10 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
 			return Parked("nmi provider writes blocked (mode=readonly)")
 		}
+		if errors.Is(err, providerposture.ErrDisarmed) {
+			// The posture gate refused before any bytes were sent.
+			return Parked("nmi refund held by sandbox posture gate: " + err.Error())
+		}
 		if nmi.RequiresVerification(err) {
 			// Processor communication/duplicate responses do not prove the
 			// refund did not land; releasing the reservation could refund twice.
@@ -433,6 +438,9 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 	if err != nil {
 		if errors.Is(err, stripeapi.ErrProviderReadOnly) {
 			return Parked("stripe provider writes blocked (mode=readonly)")
+		}
+		if errors.Is(err, providerposture.ErrDisarmed) {
+			return Parked("stripe refund held by sandbox posture gate: " + err.Error())
 		}
 		var apiErr *subscriptions.StripeAPICallError
 		if errors.As(err, &apiErr) {

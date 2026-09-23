@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -265,6 +266,39 @@ func TestNMIRefundParksUnderReadonlyAndDrainsUnderFull(t *testing.T) {
 	status, txn, _ := fx.reservation(t)
 	assert.Equal(t, "completed", status, "async drain completes the reservation via the handler's finalize")
 	assert.Equal(t, "txn_refund_1", txn)
+}
+
+// The sandbox posture gate refuses before sending. A refund held by it is
+// parked with its reservation open, and drains once the credential is armed.
+func TestNMIRefundParksUnderPostureGateAndDrainsWhenArmed(t *testing.T) {
+	ctx := dbtest.WithTestMerchant(context.Background())
+	fx := seedRefundablePayment(t, 500)
+	fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
+	client.LoopbackFixture = false
+	verdict := func(v providerposture.Verdict) providerposture.Check {
+		return func(context.Context) (providerposture.Verdict, error) { return v, nil }
+	}
+	providerposture.Process().Verify(ctx, client.PostureKey(), verdict(providerposture.Live))
+
+	row, err := fx.refundRunner(client, fullModeConfig()).EnqueueAndExecute(ctx, fx.enqueueParams(500))
+	require.NoError(t, err)
+	assert.Equal(t, StatusPending, row.Status)
+	require.NotNil(t, row.LastFailureReason)
+	assert.Contains(t, *row.LastFailureReason, "sandbox posture gate")
+	assert.EqualValues(t, 0, row.Attempts, "a gated refund does not burn an attempt")
+	assert.Zero(t, fake.refundCalls.Load(), "nothing reaches a disarmed provider")
+	status, _, _ := fx.reservation(t)
+	assert.Equal(t, "pending", status)
+
+	providerposture.Process().Verify(ctx, client.PostureKey(), verdict(providerposture.Simulated))
+	_, err = fx.db.Pool().Exec(ctx, "UPDATE billing.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+	require.NoError(t, err)
+	_, err = fx.refundRunner(client, fullModeConfig()).RunExecuteOnce(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, StatusSucceeded, fx.intentByID(t, row.ID).Status)
+	assert.EqualValues(t, 1, fake.refundCalls.Load())
+	status, _, _ = fx.reservation(t)
+	assert.Equal(t, "completed", status)
 }
 
 // An equal-size refund action or a currently empty read cannot attribute a lost

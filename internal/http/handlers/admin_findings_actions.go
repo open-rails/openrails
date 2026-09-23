@@ -406,28 +406,30 @@ func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRe
 		return errors.New("payment service unavailable")
 	}
 	ctx := r.Request.Context()
-	payment, err := r.State.PaymentService.GetByID(ctx, paymentID)
-	if err != nil {
+	if _, err := r.State.PaymentService.GetByID(ctx, paymentID); err != nil {
 		return paramErrorf("refund payment %s not found", paymentID)
 	}
-	amount := payment.Amount // full refund by default (micros)
+	// Without an explicit amount the remaining refundable amount is refunded.
+	request := refundRequest{Full: true, Reason: reason}
 	if raw, ok := params["amount"]; ok && raw != nil {
 		parsed, perr := paramAmountMicros(raw)
 		if perr != nil {
 			return perr
 		}
-		amount = parsed
+		request = refundRequest{Amount: parsed, Reason: reason}
+	}
+	if revoke, ok := params["revoke_access"].(bool); ok {
+		request.RevokeAccess = revoke
 	}
 	idempotencyKey := "finding:" + finding.ID.String() + ":refund:" + paymentID.String()
-	refund, status, err := executeAdminRefund(ctx, r, paymentID, refundRequest{
-		Amount: amount,
-		Reason: reason,
-	}, idempotencyKey)
+	refund, status, err := executeAdminRefund(ctx, r, paymentID, request, idempotencyKey)
 	if err != nil {
 		return fmt.Errorf("refund payment %s: %w", paymentID, err)
 	}
 	result["refund_payment_id"] = openrails.PaymentID(paymentID).String()
-	result["refund_amount"] = strconv.FormatInt(amount, 10)
+	if refund != nil {
+		result["refund_amount"] = strconv.FormatInt(-refund.Amount, 10)
+	}
 	if refund != nil {
 		result["refund_id"] = refund.ID.String()
 	}

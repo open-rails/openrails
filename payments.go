@@ -51,8 +51,12 @@ type Payment struct {
 	FailureCode   *string      `json:"failure_code,omitempty"`
 	FailureReason *string      `json:"failure_reason,omitempty"`
 	Refunds       *PaymentList `json:"refunds,omitempty"`
-	CreatedAt     time.Time    `json:"created_at"`
-	Price         *PublicPrice `json:"price,omitempty"`
+	// RefundedPaymentID and Reason are set on refund objects: the charge the
+	// refund reverses and the merchant's stated reason.
+	RefundedPaymentID *PaymentID   `json:"refunded_payment_id,omitempty"`
+	Reason            string       `json:"reason,omitempty"`
+	CreatedAt         time.Time    `json:"created_at"`
+	Price             *PublicPrice `json:"price,omitempty"`
 }
 
 // PaymentList is the refund list embedded in a single payment.
