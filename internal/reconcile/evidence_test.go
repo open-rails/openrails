@@ -14,6 +14,7 @@ import (
 
 func TestEvidenceCurrencyPreservesUnknown(t *testing.T) {
 	require.Empty(t, evidenceCurrency(""))
+	require.Equal(t, "UNK", evidenceCurrencyValue(""))
 	require.Equal(t, "USD", evidenceCurrency(" usd "))
 	require.Equal(t, "USD", transactionCurrency(RemoteTransaction{Raw: json.RawMessage(`{"currency":" usd "}`)}))
 }
