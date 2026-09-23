@@ -73,8 +73,11 @@ type CreateCheckoutSessionRequest struct {
 	Customer CheckoutCustomerIdentity `json:"customer"`
 	// Supply exactly one of PriceID or PriceKey. Keys are always opaque, even
 	// when they resemble UUIDs. Accepted retries retain the original offer.
-	PriceID        string                 `json:"price_id,omitzero"`
-	PriceKey       string                 `json:"price_key,omitempty"`
+	PriceID  string `json:"price_id,omitzero"`
+	PriceKey string `json:"price_key,omitempty"`
+	// Entitlement optionally binds admission to the opaque resource the host
+	// showed. OpenRails verifies the selected product grants this key.
+	Entitlement    string                 `json:"entitlement,omitempty"`
 	PaymentOptions CheckoutPaymentOptions `json:"payment"`
 	Metadata       map[string]string      `json:"metadata"`
 	IdempotencyKey string                 `json:"-"`

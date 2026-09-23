@@ -23,6 +23,22 @@ func (c *Client) CreateCheckoutSession(ctx context.Context, request CreateChecko
 	return &out, nil
 }
 
+// LookupCheckoutSession is a read-only idempotency probe for thin host
+// wrappers. It never creates, routes, or contacts a provider.
+func (c *Client) LookupCheckoutSession(ctx context.Context, request CreateCheckoutSessionRequest, requestOptions ...RequestOption) (*CheckoutSession, error) {
+	if strings.TrimSpace(request.IdempotencyKey) == "" {
+		return nil, invalidErr("Idempotency-Key required")
+	}
+	if (strings.TrimSpace(request.PriceID) == "") == (strings.TrimSpace(request.PriceKey) == "") {
+		return nil, invalidErr("exactly one of price_id or price_key is required")
+	}
+	var out CheckoutSession
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/checkout-sessions/lookup", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *Client) CreatePaymentMethodSession(ctx context.Context, request CreatePaymentMethodSessionRequest, requestOptions ...RequestOption) (*CheckoutSession, error) {
 	var out CheckoutSession
 	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/payment-method-sessions", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}, requestOptions...); err != nil {

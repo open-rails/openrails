@@ -365,7 +365,7 @@ func checkClientCredentials(t *testing.T, ctx context.Context, d clientWorkflowD
 			_, err = reader.CreatePlanMigration(ctx, openrails.PlanMigrationRequest{SourcePrice: uuid.NewString(), TargetPrice: uuid.NewString()})
 			require.ErrorIs(t, err, openrails.ErrDenied)
 		} else {
-			_, err = reader.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()).String()}, IdempotencyKey: uuid.NewString()})
+			_, err = reader.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()).String()}, PriceKey: "authorization-probe", IdempotencyKey: uuid.NewString()})
 			require.ErrorIs(t, err, openrails.ErrDenied)
 		}
 	}

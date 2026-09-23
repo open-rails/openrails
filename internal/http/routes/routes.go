@@ -246,6 +246,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	)
 
 	users := group.Group("/users/:user_id")
+	users.Handle(http.MethodPost, "/entitlements/check", h(httphandlers.ServiceCheckEntitlements), readMW...)
 	users.Handle(http.MethodPost, "/product-access/check", h(httphandlers.ServiceCheckUserProductAccess), readMW...)
 	users.Handle(http.MethodGet, "/product-access",
 		h(httphandlers.ServiceGetUserProductAccess),
@@ -260,6 +261,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 
 	checkoutWriteMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCheckoutCreate)}, dbMW...)
 	group.Handle(http.MethodPost, "/checkout-sessions", h(httphandlers.ServiceCreateCheckoutSession), checkoutWriteMW...)
+	group.Handle(http.MethodPost, "/checkout-sessions/lookup", h(httphandlers.ServiceLookupCheckoutSession), checkoutWriteMW...)
 	group.Handle(http.MethodPost, "/payment-method-sessions", h(httphandlers.ServiceCreatePaymentMethodSession), checkoutWriteMW...)
 	group.Handle(http.MethodPost, "/solana-cancel-sessions", h(httphandlers.ServiceCreateSolanaCancelSession), checkoutWriteMW...)
 	group.Handle(http.MethodPost, "/solana-tier-change-sessions", h(httphandlers.ServiceCreateSolanaTierChangeSession), checkoutWriteMW...)
@@ -629,6 +631,7 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 	write := opts.merchantActionPermissionMW(authpolicy.PermMerchantCatalogUpdate)
 	readMW := append([]router.Middleware{read}, dbMW...)
 	writeMW := append([]router.Middleware{write}, dbMW...)
+	catalog.Handle(http.MethodGet, "/offers", h(httphandlers.ListOffersForEntitlement), readMW...)
 
 	products := catalog.Group("/products")
 	products.Handle(http.MethodPost, "", h(httphandlers.AdminCreateProduct), writeMW...)

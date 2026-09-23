@@ -67,6 +67,48 @@ func (s *Service) CreateCheckoutSessionForCustomer(ctx context.Context, customer
 	return s.createCheckoutSessionForCustomer(ctx, customer, req, "", "", "")
 }
 
+func (s *Service) LookupCheckoutSessionForCustomer(ctx context.Context, customer CheckoutCustomerIdentity, req CreateCheckoutSessionRequest) (*CheckoutSession, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	user, err := checkoutUserIdentity(customer)
+	if err != nil {
+		return nil, err
+	}
+	return s.lookupCheckoutSession(ctx, user, req)
+}
+
+func (s *Service) lookupCheckoutSession(ctx context.Context, user *checkout.UserIdentity, req CreateCheckoutSessionRequest) (*CheckoutSession, error) {
+	checkoutSessions, err := s.requireCheckoutSessionService()
+	if err != nil {
+		return nil, err
+	}
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	var resp *checkout.CheckoutSessionResponse
+	err = rt.DB.RunInMerchantConn(ctx, func(scoped context.Context) error {
+		priceID := req.PriceID
+		if priceID == "" {
+			priceID = req.PriceKey
+		}
+		var key string
+		if req.PriceKey != "" {
+			key = req.PriceKey
+		}
+		returnErr := error(nil)
+		resp, returnErr = checkoutSessions.LookupSession(scoped, &checkout.CheckoutSessionLookupRequest{PriceID: priceID, PriceKey: key, Entitlement: req.Entitlement, IdempotencyKey: req.IdempotencyKey}, user)
+		return returnErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return checkoutSessionFromResponse(resp), nil
+}
+
 func (s *Service) CreatePaymentMethodSessionForCustomer(ctx context.Context, req openrails.CreatePaymentMethodSessionRequest) (*CheckoutSession, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
@@ -129,6 +171,7 @@ func (s *Service) createCheckoutSessionForCustomer(ctx context.Context, customer
 	svcReq := &checkout.CheckoutSessionCreateRequest{
 		PriceID:        req.PriceID,
 		PriceKey:       req.PriceKey,
+		Entitlement:    req.Entitlement,
 		SubscriptionID: subscriptionID,
 		NewPriceID:     newPriceID,
 		Mode:           mode,

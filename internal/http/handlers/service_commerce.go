@@ -70,6 +70,35 @@ func ServiceCreateCheckoutSession(r *httprequest.Request) {
 	r.SuccessJSON(out)
 }
 
+func ServiceLookupCheckoutSession(r *httprequest.Request) {
+	r.SetHeader("Cache-Control", "no-store")
+	var input openrails.CreateCheckoutSessionRequest
+	if !r.BindJSON(&input) {
+		return
+	}
+	payer, ok := commerceCustomer(r, customerIDParam(input.Customer.ID))
+	if !ok {
+		return
+	}
+	input.Customer.ID = payer.String()
+	input.IdempotencyKey = r.Header("Idempotency-Key")
+	if strings.TrimSpace(input.IdempotencyKey) == "" {
+		r.ErrorJSON(http.StatusBadRequest, "Idempotency-Key required")
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.InternalError("billing service unavailable", err)
+		return
+	}
+	out, err := svc.LookupCheckoutSessionForCustomer(r.Request.Context(), input.Customer, input)
+	if err != nil {
+		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
+		return
+	}
+	r.SuccessJSON(out)
+}
+
 func ServiceGetCheckoutSession(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
 	payer, ok := commerceCustomer(r, customerIDParam(r.Query("customer_id")))

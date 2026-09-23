@@ -497,21 +497,23 @@ func checkoutSessionRequestFingerprintForRail(req *CheckoutSessionCreateRequest,
 		}
 	}
 	payload, _ := json.Marshal(struct {
-		PriceID    string
-		PriceKey   string `json:",omitempty"`
-		Mode       string
-		Payment    CheckoutSessionPaymentRequest
-		Metadata   map[string]string
-		SuccessURL string
-		CancelURL  string
+		PriceID     string
+		PriceKey    string `json:",omitempty"`
+		Mode        string
+		Payment     CheckoutSessionPaymentRequest
+		Metadata    map[string]string
+		SuccessURL  string
+		CancelURL   string
+		Entitlement string `json:",omitempty"`
 	}{
-		PriceID:    strings.TrimSpace(req.PriceID),
-		PriceKey:   strings.TrimSpace(req.PriceKey),
-		Mode:       strings.TrimSpace(req.Mode),
-		Payment:    payment,
-		Metadata:   normalizeMetadata(req.Metadata),
-		SuccessURL: strings.TrimSpace(req.SuccessURL),
-		CancelURL:  strings.TrimSpace(req.CancelURL),
+		PriceID:     strings.TrimSpace(req.PriceID),
+		PriceKey:    strings.TrimSpace(req.PriceKey),
+		Mode:        strings.TrimSpace(req.Mode),
+		Payment:     payment,
+		Metadata:    normalizeMetadata(req.Metadata),
+		SuccessURL:  strings.TrimSpace(req.SuccessURL),
+		CancelURL:   strings.TrimSpace(req.CancelURL),
+		Entitlement: strings.TrimSpace(req.Entitlement),
 	})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
@@ -574,6 +576,14 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	}
 	if !product.IsPurchasable() {
 		return nil, fmt.Errorf("%w: product is not active", ErrCheckoutSessionValidation)
+	}
+	if key := strings.TrimSpace(req.Entitlement); key != "" {
+		if product.EntitlementsSpec == nil {
+			return nil, fmt.Errorf("%w: selected product does not grant entitlement %q", ErrCheckoutSessionValidation, key)
+		}
+		if _, ok := product.EntitlementsSpec[key]; !ok {
+			return nil, fmt.Errorf("%w: selected product does not grant entitlement %q", ErrCheckoutSessionValidation, key)
+		}
 	}
 
 	// or#288 + #848: resolve the processor ONCE, before the session exists.
