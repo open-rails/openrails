@@ -2,6 +2,7 @@ package recurring
 
 import (
 	"context"
+	"encoding/binary"
 	"testing"
 
 	solanago "github.com/gagliardetto/solana-go"
@@ -67,6 +68,16 @@ func TestPrepareCancel_AttachesReference(t *testing.T) {
 	tx := decodeTx(t, res.Transaction)
 	if got := programInstructionAccountCounts(t, tx); len(got) != 1 || got[0] != 5 {
 		t.Fatalf("cancel instruction accounts = %v, want [5]", got)
+	}
+	tag := tx.Message.Instructions[len(tx.Message.Instructions)-1]
+	program, err := tx.Message.Program(tag.ProgramIDIndex)
+	if err != nil || !program.Equals(solanago.SystemProgramID) || len(tag.Data) != 12 ||
+		binary.LittleEndian.Uint32(tag.Data[:4]) != 2 || binary.LittleEndian.Uint64(tag.Data[4:]) != 0 {
+		t.Fatalf("reference tag must be a zero-lamport System transfer: %+v, %v", tag, err)
+	}
+	if len(tag.Accounts) != 3 || tx.Message.AccountKeys[tag.Accounts[0]].String() != row.SubscriberWallet ||
+		tx.Message.AccountKeys[tag.Accounts[1]].String() != row.SubscriberWallet {
+		t.Fatal("reference tag must transfer from the subscriber to itself")
 	}
 	found, ro := referenceInAccountKeys(t, tx, reference)
 	if !found {
